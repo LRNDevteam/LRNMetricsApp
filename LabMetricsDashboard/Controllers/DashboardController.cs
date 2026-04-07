@@ -11,15 +11,24 @@ public class DashboardController : Controller
     private readonly LabSettings _labSettings;
     private readonly LabCsvFileResolver _resolver;
     private readonly CsvParserService _csvParser;
+    private readonly IClinicSummaryRepository _clinicSummaryRepo;
+    private readonly ISalesRepSummaryRepository _salesRepSummaryRepo;
+    private readonly ILogger<DashboardController> _logger;
 
     public DashboardController(
         LabSettings labSettings,
         LabCsvFileResolver resolver,
-        CsvParserService csvParser)
+        CsvParserService csvParser,
+        IClinicSummaryRepository clinicSummaryRepo,
+        ISalesRepSummaryRepository salesRepSummaryRepo,
+        ILogger<DashboardController> logger)
     {
         _labSettings = labSettings;
         _resolver = resolver;
         _csvParser = csvParser;
+        _clinicSummaryRepo = clinicSummaryRepo;
+        _salesRepSummaryRepo = salesRepSummaryRepo;
+        _logger = logger;
     }
 
     // GET /Dashboard  or  /Dashboard/Index?lab=PCRLabsofAmerica&filterPayerName=...
@@ -493,5 +502,214 @@ public class DashboardController : Controller
         };
 
         return View(vm);
+    }
+
+    // GET /Dashboard/ClinicSummary?lab=...&filterClinicName=...&...
+    // GET /Dashboard/ClinicSummary?lab=...&filterClinicNames=A&filterClinicNames=B&...
+    /// <summary>
+    /// Clinic Summary page — reads from <c>dbo.ClaimLevelData</c> via the lab's
+    /// DB connection string. Groups by ClinicName and computes billing, payment,
+    /// denial, and outstanding metrics. Supports multi-select filters.
+    /// </summary>
+    public async Task<IActionResult> ClinicSummary(
+        string? lab,
+        List<string>? filterClinicNames,
+        List<string>? filterPayerNames,
+        List<string>? filterPanelNames,
+        CancellationToken ct = default)
+    {
+        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var selectedLab   = lab ?? availableLabs.FirstOrDefault() ?? string.Empty;
+
+        // Normalize: remove empty entries
+        filterClinicNames = filterClinicNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
+        filterPayerNames  = filterPayerNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
+        filterPanelNames  = filterPanelNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
+
+        if (string.IsNullOrWhiteSpace(selectedLab))
+            return View(new ClinicSummaryViewModel { AvailableLabs = availableLabs });
+
+        if (!_labSettings.Labs.TryGetValue(selectedLab, out var config) || !config.LineClaimEnable)
+        {
+            return View(new ClinicSummaryViewModel
+            {
+                AvailableLabs = availableLabs,
+                SelectedLab   = selectedLab,
+                ErrorMessage  = $"Clinic Summary is currently not available for {selectedLab}.",
+            });
+        }
+
+        var connStr = config.DbConnectionString;
+        if (string.IsNullOrWhiteSpace(connStr))
+        {
+            return View(new ClinicSummaryViewModel
+            {
+                AvailableLabs = availableLabs,
+                SelectedLab   = selectedLab,
+                ErrorMessage  = $"Clinic Summary is currently not available for {selectedLab}. No connection string configured.",
+            });
+        }
+
+        var dbLabName = string.IsNullOrWhiteSpace(config.DbLabName) ? selectedLab : config.DbLabName;
+
+        try
+        {
+            var result = await _clinicSummaryRepo.GetClinicSummaryAsync(
+                connStr, dbLabName,
+                filterClinicNames.Count > 0 ? filterClinicNames : null,
+                filterPayerNames.Count > 0 ? filterPayerNames : null,
+                filterPanelNames.Count > 0 ? filterPanelNames : null,
+                ct);
+
+            var rows = result.Rows;
+
+            // Build grand-total row from the rows
+            var totals = new ClinicSummaryRow
+            {
+                ClinicName                  = "Grand Total",
+                BilledClaimCount            = rows.Sum(r => r.BilledClaimCount),
+                PaidClaimCount              = rows.Sum(r => r.PaidClaimCount),
+                DeniedClaimCount            = rows.Sum(r => r.DeniedClaimCount),
+                OutstandingClaimCount       = rows.Sum(r => r.OutstandingClaimCount),
+                TotalBilledCharges          = rows.Sum(r => r.TotalBilledCharges),
+                TotalBilledChargeOnPaidClaim = rows.Sum(r => r.TotalBilledChargeOnPaidClaim),
+                TotalAllowedAmount          = rows.Sum(r => r.TotalAllowedAmount),
+                TotalInsurancePaidAmount    = rows.Sum(r => r.TotalInsurancePaidAmount),
+                TotalPatientResponsibility  = rows.Sum(r => r.TotalPatientResponsibility),
+                TotalDeniedCharges          = rows.Sum(r => r.TotalDeniedCharges),
+                TotalOutstandingCharges     = rows.Sum(r => r.TotalOutstandingCharges),
+                AverageAllowedAmount        = rows.Count == 0 ? 0 : Math.Round(rows.Average(r => r.AverageAllowedAmount), 2),
+                AverageInsurancePaidAmount  = rows.Count == 0 ? 0 : Math.Round(rows.Average(r => r.AverageInsurancePaidAmount), 2),
+            };
+
+            return View(new ClinicSummaryViewModel
+            {
+                AvailableLabs      = availableLabs,
+                SelectedLab        = selectedLab,
+                FilterClinicNames  = filterClinicNames,
+                FilterPayerNames   = filterPayerNames,
+                FilterPanelNames   = filterPanelNames,
+                ClinicNames        = result.ClinicNames,
+                PayerNames         = result.PayerNames,
+                PanelNames         = result.PanelNames,
+                Rows               = rows,
+                Totals             = totals,
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Clinic Summary query failed for lab '{LabName}'.", selectedLab);
+            return View(new ClinicSummaryViewModel
+            {
+                AvailableLabs = availableLabs,
+                SelectedLab   = selectedLab,
+                ErrorMessage  = $"Failed to load Clinic Summary: {ex.Message}",
+            });
+        }
+    }
+
+    /// <summary>
+    /// Sales Rep Summary page — reads from <c>dbo.ClaimLevelData</c> via the lab's
+    /// DB connection string. Groups by SalesRepName and computes billing, payment,
+    /// denial, and outstanding metrics. Supports multi-select filters.
+    /// </summary>
+    public async Task<IActionResult> SalesRepSummary(
+        string? lab,
+        List<string>? filterSalesRepNames,
+        List<string>? filterClinicNames,
+        List<string>? filterPayerNames,
+        List<string>? filterPanelNames,
+        CancellationToken ct = default)
+    {
+        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var selectedLab   = lab ?? availableLabs.FirstOrDefault() ?? string.Empty;
+
+        // Normalize: remove empty entries
+        filterSalesRepNames = filterSalesRepNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
+        filterClinicNames   = filterClinicNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
+        filterPayerNames    = filterPayerNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
+        filterPanelNames    = filterPanelNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
+
+        if (string.IsNullOrWhiteSpace(selectedLab))
+            return View(new SalesRepSummaryViewModel { AvailableLabs = availableLabs });
+
+        if (!_labSettings.Labs.TryGetValue(selectedLab, out var config) || !config.LineClaimEnable)
+        {
+            return View(new SalesRepSummaryViewModel
+            {
+                AvailableLabs = availableLabs,
+                SelectedLab   = selectedLab,
+                ErrorMessage  = $"Sales Rep Summary is currently not available for {selectedLab}.",
+            });
+        }
+
+        var connStr = config.DbConnectionString;
+        if (string.IsNullOrWhiteSpace(connStr))
+        {
+            return View(new SalesRepSummaryViewModel
+            {
+                AvailableLabs = availableLabs,
+                SelectedLab   = selectedLab,
+                ErrorMessage  = $"Sales Rep Summary is currently not available for {selectedLab}. No connection string configured.",
+            });
+        }
+
+        var dbLabName = string.IsNullOrWhiteSpace(config.DbLabName) ? selectedLab : config.DbLabName;
+
+        try
+        {
+            var result = await _salesRepSummaryRepo.GetSalesRepSummaryAsync(
+                connStr, dbLabName,
+                filterSalesRepNames.Count > 0 ? filterSalesRepNames : null,
+                filterClinicNames.Count > 0 ? filterClinicNames : null,
+                filterPayerNames.Count > 0 ? filterPayerNames : null,
+                filterPanelNames.Count > 0 ? filterPanelNames : null,
+                ct);
+
+            var rows = result.Rows;
+
+            var totals = new SalesRepSummaryRow
+            {
+                SalesRepName                = "Grand Total",
+                BilledClaimCount            = rows.Sum(r => r.BilledClaimCount),
+                PaidClaimCount              = rows.Sum(r => r.PaidClaimCount),
+                DeniedClaimCount            = rows.Sum(r => r.DeniedClaimCount),
+                OutstandingClaimCount       = rows.Sum(r => r.OutstandingClaimCount),
+                TotalBilledCharges          = rows.Sum(r => r.TotalBilledCharges),
+                TotalAllowedAmount          = rows.Sum(r => r.TotalAllowedAmount),
+                TotalInsurancePaidAmount    = rows.Sum(r => r.TotalInsurancePaidAmount),
+                TotalPatientResponsibility  = rows.Sum(r => r.TotalPatientResponsibility),
+                TotalDeniedCharges          = rows.Sum(r => r.TotalDeniedCharges),
+                TotalOutstandingCharges     = rows.Sum(r => r.TotalOutstandingCharges),
+                AverageAllowedAmount        = rows.Count == 0 ? 0 : Math.Round(rows.Average(r => r.AverageAllowedAmount), 2),
+                AverageInsurancePaidAmount  = rows.Count == 0 ? 0 : Math.Round(rows.Average(r => r.AverageInsurancePaidAmount), 2),
+            };
+
+            return View(new SalesRepSummaryViewModel
+            {
+                AvailableLabs        = availableLabs,
+                SelectedLab          = selectedLab,
+                FilterSalesRepNames  = filterSalesRepNames,
+                FilterClinicNames    = filterClinicNames,
+                FilterPayerNames     = filterPayerNames,
+                FilterPanelNames     = filterPanelNames,
+                SalesRepNames        = result.SalesRepNames,
+                ClinicNames          = result.ClinicNames,
+                PayerNames           = result.PayerNames,
+                PanelNames           = result.PanelNames,
+                Rows                 = rows,
+                Totals               = totals,
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Sales Rep Summary query failed for lab '{LabName}'.", selectedLab);
+            return View(new SalesRepSummaryViewModel
+            {
+                AvailableLabs = availableLabs,
+                SelectedLab   = selectedLab,
+                ErrorMessage  = $"Failed to load Sales Rep Summary: {ex.Message}",
+            });
+        }
     }
 }

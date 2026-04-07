@@ -24,6 +24,13 @@ public sealed class LabCsvConfig
     public bool DBEnabled { get; init; } = false;
 
     /// <summary>
+    /// When true the Clinic Summary and Sales Rep Summary pages are available
+    /// for this lab (reads from <c>dbo.ClaimLevelData</c>).
+    /// Requires <see cref="DBEnabled"/> and <see cref="DbConnectionString"/> to also be set.
+    /// </summary>
+    public bool LineClaimEnable { get; init; } = false;
+
+    /// <summary>
     /// Per-lab SQL Server connection string.
     /// Required when <see cref="DBEnabled"/> is true.
     /// </summary>

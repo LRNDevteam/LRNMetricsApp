@@ -1,0 +1,611 @@
+@model LabMetricsDashboard.Models.ClinicSummaryViewModel
+@{
+    ViewData["Title"]       = $"Clinic Summary – {Model.SelectedLab}";
+    ViewData["SelectedLab"] = Model.SelectedLab;
+    ViewData["PageLabel"]   = "Clinic Summary";
+}
+
+<style>
+.cs-wrap {
+    border-radius: 14px; overflow: hidden;
+    background: #fff; border: 1px solid #e0e6ed;
+    box-shadow: 0 2px 12px rgba(0,0,0,.05);
+}
+.cs-table {
+    width: 100%; border-collapse: separate; border-spacing: 0;
+    font-size: .76rem;
+}
+.cs-table thead th {
+    background: #f8fafc;
+    color: #334155; font-weight: 700; font-size: .65rem;
+    letter-spacing: .03em; text-transform: uppercase;
+    padding: .6rem .65rem; text-align: right;
+    white-space: normal; min-width: 100px;
+    position: sticky; top: 0; z-index: 3;
+    border-bottom: 2px solid #cbd5e1;
+    border-right: 1px solid #e9edf2;
+}
+.cs-table thead th:last-child { border-right: none; }
+.cs-table thead th:first-child {
+    text-align: left;
+    position: sticky; left: 0; z-index: 4;
+    min-width: 220px; background: #f8fafc;
+}
+.cs-table thead th .bi {
+    font-size: .72rem; margin-right: .3rem; vertical-align: baseline;
+    opacity: .7;
+}
+.cs-table thead th .th-icon-clinic { color: #2B2D42; }
+.cs-table thead th .th-icon-count  { color: #2B2D42; }
+.cs-table thead th .th-icon-money  { color: #594539; }
+.cs-table thead th .th-icon-avg    { color: #7B8B8E; }
+.cs-table thead th .th-icon-pct    { color: #706b5e; }
+
+.cs-table tbody tr { border-bottom: 1px solid #f1f5f9; transition: background .1s; }
+.cs-table tbody tr:hover { background: #f5f5f4; }
+.cs-table td {
+    padding: .45rem .65rem; vertical-align: middle;
+    text-align: right; white-space: nowrap;
+    border-right: 1.5px solid #cbd5e1;
+    border-bottom: 1.5px solid #cbd5e1;
+}
+.cs-table td:last-child { border-right: none; }
+.cs-table td:first-child {
+    text-align: left; font-weight: 600; color: #1e293b;
+    max-width: 260px; overflow: hidden; text-overflow: ellipsis;
+    position: sticky; left: 0; z-index: 1;
+    background: #fff; min-width: 220px;
+}
+.cs-table tbody tr:hover td:first-child { background: #f5f5f4; }
+.cs-table tfoot td {
+    background: #f8fafc; font-weight: 800; color: #0d1b2a;
+    border-top: 2px solid #cbd5e1;
+}
+.cs-table tfoot td:first-child {
+    position: sticky; left: 0; z-index: 1;
+    background: #f8fafc;
+}
+.cs-money { color: #1e293b; }
+.cs-pct {
+    color: #475569; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    min-width: 70px;
+}
+.cs-pct-val {
+    display: inline-flex; align-items: center; justify-content: flex-end;
+    gap: 4px; min-width: 68px;
+}
+.cs-pct-val .cs-pct-num {
+    display: inline-block; min-width: 30px; text-align: right;
+}
+.cs-cnt { color: #334155; font-weight: 600; }
+
+/* Flag circle indicators — Red (<30) / Orange (30–80) / Green (>80) */
+.cs-flag {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border-radius: 50%;
+    vertical-align: middle;
+    font-size: .7rem; line-height: 1; flex-shrink: 0;
+}
+.cs-flag-good    { background: #006400; color: #fff; }
+.cs-flag-caution { background: #ff8c00; color: #fff; }
+.cs-flag-low     { background: #8b0000; color: #fff; }
+
+/* Column group backgrounds — Pantone palette */
+/* Group 1: Counts — Peacoat (#2B2D42) tints */
+.col-grp-count { background-color: #e8e9ee; }
+.cs-table thead th.col-grp-count { background: #cfd0da; }
+.cs-table tbody tr:hover td.col-grp-count { background: #c0c2d0; }
+.cs-table tfoot td.col-grp-count { background: #cfd0da; }
+
+/* Group 2: Dollar Totals — Shopping Bag (#594539) tints */
+.col-grp-money { background-color: #efece9; }
+.cs-table thead th.col-grp-money { background: #ddd6d0; }
+.cs-table tbody tr:hover td.col-grp-money { background: #cfc6be; }
+.cs-table tfoot td.col-grp-money { background: #ddd6d0; }
+
+/* Group 3: Averages — City Skyline (#7B8B8E) tints */
+.col-grp-avg { background-color: #edf0f0; }
+.cs-table thead th.col-grp-avg { background: #d6dcdd; }
+.cs-table tbody tr:hover td.col-grp-avg { background: #c6cfcf; }
+.cs-table tfoot td.col-grp-avg { background: #d6dcdd; }
+
+/* Group 4: Percentages — Pantone 19-0913 TCX Hot Fudge (#3C2415) */
+.col-grp-pct { background-color: #eceae6; }
+.cs-table thead th.col-grp-pct { background: #3C2415; color: #fff; }
+.cs-table thead th.col-grp-pct .th-icon-pct { color: #ddd; }
+.cs-table tbody tr:hover td.col-grp-pct { background: #cbc6b8; }
+.cs-table tfoot td.col-grp-pct { background: #d9d5cb; }
+
+.cs-scroll { max-height: 72vh; overflow: auto; }
+
+/* KPI stat ribbon — Peacoat background */
+.cs-stats-card {
+    background: #2B2D42; border: 1px solid #1e1f32; border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.18); margin-bottom: 1rem;
+    overflow: hidden;
+}
+.cs-stats-row {
+    display: flex; flex-wrap: wrap; align-items: center;
+    padding: .5rem 0;
+}
+.cs-stats-row + .cs-stats-row { border-top: 1px solid rgba(255,255,255,.1); }
+.cs-stats-row-label {
+    font-size: .6rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .06em; color: rgba(255,255,255,.45); writing-mode: horizontal-tb;
+    padding: 0 .8rem; min-width: 72px; flex-shrink: 0;
+}
+.cs-stat {
+    display: flex; align-items: baseline; gap: .35rem;
+    padding: .25rem .9rem; position: relative;
+}
+.cs-stat + .cs-stat::before {
+    content: ''; position: absolute; left: 0; top: 20%; bottom: 20%;
+    width: 1px; background: rgba(255,255,255,.12);
+}
+.cs-stat-label {
+    font-size: .65rem; color: rgba(255,255,255,.6); font-weight: 600;
+    white-space: nowrap;
+}
+.cs-stat-val {
+    font-size: 1rem; font-weight: 800; color: #fff;
+    font-variant-numeric: tabular-nums;
+}
+.cs-stat-val.v-navy   { color: #fff; }
+.cs-stat-val.v-teal   { color: #a8d8dc; }
+.cs-stat-val.v-red    { color: #f8a4a8; }
+.cs-stat-val.v-slate  { color: #b8c4c6; }
+.cs-stat-val.v-brown  { color: #d4b8a8; }
+.cs-stat-val.v-green  { color: #8fd4a0; }
+.cs-stat-val.v-plum   { color: #c8b0d8; }
+.cs-stat-icon {
+    font-size: .8rem; opacity: .7; margin-right: .1rem;
+}
+
+/* Filter panel */
+.cs-filter-panel {
+    background: #fff; border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.07);
+}
+.cs-filter-badge { font-size: .7rem; vertical-align: middle; }
+
+/* Multi-select dropdown */
+.cs-ms { position: relative; }
+.cs-ms-btn {
+    display: flex; align-items: center; justify-content: space-between;
+    width: 100%; padding: .3rem .6rem; font-size: .8rem;
+    border: 1px solid #ced4da; border-radius: .375rem;
+    background: #fff; cursor: pointer; min-height: 31px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cs-ms-btn:hover { border-color: #7B8B8E; }
+.cs-ms-btn .cs-ms-count {
+    background: #2B2D42; color: #fff; font-size: .65rem;
+    border-radius: 10px; padding: 0 .45rem; margin-left: .4rem;
+    font-weight: 700; flex-shrink: 0;
+}
+.cs-ms-panel {
+    display: none; position: absolute; z-index: 100; top: 100%;
+    left: 0; right: 0; background: #fff; border: 1px solid #ced4da;
+    border-radius: .375rem; box-shadow: 0 4px 16px rgba(0,0,0,.12);
+    margin-top: 2px; max-height: 280px; overflow: hidden;
+}
+.cs-ms-panel.open { display: flex; flex-direction: column; }
+.cs-ms-search {
+    border: none; border-bottom: 1px solid #e9ecef;
+    padding: .4rem .6rem; font-size: .78rem; outline: none; width: 100%;
+}
+.cs-ms-list {
+    overflow-y: auto; max-height: 220px; padding: .25rem 0;
+}
+.cs-ms-list label {
+    display: flex; align-items: center; gap: .4rem;
+    padding: .25rem .6rem; font-size: .78rem; cursor: pointer;
+    margin: 0;
+}
+.cs-ms-list label:hover { background: #edf0f0; }
+.cs-ms-list label.cs-ms-hidden { display: none; }
+.cs-ms-empty {
+    padding: .5rem .6rem; font-size: .75rem; color: #94a3b8;
+    text-align: center;
+    }
+</style>
+
+<!-- Lab selector banner (like other pages) -->
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <h2 class="mb-0 fw-bold">Clinic Summary</h2>
+    <form method="get" asp-controller="Dashboard" asp-action="ClinicSummary"
+          class="d-flex align-items-center gap-2" data-lab-form>
+        <label class="fw-semibold me-1 mb-0" for="labSelect">Lab:</label>
+        <select id="labSelect" name="lab"
+                class="form-select form-select-sm" style="min-width:220px"
+                data-lab-selector onchange="this.form.submit()">
+            @foreach (var l in Model.AvailableLabs)
+            {
+                <option value="@l" selected="@(l == Model.SelectedLab ? "selected" : null)">@l</option>
+            }
+        </select>
+    </form>
+</div>
+
+@{
+    string PctFlag(decimal pct) => pct > 80
+        ? "<span class='cs-flag cs-flag-good'>&#9873;</span>"
+        : pct >= 30
+            ? "<span class='cs-flag cs-flag-caution'>&#9873;</span>"
+            : "<span class='cs-flag cs-flag-low'>&#9873;</span>";
+
+    // Inverse flag for "lower is better" columns (Denied / Outstanding)
+    // Green when < 30, Orange when 30–80, Red when > 80
+    string InversePctFlag(decimal pct) => pct < 30
+        ? "<span class='cs-flag cs-flag-good'>&#9873;</span>"
+        : pct <= 80
+            ? "<span class='cs-flag cs-flag-caution'>&#9873;</span>"
+            : "<span class='cs-flag cs-flag-low'>&#9873;</span>";
+
+    string PctCell(decimal badgePct, decimal displayPct) =>
+        $"<span class='cs-pct-val'>{PctFlag(badgePct)}<span class='cs-pct-num'>{displayPct}%</span></span>";
+
+    string InversePctCell(decimal pct) =>
+        $"<span class='cs-pct-val'>{InversePctFlag(pct)}<span class='cs-pct-num'>{pct}%</span></span>";
+
+    string PlainPctCell(decimal pct) =>
+        $"<span class='cs-pct-val'><span class='cs-pct-num'>{pct}%</span></span>";
+}
+
+@if (Model.Totals is not null)
+{
+    <!-- Filter panel — always visible when data is loaded -->
+    <div class="cs-filter-panel p-3 mb-4">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+            <span class="fw-semibold" style="font-size:.9rem">
+                <i class="bi bi-funnel"></i> Filters
+                @if (Model.HasFilters)
+                {
+                    <span class="badge bg-primary cs-filter-badge ms-1">Active</span>
+                }
+            </span>
+            <button class="btn btn-sm btn-link text-muted p-0" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#csFilterBody"
+                    aria-expanded="@(Model.HasFilters ? "true" : "false")">
+                @Html.Raw(Model.HasFilters ? "&#9650; Hide" : "&#9660; Show")
+            </button>
+        </div>
+
+        <div id="csFilterBody" class="collapse @(Model.HasFilters ? "show" : "")">
+            <form id="csFilterForm" method="get" asp-controller="Dashboard" asp-action="ClinicSummary" data-lab-form>
+                <input type="hidden" name="lab" value="@Model.SelectedLab" />
+
+                <div class="row g-2 align-items-end mb-2">
+                    <!-- Clinic Name (multi-select) -->
+                    <div class="col-sm-6 col-md-3">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">CLINIC NAME</label>
+                        <div class="cs-ms" data-ms-name="filterClinicNames">
+                            <div class="cs-ms-btn" tabindex="0">
+                                <span class="cs-ms-label">All</span>
+                                <span class="cs-ms-count" style="display:none">0</span>
+                            </div>
+                            <div class="cs-ms-panel">
+                                <input type="text" class="cs-ms-search" placeholder="Search clinics…" autocomplete="off" />
+                                <div class="cs-ms-list">
+                                    @foreach (var cn in Model.ClinicNames)
+                                    {
+                                        <label><input type="checkbox" name="filterClinicNames" value="@cn"
+                                            @(Model.FilterClinicNames.Contains(cn) ? "checked" : "") /> @cn</label>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Payer Name (multi-select) -->
+                    <div class="col-sm-6 col-md-3">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PAYER NAME</label>
+                        <div class="cs-ms" data-ms-name="filterPayerNames">
+                            <div class="cs-ms-btn" tabindex="0">
+                                <span class="cs-ms-label">All</span>
+                                <span class="cs-ms-count" style="display:none">0</span>
+                            </div>
+                            <div class="cs-ms-panel">
+                                <input type="text" class="cs-ms-search" placeholder="Search payers…" autocomplete="off" />
+                                <div class="cs-ms-list">
+                                    @foreach (var pn in Model.PayerNames)
+                                    {
+                                        <label><input type="checkbox" name="filterPayerNames" value="@pn"
+                                            @(Model.FilterPayerNames.Contains(pn) ? "checked" : "") /> @pn</label>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Panel Name (multi-select) -->
+                    <div class="col-sm-6 col-md-3">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PANEL NAME</label>
+                        <div class="cs-ms" data-ms-name="filterPanelNames">
+                            <div class="cs-ms-btn" tabindex="0">
+                                <span class="cs-ms-label">All</span>
+                                <span class="cs-ms-count" style="display:none">0</span>
+                            </div>
+                            <div class="cs-ms-panel">
+                                <input type="text" class="cs-ms-search" placeholder="Search panels…" autocomplete="off" />
+                                <div class="cs-ms-list">
+                                    @foreach (var pl in Model.PanelNames)
+                                    {
+                                        <label><input type="checkbox" name="filterPanelNames" value="@pl"
+                                            @(Model.FilterPanelNames.Contains(pl) ? "checked" : "") /> @pl</label>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="d-flex gap-2 mt-2">
+                    <button type="submit" class="btn btn-sm btn-primary">
+                        <i class="bi bi-funnel-fill me-1"></i>Apply
+                    </button>
+                    <a asp-controller="Dashboard" asp-action="ClinicSummary"
+                       asp-route-lab="@Model.SelectedLab"
+                       class="btn btn-sm btn-outline-secondary">Clear</a>
+                </div>
+            </form>
+        </div>
+    </div>
+}
+
+@if (Model.Totals is not null && Model.Rows.Count > 0)
+{
+    <!-- KPI Stat Ribbon -->
+    <div class="cs-stats-card">
+        <!-- Row 1: Claim Counts -->
+        <div class="cs-stats-row">
+            <span class="cs-stats-row-label">Claims</span>
+            <div class="cs-stat">
+                <i class="bi bi-file-earmark-text cs-stat-icon" style="color:#8b8da8"></i>
+                <span class="cs-stat-label">Billed</span>
+                <span class="cs-stat-val v-navy">@Model.Totals.BilledClaimCount.ToString("N0")</span>
+            </div>
+            <div class="cs-stat">
+                <i class="bi bi-check2-circle cs-stat-icon" style="color:#a8d8dc"></i>
+                <span class="cs-stat-label">Paid</span>
+                <span class="cs-stat-val v-teal">@Model.Totals.PaidClaimCount.ToString("N0")</span>
+            </div>
+            <div class="cs-stat">
+                <i class="bi bi-x-circle cs-stat-icon" style="color:#f8a4a8"></i>
+                <span class="cs-stat-label">Denied</span>
+                <span class="cs-stat-val v-red">@Model.Totals.DeniedClaimCount.ToString("N0")</span>
+            </div>
+            <div class="cs-stat">
+                <i class="bi bi-hourglass-split cs-stat-icon" style="color:#b8c4c6"></i>
+                <span class="cs-stat-label">Outstanding</span>
+                <span class="cs-stat-val v-slate">@Model.Totals.OutstandingClaimCount.ToString("N0")</span>
+            </div>
+        </div>
+        <!-- Row 2: Dollar Totals -->
+        <div class="cs-stats-row">
+            <span class="cs-stats-row-label">Financials</span>
+            <div class="cs-stat">
+                <i class="bi bi-receipt cs-stat-icon" style="color:#d4b8a8"></i>
+                <span class="cs-stat-label">Billed</span>
+                <span class="cs-stat-val v-brown">@Model.Totals.TotalBilledCharges.ToString("C0")</span>
+            </div>
+            <div class="cs-stat">
+                <i class="bi bi-cash-stack cs-stat-icon" style="color:#8fd4a0"></i>
+                <span class="cs-stat-label">Allowed</span>
+                <span class="cs-stat-val v-green">@Model.Totals.TotalAllowedAmount.ToString("C0")</span>
+            </div>
+            <div class="cs-stat">
+                <i class="bi bi-cash-coin cs-stat-icon" style="color:#c8b0d8"></i>
+                <span class="cs-stat-label">Ins. Paid</span>
+                <span class="cs-stat-val v-plum">@Model.Totals.TotalInsurancePaidAmount.ToString("C0")</span>
+            </div>
+            <div class="cs-stat">
+                <i class="bi bi-person-fill cs-stat-icon" style="color:#8b8da8"></i>
+                <span class="cs-stat-label">Patient Resp.</span>
+                <span class="cs-stat-val v-navy">@Model.Totals.TotalPatientResponsibility.ToString("C0")</span>
+            </div>
+            <div class="cs-stat">
+                <i class="bi bi-shield-x cs-stat-icon" style="color:#f8a4a8"></i>
+                <span class="cs-stat-label">Denied</span>
+                <span class="cs-stat-val v-red">@Model.Totals.TotalDeniedCharges.ToString("C0")</span>
+            </div>
+            <div class="cs-stat">
+                <i class="bi bi-clock-history cs-stat-icon" style="color:#b8c4c6"></i>
+                <span class="cs-stat-label">Outstanding</span>
+                <span class="cs-stat-val v-slate">@Model.Totals.TotalOutstandingCharges.ToString("C0")</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Data table -->
+    <div class="cs-wrap">
+    <div class="cs-scroll">
+        <table class="cs-table">
+            <thead>
+                <tr>
+                    <th><i class="bi bi-building th-icon-clinic"></i>Clinic Name</th>
+                    <th class="col-grp-count"><i class="bi bi-file-earmark-text th-icon-count"></i>Billed Claim Count</th>
+                    <th class="col-grp-count"><i class="bi bi-check2-circle th-icon-count"></i>Paid Claim Count</th>
+                    <th class="col-grp-count"><i class="bi bi-x-circle th-icon-count"></i>Denied Claim Count</th>
+                    <th class="col-grp-count"><i class="bi bi-hourglass-split th-icon-count"></i>Outstanding Claim Count</th>
+                    <th class="col-grp-money"><i class="bi bi-currency-dollar th-icon-money"></i>Total Billed Charges</th>
+                    <th class="col-grp-money"><i class="bi bi-currency-dollar th-icon-money"></i>Total Billed Charge on Paid Claim</th>
+                    <th class="col-grp-money"><i class="bi bi-cash-stack th-icon-money"></i>Total Allowed Amount</th>
+                    <th class="col-grp-money"><i class="bi bi-cash-coin th-icon-money"></i>Total Insurance Paid Amount</th>
+                    <th class="col-grp-money"><i class="bi bi-person-fill th-icon-money"></i>Total Patient Responsibility</th>
+                    <th class="col-grp-money"><i class="bi bi-shield-x th-icon-money"></i>Total Denied Charges</th>
+                    <th class="col-grp-money"><i class="bi bi-clock-history th-icon-money"></i>Total Outstanding Charges</th>
+                    <th class="col-grp-avg"><i class="bi bi-calculator th-icon-avg"></i>Average Allowed Amount</th>
+                    <th class="col-grp-avg"><i class="bi bi-calculator-fill th-icon-avg"></i>Average Insurance Paid Amount</th>
+                    <th class="col-grp-pct"><i class="bi bi-graph-up-arrow th-icon-pct"></i>Average Payment</th>
+                    <th class="col-grp-pct"><i class="bi bi-percent th-icon-pct"></i>Denied Claim</th>
+                    <th class="col-grp-pct"><i class="bi bi-percent th-icon-pct"></i>Outstanding Claim</th>
+                    <th class="col-grp-pct"><i class="bi bi-percent th-icon-pct"></i>Denied Charges</th>
+                    <th class="col-grp-pct"><i class="bi bi-percent th-icon-pct"></i>Outstanding Charges</th>
+                    <th class="col-grp-pct"><i class="bi bi-percent th-icon-pct"></i>Allowed on Billed</th>
+                    <th class="col-grp-pct"><i class="bi bi-percent th-icon-pct"></i>Paid on Allowed</th>
+                    <th class="col-grp-pct"><i class="bi bi-percent th-icon-pct"></i>Paid Claim %</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in Model.Rows)
+                {
+                    <tr>
+                        <td title="@row.ClinicName">@row.ClinicName</td>
+                        <td class="cs-cnt col-grp-count">@row.BilledClaimCount</td>
+                        <td class="cs-cnt col-grp-count">@row.PaidClaimCount</td>
+                        <td class="cs-cnt col-grp-count">@row.DeniedClaimCount</td>
+                        <td class="cs-cnt col-grp-count">@row.OutstandingClaimCount</td>
+                        <td class="cs-money col-grp-money">@row.TotalBilledCharges.ToString("C2")</td>
+                        <td class="cs-money col-grp-money">@row.TotalBilledChargeOnPaidClaim.ToString("C2")</td>
+                        <td class="cs-money col-grp-money">@row.TotalAllowedAmount.ToString("C2")</td>
+                        <td class="cs-money col-grp-money">@row.TotalInsurancePaidAmount.ToString("C2")</td>
+                        <td class="cs-money col-grp-money">@row.TotalPatientResponsibility.ToString("C2")</td>
+                        <td class="cs-money col-grp-money">@row.TotalDeniedCharges.ToString("C2")</td>
+                        <td class="cs-money col-grp-money">@row.TotalOutstandingCharges.ToString("C2")</td>
+                        <td class="cs-money col-grp-avg">@row.AverageAllowedAmount.ToString("C2")</td>
+                        <td class="cs-money col-grp-avg">@row.AverageInsurancePaidAmount.ToString("C2")</td>
+                        <td class="cs-pct col-grp-pct">@Html.Raw(PlainPctCell(row.AveragePaymentPct))</td>
+                        <td class="cs-pct col-grp-pct">@Html.Raw(PlainPctCell(row.DeniedClaimPct))</td>
+                        <td class="cs-pct col-grp-pct">@Html.Raw(PlainPctCell(row.OutstandingClaimPct))</td>
+                        <td class="cs-pct col-grp-pct">@Html.Raw(PlainPctCell(row.DeniedChargesPct))</td>
+                        <td class="cs-pct col-grp-pct">@Html.Raw(PlainPctCell(row.OutstandingChargesPct))</td>
+                        <td class="cs-pct col-grp-pct">@Html.Raw(PctCell(row.AllowedOnBilledPct, row.AllowedOnBilledPct))</td>
+                        <td class="cs-pct col-grp-pct">@Html.Raw(PctCell(row.PaidOnAllowedPct, row.PaidOnAllowedPct))</td>
+                        <td class="cs-pct col-grp-pct">@Html.Raw(PctCell(row.PaidClaimPct, row.PaidClaimPct))</td>
+                    </tr>
+                }
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td>Grand Total</td>
+                    <td class="col-grp-count">@Model.Totals.BilledClaimCount</td>
+                    <td class="col-grp-count">@Model.Totals.PaidClaimCount</td>
+                    <td class="col-grp-count">@Model.Totals.DeniedClaimCount</td>
+                    <td class="col-grp-count">@Model.Totals.OutstandingClaimCount</td>
+                    <td class="col-grp-money">@Model.Totals.TotalBilledCharges.ToString("C2")</td>
+                    <td class="col-grp-money">@Model.Totals.TotalBilledChargeOnPaidClaim.ToString("C2")</td>
+                    <td class="col-grp-money">@Model.Totals.TotalAllowedAmount.ToString("C2")</td>
+                    <td class="col-grp-money">@Model.Totals.TotalInsurancePaidAmount.ToString("C2")</td>
+                    <td class="col-grp-money">@Model.Totals.TotalPatientResponsibility.ToString("C2")</td>
+                    <td class="col-grp-money">@Model.Totals.TotalDeniedCharges.ToString("C2")</td>
+                    <td class="col-grp-money">@Model.Totals.TotalOutstandingCharges.ToString("C2")</td>
+                    <td class="col-grp-avg">@Model.Totals.AverageAllowedAmount.ToString("C2")</td>
+                    <td class="col-grp-avg">@Model.Totals.AverageInsurancePaidAmount.ToString("C2")</td>
+                    <td class="col-grp-pct">@Html.Raw(PlainPctCell(Model.Totals.AveragePaymentPct))</td>
+                    <td class="col-grp-pct">@Html.Raw(PlainPctCell(Model.Totals.DeniedClaimPct))</td>
+                    <td class="col-grp-pct">@Html.Raw(PlainPctCell(Model.Totals.OutstandingClaimPct))</td>
+                    <td class="col-grp-pct">@Html.Raw(PlainPctCell(Model.Totals.DeniedChargesPct))</td>
+                    <td class="col-grp-pct">@Html.Raw(PlainPctCell(Model.Totals.OutstandingChargesPct))</td>
+                    <td class="col-grp-pct">@Html.Raw(PctCell(Model.Totals.AllowedOnBilledPct, Model.Totals.AllowedOnBilledPct))</td>
+                    <td class="col-grp-pct">@Html.Raw(PctCell(Model.Totals.PaidOnAllowedPct, Model.Totals.PaidOnAllowedPct))</td>
+                    <td class="col-grp-pct">@Html.Raw(PctCell(Model.Totals.PaidClaimPct, Model.Totals.PaidClaimPct))</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+    </div>
+
+    <div class="text-muted mt-2" style="font-size:.68rem">
+        Source: dbo.ClaimLevelData &middot; Lab: @Model.SelectedLab
+    </div>
+}
+else if (Model.Totals is not null && Model.Rows.Count == 0 && Model.HasFilters)
+{
+    <div class="text-center py-5 text-muted">
+        <div style="font-size:2rem;opacity:.5"><i class="bi bi-funnel"></i></div>
+        <div class="fw-semibold mt-2">No results match your filters</div>
+        <div class="small mt-1">Try adjusting or clearing the filters above.</div>
+        <a asp-controller="Dashboard" asp-action="ClinicSummary"
+           asp-route-lab="@Model.SelectedLab"
+           class="btn btn-sm btn-outline-primary mt-3">
+            <i class="bi bi-x-circle me-1"></i>Clear Filters
+        </a>
+    </div>
+}
+else if (!string.IsNullOrEmpty(Model.ErrorMessage))
+{
+    <div class="alert alert-warning mt-3" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-1"></i> @Model.ErrorMessage
+    </div>
+}
+else
+{
+    <div class="text-center py-5 text-muted">
+        <div style="font-size:2rem;opacity:.4">&#128202;</div>
+        <div class="fw-semibold mt-2">No clinic data available</div>
+        <div class="small mt-1">Select a lab with DB enabled to view the clinic summary.</div>
+    </div>
+}
+
+<script>
+    // Multi-select dropdown widget
+    document.addEventListener('DOMContentLoaded', function () {
+        document.querySelectorAll('.cs-ms').forEach(function (ms) {
+            var btn = ms.querySelector('.cs-ms-btn');
+            var panel = ms.querySelector('.cs-ms-panel');
+            var search = ms.querySelector('.cs-ms-search');
+            var labels = ms.querySelectorAll('.cs-ms-list label');
+            var labelEl = ms.querySelector('.cs-ms-label');
+            var countEl = ms.querySelector('.cs-ms-count');
+
+            function updateLabel() {
+                var checked = ms.querySelectorAll('.cs-ms-list input:checked');
+                if (checked.length === 0) {
+                    labelEl.textContent = 'All';
+                    countEl.style.display = 'none';
+                } else if (checked.length === 1) {
+                    labelEl.textContent = checked[0].value;
+                    countEl.style.display = 'none';
+                } else {
+                    labelEl.textContent = checked[0].value;
+                    countEl.textContent = '+' + (checked.length - 1);
+                    countEl.style.display = '';
+                }
+            }
+
+            // Toggle panel
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                // Close other open panels
+                document.querySelectorAll('.cs-ms-panel.open').forEach(function (p) {
+                    if (p !== panel) p.classList.remove('open');
+                });
+                panel.classList.toggle('open');
+                if (panel.classList.contains('open')) {
+                    search.value = '';
+                    search.focus();
+                    labels.forEach(function (l) { l.classList.remove('cs-ms-hidden'); });
+                }
+            });
+
+            // Search/filter
+            search.addEventListener('input', function () {
+                var q = this.value.toLowerCase();
+                labels.forEach(function (l) {
+                    var text = l.textContent.toLowerCase();
+                    l.classList.toggle('cs-ms-hidden', q.length > 0 && text.indexOf(q) === -1);
+                });
+            });
+
+            // Checkbox change
+            ms.querySelectorAll('.cs-ms-list input').forEach(function (cb) {
+                cb.addEventListener('change', updateLabel);
+            });
+
+            // Prevent panel close on click inside
+            panel.addEventListener('click', function (e) { e.stopPropagation(); });
+
+            // Init label
+            updateLabel();
+        });
+
+        // Close all panels on outside click
+        document.addEventListener('click', function () {
+            document.querySelectorAll('.cs-ms-panel.open').forEach(function (p) {
+                p.classList.remove('open');
+            });
+        });
+    });
+</script>

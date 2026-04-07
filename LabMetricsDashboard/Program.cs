@@ -45,6 +45,8 @@ builder.Services.AddSingleton<RcmJsonWriterService>();
 builder.Services.AddScoped<PredictionReportParserService>();
 builder.Services.AddScoped<IPredictionDbRepository, SqlPredictionDbRepository>();
 builder.Services.AddScoped<ICodingValidationRepository, SqlCodingValidationRepository>();
+builder.Services.AddScoped<IClinicSummaryRepository, SqlClinicSummaryRepository>();
+builder.Services.AddScoped<ISalesRepSummaryRepository, SqlSalesRepSummaryRepository>();
 
 // Add services to the container.
 builder.Services.AddMemoryCache();

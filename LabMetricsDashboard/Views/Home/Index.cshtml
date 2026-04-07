@@ -169,14 +169,17 @@
     position: relative; z-index: 1; line-height: 1.2;
 }
 .status-pill {
-    font-size: .62rem; font-weight: 800; letter-spacing: .06em;
-    text-transform: uppercase; border-radius: 30px; padding: .22em .7em;
+    font-size: .58rem; font-weight: 700; letter-spacing: .04em;
+    border-radius: 30px; padding: .18em .6em;
     position: relative; z-index: 1; white-space: nowrap;
-    border: 1px solid rgba(255,255,255,.35);
-    background: rgba(255,255,255,.22); color: #fff;
+    border: 1px solid rgba(255,255,255,.30);
+    background: rgba(255,255,255,.18); color: rgba(255,255,255,.85);
+    max-width: 130px; overflow: hidden; text-overflow: ellipsis;
 }
-.status-pill.partial { background: rgba(255,235,59,.28); }
-.status-pill.none    { background: rgba(244,67,54,.28); }
+.runid-sub {
+    font-size: .5rem; font-weight: 600; color: rgba(255,255,255,.5);
+    display: block; margin-top: 1px; letter-spacing: .02em;
+}
 
 /* ── Card body ──────────────────────────────────────────────────── */
 .lab-card-body {
@@ -218,15 +221,30 @@
     font-size: .75rem; font-weight: 900;
     flex-shrink: 0; margin-top: 2px;
 }
+.file-pending {
+    font-size: .52rem; font-weight: 800; letter-spacing: .04em;
+    text-transform: uppercase;
+    padding: .12em .45em; border-radius: 4px;
+    background: #fef3c7; color: #92400e;
+    flex-shrink: 0; margin-top: 2px;
+    white-space: nowrap;
+}
 
 /* ── Card footer ────────────────────────────────────────────────── */
 .lab-card-footer {
     padding: .55rem .7rem .65rem;
     background: #fff;
     border-top: 1px solid #f1f5f9;
+}
+.lab-card-footer .fc-row {
     display: flex; gap: .35rem; flex-wrap: wrap;
-    align-items: center;
-    justify-content: center;
+    align-items: center; justify-content: center;
+}
+.lab-card-footer .fc-row-claim {
+    display: flex; gap: .35rem; flex-wrap: wrap;
+    align-items: center; justify-content: center;
+    margin-top: .4rem; padding-top: .4rem;
+    border-top: 1px dashed #e2e8f0;
 }
 .fc-btn {
     font-size: .62rem; font-weight: 700; letter-spacing: .02em;
@@ -260,6 +278,12 @@
     border-color: #c0d4f7;
 }
 .fc-btn-code:hover { background: #dde9fd; color: #0d47a1; }
+.fc-btn-claim {
+    color: #0d7377;
+    background: #e6f7f7;
+    border-color: #b2dfdb;
+}
+.fc-btn-claim:hover { background: #ccefee; color: #004d40; }
 .fc-btn-disabled {
     color: #c0cad8; background: #f8fafc;
     border-color: #e8ecf2;
@@ -269,6 +293,129 @@
 /* ── Empty state ─────────────────────────────────────────────────── */
 .home-empty {
     text-align: center; padding: 4rem 1rem; color: #94a3b8;
+}
+
+/* ── Toggle tabs ─────────────────────────────────────────────────── */
+.view-tabs {
+    display: inline-flex; gap: .15rem;
+    margin-bottom: 1rem;
+}
+.view-tab {
+    padding: .4rem .9rem; font-size: .76rem; font-weight: 600;
+    border-radius: 8px; border: none; cursor: pointer;
+    color: #64748b; background: transparent;
+    transition: all .14s;
+}
+.view-tab:hover { color: #1e293b; background: rgba(0,0,0,.04); }
+.view-tab.active {
+    color: #fff; background: #1565c0;
+    box-shadow: 0 2px 8px rgba(21,101,192,.25);
+}
+
+/* ── Worklist table ─────────────────────────────────────────────── */
+.wl-wrap {
+    border-radius: 16px; overflow: hidden;
+    background: #fff;
+    border: 1px solid #e8ecf2;
+    box-shadow: 0 2px 12px rgba(0,0,0,.04);
+}
+.wl-table {
+    width: 100%; border-collapse: collapse;
+    font-size: .8rem;
+}
+.wl-table thead th {
+    background: #f8fafc; color: #64748b;
+    font-weight: 700; font-size: .68rem; letter-spacing: .06em;
+    text-transform: uppercase;
+    padding: .65rem .9rem;
+    border-bottom: 1.5px solid #e2e8f0;
+    text-align: left; white-space: nowrap;
+}
+.wl-table tbody tr {
+    border-bottom: 1px solid #f1f5f9;
+    transition: background .1s;
+}
+.wl-table tbody tr:last-child { border-bottom: none; }
+.wl-table tbody tr:hover { background: #f8fafc; }
+.wl-table td { padding: .6rem .9rem; vertical-align: middle; }
+
+/* Lab cell with avatar */
+.wl-lab {
+    display: flex; align-items: center; gap: .6rem;
+    min-width: 0;
+}
+.wl-avatar {
+    width: 32px; height: 32px; border-radius: 9px;
+    display: grid; place-items: center;
+    font-size: .78rem; font-weight: 800; color: #fff;
+    flex-shrink: 0;
+}
+.wl-lab-name {
+    font-weight: 700; font-size: .82rem; color: #1e293b;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Status badge */
+.wl-status {
+    display: inline-block; font-size: .64rem; font-weight: 800;
+    letter-spacing: .04em; text-transform: uppercase;
+    padding: .2em .6em; border-radius: 5px; white-space: nowrap;
+}
+.wl-status-ready   { background: #dcfce7; color: #166534; }
+.wl-status-partial { background: #fef9c3; color: #854d0e; }
+.wl-status-none    { background: #fee2e2; color: #991b1b; }
+
+/* Check / dash marks */
+.wl-check { color: #22c55e; font-size: .92rem; font-weight: 700; }
+.wl-dash  { color: #cbd5e1; font-size: .8rem; }
+
+/* File age sub-text */
+.wl-age {
+    display: block; font-size: .6rem; color: #94a3b8; font-weight: 600;
+    margin-top: 1px;
+}
+.wl-age-stale { color: #dc2626; }
+
+/* Action buttons */
+.wl-actions {
+    display: flex; gap: .3rem; flex-wrap: wrap; align-items: center;
+}
+.wl-btn {
+    font-size: .65rem; font-weight: 700; letter-spacing: .01em;
+    border-radius: 7px; padding: .28rem .55rem;
+    border: 1.5px solid transparent;
+    text-align: center; text-decoration: none;
+    white-space: nowrap; transition: all .14s; cursor: pointer;
+    display: inline-block;
+}
+.wl-btn-dash {
+    color: #fff; border-color: transparent;
+    box-shadow: 0 1px 4px rgba(0,0,0,.10);
+}
+.wl-btn-dash:hover { filter: brightness(1.12); color: #fff; }
+.wl-btn-out {
+    color: #4a6080; background: #f4f7fa; border-color: #dde3ed;
+}
+.wl-btn-out:hover { background: #e2e8f4; border-color: #b0bccc; color: #1a2744; }
+.wl-btn-pred {
+    color: #1565c0; background: #eef3ff; border-color: #c0d4f7;
+}
+.wl-btn-pred:hover { background: #dde9fd; color: #0d47a1; }
+.wl-btn-code {
+    color: #1565c0; background: #eef3ff; border-color: #c0d4f7;
+}
+.wl-btn-code:hover { background: #dde9fd; color: #0d47a1; }
+.wl-btn-claim {
+    color: #0d7377; background: #e6f7f7; border-color: #b2dfdb;
+}
+.wl-btn-claim:hover { background: #ccefee; color: #004d40; }
+.wl-actions-sep {
+    width: 1px; height: 18px; background: #dde3ed;
+    flex-shrink: 0; margin: 0 .1rem;
+}
+.wl-btn-disabled {
+    color: #c0cad8; background: #f8fafc; border-color: #e8ecf2;
+    pointer-events: none; opacity: .5;
 }
 </style>
 
@@ -304,6 +451,12 @@
     }
     else
     {
+        <div class="view-tabs">
+            <button class="view-tab active" id="btnGridView" onclick="switchView('grid')">Grid view</button>
+            <button class="view-tab" id="btnTableView" onclick="switchView('table')">Worklist (table)</button>
+        </div>
+
+        <div id="gridView">
         <div class="lab-grid">
             @for (int i = 0; i < Model.LabTiles.Count; i++)
             {
@@ -311,11 +464,6 @@
                 var grad     = palette[i % palette.Length];
                 var glow     = glows[i % glows.Length];
                 var initial  = tile.LabName.Length > 0 ? tile.LabName[0].ToString().ToUpper() : "L";
-                var hasAll   = tile.HasClaimFile && tile.HasLineFile;
-                var hasAny   = tile.HasClaimFile || tile.HasLineFile;
-
-                var statusTxt  = hasAll ? "Ready" : hasAny ? "Partial" : "No Files";
-                var statusCls  = hasAll ? "" : hasAny ? "partial" : "none";
 
                 <div class="lab-card" style="box-shadow:0 10px 36px @glow, 0 2px 8px rgba(0,0,0,.06)">
 
@@ -323,8 +471,21 @@
                     <div class="lab-card-head" style="background:linear-gradient(@grad)">
                         <div class="d-flex align-items-center gap-2">
                             <div class="lab-avatar">@initial</div>
-                            <div class="lab-name flex-fill">@tile.LabName</div>
-                            <span class="status-pill @statusCls">@statusTxt</span>
+                            <div class="flex-fill" style="min-width:0">
+                                <div class="lab-name">@tile.LabName</div>
+                                @if (tile.SourceRunId is not null)
+                                {
+                                    <span class="runid-sub">Run: @tile.SourceRunId</span>
+                                }
+                            </div>
+                            @if (tile.WeekRange is not null)
+                            {
+                                <span class="status-pill" title="@tile.WeekRange">@tile.WeekRange</span>
+                            }
+                            else if (tile.ClaimFileAgeText is not null)
+                            {
+                                <span class="status-pill">@tile.ClaimFileAgeText</span>
+                            }
                         </div>
                     </div>
 
@@ -389,7 +550,11 @@
                                     <div class="file-name missing">Not configured</div>
                                 }
                             </div>
-                            @if (tile.PredictionEnabled)
+                            @if (tile.IsPredictionPending)
+                            {
+                                <span class="file-pending" title="Source: @tile.SourceRunId | Prediction: @tile.PredictionRunId">&#9888; Pending</span>
+                            }
+                            else if (tile.PredictionEnabled)
                             {
                                 <span class="file-check" style="color:#3b82f6">&#10003;</span>
                             }
@@ -413,7 +578,11 @@
                                     <div class="file-name missing">Not configured</div>
                                 }
                             </div>
-                            @if (tile.HasCodingMasterFile || tile.CodingEnabled)
+                            @if (tile.IsCodingPending)
+                            {
+                                <span class="file-pending" title="Source: @tile.SourceRunId | Coding: @tile.CodingRunId">&#9888; Pending</span>
+                            }
+                            else if (tile.HasCodingMasterFile || tile.CodingEnabled)
                             {
                                 <span class="file-check" style="color:#10b981">&#10003;</span>
                             }
@@ -423,51 +592,237 @@
 
                     <!-- Footer buttons -->
                     <div class="lab-card-footer">
-                        <a asp-controller="Dashboard" asp-action="Index"
-                           asp-route-lab="@tile.LabName"
-                           class="fc-btn fc-btn-primary"
-                           style="background:linear-gradient(@grad)">
-                            Dashboard
-                        </a>
-                        <a asp-controller="Dashboard" asp-action="ClaimLevel"
-                           asp-route-lab="@tile.LabName"
-                           class="fc-btn fc-btn-outline">
-                            Claims
-                        </a>
-                        <a asp-controller="Dashboard" asp-action="LineLevel"
-                           asp-route-lab="@tile.LabName"
-                           class="fc-btn fc-btn-outline">
-                            Lines
-                        </a>
-                        @if (tile.PredictionEnabled)
-                        {
-                            <a asp-controller="Prediction" asp-action="Index"
+                        <div class="fc-row">
+                            <a asp-controller="Dashboard" asp-action="Index"
                                asp-route-lab="@tile.LabName"
-                               class="fc-btn fc-btn-pred">
-                                Prediction
+                               class="fc-btn fc-btn-primary"
+                               style="background:linear-gradient(@grad)">
+                                Dashboard
                             </a>
-                        }
-                        else
-                        {
-                            <span class="fc-btn fc-btn-disabled" title="Prediction not enabled">Prediction</span>
-                        }
-                        @if (tile.CodingEnabled)
-                        {
-                            <a asp-controller="Coding" asp-action="Summary"
+                            <a asp-controller="Dashboard" asp-action="ClaimLevel"
                                asp-route-lab="@tile.LabName"
-                               class="fc-btn fc-btn-code">
-                                Coding
+                               class="fc-btn fc-btn-outline">
+                                Claims
                             </a>
-                        }
-                        else
+                            <a asp-controller="Dashboard" asp-action="LineLevel"
+                               asp-route-lab="@tile.LabName"
+                               class="fc-btn fc-btn-outline">
+                                Lines
+                            </a>
+                            @if (tile.PredictionEnabled)
+                            {
+                                <a asp-controller="Prediction" asp-action="Index"
+                                   asp-route-lab="@tile.LabName"
+                                   class="fc-btn fc-btn-pred">
+                                    Prediction
+                                </a>
+                            }
+                            else
+                            {
+                                <span class="fc-btn fc-btn-disabled" title="Prediction not enabled">Prediction</span>
+                            }
+                            @if (tile.CodingEnabled)
+                            {
+                                <a asp-controller="Coding" asp-action="Summary"
+                                   asp-route-lab="@tile.LabName"
+                                   class="fc-btn fc-btn-code">
+                                    Coding
+                                </a>
+                            }
+                            else
+                            {
+                                <span class="fc-btn fc-btn-disabled" title="Coding requires DBEnabled">Coding</span>
+                            }
+                        </div>
+                        @if (tile.LineClaimEnabled)
                         {
-                            <span class="fc-btn fc-btn-disabled" title="Coding requires DBEnabled">Coding</span>
+                            <div class="fc-row-claim">
+                                <span style="font-size:.56rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em">Summaries</span>
+                                <a asp-controller="Dashboard" asp-action="ClinicSummary"
+                                   asp-route-lab="@tile.LabName"
+                                   class="fc-btn fc-btn-claim">
+                                    &#127973; Clinic
+                                </a>
+                                <a asp-controller="Dashboard" asp-action="SalesRepSummary"
+                                   asp-route-lab="@tile.LabName"
+                                   class="fc-btn fc-btn-claim">
+                                    &#128100; Sales Rep
+                                </a>
+                            </div>
                         }
                     </div>
 
                 </div>
             }
         </div>
+        </div><!-- /gridView -->
+
+        <div id="tableView" style="display:none">
+        <div class="wl-wrap">
+            <table class="wl-table">
+                <thead>
+                    <tr>
+                        <th>Lab</th>
+                        <th>Run ID</th>
+                        <th>Week</th>
+                        <th>Claim</th>
+                        <th>Line</th>
+                        <th>Prediction</th>
+                        <th>Coding</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @for (int i = 0; i < Model.LabTiles.Count; i++)
+                    {
+                        var tile = Model.LabTiles[i];
+                        var grad = palette[i % palette.Length];
+                        var initial = tile.LabName.Length > 0 ? tile.LabName[0].ToString().ToUpper() : "L";
+
+                        <tr>
+                            @* Lab *@
+                            <td>
+                                <div class="wl-lab">
+                                    <div class="wl-avatar" style="background:linear-gradient(@grad)">@initial</div>
+                                    <span class="wl-lab-name">@tile.LabName</span>
+                                </div>
+                            </td>
+
+                            @* Run ID *@
+                            <td>
+                                @if (tile.SourceRunId is not null)
+                                {
+                                    <span style="font-size:.72rem;font-weight:700;color:#1e293b">@tile.SourceRunId</span>
+                                }
+                                else
+                                {
+                                    <span class="wl-dash">&mdash;</span>
+                                }
+                            </td>
+
+                            @* Week *@
+                            <td>
+                                @if (tile.WeekRange is not null)
+                                {
+                                    <span style="font-size:.68rem;color:#475569;font-weight:600" title="@tile.WeekRange">@tile.WeekRange</span>
+                                }
+                                else if (tile.ClaimFileAgeText is not null)
+                                {
+                                    <span class="wl-age">@tile.ClaimFileAgeText</span>
+                                }
+                                else
+                                {
+                                    <span class="wl-dash">&mdash;</span>
+                                }
+                            </td>
+
+                            @* Claim *@
+                            <td style="text-align:center">
+                                @if (tile.HasClaimFile)
+                                {
+                                    <span class="wl-check" title="@tile.ClaimFilePath">&#10003;</span>
+                                    if (tile.ClaimFileAgeText is not null)
+                                    {
+                                        <span class="@(tile.IsClaimAgeStale ? "wl-age wl-age-stale" : "wl-age")">@tile.ClaimFileAgeText</span>
+                                    }
+                                }
+                                else
+                                {
+                                    <span class="wl-dash">&mdash;</span>
+                                }
+                            </td>
+
+                            @* Line *@
+                            <td style="text-align:center">
+                                @if (tile.HasLineFile)
+                                {
+                                    <span class="wl-check" title="@tile.LineFilePath">&#10003;</span>
+                                    if (tile.LineFileAgeText is not null)
+                                    {
+                                        <span class="@(tile.IsLineAgeStale ? "wl-age wl-age-stale" : "wl-age")">@tile.LineFileAgeText</span>
+                                    }
+                                }
+                                else
+                                {
+                                    <span class="wl-dash">&mdash;</span>
+                                }
+                            </td>
+
+                            @* Prediction *@
+                            <td style="text-align:center">
+                                @if (tile.IsPredictionPending)
+                                {
+                                    <span class="wl-status wl-status-partial" title="Source: @tile.SourceRunId | Prediction: @tile.PredictionRunId">Pending</span>
+                                }
+                                else if (tile.HasPredictionFile || tile.DBEnabled)
+                                {
+                                    <span class="wl-check">&#10003;</span>
+                                }
+                                else
+                                {
+                                    <span class="wl-dash">&mdash;</span>
+                                }
+                            </td>
+
+                            @* Coding *@
+                            <td style="text-align:center">
+                                @if (tile.IsCodingPending)
+                                {
+                                    <span class="wl-status wl-status-partial" title="Source: @tile.SourceRunId | Coding: @tile.CodingRunId">Pending</span>
+                                }
+                                else if (tile.HasCodingMasterFile || tile.CodingEnabled)
+                                {
+                                    <span class="wl-check">&#10003;</span>
+                                }
+                                else
+                                {
+                                    <span class="wl-dash">&mdash;</span>
+                                }
+                            </td>
+
+                            @* Actions *@
+                            <td>
+                                <div class="wl-actions">
+                                    <a asp-controller="Dashboard" asp-action="Index"
+                                       asp-route-lab="@tile.LabName"
+                                       class="wl-btn wl-btn-dash"
+                                       style="background:linear-gradient(@grad)">Dashboard</a>
+                                    <a asp-controller="Dashboard" asp-action="ClaimLevel"
+                                       asp-route-lab="@tile.LabName"
+                                       class="wl-btn wl-btn-out">Claims</a>
+                                    <a asp-controller="Dashboard" asp-action="LineLevel"
+                                       asp-route-lab="@tile.LabName"
+                                       class="wl-btn wl-btn-out">Lines</a>
+                                    @if (tile.PredictionEnabled)
+                                    {
+                                        <a asp-controller="Prediction" asp-action="Index"
+                                           asp-route-lab="@tile.LabName"
+                                           class="wl-btn wl-btn-pred">Prediction</a>
+                                    }
+                                    @if (tile.CodingEnabled)
+                                    {
+                                        <a asp-controller="Coding" asp-action="Summary"
+                                           asp-route-lab="@tile.LabName"
+                                           class="wl-btn wl-btn-code">Coding</a>
+                                    }
+                                    @if (tile.LineClaimEnabled)
+                                    {
+                                        <span class="wl-actions-sep"></span>
+                                        <a asp-controller="Dashboard" asp-action="ClinicSummary"
+                                           asp-route-lab="@tile.LabName"
+                                           class="wl-btn wl-btn-claim">&#127973; Clinic</a>
+                                        <a asp-controller="Dashboard" asp-action="SalesRepSummary"
+                                           asp-route-lab="@tile.LabName"
+                                           class="wl-btn wl-btn-claim">&#128100; Sales Rep</a>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        </div><!-- /tableView -->
     }
 
     <div class="text-center mt-5" style="font-size:.75rem;color:#94a3b8;font-weight:500">
@@ -476,5 +831,35 @@
 
 </div>
 
+<script>
+function switchView(view) {
+    var gridEl  = document.getElementById('gridView');
+    var tableEl = document.getElementById('tableView');
+    var btnGrid = document.getElementById('btnGridView');
+    var btnTbl  = document.getElementById('btnTableView');
+    if (!gridEl || !tableEl) return;
+
+    if (view === 'table') {
+        gridEl.style.display  = 'none';
+        tableEl.style.display = 'block';
+        btnGrid.classList.remove('active');
+        btnTbl.classList.add('active');
+    } else {
+        gridEl.style.display  = 'block';
+        tableEl.style.display = 'none';
+        btnGrid.classList.add('active');
+        btnTbl.classList.remove('active');
+    }
+    // Remember preference
+    try { localStorage.setItem('homeView', view); } catch(e) {}
+}
+// Restore saved preference
+document.addEventListener('DOMContentLoaded', function() {
+    try {
+        var saved = localStorage.getItem('homeView');
+        if (saved === 'table') switchView('table');
+    } catch(e) {}
+});
+</script>
 
 @* end of file *@
