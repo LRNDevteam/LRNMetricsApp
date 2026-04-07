@@ -1,0 +1,1298 @@
+@model LabMetricsDashboard.Models.PredictionAnalysisViewModel
+@{
+    ViewData["Title"]       = $"Prediction Analysis – {Model.SelectedLab}";
+    ViewData["SelectedLab"] = Model.SelectedLab;
+    ViewData["PageLabel"]   = "Prediction Analysis";
+
+    bool hasFilters = new[]
+    {
+        Model.FilterPayerName, Model.FilterPayerType, Model.FilterPanelName,
+        Model.FilterFinalCoverageStatus, Model.FilterPayability, Model.FilterCPTCode
+    }.Any(v => !string.IsNullOrWhiteSpace(v));
+
+    var routeValues = new Dictionary<string, string?>
+    {
+        ["lab"]                       = Model.SelectedLab,
+        ["filterPayerName"]           = Model.FilterPayerName,
+        ["filterPayerType"]           = Model.FilterPayerType,
+        ["filterPanelName"]           = Model.FilterPanelName,
+        ["filterFinalCoverageStatus"] = Model.FilterFinalCoverageStatus,
+        ["filterPayability"]          = Model.FilterPayability,
+        ["filterCPTCode"]             = Model.FilterCPTCode,
+    };
+
+    static string PayabilityBadgeClass(string v) => v switch
+    {
+        "Payable"             => "bg-success",
+        "Potentially Payable" => "bg-warning text-dark",
+        "Unknown"             => "bg-secondary",
+        _                     => "bg-danger"
+    };
+
+    static string CoverageBadgeClass(string v) => v switch
+    {
+        "Covered"                             => "bg-success",
+        "No Policy Found - Payment Expected"  => "bg-info text-dark",
+        "No Policy Found - Payment Uncertain" => "bg-warning text-dark",
+        _                                     => "bg-secondary"
+    };
+
+    // Bucket row styling: top-level rows bold, sub-rows indented
+    static bool IsSummaryBucket(string name) =>
+        name is "Predicted To Pay" or "Predicted – Paid" or "Predicted – Unpaid";
+
+    static string VarianceClass(decimal? v) =>
+        v is null ? "" : v >= 0 ? "text-success" : "text-danger";
+
+    static string FmtPct(decimal? v) => v.HasValue ? $"{v.Value:N2}%" : "—";
+    static string FmtAmt(decimal? v) => v.HasValue ? $"${v.Value:N2}" : "—";
+
+    var sm = Model.SummaryMetrics;
+    var db = Model.DenialBreakdown;
+    var nr = Model.NoResponseBreakdown;
+
+    static string PriBadgeClass(string b) => b switch
+    {
+        AgeBuckets.B0_30   => "pri-0-30",
+        AgeBuckets.B31_60  => "pri-31-60",
+        AgeBuckets.B61_90  => "pri-61-90",
+        AgeBuckets.B91_120 => "pri-91-120",
+        _                  => "pri-120p"
+    };
+    static string PriLabel(string b) => b switch
+    {
+        AgeBuckets.B0_30   => "Critical (0\u201330d)",
+        AgeBuckets.B31_60  => "High (31\u201360d)",
+        AgeBuckets.B61_90  => "Medium (61\u201390d)",
+        AgeBuckets.B91_120 => "Low (91\u2013120d)",
+        _                  => "Review (>120d)"
+    };
+
+    // Hardcoded fallback insight shown only for PCRLabsofAmerica when no JSON file is found on disk
+    LabMetricsDashboard.Models.PredictionInsight? insight = Model.Insight;
+    if (insight is null && Model.SelectedLab == "PCRLabsofAmerica")
+    {
+        insight = new LabMetricsDashboard.Models.PredictionInsight
+        {
+            ReportTitle    = "Prediction vs Non-Payment Analysis - Executive Insights",
+            ReportPeriod   = "March 12, 2026 - March 18, 2026",
+            GeneratedAt    = "2024-02-29T16:35:00Z",
+            ModelUsed      = "gemma3:4b",
+            SourceFileName = "(hardcoded fallback)",
+            Sections       =
+            [
+                new LabMetricsDashboard.Models.InsightSection
+                {
+                    SectionNumber = 1,
+                    Title         = "Payment vs Prediction Performance",
+                    Subsections   =
+                    [
+                        new LabMetricsDashboard.Models.InsightSubsection
+                        {
+                            Title   = "Overview",
+                            Bullets =
+                            [
+                                "Total predicted claims amount: $40,157.43",
+                                "Predicted allowed amount: $21,497.43",
+                                "Predicted insurance payment: $18,949.97",
+                                "Overall, the predicted total closely matches the actual financial exposure, representing a core strength of the prediction model.",
+                            ],
+                        },
+                        new LabMetricsDashboard.Models.InsightSubsection
+                        {
+                            Title   = "Actual vs Predicted",
+                            Bullets =
+                            [
+                                "Actual allowed amount was $7,298.72, representing a variance of $8,258.73 compared to the predicted allowed amount.",
+                                "Actual insurance payment was $0, representing a variance of $13,374.99 compared to the predicted insurance payment.",
+                                "The largest variance is observed within the 'Predicted To Pay' category, indicating a significant overestimation of expected payment amounts.",
+                            ],
+                        },
+                        new LabMetricsDashboard.Models.InsightSubsection
+                        {
+                            Title   = "Payment Rate",
+                            Bullets =
+                            [
+                                "The overall payment rate for claims is 12.4%, suggesting that a small percentage of predicted claims are successfully paid.",
+                                "Predicted allowed amount represents 27.6% of the total predicted claims, indicating a relatively high level of confidence in expected allowed amounts.",
+                                "Predicted insurance payment represents 29.4% of the total predicted claims, aligning closely with the allowed amount and reinforcing the model's predictive capabilities.",
+                            ],
+                        },
+                    ],
+                },
+                new LabMetricsDashboard.Models.InsightSection
+                {
+                    SectionNumber = 2,
+                    Title         = "Non-Payment Breakdown",
+                    Subsections   =
+                    [
+                        new LabMetricsDashboard.Models.InsightSubsection
+                        {
+                            Title   = "Denied Claims",
+                            Bullets =
+                            [
+                                "39 claims were denied, accounting for 56.5% of the total unpaid claims.",
+                                "The predicted allowed amount at risk for denied claims is $4,636.27, while the predicted insurance payment at risk is $3,419.21.",
+                                "Denial rates are significantly higher than predicted, highlighting a need for improved pre-service authorization processes.",
+                            ],
+                        },
+                        new LabMetricsDashboard.Models.InsightSubsection
+                        {
+                            Title   = "No Response Claims",
+                            Bullets =
+                            [
+                                "29 claims are marked as 'No Response', representing 42.0% of the total unpaid claims.",
+                                "The financial exposure associated with these claims is substantial, with a predicted allowed amount of $9,949.48 and a predicted insurance payment of $8,984.08.",
+                                "'No Response' claims constitute the largest dollar risk within the unpaid claims category, demanding immediate attention.",
+                            ],
+                        },
+                        new LabMetricsDashboard.Models.InsightSubsection
+                        {
+                            Title   = "Adjusted Claims",
+                            Bullets =
+                            [
+                                "2 claims were marked as 'Adjusted', representing 2.9% of the total unpaid claims.",
+                                "The predicted allowed amount and insurance payment amounts for adjusted claims are $971.70 each, reflecting a relatively small financial impact.",
+                                "These claims likely involve complex coding or billing issues requiring targeted remediation efforts.",
+                            ],
+                        },
+                    ],
+                },
+                new LabMetricsDashboard.Models.InsightSection
+                {
+                    SectionNumber = 3,
+                    Title         = "Prediction Model Accuracy",
+                    Subsections   =
+                    [
+                        new LabMetricsDashboard.Models.InsightSubsection
+                        {
+                            Title   = "Accuracy Summary",
+                            Bullets =
+                            [
+                                "Overall prediction accuracy for the allowed amount is 99.2%, indicating a highly reliable model when predicting allowed amounts.",
+                                "Overall prediction accuracy for insurance payment is 99.1%, mirroring the high reliability for allowed amount predictions.",
+                                "The exceptionally high accuracy rates suggest the model is performing well and warrants continued monitoring for potential drift.",
+                            ],
+                        },
+                    ],
+                },
+                new LabMetricsDashboard.Models.InsightSection
+                {
+                    SectionNumber = 4,
+                    Title         = "Risks & Recommended Actions",
+                    Subsections   =
+                    [
+                        new LabMetricsDashboard.Models.InsightSubsection
+                        {
+                            Title   = "Key Risks",
+                            Bullets =
+                            [
+                                "High 'No Response' claim volume and associated financial exposure represents the most significant risk.",
+                                "Large variances between predicted and actual allowed amounts, particularly in the 'Predicted To Pay' category, indicate potential overestimation of payment rates.",
+                                "Denial of claims at a rate significantly higher than predicted suggests underlying authorization issues.",
+                            ],
+                        },
+                        new LabMetricsDashboard.Models.InsightSubsection
+                        {
+                            Title   = "Recommended Actions",
+                            Bullets =
+                            [
+                                "Prioritize investigation and resolution of all 'No Response' claims immediately, implementing enhanced follow-up procedures.",
+                                "Conduct a root cause analysis of the overestimation in the 'Predicted To Pay' category to identify and correct model biases.",
+                                "Review and refine pre-service authorization processes to reduce the rate of denied claims, focusing on proactive communication and accurate coding.",
+                                "Implement automated claim review workflows to proactively identify and address potential payment issues prior to submission.",
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+    }
+    // Per-section accent colours for the insight card (border, bg, icon, emoji)
+    string[] insSecBorder = ["#1565c0","#c0392b","#1565c0","#f57c00"];
+    string[] insSecBg     = ["#eff6ff","#fff5f5","#eff6ff","#fff8f0"];
+    string[] insSecIcon   = ["#1565c0","#e53935","#1565c0","#f57c00"];
+    string[] insSecEmoji  = ["&#128200;","&#128683;","&#127919;","&#9888;"];
+}
+
+<style>
+    .pred-kpi-card   { border:none; border-radius:12px; box-shadow:0 2px 14px rgba(0,0,0,.08); }
+    .insight-card    { border:none; border-radius:12px; box-shadow:0 2px 14px rgba(0,0,0,.08); }
+    .insight-card .card-header { font-weight:700; font-size:.85rem; letter-spacing:.04em; border-radius:12px 12px 0 0; }
+    .insight-table th, .insight-table td { font-size:.78rem; padding:.35rem .6rem; }
+    .bar-wrap  { background:#e9ecef; border-radius:4px; height:6px; overflow:hidden; }
+    .bar-fill  { height:6px; border-radius:4px; }
+    .filter-panel { background:#fff; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,.07); }
+    /* Bucket table */
+    .bucket-table th  { font-size:.76rem; white-space:nowrap; }
+    .bucket-table td  { font-size:.82rem; }
+    .bucket-summary   { background:#f0f4f8 !important; font-weight:700; }
+    .bucket-sub td    { padding-left:2rem !important; color:#444; }
+    .na-cell          { color:#bbb; font-style:italic; }
+    /* Summary metrics table */
+    .metrics-sheet { border-collapse:collapse; width:100%; font-size:.78rem; }
+    .metrics-sheet th { border:1px solid #d0d7de; padding:.42rem .7rem; vertical-align:middle; white-space:nowrap; }
+    .metrics-sheet td { border:1px solid #d0d7de; padding:.42rem .7rem; vertical-align:middle; white-space:nowrap; }
+    .metrics-sheet thead th { background:#0d1b2a; color:#fff; font-weight:700; }
+    .metrics-sheet .section-header td { background:#1565c0; color:#fff; font-weight:700; font-size:.8rem; letter-spacing:.03em; }
+    .metrics-sheet .row-summary td:first-child { font-weight:700; }
+    .metrics-sheet .row-sub   td:first-child { color:#c0392b; font-weight:600; padding-left:1rem; }
+    .metrics-sheet .row-sub-2 td:first-child { color:#c0392b; font-weight:600; padding-left:2rem; }
+    .metrics-sheet .row-ratio td:first-child { color:#2c3e50; }
+    .metrics-sheet .val-cell { font-weight:700; white-space:nowrap; }
+    /* Ratio cards strip */
+    .ratio-strip { background:#f0f4f8; border-top:1px solid #d0d7de; padding:.75rem 1rem; }
+    .ratio-card  { background:#fff; border-radius:8px; border-left:3px solid #1565c0;
+                   padding:.45rem .85rem; min-width:160px; box-shadow:0 1px 4px rgba(0,0,0,.06); }
+    .ratio-card .rc-label { font-size:.68rem; font-weight:600; color:#555; letter-spacing:.03em; text-transform:uppercase; }
+    .ratio-card .rc-vals  { display:flex; gap:.6rem; align-items:baseline; flex-wrap:wrap; margin-top:.15rem; }
+    .ratio-card .rc-val   { font-size:.92rem; font-weight:700; color:#0d1b2a; }
+    .ratio-card .rc-sub   { font-size:.66rem; color:#888; }
+    .disclaimer-bar { background:#f8f9fa; border:1px solid #dee2e6; border-radius:8px; padding:.5rem 1rem; font-size:.78rem; color:#555; }
+    /* Validation table (Payer / Panel) */
+    .vt-table { border-collapse:collapse; width:100%; font-size:.76rem; }
+    .vt-table th, .vt-table td { border:1px solid #dde3ea; padding:.38rem .6rem; white-space:nowrap; vertical-align:middle; }
+    .vt-table thead th { background:#253858; color:#fff; font-weight:600; text-align:center; }
+    .vt-table thead th:first-child { text-align:left; }
+    .vt-table tbody tr:nth-child(odd)  { background:#fafbfc; }
+    .vt-table tbody tr:nth-child(even) { background:#fff; }
+    .vt-table tbody tr:hover { background:#eef4ff; }
+    .vt-table tfoot tr.vt-total td { background:#1a2744; color:#fff; font-weight:700; border-top:2px solid #0d1b2a; }
+    .vt-type-badge  { background:#e3f2fd; color:#1565c0; border-radius:4px; padding:.1rem .45rem; font-size:.66rem; font-weight:600; }
+    .vt-paid   { color:#1565c0; font-weight:600; }
+    .vt-denied { color:#c62828; font-weight:600; }
+    .vt-noresp { color:#e65100; font-weight:600; }
+    .vt-adj    { color:#6a1b9a; font-weight:600; }
+    .vt-unpaid { color:#b71c1c; }
+    .vt-var-pos { color:#1565c0; }
+    .vt-var-neg { color:#c62828; }
+    .vt-header  { border-bottom:1px solid #253858; }
+    /* Denial breakdown table */
+    .denial-table { border-collapse:collapse; width:100%; font-size:.76rem; }
+    .denial-table th, .denial-table td { border:1px solid #d0d7de; padding:.38rem .55rem; white-space:nowrap; }
+    .denial-table thead tr:first-child th { background:#0d1b2a; color:#fff; font-weight:700; text-align:center; }
+    .denial-table thead tr:last-child th  { background:#1565c0; color:#fff; font-weight:600; text-align:center; }
+    .denial-row-payer td  { background:#e8f0fe; font-weight:700; }
+    .denial-row-code  td  { background:#fff; padding-left:1.5rem !important; color:#333; }
+    .denial-row-code td:first-child { color:#c0392b; font-weight:600; }
+    .denial-row-total td  { background:#f0f4f8; font-weight:700; }
+    .denial-table td.amt  { text-align:right; font-variant-numeric:tabular-nums; }
+    .denial-table td.cnt  { text-align:right; }
+    .denial-month-group   { border-left:2px solid #90caf9 !important; }
+    /* No Response breakdown table */
+    .nr-table { border-collapse:collapse; width:100%; font-size:.76rem; }
+    .nr-table th, .nr-table td { border:1px solid #d0d7de; padding:.38rem .55rem; white-space:nowrap; }
+    .nr-table thead tr:first-child th { background:#4a148c; color:#fff; font-weight:700; text-align:center; }
+    .nr-table thead tr:last-child th  { background:#7b1fa2; color:#fff; font-weight:600; text-align:center; }
+    .nr-row-payer td { background:#f3e5f5; font-weight:700; }
+    .nr-row-total td { background:#f0f4f8; font-weight:700; }
+    .nr-table td.amt { text-align:right; font-variant-numeric:tabular-nums; }
+    .nr-table td.cnt { text-align:right; }
+    .nr-bucket-group { border-left:2px solid #ce93d8 !important; }
+    /* Priority badge colours */
+    .pri-0-30   { background:#d32f2f; color:#fff; }
+    .pri-31-60  { background:#f57c00; color:#fff; }
+    .pri-61-90  { background:#fbc02d; color:#212121; }
+    .pri-91-120 { background:#1565c0; color:#fff; }
+    .pri-120p   { background:#1565c0; color:#fff; }
+    .pri-badge  { border-radius:12px; padding:.15rem .55rem; font-size:.68rem; font-weight:700; white-space:nowrap; }
+    /* Pro tabs */
+    .pro-tabs       { display:flex; gap:0; border-bottom:2px solid #dde3ea; background:#f8fafc; border-radius:12px 12px 0 0; overflow-x:auto; }
+    .pro-tab        { border:none; background:transparent; padding:.65rem 1.25rem; font-size:.8rem;
+                      font-weight:600; color:#64748b; cursor:pointer; border-bottom:3px solid transparent;
+                      margin-bottom:-2px; white-space:nowrap; letter-spacing:.01em;
+                      transition:color .15s,border-color .15s,background .15s; display:flex; align-items:center; gap:.4rem; }
+    .pro-tab:hover  { color:#1565c0; background:#eef4ff; }
+    .pro-tab.active { color:#1565c0; border-bottom-color:#1565c0; background:#fff; }
+    .pro-tab.tab-denial.active   { color:#b71c1c; border-bottom-color:#b71c1c; }
+    .pro-tab.tab-denial:hover    { color:#b71c1c; background:#fff5f5; }
+    .pro-tab.tab-noresp.active   { color:#6a1b9a; border-bottom-color:#6a1b9a; }
+    .pro-tab.tab-noresp:hover    { color:#6a1b9a; background:#fdf4ff; }
+    .pro-tab.tab-panel.active    { color:#00695c; border-bottom-color:#00695c; }
+    .pro-tab.tab-panel:hover     { color:#00695c; background:#f0fdf9; }
+    .pro-tab.tab-cpt.active      { color:#00838f; border-bottom-color:#00838f; }
+    .pro-tab.tab-cpt:hover       { color:#00838f; background:#e0f7fa; }
+    .pro-tab-badge  { background:#e2e8f0; color:#475569; border-radius:20px; padding:.05rem .45rem;
+                      font-size:.65rem; font-weight:700; line-height:1.5; }
+    .pro-tab.active .pro-tab-badge { background:#1565c0; color:#fff; }
+    .pro-tab.tab-denial.active .pro-tab-badge  { background:#b71c1c; }
+    .pro-tab.tab-noresp.active .pro-tab-badge  { background:#6a1b9a; }
+    .pro-tab.tab-panel.active  .pro-tab-badge  { background:#00695c; }
+    .pro-tab.tab-cpt.active    .pro-tab-badge  { background:#00838f; }
+    .pro-tab.tab-insight.active { color:#7c3aed; border-bottom-color:#7c3aed; }
+    .pro-tab.tab-insight:hover  { color:#7c3aed; background:#faf5ff; }
+    .pro-tab.tab-insight.active .pro-tab-badge { background:#7c3aed; }
+    /* Prediction Accuracy tiles (no bg) */
+    .pa-strip { padding:.85rem 1rem .6rem; border-bottom:1px solid #e9eef4; }
+    .pa-tile  { border-radius:10px; padding:.65rem 1rem; min-width:180px; flex:1;
+                border:1px solid #dde3ea; display:flex; flex-direction:column; gap:.18rem; }
+    .pa-tile .pa-label { font-size:.65rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
+    .pa-tile .pa-value { font-size:1.5rem; font-weight:800; line-height:1; }
+    .pa-tile .pa-sub   { font-size:.65rem; color:#64748b; }
+</style>
+
+<!-- ?? Header + lab selector ???????????????????????????????????????????????? -->
+<div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+    <h2 class="mb-0 fw-bold">&#128202; Prediction Analysis</h2>
+    <form method="get" asp-controller="Prediction" asp-action="Index"
+          class="d-flex align-items-center gap-2" data-lab-form>
+        <label class="fw-semibold me-1 mb-0" for="predLabSelect">Lab:</label>
+        <select id="predLabSelect" name="lab"
+                class="form-select form-select-sm" style="min-width:220px"
+                data-lab-selector onchange="this.form.submit()">
+            @foreach (var lab in Model.AvailableLabs)
+            {
+                if (lab == Model.SelectedLab) { <option value="@lab" selected="selected">@lab</option> }
+                else { <option value="@lab">@lab</option> }
+            }
+        </select>
+    </form>
+</div>
+
+@if (!string.IsNullOrEmpty(Model.SelectedLab))
+{
+    @if (!Model.PredictionAvailable)
+    {
+        <div class="d-flex flex-column align-items-center justify-content-center py-5 my-3"
+             style="background:#fff;border-radius:16px;box-shadow:0 2px 14px rgba(0,0,0,.08);min-height:320px">
+            <div style="font-size:3.5rem;line-height:1">&#128683;</div>
+            <h4 class="fw-bold mt-3 mb-1" style="color:#1565c0">Prediction Not Available</h4>
+            <p class="text-muted mb-3" style="font-size:.92rem;max-width:420px;text-align:center">
+                Prediction Analysis is currently not available for <strong>@Model.SelectedLab</strong>.<br/>
+                Please contact your administrator for more details.
+            </p>
+            <a asp-controller="Home" asp-action="Index" class="btn btn-outline-primary btn-sm">
+                &#8592; Back to Home
+            </a>
+        </div>
+        return;
+    }
+
+
+    <!-- ?? Filter panel ????????????????????????????????????????????????????? -->
+    <div class="filter-panel p-3 mb-4">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+            <span class="fw-semibold" style="font-size:.9rem">
+                &#128269; Filters
+                @if (hasFilters)
+                {
+                    <span class="badge bg-primary ms-1" style="font-size:.7rem">Active</span>
+                }
+            </span>
+            <button class="btn btn-sm btn-link text-muted p-0" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#predFilterBody"
+                    aria-expanded="@(hasFilters ? "true" : "false")">
+                @if (hasFilters)
+                {
+                    <i class="bi bi-chevron-up me-1"></i><span>Hide</span>
+                }
+                else
+                {
+                    <i class="bi bi-chevron-down me-1"></i><span>Show</span>
+                }
+            </button>
+        </div>
+        <div id="predFilterBody" class="collapse @(hasFilters ? "show" : "")">
+            <form method="get" asp-controller="Prediction" asp-action="Index" data-lab-form>
+                <input type="hidden" name="lab" value="@Model.SelectedLab" />
+                <div class="row g-2 align-items-end">
+                    <div class="col-sm-6 col-md-2">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PAYER NAME</label>
+                        <select name="filterPayerName" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            @foreach (var v in Model.PayerNames)
+                            {
+                                if (v == Model.FilterPayerName) { <option value="@v" selected="selected">@v</option> }
+                                else { <option value="@v">@v</option> }
+                            }
+                        </select>
+                    </div>
+                    <div class="col-sm-6 col-md-2">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PAYER TYPE</label>
+                        <select name="filterPayerType" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            @foreach (var v in Model.PayerTypes)
+                            {
+                                if (v == Model.FilterPayerType) { <option value="@v" selected="selected">@v</option> }
+                                else { <option value="@v">@v</option> }
+                            }
+                        </select>
+                    </div>
+                    <div class="col-sm-6 col-md-2">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PANEL NAME</label>
+                        <select name="filterPanelName" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            @foreach (var v in Model.PanelNames)
+                            {
+                                if (v == Model.FilterPanelName) { <option value="@v" selected="selected">@v</option> }
+                                else { <option value="@v">@v</option> }
+                            }
+                        </select>
+                    </div>
+                    <div class="col-sm-6 col-md-2">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">COVERAGE STATUS</label>
+                        <select name="filterFinalCoverageStatus" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            @foreach (var v in Model.FinalCoverageStatuses)
+                            {
+                                if (v == Model.FilterFinalCoverageStatus) { <option value="@v" selected="selected">@v</option> }
+                                else { <option value="@v">@v</option> }
+                            }
+                        </select>
+                    </div>
+                    <div class="col-sm-6 col-md-2">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PAYABILITY</label>
+                        <select name="filterPayability" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            @foreach (var v in Model.PayabilityOptions)
+                            {
+                                if (v == Model.FilterPayability) { <option value="@v" selected="selected">@v</option> }
+                                else { <option value="@v">@v</option> }
+                            }
+                        </select>
+                    </div>
+                    <div class="col-sm-6 col-md-2">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">CPT CODE</label>
+                        <select name="filterCPTCode" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            @foreach (var v in Model.CPTCodes)
+                            {
+                                if (v == Model.FilterCPTCode) { <option value="@v" selected="selected">@v</option> }
+                                else { <option value="@v">@v</option> }
+                            }
+                        </select>
+                    </div>
+                </div>
+                <div class="mt-2 d-flex gap-2">
+                    <button type="submit" class="btn btn-primary btn-sm">Apply Filters</button>
+                    <a asp-controller="Prediction" asp-action="Index" asp-route-lab="@Model.SelectedLab"
+                       class="btn btn-outline-secondary btn-sm">Clear</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    @if (!Model.FileFound)
+    {
+        return;
+    }
+
+    <!-- ?? Prediction vs Non-Payment Summary ??????????????????????????????? -->
+    <div class="card insight-card mb-4">
+        <div class="card-header text-white d-flex align-items-center justify-content-between"
+             style="background:linear-gradient(135deg,#0d1b2a,#1565c0)">
+            <div>
+                <div class="fw-bold">&#128203; Prediction vs Non-Payment Summary</div>
+                <div style="font-size:.72rem;opacity:.8;font-weight:400">
+                    Claims = COUNT(DISTINCT Visit#) &nbsp;|&nbsp;
+                    Predicted = SUM(Mode Allowed / Mode Ins. Paid) &nbsp;|&nbsp;
+                    Analysis cutoff: Expected Payment Date &lt; Start of current week
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab bar -->
+        <div class="pro-tabs" role="tablist" style="border-radius:0">
+            <button class="pro-tab active" id="pt-summary" data-bs-toggle="tab"
+                    data-bs-target="#pane-summary" type="button" role="tab">
+                &#128203; Summary
+            </button>
+            @if (insight is not null)
+            {
+                <button class="pro-tab tab-insight" id="pt-aiinsight" data-bs-toggle="tab"
+                        data-bs-target="#pane-aiinsight" type="button" role="tab">
+                    &#129504; Insights
+                    <span class="pro-tab-badge">@insight.Sections.Count</span>
+                </button>
+            }
+        </div>
+
+        <div class="tab-content">
+
+            <!-- Summary tab (existing content) -->
+            <div class="tab-pane fade show active" id="pane-summary" role="tabpanel">
+                <div class="card-body p-0">
+
+                <div class="table-responsive">
+                <table class="metrics-sheet">
+                    @{
+                        var toPay  = Model.Buckets.FirstOrDefault(b => b.BucketName == "Predicted To Pay");
+                        var paid   = Model.Buckets.FirstOrDefault(b => b.BucketName == "Predicted \u2013 Paid");
+                        var unpaid = Model.Buckets.FirstOrDefault(b => b.BucketName == "Predicted \u2013 Unpaid");
+                        var denied = Model.Buckets.FirstOrDefault(b => b.BucketName == "Unpaid \u2013 Denied");
+                        var noresp = Model.Buckets.FirstOrDefault(b => b.BucketName == "Unpaid \u2013 No Response");
+                        var adj    = Model.Buckets.FirstOrDefault(b => b.BucketName == "Unpaid \u2013 Adjusted");
+                    }
+                    <thead>
+                        <tr>
+                            <th style="width:16%">Metrics</th>
+                            <th class="text-end" style="width:9%">Claim Count (#)</th>
+                            <th class="text-end" style="width:12%">Predicted Allowed ($)</th>
+                            <th class="text-end" style="width:12%">Predicted Insurance Payment ($)</th>
+                            <th class="text-end" style="width:12%">Actual Allowed Amount ($)</th>
+                            <th class="text-end" style="width:12%">Actual Insurance Payment ($)</th>
+                            <th class="text-end" style="width:13%">Allowed Amount - Predicted Vs Actual ($)</th>
+                            <th class="text-end" style="width:14%">Insurance Paid - Predicted Vs Actual ($)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @{
+                            string FmtVariance(decimal? pred, decimal? actual)
+                            {
+                                if (pred is null || actual is null) return "\u2014";
+                                var v = pred.Value - actual.Value;
+                                return (v >= 0 ? "+" : "") + v.ToString("N2");
+                            }
+                            string VarClass(decimal? pred, decimal? actual)
+                            {
+                                if (pred is null || actual is null) return "na-cell";
+                                return (pred.Value - actual.Value) >= 0 ? "text-success" : "text-danger";
+                            }
+                        }
+
+                        <!-- Predicted To Pay -->
+                        <tr class="row-summary">
+                            <td><strong>Predicted To Pay</strong></td>
+                            <td class="text-end val-cell">@(toPay?.ClaimCount.ToString("N0") ?? "\u2014")</td>
+                            <td class="text-end val-cell">@FmtAmt(toPay?.PredictedAllowed)</td>
+                            <td class="text-end val-cell">@FmtAmt(toPay?.PredictedInsurance)</td>
+                            <td class="text-end na-cell">—</td>
+                            <td class="text-end na-cell">—</td>
+                            <td class="text-end na-cell">—</td>
+                            <td class="text-end na-cell">—</td>
+                        </tr>
+
+                        <!-- Predicted – Paid -->
+                        <tr class="row-summary">
+                            <td><strong>Predicted – Paid</strong></td>
+                            <td class="text-end val-cell">@(paid?.ClaimCount.ToString("N0") ?? "\u2014")</td>
+                            <td class="text-end val-cell">@FmtAmt(paid?.PredictedAllowed)</td>
+                            <td class="text-end val-cell">@FmtAmt(paid?.PredictedInsurance)</td>
+                            <td class="text-end val-cell">@FmtAmt(paid?.ActualAllowed)</td>
+                            <td class="text-end val-cell">@FmtAmt(paid?.ActualInsurance)</td>
+                            <td class="text-end val-cell fw-semibold @VarClass(paid?.PredictedAllowed, paid?.ActualAllowed)">
+                                @FmtVariance(paid?.PredictedAllowed, paid?.ActualAllowed)
+                            </td>
+                            <td class="text-end val-cell fw-semibold @VarClass(paid?.PredictedInsurance, paid?.ActualInsurance)">
+                                @FmtVariance(paid?.PredictedInsurance, paid?.ActualInsurance)
+                            </td>
+                        </tr>
+
+                        <!-- Predicted – Unpaid -->
+                        <tr class="row-sub">
+                            <td>Predicted – Unpaid</td>
+                            <td class="text-end val-cell">@(unpaid?.ClaimCount.ToString("N0") ?? "\u2014")</td>
+                            <td class="text-end val-cell">@FmtAmt(unpaid?.PredictedAllowed)</td>
+                            <td class="text-end val-cell">@FmtAmt(unpaid?.PredictedInsurance)</td>
+                            <td class="text-end val-cell">@FmtAmt(unpaid?.ActualAllowed)</td>
+                            <td class="text-end val-cell">@FmtAmt(unpaid?.ActualInsurance)</td>
+                            <td class="text-end val-cell fw-semibold @VarClass(unpaid?.PredictedAllowed, unpaid?.ActualAllowed)">
+                                @FmtVariance(unpaid?.PredictedAllowed, unpaid?.ActualAllowed)
+                            </td>
+                            <td class="text-end val-cell fw-semibold @VarClass(unpaid?.PredictedInsurance, unpaid?.ActualInsurance)">
+                                @FmtVariance(unpaid?.PredictedInsurance, unpaid?.ActualInsurance)
+                            </td>
+                        </tr>
+
+                        <!-- Unpaid – Denied -->
+                        <tr class="row-sub-2">
+                            <td>Unpaid – Denied</td>
+                            <td class="text-end val-cell">@(denied?.ClaimCount.ToString("N0") ?? "\u2014")</td>
+                            <td class="text-end val-cell">@FmtAmt(denied?.PredictedAllowed)</td>
+                            <td class="text-end val-cell">@FmtAmt(denied?.PredictedInsurance)</td>
+                            <td class="text-end val-cell">@FmtAmt(denied?.ActualAllowed)</td>
+                            <td class="text-end val-cell">@FmtAmt(denied?.ActualInsurance)</td>
+                            <td class="text-end val-cell fw-semibold @VarClass(denied?.PredictedAllowed, denied?.ActualAllowed)">
+                                @FmtVariance(denied?.PredictedAllowed, denied?.ActualAllowed)
+                            </td>
+                            <td class="text-end val-cell fw-semibold @VarClass(denied?.PredictedInsurance, denied?.ActualInsurance)">
+                                @FmtVariance(denied?.PredictedInsurance, denied?.ActualInsurance)
+                            </td>
+                        </tr>
+
+                        <!-- Unpaid – No Response -->
+                        <tr class="row-sub-2">
+                            <td>Unpaid – No Response</td>
+                            <td class="text-end val-cell">@(noresp?.ClaimCount.ToString("N0") ?? "\u2014")</td>
+                            <td class="text-end val-cell">@FmtAmt(noresp?.PredictedAllowed)</td>
+                            <td class="text-end val-cell">@FmtAmt(noresp?.PredictedInsurance)</td>
+                            <td class="text-end val-cell">@FmtAmt(noresp?.ActualAllowed)</td>
+                            <td class="text-end val-cell">@FmtAmt(noresp?.ActualInsurance)</td>
+                            <td class="text-end val-cell fw-semibold @VarClass(noresp?.PredictedAllowed, noresp?.ActualAllowed)">
+                                @FmtVariance(noresp?.PredictedAllowed, noresp?.ActualAllowed)
+                            </td>
+                            <td class="text-end val-cell fw-semibold @VarClass(noresp?.PredictedInsurance, noresp?.ActualInsurance)">
+                                @FmtVariance(noresp?.PredictedInsurance, noresp?.ActualInsurance)
+                            </td>
+                        </tr>
+
+                        <!-- Unpaid – Adjusted -->
+                        <tr class="row-sub-2">
+                            <td>Unpaid – Adjusted</td>
+                            <td class="text-end val-cell">@(adj?.ClaimCount.ToString("N0") ?? "\u2014")</td>
+                            <td class="text-end val-cell">@FmtAmt(adj?.PredictedAllowed)</td>
+                            <td class="text-end val-cell">@FmtAmt(adj?.PredictedInsurance)</td>
+                            <td class="text-end val-cell">@FmtAmt(adj?.ActualAllowed)</td>
+                            <td class="text-end val-cell">@FmtAmt(adj?.ActualInsurance)</td>
+                            <td class="text-end val-cell fw-semibold @VarClass(adj?.PredictedAllowed, adj?.ActualAllowed)">
+                                @FmtVariance(adj?.PredictedAllowed, adj?.ActualAllowed)
+                            </td>
+                            <td class="text-end val-cell fw-semibold @VarClass(adj?.PredictedInsurance, adj?.ActualInsurance)">
+                                @FmtVariance(adj?.PredictedInsurance, adj?.ActualInsurance)
+                            </td>
+                        </tr>
+
+
+                        @* ?? Prediction Accuracy ?? moved to KPI cards below *@
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- ?? Ratios card strip ???????????????????????????????????? -->
+            <div class="ratio-strip">
+                <div class="fw-bold mb-2" style="font-size:.75rem;color:#0d1b2a;letter-spacing:.04em">&#128200; RATIOS</div>
+                <div class="d-flex flex-wrap gap-2">
+                    <div class="ratio-card">
+                        <div class="rc-label">Payment Ratio</div>
+                        <div class="rc-vals">
+                            <span class="rc-val">@FmtPct(sm.PaymentRatioClaim)</span><span class="rc-sub">Claim</span>
+                            <span class="rc-val">@FmtPct(sm.PaymentRatioAllowed)</span><span class="rc-sub">Allowed</span>
+                            <span class="rc-val">@FmtPct(sm.PaymentRatioInsurance)</span><span class="rc-sub">Ins. Pmt</span>
+                        </div>
+                    </div>
+                    <div class="ratio-card" style="border-left-color:#c0392b">
+                        <div class="rc-label">Non-Payment Rate</div>
+                        <div class="rc-vals">
+                            <span class="rc-val" style="color:#c0392b">@FmtPct(sm.NonPaymentRateClaim)</span><span class="rc-sub">Claim</span>
+                            <span class="rc-val" style="color:#c0392b">@FmtPct(sm.NonPaymentRateAllowed)</span><span class="rc-sub">Allowed</span>
+                            <span class="rc-val" style="color:#c0392b">@FmtPct(sm.NonPaymentRateInsurance)</span><span class="rc-sub">Ins. Pmt</span>
+                        </div>
+                    </div>
+                    <div class="ratio-card" style="border-left-color:#e53935">
+                        <div class="rc-label">Denied</div>
+                        <div class="rc-vals">
+                            <span class="rc-val">@FmtPct(sm.DeniedPctClaim)</span><span class="rc-sub">Claim</span>
+                            <span class="rc-val">@FmtPct(sm.DeniedPctAllowed)</span><span class="rc-sub">Allowed</span>
+                            <span class="rc-val">@FmtPct(sm.DeniedPctInsurance)</span><span class="rc-sub">Ins. Pmt</span>
+                        </div>
+                    </div>
+                    <div class="ratio-card" style="border-left-color:#f57c00">
+                        <div class="rc-label">No Response</div>
+                        <div class="rc-vals">
+                            <span class="rc-val">@FmtPct(sm.NoResponsePctClaim)</span><span class="rc-sub">Claim</span>
+                            <span class="rc-val">@FmtPct(sm.NoResponsePctAllowed)</span><span class="rc-sub">Allowed</span>
+                            <span class="rc-val">@FmtPct(sm.NoResponsePctInsurance)</span><span class="rc-sub">Ins. Pmt</span>
+                        </div>
+                    </div>
+                    <div class="ratio-card" style="border-left-color:#6a1b9a">
+                        <div class="rc-label">Adjusted</div>
+                        <div class="rc-vals">
+                            <span class="rc-val">@FmtPct(sm.AdjustedPctClaim)</span><span class="rc-sub">Claim</span>
+                            <span class="rc-val">@FmtPct(sm.AdjustedPctAllowed)</span><span class="rc-sub">Allowed</span>
+                            <span class="rc-val">@FmtPct(sm.AdjustedPctInsurance)</span><span class="rc-sub">Ins. Pmt</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- ?? Prediction Accuracy KPI tiles ???????????????????????? -->
+            <div class="px-3 py-3" style="background:#f8fafc;border-top:1px solid #e2e8f0">
+                <div class="fw-bold mb-3" style="font-size:.78rem;letter-spacing:.08em;color:#0d1b2a">
+                    &#127919; PREDICTION ACCURACY
+                </div>
+                <div class="d-flex flex-wrap gap-3">
+
+                    <!-- Claim % tile -->
+                    <div style="background:#fff;border:1px solid #bfdbfe;border-left:4px solid #1565c0;
+                                border-radius:10px;padding:.9rem 1.2rem;min-width:190px;
+                                box-shadow:0 2px 8px rgba(21,101,192,.10);flex:1">
+                        <div style="font-size:.65rem;font-weight:700;letter-spacing:.1em;
+                                    color:#1565c0;text-transform:uppercase;margin-bottom:.3rem">
+                            Claim (%)
+                        </div>
+                        <div style="font-size:2rem;font-weight:800;color:#1565c0;line-height:1;margin-bottom:.2rem">
+                            @FmtPct(sm.PredVsActualRatioClaim)
+                        </div>
+                        <div style="font-size:.68rem;color:#64748b">Predicted vs Actuals Ratio</div>
+                    </div>
+
+                    <!-- Allowed Amount % tile -->
+                    <div style="background:#fff;border:1px solid #bbf7d0;border-left:4px solid #2e7d32;
+                                border-radius:10px;padding:.9rem 1.2rem;min-width:220px;
+                                box-shadow:0 2px 8px rgba(46,125,50,.10);flex:1">
+                        <div style="font-size:.65rem;font-weight:700;letter-spacing:.1em;
+                                    color:#2e7d32;text-transform:uppercase;margin-bottom:.3rem">
+                            Allowed Amount (%)
+                        </div>
+                        <div style="font-size:2rem;font-weight:800;color:#2e7d32;line-height:1;margin-bottom:.2rem">
+                            @FmtPct(sm.PredVsActualAllowedAmount)
+                        </div>
+                        <div style="font-size:.68rem;color:#64748b">Predicted vs Actuals – Allowed Amount</div>
+                    </div>
+
+                    <!-- Insurance Payment % tile -->
+                    <div style="background:#fff;border:1px solid #e9d5ff;border-left:4px solid #6a1b9a;
+                                border-radius:10px;padding:.9rem 1.2rem;min-width:220px;
+                                box-shadow:0 2px 8px rgba(106,27,154,.10);flex:1">
+                        <div style="font-size:.65rem;font-weight:700;letter-spacing:.1em;
+                                    color:#6a1b9a;text-transform:uppercase;margin-bottom:.3rem">
+                            Insurance Payment (%)
+                        </div>
+                        <div style="font-size:2rem;font-weight:800;color:#6a1b9a;line-height:1;margin-bottom:.2rem">
+                            @FmtPct(sm.PredVsActualInsPayment)
+                        </div>
+                        <div style="font-size:.68rem;color:#64748b">Predicted vs Actuals – Insurance Payment</div>
+                    </div>
+
+                </div>
+            </div>
+            </div>
+            </div>
+            <!-- /Summary tab pane -->
+
+            @if (insight is not null)
+            {
+            <div class="tab-pane fade" id="pane-aiinsight" role="tabpanel">
+                <div class="p-3" style="background:#f1f5f9">
+                    <div class="row g-3">
+                        @for (int si = 0; si < insight.Sections.Count; si++)
+                        {
+                            var sec   = insight.Sections[si];
+                            var ci    = si % 4;
+                            var bdr   = insSecBorder[ci];
+                            var bg    = insSecBg[ci];
+                            var icol  = insSecIcon[ci];
+                            var emoji = insSecEmoji[ci];
+                            <div class="col-12 col-xl-6">
+                                <div class="h-100 rounded-3 overflow-hidden"
+                                     style="background:#fff;border:1px solid #e2e8f0;box-shadow:0 2px 8px rgba(0,0,0,.05)">
+                                    <!-- Section header bar -->
+                                    <div class="d-flex align-items-center gap-2 px-3 py-2"
+                                         style="background:@bg;border-bottom:2px solid @bdr">
+                                        <span>@(new Microsoft.AspNetCore.Html.HtmlString(emoji))</span>
+                                        <span class="fw-bold" style="font-size:.78rem;color:@icol;letter-spacing:.05em;text-transform:uppercase">
+                                            @sec.SectionNumber. @sec.Title
+                                        </span>
+                                    </div>
+                                    <!-- Subsections -->
+                                    <div class="px-3 py-2">
+                                        @foreach (var sub in sec.Subsections)
+                                        {
+                                            <div class="d-inline-block mb-2 mt-2 px-2 py-1 rounded-pill"
+                                                 style="background:@bg;border:1px solid @bdr;font-size:.68rem;font-weight:700;color:@icol;letter-spacing:.04em;text-transform:uppercase">
+                                                @sub.Title
+                                            </div>
+                                            <ul class="mb-2" style="list-style:none;padding-left:.25rem">
+                                                @foreach (var bullet in sub.Bullets)
+                                                {
+                                                    <li class="d-flex gap-2 mb-1" style="font-size:.78rem;color:#374151;line-height:1.5">
+                                                        <span style="color:@icol;font-weight:700;flex-shrink:0">&#8250;</span>
+                                                        <span>@bullet</span>
+                                                    </li>
+                                                }
+                                            </ul>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+                <!-- Footer -->
+                <div class="d-flex align-items-center justify-content-between px-4 py-2"
+                     style="background:#f8fafc;border-top:1px solid #e2e8f0">
+                    <span style="font-size:.68rem;color:#94a3b8">&#128196; Source: @insight.SourceFileName</span>
+                    @if (Model.Insight is null)
+                    {
+                        <span class="badge bg-warning text-dark" style="font-size:.62rem">fallback data</span>
+                    }
+                </div>
+            </div>
+            }
+            <!-- /AI Insights tab pane -->
+
+        </div>
+    </div>
+
+    <!-- ?? Unified Analysis Tabs: Payers | CPT | Panels | Denial | No Response ?? -->
+    <div class="card insight-card mb-4">
+        <div class="card-header text-white d-flex align-items-center gap-2 px-3 py-2"
+             style="background:linear-gradient(135deg,#0d1b2a,#1a2744)">
+            <span>&#128202; Prediction Validation &amp; Breakdown Analysis</span>
+        </div>
+        <div class="card-body p-0">
+
+            <!-- Pro Tab Bar -->
+            <div class="pro-tabs" role="tablist">
+                <button class="pro-tab active" id="pt-payers" data-bs-toggle="tab"
+                        data-bs-target="#pp-payers" type="button" role="tab">
+                    &#128100; Payers
+                    <span class="pro-tab-badge">@Model.TopPayerInsights.Count</span>
+                </button>
+                <button class="pro-tab tab-cpt" id="pt-cpts" data-bs-toggle="tab"
+                        data-bs-target="#pp-cpts" type="button" role="tab">
+                    &#35; CPT Codes
+                    <span class="pro-tab-badge">@Model.TopCptInsights.Count</span>
+                </button>
+                <button class="pro-tab tab-panel" id="pt-panels" data-bs-toggle="tab"
+                        data-bs-target="#pp-panels" type="button" role="tab">
+                    &#9635; Panels
+                    <span class="pro-tab-badge">@Model.TopPanelInsights.Count</span>
+                </button>
+                <button class="pro-tab tab-denial" id="pt-denial" data-bs-toggle="tab"
+                        data-bs-target="#pp-denial" type="button" role="tab">
+                    &#128683; Denial Breakdown
+                    <span class="pro-tab-badge">@db.TotalClaims.ToString("N0")</span>
+                </button>
+                <button class="pro-tab tab-noresp" id="pt-noresp" data-bs-toggle="tab"
+                        data-bs-target="#pp-noresp" type="button" role="tab">
+                    &#9888;&#65039; No Response
+                    <span class="pro-tab-badge">@nr.TotalClaims.ToString("N0")</span>
+                </button>
+            </div>
+
+            <div class="tab-content">
+
+                <!-- ?? Payers ?? -->
+                <div class="tab-pane fade show active" id="pp-payers" role="tabpanel">
+                    @{
+                        var pTotal = new
+                        {
+                            Claims    = Model.TopPayerInsights.Sum(r => r.TotalClaims),
+                            Paid      = Model.TopPayerInsights.Sum(r => r.Paid),
+                            Denied    = Model.TopPayerInsights.Sum(r => r.Denied),
+                            NoResp    = Model.TopPayerInsights.Sum(r => r.NoResponse),
+                            Adj       = Model.TopPayerInsights.Sum(r => r.Adjusted),
+                            Unpaid    = Model.TopPayerInsights.Sum(r => r.Unpaid),
+                            PredAllow = Model.TopPayerInsights.Sum(r => r.PredictedAllowed),
+                            PredIns   = Model.TopPayerInsights.Sum(r => r.PredictedInsurance),
+                            ActAllow  = Model.TopPayerInsights.Sum(r => r.ActualAllowed),
+                            ActIns    = Model.TopPayerInsights.Sum(r => r.ActualInsurance),
+                            Variance  = Model.TopPayerInsights.Sum(r => r.Variance),
+                        };
+                    }
+                    <div class="px-3 py-2" style="background:#f8fafc;border-bottom:1px solid #e2e8f0">
+                        <span class="fw-semibold" style="font-size:.8rem;color:#1a2744">Prediction Validation by Payer (Claim Level)</span>
+                        <span class="text-muted ms-2" style="font-size:.72rem">Sorted by Total Claims Descending</span>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="vt-table">
+                            <thead>
+                                <tr>
+                                    <th>Payer Name</th><th>Payer Type</th>
+                                    <th class="text-end">Total Claims</th>
+                                    <th class="text-end" style="color:#4caf50">Paid</th>
+                                    <th class="text-end" style="color:#ef5350">Denied</th>
+                                    <th class="text-end" style="color:#ff9800">No Response</th>
+                                    <th class="text-end" style="color:#ab47bc">Adjusted</th>
+                                    <th class="text-end" style="color:#ef5350">Unpaid</th>
+                                    <th class="text-end">Payment Rate (%)</th>
+                                    <th class="text-end">Predicted Allowed</th>
+                                    <th class="text-end">Pred. Ins. Payment</th>
+                                    <th class="text-end">Actual Allowed ($)</th>
+                                    <th class="text-end">Actual Ins. Payment</th>
+                                    <th class="text-end">Variance ($)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var r in Model.TopPayerInsights)
+                                {
+                                    <tr>
+                                        <td class="fw-semibold" title="@r.PayerName">@r.PayerName</td>
+                                        <td>@if (!string.IsNullOrWhiteSpace(r.PayerType)) { <span class="vt-type-badge">@r.PayerType</span> }</td>
+                                        <td class="text-end fw-bold">@r.TotalClaims</td>
+                                        <td class="text-end vt-paid">@r.Paid</td>
+                                        <td class="text-end vt-denied">@r.Denied</td>
+                                        <td class="text-end vt-noresp">@r.NoResponse</td>
+                                        <td class="text-end vt-adj">@r.Adjusted</td>
+                                        <td class="text-end vt-unpaid fw-bold">@r.Unpaid</td>
+                                        <td class="text-end fw-semibold" style="color:@(r.PaymentRatePct >= 50 ? "#2e7d32" : "#c0392b")">
+                                            @(r.PaymentRatePct.HasValue ? $"{r.PaymentRatePct:N1}%" : "—")
+                                        </td>
+                                        <td class="text-end">@(r.PredictedAllowed == 0 ? "" : $"${r.PredictedAllowed:N2}")</td>
+                                        <td class="text-end">@(r.PredictedInsurance == 0 ? "" : $"${r.PredictedInsurance:N2}")</td>
+                                        <td class="text-end">@(r.ActualAllowed == 0 ? "" : $"${r.ActualAllowed:N2}")</td>
+                                        <td class="text-end">@(r.ActualInsurance == 0 ? "" : $"${r.ActualInsurance:N2}")</td>
+                                        <td class="text-end fw-semibold @(r.Variance >= 0 ? "vt-var-pos" : "vt-var-neg")">
+                                            @(r.Variance == 0 ? "" : (r.Variance > 0 ? "+" : "") + $"${r.Variance:N2}")
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr class="vt-total">
+                                    <td colspan="2">TOTAL</td>
+                                    <td class="text-end">@pTotal.Claims</td>
+                                    <td class="text-end">@pTotal.Paid</td>
+                                    <td class="text-end">@pTotal.Denied</td>
+                                    <td class="text-end">@pTotal.NoResp</td>
+                                    <td class="text-end">@pTotal.Adj</td>
+                                    <td class="text-end">@pTotal.Unpaid</td>
+                                    <td></td>
+                                    <td class="text-end">$@pTotal.PredAllow.ToString("N2")</td>
+                                    <td class="text-end">$@pTotal.PredIns.ToString("N2")</td>
+                                    <td class="text-end">$@pTotal.ActAllow.ToString("N2")</td>
+                                    <td class="text-end">$@pTotal.ActIns.ToString("N2")</td>
+                                    <td class="text-end @(pTotal.Variance >= 0 ? "vt-var-pos" : "vt-var-neg")">
+                                        @((pTotal.Variance > 0 ? "+" : "") + $"${pTotal.Variance:N2}")
+                                    </td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- ?? CPT Codes ?? -->
+                <div class="tab-pane fade" id="pp-cpts" role="tabpanel">
+                    <div class="px-3 py-2" style="background:#f8fafc;border-bottom:1px solid #e2e8f0">
+                        <span class="fw-semibold" style="font-size:.8rem;color:#00695c">CPT Code Breakdown</span>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="vt-table">
+                            <thead>
+                                <tr>
+                                    <th>CPT Code</th>
+                                    <th class="text-end">Claims</th>
+                                    <th class="text-end">Pred. Allowed</th>
+                                    <th class="text-end">Pred. Ins. Pmt</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var r in Model.TopCptInsights)
+                                {
+                                    <tr>
+                                        <td><strong>@r.CPTCode</strong></td>
+                                        <td class="text-end">@r.LineItems.ToString("N0")</td>
+                                        <td class="text-end">$@r.PredictedAllowed.ToString("N0")</td>
+                                        <td class="text-end fw-semibold vt-var-pos">$@r.PredictedInsurance.ToString("N0")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- ?? Panels ?? -->
+                <div class="tab-pane fade" id="pp-panels" role="tabpanel">
+                    @{
+                        var plTotal = new
+                        {
+                            Claims    = Model.TopPanelInsights.Sum(r => r.TotalClaims),
+                            Paid      = Model.TopPanelInsights.Sum(r => r.Paid),
+                            Denied    = Model.TopPanelInsights.Sum(r => r.Denied),
+                            NoResp    = Model.TopPanelInsights.Sum(r => r.NoResponse),
+                            Adj       = Model.TopPanelInsights.Sum(r => r.Adjusted),
+                            Unpaid    = Model.TopPanelInsights.Sum(r => r.Unpaid),
+                            PredAllow = Model.TopPanelInsights.Sum(r => r.PredictedAllowed),
+                            PredIns   = Model.TopPanelInsights.Sum(r => r.PredictedInsurance),
+                            ActAllow  = Model.TopPanelInsights.Sum(r => r.ActualAllowed),
+                            ActIns    = Model.TopPanelInsights.Sum(r => r.ActualInsurance),
+                            Variance  = Model.TopPanelInsights.Sum(r => r.Variance),
+                        };
+                    }
+                    <div class="px-3 py-2" style="background:#f8fafc;border-bottom:1px solid #e2e8f0">
+                        <span class="fw-semibold" style="font-size:.8rem;color:#00695c">Prediction Validation by Panel (Claim Level)</span>
+                        <span class="text-muted ms-2" style="font-size:.72rem">Sorted by Total Claims Descending</span>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="vt-table">
+                            <thead>
+                                <tr>
+                                    <th>Panel Name</th>
+                                    <th class="text-end">Total Claims</th>
+                                    <th class="text-end" style="color:#4caf50">Paid</th>
+                                    <th class="text-end" style="color:#ef5350">Denied</th>
+                                    <th class="text-end" style="color:#ff9800">No Response</th>
+                                    <th class="text-end" style="color:#ab47bc">Adjusted</th>
+                                    <th class="text-end" style="color:#ef5350">Unpaid</th>
+                                    <th class="text-end">Payment Rate (%)</th>
+                                    <th class="text-end">Predicted Allowed</th>
+                                    <th class="text-end">Pred. Ins. Payment</th>
+                                    <th class="text-end">Actual Allowed ($)</th>
+                                    <th class="text-end">Actual Ins. Payment</th>
+                                    <th class="text-end">Variance ($)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var r in Model.TopPanelInsights)
+                                {
+                                    <tr>
+                                        <td class="fw-semibold">@r.PanelName</td>
+                                        <td class="text-end fw-bold">@r.TotalClaims</td>
+                                        <td class="text-end vt-paid">@r.Paid</td>
+                                        <td class="text-end vt-denied">@r.Denied</td>
+                                        <td class="text-end vt-noresp">@r.NoResponse</td>
+                                        <td class="text-end vt-adj">@r.Adjusted</td>
+                                        <td class="text-end vt-unpaid fw-bold">@r.Unpaid</td>
+                                        <td class="text-end fw-semibold" style="color:@(r.PaymentRatePct >= 50 ? "#2e7d32" : "#c0392b")">
+                                            @(r.PaymentRatePct.HasValue ? $"{r.PaymentRatePct:N1}%" : "—")
+                                        </td>
+                                        <td class="text-end">@(r.PredictedAllowed == 0 ? "" : $"${r.PredictedAllowed:N2}")</td>
+                                        <td class="text-end">@(r.PredictedInsurance == 0 ? "" : $"${r.PredictedInsurance:N2}")</td>
+                                        <td class="text-end">@(r.ActualAllowed == 0 ? "" : $"${r.ActualAllowed:N2}")</td>
+                                        <td class="text-end">@(r.ActualInsurance == 0 ? "" : $"${r.ActualInsurance:N2}")</td>
+                                        <td class="text-end fw-semibold @(r.Variance >= 0 ? "vt-var-pos" : "vt-var-neg")">
+                                            @(r.Variance == 0 ? "" : (r.Variance > 0 ? "+" : "") + $"${r.Variance:N2}")
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr class="vt-total">
+                                    <td>TOTAL</td>
+                                    <td class="text-end">@plTotal.Claims</td>
+                                    <td class="text-end">@plTotal.Paid</td>
+                                    <td class="text-end">@plTotal.Denied</td>
+                                    <td class="text-end">@plTotal.NoResp</td>
+                                    <td class="text-end">@plTotal.Adj</td>
+                                    <td class="text-end">@plTotal.Unpaid</td>
+                                    <td></td>
+                                    <td class="text-end">$@plTotal.PredAllow.ToString("N2")</td>
+                                    <td class="text-end">$@plTotal.PredIns.ToString("N2")</td>
+                                    <td class="text-end">$@plTotal.ActAllow.ToString("N2")</td>
+                                    <td class="text-end">$@plTotal.ActIns.ToString("N2")</td>
+                                    <td class="text-end @(plTotal.Variance >= 0 ? "vt-var-pos" : "vt-var-neg")">
+                                        @((plTotal.Variance > 0 ? "+" : "") + $"${plTotal.Variance:N2}")
+                                    </td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- ?? Denial Breakdown ?? -->
+                <div class="tab-pane fade" id="pp-denial" role="tabpanel">
+                    <div class="px-3 py-2 d-flex align-items-center justify-content-between"
+                         style="background:#fff5f5;border-bottom:1px solid #fecaca">
+                        <span class="fw-semibold" style="font-size:.8rem;color:#b71c1c">
+                            &#128683; Predicted to Pay vs Denial Breakdown
+                        </span>
+                        <span class="badge" style="background:#b71c1c;font-size:.7rem">
+                            @db.TotalClaims.ToString("N0") denied claims
+                        </span>
+                    </div>
+                    @if (db.PayerRows.Count == 0)
+                    {
+                        <div class="p-3 text-muted" style="font-size:.85rem">No denied records match the current filter criteria.</div>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="denial-table">
+                                <thead>
+                                    <tr>
+                                        <th rowspan="2" style="min-width:180px;text-align:left">Payer Name</th>
+                                        @foreach (var mo in db.Months)
+                                        {
+                                            <th colspan="3" class="denial-month-group">@mo</th>
+                                        }
+                                        <th colspan="3" style="background:#1b5e20">Total</th>
+                                    </tr>
+                                    <tr>
+                                        @foreach (var mo in db.Months)
+                                        {
+                                            <th class="denial-month-group">Claims</th>
+                                            <th>Pred. Allowed ($)</th>
+                                            <th>Pred. Ins. Pmt ($)</th>
+                                        }
+                                        <th style="background:#2e7d32">Claims</th>
+                                        <th style="background:#2e7d32">Pred. Allowed ($)</th>
+                                        <th style="background:#2e7d32">Pred. Ins. Pmt ($)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var payer in db.PayerRows)
+                                    {
+                                        <tr class="denial-row-payer">
+                                            <td title="@payer.PayerName">
+                                                @(payer.PayerName.Length > 38 ? payer.PayerName[..38] + "…" : payer.PayerName)
+                                            </td>
+                                            @foreach (var mo in db.Months)
+                                            {
+                                                var ma = payer.ByMonth.GetValueOrDefault(mo);
+                                                <td class="cnt denial-month-group">@((ma?.ClaimCount ?? 0).ToString("N0"))</td>
+                                                <td class="amt">$@((ma?.PredictedAllowed ?? 0).ToString("N0"))</td>
+                                                <td class="amt">$@((ma?.PredictedInsurance ?? 0).ToString("N0"))</td>
+                                            }
+                                            <td class="cnt">@payer.TotalClaims.ToString("N0")</td>
+                                            <td class="amt">$@payer.TotalPredictedAllowed.ToString("N0")</td>
+                                            <td class="amt">$@payer.TotalPredictedInsurance.ToString("N0")</td>
+                                        </tr>
+                                        @foreach (var dc in payer.TopDenialCodes)
+                                        {
+                                            <tr class="denial-row-code">
+                                                <td title="@dc.DenialDescription">
+                                                    &nbsp;&nbsp;&nbsp;@dc.DenialCode
+                                                    @if (!string.IsNullOrWhiteSpace(dc.DenialDescription))
+                                                    {
+                                                        <span class="text-muted" style="font-weight:400">
+                                                            &mdash; @(dc.DenialDescription.Length > 40 ? dc.DenialDescription[..40] + "…" : dc.DenialDescription)
+                                                        </span>
+                                                    }
+                                                </td>
+                                                @foreach (var mo in db.Months)
+                                                {
+                                                    var ma = dc.ByMonth.GetValueOrDefault(mo);
+                                                    <td class="cnt denial-month-group">@((ma?.ClaimCount ?? 0).ToString("N0"))</td>
+                                                    <td class="amt">$@((ma?.PredictedAllowed ?? 0).ToString("N0"))</td>
+                                                    <td class="amt">$@((ma?.PredictedInsurance ?? 0).ToString("N0"))</td>
+                                                }
+                                                <td class="cnt">@dc.TotalClaims.ToString("N0")</td>
+                                                <td class="amt">$@dc.TotalPredictedAllowed.ToString("N0")</td>
+                                                <td class="amt">$@dc.TotalPredictedInsurance.ToString("N0")</td>
+                                            </tr>
+                                        }
+                                    }
+                                    <tr class="denial-row-total">
+                                        <td>Total</td>
+                                        @foreach (var mo in db.Months)
+                                        {
+                                            var ma = db.TotalByMonth.GetValueOrDefault(mo);
+                                            <td class="cnt denial-month-group">@((ma?.ClaimCount ?? 0).ToString("N0"))</td>
+                                            <td class="amt">$@((ma?.PredictedAllowed ?? 0).ToString("N0"))</td>
+                                            <td class="amt">$@((ma?.PredictedInsurance ?? 0).ToString("N0"))</td>
+                                        }
+                                        <td class="cnt">@db.TotalClaims.ToString("N0")</td>
+                                        <td class="amt">$@db.TotalPredictedAllowed.ToString("N0")</td>
+                                        <td class="amt">$@db.TotalPredictedInsurance.ToString("N0")</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+
+                <!-- ?? No Response Breakdown ?? -->
+                <div class="tab-pane fade" id="pp-noresp" role="tabpanel">
+                    <div class="px-3 py-2 d-flex align-items-center justify-content-between"
+                         style="background:#fdf4ff;border-bottom:1px solid #e9d5ff">
+                        <span class="fw-semibold" style="font-size:.8rem;color:#6a1b9a">
+                            &#9888;&#65039; Predicted to Pay vs No Response Breakdown
+                        </span>
+                        <span class="badge" style="background:#6a1b9a;font-size:.7rem">
+                            @nr.TotalClaims.ToString("N0") no-response claims
+                        </span>
+                    </div>
+                    @if (nr.PayerRows.Count == 0)
+                    {
+                        <div class="p-3 text-muted" style="font-size:.85rem">No no-response records match the current filter criteria.</div>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="nr-table">
+                                <thead>
+                                    <tr>
+                                        <th rowspan="2" style="min-width:180px;text-align:left">Payer Name</th>
+                                        @foreach (var bkt in AgeBuckets.All)
+                                        {
+                                            <th colspan="3" class="nr-bucket-group">@bkt days</th>
+                                        }
+                                        <th colspan="3" style="background:#1b5e20">Total</th>
+                                        <th rowspan="2" style="background:#37474f;min-width:130px">Priority Level</th>
+                                    </tr>
+                                    <tr>
+                                        @foreach (var bkt in AgeBuckets.All)
+                                        {
+                                            <th class="nr-bucket-group">Claims</th>
+                                            <th>Pred. Allowed ($)</th>
+                                            <th>Pred. Ins. Pmt ($)</th>
+                                        }
+                                        <th style="background:#2e7d32">Claims</th>
+                                        <th style="background:#2e7d32">Pred. Allowed ($)</th>
+                                        <th style="background:#2e7d32">Pred. Ins. Pmt ($)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var payer in nr.PayerRows)
+                                    {
+                                        <tr class="nr-row-payer">
+                                            <td title="@payer.PayerName">
+                                                @(payer.PayerName.Length > 38 ? payer.PayerName[..38] + "…" : payer.PayerName)
+                                            </td>
+                                            @foreach (var bkt in AgeBuckets.All)
+                                            {
+                                                var ba = payer.ByBucket.GetValueOrDefault(bkt);
+                                                <td class="cnt nr-bucket-group">@((ba?.ClaimCount ?? 0).ToString("N0"))</td>
+                                                <td class="amt">$@((ba?.PredictedAllowed ?? 0).ToString("N0"))</td>
+                                                <td class="amt">$@((ba?.PredictedInsurance ?? 0).ToString("N0"))</td>
+                                            }
+                                            <td class="cnt">@payer.TotalClaims.ToString("N0")</td>
+                                            <td class="amt">$@payer.TotalPredictedAllowed.ToString("N0")</td>
+                                            <td class="amt">$@payer.TotalPredictedInsurance.ToString("N0")</td>
+                                            <td class="text-center">
+                                                <span class="pri-badge @PriBadgeClass(payer.PriorityBucket)">
+                                                    @PriLabel(payer.PriorityBucket)
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    }
+                                    <tr class="nr-row-total">
+                                        <td>Total</td>
+                                        @foreach (var bkt in AgeBuckets.All)
+                                        {
+                                            var tba = nr.TotalByBucket.GetValueOrDefault(bkt);
+                                            <td class="cnt nr-bucket-group">@((tba?.ClaimCount ?? 0).ToString("N0"))</td>
+                                            <td class="amt">$@((tba?.PredictedAllowed ?? 0).ToString("N0"))</td>
+                                            <td class="amt">$@((tba?.PredictedInsurance ?? 0).ToString("N0"))</td>
+                                        }
+                                        <td class="cnt">@nr.TotalClaims.ToString("N0")</td>
+                                        <td class="amt">$@nr.TotalPredictedAllowed.ToString("N0")</td>
+                                        <td class="amt">$@nr.TotalPredictedInsurance.ToString("N0")</td>
+                                        <td></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- ?? Line Item Detail (separate page) ????????????????????????? -->
+    <div class="card insight-card mb-4" style="border:1px solid #dee2e6">
+        <div class="card-body d-flex align-items-center justify-content-between flex-wrap gap-3 py-3 px-4">
+            <div>
+                <div class="fw-bold" style="font-size:.95rem">&#128196; Line Item Detail</div>
+                <div class="text-muted" style="font-size:.8rem">
+                    @Model.Paging.TotalFiltered.ToString("N0") records (after global filter) — view on a dedicated page with filters and paging.
+                </div>
+            </div>
+            <a asp-controller="Prediction" asp-action="LineDetail"
+               asp-route-lab="@Model.SelectedLab"
+               asp-route-filterPayerName="@Model.FilterPayerName"
+               asp-route-filterPayerType="@Model.FilterPayerType"
+               asp-route-filterPanelName="@Model.FilterPanelName"
+               asp-route-filterFinalCoverageStatus="@Model.FilterFinalCoverageStatus"
+               asp-route-filterPayability="@Model.FilterPayability"
+               asp-route-filterCPTCode="@Model.FilterCPTCode"
+               class="btn btn-primary">
+                &#128196; Open Line Detail &rarr;
+            </a>
+        </div>
+    </div>
+
+    <!-- ?? Forecasting Summary (separate page) ???????????????????????????? -->
+    <div class="card insight-card mb-4" style="border:1px solid #dee2e6">
+        <div class="card-body d-flex align-items-center justify-content-between flex-wrap gap-3 py-3 px-4">
+            <div>
+                <div class="fw-bold" style="font-size:.95rem">&#128197; Forecasting Summary</div>
+                <div class="text-muted" style="font-size:.8rem">
+                    Last 4 weeks Median &amp; Mode weekly breakdown by payer — view on a dedicated page.
+                </div>
+            </div>
+            <a asp-controller="Prediction" asp-action="ForecastingSummary"
+               asp-route-lab="@Model.SelectedLab"
+               asp-route-filterPayerName="@Model.FilterPayerName"
+               asp-route-filterPayerType="@Model.FilterPayerType"
+               asp-route-filterPanelName="@Model.FilterPanelName"
+               asp-route-filterCPTCode="@Model.FilterCPTCode"
+               class="btn btn-success">
+                &#128197; Open Forecasting Summary &rarr;
+            </a>
+        </div>
+    </div>
+}

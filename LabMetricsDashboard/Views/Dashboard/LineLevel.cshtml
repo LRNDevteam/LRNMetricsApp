@@ -1,0 +1,233 @@
+@model LabMetricsDashboard.Models.LineLevelViewModel
+@{
+    ViewData["Title"]       = $"Line Level – {Model.SelectedLab}";
+    ViewData["SelectedLab"] = Model.SelectedLab;
+    ViewData["PageLabel"]   = "Line Level Details";
+
+    var routeValues = new Dictionary<string, string?>
+    {
+        ["lab"]               = Model.SelectedLab,
+        ["filterPayerName"]   = Model.FilterPayerName,
+        ["filterPayerType"]   = Model.FilterPayerType,
+        ["filterClaimStatus"] = Model.FilterClaimStatus,
+        ["filterPayStatus"]   = Model.FilterPayStatus,
+        ["filterCPTCode"]     = Model.FilterCPTCode,
+        ["filterClinicName"]  = Model.FilterClinicName,
+        ["filterDenialCode"]  = Model.FilterDenialCode,
+    };
+}
+
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <h2 class="mb-0">Line Level Details</h2>
+    <a asp-controller="Dashboard" asp-action="Index" asp-route-lab="@Model.SelectedLab"
+       class="btn btn-sm btn-outline-secondary">&larr; Back to Dashboard</a>
+</div>
+
+<!-- Filter form -->
+<form method="get" asp-controller="Dashboard" asp-action="LineLevel"
+      class="card border-0 shadow-sm p-3 mb-4" data-lab-form>
+    <div class="row g-2 align-items-end">
+        <div class="col-sm-6 col-md-2">
+            <label class="form-label fw-semibold mb-1">Lab</label>
+            <select name="lab" class="form-select form-select-sm"
+                    data-lab-selector onchange="this.form.submit()">
+                @foreach (var lab in Model.AvailableLabs)
+                {
+                    <option value="@lab" selected="@(lab == Model.SelectedLab ? "selected" : null)">@lab</option>
+                }
+            </select>
+        </div>
+        <div class="col-sm-6 col-md-2">
+            <label class="form-label fw-semibold mb-1">Payer Name</label>
+            <input type="text" name="filterPayerName" value="@Model.FilterPayerName"
+                   class="form-control form-control-sm" placeholder="Search…" />
+        </div>
+        <div class="col-sm-6 col-md-2">
+            <label class="form-label fw-semibold mb-1">Payer Type</label>
+            <select name="filterPayerType" class="form-select form-select-sm">
+                <option value="">All</option>
+                @foreach (var pt in Model.PayerTypes)
+                {
+                    <option value="@pt" selected="@(pt == Model.FilterPayerType ? "selected" : null)">@pt</option>
+                }
+            </select>
+        </div>
+        <div class="col-sm-6 col-md-2">
+            <label class="form-label fw-semibold mb-1">CPT Code</label>
+            <select name="filterCPTCode" class="form-select form-select-sm">
+                <option value="">All</option>
+                @foreach (var cpt in Model.CPTCodes)
+                {
+                    <option value="@cpt" selected="@(cpt == Model.FilterCPTCode ? "selected" : null)">@cpt</option>
+                }
+            </select>
+        </div>
+        <div class="col-sm-6 col-md-1">
+            <label class="form-label fw-semibold mb-1">Claim Status</label>
+            <select name="filterClaimStatus" class="form-select form-select-sm">
+                <option value="">All</option>
+                @foreach (var cs in Model.ClaimStatuses)
+                {
+                    <option value="@cs" selected="@(cs == Model.FilterClaimStatus ? "selected" : null)">@cs</option>
+                }
+            </select>
+        </div>
+        <div class="col-sm-6 col-md-1">
+            <label class="form-label fw-semibold mb-1">Pay Status</label>
+            <select name="filterPayStatus" class="form-select form-select-sm">
+                <option value="">All</option>
+                @foreach (var ps in Model.PayStatuses)
+                {
+                    <option value="@ps" selected="@(ps == Model.FilterPayStatus ? "selected" : null)">@ps</option>
+                }
+            </select>
+        </div>
+        <div class="col-sm-6 col-md-1">
+            <label class="form-label fw-semibold mb-1">Clinic</label>
+            <select name="filterClinicName" class="form-select form-select-sm">
+                <option value="">All</option>
+                @foreach (var cn in Model.ClinicNames)
+                {
+                    <option value="@cn" selected="@(cn == Model.FilterClinicName ? "selected" : null)">@cn</option>
+                }
+            </select>
+        </div>
+        <div class="col-sm-6 col-md-1">
+            <label class="form-label fw-semibold mb-1">Denial Code</label>
+            <input type="text" name="filterDenialCode" value="@Model.FilterDenialCode"
+                   class="form-control form-control-sm" placeholder="Search…" />
+        </div>
+    </div>
+    <div class="mt-2 d-flex gap-2">
+        <button type="submit" class="btn btn-primary btn-sm">Apply Filters</button>
+        <a asp-controller="Dashboard" asp-action="LineLevel" asp-route-lab="@Model.SelectedLab"
+           class="btn btn-outline-secondary btn-sm">Clear</a>
+    </div>
+</form>
+
+@if (Model.ResolvedFilePath is not null)
+{
+    <div class="alert alert-light border d-flex align-items-center gap-2 py-2 mb-3" style="font-size:0.8rem">
+        <span class="text-success fw-bold">&#10003;</span>
+        <span class="text-muted">Source:</span>
+        <span class="text-break fw-semibold" title="@Model.ResolvedFilePath">@Model.ResolvedFilePath</span>
+    </div>
+}
+else
+{
+    <div class="alert alert-warning py-2 mb-3" style="font-size:0.8rem">
+        No Line Level CSV file found for <strong>@Model.SelectedLab</strong>.
+    </div>
+}
+
+@{
+    ViewData["RouteValues"] = routeValues;
+}
+<partial name="_Pager" model="Model.Paging" />
+
+<div class="table-responsive mt-2">
+    <table class="table table-sm table-hover table-bordered align-middle" style="font-size:0.78rem">
+        <thead class="table-dark sticky-top">
+            <tr>
+                <th>Claim ID</th>
+                <th>Patient ID</th>
+                <th>Date of Service</th>
+                <th>Panel</th>
+                <th>CPT Code</th>
+                <th class="text-center">Units</th>
+                <th>Modifier</th>
+                <th>Payer Name</th>
+                <th>Payer Type</th>
+                <th>Clinic</th>
+                <th class="text-end">Charges</th>
+                <th class="text-end">Chg/Unit</th>
+                <th class="text-end">Allowed</th>
+                <th class="text-end">Ins. Pmt</th>
+                <th class="text-end">Ins. Pmt/Unit</th>
+                <th class="text-end">Pat. Pmt</th>
+                <th class="text-end">Total Pmts</th>
+                <th class="text-end">Ins. Balance</th>
+                <th class="text-end">Pat. Balance</th>
+                <th class="text-end">Total Balance</th>
+                <th>Claim Status</th>
+                <th>Pay Status</th>
+                <th>Denial Code</th>
+                <th>ICD Code</th>
+                <th class="text-center">Days to Bill</th>
+                <th class="text-center">Days to Post</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (!Model.Records.Any())
+            {
+                <tr>
+                    <td colspan="26" class="text-center text-muted py-4">
+                        No records match the selected filters.
+                    </td>
+                </tr>
+            }
+            @foreach (var r in Model.Records)
+            {
+                <tr>
+                    <td>@r.ClaimID</td>
+                    <td>@r.PatientID</td>
+                    <td>@r.DateOfService</td>
+                    <td>@r.PanelName</td>
+                    <td><span class="badge bg-secondary">@r.CPTCode</span></td>
+                    <td class="text-center">@r.Units</td>
+                    <td>@r.Modifier</td>
+                    <td>@r.PayerName</td>
+                    <td><span class="badge @PayerTypeBadge(r.PayerType)">@r.PayerType</span></td>
+                    <td>@r.ClinicName</td>
+                    <td class="text-end">@r.ChargeAmount.ToString("C")</td>
+                    <td class="text-end">@r.ChargeAmountPerUnit.ToString("C")</td>
+                    <td class="text-end">@r.AllowedAmount.ToString("C")</td>
+                    <td class="text-end">@r.InsurancePayment.ToString("C")</td>
+                    <td class="text-end">@r.InsurancePaymentPerUnit.ToString("C")</td>
+                    <td class="text-end">@r.PatientPayment.ToString("C")</td>
+                    <td class="text-end fw-semibold text-success">@r.TotalPayments.ToString("C")</td>
+                    <td class="text-end">@r.InsuranceBalance.ToString("C")</td>
+                    <td class="text-end">@r.PatientBalance.ToString("C")</td>
+                    <td class="text-end fw-semibold @(r.TotalBalance > 0 ? "text-danger" : "text-muted")">
+                        @r.TotalBalance.ToString("C")
+                    </td>
+                    <td><span class="badge @ClaimStatusBadge(r.ClaimStatus)">@r.ClaimStatus</span></td>
+                    <td><span class="badge @PayStatusBadge(r.PayStatus)">@r.PayStatus</span></td>
+                    <td>@r.DenialCode</td>
+                    <td>@r.ICDCode</td>
+                    <td class="text-center">@r.DaysToBill</td>
+                    <td class="text-center">@r.DaysToPost</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+<partial name="_Pager" model="Model.Paging" />
+
+@functions {
+    static string PayerTypeBadge(string payerType) => payerType switch
+    {
+        var s when s.StartsWith("MC", StringComparison.OrdinalIgnoreCase) => "bg-primary",
+        var s when s.StartsWith("CC", StringComparison.OrdinalIgnoreCase) => "bg-info text-dark",
+        var s when s.StartsWith("SP", StringComparison.OrdinalIgnoreCase) => "bg-warning text-dark",
+        _ => "bg-secondary"
+    };
+
+    static string ClaimStatusBadge(string status) => status switch
+    {
+        "Fully Paid"             => "bg-success",
+        "No Response"            => "bg-warning text-dark",
+        "Patient Responsibility" => "bg-info text-dark",
+        "Denied"                 => "bg-danger",
+        _ => "bg-secondary"
+    };
+
+    static string PayStatusBadge(string status) => status switch
+    {
+        "Paid"        => "bg-success",
+        "No Response" => "bg-warning text-dark",
+        "Denied"      => "bg-danger",
+        _ => "bg-secondary"
+    };
+}

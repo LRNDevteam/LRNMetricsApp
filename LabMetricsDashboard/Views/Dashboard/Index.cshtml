@@ -1,0 +1,607 @@
+@model LabMetricsDashboard.Models.DashboardViewModel
+@{
+    ViewData["Title"]       = "Revenue Dashboard";
+    ViewData["SelectedLab"] = Model.SelectedLab;
+    ViewData["PageLabel"]   = "Revenue Dashboard";
+
+    bool hasFilters = new[]
+    {
+        Model.FilterPayerName, Model.FilterPayerType, Model.FilterPanelName,
+        Model.FilterClinicName, Model.FilterReferringProvider,
+        Model.FilterDosFrom, Model.FilterDosTo,
+        Model.FilterFirstBillFrom, Model.FilterFirstBillTo
+    }.Any(v => !string.IsNullOrWhiteSpace(v));
+
+    // Rate cards — defined here (top-level block) so they are available inside @if
+    var rates = new []
+    {
+        new {
+            Label      = "Collection Rate",
+            Rate       = Model.CollectionRate,
+            Numerator  = Model.CollectionNumerator,
+            NumLabel   = "Allowed (Fully/Partly Paid + Patient)",
+            BarColor   = "linear-gradient(90deg,#1565c0,#42a5f5)",
+            AccentHex  = "#1565c0",
+            BadgeColor = Model.CollectionRate >= 80 ? "#1565c0" : Model.CollectionRate >= 60 ? "#e65100" : "#b71c1c",
+            Icon       = "$"
+        },
+        new {
+            Label      = "Denial Rate",
+            Rate       = Model.DenialRate,
+            Numerator  = Model.DenialNumerator,
+            NumLabel   = "Charges (Fully / Partly Denied)",
+            BarColor   = "linear-gradient(90deg,#b71c1c,#ef5350)",
+            AccentHex  = "#b71c1c",
+            BadgeColor = Model.DenialRate <= 10 ? "#1565c0" : Model.DenialRate <= 20 ? "#e65100" : "#b71c1c",
+            Icon       = "X"
+        },
+        new {
+            Label      = "Adjustment Rate",
+            Rate       = Model.AdjustmentRate,
+            Numerator  = Model.AdjustmentNumerator,
+            NumLabel   = "Ins. Adj. (W/O + Partly Adjusted)",
+            BarColor   = "linear-gradient(90deg,#6a1b9a,#ab47bc)",
+            AccentHex  = "#6a1b9a",
+            BadgeColor = Model.AdjustmentRate <= 15 ? "#1565c0" : "#e65100",
+            Icon       = "~"
+        },
+        new {
+            Label      = "Outstanding Charge %",
+            Rate       = Model.OutstandingRate,
+            Numerator  = Model.OutstandingNumerator,
+            NumLabel   = "Charges (No Response)",
+            BarColor   = "linear-gradient(90deg,#e65100,#ffa726)",
+            AccentHex  = "#e65100",
+            BadgeColor = Model.OutstandingRate <= 10 ? "#1565c0" : Model.OutstandingRate <= 25 ? "#e65100" : "#b71c1c",
+            Icon       = "!"
+        },
+    };
+}
+
+@functions {
+    Microsoft.AspNetCore.Html.HtmlString InsightTable(
+        string title, string gradient,
+        IReadOnlyList<LabMetricsDashboard.Models.InsightRow> rows)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"<div class=\"col-12 col-lg-6\"><div class=\"card insight-card h-100\"><div class=\"card-header text-white\" style=\"background:{gradient}\">{title}</div><div class=\"card-body p-0\"><table class=\"table table-sm table-hover insight-table mb-0\"><thead class=\"table-light\"><tr><th>Label</th><th class=\"text-center\">Claims</th><th class=\"text-end\">Charges</th><th class=\"text-end\">Payments</th><th class=\"text-end\">Balance</th><th style=\"min-width:110px\">Rate</th></tr></thead><tbody>");
+        var maxRate = rows.Any() ? rows.Max(r => r.CollectionRate) : 1m;
+        foreach (var row in rows)
+        {
+            var barPct = maxRate > 0 ? Math.Round((double)(row.CollectionRate / maxRate) * 100, 1) : 0;
+            var rateColor = row.CollectionRate >= 80 ? "#1565c0" : row.CollectionRate >= 50 ? "#1565c0" : "#e53935";
+            sb.Append($"<tr>" +
+                $"<td>{System.Net.WebUtility.HtmlEncode(row.Label)}</td>" +
+                $"<td class=\"text-center\">{row.Claims:N0}</td>" +
+                $"<td class=\"text-end\">{row.Charges:C0}</td>" +
+                $"<td class=\"text-end text-success\">{row.Payments:C0}</td>" +
+                $"<td class=\"text-end text-danger\">{row.Balance:C0}</td>" +
+                $"<td>" +
+                $"<div style=\"background:#e9ecef;border-radius:4px;height:6px;overflow:hidden;margin-bottom:3px\">" +
+                $"<div style=\"width:{barPct}%;height:6px;border-radius:4px;background:linear-gradient(90deg,#1565c0,#42a5f5)\"></div></div>" +
+                $"<span style=\"font-size:.72rem;font-weight:700;color:{rateColor}\">{row.CollectionRate}%</span>" +
+                $"</td>" +
+                $"</tr>");
+        }
+        sb.Append("</tbody></table></div></div></div>");
+        return new Microsoft.AspNetCore.Html.HtmlString(sb.ToString());
+    }
+
+    Microsoft.AspNetCore.Html.HtmlString MonthBar(
+        string title, string gradient,
+        IReadOnlyList<(string Month, int Count)> items)
+    {
+        var maxCount = items.Any() ? items.Max(x => x.Count) : 1;
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"<div class=\"card insight-card h-100\"><div class=\"card-header text-white\" style=\"background:{gradient}\">{title}</div><div class=\"card-body\"><div class=\"table-responsive\"><table class=\"table table-sm insight-table mb-0\"><thead class=\"table-light\"><tr><th>Month</th><th>Claims</th><th class=\"w-50\">Bar</th></tr></thead><tbody>");
+        foreach (var (month, count) in items)
+        {
+            var pct = maxCount > 0 ? Math.Round((double)count / maxCount * 100, 1) : 0;
+            sb.Append($"<tr><td class=\"bar-month text-nowrap\">{month}</td><td class=\"text-center bar-cell fw-semibold\">{count:N0}</td><td class=\"bar-cell\"><div style=\"background:#e9ecef;border-radius:3px;height:8px;overflow:hidden\"><div style=\"width:{pct}%;height:8px;border-radius:3px;background:{gradient}\"></div></div></td></tr>");
+        }
+        sb.Append("</tbody></table></div></div></div>");
+        return new Microsoft.AspNetCore.Html.HtmlString(sb.ToString());
+    }
+}
+
+<style>
+    .insight-card          { border:none; border-radius:12px; box-shadow:0 2px 14px rgba(0,0,0,.08); }
+    .insight-card .card-header { border-radius:12px 12px 0 0; font-weight:700; font-size:.85rem; letter-spacing:.04em; }
+    .insight-table td, .insight-table th { font-size:.78rem; padding:.35rem .6rem; }
+    .rate-bar-wrap          { background:#e9ecef; border-radius:4px; height:6px; overflow:hidden; }
+    .rate-bar               { background:linear-gradient(90deg,#1565c0,#42a5f5); height:6px; border-radius:4px; }
+    .filter-panel           { background:#fff; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,.07); }
+    .filter-active-badge    { font-size:.7rem; vertical-align:middle; }
+    .bar-month              { font-size:.7rem; color:#555; }
+    .bar-cell               { vertical-align:middle; }
+</style>
+
+<!-- ?? Lab selector ???????????????????????????????????????????????????????? -->
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <h2 class="mb-0 fw-bold">Revenue Dashboard</h2>
+    <form method="get" asp-controller="Dashboard" asp-action="Index"
+          class="d-flex align-items-center gap-2" data-lab-form>
+        <label class="fw-semibold me-1 mb-0" for="labSelect">Lab:</label>
+        <select id="labSelect" name="lab"
+                class="form-select form-select-sm" style="min-width:220px"
+                data-lab-selector onchange="this.form.submit()">
+            @foreach (var lab in Model.AvailableLabs)
+            {
+                <option value="@lab" selected="@(lab == Model.SelectedLab ? "selected" : null)">@lab</option>
+            }
+        </select>
+    </form>
+</div>
+
+@if (!string.IsNullOrEmpty(Model.SelectedLab))
+{
+    <!-- ?? Filter panel ????????????????????????????????????????????????????? -->
+    <div class="filter-panel p-3 mb-4">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+            <span class="fw-semibold" style="font-size:.9rem">
+                &#128269; Filters
+                @if (hasFilters)
+                {
+                    <span class="badge bg-primary filter-active-badge ms-1">Active</span>
+                }
+            </span>
+            <button id="filterToggleBtn"
+                    class="btn btn-sm btn-link text-muted p-0"
+                    type="button"
+                    data-bs-toggle="collapse"
+                    data-bs-target="#filterBody"
+                    aria-expanded="@(hasFilters ? "true" : "false")">
+                @Html.Raw(hasFilters ? "&#9650; Hide" : "&#9660; Show")
+            </button>
+        </div>
+
+        <div id="filterBody" class="collapse @(hasFilters ? "show" : "")">
+            <form method="get" asp-controller="Dashboard" asp-action="Index" data-lab-form>
+                <input type="hidden" name="lab" value="@Model.SelectedLab" />
+
+                <!-- Row 1 : Dropdown filters -->
+                <div class="row g-2 align-items-end mb-2">
+
+                    <div class="col-sm-6 col-md-3">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PAYER NAME</label>
+                        <select name="filterPayerName" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            @foreach (var v in Model.PayerNames)
+                            {
+                                <option value="@v" selected="@(v == Model.FilterPayerName ? "selected" : null)">@v</option>
+                            }
+                        </select>
+                    </div>
+
+                    <div class="col-sm-6 col-md-2">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PAYER TYPE</label>
+                        <select name="filterPayerType" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            @foreach (var v in Model.PayerTypes)
+                            {
+                                <option value="@v" selected="@(v == Model.FilterPayerType ? "selected" : null)">@v</option>
+                            }
+                        </select>
+                    </div>
+
+                    <div class="col-sm-6 col-md-2">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PANEL</label>
+                        <select name="filterPanelName" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            @foreach (var v in Model.PanelNames)
+                            {
+                                <option value="@v" selected="@(v == Model.FilterPanelName ? "selected" : null)">@v</option>
+                            }
+                        </select>
+                    </div>
+
+                    <div class="col-sm-6 col-md-2">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">CLINIC</label>
+                        <select name="filterClinicName" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            @foreach (var v in Model.ClinicNames)
+                            {
+                                <option value="@v" selected="@(v == Model.FilterClinicName ? "selected" : null)">@v</option>
+                            }
+                        </select>
+                    </div>
+
+                    <div class="col-sm-6 col-md-3">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">REFERRING PHYSICIAN</label>
+                        <select name="filterReferringProvider" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            @foreach (var v in Model.ReferringProviders)
+                            {
+                                <option value="@v" selected="@(v == Model.FilterReferringProvider ? "selected" : null)">@v</option>
+                            }
+                        </select>
+                    </div>
+
+                </div>
+
+                <!-- Row 2 : Date range filters -->
+                <div class="row g-2 align-items-end">
+
+                    <div class="col-auto">
+                        <label class="form-label fw-semibold mb-1 text-nowrap" style="font-size:.75rem">DATE OF SERVICE</label>
+                    </div>
+                    <div class="col-sm-4 col-md-2">
+                        <label class="form-label text-muted mb-1" style="font-size:.72rem">From</label>
+                        <input type="date" name="filterDosFrom" value="@Model.FilterDosFrom"
+                               class="form-control form-control-sm" />
+                    </div>
+                    <div class="col-sm-4 col-md-2">
+                        <label class="form-label text-muted mb-1" style="font-size:.72rem">To</label>
+                        <input type="date" name="filterDosTo" value="@Model.FilterDosTo"
+                               class="form-control form-control-sm" />
+                    </div>
+
+                    <div class="col-md-1 d-none d-md-block">
+                        <div class="vr" style="height:38px;margin:auto;display:block"></div>
+                    </div>
+
+                    <div class="col-auto">
+                        <label class="form-label fw-semibold mb-1 text-nowrap" style="font-size:.75rem">FIRST BILL DATE</label>
+                    </div>
+                    <div class="col-sm-4 col-md-2">
+                        <label class="form-label text-muted mb-1" style="font-size:.72rem">From</label>
+                        <input type="date" name="filterFirstBillFrom" value="@Model.FilterFirstBillFrom"
+                               class="form-control form-control-sm" />
+                    </div>
+                    <div class="col-sm-4 col-md-2">
+                        <label class="form-label text-muted mb-1" style="font-size:.72rem">To</label>
+                        <input type="date" name="filterFirstBillTo" value="@Model.FilterFirstBillTo"
+                               class="form-control form-control-sm" />
+                    </div>
+
+                </div>
+
+                <div class="d-flex gap-2 mt-3">
+                    <button type="submit" class="btn btn-primary btn-sm">Apply Filters</button>
+                    <a asp-controller="Dashboard" asp-action="Index" asp-route-lab="@Model.SelectedLab"
+                       class="btn btn-outline-secondary btn-sm">Clear</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            var el = document.getElementById('filterBody');
+            var btn = document.getElementById('filterToggleBtn');
+            if (!el || !btn) return;
+
+            function syncLabel() {
+                var expanded = el.classList.contains('show');
+                btn.innerHTML = expanded ? '&#9650; Hide' : '&#9660; Show';
+                btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+            }
+
+            // Sync on Bootstrap collapse events
+            el.addEventListener('shown.bs.collapse',  syncLabel);
+            el.addEventListener('hidden.bs.collapse', syncLabel);
+
+            // Set correct label on page load
+            syncLabel();
+        })();
+    </script>
+
+    <!-- KPI Cards -->
+    @* ?? 4 Summary KPI cards (Total Claims / Charges / Payments / Balance) *@
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow text-center py-4 px-2"
+                 style="border-radius:14px;background:linear-gradient(135deg,#1565c0,#42a5f5)">
+                <div class="mb-1 fw-semibold text-white-50" style="font-size:.78rem;letter-spacing:.06em">Total Claims</div>
+                <div class="fw-bold text-white" style="font-size:1.9rem;line-height:1.2">@Model.TotalClaims.ToString("N0")</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow text-center py-4 px-2"
+                 style="border-radius:14px;background:linear-gradient(135deg,#6a1b9a,#ab47bc)">
+                <div class="mb-1 fw-semibold text-white-50" style="font-size:.78rem;letter-spacing:.06em">Total Charges</div>
+                <div class="fw-bold text-white" style="font-size:1.9rem;line-height:1.2">@Model.TotalCharges.ToString("C2")</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow text-center py-4 px-2"
+                 style="border-radius:14px;background:linear-gradient(135deg,#1b5e20,#43a047)">
+                <div class="mb-1 fw-semibold text-white-50" style="font-size:.78rem;letter-spacing:.06em">Total Payments</div>
+                <div class="fw-bold text-white" style="font-size:1.9rem;line-height:1.2">@Model.TotalPayments.ToString("C2")</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow text-center py-4 px-2"
+                 style="border-radius:14px;background:linear-gradient(135deg,#b71c1c,#ef5350)">
+                <div class="mb-1 fw-semibold text-white-50" style="font-size:.78rem;letter-spacing:.06em">Outstanding Balance</div>
+                <div class="fw-bold text-white" style="font-size:1.9rem;line-height:1.2">@Model.TotalBalance.ToString("C2")</div>
+            </div>
+        </div>
+    </div>
+
+    @* ?? 4 Rate cards (horizontal) *@
+    <div class="row g-3 mb-4">
+        @foreach (var r in rates)
+        {
+            var barPct = (double)Math.Min(r.Rate, 100);
+            <div class="col-6 col-md-3">
+                <div class="card border-0 shadow-sm h-100" style="border-radius:12px;overflow:hidden">
+                    <div style="height:4px;background:@r.BarColor"></div>
+                    <div class="card-body px-3 py-3">
+                        <div class="d-flex align-items-center gap-2 mb-2">
+                            <span class="d-inline-flex align-items-center justify-content-center fw-bold"
+                                  style="width:22px;height:22px;border-radius:50%;background:@r.AccentHex;
+                                         color:#fff;font-size:.7rem;flex-shrink:0">
+                                @r.Icon
+                            </span>
+                            <span class="fw-semibold text-uppercase" style="font-size:.68rem;letter-spacing:.05em;color:#444;flex:1">
+                                @r.Label
+                            </span>
+                            <span class="badge rounded-pill fw-bold ms-auto"
+                                  style="background:@r.BadgeColor;font-size:.8rem;padding:.3em .75em">
+                                @r.Rate%
+                            </span>
+                        </div>
+                        <div class="rate-bar-wrap mb-2">
+                            <div class="rate-bar" style="width:@barPct%;background:@r.BarColor"></div>
+                        </div>
+                        <div style="font-size:.68rem;color:#6c757d" class="mb-1">@r.NumLabel</div>
+                        <div class="d-flex justify-content-between" style="font-size:.7rem">
+                            <span class="fw-semibold text-dark">@r.Numerator.ToString("C0")</span>
+                            <span class="text-muted">/ @Model.TotalCharges.ToString("C0")</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+
+    @* ?? Claim Status Breakdown + Payments by Payer Type *@
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-lg-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-light fw-semibold">Claim Status Breakdown</div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-bordered mb-0" style="font-size:.8rem">
+                            <thead class="table-light">
+                                <tr>
+                                    <th class="text-center align-middle" rowspan="2" style="width:30%">Status</th>
+                                    <th class="text-center align-middle" rowspan="2" style="width:15%">Claims</th>
+                                    <th class="text-center" colspan="2" style="width:55%">%</th>
+                                </tr>
+                                <tr>
+                                    <th class="text-center" style="font-size:.68rem;font-weight:400;color:#666">Label</th>
+                                    <th class="text-center" style="font-size:.68rem;font-weight:400;color:#666">Ratio</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in Model.ClaimStatusRows)
+                                {
+                                    var pct    = Model.TotalClaims > 0 ? Math.Round((decimal)row.Claims / Model.TotalClaims * 100, 1) : 0m;
+                                    var pctBar = (double)Math.Min(pct, 100);
+                                    <tr>
+                                        <td class="align-middle">@row.Status</td>
+                                        <td class="text-center align-middle fw-semibold">@row.Claims.ToString("N0")</td>
+                                        <td class="align-middle px-2" style="min-width:100px">
+                                            <div style="font-size:.68rem;color:#555;line-height:1.3;margin-bottom:3px">
+                                                Total Claims for @row.Status<br/>/ Total Claim Count
+                                            </div>
+                                            <div style="background:#e9ecef;border-radius:3px;height:5px;overflow:hidden">
+                                                <div style="width:@(pctBar)%;height:5px;border-radius:3px;
+                                                            background:linear-gradient(90deg,#1565c0,#42a5f5)"></div>
+                                            </div>
+                                            <div class="text-end mt-1" style="font-size:.67rem;color:#888">@pct%</div>
+                                        </td>
+                                        <td class="text-center align-middle fw-semibold" style="font-size:.8rem;color:#1565c0">
+                                            @pct%
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-lg-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-light fw-semibold">Payments by Payer Type</div>
+                <div class="card-body p-0">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light">
+                            <tr><th>Payer Type</th><th class="text-end">Payments</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var kv in Model.PayerTypePayments.OrderByDescending(x => x.Value))
+                            {
+                                <tr>
+                                    <td>@kv.Key</td>
+                                    <td class="text-end">@kv.Value.ToString("C")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mb-3">
+        <a asp-controller="Dashboard" asp-action="ClaimLevel" asp-route-lab="@Model.SelectedLab"
+           class="btn btn-outline-primary btn-sm">View Claim Level Details &rarr;</a>
+        @if (Model.ResolvedClaimFilePath is not null)
+        {
+            <span class="ms-3 text-muted small">Source: @System.IO.Path.GetFileName(Model.ResolvedClaimFilePath)</span>
+        }
+        else { <span class="ms-3 text-warning small">No Claim Level CSV found for @Model.SelectedLab</span> }
+    </div>
+
+    <!-- INSIGHTS -->
+    <hr class="my-4" />
+    <h5 class="fw-bold mb-3">&#128202; Insights</h5>
+
+    <!-- Row 1: Payer Level + Panel Level -->
+    <div class="row g-4 mb-4">
+        @InsightTable("Payer Level", "linear-gradient(135deg,#1565c0,#42a5f5)", Model.PayerLevelInsights)
+        @InsightTable("Panel Level", "linear-gradient(135deg,#6a1b9a,#ab47bc)", Model.PanelLevelInsights)
+    </div>
+
+    <!-- Row 2: Clinic Level + Referring Physician -->
+    <div class="row g-4 mb-4">
+        @InsightTable("Clinic Level", "linear-gradient(135deg,#00695c,#26a69a)", Model.ClinicLevelInsights)
+        @InsightTable("Referring Physician", "linear-gradient(135deg,#e65100,#ffa726)", Model.ReferringPhysicianInsights)
+    </div>
+
+    <!-- Row 3: DOS monthly + First Bill Date monthly -->
+    <div class="row g-4 mb-4">
+        <div class="col-12 col-lg-6">
+            @MonthBar("Date of Service – Monthly Claims", "linear-gradient(135deg,#1b5e20,#66bb6a)", Model.DOSMonthly)
+        </div>
+        <div class="col-12 col-lg-6">
+            @MonthBar("First Bill Date – Monthly Claims", "linear-gradient(135deg,#880e4f,#f06292)", Model.FirstBillMonthly)
+        </div>
+    </div>
+
+    <!-- Average Allowed by Panel x Month -->
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header fw-semibold" style="background:linear-gradient(135deg,#0d47a1,#29b6f6);color:#fff;border-radius:12px 12px 0 0">
+            Average Allowed by Panel X Month &mdash; Top 10 Panels
+        </div>
+        <div class="card-body p-0">
+            <div class="text-muted px-3 pt-2 pb-1" style="font-size:.75rem">
+                Source : Claim Level Data
+            </div>
+            @if (!Model.AvgAllowedMonths.Any() || !Model.AvgAllowedByPanelMonth.Any())
+            {
+                <p class="text-muted px-3 py-2 mb-0" style="font-size:.82rem">No data available.</p>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-bordered table-sm mb-0" style="font-size:.8rem;min-width:600px">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="fw-bold" style="white-space:nowrap;min-width:160px">Panel Name</th>
+                                @foreach (var month in Model.AvgAllowedMonths)
+                                {
+                                    var label = DateTime.ParseExact(month, "yyyy-MM",
+                                        System.Globalization.CultureInfo.InvariantCulture)
+                                        .ToString("MMMM-yy");
+                                    <th class="text-center fw-bold" style="white-space:nowrap">@label</th>
+                                }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in Model.AvgAllowedByPanelMonth)
+                            {
+                                <tr>
+                                    <td style="white-space:nowrap">@row.PanelName</td>
+                                    @foreach (var month in Model.AvgAllowedMonths)
+                                    {
+                                        if (row.AvgByMonth.TryGetValue(month, out var avg))
+                                        {
+                                            <td class="text-end">@avg.ToString("C0")</td>
+                                        }
+                                        else
+                                        {
+                                            <td class="text-center text-muted">–</td>
+                                        }
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+
+    <!-- Line Level Summary -->
+    <hr class="my-4" />
+    <h5 class="fw-bold mb-3">Line Level Summary</h5>
+
+    <!-- Top CPT By Charges -->
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header fw-semibold">Top CPT By Charges</div>
+        <div class="card-body p-0">
+            <div class="text-muted px-3 pt-2 pb-1" style="font-size:.75rem">Source : Line Level Data</div>
+            @if (!Model.TopCptDetail.Any())
+            {
+                <p class="text-muted px-3 py-2 mb-0" style="font-size:.82rem">No data available.</p>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-bordered table-sm mb-0" style="font-size:.8rem">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="align-middle" rowspan="2">CPT Code</th>
+                                <th class="align-middle text-end" rowspan="2">Charges</th>
+                                <th class="align-middle text-end" rowspan="2">Allowed Amount</th>
+                                <th class="align-middle text-end" rowspan="2">Insurance Balance</th>
+                                <th class="text-center fw-bold" style="border-bottom:0">Collection Rate</th>
+                                <th class="text-center fw-bold" style="border-bottom:0">Denial Rate</th>
+                                <th class="text-center fw-bold" style="border-bottom:0">No Response Rate</th>
+                            </tr>
+                            <tr>
+                                <th class="text-center" style="font-size:.65rem;font-weight:400;color:#666;white-space:normal">
+                                    Filter By: Pay Status = Paid, Patient Responsibility<br/>
+                                    Sum {AllowedAmount} / Sum {ChargeAmount}
+                                </th>
+                                <th class="text-center" style="font-size:.65rem;font-weight:400;color:#666;white-space:normal">
+                                    Filter By: Pay Status = Denied<br/>
+                                    Sum {ChargeAmount} / Sum {ChargeAmount}
+                                </th>
+                                <th class="text-center" style="font-size:.65rem;font-weight:400;color:#666;white-space:normal">
+                                    Filter By: Pay Status = No Response<br/>
+                                    Sum {ChargeAmount} / Sum {ChargeAmount}
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var cpt in Model.TopCptDetail)
+                            {
+                                var colBg  = cpt.CollectionRate == 0 ? "#c62828" : "#1565c0";
+                                var denBg  = cpt.DenialRate     == 0 ? "#2e7d32" : "#c62828";
+                                var nrBg   = cpt.NoResponseRate == 0 ? "#2e7d32" : "#e65100";
+                                <tr>
+                                    <td class="fw-semibold">@cpt.CPTCode</td>
+                                    <td class="text-end">@cpt.Charges.ToString("C0")</td>
+                                    <td class="text-end">@cpt.AllowedAmount.ToString("C0")</td>
+                                    <td class="text-end">@cpt.InsuranceBalance.ToString("C0")</td>
+                                    <td class="text-center">
+                                        <span class="badge rounded-pill px-3 py-1 fw-bold"
+                                              style="background:@colBg;font-size:.75rem">@cpt.CollectionRate%</span>
+                                    </td>
+                                    <td class="text-center">
+                                        <span class="badge rounded-pill px-3 py-1 fw-bold"
+                                              style="background:@denBg;font-size:.75rem">@cpt.DenialRate%</span>
+                                    </td>
+                                    <td class="text-center">
+                                        <span class="badge rounded-pill px-3 py-1 fw-bold"
+                                              style="background:@nrBg;font-size:.75rem">@cpt.NoResponseRate%</span>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="mb-3">
+        <a asp-controller="Dashboard" asp-action="LineLevel" asp-route-lab="@Model.SelectedLab"
+           class="btn btn-outline-primary btn-sm">View Line Level Details &rarr;</a>
+        @if (Model.ResolvedLineFilePath is not null)
+        {
+            <span class="ms-3 text-muted small">Source: @System.IO.Path.GetFileName(Model.ResolvedLineFilePath)</span>
+        }
+        else { <span class="ms-3 text-warning small">No Line Level CSV found for @Model.SelectedLab</span> }
+    </div>
+}
+else
+{
+    <div class="alert alert-info mt-4">Please select a lab to view the dashboard.</div>
+}

@@ -1,0 +1,96 @@
+@* Pager partial — pass PageInfo as model, extra route values as ViewData["RouteValues"] *@
+@model LabMetricsDashboard.Models.PageInfo
+
+@{
+    var route = ViewData["RouteValues"] as Dictionary<string, string?> ?? [];
+}
+
+@if (Model.TotalPages <= 1 && Model.TotalFiltered > 0)
+{
+    <div class="text-muted small py-1">
+        Showing all <strong>@Model.TotalFiltered.ToString("N0")</strong> records
+        (@Model.TotalAll.ToString("N0") total)
+    </div>
+    return;
+}
+
+<nav aria-label="Page navigation" class="d-flex align-items-center justify-content-between flex-wrap gap-2 mt-2">
+
+    <div class="text-muted small">
+        @if (Model.TotalFiltered == 0)
+        {
+            <span>No records found</span>
+        }
+        else
+        {
+            <span>
+                Showing <strong>@Model.FirstItem.ToString("N0")</strong>–<strong>@Model.LastItem.ToString("N0")</strong>
+                of <strong>@Model.TotalFiltered.ToString("N0")</strong> filtered
+                (@Model.TotalAll.ToString("N0") total)
+            </span>
+        }
+    </div>
+
+    <ul class="pagination pagination-sm mb-0">
+
+        @* First *@
+        <li class="page-item @(!Model.HasPrev ? "disabled" : "")">
+            <a class="page-link" href="@PageUrl(1)">«</a>
+        </li>
+
+        @* Prev *@
+        <li class="page-item @(!Model.HasPrev ? "disabled" : "")">
+            <a class="page-link" href="@PageUrl(Model.CurrentPage - 1)">‹</a>
+        </li>
+
+        @* Page window: show up to 7 pages centred on current *@
+        @{
+            int window = 3;
+            int start  = Math.Max(1, Model.CurrentPage - window);
+            int end    = Math.Min(Model.TotalPages, Model.CurrentPage + window);
+
+            if (start > 1)
+            {
+                <li class="page-item disabled"><span class="page-link">…</span></li>
+            }
+
+            for (int p = start; p <= end; p++)
+            {
+                var active = p == Model.CurrentPage ? "active" : "";
+                <li class="page-item @active">
+                    <a class="page-link" href="@PageUrl(p)">@p</a>
+                </li>
+            }
+
+            if (end < Model.TotalPages)
+            {
+                <li class="page-item disabled"><span class="page-link">…</span></li>
+            }
+        }
+
+        @* Next *@
+        <li class="page-item @(!Model.HasNext ? "disabled" : "")">
+            <a class="page-link" href="@PageUrl(Model.CurrentPage + 1)">›</a>
+        </li>
+
+        @* Last *@
+        <li class="page-item @(!Model.HasNext ? "disabled" : "")">
+            <a class="page-link" href="@PageUrl(Model.TotalPages)">»</a>
+        </li>
+
+    </ul>
+</nav>
+
+@functions {
+    string PageUrl(int p)
+    {
+        var qs = System.Web.HttpUtility.ParseQueryString(string.Empty);
+        foreach (var kv in (ViewData["RouteValues"] as Dictionary<string, string?> ?? []))
+        {
+            if (!string.IsNullOrEmpty(kv.Value))
+                qs[kv.Key] = kv.Value;
+        }
+        qs["page"] = p.ToString();
+        return $"?{qs}";
+    }
+}

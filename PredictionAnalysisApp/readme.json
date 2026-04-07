@@ -1,0 +1,50 @@
+{
+  "Metrics": [
+    {
+      "Label":       "Total Predicted To Pay",
+      "Description": "Line Items where Forecasting Payability = Payable + Potentially Payable + Payable - Need Action"
+    },
+    {
+      "Label":       "Total Predicted - Paid",
+      "Description": "Line Items where Forecasting Payability = Payable + Potentially Payable + Payable - Need Action AND Pay Status = Paid"
+    },
+    {
+      "Label":       "Total Unpaid",
+      "Description": "Line Items where Forecasting Payability = Payable + Potentially Payable + Payable - Need Action AND Pay Status = Denied, Adjusted, No Response"
+    },
+    {
+      "Label":       "Denied",
+      "Description": "Line Items where Forecasting Payability = Payable + Potentially Payable + Payable - Need Action AND Pay Status = Denied"
+    },
+    {
+      "Label":       "Adjusted",
+      "Description": "Line Items where Forecasting Payability = Payable + Potentially Payable + Payable - Need Action AND Pay Status = Adjusted"
+    },
+    {
+      "Label":       "No Response",
+      "Description": "Line Items where Forecasting Payability = Payable + Potentially Payable + Payable - Need Action AND Pay Status = No Response"
+    }
+  ],
+  "Ratios": [
+    {
+      "Label":       "Payment Ratio (%)",
+      "Description": "Total Predicted - Paid / Total Predicted to Pay * 100"
+    },
+    {
+      "Label":       "Non-Payment Rate (%)",
+      "Description": "Total Predicted - Unpaid / Total Predicted to Pay * 100"
+    },
+    {
+      "Label":       "Denied (%)",
+      "Description": "Total Predicted - Denied / Total Predicted Unpaid * 100"
+    },
+    {
+      "Label":       "Adjusted (%)",
+      "Description": "Total Predicted - Adjusted / Total Predicted Unpaid * 100"
+    },
+    {
+      "Label":       "No Response (%)",
+      "Description": "Total Predicted - No Response / Total Predicted Unpaid * 100"
+    }
+  ]
+}

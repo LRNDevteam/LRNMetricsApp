@@ -1,0 +1,258 @@
+@model LabMetricsDashboard.Models.PredictionDiagnosticsViewModel
+@{
+    ViewData["Title"]       = $"Diagnostics – {Model.SelectedLab}";
+    ViewData["SelectedLab"] = Model.SelectedLab;
+    ViewData["PageLabel"]   = "Diagnostics";
+}
+
+<style>
+    .diag-hero {
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+        border-radius: 10px; padding: .85rem 1.4rem .7rem; color: #fff;
+    }
+    .diag-hero h2 { font-size: 1.05rem; font-weight: 700; margin-bottom: 0; }
+    .diag-hero .sub { font-size: .72rem; opacity: .7; }
+    .diag-stats {
+        background: rgba(0,0,0,.25); border-top: 1px solid rgba(255,255,255,.15);
+        padding: .45rem 1.4rem; display: flex; flex-wrap: wrap; gap: .35rem 1.4rem;
+        font-size: .72rem; color: rgba(255,255,255,.85);
+    }
+    .diag-stats strong { color: #fff; font-weight: 700; margin-left: .25rem; }
+    .diag-card { border: none; border-radius: 10px; box-shadow: 0 1px 10px rgba(0,0,0,.07); overflow: hidden; }
+    .diag-card .card-header {
+        font-weight: 600; font-size: .78rem; letter-spacing: .03em;
+        padding: .5rem 1rem; color: #fff;
+    }
+    .diag-table { font-size: .73rem; margin-bottom: 0; }
+    .diag-table th { font-size: .7rem; background: #f0f4f8; white-space: nowrap; }
+    .diag-table td { white-space: nowrap; }
+    .diag-table td.mono { font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: .7rem; }
+    .diag-badge-ok { background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+    .diag-badge-fail { background: #fce4ec; color: #c62828; border: 1px solid #f8bbd0; }
+    .diag-badge-info { background: #e3f2fd; color: #1565c0; border: 1px solid #bbdefb; }
+    .diag-badge { display: inline-block; border-radius: 4px; padding: .1rem .4rem; font-size: .65rem; font-weight: 600; }
+    .diag-funnel { font-size: .76rem; }
+    .diag-funnel .step { padding: .4rem .8rem; border-radius: 6px; margin-bottom: .3rem; display: flex; justify-content: space-between; align-items: center; }
+    .diag-funnel .step-all { background: #e3f2fd; color: #0d47a1; }
+    .diag-funnel .step-mid { background: #fff3e0; color: #e65100; }
+    .diag-funnel .step-end { background: #e8f5e9; color: #1b5e20; }
+    .diag-back { font-size: .78rem; }
+</style>
+
+<!-- Hero -->
+<div class="mb-3" style="border-radius:10px;box-shadow:0 3px 14px rgba(0,0,0,.18);overflow:hidden">
+    <div class="diag-hero">
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div>
+                <h2><i class="bi bi-bug me-1"></i> Prediction Diagnostics</h2>
+                <div class="sub">Raw field values &amp; filter-step analysis</div>
+            </div>
+            <form method="get" asp-controller="Prediction" asp-action="Diagnostics"
+                  class="d-flex align-items-center gap-2">
+                <label class="fw-semibold me-1 mb-0" for="diagLabSelect"
+                       style="color:rgba(255,255,255,.65);font-size:.74rem">Lab:</label>
+                <select id="diagLabSelect" name="lab"
+                        class="form-select form-select-sm" style="min-width:190px;font-size:.78rem"
+                        onchange="this.form.submit()">
+                    @foreach (var l in Model.AvailableLabs)
+                    {
+                        if (l == Model.SelectedLab) { <option value="@l" selected="selected">@l</option> }
+                        else { <option value="@l">@l</option> }
+                    }
+                </select>
+            </form>
+        </div>
+    </div>
+    <div class="diag-stats">
+        <span>Source:<strong style="word-break:break-all">@(Model.UsingDb ? "[Database]" : Model.SourceFilePath)</strong></span>
+        <span>Total rows:<strong>@Model.TotalRows.ToString("N0")</strong></span>
+        <span>Week start:<strong>@Model.WeekStart</strong></span>
+        <span>Mode:<strong>@(Model.UsingDb ? "DB" : "Excel")</strong></span>
+    </div>
+</div>
+
+@if (Model.TotalRows == 0)
+{
+    <div class="alert alert-warning" style="font-size:.82rem">
+        <i class="bi bi-exclamation-triangle me-1"></i>
+        <strong>No records loaded.</strong>
+        @if (!Model.UsingDb)
+        {
+            <text>Check that the source file exists at the path shown above and contains an "output" sheet.</text>
+        }
+        else
+        {
+            <text>The database query returned 0 rows. Verify the stored procedure and lab name.</text>
+        }
+    </div>
+}
+else
+{
+    <div class="row g-3 mb-3">
+        <!-- Filter funnel -->
+        <div class="col-lg-4">
+            <div class="diag-card card h-100">
+                <div class="card-header" style="background:linear-gradient(135deg,#0d47a1,#1565c0)">
+                    <i class="bi bi-funnel me-1"></i> Filter Pipeline
+                </div>
+                <div class="card-body diag-funnel">
+                    <div class="step step-all">
+                        <span>Total records</span>
+                        <strong>@Model.TotalRows.ToString("N0")</strong>
+                    </div>
+                    <div class="text-center text-muted" style="font-size:.65rem"><i class="bi bi-arrow-down"></i> ForecastingPayability IN (Payable, Potentially Payable, Payable - Need Action)</div>
+                    <div class="step step-mid">
+                        <span>After Payability filter</span>
+                        <strong>@Model.AfterForecastFilter.ToString("N0")</strong>
+                    </div>
+                    <div class="text-center text-muted" style="font-size:.65rem"><i class="bi bi-arrow-down"></i> ExpectedPaymentDate &lt; @Model.WeekStart</div>
+                    <div class="step step-end">
+                        <span>After both filters</span>
+                        <strong>@Model.AfterBothFilters.ToString("N0")</strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Distinct values -->
+        <div class="col-lg-4">
+            <div class="diag-card card h-100">
+                <div class="card-header" style="background:linear-gradient(135deg,#1b5e20,#388e3c)">
+                    <i class="bi bi-list-check me-1"></i> Forecasting Payability
+                </div>
+                <div class="card-body p-0">
+                    <table class="table table-sm table-hover diag-table">
+                        <thead><tr><th>Value</th><th class="text-center">Length</th></tr></thead>
+                        <tbody>
+                        @foreach (var v in Model.ForecastingPayabilityValues)
+                        {
+                            var isPayable = v.Value is "Payable" or "Potentially Payable" or "Payable - Need Action";
+                            <tr>
+                                <td class="mono">
+                                    @v.Value
+                                    @if (isPayable) { <span class="diag-badge diag-badge-ok ms-1">included</span> }
+                                </td>
+                                <td class="text-center">@v.Length</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-4">
+            <div class="diag-card card h-100">
+                <div class="card-header" style="background:linear-gradient(135deg,#4a148c,#7b1fa2)">
+                    <i class="bi bi-list-check me-1"></i> Pay Status
+                </div>
+                <div class="card-body p-0">
+                    <table class="table table-sm table-hover diag-table">
+                        <thead><tr><th>Value</th></tr></thead>
+                        <tbody>
+                        @foreach (var v in Model.PayStatusValues)
+                        {
+                            <tr><td class="mono">@v</td></tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Expected Payment Date samples -->
+    <div class="diag-card card mb-3">
+        <div class="card-header" style="background:linear-gradient(135deg,#e65100,#f57c00)">
+            <i class="bi bi-calendar-date me-1"></i> Expected Payment Date — Sample Values (first 30 distinct)
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-sm table-hover diag-table">
+                    <thead>
+                        <tr>
+                            <th>Raw Value</th>
+                            <th class="text-center">Parsed?</th>
+                            <th>Parsed Date</th>
+                            <th class="text-center">Passes Filter?</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var s in Model.ExpectedPaymentDateSamples)
+                    {
+                        <tr>
+                            <td class="mono">@(string.IsNullOrEmpty(s.RawValue) ? "(empty)" : s.RawValue)</td>
+                            <td class="text-center">
+                                <span class="diag-badge @(s.Parsed ? "diag-badge-ok" : "diag-badge-fail")">@(s.Parsed ? "Yes" : "No")</span>
+                            </td>
+                            <td class="mono">@(s.Parsed ? s.ParsedDate : "—")</td>
+                            <td class="text-center">
+                                <span class="diag-badge @(s.PassesFilter ? "diag-badge-ok" : "diag-badge-fail")">@(s.PassesFilter ? "Yes" : "No")</span>
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sample records -->
+    <div class="diag-card card mb-3">
+        <div class="card-header" style="background:linear-gradient(135deg,#0d1b2a,#1b3a5c)">
+            <i class="bi bi-table me-1"></i> Sample Records (first 20)
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive" style="max-height:420px;overflow:auto">
+                <table class="table table-sm table-hover table-bordered diag-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Visit #</th>
+                            <th>CPT</th>
+                            <th>Pay Status</th>
+                            <th>Forecasting Payability</th>
+                            <th>Expected Pmt Date</th>
+                            <th class="text-end">Mode Allowed</th>
+                            <th class="text-end">Mode Ins Paid</th>
+                            <th class="text-end">Median Allowed</th>
+                            <th class="text-end">Median Ins Paid</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @{ int rn = 1; }
+                    @foreach (var r in Model.SampleRecords)
+                    {
+                        var isPayable = r.ForecastingPayability is "Payable" or "Potentially Payable" or "Payable - Need Action";
+                        <tr>
+                            <td class="text-muted">@rn</td>
+                            <td class="mono">@r.VisitNumber</td>
+                            <td><strong>@r.CPTCode</strong></td>
+                            <td>
+                                <span class="diag-badge diag-badge-info">@r.PayStatus</span>
+                            </td>
+                            <td>
+                                <span class="diag-badge @(isPayable ? "diag-badge-ok" : "diag-badge-fail")">@r.ForecastingPayability</span>
+                            </td>
+                            <td class="mono">@(string.IsNullOrEmpty(r.ExpectedPaymentDate) ? "(empty)" : r.ExpectedPaymentDate)</td>
+                            <td class="text-end mono">$@r.ModeAllowedAmount.ToString("N2")</td>
+                            <td class="text-end mono">$@r.ModeInsurancePaid.ToString("N2")</td>
+                            <td class="text-end mono">$@r.MedianAllowedAmount.ToString("N2")</td>
+                            <td class="text-end mono">$@r.MedianInsurancePaid.ToString("N2")</td>
+                        </tr>
+                        rn++;
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Back navigation -->
+<div class="d-flex justify-content-start mb-4">
+    <a asp-controller="Prediction" asp-action="Index" asp-route-lab="@Model.SelectedLab"
+       class="btn btn-outline-secondary btn-sm diag-back">
+        <i class="bi bi-arrow-left me-1"></i> Back to Prediction Analysis
+    </a>
+</div>

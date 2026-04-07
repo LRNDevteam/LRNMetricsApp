@@ -1,0 +1,480 @@
+﻿@model LabMetricsDashboard.Models.HomeViewModel
+@{
+    ViewData["Title"] = "Lab Metrics – Home";
+
+    string[] palette =
+    [
+        "135deg,#1565c0,#1e88e5",   // Blue
+        "135deg,#6a1b9a,#9c27b0",   // Purple
+        "135deg,#1b3a5c,#1565c0",   // Navy-Blue
+        "135deg,#b71c1c,#e53935",   // Red
+        "135deg,#1e88e5,#42a5f5",   // Light Blue
+        "135deg,#880e4f,#e91e63",   // Pink
+        "135deg,#e65100,#f57c00",   // Orange
+        "135deg,#4527a0,#673ab7",   // Deep purple
+        "135deg,#0277bd,#0288d1",   // Cyan-Blue
+        "135deg,#1565c0,#42a5f5",   // Sky blue
+        "135deg,#4e342e,#795548",   // Brown
+        "135deg,#37474f,#546e7a",   // Blue grey
+    ];
+
+    string[] glows =
+    [
+        "rgba(21,101,192,.35)",  "rgba(106,27,154,.35)", "rgba(27,58,92,.35)",
+        "rgba(183,28,28,.35)",   "rgba(30,136,229,.35)", "rgba(136,14,79,.35)",
+        "rgba(230,81,0,.35)",    "rgba(69,39,160,.35)",  "rgba(2,119,189,.35)",
+        "rgba(21,101,192,.35)",  "rgba(78,52,46,.35)",   "rgba(55,71,79,.35)",
+    ];
+}
+
+<style>
+/* ── Google Font hint ───────────────────────────────────────────── */
+@@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+/* ── Page background ────────────────────────────────────────────── */
+.home-page {
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+    min-height: 100vh;
+    background:
+        radial-gradient(900px 500px at 10%  5%,  rgba(17,163,155,.13), transparent 60%),
+        radial-gradient(800px 420px at 90%  8%,  rgba(47,111,237,.12), transparent 60%),
+        radial-gradient(600px 350px at 55% 92%,  rgba(10,122,116,.10), transparent 55%),
+        #F0F4F8;
+    padding-bottom: 3rem;
+}
+
+/* ── Hero ───────────────────────────────────────────────────────── */
+.home-hero {
+    position: relative;
+    border-radius: 16px;
+    padding: 1rem 1.6rem;
+    margin-bottom: 1.5rem;
+    overflow: hidden;
+    background: linear-gradient(120deg, #0a1628 0%, #0e3460 40%, #0d5c74 75%, #0a7a74 100%);
+    box-shadow: 0 12px 40px rgba(7,24,39,.22), 0 0 0 1px rgba(255,255,255,.07);
+}
+.home-hero::before {
+    content: '';
+    position: absolute; inset: -2px;
+    background:
+        radial-gradient(400px 200px at 12% 20%, rgba(255,255,255,.09), transparent 65%),
+        radial-gradient(300px 160px at 85% 15%, rgba(255,255,255,.06), transparent 65%);
+    pointer-events: none;
+}
+.home-hero::after {
+    content: '';
+    position: absolute; inset: 0;
+    opacity: .08;
+    background-image:
+        linear-gradient(rgba(255,255,255,.18) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.18) 1px, transparent 1px);
+    background-size: 24px 24px;
+    mask-image: radial-gradient(circle at 20% 30%, black 30%, transparent 70%);
+    pointer-events: none;
+}
+.hero-title {
+    font-size: 1.25rem; font-weight: 800; color: #fff;
+    letter-spacing: -.01em; line-height: 1.15; margin: 0;
+    display: flex; align-items: center; gap: .55rem;
+}
+.hero-title-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; border-radius: 9px;
+    background: rgba(255,255,255,.14);
+    border: 1.5px solid rgba(255,255,255,.22);
+    font-size: .85rem; flex-shrink: 0;
+}
+.hero-sub {
+    font-size: .78rem; color: rgba(255,255,255,.62);
+    margin-top: .15rem; font-weight: 500; padding-left: 2.65rem;
+}
+.hero-chip {
+    display: inline-flex; align-items: center; gap: .45rem;
+    background: rgba(255,255,255,.12);
+    border: 1.5px solid rgba(255,255,255,.24);
+    border-radius: 30px; padding: .3em .9em;
+    font-size: .78rem; font-weight: 700; color: #fff;
+    backdrop-filter: blur(8px);
+    position: relative; z-index: 1;
+}
+.hero-chip-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #64b5f6;
+    box-shadow: 0 0 0 3px rgba(100,181,246,.25);
+    flex-shrink: 0;
+    animation: hero-pulse 2s ease-in-out infinite;
+}
+@@keyframes hero-pulse {
+    0%, 100% { box-shadow: 0 0 0 3px rgba(100,181,246,.25); }
+    50%      { box-shadow: 0 0 0 6px rgba(100,181,246,.12); }
+}
+
+/* ── Card grid ──────────────────────────────────────────────────── */
+.lab-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1.25rem;
+}
+@@media (max-width: 1100px) { .lab-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@@media (max-width:  660px) { .lab-grid { grid-template-columns: 1fr; } }
+
+/* ── Lab card ───────────────────────────────────────────────────── */
+.lab-card {
+    border-radius: 20px;
+    border: 1px solid rgba(255,255,255,.60);
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    background: rgba(255,255,255,.92);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    transition: transform .22s ease, box-shadow .22s ease;
+    position: relative;
+}
+.lab-card:hover {
+    transform: translateY(-7px);
+}
+
+/* ── Card header ────────────────────────────────────────────────── */
+.lab-card-head {
+    padding: 1.1rem 1.2rem .9rem;
+    position: relative; overflow: hidden;
+}
+.lab-card-head::before {
+    content: ''; position: absolute;
+    right: -20px; top: -20px;
+    width: 100px; height: 100px;
+    background: rgba(255,255,255,.14); border-radius: 50%;
+    pointer-events: none;
+}
+.lab-card-head::after {
+    content: ''; position: absolute;
+    right: 40px; bottom: -36px;
+    width: 70px; height: 70px;
+    background: rgba(255,255,255,.09); border-radius: 50%;
+    pointer-events: none;
+}
+
+.lab-avatar {
+    width: 40px; height: 40px; border-radius: 12px;
+    background: rgba(255,255,255,.22);
+    border: 2px solid rgba(255,255,255,.40);
+    display: grid; place-items: center;
+    font-size: 1.05rem; font-weight: 900; color: #fff;
+    flex-shrink: 0; position: relative; z-index: 1;
+    letter-spacing: 0;
+}
+.lab-name {
+    font-size: .97rem; font-weight: 800; color: #fff;
+    letter-spacing: .01em; word-break: break-word;
+    position: relative; z-index: 1; line-height: 1.2;
+}
+.status-pill {
+    font-size: .62rem; font-weight: 800; letter-spacing: .06em;
+    text-transform: uppercase; border-radius: 30px; padding: .22em .7em;
+    position: relative; z-index: 1; white-space: nowrap;
+    border: 1px solid rgba(255,255,255,.35);
+    background: rgba(255,255,255,.22); color: #fff;
+}
+.status-pill.partial { background: rgba(255,235,59,.28); }
+.status-pill.none    { background: rgba(244,67,54,.28); }
+
+/* ── Card body ──────────────────────────────────────────────────── */
+.lab-card-body {
+    padding: .7rem 1rem;
+    background: #fff;
+    flex: 1;
+    border-top: 1px solid rgba(0,0,0,.04);
+}
+
+.file-row {
+    display: flex; align-items: flex-start; gap: .55rem;
+    padding: .42rem .5rem;
+    border-radius: 10px;
+    margin-bottom: .3rem;
+    background: #f8fafc;
+    border: 1px solid #eef2f7;
+    transition: background .12s;
+}
+.file-row:last-child { margin-bottom: 0; }
+.file-row:hover { background: #f0f8ff; }
+
+.file-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    flex-shrink: 0; margin-top: 5px;
+}
+.file-content { flex: 1; min-width: 0; }
+.file-section {
+    font-size: .58rem; font-weight: 800; letter-spacing: .08em;
+    text-transform: uppercase; color: #94a3b8; margin-bottom: 1px;
+    line-height: 1;
+}
+.file-name {
+    font-size: .72rem; font-weight: 600; color: #1e293b;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 100%;
+}
+.file-name.missing { color: #cbd5e1; font-style: italic; }
+.file-check {
+    font-size: .75rem; font-weight: 900;
+    flex-shrink: 0; margin-top: 2px;
+}
+
+/* ── Card footer ────────────────────────────────────────────────── */
+.lab-card-footer {
+    padding: .55rem .7rem .65rem;
+    background: #fff;
+    border-top: 1px solid #f1f5f9;
+    display: flex; gap: .35rem; flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+}
+.fc-btn {
+    font-size: .62rem; font-weight: 700; letter-spacing: .02em;
+    border-radius: 7px; padding: .3rem .55rem;
+    border: 1.5px solid transparent;
+    text-align: center; text-decoration: none;
+    white-space: nowrap;
+    transition: all .14s ease; cursor: pointer;
+    display: inline-block;
+}
+.fc-btn-primary {
+    color: #fff; border-color: transparent;
+    box-shadow: 0 2px 6px rgba(0,0,0,.12);
+}
+.fc-btn-primary:hover { filter: brightness(1.12); color: #fff; box-shadow: 0 3px 10px rgba(0,0,0,.18); }
+.fc-btn-outline {
+    color: #4a6080;
+    background: #f4f7fa;
+    border-color: #dde3ed;
+}
+.fc-btn-outline:hover { background: #e2e8f4; border-color: #b0bccc; color: #1a2744; }
+.fc-btn-pred {
+    color: #1565c0;
+    background: #eef3ff;
+    border-color: #c0d4f7;
+}
+.fc-btn-pred:hover { background: #dde9fd; color: #0d47a1; }
+.fc-btn-code {
+    color: #1565c0;
+    background: #eef3ff;
+    border-color: #c0d4f7;
+}
+.fc-btn-code:hover { background: #dde9fd; color: #0d47a1; }
+.fc-btn-disabled {
+    color: #c0cad8; background: #f8fafc;
+    border-color: #e8ecf2;
+    pointer-events: none; opacity: .5;
+}
+
+/* ── Empty state ─────────────────────────────────────────────────── */
+.home-empty {
+    text-align: center; padding: 4rem 1rem; color: #94a3b8;
+}
+</style>
+
+<div class="home-page px-3 pt-3">
+
+    <!-- Hero -->
+    <div class="home-hero" style="position:relative;z-index:1">
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2"
+             style="position:relative;z-index:1">
+            <div>
+                <h1 class="hero-title">
+                    <span class="hero-title-icon">&#128202;</span>
+                    Lab Metrics Dashboard
+                </h1>
+                <p class="hero-sub">Select a lab to open its dashboard, claims, or line details.</p>
+            </div>
+            <span class="hero-chip">
+                <span class="hero-chip-dot"></span>
+                @Model.LabTiles.Count Labs
+            </span>
+        </div>
+    </div>
+
+    @if (!Model.LabTiles.Any())
+    {
+        <div class="home-empty">
+            <div style="font-size:2.5rem;margin-bottom:.75rem;opacity:.4">&#128202;</div>
+            <div style="font-weight:700;font-size:1rem">No labs configured</div>
+            <div style="font-size:.88rem;margin-top:.3rem">
+                Check <code>appsettings.json</code> and the lab config folder.
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="lab-grid">
+            @for (int i = 0; i < Model.LabTiles.Count; i++)
+            {
+                var tile     = Model.LabTiles[i];
+                var grad     = palette[i % palette.Length];
+                var glow     = glows[i % glows.Length];
+                var initial  = tile.LabName.Length > 0 ? tile.LabName[0].ToString().ToUpper() : "L";
+                var hasAll   = tile.HasClaimFile && tile.HasLineFile;
+                var hasAny   = tile.HasClaimFile || tile.HasLineFile;
+
+                var statusTxt  = hasAll ? "Ready" : hasAny ? "Partial" : "No Files";
+                var statusCls  = hasAll ? "" : hasAny ? "partial" : "none";
+
+                <div class="lab-card" style="box-shadow:0 10px 36px @glow, 0 2px 8px rgba(0,0,0,.06)">
+
+                    <!-- Header -->
+                    <div class="lab-card-head" style="background:linear-gradient(@grad)">
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="lab-avatar">@initial</div>
+                            <div class="lab-name flex-fill">@tile.LabName</div>
+                            <span class="status-pill @statusCls">@statusTxt</span>
+                        </div>
+                    </div>
+
+                    <!-- File rows -->
+                    <div class="lab-card-body">
+
+                        <!-- Claim Level -->
+                        <div class="file-row">
+                            <span class="file-dot" style="background:@(tile.HasClaimFile ? "#22c55e" : "#e2e8f0")"></span>
+                            <div class="file-content">
+                                <div class="file-section">Claim Level</div>
+                                @if (tile.HasClaimFile)
+                                {
+                                    <div class="file-name" title="@tile.ClaimFilePath">@tile.ClaimFileName</div>
+                                }
+                                else
+                                {
+                                    <div class="file-name missing">File not found</div>
+                                }
+                            </div>
+                            @if (tile.HasClaimFile)
+                            {
+                                <span class="file-check" style="color:#22c55e">&#10003;</span>
+                            }
+                        </div>
+
+                        <!-- Line Level -->
+                        <div class="file-row">
+                            <span class="file-dot" style="background:@(tile.HasLineFile ? "#22c55e" : "#e2e8f0")"></span>
+                            <div class="file-content">
+                                <div class="file-section">Line Level</div>
+                                @if (tile.HasLineFile)
+                                {
+                                    <div class="file-name" title="@tile.LineFilePath">@tile.LineFileName</div>
+                                }
+                                else
+                                {
+                                    <div class="file-name missing">File not found</div>
+                                }
+                            </div>
+                            @if (tile.HasLineFile)
+                            {
+                                <span class="file-check" style="color:#22c55e">&#10003;</span>
+                            }
+                        </div>
+
+                        <!-- Prediction Analysis -->
+                        <div class="file-row">
+                            <span class="file-dot" style="background:@(tile.PredictionEnabled ? "#3b82f6" : "#e2e8f0")"></span>
+                            <div class="file-content">
+                                <div class="file-section">Prediction Analysis</div>
+                                @if (tile.HasPredictionFile)
+                                {
+                                    <div class="file-name" title="@tile.PredictionFilePath">@tile.PredictionFileName</div>
+                                }
+                                else if (tile.DBEnabled)
+                                {
+                                    <div class="file-name" style="color:#3b82f6">Database</div>
+                                }
+                                else
+                                {
+                                    <div class="file-name missing">Not configured</div>
+                                }
+                            </div>
+                            @if (tile.PredictionEnabled)
+                            {
+                                <span class="file-check" style="color:#3b82f6">&#10003;</span>
+                            }
+                        </div>
+
+                        <!-- Coding Master -->
+                        <div class="file-row">
+                            <span class="file-dot" style="background:@(tile.HasCodingMasterFile || tile.CodingEnabled ? "#10b981" : "#e2e8f0")"></span>
+                            <div class="file-content">
+                                <div class="file-section">Coding Master</div>
+                                @if (tile.HasCodingMasterFile)
+                                {
+                                    <div class="file-name" title="@tile.CodingMasterFilePath">@tile.CodingMasterFileName</div>
+                                }
+                                else if (tile.CodingEnabled)
+                                {
+                                    <div class="file-name" style="color:#10b981">Database</div>
+                                }
+                                else
+                                {
+                                    <div class="file-name missing">Not configured</div>
+                                }
+                            </div>
+                            @if (tile.HasCodingMasterFile || tile.CodingEnabled)
+                            {
+                                <span class="file-check" style="color:#10b981">&#10003;</span>
+                            }
+                        </div>
+
+                    </div><!-- /.lab-card-body -->
+
+                    <!-- Footer buttons -->
+                    <div class="lab-card-footer">
+                        <a asp-controller="Dashboard" asp-action="Index"
+                           asp-route-lab="@tile.LabName"
+                           class="fc-btn fc-btn-primary"
+                           style="background:linear-gradient(@grad)">
+                            Dashboard
+                        </a>
+                        <a asp-controller="Dashboard" asp-action="ClaimLevel"
+                           asp-route-lab="@tile.LabName"
+                           class="fc-btn fc-btn-outline">
+                            Claims
+                        </a>
+                        <a asp-controller="Dashboard" asp-action="LineLevel"
+                           asp-route-lab="@tile.LabName"
+                           class="fc-btn fc-btn-outline">
+                            Lines
+                        </a>
+                        @if (tile.PredictionEnabled)
+                        {
+                            <a asp-controller="Prediction" asp-action="Index"
+                               asp-route-lab="@tile.LabName"
+                               class="fc-btn fc-btn-pred">
+                                Prediction
+                            </a>
+                        }
+                        else
+                        {
+                            <span class="fc-btn fc-btn-disabled" title="Prediction not enabled">Prediction</span>
+                        }
+                        @if (tile.CodingEnabled)
+                        {
+                            <a asp-controller="Coding" asp-action="Summary"
+                               asp-route-lab="@tile.LabName"
+                               class="fc-btn fc-btn-code">
+                                Coding
+                            </a>
+                        }
+                        else
+                        {
+                            <span class="fc-btn fc-btn-disabled" title="Coding requires DBEnabled">Coding</span>
+                        }
+                    </div>
+
+                </div>
+            }
+        </div>
+    }
+
+    <div class="text-center mt-5" style="font-size:.75rem;color:#94a3b8;font-weight:500">
+        &copy; @DateTime.Now.Year Lab Revenue Intelligence
+    </div>
+
+</div>
+
+
+@* end of file *@

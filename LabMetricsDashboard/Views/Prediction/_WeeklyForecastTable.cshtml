@@ -1,0 +1,79 @@
+@model LabMetricsDashboard.Models.WeeklyForecastSummary
+@{
+    var label = ViewData["SummaryLabel"]?.ToString() ?? "Summary";
+}
+
+<div class="table-responsive">
+    <table class="wk-table">
+        <thead>
+            @* Week range header row *@
+            <tr>
+                <th rowspan="2" style="width:3%"></th>
+                <th rowspan="2" style="min-width:160px">Description</th>
+                @foreach (var wk in Model.Weeks)
+                {
+                    <th colspan="2">@wk.Label</th>
+                }
+                <th colspan="2" class="wk-total" style="background:#1b5e20">Total</th>
+            </tr>
+            @* Sub-header row *@
+            <tr class="wk-sub">
+                @for (int i = 0; i < Model.Weeks.Count; i++)
+                {
+                    <th>Expected Allowed Amount</th>
+                    <th>Expected Paid</th>
+                }
+                <th style="background:#1b5e20">Expected Allowed Amount</th>
+                <th style="background:#1b5e20">Expected Paid</th>
+            </tr>
+        </thead>
+        <tbody>
+            @* Summary row (label A) *@
+            <tr class="summary-row">
+                <td class="fw-bold text-center">A</td>
+                <td class="desc"></td>
+                @foreach (var wk in Model.Weeks)
+                {
+                    var amt = Model.Totals.WeekAmounts.GetValueOrDefault(wk.Start);
+                    <td class="amt">$@((amt?.ExpectedAllowed ?? 0).ToString("N0"))</td>
+                    <td class="amt">$@((amt?.ExpectedPaid ?? 0).ToString("N0"))</td>
+                }
+                <td class="amt fw-bold">$@Model.Totals.TotalAllowed.ToString("N0")</td>
+                <td class="amt fw-bold">$@Model.Totals.TotalPaid.ToString("N0")</td>
+            </tr>
+
+            @* Per-payer rows *@
+            @{ int idx = 1; }
+            @foreach (var payer in Model.PayerRows)
+            {
+                <tr>
+                    <td class="text-center text-muted">@idx</td>
+                    <td class="desc">@payer.PayerName</td>
+                    @foreach (var wk in Model.Weeks)
+                    {
+                        var amt = payer.WeekAmounts.GetValueOrDefault(wk.Start);
+                        <td class="amt">$@((amt?.ExpectedAllowed ?? 0).ToString("N0"))</td>
+                        <td class="amt">$@((amt?.ExpectedPaid ?? 0).ToString("N0"))</td>
+                    }
+                    <td class="amt">$@payer.TotalAllowed.ToString("N0")</td>
+                    <td class="amt">$@payer.TotalPaid.ToString("N0")</td>
+                </tr>
+                idx++;
+            }
+
+            @* Totals row *@
+            <tr class="total-row">
+                <td></td>
+                <td class="desc"><strong>Total</strong></td>
+                @foreach (var wk in Model.Weeks)
+                {
+                    var amt = Model.Totals.WeekAmounts.GetValueOrDefault(wk.Start);
+                    <td class="amt">$@((amt?.ExpectedAllowed ?? 0).ToString("N0"))</td>
+                    <td class="amt">$@((amt?.ExpectedPaid ?? 0).ToString("N0"))</td>
+                }
+                <td class="amt fw-bold">$@Model.Totals.TotalAllowed.ToString("N0")</td>
+                <td class="amt fw-bold">$@Model.Totals.TotalPaid.ToString("N0")</td>
+            </tr>
+        </tbody>
+    </table>
+</div>

@@ -1,0 +1,18 @@
+@model RecordsPagerViewModel
+@{
+    var startItem = Model.TotalItems == 0 ? 0 : ((Model.Page - 1) * Model.PageSize) + 1;
+    var endItem = Math.Min(Model.Page * Model.PageSize, Model.TotalItems);
+}
+<div class="pager-shell">
+    <div>
+        <div class="pager-meta">Showing @startItem-@endItem of @Model.TotalItems.ToString("N0") @Model.ItemLabel</div>
+        <div class="page-note">Large labs are paged to keep the dashboard responsive.</div>
+    </div>
+    <div class="pager-actions">
+        <a class="pager-btn js-loader-link @(Model.Page <= 1 ? "disabled" : string.Empty)" href="@(Model.Page <= 1 ? "#" : Model.BuildUrl(1, Model.TabName))">First</a>
+        <a class="pager-btn js-loader-link @(Model.Page <= 1 ? "disabled" : string.Empty)" href="@(Model.Page <= 1 ? "#" : Model.BuildUrl(Model.Page - 1, Model.TabName))">Prev</a>
+        <span class="pager-btn active">@Model.Page / @Model.TotalPages</span>
+        <a class="pager-btn js-loader-link @(Model.Page >= Model.TotalPages ? "disabled" : string.Empty)" href="@(Model.Page >= Model.TotalPages ? "#" : Model.BuildUrl(Model.Page + 1, Model.TabName))">Next</a>
+        <a class="pager-btn js-loader-link @(Model.Page >= Model.TotalPages ? "disabled" : string.Empty)" href="@(Model.Page >= Model.TotalPages ? "#" : Model.BuildUrl(Model.TotalPages, Model.TabName))">Last</a>
+    </div>
+</div>

@@ -1,0 +1,496 @@
+@model LabMetricsDashboard.Models.ForecastingSummaryViewModel
+@{
+    ViewData["Title"]       = $"Forecasting Summary – {Model.SelectedLab}";
+    ViewData["SelectedLab"] = Model.SelectedLab;
+    ViewData["PageLabel"]   = "Forecasting Summary";
+
+    var weeks       = Model.MedianSummary.Weeks;
+    var rangeLabel  = weeks.Count >= 2
+        ? $"{weeks[0].Start:MM/dd/yyyy} – {weeks[^1].End:MM/dd/yyyy}"
+        : "—";
+
+    bool isMedian   = Model.ActiveTab == "median";
+    bool isMode     = Model.ActiveTab == "mode";
+    bool isFiltered = Model.ActiveTab == "filtered";
+
+    var activeFilterNames = new List<string>();
+    if (!string.IsNullOrWhiteSpace(Model.FilterPayerName)) activeFilterNames.Add($"Payer: {Model.FilterPayerName}");
+    if (!string.IsNullOrWhiteSpace(Model.FilterPayerType)) activeFilterNames.Add($"Type: {Model.FilterPayerType}");
+    if (!string.IsNullOrWhiteSpace(Model.FilterPanelName)) activeFilterNames.Add($"Panel: {Model.FilterPanelName}");
+    if (!string.IsNullOrWhiteSpace(Model.FilterCPTCode))   activeFilterNames.Add($"CPT: {Model.FilterCPTCode}");
+
+    var filterRouteValues = new Dictionary<string, string?>
+    {
+        ["lab"]             = Model.SelectedLab,
+        ["filterPayerName"] = Model.FilterPayerName,
+        ["filterPayerType"] = Model.FilterPayerType,
+        ["filterPanelName"] = Model.FilterPanelName,
+        ["filterCPTCode"]   = Model.FilterCPTCode,
+    };
+}
+
+<style>
+    /* ?? Hero + stats strip ????????????????????????????????????????? */
+    .fc-hero {
+        background: linear-gradient(135deg, #0d1b2a 0%, #1b3a5c 50%, #1565c0 100%);
+        border-radius: 10px 10px 0 0;
+        padding: .85rem 1.4rem .7rem;
+        color: #fff;
+    }
+    .fc-hero h2 { font-size: 1.05rem; font-weight: 700; margin-bottom: 0; }
+    .fc-hero .sub { font-size: .72rem; opacity: .7; }
+    .fc-stats {
+        background: rgba(0,0,0,.25);
+        border-top: 1px solid rgba(255,255,255,.15);
+        padding: .45rem 1.4rem;
+        display: flex; flex-wrap: wrap; gap: .4rem 1.6rem;
+        font-size: .72rem; color: rgba(255,255,255,.85);
+    }
+    .fc-stats strong { color: #fff; font-weight: 700; margin-left: .25rem; }
+
+    /* ?? Totals bar ????????????????????????????????????????????????? */
+    .fc-totals-bar {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-top: none;
+        border-radius: 0 0 10px 10px;
+        display: flex; flex-wrap: wrap;
+        font-size: .76rem;
+    }
+    .fc-totals-bar .fc-tg {
+        flex: 1 1 50%; display: flex; align-items: center;
+        justify-content: center; gap: 1.2rem;
+        padding: .5rem .8rem;
+    }
+    .fc-totals-bar .fc-tg + .fc-tg { border-left: 1px solid #e2e8f0; }
+    .fc-tg-label { font-weight: 600; font-size: .7rem; color: #888; text-transform: uppercase; letter-spacing: .03em; }
+    .fc-tg-pair { text-align: center; }
+    .fc-tg-val { font-weight: 700; font-size: .9rem; line-height: 1.1; }
+    .fc-tg-sub { font-size: .62rem; color: #999; }
+
+    /* ?? Cards ??????????????????????????????????????????????????????? */
+    .fc-card { border: none; border-radius: 10px; box-shadow: 0 1px 10px rgba(0,0,0,.07); overflow: hidden; }
+
+    /* ?? Tabs ???????????????????????????????????????????????????????? */
+    .fc-top-tabs .nav-link {
+        font-weight: 600; font-size: .78rem; color: #4a5568;
+        border: 1px solid transparent; border-bottom: none;
+        padding: .45rem 1.2rem; border-radius: 8px 8px 0 0;
+        background: #f0f4f8; margin-right: 2px; transition: all .15s;
+    }
+    .fc-top-tabs .nav-link:hover { color: #1b3a5c; background: #e2e8f0; }
+    .fc-top-tabs .nav-link.active { color: #fff; background: #1b3a5c; border-color: #1b3a5c; }
+    .fc-top-tabs .nav-link .tab-cnt { font-size: .62rem; padding: .08rem .35rem; vertical-align: middle; margin-left: .25rem; }
+
+    /* ?? Weekly table ???????????????????????????????????????????????? */
+    .wk-table { border-collapse: collapse; width: 100%; font-size: .74rem; }
+    .wk-table th, .wk-table td { border: 1px solid #e2e8f0; padding: .38rem .55rem; vertical-align: middle; }
+    .wk-table thead th { background: #1b3a5c; color: #fff; font-weight: 600; text-align: center; white-space: nowrap; font-size: .72rem; }
+    .wk-table thead .wk-sub th { background: #2d5f8a; color: rgba(255,255,255,.9); font-weight: 500; text-align: center; font-size: .67rem; }
+    .wk-table thead .wk-total th { background: #0d2137; color: #fff; font-weight: 700; text-align: center; }
+    .wk-table .summary-row td { background: #edf2f7; font-weight: 700; font-size: .75rem; }
+    .wk-table .total-row td { background: #e2e8f0; font-weight: 700; font-size: .75rem; }
+    .wk-table td.amt { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .wk-table td.desc { white-space: nowrap; }
+    .wk-table tbody tr:hover { background: #f7fafc; }
+
+    /* ?? Filter panel ??????????????????????????????????????????????? */
+    .fc-filter-panel { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: .6rem 1rem; }
+    .fc-filter-panel label { font-size: .7rem; font-weight: 600; color: #555; margin-bottom: .1rem; }
+    .fc-filter-panel select { font-size: .76rem; }
+    .fc-filter-badge { display: inline-block; background: #e3f2fd; color: #1565c0; border: 1px solid #bbdefb; border-radius: 4px; padding: .1rem .4rem; font-size: .66rem; font-weight: 600; }
+
+    /* ?? Detail table ??????????????????????????????????????????????? */
+    .fc-detail-table { font-size: .72rem; }
+    .fc-detail-table th { font-size: .7rem; white-space: nowrap; background: #f0f4f8; position: sticky; top: 0; }
+    .fc-detail-table td { white-space: nowrap; }
+    .fc-detail-table td.amt { text-align: right; font-variant-numeric: tabular-nums; }
+
+    /* ?? Paging ?????????????????????????????????????????????????????? */
+    .fc-paging { font-size: .74rem; }
+    .fc-paging .page-link { font-size: .72rem; padding: .2rem .5rem; }
+
+    .fc-back { font-size: .78rem; }
+</style>
+
+<!-- ?? Hero + inline stats ?????????????????????????????????????????????? -->
+<div class="mb-3" style="border-radius:10px;box-shadow:0 3px 14px rgba(0,0,0,.18);overflow:hidden">
+    <div class="fc-hero">
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div>
+                <h2><i class="bi bi-calendar3-week me-1"></i> Forecasting Summary</h2>
+                <div class="sub">Last 4 Weeks &nbsp;|&nbsp; Weekly Breakdown by Payer</div>
+            </div>
+            <form method="get" asp-controller="Prediction" asp-action="ForecastingSummary"
+                  class="d-flex align-items-center gap-2" id="fc-lab-form">
+                <label class="fw-semibold me-1 mb-0" for="fcLabSelect"
+                       style="color:rgba(255,255,255,.65);font-size:.74rem">Lab:</label>
+                <select id="fcLabSelect" name="lab"
+                        class="form-select form-select-sm" style="min-width:190px;font-size:.78rem">
+                    @foreach (var l in Model.AvailableLabs)
+                    {
+                        if (l == Model.SelectedLab) { <option value="@l" selected="selected">@l</option> }
+                        else { <option value="@l">@l</option> }
+                    }
+                </select>
+            </form>
+            <script>
+                (function () {
+                    var sel  = document.getElementById('fcLabSelect');
+                    var form = document.getElementById('fc-lab-form');
+                    if (!sel || !form) return;
+                    sel.addEventListener('change', function () {
+                        var loader = document.getElementById('lmd-loader');
+                        var text   = document.getElementById('lmd-loader-text');
+                        if (text)   text.textContent = 'Loading ' + sel.options[sel.selectedIndex].text + '\u2026';
+                        if (loader) loader.classList.add('active');
+                        form.submit();
+                    });
+                }());
+            </script>
+        </div>
+    </div>
+    @if (Model.PredictionAvailable)
+    {
+        <div class="fc-stats">
+            <span>Lab:<strong>@Model.SelectedLab</strong></span>
+            <span>Period:<strong>@rangeLabel</strong></span>
+            <span>Records:<strong>@Model.TotalRecordsInRange.ToString("N0")</strong></span>
+            <span>Payers:<strong>@Model.MedianSummary.PayerRows.Count.ToString("N0")</strong></span>
+        </div>
+    }
+    @if (Model.PredictionAvailable)
+    {
+        <!-- Totals bar -->
+        <div class="fc-totals-bar">
+            <div class="fc-tg">
+                <span class="fc-tg-label" style="color:#1565c0">Median Total</span>
+                <div class="fc-tg-pair">
+                    <div class="fc-tg-val" style="color:#1565c0">$@Model.MedianSummary.Totals.TotalAllowed.ToString("N0")</div>
+                    <div class="fc-tg-sub">Allowed</div>
+                </div>
+                <div class="fc-tg-pair">
+                    <div class="fc-tg-val" style="color:#0d47a1">$@Model.MedianSummary.Totals.TotalPaid.ToString("N0")</div>
+                    <div class="fc-tg-sub">Paid</div>
+                </div>
+            </div>
+            <div class="fc-tg">
+                <span class="fc-tg-label" style="color:#1565c0">Mode Total</span>
+                <div class="fc-tg-pair">
+                    <div class="fc-tg-val" style="color:#1565c0">$@Model.ModeSummary.Totals.TotalAllowed.ToString("N0")</div>
+                    <div class="fc-tg-sub">Allowed</div>
+                </div>
+                <div class="fc-tg-pair">
+                    <div class="fc-tg-val" style="color:#0d47a1">$@Model.ModeSummary.Totals.TotalPaid.ToString("N0")</div>
+                    <div class="fc-tg-sub">Paid</div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@if (!Model.PredictionAvailable)
+{
+    <div class="d-flex flex-column align-items-center justify-content-center py-5 my-3"
+         style="background:#fff;border-radius:16px;box-shadow:0 2px 14px rgba(0,0,0,.08);min-height:320px">
+        <div style="font-size:3.5rem;line-height:1">&#128683;</div>
+        <h4 class="fw-bold mt-3 mb-1" style="color:#1565c0">Forecasting Not Available</h4>
+        <p class="text-muted mb-3" style="font-size:.92rem;max-width:420px;text-align:center">
+            Forecasting Summary is currently not available for <strong>@Model.SelectedLab</strong>.<br/>
+            Please contact your administrator for more details.
+        </p>
+        <a asp-controller="Home" asp-action="Index" class="btn btn-outline-primary btn-sm">
+            &#8592; Back to Home
+        </a>
+    </div>
+}
+else if (Model.NoDataForRange)
+{
+    <div class="d-flex flex-column align-items-center justify-content-center py-5 my-3"
+         style="background:#fff;border-radius:16px;box-shadow:0 2px 14px rgba(0,0,0,.08);min-height:320px">
+        <div style="font-size:3.5rem;line-height:1">&#128197;</div>
+        <h4 class="fw-bold mt-3 mb-1" style="color:#e65100">No Data for the Last 4 Weeks</h4>
+        <p class="text-muted mb-2" style="font-size:.92rem;max-width:480px;text-align:center">
+            There are no forecast records available for <strong>@Model.SelectedLab</strong>
+            in the period <strong>@rangeLabel</strong>.
+        </p>
+        @if (Model.LatestDataDate.HasValue)
+        {
+            <p class="mb-3" style="font-size:.88rem;text-align:center">
+                The most recent data available for this lab is from
+                <strong style="color:#1565c0">@Model.LatestDataDate.Value.ToString("MMMM d, yyyy")</strong>.
+                <br/><span class="text-muted">New data has not yet been processed for the current 4-week window.</span>
+            </p>
+        }
+        else
+        {
+            <p class="text-muted mb-3" style="font-size:.88rem;text-align:center">
+                No historical data was found for this lab. Please contact your administrator for more details.
+            </p>
+        }
+        <a asp-controller="Home" asp-action="Index" class="btn btn-outline-primary btn-sm">
+            &#8592; Back to Home
+        </a>
+    </div>
+}
+else
+{
+<ul class="nav fc-top-tabs mb-0" id="fcTopTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link @(isMedian ? "active" : "")" id="topMedianTab" data-bs-toggle="tab"
+                data-bs-target="#topMedianPane" type="button" role="tab"
+                aria-controls="topMedianPane" aria-selected="@(isMedian ? "true" : "false")">
+            <i class="bi bi-graph-up me-1"></i> Median Summary
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link @(isMode ? "active" : "")" id="topModeTab" data-bs-toggle="tab"
+                data-bs-target="#topModePane" type="button" role="tab"
+                aria-controls="topModePane" aria-selected="@(isMode ? "true" : "false")">
+            <i class="bi bi-graph-up-arrow me-1"></i> Mode Summary
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link @(isFiltered ? "active" : "")" id="topFilteredTab" data-bs-toggle="tab"
+                data-bs-target="#topFilteredPane" type="button" role="tab"
+                aria-controls="topFilteredPane" aria-selected="@(isFiltered ? "true" : "false")">
+            <i class="bi bi-funnel me-1"></i> Filtered Data
+            @if (Model.HasActiveFilters)
+            {
+                <span class="badge bg-warning text-dark tab-cnt">@Model.FilteredTotalInRange.ToString("N0")</span>
+            }
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content">
+    <!-- ?? TAB 1: Median Summary ???????????????????????????????????????? -->
+    <div class="tab-pane fade @(isMedian ? "show active" : "")" id="topMedianPane" role="tabpanel" aria-labelledby="topMedianTab">
+        <div class="fc-card card border-top-0" style="border-radius:0 0 10px 10px">
+            <div class="card-body px-0 pb-0 pt-0">
+                @await Html.PartialAsync("_WeeklyForecastTable", Model.MedianSummary,
+                    new ViewDataDictionary(ViewData) { ["SummaryLabel"] = "Median Summary" })
+            </div>
+        </div>
+    </div>
+
+    <!-- ?? TAB 2: Mode Summary ?????????????????????????????????????????? -->
+    <div class="tab-pane fade @(isMode ? "show active" : "")" id="topModePane" role="tabpanel" aria-labelledby="topModeTab">
+        <div class="fc-card card border-top-0" style="border-radius:0 0 10px 10px">
+            <div class="card-body px-0 pb-0 pt-0">
+                @await Html.PartialAsync("_WeeklyForecastTable", Model.ModeSummary,
+                    new ViewDataDictionary(ViewData) { ["SummaryLabel"] = "Mode Summary" })
+            </div>
+        </div>
+    </div>
+
+    <!-- ?? TAB 3: Filtered Data ????????????????????????????????????????? -->
+    <div class="tab-pane fade @(isFiltered ? "show active" : "")" id="topFilteredPane" role="tabpanel" aria-labelledby="topFilteredTab">
+        <div class="fc-card card border-top-0" style="border-radius:0 0 10px 10px">
+            <div class="card-body p-3">
+
+                <div class="fc-filter-panel mb-3">
+                    <form method="get" asp-controller="Prediction" asp-action="ForecastingSummary">
+                        <input type="hidden" name="lab" value="@Model.SelectedLab" />
+                        <div class="row g-2 align-items-end">
+                            <div class="col-sm-6 col-lg-3">
+                                <label for="fcFilterPayer">Payer Name</label>
+                                <select id="fcFilterPayer" name="filterPayerName" class="form-select form-select-sm">
+                                    <option value="">All Payers</option>
+                                    @foreach (var v in Model.PayerNames)
+                                    {
+                                        if (v == Model.FilterPayerName) { <option value="@v" selected="selected">@v</option> }
+                                        else { <option value="@v">@v</option> }
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-sm-6 col-lg-2">
+                                <label for="fcFilterType">Payer Type</label>
+                                <select id="fcFilterType" name="filterPayerType" class="form-select form-select-sm">
+                                    <option value="">All Types</option>
+                                    @foreach (var v in Model.PayerTypes)
+                                    {
+                                        if (v == Model.FilterPayerType) { <option value="@v" selected="selected">@v</option> }
+                                        else { <option value="@v">@v</option> }
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-sm-6 col-lg-3">
+                                <label for="fcFilterPanel">Panel Name</label>
+                                <select id="fcFilterPanel" name="filterPanelName" class="form-select form-select-sm">
+                                    <option value="">All Panels</option>
+                                    @foreach (var v in Model.PanelNames)
+                                    {
+                                        if (v == Model.FilterPanelName) { <option value="@v" selected="selected">@v</option> }
+                                        else { <option value="@v">@v</option> }
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-sm-6 col-lg-2">
+                                <label for="fcFilterCpt">CPT Code</label>
+                                <select id="fcFilterCpt" name="filterCPTCode" class="form-select form-select-sm">
+                                    <option value="">All CPTs</option>
+                                    @foreach (var v in Model.CPTCodes)
+                                    {
+                                        if (v == Model.FilterCPTCode) { <option value="@v" selected="selected">@v</option> }
+                                        else { <option value="@v">@v</option> }
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-sm-12 col-lg-2 d-flex gap-2">
+                                <button type="submit" class="btn btn-primary btn-sm flex-fill" style="font-size:.74rem">
+                                    <i class="bi bi-funnel me-1"></i>Apply
+                                </button>
+                                <a asp-controller="Prediction" asp-action="ForecastingSummary" asp-route-lab="@Model.SelectedLab"
+                                   class="btn btn-outline-secondary btn-sm flex-fill" style="font-size:.74rem">Clear</a>
+                            </div>
+                        </div>
+                    </form>
+                    @if (Model.HasActiveFilters)
+                    {
+                        <div class="mt-2 d-flex align-items-center flex-wrap gap-1" style="font-size:.7rem;color:#666">
+                            <strong>Active:</strong>
+                            @foreach (var f in activeFilterNames)
+                            {
+                                <span class="fc-filter-badge">@f</span>
+                            }
+                            <span class="ms-1 text-muted">
+                                — @Model.FilteredTotalInRange.ToString("N0") of @Model.TotalRecordsInRange.ToString("N0") records
+                            </span>
+                        </div>
+                    }
+                </div>
+
+                @{
+                    var hasRows    = Model.FilteredRecords.Count != 0;
+                    var pg         = Model.FilteredPaging;
+                    var showPaging = pg.TotalPages > 1;
+                    int pgStart    = Math.Max(1, pg.CurrentPage - 2);
+                    int pgEnd      = Math.Min(pg.TotalPages, pg.CurrentPage + 2);
+                }
+
+                @if (!hasRows)
+                {
+                    <div class="text-center text-muted py-4" style="font-size:.82rem">
+                        <i class="bi bi-funnel" style="font-size:1.8rem;opacity:.3"></i>
+                        <div class="mt-2">
+                            @if (Model.HasActiveFilters)
+                            {
+                                <text>No records match the selected filters.</text>
+                            }
+                            else
+                            {
+                                <text>Use the filters above to view line-item detail data for the last 4 weeks.</text>
+                            }
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="d-flex justify-content-between align-items-center mb-2 fc-paging">
+                        <span class="text-muted">
+                            Showing @pg.FirstItem–@pg.LastItem of @pg.TotalFiltered.ToString("N0") records
+                        </span>
+                    </div>
+
+                    <div class="table-responsive" style="max-height:520px;overflow:auto">
+                        <table class="table table-sm table-hover table-bordered mb-0 fc-detail-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Accession #</th>
+                                    <th>Visit #</th>
+                                    <th>CPT</th>
+                                    <th>Payer Name</th>
+                                    <th>Payer Type</th>
+                                    <th>Panel</th>
+                                    <th>Forecasting Payability</th>
+                                    <th>Expected Pmt Date</th>
+                                    <th class="text-end">Billed Amt</th>
+                                    <th class="text-end">Median Allowed</th>
+                                    <th class="text-end">Median Ins Paid</th>
+                                    <th class="text-end">Mode Allowed</th>
+                                    <th class="text-end">Mode Ins Paid</th>
+                                    <th>Pay Status</th>
+                                    <th>Payability</th>
+                                    <th>Final Coverage</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @{ int rowNum = pg.FirstItem; }
+                                @foreach (var r in Model.FilteredRecords)
+                                {
+                                    <tr>
+                                        <td class="text-muted">@rowNum</td>
+                                        <td>@r.AccessionNo</td>
+                                        <td>@r.VisitNumber</td>
+                                        <td><strong>@r.CPTCode</strong></td>
+                                        <td title="@r.PayerNameNormalized">@(r.PayerNameNormalized.Length > 22 ? r.PayerNameNormalized[..22] + "…" : r.PayerNameNormalized)</td>
+                                        <td>@r.PayerType</td>
+                                        <td title="@r.PanelName">@(r.PanelName.Length > 20 ? r.PanelName[..20] + "…" : r.PanelName)</td>
+                                        <td><span class="badge bg-success" style="font-size:.64rem">@r.ForecastingPayability</span></td>
+                                        <td>@r.ExpectedPaymentDate</td>
+                                        <td class="amt">$@r.BilledAmount.ToString("N2")</td>
+                                        <td class="amt">$@r.MedianAllowedAmountSameLab.ToString("N2")</td>
+                                        <td class="amt">$@r.MedianInsurancePaidSameLab.ToString("N2")</td>
+                                        <td class="amt">$@r.ModeAllowedAmountSameLab.ToString("N2")</td>
+                                        <td class="amt">$@r.ModeInsurancePaidSameLab.ToString("N2")</td>
+                                        <td>@r.PayStatus</td>
+                                        <td>@r.Payability</td>
+                                        <td>@r.FinalCoverageStatus</td>
+                                    </tr>
+                                    rowNum++;
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                    @if (showPaging)
+                    {
+                        <nav class="mt-2 d-flex justify-content-end fc-paging">
+                            <ul class="pagination pagination-sm mb-0">
+                                @if (pg.HasPrev)
+                                {
+                                    <li class="page-item">
+                                        <a class="page-link"
+                                           asp-controller="Prediction" asp-action="ForecastingSummary"
+                                           asp-all-route-data="filterRouteValues"
+                                           asp-route-page="@(pg.CurrentPage - 1)">‹ Prev</a>
+                                    </li>
+                                }
+                                @for (var p = pgStart; p <= pgEnd; p++)
+                                {
+                                    <li class="page-item @(p == pg.CurrentPage ? "active" : "")">
+                                        <a class="page-link"
+                                           asp-controller="Prediction" asp-action="ForecastingSummary"
+                                           asp-all-route-data="filterRouteValues"
+                                           asp-route-page="@p">@p</a>
+                                    </li>
+                                }
+                                @if (pg.HasNext)
+                                {
+                                    <li class="page-item">
+                                        <a class="page-link"
+                                           asp-controller="Prediction" asp-action="ForecastingSummary"
+                                           asp-all-route-data="filterRouteValues"
+                                           asp-route-page="@(pg.CurrentPage + 1)">Next ›</a>
+                                    </li>
+                                }
+                            </ul>
+                        </nav>
+                    }
+                }
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ?? Back navigation ????????????????????????????????????????????????? -->
+<div class="d-flex justify-content-start mt-3 mb-4">
+    <a asp-controller="Prediction" asp-action="Index" asp-route-lab="@Model.SelectedLab"
+       class="btn btn-outline-secondary btn-sm fc-back">
+        <i class="bi bi-arrow-left me-1"></i> Back to Prediction Analysis
+    </a>
+</div>
+}
