@@ -374,7 +374,7 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
       <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
          <div>
             <div class="section-title">Global filters</div>
-            <div class="section-subtitle">Lab options now come from LRNMaster.dbo.LRNMetricsLab. The selected lab resolves its ConnectionKey from appsettings and loads Task Board, Denial Insight, and Line Item from that lab database.</div>
+            @* <div class="section-subtitle">Lab options now come from LRNMaster.dbo.LRNMetricsLab. The selected lab resolves its ConnectionKey from appsettings and loads Task Board, Denial Insight, and Line Item from that lab database.</div> *@
          </div>
          <div class="d-flex flex-wrap align-items-center gap-2 ms-auto">
             <div class="text-end me-2">
@@ -1007,6 +1007,9 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
                <tr>
                   <th>Task ID</th>
                   <th>Claim ID</th>
+                  <th>CPT Code</th>
+                  <th>Denial Code</th>
+                  <th>Denial Description</th>
                   <th>Patient / Acct #</th>
                   <th>Task</th>
                   <th>Action Category</th>
@@ -1025,6 +1028,9 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
                <tr>
                   <td class="fw-semibold">@item.TaskId</td>
                   <td>@item.ClaimId</td>
+                  <td>@item.CptCode</td>
+                  <td>@item.DenialCode</td>
+                  <td>@item.DenialDescription</td>
                   <td>@item.PatientAccountNumber</td>
                   <td class="text-wrap narrow-cell">@item.Task</td>
                   <td class="text-wrap narrow-cell">@item.EffectiveActionCategory</td>
@@ -1103,10 +1109,10 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
       <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
          <div>
             <div class="section-title">Denial Insight</div>
-            <div class="section-subtitle">Derived from <code>dbo.DenialTaskBoard</code> for the selected lab and latest available run.</div>
+            @* <div class="section-subtitle">Derived from <code>dbo.DenialTaskBoard</code> for the selected lab and latest available run.</div> *@
          </div>
          <div class="d-flex flex-wrap gap-2">
-            <span class="chip chip-muted">Run: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span>
+            @* <span class="chip chip-muted">Run: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span> *@
             <span class="chip">Rows: @Model.InsightCount.ToString("N0")</span>
          </div>
       </div>
@@ -1213,16 +1219,16 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
       <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
          <div>
             <div class="section-title">Line Item</div>
-            <div class="section-subtitle">Filtered denial line-item rows from <code>dbo.DenialLineItem</code> for the selected lab and latest available run.</div>
+            @* <div class="section-subtitle">Filtered denial line-item rows from <code>dbo.DenialLineItem</code> for the selected lab and latest available run.</div> *@
          </div>
          <div class="d-flex flex-wrap gap-2">
-            <span class="chip chip-muted">Run: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span>
+            @* <span class="chip chip-muted">Run: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span> *@
             <span class="chip">Rows: @Model.LineItemCount.ToString("N0")</span>
          </div>
       </div>
 
       <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-         <div class="section-subtitle">This tab replaces Claim View and shows the filtered line-item level denial details for the selected lab and latest run.</div>
+         @* <div class="section-subtitle">This tab replaces Claim View and shows the filtered line-item level denial details for the selected lab and latest run.</div> *@
          <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search line items on this page..." data-target-table="lineItemTable" /></div>
       </div>
 
