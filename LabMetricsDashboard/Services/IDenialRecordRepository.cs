@@ -13,6 +13,7 @@ public interface IDenialRecordRepository
     Task<int> GetLineItemCountByLabAsync(int labId, DenialDashboardFilters filters, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<string>> GetPayerNamesByLabAsync(int labId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<string>> GetPanelNamesByLabAsync(int labId, CancellationToken cancellationToken = default);
+    Task<DenialFilterAutocompleteOptions> GetFilterAutocompleteOptionsAsync(int labId, CancellationToken cancellationToken = default);
     Task<string?> GetCurrentRunIdAsync(int labId, CancellationToken cancellationToken = default);
     Task<string?> GetLatestExportFilePathForLabAsync(int labId, CancellationToken cancellationToken = default);
     Task<TaskBoardUploadResult> UpdateTaskBoardAsync(int labId, IReadOnlyList<TaskBoardCsvUpdate> updates, CancellationToken cancellationToken = default);

@@ -510,28 +510,34 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
             </div>
             <div class="col-12 col-md-6 col-xl-3">
                <label class="form-label">Payer Name</label>
-               <input class="form-control filter-select" type="text" name="PayerName" value="@Model.Filters.PayerName" placeholder="Contains payer name" />
+               <input class="form-control filter-select filter-autocomplete-input" type="text" name="PayerName" value="@Model.Filters.PayerName" placeholder="Start typing payer name" list="payerNameOptions" autocomplete="off" />
+               <datalist id="payerNameOptions"></datalist>
             </div>
             <div class="col-12 col-md-6 col-xl-3">
                <label class="form-label">Payer Type</label>
-               <input class="form-control filter-select" type="text" name="PayerType" value="@Model.Filters.PayerType" placeholder="Contains payer type" />
+               <input class="form-control filter-select filter-autocomplete-input" type="text" name="PayerType" value="@Model.Filters.PayerType" placeholder="Start typing payer type" list="payerTypeOptions" autocomplete="off" />
+               <datalist id="payerTypeOptions"></datalist>
             </div>
 
             <div class="col-12 col-md-6 col-xl-3">
                <label class="form-label">Panel Name</label>
-               <input class="form-control filter-select" type="text" name="PanelName" value="@Model.Filters.PanelName" placeholder="Contains panel name" />
+               <input class="form-control filter-select filter-autocomplete-input" type="text" name="PanelName" value="@Model.Filters.PanelName" placeholder="Start typing panel name" list="panelNameOptions" autocomplete="off" />
+               <datalist id="panelNameOptions"></datalist>
             </div>
             <div class="col-12 col-md-6 col-xl-3">
                <label class="form-label">Referring Provider</label>
-               <input class="form-control filter-select" type="text" name="ReferringProvider" value="@Model.Filters.ReferringProvider" placeholder="Contains provider" />
+               <input class="form-control filter-select filter-autocomplete-input" type="text" name="ReferringProvider" value="@Model.Filters.ReferringProvider" placeholder="Start typing provider" list="referringProviderOptions" autocomplete="off" />
+               <datalist id="referringProviderOptions"></datalist>
             </div>
             <div class="col-12 col-md-6 col-xl-3">
                <label class="form-label">Clinic Name</label>
-               <input class="form-control filter-select" type="text" name="ClinicName" value="@Model.Filters.ClinicName" placeholder="Contains clinic" />
+               <input class="form-control filter-select filter-autocomplete-input" type="text" name="ClinicName" value="@Model.Filters.ClinicName" placeholder="Start typing clinic" list="clinicNameOptions" autocomplete="off" />
+               <datalist id="clinicNameOptions"></datalist>
             </div>
             <div class="col-12 col-md-6 col-xl-3">
                <label class="form-label">Sales Rep</label>
-               <input class="form-control filter-select" type="text" name="SalesRepname" value="@Model.Filters.SalesRepname" placeholder="Contains sales rep" />
+               <input class="form-control filter-select filter-autocomplete-input" type="text" name="SalesRepname" value="@Model.Filters.SalesRepname" placeholder="Start typing sales rep" list="salesRepOptions" autocomplete="off" />
+               <datalist id="salesRepOptions"></datalist>
             </div>
 
             <div class="col-12 col-md-6 col-xl-3">
@@ -1450,6 +1456,81 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
                });
            });
        });
+
+       const autocompleteUrl = '@Url.Action("GetFilterAutocompleteOptions", "DenialDashboard")';
+       const autocompleteCachePrefix = 'denial-dashboard:autocomplete:';
+       const labSelect2 = form ? form.querySelector('select[name="LabId"]') : null;
+
+       function getAutocompleteLabId() {
+           return labSelect2 ? (labSelect2.value || '').trim() : '';
+       }
+
+       function populateDatalist(listId, values) {
+           const list = document.getElementById(listId);
+           if (!list) return;
+
+           list.innerHTML = '';
+           (values || []).forEach(function (value) {
+               if (!value) return;
+               const option = document.createElement('option');
+               option.value = value;
+               list.appendChild(option);
+           });
+       }
+
+       function applyAutocompletePayload(payload) {
+           if (!payload) return;
+
+           populateDatalist('payerNameOptions', payload.payerNames || payload.PayerNames || []);
+           populateDatalist('payerTypeOptions', payload.payerTypes || payload.PayerTypes || []);
+           populateDatalist('panelNameOptions', payload.panelNames || payload.PanelNames || []);
+           populateDatalist('referringProviderOptions', payload.referringProviders || payload.ReferringProviders || []);
+           populateDatalist('clinicNameOptions', payload.clinicNames || payload.ClinicNames || []);
+           populateDatalist('salesRepOptions', payload.salesRepnames || payload.SalesRepnames || []);
+       }
+
+       async function loadFilterAutocomplete(forceRefresh) {
+           const labId = getAutocompleteLabId();
+           if (!labId) return;
+
+           const cacheKey = autocompleteCachePrefix + labId;
+           if (!forceRefresh) {
+               const cached = localStorage.getItem(cacheKey);
+               if (cached) {
+                   try {
+                       applyAutocompletePayload(JSON.parse(cached));
+                       return;
+                   }
+                   catch (error) {
+                       localStorage.removeItem(cacheKey);
+                   }
+               }
+           }
+
+           try {
+               const response = await fetch(autocompleteUrl + '?labId=' + encodeURIComponent(labId), {
+                   headers: { 'X-Requested-With': 'XMLHttpRequest' }
+               });
+
+               if (!response.ok) {
+                   return;
+               }
+
+               const payload = await response.json();
+               localStorage.setItem(cacheKey, JSON.stringify(payload));
+               applyAutocompletePayload(payload);
+           }
+           catch (error) {
+               console.warn('Unable to load filter autocomplete values.', error);
+           }
+       }
+
+       if (labSelect2) {
+           loadFilterAutocomplete(false);
+           labSelect2.addEventListener('change', function () {
+               loadFilterAutocomplete(false);
+           });
+       }
 
        function parseSortableValue(value) {
            const raw = (value || '').trim();

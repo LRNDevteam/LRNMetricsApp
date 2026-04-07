@@ -2,7 +2,7 @@ using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
 
 var builder = WebApplication.CreateBuilder(args);
-//test s
+
 // Bind the "LabConfig" section from appsettings.json.
 var labConfigOptions = builder.Configuration
     .GetSection(LabConfigOptions.Section)
