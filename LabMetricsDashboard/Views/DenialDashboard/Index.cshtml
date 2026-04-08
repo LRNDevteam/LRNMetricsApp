@@ -582,7 +582,7 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
       <div class="card-body">
          <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
             <div>
-               <div class="section-title"><i class="bi bi-bar-chart-line-fill me-2"></i>Insights  <span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
+               <div class="section-title"><i class="bi bi-bar-chart-line-fill me-2"></i>Insights &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
            
 
             </div>
@@ -749,7 +749,7 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
    <div class="card-body">
       <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
          <div>
-            <div class="section-title">Denial Input <span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
+            <div class="section-title">Denial Input &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
             @* 
             <div class="section-subtitle">This is the raw grid from <code>dbo.DenialTaskBoard</code> for the selected lab.</div>
             *@
@@ -943,7 +943,7 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
    <div class="card-body">
       <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
          <div>
-            <div class="section-title">Task Board <span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
+            <div class="section-title">Task Board &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
             <div class="section-subtitle">Operational work queue for denial follow-up.</div>
                      </div>
          <div class="d-flex flex-wrap align-items-center gap-2 ms-auto">
@@ -1038,7 +1038,7 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
    <div class="card-body">
       <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
          <div>
-            <div class="section-title">SLA Tracker<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
+            <div class="section-title">SLA Tracker &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
             <div class="section-subtitle">Deadline monitor with warning and escalation logic.</div>
          </div>
          <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search this page..." data-target-table="slaTrackerTable" /></div>
@@ -1091,7 +1091,7 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
    <div class="card-body">
       <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
          <div>
-            <div class="section-title">Denial Insight <span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
+            <div class="section-title">Denial Insight &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
             @* <div class="section-subtitle">Derived from <code>dbo.DenialTaskBoard</code> for the selected lab and latest available run.</div> *@
          </div>
          <div class="d-flex flex-wrap gap-2">
@@ -1201,7 +1201,7 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
    <div class="card-body">
       <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
          <div>
-            <div class="section-title">Line Item<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
+            <div class="section-title">Line Item &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
             @* <div class="section-subtitle">Filtered denial line-item rows from <code>dbo.DenialLineItem</code> for the selected lab and latest available run.</div> *@
          </div>
          <div class="d-flex flex-wrap gap-2">
@@ -1298,7 +1298,7 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
       <div class="card-body">
          <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
             <div>
-               <div class="section-title"><i class="bi bi-calendar-week me-2"></i>Weekly Breakdown <span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
+               <div class="section-title"><i class="bi bi-calendar-week me-2"></i>Weekly Breakdown &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
                <div class="section-subtitle">Pivot-style weekly view from <code>DenialLineItem.DenialDate</code> showing top insurance and top denials.</div>
             </div>
          </div>
@@ -1312,7 +1312,7 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
       <div class="card-body">
          <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
             <div>
-               <div class="section-title"><i class="bi bi-calendar-month me-2"></i>Monthly Breakdown <span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
+               <div class="section-title"><i class="bi bi-calendar-month me-2"></i>Monthly Breakdown &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
                <div class="section-subtitle">Pivot-style monthly view from <code>DenialLineItem.DenialDate</code> showing top insurance and top denials.</div>
             </div>
          </div>

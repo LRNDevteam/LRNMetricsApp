@@ -41,7 +41,7 @@ SELECT
     CAST(ISNULL(LabId, 0) AS int) AS LabId,
     ISNULL(LabName, '') AS LabName,
     ISNULL(ConnectionKey, '') AS ConnectionKey
-FROM dbo.LRNMetricsLab
+FROM dbo.LRNMetricsLab  WITH(NOLOCK)
 WHERE ISNULL(IsActive, 0) = 1
 ORDER BY LabName, LabId;";
 
@@ -281,7 +281,7 @@ WHERE {where}
         var cols = await GetTableColumnsAsync(connection, "dbo", "DenialLineItem", cancellationToken);
         if (!cols.Contains("PayerName")) return Array.Empty<string>();
         var where = BuildScopedWhere(cols, currentRunId);
-        var sql = $@"SELECT DISTINCT TOP (200) LTRIM(RTRIM(ISNULL(PayerName, ''))) AS PayerNameValue FROM dbo.DenialLineItem WHERE {where} AND ISNULL(PayerName, '') <> '' ORDER BY PayerNameValue;";
+        var sql = $@"SELECT DISTINCT TOP (200) LTRIM(RTRIM(ISNULL(PayerName, ''))) AS PayerNameValue FROM dbo.DenialLineItem WITH(NOLOCK) WHERE {where} AND ISNULL(PayerName, '') <> '' ORDER BY PayerNameValue;";
         await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 120 };
         AddScopeParameters(command, cols, labId, currentRunId);
         var items = new List<string>();
@@ -302,7 +302,7 @@ WHERE {where}
         var cols = await GetTableColumnsAsync(connection, "dbo", "DenialLineItem", cancellationToken);
         if (!cols.Contains("PanelName")) return Array.Empty<string>();
         var where = BuildScopedWhere(cols, currentRunId);
-        var sql = $@"SELECT DISTINCT TOP (200) LTRIM(RTRIM(ISNULL(PanelName, ''))) AS PanelNameValue FROM dbo.DenialLineItem WHERE {where} AND ISNULL(PanelName, '') <> '' ORDER BY PanelNameValue;";
+        var sql = $@"SELECT DISTINCT TOP (200) LTRIM(RTRIM(ISNULL(PanelName, ''))) AS PanelNameValue FROM dbo.DenialLineItem WITH(NOLOCK) WHERE {where} AND ISNULL(PanelName, '') <> '' ORDER BY PanelNameValue;";
         await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 120 };
         AddScopeParameters(command, cols, labId, currentRunId);
         var items = new List<string>();
@@ -365,7 +365,7 @@ WHERE {where}
                     ? "ORDER BY ISNULL([CreatedOn], '19000101') DESC, [RunId] DESC"
                     : "ORDER BY [RunId] DESC";
 
-            var sql = $"SELECT TOP (1) [RunId] FROM dbo.DenialTaskBoard {where} {orderBy};";
+            var sql = $"SELECT TOP (1) [RunId] FROM dbo.DenialTaskBoard WITH(NOLOCK) {where} {orderBy};";
             await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 120 };
             if (cols.Contains("LabId")) command.Parameters.AddWithValue("@LabId", labId);
             var result = await command.ExecuteScalarAsync(cancellationToken);
@@ -386,7 +386,7 @@ WHERE {where}
             const string sql = @"
 SELECT TOP (1)
     OutputFileName
-FROM dbo.DenialAnalysisRunLog
+FROM dbo.DenialAnalysisRunLog WITH(NOLOCK) 
 WHERE RunId = @RunId
   AND OutputFileName IS NOT NULL
   AND OutputFileName <> ''
@@ -507,7 +507,7 @@ SET
     t.Status = ISNULL(u.Status, ''),
     t.AssignedTo = ISNULL(u.AssignedTo, ''),
     t.DateCompleted = u.DateCompleted
-FROM dbo.DenialTaskBoard t
+FROM dbo.DenialTaskBoard t WITH(NOLOCK) 
 INNER JOIN #TaskBoardCsvUpdates u
     ON u.UniqueTrackId IS NOT NULL
    AND t.UniqueTrackId = u.UniqueTrackId
@@ -519,7 +519,7 @@ WHERE ISNULL(t.Status, '') <> ISNULL(u.Status, '')
 INSERT INTO #MatchedRows (RowNumber)
 SELECT DISTINCT u.RowNumber
 FROM #TaskBoardCsvUpdates u
-INNER JOIN dbo.DenialTaskBoard t
+INNER JOIN dbo.DenialTaskBoard t WITH(NOLOCK) 
     ON u.UniqueTrackId IS NULL
    AND u.TaskId IS NOT NULL
    AND t.TaskID = u.TaskId
@@ -618,7 +618,7 @@ SELECT
     {SelectString(cols, "PatientID")},
     {SelectString(cols, "RunId")},
     {SelectDate(cols, "CreatedOn")}
-FROM dbo.DenialLineItem
+FROM dbo.DenialLineItem WITH(NOLOCK) 
 WHERE {where}
 ORDER BY {OrderBy(cols, "DateOfService", "AccessionNo")}{pagingSql};";
 
@@ -728,7 +728,7 @@ ORDER BY {OrderBy(cols, "DateOfService", "AccessionNo")}{pagingSql};";
         {
             queries.Add($@"
 SELECT LTRIM(RTRIM(CONVERT(nvarchar(255), [{column}]))) AS [Value]
-FROM dbo.DenialTaskBoard
+FROM dbo.DenialTaskBoard WITH(NOLOCK) 
 WHERE {BuildScopedWhere(taskCols, currentRunId)} AND ISNULL(CONVERT(nvarchar(255), [{column}]), '') <> ''");
         }
 
@@ -736,7 +736,7 @@ WHERE {BuildScopedWhere(taskCols, currentRunId)} AND ISNULL(CONVERT(nvarchar(255
         {
             queries.Add($@"
 SELECT LTRIM(RTRIM(CONVERT(nvarchar(255), [{column}]))) AS [Value]
-FROM dbo.DenialLineItem
+FROM dbo.DenialLineItem WITH(NOLOCK) 
 WHERE {BuildScopedWhere(lineCols, currentRunId)} AND ISNULL(CONVERT(nvarchar(255), [{column}]), '') <> ''");
         }
 
