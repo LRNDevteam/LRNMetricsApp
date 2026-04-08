@@ -1,27 +1,50 @@
 @using System.Linq
 @using System.Globalization
+@using System.Text.Json
 @model DashboardPageViewModel
 @{
 var usd = CultureInfo.GetCultureInfo("en-US");
 string Money(decimal? amount) => (amount ?? 0m).ToString("C2", usd);
 string PercentWidth(decimal percentage) => Math.Clamp((double)percentage, 0d, 100d).ToString("0.#", CultureInfo.InvariantCulture);
+IReadOnlyList<string> SelectedValues(string? raw, bool treatAllAsEmpty = false)
+{
+    if (string.IsNullOrWhiteSpace(raw)) return Array.Empty<string>();
+
+    var items = raw.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Where(x => !string.IsNullOrWhiteSpace(x))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
+    if (treatAllAsEmpty && items.Any(x => x.Equals("(All)", StringComparison.OrdinalIgnoreCase)))
+    {
+        return Array.Empty<string>();
+    }
+
+    return items;
+}
+string SelectedSummary(string? raw, bool treatAllAsEmpty = false)
+{
+    var items = SelectedValues(raw, treatAllAsEmpty);
+    if (items.Count == 0) return string.Empty;
+    return string.Join(", ", items);
+}
 ViewData["Title"] = "Denial Dashboard";
 var today = DateTime.Today;
 var activeTab = Model.Filters.ActiveTab;
 var activeFilters = new List<KeyValuePair<string, string?>>
 {
     new("Lab", string.IsNullOrWhiteSpace(Model.CurrentLabName) ? "-" : Model.CurrentLabName),
-    new("Status", Model.Filters.Status),
-    new("Priority", Model.Filters.Priority),
-    new("Action Category", Model.Filters.ActionCategory),
-    new("SLA Deadline", Model.Filters.Deadline),
-    new("Classification", Model.Filters.Classification),
-    new("Payer", Model.Filters.PayerName),
-    new("Payer Type", Model.Filters.PayerType),
-    new("Panel", Model.Filters.PanelName),
-    new("Referring Provider", Model.Filters.ReferringProvider),
-    new("Clinic", Model.Filters.ClinicName),
-    new("Sales Rep", Model.Filters.SalesRepname),
+    new("Status", SelectedSummary(Model.Filters.Status, true)),
+    new("Priority", SelectedSummary(Model.Filters.Priority, true)),
+    new("Action Category", SelectedSummary(Model.Filters.ActionCategory, true)),
+    new("SLA Deadline", SelectedSummary(Model.Filters.Deadline, true)),
+    new("Classification", SelectedSummary(Model.Filters.Classification, true)),
+    new("Payer", SelectedSummary(Model.Filters.PayerName)),
+    new("Payer Type", SelectedSummary(Model.Filters.PayerType)),
+    new("Panel", SelectedSummary(Model.Filters.PanelName)),
+    new("Referring Provider", SelectedSummary(Model.Filters.ReferringProvider)),
+    new("Clinic", SelectedSummary(Model.Filters.ClinicName)),
+    new("Sales Rep", SelectedSummary(Model.Filters.SalesRepname)),
     new("DOS From", Model.Filters.DateOfServiceFrom?.ToString("dd MMM yyyy")),
     new("DOS To", Model.Filters.DateOfServiceTo?.ToString("dd MMM yyyy")),
     new("First Billed From", Model.Filters.FirstBilledDateFrom?.ToString("dd MMM yyyy")),
@@ -161,6 +184,24 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
    border-color: #5b9df9;
    box-shadow: 0 0 0 .2rem rgba(91, 157, 249, .15);
    }
+   .msf { position: relative; }
+   .msf-toggle { display: flex; align-items: center; min-height: 42px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+   .msf-menu {
+   position: absolute;
+   inset: calc(100% + .35rem) 0 auto 0;
+   z-index: 1080;
+   background: #fff;
+   border: 1px solid #d8e2ee;
+   border-radius: .9rem;
+   padding: .6rem;
+   }
+   .msf-search-wrap { margin-bottom: .45rem; }
+   .msf-actions { display: flex; justify-content: space-between; font-size: .82rem; margin-bottom: .45rem; }
+   .msf-options { max-height: 210px; overflow: auto; display: grid; gap: .2rem; }
+   .msf-option { display: flex; align-items: center; gap: .5rem; padding: .3rem .25rem; border-radius: .55rem; cursor: pointer; }
+   .msf-option:hover { background: #f4f8fd; }
+   .msf-option input { margin: 0; }
+   .msf-empty { padding: .5rem .35rem; color: #6b7280; font-size: .85rem; }
    .chip {
    display: inline-flex;
    align-items: center;
@@ -392,6 +433,7 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
             <div class="col-12">
                <div class="filter-group-heading">Workflow filters</div>
             </div>
+
             <input type="hidden" name="ActiveTab" id="activeTabInput" value="@activeTab" />
             <input type="hidden" name="Page" value="1" />
             <input type="hidden" name="InsightPage" value="1" />
@@ -425,51 +467,15 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
             </div>
             <div class="col-12 col-md-6 col-xl-3">
                <label class="form-label">Task Status</label>
-               <select class="form-select filter-select" name="Status">
-                  @foreach (var option in Model.StatusOptions)
-                  {
-                     if (option == Model.Filters.Status)
-                     {
-                        <option value="@option" selected>@option</option>
-                     }
-                     else
-                     {
-                        <option value="@option">@option</option>
-                     }
-                  }
-               </select>
+               <div class="multi-select-filter" data-name="Status" data-placeholder="All statuses" data-options='@Html.Raw(JsonSerializer.Serialize(Model.StatusOptions.Where(x => x != "(All)")))' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.Status, true)))'></div>
             </div>
             <div class="col-12 col-md-6 col-xl-3">
                <label class="form-label">Priority</label>
-               <select class="form-select filter-select" name="Priority">
-                  @foreach (var option in Model.PriorityOptions)
-                  {
-                     if (option == Model.Filters.Priority)
-                     {
-                        <option value="@option" selected>@option</option>
-                     }
-                     else
-                     {
-                        <option value="@option">@option</option>
-                     }
-                  }
-               </select>
+               <div class="multi-select-filter" data-name="Priority" data-placeholder="All priorities" data-options='@Html.Raw(JsonSerializer.Serialize(Model.PriorityOptions.Where(x => x != "(All)")))' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.Priority, true)))'></div>
             </div>
             <div class="col-12 col-md-6 col-xl-3">
                <label class="form-label">Classification</label>
-               <select class="form-select filter-select" name="Classification">
-                  @foreach (var option in Model.ClassificationOptions)
-                  {
-                     if (option == Model.Filters.Classification)
-                     {
-                        <option value="@option" selected>@option</option>
-                     }
-                     else
-                     {
-                        <option value="@option">@option</option>
-                     }
-                  }
-               </select>
+               <div class="multi-select-filter" data-name="Classification" data-placeholder="All classifications" data-options='@Html.Raw(JsonSerializer.Serialize(Model.ClassificationOptions.Where(x => x != "(All)")))' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.Classification, true)))'></div>
             </div>
 
             <div class="col-12">
@@ -478,66 +484,35 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
 
             <div class="col-12 col-md-6 col-xl-3">
                <label class="form-label">Action Category</label>
-               <select class="form-select filter-select" name="ActionCategory">
-                  @foreach (var option in Model.ActionCategoryOptions)
-                  {
-                     if (option == Model.Filters.ActionCategory)
-                     {
-                        <option value="@option" selected>@option</option>
-                     }
-                     else
-                     {
-                        <option value="@option">@option</option>
-                     }
-                  }
-               </select>
+               <div class="multi-select-filter" data-name="ActionCategory" data-placeholder="All action categories" data-options='@Html.Raw(JsonSerializer.Serialize(Model.ActionCategoryOptions.Where(x => x != "(All)")))' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.ActionCategory, true)))'></div>
             </div>
             <div class="col-12 col-md-6 col-xl-3">
                <label class="form-label">SLA</label>
-               <select class="form-select filter-select" name="Deadline">
-                  @foreach (var option in Model.DeadlineOptions)
-                  {
-                     if (option == Model.Filters.Deadline)
-                     {
-                        <option value="@option" selected>@option</option>
-                     }
-                     else
-                     {
-                        <option value="@option">@option</option>
-                     }
-                  }
-               </select>
+               <div class="multi-select-filter" data-name="Deadline" data-placeholder="All SLA buckets" data-options='@Html.Raw(JsonSerializer.Serialize(Model.DeadlineOptions.Where(x => x != "(All)")))' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.Deadline, true)))'></div>
             </div>
             <div class="col-12 col-md-6 col-xl-3">
                <label class="form-label">Payer Name</label>
-               <input class="form-control filter-select filter-autocomplete-input" type="text" name="PayerName" value="@Model.Filters.PayerName" placeholder="Start typing payer name" list="payerNameOptions" autocomplete="off" />
-               <datalist id="payerNameOptions"></datalist>
+               <div class="multi-select-filter remote-multi-select" data-name="PayerName" data-placeholder="Select payer names" data-remote-key="payerNames" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.PayerName)))'></div>
             </div>
             <div class="col-12 col-md-6 col-xl-3">
                <label class="form-label">Payer Type</label>
-               <input class="form-control filter-select filter-autocomplete-input" type="text" name="PayerType" value="@Model.Filters.PayerType" placeholder="Start typing payer type" list="payerTypeOptions" autocomplete="off" />
-               <datalist id="payerTypeOptions"></datalist>
+               <div class="multi-select-filter remote-multi-select" data-name="PayerType" data-placeholder="Select payer types" data-remote-key="payerTypes" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.PayerType)))'></div>
             </div>
-
             <div class="col-12 col-md-6 col-xl-3">
                <label class="form-label">Panel Name</label>
-               <input class="form-control filter-select filter-autocomplete-input" type="text" name="PanelName" value="@Model.Filters.PanelName" placeholder="Start typing panel name" list="panelNameOptions" autocomplete="off" />
-               <datalist id="panelNameOptions"></datalist>
+               <div class="multi-select-filter remote-multi-select" data-name="PanelName" data-placeholder="Select panel names" data-remote-key="panelNames" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.PanelName)))'></div>
             </div>
             <div class="col-12 col-md-6 col-xl-3">
                <label class="form-label">Referring Provider</label>
-               <input class="form-control filter-select filter-autocomplete-input" type="text" name="ReferringProvider" value="@Model.Filters.ReferringProvider" placeholder="Start typing provider" list="referringProviderOptions" autocomplete="off" />
-               <datalist id="referringProviderOptions"></datalist>
+               <div class="multi-select-filter remote-multi-select" data-name="ReferringProvider" data-placeholder="Select providers" data-remote-key="referringProviders" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.ReferringProvider)))'></div>
             </div>
             <div class="col-12 col-md-6 col-xl-3">
                <label class="form-label">Clinic Name</label>
-               <input class="form-control filter-select filter-autocomplete-input" type="text" name="ClinicName" value="@Model.Filters.ClinicName" placeholder="Start typing clinic" list="clinicNameOptions" autocomplete="off" />
-               <datalist id="clinicNameOptions"></datalist>
+               <div class="multi-select-filter remote-multi-select" data-name="ClinicName" data-placeholder="Select clinics" data-remote-key="clinicNames" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.ClinicName)))'></div>
             </div>
             <div class="col-12 col-md-6 col-xl-3">
                <label class="form-label">Sales Rep</label>
-               <input class="form-control filter-select filter-autocomplete-input" type="text" name="SalesRepname" value="@Model.Filters.SalesRepname" placeholder="Start typing sales rep" list="salesRepOptions" autocomplete="off" />
-               <datalist id="salesRepOptions"></datalist>
+               <div class="multi-select-filter remote-multi-select" data-name="SalesRepname" data-placeholder="Select sales reps" data-remote-key="salesRepnames" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.SalesRepname)))'></div>
             </div>
 
             <div class="col-12 col-md-6 col-xl-3">
@@ -559,6 +534,8 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
 
             <div class="col-12 d-flex flex-wrap justify-content-between align-items-center gap-3 mt-2">
                <div class="d-flex flex-wrap gap-2">
+            <span class="chip chip-muted">Run: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span>
+
                   @if (activeFilters.Any())
                   {
                      @foreach (var filter in activeFilters)
@@ -590,6 +567,8 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
 </div>
 <ul class="nav nav-pills dashboard-tabs mb-4" id="dashboardTabs" role="tablist">
    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "dashboard" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#dashboard" type="button"><i class="bi bi-bar-chart me-2"></i>Dashboard</button></li>
+   <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "weekly-breakdown" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#weekly-breakdown" type="button"><i class="bi bi-calendar-week me-2"></i>Weekly Breakdown</button></li>
+   <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "monthly-breakdown" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#monthly-breakdown" type="button"><i class="bi bi-calendar-month me-2"></i>Monthly Breakdown</button></li>
    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "filter-panel" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#filter-panel" type="button"><i class="bi bi-search me-2"></i>Filter Panel</button></li>
    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "denial-input" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#denial-input" type="button"><i class="bi bi-table me-2"></i>Denial Input</button></li>
    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "task-board" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#task-board" type="button"><i class="bi bi-clipboard-data me-2"></i>Task Board</button></li>
@@ -603,8 +582,11 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
       <div class="card-body">
          <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
             <div>
-               <div class="section-title"><i class="bi bi-bar-chart-line-fill me-2"></i>Insights</div>
+               <div class="section-title"><i class="bi bi-bar-chart-line-fill me-2"></i>Insights  <span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
+           
+
             </div>
+
             <span class="chip chip-warning">Today: @today.ToString("dd MMM yyyy")</span>
          </div>
          <div class="row g-3">
@@ -767,11 +749,12 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
    <div class="card-body">
       <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
          <div>
-            <div class="section-title">Denial Input</div>
+            <div class="section-title">Denial Input <span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
             @* 
             <div class="section-subtitle">This is the raw grid from <code>dbo.DenialTaskBoard</code> for the selected lab.</div>
             *@
          </div>
+
          <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search this page..." data-target-table="denialInputTable" /></div>
       </div>
       <div class="table-responsive table-frame">
@@ -960,9 +943,9 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
    <div class="card-body">
       <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
          <div>
-            <div class="section-title">Task Board</div>
+            <div class="section-title">Task Board <span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
             <div class="section-subtitle">Operational work queue for denial follow-up.</div>
-         </div>
+                     </div>
          <div class="d-flex flex-wrap align-items-center gap-2 ms-auto">
             <a class="btn btn-outline-success rounded-pill px-3 js-loader-link" href="@Url.Action("DownloadTaskBoardCsv", "DenialDashboard", new { LabId = Model.Filters.LabId, Status = Model.Filters.Status, Priority = Model.Filters.Priority, ActionCategory = Model.Filters.ActionCategory, Deadline = Model.Filters.Deadline, Classification = Model.Filters.Classification, SalesRepname = Model.Filters.SalesRepname, ClinicName = Model.Filters.ClinicName, ReferringProvider = Model.Filters.ReferringProvider, PayerName = Model.Filters.PayerName, PayerType = Model.Filters.PayerType, PanelName = Model.Filters.PanelName, FirstBilledDateFrom = Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"), FirstBilledDateTo = Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"), DateOfServiceFrom = Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"), DateOfServiceTo = Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"), ActiveTab = "task-board", Page = Model.Filters.Page, PageSize = Model.Filters.PageSize, InsightPage = Model.Filters.InsightPage, InsightPageSize = Model.Filters.InsightPageSize, LineItemPage = Model.Filters.LineItemPage, LineItemPageSize = Model.Filters.LineItemPageSize })">
                <i class="bi bi-download me-1"></i>Download CSV
@@ -1055,7 +1038,7 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
    <div class="card-body">
       <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
          <div>
-            <div class="section-title">SLA Tracker</div>
+            <div class="section-title">SLA Tracker<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
             <div class="section-subtitle">Deadline monitor with warning and escalation logic.</div>
          </div>
          <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search this page..." data-target-table="slaTrackerTable" /></div>
@@ -1108,11 +1091,11 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
    <div class="card-body">
       <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
          <div>
-            <div class="section-title">Denial Insight</div>
+            <div class="section-title">Denial Insight <span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
             @* <div class="section-subtitle">Derived from <code>dbo.DenialTaskBoard</code> for the selected lab and latest available run.</div> *@
          </div>
          <div class="d-flex flex-wrap gap-2">
-            @* <span class="chip chip-muted">Run: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span> *@
+       
             <span class="chip">Rows: @Model.InsightCount.ToString("N0")</span>
          </div>
       </div>
@@ -1218,11 +1201,11 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
    <div class="card-body">
       <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
          <div>
-            <div class="section-title">Line Item</div>
+            <div class="section-title">Line Item<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
             @* <div class="section-subtitle">Filtered denial line-item rows from <code>dbo.DenialLineItem</code> for the selected lab and latest available run.</div> *@
          </div>
          <div class="d-flex flex-wrap gap-2">
-            @* <span class="chip chip-muted">Run: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span> *@
+
             <span class="chip">Rows: @Model.LineItemCount.ToString("N0")</span>
          </div>
       </div>
@@ -1310,10 +1293,39 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
    </div>
 </div>
 </div>
+<div class="tab-pane fade @(activeTab == "weekly-breakdown" ? "show active" : "")" id="weekly-breakdown" role="tabpanel">
+   <div class="card border-0 shadow-sm table-card">
+      <div class="card-body">
+         <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+            <div>
+               <div class="section-title"><i class="bi bi-calendar-week me-2"></i>Weekly Breakdown <span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
+               <div class="section-subtitle">Pivot-style weekly view from <code>DenialLineItem.DenialDate</code> showing top insurance and top denials.</div>
+            </div>
+         </div>
+         @await Html.PartialAsync("_BreakdownPivotTable", Model.WeeklyPivot)
+      </div>
+   </div>
+</div>
+
+<div class="tab-pane fade @(activeTab == "monthly-breakdown" ? "show active" : "")" id="monthly-breakdown" role="tabpanel">
+   <div class="card border-0 shadow-sm table-card">
+      <div class="card-body">
+         <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+            <div>
+               <div class="section-title"><i class="bi bi-calendar-month me-2"></i>Monthly Breakdown <span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
+               <div class="section-subtitle">Pivot-style monthly view from <code>DenialLineItem.DenialDate</code> showing top insurance and top denials.</div>
+            </div>
+         </div>
+         @await Html.PartialAsync("_BreakdownPivotTable", Model.MonthlyPivot)
+      </div>
+   </div>
+</div>
+</div>
 <br />
 <br />
 <br />
 <br />
+
 <script>
    document.addEventListener('DOMContentLoaded', function () {
        const loader = document.getElementById('pageLoader');
@@ -1467,32 +1479,162 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
        const autocompleteCachePrefix = 'denial-dashboard:autocomplete:';
        const labSelect2 = form ? form.querySelector('select[name="LabId"]') : null;
 
-       function getAutocompleteLabId() {
-           return labSelect2 ? (labSelect2.value || '').trim() : '';
+       function uniqueValues(values) {
+           const seen = new Set();
+           return (values || []).filter(function (value) {
+               const normalized = (value || '').trim();
+               if (!normalized) return false;
+               const key = normalized.toLowerCase();
+               if (seen.has(key)) return false;
+               seen.add(key);
+               return true;
+           });
        }
 
-       function populateDatalist(listId, values) {
-           const list = document.getElementById(listId);
-           if (!list) return;
+       function summarizeSelection(values, placeholder) {
+           const selected = uniqueValues(values);
+           if (!selected.length) return placeholder;
+           if (selected.length === 1) return selected[0];
+           if (selected.length === 2) return selected.join(', ');
+           return selected.length + ' selected';
+       }
 
-           list.innerHTML = '';
-           (values || []).forEach(function (value) {
-               if (!value) return;
-               const option = document.createElement('option');
-               option.value = value;
-               list.appendChild(option);
+       function initMultiSelect(container) {
+           const name = container.dataset.name;
+           const placeholder = container.dataset.placeholder || 'Select';
+           const parsedOptions = JSON.parse(container.dataset.options || '[]');
+           const parsedSelected = JSON.parse(container.dataset.selected || '[]');
+           let options = uniqueValues(parsedOptions);
+           let selected = uniqueValues(parsedSelected);
+
+           container.innerHTML = '';
+           container.classList.add('msf');
+           container.innerHTML = `
+               <input type="hidden" name="${name}" class="msf-hidden" />
+               <button type="button" class="form-select filter-select text-start msf-toggle"></button>
+               <div class="msf-menu shadow-sm d-none">
+                   <div class="msf-search-wrap"><input type="text" class="form-control form-control-sm msf-search" placeholder="Search..." autocomplete="off" /></div>
+                   <div class="msf-actions">
+                       <button type="button" class="btn btn-link btn-sm p-0 msf-select-all">Select all</button>
+                       <button type="button" class="btn btn-link btn-sm p-0 msf-clear">Clear</button>
+                   </div>
+                   <div class="msf-options"></div>
+               </div>`;
+
+           const hiddenInput = container.querySelector('.msf-hidden');
+           const toggle = container.querySelector('.msf-toggle');
+           const menu = container.querySelector('.msf-menu');
+           const search = container.querySelector('.msf-search');
+           const optionsWrap = container.querySelector('.msf-options');
+           const selectAllButton = container.querySelector('.msf-select-all');
+           const clearButton = container.querySelector('.msf-clear');
+
+           function syncHidden() {
+               hiddenInput.value = uniqueValues(selected).join('|');
+               toggle.textContent = summarizeSelection(selected, placeholder);
+           }
+
+           function renderOptions(filterText) {
+               const term = (filterText || '').trim().toLowerCase();
+               const optionList = term
+                   ? options.filter(function (value) { return value.toLowerCase().includes(term); })
+                   : options.slice();
+
+               optionsWrap.innerHTML = '';
+               if (!optionList.length) {
+                   optionsWrap.innerHTML = '<div class="msf-empty">No matches</div>';
+                   return;
+               }
+
+               optionList.forEach(function (value) {
+                   const row = document.createElement('label');
+                   row.className = 'msf-option';
+                   const checked = selected.some(function (item) { return item.toLowerCase() === value.toLowerCase(); });
+                   row.innerHTML = `<input type="checkbox" value="${value.replace(/"/g, '&quot;')}" ${checked ? 'checked' : ''} /> <span>${value}</span>`;
+                   const input = row.querySelector('input');
+                   input.addEventListener('change', function () {
+                       if (input.checked) {
+                           selected.push(value);
+                       } else {
+                           selected = selected.filter(function (item) { return item.toLowerCase() !== value.toLowerCase(); });
+                       }
+                       selected = uniqueValues(selected);
+                       syncHidden();
+                   });
+                   optionsWrap.appendChild(row);
+               });
+           }
+
+           function setOptions(nextOptions) {
+               options = uniqueValues([].concat(nextOptions || [], selected));
+               renderOptions(search.value);
+               syncHidden();
+           }
+
+           toggle.addEventListener('click', function () {
+               document.querySelectorAll('.msf-menu').forEach(function (item) {
+                   if (item !== menu) item.classList.add('d-none');
+               });
+               menu.classList.toggle('d-none');
+               if (!menu.classList.contains('d-none')) {
+                   search.focus();
+               }
            });
+
+           search.addEventListener('input', function () {
+               renderOptions(search.value);
+           });
+
+           selectAllButton.addEventListener('click', function () {
+               selected = uniqueValues(options.slice());
+               renderOptions(search.value);
+               syncHidden();
+           });
+
+           clearButton.addEventListener('click', function () {
+               selected = [];
+               renderOptions(search.value);
+               syncHidden();
+           });
+
+           container._multiSelect = { setOptions: setOptions, getSelected: function () { return selected.slice(); } };
+           renderOptions('');
+           syncHidden();
+       }
+
+       document.querySelectorAll('.multi-select-filter').forEach(initMultiSelect);
+
+       document.addEventListener('click', function (event) {
+           document.querySelectorAll('.multi-select-filter').forEach(function (container) {
+               if (!container.contains(event.target)) {
+                   const menu = container.querySelector('.msf-menu');
+                   if (menu) menu.classList.add('d-none');
+               }
+           });
+       });
+
+       function getAutocompleteLabId() {
+           return labSelect2 ? (labSelect2.value || '').trim() : '';
        }
 
        function applyAutocompletePayload(payload) {
            if (!payload) return;
 
-           populateDatalist('payerNameOptions', payload.payerNames || payload.PayerNames || []);
-           populateDatalist('payerTypeOptions', payload.payerTypes || payload.PayerTypes || []);
-           populateDatalist('panelNameOptions', payload.panelNames || payload.PanelNames || []);
-           populateDatalist('referringProviderOptions', payload.referringProviders || payload.ReferringProviders || []);
-           populateDatalist('clinicNameOptions', payload.clinicNames || payload.ClinicNames || []);
-           populateDatalist('salesRepOptions', payload.salesRepnames || payload.SalesRepnames || []);
+           const payloadMap = {
+               payerNames: payload.payerNames || payload.PayerNames || [],
+               payerTypes: payload.payerTypes || payload.PayerTypes || [],
+               panelNames: payload.panelNames || payload.PanelNames || [],
+               referringProviders: payload.referringProviders || payload.ReferringProviders || [],
+               clinicNames: payload.clinicNames || payload.ClinicNames || [],
+               salesRepnames: payload.salesRepnames || payload.SalesRepnames || []
+           };
+
+           document.querySelectorAll('.remote-multi-select').forEach(function (container) {
+               const key = container.dataset.remoteKey;
+               if (container._multiSelect && payloadMap[key]) {
+                   container._multiSelect.setOptions(payloadMap[key]);
+               }
+           });
        }
 
        async function loadFilterAutocomplete(forceRefresh) {
@@ -1506,8 +1648,7 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
                    try {
                        applyAutocompletePayload(JSON.parse(cached));
                        return;
-                   }
-                   catch (error) {
+                   } catch (error) {
                        localStorage.removeItem(cacheKey);
                    }
                }
@@ -1518,15 +1659,12 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
                });
 
-               if (!response.ok) {
-                   return;
-               }
+               if (!response.ok) return;
 
                const payload = await response.json();
                localStorage.setItem(cacheKey, JSON.stringify(payload));
                applyAutocompletePayload(payload);
-           }
-           catch (error) {
+           } catch (error) {
                console.warn('Unable to load filter autocomplete values.', error);
            }
        }

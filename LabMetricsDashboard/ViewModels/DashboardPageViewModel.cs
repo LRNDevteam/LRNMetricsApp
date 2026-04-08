@@ -46,4 +46,10 @@ public class DashboardPageViewModel
     public int LineItemPage { get; set; } = 1;
     public int LineItemPageSize { get; set; } = 100;
     public int LineItemTotalPages { get; set; }
+
+    public List<TrendBreakdownItem> WeeklyBreakdowns { get; set; } = new();
+    public List<TrendBreakdownItem> MonthlyBreakdowns { get; set; } = new();
+
+    public BreakdownPivotViewModel WeeklyPivot { get; set; } = new();
+    public BreakdownPivotViewModel MonthlyPivot { get; set; } = new();
 }
