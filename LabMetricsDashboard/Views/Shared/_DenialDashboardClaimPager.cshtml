@@ -6,7 +6,7 @@
 <div class="pager-shell">
     <div>
         <div class="pager-meta">Showing @startItem-@endItem of @Model.TotalItems.ToString("N0") claims</div>
-        <div class="page-note">Claim View is paged separately to keep accordion rendering fast.</div>
+        @* <div class="page-note">Claim View is paged separately to keep accordion rendering fast.</div> *@
     </div>
     <div class="pager-actions">
         <a class="pager-btn js-loader-link @(Model.Page <= 1 ? "disabled" : string.Empty)" href="@(Model.Page <= 1 ? "#" : Model.BuildUrl(1))">First</a>

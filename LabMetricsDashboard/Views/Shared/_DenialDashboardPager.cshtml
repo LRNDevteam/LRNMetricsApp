@@ -6,7 +6,7 @@
 <div class="pager-shell">
     <div>
         <div class="pager-meta">Showing @startItem-@endItem of @Model.TotalItems.ToString("N0") @Model.ItemLabel</div>
-        <div class="page-note">Large labs are paged to keep the dashboard responsive.</div>
+        @* <div class="page-note">Large labs are paged to keep the dashboard responsive.</div> *@
     </div>
     <div class="pager-actions">
         <a class="pager-btn js-loader-link @(Model.Page <= 1 ? "disabled" : string.Empty)" href="@(Model.Page <= 1 ? "#" : Model.BuildUrl(1, Model.TabName))">First</a>

@@ -71,15 +71,24 @@ public class MockDenialRecordRepository : IDenialRecordRepository
 
     public Task<IReadOnlyList<DenialLineItemRecord>> GetLineItemsByLabAsync(int labId, int page, int pageSize, DenialDashboardFilters filters, CancellationToken cancellationToken = default)
     {
-        var records = BuildLineItems();
-        records = ApplyLineItemFilters(records, filters).ToList();
+        var records = ApplyLineItemFilters(BuildLineItems(), filters).ToList();
         return Task.FromResult<IReadOnlyList<DenialLineItemRecord>>(records.Skip((Math.Max(page, 1) - 1) * Math.Max(pageSize, 1)).Take(Math.Max(pageSize, 1)).ToList());
     }
 
     public Task<IReadOnlyList<DenialLineItemRecord>> GetLineItemsForExportByLabAsync(int labId, DenialDashboardFilters filters, CancellationToken cancellationToken = default)
-    {
-        return Task.FromResult<IReadOnlyList<DenialLineItemRecord>>(ApplyLineItemFilters(BuildLineItems(), filters).ToList());
-    }
+        => Task.FromResult<IReadOnlyList<DenialLineItemRecord>>(ApplyLineItemFilters(BuildLineItems(), filters).ToList());
+
+    public Task<IReadOnlyList<DenialBreakdownSourceRecord>> GetBreakdownSourceByLabAsync(int labId, DenialDashboardFilters filters, CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<DenialBreakdownSourceRecord>>(ApplyLineItemFilters(BuildLineItems(), filters)
+            .Select(x => new DenialBreakdownSourceRecord
+            {
+                DenialDate = x.DenialDate,
+                VisitNumber = x.VisitNumber,
+                InsuranceBalance = x.InsuranceBalance,
+                TotalBalance = x.TotalBalance
+            })
+            .Where(x => x.DenialDate.HasValue)
+            .ToList());
 
     public async Task<int> GetLineItemCountByLabAsync(int labId, DenialDashboardFilters filters, CancellationToken cancellationToken = default)
     {
@@ -92,7 +101,6 @@ public class MockDenialRecordRepository : IDenialRecordRepository
 
     public Task<IReadOnlyList<string>> GetPanelNamesByLabAsync(int labId, CancellationToken cancellationToken = default)
         => Task.FromResult<IReadOnlyList<string>>(["Blood", "Tox"]);
-
 
     public async Task<DenialFilterAutocompleteOptions> GetFilterAutocompleteOptionsAsync(int labId, CancellationToken cancellationToken = default)
     {
@@ -159,31 +167,28 @@ public class MockDenialRecordRepository : IDenialRecordRepository
 
     private IEnumerable<DenialLineItemRecord> ApplyLineItemFilters(IEnumerable<DenialLineItemRecord> records, DenialDashboardFilters filters)
     {
-        static string NormalizeMappedValue(string? value)
-        {
-            if (string.IsNullOrWhiteSpace(value)) return string.Empty;
-            var trimmed = value.Trim();
-            var colonIndex = trimmed.IndexOf(':');
-            if (colonIndex <= 0 || colonIndex >= trimmed.Length - 1) return trimmed;
-            var prefix = trimmed[..colonIndex].Trim();
-            var suffix = trimmed[(colonIndex + 1)..].Trim();
-            var looksLikeDenialCode = prefix.Any(char.IsDigit) && prefix.Any(char.IsLetter) && prefix.Length <= 30 && !suffix.Contains(':');
-            return looksLikeDenialCode ? suffix : trimmed;
-        }
-
-        bool StartsWithOrAll(string? source, string? term) => string.IsNullOrWhiteSpace(term) || (!string.IsNullOrWhiteSpace(source) && source.StartsWith(term.Trim(), StringComparison.OrdinalIgnoreCase));
+        var statusSet = ParseSelection(filters.Status, true);
+        var prioritySet = ParseSelection(filters.Priority, true);
+        var actionSet = ParseSelection(filters.ActionCategory, true);
+        var classSet = ParseSelection(filters.Classification, true);
+        var payerSet = ParseSelection(filters.PayerName, false);
+        var payerTypeSet = ParseSelection(filters.PayerType, false);
+        var panelSet = ParseSelection(filters.PanelName, false);
+        var providerSet = ParseSelection(filters.ReferringProvider, false);
+        var clinicSet = ParseSelection(filters.ClinicName, false);
+        var salesSet = ParseSelection(filters.SalesRepname, false);
 
         var query = records;
-        if (filters.Status != "(All)") query = query.Where(x => string.Equals(x.TaskStatus, filters.Status, StringComparison.OrdinalIgnoreCase));
-        if (filters.Priority != "(All)") query = query.Where(x => string.Equals(NormalizeMappedValue(x.Priority), filters.Priority, StringComparison.OrdinalIgnoreCase));
-        if (filters.ActionCategory != "(All)") query = query.Where(x => string.Equals(NormalizeMappedValue(x.ActionCategory), filters.ActionCategory, StringComparison.OrdinalIgnoreCase));
-        if (filters.Classification != "(All)") query = query.Where(x => string.Equals(NormalizeMappedValue(x.DenialClassification), filters.Classification, StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrWhiteSpace(filters.PayerName)) query = query.Where(x => StartsWithOrAll(x.PayerName, filters.PayerName));
-        if (!string.IsNullOrWhiteSpace(filters.PayerType)) query = query.Where(x => StartsWithOrAll(x.PayerType, filters.PayerType));
-        if (!string.IsNullOrWhiteSpace(filters.PanelName)) query = query.Where(x => StartsWithOrAll(x.PanelName, filters.PanelName));
-        if (!string.IsNullOrWhiteSpace(filters.ReferringProvider)) query = query.Where(x => StartsWithOrAll(x.ReferringProvider, filters.ReferringProvider));
-        if (!string.IsNullOrWhiteSpace(filters.ClinicName)) query = query.Where(x => StartsWithOrAll(x.ClinicName, filters.ClinicName));
-        if (!string.IsNullOrWhiteSpace(filters.SalesRepname)) query = query.Where(x => StartsWithOrAll(x.SalesRepname, filters.SalesRepname));
+        if (statusSet.Count > 0) query = query.Where(x => statusSet.Contains(x.TaskStatus ?? string.Empty));
+        if (prioritySet.Count > 0) query = query.Where(x => prioritySet.Contains(x.CleanPriority ?? string.Empty));
+        if (actionSet.Count > 0) query = query.Where(x => actionSet.Contains(x.CleanActionCategory ?? string.Empty));
+        if (classSet.Count > 0) query = query.Where(x => classSet.Contains(x.CleanDenialClassification ?? string.Empty));
+        if (payerSet.Count > 0) query = query.Where(x => payerSet.Contains(x.PayerName ?? string.Empty));
+        if (payerTypeSet.Count > 0) query = query.Where(x => payerTypeSet.Contains(x.PayerType ?? string.Empty));
+        if (panelSet.Count > 0) query = query.Where(x => panelSet.Contains(x.PanelName ?? string.Empty));
+        if (providerSet.Count > 0) query = query.Where(x => providerSet.Contains(x.ReferringProvider ?? string.Empty));
+        if (clinicSet.Count > 0) query = query.Where(x => clinicSet.Contains(x.ClinicName ?? string.Empty));
+        if (salesSet.Count > 0) query = query.Where(x => salesSet.Contains(x.SalesRepname ?? string.Empty));
         if (filters.DateOfServiceFrom.HasValue) query = query.Where(x => x.DateOfService.HasValue && x.DateOfService.Value.Date >= filters.DateOfServiceFrom.Value.Date);
         if (filters.DateOfServiceTo.HasValue) query = query.Where(x => x.DateOfService.HasValue && x.DateOfService.Value.Date <= filters.DateOfServiceTo.Value.Date);
         if (filters.FirstBilledDateFrom.HasValue) query = query.Where(x => x.FirstBilledDate.HasValue && x.FirstBilledDate.Value.Date >= filters.FirstBilledDateFrom.Value.Date);
@@ -191,26 +196,36 @@ public class MockDenialRecordRepository : IDenialRecordRepository
         return query;
     }
 
+    private static HashSet<string> ParseSelection(string? raw, bool allowAll)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var items = raw.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (allowAll && items.Contains("(All)")) items.Clear();
+        return items;
+    }
+
     private List<DenialLineItemRecord> BuildLineItems() =>
     [
         new()
         {
             AccessionNo = "ACC-1001", VisitNumber = "VIS-5001", CptCode = "80307", DateOfService = DateTime.Today.AddDays(-10),
-            FirstBilledDate = DateTime.Today.AddDays(-8), PanelName = "Tox", PayerName = "Sample Payer", PayerType = "Commercial",
+            FirstBilledDate = DateTime.Today.AddDays(-8), DenialDate = DateTime.Today.AddDays(-7), PanelName = "Tox", PayerName = "Sample Payer", PayerType = "Commercial",
             DenialCodeNormalized = "CO16", DenialDescription = "Missing or invalid information.", BilledAmount = 144.28m, AllowedAmount = 60.90m,
-            InsuranceBalance = 83.38m, TotalBalance = 83.38m, DenialClassification = "Billing", DenialType = "Claim Level Denial",
-            ActionCategory = "Billing Related Denial", ActionCode = "CO16: RB", RecommendedAction = "Correct and resubmit",
-            TaskGuidance = "Review claim and resubmit", TaskStatus = "Open", Priority = "High", SlaDays = "7", PatientId = "PAT-001",
+            InsuranceBalance = 83.38m, TotalBalance = 83.38m, DenialClassification = "CO16: Billing", DenialType = "Claim Level Denial",
+            ActionCategory = "CO16: Billing Related Denial", ActionCode = "CO16: RB", RecommendedAction = "Correct and resubmit",
+            TaskGuidance = "Review claim and resubmit", TaskStatus = "Open", Priority = "CO16: High", SlaDays = "7", PatientId = "PAT-001",
             ReferringProvider = "Dr Smith", ClinicName = "West Clinic", SalesRepname = "Ava", LabName = "Sample Lab", RunId = "SAMPLE-RUN"
         },
         new()
         {
             AccessionNo = "ACC-1002", VisitNumber = "VIS-5002", CptCode = "81001", DateOfService = DateTime.Today.AddDays(-7),
-            FirstBilledDate = DateTime.Today.AddDays(-5), PanelName = "Blood", PayerName = "Blue Shield", PayerType = "Government",
+            FirstBilledDate = DateTime.Today.AddDays(-5), DenialDate = DateTime.Today.AddDays(-4), PanelName = "Blood", PayerName = "Blue Shield", PayerType = "Government",
             DenialCodeNormalized = "CO97", DenialDescription = "Bundled service denial.", BilledAmount = 210.00m, AllowedAmount = 120.00m,
-            InsuranceBalance = 75m, TotalBalance = 75m, DenialClassification = "Coding", DenialType = "Line Level Denial",
-            ActionCategory = "Coding Related Denial", ActionCode = "CO97: CR", RecommendedAction = "Review coding",
-            TaskGuidance = "Validate service combination", TaskStatus = "Open", Priority = "Medium", SlaDays = "5", PatientId = "PAT-002",
+            InsuranceBalance = 75m, TotalBalance = 75m, DenialClassification = "CO97: Coding", DenialType = "Line Level Denial",
+            ActionCategory = "CO97: Coding Related Denial", ActionCode = "CO97: CR", RecommendedAction = "Review coding",
+            TaskGuidance = "Validate service combination", TaskStatus = "Open", Priority = "CO97: Medium", SlaDays = "5", PatientId = "PAT-002",
             ReferringProvider = "Dr John", ClinicName = "North Clinic", SalesRepname = "Ben", LabName = "Sample Lab", RunId = "SAMPLE-RUN"
         }
     ];

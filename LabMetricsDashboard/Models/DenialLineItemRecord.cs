@@ -32,6 +32,7 @@ public sealed class DenialLineItemRecord
     public string PayStatus { get; set; } = string.Empty;
     public DateTime? DateOfService { get; set; }
     public DateTime? FirstBilledDate { get; set; }
+    public DateTime? DenialDate { get; set; }
     public string PanelName { get; set; } = string.Empty;
     public string ReferringProvider { get; set; } = string.Empty;
     public string ClinicName { get; set; } = string.Empty;

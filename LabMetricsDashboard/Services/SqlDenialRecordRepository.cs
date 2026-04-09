@@ -41,7 +41,7 @@ SELECT
     CAST(ISNULL(LabId, 0) AS int) AS LabId,
     ISNULL(LabName, '') AS LabName,
     ISNULL(ConnectionKey, '') AS ConnectionKey
-FROM dbo.LRNMetricsLab
+FROM dbo.LRNMetricsLab  WITH(NOLOCK)
 WHERE ISNULL(IsActive, 0) = 1
 ORDER BY LabName, LabId;";
 
@@ -197,6 +197,63 @@ ORDER BY {OrderBy(cols, "DueDate", "TaskID")};";
     public Task<IReadOnlyList<DenialLineItemRecord>> GetLineItemsForExportByLabAsync(int labId, DenialDashboardFilters filters, CancellationToken cancellationToken = default)
         => QueryLineItemsAsync(labId, filters, cancellationToken, withPaging: false, 1, 1);
 
+    public async Task<IReadOnlyList<DenialBreakdownSourceRecord>> GetBreakdownSourceByLabAsync(int labId, DenialDashboardFilters filters, CancellationToken cancellationToken = default)
+    {
+        var currentRunId = await GetCurrentRunIdAsync(labId, cancellationToken);
+        await using var connection = await OpenLabConnectionAsync(labId, cancellationToken);
+        if (!await TableExistsAsync(connection, "dbo", "DenialLineItem", cancellationToken)) return Array.Empty<DenialBreakdownSourceRecord>();
+
+        var cols = await GetTableColumnsAsync(connection, "dbo", "DenialLineItem", cancellationToken);
+        if (!cols.Contains("DenialDate")) return Array.Empty<DenialBreakdownSourceRecord>();
+
+        async Task<List<DenialBreakdownSourceRecord>> queryAsync(bool includeRunFilter)
+        {
+            var where = BuildLineItemWhere(cols, filters, includeRunFilter ? currentRunId : null);
+            var sql = $@"
+SELECT
+    {SelectSmartDate(cols, "DenialDate")},
+    {SelectString(cols, "VisitNumber")},
+    {SelectDecimal(cols, "InsuranceBalance", 4)},
+    {SelectDecimal(cols, "TotalBalance", 4)},
+    {SelectString(cols, "PayerName")},
+    {SelectString(cols, "DenialCodeNormalized")},
+    {SelectString(cols, "DenialDescription")}
+FROM dbo.DenialLineItem
+WHERE {where}
+  AND {NotNullSmartDate(cols, "DenialDate")};";
+
+            await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 180 };
+            AddScopeParameters(command, cols, labId, includeRunFilter ? currentRunId : null);
+            AddLineItemFilterParameters(command, filters);
+
+            var items = new List<DenialBreakdownSourceRecord>();
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                items.Add(new DenialBreakdownSourceRecord
+                {
+                    DenialDate = GetNullableDateTime(reader, "DenialDate"),
+                    VisitNumber = GetString(reader, "VisitNumber"),
+                    InsuranceBalance = GetNullableDecimal(reader, "InsuranceBalance") ?? 0m,
+                    TotalBalance = GetNullableDecimal(reader, "TotalBalance") ?? 0m,
+                    PayerName = GetString(reader, "PayerName"),
+                    DenialCode = GetString(reader, "DenialCodeNormalized"),
+                    DenialDescription = GetString(reader, "DenialDescription")
+                });
+            }
+
+            return items;
+        }
+
+        var scopedItems = await queryAsync(includeRunFilter: true);
+        if (scopedItems.Count > 0)
+        {
+            return scopedItems;
+        }
+
+        return await queryAsync(includeRunFilter: false);
+    }
+
     public async Task<int> GetLineItemCountByLabAsync(int labId, DenialDashboardFilters filters, CancellationToken cancellationToken = default)
     {
         var currentRunId = await GetCurrentRunIdAsync(labId, cancellationToken);
@@ -224,7 +281,7 @@ ORDER BY {OrderBy(cols, "DueDate", "TaskID")};";
         var cols = await GetTableColumnsAsync(connection, "dbo", "DenialLineItem", cancellationToken);
         if (!cols.Contains("PayerName")) return Array.Empty<string>();
         var where = BuildScopedWhere(cols, currentRunId);
-        var sql = $@"SELECT DISTINCT TOP (200) LTRIM(RTRIM(ISNULL(PayerName, ''))) AS PayerNameValue FROM dbo.DenialLineItem WHERE {where} AND ISNULL(PayerName, '') <> '' ORDER BY PayerNameValue;";
+        var sql = $@"SELECT DISTINCT TOP (200) LTRIM(RTRIM(ISNULL(PayerName, ''))) AS PayerNameValue FROM dbo.DenialLineItem WITH(NOLOCK) WHERE {where} AND ISNULL(PayerName, '') <> '' ORDER BY PayerNameValue;";
         await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 120 };
         AddScopeParameters(command, cols, labId, currentRunId);
         var items = new List<string>();
@@ -245,7 +302,7 @@ ORDER BY {OrderBy(cols, "DueDate", "TaskID")};";
         var cols = await GetTableColumnsAsync(connection, "dbo", "DenialLineItem", cancellationToken);
         if (!cols.Contains("PanelName")) return Array.Empty<string>();
         var where = BuildScopedWhere(cols, currentRunId);
-        var sql = $@"SELECT DISTINCT TOP (200) LTRIM(RTRIM(ISNULL(PanelName, ''))) AS PanelNameValue FROM dbo.DenialLineItem WHERE {where} AND ISNULL(PanelName, '') <> '' ORDER BY PanelNameValue;";
+        var sql = $@"SELECT DISTINCT TOP (200) LTRIM(RTRIM(ISNULL(PanelName, ''))) AS PanelNameValue FROM dbo.DenialLineItem WITH(NOLOCK) WHERE {where} AND ISNULL(PanelName, '') <> '' ORDER BY PanelNameValue;";
         await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 120 };
         AddScopeParameters(command, cols, labId, currentRunId);
         var items = new List<string>();
@@ -308,7 +365,7 @@ ORDER BY {OrderBy(cols, "DueDate", "TaskID")};";
                     ? "ORDER BY ISNULL([CreatedOn], '19000101') DESC, [RunId] DESC"
                     : "ORDER BY [RunId] DESC";
 
-            var sql = $"SELECT TOP (1) [RunId] FROM dbo.DenialTaskBoard {where} {orderBy};";
+            var sql = $"SELECT TOP (1) [RunId] FROM dbo.DenialTaskBoard WITH(NOLOCK) {where} {orderBy};";
             await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 120 };
             if (cols.Contains("LabId")) command.Parameters.AddWithValue("@LabId", labId);
             var result = await command.ExecuteScalarAsync(cancellationToken);
@@ -329,7 +386,7 @@ ORDER BY {OrderBy(cols, "DueDate", "TaskID")};";
             const string sql = @"
 SELECT TOP (1)
     OutputFileName
-FROM dbo.DenialAnalysisRunLog
+FROM dbo.DenialAnalysisRunLog WITH(NOLOCK) 
 WHERE RunId = @RunId
   AND OutputFileName IS NOT NULL
   AND OutputFileName <> ''
@@ -450,7 +507,7 @@ SET
     t.Status = ISNULL(u.Status, ''),
     t.AssignedTo = ISNULL(u.AssignedTo, ''),
     t.DateCompleted = u.DateCompleted
-FROM dbo.DenialTaskBoard t
+FROM dbo.DenialTaskBoard t WITH(NOLOCK) 
 INNER JOIN #TaskBoardCsvUpdates u
     ON u.UniqueTrackId IS NOT NULL
    AND t.UniqueTrackId = u.UniqueTrackId
@@ -462,7 +519,7 @@ WHERE ISNULL(t.Status, '') <> ISNULL(u.Status, '')
 INSERT INTO #MatchedRows (RowNumber)
 SELECT DISTINCT u.RowNumber
 FROM #TaskBoardCsvUpdates u
-INNER JOIN dbo.DenialTaskBoard t
+INNER JOIN dbo.DenialTaskBoard t WITH(NOLOCK) 
     ON u.UniqueTrackId IS NULL
    AND u.TaskId IS NOT NULL
    AND t.TaskID = u.TaskId
@@ -528,6 +585,7 @@ SELECT
     {SelectString(cols, "PayStatus")},
     {SelectDate(cols, "DateOfService")},
     {SelectDate(cols, "FirstBilledDate")},
+    {SelectDate(cols, "DenialDate")},
     {SelectString(cols, "PanelName")},
     {SelectString(cols, "ReferringProvider")},
     {SelectString(cols, "ClinicName")},
@@ -560,7 +618,7 @@ SELECT
     {SelectString(cols, "PatientID")},
     {SelectString(cols, "RunId")},
     {SelectDate(cols, "CreatedOn")}
-FROM dbo.DenialLineItem
+FROM dbo.DenialLineItem WITH(NOLOCK) 
 WHERE {where}
 ORDER BY {OrderBy(cols, "DateOfService", "AccessionNo")}{pagingSql};";
 
@@ -590,6 +648,7 @@ ORDER BY {OrderBy(cols, "DateOfService", "AccessionNo")}{pagingSql};";
                 PayStatus = GetString(reader, "PayStatus"),
                 DateOfService = GetNullableDateTime(reader, "DateOfService"),
                 FirstBilledDate = GetNullableDateTime(reader, "FirstBilledDate"),
+                DenialDate = GetNullableDateTime(reader, "DenialDate"),
                 PanelName = GetString(reader, "PanelName"),
                 ReferringProvider = GetString(reader, "ReferringProvider"),
                 ClinicName = GetString(reader, "ClinicName"),
@@ -669,7 +728,7 @@ ORDER BY {OrderBy(cols, "DateOfService", "AccessionNo")}{pagingSql};";
         {
             queries.Add($@"
 SELECT LTRIM(RTRIM(CONVERT(nvarchar(255), [{column}]))) AS [Value]
-FROM dbo.DenialTaskBoard
+FROM dbo.DenialTaskBoard WITH(NOLOCK) 
 WHERE {BuildScopedWhere(taskCols, currentRunId)} AND ISNULL(CONVERT(nvarchar(255), [{column}]), '') <> ''");
         }
 
@@ -677,7 +736,7 @@ WHERE {BuildScopedWhere(taskCols, currentRunId)} AND ISNULL(CONVERT(nvarchar(255
         {
             queries.Add($@"
 SELECT LTRIM(RTRIM(CONVERT(nvarchar(255), [{column}]))) AS [Value]
-FROM dbo.DenialLineItem
+FROM dbo.DenialLineItem WITH(NOLOCK) 
 WHERE {BuildScopedWhere(lineCols, currentRunId)} AND ISNULL(CONVERT(nvarchar(255), [{column}]), '') <> ''");
         }
 
@@ -798,17 +857,17 @@ WHERE TABLE_SCHEMA = @Schema AND TABLE_NAME = @Table;";
         if (cols.Contains("LabId")) where.Add("[LabId] = @LabId");
         if (!string.IsNullOrWhiteSpace(currentRunId) && cols.Contains("RunId")) where.Add("[RunId] = @RunId");
 
-        AddExact(where, cols, "TaskStatus", filters.Status, "@Status");
-        AddExactNormalized(where, cols, "Priority", filters.Priority, "@Priority");
-        AddExactNormalized(where, cols, "ActionCategory", filters.ActionCategory, "@ActionCategory");
-        AddExactNormalized(where, cols, "DenialClassification", filters.Classification, "@Classification");
+        AddMultiExact(where, cols, "TaskStatus", filters.Status, "Status");
+        AddMultiExactNormalized(where, cols, "Priority", filters.Priority, "Priority");
+        AddMultiExactNormalized(where, cols, "ActionCategory", filters.ActionCategory, "ActionCategory");
+        AddMultiExactNormalized(where, cols, "DenialClassification", filters.Classification, "Classification");
 
-        AddStartsWith(where, cols, "SalesRepname", filters.SalesRepname, "@SalesRepname");
-        AddStartsWith(where, cols, "ClinicName", filters.ClinicName, "@ClinicName");
-        AddStartsWith(where, cols, "ReferringProvider", filters.ReferringProvider, "@ReferringProvider");
-        AddStartsWith(where, cols, "PayerName", filters.PayerName, "@PayerName");
-        AddStartsWith(where, cols, "PayerType", filters.PayerType, "@PayerType");
-        AddStartsWith(where, cols, "PanelName", filters.PanelName, "@PanelName");
+        AddMultiExact(where, cols, "SalesRepname", filters.SalesRepname, "SalesRepname");
+        AddMultiExact(where, cols, "ClinicName", filters.ClinicName, "ClinicName");
+        AddMultiExact(where, cols, "ReferringProvider", filters.ReferringProvider, "ReferringProvider");
+        AddMultiExact(where, cols, "PayerName", filters.PayerName, "PayerName");
+        AddMultiExact(where, cols, "PayerType", filters.PayerType, "PayerType");
+        AddMultiExact(where, cols, "PanelName", filters.PanelName, "PanelName");
 
         AddDateRange(where, cols, "FirstBilledDate", filters.FirstBilledDateFrom, filters.FirstBilledDateTo, "@FirstBilledDateFrom", "@FirstBilledDateTo");
         AddDateRange(where, cols, "DateOfService", filters.DateOfServiceFrom, filters.DateOfServiceTo, "@DateOfServiceFrom", "@DateOfServiceTo");
@@ -816,20 +875,22 @@ WHERE TABLE_SCHEMA = @Schema AND TABLE_NAME = @Table;";
         return where.Count == 0 ? "1 = 1" : string.Join(" AND ", where);
     }
 
-    private static void AddExact(List<string> where, HashSet<string> cols, string column, string? value, string parameter)
+    private static void AddMultiExact(List<string> where, HashSet<string> cols, string column, string? rawValue, string parameterPrefix)
     {
-        if (cols.Contains(column) && !string.IsNullOrWhiteSpace(value) && value != "(All)")
-        {
-            where.Add($"ISNULL(CONVERT(nvarchar(255), [{column}]), '') = {parameter}");
-        }
+        var values = ParseSelectedValues(rawValue, treatAllAsEmpty: true);
+        if (!cols.Contains(column) || values.Count == 0) return;
+
+        var predicates = values.Select((_, index) => $"ISNULL(CONVERT(nvarchar(255), [{column}]), '') = @{parameterPrefix}{index}");
+        where.Add("(" + string.Join(" OR ", predicates) + ")");
     }
 
-    private static void AddExactNormalized(List<string> where, HashSet<string> cols, string column, string? value, string parameter)
+    private static void AddMultiExactNormalized(List<string> where, HashSet<string> cols, string column, string? rawValue, string parameterPrefix)
     {
-        if (cols.Contains(column) && !string.IsNullOrWhiteSpace(value) && value != "(All)")
-        {
-            where.Add($"{NormalizedEqualsExpression(column, parameter)}");
-        }
+        var values = ParseSelectedValues(rawValue, treatAllAsEmpty: true);
+        if (!cols.Contains(column) || values.Count == 0) return;
+
+        var predicates = values.Select((_, index) => NormalizedEqualsExpression(column, $"@{parameterPrefix}{index}"));
+        where.Add("(" + string.Join(" OR ", predicates) + ")");
     }
 
     private static string NormalizedEqualsExpression(string column, string parameter)
@@ -841,14 +902,6 @@ WHERE TABLE_SCHEMA = @Schema AND TABLE_NAME = @Table;";
                 ELSE ISNULL(CONVERT(nvarchar(4000), [{column}]), '')
             END) = {parameter}";
 
-    private static void AddStartsWith(List<string> where, HashSet<string> cols, string column, string? value, string parameter)
-    {
-        if (cols.Contains(column) && !string.IsNullOrWhiteSpace(value))
-        {
-            where.Add($"[{column}] LIKE {parameter}");
-        }
-    }
-
     private static void AddDateRange(List<string> where, HashSet<string> cols, string column, DateTime? from, DateTime? to, string fromParameter, string toParameter)
     {
         if (!cols.Contains(column)) return;
@@ -858,20 +911,46 @@ WHERE TABLE_SCHEMA = @Schema AND TABLE_NAME = @Table;";
 
     private static void AddLineItemFilterParameters(SqlCommand command, DenialDashboardFilters filters)
     {
-        if (filters.Status != "(All)") command.Parameters.AddWithValue("@Status", filters.Status);
-        if (filters.Priority != "(All)") command.Parameters.AddWithValue("@Priority", filters.Priority);
-        if (filters.ActionCategory != "(All)") command.Parameters.AddWithValue("@ActionCategory", filters.ActionCategory);
-        if (filters.Classification != "(All)") command.Parameters.AddWithValue("@Classification", filters.Classification);
-        if (!string.IsNullOrWhiteSpace(filters.SalesRepname)) command.Parameters.AddWithValue("@SalesRepname", $"{filters.SalesRepname.Trim()}%");
-        if (!string.IsNullOrWhiteSpace(filters.ClinicName)) command.Parameters.AddWithValue("@ClinicName", $"{filters.ClinicName.Trim()}%");
-        if (!string.IsNullOrWhiteSpace(filters.ReferringProvider)) command.Parameters.AddWithValue("@ReferringProvider", $"{filters.ReferringProvider.Trim()}%");
-        if (!string.IsNullOrWhiteSpace(filters.PayerName)) command.Parameters.AddWithValue("@PayerName", $"{filters.PayerName.Trim()}%");
-        if (!string.IsNullOrWhiteSpace(filters.PayerType)) command.Parameters.AddWithValue("@PayerType", $"{filters.PayerType.Trim()}%");
-        if (!string.IsNullOrWhiteSpace(filters.PanelName)) command.Parameters.AddWithValue("@PanelName", $"{filters.PanelName.Trim()}%");
+        AddMultiValueParameters(command, "Status", ParseSelectedValues(filters.Status, treatAllAsEmpty: true));
+        AddMultiValueParameters(command, "Priority", ParseSelectedValues(filters.Priority, treatAllAsEmpty: true));
+        AddMultiValueParameters(command, "ActionCategory", ParseSelectedValues(filters.ActionCategory, treatAllAsEmpty: true));
+        AddMultiValueParameters(command, "Classification", ParseSelectedValues(filters.Classification, treatAllAsEmpty: true));
+        AddMultiValueParameters(command, "SalesRepname", ParseSelectedValues(filters.SalesRepname));
+        AddMultiValueParameters(command, "ClinicName", ParseSelectedValues(filters.ClinicName));
+        AddMultiValueParameters(command, "ReferringProvider", ParseSelectedValues(filters.ReferringProvider));
+        AddMultiValueParameters(command, "PayerName", ParseSelectedValues(filters.PayerName));
+        AddMultiValueParameters(command, "PayerType", ParseSelectedValues(filters.PayerType));
+        AddMultiValueParameters(command, "PanelName", ParseSelectedValues(filters.PanelName));
         if (filters.FirstBilledDateFrom.HasValue) command.Parameters.AddWithValue("@FirstBilledDateFrom", filters.FirstBilledDateFrom.Value.Date);
         if (filters.FirstBilledDateTo.HasValue) command.Parameters.AddWithValue("@FirstBilledDateTo", filters.FirstBilledDateTo.Value.Date);
         if (filters.DateOfServiceFrom.HasValue) command.Parameters.AddWithValue("@DateOfServiceFrom", filters.DateOfServiceFrom.Value.Date);
         if (filters.DateOfServiceTo.HasValue) command.Parameters.AddWithValue("@DateOfServiceTo", filters.DateOfServiceTo.Value.Date);
+    }
+
+    private static void AddMultiValueParameters(SqlCommand command, string prefix, IReadOnlyList<string> values)
+    {
+        for (var i = 0; i < values.Count; i++)
+        {
+            command.Parameters.AddWithValue($"@{prefix}{i}", values[i]);
+        }
+    }
+
+    private static IReadOnlyList<string> ParseSelectedValues(string? rawValue, bool treatAllAsEmpty = false)
+    {
+        if (string.IsNullOrWhiteSpace(rawValue)) return Array.Empty<string>();
+
+        var values = rawValue
+            .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (treatAllAsEmpty && values.Any(x => x.Equals("(All)", StringComparison.OrdinalIgnoreCase)))
+        {
+            return Array.Empty<string>();
+        }
+
+        return values;
     }
 
     private static IReadOnlyList<DenialInsightRecord> BuildInsights(IEnumerable<DenialRecord> records)
@@ -945,6 +1024,16 @@ WHERE TABLE_SCHEMA = @Schema AND TABLE_NAME = @Table;";
 
     private static string SelectDate(HashSet<string> cols, string column)
         => cols.Contains(column) ? $"TRY_CONVERT(datetime, [{column}]) AS [{column}]" : $"CAST(NULL AS datetime) AS [{column}]";
+
+    private static string SelectSmartDate(HashSet<string> cols, string column)
+        => cols.Contains(column)
+            ? $"COALESCE(TRY_CONVERT(datetime, [{column}], 126), TRY_CONVERT(datetime, [{column}], 121), TRY_CONVERT(datetime, [{column}], 120), TRY_CONVERT(datetime, [{column}], 101), TRY_CONVERT(datetime, [{column}], 103), TRY_CONVERT(datetime, [{column}])) AS [{column}]"
+            : $"CAST(NULL AS datetime) AS [{column}]";
+
+    private static string NotNullSmartDate(HashSet<string> cols, string column)
+        => cols.Contains(column)
+            ? $"COALESCE(TRY_CONVERT(datetime, [{column}], 126), TRY_CONVERT(datetime, [{column}], 121), TRY_CONVERT(datetime, [{column}], 120), TRY_CONVERT(datetime, [{column}], 101), TRY_CONVERT(datetime, [{column}], 103), TRY_CONVERT(datetime, [{column}])) IS NOT NULL"
+            : "1 = 0";
 
     private static string OrderBy(HashSet<string> cols, string primary, string fallback)
     {

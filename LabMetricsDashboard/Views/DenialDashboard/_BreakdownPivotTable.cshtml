@@ -1,0 +1,148 @@
+@model LabMetricsDashboard.ViewModels.BreakdownPivotViewModel
+@using System.Globalization
+
+@{
+    string Money(decimal amount) => amount.ToString("$#,##0.00", CultureInfo.GetCultureInfo("en-US"));
+    var colSpan = 2 + (Model.Periods.Count * 2) + 2;
+    var tableId = "pivot_" + Guid.NewGuid().ToString("N");
+    var groupNumber = 0;
+    string? currentGroupKey = null;
+}
+
+<div class="breakdown-pivot-shell">
+    @if (Model.HasData)
+    {
+        <div class="table-responsive table-frame breakdown-pivot-frame" id="@tableId">
+            <table class="table table-sm app-table breakdown-pivot-table mb-0">
+                <thead>
+                    <tr>
+                        <th class="pivot-grand-title" colspan="@colSpan">@Model.HeaderTitle</th>
+                    </tr>
+                    <tr>
+                        <th class="pivot-side-title" colspan="2" rowspan="3">Insurance &amp; Top Denials</th>
+                        <th class="pivot-section-title" colspan="@(Model.Periods.Count * 2)">@Model.SectionTitle</th>
+                        <th class="pivot-total-title" colspan="2" rowspan="2">Total</th>
+                    </tr>
+                    <tr>
+                        @foreach (var period in Model.Periods)
+                        {
+                            <th class="pivot-period-title" colspan="2">@period.Label</th>
+                        }
+                    </tr>
+                    <tr>
+                        @foreach (var period in Model.Periods)
+                        {
+                            <th class="pivot-metric-title">No. of Claims</th>
+                            <th class="pivot-metric-title">Denial Bal</th>
+                        }
+                        <th class="pivot-metric-title">No. of Claims</th>
+                        <th class="pivot-metric-title">Denial Bal</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in Model.Rows)
+                    {
+                        if (row.IsInsuranceRow)
+                        {
+                            groupNumber++;
+                            currentGroupKey = $"{tableId}_g{groupNumber}";
+                            var childCount = Model.Rows.SkipWhile(r => !object.ReferenceEquals(r, row)).Skip(1).TakeWhile(r => !r.IsInsuranceRow).Count();
+                            <tr class="pivot-insurance-row pivot-group-header" data-group="@currentGroupKey" data-expanded="true">
+                                <td class="pivot-index">@row.IndexLabel</td>
+                                <td class="pivot-label pivot-group-cell">
+                                    <button type="button" class="pivot-collapse-btn" aria-expanded="true" aria-controls="@currentGroupKey" title="Hide or show denial rows">
+                                        <span class="pivot-chevron">▾</span>
+                                    </button>
+                                    <span class="pivot-group-text">@row.Label</span>
+                                    @if (childCount > 0)
+                                    {
+                                        <span class="pivot-group-count">@childCount denial@(childCount == 1 ? "" : "s")</span>
+                                    }
+                                </td>
+                                @foreach (var cell in row.Cells)
+                                {
+                                    <td class="text-end pivot-claims">@(cell.ClaimCount == 0 ? "-" : cell.ClaimCount.ToString("N0"))</td>
+                                    <td class="text-end pivot-balance">@(cell.DenialBalance == 0 ? "$ -" : Money(cell.DenialBalance))</td>
+                                }
+                                <td class="text-end pivot-claims total-col">@(row.TotalClaimCount == 0 ? "-" : row.TotalClaimCount.ToString("N0"))</td>
+                                <td class="text-end pivot-balance total-col">@(row.TotalBalance == 0 ? "$ -" : Money(row.TotalBalance))</td>
+                            </tr>
+                        }
+                        else
+                        {
+                            <tr class="pivot-denial-row pivot-child-row" data-parent-group="@currentGroupKey">
+                                <td class="pivot-index">@row.IndexLabel</td>
+                                <td class="pivot-label pivot-child-label">@row.Label</td>
+                                @foreach (var cell in row.Cells)
+                                {
+                                    <td class="text-end pivot-claims">@(cell.ClaimCount == 0 ? "-" : cell.ClaimCount.ToString("N0"))</td>
+                                    <td class="text-end pivot-balance">@(cell.DenialBalance == 0 ? "$ -" : Money(cell.DenialBalance))</td>
+                                }
+                                <td class="text-end pivot-claims total-col">@(row.TotalClaimCount == 0 ? "-" : row.TotalClaimCount.ToString("N0"))</td>
+                                <td class="text-end pivot-balance total-col">@(row.TotalBalance == 0 ? "$ -" : Money(row.TotalBalance))</td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+                <tfoot>
+                    <tr class="pivot-footer-row">
+                        <th colspan="2">Total</th>
+                        @foreach (var total in Model.TotalsByPeriod)
+                        {
+                            <th class="text-end">@total.ClaimCount.ToString("N0")</th>
+                            <th class="text-end">@Money(total.DenialBalance)</th>
+                        }
+                        <th class="text-end">@Model.GrandTotalClaimCount.ToString("N0")</th>
+                        <th class="text-end">@Money(Model.GrandTotalBalance)</th>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    }
+    else
+    {
+        <div class="text-center text-muted py-4">No breakdown rows were found for the selected lab and filters.</div>
+    }
+</div>
+
+<script>
+    (function () {
+        const root = document.getElementById('@tableId');
+        if (!root) return;
+
+        const toggleGroup = (groupKey, expanded) => {
+            const childRows = root.querySelectorAll(`.pivot-child-row[data-parent-group="${groupKey}"]`);
+            childRows.forEach(row => {
+                row.style.display = expanded ? '' : 'none';
+            });
+        };
+
+        root.querySelectorAll('.pivot-group-header').forEach(headerRow => {
+            const btn = headerRow.querySelector('.pivot-collapse-btn');
+            if (!btn) return;
+
+            const groupKey = headerRow.getAttribute('data-group');
+            const applyState = (expanded) => {
+                headerRow.setAttribute('data-expanded', expanded ? 'true' : 'false');
+                btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+                const chevron = btn.querySelector('.pivot-chevron');
+                if (chevron) chevron.textContent = expanded ? '▾' : '▸';
+                toggleGroup(groupKey, expanded);
+            };
+
+            btn.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const expanded = headerRow.getAttribute('data-expanded') === 'true';
+                applyState(!expanded);
+            });
+
+            headerRow.addEventListener('dblclick', function () {
+                const expanded = headerRow.getAttribute('data-expanded') === 'true';
+                applyState(!expanded);
+            });
+
+            applyState(true);
+        });
+    })();
+</script>
