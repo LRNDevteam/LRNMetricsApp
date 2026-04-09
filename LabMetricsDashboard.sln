@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 18
-VisualStudioVersion = 18.5.11626.173 insiders
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.37027.9 d17.14
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LabMetricsDashboard", "LabMetricsDashboard\LabMetricsDashboard.csproj", "{28C8D0C9-0B2C-25B1-944F-544054B185DE}"
 EndProject
@@ -12,6 +12,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PredictionAnalysisApp", "PredictionAnalysisApp\PredictionAnalysisApp.csproj", "{9CBC5091-CD3A-9873-CEF3-2F96C3C8C46F}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RcmWatcherService", "RcmWatcherService\RcmWatcherService.csproj", "{5925AD32-6410-77A8-8C2B-339ACD528AA0}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ClaimLineCSVDataCapture", "ClaimLineCSVDataCapture\ClaimLineCSVDataCapture.csproj", "{4BD2A6E2-67E4-444A-B244-F169BC8F8C77}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -39,6 +41,10 @@ Global
 		{5925AD32-6410-77A8-8C2B-339ACD528AA0}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5925AD32-6410-77A8-8C2B-339ACD528AA0}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{5925AD32-6410-77A8-8C2B-339ACD528AA0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4BD2A6E2-67E4-444A-B244-F169BC8F8C77}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4BD2A6E2-67E4-444A-B244-F169BC8F8C77}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4BD2A6E2-67E4-444A-B244-F169BC8F8C77}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4BD2A6E2-67E4-444A-B244-F169BC8F8C77}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
