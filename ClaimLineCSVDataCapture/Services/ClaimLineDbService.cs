@@ -42,22 +42,46 @@ public sealed class ClaimLineDbService
     }
 
     /// <summary>
-    /// Bulk-inserts rows via the stored procedure specified in the mapping.
-    /// Builds the TVP dynamically from the field mapping configuration.
-    /// Returns the number of rows inserted (0 = skipped/already loaded).
+    /// Streams CSV batches directly into a single DataTable, then sends all rows
+    /// to the stored procedure in one TVP call. The SP expects all rows at once
+    /// because it logs the file in <c>LineClaimFileLogs</c> on entry and skips
+    /// subsequent calls for the same RunId.
+    /// Streaming avoids holding the intermediate <see cref="CsvDataRow"/> list;
+    /// each batch is appended to the DataTable and then released.
     /// </summary>
-    public int InsertRows(List<CsvDataRow> rows, string labName, string weekFolder, FileTypeMapping mapping)
+    public int StreamingInsert(
+        IEnumerable<List<CsvDataRow>> batches, string labName, string weekFolder,
+        FileTypeMapping mapping, string sourceFilePath, Action<int, int>? onBatchLoaded = null)
     {
-        if (rows.Count == 0) return 0;
+        ArgumentNullException.ThrowIfNull(batches);
         ArgumentNullException.ThrowIfNull(mapping);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceFilePath);
 
-        var sourceFilePath = rows[0].SourceFullPath;
-        var runId          = ExtractRunId(sourceFilePath);
-        var fileName       = Path.GetFileName(sourceFilePath);
-        var fileCreated    = File.Exists(sourceFilePath)
-                             ? (object)File.GetCreationTime(sourceFilePath)
-                             : DBNull.Value;
+        var runId       = ExtractRunId(sourceFilePath);
+        var fileName    = Path.GetFileName(sourceFilePath);
+        var fileCreated = File.Exists(sourceFilePath)
+                          ? (object)File.GetCreationTime(sourceFilePath)
+                          : DBNull.Value;
 
+        // Build DataTable schema once, then stream batches into it
+        var dt = CreateTvpSchema(mapping);
+        int totalRows = 0;
+        int batchNumber = 0;
+
+        foreach (var batch in batches)
+        {
+            if (batch.Count == 0) continue;
+            batchNumber++;
+
+            AppendBatchToTvp(dt, batch, mapping);
+            totalRows += batch.Count;
+
+            onBatchLoaded?.Invoke(batchNumber, batch.Count);
+        }
+
+        if (totalRows == 0) return 0;
+
+        // Single SP call with all rows — the SP handles internal chunked inserts
         using var conn = new SqlConnection(_connectionString);
         conn.Open();
 
@@ -67,11 +91,10 @@ public sealed class ClaimLineDbService
             CommandTimeout = 1200
         };
 
-        var tvp = BuildTvp(rows, mapping);
         cmd.Parameters.Add(new SqlParameter("@Rows", SqlDbType.Structured)
         {
             TypeName = mapping.TvpTypeName,
-            Value    = tvp,
+            Value    = dt,
         });
         cmd.Parameters.AddWithValue("@LabName",        labName);
         cmd.Parameters.AddWithValue("@WeekFolder",     weekFolder);
@@ -88,11 +111,23 @@ public sealed class ClaimLineDbService
     }
 
     /// <summary>
-    /// Builds a DataTable matching the TVP structure dynamically from the field mapping.
-    /// System columns (FileLogId, RunId, WeekFolder, etc.) are added first,
-    /// then all configured CSV?SQL field mappings in order.
+    /// Bulk-inserts rows via the stored procedure specified in the mapping.
+    /// Builds the TVP dynamically from the field mapping configuration.
+    /// Returns the number of rows inserted (0 = skipped/already loaded).
     /// </summary>
-    private static DataTable BuildTvp(List<CsvDataRow> rows, FileTypeMapping mapping)
+    public int InsertRows(List<CsvDataRow> rows, string labName, string weekFolder, FileTypeMapping mapping)
+    {
+        if (rows.Count == 0) return 0;
+        ArgumentNullException.ThrowIfNull(mapping);
+
+        var sourceFilePath = rows[0].SourceFullPath;
+        return StreamingInsert([rows], labName, weekFolder, mapping, sourceFilePath);
+    }
+
+    /// <summary>
+    /// Creates an empty DataTable with the TVP column schema.
+    /// </summary>
+    private static DataTable CreateTvpSchema(FileTypeMapping mapping)
     {
         var dt = new DataTable();
 
@@ -111,9 +146,20 @@ public sealed class ClaimLineDbService
             dt.Columns.Add(fm.SqlColumn);
         }
 
+        return dt;
+    }
+
+    /// <summary>
+    /// Appends a batch of rows to an existing DataTable.
+    /// The batch list can be released by the caller after this returns.
+    /// </summary>
+    private static void AppendBatchToTvp(DataTable dt, List<CsvDataRow> rows, FileTypeMapping mapping)
+    {
+        var colCount = 7 + mapping.Fields.Count;
+
         foreach (var r in rows)
         {
-            var values = new object[7 + mapping.Fields.Count];
+            var values = new object[colCount];
             values[0] = r.FileLogId;
             values[1] = r.RunId;
             values[2] = r.WeekFolder;
@@ -129,8 +175,6 @@ public sealed class ClaimLineDbService
 
             dt.Rows.Add(values);
         }
-
-        return dt;
     }
 
     /// <summary>
