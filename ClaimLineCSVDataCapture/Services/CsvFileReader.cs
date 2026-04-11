@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Security.Cryptography;
 using System.Text;
 using ClaimLineCSVDataCapture.Models;
 
@@ -13,97 +12,144 @@ namespace ClaimLineCSVDataCapture.Services;
 public static class CsvFileReader
 {
     /// <summary>
-    /// Reads a CSV file and returns parsed rows using the supplied field mapping.
-    /// Works for both Claim Level and Line Level — the mapping drives everything.
+    /// Default number of rows per batch when streaming large CSV files.
+    /// Balances memory usage against TVP insert throughput.
+    /// </summary>
+    internal const int DefaultBatchSize = 50_000;
+
+    /// <summary>
+    /// Streams a CSV file and yields batches of parsed rows.
+    /// Only one batch is in memory at a time, keeping allocation bounded
+    /// regardless of file size (100 MB+, 230 MB+, etc.).
+    /// </summary>
+    public static IEnumerable<List<CsvDataRow>> ReadCsvBatches(
+        string filePath, string labName, string weekFolder, string runId,
+        FileTypeMapping mapping, string? originalSourcePath = null,
+        int batchSize = DefaultBatchSize)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+        ArgumentNullException.ThrowIfNull(mapping);
+        if (batchSize <= 0) batchSize = DefaultBatchSize;
+
+        var sourceFullPath = string.IsNullOrWhiteSpace(originalSourcePath) ? filePath : originalSourcePath;
+        var fileName = Path.GetFileName(sourceFullPath);
+        var hashFields = mapping.Fields.Where(f => f.IncludeInHash).ToList();
+
+        using var reader = new StreamReader(filePath, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024 * 64);
+
+        // Read header row
+        var headerRow = ReadNextRecord(reader);
+        if (headerRow is null) yield break;
+
+        var headerIndex = BuildHeaderIndex(headerRow);
+        var batch = new List<CsvDataRow>(batchSize);
+
+        while (true)
+        {
+            var fields = ReadNextRecord(reader);
+            if (fields is null) break;
+
+            if (fields.Length == 0 || fields.All(string.IsNullOrWhiteSpace))
+                continue;
+
+            var row = MapRow(fields, headerIndex, mapping, hashFields,
+                            runId, weekFolder, sourceFullPath, fileName, labName);
+            batch.Add(row);
+
+            if (batch.Count >= batchSize)
+            {
+                yield return batch;
+                batch = new List<CsvDataRow>(batchSize);
+            }
+        }
+
+        if (batch.Count > 0)
+            yield return batch;
+    }
+
+    /// <summary>
+    /// Reads a CSV file and returns all parsed rows.
+    /// Retained for small files or backward compatibility.
+    /// For large files (100 MB+), prefer <see cref="ReadCsvBatches"/>.
     /// </summary>
     public static List<CsvDataRow> ReadCsv(
         string filePath, string labName, string weekFolder, string runId,
         FileTypeMapping mapping, string? originalSourcePath = null)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
-        ArgumentNullException.ThrowIfNull(mapping);
-
-        // Use original source path for DB tracking; fall back to filePath if not provided
-        var sourceFullPath = string.IsNullOrWhiteSpace(originalSourcePath) ? filePath : originalSourcePath;
-        var csvRows = ParseCsvLines(filePath);
-        if (csvRows.Count < 2) return [];
-
-        var headers = csvRows[0];
-        var headerIndex = BuildHeaderIndex(headers);
-        var fileName = Path.GetFileName(sourceFullPath);
-        var hashFields = mapping.Fields.Where(f => f.IncludeInHash).ToList();
-        var rows = new List<CsvDataRow>(csvRows.Count - 1);
-
-        for (int i = 1; i < csvRows.Count; i++)
+        var allRows = new List<CsvDataRow>();
+        foreach (var batch in ReadCsvBatches(filePath, labName, weekFolder, runId,
+                                             mapping, originalSourcePath))
         {
-            var fields = csvRows[i];
-            if (fields.Length == 0 || fields.All(string.IsNullOrWhiteSpace))
-                continue;
+            allRows.AddRange(batch);
+        }
+        return allRows;
+    }
 
-            var row = new CsvDataRow
-            {
-                RunId          = runId,
-                WeekFolder     = weekFolder,
-                SourceFullPath = sourceFullPath,
-                FileName       = fileName,
-                FileType       = mapping.FileTypeKey,
-            };
+    /// <summary>Maps a single CSV record to a <see cref="CsvDataRow"/>.</summary>
+    private static CsvDataRow MapRow(
+        string[] fields, Dictionary<string, int> headerIndex,
+        FileTypeMapping mapping, List<FieldMapping> hashFields,
+        string runId, string weekFolder, string sourceFullPath,
+        string fileName, string labName)
+    {
+        var row = new CsvDataRow
+        {
+            RunId          = runId,
+            WeekFolder     = weekFolder,
+            SourceFullPath = sourceFullPath,
+            FileName       = fileName,
+            FileType       = mapping.FileTypeKey,
+        };
 
-            // Map only configured fields from CSV to SQL column
-            foreach (var fm in mapping.Fields)
-            {
-                var value = GetField(fields, headerIndex, fm.CsvHeader);
-                row.Fields[fm.SqlColumn] = value;
-            }
-
-            // Use LabName from config if CSV field is empty
-            if (row.Fields.TryGetValue("LabName", out var csvLabName)
-                && string.IsNullOrWhiteSpace(csvLabName))
-            {
-                row.Fields["LabName"] = labName;
-            }
-            else if (!row.Fields.ContainsKey("LabName"))
-            {
-                row.Fields["LabName"] = labName;
-            }
-
-            row.RowHash = ComputeRowHash(row, hashFields);
-            rows.Add(row);
+        foreach (var fm in mapping.Fields)
+        {
+            var value = GetField(fields, headerIndex, fm.CsvHeader);
+            row.Fields[fm.SqlColumn] = value;
         }
 
-        return rows;
+        if (row.Fields.TryGetValue("LabName", out var csvLabName)
+            && string.IsNullOrWhiteSpace(csvLabName))
+        {
+            row.Fields["LabName"] = labName;
+        }
+        else if (!row.Fields.ContainsKey("LabName"))
+        {
+            row.Fields["LabName"] = labName;
+        }
+
+        row.RowHash = ComputeRowHash(row, hashFields);
+        return row;
     }
 
     /// <summary>
-    /// Parses CSV lines handling RFC 4180 quoted fields (fields with commas, quotes, newlines).
+    /// Reads the next complete RFC 4180 CSV record from the stream.
+    /// Handles quoted fields containing commas, quotes, and newlines.
+    /// Returns null at end-of-stream.
     /// </summary>
-    private static List<string[]> ParseCsvLines(string filePath)
+    private static string[]? ReadNextRecord(StreamReader reader)
     {
-        var result = new List<string[]>();
-        using var reader = new StreamReader(filePath, Encoding.UTF8);
-
         var fields = new List<string>();
         var currentField = new StringBuilder();
         bool inQuotes = false;
+        bool hasData = false;
 
         while (true)
         {
             var line = reader.ReadLine();
             if (line is null)
             {
-                if (fields.Count > 0 || currentField.Length > 0)
+                if (hasData)
                 {
                     fields.Add(currentField.ToString());
-                    result.Add(fields.ToArray());
+                    return fields.ToArray();
                 }
-                break;
+                return null;
             }
 
+            hasData = true;
             int ci = 0;
             if (inQuotes)
-            {
                 currentField.Append('\n');
-            }
 
             while (ci < line.Length)
             {
@@ -157,14 +203,13 @@ public static class CsvFileReader
                 currentField.Clear();
 
                 if (fields.Count > 0 && !fields.All(string.IsNullOrWhiteSpace))
-                {
-                    result.Add(fields.ToArray());
-                }
+                    return fields.ToArray();
+
+                // Empty row — reset and continue to next record
                 fields.Clear();
+                hasData = false;
             }
         }
-
-        return result;
     }
 
     /// <summary>Builds a case-insensitive header-to-column-index map.</summary>

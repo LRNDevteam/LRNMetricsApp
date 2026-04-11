@@ -232,28 +232,23 @@
 
 /* ── Card footer ────────────────────────────────────────────────── */
 .lab-card-footer {
-    padding: .55rem .7rem .65rem;
+    padding: .45rem .6rem .55rem;
     background: #fff;
     border-top: 1px solid #f1f5f9;
 }
 .lab-card-footer .fc-row {
-    display: flex; gap: .35rem; flex-wrap: wrap;
+    display: flex; gap: .25rem; flex-wrap: nowrap;
     align-items: center; justify-content: center;
-}
-.lab-card-footer .fc-row-claim {
-    display: flex; gap: .35rem; flex-wrap: wrap;
-    align-items: center; justify-content: center;
-    margin-top: .4rem; padding-top: .4rem;
-    border-top: 1px dashed #e2e8f0;
+    overflow-x: auto;
 }
 .fc-btn {
-    font-size: .62rem; font-weight: 700; letter-spacing: .02em;
-    border-radius: 7px; padding: .3rem .55rem;
+    font-size: .54rem; font-weight: 700; letter-spacing: .02em;
+    border-radius: 6px; padding: .22rem .42rem;
     border: 1.5px solid transparent;
     text-align: center; text-decoration: none;
     white-space: nowrap;
     transition: all .14s ease; cursor: pointer;
-    display: inline-block;
+    display: inline-block; flex-shrink: 0;
 }
 .fc-btn-primary {
     color: #fff; border-color: transparent;
@@ -316,43 +311,57 @@
 .wl-wrap {
     border-radius: 16px; overflow: hidden;
     background: #fff;
-    border: 1px solid #e8ecf2;
-    box-shadow: 0 2px 12px rgba(0,0,0,.04);
+    border: 1px solid rgba(0,0,0,.06);
+    box-shadow: 0 4px 20px rgba(0,0,0,.06);
 }
 .wl-table {
     width: 100%; border-collapse: collapse;
-    font-size: .8rem;
+    font-size: .78rem;
 }
 .wl-table thead th {
-    background: #f8fafc; color: #64748b;
-    font-weight: 700; font-size: .68rem; letter-spacing: .06em;
+    background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
+    color: rgba(255,255,255,.88);
+    font-weight: 700; font-size: .66rem; letter-spacing: .06em;
     text-transform: uppercase;
-    padding: .65rem .9rem;
-    border-bottom: 1.5px solid #e2e8f0;
+    padding: .7rem 1rem;
+    border-bottom: none;
     text-align: left; white-space: nowrap;
 }
+.wl-table thead th:first-child { border-radius: 0; }
+.wl-table thead th:last-child  { border-radius: 0; }
 .wl-table tbody tr {
-    border-bottom: 1px solid #f1f5f9;
-    transition: background .1s;
+    border-bottom: 1px solid #f0f3f7;
+    transition: all .18s ease;
 }
+.wl-table tbody tr:nth-child(even) { background: #f8fafb; }
 .wl-table tbody tr:last-child { border-bottom: none; }
-.wl-table tbody tr:hover { background: #f8fafc; }
-.wl-table td { padding: .6rem .9rem; vertical-align: middle; }
+.wl-table tbody tr:hover {
+    background: linear-gradient(90deg, rgba(21,101,192,.04), rgba(13,92,116,.06));
+    box-shadow: 0 0 18px rgba(21,101,192,.10), 0 0 6px rgba(13,92,116,.08);
+}
+.wl-table td { padding: .65rem 1rem; vertical-align: middle; }
 
 /* Lab cell with avatar */
 .wl-lab {
-    display: flex; align-items: center; gap: .6rem;
+    display: flex; align-items: center; gap: .65rem;
     min-width: 0;
 }
 .wl-avatar {
-    width: 32px; height: 32px; border-radius: 9px;
+    width: 36px; height: 36px; border-radius: 10px;
     display: grid; place-items: center;
-    font-size: .78rem; font-weight: 800; color: #fff;
+    font-size: .85rem; font-weight: 800; color: #fff;
     flex-shrink: 0;
 }
+.wl-lab-info { min-width: 0; }
 .wl-lab-name {
-    font-weight: 700; font-size: .82rem; color: #1e293b;
+    font-weight: 700; font-size: .88rem; color: #1e293b;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    display: block;
+}
+.wl-lab-sub {
+    display: block; font-size: .62rem; font-weight: 500; color: #94a3b8;
+    margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 220px;
 }
 
 /* Status badge */
@@ -367,40 +376,79 @@
 
 /* Check / dash marks */
 .wl-check { color: #22c55e; font-size: .92rem; font-weight: 700; }
-.wl-dash  { color: #cbd5e1; font-size: .8rem; }
+.wl-dash  { color: #cbd5e1; font-size: .85rem; }
 
-/* File age sub-text */
-.wl-age {
-    display: block; font-size: .6rem; color: #94a3b8; font-weight: 600;
+/* Week cell */
+.wl-week-range {
+    font-size: .78rem; font-weight: 700; color: #1e293b;
+    white-space: nowrap;
+}
+.wl-week-sub {
+    display: block; font-size: .6rem; font-weight: 500; color: #94a3b8;
+    margin-top: 2px;
+}
+.wl-runid-sub {
+    display: block; font-size: .58rem; font-weight: 500; color: #94a3b8;
     margin-top: 1px;
 }
-.wl-age-stale { color: #dc2626; }
+
+/* Icon cluster for Claim / Line columns */
+.wl-icons {
+    display: flex; align-items: center; gap: .3rem;
+    justify-content: center; flex-wrap: nowrap;
+}
+.wl-icon-circle {
+    width: 22px; height: 22px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: .62rem; font-weight: 800; flex-shrink: 0;
+    border: 1.5px solid transparent;
+}
+.wl-icon-ok {
+    background: #dcfce7; color: #22c55e;
+    border-color: #bbf7d0;
+}
+.wl-icon-warn {
+    background: #fee2e2; color: #dc2626;
+    border-color: #fecaca;
+}
+.wl-icon-pending {
+    background: #fef3c7; color: #92400e;
+    border-color: #fde68a;
+    font-size: .7rem;
+}
+.wl-age-badge {
+    font-size: .64rem; font-weight: 700; color: #dc2626;
+    white-space: nowrap; margin-left: .1rem;
+}
+.wl-age-badge-ok {
+    color: #475569;
+}
 
 /* Action buttons */
 .wl-actions {
-    display: flex; gap: .3rem; flex-wrap: wrap; align-items: center;
+    display: flex; gap: .35rem; flex-wrap: nowrap; align-items: center;
 }
 .wl-btn {
-    font-size: .65rem; font-weight: 700; letter-spacing: .01em;
-    border-radius: 7px; padding: .28rem .55rem;
+    font-size: .68rem; font-weight: 700; letter-spacing: .01em;
+    border-radius: 8px; padding: .35rem .7rem;
     border: 1.5px solid transparent;
     text-align: center; text-decoration: none;
     white-space: nowrap; transition: all .14s; cursor: pointer;
-    display: inline-block;
+    display: inline-block; flex-shrink: 0;
 }
 .wl-btn-dash {
     color: #fff; border-color: transparent;
-    box-shadow: 0 1px 4px rgba(0,0,0,.10);
+    box-shadow: 0 2px 6px rgba(0,0,0,.12);
 }
-.wl-btn-dash:hover { filter: brightness(1.12); color: #fff; }
+.wl-btn-dash:hover { filter: brightness(1.12); color: #fff; box-shadow: 0 3px 10px rgba(0,0,0,.18); }
 .wl-btn-out {
     color: #4a6080; background: #f4f7fa; border-color: #dde3ed;
 }
 .wl-btn-out:hover { background: #e2e8f4; border-color: #b0bccc; color: #1a2744; }
 .wl-btn-pred {
-    color: #1565c0; background: #eef3ff; border-color: #c0d4f7;
+    color: #1e293b; background: #fff; border-color: #d1d5db;
 }
-.wl-btn-pred:hover { background: #dde9fd; color: #0d47a1; }
+.wl-btn-pred:hover { background: #f3f4f6; border-color: #9ca3af; color: #0d47a1; }
 .wl-btn-code {
     color: #1565c0; background: #eef3ff; border-color: #c0d4f7;
 }
@@ -409,14 +457,89 @@
     color: #0d7377; background: #e6f7f7; border-color: #b2dfdb;
 }
 .wl-btn-claim:hover { background: #ccefee; color: #004d40; }
-.wl-actions-sep {
-    width: 1px; height: 18px; background: #dde3ed;
-    flex-shrink: 0; margin: 0 .1rem;
-}
 .wl-btn-disabled {
     color: #c0cad8; background: #f8fafc; border-color: #e8ecf2;
     pointer-events: none; opacity: .5;
 }
+
+/* More dropdown */
+.wl-more-wrap {
+    position: relative; display: inline-block;
+}
+.wl-btn-more {
+    font-size: .68rem; font-weight: 700;
+    border-radius: 8px; padding: .35rem .7rem;
+    border: 1.5px solid #d1d5db;
+    background: #fff; color: #1e293b;
+    cursor: pointer; white-space: nowrap;
+    transition: all .14s;
+    display: inline-flex; align-items: center; gap: .25rem;
+}
+.wl-btn-more:hover { background: #f3f4f6; border-color: #9ca3af; }
+.wl-more-menu {
+    display: none; position: absolute; right: 0; top: calc(100% + 4px);
+    background: #fff; border: 1px solid #e5e7eb;
+    border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.12);
+    min-width: 150px; z-index: 50; padding: .3rem 0;
+}
+.wl-more-wrap.open .wl-more-menu { display: block; }
+.wl-more-menu a {
+    display: block; padding: .4rem .8rem;
+    font-size: .68rem; font-weight: 600; color: #374151;
+    text-decoration: none; white-space: nowrap;
+    transition: background .1s;
+}
+.wl-more-menu a:hover { background: #f3f4f6; color: #1e293b; }
+.wl-more-menu .wl-menu-disabled {
+    color: #c0cad8; pointer-events: none; opacity: .5;
+}
+
+/* Search bar */
+.wl-search-bar {
+    display: flex; align-items: center; gap: .5rem;
+    margin-bottom: .75rem;
+    max-width: 320px; margin-left: auto;
+}
+.wl-search-input {
+    width: 100%; padding: .45rem .75rem .45rem 2rem;
+    border: 1.5px solid #d1d5db; border-radius: 10px;
+    font-size: .78rem; font-weight: 500; color: #1e293b;
+    background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='%2394a3b8' viewBox='0 0 24 24'%3E%3Cpath d='M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z'/%3E%3C/svg%3E") no-repeat .6rem center;
+    outline: none; transition: border-color .14s;
+}
+.wl-search-input::placeholder { color: #94a3b8; font-weight: 500; }
+.wl-search-input:focus { border-color: #1565c0; box-shadow: 0 0 0 3px rgba(21,101,192,.1); }
+
+/* Legend footer */
+.wl-legend {
+    padding: .55rem 1rem;
+    border-top: 1px solid #f0f3f7;
+    font-size: .62rem; font-weight: 500; color: #94a3b8;
+    display: flex; align-items: center; gap: .6rem;
+}
+.wl-legend-item {
+    display: inline-flex; align-items: center; gap: .25rem;
+}
+
+/* Row count badge */
+.wl-count {
+    display: inline-block; font-size: .58rem; font-weight: 700;
+    padding: .12em .45em; border-radius: 4px;
+    background: #eef3ff; color: #1565c0;
+    margin-top: 2px;
+}
+.wl-count-line {
+    background: #e6f7f7; color: #0d7377;
+}
+
+/* Card row count */
+.file-count {
+    font-size: .56rem; font-weight: 700;
+    padding: .1em .4em; border-radius: 4px;
+    flex-shrink: 0; margin-top: 2px;
+}
+.file-count-claim { background: #eef3ff; color: #1565c0; }
+.file-count-line  { background: #e6f7f7; color: #0d7377; }
 </style>
 
 <div class="home-page px-3 pt-3">
@@ -510,6 +633,14 @@
                             {
                                 <span class="file-check" style="color:#22c55e">&#10003;</span>
                             }
+                            @if (tile.ClaimRowCount.HasValue)
+                            {
+                                <span class="file-count file-count-claim" title="ClaimLevelData rows">@tile.ClaimRowCount.Value.ToString("N0")</span>
+                            }
+                            else if (tile.LineClaimEnabled)
+                            {
+                                <span class="file-count file-count-claim" title="ClaimLevelData rows unavailable">&mdash;</span>
+                            }
                         </div>
 
                         <!-- Line Level -->
@@ -529,6 +660,14 @@
                             @if (tile.HasLineFile)
                             {
                                 <span class="file-check" style="color:#22c55e">&#10003;</span>
+                            }
+                            @if (tile.LineRowCount.HasValue)
+                            {
+                                <span class="file-count file-count-line" title="LineLevelData rows">@tile.LineRowCount.Value.ToString("N0")</span>
+                            }
+                            else if (tile.LineClaimEnabled)
+                            {
+                                <span class="file-count file-count-line" title="LineLevelData rows unavailable">&mdash;</span>
                             }
                         </div>
 
@@ -599,16 +738,6 @@
                                style="background:linear-gradient(@grad)">
                                 Dashboard
                             </a>
-                            <a asp-controller="Dashboard" asp-action="ClaimLevel"
-                               asp-route-lab="@tile.LabName"
-                               class="fc-btn fc-btn-outline">
-                                Claims
-                            </a>
-                            <a asp-controller="Dashboard" asp-action="LineLevel"
-                               asp-route-lab="@tile.LabName"
-                               class="fc-btn fc-btn-outline">
-                                Lines
-                            </a>
                             @if (tile.PredictionEnabled)
                             {
                                 <a asp-controller="Prediction" asp-action="Index"
@@ -633,11 +762,8 @@
                             {
                                 <span class="fc-btn fc-btn-disabled" title="Coding requires DBEnabled">Coding</span>
                             }
-                        </div>
-                        @if (tile.LineClaimEnabled)
-                        {
-                            <div class="fc-row-claim">
-                                <span style="font-size:.56rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em">Summaries</span>
+                            @if (tile.LineClaimEnabled)
+                            {
                                 <a asp-controller="Dashboard" asp-action="ClinicSummary"
                                    asp-route-lab="@tile.LabName"
                                    class="fc-btn fc-btn-claim">
@@ -648,8 +774,8 @@
                                    class="fc-btn fc-btn-claim">
                                     &#128100; Sales Rep
                                 </a>
-                            </div>
-                        }
+                            }
+                        </div>
                     </div>
 
                 </div>
@@ -658,12 +784,14 @@
         </div><!-- /gridView -->
 
         <div id="tableView" style="display:none">
+        <div class="wl-search-bar">
+            <input type="text" class="wl-search-input" id="wlSearchInput" placeholder="Search labs…" oninput="filterWorklistRows()" />
+        </div>
         <div class="wl-wrap">
             <table class="wl-table">
                 <thead>
                     <tr>
                         <th>Lab</th>
-                        <th>Run ID</th>
                         <th>Week</th>
                         <th>Claim</th>
                         <th>Line</th>
@@ -672,47 +800,80 @@
                         <th>Actions</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="wlTableBody">
                     @for (int i = 0; i < Model.LabTiles.Count; i++)
                     {
                         var tile = Model.LabTiles[i];
                         var grad = palette[i % palette.Length];
                         var initial = tile.LabName.Length > 0 ? tile.LabName[0].ToString().ToUpper() : "L";
+                        var claimAgeDays = tile.ClaimFileAgeHours.HasValue ? (int)(tile.ClaimFileAgeHours.Value / 24) : (int?)null;
+                        var lineAgeDays  = tile.LineFileAgeHours.HasValue  ? (int)(tile.LineFileAgeHours.Value  / 24) : (int?)null;
+                        var isHighPriority = tile.IsClaimAgeStale || tile.IsLineAgeStale;
 
-                        <tr>
+                        @* Build lab sub-text *@
+                        var labSubParts = new List<string>();
+                        if (tile.ClaimFileAgeText is not null)
+                        {
+                            labSubParts.Add($"Last updated: {tile.ClaimFileAgeText}");
+                        }
+                        if (tile.SourceRunId is not null)
+                        {
+                            labSubParts.Add($"Run: {tile.SourceRunId}");
+                        }
+                        var labSubText = labSubParts.Count > 0 ? string.Join(" \u00b7 ", labSubParts) : null;
+
+                        @* High priority sub-text *@
+                        var priorityParts = new List<string>();
+                        if (isHighPriority)
+                        {
+                            priorityParts.Add("High priority");
+                            if (tile.IsClaimAgeStale && claimAgeDays.HasValue) priorityParts.Add($"Claim age {claimAgeDays}d");
+                            if (tile.IsLineAgeStale && lineAgeDays.HasValue) priorityParts.Add($"Line age {lineAgeDays}d");
+                        }
+                        var priorityText = priorityParts.Count > 0 ? string.Join(" \u00b7 ", priorityParts) : null;
+
+                        <tr data-lab="@tile.LabName.ToLowerInvariant()">
                             @* Lab *@
                             <td>
                                 <div class="wl-lab">
                                     <div class="wl-avatar" style="background:linear-gradient(@grad)">@initial</div>
-                                    <span class="wl-lab-name">@tile.LabName</span>
+                                    <div class="wl-lab-info">
+                                        <span class="wl-lab-name">@tile.LabName</span>
+                                        @if (isHighPriority && priorityText is not null)
+                                        {
+                                            <span class="wl-lab-sub" style="color:#dc2626" title="@priorityText">@priorityText</span>
+                                        }
+                                        else if (labSubText is not null)
+                                        {
+                                            <span class="wl-lab-sub" title="@labSubText">@labSubText</span>
+                                        }
+                                    </div>
                                 </div>
-                            </td>
-
-                            @* Run ID *@
-                            <td>
-                                @if (tile.SourceRunId is not null)
-                                {
-                                    <span style="font-size:.72rem;font-weight:700;color:#1e293b">@tile.SourceRunId</span>
-                                }
-                                else
-                                {
-                                    <span class="wl-dash">&mdash;</span>
-                                }
                             </td>
 
                             @* Week *@
                             <td>
                                 @if (tile.WeekRange is not null)
                                 {
-                                    <span style="font-size:.68rem;color:#475569;font-weight:600" title="@tile.WeekRange">@tile.WeekRange</span>
-                                }
-                                else if (tile.ClaimFileAgeText is not null)
-                                {
-                                    <span class="wl-age">@tile.ClaimFileAgeText</span>
+                                    var weekParts = tile.WeekRange.Split(" to ", StringSplitOptions.TrimEntries);
+                                    if (weekParts.Length == 2)
+                                    {
+                                        <span class="wl-week-range">@weekParts[0] &rarr; @weekParts[1]</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="wl-week-range">@tile.WeekRange</span>
+                                    }
+                                    <span class="wl-week-sub">Week window</span>
+                                    @if (tile.SourceRunId is not null)
+                                    {
+                                        <span class="wl-runid-sub">Run: @tile.SourceRunId</span>
+                                    }
                                 }
                                 else
                                 {
-                                    <span class="wl-dash">&mdash;</span>
+                                    <span class="wl-dash" style="font-size:1rem;font-weight:700">&mdash;</span>
+                                    <span class="wl-week-sub">No week data</span>
                                 }
                             </td>
 
@@ -720,11 +881,17 @@
                             <td style="text-align:center">
                                 @if (tile.HasClaimFile)
                                 {
-                                    <span class="wl-check" title="@tile.ClaimFilePath">&#10003;</span>
-                                    if (tile.ClaimFileAgeText is not null)
-                                    {
-                                        <span class="@(tile.IsClaimAgeStale ? "wl-age wl-age-stale" : "wl-age")">@tile.ClaimFileAgeText</span>
-                                    }
+                                    <div class="wl-icons">
+                                        <span class="wl-icon-circle wl-icon-ok" title="@tile.ClaimFilePath">&#10003;</span>
+                                        @if (tile.IsClaimAgeStale)
+                                        {
+                                            <span class="wl-icon-circle wl-icon-warn" title="Stale: @tile.ClaimFileAgeText">!</span>
+                                        }
+                                        @if (claimAgeDays.HasValue)
+                                        {
+                                            <span class="wl-age-badge @(tile.IsClaimAgeStale ? "" : "wl-age-badge-ok")">@(claimAgeDays)d</span>
+                                        }
+                                    </div>
                                 }
                                 else
                                 {
@@ -736,11 +903,17 @@
                             <td style="text-align:center">
                                 @if (tile.HasLineFile)
                                 {
-                                    <span class="wl-check" title="@tile.LineFilePath">&#10003;</span>
-                                    if (tile.LineFileAgeText is not null)
-                                    {
-                                        <span class="@(tile.IsLineAgeStale ? "wl-age wl-age-stale" : "wl-age")">@tile.LineFileAgeText</span>
-                                    }
+                                    <div class="wl-icons">
+                                        <span class="wl-icon-circle wl-icon-ok" title="@tile.LineFilePath">&#10003;</span>
+                                        @if (tile.IsLineAgeStale)
+                                        {
+                                            <span class="wl-icon-circle wl-icon-warn" title="Stale: @tile.LineFileAgeText">!</span>
+                                        }
+                                        @if (lineAgeDays.HasValue)
+                                        {
+                                            <span class="wl-age-badge @(tile.IsLineAgeStale ? "" : "wl-age-badge-ok")">@(lineAgeDays)d</span>
+                                        }
+                                    </div>
                                 }
                                 else
                                 {
@@ -752,11 +925,11 @@
                             <td style="text-align:center">
                                 @if (tile.IsPredictionPending)
                                 {
-                                    <span class="wl-status wl-status-partial" title="Source: @tile.SourceRunId | Prediction: @tile.PredictionRunId">Pending</span>
+                                    <span class="wl-icon-circle wl-icon-pending" title="Pending – Source: @tile.SourceRunId | Prediction: @tile.PredictionRunId">&#9203;</span>
                                 }
                                 else if (tile.HasPredictionFile || tile.DBEnabled)
                                 {
-                                    <span class="wl-check">&#10003;</span>
+                                    <span class="wl-icon-circle wl-icon-ok">&#10003;</span>
                                 }
                                 else
                                 {
@@ -768,11 +941,11 @@
                             <td style="text-align:center">
                                 @if (tile.IsCodingPending)
                                 {
-                                    <span class="wl-status wl-status-partial" title="Source: @tile.SourceRunId | Coding: @tile.CodingRunId">Pending</span>
+                                    <span class="wl-icon-circle wl-icon-pending" title="Pending – Source: @tile.SourceRunId | Coding: @tile.CodingRunId">&#9203;</span>
                                 }
                                 else if (tile.HasCodingMasterFile || tile.CodingEnabled)
                                 {
-                                    <span class="wl-check">&#10003;</span>
+                                    <span class="wl-icon-circle wl-icon-ok">&#10003;</span>
                                 }
                                 else
                                 {
@@ -787,33 +960,38 @@
                                        asp-route-lab="@tile.LabName"
                                        class="wl-btn wl-btn-dash"
                                        style="background:linear-gradient(@grad)">Dashboard</a>
-                                    <a asp-controller="Dashboard" asp-action="ClaimLevel"
-                                       asp-route-lab="@tile.LabName"
-                                       class="wl-btn wl-btn-out">Claims</a>
-                                    <a asp-controller="Dashboard" asp-action="LineLevel"
-                                       asp-route-lab="@tile.LabName"
-                                       class="wl-btn wl-btn-out">Lines</a>
                                     @if (tile.PredictionEnabled)
                                     {
                                         <a asp-controller="Prediction" asp-action="Index"
                                            asp-route-lab="@tile.LabName"
                                            class="wl-btn wl-btn-pred">Prediction</a>
                                     }
-                                    @if (tile.CodingEnabled)
-                                    {
-                                        <a asp-controller="Coding" asp-action="Summary"
-                                           asp-route-lab="@tile.LabName"
-                                           class="wl-btn wl-btn-code">Coding</a>
+                                    @{
+                                        var hasMoreItems = tile.CodingEnabled || tile.LineClaimEnabled;
                                     }
-                                    @if (tile.LineClaimEnabled)
+                                    @if (hasMoreItems)
                                     {
-                                        <span class="wl-actions-sep"></span>
-                                        <a asp-controller="Dashboard" asp-action="ClinicSummary"
-                                           asp-route-lab="@tile.LabName"
-                                           class="wl-btn wl-btn-claim">&#127973; Clinic</a>
-                                        <a asp-controller="Dashboard" asp-action="SalesRepSummary"
-                                           asp-route-lab="@tile.LabName"
-                                           class="wl-btn wl-btn-claim">&#128100; Sales Rep</a>
+                                        <div class="wl-more-wrap">
+                                            <button class="wl-btn-more" onclick="toggleMore(this, event)">More &#9662;</button>
+                                            <div class="wl-more-menu">
+                                                @if (tile.CodingEnabled)
+                                                {
+                                                    <a asp-controller="Coding" asp-action="Summary"
+                                                       asp-route-lab="@tile.LabName">Coding</a>
+                                                }
+                                                @if (tile.LineClaimEnabled)
+                                                {
+                                                    <a asp-controller="Dashboard" asp-action="ClinicSummary"
+                                                       asp-route-lab="@tile.LabName">&#127973; Clinic</a>
+                                                    <a asp-controller="Dashboard" asp-action="SalesRepSummary"
+                                                       asp-route-lab="@tile.LabName">&#128100; Sales Rep</a>
+                                                }
+                                            </div>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <span class="wl-btn wl-btn-disabled" style="font-size:.68rem;padding:.35rem .7rem">More &#9662;</span>
                                     }
                                 </div>
                             </td>
@@ -821,6 +999,14 @@
                     }
                 </tbody>
             </table>
+            <div class="wl-legend">
+                <span>Icons:</span>
+                <span class="wl-legend-item"><span class="wl-icon-circle wl-icon-ok" style="width:16px;height:16px;font-size:.5rem">&#10003;</span> done/ready</span>
+                <span>&middot;</span>
+                <span class="wl-legend-item"><span class="wl-icon-circle wl-icon-pending" style="width:16px;height:16px;font-size:.52rem">&#9203;</span> pending</span>
+                <span>&middot;</span>
+                <span class="wl-legend-item"><span class="wl-icon-circle wl-icon-warn" style="width:16px;height:16px;font-size:.5rem">!</span> attention/overdue</span>
+            </div>
         </div>
         </div><!-- /tableView -->
     }
@@ -850,10 +1036,29 @@ function switchView(view) {
         btnGrid.classList.add('active');
         btnTbl.classList.remove('active');
     }
-    // Remember preference
     try { localStorage.setItem('homeView', view); } catch(e) {}
 }
-// Restore saved preference
+
+function filterWorklistRows() {
+    var q = (document.getElementById('wlSearchInput').value || '').toLowerCase();
+    var rows = document.querySelectorAll('#wlTableBody tr[data-lab]');
+    rows.forEach(function(row) {
+        row.style.display = row.getAttribute('data-lab').indexOf(q) >= 0 ? '' : 'none';
+    });
+}
+
+function toggleMore(btn, e) {
+    e.stopPropagation();
+    var wrap = btn.closest('.wl-more-wrap');
+    var wasOpen = wrap.classList.contains('open');
+    document.querySelectorAll('.wl-more-wrap.open').forEach(function(el) { el.classList.remove('open'); });
+    if (!wasOpen) wrap.classList.add('open');
+}
+
+document.addEventListener('click', function() {
+    document.querySelectorAll('.wl-more-wrap.open').forEach(function(el) { el.classList.remove('open'); });
+});
+
 document.addEventListener('DOMContentLoaded', function() {
     try {
         var saved = localStorage.getItem('homeView');

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
 
 namespace LabMetricsDashboard.Controllers;
 
@@ -36,6 +37,10 @@ public class HomeController : Controller
                 var dbEnabled  = labConfig?.DBEnabled == true;
                 var lineClaimEnabled = labConfig?.LineClaimEnable == true;
 
+                var (claimCount, lineCount) = lineClaimEnabled
+                    ? GetClaimLineCounts(labConfig?.DbConnectionString, _logger)
+                    : (null, null);
+
                 return new LabTileViewModel
                 {
                     LabName               = labName,
@@ -58,6 +63,8 @@ public class HomeController : Controller
                     WeekRange             = ExtractWeekRange(claimPath),
                     ClaimFileAgeHours     = GetFileAgeHours(claimPath),
                     LineFileAgeHours      = GetFileAgeHours(linePath),
+                    ClaimRowCount         = claimCount,
+                    LineRowCount          = lineCount,
                 };
             })
             .ToList();
@@ -102,6 +109,42 @@ public class HomeController : Controller
         if (lastUnderscore < 0 || lastUnderscore >= name.Length - 1) return null;
         var range = name[(lastUnderscore + 1)..];
         return range.Contains("to", StringComparison.OrdinalIgnoreCase) ? range : null;
+    }
+
+    /// <summary>
+    /// Queries row counts from ClaimLevelData and LineLevelData.
+    /// Returns (null, null) when the connection string is missing or the query fails.
+    /// </summary>
+    private static (int? ClaimCount, int? LineCount) GetClaimLineCounts(
+        string? connectionString, ILogger logger)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+            return (null, null);
+
+        try
+        {
+            using var conn = new SqlConnection(connectionString);
+            conn.Open();
+
+            using var cmd = new SqlCommand(
+                "SELECT (SELECT COUNT(RunId) FROM dbo.ClaimLevelData), (SELECT COUNT(RunId) FROM dbo.LineLevelData)",
+                conn);
+            cmd.CommandTimeout = 30;
+
+            using var reader = cmd.ExecuteReader();
+            if (reader.Read())
+            {
+                var claim = reader.IsDBNull(0) ? (int?)null : reader.GetInt32(0);
+                var line  = reader.IsDBNull(1) ? (int?)null : reader.GetInt32(1);
+                return (claim, line);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to query ClaimLevel/LineLevel row counts.");
+        }
+
+        return (null, null);
     }
 
     [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]

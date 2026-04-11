@@ -120,14 +120,19 @@ foreach (var lab in labConfigs)
                     log.Info($"  [Claim Level] Copying to working folder…");
                     File.Copy(claimFilePath, claimWorkingPath, overwrite: true);
 
-                    log.Info($"  [Claim Level] Reading CSV…");
-                    var claimRows = CsvFileReader.ReadCsv(claimWorkingPath, lab.LabName, claimWeekFolder, runId, fieldMappings.ClaimLevel, claimFilePath);
-                    log.Info($"  [Claim Level] Read complete : {claimRows.Count} rows.");
+                    log.Info($"  [Claim Level] Streaming CSV in batches of {CsvFileReader.DefaultBatchSize}…");
+                    var claimBatches = CsvFileReader.ReadCsvBatches(
+                        claimWorkingPath, lab.LabName, claimWeekFolder, runId,
+                        fieldMappings.ClaimLevel, claimFilePath);
 
-                    log.Info($"  [Claim Level] Inserting rows…");
-                    var inserted = db.InsertRows(claimRows, lab.LabName, claimWeekFolder, fieldMappings.ClaimLevel);
+                    var inserted = db.StreamingInsert(
+                        claimBatches, lab.LabName, claimWeekFolder,
+                        fieldMappings.ClaimLevel, claimFilePath,
+                        onBatchLoaded: (batch, count) =>
+                            log.Info($"  [Claim Level] Batch {batch} loaded — {count} rows."));
+
                     log.Info(inserted > 0
-                        ? $"  [Claim Level] Inserted : {inserted} rows."
+                        ? $"  [Claim Level] Total inserted : {inserted} rows."
                         : $"  [Claim Level] Already loaded — skipped.");
                     anyProcessed = inserted > 0;
                 }
@@ -177,14 +182,19 @@ foreach (var lab in labConfigs)
                     log.Info($"  [Line Level] Copying to working folder…");
                     File.Copy(lineFilePath, lineWorkingPath, overwrite: true);
 
-                    log.Info($"  [Line Level] Reading CSV…");
-                    var lineRows = CsvFileReader.ReadCsv(lineWorkingPath, lab.LabName, lineWeekFolder, runId, fieldMappings.LineLevel, lineFilePath);
-                    log.Info($"  [Line Level] Read complete : {lineRows.Count} rows.");
+                    log.Info($"  [Line Level] Streaming CSV in batches of {CsvFileReader.DefaultBatchSize}…");
+                    var lineBatches = CsvFileReader.ReadCsvBatches(
+                        lineWorkingPath, lab.LabName, lineWeekFolder, runId,
+                        fieldMappings.LineLevel, lineFilePath);
 
-                    log.Info($"  [Line Level] Inserting rows…");
-                    var inserted = db.InsertRows(lineRows, lab.LabName, lineWeekFolder, fieldMappings.LineLevel);
+                    var inserted = db.StreamingInsert(
+                        lineBatches, lab.LabName, lineWeekFolder,
+                        fieldMappings.LineLevel, lineFilePath,
+                        onBatchLoaded: (batch, count) =>
+                            log.Info($"  [Line Level] Batch {batch} loaded — {count} rows."));
+
                     log.Info(inserted > 0
-                        ? $"  [Line Level] Inserted : {inserted} rows."
+                        ? $"  [Line Level] Total inserted : {inserted} rows."
                         : $"  [Line Level] Already loaded — skipped.");
                     anyProcessed = anyProcessed || inserted > 0;
                 }
