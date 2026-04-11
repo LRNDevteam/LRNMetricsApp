@@ -237,6 +237,11 @@
                                         &#128100; Sales Rep Summary
                                     </a>
                                 </li>
+                            @*     <li>
+                                    <a class="dropdown-item" asp-controller="Usage" asp-action="Index">
+                                        &#128100; Usage Monitor
+                                    </a>
+                                </li> *@
                             </ul>
                         </li>
                     </ul>
@@ -315,6 +320,116 @@
                 document.getElementById('lmd-loader').classList.remove('active');
             }
         });
+    </script>
+
+    <script>
+        (function () {
+            const heartbeatUrl = '@Url.Action("Heartbeat", "Usage")';
+            if (!heartbeatUrl || !window.fetch || !window.sessionStorage) {
+                return;
+            }
+
+            const tabStorageKey = 'lmd.usage.tabid';
+            let tabId = sessionStorage.getItem(tabStorageKey);
+            if (!tabId) {
+                tabId = (window.crypto && window.crypto.randomUUID)
+                    ? window.crypto.randomUUID()
+                    : ('tab-' + Math.random().toString(36).slice(2) + Date.now().toString(36));
+                sessionStorage.setItem(tabStorageKey, tabId);
+            }
+
+            let lastActionAt = Date.now();
+            let geo = null;
+            let lastSent = 0;
+            let pendingLocationSend = false;
+
+            function pageTitle() {
+                return (document.title || '').replace(/\s*-\s*Lab Revenue Intelligence\s*$/i, '').trim() || 'Unknown';
+            }
+
+            function currentIdleSeconds() {
+                return Math.max(0, Math.floor((Date.now() - lastActionAt) / 1000));
+            }
+
+            function markActivity() {
+                lastActionAt = Date.now();
+            }
+
+            ['click', 'keydown', 'mousemove', 'scroll', 'touchstart', 'focus'].forEach(function (evt) {
+                window.addEventListener(evt, markActivity, { passive: true });
+            });
+
+            document.addEventListener('visibilitychange', function () {
+                if (!document.hidden) {
+                    markActivity();
+                }
+                sendHeartbeat(true);
+            });
+
+            function buildPayload() {
+                return {
+                    tabId: tabId,
+                    pageName: pageTitle(),
+                    path: window.location.pathname,
+                    queryString: window.location.search || '',
+                    idleSeconds: currentIdleSeconds(),
+                    latitude: geo ? geo.latitude : null,
+                    longitude: geo ? geo.longitude : null,
+                    locationText: geo ? geo.locationText : null
+                };
+            }
+
+            function sendHeartbeat(force) {
+                const now = Date.now();
+                if (!force && (now - lastSent) < 12000) {
+                    return;
+                }
+                lastSent = now;
+
+                const body = JSON.stringify(buildPayload());
+                fetch(heartbeatUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Lmd-TabId': tabId
+                    },
+                    body: body,
+                    credentials: 'same-origin',
+                    keepalive: true
+                }).catch(function () { });
+            }
+
+            window.addEventListener('pagehide', function () {
+                const body = JSON.stringify(buildPayload());
+                if (navigator.sendBeacon) {
+                    const blob = new Blob([body], { type: 'application/json' });
+                    navigator.sendBeacon(heartbeatUrl, blob);
+                } else {
+                    sendHeartbeat(true);
+                }
+            });
+
+            if (navigator.permissions && navigator.geolocation) {
+                navigator.permissions.query({ name: 'geolocation' }).then(function (result) {
+                    if (result.state === 'granted') {
+                        navigator.geolocation.getCurrentPosition(function (position) {
+                            geo = {
+                                latitude: Number(position.coords.latitude.toFixed(6)),
+                                longitude: Number(position.coords.longitude.toFixed(6)),
+                                locationText: Number(position.coords.latitude).toFixed(6) + ', ' + Number(position.coords.longitude).toFixed(6)
+                            };
+                            pendingLocationSend = true;
+                            sendHeartbeat(true);
+                        }, function () { }, { enableHighAccuracy: false, maximumAge: 600000, timeout: 8000 });
+                    }
+                }).catch(function () { });
+            }
+
+            sendHeartbeat(true);
+            window.setInterval(function () {
+                sendHeartbeat(false);
+            }, 15000);
+        })();
     </script>
 
     @await RenderSectionAsync("Scripts", required: false)

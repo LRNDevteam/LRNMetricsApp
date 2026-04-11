@@ -1,3 +1,4 @@
+using LabMetricsDashboard.Filters;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
 
@@ -50,7 +51,12 @@ builder.Services.AddScoped<ISalesRepSummaryRepository, SqlSalesRepSummaryReposit
 
 // Add services to the container.
 builder.Services.AddMemoryCache();
-builder.Services.AddControllersWithViews();
+builder.Services.AddScoped<IAppUsageAuditService, SqlAppUsageAuditService>();
+builder.Services.AddScoped<AppUsageAuditFilter>();
+builder.Services.AddControllersWithViews(options =>
+{
+    options.Filters.AddService<AppUsageAuditFilter>();
+});
 
 var app = builder.Build();
 

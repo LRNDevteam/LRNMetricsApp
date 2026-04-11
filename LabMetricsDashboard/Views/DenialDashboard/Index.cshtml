@@ -3,35 +3,35 @@
 @using System.Text.Json
 @model DashboardPageViewModel
 @{
-var usd = CultureInfo.GetCultureInfo("en-US");
-string Money(decimal? amount) => (amount ?? 0m).ToString("C2", usd);
-string PercentWidth(decimal percentage) => Math.Clamp((double)percentage, 0d, 100d).ToString("0.#", CultureInfo.InvariantCulture);
-IReadOnlyList<string> SelectedValues(string? raw, bool treatAllAsEmpty = false)
-{
-    if (string.IsNullOrWhiteSpace(raw)) return Array.Empty<string>();
-
-    var items = raw.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-        .Where(x => !string.IsNullOrWhiteSpace(x))
-        .Distinct(StringComparer.OrdinalIgnoreCase)
-        .ToList();
-
-    if (treatAllAsEmpty && items.Any(x => x.Equals("(All)", StringComparison.OrdinalIgnoreCase)))
+    var usd = CultureInfo.GetCultureInfo("en-US");
+    string Money(decimal? amount) => (amount ?? 0m).ToString("C2", usd);
+    string PercentWidth(decimal percentage) => Math.Clamp((double)percentage, 0d, 100d).ToString("0.#", CultureInfo.InvariantCulture);
+    IReadOnlyList<string> SelectedValues(string? raw, bool treatAllAsEmpty = false)
     {
-        return Array.Empty<string>();
-    }
+        if (string.IsNullOrWhiteSpace(raw)) return Array.Empty<string>();
 
-    return items;
-}
-string SelectedSummary(string? raw, bool treatAllAsEmpty = false)
-{
-    var items = SelectedValues(raw, treatAllAsEmpty);
-    if (items.Count == 0) return string.Empty;
-    return string.Join(", ", items);
-}
-ViewData["Title"] = "Denial Dashboard";
-var today = DateTime.Today;
-var activeTab = Model.Filters.ActiveTab;
-var activeFilters = new List<KeyValuePair<string, string?>>
+        var items = raw.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (treatAllAsEmpty && items.Any(x => x.Equals("(All)", StringComparison.OrdinalIgnoreCase)))
+        {
+            return Array.Empty<string>();
+        }
+
+        return items;
+    }
+    string SelectedSummary(string? raw, bool treatAllAsEmpty = false)
+    {
+        var items = SelectedValues(raw, treatAllAsEmpty);
+        if (items.Count == 0) return string.Empty;
+        return string.Join(", ", items);
+    }
+    ViewData["Title"] = "Denial Dashboard";
+    var today = DateTime.Today;
+    var activeTab = Model.Filters.ActiveTab;
+    var activeFilters = new List<KeyValuePair<string, string?>>
 {
     new("Lab", string.IsNullOrWhiteSpace(Model.CurrentLabName) ? "-" : Model.CurrentLabName),
     new("Status", SelectedSummary(Model.Filters.Status, true)),
@@ -48,1278 +48,1450 @@ var activeFilters = new List<KeyValuePair<string, string?>>
     new("DOS From", Model.Filters.DateOfServiceFrom?.ToString("dd MMM yyyy")),
     new("DOS To", Model.Filters.DateOfServiceTo?.ToString("dd MMM yyyy")),
     new("First Billed From", Model.Filters.FirstBilledDateFrom?.ToString("dd MMM yyyy")),
-    new("First Billed To", Model.Filters.FirstBilledDateTo?.ToString("dd MMM yyyy"))
+    new("First Billed To", Model.Filters.FirstBilledDateTo?.ToString("dd MMM yyyy")),
+    new("Denial Date From", Model.Filters.DenialDateFrom?.ToString("dd MMM yyyy")),
+    new("Denial Date To", Model.Filters.DenialDateTo?.ToString("dd MMM yyyy"))
 }
-.Where(x => !string.IsNullOrWhiteSpace(x.Value) && x.Value != "(All)")
-.ToList();
-string StatusBadge(string status) => status switch
-{
-    "Open" => "badge-soft-primary",
-    "In Progress" => "badge-soft-warning",
-    "Completed" => "badge-soft-success",
-    "On Hold" => "badge-soft-secondary",
-    "Escalated" => "badge-soft-danger",
-    "Closed" => "badge-soft-dark",
-    _ => "badge-soft-info"
-};
-string PriorityBadge(string priority) => priority switch
-{
-    "High" => "badge-soft-danger",
-    "Medium" => "badge-soft-warning",
-    "Low" => "badge-soft-success",
-    _ => "badge-soft-info"
-};
-string SlaBadge(string sla) => sla switch
-{
-    "Overdue" => "badge-soft-danger",
-    "Due Soon" => "badge-soft-warning",
-    "Met" => "badge-soft-success",
-    _ => "badge-soft-primary"
-};
-string RecordsPageUrl(int page, string? tabOverride = null) => Url.Action("Index", "DenialDashboard", new
-{
-    LabId = Model.Filters.LabId,
-    Status = Model.Filters.Status,
-    Priority = Model.Filters.Priority,
-    ActionCategory = Model.Filters.ActionCategory,
-    Deadline = Model.Filters.Deadline,
-    Classification = Model.Filters.Classification,
-    SalesRepname = Model.Filters.SalesRepname,
-    ClinicName = Model.Filters.ClinicName,
-    ReferringProvider = Model.Filters.ReferringProvider,
-    PayerName = Model.Filters.PayerName,
-    PayerType = Model.Filters.PayerType,
-    PanelName = Model.Filters.PanelName,
-    FirstBilledDateFrom = Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"),
-    FirstBilledDateTo = Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"),
-    DateOfServiceFrom = Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"),
-    DateOfServiceTo = Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"),
-    ActiveTab = tabOverride ?? activeTab,
-    Page = page,
-    PageSize = Model.Filters.PageSize,
-    InsightPage = Model.Filters.InsightPage,
-    InsightPageSize = Model.Filters.InsightPageSize,
-    LineItemPage = Model.Filters.LineItemPage,
-    LineItemPageSize = Model.Filters.LineItemPageSize
-}) ?? "#";
-string InsightPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
-{
-    LabId = Model.Filters.LabId,
-    Status = Model.Filters.Status,
-    Priority = Model.Filters.Priority,
-    ActionCategory = Model.Filters.ActionCategory,
-    Deadline = Model.Filters.Deadline,
-    Classification = Model.Filters.Classification,
-    SalesRepname = Model.Filters.SalesRepname,
-    ClinicName = Model.Filters.ClinicName,
-    ReferringProvider = Model.Filters.ReferringProvider,
-    PayerName = Model.Filters.PayerName,
-    PayerType = Model.Filters.PayerType,
-    PanelName = Model.Filters.PanelName,
-    FirstBilledDateFrom = Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"),
-    FirstBilledDateTo = Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"),
-    DateOfServiceFrom = Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"),
-    DateOfServiceTo = Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"),
-    ActiveTab = "denial-insight",
-    Page = Model.Filters.Page,
-    PageSize = Model.Filters.PageSize,
-    InsightPage = page,
-    InsightPageSize = Model.Filters.InsightPageSize,
-    LineItemPage = Model.Filters.LineItemPage,
-    LineItemPageSize = Model.Filters.LineItemPageSize
-}) ?? "#";
-string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
-{
-    LabId = Model.Filters.LabId,
-    Status = Model.Filters.Status,
-    Priority = Model.Filters.Priority,
-    ActionCategory = Model.Filters.ActionCategory,
-    Deadline = Model.Filters.Deadline,
-    Classification = Model.Filters.Classification,
-    SalesRepname = Model.Filters.SalesRepname,
-    ClinicName = Model.Filters.ClinicName,
-    ReferringProvider = Model.Filters.ReferringProvider,
-    PayerName = Model.Filters.PayerName,
-    PayerType = Model.Filters.PayerType,
-    PanelName = Model.Filters.PanelName,
-    FirstBilledDateFrom = Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"),
-    FirstBilledDateTo = Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"),
-    DateOfServiceFrom = Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"),
-    DateOfServiceTo = Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"),
-    ActiveTab = "line-item",
-    Page = Model.Filters.Page,
-    PageSize = Model.Filters.PageSize,
-    InsightPage = Model.Filters.InsightPage,
-    InsightPageSize = Model.Filters.InsightPageSize,
-    LineItemPage = page,
-    LineItemPageSize = Model.Filters.LineItemPageSize
-}) ?? "#";
+    .Where(x => !string.IsNullOrWhiteSpace(x.Value) && x.Value != "(All)")
+    .ToList();
+    string StatusBadge(string status) => status switch
+    {
+        "Open" => "badge-soft-primary",
+        "In Progress" => "badge-soft-warning",
+        "Completed" => "badge-soft-success",
+        "On Hold" => "badge-soft-secondary",
+        "Escalated" => "badge-soft-danger",
+        "Closed" => "badge-soft-dark",
+        _ => "badge-soft-info"
+    };
+    string PriorityBadge(string priority) => priority switch
+    {
+        "High" => "badge-soft-danger",
+        "Medium" => "badge-soft-warning",
+        "Low" => "badge-soft-success",
+        _ => "badge-soft-info"
+    };
+    string SlaBadge(string sla) => sla switch
+    {
+        "Overdue" => "badge-soft-danger",
+        "Due Soon" => "badge-soft-warning",
+        "Met" => "badge-soft-success",
+        _ => "badge-soft-primary"
+    };
+    string RecordsPageUrl(int page, string? tabOverride = null) => Url.Action("Index", "DenialDashboard", new
+    {
+        LabId = Model.Filters.LabId,
+        Status = Model.Filters.Status,
+        Priority = Model.Filters.Priority,
+        ActionCategory = Model.Filters.ActionCategory,
+        Deadline = Model.Filters.Deadline,
+        Classification = Model.Filters.Classification,
+        SalesRepname = Model.Filters.SalesRepname,
+        ClinicName = Model.Filters.ClinicName,
+        ReferringProvider = Model.Filters.ReferringProvider,
+        PayerName = Model.Filters.PayerName,
+        PayerType = Model.Filters.PayerType,
+        PanelName = Model.Filters.PanelName,
+        FirstBilledDateFrom = Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"),
+        FirstBilledDateTo = Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"),
+        DateOfServiceFrom = Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"),
+        DateOfServiceTo = Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"),
+        DenialDateFrom = Model.Filters.DenialDateFrom?.ToString("yyyy-MM-dd"),
+        DenialDateTo = Model.Filters.DenialDateTo?.ToString("yyyy-MM-dd"),
+        ActiveTab = tabOverride ?? activeTab,
+        Page = page,
+        PageSize = Model.Filters.PageSize,
+        InsightPage = Model.Filters.InsightPage,
+        InsightPageSize = Model.Filters.InsightPageSize,
+        LineItemPage = Model.Filters.LineItemPage,
+        LineItemPageSize = Model.Filters.LineItemPageSize
+    }) ?? "#";
+    string InsightPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
+    {
+        LabId = Model.Filters.LabId,
+        Status = Model.Filters.Status,
+        Priority = Model.Filters.Priority,
+        ActionCategory = Model.Filters.ActionCategory,
+        Deadline = Model.Filters.Deadline,
+        Classification = Model.Filters.Classification,
+        SalesRepname = Model.Filters.SalesRepname,
+        ClinicName = Model.Filters.ClinicName,
+        ReferringProvider = Model.Filters.ReferringProvider,
+        PayerName = Model.Filters.PayerName,
+        PayerType = Model.Filters.PayerType,
+        PanelName = Model.Filters.PanelName,
+        FirstBilledDateFrom = Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"),
+        FirstBilledDateTo = Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"),
+        DateOfServiceFrom = Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"),
+        DateOfServiceTo = Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"),
+        DenialDateFrom = Model.Filters.DenialDateFrom?.ToString("yyyy-MM-dd"),
+        DenialDateTo = Model.Filters.DenialDateTo?.ToString("yyyy-MM-dd"),
+        ActiveTab = "denial-insight",
+        Page = Model.Filters.Page,
+        PageSize = Model.Filters.PageSize,
+        InsightPage = page,
+        InsightPageSize = Model.Filters.InsightPageSize,
+        LineItemPage = Model.Filters.LineItemPage,
+        LineItemPageSize = Model.Filters.LineItemPageSize
+    }) ?? "#";
+    string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
+    {
+        LabId = Model.Filters.LabId,
+        Status = Model.Filters.Status,
+        Priority = Model.Filters.Priority,
+        ActionCategory = Model.Filters.ActionCategory,
+        Deadline = Model.Filters.Deadline,
+        Classification = Model.Filters.Classification,
+        SalesRepname = Model.Filters.SalesRepname,
+        ClinicName = Model.Filters.ClinicName,
+        ReferringProvider = Model.Filters.ReferringProvider,
+        PayerName = Model.Filters.PayerName,
+        PayerType = Model.Filters.PayerType,
+        PanelName = Model.Filters.PanelName,
+        FirstBilledDateFrom = Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"),
+        FirstBilledDateTo = Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"),
+        DateOfServiceFrom = Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"),
+        DateOfServiceTo = Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"),
+        DenialDateFrom = Model.Filters.DenialDateFrom?.ToString("yyyy-MM-dd"),
+        DenialDateTo = Model.Filters.DenialDateTo?.ToString("yyyy-MM-dd"),
+        ActiveTab = "line-item",
+        Page = Model.Filters.Page,
+        PageSize = Model.Filters.PageSize,
+        InsightPage = Model.Filters.InsightPage,
+        InsightPageSize = Model.Filters.InsightPageSize,
+        LineItemPage = page,
+        LineItemPageSize = Model.Filters.LineItemPageSize
+    }) ?? "#";
 }
 <style>
-   .filter-shell {
-   border-radius: 1rem;
-   background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
-   }
-   .section-title {
-   font-size: 1.05rem;
-   font-weight: 700;
-   color: #1b3a5c;
-   letter-spacing: .01em;
-   }
-   .section-subtitle {
-   color: #6b7280;
-   font-size: .92rem;
-   margin-top: .15rem;
-   }
-   .filter-select,
-   .table-search-input,
-   .accordion-search-input {
-   border-radius: .75rem;
-   border: 1px solid #d8e2ee;
-   min-height: 42px;
-   }
-   .filter-select:focus,
-   .table-search-input:focus,
-   .accordion-search-input:focus {
-   border-color: #5b9df9;
-   box-shadow: 0 0 0 .2rem rgba(91, 157, 249, .15);
-   }
-   .msf { position: relative; }
-   .msf-toggle { display: flex; align-items: center; min-height: 42px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-   .msf-menu {
-   position: absolute;
-   inset: calc(100% + .35rem) 0 auto 0;
-   z-index: 1080;
-   background: #fff;
-   border: 1px solid #d8e2ee;
-   border-radius: .9rem;
-   padding: .6rem;
-   }
-   .msf-search-wrap { margin-bottom: .45rem; }
-   .msf-actions { display: flex; justify-content: space-between; font-size: .82rem; margin-bottom: .45rem; }
-   .msf-options { max-height: 210px; overflow: auto; display: grid; gap: .2rem; }
-   .msf-option { display: flex; align-items: center; gap: .5rem; padding: .3rem .25rem; border-radius: .55rem; cursor: pointer; }
-   .msf-option:hover { background: #f4f8fd; }
-   .msf-option input { margin: 0; }
-   .msf-empty { padding: .5rem .35rem; color: #6b7280; font-size: .85rem; }
-   .chip {
-   display: inline-flex;
-   align-items: center;
-   gap: .35rem;
-   padding: .35rem .7rem;
-   border-radius: 999px;
-   background: #eef4fb;
-   color: #294766;
-   font-size: .8rem;
-   font-weight: 600;
-   border: 1px solid #d9e5f2;
-   }
-   .chip-muted {
-   background: #f3f4f6;
-   border-color: #e5e7eb;
-   color: #4b5563;
-   }
-   .chip-warning {
-   background: #fff8e6;
-   border-color: #fde7a8;
-   color: #9a6700;
-   }
-   .chip-success {
-   background: #e9f9ef;
-   border-color: #b7ebc7;
-   color: #146c43;
-   }
-   .chip-danger {
-   background: #feeaec;
-   border-color: #f5b9c0;
-   color: #b42318;
-   }
-   .dashboard-tabs {
-   gap: .6rem;
-   border-bottom: 0;
-   }
-   .dashboard-tabs .nav-link {
-   border: 1px solid #d8e2ee;
-   color: #34516f;
-   border-radius: .85rem;
-   background: #fff;
-   padding: .65rem 1rem;
-   font-weight: 600;
-   box-shadow: 0 4px 14px rgba(15, 23, 42, .04);
-   }
-   .dashboard-tabs .nav-link:hover {
-   background: #f4f8fd;
-   border-color: #c6d7ea;
-   }
-   .dashboard-tabs .nav-link.active {
-   color: #fff;
-   border-color: #1f6feb;
-   background: linear-gradient(135deg, #1565c0 0%, #1f6feb 100%);
-   box-shadow: 0 10px 24px rgba(31, 111, 235, .25);
-   }
-   .mini-panel,
-   .table-card {
-   border: 1px solid #e3ebf5;
-   border-radius: 1rem;
-   background: #fff;
-   padding: 1rem;
-   height: auto;
-   }
-   .mini-panel-title {
-   font-weight: 700;
-   color: #294766;
-   margin-bottom: .8rem;
-   font-size: .95rem;
-   }
-   .kpi-card {
-   border-radius: 1rem;
-   padding: 1rem 1.1rem;
-   color: #15314b;
-   background: linear-gradient(180deg, #eff6ff 0%, #ffffff 100%);
-   border: 1px solid #d9e6f5;
-   box-shadow: 0 8px 20px rgba(15, 23, 42, .05);
-   min-height: 114px;
-   }
-   .kpi-card.accent-blue { background: linear-gradient(180deg, #e9f3ff 0%, #ffffff 100%); border-color: #cddff9; }
-   .kpi-card.accent-amber { background: linear-gradient(180deg, #fff7e8 0%, #ffffff 100%); border-color: #f6deb0; }
-   .kpi-card.accent-green { background: linear-gradient(180deg, #ecfbf1 0%, #ffffff 100%); border-color: #c4ebcf; }
-   .kpi-card.accent-red { background: linear-gradient(180deg, #fff0f1 0%, #ffffff 100%); border-color: #f3c2c7; }
-   .kpi-card.accent-purple { background: linear-gradient(180deg, #f6efff 0%, #ffffff 100%); border-color: #decdf7; }
-   .kpi-card.accent-rose { background: linear-gradient(180deg, #fff0f7 0%, #ffffff 100%); border-color: #f2c9dd; }
-   .kpi-card.accent-dark { background: linear-gradient(180deg, #eef2f7 0%, #ffffff 100%); border-color: #d4dde7; }
-   .kpi-label {
-   color: #5c738a;
-   font-size: .84rem;
-   font-weight: 600;
-   text-transform: uppercase;
-   letter-spacing: .04em;
-   margin-bottom: .45rem;
-   }
-   .kpi-value {
-   font-size: 1.65rem;
-   font-weight: 800;
-   line-height: 1.15;
-   color: #0f2942;
-   }
-   .table-search {
-   position: relative;
-   min-width: 240px;
-   }
-   .table-search .bi-search {
-   position: absolute;
-   top: 50%;
-   left: .85rem;
-   transform: translateY(-50%);
-   color: #7b8794;
-   z-index: 2;
-   }
-   .table-search .form-control {
-   padding-left: 2.35rem;
-   border-radius: .8rem;
-   }
-   .app-table thead th {
-   background: #f6f9fc;
-   color: #37516b;
-   font-size: .82rem;
-   font-weight: 700;
-   text-transform: uppercase;
-   letter-spacing: .03em;
-   border-bottom-width: 1px;
-   white-space: nowrap;
-   }
-   .app-table tbody td {
-   vertical-align: middle;
-   color: #213547;
-   }
-   .app-table tbody tr:hover {
-   background: #f9fbff;
-   }
-   .narrow-cell {
-   max-width: 220px;
-   white-space: normal;
-   }
-   .badge-soft-primary { background: #e8f1ff; color: #1557b0; }
-   .badge-soft-warning { background: #fff4db; color: #9a6700; }
-   .badge-soft-success { background: #e9f9ef; color: #146c43; }
-   .badge-soft-secondary { background: #eef0f4; color: #4b5563; }
-   .badge-soft-danger { background: #feeaec; color: #b42318; }
-   .badge-soft-dark { background: #e5e7eb; color: #111827; }
-   .badge-soft-info { background: #e8fbff; color: #0f5d78; }
-   .badge-soft-primary,
-   .badge-soft-warning,
-   .badge-soft-success,
-   .badge-soft-secondary,
-   .badge-soft-danger,
-   .badge-soft-dark,
-   .badge-soft-info {
-   border-radius: 999px;
-   padding: .45rem .7rem;
-   font-weight: 700;
-   font-size: .76rem;
-   }
-   .app-accordion .accordion-item {
-   border: 1px solid #dfe7f2;
-   border-radius: 1rem;
-   overflow: hidden;
-   margin-bottom: .85rem;
-   box-shadow: 0 8px 20px rgba(15, 23, 42, .04);
-   }
-   .app-accordion .accordion-button {
-   background: #fff;
-   font-weight: 600;
-   color: #213547;
-   box-shadow: none;
-   gap: .4rem;
-   }
-   .app-accordion .accordion-button:not(.collapsed) {
-   background: #f7fbff;
-   color: #0f2942;
-   }
-   .app-accordion .accordion-body {
-   background: #fcfdff;
-   }
-   .tab-content > .tab-pane {
-   animation: fadeInUp .18s ease-in-out;
-   }
-   @@keyframes fadeInUp {
-   from { opacity: 0; transform: translateY(4px); }
-   to { opacity: 1; transform: translateY(0); }
-   }
-   @@media (max-width: 767.98px) {
-   .table-search {
-   min-width: 100%;
-   }
-   .kpi-value {
-   font-size: 1.35rem;
-   }
-   }
+    .filter-shell {
+        border-radius: 1rem;
+        background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+    }
+
+    .section-title {
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: #1b3a5c;
+        letter-spacing: .01em;
+    }
+
+    .section-subtitle {
+        color: #6b7280;
+        font-size: .92rem;
+        margin-top: .15rem;
+    }
+
+    .filter-select,
+    .table-search-input,
+    .accordion-search-input {
+        border-radius: .75rem;
+        border: 1px solid #d8e2ee;
+        min-height: 42px;
+    }
+
+        .filter-select:focus,
+        .table-search-input:focus,
+        .accordion-search-input:focus {
+            border-color: #5b9df9;
+            box-shadow: 0 0 0 .2rem rgba(91, 157, 249, .15);
+        }
+
+    .msf {
+        position: relative;
+    }
+
+    .msf-toggle {
+        display: flex;
+        align-items: center;
+        min-height: 42px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .msf-menu {
+        position: absolute;
+        inset: calc(100% + .35rem) 0 auto 0;
+        z-index: 1080;
+        background: #fff;
+        border: 1px solid #d8e2ee;
+        border-radius: .9rem;
+        padding: .6rem;
+    }
+
+    .msf-search-wrap {
+        margin-bottom: .45rem;
+    }
+
+    .msf-actions {
+        display: flex;
+        justify-content: space-between;
+        font-size: .82rem;
+        margin-bottom: .45rem;
+    }
+
+    .msf-options {
+        max-height: 210px;
+        overflow: auto;
+        display: grid;
+        gap: .2rem;
+    }
+
+    .msf-option {
+        display: flex;
+        align-items: center;
+        gap: .5rem;
+        padding: .3rem .25rem;
+        border-radius: .55rem;
+        cursor: pointer;
+    }
+
+        .msf-option:hover {
+            background: #f4f8fd;
+        }
+
+        .msf-option input {
+            margin: 0;
+        }
+
+    .msf-empty {
+        padding: .5rem .35rem;
+        color: #6b7280;
+        font-size: .85rem;
+    }
+
+    .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: .35rem;
+        padding: .35rem .7rem;
+        border-radius: 999px;
+        background: #eef4fb;
+        color: #294766;
+        font-size: .8rem;
+        font-weight: 600;
+        border: 1px solid #d9e5f2;
+    }
+
+    .chip-muted {
+        background: #f3f4f6;
+        border-color: #e5e7eb;
+        color: #4b5563;
+    }
+
+    .chip-warning {
+        background: #fff8e6;
+        border-color: #fde7a8;
+        color: #9a6700;
+    }
+
+    .chip-success {
+        background: #e9f9ef;
+        border-color: #b7ebc7;
+        color: #146c43;
+    }
+
+    .chip-danger {
+        background: #feeaec;
+        border-color: #f5b9c0;
+        color: #b42318;
+    }
+
+    .dashboard-tabs {
+        gap: .6rem;
+        border-bottom: 0;
+    }
+
+        .dashboard-tabs .nav-link {
+            border: 1px solid #d8e2ee;
+            color: #34516f;
+            border-radius: .85rem;
+            background: #fff;
+            padding: .65rem 1rem;
+            font-weight: 600;
+            box-shadow: 0 4px 14px rgba(15, 23, 42, .04);
+        }
+
+            .dashboard-tabs .nav-link:hover {
+                background: #f4f8fd;
+                border-color: #c6d7ea;
+            }
+
+            .dashboard-tabs .nav-link.active {
+                color: #fff;
+                border-color: #1f6feb;
+                background: linear-gradient(135deg, #1565c0 0%, #1f6feb 100%);
+                box-shadow: 0 10px 24px rgba(31, 111, 235, .25);
+            }
+
+    .mini-panel,
+    .table-card {
+        border: 1px solid #e3ebf5;
+        border-radius: 1rem;
+        background: #fff;
+        padding: 1rem;
+        height: auto;
+    }
+
+    .mini-panel-title {
+        font-weight: 700;
+        color: #294766;
+        margin-bottom: .8rem;
+        font-size: .95rem;
+    }
+
+    .kpi-card {
+        border-radius: 1rem;
+        padding: 1rem 1.1rem;
+        color: #15314b;
+        background: linear-gradient(180deg, #eff6ff 0%, #ffffff 100%);
+        border: 1px solid #d9e6f5;
+        box-shadow: 0 8px 20px rgba(15, 23, 42, .05);
+        min-height: 114px;
+    }
+
+        .kpi-card.accent-blue {
+            background: linear-gradient(180deg, #e9f3ff 0%, #ffffff 100%);
+            border-color: #cddff9;
+        }
+
+        .kpi-card.accent-amber {
+            background: linear-gradient(180deg, #fff7e8 0%, #ffffff 100%);
+            border-color: #f6deb0;
+        }
+
+        .kpi-card.accent-green {
+            background: linear-gradient(180deg, #ecfbf1 0%, #ffffff 100%);
+            border-color: #c4ebcf;
+        }
+
+        .kpi-card.accent-red {
+            background: linear-gradient(180deg, #fff0f1 0%, #ffffff 100%);
+            border-color: #f3c2c7;
+        }
+
+        .kpi-card.accent-purple {
+            background: linear-gradient(180deg, #f6efff 0%, #ffffff 100%);
+            border-color: #decdf7;
+        }
+
+        .kpi-card.accent-rose {
+            background: linear-gradient(180deg, #fff0f7 0%, #ffffff 100%);
+            border-color: #f2c9dd;
+        }
+
+        .kpi-card.accent-dark {
+            background: linear-gradient(180deg, #eef2f7 0%, #ffffff 100%);
+            border-color: #d4dde7;
+        }
+
+    .kpi-label {
+        color: #5c738a;
+        font-size: .84rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        margin-bottom: .45rem;
+    }
+
+    .kpi-value {
+        font-size: 1.65rem;
+        font-weight: 800;
+        line-height: 1.15;
+        color: #0f2942;
+    }
+
+    .table-search {
+        position: relative;
+        min-width: 240px;
+    }
+
+        .table-search .bi-search {
+            position: absolute;
+            top: 50%;
+            left: .85rem;
+            transform: translateY(-50%);
+            color: #7b8794;
+            z-index: 2;
+        }
+
+        .table-search .form-control {
+            padding-left: 2.35rem;
+            border-radius: .8rem;
+        }
+
+    .app-table thead th {
+        background: #f6f9fc;
+        color: #37516b;
+        font-size: .82rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .03em;
+        border-bottom-width: 1px;
+        white-space: nowrap;
+    }
+
+    .app-table tbody td {
+        vertical-align: middle;
+        color: #213547;
+    }
+
+    .app-table tbody tr:hover {
+        background: #f9fbff;
+    }
+
+    .narrow-cell {
+        max-width: 220px;
+        white-space: normal;
+    }
+
+    .badge-soft-primary {
+        background: #e8f1ff;
+        color: #1557b0;
+    }
+
+    .badge-soft-warning {
+        background: #fff4db;
+        color: #9a6700;
+    }
+
+    .badge-soft-success {
+        background: #e9f9ef;
+        color: #146c43;
+    }
+
+    .badge-soft-secondary {
+        background: #eef0f4;
+        color: #4b5563;
+    }
+
+    .badge-soft-danger {
+        background: #feeaec;
+        color: #b42318;
+    }
+
+    .badge-soft-dark {
+        background: #e5e7eb;
+        color: #111827;
+    }
+
+    .badge-soft-info {
+        background: #e8fbff;
+        color: #0f5d78;
+    }
+
+    .badge-soft-primary,
+    .badge-soft-warning,
+    .badge-soft-success,
+    .badge-soft-secondary,
+    .badge-soft-danger,
+    .badge-soft-dark,
+    .badge-soft-info {
+        border-radius: 999px;
+        padding: .45rem .7rem;
+        font-weight: 700;
+        font-size: .76rem;
+    }
+
+    .app-accordion .accordion-item {
+        border: 1px solid #dfe7f2;
+        border-radius: 1rem;
+        overflow: hidden;
+        margin-bottom: .85rem;
+        box-shadow: 0 8px 20px rgba(15, 23, 42, .04);
+    }
+
+    .app-accordion .accordion-button {
+        background: #fff;
+        font-weight: 600;
+        color: #213547;
+        box-shadow: none;
+        gap: .4rem;
+    }
+
+        .app-accordion .accordion-button:not(.collapsed) {
+            background: #f7fbff;
+            color: #0f2942;
+        }
+
+    .app-accordion .accordion-body {
+        background: #fcfdff;
+    }
+
+    .tab-content > .tab-pane {
+        animation: fadeInUp .18s ease-in-out;
+    }
+
+    @@keyframes fadeInUp {
+        from {
+            opacity: 0;
+            transform: translateY(4px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    @@media (max-width: 767.98px) {
+        .table-search {
+            min-width: 100%;
+        }
+
+        .kpi-value {
+            font-size: 1.35rem;
+        }
+    }
 </style>
 <link href="~/css/denial_dashboard.css" rel="stylesheet" />
 <div id="pageLoader" class="hidden" aria-live="polite" aria-busy="true">
-   <div class="page-loader-card">
-      <div class="page-loader-spinner"></div>
-  @*     <div class="fw-semibold text-primary mb-1">Loading dashboard data...</div>
+    <div class="page-loader-card">
+        <div class="page-loader-spinner"></div>
+        @*     <div class="fw-semibold text-primary mb-1">Loading dashboard data...</div>
       <div class="small text-muted">Please wait while the selected lab data is prepared.</div> *@
-   </div>
+    </div>
 </div>
 @if (TempData["DenialDashboardSuccess"] is string successMessage && !string.IsNullOrWhiteSpace(successMessage))
 {
-<div class="alert alert-success border-0 shadow-sm">@successMessage</div>
+    <div class="alert alert-success border-0 shadow-sm">@successMessage</div>
 }
 @if (TempData["DenialDashboardError"] is string errorMessage && !string.IsNullOrWhiteSpace(errorMessage))
 {
-<div class="alert alert-warning border-0 shadow-sm">@errorMessage</div>
+    <div class="alert alert-warning border-0 shadow-sm">@errorMessage</div>
 }
 <div class="filter-shell card border-0 shadow-sm mb-4">
-   <div class="card-body">
-      <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-         <div>
-            <div class="section-title">Global filters</div>
-            @* <div class="section-subtitle">Lab options now come from LRNMaster.dbo.LRNMetricsLab. The selected lab resolves its ConnectionKey from appsettings and loads Task Board, Denial Insight, and Line Item from that lab database.</div> *@
-         </div>
-         <div class="d-flex flex-wrap align-items-center gap-2 ms-auto">
-            <div class="text-end me-2">
-               <div class="small text-muted">Data source for selected lab</div>
-               <div class="fw-semibold">@Model.CurrentLabName · @Model.AllRecordCount.ToString("N0") rows · @Model.FilteredRecordCount.ToString("N0") visible after filtering</div>
+    <div class="card-body">
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+            <div>
+                <div class="section-title">Global filters</div>
+                @* <div class="section-subtitle">Lab options now come from LRNMaster.dbo.LRNMetricsLab. The selected lab resolves its ConnectionKey from appsettings and loads Task Board, Denial Insight, and Line Item from that lab database.</div> *@
             </div>
-            <button class="btn btn-outline-primary rounded-pill px-3" type="button" data-bs-toggle="collapse" data-bs-target="#dashboardFiltersCollapse" aria-expanded="true" aria-controls="dashboardFiltersCollapse" id="filterCollapseToggle">
-               <i class="bi bi-sliders me-1"></i><span class="filter-toggle-text">Hide Filters</span>
-            </button>
-         </div>
-      </div>
-
-      <div class="collapse show" id="dashboardFiltersCollapse">
-         <form method="get" class="row g-3 align-items-end filter-form-grid" id="dashboardFilterForm">
-            <div class="col-12">
-               <div class="filter-group-heading">Workflow filters</div>
+            <div class="d-flex flex-wrap align-items-center gap-2 ms-auto">
+                <div class="text-end me-2">
+                    <div class="small text-muted">Data source for selected lab</div>
+                    <div class="fw-semibold">@Model.CurrentLabName · @Model.AllRecordCount.ToString("N0") rows · @Model.FilteredRecordCount.ToString("N0") visible after filtering</div>
+                </div>
+                <button class="btn btn-outline-primary rounded-pill px-3" type="button" data-bs-toggle="collapse" data-bs-target="#dashboardFiltersCollapse" aria-expanded="true" aria-controls="dashboardFiltersCollapse" id="filterCollapseToggle">
+                    <i class="bi bi-sliders me-1"></i><span class="filter-toggle-text">Hide Filters</span>
+                </button>
             </div>
+        </div>
 
-            <input type="hidden" name="ActiveTab" id="activeTabInput" value="@activeTab" />
-            <input type="hidden" name="Page" value="1" />
-            <input type="hidden" name="InsightPage" value="1" />
-            <input type="hidden" name="LineItemPage" value="1" />
-            <input type="hidden" name="PageSize" value="@Model.Filters.PageSize" />
-            <input type="hidden" name="InsightPageSize" value="@Model.Filters.InsightPageSize" />
-            <input type="hidden" name="LineItemPageSize" value="@Model.Filters.LineItemPageSize" />
+        <div class="collapse show" id="dashboardFiltersCollapse">
+            <form method="get" class="row g-3 align-items-end filter-form-grid" id="dashboardFilterForm">
+                <div class="col-12">
+                    <div class="filter-group-heading">Workflow filters</div>
+                </div>
 
-            <div class="col-12 col-md-6 col-xl-3">
-               <label class="form-label">Lab <span class="text-danger">*</span></label>
-               <select class="form-select filter-select" id="labSelect" name="LabId" required>
-                  @if (Model.LabOptions.Any())
-                  {
-                     @foreach (var option in Model.LabOptions)
-                     {
-                        if (option.LabId == Model.Filters.LabId)
+                <input type="hidden" name="ActiveTab" id="activeTabInput" value="@activeTab" />
+                <input type="hidden" name="Page" value="1" />
+                <input type="hidden" name="InsightPage" value="1" />
+                <input type="hidden" name="LineItemPage" value="1" />
+                <input type="hidden" name="PageSize" value="@Model.Filters.PageSize" />
+                <input type="hidden" name="InsightPageSize" value="@Model.Filters.InsightPageSize" />
+                <input type="hidden" name="LineItemPageSize" value="@Model.Filters.LineItemPageSize" />
+
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label">Lab <span class="text-danger">*</span></label>
+                    <select class="form-select filter-select" id="labSelect" name="LabId" required>
+                        @if (Model.LabOptions.Any())
                         {
-                           <option value="@option.LabId" selected>@option.LabName</option>
+                            @foreach (var option in Model.LabOptions)
+                            {
+                                if (option.LabId == Model.Filters.LabId)
+                                {
+                                    <option value="@option.LabId" selected>@option.LabName</option>
+                                }
+                                else
+                                {
+                                    <option value="@option.LabId">@option.LabName</option>
+                                }
+                            }
                         }
                         else
                         {
-                           <option value="@option.LabId">@option.LabName</option>
+                            <option value="">No labs available</option>
                         }
-                     }
-                  }
-                  else
-                  {
-                     <option value="">No labs available</option>
-                  }
-               </select>
-            </div>
-            <div class="col-12 col-md-6 col-xl-3">
-               <label class="form-label">Task Status</label>
-               <div class="multi-select-filter" data-name="Status" data-placeholder="All statuses" data-options='@Html.Raw(JsonSerializer.Serialize(Model.StatusOptions.Where(x => x != "(All)")))' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.Status, true)))'></div>
-            </div>
-            <div class="col-12 col-md-6 col-xl-3">
-               <label class="form-label">Priority</label>
-               <div class="multi-select-filter" data-name="Priority" data-placeholder="All priorities" data-options='@Html.Raw(JsonSerializer.Serialize(Model.PriorityOptions.Where(x => x != "(All)")))' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.Priority, true)))'></div>
-            </div>
-            <div class="col-12 col-md-6 col-xl-3">
-               <label class="form-label">Classification</label>
-               <div class="multi-select-filter" data-name="Classification" data-placeholder="All classifications" data-options='@Html.Raw(JsonSerializer.Serialize(Model.ClassificationOptions.Where(x => x != "(All)")))' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.Classification, true)))'></div>
-            </div>
+                    </select>
+                </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label">Task Status</label>
+                    <div class="multi-select-filter" data-name="Status" data-placeholder="All statuses" data-options='@Html.Raw(JsonSerializer.Serialize(Model.StatusOptions.Where(x => x != "(All)")))' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.Status, true)))'></div>
+                </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label">Priority</label>
+                    <div class="multi-select-filter" data-name="Priority" data-placeholder="All priorities" data-options='@Html.Raw(JsonSerializer.Serialize(Model.PriorityOptions.Where(x => x != "(All)")))' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.Priority, true)))'></div>
+                </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label">Classification</label>
+                    <div class="multi-select-filter" data-name="Classification" data-placeholder="All classifications" data-options='@Html.Raw(JsonSerializer.Serialize(Model.ClassificationOptions.Where(x => x != "(All)")))' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.Classification, true)))'></div>
+                </div>
 
-            <div class="col-12">
-               <div class="filter-group-heading filter-group-heading-secondary">Payer / service filters</div>
-            </div>
+                <div class="col-12">
+                    <div class="filter-group-heading filter-group-heading-secondary">Payer / service filters</div>
+                </div>
 
-            <div class="col-12 col-md-6 col-xl-3">
-               <label class="form-label">Action Category</label>
-               <div class="multi-select-filter" data-name="ActionCategory" data-placeholder="All action categories" data-options='@Html.Raw(JsonSerializer.Serialize(Model.ActionCategoryOptions.Where(x => x != "(All)")))' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.ActionCategory, true)))'></div>
-            </div>
-            <div class="col-12 col-md-6 col-xl-3">
-               <label class="form-label">SLA</label>
-               <div class="multi-select-filter" data-name="Deadline" data-placeholder="All SLA buckets" data-options='@Html.Raw(JsonSerializer.Serialize(Model.DeadlineOptions.Where(x => x != "(All)")))' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.Deadline, true)))'></div>
-            </div>
-            <div class="col-12 col-md-6 col-xl-3">
-               <label class="form-label">Payer Name</label>
-               <div class="multi-select-filter remote-multi-select" data-name="PayerName" data-placeholder="Select payer names" data-remote-key="payerNames" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.PayerName)))'></div>
-            </div>
-            <div class="col-12 col-md-6 col-xl-3">
-               <label class="form-label">Payer Type</label>
-               <div class="multi-select-filter remote-multi-select" data-name="PayerType" data-placeholder="Select payer types" data-remote-key="payerTypes" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.PayerType)))'></div>
-            </div>
-            <div class="col-12 col-md-6 col-xl-3">
-               <label class="form-label">Panel Name</label>
-               <div class="multi-select-filter remote-multi-select" data-name="PanelName" data-placeholder="Select panel names" data-remote-key="panelNames" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.PanelName)))'></div>
-            </div>
-            <div class="col-12 col-md-6 col-xl-3">
-               <label class="form-label">Referring Provider</label>
-               <div class="multi-select-filter remote-multi-select" data-name="ReferringProvider" data-placeholder="Select providers" data-remote-key="referringProviders" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.ReferringProvider)))'></div>
-            </div>
-            <div class="col-12 col-md-6 col-xl-3">
-               <label class="form-label">Clinic Name</label>
-               <div class="multi-select-filter remote-multi-select" data-name="ClinicName" data-placeholder="Select clinics" data-remote-key="clinicNames" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.ClinicName)))'></div>
-            </div>
-            <div class="col-12 col-md-6 col-xl-3">
-               <label class="form-label">Sales Rep</label>
-               <div class="multi-select-filter remote-multi-select" data-name="SalesRepname" data-placeholder="Select sales reps" data-remote-key="salesRepnames" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.SalesRepname)))'></div>
-            </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label">Action Category</label>
+                    <div class="multi-select-filter" data-name="ActionCategory" data-placeholder="All action categories" data-options='@Html.Raw(JsonSerializer.Serialize(Model.ActionCategoryOptions.Where(x => x != "(All)")))' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.ActionCategory, true)))'></div>
+                </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label">SLA</label>
+                    <div class="multi-select-filter" data-name="Deadline" data-placeholder="All SLA buckets" data-options='@Html.Raw(JsonSerializer.Serialize(Model.DeadlineOptions.Where(x => x != "(All)")))' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.Deadline, true)))'></div>
+                </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label">Payer Name</label>
+                    <div class="multi-select-filter remote-multi-select" data-name="PayerName" data-placeholder="Select payer names" data-remote-key="payerNames" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.PayerName)))'></div>
+                </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label">Payer Type</label>
+                    <div class="multi-select-filter remote-multi-select" data-name="PayerType" data-placeholder="Select payer types" data-remote-key="payerTypes" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.PayerType)))'></div>
+                </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label">Panel Name</label>
+                    <div class="multi-select-filter remote-multi-select" data-name="PanelName" data-placeholder="Select panel names" data-remote-key="panelNames" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.PanelName)))'></div>
+                </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label">Referring Provider</label>
+                    <div class="multi-select-filter remote-multi-select" data-name="ReferringProvider" data-placeholder="Select providers" data-remote-key="referringProviders" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.ReferringProvider)))'></div>
+                </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label">Clinic Name</label>
+                    <div class="multi-select-filter remote-multi-select" data-name="ClinicName" data-placeholder="Select clinics" data-remote-key="clinicNames" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.ClinicName)))'></div>
+                </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label">Sales Rep</label>
+                    <div class="multi-select-filter remote-multi-select" data-name="SalesRepname" data-placeholder="Select sales reps" data-remote-key="salesRepnames" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.SalesRepname)))'></div>
+                </div>
 
-            <div class="col-12 col-md-6 col-xl-3">
-               <label class="form-label">Date of Service From</label>
-               <input class="form-control filter-select" type="date" name="DateOfServiceFrom" value="@(Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"))" />
-            </div>
-            <div class="col-12 col-md-6 col-xl-3">
-               <label class="form-label">Date of Service To</label>
-               <input class="form-control filter-select" type="date" name="DateOfServiceTo" value="@(Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"))" />
-            </div>
-            <div class="col-12 col-md-6 col-xl-3">
-               <label class="form-label">First Billed From</label>
-               <input class="form-control filter-select" type="date" name="FirstBilledDateFrom" value="@(Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"))" />
-            </div>
-            <div class="col-12 col-md-6 col-xl-3">
-               <label class="form-label">First Billed To</label>
-               <input class="form-control filter-select" type="date" name="FirstBilledDateTo" value="@(Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"))" />
-            </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label">Date of Service From</label>
+                    <input class="form-control filter-select" type="date" name="DateOfServiceFrom" value="@(Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"))" />
+                </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label">Date of Service To</label>
+                    <input class="form-control filter-select" type="date" name="DateOfServiceTo" value="@(Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"))" />
+                </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label">First Billed From</label>
+                    <input class="form-control filter-select" type="date" name="FirstBilledDateFrom" value="@(Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"))" />
+                </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label">First Billed To</label>
+                    <input class="form-control filter-select" type="date" name="FirstBilledDateTo" value="@(Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"))" />
+                </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label">Denial Date From</label>
+                    <input class="form-control filter-select" type="date" name="DenialDateFrom" value="@(Model.Filters.DenialDateFrom?.ToString("yyyy-MM-dd"))" />
+                </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label">Denial Date To</label>
+                    <input class="form-control filter-select" type="date" name="DenialDateTo" value="@(Model.Filters.DenialDateTo?.ToString("yyyy-MM-dd"))" />
+                </div>
 
-            <div class="col-12 d-flex flex-wrap justify-content-between align-items-center gap-3 mt-2">
-               <div class="d-flex flex-wrap gap-2">
-            <span class="chip chip-muted">Run: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span>
+                <div class="col-12 d-flex flex-wrap justify-content-between align-items-center gap-3 mt-2">
+                    <div class="d-flex flex-wrap gap-2">
+                        <span class="chip chip-muted">Run: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span>
 
-                  @if (activeFilters.Any())
-                  {
-                     @foreach (var filter in activeFilters)
-                     {
-                        <span class="chip">@filter.Key: <strong>@filter.Value</strong></span>
-                     }
-                  }
-                  else
-                  {
-                     <span class="chip chip-muted">Only the selected lab is applied</span>
-                  }
-               </div>
-               <div class="d-flex flex-wrap gap-2">
-                  <button type="button" id="exportExcelBtn" class="btn btn-outline-success rounded-pill px-3 js-loader-button">
-                     <i class="bi bi-file-earmark-excel me-1"></i> Download Excel
-                  </button>
-                  <button type="submit" class="btn btn-primary rounded-pill px-4 js-loader-button">
-                     <i class="bi bi-funnel me-1"></i> Apply Filters
-                  </button>
-                  <a class="btn btn-outline-secondary rounded-pill px-3 js-loader-link" href="@Url.Action("Index", "DenialDashboard", new { LabId = Model.Filters.LabId, ActiveTab = activeTab, Page = 1, InsightPage = 1, LineItemPage = 1, PageSize = Model.Filters.PageSize, InsightPageSize = Model.Filters.InsightPageSize, LineItemPageSize = Model.Filters.LineItemPageSize })">
-                     <i class="bi bi-arrow-counterclockwise me-1"></i> Reset
-                  </a>
-               </div>
-            </div>
-         </form>
-      </div>
-   </div>
+                        @if (activeFilters.Any())
+                        {
+                            @foreach (var filter in activeFilters)
+                            {
+                                <span class="chip">@filter.Key: <strong>@filter.Value</strong></span>
+                            }
+                        }
+                        else
+                        {
+                            <span class="chip chip-muted">Only the selected lab is applied</span>
+                        }
+                    </div>
+                    <div class="d-flex flex-wrap gap-2">
+                        <button type="button" id="exportExcelBtn" class="btn btn-outline-success rounded-pill px-3 js-loader-button">
+                            <i class="bi bi-file-earmark-excel me-1"></i> Download Excel
+                        </button>
+                        <button type="submit" class="btn btn-primary rounded-pill px-4 js-loader-button">
+                            <i class="bi bi-funnel me-1"></i> Apply Filters
+                        </button>
+                        <a class="btn btn-outline-secondary rounded-pill px-3 js-loader-link" href="@Url.Action("Index", "DenialDashboard", new { LabId = Model.Filters.LabId, ActiveTab = activeTab, Page = 1, InsightPage = 1, LineItemPage = 1, PageSize = Model.Filters.PageSize, InsightPageSize = Model.Filters.InsightPageSize, LineItemPageSize = Model.Filters.LineItemPageSize })">
+                            <i class="bi bi-arrow-counterclockwise me-1"></i> Reset
+                        </a>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
 </div>
 </div>
 <ul class="nav nav-pills dashboard-tabs mb-4" id="dashboardTabs" role="tablist">
-   <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "dashboard" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#dashboard" type="button"><i class="bi bi-bar-chart me-2"></i>Dashboard</button></li>
-   <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "weekly-breakdown" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#weekly-breakdown" type="button"><i class="bi bi-calendar-week me-2"></i>Weekly Breakdown</button></li>
-   <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "monthly-breakdown" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#monthly-breakdown" type="button"><i class="bi bi-calendar-month me-2"></i>Monthly Breakdown</button></li>
-   <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "filter-panel" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#filter-panel" type="button"><i class="bi bi-search me-2"></i>Filter Panel</button></li>
-   <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "denial-input" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#denial-input" type="button"><i class="bi bi-table me-2"></i>Denial Input</button></li>
-   <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "task-board" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#task-board" type="button"><i class="bi bi-clipboard-data me-2"></i>Task Board</button></li>
-   <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "sla-tracker" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#sla-tracker" type="button"><i class="bi bi-alarm me-2"></i>SLA Tracker</button></li>
-   <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "denial-insight" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#denial-insight" type="button"><i class="bi bi-lightbulb me-2"></i>Denial Insight</button></li>
-   <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "line-item" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#line-item" type="button"><i class="bi bi-list-ul me-2"></i>Line Item</button></li>
+    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "dashboard" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#dashboard" type="button"><i class="bi bi-bar-chart me-2"></i>Dashboard</button></li>
+    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "weekly-breakdown" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#weekly-breakdown" type="button"><i class="bi bi-calendar-week me-2"></i>Weekly Breakdown</button></li>
+    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "monthly-breakdown" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#monthly-breakdown" type="button"><i class="bi bi-calendar-month me-2"></i>Monthly Breakdown</button></li>
+    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "filter-panel" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#filter-panel" type="button"><i class="bi bi-search me-2"></i>Filter Panel</button></li>
+    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "denial-input" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#denial-input" type="button"><i class="bi bi-table me-2"></i>Denial Input</button></li>
+    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "task-board" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#task-board" type="button"><i class="bi bi-clipboard-data me-2"></i>Task Board</button></li>
+    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "sla-tracker" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#sla-tracker" type="button"><i class="bi bi-alarm me-2"></i>SLA Tracker</button></li>
+    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "denial-insight" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#denial-insight" type="button"><i class="bi bi-lightbulb me-2"></i>Denial Insight</button></li>
+    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "line-item" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#line-item" type="button"><i class="bi bi-list-ul me-2"></i>Line Item</button></li>
 </ul>
 <div class="tab-content">
-   <div class="tab-pane fade @(activeTab == "filter-panel" ? "show active" : "")" id="filter-panel" role="tabpanel">
-   <div class="card border-0 shadow-sm table-card">
-      <div class="card-body">
-         <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
-            <div>
-               <div class="section-title"><i class="bi bi-bar-chart-line-fill me-2"></i>Insights &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
-           
+    <div class="tab-pane fade @(activeTab == "filter-panel" ? "show active" : "")" id="filter-panel" role="tabpanel">
+        <div class="card border-0 shadow-sm table-card">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+                    <div>
+                        <div class="section-title"><i class="bi bi-bar-chart-line-fill me-2"></i>Insights &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
 
-            </div>
 
-            <span class="chip chip-warning">Today: @today.ToString("dd MMM yyyy")</span>
-         </div>
-         <div class="row g-3">
-            <div class="col-12 col-xl-6">
-               <div class="mini-panel panel-theme-blue">
-                  <div class="mini-panel-title">Task Status</div>
-                  <div class="table-responsive panel-table-wrap table-frame">
-                     <table class="table table-sm app-table polished-table filter-table zebra-table sortable-table mb-0">
-                        <thead>
-                           <tr>
-                              <th>Label</th>
-                              <th class="text-end">Claims</th>
-                              <th class="text-end">Balance</th>
-                              <th class="text-end">Rate</th>
-                           </tr>
-                        </thead>
-                        <tbody>
-                           @foreach (var item in Model.StatusBreakdown)
-                           {
-                           <tr>
-                              <td>@item.Label</td>
-                              <td class="text-end fw-semibold">@item.Count.ToString("N0")</td>
-                              <td class="text-end text-danger-emphasis">@Money(item.InsuranceBalanceSum)</td>
-                              <td class="text-end">
-                                 <div class="rate-cell">
-                                    <div class="rate-value">@item.Percentage.ToString("0.0")%</div>
-                                    <div class="rate-track"><span style="width:@(PercentWidth(item.Percentage))%;"></span></div>
-                                 </div>
-                              </td>
-                           </tr>
-                           }
-                        </tbody>
-                     </table>
-                  </div>
-               </div>
+                    </div>
+
+                    <span class="chip chip-warning">Today: @today.ToString("dd MMM yyyy")</span>
+                </div>
+                <div class="row g-3">
+                    <div class="col-12 col-xl-6">
+                        <div class="mini-panel panel-theme-blue">
+                            <div class="mini-panel-title">Task Status</div>
+                            <div class="table-responsive panel-table-wrap table-frame">
+                                <table class="table table-sm app-table polished-table filter-table zebra-table sortable-table mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Label</th>
+                                            <th class="text-end">Claims</th>
+                                            <th class="text-end">Balance</th>
+                                            <th class="text-end">Rate</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var item in Model.StatusBreakdown)
+                                        {
+                                            <tr>
+                                                <td>@item.Label</td>
+                                                <td class="text-end fw-semibold">@item.Count.ToString("N0")</td>
+                                                <td class="text-end text-danger-emphasis">@Money(item.InsuranceBalanceSum)</td>
+                                                <td class="text-end">
+                                                    <div class="rate-cell">
+                                                        <div class="rate-value">@item.Percentage.ToString("0.0")%</div>
+                                                        <div class="rate-track"><span style="width:@(PercentWidth(item.Percentage))%;"></span></div>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-xl-6">
+                        <div class="mini-panel panel-theme-purple">
+                            <div class="mini-panel-title">Priority</div>
+                            <div class="table-responsive panel-table-wrap table-frame">
+                                <table class="table table-sm app-table polished-table filter-table zebra-table sortable-table mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Label</th>
+                                            <th class="text-end">Claims</th>
+                                            <th class="text-end">Balance</th>
+                                            <th class="text-end">Rate</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var item in Model.PriorityBreakdown)
+                                        {
+                                            <tr>
+                                                <td>@item.Label</td>
+                                                <td class="text-end fw-semibold">@item.Count.ToString("N0")</td>
+                                                <td class="text-end text-danger-emphasis">@Money(item.InsuranceBalanceSum)</td>
+                                                <td class="text-end">
+                                                    <div class="rate-cell">
+                                                        <div class="rate-value">@item.Percentage.ToString("0.0")%</div>
+                                                        <div class="rate-track"><span style="width:@(PercentWidth(item.Percentage))%;"></span></div>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-xl-6">
+                        <div class="mini-panel panel-theme-blue">
+                            <div class="mini-panel-title">Action Category</div>
+                            <div class="table-responsive panel-table-wrap table-frame">
+                                <table class="table table-sm app-table polished-table filter-table zebra-table sortable-table mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Label</th>
+                                            <th class="text-end">Claims</th>
+                                            <th class="text-end">Balance</th>
+                                            <th class="text-end">Rate</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var item in Model.ActionCategoryBreakdown.Take(12))
+                                        {
+                                            <tr>
+                                                <td>@item.Label</td>
+                                                <td class="text-end fw-semibold">@item.Count.ToString("N0")</td>
+                                                <td class="text-end text-danger-emphasis">@Money(item.InsuranceBalanceSum)</td>
+                                                <td class="text-end">
+                                                    <div class="rate-cell">
+                                                        <div class="rate-value">@item.Percentage.ToString("0.0")%</div>
+                                                        <div class="rate-track"><span style="width:@(PercentWidth(item.Percentage))%;"></span></div>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-xl-6">
+                        <div class="mini-panel panel-theme-purple">
+                            <div class="mini-panel-title">Classification & SLA</div>
+                            <div class="table-responsive panel-table-wrap table-frame mb-3">
+                                <table class="table table-sm app-table polished-table filter-table zebra-table sortable-table mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Classification</th>
+                                            <th class="text-end">Claims</th>
+                                            <th class="text-end">High Priority</th>
+                                            <th class="text-end">Balance</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var item in Model.ClassificationBreakdown.Take(8))
+                                        {
+                                            <tr>
+                                                <td>@item.Label</td>
+                                                <td class="text-end fw-semibold">@item.Count.ToString("N0")</td>
+                                                <td class="text-end">@item.HighPriorityCount.ToString("N0")</td>
+                                                <td class="text-end text-danger-emphasis">@Money(item.InsuranceBalanceSum)</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="table-responsive panel-table-wrap table-frame">
+                                <table class="table table-sm app-table polished-table filter-table zebra-table sortable-table mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Deadline</th>
+                                            <th class="text-end">Claims</th>
+                                            <th class="text-end">Open</th>
+                                            <th class="text-end">Balance</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var item in Model.DeadlineBreakdown)
+                                        {
+                                            <tr>
+                                                <td>@item.Label</td>
+                                                <td class="text-end fw-semibold">@item.Count.ToString("N0")</td>
+                                                <td class="text-end">@item.OpenCount.ToString("N0")</td>
+                                                <td class="text-end text-danger-emphasis">@Money(item.InsuranceBalanceSum)</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div class="col-12 col-xl-6">
-               <div class="mini-panel panel-theme-purple">
-                  <div class="mini-panel-title">Priority</div>
-                  <div class="table-responsive panel-table-wrap table-frame">
-                     <table class="table table-sm app-table polished-table filter-table zebra-table sortable-table mb-0">
-                        <thead>
-                           <tr>
-                              <th>Label</th>
-                              <th class="text-end">Claims</th>
-                              <th class="text-end">Balance</th>
-                              <th class="text-end">Rate</th>
-                           </tr>
-                        </thead>
-                        <tbody>
-                           @foreach (var item in Model.PriorityBreakdown)
-                           {
-                           <tr>
-                              <td>@item.Label</td>
-                              <td class="text-end fw-semibold">@item.Count.ToString("N0")</td>
-                              <td class="text-end text-danger-emphasis">@Money(item.InsuranceBalanceSum)</td>
-                              <td class="text-end">
-                                 <div class="rate-cell">
-                                    <div class="rate-value">@item.Percentage.ToString("0.0")%</div>
-                                    <div class="rate-track"><span style="width:@(PercentWidth(item.Percentage))%;"></span></div>
-                                 </div>
-                              </td>
-                           </tr>
-                           }
-                        </tbody>
-                     </table>
-                  </div>
-               </div>
-            </div>
-            <div class="col-12 col-xl-6">
-               <div class="mini-panel panel-theme-blue">
-                  <div class="mini-panel-title">Action Category</div>
-                  <div class="table-responsive panel-table-wrap table-frame">
-                     <table class="table table-sm app-table polished-table filter-table zebra-table sortable-table mb-0">
-                        <thead>
-                           <tr>
-                              <th>Label</th>
-                              <th class="text-end">Claims</th>
-                              <th class="text-end">Balance</th>
-                              <th class="text-end">Rate</th>
-                           </tr>
-                        </thead>
-                        <tbody>
-                           @foreach (var item in Model.ActionCategoryBreakdown.Take(12))
-                           {
-                           <tr>
-                              <td>@item.Label</td>
-                              <td class="text-end fw-semibold">@item.Count.ToString("N0")</td>
-                              <td class="text-end text-danger-emphasis">@Money(item.InsuranceBalanceSum)</td>
-                              <td class="text-end">
-                                 <div class="rate-cell">
-                                    <div class="rate-value">@item.Percentage.ToString("0.0")%</div>
-                                    <div class="rate-track"><span style="width:@(PercentWidth(item.Percentage))%;"></span></div>
-                                 </div>
-                              </td>
-                           </tr>
-                           }
-                        </tbody>
-                     </table>
-                  </div>
-               </div>
-            </div>
-            <div class="col-12 col-xl-6">
-               <div class="mini-panel panel-theme-purple">
-                  <div class="mini-panel-title">Classification & SLA</div>
-                  <div class="table-responsive panel-table-wrap table-frame mb-3">
-                     <table class="table table-sm app-table polished-table filter-table zebra-table sortable-table mb-0">
-                        <thead>
-                           <tr>
-                              <th>Classification</th>
-                              <th class="text-end">Claims</th>
-                              <th class="text-end">High Priority</th>
-                              <th class="text-end">Balance</th>
-                           </tr>
-                        </thead>
-                        <tbody>
-                           @foreach (var item in Model.ClassificationBreakdown.Take(8))
-                           {
-                           <tr>
-                              <td>@item.Label</td>
-                              <td class="text-end fw-semibold">@item.Count.ToString("N0")</td>
-                              <td class="text-end">@item.HighPriorityCount.ToString("N0")</td>
-                              <td class="text-end text-danger-emphasis">@Money(item.InsuranceBalanceSum)</td>
-                           </tr>
-                           }
-                        </tbody>
-                     </table>
-                  </div>
-                  <div class="table-responsive panel-table-wrap table-frame">
-                     <table class="table table-sm app-table polished-table filter-table zebra-table sortable-table mb-0">
-                        <thead>
-                           <tr>
-                              <th>Deadline</th>
-                              <th class="text-end">Claims</th>
-                              <th class="text-end">Open</th>
-                              <th class="text-end">Balance</th>
-                           </tr>
-                        </thead>
-                        <tbody>
-                           @foreach (var item in Model.DeadlineBreakdown)
-                           {
-                           <tr>
-                              <td>@item.Label</td>
-                              <td class="text-end fw-semibold">@item.Count.ToString("N0")</td>
-                              <td class="text-end">@item.OpenCount.ToString("N0")</td>
-                              <td class="text-end text-danger-emphasis">@Money(item.InsuranceBalanceSum)</td>
-                           </tr>
-                           }
-                        </tbody>
-                     </table>
-                  </div>
-               </div>
-            </div>
-         </div>
-      </div>
-   </div>
-</div>
-<div class="tab-pane fade @(activeTab == "denial-input" ? "show active" : "")" id="denial-input" role="tabpanel">
-<div class="card border-0 shadow-sm table-card">
-   <div class="card-body">
-      <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-         <div>
-            <div class="section-title">Denial Input &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
-            @* 
+        </div>
+    </div>
+    <div class="tab-pane fade @(activeTab == "denial-input" ? "show active" : "")" id="denial-input" role="tabpanel">
+        <div class="card border-0 shadow-sm table-card">
+            <div class="card-body">
+                <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+                    <div>
+                        <div class="section-title">Denial Input &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
+                        @* 
             <div class="section-subtitle">This is the raw grid from <code>dbo.DenialTaskBoard</code> for the selected lab.</div>
             *@
-         </div>
+                    </div>
 
-         <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search this page..." data-target-table="denialInputTable" /></div>
-      </div>
-      <div class="table-responsive table-frame">
-         <table class="table table-hover align-middle app-table polished-table line-table zebra-table sortable-table" id="denialInputTable">
-            <thead>
-               <tr>
-                  <th>Claim ID</th>
-                  <th>Patient / Acct #</th>
-                  <th>CPT</th>
-                  <th>Denial Code</th>
-                  <th>Description</th>
-                  <th>Classification</th>
-                  <th>Action Code</th>
-                  <th>Recommended Action</th>
-                  <th>Action Category</th>
-                  <th>Assigned To</th>
-                  <th>Task</th>
-                  <th>Priority</th>
-                  <th>Insurance Balance</th>
-                  <th>SLA</th>
-                  <th>Status</th>
-                  <th>Date Opened</th>
-                  <th>Due Date</th>
-                  <th>Date Completed</th>
-               </tr>
-            </thead>
-            <tbody>
-               @foreach (var item in Model.PagedRecords)
-               {
-               <tr>
-                  <td class="fw-semibold">@item.ClaimId</td>
-                  <td>@item.PatientAccountNumber</td>
-                  <td>@item.CptCode</td>
-                  <td>@item.DenialCode</td>
-                  <td class="text-wrap narrow-cell">@item.DenialDescription</td>
-                  <td>@item.DenialClassification</td>
-                  <td>@item.ActionCode</td>
-                  <td class="text-wrap narrow-cell">@item.RecommendedAction</td>
-                  <td>@item.EffectiveActionCategory</td>
-                  <td>@(string.IsNullOrWhiteSpace(item.AssignedTo) ? "-" : item.AssignedTo)</td>
-                  <td>@item.Task</td>
-                  <td><span class="badge @PriorityBadge(item.Priority)">@item.Priority</span></td>
-                  <td class="text-end">@Money(item.InsuranceBalance)</td>
-                  <td>@item.SlaDays days</td>
-                  <td><span class="badge @StatusBadge(item.Status)">@item.Status</span></td>
-                  <td>@item.DateOpened.ToString("dd MMM yyyy")</td>
-                  <td>@item.DueDate.ToString("dd MMM yyyy")</td>
-                  <td>@(item.DateCompleted?.ToString("dd MMM yyyy") ?? "-")</td>
-               </tr>
-               }
-            </tbody>
-         </table>
-      </div>
-      @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "denial-input", Page = Model.RecordsPage, TotalPages = Model.RecordsTotalPages, TotalItems = Model.FilteredRecordCount, PageSize = Model.RecordsPageSize, ItemLabel = "rows", BuildUrl = RecordsPageUrl })
-   </div>
-</div>
-</div>
-<div class="tab-pane fade @(activeTab == "dashboard" ? "show active" : "")" id="dashboard" role="tabpanel">
-<div class="row g-3 mb-3">
-   <div class="col-12 col-md-6 col-xl-3">
-      <div class="metric-hero hero-blue">
-         <div class="metric-title">Total Tasks</div>
-         <div class="metric-value">@Model.Summary.TotalTasks.ToString("N0")</div>
-      </div>
-   </div>
-   <div class="col-12 col-md-6 col-xl-3">
-      <div class="metric-hero hero-purple">
-         <div class="metric-title">Open</div>
-         <div class="metric-value">@Model.Summary.OpenTasks.ToString("N0")</div>
-      </div>
-   </div>
-   <div class="col-12 col-md-6 col-xl-3">
-      <div class="metric-hero hero-green">
-         <div class="metric-title">In Progress</div>
-         <div class="metric-value">@Model.Summary.InProgressTasks.ToString("N0")</div>
-      </div>
-   </div>
-   <div class="col-12 col-md-6 col-xl-3">
-      <div class="metric-hero hero-red">
-         <div class="metric-title">Completed</div>
-         <div class="metric-value">@Model.Summary.CompletedTasks.ToString("N0")</div>
-      </div>
-   </div>
-</div>
-<div class="row g-3 mb-4">
-   <div class="col-12 col-md-6 col-xl-3">
-      <div class="metric-mini-card metric-mini-blue">
-         <div class="metric-mini-top"><span class="metric-mini-icon"><i class="bi bi-exclamation-circle-fill"></i></span><span class="metric-mini-label">Overdue</span><span class="metric-mini-pill">@Model.Summary.OverdueTasks.ToString("N0")</span></div>
-         <div class="metric-mini-track"></div>
-         <div class="metric-mini-foot"><span>SLA breach queue</span><strong>@Model.Summary.OverdueTasks.ToString("N0")</strong></div>
-      </div>
-   </div>
-   <div class="col-12 col-md-6 col-xl-3">
-      <div class="metric-mini-card metric-mini-purple">
-         <div class="metric-mini-top"><span class="metric-mini-icon"><i class="bi bi-clock-fill"></i></span><span class="metric-mini-label">Due in 3 Days</span><span class="metric-mini-pill">@Model.Summary.DueInThreeDays.ToString("N0")</span></div>
-         <div class="metric-mini-track"></div>
-         <div class="metric-mini-foot"><span>Upcoming attention</span><strong>@Model.Summary.DueInThreeDays.ToString("N0")</strong></div>
-      </div>
-   </div>
-   <div class="col-12 col-md-6 col-xl-3">
-      <div class="metric-mini-card metric-mini-green">
-         <div class="metric-mini-top"><span class="metric-mini-icon"><i class="bi bi-flag-fill"></i></span><span class="metric-mini-label">High Priority</span><span class="metric-mini-pill">@Model.Summary.HighPriorityTasks.ToString("N0")</span></div>
-         <div class="metric-mini-track"></div>
-         <div class="metric-mini-foot"><span>Priority focus items</span><strong>@Model.Summary.HighPriorityTasks.ToString("N0")</strong></div>
-      </div>
-   </div>
-   <div class="col-12 col-md-6 col-xl-3">
-      <div class="metric-mini-card metric-mini-orange">
-         <div class="metric-mini-top"><span class="metric-mini-icon"><i class="bi bi-cash-stack"></i></span><span class="metric-mini-label">Insurance Balance</span><span class="metric-mini-pill">Total</span></div>
-         <div class="metric-mini-track"></div>
-         <div class="metric-mini-foot"><span>Outstanding balance</span><strong>@Money(Model.Summary.TotalInsuranceBalance)</strong></div>
-      </div>
-   </div>
-</div>
-<div class="row g-4">
-   <div class="col-12 col-xl-6">
-      <div class="card border-0 shadow-sm">
-         <div class="card-body">
-            <div class="section-title mb-3">Status Summary</div>
-            <div class="table-responsive table-frame">
-               <table class="table table-sm align-middle app-table polished-table zebra-table sortable-table mb-0">
-                  <thead>
-                     <tr>
-                        <th>Status</th>
-                        <th class="text-end">Count</th>
-                        <th class="text-end">% Filtered</th>
-                        <th class="text-end">SLA Breach</th>
-                        <th class="text-end">Insurance Balance</th>
-                     </tr>
-                  </thead>
-                  <tbody>
-                     @foreach (var item in Model.StatusBreakdown)
-                     {
-                     <tr>
-                        <td>@item.Label</td>
-                        <td class="text-end fw-semibold">@item.Count</td>
-                        <td class="text-end">@item.Percentage.ToString("0.0")%</td>
-                        <td class="text-end">@item.OverdueCount</td>
-                        <td class="text-end">@Money(item.InsuranceBalanceSum)</td>
-                     </tr>
-                     }
-                  </tbody>
-               </table>
+                    <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search this page..." data-target-table="denialInputTable" /></div>
+                </div>
+                <div class="table-responsive table-frame">
+                    <table class="table table-hover align-middle app-table polished-table line-table zebra-table sortable-table" id="denialInputTable">
+                        <thead>
+                            <tr>
+                                <th>Claim ID</th>
+                                <th>Patient / Acct #</th>
+                                <th>CPT</th>
+                                <th>Denial Code</th>
+                                <th>Description</th>
+                                <th>Classification</th>
+                                <th>Action Code</th>
+                                <th>Recommended Action</th>
+                                <th>Action Category</th>
+                                <th>Assigned To</th>
+                                <th>Task</th>
+                                <th>Priority</th>
+                                <th>Insurance Balance</th>
+                                <th>SLA</th>
+                                <th>Status</th>
+                                <th>Date Opened</th>
+                                <th>Due Date</th>
+                                <th>Date Completed</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var item in Model.PagedRecords)
+                            {
+                                <tr>
+                                    <td class="fw-semibold">@item.ClaimId</td>
+                                    <td>@item.PatientAccountNumber</td>
+                                    <td>@item.CptCode</td>
+                                    <td>@item.DenialCode</td>
+                                    <td class="text-wrap narrow-cell">@item.DenialDescription</td>
+                                    <td>@item.DenialClassification</td>
+                                    <td>@item.ActionCode</td>
+                                    <td class="text-wrap narrow-cell">@item.RecommendedAction</td>
+                                    <td>@item.EffectiveActionCategory</td>
+                                    <td>@(string.IsNullOrWhiteSpace(item.AssignedTo) ? "-" : item.AssignedTo)</td>
+                                    <td>@item.Task</td>
+                                    <td><span class="badge @PriorityBadge(item.Priority)">@item.Priority</span></td>
+                                    <td class="text-end">@Money(item.InsuranceBalance)</td>
+                                    <td>@item.SlaDays days</td>
+                                    <td><span class="badge @StatusBadge(item.Status)">@item.Status</span></td>
+                                    <td>@item.DateOpened.ToString("dd MMM yyyy")</td>
+                                    <td>@item.DueDate.ToString("dd MMM yyyy")</td>
+                                    <td>@(item.DateCompleted?.ToString("dd MMM yyyy") ?? "-")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "denial-input", Page = Model.RecordsPage, TotalPages = Model.RecordsTotalPages, TotalItems = Model.FilteredRecordCount, PageSize = Model.RecordsPageSize, ItemLabel = "rows", BuildUrl = RecordsPageUrl })
             </div>
-         </div>
-      </div>
-   </div>
-   <div class="col-12 col-xl-6">
-      <div class="card border-0 shadow-sm">
-         <div class="card-body">
-            <div class="section-title mb-3">Top Denial Classifications</div>
-            <div class="table-responsive table-frame">
-               <table class="table table-sm align-middle app-table polished-table zebra-table sortable-table mb-0">
-                  <thead>
-                     <tr>
-                        <th>Classification</th>
-                        <th class="text-end">Count</th>
-                        <th class="text-end">Open</th>
-                        <th class="text-end">Completed</th>
-                        <th class="text-end">High Priority</th>
-                        <th class="text-end">Insurance Balance</th>
-                     </tr>
-                  </thead>
-                  <tbody>
-                     @foreach (var item in Model.ClassificationBreakdown.Take(10))
-                     {
-                     <tr>
-                        <td>@item.Label</td>
-                        <td class="text-end fw-semibold">@item.Count</td>
-                        <td class="text-end">@item.OpenCount</td>
-                        <td class="text-end">@item.CompletedCount</td>
-                        <td class="text-end">@item.HighPriorityCount</td>
-                        <td class="text-end">@Money(item.InsuranceBalanceSum)</td>
-                     </tr>
-                     }
-                  </tbody>
-               </table>
+        </div>
+    </div>
+    <div class="tab-pane fade @(activeTab == "dashboard" ? "show active" : "")" id="dashboard" role="tabpanel">
+        <div class="row g-3 mb-3">
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="metric-hero hero-blue">
+                    <div class="metric-title">Total Tasks</div>
+                    <div class="metric-value">@Model.Summary.TotalTasks.ToString("N0")</div>
+                </div>
             </div>
-         </div>
-      </div>
-   </div>
-</div>
-</div>
-<div class="tab-pane fade @(activeTab == "task-board" ? "show active" : "")" id="task-board" role="tabpanel">
-<div class="card border-0 shadow-sm table-card">
-   <div class="card-body">
-      <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-         <div>
-            <div class="section-title">Task Board &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
-            <div class="section-subtitle">Operational work queue for denial follow-up.</div>
-                     </div>
-         <div class="d-flex flex-wrap align-items-center gap-2 ms-auto">
-            <a class="btn btn-outline-success rounded-pill px-3 js-loader-link" href="@Url.Action("DownloadTaskBoardCsv", "DenialDashboard", new { LabId = Model.Filters.LabId, Status = Model.Filters.Status, Priority = Model.Filters.Priority, ActionCategory = Model.Filters.ActionCategory, Deadline = Model.Filters.Deadline, Classification = Model.Filters.Classification, SalesRepname = Model.Filters.SalesRepname, ClinicName = Model.Filters.ClinicName, ReferringProvider = Model.Filters.ReferringProvider, PayerName = Model.Filters.PayerName, PayerType = Model.Filters.PayerType, PanelName = Model.Filters.PanelName, FirstBilledDateFrom = Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"), FirstBilledDateTo = Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"), DateOfServiceFrom = Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"), DateOfServiceTo = Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"), ActiveTab = "task-board", Page = Model.Filters.Page, PageSize = Model.Filters.PageSize, InsightPage = Model.Filters.InsightPage, InsightPageSize = Model.Filters.InsightPageSize, LineItemPage = Model.Filters.LineItemPage, LineItemPageSize = Model.Filters.LineItemPageSize })">
-               <i class="bi bi-download me-1"></i>Download CSV
-            </a>
-            <form asp-action="UploadTaskBoardCsv" asp-controller="DenialDashboard" method="post" enctype="multipart/form-data" class="d-inline-flex align-items-center gap-2 task-upload-form">
-               @Html.AntiForgeryToken()
-               <input type="hidden" name="LabId" value="@Model.Filters.LabId" />
-               <input type="hidden" name="Status" value="@Model.Filters.Status" />
-               <input type="hidden" name="Priority" value="@Model.Filters.Priority" />
-               <input type="hidden" name="ActionCategory" value="@Model.Filters.ActionCategory" />
-               <input type="hidden" name="Deadline" value="@Model.Filters.Deadline" />
-               <input type="hidden" name="Classification" value="@Model.Filters.Classification" />
-               <input type="hidden" name="SalesRepname" value="@Model.Filters.SalesRepname" />
-               <input type="hidden" name="ClinicName" value="@Model.Filters.ClinicName" />
-               <input type="hidden" name="ReferringProvider" value="@Model.Filters.ReferringProvider" />
-               <input type="hidden" name="PayerName" value="@Model.Filters.PayerName" />
-               <input type="hidden" name="PayerType" value="@Model.Filters.PayerType" />
-               <input type="hidden" name="PanelName" value="@Model.Filters.PanelName" />
-               <input type="hidden" name="FirstBilledDateFrom" value="@(Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"))" />
-               <input type="hidden" name="FirstBilledDateTo" value="@(Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"))" />
-               <input type="hidden" name="DateOfServiceFrom" value="@(Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"))" />
-               <input type="hidden" name="DateOfServiceTo" value="@(Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"))" />
-               <input type="hidden" name="ActiveTab" value="task-board" />
-               <input type="hidden" name="Page" value="@Model.Filters.Page" />
-               <input type="hidden" name="PageSize" value="@Model.Filters.PageSize" />
-               <input type="hidden" name="InsightPage" value="@Model.Filters.InsightPage" />
-               <input type="hidden" name="InsightPageSize" value="@Model.Filters.InsightPageSize" />
-               <input type="hidden" name="LineItemPage" value="@Model.Filters.LineItemPage" />
-               <input type="hidden" name="LineItemPageSize" value="@Model.Filters.LineItemPageSize" />
-               <input type="file" name="taskBoardCsv" class="d-none task-upload-input" accept=".csv,text/csv" />
-               <button type="button" class="btn btn-outline-primary rounded-pill px-3 task-upload-trigger">
-                  <i class="bi bi-upload me-1"></i>Upload CSV
-               </button>
-            </form>
-            <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search this page..." data-target-table="taskBoardTable" /></div>
-         </div>
-      </div>
-      <div class="small text-muted mb-3">Download the task list, update only <strong>Status</strong>, <strong>AssignedTo</strong>, and <strong>DateCompleted</strong> (or Closed Date), then upload the CSV back here.</div>
-      <div class="table-responsive table-frame">
-         <table class="table table-hover align-middle app-table polished-table line-table zebra-table sortable-table" id="taskBoardTable">
-            <thead>
-               <tr>
-                  <th>Task ID</th>
-                  <th>Claim ID</th>
-                  <th>CPT Code</th>
-                  <th>Denial Code</th>
-                  <th>Denial Description</th>
-                  <th>Patient / Acct #</th>
-                  <th>Task</th>
-                  <th>Action Category</th>
-                  <th>Assigned To</th>
-                  <th>Priority</th>
-                  <th>Insurance Balance</th>
-                  <th>Status</th>
-                  <th>Due Date</th>
-                  <th>Days Remaining</th>
-                  <th>SLA Status</th>
-               </tr>
-            </thead>
-            <tbody>
-               @foreach (var item in Model.PagedRecords)
-               {
-               <tr>
-                  <td class="fw-semibold">@item.TaskId</td>
-                  <td>@item.ClaimId</td>
-                  <td>@item.CptCode</td>
-                  <td>@item.DenialCode</td>
-                  <td>@item.DenialDescription</td>
-                  <td>@item.PatientAccountNumber</td>
-                  <td class="text-wrap narrow-cell">@item.Task</td>
-                  <td class="text-wrap narrow-cell">@item.EffectiveActionCategory</td>
-                  <td>@(string.IsNullOrWhiteSpace(item.AssignedTo) ? "-" : item.AssignedTo)</td>
-                  <td><span class="badge @PriorityBadge(item.Priority)">@item.Priority</span></td>
-                  <td class="text-end">@Money(item.InsuranceBalance)</td>
-                  <td><span class="badge @StatusBadge(item.Status)">@item.Status</span></td>
-                  <td>@item.DueDate.ToString("dd MMM yyyy")</td>
-                  <td>@(item.DaysRemaining?.ToString() ?? "Done")</td>
-                  <td><span class="badge @SlaBadge(item.SlaStatus)">@item.SlaStatus</span></td>
-               </tr>
-               }
-            </tbody>
-         </table>
-      </div>
-      @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "task-board", Page = Model.RecordsPage, TotalPages = Model.RecordsTotalPages, TotalItems = Model.FilteredRecordCount, PageSize = Model.RecordsPageSize, ItemLabel = "rows", BuildUrl = RecordsPageUrl })
-   </div>
-</div>
-</div>
-<div class="tab-pane fade @(activeTab == "sla-tracker" ? "show active" : "")" id="sla-tracker" role="tabpanel">
-<div class="card border-0 shadow-sm table-card">
-   <div class="card-body">
-      <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-         <div>
-            <div class="section-title">SLA Tracker &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
-            <div class="section-subtitle">Deadline monitor with warning and escalation logic.</div>
-         </div>
-         <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search this page..." data-target-table="slaTrackerTable" /></div>
-      </div>
-      <div class="table-responsive table-frame">
-         <table class="table table-hover align-middle app-table polished-table line-table zebra-table sortable-table" id="slaTrackerTable">
-            <thead>
-               <tr>
-                  <th>Task ID</th>
-                  <th>Claim ID</th>
-                  <th>Patient / Acct #</th>
-                  <th>CPT</th>
-                  <th>Task</th>
-                  <th>Priority</th>
-                  <th>Insurance Balance</th>
-                  <th>Status</th>
-                  <th>SLA Days</th>
-                  <th>Due Date</th>
-                  <th>Days Remaining</th>
-                  <th>Escalation Flag</th>
-               </tr>
-            </thead>
-            <tbody>
-               @foreach (var item in Model.PagedRecords)
-               {
-               <tr>
-                  <td class="fw-semibold">@item.TaskId</td>
-                  <td>@item.ClaimId</td>
-                  <td>@item.PatientAccountNumber</td>
-                  <td>@item.CptCode</td>
-                  <td class="text-wrap narrow-cell">@item.Task</td>
-                  <td><span class="badge @PriorityBadge(item.Priority)">@item.Priority</span></td>
-                  <td class="text-end">@Money(item.InsuranceBalance)</td>
-                  <td><span class="badge @StatusBadge(item.Status)">@item.Status</span></td>
-                  <td>@item.SlaDays</td>
-                  <td>@item.DueDate.ToString("dd MMM yyyy")</td>
-                  <td>@(item.DaysRemaining?.ToString() ?? "Done")</td>
-                  <td>@if (string.IsNullOrWhiteSpace(item.EscalationFlag)){<span class="text-muted">-</span>}else{<span class="badge @(item.EscalationFlag.Contains("Escalate") ? "badge-soft-danger" : "badge-soft-warning")">@item.EscalationFlag</span>}</td>
-               </tr>
-               }
-            </tbody>
-         </table>
-      </div>
-      @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "sla-tracker", Page = Model.RecordsPage, TotalPages = Model.RecordsTotalPages, TotalItems = Model.FilteredRecordCount, PageSize = Model.RecordsPageSize, ItemLabel = "rows", BuildUrl = RecordsPageUrl })
-   </div>
-</div>
-</div>
-<div class="tab-pane fade @(activeTab == "denial-insight" ? "show active" : "")" id="denial-insight" role="tabpanel">
-<div class="card border-0 shadow-sm table-card">
-   <div class="card-body">
-      <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
-         <div>
-            <div class="section-title">Denial Insight &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
-            @* <div class="section-subtitle">Derived from <code>dbo.DenialTaskBoard</code> for the selected lab and latest available run.</div> *@
-         </div>
-         <div class="d-flex flex-wrap gap-2">
-       
-            <span class="chip">Rows: @Model.InsightCount.ToString("N0")</span>
-         </div>
-      </div>
-
-      <div class="row g-3 mb-4">
-         <div class="col-12 col-md-6 col-xl-3">
-            <div class="metric-hero hero-blue">
-               <div class="metric-title">Total Denials</div>
-               <div class="metric-value">@Model.InsightTotalDenials.ToString("N0")</div>
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="metric-hero hero-purple">
+                    <div class="metric-title">Open</div>
+                    <div class="metric-value">@Model.Summary.OpenTasks.ToString("N0")</div>
+                </div>
             </div>
-         </div>
-         <div class="col-12 col-md-6 col-xl-3">
-            <div class="metric-hero hero-purple">
-               <div class="metric-title">Total Claims</div>
-               <div class="metric-value">@Model.InsightTotalClaims.ToString("N0")</div>
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="metric-hero hero-green">
+                    <div class="metric-title">In Progress</div>
+                    <div class="metric-value">@Model.Summary.InProgressTasks.ToString("N0")</div>
+                </div>
             </div>
-         </div>
-         <div class="col-12 col-md-6 col-xl-3">
-            <div class="metric-hero hero-green">
-               <div class="metric-title">Total Balance</div>
-               <div class="metric-value">@Money(Model.InsightTotalBalance)</div>
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="metric-hero hero-red">
+                    <div class="metric-title">Completed</div>
+                    <div class="metric-value">@Model.Summary.CompletedTasks.ToString("N0")</div>
+                </div>
             </div>
-         </div>
-         <div class="col-12 col-md-6 col-xl-3">
-            <div class="metric-hero hero-red">
-               <div class="metric-title">Insurance Balance</div>
-               <div class="metric-value">@Money(Model.InsightTotalInsuranceBalance)</div>
+        </div>
+        <div class="row g-3 mb-4">
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="metric-mini-card metric-mini-blue">
+                    <div class="metric-mini-top"><span class="metric-mini-icon"><i class="bi bi-exclamation-circle-fill"></i></span><span class="metric-mini-label">Overdue</span><span class="metric-mini-pill">@Model.Summary.OverdueTasks.ToString("N0")</span></div>
+                    <div class="metric-mini-track"></div>
+                    <div class="metric-mini-foot"><span>SLA breach queue</span><strong>@Model.Summary.OverdueTasks.ToString("N0")</strong></div>
+                </div>
             </div>
-         </div>
-      </div>
-
-      <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-         <div>
-            <div class="mini-panel-title insight-summary-title mb-1">Insight Summary Rows</div>
-            <div class="section-subtitle">$ Impact (%) is calculated as <code>(InsuranceBalance / TotalBalance) * 100</code>.</div>
-         </div>
-         <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search denial insights on this page..." data-target-table="denialInsightTable" /></div>
-      </div>
-
-      <div class="table-responsive table-frame table-frame-bordered">
-         <table class="table table-hover align-middle app-table polished-table bordered-grid-table zebra-table sortable-table" id="denialInsightTable">
-            <thead>
-               <tr>
-                  <th>Denial Codes</th>
-                  <th>Description</th>
-                  <th class="text-end"># of Denial</th>
-                  <th class="text-end"># of Claims</th>
-                  <th class="text-end">Total Balance</th>
-                  <th>High Impact Insurance</th>
-                  <th class="text-end">Insurance Balance</th>
-                  <th class="text-end">$ Impact (%)</th>
-                  <th>Action Category</th>
-                  <th>Action Code</th>
-                  <th>Action</th>
-                  <th>Task</th>
-                  <th>Feedback</th>
-                  <th>Responsibility</th>
-                  <th>Discussion Date</th>
-                  <th>ETA</th>
-               </tr>
-            </thead>
-            <tbody>
-               @if (Model.PagedInsights.Any())
-               {
-                  @foreach (var item in Model.PagedInsights)
-                  {
-                     <tr>
-                        <td class="fw-semibold">@item.DenialCodes</td>
-                        <td class="text-wrap narrow-cell">@item.Descriptions</td>
-                        <td class="text-end">@item.NoOfDenialCount.ToString("N0")</td>
-                        <td class="text-end">@item.NoOfClaimsCount.ToString("N0")</td>
-                        <td class="text-end">@Money(item.TotalBalance)</td>
-                        <td class="text-wrap narrow-cell">@item.HighImpactInsurance</td>
-                        <td class="text-end">@Money(item.InsuranceBalance)</td>
-                        <td class="text-end">@item.ImpactPercentageDisplay</td>
-                        <td class="text-wrap narrow-cell">@item.ActionCategory</td>
-                        <td>@item.ActionCode</td>
-                        <td class="text-wrap narrow-cell">@item.Action</td>
-                        <td class="text-wrap narrow-cell">@item.Task</td>
-                        <td class="text-wrap narrow-cell">@(string.IsNullOrWhiteSpace(item.Feedback) ? "-" : item.Feedback)</td>
-                        <td>@(string.IsNullOrWhiteSpace(item.Responsibility) ? "-" : item.Responsibility)</td>
-                        <td>@(item.DiscussionDate?.ToString("dd MMM yyyy") ?? "-")</td>
-                        <td>@(string.IsNullOrWhiteSpace(item.ETA) ? "-" : item.ETA)</td>
-                     </tr>
-                  }
-               }
-               else
-               {
-                  <tr>
-                     <td colspan="16" class="text-center text-muted py-4">No denial insight rows were found for the selected lab.</td>
-                  </tr>
-               }
-            </tbody>
-         </table>
-      </div>
-      @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "denial-insight", Page = Model.InsightPage, TotalPages = Model.InsightTotalPages, TotalItems = Model.InsightCount, PageSize = Model.InsightPageSize, ItemLabel = "insight rows", BuildUrl = (page, _) => InsightPageUrl(page) })
-   </div>
-</div>
-</div>
-
-<div class="tab-pane fade @(activeTab == "line-item" ? "show active" : "")" id="line-item" role="tabpanel">
-<div class="card border-0 shadow-sm table-card">
-   <div class="card-body">
-      <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-         <div>
-            <div class="section-title">Line Item &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
-            @* <div class="section-subtitle">Filtered denial line-item rows from <code>dbo.DenialLineItem</code> for the selected lab and latest available run.</div> *@
-         </div>
-         <div class="d-flex flex-wrap gap-2">
-
-            <span class="chip">Rows: @Model.LineItemCount.ToString("N0")</span>
-         </div>
-      </div>
-
-      <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-         @* <div class="section-subtitle">This tab replaces Claim View and shows the filtered line-item level denial details for the selected lab and latest run.</div> *@
-         <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search line items on this page..." data-target-table="lineItemTable" /></div>
-      </div>
-
-      <div class="table-responsive table-frame">
-         <table class="table table-hover align-middle app-table polished-table line-table zebra-table sortable-table" id="lineItemTable">
-            <thead>
-               <tr>
-                  <th>Accession No</th>
-                  <th>Visit Number</th>
-                  <th>CPT</th>
-                  <th>DOS</th>
-                  <th>Panel</th>
-                  <th>Payer</th>
-                  <th>Denial Code</th>
-                  <th>Description</th>
-                  <th class="text-end">Billed</th>
-                  <th class="text-end">Allowed</th>
-                  <th class="text-end">Insurance Paid</th>
-                  <th class="text-end">Insurance Adj.</th>
-                  <th class="text-end">Insurance Balance</th>
-                  <th class="text-end">Total Balance</th>
-                  <th>Final Claim Status</th>
-                  <th>Coverage Status</th>
-                  <th>Classification</th>
-                  <th>Denial Type</th>
-                  <th>Action Category</th>
-                  <th>Action Code</th>
-                  <th>Recommended Action</th>
-                  <th>Task Guidance</th>
-                  <th>Task Status</th>
-                  <th>Priority</th>
-                  <th>SLA Days</th>
-               </tr>
-            </thead>
-            <tbody>
-               @if (Model.PagedLineItems.Any())
-               {
-                  @foreach (var item in Model.PagedLineItems)
-                  {
-                     <tr>
-                        <td class="fw-semibold">@item.AccessionNo</td>
-                        <td>@item.VisitNumber</td>
-                        <td>@item.CptCode</td>
-                        <td>@(item.DateOfService?.ToString("dd MMM yyyy") ?? "-")</td>
-                        <td>@item.PanelName</td>
-                        <td class="text-wrap narrow-cell">@item.PayerName</td>
-                        <td>@(string.IsNullOrWhiteSpace(item.DenialCodeNormalized) ? item.DenialCodeOriginal : item.DenialCodeNormalized)</td>
-                        <td class="text-wrap narrow-cell">@item.DenialDescription</td>
-                        <td class="text-end">@Money(item.BilledAmount) </td>
-                        <td class="text-end">@Money(item.AllowedAmount) </td>
-                        <td class="text-end">@Money(item.InsurancePayment) </td>
-                        <td class="text-end">@Money(item.InsuranceAdjustment) </td>
-                        <td class="text-end">@Money(item.InsuranceBalance) </td>
-                        <td class="text-end">@Money(item.TotalBalance) </td>
-                        <td>@item.FinalClaimStatus</td>
-                        <td>@(string.IsNullOrWhiteSpace(item.FinalCoverageStatus) ? item.CoverageStatus : item.FinalCoverageStatus)</td>
-                        <td>@item.CleanDenialClassification</td>
-                        <td>@item.DenialType</td>
-                        <td class="text-wrap narrow-cell">@item.CleanActionCategory</td>
-                        <td>@item.ActionCode</td>
-                        <td class="text-wrap narrow-cell">@item.RecommendedAction</td>
-                        <td class="text-wrap narrow-cell">@item.TaskGuidance</td>
-                        <td>@item.TaskStatus</td>
-                        <td><span class="badge @PriorityBadge(item.CleanPriority)">@item.CleanPriority</span></td>
-                        <td>@(string.IsNullOrWhiteSpace(item.SlaDays) ? "-" : item.SlaDays)</td>
-                     </tr>
-                  }
-               }
-               else
-               {
-                  <tr>
-                     <td colspan="25" class="text-center text-muted py-4">No line-item rows were found for the selected lab.</td>
-                  </tr>
-               }
-            </tbody>
-         </table>
-      </div>
-      @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "line-item", Page = Model.LineItemPage, TotalPages = Model.LineItemTotalPages, TotalItems = Model.LineItemCount, PageSize = Model.LineItemPageSize, ItemLabel = "line items", BuildUrl = (page, _) => LineItemPageUrl(page) })
-   </div>
-</div>
-</div>
-<div class="tab-pane fade @(activeTab == "weekly-breakdown" ? "show active" : "")" id="weekly-breakdown" role="tabpanel">
-   <div class="card border-0 shadow-sm table-card">
-      <div class="card-body">
-         <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-            <div>
-               <div class="section-title"><i class="bi bi-calendar-week me-2"></i>Weekly Breakdown &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
-               <div class="section-subtitle">Pivot-style weekly view from <code>DenialLineItem.DenialDate</code> showing top insurance and top denials.</div>
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="metric-mini-card metric-mini-purple">
+                    <div class="metric-mini-top"><span class="metric-mini-icon"><i class="bi bi-clock-fill"></i></span><span class="metric-mini-label">Due in 3 Days</span><span class="metric-mini-pill">@Model.Summary.DueInThreeDays.ToString("N0")</span></div>
+                    <div class="metric-mini-track"></div>
+                    <div class="metric-mini-foot"><span>Upcoming attention</span><strong>@Model.Summary.DueInThreeDays.ToString("N0")</strong></div>
+                </div>
             </div>
-         </div>
-         @await Html.PartialAsync("_BreakdownPivotTable", Model.WeeklyPivot)
-      </div>
-   </div>
-</div>
-
-<div class="tab-pane fade @(activeTab == "monthly-breakdown" ? "show active" : "")" id="monthly-breakdown" role="tabpanel">
-   <div class="card border-0 shadow-sm table-card">
-      <div class="card-body">
-         <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-            <div>
-               <div class="section-title"><i class="bi bi-calendar-month me-2"></i>Monthly Breakdown &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
-               <div class="section-subtitle">Pivot-style monthly view from <code>DenialLineItem.DenialDate</code> showing top insurance and top denials.</div>
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="metric-mini-card metric-mini-green">
+                    <div class="metric-mini-top"><span class="metric-mini-icon"><i class="bi bi-flag-fill"></i></span><span class="metric-mini-label">High Priority</span><span class="metric-mini-pill">@Model.Summary.HighPriorityTasks.ToString("N0")</span></div>
+                    <div class="metric-mini-track"></div>
+                    <div class="metric-mini-foot"><span>Priority focus items</span><strong>@Model.Summary.HighPriorityTasks.ToString("N0")</strong></div>
+                </div>
             </div>
-         </div>
-         @await Html.PartialAsync("_BreakdownPivotTable", Model.MonthlyPivot)
-      </div>
-   </div>
-</div>
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="metric-mini-card metric-mini-orange">
+                    <div class="metric-mini-top"><span class="metric-mini-icon"><i class="bi bi-cash-stack"></i></span><span class="metric-mini-label">Insurance Balance</span><span class="metric-mini-pill">Total</span></div>
+                    <div class="metric-mini-track"></div>
+                    <div class="metric-mini-foot"><span>Outstanding balance</span><strong>@Money(Model.Summary.TotalInsuranceBalance)</strong></div>
+                </div>
+            </div>
+        </div>
+        <div class="row g-4">
+            <div class="col-12 col-xl-6">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-body">
+                        <div class="section-title mb-3">Status Summary</div>
+                        <div class="table-responsive table-frame">
+                            <table class="table table-sm align-middle app-table polished-table zebra-table sortable-table mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Status</th>
+                                        <th class="text-end">Count</th>
+                                        <th class="text-end">% Filtered</th>
+                                        <th class="text-end">SLA Breach</th>
+                                        <th class="text-end">Insurance Balance</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in Model.StatusBreakdown)
+                                    {
+                                        <tr>
+                                            <td>@item.Label</td>
+                                            <td class="text-end fw-semibold">@item.Count</td>
+                                            <td class="text-end">@item.Percentage.ToString("0.0")%</td>
+                                            <td class="text-end">@item.OverdueCount</td>
+                                            <td class="text-end">@Money(item.InsuranceBalanceSum)</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-xl-6">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-body">
+                        <div class="section-title mb-3">Top Denial Classifications</div>
+                        <div class="table-responsive table-frame">
+                            <table class="table table-sm align-middle app-table polished-table zebra-table sortable-table mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Classification</th>
+                                        <th class="text-end">Count</th>
+                                        <th class="text-end">Open</th>
+                                        <th class="text-end">Completed</th>
+                                        <th class="text-end">High Priority</th>
+                                        <th class="text-end">Insurance Balance</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in Model.ClassificationBreakdown.Take(10))
+                                    {
+                                        <tr>
+                                            <td>@item.Label</td>
+                                            <td class="text-end fw-semibold">@item.Count</td>
+                                            <td class="text-end">@item.OpenCount</td>
+                                            <td class="text-end">@item.CompletedCount</td>
+                                            <td class="text-end">@item.HighPriorityCount</td>
+                                            <td class="text-end">@Money(item.InsuranceBalanceSum)</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="tab-pane fade @(activeTab == "task-board" ? "show active" : "")" id="task-board" role="tabpanel">
+        <div class="card border-0 shadow-sm table-card">
+            <div class="card-body">
+                <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+                    <div>
+                        <div class="section-title">Task Board &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
+                        <div class="section-subtitle">Operational work queue for denial follow-up.</div>
+                    </div>
+                    <div class="d-flex flex-wrap align-items-center gap-2 ms-auto">
+                        <a class="btn btn-outline-success rounded-pill px-3 js-loader-link" href="@Url.Action("DownloadTaskBoardCsv", "DenialDashboard", new { LabId = Model.Filters.LabId, Status = Model.Filters.Status, Priority = Model.Filters.Priority, ActionCategory = Model.Filters.ActionCategory, Deadline = Model.Filters.Deadline, Classification = Model.Filters.Classification, SalesRepname = Model.Filters.SalesRepname, ClinicName = Model.Filters.ClinicName, ReferringProvider = Model.Filters.ReferringProvider, PayerName = Model.Filters.PayerName, PayerType = Model.Filters.PayerType, PanelName = Model.Filters.PanelName, FirstBilledDateFrom = Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"), FirstBilledDateTo = Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"), DateOfServiceFrom = Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"), DateOfServiceTo = Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"), DenialDateFrom = Model.Filters.DenialDateFrom?.ToString("yyyy-MM-dd"), DenialDateTo = Model.Filters.DenialDateTo?.ToString("yyyy-MM-dd"), ActiveTab = "task-board", Page = Model.Filters.Page, PageSize = Model.Filters.PageSize, InsightPage = Model.Filters.InsightPage, InsightPageSize = Model.Filters.InsightPageSize, LineItemPage = Model.Filters.LineItemPage, LineItemPageSize = Model.Filters.LineItemPageSize })">
+                            <i class="bi bi-download me-1"></i>Download CSV
+                        </a>
+                        <form asp-action="UploadTaskBoardCsv" asp-controller="DenialDashboard" method="post" enctype="multipart/form-data" class="d-inline-flex align-items-center gap-2 task-upload-form">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="LabId" value="@Model.Filters.LabId" />
+                            <input type="hidden" name="Status" value="@Model.Filters.Status" />
+                            <input type="hidden" name="Priority" value="@Model.Filters.Priority" />
+                            <input type="hidden" name="ActionCategory" value="@Model.Filters.ActionCategory" />
+                            <input type="hidden" name="Deadline" value="@Model.Filters.Deadline" />
+                            <input type="hidden" name="Classification" value="@Model.Filters.Classification" />
+                            <input type="hidden" name="SalesRepname" value="@Model.Filters.SalesRepname" />
+                            <input type="hidden" name="ClinicName" value="@Model.Filters.ClinicName" />
+                            <input type="hidden" name="ReferringProvider" value="@Model.Filters.ReferringProvider" />
+                            <input type="hidden" name="PayerName" value="@Model.Filters.PayerName" />
+                            <input type="hidden" name="PayerType" value="@Model.Filters.PayerType" />
+                            <input type="hidden" name="PanelName" value="@Model.Filters.PanelName" />
+                            <input type="hidden" name="FirstBilledDateFrom" value="@(Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"))" />
+                            <input type="hidden" name="FirstBilledDateTo" value="@(Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"))" />
+                            <input type="hidden" name="DateOfServiceFrom" value="@(Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"))" />
+                            <input type="hidden" name="DateOfServiceTo" value="@(Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"))" />
+                            <input type="hidden" name="DenialDateFrom" value="@(Model.Filters.DenialDateFrom?.ToString("yyyy-MM-dd"))" />
+                            <input type="hidden" name="DenialDateTo" value="@(Model.Filters.DenialDateTo?.ToString("yyyy-MM-dd"))" />
+                            <input type="hidden" name="ActiveTab" value="task-board" />
+                            <input type="hidden" name="Page" value="@Model.Filters.Page" />
+                            <input type="hidden" name="PageSize" value="@Model.Filters.PageSize" />
+                            <input type="hidden" name="InsightPage" value="@Model.Filters.InsightPage" />
+                            <input type="hidden" name="InsightPageSize" value="@Model.Filters.InsightPageSize" />
+                            <input type="hidden" name="LineItemPage" value="@Model.Filters.LineItemPage" />
+                            <input type="hidden" name="LineItemPageSize" value="@Model.Filters.LineItemPageSize" />
+                            <input type="file" name="taskBoardCsv" class="d-none task-upload-input" accept=".csv,text/csv" />
+                            <button type="button" class="btn btn-outline-primary rounded-pill px-3 task-upload-trigger">
+                                <i class="bi bi-upload me-1"></i>Upload CSV
+                            </button>
+                        </form>
+                        <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search this page..." data-target-table="taskBoardTable" /></div>
+                    </div>
+                </div>
+                <div class="small text-muted mb-3">Download the task list, update only <strong>Status</strong>, <strong>AssignedTo</strong>, and <strong>DateCompleted</strong> (or Closed Date), then upload the CSV back here.</div>
+                <div class="table-responsive table-frame">
+                    <table class="table table-hover align-middle app-table polished-table line-table zebra-table sortable-table" id="taskBoardTable">
+                        <thead>
+                            <tr>
+                                <th>Task ID</th>
+                                <th>Claim ID</th>
+                                <th>CPT Code</th>
+                                <th>Denial Code</th>
+                                <th>Denial Description</th>
+                                <th>Patient / Acct #</th>
+                                <th>Task</th>
+                                <th>Action Category</th>
+                                <th>Assigned To</th>
+                                <th>Priority</th>
+                                <th>Insurance Balance</th>
+                                <th>Status</th>
+                                <th>Due Date</th>
+                                <th>Days Remaining</th>
+                                <th>SLA Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var item in Model.PagedRecords)
+                            {
+                                <tr>
+                                    <td class="fw-semibold">@item.TaskId</td>
+                                    <td>@item.ClaimId</td>
+                                    <td>@item.CptCode</td>
+                                    <td>@item.DenialCode</td>
+                                    <td>@item.DenialDescription</td>
+                                    <td>@item.PatientAccountNumber</td>
+                                    <td class="text-wrap narrow-cell">@item.Task</td>
+                                    <td class="text-wrap narrow-cell">@item.EffectiveActionCategory</td>
+                                    <td>@(string.IsNullOrWhiteSpace(item.AssignedTo) ? "-" : item.AssignedTo)</td>
+                                    <td><span class="badge @PriorityBadge(item.Priority)">@item.Priority</span></td>
+                                    <td class="text-end">@Money(item.InsuranceBalance)</td>
+                                    <td><span class="badge @StatusBadge(item.Status)">@item.Status</span></td>
+                                    <td>@item.DueDate.ToString("dd MMM yyyy")</td>
+                                    <td>@(item.DaysRemaining?.ToString() ?? "Done")</td>
+                                    <td><span class="badge @SlaBadge(item.SlaStatus)">@item.SlaStatus</span></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "task-board", Page = Model.RecordsPage, TotalPages = Model.RecordsTotalPages, TotalItems = Model.FilteredRecordCount, PageSize = Model.RecordsPageSize, ItemLabel = "rows", BuildUrl = RecordsPageUrl })
+            </div>
+        </div>
+    </div>
+    <div class="tab-pane fade @(activeTab == "sla-tracker" ? "show active" : "")" id="sla-tracker" role="tabpanel">
+        <div class="card border-0 shadow-sm table-card">
+            <div class="card-body">
+                <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+                    <div>
+                        <div class="section-title">SLA Tracker &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
+                        <div class="section-subtitle">Deadline monitor with warning and escalation logic.</div>
+                    </div>
+                    <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search this page..." data-target-table="slaTrackerTable" /></div>
+                </div>
+                <div class="table-responsive table-frame">
+                    <table class="table table-hover align-middle app-table polished-table line-table zebra-table sortable-table" id="slaTrackerTable">
+                        <thead>
+                            <tr>
+                                <th>Task ID</th>
+                                <th>Claim ID</th>
+                                <th>Patient / Acct #</th>
+                                <th>CPT</th>
+                                <th>Task</th>
+                                <th>Priority</th>
+                                <th>Insurance Balance</th>
+                                <th>Status</th>
+                                <th>SLA Days</th>
+                                <th>Due Date</th>
+                                <th>Days Remaining</th>
+                                <th>Escalation Flag</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var item in Model.PagedRecords)
+                            {
+                                <tr>
+                                    <td class="fw-semibold">@item.TaskId</td>
+                                    <td>@item.ClaimId</td>
+                                    <td>@item.PatientAccountNumber</td>
+                                    <td>@item.CptCode</td>
+                                    <td class="text-wrap narrow-cell">@item.Task</td>
+                                    <td><span class="badge @PriorityBadge(item.Priority)">@item.Priority</span></td>
+                                    <td class="text-end">@Money(item.InsuranceBalance)</td>
+                                    <td><span class="badge @StatusBadge(item.Status)">@item.Status</span></td>
+                                    <td>@item.SlaDays</td>
+                                    <td>@item.DueDate.ToString("dd MMM yyyy")</td>
+                                    <td>@(item.DaysRemaining?.ToString() ?? "Done")</td>
+                                    <td>@if (string.IsNullOrWhiteSpace(item.EscalationFlag)){
+                                    <span class="text-muted">-</span>
+                                }else
+                                {
+
+                                    <span class="badge @(item.EscalationFlag.Contains("Escalate") ? "badge-soft-danger" : "badge-soft-warning")">@item.EscalationFlag</span>
+                                }
+</td>
+                            </tr>
+                                                        }
+                        </tbody>
+                    </table>
+                </div>
+                @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "sla-tracker", Page = Model.RecordsPage, TotalPages = Model.RecordsTotalPages, TotalItems = Model.FilteredRecordCount, PageSize = Model.RecordsPageSize, ItemLabel = "rows", BuildUrl = RecordsPageUrl })
+            </div>
+        </div>
+    </div>
+    <div class="tab-pane fade @(activeTab == "denial-insight" ? "show active" : "")" id="denial-insight" role="tabpanel">
+        <div class="card border-0 shadow-sm table-card">
+            <div class="card-body">
+                <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+                    <div>
+                        <div class="section-title">Denial Insight &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
+                        @* <div class="section-subtitle">Derived from <code>dbo.DenialTaskBoard</code> for the selected lab and latest available run.</div> *@
+                    </div>
+                    <div class="d-flex flex-wrap gap-2">
+
+                        <span class="chip">Rows: @Model.InsightCount.ToString("N0")</span>
+                    </div>
+                </div>
+
+                <div class="row g-3 mb-4">
+                    <div class="col-12 col-md-6 col-xl-3">
+                        <div class="metric-hero hero-blue">
+                            <div class="metric-title">Total Denials</div>
+                            <div class="metric-value">@Model.InsightTotalDenials.ToString("N0")</div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-6 col-xl-3">
+                        <div class="metric-hero hero-purple">
+                            <div class="metric-title">Total Claims</div>
+                            <div class="metric-value">@Model.InsightTotalClaims.ToString("N0")</div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-6 col-xl-3">
+                        <div class="metric-hero hero-green">
+                            <div class="metric-title">Total Balance</div>
+                            <div class="metric-value">@Money(Model.InsightTotalBalance)</div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-6 col-xl-3">
+                        <div class="metric-hero hero-red">
+                            <div class="metric-title">Insurance Balance</div>
+                            <div class="metric-value">@Money(Model.InsightTotalInsuranceBalance)</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+                    <div>
+                        <div class="mini-panel-title insight-summary-title mb-1">Insight Summary Rows</div>
+                        <div class="section-subtitle">$ Impact (%) is calculated as <code>(InsuranceBalance / TotalBalance) * 100</code>.</div>
+                    </div>
+                    <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search denial insights on this page..." data-target-table="denialInsightTable" /></div>
+                </div>
+
+                <div class="table-responsive table-frame table-frame-bordered">
+                    <table class="table table-hover align-middle app-table polished-table bordered-grid-table zebra-table sortable-table" id="denialInsightTable">
+                        <thead>
+                            <tr>
+                                <th>Denial Codes</th>
+                                <th>Description</th>
+                                <th class="text-end"># of Denial</th>
+                                <th class="text-end"># of Claims</th>
+                                <th class="text-end">Total Balance</th>
+                                <th>High Impact Insurance</th>
+                                <th class="text-end">Insurance Balance</th>
+                                <th class="text-end">$ Impact (%)</th>
+                                <th>Action Category</th>
+                                <th>Action Code</th>
+                                <th>Action</th>
+                                <th>Task</th>
+                                <th>Feedback</th>
+                                <th>Responsibility</th>
+                                <th>Discussion Date</th>
+                                <th>ETA</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (Model.PagedInsights.Any())
+                            {
+                                @foreach (var item in Model.PagedInsights)
+                                {
+                                    <tr>
+                                        <td class="fw-semibold">@item.DenialCodes</td>
+                                        <td class="text-wrap narrow-cell">@item.Descriptions</td>
+                                        <td class="text-end">@item.NoOfDenialCount.ToString("N0")</td>
+                                        <td class="text-end">@item.NoOfClaimsCount.ToString("N0")</td>
+                                        <td class="text-end">@Money(item.TotalBalance)</td>
+                                        <td class="text-wrap narrow-cell">@item.HighImpactInsurance</td>
+                                        <td class="text-end">@Money(item.InsuranceBalance)</td>
+                                        <td class="text-end">@item.ImpactPercentageDisplay</td>
+                                        <td class="text-wrap narrow-cell">@item.ActionCategory</td>
+                                        <td>@item.ActionCode</td>
+                                        <td class="text-wrap narrow-cell">@item.Action</td>
+                                        <td class="text-wrap narrow-cell">@item.Task</td>
+                                        <td class="text-wrap narrow-cell">@(string.IsNullOrWhiteSpace(item.Feedback) ? "-" : item.Feedback)</td>
+                                        <td>@(string.IsNullOrWhiteSpace(item.Responsibility) ? "-" : item.Responsibility)</td>
+                                        <td>@(item.DiscussionDate?.ToString("dd MMM yyyy") ?? "-")</td>
+                                        <td>@(string.IsNullOrWhiteSpace(item.ETA) ? "-" : item.ETA)</td>
+                                    </tr>
+                                }
+                            }
+                            else
+                            {
+                                <tr>
+                                    <td colspan="16" class="text-center text-muted py-4">No denial insight rows were found for the selected lab.</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "denial-insight", Page = Model.InsightPage, TotalPages = Model.InsightTotalPages, TotalItems = Model.InsightCount, PageSize = Model.InsightPageSize, ItemLabel = "insight rows", BuildUrl = (page, _) => InsightPageUrl(page) })
+            </div>
+        </div>
+    </div>
+
+    <div class="tab-pane fade @(activeTab == "line-item" ? "show active" : "")" id="line-item" role="tabpanel">
+        <div class="card border-0 shadow-sm table-card">
+            <div class="card-body">
+                <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+                    <div>
+                        <div class="section-title">Line Item &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
+                        @* <div class="section-subtitle">Filtered denial line-item rows from <code>dbo.DenialLineItem</code> for the selected lab and latest available run.</div> *@
+                    </div>
+                    <div class="d-flex flex-wrap gap-2">
+
+                        <span class="chip">Rows: @Model.LineItemCount.ToString("N0")</span>
+                    </div>
+                </div>
+
+                <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+                    @* <div class="section-subtitle">This tab replaces Claim View and shows the filtered line-item level denial details for the selected lab and latest run.</div> *@
+                    <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search line items on this page..." data-target-table="lineItemTable" /></div>
+                </div>
+
+                <div class="table-responsive table-frame">
+                    <table class="table table-hover align-middle app-table polished-table line-table zebra-table sortable-table" id="lineItemTable">
+                        <thead>
+                            <tr>
+                                <th>Accession No</th>
+                                <th>Visit Number</th>
+                                <th>CPT</th>
+                                <th>DOS</th>
+                                <th>Panel</th>
+                                <th>Payer</th>
+                                <th>Denial Code</th>
+                                <th>Description</th>
+                                <th class="text-end">Billed</th>
+                                <th class="text-end">Allowed</th>
+                                <th class="text-end">Insurance Paid</th>
+                                <th class="text-end">Insurance Adj.</th>
+                                <th class="text-end">Insurance Balance</th>
+                                <th class="text-end">Total Balance</th>
+                                <th>FirstBill Date</th>
+                                <th>Denial Date</th>
+                                <th>Final Claim Status</th>
+                                <th>Coverage Status</th>
+                                <th>Classification</th>
+                                <th>Denial Type</th>
+                                <th>Action Category</th>
+                                <th>Action Code</th>
+                                <th>Recommended Action</th>
+                                <th>Task Guidance</th>
+                                <th>Task Status</th>
+                                <th>Priority</th>
+                                <th>SLA Days</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (Model.PagedLineItems.Any())
+                            {
+                                @foreach (var item in Model.PagedLineItems)
+                                {
+                                    <tr>
+                                        <td class="fw-semibold">@item.AccessionNo</td>
+                                        <td>@item.VisitNumber</td>
+                                        <td>@item.CptCode</td>
+                                        <td>@(item.DateOfService?.ToString("MM/dd/yyyy") ?? "-")</td>
+                                        <td>@item.PanelName</td>
+                                        <td class="text-wrap narrow-cell">@item.PayerName</td>
+                                        <td>@(string.IsNullOrWhiteSpace(item.DenialCodeNormalized) ? item.DenialCodeOriginal : item.DenialCodeNormalized)</td>
+                                        <td class="text-wrap narrow-cell">@item.DenialDescription</td>
+                                        <td class="text-end">@Money(item.BilledAmount) </td>
+                                        <td class="text-end">@Money(item.AllowedAmount) </td>
+                                        <td class="text-end">@Money(item.InsurancePayment) </td>
+                                        <td class="text-end">@Money(item.InsuranceAdjustment) </td>
+                                        <td class="text-end">@Money(item.InsuranceBalance) </td>
+                                        <td class="text-end">@Money(item.TotalBalance) </td>
+                                        <td>@(item.FirstBilledDate?.ToString("MM/dd/yyyy") ?? "-")</td>
+                                        <td>@(item.DenialDate?.ToString("MM/dd/yyyy") ?? "-")</td>
+                                        <td>@item.FinalClaimStatus</td>
+                                        <td>@(string.IsNullOrWhiteSpace(item.FinalCoverageStatus) ? item.CoverageStatus : item.FinalCoverageStatus)</td>
+                                        <td>@item.CleanDenialClassification</td>
+                                        <td>@item.DenialType</td>
+                                        <td class="text-wrap narrow-cell">@item.CleanActionCategory</td>
+                                        <td>@item.ActionCode</td>
+                                        <td class="text-wrap narrow-cell">@item.RecommendedAction</td>
+                                        <td class="text-wrap narrow-cell">@item.TaskGuidance</td>
+                                        <td>@item.TaskStatus</td>
+                                        <td><span class="badge @PriorityBadge(item.CleanPriority)">@item.CleanPriority</span></td>
+                                        <td>@(string.IsNullOrWhiteSpace(item.SlaDays) ? "-" : item.SlaDays)</td>
+                                    </tr>
+                                }
+                            }
+                            else
+                            {
+                                <tr>
+                                    <td colspan="25" class="text-center text-muted py-4">No line-item rows were found for the selected lab.</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "line-item", Page = Model.LineItemPage, TotalPages = Model.LineItemTotalPages, TotalItems = Model.LineItemCount, PageSize = Model.LineItemPageSize, ItemLabel = "line items", BuildUrl = (page, _) => LineItemPageUrl(page) })
+            </div>
+        </div>
+    </div>
+    <div class="tab-pane fade @(activeTab == "weekly-breakdown" ? "show active" : "")" id="weekly-breakdown" role="tabpanel">
+        <div class="card border-0 shadow-sm table-card">
+            <div class="card-body">
+                <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+                    <div>
+                        <div class="section-title"><i class="bi bi-calendar-week me-2"></i>Weekly Breakdown &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
+                        <div class="section-subtitle">Pivot-style weekly view from <code>DenialLineItem.DenialDate</code> showing top insurance and top denials.</div>
+                    </div>
+                </div>
+                @await Html.PartialAsync("_BreakdownPivotTable", Model.WeeklyPivot)
+            </div>
+        </div>
+    </div>
+
+    <div class="tab-pane fade @(activeTab == "monthly-breakdown" ? "show active" : "")" id="monthly-breakdown" role="tabpanel">
+        <div class="card border-0 shadow-sm table-card">
+            <div class="card-body">
+                <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+                    <div>
+                        <div class="section-title"><i class="bi bi-calendar-month me-2"></i>Monthly Breakdown &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
+                        <div class="section-subtitle">Pivot-style monthly view from <code>DenialLineItem.DenialDate</code> showing top insurance and top denials.</div>
+                    </div>
+                </div>
+                @await Html.PartialAsync("_BreakdownPivotTable", Model.MonthlyPivot)
+            </div>
+        </div>
+    </div>
 </div>
 <br />
 <br />
@@ -1327,420 +1499,497 @@ string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
 <br />
 
 <script>
-   document.addEventListener('DOMContentLoaded', function () {
-       const loader = document.getElementById('pageLoader');
-       const activeTabInput = document.getElementById('activeTabInput');
-       const tabButtons = document.querySelectorAll('#dashboardTabs button[data-bs-toggle="pill"]');
-       const form = document.getElementById('dashboardFilterForm');
-       const exportButton = document.getElementById('exportExcelBtn');
-       const labSelect = document.getElementById('labSelect');
-       const filterCollapse = document.getElementById('dashboardFiltersCollapse');
-       const filterToggleText = document.querySelector('#filterCollapseToggle .filter-toggle-text');
-       const filterStateKey = 'denialDashboard.filtersCollapsed';
+    document.addEventListener('DOMContentLoaded', function () {
+        const loader = document.getElementById('pageLoader');
+        const activeTabInput = document.getElementById('activeTabInput');
+        const tabButtons = document.querySelectorAll('#dashboardTabs button[data-bs-toggle="pill"]');
+        const form = document.getElementById('dashboardFilterForm');
+        const exportButton = document.getElementById('exportExcelBtn');
+        const labSelect = document.getElementById('labSelect');
+        const filterCollapse = document.getElementById('dashboardFiltersCollapse');
+        const filterToggleText = document.querySelector('#filterCollapseToggle .filter-toggle-text');
+        const filterStateKey = 'denialDashboard.filtersCollapsed';
 
-       function showLoader() {
-           if (loader) {
-               loader.classList.remove('hidden');
-           }
-       }
+        function showLoader() {
+            if (loader) {
+                loader.classList.remove('hidden');
+            }
+        }
 
-       function updateFilterToggleLabel(isShown) {
-           if (filterToggleText) {
-               filterToggleText.textContent = isShown ? 'Hide Filters' : 'Show Filters';
-           }
-       }
+        function updateFilterToggleLabel(isShown) {
+            if (filterToggleText) {
+                filterToggleText.textContent = isShown ? 'Hide Filters' : 'Show Filters';
+            }
+        }
 
-       if (filterCollapse) {
-           const savedState = localStorage.getItem(filterStateKey);
-           if (savedState === 'true') {
-               filterCollapse.classList.remove('show');
-               updateFilterToggleLabel(false);
-           }
-           else {
-               updateFilterToggleLabel(true);
-           }
+        if (filterCollapse) {
+            const savedState = localStorage.getItem(filterStateKey);
+            if (savedState === 'true') {
+                filterCollapse.classList.remove('show');
+                updateFilterToggleLabel(false);
+            }
+            else {
+                updateFilterToggleLabel(true);
+            }
 
-           filterCollapse.addEventListener('shown.bs.collapse', function () {
-               localStorage.setItem(filterStateKey, 'false');
-               updateFilterToggleLabel(true);
-           });
+            filterCollapse.addEventListener('shown.bs.collapse', function () {
+                localStorage.setItem(filterStateKey, 'false');
+                updateFilterToggleLabel(true);
+            });
 
-           filterCollapse.addEventListener('hidden.bs.collapse', function () {
-               localStorage.setItem(filterStateKey, 'true');
-               updateFilterToggleLabel(false);
-           });
-       }
+            filterCollapse.addEventListener('hidden.bs.collapse', function () {
+                localStorage.setItem(filterStateKey, 'true');
+                updateFilterToggleLabel(false);
+            });
+        }
 
-       tabButtons.forEach(function (button) {
-           button.addEventListener('shown.bs.tab', function (event) {
-               const target = event.target.getAttribute('data-bs-target');
-               if (target && activeTabInput) {
-                   activeTabInput.value = target.replace('#', '');
-               }
-           });
-       });
+        function navigateToTab(nextTab) {
+            if (!form || !nextTab) {
+                return;
+            }
 
-       if (form) {
-           form.addEventListener('submit', function () {
-               showLoader();
-           });
-       }
+            if (activeTabInput) {
+                activeTabInput.value = nextTab;
+            }
 
-       document.querySelectorAll('.js-loader-link').forEach(function (link) {
-           link.addEventListener('click', function () {
-               showLoader();
-           });
-       });
+            const pageInput = form.querySelector('input[name="Page"]');
+            const insightPageInput = form.querySelector('input[name="InsightPage"]');
+            const lineItemPageInput = form.querySelector('input[name="LineItemPage"]');
+            if (pageInput) pageInput.value = '1';
+            if (insightPageInput) insightPageInput.value = '1';
+            if (lineItemPageInput) lineItemPageInput.value = '1';
 
-       document.querySelectorAll('.js-loader-button').forEach(function (button) {
-           button.addEventListener('click', function () {
-               if (!button.id || button.id !== 'exportExcelBtn') {
-                   showLoader();
-               }
-           });
-       });
+            const formData = new FormData(form);
+            formData.set('ActiveTab', nextTab);
+            formData.set('Page', '1');
+            formData.set('InsightPage', '1');
+            formData.set('LineItemPage', '1');
 
-       if (exportButton) {
-           exportButton.addEventListener('click', function () {
-               if (!form) {
-                   return;
-               }
+            const params = new URLSearchParams();
+            formData.forEach(function (value, key) {
+                if (value === null || value === undefined) {
+                    return;
+                }
 
-               const formData = new FormData(form);
-               const labId = formData.get('LabId');
-               if (!labId) {
-                   alert('Please select a lab first.');
-                   return;
-               }
+                const text = String(value).trim();
+                if (text === '') {
+                    return;
+                }
 
-               const params = new URLSearchParams();
-               formData.forEach(function (value, key) {
-                   if (value !== null && value !== undefined && value !== '') {
-                       params.append(key, value.toString());
-                   }
-               });
+                params.append(key, text);
+            });
 
-               showLoader();
-               const url = '@Url.Action("ExportToExcel", "DenialDashboard")' + '?' + params.toString();
-               window.location.href = url;
-               setTimeout(function () {
-                   if (loader) {
-                       loader.classList.add('hidden');
-                   }
-               }, 3000);
-           });
-       }
+            showLoader();
+            window.location.assign(form.action + '?' + params.toString());
+        }
 
-       document.querySelectorAll('.task-upload-form').forEach(function (formElement) {
-           const trigger = formElement.querySelector('.task-upload-trigger');
-           const input = formElement.querySelector('.task-upload-input');
-           if (!trigger || !input) return;
+        tabButtons.forEach(function (button) {
+            button.addEventListener('click', function (event) {
+                const target = button.getAttribute('data-bs-target');
+                if (!target) {
+                    return;
+                }
 
-           trigger.addEventListener('click', function () {
-               input.click();
-           });
+                const nextTab = target.replace('#', '');
+                const currentActive = document.querySelector('#dashboardTabs .nav-link.active');
+                const currentTarget = currentActive ? ((currentActive.getAttribute('data-bs-target') || '').replace('#', '')) : '';
+                if (nextTab === currentTarget) {
+                    return;
+                }
 
-           input.addEventListener('change', function () {
-               if (!input.files || input.files.length === 0) {
-                   return;
-               }
-               showLoader();
-               formElement.submit();
-           });
-       });
+                event.preventDefault();
+                navigateToTab(nextTab);
+            });
 
-       document.querySelectorAll('.table-search-input').forEach(function (input) {
-           input.addEventListener('input', function () {
-               const tableId = input.getAttribute('data-target-table');
-               const table = document.getElementById(tableId);
-               if (!table) return;
-               const searchText = (input.value || '').trim().toLowerCase();
-               table.querySelectorAll('tbody tr').forEach(function (row) {
-                   const text = (row.innerText || '').toLowerCase();
-                   row.style.display = text.includes(searchText) ? '' : 'none';
-               });
-           });
-       });
+            button.addEventListener('keydown', function (event) {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    const target = button.getAttribute('data-bs-target');
+                    if (!target) {
+                        return;
+                    }
 
-       document.querySelectorAll('.accordion-search-input').forEach(function (input) {
-           input.addEventListener('input', function () {
-               const accordionId = input.getAttribute('data-target-accordion');
-               const accordion = document.getElementById(accordionId);
-               if (!accordion) return;
-               const searchText = (input.value || '').trim().toLowerCase();
-               accordion.querySelectorAll('.claim-group-item').forEach(function (item) {
-                   const text = (item.innerText || '').toLowerCase();
-                   item.style.display = text.includes(searchText) ? '' : 'none';
-               });
-           });
-       });
+                    event.preventDefault();
+                    navigateToTab(target.replace('#', ''));
+                }
+            });
+        });
 
-       const autocompleteUrl = '@Url.Action("GetFilterAutocompleteOptions", "DenialDashboard")';
-       const autocompleteCachePrefix = 'denial-dashboard:autocomplete:';
-       const labSelect2 = form ? form.querySelector('select[name="LabId"]') : null;
+        if (form) {
+            form.addEventListener('submit', function () {
+                showLoader();
+            });
+        }
 
-       function uniqueValues(values) {
-           const seen = new Set();
-           return (values || []).filter(function (value) {
-               const normalized = (value || '').trim();
-               if (!normalized) return false;
-               const key = normalized.toLowerCase();
-               if (seen.has(key)) return false;
-               seen.add(key);
-               return true;
-           });
-       }
+        document.querySelectorAll('.js-loader-link').forEach(function (link) {
+            link.addEventListener('click', function () {
+                showLoader();
+            });
+        });
 
-       function summarizeSelection(values, placeholder) {
-           const selected = uniqueValues(values);
-           if (!selected.length) return placeholder;
-           if (selected.length === 1) return selected[0];
-           if (selected.length === 2) return selected.join(', ');
-           return selected.length + ' selected';
-       }
+        document.querySelectorAll('.js-loader-button').forEach(function (button) {
+            button.addEventListener('click', function () {
+                if (!button.id || button.id !== 'exportExcelBtn') {
+                    showLoader();
+                }
+            });
+        });
 
-       function initMultiSelect(container) {
-           const name = container.dataset.name;
-           const placeholder = container.dataset.placeholder || 'Select';
-           const parsedOptions = JSON.parse(container.dataset.options || '[]');
-           const parsedSelected = JSON.parse(container.dataset.selected || '[]');
-           let options = uniqueValues(parsedOptions);
-           let selected = uniqueValues(parsedSelected);
+        if (exportButton) {
+            exportButton.addEventListener('click', function () {
+                if (!form) {
+                    return;
+                }
 
-           container.innerHTML = '';
-           container.classList.add('msf');
-           container.innerHTML = `
-               <input type="hidden" name="${name}" class="msf-hidden" />
-               <button type="button" class="form-select filter-select text-start msf-toggle"></button>
-               <div class="msf-menu shadow-sm d-none">
-                   <div class="msf-search-wrap"><input type="text" class="form-control form-control-sm msf-search" placeholder="Search..." autocomplete="off" /></div>
-                   <div class="msf-actions">
-                       <button type="button" class="btn btn-link btn-sm p-0 msf-select-all">Select all</button>
-                       <button type="button" class="btn btn-link btn-sm p-0 msf-clear">Clear</button>
-                   </div>
-                   <div class="msf-options"></div>
-               </div>`;
+                const formData = new FormData(form);
+                const labId = formData.get('LabId');
+                if (!labId) {
+                    alert('Please select a lab first.');
+                    return;
+                }
 
-           const hiddenInput = container.querySelector('.msf-hidden');
-           const toggle = container.querySelector('.msf-toggle');
-           const menu = container.querySelector('.msf-menu');
-           const search = container.querySelector('.msf-search');
-           const optionsWrap = container.querySelector('.msf-options');
-           const selectAllButton = container.querySelector('.msf-select-all');
-           const clearButton = container.querySelector('.msf-clear');
+                const params = new URLSearchParams();
+                formData.forEach(function (value, key) {
+                    if (value !== null && value !== undefined && value !== '') {
+                        params.append(key, value.toString());
+                    }
+                });
 
-           function syncHidden() {
-               hiddenInput.value = uniqueValues(selected).join('|');
-               toggle.textContent = summarizeSelection(selected, placeholder);
-           }
+                showLoader();
+                const url = '@Url.Action("ExportToExcel", "DenialDashboard")' + '?' + params.toString();
+                window.location.href = url;
+                setTimeout(function () {
+                    if (loader) {
+                        loader.classList.add('hidden');
+                    }
+                }, 3000);
+            });
+        }
 
-           function renderOptions(filterText) {
-               const term = (filterText || '').trim().toLowerCase();
-               const optionList = term
-                   ? options.filter(function (value) { return value.toLowerCase().includes(term); })
-                   : options.slice();
+        document.querySelectorAll('.task-upload-form').forEach(function (formElement) {
+            const trigger = formElement.querySelector('.task-upload-trigger');
+            const input = formElement.querySelector('.task-upload-input');
+            if (!trigger || !input) return;
 
-               optionsWrap.innerHTML = '';
-               if (!optionList.length) {
-                   optionsWrap.innerHTML = '<div class="msf-empty">No matches</div>';
-                   return;
-               }
+            trigger.addEventListener('click', function () {
+                input.click();
+            });
 
-               optionList.forEach(function (value) {
-                   const row = document.createElement('label');
-                   row.className = 'msf-option';
-                   const checked = selected.some(function (item) { return item.toLowerCase() === value.toLowerCase(); });
-                   row.innerHTML = `<input type="checkbox" value="${value.replace(/"/g, '&quot;')}" ${checked ? 'checked' : ''} /> <span>${value}</span>`;
-                   const input = row.querySelector('input');
-                   input.addEventListener('change', function () {
-                       if (input.checked) {
-                           selected.push(value);
-                       } else {
-                           selected = selected.filter(function (item) { return item.toLowerCase() !== value.toLowerCase(); });
-                       }
-                       selected = uniqueValues(selected);
-                       syncHidden();
-                   });
-                   optionsWrap.appendChild(row);
-               });
-           }
+            input.addEventListener('change', function () {
+                if (!input.files || input.files.length === 0) {
+                    return;
+                }
+                showLoader();
+                formElement.submit();
+            });
+        });
 
-           function setOptions(nextOptions) {
-               options = uniqueValues([].concat(nextOptions || [], selected));
-               renderOptions(search.value);
-               syncHidden();
-           }
+        document.querySelectorAll('.table-search-input').forEach(function (input) {
+            input.addEventListener('input', function () {
+                const tableId = input.getAttribute('data-target-table');
+                const table = document.getElementById(tableId);
+                if (!table) return;
+                const searchText = (input.value || '').trim().toLowerCase();
+                table.querySelectorAll('tbody tr').forEach(function (row) {
+                    const text = (row.innerText || '').toLowerCase();
+                    row.style.display = text.includes(searchText) ? '' : 'none';
+                });
+            });
+        });
 
-           toggle.addEventListener('click', function () {
-               document.querySelectorAll('.msf-menu').forEach(function (item) {
-                   if (item !== menu) item.classList.add('d-none');
-               });
-               menu.classList.toggle('d-none');
-               if (!menu.classList.contains('d-none')) {
-                   search.focus();
-               }
-           });
+        document.querySelectorAll('.accordion-search-input').forEach(function (input) {
+            input.addEventListener('input', function () {
+                const accordionId = input.getAttribute('data-target-accordion');
+                const accordion = document.getElementById(accordionId);
+                if (!accordion) return;
+                const searchText = (input.value || '').trim().toLowerCase();
+                accordion.querySelectorAll('.claim-group-item').forEach(function (item) {
+                    const text = (item.innerText || '').toLowerCase();
+                    item.style.display = text.includes(searchText) ? '' : 'none';
+                });
+            });
+        });
 
-           search.addEventListener('input', function () {
-               renderOptions(search.value);
-           });
+        const autocompleteUrl = '@Url.Action("GetFilterAutocompleteOptions", "DenialDashboard")';
+        const autocompleteCachePrefix = 'denial-dashboard:autocomplete:';
+        const labSelect2 = form ? form.querySelector('select[name="LabId"]') : null;
 
-           selectAllButton.addEventListener('click', function () {
-               selected = uniqueValues(options.slice());
-               renderOptions(search.value);
-               syncHidden();
-           });
+        function uniqueValues(values) {
+            const seen = new Set();
+            return (values || []).filter(function (value) {
+                const normalized = (value || '').trim();
+                if (!normalized) return false;
+                const key = normalized.toLowerCase();
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+        }
 
-           clearButton.addEventListener('click', function () {
-               selected = [];
-               renderOptions(search.value);
-               syncHidden();
-           });
+        function summarizeSelection(values, placeholder) {
+            const selected = uniqueValues(values);
+            if (!selected.length) return placeholder;
+            if (selected.length === 1) return selected[0];
+            if (selected.length === 2) return selected.join(', ');
+            return selected.length + ' selected';
+        }
 
-           container._multiSelect = { setOptions: setOptions, getSelected: function () { return selected.slice(); } };
-           renderOptions('');
-           syncHidden();
-       }
+        function initMultiSelect(container) {
+            const name = container.dataset.name;
+            const placeholder = container.dataset.placeholder || 'Select';
+            const parsedOptions = JSON.parse(container.dataset.options || '[]');
+            const parsedSelected = JSON.parse(container.dataset.selected || '[]');
+            let options = uniqueValues(parsedOptions);
+            let selected = uniqueValues(parsedSelected);
 
-       document.querySelectorAll('.multi-select-filter').forEach(initMultiSelect);
+            container.innerHTML = '';
+            container.classList.add('msf');
+            container.innerHTML = `
+                <input type="hidden" name="${name}" class="msf-hidden" />
+                <button type="button" class="form-select filter-select text-start msf-toggle"></button>
+                <div class="msf-menu shadow-sm d-none">
+                    <div class="msf-search-wrap"><input type="text" class="form-control form-control-sm msf-search" placeholder="Search..." autocomplete="off" /></div>
+                    <div class="msf-actions">
+                        <button type="button" class="btn btn-link btn-sm p-0 msf-select-all">Select all</button>
+                        <button type="button" class="btn btn-link btn-sm p-0 msf-clear">Clear</button>
+                    </div>
+                    <div class="msf-options"></div>
+                </div>`;
 
-       document.addEventListener('click', function (event) {
-           document.querySelectorAll('.multi-select-filter').forEach(function (container) {
-               if (!container.contains(event.target)) {
-                   const menu = container.querySelector('.msf-menu');
-                   if (menu) menu.classList.add('d-none');
-               }
-           });
-       });
+            const hiddenInput = container.querySelector('.msf-hidden');
+            const toggle = container.querySelector('.msf-toggle');
+            const menu = container.querySelector('.msf-menu');
+            const search = container.querySelector('.msf-search');
+            const optionsWrap = container.querySelector('.msf-options');
+            const selectAllButton = container.querySelector('.msf-select-all');
+            const clearButton = container.querySelector('.msf-clear');
 
-       function getAutocompleteLabId() {
-           return labSelect2 ? (labSelect2.value || '').trim() : '';
-       }
+            function syncHidden() {
+                hiddenInput.value = uniqueValues(selected).join('|');
+                toggle.textContent = summarizeSelection(selected, placeholder);
+            }
 
-       function applyAutocompletePayload(payload) {
-           if (!payload) return;
+            function renderOptions(filterText) {
+                const term = (filterText || '').trim().toLowerCase();
+                const optionList = term
+                    ? options.filter(function (value) { return value.toLowerCase().includes(term); })
+                    : options.slice();
 
-           const payloadMap = {
-               payerNames: payload.payerNames || payload.PayerNames || [],
-               payerTypes: payload.payerTypes || payload.PayerTypes || [],
-               panelNames: payload.panelNames || payload.PanelNames || [],
-               referringProviders: payload.referringProviders || payload.ReferringProviders || [],
-               clinicNames: payload.clinicNames || payload.ClinicNames || [],
-               salesRepnames: payload.salesRepnames || payload.SalesRepnames || []
-           };
+                optionsWrap.innerHTML = '';
+                if (!optionList.length) {
+                    optionsWrap.innerHTML = '<div class="msf-empty">No matches</div>';
+                    return;
+                }
 
-           document.querySelectorAll('.remote-multi-select').forEach(function (container) {
-               const key = container.dataset.remoteKey;
-               if (container._multiSelect && payloadMap[key]) {
-                   container._multiSelect.setOptions(payloadMap[key]);
-               }
-           });
-       }
+                optionList.forEach(function (value) {
+                    const row = document.createElement('label');
+                    row.className = 'msf-option';
+                    const checked = selected.some(function (item) { return item.toLowerCase() === value.toLowerCase(); });
+                    row.innerHTML = `<input type="checkbox" value="${value.replace(/"/g, '&quot;')}" ${checked ? 'checked' : ''} /> <span>${value}</span>`;
+                    const input = row.querySelector('input');
+                    input.addEventListener('change', function () {
+                        if (input.checked) {
+                            selected.push(value);
+                        } else {
+                            selected = selected.filter(function (item) { return item.toLowerCase() !== value.toLowerCase(); });
+                        }
+                        selected = uniqueValues(selected);
+                        syncHidden();
+                    });
+                    optionsWrap.appendChild(row);
+                });
+            }
 
-       async function loadFilterAutocomplete(forceRefresh) {
-           const labId = getAutocompleteLabId();
-           if (!labId) return;
+            function setOptions(nextOptions) {
+                options = uniqueValues([].concat(nextOptions || [], selected));
+                renderOptions(search.value);
+                syncHidden();
+            }
 
-           const cacheKey = autocompleteCachePrefix + labId;
-           if (!forceRefresh) {
-               const cached = localStorage.getItem(cacheKey);
-               if (cached) {
-                   try {
-                       applyAutocompletePayload(JSON.parse(cached));
-                       return;
-                   } catch (error) {
-                       localStorage.removeItem(cacheKey);
-                   }
-               }
-           }
+            toggle.addEventListener('click', function () {
+                document.querySelectorAll('.msf-menu').forEach(function (item) {
+                    if (item !== menu) item.classList.add('d-none');
+                });
+                menu.classList.toggle('d-none');
+                if (!menu.classList.contains('d-none')) {
+                    search.focus();
+                }
+            });
 
-           try {
-               const response = await fetch(autocompleteUrl + '?labId=' + encodeURIComponent(labId), {
-                   headers: { 'X-Requested-With': 'XMLHttpRequest' }
-               });
+            search.addEventListener('input', function () {
+                renderOptions(search.value);
+            });
 
-               if (!response.ok) return;
+            selectAllButton.addEventListener('click', function () {
+                selected = uniqueValues(options.slice());
+                renderOptions(search.value);
+                syncHidden();
+            });
 
-               const payload = await response.json();
-               localStorage.setItem(cacheKey, JSON.stringify(payload));
-               applyAutocompletePayload(payload);
-           } catch (error) {
-               console.warn('Unable to load filter autocomplete values.', error);
-           }
-       }
+            clearButton.addEventListener('click', function () {
+                selected = [];
+                renderOptions(search.value);
+                syncHidden();
+            });
 
-       if (labSelect2) {
-           loadFilterAutocomplete(false);
-           labSelect2.addEventListener('change', function () {
-               loadFilterAutocomplete(false);
-           });
-       }
+            container._multiSelect = { setOptions: setOptions, getSelected: function () { return selected.slice(); } };
+            renderOptions('');
+            syncHidden();
+        }
 
-       function parseSortableValue(value) {
-           const raw = (value || '').trim();
-           const cleaned = raw.replace(/[$,%]/g, '').replace(/,/g, '').trim();
-           const numeric = Number(cleaned);
-           if (cleaned !== '' && !Number.isNaN(numeric)) {
-               return numeric;
-           }
+        document.querySelectorAll('.multi-select-filter').forEach(initMultiSelect);
 
-           const parsedDate = Date.parse(raw);
-           if (!Number.isNaN(parsedDate)) {
-               return parsedDate;
-           }
+        document.addEventListener('click', function (event) {
+            document.querySelectorAll('.multi-select-filter').forEach(function (container) {
+                if (!container.contains(event.target)) {
+                    const menu = container.querySelector('.msf-menu');
+                    if (menu) menu.classList.add('d-none');
+                }
+            });
+        });
 
-           return raw.toLowerCase();
-       }
+        function getAutocompleteLabId() {
+            return labSelect2 ? (labSelect2.value || '').trim() : '';
+        }
 
-       document.querySelectorAll('table.sortable-table').forEach(function (table) {
-           const headers = table.querySelectorAll('thead th');
-           const tbody = table.querySelector('tbody');
-           if (!tbody) return;
+        function applyAutocompletePayload(payload) {
+            if (!payload) return;
 
-           headers.forEach(function (header, index) {
-               header.classList.add('sortable-header');
-               header.setAttribute('role', 'button');
-               header.setAttribute('tabindex', '0');
-               header.setAttribute('title', 'Sort');
+            const payloadMap = {
+                payerNames: payload.payerNames || payload.PayerNames || [],
+                payerTypes: payload.payerTypes || payload.PayerTypes || [],
+                panelNames: payload.panelNames || payload.PanelNames || [],
+                referringProviders: payload.referringProviders || payload.ReferringProviders || [],
+                clinicNames: payload.clinicNames || payload.ClinicNames || [],
+                salesRepnames: payload.salesRepnames || payload.SalesRepnames || []
+            };
 
-               function sortTable() {
-                   const currentDirection = header.getAttribute('data-sort-direction') === 'asc' ? 'asc' : 'desc';
-                   const nextDirection = currentDirection === 'asc' ? 'desc' : 'asc';
-                   headers.forEach(function (th) {
-                       th.removeAttribute('data-sort-direction');
-                       th.classList.remove('sorted-asc', 'sorted-desc');
-                   });
-                   header.setAttribute('data-sort-direction', nextDirection);
-                   header.classList.add(nextDirection === 'asc' ? 'sorted-asc' : 'sorted-desc');
+            document.querySelectorAll('.remote-multi-select').forEach(function (container) {
+                const key = container.dataset.remoteKey;
+                if (container._multiSelect && payloadMap[key]) {
+                    container._multiSelect.setOptions(payloadMap[key]);
+                }
+            });
+        }
 
-                   const rows = Array.from(tbody.querySelectorAll('tr')).filter(function (row) {
-                       return !row.querySelector('td[colspan]');
-                   });
+        async function loadFilterAutocomplete(forceRefresh) {
+            const labId = getAutocompleteLabId();
+            if (!labId) return;
 
-                   rows.sort(function (a, b) {
-                       const aText = a.children[index] ? a.children[index].innerText : '';
-                       const bText = b.children[index] ? b.children[index].innerText : '';
-                       const aValue = parseSortableValue(aText);
-                       const bValue = parseSortableValue(bText);
+            const cacheKey = autocompleteCachePrefix + labId;
+            if (!forceRefresh) {
+                const cached = localStorage.getItem(cacheKey);
+                if (cached) {
+                    try {
+                        applyAutocompletePayload(JSON.parse(cached));
+                        return;
+                    } catch (error) {
+                        localStorage.removeItem(cacheKey);
+                    }
+                }
+            }
 
-                       if (aValue < bValue) return nextDirection === 'asc' ? -1 : 1;
-                       if (aValue > bValue) return nextDirection === 'asc' ? 1 : -1;
-                       return 0;
-                   });
+            try {
+                const response = await fetch(autocompleteUrl + '?labId=' + encodeURIComponent(labId), {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                });
 
-                   rows.forEach(function (row) {
-                       tbody.appendChild(row);
-                   });
-               }
+                if (!response.ok) return;
 
-               header.addEventListener('click', sortTable);
-               header.addEventListener('keydown', function (event) {
-                   if (event.key === 'Enter' || event.key === ' ') {
-                       event.preventDefault();
-                       sortTable();
-                   }
-               });
-           });
-       });
-   });
+                const payload = await response.json();
+                localStorage.setItem(cacheKey, JSON.stringify(payload));
+                applyAutocompletePayload(payload);
+            } catch (error) {
+                console.warn('Unable to load filter autocomplete values.', error);
+            }
+        }
+
+        if (labSelect) {
+            const loadAutocompleteIfVisible = function (forceRefresh) {
+                const collapseHidden = filterCollapse && !filterCollapse.classList.contains('show');
+                if (collapseHidden) {
+                    return;
+                }
+                loadFilterAutocomplete(forceRefresh);
+            };
+
+            loadAutocompleteIfVisible(false);
+
+            if (filterCollapse) {
+                filterCollapse.addEventListener('shown.bs.collapse', function () {
+                    loadAutocompleteIfVisible(false);
+                });
+            }
+
+            labSelect.addEventListener('change', function () {
+                loadAutocompleteIfVisible(true);
+            });
+        }
+
+        function parseSortableValue(value) {
+            const raw = (value || '').trim();
+            const cleaned = raw.replace(/[$,%]/g, '').replace(/,/g, '').trim();
+            const numeric = Number(cleaned);
+            if (cleaned !== '' && !Number.isNaN(numeric)) {
+                return numeric;
+            }
+
+            const parsedDate = Date.parse(raw);
+            if (!Number.isNaN(parsedDate)) {
+                return parsedDate;
+            }
+
+            return raw.toLowerCase();
+        }
+
+        document.querySelectorAll('table.sortable-table').forEach(function (table) {
+            const headers = table.querySelectorAll('thead th');
+            const tbody = table.querySelector('tbody');
+            if (!tbody) return;
+
+            headers.forEach(function (header, index) {
+                header.classList.add('sortable-header');
+                header.setAttribute('role', 'button');
+                header.setAttribute('tabindex', '0');
+                header.setAttribute('title', 'Sort');
+
+                function sortTable() {
+                    const currentDirection = header.getAttribute('data-sort-direction') === 'asc' ? 'asc' : 'desc';
+                    const nextDirection = currentDirection === 'asc' ? 'desc' : 'asc';
+                    headers.forEach(function (th) {
+                        th.removeAttribute('data-sort-direction');
+                        th.classList.remove('sorted-asc', 'sorted-desc');
+                    });
+                    header.setAttribute('data-sort-direction', nextDirection);
+                    header.classList.add(nextDirection === 'asc' ? 'sorted-asc' : 'sorted-desc');
+
+                    const rows = Array.from(tbody.querySelectorAll('tr')).filter(function (row) {
+                        return !row.querySelector('td[colspan]');
+                    });
+
+                    rows.sort(function (a, b) {
+                        const aText = a.children[index] ? a.children[index].innerText : '';
+                        const bText = b.children[index] ? b.children[index].innerText : '';
+                        const aValue = parseSortableValue(aText);
+                        const bValue = parseSortableValue(bText);
+
+                        if (aValue < bValue) return nextDirection === 'asc' ? -1 : 1;
+                        if (aValue > bValue) return nextDirection === 'asc' ? 1 : -1;
+                        return 0;
+                    });
+
+                    rows.forEach(function (row) {
+                        tbody.appendChild(row);
+                    });
+                }
+
+                header.addEventListener('click', sortTable);
+                header.addEventListener('keydown', function (event) {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        sortTable();
+                    }
+                });
+            });
+        });
+    });
 </script>

@@ -1,0 +1,157 @@
+@model LabMetricsDashboard.ViewModels.AppUsagePageViewModel
+@{
+    ViewData["Title"] = "Usage Monitor";
+}
+
+<div class="container-fluid px-0 usage-monitor-page">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+        <div>
+            <h2 class="mb-1">Usage Monitor</h2>
+            <div class="text-muted">Shows who is using the app, which page they are on, where they are coming from, and how long they have been idle on the current page.</div>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-4">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-body">
+                    <div class="text-muted small text-uppercase">Active page sessions</div>
+                    <div class="display-6 fw-bold">@Model.ActiveUsersCount</div>
+                    <div class="text-muted small">Seen in the last 20 minutes</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-body">
+                    <div class="text-muted small text-uppercase">Distinct users (24h)</div>
+                    <div class="display-6 fw-bold">@Model.DistinctUsers24h</div>
+                    <div class="text-muted small">Identity name when available, otherwise browser id</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-body">
+                    <div class="text-muted small text-uppercase">Page views (24h)</div>
+                    <div class="display-6 fw-bold">@Model.TotalPageViews24h</div>
+                    <div class="text-muted small">Tracked GET page views across the app</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm border-0 mb-4">
+        <div class="card-header bg-white border-0 pt-3 pb-2">
+            <h5 class="mb-0">Current active sessions</h5>
+        </div>
+        <div class="card-body pt-0">
+            <div class="table-responsive">
+                <table class="table table-sm table-striped table-hover align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>User</th>
+                            <th>Page</th>
+                            <th>Location</th>
+                            <th>IP</th>
+                            <th>Idle</th>
+                            <th>Last Action (UTC)</th>
+                            <th>Last Seen (UTC)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @if (Model.ActiveUsers.Count == 0)
+                    {
+                        <tr><td colspan="7" class="text-muted">No active users found.</td></tr>
+                    }
+                    else
+                    {
+                        foreach (var item in Model.ActiveUsers)
+                        {
+                            var idleClass = item.CurrentIdleSeconds >= 300 ? "badge bg-warning-subtle text-warning-emphasis" : "badge bg-success-subtle text-success-emphasis";
+                            <tr>
+                                <td>
+                                    <div class="fw-semibold">@item.UserName</div>
+                                    <div class="text-muted small">@item.BrowserId</div>
+                                    <div class="text-muted small">Tab: @item.TabId</div>
+                                </td>
+                                <td>
+                                    <div class="fw-semibold">@item.PageName</div>
+                                    <div class="text-muted small text-break">@item.Path</div>
+                                </td>
+                                <td>
+                                    <div>@(string.IsNullOrWhiteSpace(item.LocationText) ? "Unknown" : item.LocationText)</div>
+                                    @if (item.Latitude.HasValue && item.Longitude.HasValue)
+                                    {
+                                        <div class="text-muted small">@item.Latitude.Value.ToString("0.000000"), @item.Longitude.Value.ToString("0.000000")</div>
+                                    }
+                                </td>
+                                <td>@item.IpAddress</td>
+                                <td>
+                                    <span class="@idleClass">@item.IdleStatus</span>
+                                    <div class="small mt-1">Current: @item.CurrentIdleSeconds s</div>
+                                    <div class="text-muted small">Max on page: @item.MaxIdleSeconds s</div>
+                                </td>
+                                <td>@(item.LastActionOnUtc?.ToString("yyyy-MM-dd HH:mm:ss") ?? "-")</td>
+                                <td>@item.LastSeenOnUtc.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                            </tr>
+                        }
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm border-0">
+        <div class="card-header bg-white border-0 pt-3 pb-2">
+            <h5 class="mb-0">Recent page views</h5>
+        </div>
+        <div class="card-body pt-0">
+            <div class="table-responsive">
+                <table class="table table-sm table-striped table-hover align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>UTC Time</th>
+                            <th>User</th>
+                            <th>Page</th>
+                            <th>Location</th>
+                            <th>IP</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @if (Model.RecentActivity.Count == 0)
+                    {
+                        <tr><td colspan="5" class="text-muted">No usage activity found.</td></tr>
+                    }
+                    else
+                    {
+                        foreach (var item in Model.RecentActivity)
+                        {
+                            <tr>
+                                <td>@item.OccurredOnUtc.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                                <td>
+                                    <div class="fw-semibold">@item.UserName</div>
+                                    <div class="text-muted small">@item.BrowserId</div>
+                                </td>
+                                <td>
+                                    <div class="fw-semibold">@item.PageName</div>
+                                    <div class="text-muted small text-break">@item.Path</div>
+                                </td>
+                                <td>
+                                    <div>@(string.IsNullOrWhiteSpace(item.LocationText) ? "Unknown" : item.LocationText)</div>
+                                    @if (item.Latitude.HasValue && item.Longitude.HasValue)
+                                    {
+                                        <div class="text-muted small">@item.Latitude.Value.ToString("0.000000"), @item.Longitude.Value.ToString("0.000000")</div>
+                                    }
+                                </td>
+                                <td>@item.IpAddress</td>
+                            </tr>
+                        }
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
