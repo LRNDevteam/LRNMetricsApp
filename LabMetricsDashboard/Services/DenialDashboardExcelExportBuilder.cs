@@ -19,10 +19,7 @@ public static class DenialDashboardExcelExportBuilder
 		var (insightHeaders, insightRows) = BuildInsightSheetRows(lineItems);
 		var taskSheetRows = BuildTaskSheetRows(taskRows);
 
-		BuildDenialDatabaseSheet(workbook, lineHeaders, lineRows);
 		BuildDenialInsightsSheet(workbook, insightHeaders, insightRows);
-		BuildTaskBoardSheet(workbook, taskSheetRows);
-
 		if (weeklyPivot is not null && weeklyPivot.Periods.Count > 0)
 		{
 			BuildBreakdownPivotSheet(workbook, "Weekly Breakdown", weeklyPivot);
@@ -32,6 +29,10 @@ public static class DenialDashboardExcelExportBuilder
 		{
 			BuildBreakdownPivotSheet(workbook, "Monthly Breakdown", monthlyPivot);
 		}
+		BuildTaskBoardSheet(workbook, taskSheetRows);
+		BuildDenialDatabaseSheet(workbook, lineHeaders, lineRows);
+
+
 
 		return workbook;
 	}
@@ -43,15 +44,27 @@ public static class DenialDashboardExcelExportBuilder
 			"Accession No",
 			"Visit Number",
 			"CPTCode",
-			"Date of Service",
-			"First Billed Date",
-			"Panel Name",
+			"Patient DOB",
+			"Payer Code",
 			"Payer Name",
 			"PayerName Normalized",
+			"Pay Status",
+			"Historical Payment",
+			"Historical Paid Line-Item Count",
+			"Historical Payment Confidence Score",
+			"Total Line-Item Count",
+			"Paid Line-Item Count",
+			"% Paid Line-Item Count",
 			"Payer Type",
-			"ReferringProvider",
-			"ClinicName",
-			"SalesRepname",
+			"PayerFound in Policy",
+			"Date of Service",
+			"First Billed Date",
+			"Denial Date",
+			"Panel Name",
+			"LIS ICD 10 Codes",
+			"CCW ICD10Code",
+			"Units",
+			"Modifier",
 			"DenialCode_Original",
 			"DenialCode_Normalized",
 			"Denial Description",
@@ -59,14 +72,71 @@ public static class DenialDashboardExcelExportBuilder
 			"Allowed Amount",
 			"Insurance Payment",
 			"Insurance Adjustment",
+			"Patient Paid Amount",
+			"Patient Adjustment",
 			"Insurance Balance",
 			"Patient Balance",
 			"Total Balance",
+			"Medicare Fee",
+			"Final Claim Status",
+			"Covered ICD 10 Codes Billed",
+			"Non Covered ICD 10 Codes Billed",
+			"Billed ICD codes not available in Payer Policy",
 			"Coverage Status",
 			"Final Coverage Status",
+			"Covered ICD 10 codes as per Payer Policy",
+			"Non Covered ICD 10 Codes as per Payer Policy",
 			"Action Comment",
 			"Resolution",
-			"LabName",
+			"Lab Name",
+			"Coding Validation",
+			"Coding Validation Sub-Status",
+			"ICD Compliance Status",
+			"ICD Compliance Substatus",
+			"ICD Primary Indicator Available",
+			"Covered ICD Presence",
+			"ICD Validation Confidence",
+			"Frequency Condition Met",
+			"Gender Condition Met",
+			"Payability",
+			"Forecasting Payability",
+			"Policy Coverage Expectation",
+			"Denial Validity",
+			"Coverage Expectation Remarks",
+			"Expected Average Allowed Amount",
+			"Expected Average Insurance Payment",
+			"Expected Allowed Amount - Same Lab",
+			"Expected Insurance Payment - Same Lab",
+			"Mode Allowed Amount - Same Lab",
+			"Mode Insurance Paid - Same Lab",
+			"Mode Allowed Amount- Peer",
+			"Mode Insurance Paid- Peer",
+			"Median Allowed Amount- Same Lab",
+			"Median Insurance Paid - Same Lab",
+			"Median Allowed Amount- Peer",
+			"Median Insurance Paid - Peer",
+			"Mode Allowed Amount Difference",
+			"Mode Insurance Paid Difference",
+			"Median Allowed Amount Difference",
+			"Median Insurance Paid Difference",
+			"Denial Rate",
+			"Adjustment Rate",
+			"Payment Days",
+			"Expected Payment Date",
+			"Expected Payment Month",
+			"BillingProvider",
+			"ReferringProvider",
+			"ClinicName",
+			"SalesRepname",
+			"PatientID",
+			"ChargeEnteredDate",
+			"POS",
+			"TOS",
+			"CheckDate",
+			"DaystoDOS",
+			"RollingDays",
+			"DaystoBill",
+			"DaystoPost",
 			"Denial Classification",
 			"Denial Type",
 			"Action Category",
@@ -76,7 +146,6 @@ public static class DenialDashboardExcelExportBuilder
 			"Task Status",
 			"Priority",
 			"SLA (Days)",
-			"PatientID",
 			"RunId",
 			"CreatedOn"
 		};
@@ -86,30 +155,99 @@ public static class DenialDashboardExcelExportBuilder
 			["Accession No"] = item.AccessionNo,
 			["Visit Number"] = item.VisitNumber,
 			["CPTCode"] = item.CptCode,
-			["Date of Service"] = FormatDate(item.DateOfService),
-			["First Billed Date"] = FormatDate(item.FirstBilledDate),
-			["Panel Name"] = item.PanelName,
+			["Patient DOB"] = FormatDate(item.PatientDob),
+			["Payer Code"] = item.PayerCode?.ToString() ?? string.Empty,
 			["Payer Name"] = item.PayerName,
 			["PayerName Normalized"] = item.PayerNameNormalized,
+			["Pay Status"] = item.PayStatus,
+			["Historical Payment"] = item.HistoricalPayment,
+			["Historical Paid Line-Item Count"] = item.HistoricalPaidLineItemCount,
+			["Historical Payment Confidence Score"] = item.HistoricalPaymentConfidenceScore,
+			["Total Line-Item Count"] = item.TotalLineItemCount?.ToString() ?? string.Empty,
+			["Paid Line-Item Count"] = item.PaidLineItemCount?.ToString() ?? string.Empty,
+			["% Paid Line-Item Count"] = FormatDecimal(item.PaidLineItemCountPercent),
 			["Payer Type"] = item.PayerType,
-			["ReferringProvider"] = item.ReferringProvider,
-			["ClinicName"] = item.ClinicName,
-			["SalesRepname"] = item.SalesRepname,
+			["PayerFound in Policy"] = item.PayerFoundInPolicy,
+			["Date of Service"] = FormatDate(item.DateOfService),
+			["First Billed Date"] = FormatDate(item.FirstBilledDate),
+			["Denial Date"] = FormatDate(item.DenialDate),
+			["Panel Name"] = item.PanelName,
+			["LIS ICD 10 Codes"] = item.LisIcd10Codes,
+			["CCW ICD10Code"] = item.CcwIcd10Code,
+			["Units"] = item.Units?.ToString() ?? string.Empty,
+			["Modifier"] = item.Modifier,
 			["DenialCode_Original"] = item.DenialCodeOriginal,
 			["DenialCode_Normalized"] = item.DenialCodeNormalized,
 			["Denial Description"] = item.DenialDescription,
-			["Billed Amount"] = item.BilledAmount.ToString("0.00"),
-			["Allowed Amount"] = item.AllowedAmount.ToString("0.00"),
-			["Insurance Payment"] = item.InsurancePayment.ToString("0.00"),
-			["Insurance Adjustment"] = item.InsuranceAdjustment.ToString("0.00"),
-			["Insurance Balance"] = item.InsuranceBalance.ToString("0.00"),
-			["Patient Balance"] = item.PatientBalance.ToString("0.00"),
-			["Total Balance"] = item.TotalBalance.ToString("0.00"),
+			["Billed Amount"] = FormatDecimal(item.BilledAmount),
+			["Allowed Amount"] = FormatDecimal(item.AllowedAmount),
+			["Insurance Payment"] = FormatDecimal(item.InsurancePayment),
+			["Insurance Adjustment"] = FormatDecimal(item.InsuranceAdjustment),
+			["Patient Paid Amount"] = FormatDecimal(item.PatientPaidAmount),
+			["Patient Adjustment"] = FormatDecimal(item.PatientAdjustment),
+			["Insurance Balance"] = FormatDecimal(item.InsuranceBalance),
+			["Patient Balance"] = FormatDecimal(item.PatientBalance),
+			["Total Balance"] = FormatDecimal(item.TotalBalance),
+			["Medicare Fee"] = FormatDecimal(item.MedicareFee),
+			["Final Claim Status"] = item.FinalClaimStatus,
+			["Covered ICD 10 Codes Billed"] = item.CoveredIcd10CodesBilled,
+			["Non Covered ICD 10 Codes Billed"] = item.NonCoveredIcd10CodesBilled,
+			["Billed ICD codes not available in Payer Policy"] = item.BilledIcdCodesNotAvailableInPayerPolicy,
 			["Coverage Status"] = item.CoverageStatus,
 			["Final Coverage Status"] = item.FinalCoverageStatus,
+			["Covered ICD 10 codes as per Payer Policy"] = item.CoveredIcd10CodesAsPerPayerPolicy,
+			["Non Covered ICD 10 Codes as per Payer Policy"] = item.NonCoveredIcd10CodesAsPerPayerPolicy,
 			["Action Comment"] = item.ActionComment,
 			["Resolution"] = item.Resolution,
-			["LabName"] = item.LabName,
+			["Lab Name"] = item.LabName,
+			["Coding Validation"] = item.CodingValidation,
+			["Coding Validation Sub-Status"] = item.CodingValidationSubStatus,
+			["ICD Compliance Status"] = item.IcdComplianceStatus,
+			["ICD Compliance Substatus"] = item.IcdComplianceSubstatus,
+			["ICD Primary Indicator Available"] = item.IcdPrimaryIndicatorAvailable,
+			["Covered ICD Presence"] = item.CoveredIcdPresence,
+			["ICD Validation Confidence"] = item.IcdValidationConfidence,
+			["Frequency Condition Met"] = item.FrequencyConditionMet,
+			["Gender Condition Met"] = item.GenderConditionMet,
+			["Payability"] = item.Payability,
+			["Forecasting Payability"] = item.ForecastingPayability,
+			["Policy Coverage Expectation"] = item.PolicyCoverageExpectation,
+			["Denial Validity"] = item.DenialValidity,
+			["Coverage Expectation Remarks"] = item.CoverageExpectationRemarks,
+			["Expected Average Allowed Amount"] = FormatDecimal(item.ExpectedAverageAllowedAmount),
+			["Expected Average Insurance Payment"] = FormatDecimal(item.ExpectedAverageInsurancePayment),
+			["Expected Allowed Amount - Same Lab"] = FormatDecimal(item.ExpectedAllowedAmountSameLab),
+			["Expected Insurance Payment - Same Lab"] = FormatDecimal(item.ExpectedInsurancePaymentSameLab),
+			["Mode Allowed Amount - Same Lab"] = FormatDecimal(item.ModeAllowedAmountSameLab),
+			["Mode Insurance Paid - Same Lab"] = FormatDecimal(item.ModeInsurancePaidSameLab),
+			["Mode Allowed Amount- Peer"] = FormatDecimal(item.ModeAllowedAmountPeer),
+			["Mode Insurance Paid- Peer"] = FormatDecimal(item.ModeInsurancePaidPeer),
+			["Median Allowed Amount- Same Lab"] = FormatDecimal(item.MedianAllowedAmountSameLab),
+			["Median Insurance Paid - Same Lab"] = FormatDecimal(item.MedianInsurancePaidSameLab),
+			["Median Allowed Amount- Peer"] = FormatDecimal(item.MedianAllowedAmountPeer),
+			["Median Insurance Paid - Peer"] = FormatDecimal(item.MedianInsurancePaidPeer),
+			["Mode Allowed Amount Difference"] = FormatDecimal(item.ModeAllowedAmountDifference),
+			["Mode Insurance Paid Difference"] = FormatDecimal(item.ModeInsurancePaidDifference),
+			["Median Allowed Amount Difference"] = FormatDecimal(item.MedianAllowedAmountDifference),
+			["Median Insurance Paid Difference"] = FormatDecimal(item.MedianInsurancePaidDifference),
+			["Denial Rate"] = FormatDecimal(item.DenialRate),
+			["Adjustment Rate"] = FormatDecimal(item.AdjustmentRate),
+			["Payment Days"] = item.PaymentDays?.ToString() ?? string.Empty,
+			["Expected Payment Date"] = FormatDate(item.ExpectedPaymentDate),
+			["Expected Payment Month"] = item.ExpectedPaymentMonth,
+			["BillingProvider"] = item.BillingProvider,
+			["ReferringProvider"] = item.ReferringProvider,
+			["ClinicName"] = item.ClinicName,
+			["SalesRepname"] = item.SalesRepname,
+			["PatientID"] = item.PatientId,
+			["ChargeEnteredDate"] = FormatDate(item.ChargeEnteredDate),
+			["POS"] = item.Pos,
+			["TOS"] = item.Tos,
+			["CheckDate"] = FormatDate(item.CheckDate),
+			["DaystoDOS"] = item.DaystoDos?.ToString() ?? string.Empty,
+			["RollingDays"] = item.RollingDays,
+			["DaystoBill"] = item.DaystoBill?.ToString() ?? string.Empty,
+			["DaystoPost"] = item.DaystoPost?.ToString() ?? string.Empty,
 			["Denial Classification"] = item.CleanDenialClassification,
 			["Denial Type"] = item.DenialType,
 			["Action Category"] = item.CleanActionCategory,
@@ -119,7 +257,6 @@ public static class DenialDashboardExcelExportBuilder
 			["Task Status"] = item.TaskStatus,
 			["Priority"] = item.CleanPriority,
 			["SLA (Days)"] = item.SlaDays,
-			["PatientID"] = item.PatientId,
 			["RunId"] = item.RunId,
 			["CreatedOn"] = FormatDateTime(item.CreatedOn)
 		}).ToList();
@@ -348,15 +485,25 @@ public static class DenialDashboardExcelExportBuilder
 			"Denial Description", "Coverage Status",
 			"Covered ICD 10 codes as per Payer Policy",
 			"Non Covered ICD 10 Codes as per Payer Policy",
+			"Covered ICD 10 Codes Billed",
+			"Non Covered ICD 10 Codes Billed",
+			"Billed ICD codes not available in Payer Policy",
+			"LIS ICD 10 Codes",
+			"CCW ICD10Code",
 			"Action Comment", "Coding Validation Sub-Status",
-			"Recommended Action", "Notes / Comments", "Task Guidance"
+			"Recommended Action", "Notes / Comments", "Task Guidance",
+			"Coverage Expectation Remarks"
 		};
 
 		string[] dateColumns =
 		{
+			"Patient DOB",
 			"First Billed Date",
 			"Expected Payment Date",
 			"Date of Service",
+			"Denial Date",
+			"ChargeEnteredDate",
+			"CheckDate",
 			"Claim Received Date",
 			"Last Payment Date",
 			"CreatedOn"
@@ -372,7 +519,7 @@ public static class DenialDashboardExcelExportBuilder
 			"Mode Insurance Paid - Same Lab", "Mode Allowed Amount- Peer",
 			"Mode Insurance Paid- Peer", "Median Allowed Amount- Same Lab",
 			"Median Insurance Paid - Same Lab", "Median Allowed Amount- Peer",
-			"Median, Insurance Paid - Peer", "Mode Allowed Amount Difference",
+			"Median Insurance Paid - Peer", "Mode Allowed Amount Difference",
 			"Mode Insurance Paid Difference", "Median Allowed Amount Difference",
 			"Median Insurance Paid Difference"
 		};
@@ -396,9 +543,17 @@ public static class DenialDashboardExcelExportBuilder
 		ws1.Columns().AdjustToContents();
 		SetWidth(ws1, effectiveLineHeaders, "Denial Description", 40);
 		SetWidth(ws1, effectiveLineHeaders, "Coverage Status", 25);
+		SetWidth(ws1, effectiveLineHeaders, "Covered ICD 10 codes as per Payer Policy", 45);
+		SetWidth(ws1, effectiveLineHeaders, "Non Covered ICD 10 Codes as per Payer Policy", 45);
+		SetWidth(ws1, effectiveLineHeaders, "Covered ICD 10 Codes Billed", 40);
+		SetWidth(ws1, effectiveLineHeaders, "Non Covered ICD 10 Codes Billed", 40);
+		SetWidth(ws1, effectiveLineHeaders, "Billed ICD codes not available in Payer Policy", 45);
+		SetWidth(ws1, effectiveLineHeaders, "LIS ICD 10 Codes", 35);
+		SetWidth(ws1, effectiveLineHeaders, "CCW ICD10Code", 35);
 		SetWidth(ws1, effectiveLineHeaders, "Action Comment", 40);
 		SetWidth(ws1, effectiveLineHeaders, "Recommended Action", 45);
 		SetWidth(ws1, effectiveLineHeaders, "Task Guidance", 45);
+		SetWidth(ws1, effectiveLineHeaders, "Coverage Expectation Remarks", 45);
 
 		if (lineRows.Count > 0 && effectiveLineHeaders.Count > 0)
 		{
@@ -798,4 +953,6 @@ public static class DenialDashboardExcelExportBuilder
 
 	private static string FormatDate(DateTime? value) => value?.ToString("yyyy-MM-dd") ?? string.Empty;
 	private static string FormatDateTime(DateTime? value) => value?.ToString("O") ?? string.Empty;
+	private static string FormatDecimal(decimal? value) => value?.ToString("0.00") ?? string.Empty;
+	private static string FormatDecimal(decimal value) => value.ToString("0.00");
 }

@@ -21,6 +21,8 @@ public class DenialDashboardFilters
     public DateTime? FirstBilledDateTo { get; set; }
     public DateTime? DateOfServiceFrom { get; set; }
     public DateTime? DateOfServiceTo { get; set; }
+    public DateTime? DenialDateFrom { get; set; }
+    public DateTime? DenialDateTo { get; set; }
 
     public string ActiveTab { get; set; } = "dashboard";
     public int Page { get; set; } = 1;
