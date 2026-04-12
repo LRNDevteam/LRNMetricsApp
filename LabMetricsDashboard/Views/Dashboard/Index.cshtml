@@ -156,7 +156,7 @@
         </div>
 
         <div id="filterBody" class="collapse @(hasFilters ? "show" : "")">
-            <form method="get" asp-controller="Dashboard" asp-action="Index" data-lab-form>
+            <form id="dashFilterForm" method="get" asp-controller="Dashboard" asp-action="Index" data-lab-form>
                 <input type="hidden" name="lab" value="@Model.SelectedLab" />
 
                 <!-- Row 1 : Dropdown filters -->
@@ -260,6 +260,9 @@
                     <button type="submit" class="btn btn-primary btn-sm">Apply Filters</button>
                     <a asp-controller="Dashboard" asp-action="Index" asp-route-lab="@Model.SelectedLab"
                        class="btn btn-outline-secondary btn-sm">Clear</a>
+                    <button type="button" id="exportExcelBtn" class="btn btn-sm btn-outline-success ms-auto">
+                        <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
+                    </button>
                 </div>
             </form>
         </div>
@@ -283,6 +286,29 @@
 
             // Set correct label on page load
             syncLabel();
+        })();
+    </script>
+
+    @if (TempData["ExportError"] is string exportError)
+    {
+        <div class="alert alert-warning alert-dismissible fade show mt-2" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-1"></i> @exportError
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    }
+
+    <script>
+        (function () {
+            var exportBtn = document.getElementById('exportExcelBtn');
+            if (exportBtn) {
+                exportBtn.addEventListener('click', function () {
+                    var form = document.getElementById('dashFilterForm');
+                    if (!form) return;
+                    var params = new URLSearchParams(new FormData(form));
+                    var url = '@Url.Action("ExportDashboardExcel", "Dashboard")' + '?' + params.toString();
+                    lmdExcelDownload(url);
+                });
+            }
         })();
     </script>
 

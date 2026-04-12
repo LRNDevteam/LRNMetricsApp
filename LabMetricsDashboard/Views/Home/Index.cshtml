@@ -520,26 +520,6 @@
 .wl-legend-item {
     display: inline-flex; align-items: center; gap: .25rem;
 }
-
-/* Row count badge */
-.wl-count {
-    display: inline-block; font-size: .58rem; font-weight: 700;
-    padding: .12em .45em; border-radius: 4px;
-    background: #eef3ff; color: #1565c0;
-    margin-top: 2px;
-}
-.wl-count-line {
-    background: #e6f7f7; color: #0d7377;
-}
-
-/* Card row count */
-.file-count {
-    font-size: .56rem; font-weight: 700;
-    padding: .1em .4em; border-radius: 4px;
-    flex-shrink: 0; margin-top: 2px;
-}
-.file-count-claim { background: #eef3ff; color: #1565c0; }
-.file-count-line  { background: #e6f7f7; color: #0d7377; }
 </style>
 
 <div class="home-page px-3 pt-3">
@@ -633,14 +613,6 @@
                             {
                                 <span class="file-check" style="color:#22c55e">&#10003;</span>
                             }
-                            @if (tile.ClaimRowCount.HasValue)
-                            {
-                                <span class="file-count file-count-claim" title="ClaimLevelData rows">@tile.ClaimRowCount.Value.ToString("N0")</span>
-                            }
-                            else if (tile.LineClaimEnabled)
-                            {
-                                <span class="file-count file-count-claim" title="ClaimLevelData rows unavailable">&mdash;</span>
-                            }
                         </div>
 
                         <!-- Line Level -->
@@ -660,14 +632,6 @@
                             @if (tile.HasLineFile)
                             {
                                 <span class="file-check" style="color:#22c55e">&#10003;</span>
-                            }
-                            @if (tile.LineRowCount.HasValue)
-                            {
-                                <span class="file-count file-count-line" title="LineLevelData rows">@tile.LineRowCount.Value.ToString("N0")</span>
-                            }
-                            else if (tile.LineClaimEnabled)
-                            {
-                                <span class="file-count file-count-line" title="LineLevelData rows unavailable">&mdash;</span>
                             }
                         </div>
 

@@ -206,6 +206,23 @@
     }
     .cs-ms-list label:hover { background: #edf0f0; }
     .cs-ms-list label.cs-ms-hidden { display: none; }
+
+    /* Drilldown parent row */
+    .cs-drill-parent:hover { background: #edf4f8 !important; }
+    .cs-drill-parent td:first-child { cursor: pointer; }
+    .cs-drill-parent.cs-drill-open { background: #eef6fa; }
+    .cs-drill-parent.cs-drill-open td:first-child { background: #eef6fa; }
+    .cs-drill-parent.cs-drill-open .cs-drill-chevron {
+        transform: rotate(90deg);
+    }
+    .cs-drill-detail td { background: #f8fafc; }
+    .cs-drill-detail .cs-table { border: 1px solid #e0e6ed; border-radius: 8px; overflow: hidden; }
+    .cs-drill-detail .cs-table thead th {
+        background: linear-gradient(135deg, #3a4a5c 0%, #5a6a7c 100%);
+        font-size: .6rem; padding: .35rem .5rem;
+    }
+    .cs-drill-detail .cs-table td:first-child { position: static; min-width: auto; }
+    .cs-drill-detail .cs-table thead th:first-child { position: static; min-width: auto; }
 </style>
 
 <!-- Lab selector banner -->
@@ -359,6 +376,33 @@
                     </div>
                 </div>
 
+                <div class="row g-2 align-items-end mb-2">
+                    <!-- Date of Service From -->
+                    <div class="col-sm-6 col-md-3">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">DATE OF SERVICE FROM</label>
+                        <input type="date" name="filterDosFrom" class="form-control form-control-sm"
+                               value="@Model.FilterDosFrom" />
+                    </div>
+                    <!-- Date of Service To -->
+                    <div class="col-sm-6 col-md-3">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">DATE OF SERVICE TO</label>
+                        <input type="date" name="filterDosTo" class="form-control form-control-sm"
+                               value="@Model.FilterDosTo" />
+                    </div>
+                    <!-- First Bill Date From -->
+                    <div class="col-sm-6 col-md-3">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">FIRST BILL DATE FROM</label>
+                        <input type="date" name="filterFirstBillFrom" class="form-control form-control-sm"
+                               value="@Model.FilterFirstBillFrom" />
+                    </div>
+                    <!-- First Bill Date To -->
+                    <div class="col-sm-6 col-md-3">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">FIRST BILL DATE TO</label>
+                        <input type="date" name="filterFirstBillTo" class="form-control form-control-sm"
+                               value="@Model.FilterFirstBillTo" />
+                    </div>
+                </div>
+
                 <div class="d-flex gap-2 mt-2">
                     <button type="submit" class="btn btn-sm btn-primary">
                         <i class="bi bi-funnel-fill me-1"></i>Apply
@@ -366,9 +410,20 @@
                     <a asp-controller="Dashboard" asp-action="SalesRepSummary"
                        asp-route-lab="@Model.SelectedLab"
                        class="btn btn-sm btn-outline-secondary">Clear</a>
+                    <button type="button" id="exportExcelBtn" class="btn btn-sm btn-outline-success ms-auto">
+                        <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
+                    </button>
                 </div>
             </form>
         </div>
+    </div>
+}
+
+@if (TempData["ExportError"] is string exportError)
+{
+    <div class="alert alert-warning alert-dismissible fade show mt-2" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-1"></i> @exportError
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
 }
 
@@ -522,8 +577,307 @@
     </div>
     </div>
 
-    <div class="text-muted mt-2" style="font-size:.68rem">
+    <div class="text-muted mt-2 mb-3" style="font-size:.68rem">
         Source: dbo.ClaimLevelData &middot; Lab: @Model.SelectedLab
+    </div>
+
+    <!-- Highly Collected / Highly Denied Drilldown Breakdown -->
+    <div class="cs-wrap mb-4" style="overflow:hidden">
+        <!-- Outer tabs: Collected vs Denied -->
+        <ul class="nav nav-tabs px-3 pt-2" id="topBreakdownTabs" role="tablist" style="border-bottom:1px solid #e0e6ed">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="tab-collected" data-bs-toggle="tab" data-bs-target="#pane-collected" type="button" role="tab" style="font-size:.78rem;font-weight:700">
+                    <i class="bi bi-cash-coin me-1" style="color:#0d5c74"></i>Highly Collected
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-denied" data-bs-toggle="tab" data-bs-target="#pane-denied" type="button" role="tab" style="font-size:.78rem;font-weight:700">
+                    <i class="bi bi-shield-x me-1" style="color:#8b0000"></i>Highly Denied
+                </button>
+            </li>
+        </ul>
+
+        <div class="tab-content">
+            <!-- ??? Highly Collected pane — Drilldown ??? -->
+            <div class="tab-pane fade show active" id="pane-collected" role="tabpanel">
+                @if (Model.DrilldownCollectedSalesReps.Count > 0)
+                {
+                    <div class="px-2 pb-2 pt-2" style="max-height:520px;overflow:auto">
+                        <table class="cs-table" style="font-size:.74rem">
+                            <thead>
+                                <tr>
+                                    <th style="text-align:left;min-width:220px"><i class="bi bi-person-badge me-1 th-icon-rep"></i>Sales Rep</th>
+                                    <th>Claims</th>
+                                    <th>Billed</th>
+                                    <th>Ins. Paid</th>
+                                    <th>Collection %</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @{ var collectedIdx = 0; }
+                                @foreach (var group in Model.DrilldownCollectedSalesReps)
+                                {
+                                    var parentItem = Model.TopCollectedSalesReps.FirstOrDefault(x => x.Name == group.Parent.Name);
+                                    if (parentItem is null) { collectedIdx++; continue; }
+                                    var cIdx = collectedIdx++;
+                                    <tr class="cs-drill-parent" data-drill-target="collected-drill-@cIdx" style="cursor:pointer">
+                                        <td title="@parentItem.Name" style="text-align:left;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                                            <i class="bi bi-chevron-right cs-drill-chevron me-1" style="font-size:.65rem;transition:transform .2s"></i>@parentItem.Name
+                                        </td>
+                                        <td class="cs-cnt">@parentItem.ClaimCount.ToString("N0")</td>
+                                        <td class="cs-money">@parentItem.TotalBilledCharges.ToString("C0")</td>
+                                        <td class="cs-money">@parentItem.TotalInsurancePaid.ToString("C0")</td>
+                                        <td class="cs-pct">@Html.Raw(PctCell(parentItem.CollectionPct, parentItem.CollectionPct))</td>
+                                    </tr>
+                                    <!-- Drilldown sub-rows (hidden by default) -->
+                                    <tr class="cs-drill-detail" id="collected-drill-@cIdx" style="display:none">
+                                        <td colspan="5" style="padding:0;background:#f8fafc;border-left:4px solid #0d5c74">
+                                            <div class="p-2">
+                                                @if (group.Payers.Count > 0)
+                                                {
+                                                    <div class="mb-2">
+                                                        <div class="fw-bold mb-1" style="font-size:.68rem;color:#475569"><i class="bi bi-shield-check me-1"></i>Payers</div>
+                                                        <table class="cs-table" style="font-size:.7rem;margin:0">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th style="text-align:left;min-width:160px;padding:.3rem .5rem">Payer</th>
+                                                                    <th style="padding:.3rem .5rem">Claims</th>
+                                                                    <th style="padding:.3rem .5rem">Billed</th>
+                                                                    <th style="padding:.3rem .5rem">Ins. Paid</th>
+                                                                    <th style="padding:.3rem .5rem">Collection %</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                @foreach (var sub in group.Payers)
+                                                                {
+                                                                    <tr>
+                                                                        <td title="@sub.Name" style="text-align:left;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:.3rem .5rem">@sub.Name</td>
+                                                                        <td class="cs-cnt" style="padding:.3rem .5rem">@sub.ClaimCount.ToString("N0")</td>
+                                                                        <td class="cs-money" style="padding:.3rem .5rem">@sub.TotalBilledCharges.ToString("C0")</td>
+                                                                        <td class="cs-money" style="padding:.3rem .5rem">@sub.TotalInsurancePaid.ToString("C0")</td>
+                                                                        <td class="cs-pct" style="padding:.3rem .5rem">@Html.Raw(PctCell(sub.CollectionPct, sub.CollectionPct))</td>
+                                                                    </tr>
+                                                                }
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                }
+                                                @if (group.Clinics.Count > 0)
+                                                {
+                                                    <div class="mb-2">
+                                                        <div class="fw-bold mb-1" style="font-size:.68rem;color:#475569"><i class="bi bi-hospital me-1"></i>Clinics</div>
+                                                        <table class="cs-table" style="font-size:.7rem;margin:0">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th style="text-align:left;min-width:160px;padding:.3rem .5rem">Clinic</th>
+                                                                    <th style="padding:.3rem .5rem">Claims</th>
+                                                                    <th style="padding:.3rem .5rem">Billed</th>
+                                                                    <th style="padding:.3rem .5rem">Ins. Paid</th>
+                                                                    <th style="padding:.3rem .5rem">Collection %</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                @foreach (var sub in group.Clinics)
+                                                                {
+                                                                    <tr>
+                                                                        <td title="@sub.Name" style="text-align:left;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:.3rem .5rem">@sub.Name</td>
+                                                                        <td class="cs-cnt" style="padding:.3rem .5rem">@sub.ClaimCount.ToString("N0")</td>
+                                                                        <td class="cs-money" style="padding:.3rem .5rem">@sub.TotalBilledCharges.ToString("C0")</td>
+                                                                        <td class="cs-money" style="padding:.3rem .5rem">@sub.TotalInsurancePaid.ToString("C0")</td>
+                                                                        <td class="cs-pct" style="padding:.3rem .5rem">@Html.Raw(PctCell(sub.CollectionPct, sub.CollectionPct))</td>
+                                                                    </tr>
+                                                                }
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                }
+                                                @if (group.Panels.Count > 0)
+                                                {
+                                                    <div class="mb-2">
+                                                        <div class="fw-bold mb-1" style="font-size:.68rem;color:#475569"><i class="bi bi-grid-3x3-gap me-1"></i>Panels</div>
+                                                        <table class="cs-table" style="font-size:.7rem;margin:0">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th style="text-align:left;min-width:160px;padding:.3rem .5rem">Panel</th>
+                                                                    <th style="padding:.3rem .5rem">Claims</th>
+                                                                    <th style="padding:.3rem .5rem">Billed</th>
+                                                                    <th style="padding:.3rem .5rem">Ins. Paid</th>
+                                                                    <th style="padding:.3rem .5rem">Collection %</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                @foreach (var sub in group.Panels)
+                                                                {
+                                                                    <tr>
+                                                                        <td title="@sub.Name" style="text-align:left;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:.3rem .5rem">@sub.Name</td>
+                                                                        <td class="cs-cnt" style="padding:.3rem .5rem">@sub.ClaimCount.ToString("N0")</td>
+                                                                        <td class="cs-money" style="padding:.3rem .5rem">@sub.TotalBilledCharges.ToString("C0")</td>
+                                                                        <td class="cs-money" style="padding:.3rem .5rem">@sub.TotalInsurancePaid.ToString("C0")</td>
+                                                                        <td class="cs-pct" style="padding:.3rem .5rem">@Html.Raw(PctCell(sub.CollectionPct, sub.CollectionPct))</td>
+                                                                    </tr>
+                                                                }
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                }
+                                                @if (group.Payers.Count == 0 && group.Clinics.Count == 0 && group.Panels.Count == 0)
+                                                {
+                                                    <div class="text-muted" style="font-size:.72rem">No breakdown data available</div>
+                                                }
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+                else
+                {
+                    <div class="text-center text-muted py-4" style="font-size:.78rem">No data available</div>
+                }
+            </div>
+
+            <!-- ??? Highly Denied pane — Drilldown ??? -->
+            <div class="tab-pane fade" id="pane-denied" role="tabpanel">
+                @if (Model.DrilldownDeniedSalesReps.Count > 0)
+                {
+                    <div class="px-2 pb-2 pt-2" style="max-height:520px;overflow:auto">
+                        <table class="cs-table" style="font-size:.74rem">
+                            <thead>
+                                <tr>
+                                    <th style="text-align:left;min-width:220px"><i class="bi bi-person-badge me-1 th-icon-rep"></i>Sales Rep</th>
+                                    <th>Denied Claims</th>
+                                    <th>Billed</th>
+                                    <th>Denied Charges</th>
+                                    <th>Denial %</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @{ var deniedIdx = 0; }
+                                @foreach (var group in Model.DrilldownDeniedSalesReps)
+                                {
+                                    var parentItem = Model.TopDeniedSalesReps.FirstOrDefault(x => x.Name == group.Parent.Name);
+                                    if (parentItem is null) { deniedIdx++; continue; }
+                                    var dIdx = deniedIdx++;
+                                    <tr class="cs-drill-parent" data-drill-target="denied-drill-@dIdx" style="cursor:pointer">
+                                        <td title="@parentItem.Name" style="text-align:left;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                                            <i class="bi bi-chevron-right cs-drill-chevron me-1" style="font-size:.65rem;transition:transform .2s"></i>@parentItem.Name
+                                        </td>
+                                        <td class="cs-cnt">@parentItem.DeniedClaimCount.ToString("N0")</td>
+                                        <td class="cs-money">@parentItem.TotalBilledCharges.ToString("C0")</td>
+                                        <td class="cs-money">@parentItem.TotalDeniedCharges.ToString("C0")</td>
+                                        <td class="cs-pct">@Html.Raw(InversePctCell(parentItem.DenialPct))</td>
+                                    </tr>
+                                    <!-- Drilldown sub-rows (hidden by default) -->
+                                    <tr class="cs-drill-detail" id="denied-drill-@dIdx" style="display:none">
+                                        <td colspan="5" style="padding:0;background:#f8fafc;border-left:4px solid #8b0000">
+                                            <div class="p-2">
+                                                @if (group.Payers.Count > 0)
+                                                {
+                                                    <div class="mb-2">
+                                                        <div class="fw-bold mb-1" style="font-size:.68rem;color:#475569"><i class="bi bi-shield-check me-1"></i>Payers</div>
+                                                        <table class="cs-table" style="font-size:.7rem;margin:0">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th style="text-align:left;min-width:160px;padding:.3rem .5rem">Payer</th>
+                                                                    <th style="padding:.3rem .5rem">Denied Claims</th>
+                                                                    <th style="padding:.3rem .5rem">Billed</th>
+                                                                    <th style="padding:.3rem .5rem">Denied Charges</th>
+                                                                    <th style="padding:.3rem .5rem">Denial %</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                @foreach (var sub in group.Payers)
+                                                                {
+                                                                    <tr>
+                                                                        <td title="@sub.Name" style="text-align:left;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:.3rem .5rem">@sub.Name</td>
+                                                                        <td class="cs-cnt" style="padding:.3rem .5rem">@sub.DeniedClaimCount.ToString("N0")</td>
+                                                                        <td class="cs-money" style="padding:.3rem .5rem">@sub.TotalBilledCharges.ToString("C0")</td>
+                                                                        <td class="cs-money" style="padding:.3rem .5rem">@sub.TotalDeniedCharges.ToString("C0")</td>
+                                                                        <td class="cs-pct" style="padding:.3rem .5rem">@Html.Raw(InversePctCell(sub.DenialPct))</td>
+                                                                    </tr>
+                                                                }
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                }
+                                                @if (group.Clinics.Count > 0)
+                                                {
+                                                    <div class="mb-2">
+                                                        <div class="fw-bold mb-1" style="font-size:.68rem;color:#475569"><i class="bi bi-hospital me-1"></i>Clinics</div>
+                                                        <table class="cs-table" style="font-size:.7rem;margin:0">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th style="text-align:left;min-width:160px;padding:.3rem .5rem">Clinic</th>
+                                                                    <th style="padding:.3rem .5rem">Denied Claims</th>
+                                                                    <th style="padding:.3rem .5rem">Billed</th>
+                                                                    <th style="padding:.3rem .5rem">Denied Charges</th>
+                                                                    <th style="padding:.3rem .5rem">Denial %</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                @foreach (var sub in group.Clinics)
+                                                                {
+                                                                    <tr>
+                                                                        <td title="@sub.Name" style="text-align:left;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:.3rem .5rem">@sub.Name</td>
+                                                                        <td class="cs-cnt" style="padding:.3rem .5rem">@sub.DeniedClaimCount.ToString("N0")</td>
+                                                                        <td class="cs-money" style="padding:.3rem .5rem">@sub.TotalBilledCharges.ToString("C0")</td>
+                                                                        <td class="cs-money" style="padding:.3rem .5rem">@sub.TotalDeniedCharges.ToString("C0")</td>
+                                                                        <td class="cs-pct" style="padding:.3rem .5rem">@Html.Raw(InversePctCell(sub.DenialPct))</td>
+                                                                    </tr>
+                                                                }
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                }
+                                                @if (group.Panels.Count > 0)
+                                                {
+                                                    <div class="mb-2">
+                                                        <div class="fw-bold mb-1" style="font-size:.68rem;color:#475569"><i class="bi bi-grid-3x3-gap me-1"></i>Panels</div>
+                                                        <table class="cs-table" style="font-size:.7rem;margin:0">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th style="text-align:left;min-width:160px;padding:.3rem .5rem">Panel</th>
+                                                                    <th style="padding:.3rem .5rem">Denied Claims</th>
+                                                                    <th style="padding:.3rem .5rem">Billed</th>
+                                                                    <th style="padding:.3rem .5rem">Denied Charges</th>
+                                                                    <th style="padding:.3rem .5rem">Denial %</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                @foreach (var sub in group.Panels)
+                                                                {
+                                                                    <tr>
+                                                                        <td title="@sub.Name" style="text-align:left;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:.3rem .5rem">@sub.Name</td>
+                                                                        <td class="cs-cnt" style="padding:.3rem .5rem">@sub.DeniedClaimCount.ToString("N0")</td>
+                                                                        <td class="cs-money" style="padding:.3rem .5rem">@sub.TotalBilledCharges.ToString("C0")</td>
+                                                                        <td class="cs-money" style="padding:.3rem .5rem">@sub.TotalDeniedCharges.ToString("C0")</td>
+                                                                        <td class="cs-pct" style="padding:.3rem .5rem">@Html.Raw(InversePctCell(sub.DenialPct))</td>
+                                                                    </tr>
+                                                                }
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                }
+                                                @if (group.Payers.Count == 0 && group.Clinics.Count == 0 && group.Panels.Count == 0)
+                                                {
+                                                    <div class="text-muted" style="font-size:.72rem">No breakdown data available</div>
+                                                }
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+                else
+                {
+                    <div class="text-center text-muted py-4" style="font-size:.78rem">No denial data available</div>
+                }
+            </div>
+        </div>
     </div>
 }
 else if (Model.Totals is not null && Model.Rows.Count == 0 && Model.HasFilters)
@@ -614,5 +968,29 @@ else
                 p.classList.remove('open');
             });
         });
+
+        // Drilldown expand/collapse
+        document.querySelectorAll('.cs-drill-parent').forEach(function (row) {
+            row.addEventListener('click', function () {
+                var targetId = this.getAttribute('data-drill-target');
+                var detail = document.getElementById(targetId);
+                if (!detail) return;
+                var isOpen = detail.style.display !== 'none';
+                detail.style.display = isOpen ? 'none' : 'table-row';
+                this.classList.toggle('cs-drill-open', !isOpen);
+            });
+        });
+
+        // Export Excel — reuse filter form values to build a download URL
+        var exportBtn = document.getElementById('exportExcelBtn');
+        if (exportBtn) {
+            exportBtn.addEventListener('click', function () {
+                var form = document.getElementById('srFilterForm');
+                if (!form) return;
+                var params = new URLSearchParams(new FormData(form));
+                var url = '@Url.Action("ExportSalesRepSummaryExcel", "Dashboard")' + '?' + params.toString();
+                lmdExcelDownload(url);
+            });
+        }
     });
 </script>

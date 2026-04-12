@@ -648,7 +648,283 @@ public class PredictionController : Controller
         return View(vm);
     }
 
-    // ?? Private helpers ???????????????????????????????????????????????????????
+    /// <summary>
+    /// Downloads the current Prediction Analysis filtered data as a formatted Excel file.
+    /// Accepts the same filter parameters as <see cref="Index"/>.
+    /// </summary>
+    public async Task<IActionResult> ExportPredictionExcel(
+        string? lab,
+        string? filterPayerName,
+        string? filterPayerType,
+        string? filterPanelName,
+        string? filterFinalCoverageStatus,
+        string? filterPayability,
+        string? filterCPTCode)
+    {
+        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var selectedLab   = lab ?? availableLabs.FirstOrDefault() ?? string.Empty;
+        var labConfig     = !string.IsNullOrEmpty(selectedLab) && _labSettings.Labs.TryGetValue(selectedLab, out var cfg) ? cfg : null;
+
+        if (labConfig?.DBEnabled == false)
+        {
+            TempData["ExportError"] = "Export is not available for the selected lab.";
+            return RedirectToAction(nameof(Index), new { lab });
+        }
+
+        try
+        {
+            // Reuse the same data-load + filter logic as Index
+            var vm = await BuildPredictionViewModelAsync(selectedLab, labConfig,
+                filterPayerName, filterPayerType, filterPanelName,
+                filterFinalCoverageStatus, filterPayability, filterCPTCode);
+
+            using var workbook = PredictionExcelExportBuilder.CreateWorkbook(vm, selectedLab,
+                activeFilters: new List<(string, string?)>
+                {
+                    ("Payer Name", filterPayerName),
+                    ("Payer Type", filterPayerType),
+                    ("Panel Name", filterPanelName),
+                    ("Final Coverage Status", filterFinalCoverageStatus),
+                    ("Payability", filterPayability),
+                    ("CPT Code", filterCPTCode),
+                });
+
+            await using var stream = new MemoryStream();
+            workbook.SaveAs(stream);
+            stream.Position = 0;
+
+            var safeLabName = string.Join("_", selectedLab.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)).Trim('_');
+            var fileName = $"{safeLabName}_PredictionAnalysis_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
+
+            return File(
+                stream.ToArray(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                fileName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Prediction Excel export failed for lab '{LabName}'.", selectedLab);
+            TempData["ExportError"] = $"Export failed: {ex.Message}";
+            return RedirectToAction(nameof(Index), new { lab });
+        }
+    }
+
+    /// <summary>
+    /// Downloads the current Forecasting Summary data as a formatted Excel file.
+    /// Accepts the same filter parameters as <see cref="ForecastingSummary"/>.
+    /// </summary>
+    public async Task<IActionResult> ExportForecastingExcel(string? lab)
+    {
+        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var selectedLab   = lab ?? availableLabs.FirstOrDefault() ?? string.Empty;
+        var labConfig     = !string.IsNullOrEmpty(selectedLab) && _labSettings.Labs.TryGetValue(selectedLab, out var cfg) ? cfg : null;
+
+        if (labConfig?.DBEnabled == false)
+        {
+            TempData["ExportError"] = "Export is not available for the selected lab.";
+            return RedirectToAction(nameof(ForecastingSummary), new { lab });
+        }
+
+        try
+        {
+            var vm = await BuildForecastingViewModelAsync(selectedLab, labConfig);
+
+            using var workbook = ForecastingExcelExportBuilder.CreateWorkbook(vm, selectedLab);
+
+            await using var stream = new MemoryStream();
+            workbook.SaveAs(stream);
+            stream.Position = 0;
+
+            var safeLabName = string.Join("_", selectedLab.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)).Trim('_');
+            var fileName = $"{safeLabName}_ForecastingSummary_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
+
+            return File(
+                stream.ToArray(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                fileName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Forecasting Excel export failed for lab '{LabName}'.", selectedLab);
+            TempData["ExportError"] = $"Export failed: {ex.Message}";
+            return RedirectToAction(nameof(ForecastingSummary), new { lab });
+        }
+    }
+
+    // ?? Private helpers ?????????????????????????????????????????????????
+
+    /// <summary>Builds the Prediction Analysis view model (shared by Index and ExportPredictionExcel).</summary>
+    private async Task<PredictionAnalysisViewModel> BuildPredictionViewModelAsync(
+        string selectedLab, LabCsvConfig? labConfig,
+        string? filterPayerName, string? filterPayerType, string? filterPanelName,
+        string? filterFinalCoverageStatus, string? filterPayability, string? filterCPTCode)
+    {
+        var today          = DateOnly.FromDateTime(DateTime.Today);
+        var daysFromMonday = ((int)today.DayOfWeek + 6) % 7;
+        var weekStart      = today.AddDays(-daysFromMonday);
+
+        List<PredictionRecord> baseDataset;
+        string? filePath = null;
+        bool usingDb = labConfig?.DBEnabled == true;
+
+        if (usingDb)
+        {
+            var rawRecords = await _dbRepo.GetRecordsAsync(
+                labConfig!.DbConnectionString ?? string.Empty,
+                cancellationToken: HttpContext.RequestAborted);
+            baseDataset = PredictionReportParserService.ApplyGlobalFilter(rawRecords, weekStart);
+        }
+        else
+        {
+            filePath = string.IsNullOrEmpty(selectedLab)
+                ? null
+                : _resolver.ResolvePredictionValidationReport(selectedLab);
+            baseDataset = filePath is not null
+                ? _parser.ParseFiltered(filePath, weekStart)
+                : [];
+        }
+
+        var filtered = baseDataset.AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(filterPayerName))
+            filtered = filtered.Where(r => r.PayerNameNormalized.Equals(filterPayerName, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(filterPayerType))
+            filtered = filtered.Where(r => r.PayerType.Equals(filterPayerType, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(filterPanelName))
+            filtered = filtered.Where(r => r.PanelName.Equals(filterPanelName, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(filterFinalCoverageStatus))
+            filtered = filtered.Where(r => r.FinalCoverageStatus.Equals(filterFinalCoverageStatus, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(filterPayability))
+            filtered = filtered.Where(r => r.Payability.Equals(filterPayability, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(filterCPTCode))
+            filtered = filtered.Where(r => r.CPTCode.Equals(filterCPTCode, StringComparison.OrdinalIgnoreCase));
+
+        var dataset = filtered.ToList();
+
+        var byPayStatus = dataset
+            .GroupBy(r => PredictionReportParserService.Normalise(r.PayStatus), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+
+        var paidRows     = GetRows(byPayStatus, "Paid");
+        var deniedRows   = GetRows(byPayStatus, "Denied");
+        var noRespRows   = GetRows(byPayStatus, "No Response");
+        var adjustedRows = GetRows(byPayStatus, "Adjusted");
+        var unpaidRows   = deniedRows.Concat(noRespRows).Concat(adjustedRows).ToList();
+
+        var buckets = new List<PredictionBucketRow>
+        {
+            BuildBucket("Predicted To Pay",     dataset,      includeActuals: false),
+            BuildBucket("Predicted \u2013 Paid",     paidRows,     includeActuals: true),
+            BuildBucket("Predicted \u2013 Unpaid",   unpaidRows,   includeActuals: true),
+            BuildBucket("Unpaid \u2013 Denied",      deniedRows,   includeActuals: true),
+            BuildBucket("Unpaid \u2013 No Response", noRespRows,   includeActuals: true),
+            BuildBucket("Unpaid \u2013 Adjusted",    adjustedRows, includeActuals: true),
+        };
+
+        var weeks = new List<WeekRange>();
+        for (int w = 4; w >= 1; w--)
+        {
+            var wkStart = weekStart.AddDays(-7 * w);
+            weeks.Add(new WeekRange(wkStart, wkStart.AddDays(6)));
+        }
+
+        return new PredictionAnalysisViewModel
+        {
+            SelectedLab          = selectedLab,
+            PredictionAvailable  = true,
+            ResolvedFilePath     = usingDb ? $"[DB] {selectedLab}" : filePath,
+            CurrentWeekStartDate = weekStart,
+            Buckets              = buckets,
+            SummaryMetrics       = BuildSummaryMetrics(buckets),
+            TopPayerInsights     = BuildPayerValidationRows(dataset),
+            TopPanelInsights     = BuildPanelValidationRows(dataset),
+            TopCptInsights = dataset
+                .GroupBy(r => string.IsNullOrWhiteSpace(r.CPTCode) ? "Unknown" : r.CPTCode)
+                .Select(g => new PredictionCptRow(
+                    g.Key,
+                    g.Select(r => r.VisitNumber).Where(v => !string.IsNullOrWhiteSpace(v)).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                    g.Sum(r => r.BilledAmount),
+                    g.Sum(r => r.ModeAllowedAmountSameLab),
+                    g.Sum(r => r.ModeInsurancePaidSameLab)))
+                .OrderByDescending(x => x.PredictedInsurance)
+                .Take(15)
+                .ToList(),
+            PayabilityBreakdown = dataset
+                .GroupBy(r => string.IsNullOrWhiteSpace(r.Payability) ? "Unknown" : r.Payability)
+                .ToDictionary(g => g.Key, g => g.Count()),
+            FinalCoverageStatusBreakdown = dataset
+                .GroupBy(r => string.IsNullOrWhiteSpace(r.FinalCoverageStatus) ? "Unknown" : r.FinalCoverageStatus)
+                .ToDictionary(g => g.Key, g => g.Count()),
+            ForecastingPayabilityBreakdown = dataset
+                .GroupBy(r => string.IsNullOrWhiteSpace(r.ForecastingPayability) ? "Unknown" : r.ForecastingPayability)
+                .ToDictionary(g => g.Key, g => g.Count()),
+            ICDComplianceBreakdown = dataset
+                .GroupBy(r => string.IsNullOrWhiteSpace(r.ICDComplianceStatus) ? "Unknown" : r.ICDComplianceStatus)
+                .ToDictionary(g => g.Key, g => g.Count()),
+            PayerTypeBreakdown = dataset
+                .GroupBy(r => string.IsNullOrWhiteSpace(r.PayerType) ? "Unknown" : r.PayerType)
+                .ToDictionary(g => g.Key, g => g.Count()),
+            DenialBreakdown     = BuildDenialBreakdown(deniedRows),
+            NoResponseBreakdown = BuildNoResponseBreakdown(noRespRows),
+            MedianWeeklySummary = BuildWeeklySummary(dataset, weeks,
+                r => r.MedianAllowedAmountSameLab, r => r.MedianInsurancePaidSameLab),
+            ModeWeeklySummary = BuildWeeklySummary(dataset, weeks,
+                r => r.ModeAllowedAmountSameLab, r => r.ModeInsurancePaidSameLab),
+        };
+    }
+
+    /// <summary>Builds the Forecasting Summary view model (shared by ForecastingSummary and ExportForecastingExcel).</summary>
+    private async Task<ForecastingSummaryViewModel> BuildForecastingViewModelAsync(
+        string selectedLab, LabCsvConfig? labConfig)
+    {
+        var today          = DateOnly.FromDateTime(DateTime.Today);
+        var daysFromMonday = ((int)today.DayOfWeek + 6) % 7;
+        var weekStart      = today.AddDays(-daysFromMonday);
+
+        var weeks = new List<WeekRange>();
+        for (int w = 4; w >= 1; w--)
+        {
+            var wkStart = weekStart.AddDays(-7 * w);
+            weeks.Add(new WeekRange(wkStart, wkStart.AddDays(6)));
+        }
+
+        var rangeStart = weeks[0].Start;
+        var rangeEnd   = weeks[^1].End;
+
+        List<PredictionRecord> inRangeRecords;
+        bool usingDb = labConfig?.DBEnabled == true;
+
+        if (usingDb)
+        {
+            var rawRecords = await _dbRepo.GetRecordsAsync(
+                labConfig!.DbConnectionString ?? string.Empty,
+                cancellationToken: HttpContext.RequestAborted);
+            inRangeRecords = PredictionReportParserService.ApplyForecastDateRangeFilter(
+                rawRecords, rangeStart, rangeEnd.AddDays(1));
+        }
+        else
+        {
+            var filePath = string.IsNullOrEmpty(selectedLab)
+                ? null
+                : _resolver.ResolvePredictionValidationReport(selectedLab);
+            var allParsed = filePath is not null ? _parser.Parse(filePath) : new List<PredictionRecord>();
+            inRangeRecords = PredictionReportParserService.ApplyForecastDateRangeFilter(
+                allParsed, rangeStart, rangeEnd.AddDays(1));
+        }
+
+        return new ForecastingSummaryViewModel
+        {
+            SelectedLab          = selectedLab,
+            PredictionAvailable  = true,
+            CurrentWeekStartDate = weekStart,
+            TotalRecordsInRange  = inRangeRecords.Count,
+            MedianSummary = BuildWeeklySummary(inRangeRecords, weeks,
+                r => r.MedianAllowedAmountSameLab, r => r.MedianInsurancePaidSameLab),
+            ModeSummary = BuildWeeklySummary(inRangeRecords, weeks,
+                r => r.ModeAllowedAmountSameLab, r => r.ModeInsurancePaidSameLab),
+        };
+    }
+
+    // ?? Static helpers ??????????????????????????????????????????????????
 
     private static List<PredictionRecord> GetRows(
         Dictionary<string, List<PredictionRecord>> byPayStatus, string key) =>

@@ -15,6 +15,12 @@ public sealed class SalesRepSummaryViewModel
     public List<string> FilterPayerNames { get; init; } = [];
     public List<string> FilterPanelNames { get; init; } = [];
 
+    // Date range filters
+    public string? FilterDosFrom { get; init; }
+    public string? FilterDosTo { get; init; }
+    public string? FilterFirstBillFrom { get; init; }
+    public string? FilterFirstBillTo { get; init; }
+
     // Filter option lists
     public List<string> SalesRepNames { get; init; } = [];
     public List<string> ClinicNames { get; init; } = [];
@@ -33,7 +39,27 @@ public sealed class SalesRepSummaryViewModel
     public bool HasFilters => FilterSalesRepNames.Count > 0
         || FilterClinicNames.Count > 0
         || FilterPayerNames.Count > 0
-        || FilterPanelNames.Count > 0;
+        || FilterPanelNames.Count > 0
+        || !string.IsNullOrWhiteSpace(FilterDosFrom)
+        || !string.IsNullOrWhiteSpace(FilterDosTo)
+        || !string.IsNullOrWhiteSpace(FilterFirstBillFrom)
+        || !string.IsNullOrWhiteSpace(FilterFirstBillTo);
+
+    // Top collected breakdowns (Top 10 by InsurancePaidAmount)
+    public List<TopCollectedItem> TopCollectedSalesReps { get; init; } = [];
+    public List<TopCollectedItem> TopCollectedClinics { get; init; } = [];
+    public List<TopCollectedItem> TopCollectedPayers { get; init; } = [];
+    public List<TopCollectedItem> TopCollectedPanels { get; init; } = [];
+
+    // Top denied breakdowns (Top 10 by DeniedCharges)
+    public List<TopDeniedItem> TopDeniedSalesReps { get; init; } = [];
+    public List<TopDeniedItem> TopDeniedClinics { get; init; } = [];
+    public List<TopDeniedItem> TopDeniedPayers { get; init; } = [];
+    public List<TopDeniedItem> TopDeniedPanels { get; init; } = [];
+
+    // Drilldown: per-sales-rep breakdowns for Highly Collected / Highly Denied
+    public List<DrilldownCollectedGroup> DrilldownCollectedSalesReps { get; init; } = [];
+    public List<DrilldownDeniedGroup> DrilldownDeniedSalesReps { get; init; } = [];
 }
 
 /// <summary>
@@ -85,4 +111,50 @@ public sealed record SalesRepSummaryRow
 
     public decimal OutstandingChargesPct => TotalBilledCharges == 0 ? 0
         : Math.Round(TotalOutstandingCharges / TotalBilledCharges * 100, 0);
+}
+
+/// <summary>
+/// A ranked item for the "Highly Collected" breakdown cards.
+/// </summary>
+public sealed record TopCollectedItem
+{
+    public string Name { get; init; } = string.Empty;
+    public int ClaimCount { get; init; }
+    public decimal TotalBilledCharges { get; init; }
+    public decimal TotalInsurancePaid { get; init; }
+    public decimal CollectionPct { get; init; }
+}
+
+/// <summary>
+/// A ranked item for the "Highly Denied" breakdown cards.
+/// </summary>
+public sealed record TopDeniedItem
+{
+    public string Name { get; init; } = string.Empty;
+    public int DeniedClaimCount { get; init; }
+    public decimal TotalBilledCharges { get; init; }
+    public decimal TotalDeniedCharges { get; init; }
+    public decimal DenialPct { get; init; }
+}
+
+/// <summary>
+/// A top collected sales rep with drilldown sub-items by Clinic, Payer, and Panel.
+/// </summary>
+public sealed record DrilldownCollectedGroup
+{
+    public TopCollectedItem Parent { get; init; } = new();
+    public List<TopCollectedItem> Clinics { get; init; } = [];
+    public List<TopCollectedItem> Payers { get; init; } = [];
+    public List<TopCollectedItem> Panels { get; init; } = [];
+}
+
+/// <summary>
+/// A top denied sales rep with drilldown sub-items by Clinic, Payer, and Panel.
+/// </summary>
+public sealed record DrilldownDeniedGroup
+{
+    public TopDeniedItem Parent { get; init; } = new();
+    public List<TopDeniedItem> Clinics { get; init; } = [];
+    public List<TopDeniedItem> Payers { get; init; } = [];
+    public List<TopDeniedItem> Panels { get; init; } = [];
 }

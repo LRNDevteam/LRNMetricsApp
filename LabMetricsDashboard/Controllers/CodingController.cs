@@ -71,6 +71,70 @@ public class CodingController : Controller
         });
     }
 
+    /// <summary>
+    /// Downloads the current Coding Summary data as a formatted Excel file.
+    /// </summary>
+    public async Task<IActionResult> ExportCodingExcel(string? lab, CancellationToken ct)
+    {
+        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var selectedLab   = lab ?? availableLabs.FirstOrDefault() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(selectedLab)
+            || !_labSettings.Labs.TryGetValue(selectedLab, out var config)
+            || !config.DBEnabled
+            || string.IsNullOrWhiteSpace(config.DbConnectionString))
+        {
+            TempData["ExportError"] = "Export is not available for the selected lab.";
+            return RedirectToAction(nameof(Summary), new { lab });
+        }
+
+        var connStr   = config.DbConnectionString;
+        var dbLabName = string.IsNullOrWhiteSpace(config.DbLabName) ? selectedLab : config.DbLabName;
+
+        try
+        {
+            var (insights, summaries, wtdInsights, wtdSummaries, financial, detail, fetchError) =
+                await FetchDataAsync(connStr, dbLabName, ct);
+
+            if (!string.IsNullOrWhiteSpace(fetchError))
+            {
+                TempData["ExportError"] = $"Export failed: {fetchError}";
+                return RedirectToAction(nameof(Summary), new { lab });
+            }
+
+            var vm = new CodingSummaryViewModel
+            {
+                LabName        = selectedLab,
+                InsightRows    = insights,
+                SummaryRows    = summaries,
+                WtdInsightRows = wtdInsights,
+                WtdSummaryRows = wtdSummaries,
+                FinancialRows  = financial,
+                DetailRows     = detail,
+            };
+
+            using var workbook = CodingExcelExportBuilder.CreateWorkbook(vm, selectedLab);
+
+            await using var stream = new MemoryStream();
+            workbook.SaveAs(stream);
+            stream.Position = 0;
+
+            var safeLabName = string.Join("_", selectedLab.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)).Trim('_');
+            var fileName = $"{safeLabName}_CodingSummary_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
+
+            return File(
+                stream.ToArray(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                fileName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Coding Excel export failed for lab '{LabName}'.", selectedLab);
+            TempData["ExportError"] = $"Export failed: {ex.Message}";
+            return RedirectToAction(nameof(Summary), new { lab });
+        }
+    }
+
     private async Task<(List<CodingInsightRow> Insights, List<CodingSummaryRow> Summaries,
                          List<CodingWtdInsightRow> WtdInsights, List<CodingWtdSummaryRow> WtdSummaries,
                          List<CodingFinancialSummaryRow> Financial,

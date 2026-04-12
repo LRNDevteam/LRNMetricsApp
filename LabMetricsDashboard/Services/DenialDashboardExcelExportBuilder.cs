@@ -1,4 +1,5 @@
 using ClosedXML.Excel;
+using ClosedXML.Excel;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.ViewModels;
 
@@ -299,17 +300,20 @@ public static class DenialDashboardExcelExportBuilder
 			.ToList();
 
 		var ws1 = wb.AddWorksheet("Denial Database");
+		ExcelTheme.ApplyDefaults(ws1);
 
 		for (int c = 0; c < effectiveLineHeaders.Count; c++)
 		{
 			var cell = ws1.Cell(1, c + 1);
 			cell.Value = effectiveLineHeaders[c];
 			cell.Style.Font.Bold = true;
+			cell.Style.Font.FontSize = ExcelTheme.FontSizeHeader;
 			cell.Style.Font.FontColor = XLColor.White;
-			cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#1F4E78");
+			cell.Style.Fill.BackgroundColor = ExcelTheme.HeaderBg;
 			cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
 			cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
 			cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+			cell.Style.Border.OutsideBorderColor = XLColor.White;
 		}
 
 		ws1.SheetView.FreezeRows(1);
@@ -332,7 +336,7 @@ public static class DenialDashboardExcelExportBuilder
 			{
 				bool isEven = ((r + 1) % 2 == 0);
 				var rowRange = dataRange.Row(r + 1);
-				rowRange.Style.Fill.BackgroundColor = isEven ? XLColor.FromHtml("#D9E1F2") : XLColor.White;
+				rowRange.Style.Fill.BackgroundColor = isEven ? ExcelTheme.BandedRowBg : XLColor.White;
 			}
 
 			dataRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
@@ -421,15 +425,16 @@ public static class DenialDashboardExcelExportBuilder
 		if (priorityIndex >= 0)
 		{
 			var col = ws1.Column(priorityIndex + 1);
-			col.AddConditionalFormat().WhenContains("High").Fill.SetBackgroundColor(XLColor.FromHtml("#FF9999"));
-			col.AddConditionalFormat().WhenContains("Medium").Fill.SetBackgroundColor(XLColor.FromHtml("#FFD580"));
-			col.AddConditionalFormat().WhenContains("Low").Fill.SetBackgroundColor(XLColor.FromHtml("#C6EFCE"));
+			col.AddConditionalFormat().WhenContains("High").Fill.SetBackgroundColor(ExcelTheme.BadBg);
+			col.AddConditionalFormat().WhenContains("Medium").Fill.SetBackgroundColor(ExcelTheme.NeutralBg);
+			col.AddConditionalFormat().WhenContains("Low").Fill.SetBackgroundColor(ExcelTheme.GoodBg);
 		}
 	}
 
 	private static void BuildDenialInsightsSheet(XLWorkbook wb, List<string> insightHeaders, List<Dictionary<string, string>> insightRows)
 	{
 		var ws2 = wb.AddWorksheet("Denial Insights");
+		ExcelTheme.ApplyDefaults(ws2);
 
 		int rowOffset = 3;
 		int colOffset = 2;
@@ -439,9 +444,9 @@ public static class DenialDashboardExcelExportBuilder
 		ws2.Range(rowOffset, colOffset, rowOffset, colOffset + insightHeaders.Count - 1).Merge();
 		titleCell.Style.Font.Bold = true;
 		titleCell.Style.Font.FontColor = XLColor.White;
-		titleCell.Style.Font.FontSize = 18;
+		titleCell.Style.Font.FontSize = ExcelTheme.FontSizeTitle;
 		titleCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-		titleCell.Style.Fill.BackgroundColor = XLColor.FromHtml("#1E3D2F");
+		titleCell.Style.Fill.BackgroundColor = ExcelTheme.TitleBg;
 		titleCell.Style.Border.BottomBorder = XLBorderStyleValues.Thick;
 
 		int headerRow = rowOffset + 2;
@@ -452,7 +457,7 @@ public static class DenialDashboardExcelExportBuilder
 			cell.Value = insightHeaders[c];
 			cell.Style.Font.Bold = true;
 			cell.Style.Font.FontColor = XLColor.White;
-			cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#6B8E23");
+			cell.Style.Fill.BackgroundColor = ExcelTheme.SubHeaderBg;
 			cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
 			cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
 		}
@@ -467,7 +472,7 @@ public static class DenialDashboardExcelExportBuilder
 				var key = insightHeaders[c];
 				row.TryGetValue(key, out var val);
 				var cell = ws2.Cell(headerRow + 1 + r, colOffset + c);
-				cell.Style.Fill.BackgroundColor = isEven ? XLColor.FromHtml("#E8F5E9") : XLColor.White;
+				cell.Style.Fill.BackgroundColor = isEven ? ExcelTheme.GroupRowBg : XLColor.White;
 
 				if (key.Equals("Data", StringComparison.OrdinalIgnoreCase))
 				{
@@ -516,6 +521,7 @@ public static class DenialDashboardExcelExportBuilder
 	private static void BuildTaskBoardSheet(XLWorkbook wb, List<Dictionary<string, string>> taskRows)
 	{
 		var ws3 = wb.AddWorksheet("Task Board");
+		ExcelTheme.ApplyDefaults(ws3);
 
 		var taskHeaders = new List<string>
 		{
@@ -548,9 +554,10 @@ public static class DenialDashboardExcelExportBuilder
 			cell.Value = taskHeaders[c];
 			cell.Style.Font.Bold = true;
 			cell.Style.Font.FontColor = XLColor.White;
-			cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#34495E");
+			cell.Style.Fill.BackgroundColor = ExcelTheme.HeaderBg;
 			cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
 			cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+			cell.Style.Border.OutsideBorderColor = XLColor.White;
 		}
 
 		for (int r = 0; r < taskRows.Count; r++)
@@ -564,7 +571,7 @@ public static class DenialDashboardExcelExportBuilder
 				row.TryGetValue(key, out var val);
 				var cell = ws3.Cell(r + 2, c + 1);
 				cell.Value = val ?? string.Empty;
-				cell.Style.Fill.BackgroundColor = isEven ? XLColor.FromHtml("#ECF0F1") : XLColor.White;
+				cell.Style.Fill.BackgroundColor = isEven ? ExcelTheme.BandedRowBg : XLColor.White;
 
 				if (key is "Recommended Action" or "Task") cell.Style.Alignment.WrapText = true;
 				if (key is "Date Opened" or "Due Date" or "Date Completed" or "CreatedOn")
@@ -598,6 +605,7 @@ public static class DenialDashboardExcelExportBuilder
 	private static void BuildBreakdownPivotSheet(XLWorkbook wb, string sheetName, BreakdownPivotViewModel model)
 	{
 		var ws = wb.AddWorksheet(sheetName);
+		ExcelTheme.ApplyDefaults(ws);
 		var totalColumns = 2 + (model.Periods.Count * 2) + 2;
 
 		ws.Cell(1, 1).Value = model.HeaderTitle;
@@ -605,10 +613,10 @@ public static class DenialDashboardExcelExportBuilder
 		var titleRange = ws.Range(1, 1, 1, totalColumns);
 		titleRange.Style.Font.Bold = true;
 		titleRange.Style.Font.FontColor = XLColor.White;
-		titleRange.Style.Font.FontSize = 14;
+		titleRange.Style.Font.FontSize = ExcelTheme.FontSizeTitle;
 		titleRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
 		titleRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-		titleRange.Style.Fill.BackgroundColor = XLColor.FromHtml("#1F5E16");
+		titleRange.Style.Fill.BackgroundColor = ExcelTheme.TitleBg;
 		titleRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
 
 		ws.Cell(2, 1).Value = "Insurance & Top Denials";
@@ -618,7 +626,7 @@ public static class DenialDashboardExcelExportBuilder
 		leftHeader.Style.Font.FontColor = XLColor.White;
 		leftHeader.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
 		leftHeader.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-		leftHeader.Style.Fill.BackgroundColor = XLColor.FromHtml("#245B14");
+		leftHeader.Style.Fill.BackgroundColor = ExcelTheme.HeaderBg;
 		leftHeader.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
 
 		if (model.Periods.Count > 0)
@@ -630,7 +638,7 @@ public static class DenialDashboardExcelExportBuilder
 			sectionHeader.Style.Font.FontColor = XLColor.White;
 			sectionHeader.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
 			sectionHeader.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-			sectionHeader.Style.Fill.BackgroundColor = XLColor.FromHtml("#245B14");
+			sectionHeader.Style.Fill.BackgroundColor = ExcelTheme.HeaderBg;
 			sectionHeader.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
 		}
 
@@ -641,7 +649,7 @@ public static class DenialDashboardExcelExportBuilder
 		totalHeader.Style.Font.FontColor = XLColor.White;
 		totalHeader.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
 		totalHeader.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-		totalHeader.Style.Fill.BackgroundColor = XLColor.FromHtml("#245B14");
+		totalHeader.Style.Fill.BackgroundColor = ExcelTheme.HeaderBg;
 		totalHeader.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
 
 		var periodCol = 3;
@@ -653,14 +661,14 @@ public static class DenialDashboardExcelExportBuilder
 			periodHeader.Style.Font.Bold = true;
 			periodHeader.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
 			periodHeader.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-			periodHeader.Style.Fill.BackgroundColor = XLColor.FromHtml("#DDE8D2");
+			periodHeader.Style.Fill.BackgroundColor = ExcelTheme.GroupRowBg;
 			periodHeader.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
 
 			ws.Cell(4, periodCol).Value = "No. of Claims";
 			ws.Cell(4, periodCol + 1).Value = "Denial Bal";
 			ws.Range(4, periodCol, 4, periodCol + 1).Style.Font.Bold = true;
 			ws.Range(4, periodCol, 4, periodCol + 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-			ws.Range(4, periodCol, 4, periodCol + 1).Style.Fill.BackgroundColor = XLColor.FromHtml("#F3F3F3");
+			ws.Range(4, periodCol, 4, periodCol + 1).Style.Fill.BackgroundColor = ExcelTheme.SubLabelBg;
 			ws.Range(4, periodCol, 4, periodCol + 1).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
 			ws.Range(4, periodCol, 4, periodCol + 1).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
 			periodCol += 2;
@@ -670,7 +678,7 @@ public static class DenialDashboardExcelExportBuilder
 		ws.Cell(4, periodCol + 1).Value = "Denial Bal";
 		ws.Range(4, periodCol, 4, periodCol + 1).Style.Font.Bold = true;
 		ws.Range(4, periodCol, 4, periodCol + 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-		ws.Range(4, periodCol, 4, periodCol + 1).Style.Fill.BackgroundColor = XLColor.FromHtml("#F3F3F3");
+		ws.Range(4, periodCol, 4, periodCol + 1).Style.Fill.BackgroundColor = ExcelTheme.SubLabelBg;
 		ws.Range(4, periodCol, 4, periodCol + 1).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
 		ws.Range(4, periodCol, 4, periodCol + 1).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
 
@@ -681,7 +689,7 @@ public static class DenialDashboardExcelExportBuilder
 			ws.Cell(dataRow, 2).Value = row.Label;
 
 			var rowRange = ws.Range(dataRow, 1, dataRow, totalColumns);
-			rowRange.Style.Fill.BackgroundColor = row.IsInsuranceRow ? XLColor.FromHtml("#E7ECE3") : XLColor.White;
+			rowRange.Style.Fill.BackgroundColor = row.IsInsuranceRow ? ExcelTheme.GroupRowBg : XLColor.White;
 			rowRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
 			rowRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
 
@@ -728,7 +736,7 @@ public static class DenialDashboardExcelExportBuilder
 		ws.Cell(dataRow, 1).Value = "";
 		ws.Cell(dataRow, 2).Value = "Total";
 		ws.Range(dataRow, 1, dataRow, totalColumns).Style.Font.Bold = true;
-		ws.Range(dataRow, 1, dataRow, totalColumns).Style.Fill.BackgroundColor = XLColor.FromHtml("#E1E9D9");
+		ws.Range(dataRow, 1, dataRow, totalColumns).Style.Fill.BackgroundColor = ExcelTheme.TotalRowBg;
 		ws.Range(dataRow, 1, dataRow, totalColumns).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
 		ws.Range(dataRow, 1, dataRow, totalColumns).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
 

@@ -11,11 +11,19 @@ public sealed class ClinicSummaryViewModel
 
     // Filters (multi-select, comma-separated in query string)
     public List<string> FilterClinicNames { get; init; } = [];
+    public List<string> FilterSalesRepNames { get; init; } = [];
     public List<string> FilterPayerNames { get; init; } = [];
     public List<string> FilterPanelNames { get; init; } = [];
 
+    // Date range filters
+    public string? FilterDosFrom { get; init; }
+    public string? FilterDosTo { get; init; }
+    public string? FilterFirstBillFrom { get; init; }
+    public string? FilterFirstBillTo { get; init; }
+
     // Filter option lists
     public List<string> ClinicNames { get; init; } = [];
+    public List<string> SalesRepNames { get; init; } = [];
     public List<string> PayerNames { get; init; } = [];
     public List<string> PanelNames { get; init; } = [];
 
@@ -29,8 +37,25 @@ public sealed class ClinicSummaryViewModel
 
     /// <summary>True when any filter is active.</summary>
     public bool HasFilters => FilterClinicNames.Count > 0
+        || FilterSalesRepNames.Count > 0
         || FilterPayerNames.Count > 0
-        || FilterPanelNames.Count > 0;
+        || FilterPanelNames.Count > 0
+        || !string.IsNullOrWhiteSpace(FilterDosFrom)
+        || !string.IsNullOrWhiteSpace(FilterDosTo)
+        || !string.IsNullOrWhiteSpace(FilterFirstBillFrom)
+        || !string.IsNullOrWhiteSpace(FilterFirstBillTo);
+
+    // Top collected breakdowns (Top 10 by InsurancePaidAmount)
+    public List<TopCollectedItem> TopCollectedClinics { get; init; } = [];
+    public List<TopCollectedItem> TopCollectedSalesReps { get; init; } = [];
+    public List<TopCollectedItem> TopCollectedPayers { get; init; } = [];
+    public List<TopCollectedItem> TopCollectedPanels { get; init; } = [];
+
+    // Top denied breakdowns (Top 10 by DeniedCharges)
+    public List<TopDeniedItem> TopDeniedClinics { get; init; } = [];
+    public List<TopDeniedItem> TopDeniedSalesReps { get; init; } = [];
+    public List<TopDeniedItem> TopDeniedPayers { get; init; } = [];
+    public List<TopDeniedItem> TopDeniedPanels { get; init; } = [];
 }
 
 /// <summary>

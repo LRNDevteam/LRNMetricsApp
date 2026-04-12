@@ -315,6 +315,40 @@
                 document.getElementById('lmd-loader').classList.remove('active');
             }
         });
+
+        // Reusable Excel download with loading overlay.
+        // Shows the full-screen loader, fetches the file as a blob,
+        // triggers a browser download, then hides the loader.
+        window.lmdExcelDownload = function (url) {
+            var loader = document.getElementById('lmd-loader');
+            var text   = document.getElementById('lmd-loader-text');
+            if (text)   text.textContent = 'Generating Excel\u2026';
+            if (loader) loader.classList.add('active');
+
+            fetch(url, { credentials: 'same-origin' })
+                .then(function (resp) {
+                    if (!resp.ok) throw new Error('Export failed (' + resp.status + ')');
+                    var cd = resp.headers.get('content-disposition') || '';
+                    var match = cd.match(/filename[^;=\n]*=(['"]?)([^'"\n;]+)\1/);
+                    var filename = match ? match[2] : 'export.xlsx';
+                    return resp.blob().then(function (blob) { return { blob: blob, filename: filename }; });
+                })
+                .then(function (result) {
+                    var a = document.createElement('a');
+                    a.href = URL.createObjectURL(result.blob);
+                    a.download = result.filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 100);
+                })
+                .catch(function (err) {
+                    console.error('Excel download error:', err);
+                    alert('Excel export failed. Please try again.');
+                })
+                .finally(function () {
+                    if (loader) loader.classList.remove('active');
+                });
+        };
     </script>
 
     @await RenderSectionAsync("Scripts", required: false)

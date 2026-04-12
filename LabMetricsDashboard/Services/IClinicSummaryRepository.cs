@@ -16,8 +16,13 @@ public interface IClinicSummaryRepository
         string connectionString,
         string labName,
         List<string>? filterClinicNames = null,
+        List<string>? filterSalesRepNames = null,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
         CancellationToken ct = default);
 }
 
@@ -25,5 +30,14 @@ public interface IClinicSummaryRepository
 public sealed record ClinicSummaryResult(
     List<ClinicSummaryRow> Rows,
     List<string> ClinicNames,
+    List<string> SalesRepNames,
     List<string> PayerNames,
-    List<string> PanelNames);
+    List<string> PanelNames,
+    List<TopCollectedItem> TopCollectedClinics,
+    List<TopCollectedItem> TopCollectedSalesReps,
+    List<TopCollectedItem> TopCollectedPayers,
+    List<TopCollectedItem> TopCollectedPanels,
+    List<TopDeniedItem> TopDeniedClinics,
+    List<TopDeniedItem> TopDeniedSalesReps,
+    List<TopDeniedItem> TopDeniedPayers,
+    List<TopDeniedItem> TopDeniedPanels);

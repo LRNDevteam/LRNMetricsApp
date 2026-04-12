@@ -134,6 +134,20 @@
                     }
                 </select>
             </form>
+            <button type="button" id="exportForecastingExcelBtn"
+                    class="btn btn-sm btn-outline-light ms-2" style="font-size:.76rem">
+                <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
+            </button>
+            <script>
+                (function () {
+                    var btn = document.getElementById('exportForecastingExcelBtn');
+                    if (btn) {
+                        btn.addEventListener('click', function () {
+                            lmdExcelDownload('@Url.Action("ExportForecastingExcel", "Prediction", new { lab = Model.SelectedLab })');
+                        });
+                    }
+                }());
+            </script>
             <script>
                 (function () {
                     var sel  = document.getElementById('fcLabSelect');
@@ -485,6 +499,14 @@ else
         </div>
     </div>
 </div>
+
+@if (TempData["ExportError"] is string exportError)
+{
+    <div class="alert alert-warning alert-dismissible fade show mt-2" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-1"></i> @exportError
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
 
 <!-- ?? Back navigation ????????????????????????????????????????????????? -->
 <div class="d-flex justify-content-start mt-3 mb-4">

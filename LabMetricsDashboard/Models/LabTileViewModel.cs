@@ -102,10 +102,4 @@ public sealed class LabTileViewModel
 
     /// <summary>True when any downstream process has a RunId mismatch.</summary>
     public bool HasAnyMismatch => IsClaimLineMismatch || IsPredictionPending || IsCodingPending;
-
-    /// <summary>Row count from dbo.ClaimLevelData (null when LineClaimEnable is off or DB unavailable).</summary>
-    public int? ClaimRowCount { get; init; }
-
-    /// <summary>Row count from dbo.LineLevelData (null when LineClaimEnable is off or DB unavailable).</summary>
-    public int? LineRowCount { get; init; }
 }

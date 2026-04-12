@@ -467,10 +467,21 @@
                     <button type="submit" class="btn btn-primary btn-sm">Apply Filters</button>
                     <a asp-controller="Prediction" asp-action="Index" asp-route-lab="@Model.SelectedLab"
                        class="btn btn-outline-secondary btn-sm">Clear</a>
+                    <button type="button" id="exportPredictionExcelBtn" class="btn btn-sm btn-outline-success ms-auto">
+                        <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
+                    </button>
                 </div>
             </form>
         </div>
     </div>
+
+    @if (TempData["ExportError"] is string exportError)
+    {
+        <div class="alert alert-warning alert-dismissible fade show mt-2" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-1"></i> @exportError
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    }
 
     @if (!Model.FileFound)
     {
@@ -1296,3 +1307,18 @@
         </div>
     </div>
 }
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        var exportBtn = document.getElementById('exportPredictionExcelBtn');
+        if (exportBtn) {
+            exportBtn.addEventListener('click', function () {
+                var form = exportBtn.closest('form');
+                if (!form) return;
+                var params = new URLSearchParams(new FormData(form));
+                var url = '@Url.Action("ExportPredictionExcel", "Prediction")' + '?' + params.toString();
+                lmdExcelDownload(url);
+            });
+        }
+    });
+</script>

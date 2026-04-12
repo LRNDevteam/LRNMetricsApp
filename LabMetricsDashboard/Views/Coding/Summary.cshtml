@@ -558,6 +558,20 @@
                     }
                 </select>
                 <a asp-controller="Home" asp-action="Index" class="cs-back-btn">&larr; Home</a>
+                <button type="button" id="exportCodingExcelBtn"
+                        class="btn btn-sm btn-outline-light" style="font-size:.76rem;border-radius:20px;padding:.3em .9em">
+                    <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
+                </button>
+                <script>
+                    (function () {
+                        var btn = document.getElementById('exportCodingExcelBtn');
+                        if (btn) {
+                            btn.addEventListener('click', function () {
+                                lmdExcelDownload('@Url.Action("ExportCodingExcel", "Coding", new { lab = Model.LabName })');
+                            });
+                        }
+                    }());
+                </script>
             </form>
             <script>
                 (function () {
@@ -576,6 +590,14 @@
         </div>
     </div>
 </div>
+
+@if (TempData["ExportError"] is string exportError)
+{
+    <div class="alert alert-warning alert-dismissible fade show mt-2" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-1"></i> @exportError
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
 
 @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
 {
