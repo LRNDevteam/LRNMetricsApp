@@ -51,7 +51,7 @@ public class PredictionController : Controller
         int page = 1)
     {
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
-        var selectedLab   = lab ?? availableLabs.FirstOrDefault() ?? string.Empty;
+        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         var labConfig = !string.IsNullOrEmpty(selectedLab) && _labSettings.Labs.TryGetValue(selectedLab, out var cfg)
             ? cfg : null;
@@ -68,7 +68,7 @@ public class PredictionController : Controller
             });
         }
 
-        // Week-start cutoff (Monday of current ISO week) – needed for both paths
+        // Week-start cutoff (Monday of current ISO week) â€“ needed for both paths
         var today          = DateOnly.FromDateTime(DateTime.Today);
         var daysFromMonday = ((int)today.DayOfWeek + 6) % 7;
         var weekStart      = today.AddDays(-daysFromMonday);
@@ -130,7 +130,7 @@ public class PredictionController : Controller
         if (!string.IsNullOrWhiteSpace(filterCPTCode))
             filtered = filtered.Where(r => r.CPTCode.Equals(filterCPTCode, StringComparison.OrdinalIgnoreCase));
 
-        // Single materialisation — every bucket and insight reuses this one list
+        // Single materialisation â€“ every bucket and insight reuses this one list
         var dataset = filtered.ToList();
 
         // ?? Bucket computation ????????????????????????????????????????????????
@@ -149,18 +149,18 @@ public class PredictionController : Controller
 
         var buckets = new List<PredictionBucketRow>
         {
-            // 1. Predicted To Pay — all records; no actuals/variance
+            // 1. Predicted To Pay â€“ all records; no actuals/variance
             BuildBucket("Predicted To Pay",     dataset,      includeActuals: false),
-            // 2. Predicted – Paid
-            BuildBucket("Predicted – Paid",     paidRows,     includeActuals: true),
-            // 3. Predicted – Unpaid (Denied + Adjusted + No Response combined)
-            BuildBucket("Predicted – Unpaid",   unpaidRows,   includeActuals: true),
-            // 4. Unpaid – Denied
-            BuildBucket("Unpaid – Denied",      deniedRows,   includeActuals: true),
-            // 5. Unpaid – No Response
-            BuildBucket("Unpaid – No Response", noRespRows,   includeActuals: true),
-            // 6. Unpaid – Adjusted
-            BuildBucket("Unpaid – Adjusted",    adjustedRows, includeActuals: true),
+            // 2. Predicted â€“ Paid
+            BuildBucket("Predicted â€“ Paid",     paidRows,     includeActuals: true),
+            // 3. Predicted â€“ Unpaid (Denied + Adjusted + No Response combined)
+            BuildBucket("Predicted â€“ Unpaid",   unpaidRows,   includeActuals: true),
+            // 4. Unpaid â€“ Denied
+            BuildBucket("Unpaid â€“ Denied",      deniedRows,   includeActuals: true),
+            // 5. Unpaid â€“ No Response
+            BuildBucket("Unpaid â€“ No Response", noRespRows,   includeActuals: true),
+            // 6. Unpaid â€“ Adjusted
+            BuildBucket("Unpaid â€“ Adjusted",    adjustedRows, includeActuals: true),
         };
 
         // ?? Breakdown charts ??????????????????????????????????????????????????
@@ -184,7 +184,7 @@ public class PredictionController : Controller
             .GroupBy(r => string.IsNullOrWhiteSpace(r.PayerType) ? "Unknown" : r.PayerType)
             .ToDictionary(g => g.Key, g => g.Count());
 
-        // ?? Insight tables – Prediction Validation by Payer / Panel (Claim Level) ???
+        // ?? Insight tables â€“ Prediction Validation by Payer / Panel (Claim Level) ???
         var topPayers = BuildPayerValidationRows(dataset);
         var topPanels = BuildPanelValidationRows(dataset);
 
@@ -217,7 +217,7 @@ public class PredictionController : Controller
         // ?? Predicted to Pay vs No Response Breakdown ????????????????????????????????
         var noResponseBreakdown = BuildNoResponseBreakdown(noRespRows);
 
-        // ?? Last 4 Weeks Forecasting – Median & Mode summaries ???????????????
+        // ?? Last 4 Weeks Forecasting â€“ Median & Mode summaries ???????????????
         var weeks = new List<WeekRange>();
         for (int w = 4; w >= 1; w--)
         {
@@ -292,7 +292,7 @@ public class PredictionController : Controller
         int page = 1)
     {
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
-        var selectedLab   = lab ?? availableLabs.FirstOrDefault() ?? string.Empty;
+        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         var labConfig = !string.IsNullOrEmpty(selectedLab) && _labSettings.Labs.TryGetValue(selectedLab, out var cfg)
             ? cfg : null;
@@ -312,7 +312,7 @@ public class PredictionController : Controller
         var daysFromMonday = ((int)today.DayOfWeek + 6) % 7;
         var weekStart      = today.AddDays(-daysFromMonday);
 
-        // Build 4 week ranges first — needed for both the filter and the summaries
+        // Build 4 week ranges first â€“ needed for both the filter and the summaries
         var weeks = new List<WeekRange>();
         for (int w = 4; w >= 1; w--)
         {
@@ -335,11 +335,11 @@ public class PredictionController : Controller
 
             _logger.LogInformation("[{Lab}] ForecastingSummary DB raw rows: {Count}", selectedLab, rawRecords.Count);
 
-            // Use the date-range filter — NOT ApplyGlobalFilter which strips the last-4-weeks data
+            // Use the date-range filter â€“ NOT ApplyGlobalFilter which strips the last-4-weeks data
             inRangeRecords = PredictionReportParserService.ApplyForecastDateRangeFilter(
                 rawRecords, rangeStart, rangeEnd.AddDays(1));
 
-        _logger.LogInformation("[{Lab}] ForecastingSummary in-range rows ({Start}–{End}): {Count}",
+        _logger.LogInformation("[{Lab}] ForecastingSummary in-range rows ({Start}â€“{End}): {Count}",
                 selectedLab, rangeStart, rangeEnd, inRangeRecords.Count);
         }
         else
@@ -467,7 +467,7 @@ public class PredictionController : Controller
             .Select(kv => kv.Key)
             .OrderBy(x => x)
             .ToList();
-        var selectedLab   = lab ?? availableLabs.FirstOrDefault() ?? string.Empty;
+        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         var labConfig = !string.IsNullOrEmpty(selectedLab) && _labSettings.Labs.TryGetValue(selectedLab, out var cfg)
             ? cfg : null;
@@ -545,7 +545,7 @@ public class PredictionController : Controller
 
     // GET /Prediction/Diagnostics?lab=PCRLabsofAmerica
     /// <summary>
-    /// Diagnostics page — shows raw distinct field values, sample records,
+    /// Diagnostics page â€“ shows raw distinct field values, sample records,
     /// and filter-step counts from the source file/DB for a selected lab.
     /// </summary>
     public async Task<IActionResult> Diagnostics(string? lab)
@@ -555,7 +555,7 @@ public class PredictionController : Controller
             .Select(kv => kv.Key)
             .OrderBy(x => x)
             .ToList();
-        var selectedLab   = lab ?? availableLabs.FirstOrDefault() ?? string.Empty;
+        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         var labConfig = !string.IsNullOrEmpty(selectedLab) && _labSettings.Labs.TryGetValue(selectedLab, out var cfg)
             ? cfg : null;
@@ -662,7 +662,7 @@ public class PredictionController : Controller
         string? filterCPTCode)
     {
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
-        var selectedLab   = lab ?? availableLabs.FirstOrDefault() ?? string.Empty;
+        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
         var labConfig     = !string.IsNullOrEmpty(selectedLab) && _labSettings.Labs.TryGetValue(selectedLab, out var cfg) ? cfg : null;
 
         if (labConfig?.DBEnabled == false)
@@ -716,7 +716,7 @@ public class PredictionController : Controller
     public async Task<IActionResult> ExportForecastingExcel(string? lab)
     {
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
-        var selectedLab   = lab ?? availableLabs.FirstOrDefault() ?? string.Empty;
+        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
         var labConfig     = !string.IsNullOrEmpty(selectedLab) && _labSettings.Labs.TryGetValue(selectedLab, out var cfg) ? cfg : null;
 
         if (labConfig?.DBEnabled == false)
@@ -995,7 +995,7 @@ public class PredictionController : Controller
             AdjustedPctAllowed    = Pct(adj?.PredictedAllowed,   unpaid?.PredictedAllowed),
             AdjustedPctInsurance  = Pct(adj?.PredictedInsurance, unpaid?.PredictedInsurance),
 
-            // Prediction Accuracy – Predicted Paid Claim / Total Predicted To Pay * 100
+            // Prediction Accuracy â€“ Predicted Paid Claim / Total Predicted To Pay * 100
             PredVsActualRatioClaim    = Pct(paid?.ClaimCount, toPay?.ClaimCount),
             PredVsActualAllowedAmount = paid?.ActualAllowed.HasValue == true && paid.PredictedAllowed != 0
                 ? Math.Round(paid.ActualAllowed!.Value / paid.PredictedAllowed * 100, 2) : null,
@@ -1014,7 +1014,7 @@ public class PredictionController : Controller
         Func<PredictionRecord, decimal> allowedSelector,
         Func<PredictionRecord, decimal> paidSelector)
     {
-        // Assign each record to its week bin (Mon–Sun)
+        // Assign each record to its week bin (Monâ€“Sun)
         var recordsWithWeek = new List<(PredictionRecord Rec, DateOnly WeekStart)>();
         foreach (var r in records)
         {
@@ -1123,7 +1123,7 @@ public class PredictionController : Controller
                 m => Aggregate(list.Where(r => r.ExpectedPaymentMonth == m)));
         }
 
-        // Group by payer — sort by total claim count desc
+        // Group by payer â€“ sort by total claim count desc
         var payerGroups = deniedRows
             .GroupBy(r => string.IsNullOrWhiteSpace(r.PayerNameNormalized) ? r.PayerName : r.PayerNameNormalized,
                      StringComparer.OrdinalIgnoreCase)
@@ -1189,8 +1189,8 @@ public class PredictionController : Controller
 
     /// <summary>
     /// Builds the Predicted to Pay vs No Response Breakdown table.
-    /// Input: noRespRows — already filtered by ForecastingPayability + PayStatus=NoResponse + ExpDate&lt;weekStart.
-    /// Columns: Age buckets (0–30, 31–60, 61–90, 91–120, &gt;120) derived from FirstBilledDate.
+    /// Input: noRespRows â€“ already filtered by ForecastingPayability + PayStatus=NoResponse + ExpDate&lt;weekStart.
+    /// Columns: Age buckets (0â€“30, 31â€“60, 61â€“90, 91â€“120, &gt;120) derived from FirstBilledDate.
     /// Priority Level: age bucket with the highest claim count per payer.
     /// </summary>
     private static NoResponseBreakdown BuildNoResponseBreakdown(List<PredictionRecord> noRespRows)
@@ -1232,7 +1232,7 @@ public class PredictionController : Controller
                 b => AggregateBucket(list.Where(x => x.Bucket == b)));
         }
 
-        // Group by payer — sort by total claim count desc
+        // Group by payer â€“ sort by total claim count desc
         var payerRows = classified
             .GroupBy(
                 x => string.IsNullOrWhiteSpace(x.Record.PayerNameNormalized)

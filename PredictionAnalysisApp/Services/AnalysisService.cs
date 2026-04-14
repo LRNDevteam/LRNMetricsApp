@@ -83,13 +83,19 @@ public class AnalysisService
             => denom == 0 ? 0m : Math.Round(num / denom * 100, 2);
 
         // ── Aggregate helper: count, predAllowed, predInsurance, actAllowed, actInsurance ──
+        // Group by VisitNumber and take Max per visit to avoid double-counting
+        // when a single visit has multiple line items.
         static (int cnt, decimal predAllowed, decimal predIns, decimal actAllowed, decimal actIns)
-            Agg(List<ClaimRecord> rows) => (
-                rows.Select(r => r.VisitNumber).Distinct().Count(),
-                rows.Sum(r => r.ModeAllowedAmount),
-                rows.Sum(r => r.ModeInsurancePaid),
-                rows.Sum(r => r.AllowedAmount),
-                rows.Sum(r => r.InsurancePayment));
+            Agg(List<ClaimRecord> rows)
+        {
+            var byVisit = rows.GroupBy(r => r.VisitNumber);
+            return (
+                byVisit.Count(),
+                byVisit.Sum(vg => vg.Max(r => r.ModeAllowedAmount)),
+                byVisit.Sum(vg => vg.Max(r => r.ModeInsurancePaid)),
+                byVisit.Sum(vg => vg.Max(r => r.AllowedAmount)),
+                byVisit.Sum(vg => vg.Max(r => r.InsurancePayment)));
+        }
 
         // ── Predicted To Pay ──────────────────────────────────────────────────
         var (predCnt, predAllowed, predIns, _, _) = Agg(predicted);

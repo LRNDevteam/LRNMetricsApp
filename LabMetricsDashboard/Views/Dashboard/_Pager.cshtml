@@ -90,6 +90,15 @@
             if (!string.IsNullOrEmpty(kv.Value))
                 qs[kv.Key] = kv.Value;
         }
+        // Support list-based route values for multi-select filters
+        foreach (var kv in (ViewData["RouteListValues"] as Dictionary<string, List<string>> ?? []))
+        {
+            foreach (var v in kv.Value)
+            {
+                if (!string.IsNullOrEmpty(v))
+                    qs.Add(kv.Key, v);
+            }
+        }
         qs["page"] = p.ToString();
         return $"?{qs}";
     }

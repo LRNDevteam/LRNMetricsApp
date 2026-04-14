@@ -331,23 +331,8 @@
     .pa-tile .pa-sub   { font-size:.65rem; color:#64748b; }
 </style>
 
-<!-- ?? Header + lab selector ???????????????????????????????????????????????? -->
-<div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
-    <h2 class="mb-0 fw-bold">&#128202; Prediction Analysis</h2>
-    <form method="get" asp-controller="Prediction" asp-action="Index"
-          class="d-flex align-items-center gap-2" data-lab-form>
-        <label class="fw-semibold me-1 mb-0" for="predLabSelect">Lab:</label>
-        <select id="predLabSelect" name="lab"
-                class="form-select form-select-sm" style="min-width:220px"
-                data-lab-selector onchange="this.form.submit()">
-            @foreach (var lab in Model.AvailableLabs)
-            {
-                if (lab == Model.SelectedLab) { <option value="@lab" selected="selected">@lab</option> }
-                else { <option value="@lab">@lab</option> }
-            }
-        </select>
-    </form>
-</div>
+<!-- Header -->
+<h2 class="mb-3 fw-bold">&#128202; Prediction Analysis <span class="badge bg-primary bg-gradient fw-semibold" style="font-size:.45em;vertical-align:middle;border-radius:20px;padding:.35em .85em">@Model.SelectedLab</span></h2>
 
 @if (!string.IsNullOrEmpty(Model.SelectedLab))
 {

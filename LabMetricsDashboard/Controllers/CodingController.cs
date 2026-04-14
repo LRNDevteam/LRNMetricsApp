@@ -25,7 +25,7 @@ public class CodingController : Controller
     public async Task<IActionResult> Summary(string? lab, CancellationToken ct)
     {
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
-        var selectedLab   = lab ?? availableLabs.FirstOrDefault() ?? string.Empty;
+        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         if (string.IsNullOrWhiteSpace(selectedLab))
             return View(new CodingSummaryViewModel { AvailableLabs = availableLabs });
@@ -77,7 +77,7 @@ public class CodingController : Controller
     public async Task<IActionResult> ExportCodingExcel(string? lab, CancellationToken ct)
     {
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
-        var selectedLab   = lab ?? availableLabs.FirstOrDefault() ?? string.Empty;
+        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         if (string.IsNullOrWhiteSpace(selectedLab)
             || !_labSettings.Labs.TryGetValue(selectedLab, out var config)

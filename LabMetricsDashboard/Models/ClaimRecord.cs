@@ -49,4 +49,5 @@ public sealed class ClaimRecord
     public string DaysToBill { get; init; } = string.Empty;
     public string DaysToPost { get; init; } = string.Empty;
     public string ICDPointer { get; init; } = string.Empty;
+    public string AgingBucket { get; init; } = string.Empty;
 }

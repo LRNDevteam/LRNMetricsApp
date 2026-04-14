@@ -1,4 +1,6 @@
 ﻿@using LabMetricsDashboard.Models
+@using LabMetricsDashboard.Models
+@inject LabSettings LabSettingsInstance
 <!DOCTYPE html>
 <html lang="en">
 
@@ -69,6 +71,112 @@
             border-color: rgba(255, 255, 255, .3);
         }
 
+        /* ── Navbar right-side toolbar (lab selector + future user) ── */
+        .nav-toolbar {
+            display: flex;
+            align-items: center;
+            gap: .6rem;
+            flex-shrink: 0;
+        }
+
+        .nav-lab-wrap {
+            position: relative;
+        }
+
+        .nav-lab-btn {
+            display: flex;
+            align-items: center;
+            gap: .4rem;
+            background: rgba(255, 255, 255, .12);
+            border: 1px solid rgba(255, 255, 255, .25);
+            border-radius: 20px;
+            padding: .25em .85em .25em .7em;
+            color: #fff;
+            font-weight: 700;
+            font-size: .8rem;
+            letter-spacing: .02em;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background .15s;
+        }
+
+        .nav-lab-btn:hover {
+            background: rgba(255, 255, 255, .22);
+        }
+
+        .nav-lab-btn .bi-chevron-down {
+            font-size: .55rem;
+            opacity: .7;
+            transition: transform .15s;
+        }
+
+        .nav-lab-panel {
+            display: none;
+            position: absolute;
+            right: 0;
+            top: calc(100% + 6px);
+            background: #fff;
+            border: 1px solid #ced4da;
+            border-radius: .5rem;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, .22);
+            min-width: 260px;
+            max-height: 340px;
+            overflow: hidden;
+            z-index: 1100;
+            flex-direction: column;
+        }
+
+        .nav-lab-panel.open {
+            display: flex;
+        }
+
+        .nav-lab-search {
+            border: none;
+            border-bottom: 1px solid #e9ecef;
+            padding: .5rem .75rem;
+            font-size: .8rem;
+            outline: none;
+            width: 100%;
+        }
+
+        .nav-lab-list {
+            overflow-y: auto;
+            max-height: 270px;
+            padding: .25rem 0;
+        }
+
+        .nav-lab-list a {
+            display: block;
+            padding: .4rem .8rem;
+            font-size: .8rem;
+            color: #1e293b;
+            text-decoration: none;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .nav-lab-list a:hover,
+        .nav-lab-list a.active {
+            background: #eef4ff;
+        }
+
+        .nav-lab-list a.active {
+            font-weight: 700;
+            color: #1565c0;
+        }
+
+        .nav-lab-list a.nav-lab-hidden {
+            display: none;
+        }
+
+        /* Separator between toolbar items (future: lab | user) */
+        .nav-toolbar-sep {
+            width: 1px;
+            height: 20px;
+            background: rgba(255, 255, 255, .2);
+        }
+
         /* ── Breadcrumb bar ──────────────────────────────────────────── */
         .lmd-breadcrumb {
             background: linear-gradient(90deg, #1565c0 0%, #0097a7 100%);
@@ -94,17 +202,6 @@
         .lmd-breadcrumb .bc-current {
             color: #fff;
             font-weight: 600;
-        }
-
-        .lmd-breadcrumb .bc-lab {
-            background: rgba(255, 255, 255, .18);
-            border: 1px solid rgba(255, 255, 255, .3);
-            border-radius: 20px;
-            padding: .1em .75em;
-            color: #fff;
-            font-weight: 700;
-            margin-left: .5rem;
-            letter-spacing: .02em;
         }
 
         /* ── Full-screen loading overlay ─────────────────────────────── */
@@ -164,6 +261,26 @@
     </div>
 
     <header>
+        @{
+            var selectedLab   = ViewData["SelectedLab"] as string;
+            var pageLabel     = ViewData["PageLabel"]   as string;
+            var availableLabs = LabSettingsInstance.Labs.Keys.OrderBy(x => x).ToList();
+            // For the navbar lab selector: use ViewData first, then fall back to cookie
+            var activeLab = selectedLab;
+            if (string.IsNullOrEmpty(activeLab))
+            {
+                Context.Request.Cookies.TryGetValue("lmd_selected_lab", out var cookieLab);
+                if (!string.IsNullOrWhiteSpace(cookieLab)
+                    && availableLabs.Contains(cookieLab, StringComparer.OrdinalIgnoreCase))
+                {
+                    activeLab = cookieLab;
+                }
+                else
+                {
+                    activeLab = availableLabs.FirstOrDefault();
+                }
+            }
+        }
         <!-- Main navbar -->
         <nav class="navbar navbar-expand-sm lmd-navbar mb-0 py-2">
             <div class="container-fluid">
@@ -187,9 +304,15 @@
                         <li class="nav-item dropdown">
                             <a class="nav-link dropdown-toggle" href="#" role="button"
                                data-bs-toggle="dropdown" aria-expanded="false">
-                                &#9741; Reports
+                                &#9741; Standard Reports
                             </a>
                             <ul class="dropdown-menu">
+                                <li>
+                                    <a class="dropdown-item" asp-controller="Dashboard" asp-action="ProductionReport">
+                                        &#128202; Production Report
+                                    </a>
+                                </li>
+                                <li><hr class="dropdown-divider" style="border-color:rgba(255,255,255,.15)"></li>
                                 <li>
                                     <a class="dropdown-item" asp-controller="Dashboard" asp-action="ClaimLevel">
                                         Claim Level Details
@@ -245,15 +368,43 @@
                             </ul>
                         </li>
                     </ul>
+
+                    <!-- ── Right-side toolbar: Lab selector + future user/login ── -->
+                    <div class="nav-toolbar">
+                        @if (!string.IsNullOrEmpty(activeLab) && !string.IsNullOrEmpty(selectedLab))
+                        {
+                            <span class="nav-lab-wrap" id="navLabWrap">
+                                <span class="nav-lab-btn" id="navLabBtn" tabindex="0"
+                                      title="Switch lab">
+                                    <i class="bi bi-building"></i>
+                                    @activeLab
+                                    <i class="bi bi-chevron-down"></i>
+                                </span>
+                                <div class="nav-lab-panel" id="navLabPanel">
+                                    <input type="text" class="nav-lab-search" id="navLabSearch"
+                                           placeholder="Search labs…" autocomplete="off" />
+                                    <div class="nav-lab-list" id="navLabList">
+                                        @foreach (var lab in availableLabs)
+                                        {
+                                            <a href="#" data-lab="@lab"
+                                               class="@(lab == activeLab ? "active" : "")">@lab</a>
+                                        }
+                                    </div>
+                                </div>
+                            </span>
+                        }
+                        @* ── Future: login / user display ──
+                        <div class="nav-toolbar-sep"></div>
+                        <span class="text-white" style="font-size:.82rem">
+                            <i class="bi bi-person-circle me-1"></i> Username
+                        </span>
+                        *@
+                    </div>
                 </div>
             </div>
         </nav>
 
-        <!-- Breadcrumb bar — only shown when a lab is selected -->
-        @{
-            var selectedLab = ViewData["SelectedLab"] as string;
-            var pageLabel   = ViewData["PageLabel"]   as string;
-        }
+        <!-- Breadcrumb bar — shown when a lab is selected -->
         @if (!string.IsNullOrEmpty(selectedLab))
         {
             <div class="lmd-breadcrumb d-flex align-items-center flex-wrap gap-1">
@@ -265,7 +416,6 @@
                     <span class="bc-sep">›</span>
                     <span class="bc-current">@pageLabel</span>
                 }
-                <span class="bc-lab">&#9670; @selectedLab</span>
             </div>
         }
     </header>
@@ -354,6 +504,58 @@
                     if (loader) loader.classList.remove('active');
                 });
         };
+
+        // ── Navbar lab selector ─────────────────────────────────────
+        (function () {
+            var btn    = document.getElementById('navLabBtn');
+            var panel  = document.getElementById('navLabPanel');
+            var search = document.getElementById('navLabSearch');
+            var list   = document.getElementById('navLabList');
+            if (!btn || !panel) return;
+
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                panel.classList.toggle('open');
+                if (panel.classList.contains('open') && search) {
+                    search.value = '';
+                    search.focus();
+                    list.querySelectorAll('a').forEach(function (a) { a.classList.remove('nav-lab-hidden'); });
+                }
+            });
+
+            if (search) {
+                search.addEventListener('input', function () {
+                    var q = this.value.toLowerCase();
+                    list.querySelectorAll('a').forEach(function (a) {
+                        a.classList.toggle('nav-lab-hidden', q.length > 0 && a.textContent.toLowerCase().indexOf(q) === -1);
+                    });
+                });
+                search.addEventListener('click', function (e) { e.stopPropagation(); });
+            }
+
+            panel.addEventListener('click', function (e) { e.stopPropagation(); });
+
+            // When a lab is clicked, navigate to the current page with the new lab
+            list.addEventListener('click', function (e) {
+                var a = e.target.closest('a[data-lab]');
+                if (!a) return;
+                e.preventDefault();
+                var newLab = a.getAttribute('data-lab');
+                // Navigate to current path with only the lab param (clear filters)
+                var url = new URL(window.location.pathname, window.location.origin);
+                url.searchParams.set('lab', newLab);
+                // Show loader
+                var text = document.getElementById('lmd-loader-text');
+                if (text) text.textContent = 'Loading ' + newLab + '\u2026';
+                document.getElementById('lmd-loader').classList.add('active');
+                window.location.href = url.toString();
+            });
+
+            // Close on outside click
+            document.addEventListener('click', function () {
+                panel.classList.remove('open');
+            });
+        })();
     </script>
 
     <script>

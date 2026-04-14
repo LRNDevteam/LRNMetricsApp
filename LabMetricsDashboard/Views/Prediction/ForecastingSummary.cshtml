@@ -118,22 +118,9 @@
     <div class="fc-hero">
         <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
             <div>
-                <h2><i class="bi bi-calendar3-week me-1"></i> Forecasting Summary</h2>
+                <h2><i class="bi bi-calendar3-week me-1"></i> Forecasting Summary <span class="badge bg-light text-primary fw-semibold" style="font-size:.45em;vertical-align:middle;border-radius:20px;padding:.35em .85em">@Model.SelectedLab</span></h2>
                 <div class="sub">Last 4 Weeks &nbsp;|&nbsp; Weekly Breakdown by Payer</div>
             </div>
-            <form method="get" asp-controller="Prediction" asp-action="ForecastingSummary"
-                  class="d-flex align-items-center gap-2" id="fc-lab-form">
-                <label class="fw-semibold me-1 mb-0" for="fcLabSelect"
-                       style="color:rgba(255,255,255,.65);font-size:.74rem">Lab:</label>
-                <select id="fcLabSelect" name="lab"
-                        class="form-select form-select-sm" style="min-width:190px;font-size:.78rem">
-                    @foreach (var l in Model.AvailableLabs)
-                    {
-                        if (l == Model.SelectedLab) { <option value="@l" selected="selected">@l</option> }
-                        else { <option value="@l">@l</option> }
-                    }
-                </select>
-            </form>
             <button type="button" id="exportForecastingExcelBtn"
                     class="btn btn-sm btn-outline-light ms-2" style="font-size:.76rem">
                 <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
@@ -146,20 +133,6 @@
                             lmdExcelDownload('@Url.Action("ExportForecastingExcel", "Prediction", new { lab = Model.SelectedLab })');
                         });
                     }
-                }());
-            </script>
-            <script>
-                (function () {
-                    var sel  = document.getElementById('fcLabSelect');
-                    var form = document.getElementById('fc-lab-form');
-                    if (!sel || !form) return;
-                    sel.addEventListener('change', function () {
-                        var loader = document.getElementById('lmd-loader');
-                        var text   = document.getElementById('lmd-loader-text');
-                        if (text)   text.textContent = 'Loading ' + sel.options[sel.selectedIndex].text + '\u2026';
-                        if (loader) loader.classList.add('active');
-                        form.submit();
-                    });
                 }());
             </script>
         </div>

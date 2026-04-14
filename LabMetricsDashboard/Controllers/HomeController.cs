@@ -21,8 +21,10 @@ public class HomeController : Controller
         _resolver = resolver;
     }
 
-    public IActionResult Index()
+    public IActionResult Index(string? sort)
     {
+        var resolvedSort = string.IsNullOrWhiteSpace(sort) ? "latest" : sort;
+
         var tiles = _labSettings.Labs.Keys
             .OrderBy(name => name)
             .Select(labName =>
@@ -62,7 +64,16 @@ public class HomeController : Controller
             })
             .ToList();
 
-        return View(new HomeViewModel { LabTiles = tiles });
+        if (string.Equals(resolvedSort, "latest", StringComparison.OrdinalIgnoreCase))
+        {
+            tiles = tiles
+                .OrderBy(t => t.ClaimFileAgeHours.HasValue ? 0 : 1)
+                .ThenBy(t => t.ClaimFileAgeHours ?? double.MaxValue)
+                .ToList();
+        }
+        // else: already sorted A-Z
+
+        return View(new HomeViewModel { LabTiles = tiles, Sort = resolvedSort });
     }
 
     public IActionResult Privacy() => View();

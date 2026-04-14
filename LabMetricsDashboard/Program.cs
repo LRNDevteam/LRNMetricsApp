@@ -49,6 +49,8 @@ builder.Services.AddScoped<ICodingValidationRepository, SqlCodingValidationRepos
 builder.Services.AddScoped<IClinicSummaryRepository, SqlClinicSummaryRepository>();
 builder.Services.AddScoped<ISalesRepSummaryRepository, SqlSalesRepSummaryRepository>();
 builder.Services.AddScoped<IDashboardRepository, SqlDashboardRepository>();
+builder.Services.AddScoped<IProductionReportRepository, SqlProductionReportRepository>();
+builder.Services.AddScoped<IClaimLineRepository, SqlClaimLineRepository>();
 
 // Add services to the container.
 builder.Services.AddMemoryCache();

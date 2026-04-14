@@ -14,6 +14,8 @@ public class DashboardController : Controller
     private readonly IClinicSummaryRepository _clinicSummaryRepo;
     private readonly ISalesRepSummaryRepository _salesRepSummaryRepo;
     private readonly IDashboardRepository _dashboardRepo;
+    private readonly IProductionReportRepository _productionReportRepo;
+    private readonly IClaimLineRepository _claimLineRepo;
     private readonly ILogger<DashboardController> _logger;
 
     public DashboardController(
@@ -23,6 +25,8 @@ public class DashboardController : Controller
         IClinicSummaryRepository clinicSummaryRepo,
         ISalesRepSummaryRepository salesRepSummaryRepo,
         IDashboardRepository dashboardRepo,
+        IProductionReportRepository productionReportRepo,
+        IClaimLineRepository claimLineRepo,
         ILogger<DashboardController> logger)
     {
         _labSettings = labSettings;
@@ -31,6 +35,8 @@ public class DashboardController : Controller
         _clinicSummaryRepo = clinicSummaryRepo;
         _salesRepSummaryRepo = salesRepSummaryRepo;
         _dashboardRepo = dashboardRepo;
+        _productionReportRepo = productionReportRepo;
+        _claimLineRepo = claimLineRepo;
         _logger = logger;
     }
 
@@ -49,7 +55,7 @@ public class DashboardController : Controller
         CancellationToken ct = default)
     {
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
-        var selectedLab   = lab ?? availableLabs.FirstOrDefault() ?? string.Empty;
+        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         // Resolve lab config to check for DB availability
         _labSettings.Labs.TryGetValue(selectedLab, out var labConfig);
@@ -271,7 +277,7 @@ public class DashboardController : Controller
                 .OrderBy(x => x.Month)
                 .ToList();
 
-        // ?? Rate numerators — each uses the correct ClaimStatus filter per spec ??
+        // ?? Rate numerators ï¿½ each uses the correct ClaimStatus filter per spec ??
         // Collection : SUM(AllowedAmount) where status IN (Fully Paid, Partially Paid,
         //              Patient Responsibility, Patient Payment)
         var collectionStatuses = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -305,7 +311,7 @@ public class DashboardController : Controller
             .Where(r => outstandingStatuses.Contains(r.ClaimStatus))
             .Sum(r => r.ChargeAmount);
 
-        // ?? Average Allowed by Panel × Month pivot ????????????????????????????
+        // ?? Average Allowed by Panel ï¿½ Month pivot ????????????????????????????
         // Only rows with a parseable DateOfService and non-blank PanelName contribute.
         // Group panel names case-insensitively; use the most-frequent casing as the display name.
         var panelMonthGroups = claimRecords
@@ -475,7 +481,7 @@ public class DashboardController : Controller
                 .GroupBy(r => r.PayerType)
                 .ToDictionary(g => g.Key, g => g.Sum(r => r.TotalPayments)),
 
-            // Average Allowed by Panel × Month
+            // Average Allowed by Panel ï¿½ Month
             AvgAllowedMonths       = avgMonths,
             AvgAllowedByPanelMonth = avgAllowedByPanelMonth,
 
@@ -487,18 +493,164 @@ public class DashboardController : Controller
     }
 
     // GET /Dashboard/ClaimLevel?lab=PCRLabsofAmerica&...
-    public IActionResult ClaimLevel(
+    public async Task<IActionResult> ClaimLevel(
         string? lab,
         string? filterPayerName,
-        string? filterPayerType,
-        string? filterClaimStatus,
-        string? filterClinicName,
+        List<string>? filterPayerTypes,
+        List<string>? filterClaimStatuses,
+        List<string>? filterClinicNames,
         string? filterDenialCode,
-        int page = 1)
+        List<string>? filterPayerNames,
+        List<string>? filterPanelNames,
+        List<string>? filterAgingBuckets,
+        string? filterFirstBillFrom,
+        string? filterFirstBillTo,
+        string? filterChargeEnteredFrom,
+        string? filterChargeEnteredTo,
+        string? filterDosFrom,
+        string? filterDosTo,
+        bool filterFirstBillNull = false,
+        bool filterFirstBillExcludeBlank = false,
+        bool filterChargeEnteredNull = false,
+        bool filterChargeEnteredExcludeBlank = false,
+        bool filterDosNull = false,
+        bool filterDenialCodeExcludeBlank = false,
+        bool filterPayerExcludeBlank = false,
+        bool filterPanelExcludeBlank = false,
+        int page = 1,
+        CancellationToken ct = default)
     {
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
-        var selectedLab = lab ?? availableLabs.FirstOrDefault() ?? string.Empty;
+        var selectedLab = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
+        _labSettings.Labs.TryGetValue(selectedLab, out var labConfig);
+        var useDb = labConfig is { LineClaimEnable: true }
+                    && !string.IsNullOrWhiteSpace(labConfig.DbConnectionString);
+
+        if (useDb)
+        {
+            return await ClaimLevelFromDbAsync(
+                availableLabs, selectedLab, labConfig!,
+                filterPayerName, filterPayerTypes, filterClaimStatuses,
+                filterClinicNames, filterDenialCode, filterDenialCodeExcludeBlank,
+                filterPayerNames, filterPayerExcludeBlank,
+                filterPanelNames, filterPanelExcludeBlank,
+                filterAgingBuckets,
+                filterFirstBillFrom, filterFirstBillTo, filterFirstBillNull, filterFirstBillExcludeBlank,
+                filterChargeEnteredFrom, filterChargeEnteredTo, filterChargeEnteredNull, filterChargeEnteredExcludeBlank,
+                filterDosFrom, filterDosTo, filterDosNull,
+                page, ct);
+        }
+
+        return ClaimLevelFromCsv(
+            availableLabs, selectedLab,
+            filterPayerName, filterPayerTypes, filterClaimStatuses,
+            filterClinicNames, filterDenialCode, filterDenialCodeExcludeBlank,
+            filterPayerNames, filterPayerExcludeBlank,
+            filterPanelNames, filterPanelExcludeBlank,
+            filterAgingBuckets,
+            filterFirstBillFrom, filterFirstBillTo, filterFirstBillNull, filterFirstBillExcludeBlank,
+            filterChargeEnteredFrom, filterChargeEnteredTo, filterChargeEnteredNull, filterChargeEnteredExcludeBlank,
+            filterDosFrom, filterDosTo, filterDosNull,
+            page);
+    }
+
+    /// <summary>Claim Level backed by the database with server-side pagination.</summary>
+    private async Task<IActionResult> ClaimLevelFromDbAsync(
+        List<string> availableLabs, string selectedLab, LabCsvConfig labConfig,
+        string? filterPayerName, List<string>? filterPayerTypes, List<string>? filterClaimStatuses,
+        List<string>? filterClinicNames, string? filterDenialCode, bool filterDenialCodeExcludeBlank,
+        List<string>? filterPayerNames, bool filterPayerExcludeBlank,
+        List<string>? filterPanelNames, bool filterPanelExcludeBlank,
+        List<string>? filterAgingBuckets,
+        string? filterFirstBillFrom, string? filterFirstBillTo, bool filterFirstBillNull, bool filterFirstBillExcludeBlank,
+        string? filterChargeEnteredFrom, string? filterChargeEnteredTo, bool filterChargeEnteredNull, bool filterChargeEnteredExcludeBlank,
+        string? filterDosFrom, string? filterDosTo, bool filterDosNull,
+        int page, CancellationToken ct)
+    {
+        var connStr   = labConfig.DbConnectionString!;
+        var dbLabName = string.IsNullOrWhiteSpace(labConfig.DbLabName) ? selectedLab : labConfig.DbLabName;
+
+        DateOnly.TryParse(filterFirstBillFrom, out var fbFrom);
+        DateOnly.TryParse(filterFirstBillTo, out var fbTo);
+        DateOnly.TryParse(filterChargeEnteredFrom, out var ceFrom);
+        DateOnly.TryParse(filterChargeEnteredTo, out var ceTo);
+        DateOnly.TryParse(filterDosFrom, out var dosFrom);
+        DateOnly.TryParse(filterDosTo, out var dosTo);
+
+        var result = await _claimLineRepo.GetClaimLevelAsync(
+            connStr, dbLabName,
+            filterPayerName, filterPayerTypes, filterClaimStatuses,
+            filterClinicNames, filterDenialCode, filterDenialCodeExcludeBlank,
+            filterPayerNames, filterPayerExcludeBlank,
+            filterPanelNames, filterPanelExcludeBlank,
+            filterAgingBuckets,
+            fbFrom != default ? fbFrom : null,
+            fbTo != default ? fbTo : null,
+            filterFirstBillNull,
+            filterFirstBillExcludeBlank,
+            ceFrom != default ? ceFrom : null,
+            ceTo != default ? ceTo : null,
+            filterChargeEnteredNull,
+            filterChargeEnteredExcludeBlank,
+            dosFrom != default ? dosFrom : null,
+            dosTo != default ? dosTo : null,
+            filterDosNull,
+            page, PageSize, ct);
+
+        var vm = new ClaimLevelViewModel
+        {
+            AvailableLabs      = availableLabs,
+            SelectedLab        = selectedLab,
+            FilterPayerName    = filterPayerName,
+            FilterPayerTypes   = filterPayerTypes ?? [],
+            FilterClaimStatuses= filterClaimStatuses ?? [],
+            FilterClinicNames  = filterClinicNames ?? [],
+            FilterDenialCode   = filterDenialCode,
+            FilterDenialCodeExcludeBlank = filterDenialCodeExcludeBlank,
+            FilterPayerNames   = filterPayerNames ?? [],
+            FilterPayerExcludeBlank = filterPayerExcludeBlank,
+            FilterPanelNames   = filterPanelNames ?? [],
+            FilterPanelExcludeBlank = filterPanelExcludeBlank,
+            FilterAgingBuckets = filterAgingBuckets ?? [],
+            FilterFirstBillFrom     = filterFirstBillFrom,
+            FilterFirstBillTo       = filterFirstBillTo,
+            FilterFirstBillNull     = filterFirstBillNull,
+            FilterFirstBillExcludeBlank = filterFirstBillExcludeBlank,
+            FilterChargeEnteredFrom = filterChargeEnteredFrom,
+            FilterChargeEnteredTo   = filterChargeEnteredTo,
+            FilterChargeEnteredNull = filterChargeEnteredNull,
+            FilterChargeEnteredExcludeBlank = filterChargeEnteredExcludeBlank,
+            FilterDosFrom           = filterDosFrom,
+            FilterDosTo             = filterDosTo,
+            FilterDosNull           = filterDosNull,
+            PayerTypes         = result.PayerTypes,
+            ClaimStatuses      = result.ClaimStatuses,
+            ClinicNames        = result.ClinicNames,
+            PayerNames         = result.PayerNames,
+            PanelNames         = result.PanelNames,
+            AgingBuckets       = result.AgingBuckets,
+            Records            = result.Records,
+            Paging             = new PageInfo(Math.Max(1, page), PageSize, result.TotalFiltered, result.TotalAll),
+            DataSource         = "SQL Database",
+        };
+
+        return View(vm);
+    }
+
+    /// <summary>Claim Level backed by CSV files (legacy fallback).</summary>
+    private IActionResult ClaimLevelFromCsv(
+        List<string> availableLabs, string selectedLab,
+        string? filterPayerName, List<string>? filterPayerTypes, List<string>? filterClaimStatuses,
+        List<string>? filterClinicNames, string? filterDenialCode, bool filterDenialCodeExcludeBlank,
+        List<string>? filterPayerNames, bool filterPayerExcludeBlank,
+        List<string>? filterPanelNames, bool filterPanelExcludeBlank,
+        List<string>? filterAgingBuckets,
+        string? filterFirstBillFrom, string? filterFirstBillTo, bool filterFirstBillNull, bool filterFirstBillExcludeBlank,
+        string? filterChargeEnteredFrom, string? filterChargeEnteredTo, bool filterChargeEnteredNull, bool filterChargeEnteredExcludeBlank,
+        string? filterDosFrom, string? filterDosTo, bool filterDosNull,
+        int page)
+    {
         var claimFilePath = string.IsNullOrEmpty(selectedLab) ? null : _resolver.ResolveClaimLevelCsv(selectedLab);
         var allRecords    = claimFilePath is not null ? _csvParser.ParseClaimLevel(claimFilePath) : [];
 
@@ -513,19 +665,68 @@ public class DashboardController : Controller
             .ToList();
 
         var clinicNames   = allRecords.Select(r => r.ClinicName.Trim()).Where(v => !string.IsNullOrWhiteSpace(v)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(v => v).ToList();
+        var payerNameOpts = allRecords.Select(r => r.PayerName.Trim()).Where(v => !string.IsNullOrWhiteSpace(v)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(v => v).ToList();
+        var panelNameOpts = allRecords.Select(r => r.PanelName.Trim()).Where(v => !string.IsNullOrWhiteSpace(v)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(v => v).ToList();
 
         var filtered = allRecords.AsEnumerable();
 
         if (!string.IsNullOrWhiteSpace(filterPayerName))
             filtered = filtered.Where(r => r.PayerName.Contains(filterPayerName, StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrWhiteSpace(filterPayerType))
-            filtered = filtered.Where(r => r.PayerType.Equals(filterPayerType, StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrWhiteSpace(filterClaimStatus))
-            filtered = filtered.Where(r => r.ClaimStatus.Equals(filterClaimStatus, StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrWhiteSpace(filterClinicName))
-            filtered = filtered.Where(r => r.ClinicName.Equals(filterClinicName, StringComparison.OrdinalIgnoreCase));
+        if (filterPayerTypes is { Count: > 0 })
+        {
+            var set = filterPayerTypes.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            filtered = filtered.Where(r => set.Contains(r.PayerType.Trim()));
+        }
+        if (filterClaimStatuses is { Count: > 0 })
+        {
+            var set = filterClaimStatuses.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            filtered = filtered.Where(r => set.Contains(r.ClaimStatus.Trim()));
+        }
+        if (filterClinicNames is { Count: > 0 })
+        {
+            var set = filterClinicNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            filtered = filtered.Where(r => set.Contains(r.ClinicName.Trim()));
+        }
         if (!string.IsNullOrWhiteSpace(filterDenialCode))
             filtered = filtered.Where(r => r.DenialCode.Contains(filterDenialCode, StringComparison.OrdinalIgnoreCase));
+        if (filterDenialCodeExcludeBlank)
+            filtered = filtered.Where(r => !string.IsNullOrWhiteSpace(r.DenialCode));
+        if (filterPayerNames is { Count: > 0 })
+        {
+            var set = filterPayerNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            filtered = filtered.Where(r => set.Contains(r.PayerName.Trim()));
+        }
+        if (filterPayerExcludeBlank)
+            filtered = filtered.Where(r => !string.IsNullOrWhiteSpace(r.PayerName));
+        if (filterPanelNames is { Count: > 0 })
+        {
+            var set = filterPanelNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            filtered = filtered.Where(r => set.Contains(r.PanelName.Trim()));
+        }
+        if (filterPanelExcludeBlank)
+            filtered = filtered.Where(r => !string.IsNullOrWhiteSpace(r.PanelName));
+        if (DateOnly.TryParse(filterFirstBillFrom, out var fbFrom))
+            filtered = filtered.Where(r => DateOnly.TryParse(r.FirstBilledDate, out var d) && d >= fbFrom);
+        if (DateOnly.TryParse(filterFirstBillTo, out var fbTo))
+            filtered = filtered.Where(r => DateOnly.TryParse(r.FirstBilledDate, out var d) && d <= fbTo);
+        if (filterFirstBillNull)
+            filtered = filtered.Where(r => string.IsNullOrWhiteSpace(r.FirstBilledDate));
+        if (filterFirstBillExcludeBlank)
+            filtered = filtered.Where(r => !string.IsNullOrWhiteSpace(r.FirstBilledDate));
+        if (DateOnly.TryParse(filterChargeEnteredFrom, out var ceFrom))
+            filtered = filtered.Where(r => DateOnly.TryParse(r.ChargeEnteredDate, out var d) && d >= ceFrom);
+        if (DateOnly.TryParse(filterChargeEnteredTo, out var ceTo))
+            filtered = filtered.Where(r => DateOnly.TryParse(r.ChargeEnteredDate, out var d) && d <= ceTo);
+        if (filterChargeEnteredNull)
+            filtered = filtered.Where(r => string.IsNullOrWhiteSpace(r.ChargeEnteredDate));
+        if (filterChargeEnteredExcludeBlank)
+            filtered = filtered.Where(r => !string.IsNullOrWhiteSpace(r.ChargeEnteredDate));
+        if (DateOnly.TryParse(filterDosFrom, out var dosFrom))
+            filtered = filtered.Where(r => DateOnly.TryParse(r.DateOfService, out var d) && d >= dosFrom);
+        if (DateOnly.TryParse(filterDosTo, out var dosTo))
+            filtered = filtered.Where(r => DateOnly.TryParse(r.DateOfService, out var d) && d <= dosTo);
+        if (filterDosNull)
+            filtered = filtered.Where(r => string.IsNullOrWhiteSpace(r.DateOfService));
 
         var filteredList  = filtered.ToList();
         var currentPage   = Math.Max(1, page);
@@ -533,45 +734,133 @@ public class DashboardController : Controller
 
         var vm = new ClaimLevelViewModel
         {
-            AvailableLabs     = availableLabs,
-            SelectedLab       = selectedLab,
-            FilterPayerName   = filterPayerName,
-            FilterPayerType   = filterPayerType,
-            FilterClaimStatus = filterClaimStatus,
-            FilterClinicName  = filterClinicName,
-            FilterDenialCode  = filterDenialCode,
-            PayerTypes        = payerTypes,
-            ClaimStatuses     = claimStatuses,
-            ClinicNames       = clinicNames,
-            Records           = pagedRecords,
-            Paging            = new PageInfo(currentPage, PageSize, filteredList.Count, allRecords.Count),
-            ResolvedFilePath  = claimFilePath
+            AvailableLabs      = availableLabs,
+            SelectedLab        = selectedLab,
+            FilterPayerName    = filterPayerName,
+            FilterPayerTypes   = filterPayerTypes ?? [],
+            FilterClaimStatuses= filterClaimStatuses ?? [],
+            FilterClinicNames  = filterClinicNames ?? [],
+            FilterDenialCode   = filterDenialCode,
+            FilterDenialCodeExcludeBlank = filterDenialCodeExcludeBlank,
+            FilterPayerNames   = filterPayerNames ?? [],
+            FilterPayerExcludeBlank = filterPayerExcludeBlank,
+            FilterPanelNames   = filterPanelNames ?? [],
+            FilterPanelExcludeBlank = filterPanelExcludeBlank,
+            FilterAgingBuckets = filterAgingBuckets ?? [],
+            FilterFirstBillFrom     = filterFirstBillFrom,
+            FilterFirstBillTo       = filterFirstBillTo,
+            FilterFirstBillNull     = filterFirstBillNull,
+            FilterFirstBillExcludeBlank = filterFirstBillExcludeBlank,
+            FilterChargeEnteredFrom = filterChargeEnteredFrom,
+            FilterChargeEnteredTo   = filterChargeEnteredTo,
+            FilterChargeEnteredNull = filterChargeEnteredNull,
+            FilterChargeEnteredExcludeBlank = filterChargeEnteredExcludeBlank,
+            FilterDosFrom           = filterDosFrom,
+            FilterDosTo             = filterDosTo,
+            FilterDosNull           = filterDosNull,
+            PayerTypes         = payerTypes,
+            ClaimStatuses      = claimStatuses,
+            ClinicNames        = clinicNames,
+            PayerNames         = payerNameOpts,
+            PanelNames         = panelNameOpts,
+            Records            = pagedRecords,
+            Paging             = new PageInfo(currentPage, PageSize, filteredList.Count, allRecords.Count),
+            ResolvedFilePath   = claimFilePath,
+            DataSource         = claimFilePath is not null ? $"CSV: {claimFilePath}" : null,
         };
 
         return View(vm);
     }
 
     // GET /Dashboard/LineLevel?lab=PCRLabsofAmerica&...
-    public IActionResult LineLevel(
+    public async Task<IActionResult> LineLevel(
         string? lab,
         string? filterPayerName,
-        string? filterPayerType,
-        string? filterClaimStatus,
-        string? filterPayStatus,
-        string? filterCPTCode,
-        string? filterClinicName,
+        List<string>? filterPayerTypes,
+        List<string>? filterClaimStatuses,
+        List<string>? filterPayStatuses,
+        List<string>? filterCPTCodes,
+        List<string>? filterClinicNames,
         string? filterDenialCode,
-        int page = 1)
+        int page = 1,
+        CancellationToken ct = default)
     {
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
-        var selectedLab = lab ?? availableLabs.FirstOrDefault() ?? string.Empty;
+        var selectedLab = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
+        _labSettings.Labs.TryGetValue(selectedLab, out var labConfig);
+        var useDb = labConfig is { LineClaimEnable: true }
+                    && !string.IsNullOrWhiteSpace(labConfig.DbConnectionString);
+
+        if (useDb)
+        {
+            return await LineLevelFromDbAsync(
+                availableLabs, selectedLab, labConfig!,
+                filterPayerName, filterPayerTypes, filterClaimStatuses,
+                filterPayStatuses, filterCPTCodes, filterClinicNames,
+                filterDenialCode, page, ct);
+        }
+
+        return LineLevelFromCsv(
+            availableLabs, selectedLab,
+            filterPayerName, filterPayerTypes, filterClaimStatuses,
+            filterPayStatuses, filterCPTCodes, filterClinicNames,
+            filterDenialCode, page);
+    }
+
+    /// <summary>Line Level backed by the database with server-side pagination.</summary>
+    private async Task<IActionResult> LineLevelFromDbAsync(
+        List<string> availableLabs, string selectedLab, LabCsvConfig labConfig,
+        string? filterPayerName, List<string>? filterPayerTypes, List<string>? filterClaimStatuses,
+        List<string>? filterPayStatuses, List<string>? filterCPTCodes, List<string>? filterClinicNames,
+        string? filterDenialCode, int page, CancellationToken ct)
+    {
+        var connStr   = labConfig.DbConnectionString!;
+        var dbLabName = string.IsNullOrWhiteSpace(labConfig.DbLabName) ? selectedLab : labConfig.DbLabName;
+
+        var result = await _claimLineRepo.GetLineLevelAsync(
+            connStr, dbLabName,
+            filterPayerName, filterPayerTypes, filterClaimStatuses,
+            filterPayStatuses, filterCPTCodes, filterClinicNames,
+            filterDenialCode, page, PageSize, ct);
+
+        var vm = new LineLevelViewModel
+        {
+            AvailableLabs       = availableLabs,
+            SelectedLab         = selectedLab,
+            FilterPayerName     = filterPayerName,
+            FilterPayerTypes    = filterPayerTypes ?? [],
+            FilterClaimStatuses = filterClaimStatuses ?? [],
+            FilterPayStatuses   = filterPayStatuses ?? [],
+            FilterCPTCodes      = filterCPTCodes ?? [],
+            FilterClinicNames   = filterClinicNames ?? [],
+            FilterDenialCode    = filterDenialCode,
+            PayerTypes          = result.PayerTypes,
+            ClaimStatuses       = result.ClaimStatuses,
+            PayStatuses         = result.PayStatuses,
+            ClinicNames         = result.ClinicNames,
+            CPTCodes            = result.CPTCodes,
+            Records             = result.Records,
+            Paging              = new PageInfo(Math.Max(1, page), PageSize, result.TotalFiltered, result.TotalAll),
+            DataSource          = "SQL Database",
+        };
+
+        return View(vm);
+    }
+
+    /// <summary>Line Level backed by CSV files (legacy fallback).</summary>
+    private IActionResult LineLevelFromCsv(
+        List<string> availableLabs, string selectedLab,
+        string? filterPayerName, List<string>? filterPayerTypes, List<string>? filterClaimStatuses,
+        List<string>? filterPayStatuses, List<string>? filterCPTCodes, List<string>? filterClinicNames,
+        string? filterDenialCode, int page)
+    {
         var lineFilePath = string.IsNullOrEmpty(selectedLab) ? null : _resolver.ResolveLineLevelCsv(selectedLab);
         var allRecords   = lineFilePath is not null ? _csvParser.ParseLineLevel(lineFilePath) : [];
 
         var payerTypes    = allRecords.Select(r => r.PayerType).Where(v => !string.IsNullOrWhiteSpace(v)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(v => v).ToList();
 
-        // Exclude values that look like dates (contain "/" or "-" and are parseable as DateOnly)
+        // Exclude values that look like dates
         var claimStatuses = allRecords
             .Select(r => r.ClaimStatus.Trim())
             .Where(v => !string.IsNullOrWhiteSpace(v) && !DateOnly.TryParse(v, out _))
@@ -597,16 +886,31 @@ public class DashboardController : Controller
 
         if (!string.IsNullOrWhiteSpace(filterPayerName))
             filtered = filtered.Where(r => r.PayerName.Contains(filterPayerName, StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrWhiteSpace(filterPayerType))
-            filtered = filtered.Where(r => r.PayerType.Equals(filterPayerType, StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrWhiteSpace(filterClaimStatus))
-            filtered = filtered.Where(r => r.ClaimStatus.Equals(filterClaimStatus, StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrWhiteSpace(filterPayStatus))
-            filtered = filtered.Where(r => r.PayStatus.Equals(filterPayStatus, StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrWhiteSpace(filterCPTCode))
-            filtered = filtered.Where(r => r.CPTCode.Equals(filterCPTCode, StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrWhiteSpace(filterClinicName))
-            filtered = filtered.Where(r => r.ClinicName.Equals(filterClinicName, StringComparison.OrdinalIgnoreCase));
+        if (filterPayerTypes is { Count: > 0 })
+        {
+            var set = filterPayerTypes.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            filtered = filtered.Where(r => set.Contains(r.PayerType.Trim()));
+        }
+        if (filterClaimStatuses is { Count: > 0 })
+        {
+            var set = filterClaimStatuses.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            filtered = filtered.Where(r => set.Contains(r.ClaimStatus.Trim()));
+        }
+        if (filterPayStatuses is { Count: > 0 })
+        {
+            var set = filterPayStatuses.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            filtered = filtered.Where(r => set.Contains(r.PayStatus.Trim()));
+        }
+        if (filterCPTCodes is { Count: > 0 })
+        {
+            var set = filterCPTCodes.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            filtered = filtered.Where(r => set.Contains(r.CPTCode.Trim()));
+        }
+        if (filterClinicNames is { Count: > 0 })
+        {
+            var set = filterClinicNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            filtered = filtered.Where(r => set.Contains(r.ClinicName.Trim()));
+        }
         if (!string.IsNullOrWhiteSpace(filterDenialCode))
             filtered = filtered.Where(r => r.DenialCode.Contains(filterDenialCode, StringComparison.OrdinalIgnoreCase));
 
@@ -616,23 +920,24 @@ public class DashboardController : Controller
 
         var vm = new LineLevelViewModel
         {
-            AvailableLabs     = availableLabs,
-            SelectedLab       = selectedLab,
-            FilterPayerName   = filterPayerName,
-            FilterPayerType   = filterPayerType,
-            FilterClaimStatus = filterClaimStatus,
-            FilterPayStatus   = filterPayStatus,
-            FilterCPTCode     = filterCPTCode,
-            FilterClinicName  = filterClinicName,
-            FilterDenialCode  = filterDenialCode,
-            PayerTypes        = payerTypes,
-            ClaimStatuses     = claimStatuses,
-            PayStatuses       = payStatuses,
-            ClinicNames       = clinicNames,
-            CPTCodes          = cptCodes,
-            Records           = pagedRecords,
-            Paging            = new PageInfo(currentPage, PageSize, filteredList.Count, allRecords.Count),
-            ResolvedFilePath  = lineFilePath
+            AvailableLabs       = availableLabs,
+            SelectedLab         = selectedLab,
+            FilterPayerName     = filterPayerName,
+            FilterPayerTypes    = filterPayerTypes ?? [],
+            FilterClaimStatuses = filterClaimStatuses ?? [],
+            FilterPayStatuses   = filterPayStatuses ?? [],
+            FilterCPTCodes      = filterCPTCodes ?? [],
+            FilterClinicNames   = filterClinicNames ?? [],
+            FilterDenialCode    = filterDenialCode,
+            PayerTypes          = payerTypes,
+            ClaimStatuses       = claimStatuses,
+            PayStatuses         = payStatuses,
+            ClinicNames         = clinicNames,
+            CPTCodes            = cptCodes,
+            Records             = pagedRecords,
+            Paging              = new PageInfo(currentPage, PageSize, filteredList.Count, allRecords.Count),
+            ResolvedFilePath    = lineFilePath,
+            DataSource          = lineFilePath is not null ? $"CSV: {lineFilePath}" : null,
         };
 
         return View(vm);
@@ -641,7 +946,7 @@ public class DashboardController : Controller
     // GET /Dashboard/ClinicSummary?lab=...&filterClinicName=...&...
     // GET /Dashboard/ClinicSummary?lab=...&filterClinicNames=A&filterClinicNames=B&...
     /// <summary>
-    /// Clinic Summary page — reads from <c>dbo.ClaimLevelData</c> via the lab's
+    /// Clinic Summary page ï¿½ reads from <c>dbo.ClaimLevelData</c> via the lab's
     /// DB connection string. Groups by ClinicName and computes billing, payment,
     /// denial, and outstanding metrics. Supports multi-select filters.
     /// </summary>
@@ -658,7 +963,7 @@ public class DashboardController : Controller
         CancellationToken ct = default)
     {
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
-        var selectedLab   = lab ?? availableLabs.FirstOrDefault() ?? string.Empty;
+        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         // Normalize: remove empty entries
         filterClinicNames   = filterClinicNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
@@ -789,7 +1094,7 @@ public class DashboardController : Controller
         CancellationToken ct = default)
     {
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
-        var selectedLab   = lab ?? availableLabs.FirstOrDefault() ?? string.Empty;
+        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         filterClinicNames   = filterClinicNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
         filterSalesRepNames = filterSalesRepNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
@@ -886,7 +1191,7 @@ public class DashboardController : Controller
     }
 
     /// <summary>
-    /// Sales Rep Summary page — reads from <c>dbo.ClaimLevelData</c> via the lab's
+    /// Sales Rep Summary page ï¿½ reads from <c>dbo.ClaimLevelData</c> via the lab's
     /// DB connection string. Groups by SalesRepName and computes billing, payment,
     /// denial, and outstanding metrics. Supports multi-select filters.
     /// </summary>
@@ -903,7 +1208,7 @@ public class DashboardController : Controller
         CancellationToken ct = default)
     {
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
-        var selectedLab   = lab ?? availableLabs.FirstOrDefault() ?? string.Empty;
+        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         // Normalize: remove empty entries
         filterSalesRepNames = filterSalesRepNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
@@ -1035,7 +1340,7 @@ public class DashboardController : Controller
         CancellationToken ct = default)
     {
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
-        var selectedLab   = lab ?? availableLabs.FirstOrDefault() ?? string.Empty;
+        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         try
         {
@@ -1084,7 +1389,7 @@ public class DashboardController : Controller
         CancellationToken ct = default)
     {
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
-        var selectedLab   = lab ?? availableLabs.FirstOrDefault() ?? string.Empty;
+        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         filterSalesRepNames = filterSalesRepNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
         filterClinicNames   = filterClinicNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
@@ -1375,5 +1680,321 @@ public class DashboardController : Controller
                 .GroupBy(x => x.PayerType).ToDictionary(g => g.Key, g => g.Sum(x => x.TotalPayments)),
             TopCptDetail = topCptDetail,
         };
+    }
+
+    // ?? Production Report ????????????????????????????????????????????????
+
+    /// <summary>
+    /// Production Report page ï¿½ Monthly Claim Volume pivot table.
+    /// Source: dbo.ClaimLevelData grouped by PanelName ï¿½ Year/Month(FirstBilledDate).
+    /// </summary>
+    public async Task<IActionResult> ProductionReport(
+        string? lab,
+        List<string>? filterPayerNames,
+        List<string>? filterPanelNames,
+        string? filterFirstBillFrom,
+        string? filterFirstBillTo,
+        CancellationToken ct = default)
+    {
+        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+
+        filterPayerNames = filterPayerNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
+        filterPanelNames = filterPanelNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
+
+        if (string.IsNullOrWhiteSpace(selectedLab))
+            return View(new ProductionReportViewModel { AvailableLabs = availableLabs });
+
+        if (!_labSettings.Labs.TryGetValue(selectedLab, out var config) || !config.LineClaimEnable)
+        {
+            return View(new ProductionReportViewModel
+            {
+                AvailableLabs = availableLabs,
+                SelectedLab   = selectedLab,
+                ErrorMessage  = $"Production Report is currently not available for {selectedLab}.",
+            });
+        }
+
+        var connStr = config.DbConnectionString;
+        if (string.IsNullOrWhiteSpace(connStr))
+        {
+            return View(new ProductionReportViewModel
+            {
+                AvailableLabs = availableLabs,
+                SelectedLab   = selectedLab,
+                ErrorMessage  = $"Production Report is currently not available for {selectedLab}. No connection string configured.",
+            });
+        }
+
+        DateOnly.TryParse(filterFirstBillFrom, out var fbFrom);
+        DateOnly.TryParse(filterFirstBillTo, out var fbTo);
+
+        try
+        {
+            var monthlyTask = _productionReportRepo.GetMonthlyClaimVolumeAsync(
+                connStr,
+                filterPayerNames.Count > 0 ? filterPayerNames : null,
+                filterPanelNames.Count > 0 ? filterPanelNames : null,
+                fbFrom != default ? fbFrom : null,
+                fbTo != default ? fbTo : null,
+                ct);
+
+            var weeklyTask = _productionReportRepo.GetWeeklyClaimVolumeAsync(
+                connStr,
+                filterPayerNames.Count > 0 ? filterPayerNames : null,
+                filterPanelNames.Count > 0 ? filterPanelNames : null,
+                fbFrom != default ? fbFrom : null,
+                fbTo != default ? fbTo : null,
+                ct);
+
+            var codingTask = _productionReportRepo.GetCodingAsync(
+                connStr,
+                filterPanelNames.Count > 0 ? filterPanelNames : null,
+                ct);
+
+            var payerBreakdownTask = _productionReportRepo.GetPayerBreakdownAsync(
+                connStr,
+                filterPayerNames.Count > 0 ? filterPayerNames : null,
+                filterPanelNames.Count > 0 ? filterPanelNames : null,
+                ct);
+
+            var payerPanelTask = _productionReportRepo.GetPayerPanelAsync(
+                connStr,
+                filterPayerNames.Count > 0 ? filterPayerNames : null,
+                filterPanelNames.Count > 0 ? filterPanelNames : null,
+                ct);
+
+            var unbilledAgingTask = _productionReportRepo.GetUnbilledAgingAsync(
+                connStr,
+                filterPanelNames.Count > 0 ? filterPanelNames : null,
+                ct);
+
+            var cptBreakdownTask = _productionReportRepo.GetCptBreakdownAsync(
+                connStr,
+                fbFrom != default ? fbFrom : null,
+                fbTo != default ? fbTo : null,
+                ct);
+
+            await Task.WhenAll(monthlyTask, weeklyTask, codingTask, payerBreakdownTask, payerPanelTask, unbilledAgingTask, cptBreakdownTask);
+
+            var result = monthlyTask.Result;
+            var weeklyResult = weeklyTask.Result;
+            var codingResult = codingTask.Result;
+            var pbResult = payerBreakdownTask.Result;
+            var pxpResult = payerPanelTask.Result;
+            var uaResult = unbilledAgingTask.Result;
+            var cptResult = cptBreakdownTask.Result;
+
+            return View(new ProductionReportViewModel
+            {
+                AvailableLabs      = availableLabs,
+                SelectedLab        = selectedLab,
+                FilterPayerNames   = filterPayerNames,
+                FilterPanelNames   = filterPanelNames,
+                FilterFirstBillFrom = filterFirstBillFrom,
+                FilterFirstBillTo  = filterFirstBillTo,
+                PayerNames         = result.PayerNames,
+                PanelNames         = result.PanelNames,
+                Months             = result.Months,
+                Years              = result.Years,
+                PanelRows          = result.PanelRows,
+                GrandTotalByMonth  = result.GrandTotalByMonth,
+                GrandTotalClaims   = result.GrandTotalClaims,
+                GrandTotalCharges  = result.GrandTotalCharges,
+                WeekColumns             = weeklyResult.WeekColumns,
+                WeeklyPanelRows         = weeklyResult.PanelRows,
+                WeeklyGrandTotalByWeek  = weeklyResult.GrandTotalByWeek,
+                WeeklyGrandTotalClaims  = weeklyResult.GrandTotalClaims,
+                WeeklyGrandTotalCharges = weeklyResult.GrandTotalCharges,
+                CodingPanelRows         = codingResult.PanelRows,
+                CodingGrandTotalClaims  = codingResult.GrandTotalClaims,
+                CodingGrandTotalCharges = codingResult.GrandTotalCharges,
+                PayerBreakdownMonths    = pbResult.Months,
+                PayerBreakdownYears     = pbResult.Years,
+                PayerBreakdownRows      = pbResult.PayerRows,
+                PayerBreakdownGrandByMonth = pbResult.GrandTotalByMonth,
+                PayerBreakdownGrandTotal   = pbResult.GrandTotal,
+                PayerPanelColumns          = pxpResult.PanelColumns,
+                PayerPanelRows             = pxpResult.PayerRows,
+                PayerPanelGrandByPanel     = pxpResult.GrandTotalByPanel,
+                PayerPanelGrandTotalClaims = pxpResult.GrandTotalClaims,
+                PayerPanelGrandTotalCharges = pxpResult.GrandTotalCharges,
+                UnbilledAgingRows              = uaResult.PanelRows,
+                UnbilledAgingGrandByBucket     = uaResult.GrandTotalByBucket,
+                UnbilledAgingGrandTotalClaims  = uaResult.GrandTotalClaims,
+                UnbilledAgingGrandTotalCharges = uaResult.GrandTotalCharges,
+                CptBreakdownMonths             = cptResult.Months,
+                CptBreakdownYears              = cptResult.Years,
+                CptBreakdownRows               = cptResult.CptRows,
+                CptBreakdownGrandByMonth       = cptResult.GrandTotalByMonth,
+                CptBreakdownGrandTotalUnits    = cptResult.GrandTotalUnits,
+                CptBreakdownGrandTotalCharges  = cptResult.GrandTotalCharges,
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Production Report query failed for lab '{LabName}'.", selectedLab);
+            return View(new ProductionReportViewModel
+            {
+                AvailableLabs = availableLabs,
+                SelectedLab   = selectedLab,
+                ErrorMessage  = $"Failed to load Production Report: {ex.Message}",
+            });
+        }
+    }
+
+    /// <summary>
+    /// Exports the Production Report data to an Excel file, respecting the current filters.
+    /// </summary>
+    public async Task<IActionResult> ExportProductionReportExcel(
+        string? lab,
+        List<string>? filterPayerNames,
+        List<string>? filterPanelNames,
+        string? filterFirstBillFrom,
+        string? filterFirstBillTo,
+        CancellationToken ct = default)
+    {
+        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+
+        filterPayerNames = filterPayerNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
+        filterPanelNames = filterPanelNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
+
+        if (string.IsNullOrWhiteSpace(selectedLab)
+            || !_labSettings.Labs.TryGetValue(selectedLab, out var config)
+            || !config.LineClaimEnable
+            || string.IsNullOrWhiteSpace(config.DbConnectionString))
+        {
+            TempData["ExportError"] = "Export is not available for the selected lab.";
+            return RedirectToAction(nameof(ProductionReport), new { lab });
+        }
+
+        var connStr   = config.DbConnectionString;
+
+        DateOnly.TryParse(filterFirstBillFrom, out var fbFrom);
+        DateOnly.TryParse(filterFirstBillTo, out var fbTo);
+
+        try
+        {
+            var monthlyTask = _productionReportRepo.GetMonthlyClaimVolumeAsync(
+                connStr,
+                filterPayerNames.Count > 0 ? filterPayerNames : null,
+                filterPanelNames.Count > 0 ? filterPanelNames : null,
+                fbFrom != default ? fbFrom : null,
+                fbTo != default ? fbTo : null,
+                ct);
+
+            var weeklyTask = _productionReportRepo.GetWeeklyClaimVolumeAsync(
+                connStr,
+                filterPayerNames.Count > 0 ? filterPayerNames : null,
+                filterPanelNames.Count > 0 ? filterPanelNames : null,
+                fbFrom != default ? fbFrom : null,
+                fbTo != default ? fbTo : null,
+                ct);
+
+            var codingTask = _productionReportRepo.GetCodingAsync(
+                connStr,
+                filterPanelNames.Count > 0 ? filterPanelNames : null,
+                ct);
+
+            var payerBreakdownTask = _productionReportRepo.GetPayerBreakdownAsync(
+                connStr,
+                filterPayerNames.Count > 0 ? filterPayerNames : null,
+                filterPanelNames.Count > 0 ? filterPanelNames : null,
+                ct);
+
+            var payerPanelTask = _productionReportRepo.GetPayerPanelAsync(
+                connStr,
+                filterPayerNames.Count > 0 ? filterPayerNames : null,
+                filterPanelNames.Count > 0 ? filterPanelNames : null,
+                ct);
+
+            var unbilledAgingTask = _productionReportRepo.GetUnbilledAgingAsync(
+                connStr,
+                filterPanelNames.Count > 0 ? filterPanelNames : null,
+                ct);
+
+            var cptBreakdownTask = _productionReportRepo.GetCptBreakdownAsync(
+                connStr,
+                fbFrom != default ? fbFrom : null,
+                fbTo != default ? fbTo : null,
+                ct);
+
+            await Task.WhenAll(monthlyTask, weeklyTask, codingTask, payerBreakdownTask, payerPanelTask, unbilledAgingTask, cptBreakdownTask);
+
+            var result        = monthlyTask.Result;
+            var weeklyResult  = weeklyTask.Result;
+            var codingResult  = codingTask.Result;
+            var pbResult      = payerBreakdownTask.Result;
+            var pxpResult     = payerPanelTask.Result;
+            var uaResult      = unbilledAgingTask.Result;
+            var cptResult     = cptBreakdownTask.Result;
+
+            var vm = new ProductionReportViewModel
+            {
+                AvailableLabs       = availableLabs,
+                SelectedLab         = selectedLab,
+                FilterPayerNames    = filterPayerNames,
+                FilterPanelNames    = filterPanelNames,
+                FilterFirstBillFrom = filterFirstBillFrom,
+                FilterFirstBillTo   = filterFirstBillTo,
+                PayerNames          = result.PayerNames,
+                PanelNames          = result.PanelNames,
+                Months              = result.Months,
+                Years               = result.Years,
+                PanelRows           = result.PanelRows,
+                GrandTotalByMonth   = result.GrandTotalByMonth,
+                GrandTotalClaims    = result.GrandTotalClaims,
+                GrandTotalCharges   = result.GrandTotalCharges,
+                WeekColumns              = weeklyResult.WeekColumns,
+                WeeklyPanelRows          = weeklyResult.PanelRows,
+                WeeklyGrandTotalByWeek   = weeklyResult.GrandTotalByWeek,
+                WeeklyGrandTotalClaims   = weeklyResult.GrandTotalClaims,
+                WeeklyGrandTotalCharges  = weeklyResult.GrandTotalCharges,
+                CodingPanelRows          = codingResult.PanelRows,
+                CodingGrandTotalClaims   = codingResult.GrandTotalClaims,
+                CodingGrandTotalCharges  = codingResult.GrandTotalCharges,
+                PayerBreakdownMonths     = pbResult.Months,
+                PayerBreakdownYears      = pbResult.Years,
+                PayerBreakdownRows       = pbResult.PayerRows,
+                PayerBreakdownGrandByMonth = pbResult.GrandTotalByMonth,
+                PayerBreakdownGrandTotal   = pbResult.GrandTotal,
+                PayerPanelColumns           = pxpResult.PanelColumns,
+                PayerPanelRows              = pxpResult.PayerRows,
+                PayerPanelGrandByPanel      = pxpResult.GrandTotalByPanel,
+                PayerPanelGrandTotalClaims  = pxpResult.GrandTotalClaims,
+                PayerPanelGrandTotalCharges = pxpResult.GrandTotalCharges,
+                UnbilledAgingRows               = uaResult.PanelRows,
+                UnbilledAgingGrandByBucket      = uaResult.GrandTotalByBucket,
+                UnbilledAgingGrandTotalClaims   = uaResult.GrandTotalClaims,
+                UnbilledAgingGrandTotalCharges  = uaResult.GrandTotalCharges,
+                CptBreakdownMonths              = cptResult.Months,
+                CptBreakdownYears               = cptResult.Years,
+                CptBreakdownRows                = cptResult.CptRows,
+                CptBreakdownGrandByMonth        = cptResult.GrandTotalByMonth,
+                CptBreakdownGrandTotalUnits     = cptResult.GrandTotalUnits,
+                CptBreakdownGrandTotalCharges   = cptResult.GrandTotalCharges,
+            };
+
+            using var workbook = ProductionReportExcelExportBuilder.CreateWorkbook(vm, selectedLab);
+
+            await using var stream = new MemoryStream();
+            workbook.SaveAs(stream);
+            stream.Position = 0;
+
+            var safeLabName = string.Join("_", selectedLab.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)).Trim('_');
+            var fileName = $"{safeLabName}_ProductionReport_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
+
+            return File(
+                stream.ToArray(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                fileName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Production Report Excel export failed for lab '{LabName}'.", selectedLab);
+            TempData["ExportError"] = $"Export failed: {ex.Message}";
+            return RedirectToAction(nameof(ProductionReport), new { lab });
+        }
     }
 }

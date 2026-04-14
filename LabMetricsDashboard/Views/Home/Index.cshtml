@@ -343,14 +343,24 @@
 
 /* Lab cell with avatar */
 .wl-lab {
-    display: flex; align-items: center; gap: .65rem;
+    display: flex; align-items: center; gap: .75rem;
     min-width: 0;
 }
 .wl-avatar {
-    width: 36px; height: 36px; border-radius: 10px;
+    width: 44px; height: 44px; border-radius: 13px;
     display: grid; place-items: center;
-    font-size: .85rem; font-weight: 800; color: #fff;
+    font-size: 1.1rem; font-weight: 900; color: #fff;
     flex-shrink: 0;
+    position: relative;
+    border: 2.5px solid rgba(255,255,255,.45);
+    box-shadow: 0 4px 14px rgba(0,0,0,.20), inset 0 0 0 1px rgba(255,255,255,.15);
+}
+.wl-avatar::after {
+    content: '';
+    position: absolute; inset: 0;
+    border-radius: 10px;
+    background: linear-gradient(135deg, rgba(255,255,255,.22) 0%, rgba(255,255,255,.05) 100%);
+    pointer-events: none;
 }
 .wl-lab-info { min-width: 0; }
 .wl-lab-name {
@@ -378,18 +388,37 @@
 .wl-check { color: #22c55e; font-size: .92rem; font-weight: 700; }
 .wl-dash  { color: #cbd5e1; font-size: .85rem; }
 
-/* Week cell */
-.wl-week-range {
-    font-size: .78rem; font-weight: 700; color: #1e293b;
+/* Week / Run info chip (inside Lab cell) */
+.wl-week-chip {
+    display: inline-flex; align-items: center; gap: .35rem;
+    margin-top: .35rem;
+    padding: .2rem .55rem;
+    border-radius: 7px;
+    background: linear-gradient(135deg, #eef3ff 0%, #f0f9ff 100%);
+    border: 1px solid #c7d8f4;
+    max-width: 100%; overflow: hidden;
+}
+.wl-week-chip-range {
+    font-size: .62rem; font-weight: 700; color: #1565c0;
     white-space: nowrap;
 }
-.wl-week-sub {
-    display: block; font-size: .6rem; font-weight: 500; color: #94a3b8;
-    margin-top: 2px;
+.wl-week-chip-sep {
+    width: 3px; height: 3px; border-radius: 50%;
+    background: #94a3b8; flex-shrink: 0;
 }
-.wl-runid-sub {
-    display: block; font-size: .58rem; font-weight: 500; color: #94a3b8;
-    margin-top: 1px;
+.wl-week-chip-label {
+    font-size: .56rem; font-weight: 600; color: #64748b;
+    white-space: nowrap;
+}
+.wl-week-chip-runid {
+    font-size: .56rem; font-weight: 600; color: #7c8faa;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.wl-no-week {
+    display: inline-flex; align-items: center; gap: .25rem;
+    margin-top: .3rem;
+    font-size: .58rem; font-weight: 500; color: #b0bcc8;
+    font-style: italic;
 }
 
 /* Icon cluster for Claim / Line columns */
@@ -458,6 +487,27 @@
 }
 .wl-btn-claim:hover { background: #ccefee; color: #004d40; }
 .wl-btn-disabled {
+    color: #c0cad8; background: #f8fafc; border-color: #e8ecf2;
+    pointer-events: none; opacity: .5;
+}
+
+/* Standard Reports column */
+.wl-reports {
+    display: flex; gap: .3rem; flex-wrap: nowrap; align-items: center;
+}
+.wl-rpt-btn {
+    font-size: .64rem; font-weight: 700; letter-spacing: .01em;
+    border-radius: 7px; padding: .3rem .6rem;
+    border: 1.5px solid transparent;
+    text-align: center; text-decoration: none;
+    white-space: nowrap; transition: all .14s; cursor: pointer;
+    display: inline-block; flex-shrink: 0;
+}
+.wl-rpt-production {
+    color: #0d7377; background: #e6f7f7; border-color: #b2dfdb;
+}
+.wl-rpt-production:hover { background: #ccefee; color: #004d40; }
+.wl-rpt-disabled {
     color: #c0cad8; background: #f8fafc; border-color: #e8ecf2;
     pointer-events: none; opacity: .5;
 }
@@ -554,9 +604,15 @@
     }
     else
     {
-        <div class="view-tabs">
-            <button class="view-tab active" id="btnGridView" onclick="switchView('grid')">Grid view</button>
-            <button class="view-tab" id="btnTableView" onclick="switchView('table')">Worklist (table)</button>
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+            <div class="view-tabs" style="margin-bottom:0">
+                <button class="view-tab active" id="btnGridView" onclick="switchView('grid')">Grid view</button>
+                <button class="view-tab" id="btnTableView" onclick="switchView('table')">Worklist (table)</button>
+            </div>
+            <div class="view-tabs" style="margin-bottom:0">
+                <a class="view-tab @(Model.Sort == "latest" ? "active" : "")" asp-controller="Home" asp-action="Index" asp-route-sort="latest">&#128337; Latest</a>
+                <a class="view-tab @(Model.Sort == "az" ? "active" : "")" asp-controller="Home" asp-action="Index" asp-route-sort="az">A&#8211;Z</a>
+            </div>
         </div>
 
         <div id="gridView">
@@ -738,6 +794,11 @@
                                    class="fc-btn fc-btn-claim">
                                     &#128100; Sales Rep
                                 </a>
+                                <a asp-controller="Dashboard" asp-action="ProductionReport"
+                                   asp-route-lab="@tile.LabName"
+                                   class="fc-btn fc-btn-claim">
+                                    &#128202; Production
+                                </a>
                             }
                         </div>
                     </div>
@@ -756,11 +817,11 @@
                 <thead>
                     <tr>
                         <th>Lab</th>
-                        <th>Week</th>
                         <th>Claim</th>
                         <th>Line</th>
                         <th>Prediction</th>
                         <th>Coding</th>
+                        <th>Standard Reports</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -797,7 +858,7 @@
                         var priorityText = priorityParts.Count > 0 ? string.Join(" \u00b7 ", priorityParts) : null;
 
                         <tr data-lab="@tile.LabName.ToLowerInvariant()">
-                            @* Lab *@
+                            @* Lab + Week/Run info *@
                             <td>
                                 <div class="wl-lab">
                                     <div class="wl-avatar" style="background:linear-gradient(@grad)">@initial</div>
@@ -811,34 +872,33 @@
                                         {
                                             <span class="wl-lab-sub" title="@labSubText">@labSubText</span>
                                         }
+                                        @if (tile.WeekRange is not null)
+                                        {
+                                            var weekParts = tile.WeekRange.Split(" to ", StringSplitOptions.TrimEntries);
+                                            <div class="wl-week-chip">
+                                                @if (weekParts.Length == 2)
+                                                {
+                                                    <span class="wl-week-chip-range">@weekParts[0] &rarr; @weekParts[1]</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="wl-week-chip-range">@tile.WeekRange</span>
+                                                }
+                                                @if (tile.SourceRunId is not null)
+                                                {
+                                                    <span class="wl-week-chip-sep"></span>
+                                                    <span class="wl-week-chip-runid">Run: @tile.SourceRunId</span>
+                                                }
+                                            </div>
+                                        }
+                                        else if (tile.SourceRunId is not null)
+                                        {
+                                            <div class="wl-week-chip">
+                                                <span class="wl-week-chip-runid">Run: @tile.SourceRunId</span>
+                                            </div>
+                                        }
                                     </div>
                                 </div>
-                            </td>
-
-                            @* Week *@
-                            <td>
-                                @if (tile.WeekRange is not null)
-                                {
-                                    var weekParts = tile.WeekRange.Split(" to ", StringSplitOptions.TrimEntries);
-                                    if (weekParts.Length == 2)
-                                    {
-                                        <span class="wl-week-range">@weekParts[0] &rarr; @weekParts[1]</span>
-                                    }
-                                    else
-                                    {
-                                        <span class="wl-week-range">@tile.WeekRange</span>
-                                    }
-                                    <span class="wl-week-sub">Week window</span>
-                                    @if (tile.SourceRunId is not null)
-                                    {
-                                        <span class="wl-runid-sub">Run: @tile.SourceRunId</span>
-                                    }
-                                }
-                                else
-                                {
-                                    <span class="wl-dash" style="font-size:1rem;font-weight:700">&mdash;</span>
-                                    <span class="wl-week-sub">No week data</span>
-                                }
                             </td>
 
                             @* Claim *@
@@ -915,6 +975,22 @@
                                 {
                                     <span class="wl-dash">&mdash;</span>
                                 }
+                            </td>
+
+                            @* Standard Reports *@
+                            <td>
+                                <div class="wl-reports">
+                                    @if (tile.LineClaimEnabled)
+                                    {
+                                        <a asp-controller="Dashboard" asp-action="ProductionReport"
+                                           asp-route-lab="@tile.LabName"
+                                           class="wl-rpt-btn wl-rpt-production">&#128202; Production</a>
+                                    }
+                                    else
+                                    {
+                                        <span class="wl-rpt-btn wl-rpt-disabled">&#128202; Production</span>
+                                    }
+                                </div>
                             </td>
 
                             @* Actions *@

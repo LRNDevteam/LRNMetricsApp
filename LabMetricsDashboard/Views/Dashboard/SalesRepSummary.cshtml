@@ -207,6 +207,40 @@
     .cs-ms-list label:hover { background: #edf0f0; }
     .cs-ms-list label.cs-ms-hidden { display: none; }
 
+    /* Cross-page navigation links */
+    .cs-cross-nav {
+        display: flex; align-items: center; gap: .5rem;
+        margin-bottom: 1rem; flex-wrap: wrap;
+    }
+    .cs-cross-nav-label {
+        font-size: .7rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: .06em; color: #8a9ab8;
+    }
+    .cs-cross-nav a {
+        display: inline-flex; align-items: center; gap: .35rem;
+        padding: .3rem .75rem; border-radius: 8px;
+        font-size: .78rem; font-weight: 600;
+        color: #1565c0; background: #e3f2fd;
+        border: 1px solid #bbdefb;
+        text-decoration: none; transition: all .15s;
+        white-space: nowrap;
+    }
+    .cs-cross-nav a:hover {
+        background: #1565c0; color: #fff;
+        border-color: #1565c0;
+        box-shadow: 0 2px 8px rgba(21,101,192,.25);
+    }
+    .cs-cross-nav a .bi { font-size: .8rem; }
+    .cs-drilldown-link {
+        color: #1565c0; text-decoration: none;
+        border-bottom: 1px dashed #bbdefb;
+        transition: all .15s;
+    }
+    .cs-drilldown-link:hover {
+        color: #0d47a1; border-bottom-color: #1565c0;
+    }
+    .cs-drilldown-link .bi { font-size: .6rem; margin-left: .2rem; opacity: .6; }
+
     /* Drilldown parent row */
     .cs-drill-parent:hover { background: #edf4f8 !important; }
     .cs-drill-parent td:first-child { cursor: pointer; }
@@ -225,21 +259,24 @@
     .cs-drill-detail .cs-table thead th:first-child { position: static; min-width: auto; }
 </style>
 
-<!-- Lab selector banner -->
-<div class="d-flex align-items-center justify-content-between mb-3">
-    <h2 class="mb-0 fw-bold">Sales Rep Summary</h2>
-    <form method="get" asp-controller="Dashboard" asp-action="SalesRepSummary"
-          class="d-flex align-items-center gap-2" data-lab-form>
-        <label class="fw-semibold me-1 mb-0" for="labSelect">Lab:</label>
-        <select id="labSelect" name="lab"
-                class="form-select form-select-sm" style="min-width:220px"
-                data-lab-selector onchange="this.form.submit()">
-            @foreach (var l in Model.AvailableLabs)
-            {
-                <option value="@l" selected="@(l == Model.SelectedLab ? "selected" : null)">@l</option>
-            }
-        </select>
-    </form>
+<!-- Page heading -->
+<h2 class="mb-3 fw-bold">Sales Rep Summary <span class="badge bg-primary bg-gradient fw-semibold" style="font-size:.45em;vertical-align:middle;border-radius:20px;padding:.35em .85em">@Model.SelectedLab</span></h2>
+
+<!-- Cross-page navigation -->
+<div class="cs-cross-nav">
+    <span class="cs-cross-nav-label">Navigate to:</span>
+    <a href="@Url.Action("ClinicSummary", "Dashboard", new { lab = Model.SelectedLab })">
+        <i class="bi bi-building"></i> Clinic Summary
+    </a>
+    <a href="@Url.Action("ClaimLevel", "Dashboard", new { lab = Model.SelectedLab })">
+        <i class="bi bi-file-earmark-medical"></i> Claim Level
+    </a>
+    <a href="@Url.Action("LineLevel", "Dashboard", new { lab = Model.SelectedLab })">
+        <i class="bi bi-list-columns-reverse"></i> Line Level
+    </a>
+    <a href="@Url.Action("ProductionReport", "Dashboard", new { lab = Model.SelectedLab })">
+        <i class="bi bi-graph-up-arrow"></i> Production Report
+    </a>
 </div>
 
 @{
@@ -524,7 +561,11 @@
                 @foreach (var row in Model.Rows)
                 {
                     <tr>
-                        <td title="@row.SalesRepName">@row.SalesRepName</td>
+                        <td title="@row.SalesRepName">
+                            <a class="cs-drilldown-link" href="@Url.Action("ClinicSummary", "Dashboard", new { lab = Model.SelectedLab, filterSalesRepNames = row.SalesRepName })" title="View clinics for @row.SalesRepName">
+                                @row.SalesRepName <i class="bi bi-box-arrow-up-right"></i>
+                            </a>
+                        </td>
                         <td class="cs-cnt col-grp-count">@row.BilledClaimCount</td>
                         <td class="cs-cnt col-grp-count">@row.PaidClaimCount</td>
                         <td class="cs-cnt col-grp-count">@row.DeniedClaimCount</td>

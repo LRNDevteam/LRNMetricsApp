@@ -343,10 +343,11 @@ public static class PanelBreakdownSheetWriter
 
             decimal payRate      = totalClaims == 0 ? 0m
                                  : Math.Round((decimal)paidCount / totalClaims * 100, 1);
-            decimal predAllowed  = predRecords.Sum(r => r.ModeAllowedAmount);
-            decimal predIns      = predRecords.Sum(r => r.ModeInsurancePaid);
-            decimal actAllowed   = predRecords.Sum(r => r.AllowedAmount);
-            decimal actIns       = predRecords.Sum(r => r.InsurancePayment);
+            var predByVisit      = predRecords.GroupBy(r => r.VisitNumber);
+            decimal predAllowed  = predByVisit.Sum(vg => vg.Max(r => r.ModeAllowedAmount));
+            decimal predIns      = predByVisit.Sum(vg => vg.Max(r => r.ModeInsurancePaid));
+            decimal actAllowed   = predByVisit.Sum(vg => vg.Max(r => r.AllowedAmount));
+            decimal actIns       = predByVisit.Sum(vg => vg.Max(r => r.InsurancePayment));
             decimal variance     = actAllowed - predAllowed;
 
             result.Add(new PanelRow(

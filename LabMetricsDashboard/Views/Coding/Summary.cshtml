@@ -1,6 +1,6 @@
 @model LabMetricsDashboard.Models.CodingSummaryViewModel
 @{
-    ViewData["Title"]       = $"Coding Summary – {Model.LabName}";
+    ViewData["Title"]       = $"Coding Summary ï¿½ {Model.LabName}";
     ViewData["SelectedLab"] = Model.LabName;
     ViewData["PageLabel"]   = "Coding Summary";
 
@@ -8,7 +8,7 @@
                      .Union(Model.SummaryRows.Select(r => r.Year))
                      .Distinct().OrderByDescending(y => y).ToList();
 
-    // KPI values — driven from the latest financial summary row when available,
+    // KPI values ï¿½ driven from the latest financial summary row when available,
     // falling back to aggregated SummaryRows for labs without financial data.
     var fin = Model.LatestFinancial;
     var kpiClaims     = fin?.TotalClaims     ?? Model.SummaryRows.Sum(r => r.TotalClaims);
@@ -23,32 +23,8 @@
 
 <style>
 /* ???????????????????????????????????????????????????????????????
-   CODING SUMMARY – Premium UI
+   CODING SUMMARY ï¿½ Premium UI
    ??????????????????????????????????????????????????????????????? */
-
-/* ?? Hero ??????????????????????????????????????????????????????? */
-.cs-hero {
-    background: linear-gradient(135deg, #0d1b2a 0%, #1b3a5c 50%, #1565c0 100%);
-    border-radius:10px 10px 0 0; padding:.85rem 1.4rem .7rem; margin-bottom:1.75rem;
-    color:#fff; position:relative; overflow:hidden; box-shadow:0 4px 16px rgba(13,27,42,.35);
-}
-.cs-hero::before {
-    content:''; position:absolute; right:-80px; top:-80px;
-    width:280px; height:280px;
-    background:rgba(255,255,255,.06); border-radius:50%;
-}
-.cs-hero::after {
-    content:''; position:absolute; right:80px; bottom:-100px;
-    width:200px; height:200px;
-    background:rgba(255,255,255,.04); border-radius:50%;
-}
-.cs-hero-title   { font-size:1.05rem; font-weight:700; letter-spacing:0; line-height:1.2; }
-.cs-hero-sub     { font-size:.72rem; opacity:.7; margin-top:.1rem; }
-.cs-hero-lab     {
-    background:rgba(255,255,255,.15); border:1.5px solid rgba(255,255,255,.35);
-    border-radius:30px; padding:.4em 1.2em; font-size:.88rem; font-weight:700;
-    letter-spacing:.04em; backdrop-filter:blur(4px);
-}
 
 /* ?? KPI stat strip ????????????????????????????????????????????? */
 .cs-kpi-strip {
@@ -71,23 +47,6 @@
 .cs-kpi-value { font-size:1.35rem; font-weight:800; color:#1a2744; line-height:1; }
 .cs-kpi-value.neg { color:#c62828; }
 .cs-kpi-value.pos { color:#2e7d32; }
-
-/* ?? Controls (now inside hero) ??????????????????????????????????????? */
-.cs-controls { display:none; } /* removed — controls live in hero */
-.cs-lab-label { font-size:.76rem; font-weight:700; color:rgba(255,255,255,.8); letter-spacing:.06em; text-transform:uppercase; }
-.cs-lab-select {
-    border:1.5px solid rgba(255,255,255,.5); border-radius:8px;
-    padding:.38rem .85rem; font-size:.84rem; font-weight:600; color:#1a2744;
-    background:#fff; min-width:160px; cursor:pointer;
-    transition:border-color .15s;
-}
-.cs-lab-select:focus { border-color:#1565c0; outline:none; box-shadow:0 0 0 3px rgba(21,101,192,.15); }
-.cs-back-btn {
-    border:1.5px solid rgba(255,255,255,.45); border-radius:8px; padding:.38rem 1rem;
-    font-size:.82rem; font-weight:600; color:#fff; background:rgba(255,255,255,.12);
-    text-decoration:none; transition:all .15s; white-space:nowrap;
-}
-.cs-back-btn:hover { background:rgba(255,255,255,.25); border-color:#fff; color:#fff; }
 
 /* ?? Tabs ??????????????????????????????????????????????????????? */
 .cs-tabs {
@@ -540,56 +499,8 @@
 .det-pager-ellipsis { font-size:.8rem; color:#8a9ab8; padding:0 .2rem; }
 </style>
 
-<!-- Hero -->
-<div class="cs-hero">
-    <div class="d-flex align-items-center justify-content-between gap-3 flex-wrap" style="position:relative;z-index:1">
-        <div>
-            <div class="cs-hero-title">Coding Summary</div>
-            <div class="cs-hero-sub"> &bull; <span style="font-weight:700">@Model.LabName</span></div>
-        </div>
-        <div class="d-flex align-items-center gap-2 flex-wrap">
-           @*  <span class="cs-hero-lab">&#10022; @Model.LabName</span> *@
-            <form method="get" class="d-flex align-items-center gap-2" id="cs-lab-form">
-                <span class="cs-lab-label" style="color:rgba(255,255,255,.75)">LAB</span>
-                <select name="lab" class="cs-lab-select" id="cs-lab-select">
-                    @foreach (var l in Model.AvailableLabs)
-                    {
-                        <option value="@l" selected="@(l == Model.LabName ? "selected" : null)">@l</option>
-                    }
-                </select>
-                <a asp-controller="Home" asp-action="Index" class="cs-back-btn">&larr; Home</a>
-                <button type="button" id="exportCodingExcelBtn"
-                        class="btn btn-sm btn-outline-light" style="font-size:.76rem;border-radius:20px;padding:.3em .9em">
-                    <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
-                </button>
-                <script>
-                    (function () {
-                        var btn = document.getElementById('exportCodingExcelBtn');
-                        if (btn) {
-                            btn.addEventListener('click', function () {
-                                lmdExcelDownload('@Url.Action("ExportCodingExcel", "Coding", new { lab = Model.LabName })');
-                            });
-                        }
-                    }());
-                </script>
-            </form>
-            <script>
-                (function () {
-                    var sel  = document.getElementById('cs-lab-select');
-                    var form = document.getElementById('cs-lab-form');
-                    if (!sel || !form) return;
-                    sel.addEventListener('change', function () {
-                        var loader = document.getElementById('lmd-loader');
-                        var text   = document.getElementById('lmd-loader-text');
-                        if (text)   text.textContent = 'Loading ' + sel.options[sel.selectedIndex].text + '\u2026';
-                        if (loader) loader.classList.add('active');
-                        form.submit();
-                    });
-                }());
-            </script>
-        </div>
-    </div>
-</div>
+<!-- Page heading -->
+<h2 class="mb-3 fw-bold">Coding Summary <span class="badge bg-primary bg-gradient fw-semibold" style="font-size:.45em;vertical-align:middle;border-radius:20px;padding:.35em .85em">@Model.LabName</span></h2>
 
 @if (TempData["ExportError"] is string exportError)
 {
@@ -633,7 +544,7 @@ else if (Model.HasData && fin is not null)
             { <span class="ck-header-date">Report Date:&thinsp;@fin.ReportDate</span> }
         </div>
 
-        <!-- Row 1: Totals · Revenue Loss -->
+        <!-- Row 1: Totals ï¿½ Revenue Loss -->
         <div class="ck-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
 
             <!-- TOTALS -->
@@ -686,7 +597,7 @@ else if (Model.HasData && fin is not null)
                     <div class="ck-rows">
                         <div class="ck-row">
                             <div class="ck-row-left"><p class="ck-label"><span class="ck-tag">#</span> Total No. of Claims</p></div>
-                            <div class="ck-row-right"><p class="ck-value">@(fin.RevenueLoss_Claims?.ToString("N0") ?? "—")</p></div>
+                            <div class="ck-row-right"><p class="ck-value">@(fin.RevenueLoss_Claims?.ToString("N0") ?? "ï¿½")</p></div>
                         </div>
                         <div class="ck-row">
                             <div class="ck-row-left"><p class="ck-label"><span class="ck-tag">$</span> Total Actual Billed Charges</p></div>
@@ -712,7 +623,7 @@ else if (Model.HasData && fin is not null)
 
         </div><!-- /.ck-grid row1 -->
 
-        <!-- Row 2: Revenue at Risk · Compliance -->
+        <!-- Row 2: Revenue at Risk ï¿½ Compliance -->
         <div class="ck-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-top:12px">
 
             <!-- REVENUE AT RISK -->
@@ -728,7 +639,7 @@ else if (Model.HasData && fin is not null)
                     <div class="ck-rows">
                         <div class="ck-row">
                             <div class="ck-row-left"><p class="ck-label"><span class="ck-tag">#</span> Total No. of Claims</p></div>
-                            <div class="ck-row-right"><p class="ck-value">@(fin.RevenueAtRisk_Claims?.ToString("N0") ?? "—")</p></div>
+                            <div class="ck-row-right"><p class="ck-value">@(fin.RevenueAtRisk_Claims?.ToString("N0") ?? "ï¿½")</p></div>
                         </div>
                         <div class="ck-row">
                             <div class="ck-row-left"><p class="ck-label"><span class="ck-tag">$</span> Total Actual Billed Charges</p></div>
@@ -766,11 +677,11 @@ else if (Model.HasData && fin is not null)
                         <div class="ck-gauge-left">
                             <div class="ck-gauge-kpi">
                                 <p class="ck-label"><span class="ck-tag">#</span> Total No. of Claims</p>
-                                <p class="ck-value">@(fin.Compliance_TotalClaims?.ToString("N0") ?? "—")</p>
+                                <p class="ck-value">@(fin.Compliance_TotalClaims?.ToString("N0") ?? "ï¿½")</p>
                             </div>
                             <div class="ck-gauge-kpi">
                                 <p class="ck-label"><span class="ck-tag">!</span> Claims with Issues</p>
-                                <p class="ck-value ck-danger">@(fin.Compliance_ClaimsWithIssues?.ToString("N0") ?? "—")</p>
+                                <p class="ck-value ck-danger">@(fin.Compliance_ClaimsWithIssues?.ToString("N0") ?? "ï¿½")</p>
                             </div>
                         </div>
                         <div class="ck-ring" style="background:conic-gradient(@ringColor 0 @(conicDeg)deg, rgba(217,226,236,.95) @(conicDeg)deg 360deg)" title="Compliance: @fin.ComplianceRatePct">
@@ -791,8 +702,6 @@ else if (Model.HasData && fin is not null)
 
     </div><!-- /.ck-wrap -->
 }
-
-@* lab controls moved into hero *@
 
 @if (Model.ErrorMessage is not null)
 {
@@ -849,6 +758,9 @@ else
             </select>
             <button class="cs-filter-reset" onclick="resetFilter('ytd-insights')">&#10005; Clear</button>
             <span class="cs-filter-count" id="flt-ytd-insights-count"></span>
+            <button type="button" class="exportCodingExcelBtn btn btn-sm btn-outline-success" style="margin-left:auto;font-size:.76rem;border-radius:20px;padding:.3em .9em">
+                <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
+            </button>
         </div>
         @foreach (var year in years)
         {
@@ -961,6 +873,9 @@ else
             </select>
             <button class="cs-filter-reset" onclick="resetFilter('ytd-summary')">&#10005; Clear</button>
             <span class="cs-filter-count" id="flt-ytd-summary-count"></span>
+            <button type="button" class="exportCodingExcelBtn btn btn-sm btn-outline-success" style="margin-left:auto;font-size:.76rem;border-radius:20px;padding:.3em .9em">
+                <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
+            </button>
         </div>
         @foreach (var year in years)
         {
@@ -1078,6 +993,9 @@ else
             </select>
             <button class="cs-filter-reset" onclick="resetFilter('wtd-insights')">&#10005; Clear</button>
             <span class="cs-filter-count" id="flt-wtd-insights-count"></span>
+            <button type="button" class="exportCodingExcelBtn btn btn-sm btn-outline-success" style="margin-left:auto;font-size:.76rem;border-radius:20px;padding:.3em .9em">
+                <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
+            </button>
         </div>
         @{
             var wtdInsightWeeks = Model.WtdInsightRows.Select(r => r.WeekFolder)
@@ -1147,14 +1065,14 @@ else
                                                 <div class="det-expand-block">
                                                     <div class="det-expand-label">Billable CPT Codes</div>
                                                     <div class="cpt-tags">
-                                                        @if (!billableTags.Any()) { <span style="color:#aaa;font-size:.72rem">—</span> }
+                                                        @if (!billableTags.Any()) { <span style="color:#aaa;font-size:.72rem">ï¿½</span> }
                                                         @foreach (var t in billableTags) { <span class="cpt-tag cpt-tag-actual">@t</span> }
                                                     </div>
                                                 </div>
                                                 <div class="det-expand-block">
                                                     <div class="det-expand-label">Billed CPT Codes</div>
                                                     <div class="cpt-tags">
-                                                        @if (!billedTags.Any()) { <span style="color:#aaa;font-size:.72rem">—</span> }
+                                                        @if (!billedTags.Any()) { <span style="color:#aaa;font-size:.72rem">ï¿½</span> }
                                                         @foreach (var t in billedTags) { <span class="cpt-tag cpt-tag-expected">@t</span> }
                                                     </div>
                                                 </div>
@@ -1207,6 +1125,9 @@ else
             </select>
             <button class="cs-filter-reset" onclick="resetFilter('wtd-summary')">&#10005; Clear</button>
             <span class="cs-filter-count" id="flt-wtd-summary-count"></span>
+            <button type="button" class="exportCodingExcelBtn btn btn-sm btn-outline-success" style="margin-left:auto;font-size:.76rem;border-radius:20px;padding:.3em .9em">
+                <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
+            </button>
         </div>
         @{
             var wtdSummaryWeeks = Model.WtdSummaryRows.Select(r => r.WeekFolder)
@@ -1376,7 +1297,7 @@ else
                             </thead>
                             <tbody>
                                 <tr>
-                                    <td class="r">@(row.RevenueImpact_Claims?.ToString("N0") ?? "—")</td>
+                                    <td class="r">@(row.RevenueImpact_Claims?.ToString("N0") ?? "ï¿½")</td>
                                     <td class="r money">$&thinsp;@row.RevenueImpact_ActualBilled.ToString("N2")</td>
                                     <td class="r money money-neg">$&thinsp;@row.RevenueImpact_PotentialLoss.ToString("N2")</td>
                                     <td class="r money money-pos">$&thinsp;@row.RevenueImpact_ExpectedRecoup.ToString("N2")</td>
@@ -1400,7 +1321,7 @@ else
                             </thead>
                             <tbody>
                                 <tr>
-                                    <td class="r">@(row.RevenueLoss_Claims?.ToString("N0") ?? "—")</td>
+                                    <td class="r">@(row.RevenueLoss_Claims?.ToString("N0") ?? "ï¿½")</td>
                                     <td class="r money">$&thinsp;@row.RevenueLoss_ActualBilled.ToString("N2")</td>
                                     <td class="r money money-neg">$&thinsp;@row.RevenueLoss_PotentialLoss.ToString("N2")</td>
                                 </tr>
@@ -1423,7 +1344,7 @@ else
                             </thead>
                             <tbody>
                                 <tr>
-                                    <td class="r">@(row.RevenueAtRisk_Claims?.ToString("N0") ?? "—")</td>
+                                    <td class="r">@(row.RevenueAtRisk_Claims?.ToString("N0") ?? "ï¿½")</td>
                                     <td class="r money">$&thinsp;@row.RevenueAtRisk_ActualBilled.ToString("N2")</td>
                                     <td class="r money money-pos">$&thinsp;@row.RevenueAtRisk_PotentialRecoup.ToString("N2")</td>
                                 </tr>
@@ -1446,8 +1367,8 @@ else
                             </thead>
                             <tbody>
                                 <tr>
-                                    <td class="r">@(row.Compliance_TotalClaims?.ToString("N0") ?? "—")</td>
-                                    <td class="r">@(row.Compliance_ClaimsWithIssues?.ToString("N0") ?? "—")</td>
+                                    <td class="r">@(row.Compliance_TotalClaims?.ToString("N0") ?? "ï¿½")</td>
+                                    <td class="r">@(row.Compliance_ClaimsWithIssues?.ToString("N0") ?? "ï¿½")</td>
                                     <td class="r">
                                         <span class="cs-compliance-chip @(row.ComplianceRate.Contains("9") ? "good" : "warn")">
                                             @row.ComplianceRate
@@ -1479,23 +1400,23 @@ else
                                 </tr>
                                 <tr>
                                     <td>Claims with Missing CPTs</td>
-                                    <td class="r">@(row.ClaimsWithMissingCPTs?.ToString("N0") ?? "—")</td>
-                                    <td class="r">—</td>
+                                    <td class="r">@(row.ClaimsWithMissingCPTs?.ToString("N0") ?? "ï¿½")</td>
+                                    <td class="r">ï¿½</td>
                                 </tr>
                                 <tr>
                                     <td>Claims with Additional CPTs</td>
-                                    <td class="r">@(row.ClaimsWithAdditionalCPTs?.ToString("N0") ?? "—")</td>
-                                    <td class="r">—</td>
+                                    <td class="r">@(row.ClaimsWithAdditionalCPTs?.ToString("N0") ?? "ï¿½")</td>
+                                    <td class="r">ï¿½</td>
                                 </tr>
                                 <tr>
                                     <td>Claims with Missing &amp; Additional CPTs</td>
-                                    <td class="r">@(row.ClaimsWithBothMissingAndAdditional?.ToString("N0") ?? "—")</td>
-                                    <td class="r">—</td>
+                                    <td class="r">@(row.ClaimsWithBothMissingAndAdditional?.ToString("N0") ?? "ï¿½")</td>
+                                    <td class="r">ï¿½</td>
                                 </tr>
                                 <tr class="cs-fin-total-row">
                                     <td>Total Error Claims</td>
-                                    <td class="r money-neg">@(row.TotalErrorClaims?.ToString("N0") ?? "—")</td>
-                                    <td class="r">—</td>
+                                    <td class="r money-neg">@(row.TotalErrorClaims?.ToString("N0") ?? "ï¿½")</td>
+                                    <td class="r">ï¿½</td>
                                 </tr>
                                 <tr>
                                     <td>Compliance Rate</td>
@@ -1504,7 +1425,7 @@ else
                                             @row.ComplianceRatePct
                                         </span>
                                     </td>
-                                    <td class="r">—</td>
+                                    <td class="r">ï¿½</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -1513,7 +1434,7 @@ else
 
             </div><!-- /.cs-fin-card -->
         }
-    </div><!-- /#pane-financial — removed; content is now in KPI strip above -->
+    </div><!-- /#pane-financial ï¿½ removed; content is now in KPI strip above -->
 
     <!-- ?? Tab: Validation Detail ??????????????????????????????????????????? -->
     <div class="cs-tab-pane mt-3" id="pane-detail">
@@ -1532,9 +1453,12 @@ else
                 { <option value="@s">@s</option> }
             </select>
             <span class="cs-filter-label">Search</span>
-            <input type="text" id="flt-det-search" class="cs-filter-select" placeholder="Accession / CPT…" style="min-width:180px" />
+            <input type="text" id="flt-det-search" class="cs-filter-select" placeholder="Accession / CPTï¿½" style="min-width:180px" />
             <button class="cs-filter-reset" onclick="resetDetailFilter()">&#10005; Clear</button>
             <span class="cs-filter-count" id="flt-det-count"></span>
+            <button type="button" class="exportCodingExcelBtn btn btn-sm btn-outline-success" style="margin-left:auto;font-size:.76rem;border-radius:20px;padding:.3em .9em">
+                <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
+            </button>
         </div>
 
         @if (!Model.DetailRows.Any())
@@ -1594,9 +1518,9 @@ else
                                     <td><span class="panel-chip">@r.PanelName</span></td>
                                     <td class="r">@r.DateofService</td>
                                     <td><span class="det-status-chip @statusClass">@r.ValidationStatus</span></td>
-                                    <td class="r money-neutral">@(string.IsNullOrWhiteSpace(r.TotalCharge) ? "—" : "$\u2009" + r.TotalCharge)</td>
-                                    <td class="r @(isMissing ? "money-neg" : "money-neutral")">@(string.IsNullOrWhiteSpace(r.MissingCPT_Charges) ? "—" : "$\u2009" + r.MissingCPT_Charges)</td>
-                                    <td class="r @(isAdditional ? "money-warn" : "money-neutral")">@(string.IsNullOrWhiteSpace(r.AdditionalCPT_Charges) ? "—" : "$\u2009" + r.AdditionalCPT_Charges)</td>
+                                    <td class="r money-neutral">@(string.IsNullOrWhiteSpace(r.TotalCharge) ? "ï¿½" : "$\u2009" + r.TotalCharge)</td>
+                                    <td class="r @(isMissing ? "money-neg" : "money-neutral")">@(string.IsNullOrWhiteSpace(r.MissingCPT_Charges) ? "ï¿½" : "$\u2009" + r.MissingCPT_Charges)</td>
+                                    <td class="r @(isAdditional ? "money-warn" : "money-neutral")">@(string.IsNullOrWhiteSpace(r.AdditionalCPT_Charges) ? "ï¿½" : "$\u2009" + r.AdditionalCPT_Charges)</td>
                                 </tr>
                                 <tr class="det-row-expand">
                                     <td colspan="8" class="det-expand-inner">
@@ -1604,14 +1528,14 @@ else
                                             <div class="det-expand-block">
                                                 <div class="det-expand-label">Actual CPT Codes</div>
                                                 <div class="cpt-tags">
-                                                    @if (actualTags.Length == 0){ <span style="color:#aaa;font-size:.72rem">—</span> }
+                                                    @if (actualTags.Length == 0){ <span style="color:#aaa;font-size:.72rem">ï¿½</span> }
                                                     @foreach (var t in actualTags){ <span class="cpt-tag cpt-tag-actual">@t</span> }
                                                 </div>
                                             </div>
                                             <div class="det-expand-block">
                                                 <div class="det-expand-label">Expected CPT Codes</div>
                                                 <div class="cpt-tags">
-                                                    @if (expectedTags.Length == 0){ <span style="color:#aaa;font-size:.72rem">—</span> }
+                                                    @if (expectedTags.Length == 0){ <span style="color:#aaa;font-size:.72rem">ï¿½</span> }
                                                     @foreach (var t in expectedTags){ <span class="cpt-tag cpt-tag-expected">@t</span> }
                                                 </div>
                                             </div>
@@ -1761,6 +1685,13 @@ else
         applyFilter(cfg);
     };
 
+    // Wire up all Download Excel buttons (class-based)
+    document.querySelectorAll('.exportCodingExcelBtn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            lmdExcelDownload('@Url.Action("ExportCodingExcel", "Coding", new { lab = Model.LabName })');
+        });
+    });
+
 
     // ?? Validation Detail: filter + pager + expand ???????????????????????
     (function () {
@@ -1815,7 +1746,7 @@ else
             if (info) {
                 var from = filtered.length === 0 ? 0 : start + 1;
                 var to   = Math.min(start + PAGE_SIZE, filtered.length);
-                info.textContent = 'Showing ' + from + '–' + to + ' of ' + filtered.length + ' rows';
+                info.textContent = 'Showing ' + from + 'ï¿½' + to + ' of ' + filtered.length + ' rows';
             }
             renderPagerBtns();
         }
@@ -1836,21 +1767,21 @@ else
                 return b;
             }
 
-            container.appendChild(mkBtn('«', 1,          curPage === 1, false));
-            container.appendChild(mkBtn('‹', curPage - 1, curPage === 1, false));
+            container.appendChild(mkBtn('ï¿½', 1,          curPage === 1, false));
+            container.appendChild(mkBtn('ï¿½', curPage - 1, curPage === 1, false));
 
-            // page number buttons — show window of ±2 around current
+            // page number buttons ï¿½ show window of ï¿½2 around current
             var lo = Math.max(1, curPage - 2);
             var hi = Math.min(totalPages, curPage + 2);
-            if (lo > 1)          { container.appendChild(mkBtn('1', 1, false, false)); if (lo > 2) { var e=document.createElement('span'); e.className='det-pager-ellipsis'; e.textContent='…'; container.appendChild(e); } }
+            if (lo > 1)          { container.appendChild(mkBtn('1', 1, false, false)); if (lo > 2) { var e=document.createElement('span'); e.className='det-pager-ellipsis'; e.textContent='ï¿½'; container.appendChild(e); } }
             for (var p = lo; p <= hi; p++) container.appendChild(mkBtn(String(p), p, false, p === curPage));
-            if (hi < totalPages) { if (hi < totalPages-1) { var e2=document.createElement('span'); e2.className='det-pager-ellipsis'; e2.textContent='…'; container.appendChild(e2); } container.appendChild(mkBtn(String(totalPages), totalPages, false, false)); }
+            if (hi < totalPages) { if (hi < totalPages-1) { var e2=document.createElement('span'); e2.className='det-pager-ellipsis'; e2.textContent='ï¿½'; container.appendChild(e2); } container.appendChild(mkBtn(String(totalPages), totalPages, false, false)); }
 
-            container.appendChild(mkBtn('›', curPage + 1, curPage === totalPages, false));
-            container.appendChild(mkBtn('»', totalPages,  curPage === totalPages, false));
+            container.appendChild(mkBtn('ï¿½', curPage + 1, curPage === totalPages, false));
+            container.appendChild(mkBtn('ï¿½', totalPages,  curPage === totalPages, false));
         }
 
-        // Row expand/collapse — Validation Detail
+        // Row expand/collapse ï¿½ Validation Detail
         window.detToggle = function (mainRow) {
             var exp  = mainRow.nextElementSibling;
             var open = exp.classList.toggle('open');
@@ -1858,7 +1789,7 @@ else
             exp.style.display = open ? '' : 'none';
         };
 
-        // Row expand/collapse — YTD/WTD tables
+        // Row expand/collapse ï¿½ YTD/WTD tables
         window.rowToggle = function (mainRow) {
             var exp  = mainRow.nextElementSibling;
             var open = exp.classList.toggle('open');

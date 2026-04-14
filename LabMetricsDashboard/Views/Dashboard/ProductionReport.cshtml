@@ -1,0 +1,1217 @@
+@model LabMetricsDashboard.Models.ProductionReportViewModel
+@{
+    ViewData["Title"]       = $"Production Report – {Model.SelectedLab}";
+    ViewData["SelectedLab"] = Model.SelectedLab;
+    ViewData["PageLabel"]   = "Production Report";
+
+    // Filter out year 1900 on the view side as well
+    var validYears  = Model.Years.Where(y => y > 1900).ToList();
+    var validMonths = Model.Months.Where(m => int.Parse(m[..4]) > 1900).ToList();
+
+    var monthsByYear = validMonths
+        .GroupBy(m => int.Parse(m[..4]))
+        .OrderBy(g => g.Key)
+        .ToDictionary(g => g.Key, g => g.OrderBy(m => m).ToList());
+
+    string MonthLabel(string ym)
+    {
+        var parts = ym.Split('-');
+        return new DateTime(int.Parse(parts[0]), int.Parse(parts[1]), 1).ToString("MMM");
+    }
+
+    int CellClaims(Dictionary<string, LabMetricsDashboard.Models.ProductionMonthCell>? d, string mk)
+        => d is not null && d.TryGetValue(mk, out var c) ? c.ClaimCount : 0;
+    decimal CellCharges(Dictionary<string, LabMetricsDashboard.Models.ProductionMonthCell>? d, string mk)
+        => d is not null && d.TryGetValue(mk, out var c) ? c.BilledCharges : 0m;
+    int YearClaims(Dictionary<int, LabMetricsDashboard.Models.ProductionYearTotal>? d, int y)
+        => d is not null && d.TryGetValue(y, out var t) ? t.ClaimCount : 0;
+    decimal YearCharges(Dictionary<int, LabMetricsDashboard.Models.ProductionYearTotal>? d, int y)
+        => d is not null && d.TryGetValue(y, out var t) ? t.BilledCharges : 0m;
+
+    int GrandYearClaims(int year) =>
+        Model.GrandTotalByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value.ClaimCount);
+    decimal GrandYearCharges(int year) =>
+        Model.GrandTotalByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value.BilledCharges);
+
+    // Recompute grand totals excluding 1900
+    int grandClaims = Model.GrandTotalByMonth
+        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.ClaimCount);
+    decimal grandCharges = Model.GrandTotalByMonth
+        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.BilledCharges);
+
+    // Payer Breakdown helpers
+    var pbYears  = Model.PayerBreakdownYears.Where(y => y > 1900).ToList();
+    var pbMonths = Model.PayerBreakdownMonths.Where(m => int.Parse(m[..4]) > 1900).ToList();
+    var pbMonthsByYear = pbMonths
+        .GroupBy(m => int.Parse(m[..4]))
+        .OrderBy(g => g.Key)
+        .ToDictionary(g => g.Key, g => g.OrderBy(m => m).ToList());
+
+    int PbCell(Dictionary<string, int>? d, string mk)
+        => d is not null && d.TryGetValue(mk, out var v) ? v : 0;
+    int PbYear(Dictionary<int, int>? d, int y)
+        => d is not null && d.TryGetValue(y, out var v) ? v : 0;
+    int PbGrandYear(int year) =>
+        Model.PayerBreakdownGrandByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
+    int pbGrandTotal = Model.PayerBreakdownGrandByMonth
+        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value);
+
+    // Payer X Panel helpers
+    var pxpPanels = Model.PayerPanelColumns;
+    int PxpClaims(Dictionary<string, LabMetricsDashboard.Models.ProductionMonthCell>? d, string pk)
+        => d is not null && d.TryGetValue(pk, out var c) ? c.ClaimCount : 0;
+    decimal PxpCharges(Dictionary<string, LabMetricsDashboard.Models.ProductionMonthCell>? d, string pk)
+        => d is not null && d.TryGetValue(pk, out var c) ? c.BilledCharges : 0m;
+
+    // Unbilled X Aging helpers
+    var agingBuckets = LabMetricsDashboard.Models.AgingBuckets.All;
+    int UaClaims(Dictionary<string, LabMetricsDashboard.Models.ProductionMonthCell>? d, string bk)
+        => d is not null && d.TryGetValue(bk, out var c) ? c.ClaimCount : 0;
+    decimal UaCharges(Dictionary<string, LabMetricsDashboard.Models.ProductionMonthCell>? d, string bk)
+        => d is not null && d.TryGetValue(bk, out var c) ? c.BilledCharges : 0m;
+
+    // CPT Breakdown helpers
+    var cptYears  = Model.CptBreakdownYears.Where(y => y > 1900).ToList();
+    var cptMonths = Model.CptBreakdownMonths.Where(m => int.Parse(m[..4]) > 1900).ToList();
+    var cptMonthsByYear = cptMonths
+        .GroupBy(m => int.Parse(m[..4]))
+        .OrderBy(g => g.Key)
+        .ToDictionary(g => g.Key, g => g.OrderBy(m => m).ToList());
+
+    decimal CptUnits(Dictionary<string, LabMetricsDashboard.Models.CptBreakdownCell>? d, string mk)
+        => d is not null && d.TryGetValue(mk, out var c) ? c.Units : 0m;
+    decimal CptCharges(Dictionary<string, LabMetricsDashboard.Models.CptBreakdownCell>? d, string mk)
+        => d is not null && d.TryGetValue(mk, out var c) ? c.BilledCharges : 0m;
+    decimal CptYearUnits(Dictionary<int, LabMetricsDashboard.Models.CptBreakdownCell>? d, int y)
+        => d is not null && d.TryGetValue(y, out var t) ? t.Units : 0m;
+    decimal CptYearCharges(Dictionary<int, LabMetricsDashboard.Models.CptBreakdownCell>? d, int y)
+        => d is not null && d.TryGetValue(y, out var t) ? t.BilledCharges : 0m;
+    decimal CptGrandYearUnits(int year) =>
+        Model.CptBreakdownGrandByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value.Units);
+    decimal CptGrandYearCharges(int year) =>
+        Model.CptBreakdownGrandByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value.BilledCharges);
+    decimal cptGrandUnits = Model.CptBreakdownGrandByMonth
+        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.Units);
+    decimal cptGrandCharges = Model.CptBreakdownGrandByMonth
+        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.BilledCharges);
+}
+
+<style>
+/* ?? Production Report styles ??????????????????????????????? */
+.pr-wrap {
+    border-radius: 14px; overflow: hidden;
+    background: #fff; border: 1px solid #e0e6ed;
+    box-shadow: 0 2px 12px rgba(0,0,0,.05);
+}
+.pr-scroll { max-height: 78vh; overflow: auto; }
+
+.pr-table {
+    border-collapse: separate; border-spacing: 0;
+    font-size: .72rem;
+    table-layout: fixed;
+}
+
+.pr-table thead th {
+    background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
+    color: rgba(255,255,255,.92); font-weight: 700; font-size: .62rem;
+    letter-spacing: .04em; text-transform: uppercase;
+    padding: .5rem .4rem; text-align: center;
+    white-space: normal; word-wrap: break-word;
+    position: sticky; top: 0; z-index: 5;
+    border-bottom: 1px solid #0a2a4a;
+    border-right: 1px solid rgba(255,255,255,.08);
+    line-height: 1.25;
+}
+
+/* Visible header rows are 1, 2, 3 (no hidden sizing row) */
+.pr-table thead tr:nth-child(2) th {
+    top: 30px; z-index: 4;
+    background: linear-gradient(135deg, #162d50 0%, #1b4a6c 100%);
+    font-size: .58rem;
+}
+.pr-table thead tr:nth-child(3) th {
+    top: 56px; z-index: 3;
+    background: #1e5a8a;
+    font-size: .56rem; font-weight: 600;
+}
+
+.pr-table thead th:first-child {
+    text-align: left; position: sticky; left: 0; z-index: 7;
+}
+.pr-table thead tr:nth-child(2) th:first-child { z-index: 6; }
+.pr-table thead tr:nth-child(3) th:first-child { z-index: 5; }
+
+.pr-table td {
+    padding: .35rem .5rem; vertical-align: middle;
+    text-align: right; white-space: nowrap;
+    border-right: 1px solid #e2e8f0;
+    border-bottom: 1px solid #e2e8f0;
+    overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Month data columns — narrowed to ~70% */
+th.pr-month-data, td.pr-month-data {
+    padding-left: .2rem; padding-right: .2rem;
+    font-size: .60rem;
+}
+.pr-table td:first-child {
+    text-align: left; font-weight: 600; color: #1e293b;
+    max-width: 260px; overflow: hidden; text-overflow: ellipsis;
+    position: sticky; left: 0; z-index: 1;
+    background: #fff; min-width: 200px;
+}
+
+.pr-panel-row td { background: #f0fdf4; font-weight: 700; }
+.pr-panel-row td:first-child { background: #f0fdf4; color: #166534; }
+
+.pr-payer-row td { background: #fff; color: #475569; font-weight: 400; }
+.pr-payer-row td:first-child {
+    padding-left: 1.5rem; font-weight: 500; color: #64748b; background: #fff;
+}
+.pr-payer-row:hover td { background: #f8fafc; }
+.pr-payer-row:hover td:first-child { background: #f8fafc; }
+
+.pr-total-row td {
+    background: #0e3460 !important; color: #fff !important;
+    font-weight: 800; border-top: 2px solid #0a2a4a;
+}
+.pr-total-row td:first-child { background: #0e3460 !important; color: #fff !important; }
+
+.pr-year-total { background-color: #fefce8 !important; }
+.pr-table thead th.pr-year-total {
+    background: linear-gradient(135deg, #854d0e 0%, #a16207 100%) !important;
+}
+.pr-table thead tr:nth-child(3) th.pr-year-total {
+    background: #a16207 !important;
+}
+
+.pr-grand-total { background-color: #fef3c7 !important; font-weight: 800; }
+.pr-table thead th.pr-grand-total {
+    background: linear-gradient(135deg, #78350f 0%, #92400e 100%) !important;
+}
+.pr-table thead tr:nth-child(3) th.pr-grand-total {
+    background: #92400e !important;
+}
+
+/* Filter panel — matches Clinic Summary style */
+.pr-filter-panel {
+    background: #fff; border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.07);
+}
+.pr-filter-badge { font-size: .7rem; vertical-align: middle; }
+
+/* Multi-select dropdown */
+.pr-ms { position: relative; }
+.pr-ms-btn {
+    display: flex; align-items: center; justify-content: space-between;
+    width: 100%; padding: .3rem .6rem; font-size: .8rem;
+    border: 1px solid #ced4da; border-radius: .375rem;
+    background: #fff; cursor: pointer; min-height: 31px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pr-ms-btn:hover { border-color: #7B8B8E; }
+.pr-ms-btn .pr-ms-count {
+    background: #2B2D42; color: #fff; font-size: .65rem;
+    border-radius: 10px; padding: 0 .45rem; margin-left: .4rem;
+    font-weight: 700; flex-shrink: 0;
+}
+.pr-ms-panel {
+    display: none; position: absolute; z-index: 100; top: 100%;
+    left: 0; right: 0; background: #fff; border: 1px solid #ced4da;
+    border-radius: .375rem; box-shadow: 0 4px 16px rgba(0,0,0,.12);
+    margin-top: 2px; max-height: 280px; overflow: hidden;
+}
+.pr-ms-panel.open { display: flex; flex-direction: column; }
+.pr-ms-search {
+    border: none; border-bottom: 1px solid #e9ecef;
+    padding: .4rem .6rem; font-size: .78rem; outline: none; width: 100%;
+}
+.pr-ms-list {
+    overflow-y: auto; max-height: 220px; padding: .25rem 0;
+}
+.pr-ms-list label {
+    display: flex; align-items: center; gap: .4rem;
+    padding: .25rem .6rem; font-size: .78rem; cursor: pointer;
+    margin: 0;
+}
+.pr-ms-list label:hover { background: #edf0f0; }
+.pr-ms-list label.pr-ms-hidden { display: none; }
+
+/* ?? Premium pill tabs ?????????????????????????????????????? */
+.pr-tabs {
+    display: flex; flex-wrap: wrap; gap: .45rem;
+    padding: .55rem .65rem;
+    background: linear-gradient(135deg, #f8fafd 0%, #eef3fa 100%);
+    border: 1px solid #dce4f0;
+    border-radius: 1rem;
+    box-shadow: 0 2px 10px rgba(15,23,42,.04);
+}
+.pr-tabs .nav-item { margin: 0; }
+.pr-tabs .nav-link {
+    display: inline-flex; align-items: center; gap: .4rem;
+    padding: .45rem .85rem;
+    font-size: .76rem; font-weight: 700; letter-spacing: .015em;
+    color: #3b5578;
+    background: #fff;
+    border: 1.5px solid #d4dde9;
+    border-radius: .75rem;
+    transition: all .18s ease;
+    box-shadow: 0 1px 3px rgba(15,23,42,.04);
+    white-space: nowrap;
+}
+.pr-tabs .nav-link i {
+    font-size: .82rem; opacity: .7;
+    transition: opacity .18s;
+}
+.pr-tabs .nav-link:hover {
+    color: #0e3460; background: #edf2fb;
+    border-color: #b4c6e0;
+    box-shadow: 0 2px 8px rgba(15,23,42,.08);
+}
+.pr-tabs .nav-link:hover i { opacity: 1; }
+.pr-tabs .nav-link.active {
+    color: #fff;
+    background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
+    border-color: #0e3460;
+    box-shadow: 0 4px 14px rgba(14,52,96,.30);
+}
+.pr-tabs .nav-link.active i { opacity: 1; }
+</style>
+
+<!-- Page heading -->
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <h2 class="mb-0 fw-bold">Production Report <span class="badge bg-primary bg-gradient fw-semibold" style="font-size:.45em;vertical-align:middle;border-radius:20px;padding:.35em .85em">@Model.SelectedLab</span></h2>
+    <a asp-controller="Dashboard" asp-action="ClaimLevel" asp-route-lab="@Model.SelectedLab"
+       class="btn btn-sm btn-outline-primary">
+        <i class="bi bi-clipboard-data me-1"></i>Claim Level Details
+    </a>
+</div>
+
+
+
+<!-- ??? Collapsible Filter panel ?????????????????????????????? -->
+@if (!string.IsNullOrWhiteSpace(Model.SelectedLab))
+{
+    <div class="pr-filter-panel p-3 mb-4">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+            <span class="fw-semibold" style="font-size:.9rem">
+                <i class="bi bi-funnel"></i> Filters
+                @if (Model.HasFilters)
+                {
+                    <span class="badge bg-primary pr-filter-badge ms-1">Active</span>
+                }
+            </span>
+            <button class="btn btn-sm btn-link text-muted p-0" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#prFilterBody"
+                    aria-expanded="@(Model.HasFilters ? "true" : "false")">
+                @Html.Raw(Model.HasFilters ? "&#9650; Hide" : "&#9660; Show")
+            </button>
+        </div>
+
+        <div id="prFilterBody" class="collapse @(Model.HasFilters ? "show" : "")">
+            <form id="prFilterForm" method="get" asp-controller="Dashboard" asp-action="ProductionReport" data-lab-form>
+                <input type="hidden" name="lab" value="@Model.SelectedLab" />
+
+                <div class="row g-2 align-items-end mb-2">
+                    <!-- Payer Name (multi-select) -->
+                    <div class="col-sm-6 col-md-3">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PAYER NAME</label>
+                        <div class="pr-ms" data-ms-name="filterPayerNames">
+                            <div class="pr-ms-btn" tabindex="0">
+                                <span class="pr-ms-label">All</span>
+                                <span class="pr-ms-count" style="display:none">0</span>
+                            </div>
+                            <div class="pr-ms-panel">
+                                <input type="text" class="pr-ms-search" placeholder="Search payers…" autocomplete="off" />
+                                <div class="pr-ms-list">
+                                    @foreach (var pn in Model.PayerNames)
+                                    {
+                                        <label><input type="checkbox" name="filterPayerNames" value="@pn"
+                                            @(Model.FilterPayerNames.Contains(pn) ? "checked" : "") /> @pn</label>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Panel Name (multi-select) -->
+                    <div class="col-sm-6 col-md-3">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PANEL NAME</label>
+                        <div class="pr-ms" data-ms-name="filterPanelNames">
+                            <div class="pr-ms-btn" tabindex="0">
+                                <span class="pr-ms-label">All</span>
+                                <span class="pr-ms-count" style="display:none">0</span>
+                            </div>
+                            <div class="pr-ms-panel">
+                                <input type="text" class="pr-ms-search" placeholder="Search panels…" autocomplete="off" />
+                                <div class="pr-ms-list">
+                                    @foreach (var pl in Model.PanelNames)
+                                    {
+                                        <label><input type="checkbox" name="filterPanelNames" value="@pl"
+                                            @(Model.FilterPanelNames.Contains(pl) ? "checked" : "") /> @pl</label>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- First Billed Date From -->
+                    <div class="col-sm-6 col-md-3">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">FIRST BILL DATE FROM</label>
+                        <input type="date" name="filterFirstBillFrom" class="form-control form-control-sm"
+                               value="@Model.FilterFirstBillFrom" />
+                    </div>
+                    <!-- First Billed Date To -->
+                    <div class="col-sm-6 col-md-3">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">FIRST BILL DATE TO</label>
+                        <input type="date" name="filterFirstBillTo" class="form-control form-control-sm"
+                               value="@Model.FilterFirstBillTo" />
+                    </div>
+                </div>
+
+                <div class="d-flex gap-2 mt-2">
+                    <button type="submit" class="btn btn-sm btn-primary">
+                        <i class="bi bi-funnel-fill me-1"></i>Apply
+                    </button>
+                    <a asp-controller="Dashboard" asp-action="ProductionReport"
+                       asp-route-lab="@Model.SelectedLab"
+                       class="btn btn-sm btn-outline-secondary">Clear</a>
+                    <button type="button" id="exportExcelBtn" class="btn btn-sm btn-outline-success ms-auto">
+                        <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+}
+
+<!-- ??? Export error ??????????????????????????????????????????? -->
+@if (TempData["ExportError"] is string exportError)
+{
+    <div class="alert alert-danger alert-dismissible fade show">
+        <i class="bi bi-exclamation-triangle-fill me-1"></i> @exportError
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
+
+<!-- ??? Error message ????????????????????????????????????????? -->
+@if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+{
+    <div class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle-fill me-1"></i> @Model.ErrorMessage
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(Model.SelectedLab) && string.IsNullOrWhiteSpace(Model.ErrorMessage))
+{
+    <!-- ??? Premium Tabs ????????????????????????????????????????? -->
+    <ul class="nav nav-pills pr-tabs mb-3" id="prTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="monthly-tab" data-bs-toggle="pill"
+                    data-bs-target="#monthly-pane" type="button" role="tab"
+                    aria-controls="monthly-pane" aria-selected="true">
+                <i class="bi bi-calendar-month"></i> Monthly Claim Volume
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="weekly-tab" data-bs-toggle="pill"
+                    data-bs-target="#weekly-pane" type="button" role="tab"
+                    aria-controls="weekly-pane" aria-selected="false">
+                <i class="bi bi-calendar-week"></i> Weekly Claim Volume
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="coding-tab" data-bs-toggle="pill"
+                    data-bs-target="#coding-pane" type="button" role="tab"
+                    aria-controls="coding-pane" aria-selected="false">
+                <i class="bi bi-code-square"></i> Coding
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="payer-breakdown-tab" data-bs-toggle="pill"
+                    data-bs-target="#payer-breakdown-pane" type="button" role="tab"
+                    aria-controls="payer-breakdown-pane" aria-selected="false">
+                <i class="bi bi-pie-chart"></i> Payer Breakdown
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="payer-panel-tab" data-bs-toggle="pill"
+                    data-bs-target="#payer-panel-pane" type="button" role="tab"
+                    aria-controls="payer-panel-pane" aria-selected="false">
+                <i class="bi bi-grid-3x3-gap"></i> Payer X Panel
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="unbilled-aging-tab" data-bs-toggle="pill"
+                    data-bs-target="#unbilled-aging-pane" type="button" role="tab"
+                    aria-controls="unbilled-aging-pane" aria-selected="false">
+                <i class="bi bi-hourglass-split"></i> Unbilled X Aging
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="cpt-breakdown-tab" data-bs-toggle="pill"
+                    data-bs-target="#cpt-breakdown-pane" type="button" role="tab"
+                    aria-controls="cpt-breakdown-pane" aria-selected="false">
+                <i class="bi bi-list-ol"></i> CPT Breakdown
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content" id="prTabContent">
+
+        <!-- ??? Monthly Claim Volume tab pane ????????????????????? -->
+        <div class="tab-pane fade show active" id="monthly-pane" role="tabpanel" aria-labelledby="monthly-tab">
+            @if (Model.PanelRows.Count > 0 && validYears.Count > 0)
+            {
+                <div class="pr-wrap">
+                    <div class="pr-scroll">
+                        <table class="pr-table">
+                            <colgroup>
+                                <col style="width:200px" />
+                                @foreach (var year in validYears)
+                                {
+                                    var cgMons = monthsByYear.ContainsKey(year) ? monthsByYear[year] : new List<string>();
+                                    foreach (var mk in cgMons)
+                                    {
+                                        <col style="width:52px" />
+                                        <col style="width:68px" />
+                                    }
+                                    <col style="width:72px" />
+                                    <col style="width:86px" />
+                                }
+                                <col style="width:72px" />
+                                <col style="width:86px" />
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th rowspan="3">Panel &amp; Insurance</th>
+                                    @foreach (var year in validYears)
+                                    {
+                                        var mons = monthsByYear.ContainsKey(year) ? monthsByYear[year] : new List<string>();
+                                        int monthDataCols = mons.Count * 2;
+                                        int yearTotalCols = 2;
+                                        <th colspan="@(monthDataCols + yearTotalCols)">
+                                            Data based on Billed Date &mdash; @year
+                                        </th>
+                                    }
+                                    <th colspan="2" class="pr-grand-total">Grand Total</th>
+                                </tr>
+                                <tr>
+                                    @foreach (var year in validYears)
+                                    {
+                                        var mons = monthsByYear.ContainsKey(year) ? monthsByYear[year] : new List<string>();
+                                        foreach (var mk in mons)
+                                        {
+                                            <th colspan="2">@MonthLabel(mk)</th>
+                                        }
+                                        <th colspan="2" class="pr-year-total">@year Total</th>
+                                    }
+                                    <th colspan="2" class="pr-grand-total"></th>
+                                </tr>
+                                <tr>
+                                    @foreach (var year in validYears)
+                                    {
+                                        var mons = monthsByYear.ContainsKey(year) ? monthsByYear[year] : new List<string>();
+                                        foreach (var mk in mons)
+                                        {
+                                            <th class="pr-month-data">No. of Claims</th>
+                                            <th class="pr-month-data">Total Billed Charges</th>
+                                        }
+                                        <th class="pr-year-total">No. of Claims</th>
+                                        <th class="pr-year-total">Total Billed Charges</th>
+                                    }
+                                    <th class="pr-grand-total">No. of Claims</th>
+                                    <th class="pr-grand-total">Total Billed Charges</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @{ int panelIdx = 0; }
+                                @foreach (var panel in Model.PanelRows)
+                                {
+                                    var letter = (char)('A' + panelIdx % 26);
+                                    <tr class="pr-panel-row">
+                                        <td>@letter &nbsp; @panel.PanelName</td>
+                                        @foreach (var year in validYears)
+                                        {
+                                            var mons = monthsByYear.ContainsKey(year) ? monthsByYear[year] : new List<string>();
+                                            foreach (var mk in mons)
+                                            {
+                                                <td class="pr-month-data">@CellClaims(panel.ByMonth, mk).ToString("N0")</td>
+                                                <td class="pr-month-data">@CellCharges(panel.ByMonth, mk).ToString("C0")</td>
+                                            }
+                                            <td class="pr-year-total">@YearClaims(panel.ByYear, year).ToString("N0")</td>
+                                            <td class="pr-year-total">@YearCharges(panel.ByYear, year).ToString("C0")</td>
+                                        }
+                                        <td class="pr-grand-total">@panel.TotalClaims.ToString("N0")</td>
+                                        <td class="pr-grand-total">@panel.TotalCharges.ToString("C0")</td>
+                                    </tr>
+
+                                    @foreach (var payer in panel.TopPayers)
+                                    {
+                                        <tr class="pr-payer-row">
+                                            <td>@payer.PayerName</td>
+                                            @foreach (var year in validYears)
+                                            {
+                                                var mons = monthsByYear.ContainsKey(year) ? monthsByYear[year] : new List<string>();
+                                                foreach (var mk in mons)
+                                                {
+                                                    <td class="pr-month-data">@CellClaims(payer.ByMonth, mk).ToString("N0")</td>
+                                                    <td class="pr-month-data">@CellCharges(payer.ByMonth, mk).ToString("C0")</td>
+                                                }
+                                                <td class="pr-year-total">@YearClaims(payer.ByYear, year).ToString("N0")</td>
+                                                <td class="pr-year-total">@YearCharges(payer.ByYear, year).ToString("C0")</td>
+                                            }
+                                            <td class="pr-grand-total">@payer.TotalClaims.ToString("N0")</td>
+                                            <td class="pr-grand-total">@payer.TotalCharges.ToString("C0")</td>
+                                        </tr>
+                                    }
+
+                                    panelIdx++;
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr class="pr-total-row">
+                                    <td>Grand Total</td>
+                                    @foreach (var year in validYears)
+                                    {
+                                        var mons = monthsByYear.ContainsKey(year) ? monthsByYear[year] : new List<string>();
+                                        foreach (var mk in mons)
+                                        {
+                                            <td class="pr-month-data">@CellClaims(Model.GrandTotalByMonth, mk).ToString("N0")</td>
+                                            <td class="pr-month-data">@CellCharges(Model.GrandTotalByMonth, mk).ToString("C0")</td>
+                                        }
+                                        <td class="pr-year-total">@GrandYearClaims(year).ToString("N0")</td>
+                                        <td class="pr-year-total">@GrandYearCharges(year).ToString("C0")</td>
+                                    }
+                                    <td class="pr-grand-total">@grandClaims.ToString("N0")</td>
+                                    <td class="pr-grand-total">@grandCharges.ToString("C0")</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5 text-muted">
+                    <div style="font-size:2rem;opacity:.4">&#128202;</div>
+                    <div class="fw-semibold mt-2">No monthly claim volume data available</div>
+                    <div class="small mt-1">Try adjusting your filters or selecting a different lab.</div>
+                </div>
+            }
+        </div>
+
+        <!-- ??? Weekly Claim Volume tab pane ?????????????????????? -->
+        <div class="tab-pane fade" id="weekly-pane" role="tabpanel" aria-labelledby="weekly-tab">
+            @if (Model.WeeklyPanelRows.Count > 0 && Model.WeekColumns.Count > 0)
+            {
+                var weeks = Model.WeekColumns;
+
+                <div class="pr-wrap">
+                    <div class="pr-scroll">
+                        <table class="pr-table">
+                            <colgroup>
+                                <col style="width:200px" />
+                                @foreach (var wk in weeks)
+                                {
+                                    <col style="width:52px" />
+                                    <col style="width:68px" />
+                                }
+                                <col style="width:72px" />
+                                <col style="width:86px" />
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th rowspan="3">Panel &amp; Insurance</th>
+                                    <th colspan="@(weeks.Count * 2)">
+                                        Data based on Last 4 Week [FirstBilledDate]
+                                    </th>
+                                    <th colspan="2" class="pr-grand-total">Grand Total</th>
+                                </tr>
+                                <tr>
+                                    @for (int wi = 0; wi < weeks.Count; wi++)
+                                    {
+                                        <th colspan="2">
+                                            @weeks[wi].WeekStart.ToString("M/d/yyyy") &ndash; @weeks[wi].WeekEnd.ToString("M/d/yyyy")
+                                        </th>
+                                    }
+                                    <th colspan="2" class="pr-grand-total"></th>
+                                </tr>
+                                <tr>
+                                    @foreach (var wk in weeks)
+                                    {
+                                        <th class="pr-month-data">No. of Claims</th>
+                                        <th class="pr-month-data">Total Billed Charges</th>
+                                    }
+                                    <th class="pr-grand-total">No. of Claims</th>
+                                    <th class="pr-grand-total">Total Billed Charges</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @{ int wPanelIdx = 0; }
+                                @foreach (var panel in Model.WeeklyPanelRows)
+                                {
+                                    var wLetter = (char)('A' + wPanelIdx % 26);
+                                    <tr class="pr-panel-row">
+                                        <td>@wLetter &nbsp; @panel.PanelName</td>
+                                        @foreach (var wk in weeks)
+                                        {
+                                            <td class="pr-month-data">@CellClaims(panel.ByWeek, wk.Key).ToString("N0")</td>
+                                            <td class="pr-month-data">@CellCharges(panel.ByWeek, wk.Key).ToString("C0")</td>
+                                        }
+                                        <td class="pr-grand-total">@panel.TotalClaims.ToString("N0")</td>
+                                        <td class="pr-grand-total">@panel.TotalCharges.ToString("C0")</td>
+                                    </tr>
+
+                                    @foreach (var payer in panel.TopPayers)
+                                    {
+                                        <tr class="pr-payer-row">
+                                            <td>@payer.PayerName</td>
+                                            @foreach (var wk in weeks)
+                                            {
+                                                <td class="pr-month-data">@CellClaims(payer.ByWeek, wk.Key).ToString("N0")</td>
+                                                <td class="pr-month-data">@CellCharges(payer.ByWeek, wk.Key).ToString("C0")</td>
+                                            }
+                                            <td class="pr-grand-total">@payer.TotalClaims.ToString("N0")</td>
+                                            <td class="pr-grand-total">@payer.TotalCharges.ToString("C0")</td>
+                                        </tr>
+                                    }
+
+                                    wPanelIdx++;
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr class="pr-total-row">
+                                    <td>Grand Total</td>
+                                    @foreach (var wk in weeks)
+                                    {
+                                        <td class="pr-month-data">@CellClaims(Model.WeeklyGrandTotalByWeek, wk.Key).ToString("N0")</td>
+                                        <td class="pr-month-data">@CellCharges(Model.WeeklyGrandTotalByWeek, wk.Key).ToString("C0")</td>
+                                    }
+                                    <td class="pr-grand-total">@Model.WeeklyGrandTotalClaims.ToString("N0")</td>
+                                    <td class="pr-grand-total">@Model.WeeklyGrandTotalCharges.ToString("C0")</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5 text-muted">
+                    <div style="font-size:2rem;opacity:.4">&#128202;</div>
+                    <div class="fw-semibold mt-2">No weekly claim volume data available</div>
+                    <div class="small mt-1">No billed claims found in the last 4 weeks. Try adjusting your filters.</div>
+                </div>
+            }
+        </div>
+
+        <!-- ??? Coding tab pane ?????????????????????????????????? -->
+        <div class="tab-pane fade" id="coding-pane" role="tabpanel" aria-labelledby="coding-tab">
+            @if (Model.CodingPanelRows.Count > 0)
+            {
+                <div class="pr-wrap">
+                    <div class="pr-scroll">
+                        <table class="pr-table">
+                            <colgroup>
+                                <col style="width:320px" />
+                                <col style="width:140px" />
+                                <col style="width:180px" />
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th>Panel Name</th>
+                                    <th>Claim Count</th>
+                                    <th>Total Charge</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @{ int cPanelIdx = 0; }
+                                @foreach (var panel in Model.CodingPanelRows)
+                                {
+                                    var cLetter = (char)('A' + cPanelIdx % 26);
+                                    <tr class="pr-panel-row">
+                                        <td>@cLetter &nbsp; @panel.PanelName</td>
+                                        <td>@panel.ClaimCount.ToString("N0")</td>
+                                        <td>@panel.TotalCharges.ToString("C0")</td>
+                                    </tr>
+
+                                    var cptIdx = 0;
+                                    foreach (var cpt in panel.CptRows)
+                                    {
+                                        cptIdx++;
+                                        <tr class="pr-payer-row">
+                                            <td>@cptIdx &nbsp; @cpt.CptCodeUnitsModifier</td>
+                                            <td>@cpt.ClaimCount.ToString("N0")</td>
+                                            <td>@cpt.TotalCharges.ToString("C0")</td>
+                                        </tr>
+                                    }
+
+                                    cPanelIdx++;
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr class="pr-total-row">
+                                    <td>Grand Total</td>
+                                    <td>@Model.CodingGrandTotalClaims.ToString("N0")</td>
+                                    <td>@Model.CodingGrandTotalCharges.ToString("C0")</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5 text-muted">
+                    <div style="font-size:2rem;opacity:.4">&#128202;</div>
+                    <div class="fw-semibold mt-2">No coding data available</div>
+                    <div class="small mt-1">No claims with blank FirstBilledDate found. Try adjusting your filters.</div>
+                </div>
+            }
+        </div>
+
+        <!-- ??? Payer Breakdown tab pane ?????????????????????????? -->
+        <div class="tab-pane fade" id="payer-breakdown-pane" role="tabpanel" aria-labelledby="payer-breakdown-tab">
+            @if (Model.PayerBreakdownRows.Count > 0 && pbYears.Count > 0)
+            {
+                <div class="pr-wrap">
+                    <div class="pr-scroll">
+                        <table class="pr-table">
+                            <colgroup>
+                                <col style="width:220px" />
+                                @foreach (var year in pbYears)
+                                {
+                                    var pbMons = pbMonthsByYear.ContainsKey(year) ? pbMonthsByYear[year] : new List<string>();
+                                    foreach (var mk in pbMons)
+                                    {
+                                        <col style="width:72px" />
+                                    }
+                                    <col style="width:80px" />
+                                }
+                                <col style="width:86px" />
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th rowspan="2">Payer</th>
+                                    @foreach (var year in pbYears)
+                                    {
+                                        var pbMons = pbMonthsByYear.ContainsKey(year) ? pbMonthsByYear[year] : new List<string>();
+                                        <th colspan="@(pbMons.Count + 1)">@year</th>
+                                    }
+                                    <th class="pr-grand-total">Grand Total</th>
+                                </tr>
+                                <tr>
+                                    @foreach (var year in pbYears)
+                                    {
+                                        var pbMons = pbMonthsByYear.ContainsKey(year) ? pbMonthsByYear[year] : new List<string>();
+                                        foreach (var mk in pbMons)
+                                        {
+                                            <th class="pr-month-data">@MonthLabel(mk)</th>
+                                        }
+                                        <th class="pr-year-total">Year @year Total</th>
+                                    }
+                                    <th class="pr-grand-total"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var payer in Model.PayerBreakdownRows)
+                                {
+                                    <tr class="pr-panel-row">
+                                        <td>@payer.PayerName</td>
+                                        @foreach (var year in pbYears)
+                                        {
+                                            var pbMons = pbMonthsByYear.ContainsKey(year) ? pbMonthsByYear[year] : new List<string>();
+                                            foreach (var mk in pbMons)
+                                            {
+                                                <td class="pr-month-data">@PbCell(payer.ByMonth, mk).ToString("N0")</td>
+                                            }
+                                            <td class="pr-year-total">@PbYear(payer.ByYear, year).ToString("N0")</td>
+                                        }
+                                        <td class="pr-grand-total">@payer.GrandTotal.ToString("N0")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr class="pr-total-row">
+                                    <td>Grand Total</td>
+                                    @foreach (var year in pbYears)
+                                    {
+                                        var pbMons = pbMonthsByYear.ContainsKey(year) ? pbMonthsByYear[year] : new List<string>();
+                                        foreach (var mk in pbMons)
+                                        {
+                                            <td class="pr-month-data">@PbCell(Model.PayerBreakdownGrandByMonth, mk).ToString("N0")</td>
+                                        }
+                                        <td class="pr-year-total">@PbGrandYear(year).ToString("N0")</td>
+                                    }
+                                    <td class="pr-grand-total">@pbGrandTotal.ToString("N0")</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5 text-muted">
+                    <div style="font-size:2rem;opacity:.4">&#128202;</div>
+                    <div class="fw-semibold mt-2">No payer breakdown data available</div>
+                    <div class="small mt-1">Try adjusting your filters or selecting a different lab.</div>
+                </div>
+            }
+        </div>
+
+        <!-- ??? Payer X Panel tab pane ??????????????????????????? -->
+        <div class="tab-pane fade" id="payer-panel-pane" role="tabpanel" aria-labelledby="payer-panel-tab">
+            @if (Model.PayerPanelRows.Count > 0 && pxpPanels.Count > 0)
+            {
+                <div class="pr-wrap">
+                    <div class="pr-scroll">
+                        <table class="pr-table">
+                            <colgroup>
+                                <col style="width:220px" />
+                                @foreach (var panel in pxpPanels)
+                                {
+                                    <col style="width:68px" />
+                                    <col style="width:86px" />
+                                }
+                                <col style="width:72px" />
+                                <col style="width:90px" />
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th rowspan="2">Payer x Panel</th>
+                                    @foreach (var panel in pxpPanels)
+                                    {
+                                        <th colspan="2">@panel</th>
+                                    }
+                                    <th colspan="2" class="pr-grand-total">Grand Total</th>
+                                </tr>
+                                <tr>
+                                    @foreach (var panel in pxpPanels)
+                                    {
+                                        <th class="pr-month-data">No. of Claims</th>
+                                        <th class="pr-month-data">Total Billed Charges</th>
+                                    }
+                                    <th class="pr-grand-total">No. of Claims</th>
+                                    <th class="pr-grand-total">Total Billed Charges</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var payer in Model.PayerPanelRows)
+                                {
+                                    <tr class="pr-panel-row">
+                                        <td>@payer.PayerName</td>
+                                        @foreach (var panel in pxpPanels)
+                                        {
+                                            <td class="pr-month-data">@PxpClaims(payer.ByPanel, panel).ToString("N0")</td>
+                                            <td class="pr-month-data">@PxpCharges(payer.ByPanel, panel).ToString("C0")</td>
+                                        }
+                                        <td class="pr-grand-total">@payer.GrandTotalClaims.ToString("N0")</td>
+                                        <td class="pr-grand-total">@payer.GrandTotalCharges.ToString("C0")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr class="pr-total-row">
+                                    <td>Grand Total</td>
+                                    @foreach (var panel in pxpPanels)
+                                    {
+                                        <td class="pr-month-data">@PxpClaims(Model.PayerPanelGrandByPanel, panel).ToString("N0")</td>
+                                        <td class="pr-month-data">@PxpCharges(Model.PayerPanelGrandByPanel, panel).ToString("C0")</td>
+                                    }
+                                    <td class="pr-grand-total">@Model.PayerPanelGrandTotalClaims.ToString("N0")</td>
+                                    <td class="pr-grand-total">@Model.PayerPanelGrandTotalCharges.ToString("C0")</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5 text-muted">
+                    <div style="font-size:2rem;opacity:.4">&#128202;</div>
+                    <div class="fw-semibold mt-2">No payer x panel data available</div>
+                    <div class="small mt-1">Try adjusting your filters or selecting a different lab.</div>
+                </div>
+            }
+        </div>
+
+        <!-- ??? Unbilled X Aging tab pane ???????????????????????? -->
+        <div class="tab-pane fade" id="unbilled-aging-pane" role="tabpanel" aria-labelledby="unbilled-aging-tab">
+            @if (Model.UnbilledAgingRows.Count > 0)
+            {
+                <div class="pr-wrap">
+                    <div class="pr-scroll">
+                        <table class="pr-table">
+                            <colgroup>
+                                <col style="width:220px" />
+                                @foreach (var bk in agingBuckets)
+                                {
+                                    <col style="width:68px" />
+                                    <col style="width:86px" />
+                                }
+                                <col style="width:72px" />
+                                <col style="width:90px" />
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th rowspan="2">Unbilled x Aging</th>
+                                    @foreach (var bk in agingBuckets)
+                                    {
+                                        <th colspan="2">@bk</th>
+                                    }
+                                    <th colspan="2" class="pr-grand-total">Grand Total</th>
+                                </tr>
+                                <tr>
+                                    @foreach (var bk in agingBuckets)
+                                    {
+                                        <th class="pr-month-data">No. of Claims</th>
+                                        <th class="pr-month-data">Total Billed Charges</th>
+                                    }
+                                    <th class="pr-grand-total">No. of Claims</th>
+                                    <th class="pr-grand-total">Total Billed Charges</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in Model.UnbilledAgingRows)
+                                {
+                                    <tr class="pr-panel-row">
+                                        <td>@row.PanelName</td>
+                                        @foreach (var bk in agingBuckets)
+                                        {
+                                            <td class="pr-month-data">@UaClaims(row.ByBucket, bk).ToString("N0")</td>
+                                            <td class="pr-month-data">@UaCharges(row.ByBucket, bk).ToString("C0")</td>
+                                        }
+                                        <td class="pr-grand-total">@row.GrandTotalClaims.ToString("N0")</td>
+                                        <td class="pr-grand-total">@row.GrandTotalCharges.ToString("C0")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr class="pr-total-row">
+                                    <td>Grand Total</td>
+                                    @foreach (var bk in agingBuckets)
+                                    {
+                                        <td class="pr-month-data">@UaClaims(Model.UnbilledAgingGrandByBucket, bk).ToString("N0")</td>
+                                        <td class="pr-month-data">@UaCharges(Model.UnbilledAgingGrandByBucket, bk).ToString("C0")</td>
+                                    }
+                                    <td class="pr-grand-total">@Model.UnbilledAgingGrandTotalClaims.ToString("N0")</td>
+                                    <td class="pr-grand-total">@Model.UnbilledAgingGrandTotalCharges.ToString("C0")</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5 text-muted">
+                    <div style="font-size:2rem;opacity:.4">&#128202;</div>
+                    <div class="fw-semibold mt-2">No unbilled aging data available</div>
+                    <div class="small mt-1">No claims with blank FirstBilledDate found. Try adjusting your filters.</div>
+                </div>
+            }
+        </div>
+
+        <!-- ??? CPT Breakdown tab pane ??????????????????????????? -->
+        <div class="tab-pane fade" id="cpt-breakdown-pane" role="tabpanel" aria-labelledby="cpt-breakdown-tab">
+            @if (Model.CptBreakdownRows.Count > 0 && cptYears.Count > 0)
+            {
+                <div class="pr-wrap">
+                    <div class="pr-scroll">
+                        <table class="pr-table">
+                            <colgroup>
+                                <col style="width:140px" />
+                                @foreach (var year in cptYears)
+                                {
+                                    var cgMons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
+                                    foreach (var mk in cgMons)
+                                    {
+                                        <col style="width:56px" />
+                                        <col style="width:72px" />
+                                    }
+                                    <col style="width:62px" />
+                                    <col style="width:78px" />
+                                }
+                                <col style="width:62px" />
+                                <col style="width:78px" />
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th rowspan="3">CPT Codes</th>
+                                    @foreach (var year in cptYears)
+                                    {
+                                        var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
+                                        int monthDataCols = mons.Count * 2;
+                                        int yearTotalCols = 2;
+                                        <th colspan="@(monthDataCols + yearTotalCols)">@year</th>
+                                    }
+                                    <th colspan="2" class="pr-grand-total">Grand Total</th>
+                                </tr>
+                                <tr>
+                                    @foreach (var year in cptYears)
+                                    {
+                                        var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
+                                        foreach (var mk in mons)
+                                        {
+                                            <th colspan="2">@MonthLabel(mk)</th>
+                                        }
+                                        <th colspan="2" class="pr-year-total">Year @year Total</th>
+                                    }
+                                    <th colspan="2" class="pr-grand-total"></th>
+                                </tr>
+                                <tr>
+                                    @foreach (var year in cptYears)
+                                    {
+                                        var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
+                                        foreach (var mk in mons)
+                                        {
+                                            <th class="pr-month-data">Billed Units</th>
+                                            <th class="pr-month-data">Billed Amount</th>
+                                        }
+                                        <th class="pr-year-total">Billed Units</th>
+                                        <th class="pr-year-total">Billed Amount</th>
+                                    }
+                                    <th class="pr-grand-total">Billed Units</th>
+                                    <th class="pr-grand-total">Billed Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in Model.CptBreakdownRows)
+                                {
+                                    <tr class="pr-panel-row">
+                                        <td>@row.CptCode</td>
+                                        @foreach (var year in cptYears)
+                                        {
+                                            var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
+                                            foreach (var mk in mons)
+                                            {
+                                                <td class="pr-month-data">@CptUnits(row.ByMonth, mk).ToString("N0")</td>
+                                                <td class="pr-month-data">@CptCharges(row.ByMonth, mk).ToString("C0")</td>
+                                            }
+                                            <td class="pr-year-total">@CptYearUnits(row.ByYear, year).ToString("N0")</td>
+                                            <td class="pr-year-total">@CptYearCharges(row.ByYear, year).ToString("C0")</td>
+                                        }
+                                        <td class="pr-grand-total">@row.GrandTotalUnits.ToString("N0")</td>
+                                        <td class="pr-grand-total">@row.GrandTotalCharges.ToString("C0")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr class="pr-total-row">
+                                    <td>Grand Total</td>
+                                    @foreach (var year in cptYears)
+                                    {
+                                        var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
+                                        foreach (var mk in mons)
+                                        {
+                                            <td class="pr-month-data">@CptUnits(Model.CptBreakdownGrandByMonth, mk).ToString("N0")</td>
+                                            <td class="pr-month-data">@CptCharges(Model.CptBreakdownGrandByMonth, mk).ToString("C0")</td>
+                                        }
+                                        <td class="pr-year-total">@CptGrandYearUnits(year).ToString("N0")</td>
+                                        <td class="pr-year-total">@CptGrandYearCharges(year).ToString("C0")</td>
+                                    }
+                                    <td class="pr-grand-total">@cptGrandUnits.ToString("N0")</td>
+                                    <td class="pr-grand-total">@cptGrandCharges.ToString("C0")</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5 text-muted">
+                    <div style="font-size:2rem;opacity:.4">&#128202;</div>
+                    <div class="fw-semibold mt-2">No CPT breakdown data available</div>
+                    <div class="small mt-1">No billed line-level data found. Try adjusting your filters.</div>
+                </div>
+            }
+        </div>
+
+    </div>
+}
+
+<script>
+    // Multi-select dropdown widget (matches Clinic Summary pattern)
+    document.addEventListener('DOMContentLoaded', function () {
+        document.querySelectorAll('.pr-ms').forEach(function (ms) {
+            var btn = ms.querySelector('.pr-ms-btn');
+            var panel = ms.querySelector('.pr-ms-panel');
+            var search = ms.querySelector('.pr-ms-search');
+            var labels = ms.querySelectorAll('.pr-ms-list label');
+            var labelEl = ms.querySelector('.pr-ms-label');
+            var countEl = ms.querySelector('.pr-ms-count');
+
+            function updateLabel() {
+                var checked = ms.querySelectorAll('.pr-ms-list input:checked');
+                if (checked.length === 0) {
+                    labelEl.textContent = 'All';
+                    countEl.style.display = 'none';
+                } else if (checked.length === 1) {
+                    labelEl.textContent = checked[0].value;
+                    countEl.style.display = 'none';
+                } else {
+                    labelEl.textContent = checked[0].value;
+                    countEl.textContent = '+' + (checked.length - 1);
+                    countEl.style.display = '';
+                }
+            }
+
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                document.querySelectorAll('.pr-ms-panel.open').forEach(function (p) {
+                    if (p !== panel) p.classList.remove('open');
+                });
+                panel.classList.toggle('open');
+                if (panel.classList.contains('open') && search) {
+                    search.value = '';
+                    search.focus();
+                    labels.forEach(function (l) { l.classList.remove('pr-ms-hidden'); });
+                }
+            });
+
+            if (search) {
+                search.addEventListener('input', function () {
+                    var q = this.value.toLowerCase();
+                    labels.forEach(function (l) {
+                        var text = l.textContent.toLowerCase();
+                        l.classList.toggle('pr-ms-hidden', q.length > 0 && text.indexOf(q) === -1);
+                    });
+                });
+            }
+
+            ms.querySelectorAll('.pr-ms-list input').forEach(function (cb) {
+                cb.addEventListener('change', updateLabel);
+            });
+
+            panel.addEventListener('click', function (e) { e.stopPropagation(); });
+
+            updateLabel();
+        });
+
+        document.addEventListener('click', function () {
+            document.querySelectorAll('.pr-ms-panel.open').forEach(function (p) {
+                p.classList.remove('open');
+            });
+        });
+
+        // Export Excel — reuse filter form values to build a download URL
+        var exportBtn = document.getElementById('exportExcelBtn');
+        if (exportBtn) {
+            exportBtn.addEventListener('click', function () {
+                var form = document.getElementById('prFilterForm');
+                if (!form) return;
+                var params = new URLSearchParams(new FormData(form));
+                var url = '@Url.Action("ExportProductionReportExcel", "Dashboard")' + '?' + params.toString();
+                if (window.lmdExcelDownload) {
+                    window.lmdExcelDownload(url);
+                } else {
+                    window.location.href = url;
+                }
+            });
+        }
+    });
+</script>

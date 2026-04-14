@@ -1,4 +1,4 @@
-@model LabMetricsDashboard.Models.LineLevelViewModel
+@model LineLevelViewModel
 @{
     ViewData["Title"]       = $"Line Level – {Model.SelectedLab}";
     ViewData["SelectedLab"] = Model.SelectedLab;
@@ -6,201 +6,322 @@
 
     var routeValues = new Dictionary<string, string?>
     {
-        ["lab"]               = Model.SelectedLab,
-        ["filterPayerName"]   = Model.FilterPayerName,
-        ["filterPayerType"]   = Model.FilterPayerType,
-        ["filterClaimStatus"] = Model.FilterClaimStatus,
-        ["filterPayStatus"]   = Model.FilterPayStatus,
-        ["filterCPTCode"]     = Model.FilterCPTCode,
-        ["filterClinicName"]  = Model.FilterClinicName,
-        ["filterDenialCode"]  = Model.FilterDenialCode,
+        ["lab"]             = Model.SelectedLab,
+        ["filterPayerName"] = Model.FilterPayerName,
+        ["filterDenialCode"]= Model.FilterDenialCode,
+    };
+    var routeListValues = new Dictionary<string, List<string>>
+    {
+        ["filterPayerTypes"]    = Model.FilterPayerTypes,
+        ["filterClaimStatuses"] = Model.FilterClaimStatuses,
+        ["filterPayStatuses"]   = Model.FilterPayStatuses,
+        ["filterCPTCodes"]      = Model.FilterCPTCodes,
+        ["filterClinicNames"]   = Model.FilterClinicNames,
     };
 }
 
-<div class="d-flex align-items-center justify-content-between mb-3">
-    <h2 class="mb-0">Line Level Details</h2>
-    <a asp-controller="Dashboard" asp-action="Index" asp-route-lab="@Model.SelectedLab"
-       class="btn btn-sm btn-outline-secondary">&larr; Back to Dashboard</a>
+<style>
+    .ll-filter-panel { background:#fff; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,.07); }
+    .ll-filter-badge { font-size:.7rem; vertical-align:middle; }
+    .ll-data-card    { border:none; border-radius:12px; box-shadow:0 2px 14px rgba(0,0,0,.08); overflow:hidden; }
+    .ll-data-card .card-header { background:linear-gradient(135deg,#0d1b2a,#1565c0); border-radius:12px 12px 0 0; }
+    .ll-table th, .ll-table td { font-size:.78rem; padding:.38rem .55rem; white-space:nowrap; vertical-align:middle; }
+    .ll-table thead th { background:#253858; color:#fff; font-weight:600; position:sticky; top:0; z-index:2; }
+    .ll-table tbody tr:nth-child(odd)  { background:#fafbfc; }
+    .ll-table tbody tr:nth-child(even) { background:#fff; }
+    .ll-table tbody tr:hover { background:#eef4ff; }
+    .ll-table td.amt { text-align:right; font-variant-numeric:tabular-nums; }
+
+    /* Multi-select dropdown */
+    .cs-ms { position:relative; }
+    .cs-ms-btn {
+        display:flex; align-items:center; justify-content:space-between;
+        width:100%; padding:.3rem .6rem; font-size:.8rem;
+        border:1px solid #ced4da; border-radius:.375rem;
+        background:#fff; cursor:pointer; min-height:31px;
+        white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    .cs-ms-btn:hover { border-color:#7B8B8E; }
+    .cs-ms-btn .cs-ms-count {
+        background:#1565c0; color:#fff; font-size:.65rem;
+        border-radius:10px; padding:0 .45rem; margin-left:.4rem;
+        font-weight:700; flex-shrink:0;
+    }
+    .cs-ms-panel {
+        display:none; position:absolute; z-index:100; top:100%;
+        left:0; right:0; background:#fff; border:1px solid #ced4da;
+        border-radius:.375rem; box-shadow:0 4px 16px rgba(0,0,0,.12);
+        margin-top:2px; max-height:280px; overflow:hidden;
+    }
+    .cs-ms-panel.open { display:flex; flex-direction:column; }
+    .cs-ms-search {
+        border:none; border-bottom:1px solid #e9ecef;
+        padding:.4rem .6rem; font-size:.78rem; outline:none; width:100%;
+    }
+    .cs-ms-list { overflow-y:auto; max-height:220px; padding:.25rem 0; }
+    .cs-ms-list label {
+        display:flex; align-items:center; gap:.4rem;
+        padding:.25rem .6rem; font-size:.78rem; cursor:pointer; margin:0;
+    }
+    .cs-ms-list label:hover { background:#edf0f0; }
+    .cs-ms-list label.cs-ms-hidden { display:none; }
+</style>
+
+<!-- Header -->
+<h2 class="mb-3 fw-bold">&#128203; Line Level Details <span class="badge bg-primary bg-gradient fw-semibold" style="font-size:.45em;vertical-align:middle;border-radius:20px;padding:.35em .85em">@Model.SelectedLab</span></h2>
+
+<!-- Collapsible filter panel -->
+<div class="ll-filter-panel p-3 mb-4">
+    <div class="d-flex align-items-center justify-content-between mb-2">
+        <span class="fw-semibold" style="font-size:.9rem">
+            <i class="bi bi-funnel"></i> Filters
+            @if (Model.HasFilters)
+            {
+                <span class="badge bg-primary ll-filter-badge ms-1">Active</span>
+            }
+        </span>
+        <button class="btn btn-sm btn-link text-muted p-0" type="button"
+                data-bs-toggle="collapse" data-bs-target="#lineFilterBody"
+                aria-expanded="@(Model.HasFilters ? "true" : "false")">
+            @Html.Raw(Model.HasFilters ? "&#9650; Hide" : "&#9660; Show")
+        </button>
+    </div>
+    <div id="lineFilterBody" class="collapse @(Model.HasFilters ? "show" : "")">
+        <form id="lineFilterForm" method="get" asp-controller="Dashboard" asp-action="LineLevel" data-lab-form>
+            <input type="hidden" name="lab" value="@Model.SelectedLab" />
+            <div class="row g-2 align-items-end mb-2">
+                <!-- Payer Name (text search) -->
+                <div class="col-sm-6 col-md-2">
+                    <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PAYER NAME</label>
+                    <input type="text" name="filterPayerName" value="@Model.FilterPayerName"
+                           class="form-control form-control-sm" placeholder="Search…" />
+                </div>
+                <!-- Payer Type -->
+                <div class="col-sm-6 col-md-2">
+                    <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PAYER TYPE</label>
+                    <div class="cs-ms" data-ms-name="filterPayerTypes">
+                        <div class="cs-ms-btn" tabindex="0">
+                            <span class="cs-ms-label">All</span>
+                            <span class="cs-ms-count" style="display:none">0</span>
+                        </div>
+                        <div class="cs-ms-panel">
+                            <input type="text" class="cs-ms-search" placeholder="Search payer types…" autocomplete="off" />
+                            <div class="cs-ms-list">
+                                @foreach (var pt in Model.PayerTypes)
+                                {
+                                    <label><input type="checkbox" name="filterPayerTypes" value="@pt"
+                                        @(Model.FilterPayerTypes.Contains(pt) ? "checked" : "") /> @pt</label>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- CPT Code -->
+                <div class="col-sm-6 col-md-2">
+                    <label class="form-label fw-semibold mb-1" style="font-size:.75rem">CPT CODE</label>
+                    <div class="cs-ms" data-ms-name="filterCPTCodes">
+                        <div class="cs-ms-btn" tabindex="0">
+                            <span class="cs-ms-label">All</span>
+                            <span class="cs-ms-count" style="display:none">0</span>
+                        </div>
+                        <div class="cs-ms-panel">
+                            <input type="text" class="cs-ms-search" placeholder="Search CPT codes…" autocomplete="off" />
+                            <div class="cs-ms-list">
+                                @foreach (var cpt in Model.CPTCodes)
+                                {
+                                    <label><input type="checkbox" name="filterCPTCodes" value="@cpt"
+                                        @(Model.FilterCPTCodes.Contains(cpt) ? "checked" : "") /> @cpt</label>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Claim Status -->
+                <div class="col-sm-6 col-md-2">
+                    <label class="form-label fw-semibold mb-1" style="font-size:.75rem">CLAIM STATUS</label>
+                    <div class="cs-ms" data-ms-name="filterClaimStatuses">
+                        <div class="cs-ms-btn" tabindex="0">
+                            <span class="cs-ms-label">All</span>
+                            <span class="cs-ms-count" style="display:none">0</span>
+                        </div>
+                        <div class="cs-ms-panel">
+                            <input type="text" class="cs-ms-search" placeholder="Search statuses…" autocomplete="off" />
+                            <div class="cs-ms-list">
+                                @foreach (var cs in Model.ClaimStatuses)
+                                {
+                                    <label><input type="checkbox" name="filterClaimStatuses" value="@cs"
+                                        @(Model.FilterClaimStatuses.Contains(cs) ? "checked" : "") /> @cs</label>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Pay Status -->
+                <div class="col-sm-6 col-md-1">
+                    <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PAY STATUS</label>
+                    <div class="cs-ms" data-ms-name="filterPayStatuses">
+                        <div class="cs-ms-btn" tabindex="0">
+                            <span class="cs-ms-label">All</span>
+                            <span class="cs-ms-count" style="display:none">0</span>
+                        </div>
+                        <div class="cs-ms-panel">
+                            <input type="text" class="cs-ms-search" placeholder="Search…" autocomplete="off" />
+                            <div class="cs-ms-list">
+                                @foreach (var ps in Model.PayStatuses)
+                                {
+                                    <label><input type="checkbox" name="filterPayStatuses" value="@ps"
+                                        @(Model.FilterPayStatuses.Contains(ps) ? "checked" : "") /> @ps</label>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Clinic -->
+                <div class="col-sm-6 col-md-2">
+                    <label class="form-label fw-semibold mb-1" style="font-size:.75rem">CLINIC</label>
+                    <div class="cs-ms" data-ms-name="filterClinicNames">
+                        <div class="cs-ms-btn" tabindex="0">
+                            <span class="cs-ms-label">All</span>
+                            <span class="cs-ms-count" style="display:none">0</span>
+                        </div>
+                        <div class="cs-ms-panel">
+                            <input type="text" class="cs-ms-search" placeholder="Search clinics…" autocomplete="off" />
+                            <div class="cs-ms-list">
+                                @foreach (var cn in Model.ClinicNames)
+                                {
+                                    <label><input type="checkbox" name="filterClinicNames" value="@cn"
+                                        @(Model.FilterClinicNames.Contains(cn) ? "checked" : "") /> @cn</label>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Denial Code (text search) -->
+                <div class="col-sm-6 col-md-1">
+                    <label class="form-label fw-semibold mb-1" style="font-size:.75rem">DENIAL CODE</label>
+                    <input type="text" name="filterDenialCode" value="@Model.FilterDenialCode"
+                           class="form-control form-control-sm" placeholder="Search…" />
+                </div>
+            </div>
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-primary btn-sm">Apply Filters</button>
+                <a asp-controller="Dashboard" asp-action="LineLevel" asp-route-lab="@Model.SelectedLab"
+                   class="btn btn-outline-secondary btn-sm">Clear</a>
+            </div>
+        </form>
+    </div>
 </div>
 
-<!-- Filter form -->
-<form method="get" asp-controller="Dashboard" asp-action="LineLevel"
-      class="card border-0 shadow-sm p-3 mb-4" data-lab-form>
-    <div class="row g-2 align-items-end">
-        <div class="col-sm-6 col-md-2">
-            <label class="form-label fw-semibold mb-1">Lab</label>
-            <select name="lab" class="form-select form-select-sm"
-                    data-lab-selector onchange="this.form.submit()">
-                @foreach (var lab in Model.AvailableLabs)
-                {
-                    <option value="@lab" selected="@(lab == Model.SelectedLab ? "selected" : null)">@lab</option>
-                }
-            </select>
-        </div>
-        <div class="col-sm-6 col-md-2">
-            <label class="form-label fw-semibold mb-1">Payer Name</label>
-            <input type="text" name="filterPayerName" value="@Model.FilterPayerName"
-                   class="form-control form-control-sm" placeholder="Search…" />
-        </div>
-        <div class="col-sm-6 col-md-2">
-            <label class="form-label fw-semibold mb-1">Payer Type</label>
-            <select name="filterPayerType" class="form-select form-select-sm">
-                <option value="">All</option>
-                @foreach (var pt in Model.PayerTypes)
-                {
-                    <option value="@pt" selected="@(pt == Model.FilterPayerType ? "selected" : null)">@pt</option>
-                }
-            </select>
-        </div>
-        <div class="col-sm-6 col-md-2">
-            <label class="form-label fw-semibold mb-1">CPT Code</label>
-            <select name="filterCPTCode" class="form-select form-select-sm">
-                <option value="">All</option>
-                @foreach (var cpt in Model.CPTCodes)
-                {
-                    <option value="@cpt" selected="@(cpt == Model.FilterCPTCode ? "selected" : null)">@cpt</option>
-                }
-            </select>
-        </div>
-        <div class="col-sm-6 col-md-1">
-            <label class="form-label fw-semibold mb-1">Claim Status</label>
-            <select name="filterClaimStatus" class="form-select form-select-sm">
-                <option value="">All</option>
-                @foreach (var cs in Model.ClaimStatuses)
-                {
-                    <option value="@cs" selected="@(cs == Model.FilterClaimStatus ? "selected" : null)">@cs</option>
-                }
-            </select>
-        </div>
-        <div class="col-sm-6 col-md-1">
-            <label class="form-label fw-semibold mb-1">Pay Status</label>
-            <select name="filterPayStatus" class="form-select form-select-sm">
-                <option value="">All</option>
-                @foreach (var ps in Model.PayStatuses)
-                {
-                    <option value="@ps" selected="@(ps == Model.FilterPayStatus ? "selected" : null)">@ps</option>
-                }
-            </select>
-        </div>
-        <div class="col-sm-6 col-md-1">
-            <label class="form-label fw-semibold mb-1">Clinic</label>
-            <select name="filterClinicName" class="form-select form-select-sm">
-                <option value="">All</option>
-                @foreach (var cn in Model.ClinicNames)
-                {
-                    <option value="@cn" selected="@(cn == Model.FilterClinicName ? "selected" : null)">@cn</option>
-                }
-            </select>
-        </div>
-        <div class="col-sm-6 col-md-1">
-            <label class="form-label fw-semibold mb-1">Denial Code</label>
-            <input type="text" name="filterDenialCode" value="@Model.FilterDenialCode"
-                   class="form-control form-control-sm" placeholder="Search…" />
-        </div>
-    </div>
-    <div class="mt-2 d-flex gap-2">
-        <button type="submit" class="btn btn-primary btn-sm">Apply Filters</button>
-        <a asp-controller="Dashboard" asp-action="LineLevel" asp-route-lab="@Model.SelectedLab"
-           class="btn btn-outline-secondary btn-sm">Clear</a>
-    </div>
-</form>
-
-@if (Model.ResolvedFilePath is not null)
+@if (!string.IsNullOrEmpty(Model.DataSource))
 {
-    <div class="alert alert-light border d-flex align-items-center gap-2 py-2 mb-3" style="font-size:0.8rem">
-        <span class="text-success fw-bold">&#10003;</span>
+    <div class="d-flex align-items-center gap-2 mb-3" style="font-size:.78rem">
+        <span class="badge bg-success"><i class="bi bi-database-check"></i></span>
         <span class="text-muted">Source:</span>
-        <span class="text-break fw-semibold" title="@Model.ResolvedFilePath">@Model.ResolvedFilePath</span>
+        <span class="fw-semibold">@Model.DataSource</span>
     </div>
 }
 else
 {
     <div class="alert alert-warning py-2 mb-3" style="font-size:0.8rem">
-        No Line Level CSV file found for <strong>@Model.SelectedLab</strong>.
+        No Line Level data found for <strong>@Model.SelectedLab</strong>.
     </div>
 }
 
 @{
-    ViewData["RouteValues"] = routeValues;
+    ViewData["RouteValues"]     = routeValues;
+    ViewData["RouteListValues"] = routeListValues;
 }
 <partial name="_Pager" model="Model.Paging" />
 
-<div class="table-responsive mt-2">
-    <table class="table table-sm table-hover table-bordered align-middle" style="font-size:0.78rem">
-        <thead class="table-dark sticky-top">
-            <tr>
-                <th>Claim ID</th>
-                <th>Patient ID</th>
-                <th>Date of Service</th>
-                <th>Panel</th>
-                <th>CPT Code</th>
-                <th class="text-center">Units</th>
-                <th>Modifier</th>
-                <th>Payer Name</th>
-                <th>Payer Type</th>
-                <th>Clinic</th>
-                <th class="text-end">Charges</th>
-                <th class="text-end">Chg/Unit</th>
-                <th class="text-end">Allowed</th>
-                <th class="text-end">Ins. Pmt</th>
-                <th class="text-end">Ins. Pmt/Unit</th>
-                <th class="text-end">Pat. Pmt</th>
-                <th class="text-end">Total Pmts</th>
-                <th class="text-end">Ins. Balance</th>
-                <th class="text-end">Pat. Balance</th>
-                <th class="text-end">Total Balance</th>
-                <th>Claim Status</th>
-                <th>Pay Status</th>
-                <th>Denial Code</th>
-                <th>ICD Code</th>
-                <th class="text-center">Days to Bill</th>
-                <th class="text-center">Days to Post</th>
-            </tr>
-        </thead>
-        <tbody>
-            @if (!Model.Records.Any())
-            {
+<!-- Data card -->
+<div class="card ll-data-card mb-3">
+    <div class="card-header text-white d-flex align-items-center justify-content-between py-2">
+        <div>
+            <span class="fw-bold" style="font-size:.9rem">&#128203; Line Level Records</span>
+            <span class="ms-2" style="font-size:.72rem;opacity:.8">
+                @Model.Paging.TotalFiltered.ToString("N0") of @Model.Paging.TotalAll.ToString("N0") records
+            </span>
+        </div>
+        <a asp-controller="Dashboard" asp-action="Index" asp-route-lab="@Model.SelectedLab"
+           class="btn btn-sm btn-outline-light" style="font-size:.75rem">&larr; Dashboard</a>
+    </div>
+    <div class="table-responsive" style="max-height:72vh;overflow-y:auto">
+        <table class="table table-sm table-bordered align-middle ll-table mb-0">
+            <thead>
                 <tr>
-                    <td colspan="26" class="text-center text-muted py-4">
-                        No records match the selected filters.
-                    </td>
+                    <th>Claim ID</th>
+                    <th>Patient ID</th>
+                    <th>Date of Service</th>
+                    <th>Panel</th>
+                    <th>CPT Code</th>
+                    <th style="text-align:center">Units</th>
+                    <th>Modifier</th>
+                    <th>Payer Name</th>
+                    <th>Payer Type</th>
+                    <th>Clinic</th>
+                    <th style="text-align:right">Charges</th>
+                    <th style="text-align:right">Chg/Unit</th>
+                    <th style="text-align:right">Allowed</th>
+                    <th style="text-align:right">Ins. Pmt</th>
+                    <th style="text-align:right">Ins. Pmt/Unit</th>
+                    <th style="text-align:right">Pat. Pmt</th>
+                    <th style="text-align:right">Total Pmts</th>
+                    <th style="text-align:right">Ins. Balance</th>
+                    <th style="text-align:right">Pat. Balance</th>
+                    <th style="text-align:right">Total Balance</th>
+                    <th>Claim Status</th>
+                    <th>Pay Status</th>
+                    <th>Denial Code</th>
+                    <th>ICD Code</th>
+                    <th style="text-align:center">Days to Bill</th>
+                    <th style="text-align:center">Days to Post</th>
                 </tr>
-            }
-            @foreach (var r in Model.Records)
-            {
-                <tr>
-                    <td>@r.ClaimID</td>
-                    <td>@r.PatientID</td>
-                    <td>@r.DateOfService</td>
-                    <td>@r.PanelName</td>
-                    <td><span class="badge bg-secondary">@r.CPTCode</span></td>
-                    <td class="text-center">@r.Units</td>
-                    <td>@r.Modifier</td>
-                    <td>@r.PayerName</td>
-                    <td><span class="badge @PayerTypeBadge(r.PayerType)">@r.PayerType</span></td>
-                    <td>@r.ClinicName</td>
-                    <td class="text-end">@r.ChargeAmount.ToString("C")</td>
-                    <td class="text-end">@r.ChargeAmountPerUnit.ToString("C")</td>
-                    <td class="text-end">@r.AllowedAmount.ToString("C")</td>
-                    <td class="text-end">@r.InsurancePayment.ToString("C")</td>
-                    <td class="text-end">@r.InsurancePaymentPerUnit.ToString("C")</td>
-                    <td class="text-end">@r.PatientPayment.ToString("C")</td>
-                    <td class="text-end fw-semibold text-success">@r.TotalPayments.ToString("C")</td>
-                    <td class="text-end">@r.InsuranceBalance.ToString("C")</td>
-                    <td class="text-end">@r.PatientBalance.ToString("C")</td>
-                    <td class="text-end fw-semibold @(r.TotalBalance > 0 ? "text-danger" : "text-muted")">
-                        @r.TotalBalance.ToString("C")
-                    </td>
-                    <td><span class="badge @ClaimStatusBadge(r.ClaimStatus)">@r.ClaimStatus</span></td>
-                    <td><span class="badge @PayStatusBadge(r.PayStatus)">@r.PayStatus</span></td>
-                    <td>@r.DenialCode</td>
-                    <td>@r.ICDCode</td>
-                    <td class="text-center">@r.DaysToBill</td>
-                    <td class="text-center">@r.DaysToPost</td>
-                </tr>
-            }
-        </tbody>
-    </table>
+            </thead>
+            <tbody>
+                @if (!Model.Records.Any())
+                {
+                    <tr>
+                        <td colspan="26" class="text-center text-muted py-4">
+                            No records match the selected filters.
+                        </td>
+                    </tr>
+                }
+                @foreach (var r in Model.Records)
+                {
+                    <tr>
+                        <td>@r.ClaimID</td>
+                        <td>@r.PatientID</td>
+                        <td>@r.DateOfService</td>
+                        <td>@r.PanelName</td>
+                        <td><span class="badge bg-secondary">@r.CPTCode</span></td>
+                        <td style="text-align:center">@r.Units</td>
+                        <td>@r.Modifier</td>
+                        <td>@r.PayerName</td>
+                        <td><span class="badge @PayerTypeBadge(r.PayerType)">@r.PayerType</span></td>
+                        <td>@r.ClinicName</td>
+                        <td class="amt">@r.ChargeAmount.ToString("C")</td>
+                        <td class="amt">@r.ChargeAmountPerUnit.ToString("C")</td>
+                        <td class="amt">@r.AllowedAmount.ToString("C")</td>
+                        <td class="amt">@r.InsurancePayment.ToString("C")</td>
+                        <td class="amt">@r.InsurancePaymentPerUnit.ToString("C")</td>
+                        <td class="amt">@r.PatientPayment.ToString("C")</td>
+                        <td class="amt fw-semibold text-success">@r.TotalPayments.ToString("C")</td>
+                        <td class="amt">@r.InsuranceBalance.ToString("C")</td>
+                        <td class="amt">@r.PatientBalance.ToString("C")</td>
+                        <td class="amt fw-semibold @(r.TotalBalance > 0 ? "text-danger" : "text-muted")">
+                            @r.TotalBalance.ToString("C")
+                        </td>
+                        <td><span class="badge @ClaimStatusBadge(r.ClaimStatus)">@r.ClaimStatus</span></td>
+                        <td><span class="badge @PayStatusBadge(r.PayStatus)">@r.PayStatus</span></td>
+                        <td>@r.DenialCode</td>
+                        <td>@r.ICDCode</td>
+                        <td style="text-align:center">@r.DaysToBill</td>
+                        <td style="text-align:center">@r.DaysToPost</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
 </div>
 
 <partial name="_Pager" model="Model.Paging" />
@@ -231,3 +352,65 @@ else
         _ => "bg-secondary"
     };
 }
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        document.querySelectorAll('.cs-ms').forEach(function (ms) {
+            var btn   = ms.querySelector('.cs-ms-btn');
+            var panel = ms.querySelector('.cs-ms-panel');
+            var search = ms.querySelector('.cs-ms-search');
+            var labels = ms.querySelectorAll('.cs-ms-list label');
+            var labelEl = ms.querySelector('.cs-ms-label');
+            var countEl = ms.querySelector('.cs-ms-count');
+
+            function updateLabel() {
+                var checked = ms.querySelectorAll('.cs-ms-list input:checked');
+                if (checked.length === 0) {
+                    labelEl.textContent = 'All';
+                    countEl.style.display = 'none';
+                } else if (checked.length === 1) {
+                    labelEl.textContent = checked[0].value;
+                    countEl.style.display = 'none';
+                } else {
+                    labelEl.textContent = checked[0].value;
+                    countEl.textContent = '+' + (checked.length - 1);
+                    countEl.style.display = '';
+                }
+            }
+
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                document.querySelectorAll('.cs-ms-panel.open').forEach(function (p) {
+                    if (p !== panel) p.classList.remove('open');
+                });
+                panel.classList.toggle('open');
+                if (panel.classList.contains('open')) {
+                    search.value = '';
+                    search.focus();
+                    labels.forEach(function (l) { l.classList.remove('cs-ms-hidden'); });
+                }
+            });
+
+            search.addEventListener('input', function () {
+                var q = this.value.toLowerCase();
+                labels.forEach(function (l) {
+                    var text = l.textContent.toLowerCase();
+                    l.classList.toggle('cs-ms-hidden', q.length > 0 && text.indexOf(q) === -1);
+                });
+            });
+
+            ms.querySelectorAll('.cs-ms-list input').forEach(function (cb) {
+                cb.addEventListener('change', updateLabel);
+            });
+
+            panel.addEventListener('click', function (e) { e.stopPropagation(); });
+            updateLabel();
+        });
+
+        document.addEventListener('click', function () {
+            document.querySelectorAll('.cs-ms-panel.open').forEach(function (p) {
+                p.classList.remove('open');
+            });
+        });
+    });
+</script>

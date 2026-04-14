@@ -116,22 +116,8 @@
     .bar-cell               { vertical-align:middle; }
 </style>
 
-<!-- ?? Lab selector ???????????????????????????????????????????????????????? -->
-<div class="d-flex align-items-center justify-content-between mb-3">
-    <h2 class="mb-0 fw-bold">Revenue Dashboard</h2>
-    <form method="get" asp-controller="Dashboard" asp-action="Index"
-          class="d-flex align-items-center gap-2" data-lab-form>
-        <label class="fw-semibold me-1 mb-0" for="labSelect">Lab:</label>
-        <select id="labSelect" name="lab"
-                class="form-select form-select-sm" style="min-width:220px"
-                data-lab-selector onchange="this.form.submit()">
-            @foreach (var lab in Model.AvailableLabs)
-            {
-                <option value="@lab" selected="@(lab == Model.SelectedLab ? "selected" : null)">@lab</option>
-            }
-        </select>
-    </form>
-</div>
+
+<h2 class="mb-3 fw-bold">Revenue Dashboard <span class="badge bg-primary bg-gradient fw-semibold" style="font-size:.45em;vertical-align:middle;border-radius:20px;padding:.35em .85em">@Model.SelectedLab</span></h2>
 
 @if (!string.IsNullOrEmpty(Model.SelectedLab))
 {

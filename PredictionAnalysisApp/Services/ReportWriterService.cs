@@ -43,10 +43,10 @@ public class ReportWriterService
 
         var weekStart = DateTime.Today.AddDays(-(((int)DateTime.Today.DayOfWeek + 6) % 7));
 
-        int     predictedCount  = predicted.Count;
-        decimal predictedAmount = predicted.Sum(r => r.ModeAllowedAmount);
-        int     workingCount    = working.Count;
-        decimal workingAmount   = working.Sum(r => r.ModeAllowedAmount);
+        int     predictedCount  = predicted.Select(r => r.VisitNumber).Distinct().Count();
+        decimal predictedAmount = predicted.GroupBy(r => r.VisitNumber).Sum(vg => vg.Max(r => r.ModeAllowedAmount));
+        int     workingCount    = working.Select(r => r.VisitNumber).Distinct().Count();
+        decimal workingAmount   = working.GroupBy(r => r.VisitNumber).Sum(vg => vg.Max(r => r.ModeAllowedAmount));
 
         Console.WriteLine("[Step 4] Summary values:");
         Console.WriteLine($"         Predicted  — Count: {predictedCount,6} | Amount: {predictedAmount,12:C}");
