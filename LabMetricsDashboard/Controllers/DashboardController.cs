@@ -578,6 +578,8 @@ public class DashboardController : Controller
         DateOnly.TryParse(filterDosFrom, out var dosFrom);
         DateOnly.TryParse(filterDosTo, out var dosTo);
 
+        try
+        {
         var result = await _claimLineRepo.GetClaimLevelAsync(
             connStr, dbLabName,
             filterPayerName, filterPayerTypes, filterClaimStatuses,
@@ -636,6 +638,17 @@ public class DashboardController : Controller
         };
 
         return View(vm);
+        }
+        catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException or TimeoutException or OperationCanceledException)
+        {
+            _logger.LogError(ex, "Claim Level query timed out or failed for lab '{LabName}'.", selectedLab);
+            return View(new ClaimLevelViewModel
+            {
+                AvailableLabs = availableLabs,
+                SelectedLab   = selectedLab,
+                ErrorMessage  = $"The query for {selectedLab} took too long and timed out. This lab has a very large dataset. Please apply filters (e.g. date range, payer, clinic) to narrow the results and try again.",
+            });
+        }
     }
 
     /// <summary>Claim Level backed by CSV files (legacy fallback).</summary>
@@ -818,6 +831,8 @@ public class DashboardController : Controller
         var connStr   = labConfig.DbConnectionString!;
         var dbLabName = string.IsNullOrWhiteSpace(labConfig.DbLabName) ? selectedLab : labConfig.DbLabName;
 
+        try
+        {
         var result = await _claimLineRepo.GetLineLevelAsync(
             connStr, dbLabName,
             filterPayerName, filterPayerTypes, filterClaimStatuses,
@@ -846,6 +861,17 @@ public class DashboardController : Controller
         };
 
         return View(vm);
+        }
+        catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException or TimeoutException or OperationCanceledException)
+        {
+            _logger.LogError(ex, "Line Level query timed out or failed for lab '{LabName}'.", selectedLab);
+            return View(new LineLevelViewModel
+            {
+                AvailableLabs = availableLabs,
+                SelectedLab   = selectedLab,
+                ErrorMessage  = $"The query for {selectedLab} took too long and timed out. This lab has a very large dataset. Please apply filters (e.g. date range, payer, clinic) to narrow the results and try again.",
+            });
+        }
     }
 
     /// <summary>Line Level backed by CSV files (legacy fallback).</summary>
@@ -1078,6 +1104,194 @@ public class DashboardController : Controller
     }
 
     /// <summary>
+    /// Returns Clinic Panel Status pivot table as a partial view (loaded via AJAX tab).
+    /// Groups ClaimLevelData by ClinicName → PanelName × ClaimStatus with COUNT(DISTINCT ClaimID).
+    /// </summary>
+    public async Task<IActionResult> ClinicPanelStatus(
+        string? lab,
+        List<string>? filterClinicNames,
+        List<string>? filterSalesRepNames,
+        List<string>? filterPayerNames,
+        List<string>? filterPanelNames,
+        string? filterDosFrom,
+        string? filterDosTo,
+        string? filterFirstBillFrom,
+        string? filterFirstBillTo,
+        CancellationToken ct = default)
+    {
+        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+
+        if (string.IsNullOrWhiteSpace(selectedLab)
+            || !_labSettings.Labs.TryGetValue(selectedLab, out var config)
+            || !config.LineClaimEnable)
+        {
+            return PartialView("_ClinicPanelStatus", new ClinicPanelStatusViewModel
+            {
+                SelectedLab  = selectedLab ?? string.Empty,
+                ErrorMessage = "Clinic Panel Status is not available for this lab.",
+            });
+        }
+
+        var connStr = config.DbConnectionString;
+        if (string.IsNullOrWhiteSpace(connStr))
+        {
+            return PartialView("_ClinicPanelStatus", new ClinicPanelStatusViewModel
+            {
+                SelectedLab  = selectedLab,
+                ErrorMessage = "No connection string configured.",
+            });
+        }
+
+        var dbLabName = string.IsNullOrWhiteSpace(config.DbLabName) ? selectedLab : config.DbLabName;
+        var (cn, sr, pn, pl, dosF, dosT, fbF, fbT) = NormalizeFilters(
+            filterClinicNames, filterSalesRepNames, filterPayerNames, filterPanelNames,
+            filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo);
+
+        try
+        {
+            var vm = await _clinicSummaryRepo.GetClinicPanelStatusAsync(
+                connStr, dbLabName, cn, sr, pn, pl, dosF, dosT, fbF, fbT, ct);
+            return PartialView("_ClinicPanelStatus", vm);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Clinic Panel Status query failed for lab '{LabName}'.", selectedLab);
+            return PartialView("_ClinicPanelStatus", new ClinicPanelStatusViewModel
+            {
+                SelectedLab  = selectedLab,
+                ErrorMessage = $"Failed to load: {ex.Message}",
+            });
+        }
+    }
+
+    /// <summary>
+    /// Returns Clinic $ Analysis pivot table as a partial view (loaded via AJAX tab).
+    /// Groups ClaimLevelData by ClinicName → ClaimStatus with COUNT(DISTINCT ClaimID),
+    /// SUM(ChargeAmount), SUM(InsurancePayment).
+    /// </summary>
+    public async Task<IActionResult> ClinicDollarAnalysis(
+        string? lab,
+        List<string>? filterClinicNames,
+        List<string>? filterSalesRepNames,
+        List<string>? filterPayerNames,
+        List<string>? filterPanelNames,
+        string? filterDosFrom,
+        string? filterDosTo,
+        string? filterFirstBillFrom,
+        string? filterFirstBillTo,
+        CancellationToken ct = default)
+    {
+        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+
+        if (string.IsNullOrWhiteSpace(selectedLab)
+            || !_labSettings.Labs.TryGetValue(selectedLab, out var config)
+            || !config.LineClaimEnable)
+        {
+            return PartialView("_ClinicDollarAnalysis", new ClinicDollarAnalysisViewModel
+            {
+                SelectedLab  = selectedLab ?? string.Empty,
+                ErrorMessage = "Clinic $ Analysis is not available for this lab.",
+            });
+        }
+
+        var connStr = config.DbConnectionString;
+        if (string.IsNullOrWhiteSpace(connStr))
+        {
+            return PartialView("_ClinicDollarAnalysis", new ClinicDollarAnalysisViewModel
+            {
+                SelectedLab  = selectedLab,
+                ErrorMessage = "No connection string configured.",
+            });
+        }
+
+        var dbLabName = string.IsNullOrWhiteSpace(config.DbLabName) ? selectedLab : config.DbLabName;
+        var (cn, sr, pn, pl, dosF, dosT, fbF, fbT) = NormalizeFilters(
+            filterClinicNames, filterSalesRepNames, filterPayerNames, filterPanelNames,
+            filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo);
+
+        try
+        {
+            var vm = await _clinicSummaryRepo.GetClinicDollarAnalysisAsync(
+                connStr, dbLabName, cn, sr, pn, pl, dosF, dosT, fbF, fbT, ct);
+            return PartialView("_ClinicDollarAnalysis", vm);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Clinic $ Analysis query failed for lab '{LabName}'.", selectedLab);
+            return PartialView("_ClinicDollarAnalysis", new ClinicDollarAnalysisViewModel
+            {
+                SelectedLab  = selectedLab,
+                ErrorMessage = $"Failed to load: {ex.Message}",
+            });
+        }
+    }
+
+    /// <summary>
+    /// Returns Clinic Count by DOS Month pivot table as a partial view (loaded via AJAX tab).
+    /// Groups ClaimLevelData by ClinicName × YEAR(DateOfService) × MONTH(DateOfService)
+    /// with COUNT(DISTINCT ClaimID).
+    /// </summary>
+    public async Task<IActionResult> ClinicDosCount(
+        string? lab,
+        List<string>? filterClinicNames,
+        List<string>? filterSalesRepNames,
+        List<string>? filterPayerNames,
+        List<string>? filterPanelNames,
+        string? filterDosFrom,
+        string? filterDosTo,
+        string? filterFirstBillFrom,
+        string? filterFirstBillTo,
+        CancellationToken ct = default)
+    {
+        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+
+        if (string.IsNullOrWhiteSpace(selectedLab)
+            || !_labSettings.Labs.TryGetValue(selectedLab, out var config)
+            || !config.LineClaimEnable)
+        {
+            return PartialView("_ClinicDosCount", new ClinicDosCountViewModel
+            {
+                SelectedLab  = selectedLab ?? string.Empty,
+                ErrorMessage = "Clinic Count by DOS Month is not available for this lab.",
+            });
+        }
+
+        var connStr = config.DbConnectionString;
+        if (string.IsNullOrWhiteSpace(connStr))
+        {
+            return PartialView("_ClinicDosCount", new ClinicDosCountViewModel
+            {
+                SelectedLab  = selectedLab,
+                ErrorMessage = "No connection string configured.",
+            });
+        }
+
+        var dbLabName = string.IsNullOrWhiteSpace(config.DbLabName) ? selectedLab : config.DbLabName;
+        var (cn, sr, pn, pl, dosF, dosT, fbF, fbT) = NormalizeFilters(
+            filterClinicNames, filterSalesRepNames, filterPayerNames, filterPanelNames,
+            filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo);
+
+        try
+        {
+            var vm = await _clinicSummaryRepo.GetClinicDosCountAsync(
+                connStr, dbLabName, cn, sr, pn, pl, dosF, dosT, fbF, fbT, ct);
+            return PartialView("_ClinicDosCount", vm);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Clinic DOS Count query failed for lab '{LabName}'.", selectedLab);
+            return PartialView("_ClinicDosCount", new ClinicDosCountViewModel
+            {
+                SelectedLab  = selectedLab,
+                ErrorMessage = $"Failed to load: {ex.Message}",
+            });
+        }
+    }
+
+    /// <summary>
     /// Downloads the current Clinic Summary filtered data as a formatted Excel file.
     /// Accepts the same filter parameters as <see cref="ClinicSummary"/>.
     /// </summary>
@@ -1151,6 +1365,19 @@ public class DashboardController : Controller
                 AverageInsurancePaidAmount  = rows.Count == 0 ? 0 : Math.Round(rows.Average(r => r.AverageInsurancePaidAmount), 2),
             };
 
+            var (cn, sr, pn, pl, dosF, dosT, fbF, fbT) = NormalizeFilters(
+                filterClinicNames, filterSalesRepNames, filterPayerNames, filterPanelNames,
+                filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo);
+
+            var panelStatusVm = await _clinicSummaryRepo.GetClinicPanelStatusAsync(
+                connStr, dbLabName, cn, sr, pn, pl, dosF, dosT, fbF, fbT, ct);
+
+            var dollarAnalysis = await _clinicSummaryRepo.GetClinicDollarAnalysisAsync(
+                connStr, dbLabName, cn, sr, pn, pl, dosF, dosT, fbF, fbT, ct);
+
+            var dosCountVm = await _clinicSummaryRepo.GetClinicDosCountAsync(
+                connStr, dbLabName, cn, sr, pn, pl, dosF, dosT, fbF, fbT, ct);
+
             using var workbook = ClinicSummaryExcelExportBuilder.CreateWorkbook(
                 rows, totals,
                 result.TopCollectedClinics, result.TopCollectedSalesReps,
@@ -1158,6 +1385,9 @@ public class DashboardController : Controller
                 result.TopDeniedClinics, result.TopDeniedSalesReps,
                 result.TopDeniedPayers, result.TopDeniedPanels,
                 selectedLab,
+                panelStatus: panelStatusVm,
+                dollarAnalysis: dollarAnalysis,
+                dosCount: dosCountVm,
                 activeFilters: new List<(string, IReadOnlyList<string>?)>
                 {
                     ("Clinic", filterClinicNames is { Count: > 0 } ? filterClinicNames : null),
@@ -1930,6 +2160,22 @@ public class DashboardController : Controller
             var uaResult      = unbilledAgingTask.Result;
             var cptResult     = cptBreakdownTask.Result;
 
+            // Fetch raw data for ClaimLevelData and LineLevelData sheets
+            var payerFilter = filterPayerNames.Count > 0 ? filterPayerNames : null;
+            var panelFilter = filterPanelNames.Count > 0 ? filterPanelNames : null;
+            var fbFromFilter = fbFrom != default ? fbFrom : (DateOnly?)null;
+            var fbToFilter = fbTo != default ? fbTo : (DateOnly?)null;
+
+            var claimExportTask = _productionReportRepo.GetClaimLevelDataExportAsync(
+                connStr, payerFilter, panelFilter, fbFromFilter, fbToFilter, ct);
+            var lineExportTask = _productionReportRepo.GetLineLevelDataExportAsync(
+                connStr, payerFilter, panelFilter, fbFromFilter, fbToFilter, ct);
+
+            await Task.WhenAll(claimExportTask, lineExportTask);
+
+            var claimRows = await claimExportTask;
+            var lineRows = await lineExportTask;
+
             var vm = new ProductionReportViewModel
             {
                 AvailableLabs       = availableLabs,
@@ -1976,7 +2222,7 @@ public class DashboardController : Controller
                 CptBreakdownGrandTotalCharges   = cptResult.GrandTotalCharges,
             };
 
-            using var workbook = ProductionReportExcelExportBuilder.CreateWorkbook(vm, selectedLab);
+            using var workbook = ProductionReportExcelExportBuilder.CreateWorkbook(vm, selectedLab, claimRows, lineRows);
 
             await using var stream = new MemoryStream();
             workbook.SaveAs(stream);
@@ -1984,6 +2230,14 @@ public class DashboardController : Controller
 
             var safeLabName = string.Join("_", selectedLab.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)).Trim('_');
             var fileName = $"{safeLabName}_ProductionReport_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
+
+            Response.Cookies.Append("prExportDone", "1", new CookieOptions
+            {
+                Path = "/",
+                HttpOnly = false,
+                SameSite = SameSiteMode.Lax,
+                MaxAge = TimeSpan.FromSeconds(30),
+            });
 
             return File(
                 stream.ToArray(),
@@ -1996,5 +2250,44 @@ public class DashboardController : Controller
             TempData["ExportError"] = $"Export failed: {ex.Message}";
             return RedirectToAction(nameof(ProductionReport), new { lab });
         }
+    }
+
+    /// <summary>
+    /// Normalizes filter parameters: trims empty values from lists and parses date strings.
+    /// </summary>
+    private static (
+        List<string>? ClinicNames, List<string>? SalesRepNames,
+        List<string>? PayerNames, List<string>? PanelNames,
+        DateOnly? DosFrom, DateOnly? DosTo,
+        DateOnly? FirstBillFrom, DateOnly? FirstBillTo)
+        NormalizeFilters(
+            List<string>? filterClinicNames,
+            List<string>? filterSalesRepNames,
+            List<string>? filterPayerNames,
+            List<string>? filterPanelNames,
+            string? filterDosFrom,
+            string? filterDosTo,
+            string? filterFirstBillFrom,
+            string? filterFirstBillTo)
+    {
+        var cn = filterClinicNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList();
+        var sr = filterSalesRepNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList();
+        var pn = filterPayerNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList();
+        var pl = filterPanelNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList();
+
+        DateOnly.TryParse(filterDosFrom, out var dosFrom);
+        DateOnly.TryParse(filterDosTo, out var dosTo);
+        DateOnly.TryParse(filterFirstBillFrom, out var fbFrom);
+        DateOnly.TryParse(filterFirstBillTo, out var fbTo);
+
+        return (
+            cn is { Count: > 0 } ? cn : null,
+            sr is { Count: > 0 } ? sr : null,
+            pn is { Count: > 0 } ? pn : null,
+            pl is { Count: > 0 } ? pl : null,
+            dosFrom != default ? dosFrom : null,
+            dosTo != default ? dosTo : null,
+            fbFrom != default ? fbFrom : null,
+            fbTo != default ? fbTo : null);
     }
 }

@@ -212,7 +212,13 @@
     </div>
 </div>
 
-@if (!string.IsNullOrEmpty(Model.DataSource))
+@if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+{
+    <div class="alert alert-warning mt-3" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-1"></i> @Model.ErrorMessage
+    </div>
+}
+else if (!string.IsNullOrEmpty(Model.DataSource))
 {
     <div class="d-flex align-items-center gap-2 mb-3" style="font-size:.78rem">
         <span class="badge bg-success"><i class="bi bi-database-check"></i></span>
@@ -294,7 +300,7 @@ else
                         <td>@r.DateOfService</td>
                         <td>@r.PanelName</td>
                         <td><span class="badge bg-secondary">@r.CPTCode</span></td>
-                        <td style="text-align:center">@r.Units</td>
+                        <td style="text-align:center">@r.Units.ToString("F0")</td>
                         <td>@r.Modifier</td>
                         <td>@r.PayerName</td>
                         <td><span class="badge @PayerTypeBadge(r.PayerType)">@r.PayerType</span></td>

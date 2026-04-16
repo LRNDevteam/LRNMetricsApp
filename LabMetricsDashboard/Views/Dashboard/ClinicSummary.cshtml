@@ -244,6 +244,29 @@
     color: #0d47a1; border-bottom-color: #1565c0;
 }
 .cs-drilldown-link .bi { font-size: .6rem; margin-left: .2rem; opacity: .6; }
+
+/* ── Tabs ──────────────────────────────────────────────────────── */
+.cs-tabs {
+    display: flex; gap: 0; margin-bottom: 1.25rem;
+    border-bottom: 2px solid #e2e8f0;
+}
+.cs-tab {
+    padding: .55rem 1.25rem; font-size: .78rem; font-weight: 700;
+    color: #64748b; cursor: pointer;
+    border: 2px solid transparent; border-bottom: none;
+    border-radius: 10px 10px 0 0;
+    background: transparent;
+    transition: all .15s; position: relative; bottom: -2px;
+    white-space: nowrap;
+}
+.cs-tab:hover { color: #1565c0; background: #f0f7ff; }
+.cs-tab.active {
+    color: #0e3460; background: #fff;
+    border-color: #e2e8f0; border-bottom-color: #fff;
+}
+.cs-tab .bi { margin-right: .3rem; font-size: .82rem; }
+.cs-tab-panel { display: none; }
+.cs-tab-panel.active { display: block; }
 </style>
 
 <!-- Page heading -->
@@ -266,6 +289,7 @@
     </a>
 </div>
 
+<!-- ── Shared: Helper functions ──────────────────────────────────── -->
 @{
     string PctFlag(decimal pct) => pct > 80
         ? "<span class='cs-flag cs-flag-good'>&#9873;</span>"
@@ -273,8 +297,6 @@
             ? "<span class='cs-flag cs-flag-caution'>&#9873;</span>"
             : "<span class='cs-flag cs-flag-low'>&#9873;</span>";
 
-    // Inverse flag for "lower is better" columns (Denied / Outstanding)
-    // Green when < 30, Orange when 30–80, Red when > 80
     string InversePctFlag(decimal pct) => pct < 30
         ? "<span class='cs-flag cs-flag-good'>&#9873;</span>"
         : pct <= 80
@@ -291,10 +313,10 @@
         $"<span class='cs-pct-val'><span class='cs-pct-num'>{pct}%</span></span>";
 }
 
+<!-- ── Shared: Filter panel (above tabs, applies to all) ─────────── -->
 @if (Model.Totals is not null)
 {
-    <!-- Filter panel — always visible when data is loaded -->
-    <div class="cs-filter-panel p-3 mb-4">
+    <div class="cs-filter-panel p-3 mb-3">
         <div class="d-flex align-items-center justify-content-between mb-2">
             <span class="fw-semibold" style="font-size:.9rem">
                 <i class="bi bi-funnel"></i> Filters
@@ -315,115 +337,52 @@
                 <input type="hidden" name="lab" value="@Model.SelectedLab" />
 
                 <div class="row g-2 align-items-end mb-2">
-                    <!-- Clinic Name (multi-select) -->
                     <div class="col-sm-6 col-md-3">
                         <label class="form-label fw-semibold mb-1" style="font-size:.75rem">CLINIC NAME</label>
                         <div class="cs-ms" data-ms-name="filterClinicNames">
-                            <div class="cs-ms-btn" tabindex="0">
-                                <span class="cs-ms-label">All</span>
-                                <span class="cs-ms-count" style="display:none">0</span>
-                            </div>
-                            <div class="cs-ms-panel">
-                                <input type="text" class="cs-ms-search" placeholder="Search clinics…" autocomplete="off" />
-                                <div class="cs-ms-list">
-                                    @foreach (var cn in Model.ClinicNames)
-                                    {
-                                        <label><input type="checkbox" name="filterClinicNames" value="@cn"
-                                            @(Model.FilterClinicNames.Contains(cn) ? "checked" : "") /> @cn</label>
-                                    }
-                                </div>
-                            </div>
+                            <div class="cs-ms-btn" tabindex="0"><span class="cs-ms-label">All</span><span class="cs-ms-count" style="display:none">0</span></div>
+                            <div class="cs-ms-panel"><input type="text" class="cs-ms-search" placeholder="Search clinics…" autocomplete="off" /><div class="cs-ms-list">@foreach (var cn in Model.ClinicNames){<label><input type="checkbox" name="filterClinicNames" value="@cn" @(Model.FilterClinicNames.Contains(cn) ? "checked" : "") /> @cn</label>}</div></div>
                         </div>
                     </div>
-
-                    <!-- Sales Rep Name (multi-select) -->
                     <div class="col-sm-6 col-md-3">
                         <label class="form-label fw-semibold mb-1" style="font-size:.75rem">SALES REP NAME</label>
                         <div class="cs-ms" data-ms-name="filterSalesRepNames">
-                            <div class="cs-ms-btn" tabindex="0">
-                                <span class="cs-ms-label">All</span>
-                                <span class="cs-ms-count" style="display:none">0</span>
-                            </div>
-                            <div class="cs-ms-panel">
-                                <input type="text" class="cs-ms-search" placeholder="Search sales reps…" autocomplete="off" />
-                                <div class="cs-ms-list">
-                                    @foreach (var sr in Model.SalesRepNames)
-                                    {
-                                        <label><input type="checkbox" name="filterSalesRepNames" value="@sr"
-                                            @(Model.FilterSalesRepNames.Contains(sr) ? "checked" : "") /> @sr</label>
-                                    }
-                                </div>
-                            </div>
+                            <div class="cs-ms-btn" tabindex="0"><span class="cs-ms-label">All</span><span class="cs-ms-count" style="display:none">0</span></div>
+                            <div class="cs-ms-panel"><input type="text" class="cs-ms-search" placeholder="Search sales reps…" autocomplete="off" /><div class="cs-ms-list">@foreach (var sr in Model.SalesRepNames){<label><input type="checkbox" name="filterSalesRepNames" value="@sr" @(Model.FilterSalesRepNames.Contains(sr) ? "checked" : "") /> @sr</label>}</div></div>
                         </div>
                     </div>
-
-                    <!-- Payer Name (multi-select) -->
                     <div class="col-sm-6 col-md-3">
                         <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PAYER NAME</label>
                         <div class="cs-ms" data-ms-name="filterPayerNames">
-                            <div class="cs-ms-btn" tabindex="0">
-                                <span class="cs-ms-label">All</span>
-                                <span class="cs-ms-count" style="display:none">0</span>
-                            </div>
-                            <div class="cs-ms-panel">
-                                <input type="text" class="cs-ms-search" placeholder="Search payers…" autocomplete="off" />
-                                <div class="cs-ms-list">
-                                    @foreach (var pn in Model.PayerNames)
-                                    {
-                                        <label><input type="checkbox" name="filterPayerNames" value="@pn"
-                                            @(Model.FilterPayerNames.Contains(pn) ? "checked" : "") /> @pn</label>
-                                    }
-                                </div>
-                            </div>
+                            <div class="cs-ms-btn" tabindex="0"><span class="cs-ms-label">All</span><span class="cs-ms-count" style="display:none">0</span></div>
+                            <div class="cs-ms-panel"><input type="text" class="cs-ms-search" placeholder="Search payers…" autocomplete="off" /><div class="cs-ms-list">@foreach (var pn in Model.PayerNames){<label><input type="checkbox" name="filterPayerNames" value="@pn" @(Model.FilterPayerNames.Contains(pn) ? "checked" : "") /> @pn</label>}</div></div>
                         </div>
                     </div>
-
-                    <!-- Panel Name (multi-select) -->
                     <div class="col-sm-6 col-md-3">
                         <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PANEL NAME</label>
                         <div class="cs-ms" data-ms-name="filterPanelNames">
-                            <div class="cs-ms-btn" tabindex="0">
-                                <span class="cs-ms-label">All</span>
-                                <span class="cs-ms-count" style="display:none">0</span>
-                            </div>
-                            <div class="cs-ms-panel">
-                                <input type="text" class="cs-ms-search" placeholder="Search panels…" autocomplete="off" />
-                                <div class="cs-ms-list">
-                                    @foreach (var pl in Model.PanelNames)
-                                    {
-                                        <label><input type="checkbox" name="filterPanelNames" value="@pl"
-                                            @(Model.FilterPanelNames.Contains(pl) ? "checked" : "") /> @pl</label>
-                                    }
-                                </div>
-                            </div>
+                            <div class="cs-ms-btn" tabindex="0"><span class="cs-ms-label">All</span><span class="cs-ms-count" style="display:none">0</span></div>
+                            <div class="cs-ms-panel"><input type="text" class="cs-ms-search" placeholder="Search panels…" autocomplete="off" /><div class="cs-ms-list">@foreach (var pl in Model.PanelNames){<label><input type="checkbox" name="filterPanelNames" value="@pl" @(Model.FilterPanelNames.Contains(pl) ? "checked" : "") /> @pl</label>}</div></div>
                         </div>
                     </div>
                 </div>
 
                 <div class="row g-2 align-items-end mb-2">
-                    <!-- Date of Service From -->
                     <div class="col-sm-6 col-md-3">
                         <label class="form-label fw-semibold mb-1" style="font-size:.75rem">DATE OF SERVICE FROM</label>
-                        <input type="date" name="filterDosFrom" class="form-control form-control-sm"
-                               value="@Model.FilterDosFrom" />
+                        <input type="date" name="filterDosFrom" class="form-control form-control-sm" value="@Model.FilterDosFrom" />
                     </div>
-                    <!-- Date of Service To -->
                     <div class="col-sm-6 col-md-3">
                         <label class="form-label fw-semibold mb-1" style="font-size:.75rem">DATE OF SERVICE TO</label>
-                        <input type="date" name="filterDosTo" class="form-control form-control-sm"
-                               value="@Model.FilterDosTo" />
+                        <input type="date" name="filterDosTo" class="form-control form-control-sm" value="@Model.FilterDosTo" />
                     </div>
-                    <!-- First Bill Date From -->
                     <div class="col-sm-6 col-md-3">
                         <label class="form-label fw-semibold mb-1" style="font-size:.75rem">FIRST BILL DATE FROM</label>
-                        <input type="date" name="filterFirstBillFrom" class="form-control form-control-sm"
-                               value="@Model.FilterFirstBillFrom" />
+                        <input type="date" name="filterFirstBillFrom" class="form-control form-control-sm" value="@Model.FilterFirstBillFrom" />
                     </div>
-                    <!-- First Bill Date To -->
                     <div class="col-sm-6 col-md-3">
                         <label class="form-label fw-semibold mb-1" style="font-size:.75rem">FIRST BILL DATE TO</label>
-                        <input type="date" name="filterFirstBillTo" class="form-control form-control-sm"
-                               value="@Model.FilterFirstBillTo" />
+                        <input type="date" name="filterFirstBillTo" class="form-control form-control-sm" value="@Model.FilterFirstBillTo" />
                     </div>
                 </div>
 
@@ -451,11 +410,10 @@
     </div>
 }
 
+<!-- ── Shared: KPI Stat Ribbon (above tabs) ──────────────────────── -->
 @if (Model.Totals is not null && Model.Rows.Count > 0)
 {
-    <!-- KPI Stat Ribbon -->
     <div class="cs-stats-card">
-        <!-- Row 1: Claim Counts -->
         <div class="cs-stats-row">
             <span class="cs-stats-row-label">Claims</span>
             <div class="cs-stat">
@@ -479,7 +437,6 @@
                 <span class="cs-stat-val v-slate">@Model.Totals.OutstandingClaimCount.ToString("N0")</span>
             </div>
         </div>
-        <!-- Row 2: Dollar Totals -->
         <div class="cs-stats-row">
             <span class="cs-stats-row-label">Financials</span>
             <div class="cs-stat">
@@ -514,8 +471,28 @@
             </div>
         </div>
     </div>
+}
 
-    <!-- Data table -->
+<!-- ── Tabs ──────────────────────────────────────────────────────── -->
+<div class="cs-tabs">
+    <div class="cs-tab active" data-cs-tab="tabClinicSummary">
+        <i class="bi bi-table"></i>Clinic Summary
+    </div>
+    <div class="cs-tab" data-cs-tab="tabDollar">
+        <i class="bi bi-currency-dollar"></i>Clinic $ Analysis
+    </div>
+    <div class="cs-tab" data-cs-tab="tabPanelStatus">
+        <i class="bi bi-grid-3x3-gap"></i>Clinic Panel Status
+    </div>
+    <div class="cs-tab" data-cs-tab="tabDosCounts">
+        <i class="bi bi-calendar3"></i>Clinic Count by DOS Month
+    </div>
+</div>
+
+<!-- ── Tab: Clinic Summary (main data table) ─────────────────────── -->
+<div class="cs-tab-panel active" id="tabClinicSummary">
+@if (Model.Totals is not null && Model.Rows.Count > 0)
+{
     <div class="cs-wrap">
     <div class="cs-scroll">
         <table class="cs-table">
@@ -580,11 +557,11 @@
             </tbody>
             <tfoot>
                 <tr>
-                    <td>Grand Total</td>
-                    <td class="col-grp-count">@Model.Totals.BilledClaimCount</td>
-                    <td class="col-grp-count">@Model.Totals.PaidClaimCount</td>
-                    <td class="col-grp-count">@Model.Totals.DeniedClaimCount</td>
-                    <td class="col-grp-count">@Model.Totals.OutstandingClaimCount</td>
+                    <td>Grand Total (@Model.Rows.Count clinics)</td>
+                    <td class="col-grp-count">@Model.Totals.BilledClaimCount.ToString("N0")</td>
+                    <td class="col-grp-count">@Model.Totals.PaidClaimCount.ToString("N0")</td>
+                    <td class="col-grp-count">@Model.Totals.DeniedClaimCount.ToString("N0")</td>
+                    <td class="col-grp-count">@Model.Totals.OutstandingClaimCount.ToString("N0")</td>
                     <td class="col-grp-money">@Model.Totals.TotalBilledCharges.ToString("C2")</td>
                     <td class="col-grp-money">@Model.Totals.TotalBilledChargeOnPaidClaim.ToString("C2")</td>
                     <td class="col-grp-money">@Model.Totals.TotalAllowedAmount.ToString("C2")</td>
@@ -607,14 +584,12 @@
         </table>
     </div>
     </div>
-
     <div class="text-muted mt-2 mb-3" style="font-size:.68rem">
         Source: dbo.ClaimLevelData &middot; Lab: @Model.SelectedLab
     </div>
 
     <!-- Highly Collected / Highly Denied Tabbed Breakdown -->
     <div class="cs-wrap mb-4" style="overflow:hidden">
-        <!-- Outer tabs: Collected vs Denied -->
         <ul class="nav nav-tabs px-3 pt-2" id="topBreakdownTabs" role="tablist" style="border-bottom:1px solid #e0e6ed">
             <li class="nav-item" role="presentation">
                 <button class="nav-link active" id="tab-collected" data-bs-toggle="tab" data-bs-target="#pane-collected" type="button" role="tab" style="font-size:.78rem;font-weight:700">
@@ -629,7 +604,7 @@
         </ul>
 
         <div class="tab-content">
-            <!-- ═══ Highly Collected pane ═══ -->
+            <!-- Highly Collected pane -->
             <div class="tab-pane fade show active" id="pane-collected" role="tabpanel">
                 <ul class="nav nav-pills px-3 pt-2 pb-1 gap-1" id="collectedSubTabs" role="tablist">
                     <li class="nav-item" role="presentation"><button class="nav-link active py-1 px-2" style="font-size:.72rem" data-bs-toggle="pill" data-bs-target="#collected-clinic" type="button"><i class="bi bi-hospital me-1"></i>Clinic</button></li>
@@ -686,7 +661,7 @@
                 </div>
             </div>
 
-            <!-- ═══ Highly Denied pane ═══ -->
+            <!-- Highly Denied pane -->
             <div class="tab-pane fade" id="pane-denied" role="tabpanel">
                 <ul class="nav nav-pills px-3 pt-2 pb-1 gap-1" id="deniedSubTabs" role="tablist">
                     <li class="nav-item" role="presentation"><button class="nav-link active py-1 px-2" style="font-size:.72rem" data-bs-toggle="pill" data-bs-target="#denied-clinic" type="button"><i class="bi bi-hospital me-1"></i>Clinic</button></li>
@@ -751,11 +726,6 @@ else if (Model.Totals is not null && Model.Rows.Count == 0 && Model.HasFilters)
         <div style="font-size:2rem;opacity:.5"><i class="bi bi-funnel"></i></div>
         <div class="fw-semibold mt-2">No results match your filters</div>
         <div class="small mt-1">Try adjusting or clearing the filters above.</div>
-        <a asp-controller="Dashboard" asp-action="ClinicSummary"
-           asp-route-lab="@Model.SelectedLab"
-           class="btn btn-sm btn-outline-primary mt-3">
-            <i class="bi bi-x-circle me-1"></i>Clear Filters
-        </a>
     </div>
 }
 else if (!string.IsNullOrEmpty(Model.ErrorMessage))
@@ -772,9 +742,36 @@ else
         <div class="small mt-1">Select a lab with DB enabled to view the clinic summary.</div>
     </div>
 }
+</div><!-- /tabClinicSummary -->
 
+<!-- ── Tab: Clinic $ Analysis (AJAX-loaded) ──────────────────────── -->
+<div class="cs-tab-panel" id="tabDollar">
+    <div id="cdaPanelContent" class="text-center py-4 text-muted" style="font-size:.85rem">
+        <i class="bi bi-arrow-clockwise spin-slow"></i> Loading Clinic $ Analysis…
+    </div>
+</div><!-- /tabDollar -->
+
+<!-- ── Tab: Clinic Panel Status (AJAX-loaded) ────────────────────── -->
+<div class="cs-tab-panel" id="tabPanelStatus">
+    <div id="cpsPanelContent" class="text-center py-4 text-muted" style="font-size:.85rem">
+        <i class="bi bi-arrow-clockwise spin-slow"></i> Loading Clinic Panel Status…
+    </div>
+</div>
+
+<!-- ── Tab: Clinic Count by DOS Month (AJAX-loaded) ──────────────── -->
+<div class="cs-tab-panel" id="tabDosCounts">
+    <div id="cdcPanelContent" class="text-center py-4 text-muted" style="font-size:.85rem">
+        <i class="bi bi-arrow-clockwise spin-slow"></i> Loading Clinic Count by DOS Month…
+    </div>
+</div>
+
+<style>
+@@keyframes spin-slow { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+.spin-slow { display: inline-block; animation: spin-slow .8s linear infinite; }
+</style>
+
+<!-- ── Multi-select dropdown + Export JS ──────────────────────────── -->
 <script>
-    // Multi-select dropdown widget
     document.addEventListener('DOMContentLoaded', function () {
         document.querySelectorAll('.cs-ms').forEach(function (ms) {
             var btn = ms.querySelector('.cs-ms-btn');
@@ -799,10 +796,8 @@ else
                 }
             }
 
-            // Toggle panel
             btn.addEventListener('click', function (e) {
                 e.stopPropagation();
-                // Close other open panels
                 document.querySelectorAll('.cs-ms-panel.open').forEach(function (p) {
                     if (p !== panel) p.classList.remove('open');
                 });
@@ -814,7 +809,6 @@ else
                 }
             });
 
-            // Search/filter
             search.addEventListener('input', function () {
                 var q = this.value.toLowerCase();
                 labels.forEach(function (l) {
@@ -823,26 +817,20 @@ else
                 });
             });
 
-            // Checkbox change
             ms.querySelectorAll('.cs-ms-list input').forEach(function (cb) {
                 cb.addEventListener('change', updateLabel);
             });
 
-            // Prevent panel close on click inside
             panel.addEventListener('click', function (e) { e.stopPropagation(); });
-
-            // Init label
             updateLabel();
         });
 
-        // Close all panels on outside click
         document.addEventListener('click', function () {
             document.querySelectorAll('.cs-ms-panel.open').forEach(function (p) {
                 p.classList.remove('open');
             });
         });
 
-        // Export Excel — reuse filter form values to build a download URL
         var exportBtn = document.getElementById('exportExcelBtn');
         if (exportBtn) {
             exportBtn.addEventListener('click', function () {
@@ -854,4 +842,66 @@ else
             });
         }
     });
+</script>
+
+<!-- ── Tab switching + lazy-load JS ──────────────────────────────── -->
+<script>
+(function () {
+    var tabs = document.querySelectorAll('.cs-tab[data-cs-tab]');
+    var panels = document.querySelectorAll('.cs-tab-panel');
+    var panelStatusLoaded = false;
+    var dollarAnalysisLoaded = false;
+    var dosCountLoaded = false;
+
+    function getFilterParams() {
+        var form = document.getElementById('csFilterForm');
+        if (!form) return 'lab=@(Uri.EscapeDataString(Model.SelectedLab ?? ""))';
+        return new URLSearchParams(new FormData(form)).toString();
+    }
+
+    function loadAndInject(url, containerId, execScripts) {
+        fetch(url)
+            .then(function (r) { return r.text(); })
+            .then(function (html) {
+                document.getElementById(containerId).innerHTML = html;
+                if (execScripts) {
+                    document.getElementById(containerId).querySelectorAll('script').forEach(function (s) {
+                        var ns = document.createElement('script');
+                        ns.textContent = s.textContent;
+                        document.body.appendChild(ns);
+                    });
+                }
+            })
+            .catch(function (err) {
+                document.getElementById(containerId).innerHTML =
+                    '<div class="alert alert-danger" style="font-size:.85rem">Failed to load: ' + err.message + '</div>';
+            });
+    }
+
+    tabs.forEach(function (tab) {
+        tab.addEventListener('click', function () {
+            var target = tab.getAttribute('data-cs-tab');
+            tabs.forEach(function (t) { t.classList.remove('active'); });
+            panels.forEach(function (p) { p.classList.remove('active'); });
+            tab.classList.add('active');
+            var panel = document.getElementById(target);
+            if (panel) panel.classList.add('active');
+
+            if (target === 'tabDosCounts' && !dosCountLoaded) {
+                dosCountLoaded = true;
+                loadAndInject('@Url.Action("ClinicDosCount", "Dashboard")' + '?' + getFilterParams(), 'cdcPanelContent', false);
+            }
+
+            if (target === 'tabDollar' && !dollarAnalysisLoaded) {
+                dollarAnalysisLoaded = true;
+                loadAndInject('@Url.Action("ClinicDollarAnalysis", "Dashboard")' + '?' + getFilterParams(), 'cdaPanelContent', true);
+            }
+
+            if (target === 'tabPanelStatus' && !panelStatusLoaded) {
+                panelStatusLoaded = true;
+                loadAndInject('@Url.Action("ClinicPanelStatus", "Dashboard")' + '?' + getFilterParams(), 'cpsPanelContent', false);
+            }
+        });
+    });
+})();
 </script>

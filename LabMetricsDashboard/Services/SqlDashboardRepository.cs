@@ -31,11 +31,10 @@ public sealed class SqlDashboardRepository : IDashboardRepository
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
-        ArgumentException.ThrowIfNullOrWhiteSpace(labName);
 
-        // ?? Build WHERE for ClaimLevelData ???????????????????????????????
-        var claimWhere = new List<string> { "LabName = @LabName" };
-        var parameters = new List<SqlParameter> { new("@LabName", labName) };
+        // Build WHERE for ClaimLevelData
+        var claimWhere = new List<string>();
+        var parameters = new List<SqlParameter>();
 
         AddFilterClause(claimWhere, parameters, "PayerName", "@fp", filterPayerName);
         AddFilterClause(claimWhere, parameters, "PayerType", "@fpt", filterPayerType);
@@ -45,10 +44,10 @@ public sealed class SqlDashboardRepository : IDashboardRepository
         AddDateRangeClause(claimWhere, parameters, "DateOfService", "@dosFrom", "@dosTo", filterDosFrom, filterDosTo);
         AddDateRangeClause(claimWhere, parameters, "FirstBilledDate", "@fbFrom", "@fbTo", filterFirstBillFrom, filterFirstBillTo);
 
-        var claimWhereStr = string.Join(" AND ", claimWhere);
+        var claimWhereStr = claimWhere.Count > 0 ? string.Join(" AND ", claimWhere) : "1=1";
 
         // Line-level reuses the same parameter names so the same SqlParameter set works
-        var lineWhere = new List<string> { "LabName = @LabName" };
+        var lineWhere = new List<string>();
         if (!string.IsNullOrWhiteSpace(filterPayerName))          lineWhere.Add("LTRIM(RTRIM(PayerName)) = @fp");
         if (!string.IsNullOrWhiteSpace(filterPayerType))          lineWhere.Add("LTRIM(RTRIM(PayerType)) = @fpt");
         if (!string.IsNullOrWhiteSpace(filterPanelName))          lineWhere.Add("LTRIM(RTRIM(PanelName)) = @fpl");
@@ -58,15 +57,15 @@ public sealed class SqlDashboardRepository : IDashboardRepository
         if (filterDosTo.HasValue)         lineWhere.Add("TRY_CAST(DateOfService AS DATE) <= @dosTo");
         if (filterFirstBillFrom.HasValue) lineWhere.Add("TRY_CAST(FirstBilledDate AS DATE) >= @fbFrom");
         if (filterFirstBillTo.HasValue)   lineWhere.Add("TRY_CAST(FirstBilledDate AS DATE) <= @fbTo");
-        var lineWhereStr = string.Join(" AND ", lineWhere);
+        var lineWhereStr = lineWhere.Count > 0 ? string.Join(" AND ", lineWhere) : "1=1";
 
-        // ?? Filter option lists (unfiltered, lab-scoped) ????????????????
+        // Filter option lists (unfiltered)
         const string optionsSql = """
-            SELECT DISTINCT LTRIM(RTRIM(PayerName))          FROM dbo.ClaimLevelData WHERE LabName = @LabName AND PayerName          IS NOT NULL AND PayerName          <> '' ORDER BY 1;
-            SELECT DISTINCT LTRIM(RTRIM(PayerType))          FROM dbo.ClaimLevelData WHERE LabName = @LabName AND PayerType          IS NOT NULL AND PayerType          <> '' ORDER BY 1;
-            SELECT DISTINCT LTRIM(RTRIM(PanelName))          FROM dbo.ClaimLevelData WHERE LabName = @LabName AND PanelName          IS NOT NULL AND PanelName          <> '' ORDER BY 1;
-            SELECT DISTINCT LTRIM(RTRIM(ClinicName))         FROM dbo.ClaimLevelData WHERE LabName = @LabName AND ClinicName         IS NOT NULL AND ClinicName         <> '' ORDER BY 1;
-            SELECT DISTINCT LTRIM(RTRIM(ReferringProvider))  FROM dbo.ClaimLevelData WHERE LabName = @LabName AND ReferringProvider  IS NOT NULL AND ReferringProvider  <> '' ORDER BY 1;
+            SELECT DISTINCT LTRIM(RTRIM(PayerName))          FROM dbo.ClaimLevelData WHERE PayerName          IS NOT NULL AND PayerName          <> '' ORDER BY 1;
+            SELECT DISTINCT LTRIM(RTRIM(PayerType))          FROM dbo.ClaimLevelData WHERE PayerType          IS NOT NULL AND PayerType          <> '' ORDER BY 1;
+            SELECT DISTINCT LTRIM(RTRIM(PanelName))          FROM dbo.ClaimLevelData WHERE PanelName          IS NOT NULL AND PanelName          <> '' ORDER BY 1;
+            SELECT DISTINCT LTRIM(RTRIM(ClinicName))         FROM dbo.ClaimLevelData WHERE ClinicName         IS NOT NULL AND ClinicName         <> '' ORDER BY 1;
+            SELECT DISTINCT LTRIM(RTRIM(ReferringProvider))  FROM dbo.ClaimLevelData WHERE ReferringProvider  IS NOT NULL AND ReferringProvider  <> '' ORDER BY 1;
             """;
 
         // ?? Claim-level KPIs ????????????????????????????????????????????
@@ -251,7 +250,6 @@ public sealed class SqlDashboardRepository : IDashboardRepository
             // 1. Filter options
             await using (var cmd = new SqlCommand(optionsSql, conn) { CommandTimeout = 60 })
             {
-                cmd.Parameters.AddWithValue("@LabName", labName);
                 await using var r = await cmd.ExecuteReaderAsync(ct);
                 while (await r.ReadAsync(ct)) payerNames.Add(r.GetString(0));
                 await r.NextResultAsync(ct);

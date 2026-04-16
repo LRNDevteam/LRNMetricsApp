@@ -385,6 +385,25 @@ th.pr-month-data, td.pr-month-data {
     </div>
 }
 
+<!-- Production Report Excel export loading overlay -->
+<div id="prExportOverlay" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.55);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:16px;box-shadow:0 8px 40px rgba(0,0,0,.18);padding:2rem 2.5rem;width:380px;text-align:center">
+        <div style="font-size:2.4rem;color:#0d8553;margin-bottom:.6rem;animation:prPulse 1.4s ease-in-out infinite">
+            <i class="bi bi-file-earmark-excel"></i>
+        </div>
+        <div style="font-size:1.05rem;font-weight:700;color:#1e293b;margin-bottom:.25rem">Generating Excel Report</div>
+        <div id="prExportStatus" style="font-size:.78rem;color:#64748b;margin-bottom:1rem">Starting export…</div>
+        <div style="width:100%;height:10px;background:#e2e8f0;border-radius:6px;overflow:hidden">
+            <div id="prExportBar" style="height:100%;border-radius:6px;background:linear-gradient(90deg,#047857,#0d8553,#10b981);transition:width .4s ease;width:0%"></div>
+        </div>
+        <div id="prExportPct" style="font-size:.82rem;font-weight:700;color:#0d8553;margin-top:.5rem">0%</div>
+        <button type="button" id="prExportCancelBtn" class="btn btn-sm btn-outline-secondary mt-3">
+            <i class="bi bi-x-circle me-1"></i>Cancel
+        </button>
+    </div>
+</div>
+<style>@@keyframes prPulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.6;transform:scale(.92)} }</style>
+
 <!-- ??? Export error ??????????????????????????????????????????? -->
 @if (TempData["ExportError"] is string exportError)
 {
@@ -1198,19 +1217,120 @@ th.pr-month-data, td.pr-month-data {
             });
         });
 
-        // Export Excel — reuse filter form values to build a download URL
+        // Export Excel with progress overlay
         var exportBtn = document.getElementById('exportExcelBtn');
         if (exportBtn) {
+            var overlay = document.getElementById('prExportOverlay');
+            var bar = document.getElementById('prExportBar');
+            var pctLabel = document.getElementById('prExportPct');
+            var statusLabel = document.getElementById('prExportStatus');
+            var cancelBtn = document.getElementById('prExportCancelBtn');
+
+            var steps = [
+                { pct: 8,  text: 'Connecting to database\u2026' },
+                { pct: 18, text: 'Fetching Monthly Claim Volume\u2026' },
+                { pct: 26, text: 'Fetching Weekly Claim Volume\u2026' },
+                { pct: 34, text: 'Fetching Coding data\u2026' },
+                { pct: 42, text: 'Fetching Payer Breakdown\u2026' },
+                { pct: 50, text: 'Fetching Payer x Panel\u2026' },
+                { pct: 56, text: 'Fetching Unbilled Aging\u2026' },
+                { pct: 62, text: 'Fetching CPT Breakdown\u2026' },
+                { pct: 70, text: 'Fetching ClaimLevelData rows\u2026' },
+                { pct: 78, text: 'Fetching LineLevelData rows\u2026' },
+                { pct: 86, text: 'Building Excel workbook\u2026' },
+                { pct: 94, text: 'Finalizing sheets & formatting\u2026' }
+            ];
+
+            function prGetCookie(name) {
+                var m = document.cookie.match('(^|;)\\s*' + name + '=([^;]*)');
+                return m ? m[2] : null;
+            }
+            function prDeleteCookie(name) {
+                document.cookie = name + '=; path=/; max-age=0';
+            }
+            function prCleanup(p, c, s, iframe) {
+                clearInterval(p); clearInterval(c); clearInterval(s);
+                if (iframe && iframe.parentNode) document.body.removeChild(iframe);
+            }
+
             exportBtn.addEventListener('click', function () {
                 var form = document.getElementById('prFilterForm');
                 if (!form) return;
+
+                prDeleteCookie('prExportDone');
+                overlay.style.display = 'flex';
+                bar.style.width = '0%';
+                pctLabel.textContent = '0%';
+                statusLabel.textContent = 'Starting export\u2026';
+
+                var startTime = Date.now();
+                function elapsed() {
+                    var secs = Math.floor((Date.now() - startTime) / 1000);
+                    var m = Math.floor(secs / 60), s = secs % 60;
+                    return m > 0 ? m + 'm ' + s + 's' : s + 's';
+                }
+
+                var stepIdx = 0, currentPct = 0;
+                var stepTimer = setInterval(function () {
+                    if (stepIdx < steps.length) {
+                        currentPct = steps[stepIdx].pct;
+                        bar.style.width = currentPct + '%';
+                        pctLabel.textContent = currentPct + '%';
+                        statusLabel.textContent = steps[stepIdx].text;
+                        stepIdx++;
+                    } else { clearInterval(stepTimer); }
+                }, 1800);
+
+                var creepTimer = setInterval(function () {
+                    if (stepIdx >= steps.length) {
+                        if (currentPct < 99) currentPct += 0.15;
+                        var p = Math.min(Math.round(currentPct), 99);
+                        bar.style.width = p + '%';
+                        pctLabel.textContent = p + '%';
+                        var msgs = [
+                            'Writing ClaimLevelData sheet\u2026',
+                            'Writing LineLevelData sheet\u2026',
+                            'Formatting report sheets\u2026',
+                            'Almost there, please wait\u2026',
+                            'Large dataset \u2014 still processing\u2026',
+                            'Compressing workbook\u2026',
+                            'Hang tight, almost done\u2026'
+                        ];
+                        var msgIdx = Math.floor((Date.now() - startTime) / 4000) % msgs.length;
+                        statusLabel.textContent = msgs[msgIdx] + '  (' + elapsed() + ')';
+                    }
+                }, 1000);
+
                 var params = new URLSearchParams(new FormData(form));
                 var url = '@Url.Action("ExportProductionReportExcel", "Dashboard")' + '?' + params.toString();
-                if (window.lmdExcelDownload) {
-                    window.lmdExcelDownload(url);
-                } else {
-                    window.location.href = url;
-                }
+                var iframe = document.createElement('iframe');
+                iframe.style.display = 'none';
+                iframe.src = url;
+                document.body.appendChild(iframe);
+
+                var pollTimer = setInterval(function () {
+                    if (prGetCookie('prExportDone')) {
+                        prCleanup(pollTimer, creepTimer, stepTimer, iframe);
+                        prDeleteCookie('prExportDone');
+                        bar.style.width = '100%';
+                        pctLabel.textContent = '100%';
+                        statusLabel.textContent = 'Download complete!  (' + elapsed() + ')';
+                        setTimeout(function () { overlay.style.display = 'none'; }, 900);
+                    }
+                }, 500);
+
+                var onCancel = function () {
+                    prCleanup(pollTimer, creepTimer, stepTimer, iframe);
+                    prDeleteCookie('prExportDone');
+                    overlay.style.display = 'none';
+                    cancelBtn.removeEventListener('click', onCancel);
+                };
+                cancelBtn.addEventListener('click', onCancel);
+
+                setTimeout(function () {
+                    prCleanup(pollTimer, creepTimer, stepTimer, iframe);
+                    overlay.style.display = 'none';
+                }, 600000);
             });
         }
     });

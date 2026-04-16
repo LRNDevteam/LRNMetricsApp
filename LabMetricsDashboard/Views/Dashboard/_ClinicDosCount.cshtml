@@ -1,0 +1,165 @@
+@model ClinicDosCountViewModel
+
+@if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+{
+    <div class="alert alert-warning" style="font-size:.85rem">
+        <i class="bi bi-exclamation-triangle"></i> @Model.ErrorMessage
+    </div>
+    return;
+}
+
+@if (Model.Clinics.Count == 0)
+{
+    <div class="text-center text-muted py-4" style="font-size:.85rem">No data available.</div>
+    return;
+}
+
+@{
+    // Build month abbreviations
+    var monthNames = new[] { "", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+
+    // Count how many month columns each year has (for colspan)
+    var yearColSpan = new Dictionary<int, int>();
+    foreach (var y in Model.Years)
+    {
+        yearColSpan[y] = Model.Columns.Count(c => c.Year == y);
+    }
+}
+
+<style>
+.cdc-scroll { max-height: 72vh; overflow: auto; }
+.cdc-table {
+    width: 100%; border-collapse: separate; border-spacing: 0;
+    font-size: .74rem;
+}
+
+/* ??? Header rows ??? */
+.cdc-table thead th {
+    background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
+    color: rgba(255,255,255,.9); font-weight: 700; font-size: .62rem;
+    letter-spacing: .04em; text-transform: uppercase;
+    padding: .55rem .6rem; text-align: center;
+    white-space: nowrap;
+    position: sticky; top: 0; z-index: 3;
+    border-bottom: 1px solid #0a2a4a;
+    border-right: 1px solid rgba(255,255,255,.08);
+}
+.cdc-table thead tr:first-child th { top: 0; z-index: 4; }
+.cdc-table thead tr:nth-child(2) th { top: 28px; z-index: 3; }
+.cdc-table thead th:last-child { border-right: none; }
+
+/* Sticky first column */
+.cdc-table thead th:first-child {
+    text-align: left; min-width: 220px;
+    position: sticky; left: 0; z-index: 5;
+    background: linear-gradient(135deg, #0a1628 0%, #0e3460 100%);
+}
+
+/* Year group separator */
+.cdc-table thead th.cdc-year-hdr {
+    border-left: 2px solid rgba(255,255,255,.2);
+    font-size: .68rem; letter-spacing: .06em;
+}
+.cdc-table thead th.cdc-grand-hdr {
+    background: linear-gradient(135deg, #1a2e1a 0%, #2d5a2d 100%);
+    border-left: 2px solid rgba(255,255,255,.2);
+}
+
+/* ??? Body ??? */
+.cdc-table tbody tr { border-bottom: 1px solid #f1f5f9; transition: background .1s; }
+.cdc-table tbody tr:hover { background: #f0f4ff; }
+.cdc-table td {
+    padding: .4rem .6rem; vertical-align: middle;
+    text-align: right; white-space: nowrap;
+    border-right: 1px solid #e5e7eb;
+    border-bottom: 1px solid #e5e7eb;
+    font-variant-numeric: tabular-nums;
+}
+.cdc-table td:last-child { border-right: none; }
+.cdc-table td:first-child {
+    text-align: left; font-weight: 600; color: #1e293b;
+    position: sticky; left: 0; z-index: 1;
+    background: #fff;
+}
+.cdc-table tbody tr:hover td:first-child { background: #f0f4ff; }
+
+/* Year separator in body */
+.cdc-table td.cdc-year-sep { border-left: 2px solid #dde3ea; }
+
+/* Grand total column */
+.cdc-table td.cdc-grand { font-weight: 700; color: #0e3460; background: #f4f8ee; border-left: 2px solid #dde3ea; }
+
+/* Zero cells muted */
+.cdc-zero { color: #c0c4cc; }
+
+/* ??? Footer ??? */
+.cdc-table tfoot td {
+    background: #f1f5f9; font-weight: 700; color: #0e3460;
+    padding: .5rem .6rem; border-top: 2px solid #0a2a4a;
+    position: sticky; bottom: 0; z-index: 2;
+}
+.cdc-table tfoot td:first-child {
+    position: sticky; left: 0; z-index: 3;
+    background: #f1f5f9;
+}
+.cdc-table tfoot td.cdc-grand { background: #e8f0dc; }
+</style>
+
+<div class="cdc-scroll">
+    <table class="cdc-table">
+        <thead>
+            <!-- Row 1: Year headers + Grand -->
+            <tr>
+                <th rowspan="2"><i class="bi bi-building me-1"></i>Clinic Name</th>
+                @foreach (var y in Model.Years)
+                {
+                    <th class="cdc-year-hdr" colspan="@yearColSpan[y]">@y</th>
+                }
+                <th class="cdc-grand-hdr" rowspan="2">Grand<br/>Total</th>
+            </tr>
+            <!-- Row 2: Month headers -->
+            <tr>
+                @{ var firstOfYear = true; }
+                @foreach (var col in Model.Columns)
+                {
+                    var isFirst = firstOfYear || (Model.Columns.IndexOf(col) > 0 && Model.Columns[Model.Columns.IndexOf(col) - 1].Year != col.Year);
+                    <th class="@(isFirst ? "cdc-year-sep" : "")">@monthNames[col.Month]</th>
+                    firstOfYear = false;
+                }
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var clinic in Model.Clinics)
+            {
+                <tr>
+                    <td>@clinic.ClinicName</td>
+                    @foreach (var col in Model.Columns)
+                    {
+                        var key = ClinicDosCountViewModel.ColKey(col.Year, col.Month);
+                        var val = clinic.MonthCounts.GetValueOrDefault(key);
+                        var isFirst = Model.Columns.IndexOf(col) == 0 || Model.Columns[Model.Columns.IndexOf(col) - 1].Year != col.Year;
+                        <td class="@(isFirst ? "cdc-year-sep" : "") @(val == 0 ? "cdc-zero" : "")">@(val == 0 ? "–" : val.ToString("N0"))</td>
+                    }
+                    <td class="cdc-grand">@clinic.GrandTotal.ToString("N0")</td>
+                </tr>
+            }
+        </tbody>
+        <tfoot>
+            <tr>
+                <td>Grand Total</td>
+                @foreach (var col in Model.Columns)
+                {
+                    var key = ClinicDosCountViewModel.ColKey(col.Year, col.Month);
+                    var val = Model.ColumnTotals.GetValueOrDefault(key);
+                    var isFirst = Model.Columns.IndexOf(col) == 0 || Model.Columns[Model.Columns.IndexOf(col) - 1].Year != col.Year;
+                    <td class="@(isFirst ? "cdc-year-sep" : "")">@val.ToString("N0")</td>
+                }
+                <td class="cdc-grand">@Model.GrandTotal.ToString("N0")</td>
+            </tr>
+        </tfoot>
+    </table>
+</div>
+
+<div class="text-muted mt-2" style="font-size:.68rem">
+    Source: dbo.ClaimLevelData &middot; Lab: @Model.SelectedLab
+</div>

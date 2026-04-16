@@ -24,6 +24,56 @@ public interface IClinicSummaryRepository
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns a pivot of COUNT(DISTINCT ClaimID) grouped by ClinicName, PanelName, and ClaimStatus.
+    /// </summary>
+    Task<ClinicPanelStatusViewModel> GetClinicPanelStatusAsync(
+        string connectionString,
+        string labName,
+        List<string>? filterClinicNames = null,
+        List<string>? filterSalesRepNames = null,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns Clinic $ Analysis: rows grouped by ClinicName ? ClaimStatus drill-down,
+    /// with COUNT(DISTINCT ClaimID), SUM(ChargeAmount), SUM(InsurancePayment).
+    /// </summary>
+    Task<ClinicDollarAnalysisViewModel> GetClinicDollarAnalysisAsync(
+        string connectionString,
+        string labName,
+        List<string>? filterClinicNames = null,
+        List<string>? filterSalesRepNames = null,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns Clinic Count by DOS Month: pivot of COUNT(DISTINCT ClaimID)
+    /// grouped by ClinicName × YEAR(DateOfService) × MONTH(DateOfService).
+    /// </summary>
+    Task<ClinicDosCountViewModel> GetClinicDosCountAsync(
+        string connectionString,
+        string labName,
+        List<string>? filterClinicNames = null,
+        List<string>? filterSalesRepNames = null,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        CancellationToken ct = default);
 }
 
 /// <summary>Result container for clinic summary query including filter option lists.</summary>

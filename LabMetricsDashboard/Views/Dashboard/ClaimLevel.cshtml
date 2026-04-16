@@ -308,7 +308,13 @@
     </div>
 </div>
 
-@if (!string.IsNullOrEmpty(Model.DataSource))
+@if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+{
+    <div class="alert alert-warning mt-3" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-1"></i> @Model.ErrorMessage
+    </div>
+}
+else if (!string.IsNullOrEmpty(Model.DataSource))
 {
     <div class="d-flex align-items-center gap-2 mb-3" style="font-size:.78rem">
         <span class="badge bg-success"><i class="bi bi-database-check"></i></span>
@@ -351,6 +357,7 @@ else
                     <th>First Billed</th>
                     <th>Charge Entered</th>
                     <th>Panel</th>
+                    <th>CPT×Units×Modifier</th>
                     <th>Payer Name</th>
                     <th>Payer Type</th>
                     <th>Clinic</th>
@@ -372,7 +379,7 @@ else
                 @if (!Model.Records.Any())
                 {
                     <tr>
-                        <td colspan="21" class="text-center text-muted py-4">
+                        <td colspan="22" class="text-center text-muted py-4">
                             No records match the selected filters.
                         </td>
                     </tr>
@@ -386,6 +393,7 @@ else
                         <td>@r.FirstBilledDate</td>
                         <td>@r.ChargeEnteredDate</td>
                         <td>@r.PanelName</td>
+                        <td>@r.CPTCodeUnitsModifier</td>
                         <td>@r.PayerName</td>
                         <td><span class="badge @PayerTypeBadge(r.PayerType)">@r.PayerType</span></td>
                         <td>@r.ClinicName</td>

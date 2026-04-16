@@ -1,0 +1,163 @@
+@model LabMetricsDashboard.Models.ClinicPanelStatusViewModel
+
+@if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+{
+    <div class="alert alert-warning" style="font-size:.85rem">
+        <i class="bi bi-exclamation-triangle"></i> @Model.ErrorMessage
+    </div>
+    return;
+}
+
+@if (Model.Clinics.Count == 0)
+{
+    <div class="text-center text-muted py-4" style="font-size:.85rem">No data available.</div>
+    return;
+}
+
+<style>
+.cps-scroll { max-height: 72vh; overflow: auto; }
+.cps-table {
+    width: 100%; border-collapse: separate; border-spacing: 0;
+    font-size: .74rem;
+}
+.cps-table thead th {
+    background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
+    color: rgba(255,255,255,.9); font-weight: 700; font-size: .62rem;
+    letter-spacing: .04em; text-transform: uppercase;
+    padding: .6rem .6rem; text-align: right;
+    white-space: nowrap;
+    position: sticky; top: 0; z-index: 3;
+    border-bottom: 2px solid #0a2a4a;
+    border-right: 1px solid rgba(255,255,255,.08);
+}
+.cps-table thead th:last-child { border-right: none; }
+.cps-table thead th:first-child {
+    text-align: left; min-width: 240px;
+    position: sticky; left: 0; z-index: 4;
+    background: linear-gradient(135deg, #0a1628 0%, #0e3460 100%);
+}
+.cps-table tbody tr { border-bottom: 1px solid #f1f5f9; transition: background .1s; }
+.cps-table tbody tr:hover { background: #f0f4ff; }
+.cps-table td {
+    padding: .4rem .6rem; vertical-align: middle;
+    text-align: right; white-space: nowrap;
+    border-right: 1px solid #e5e7eb;
+    border-bottom: 1px solid #e5e7eb;
+    font-variant-numeric: tabular-nums;
+}
+.cps-table td:last-child { border-right: none; }
+.cps-table td:first-child {
+    text-align: left; font-weight: 600; color: #1e293b;
+    position: sticky; left: 0; z-index: 1;
+    background: #fff;
+}
+.cps-table tbody tr:hover td:first-child { background: #f0f4ff; }
+
+/* Clinic row (parent — bold, shaded) */
+.cps-clinic-row td {
+    background: #f1f5f9; font-weight: 700; color: #0f172a;
+    border-bottom: 2px solid #cbd5e1;
+}
+.cps-clinic-row td:first-child { background: #f1f5f9; cursor: pointer; }
+.cps-clinic-row:hover td { background: #e2e8f0 !important; }
+.cps-clinic-row td:first-child .cps-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border-radius: 5px;
+    font-size: .6rem; margin-right: .4rem;
+    background: #0e3460; color: #fff;
+    transition: transform .15s;
+}
+.cps-clinic-row.collapsed td:first-child .cps-toggle { transform: rotate(-90deg); }
+
+/* Panel row (child — indented) */
+.cps-panel-row td:first-child {
+    padding-left: 2.2rem; font-weight: 500; color: #475569;
+}
+.cps-panel-row td { color: #475569; }
+
+/* Grand total footer */
+.cps-table tfoot td {
+    background: #0f172a; color: #fff; font-weight: 800;
+    border-top: 2px solid #1e293b;
+    font-size: .72rem;
+}
+.cps-table tfoot td:first-child {
+    position: sticky; left: 0; z-index: 1;
+    background: #0f172a;
+}
+
+/* Grand Total column highlight */
+.cps-gt { background: #fefce8 !important; }
+.cps-clinic-row td.cps-gt { background: #fef9c3 !important; }
+.cps-table tfoot td.cps-gt { background: #1a2744 !important; }
+</style>
+
+<div class="cps-scroll">
+    <table class="cps-table">
+        <thead>
+            <tr>
+                <th>Clinic / Panel</th>
+                @foreach (var status in Model.Statuses)
+                {
+                    <th>@status</th>
+                }
+                <th class="cps-gt">Grand Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            @{ var clinicIdx = 0; }
+            @foreach (var clinic in Model.Clinics)
+            {
+                var cid = $"cps-c{clinicIdx}";
+                <!-- Clinic row -->
+                <tr class="cps-clinic-row" data-cps-toggle="@cid" onclick="cpsToggle('@cid')">
+                    <td>
+                        <span class="cps-toggle"><i class="bi bi-chevron-down"></i></span>
+                        @clinic.ClinicName
+                    </td>
+                    @foreach (var status in Model.Statuses)
+                    {
+                        var cnt = clinic.StatusCounts.GetValueOrDefault(status);
+                        <td>@(cnt > 0 ? cnt.ToString("N0") : "–")</td>
+                    }
+                    <td class="cps-gt">@clinic.GrandTotal.ToString("N0")</td>
+                </tr>
+                <!-- Panel rows (drill-down) -->
+                @foreach (var panel in clinic.Panels)
+                {
+                    <tr class="cps-panel-row" data-cps-group="@cid">
+                        <td>@panel.PanelName</td>
+                        @foreach (var status in Model.Statuses)
+                        {
+                            var cnt = panel.StatusCounts.GetValueOrDefault(status);
+                            <td>@(cnt > 0 ? cnt.ToString("N0") : "–")</td>
+                        }
+                        <td class="cps-gt">@panel.GrandTotal.ToString("N0")</td>
+                    </tr>
+                }
+                clinicIdx++;
+            }
+        </tbody>
+        <tfoot>
+            <tr>
+                <td>Grand Total</td>
+                @foreach (var status in Model.Statuses)
+                {
+                    var cnt = Model.GrandTotals.GetValueOrDefault(status);
+                    <td>@(cnt > 0 ? cnt.ToString("N0") : "–")</td>
+                }
+                <td class="cps-gt">@Model.GrandTotalAll.ToString("N0")</td>
+            </tr>
+        </tfoot>
+    </table>
+</div>
+
+<script>
+function cpsToggle(groupId) {
+    var rows = document.querySelectorAll('tr[data-cps-group="' + groupId + '"]');
+    var parent = document.querySelector('tr[data-cps-toggle="' + groupId + '"]');
+    var hidden = rows.length > 0 && rows[0].style.display === 'none';
+    rows.forEach(function (r) { r.style.display = hidden ? '' : 'none'; });
+    if (parent) parent.classList.toggle('collapsed', !hidden);
+}
+</script>

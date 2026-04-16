@@ -1,0 +1,1812 @@
+@model LabMetricsDashboard.Models.CollectionSummaryViewModel
+@{
+    ViewData["Title"]       = $"Collection Summary – {Model.SelectedLab}";
+    ViewData["SelectedLab"] = Model.SelectedLab;
+    ViewData["PageLabel"]   = "Collection Summary";
+}
+
+<style>
+/* ?? Export loading overlay ?????????????????????????????????????????? */
+.cs-export-overlay {
+    position: fixed; inset: 0; z-index: 9999;
+    background: rgba(15, 23, 42, .55);
+    backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center;
+}
+.cs-export-dialog {
+    background: #fff; border-radius: 16px;
+    box-shadow: 0 8px 40px rgba(0,0,0,.18);
+    padding: 2rem 2.5rem; width: 380px; text-align: center;
+}
+.cs-export-icon {
+    font-size: 2.4rem; color: #0d8553;
+    margin-bottom: .6rem;
+    animation: cs-export-pulse 1.4s ease-in-out infinite;
+}
+@@keyframes cs-export-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: .6; transform: scale(.92); }
+}
+.cs-export-title {
+    font-size: 1.05rem; font-weight: 700; color: #1e293b;
+    margin-bottom: .25rem;
+}
+.cs-export-sub {
+    font-size: .78rem; color: #64748b; margin-bottom: 1rem;
+}
+.cs-export-bar-bg {
+    width: 100%; height: 10px; background: #e2e8f0;
+    border-radius: 6px; overflow: hidden;
+}
+.cs-export-bar-fill {
+    height: 100%; border-radius: 6px;
+    background: linear-gradient(90deg, #047857, #0d8553, #10b981);
+    transition: width .4s ease;
+}
+.cs-export-pct {
+    font-size: .82rem; font-weight: 700; color: #0d8553;
+    margin-top: .5rem;
+}
+
+/* ?? Reuse Production Report premium styles ????????????????????? */
+.cs-rpt-wrap {
+    border-radius: 14px; overflow: hidden;
+    background: #fff; border: 1px solid #e0e6ed;
+    box-shadow: 0 2px 12px rgba(0,0,0,.05);
+}
+.cs-rpt-scroll { max-height: 78vh; overflow: auto; }
+
+.cs-rpt-table {
+    border-collapse: separate; border-spacing: 0;
+    font-size: .78rem; width: 100%;
+}
+.cs-rpt-table thead th {
+    background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
+    color: rgba(255,255,255,.92); font-weight: 700; font-size: .68rem;
+    letter-spacing: .04em; text-transform: uppercase;
+    padding: .6rem .7rem; text-align: center;
+    position: sticky; top: 0; z-index: 5;
+    border-bottom: 1px solid #0a2a4a;
+    border-right: 1px solid rgba(255,255,255,.08);
+}
+.cs-rpt-table thead th:first-child { text-align: center; width: 56px; }
+.cs-rpt-table thead th:nth-child(2) { text-align: left; }
+
+.cs-rpt-table td {
+    padding: .55rem .7rem; vertical-align: middle;
+    border-right: 1px solid #e2e8f0;
+    border-bottom: 1px solid #e2e8f0;
+}
+.cs-rpt-table td:first-child {
+    text-align: center; font-weight: 700; color: #1e293b; width: 56px;
+}
+.cs-rpt-table td:nth-child(2) {
+    text-align: left; font-weight: 600; color: #1e293b; min-width: 280px;
+}
+.cs-rpt-table td:nth-child(3) {
+    text-align: right; font-weight: 700; font-size: .88rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.cs-rpt-table tbody tr:nth-child(odd) td { background: #f8fafc; }
+.cs-rpt-table tbody tr:nth-child(even) td { background: #fff; }
+.cs-rpt-table tbody tr:hover td { background: #eef4ff; }
+
+/* Reimbursement bar */
+.reimb-bar-bg {
+    width: 100%; height: 22px; background: #e2e8f0;
+    border-radius: 6px; overflow: hidden; position: relative;
+    min-width: 120px;
+}
+.reimb-bar-fill {
+    height: 100%; border-radius: 6px;
+    background: linear-gradient(90deg, #0d5c74, #1565c0);
+    transition: width .5s ease;
+}
+.reimb-bar-label {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: .72rem; font-weight: 800; color: #1e293b;
+    text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff;
+}
+
+/* KPI cards */
+.reimb-kpi {
+    display: flex; gap: .35rem; font-size: .65rem; color: #64748b;
+    margin-top: .15rem;
+}
+.reimb-kpi span { white-space: nowrap; }
+
+/* ?? Top-5 premium dashboard cards ?????????????????????????????? */
+.top5-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.5rem; }
+@@media (max-width: 1100px) { .top5-cards { grid-template-columns: 1fr; } }
+
+.top5-card {
+    background: #fff; border-radius: 16px;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 4px 20px rgba(0,0,0,.06);
+    overflow: hidden;
+    display: flex; flex-direction: column;
+}
+
+/* Header: gradient left accent + title + badge */
+.top5-card-hdr {
+    padding: .9rem 1.2rem .5rem;
+    border-left: 4px solid;
+    display: flex; justify-content: space-between; align-items: flex-start;
+}
+.top5-card-hdr.reimb-hdr { border-left-color: #1565c0; }
+.top5-card-hdr.totpay-hdr { border-left-color: #0d8553; }
+.top5-card-hdr-title {
+    font-size: .82rem; font-weight: 800; color: #1e293b;
+    letter-spacing: .02em; text-transform: uppercase;
+}
+.top5-card-hdr-sub {
+    font-size: .72rem; font-weight: 400; color: #64748b;
+    margin-top: .15rem;
+}
+.top5-card-badge {
+    display: inline-flex; align-items: center; gap: .35rem;
+    font-size: .7rem; font-weight: 700; color: #fff;
+    padding: .3rem .7rem; border-radius: 20px;
+    white-space: nowrap; flex-shrink: 0;
+}
+.top5-card-badge.reimb-badge { background: linear-gradient(135deg, #1565c0, #0d5c74); }
+.top5-card-badge.totpay-badge { background: linear-gradient(135deg, #0d8553, #047857); }
+
+/* Body: KPI boxes + gauge row */
+.top5-card-body {
+    padding: .6rem 1.2rem 1rem;
+    display: flex; align-items: center; gap: 1rem;
+    flex: 1;
+}
+.top5-kpi-boxes {
+    display: flex; gap: .75rem; flex: 1;
+    flex-wrap: wrap;
+}
+.top5-kpi-box {
+    flex: 1; min-width: 120px;
+    background: #f8fafc; border: 1px solid #e2e8f0;
+    border-radius: 10px; padding: .6rem .8rem;
+}
+.top5-kpi-box-label {
+    display: flex; align-items: center; gap: .3rem;
+    font-size: .65rem; font-weight: 600; color: #64748b;
+    text-transform: uppercase; letter-spacing: .03em;
+}
+.top5-kpi-box-label i { font-size: .72rem; }
+.top5-kpi-box-value {
+    font-size: 1.35rem; font-weight: 800; color: #1e293b;
+    margin-top: .2rem; font-variant-numeric: tabular-nums;
+}
+
+/* Circular donut gauge (CSS conic-gradient) */
+.top5-gauge {
+    position: relative; flex-shrink: 0;
+    width: 90px; height: 90px;
+}
+.top5-gauge-ring {
+    width: 90px; height: 90px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+}
+.top5-gauge-ring.reimb-ring {
+    background: conic-gradient(#1565c0 var(--gauge-pct, 0%), #e2e8f0 0%);
+}
+.top5-gauge-ring.totpay-ring {
+    background: conic-gradient(#0d8553 var(--gauge-pct, 0%), #e2e8f0 0%);
+}
+.top5-gauge-inner {
+    width: 66px; height: 66px; border-radius: 50%;
+    background: #fff; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+}
+.top5-gauge-pct {
+    font-size: .92rem; font-weight: 800; color: #1e293b;
+    line-height: 1;
+}
+.top5-gauge-label {
+    font-size: .55rem; font-weight: 600; color: #94a3b8;
+    text-transform: uppercase; letter-spacing: .04em;
+    margin-top: .1rem;
+}
+
+/* Footer action message */
+.top5-card-footer {
+    padding: .65rem 1.2rem;
+    font-size: .72rem; color: #475569; font-weight: 500;
+    border-top: 1px solid #e2e8f0;
+    background: #f8fafc;
+}
+.top5-card-footer strong { color: #1e293b; }
+.top5-hl-blue { color: #1565c0; font-weight: 700; }
+.top5-hl-green { color: #0d8553; font-weight: 700; }
+.top5-hl-red { color: #dc2626; font-weight: 700; }
+
+/* Payer list inside card */
+.top5-payer-list { padding: 0 1.2rem .8rem; }
+.top5-payer-row {
+    display: flex; align-items: center; gap: .6rem;
+    padding: .35rem 0; border-bottom: 1px solid #f1f5f9;
+    font-size: .75rem;
+}
+.top5-payer-row:last-child { border-bottom: none; }
+.top5-payer-rank {
+    width: 22px; height: 22px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: .62rem; font-weight: 800; color: #fff; flex-shrink: 0;
+}
+.top5-payer-rank.reimb-rank { background: linear-gradient(135deg, #1565c0, #0d5c74); }
+.top5-payer-rank.totpay-rank { background: linear-gradient(135deg, #0d8553, #047857); }
+.top5-payer-name {
+    flex: 1; font-weight: 600; color: #1e293b;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.top5-payer-detail {
+    display: flex; gap: .5rem; font-size: .65rem; color: #64748b; flex-shrink: 0;
+}
+.top5-payer-bar-wrap { width: 110px; flex-shrink: 0; }
+.top5-payer-bar-bg {
+    width: 100%; height: 18px; background: #e2e8f0;
+    border-radius: 5px; overflow: hidden; position: relative;
+}
+.top5-payer-bar-fill {
+    height: 100%; border-radius: 5px;
+    transition: width .5s ease;
+}
+.top5-payer-bar-fill.reimb-fill { background: linear-gradient(90deg, #0d5c74, #1565c0); }
+.top5-payer-bar-fill.totpay-fill { background: linear-gradient(90deg, #047857, #0d8553); }
+.top5-payer-bar-label {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: .62rem; font-weight: 800; color: #1e293b;
+    text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff;
+}
+
+/* ?? Filter panel (Production Report style) ????????????????????? */
+.cs-rpt-filter-panel {
+    background: #fff; border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.07);
+}
+.cs-rpt-filter-badge { font-size: .7rem; vertical-align: middle; }
+
+/* Multi-select dropdown */
+.cs-rpt-ms { position: relative; }
+.cs-rpt-ms-btn {
+    display: flex; align-items: center; justify-content: space-between;
+    width: 100%; padding: .3rem .6rem; font-size: .8rem;
+    border: 1px solid #ced4da; border-radius: .375rem;
+    background: #fff; cursor: pointer; min-height: 31px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cs-rpt-ms-btn:hover { border-color: #7B8B8E; }
+.cs-rpt-ms-btn .cs-rpt-ms-count {
+    background: #2B2D42; color: #fff; font-size: .65rem;
+    border-radius: 10px; padding: 0 .45rem; margin-left: .4rem;
+    font-weight: 700; flex-shrink: 0;
+}
+.cs-rpt-ms-panel {
+    display: none; position: absolute; z-index: 100; top: 100%;
+    left: 0; right: 0; background: #fff; border: 1px solid #ced4da;
+    border-radius: .375rem; box-shadow: 0 4px 16px rgba(0,0,0,.12);
+    margin-top: 2px; max-height: 280px; overflow: hidden;
+}
+.cs-rpt-ms-panel.open { display: flex; flex-direction: column; }
+.cs-rpt-ms-search {
+    border: none; border-bottom: 1px solid #e9ecef;
+    padding: .4rem .6rem; font-size: .78rem; outline: none; width: 100%;
+}
+.cs-rpt-ms-list {
+    overflow-y: auto; max-height: 220px; padding: .25rem 0;
+}
+.cs-rpt-ms-list label {
+    display: flex; align-items: center; gap: .4rem;
+    padding: .25rem .6rem; font-size: .78rem; cursor: pointer; margin: 0;
+}
+.cs-rpt-ms-list label:hover { background: #edf0f0; }
+.cs-rpt-ms-list label.cs-rpt-ms-hidden { display: none; }
+
+/* ?? Premium pill tabs ?????????????????????????????????????????? */
+.cs-rpt-tabs {
+    display: flex; flex-wrap: wrap; gap: .45rem;
+    padding: .55rem .65rem;
+    background: linear-gradient(135deg, #f8fafd 0%, #eef3fa 100%);
+    border: 1px solid #dce4f0;
+    border-radius: 1rem;
+    box-shadow: 0 2px 10px rgba(15,23,42,.04);
+}
+.cs-rpt-tabs .nav-item { margin: 0; }
+.cs-rpt-tabs .nav-link {
+    display: inline-flex; align-items: center; gap: .4rem;
+    padding: .45rem .85rem;
+    font-size: .76rem; font-weight: 700; letter-spacing: .015em;
+    color: #3b5578;
+    background: #fff;
+    border: 1.5px solid #d4dde9;
+    border-radius: .75rem;
+    transition: all .18s ease;
+    box-shadow: 0 1px 3px rgba(15,23,42,.04);
+    white-space: nowrap;
+}
+.cs-rpt-tabs .nav-link i {
+    font-size: .82rem; opacity: .7; transition: opacity .18s;
+}
+.cs-rpt-tabs .nav-link:hover {
+    color: #0e3460; background: #edf2fb;
+    border-color: #b4c6e0;
+    box-shadow: 0 2px 8px rgba(15,23,42,.08);
+}
+.cs-rpt-tabs .nav-link:hover i { opacity: 1; }
+.cs-rpt-tabs .nav-link.active {
+    color: #fff;
+    background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
+    border-color: #0e3460;
+    box-shadow: 0 4px 14px rgba(14,52,96,.30);
+}
+.cs-rpt-tabs .nav-link.active i { opacity: 1; }
+.cs-rpt-tabs .nav-link.disabled {
+    opacity: .45; pointer-events: none; cursor: default;
+}
+
+/* ?? Rep vs Payments sticky first column ???????????????????????? */
+#reppay-pane .cs-rpt-table thead th:first-child {
+    position: sticky; left: 0; z-index: 10;
+    background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
+}
+#reppay-pane .cs-rpt-table tbody td:first-child {
+    position: sticky; left: 0; z-index: 3;
+    border-right: 2px solid #d4dde9;
+}
+#reppay-pane .cs-rpt-table tbody tr:nth-child(odd) td:first-child { background: #f8fafc; }
+#reppay-pane .cs-rpt-table tbody tr:nth-child(even) td:first-child { background: #fff; }
+#reppay-pane .cs-rpt-table tbody tr:hover td:first-child { background: #eef4ff; }
+#reppay-pane .cs-rpt-table tfoot td:first-child {
+    position: sticky; left: 0; z-index: 3;
+    background: #0e3460;
+    border-right: 2px solid #0a2a4a;
+}
+
+/* ?? Monthly Claim Volume sticky columns ???????????????????????? */
+#mcv-pane .cs-rpt-table thead tr:first-child th:nth-child(1),
+#mcv-pane .cs-rpt-table thead tr:first-child th:nth-child(2) {
+    position: sticky; z-index: 10;
+    background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
+}
+#mcv-pane .cs-rpt-table thead tr:first-child th:nth-child(1) { left: 0; min-width: 40px; }
+#mcv-pane .cs-rpt-table thead tr:first-child th:nth-child(2) { left: 40px; min-width: 260px; border-right: 2px solid #0a2a4a; }
+#mcv-pane .cs-rpt-table tbody td:nth-child(1),
+#mcv-pane .cs-rpt-table tbody td:nth-child(2) {
+    position: sticky; z-index: 3;
+}
+#mcv-pane .cs-rpt-table tbody td:nth-child(1) { left: 0; }
+#mcv-pane .cs-rpt-table tbody td:nth-child(2) { left: 40px; border-right: 2px solid #d4dde9; }
+#mcv-pane .cs-rpt-table tbody tr:nth-child(odd) td:nth-child(1),
+#mcv-pane .cs-rpt-table tbody tr:nth-child(odd) td:nth-child(2) { background: #f8fafc; }
+#mcv-pane .cs-rpt-table tbody tr:nth-child(even) td:nth-child(1),
+#mcv-pane .cs-rpt-table tbody tr:nth-child(even) td:nth-child(2) { background: #fff; }
+#mcv-pane .cs-rpt-table tbody tr:hover td:nth-child(1),
+#mcv-pane .cs-rpt-table tbody tr:hover td:nth-child(2) { background: #eef4ff; }
+#mcv-pane .cs-rpt-table tfoot td:nth-child(1),
+#mcv-pane .cs-rpt-table tfoot td:nth-child(2) {
+    position: sticky; z-index: 3;
+    background: #0e3460;
+}
+#mcv-pane .cs-rpt-table tfoot td:nth-child(1) { left: 0; }
+#mcv-pane .cs-rpt-table tfoot td:nth-child(2) { left: 40px; border-right: 2px solid #0a2a4a; }
+/* MCV data columns: compact and uniform */
+#mcv-pane .cs-rpt-table { width: auto; }
+#mcv-pane .cs-rpt-table thead th:nth-child(n+3) { white-space: nowrap; padding: .4rem .4rem; font-size: .62rem; width: 100px; min-width: 100px; max-width: 100px; }
+#mcv-pane .cs-rpt-table td:nth-child(n+3) { white-space: nowrap; padding: .4rem .4rem; width: 100px; min-width: 100px; max-width: 100px; }
+/* Drill-down payer rows */
+.mcv-drilldown td { font-size: .72rem !important; color: #475569; }
+.mcv-drilldown td:nth-child(2) { padding-left: 1.8rem !important; font-weight: 500 !important; }
+
+/* ?? Weekly Claim Volume sticky columns ????????????????????????? */
+#wcv-pane .cs-rpt-table thead tr:first-child th:nth-child(1),
+#wcv-pane .cs-rpt-table thead tr:first-child th:nth-child(2) {
+    position: sticky; z-index: 10;
+    background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
+}
+#wcv-pane .cs-rpt-table thead tr:first-child th:nth-child(1) { left: 0; min-width: 40px; }
+#wcv-pane .cs-rpt-table thead tr:first-child th:nth-child(2) { left: 40px; min-width: 260px; border-right: 2px solid #0a2a4a; }
+#wcv-pane .cs-rpt-table tbody td:nth-child(1),
+#wcv-pane .cs-rpt-table tbody td:nth-child(2) {
+    position: sticky; z-index: 3;
+}
+#wcv-pane .cs-rpt-table tbody td:nth-child(1) { left: 0; }
+#wcv-pane .cs-rpt-table tbody td:nth-child(2) { left: 40px; border-right: 2px solid #d4dde9; }
+#wcv-pane .cs-rpt-table tbody tr:nth-child(odd) td:nth-child(1),
+#wcv-pane .cs-rpt-table tbody tr:nth-child(odd) td:nth-child(2) { background: #f8fafc; }
+#wcv-pane .cs-rpt-table tbody tr:nth-child(even) td:nth-child(1),
+#wcv-pane .cs-rpt-table tbody tr:nth-child(even) td:nth-child(2) { background: #fff; }
+#wcv-pane .cs-rpt-table tbody tr:hover td:nth-child(1),
+#wcv-pane .cs-rpt-table tbody tr:hover td:nth-child(2) { background: #eef4ff; }
+#wcv-pane .cs-rpt-table tfoot td:nth-child(1),
+#wcv-pane .cs-rpt-table tfoot td:nth-child(2) {
+    position: sticky; z-index: 3;
+    background: #0e3460;
+}
+#wcv-pane .cs-rpt-table tfoot td:nth-child(1) { left: 0; }
+#wcv-pane .cs-rpt-table tfoot td:nth-child(2) { left: 40px; border-right: 2px solid #0a2a4a; }
+#wcv-pane .cs-rpt-table { width: auto; }
+#wcv-pane .cs-rpt-table thead th:nth-child(n+3) { white-space: nowrap; padding: .4rem .4rem; font-size: .62rem; width: 100px; min-width: 100px; max-width: 100px; }
+#wcv-pane .cs-rpt-table td:nth-child(n+3) { white-space: nowrap; padding: .4rem .4rem; width: 100px; min-width: 100px; max-width: 100px; }
+
+/* ?? Panel Averages sticky columns ?????????????????????????????? */
+#panelavg-pane .cs-rpt-table thead tr:first-child th:nth-child(1),
+#panelavg-pane .cs-rpt-table thead tr:first-child th:nth-child(2) {
+    position: sticky; z-index: 10;
+    background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
+}
+#panelavg-pane .cs-rpt-table thead tr:first-child th:nth-child(1) { left: 0; min-width: 40px; }
+#panelavg-pane .cs-rpt-table thead tr:first-child th:nth-child(2) { left: 40px; min-width: 260px; border-right: 2px solid #0a2a4a; }
+#panelavg-pane .cs-rpt-table tbody td:nth-child(1),
+#panelavg-pane .cs-rpt-table tbody td:nth-child(2) {
+    position: sticky; z-index: 3;
+}
+#panelavg-pane .cs-rpt-table tbody td:nth-child(1) { left: 0; }
+#panelavg-pane .cs-rpt-table tbody td:nth-child(2) { left: 40px; border-right: 2px solid #d4dde9; }
+#panelavg-pane .cs-rpt-table tbody tr:nth-child(odd) td:nth-child(1),
+#panelavg-pane .cs-rpt-table tbody tr:nth-child(odd) td:nth-child(2) { background: #f8fafc; }
+#panelavg-pane .cs-rpt-table tbody tr:nth-child(even) td:nth-child(1),
+#panelavg-pane .cs-rpt-table tbody tr:nth-child(even) td:nth-child(2) { background: #fff; }
+#panelavg-pane .cs-rpt-table tbody tr:hover td:nth-child(1),
+#panelavg-pane .cs-rpt-table tbody tr:hover td:nth-child(2) { background: #eef4ff; }
+#panelavg-pane .cs-rpt-table tfoot td:nth-child(1),
+#panelavg-pane .cs-rpt-table tfoot td:nth-child(2) {
+    position: sticky; z-index: 3;
+    background: #0e3460;
+}
+#panelavg-pane .cs-rpt-table tfoot td:nth-child(1) { left: 0; }
+#panelavg-pane .cs-rpt-table tfoot td:nth-child(2) { left: 40px; border-right: 2px solid #0a2a4a; }
+#panelavg-pane .cs-rpt-table { width: auto; }
+#panelavg-pane .cs-rpt-table thead th:nth-child(n+3) { white-space: nowrap; padding: .4rem .4rem; font-size: .62rem; width: 100px; min-width: 100px; max-width: 100px; }
+#panelavg-pane .cs-rpt-table td:nth-child(n+3) { white-space: nowrap; padding: .4rem .4rem; width: 100px; min-width: 100px; max-width: 100px; }
+</style>
+
+<!-- Page heading -->
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <h2 class="mb-0 fw-bold">
+        Collection Summary
+        <span class="badge bg-primary bg-gradient fw-semibold"
+              style="font-size:.45em;vertical-align:middle;border-radius:20px;padding:.35em .85em">
+            @Model.SelectedLab
+        </span>
+    </h2>
+    <a asp-controller="Dashboard" asp-action="Index" asp-route-lab="@Model.SelectedLab"
+       class="btn btn-sm btn-outline-primary">
+        <i class="bi bi-speedometer2 me-1"></i>Revenue Dashboard
+    </a>
+</div>
+
+<!-- ?? Collapsible Filter panel ?????????????????????????????????? -->
+@if (!string.IsNullOrWhiteSpace(Model.SelectedLab))
+{
+    <div class="cs-rpt-filter-panel p-3 mb-4">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+            <span class="fw-semibold" style="font-size:.9rem">
+                <i class="bi bi-funnel"></i> Filters
+                @if (Model.HasFilters)
+                {
+                    <span class="badge bg-primary cs-rpt-filter-badge ms-1">Active</span>
+                }
+            </span>
+            <button class="btn btn-sm btn-link text-muted p-0" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#csRptFilterBody"
+                    aria-expanded="@(Model.HasFilters ? "true" : "false")">
+                @Html.Raw(Model.HasFilters ? "&#9650; Hide" : "&#9660; Show")
+            </button>
+        </div>
+
+        <div id="csRptFilterBody" class="collapse @(Model.HasFilters ? "show" : "")">
+            <form id="csRptFilterForm" method="get" asp-controller="CollectionSummary" asp-action="Index">
+                <input type="hidden" name="lab" value="@Model.SelectedLab" />
+
+                <div class="row g-2 align-items-end mb-2">
+                    <!-- Payer Name (multi-select) -->
+                    <div class="col-sm-6 col-md-4">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PAYER NAME</label>
+                        <div class="cs-rpt-ms" data-ms-name="filterPayerNames">
+                            <div class="cs-rpt-ms-btn" tabindex="0">
+                                <span class="cs-rpt-ms-label">All</span>
+                                <span class="cs-rpt-ms-count" style="display:none">0</span>
+                            </div>
+                            <div class="cs-rpt-ms-panel">
+                                <input type="text" class="cs-rpt-ms-search" placeholder="Search payers…" autocomplete="off" />
+                                <div class="cs-rpt-ms-list">
+                                    @foreach (var pn in Model.PayerNames)
+                                    {
+                                        <label><input type="checkbox" name="filterPayerNames" value="@pn"
+                                            @(Model.FilterPayerNames.Contains(pn) ? "checked" : "") /> @pn</label>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Panel Name (multi-select) -->
+                    <div class="col-sm-6 col-md-4">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PANEL NAME</label>
+                        <div class="cs-rpt-ms" data-ms-name="filterPanelNames">
+                            <div class="cs-rpt-ms-btn" tabindex="0">
+                                <span class="cs-rpt-ms-label">All</span>
+                                <span class="cs-rpt-ms-count" style="display:none">0</span>
+                            </div>
+                            <div class="cs-rpt-ms-panel">
+                                <input type="text" class="cs-rpt-ms-search" placeholder="Search panels…" autocomplete="off" />
+                                <div class="cs-rpt-ms-list">
+                                    @foreach (var pl in Model.PanelNames)
+                                    {
+                                        <label><input type="checkbox" name="filterPanelNames" value="@pl"
+                                            @(Model.FilterPanelNames.Contains(pl) ? "checked" : "") /> @pl</label>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row g-2 align-items-end mb-2">
+                    <!-- First Bill Date -->
+                    <div class="col-sm-6 col-md-2">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">FIRST BILL DATE FROM</label>
+                        <input type="date" name="filterFirstBillFrom" class="form-control form-control-sm" value="@Model.FilterFirstBillFrom" />
+                    </div>
+                    <div class="col-sm-6 col-md-2">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">FIRST BILL DATE TO</label>
+                        <input type="date" name="filterFirstBillTo" class="form-control form-control-sm" value="@Model.FilterFirstBillTo" />
+                    </div>
+
+                    <!-- Date of Service -->
+                    <div class="col-sm-6 col-md-2">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">DATE OF SERVICE FROM</label>
+                        <input type="date" name="filterDosFrom" class="form-control form-control-sm" value="@Model.FilterDosFrom" />
+                    </div>
+                    <div class="col-sm-6 col-md-2">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">DATE OF SERVICE TO</label>
+                        <input type="date" name="filterDosTo" class="form-control form-control-sm" value="@Model.FilterDosTo" />
+                    </div>
+
+                    <!-- Check Date -->
+                    <div class="col-sm-6 col-md-2">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">CHECK DATE FROM</label>
+                        <input type="date" name="filterCheckDateFrom" class="form-control form-control-sm" value="@Model.FilterCheckDateFrom" />
+                    </div>
+                    <div class="col-sm-6 col-md-2">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">CHECK DATE TO</label>
+                        <input type="date" name="filterCheckDateTo" class="form-control form-control-sm" value="@Model.FilterCheckDateTo" />
+                    </div>
+                </div>
+
+                <div class="d-flex gap-2 mt-2">
+                    <button type="submit" class="btn btn-sm btn-primary">
+                        <i class="bi bi-funnel-fill me-1"></i>Apply
+                    </button>
+                    <a asp-controller="CollectionSummary" asp-action="Index"
+                       asp-route-lab="@Model.SelectedLab"
+                       class="btn btn-sm btn-outline-secondary">Clear</a>
+                    <button type="button" id="csExportExcelBtn" class="btn btn-sm btn-outline-success ms-auto">
+                        <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+}
+
+<!-- Excel export loading overlay -->
+<div id="csExportOverlay" class="cs-export-overlay" style="display:none">
+    <div class="cs-export-dialog">
+        <div class="cs-export-icon">
+            <i class="bi bi-file-earmark-excel"></i>
+        </div>
+        <div class="cs-export-title">Generating Excel Report</div>
+        <div class="cs-export-sub" id="csExportStatus">Fetching data and building workbook…</div>
+        <div class="cs-export-bar-bg">
+            <div class="cs-export-bar-fill" id="csExportBar" style="width:0%"></div>
+        </div>
+        <div class="cs-export-pct" id="csExportPct">0%</div>
+        <button type="button" id="csExportCancelBtn" class="btn btn-sm btn-outline-secondary mt-3">
+            <i class="bi bi-x-circle me-1"></i>Cancel
+        </button>
+    </div>
+</div>
+
+@if (TempData["ExportError"] is string exportError)
+{
+    <div class="alert alert-warning alert-dismissible fade show mt-2" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-1"></i> @exportError
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
+
+<!-- ?? Error message ???????????????????????????????????????????? -->
+@if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+{
+    <div class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle-fill me-1"></i> @Model.ErrorMessage
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(Model.SelectedLab) && string.IsNullOrWhiteSpace(Model.ErrorMessage))
+{
+    <!-- ?? Top-5 Insurance Dashboard Cards (always visible) ?????? -->
+    <div class="top5-cards">
+
+        <!-- ?? Reimbursement % card ??????????????????????????????? -->
+        <div class="top5-card">
+            @if (Model.Top5Reimbursement.Count > 0)
+            {
+                var reimbTotal = Model.Top5Reimbursement;
+                var reimbTotalCharges = reimbTotal.Sum(r => r.SumChargeAmount);
+                var reimbTotalPaid = reimbTotal.Sum(r => r.SumInsurancePayment);
+                var reimbTotalVisits = reimbTotal.Sum(r => r.UniqueVisitCount);
+                var reimbAvgPct = reimbTotalCharges == 0m ? 0m
+                    : Math.Round(reimbTotalPaid / reimbTotalCharges * 100m, 2);
+
+                <div class="top5-card-hdr reimb-hdr">
+                    <div>
+                        <div class="top5-card-hdr-title">Reimbursement Rate</div>
+                        <div class="top5-card-hdr-sub">Top 5 payers by unique visit count</div>
+                    </div>
+                    <span class="top5-card-badge reimb-badge">
+                        <i class="bi bi-percent"></i> Reimbursement
+                    </span>
+                </div>
+
+                <div class="top5-card-body">
+                    <div class="top5-kpi-boxes">
+                        <div class="top5-kpi-box">
+                            <div class="top5-kpi-box-label"><i class="bi bi-hash"></i> Total Visits</div>
+                            <div class="top5-kpi-box-value">@reimbTotalVisits.ToString("N0")</div>
+                        </div>
+                        <div class="top5-kpi-box">
+                            <div class="top5-kpi-box-label"><i class="bi bi-currency-dollar"></i> Total Paid</div>
+                            <div class="top5-kpi-box-value">@reimbTotalPaid.ToString("C0")</div>
+                        </div>
+                    </div>
+                    <div class="top5-gauge">
+                        <div class="top5-gauge-ring reimb-ring" style="--gauge-pct: @(reimbAvgPct.ToString("F1"))%">
+                            <div class="top5-gauge-inner">
+                                <div class="top5-gauge-pct">@reimbAvgPct.ToString("F1")%</div>
+                                <div class="top5-gauge-label">Reimb.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="top5-payer-list">
+                    @foreach (var row in reimbTotal)
+                    {
+                        var pct = row.ReimbursementPct;
+                        var barW = Math.Min(pct, 100m);
+                        <div class="top5-payer-row">
+                            <div class="top5-payer-rank reimb-rank">@row.Rank</div>
+                            <div class="top5-payer-name" title="@row.PayerName">@row.PayerName</div>
+                            <div class="top5-payer-detail">
+                                <span title="Visits">@row.UniqueVisitCount.ToString("N0")</span>
+                                <span title="Paid">@row.SumInsurancePayment.ToString("C0")</span>
+                            </div>
+                            <div class="top5-payer-bar-wrap">
+                                <div class="top5-payer-bar-bg">
+                                    <div class="top5-payer-bar-fill reimb-fill" style="width:@(barW.ToString("F1"))%"></div>
+                                    <div class="top5-payer-bar-label">@pct.ToString("F1")%</div>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <div class="top5-card-footer">
+                    Ranked by <span class="top5-hl-blue">unique visit count</span> &bull;
+                    Formula: SUM(InsurancePayment) / SUM(ChargeAmount) × 100
+                </div>
+            }
+            else
+            {
+                <div class="top5-card-hdr reimb-hdr">
+                    <div>
+                        <div class="top5-card-hdr-title">Reimbursement Rate</div>
+                        <div class="top5-card-hdr-sub">Top 5 payers by unique visit count</div>
+                    </div>
+                    <span class="top5-card-badge reimb-badge"><i class="bi bi-percent"></i> Reimbursement</span>
+                </div>
+                <div class="text-center py-5 text-muted" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center">
+                    <div style="font-size:2rem;opacity:.4"><i class="bi bi-bar-chart"></i></div>
+                    <div class="fw-semibold mt-2">No reimbursement data available</div>
+                    <div class="small mt-1">Try adjusting your filters.</div>
+                </div>
+            }
+        </div>
+
+        <!-- ?? Total Payments card ???????????????????????????????? -->
+        <div class="top5-card">
+            @if (Model.ShowTop5TotalPayments && Model.Top5TotalPayments.Count > 0)
+            {
+                var payTotal = Model.Top5TotalPayments;
+                var payTotalAmt = payTotal.Sum(r => r.TotalPayments);
+                var payTotalVisits = payTotal.Sum(r => r.UniqueVisitCount);
+                var maxPay = payTotal.Max(r => r.TotalPayments);
+                var topPayerPct = maxPay == 0m ? 0m : Math.Round(payTotal[0].TotalPayments / payTotalAmt * 100m, 1);
+
+                <div class="top5-card-hdr totpay-hdr">
+                    <div>
+                        <div class="top5-card-hdr-title">Total Payments</div>
+                        <div class="top5-card-hdr-sub">Top 5 payers by unique visit count</div>
+                    </div>
+                    <span class="top5-card-badge totpay-badge">
+                        <i class="bi bi-cash-stack"></i> Payments
+                    </span>
+                </div>
+
+                <div class="top5-card-body">
+                    <div class="top5-kpi-boxes">
+                        <div class="top5-kpi-box">
+                            <div class="top5-kpi-box-label"><i class="bi bi-hash"></i> Total Visits</div>
+                            <div class="top5-kpi-box-value">@payTotalVisits.ToString("N0")</div>
+                        </div>
+                        <div class="top5-kpi-box">
+                            <div class="top5-kpi-box-label"><i class="bi bi-currency-dollar"></i> Total Paid</div>
+                            <div class="top5-kpi-box-value">@payTotalAmt.ToString("C0")</div>
+                        </div>
+                    </div>
+                    <div class="top5-gauge">
+                        <div class="top5-gauge-ring totpay-ring" style="--gauge-pct: @(topPayerPct.ToString("F1"))%">
+                            <div class="top5-gauge-inner">
+                                <div class="top5-gauge-pct">@topPayerPct.ToString("F0")%</div>
+                                <div class="top5-gauge-label">Top Payer</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="top5-payer-list">
+                    @foreach (var row in payTotal)
+                    {
+                        var barW = maxPay == 0m ? 0m : Math.Round(row.TotalPayments / maxPay * 100m, 1);
+                        <div class="top5-payer-row">
+                            <div class="top5-payer-rank totpay-rank">@row.Rank</div>
+                            <div class="top5-payer-name" title="@row.PayerName">@row.PayerName</div>
+                            <div class="top5-payer-detail">
+                                <span title="Visits">@row.UniqueVisitCount.ToString("N0")</span>
+                            </div>
+                            <div class="top5-payer-bar-wrap">
+                                <div class="top5-payer-bar-bg">
+                                    <div class="top5-payer-bar-fill totpay-fill" style="width:@(barW.ToString("F1"))%"></div>
+                                    <div class="top5-payer-bar-label">@row.TotalPayments.ToString("C0")</div>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <div class="top5-card-footer">
+                    Ranked by <span class="top5-hl-green">unique visit count</span> &bull;
+                    Top payer accounts for <span class="top5-hl-green">@topPayerPct.ToString("F0")%</span> of total payments
+                </div>
+            }
+            else
+            {
+                <div class="top5-card-hdr totpay-hdr">
+                    <div>
+                        <div class="top5-card-hdr-title">Total Payments</div>
+                        <div class="top5-card-hdr-sub">Top 5 payers by unique visit count</div>
+                    </div>
+                    <span class="top5-card-badge totpay-badge"><i class="bi bi-cash-stack"></i> Payments</span>
+                </div>
+                <div class="text-center py-5 text-muted" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center">
+                    <div style="font-size:2rem;opacity:.4"><i class="bi bi-cash-coin"></i></div>
+                    <div class="fw-semibold mt-2">@(Model.ShowTop5TotalPayments ? "No payment data available" : "Not available for this lab")</div>
+                    <div class="small mt-1">Try adjusting your filters.</div>
+                </div>
+            }
+        </div>
+
+    </div>
+
+    <!-- ?? Premium Tabs ???????????????????????????????????????? -->
+    <ul class="nav nav-pills cs-rpt-tabs mb-3" id="csRptTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="mcv-tab" data-bs-toggle="pill"
+                    data-bs-target="#mcv-pane" type="button" role="tab"
+                    aria-controls="mcv-pane" aria-selected="true">
+                <i class="bi bi-calendar-month"></i> Monthly Claim Volume
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="wcv-tab" data-bs-toggle="pill"
+                    data-bs-target="#wcv-pane" type="button" role="tab"
+                    aria-controls="wcv-pane" aria-selected="false">
+                <i class="bi bi-calendar-week"></i> Weekly Claim Volume
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="panelavg-tab" data-bs-toggle="pill"
+                    data-bs-target="#panelavg-pane" type="button" role="tab"
+                    aria-controls="panelavg-pane" aria-selected="false">
+                <i class="bi bi-bar-chart-line"></i> Panel Averages
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="aging-tab" data-bs-toggle="pill"
+                    data-bs-target="#aging-pane" type="button" role="tab"
+                    aria-controls="aging-pane" aria-selected="false">
+                <i class="bi bi-hourglass-split"></i> Insurance vs Aging
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="panelpay-tab" data-bs-toggle="pill"
+                    data-bs-target="#panelpay-pane" type="button" role="tab"
+                    aria-controls="panelpay-pane" aria-selected="false">
+                <i class="bi bi-grid-3x3-gap"></i> Panel vs Payment
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="reppay-tab" data-bs-toggle="pill"
+                    data-bs-target="#reppay-pane" type="button" role="tab"
+                    aria-controls="reppay-pane" aria-selected="false">
+                <i class="bi bi-person-badge"></i> Rep vs Payments
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="inspctpay-tab" data-bs-toggle="pill"
+                    data-bs-target="#inspctpay-pane" type="button" role="tab"
+                    aria-controls="inspctpay-pane" aria-selected="false">
+                <i class="bi bi-pie-chart"></i> Insurance vs Payment %
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="cptpctpay-tab" data-bs-toggle="pill"
+                    data-bs-target="#cptpctpay-pane" type="button" role="tab"
+                    aria-controls="cptpctpay-pane" aria-selected="false">
+                <i class="bi bi-list-ol"></i> CPT vs Payment %
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content" id="csRptTabContent">
+
+        <!-- ?? Monthly Claim Volume tab ???????????????????????? -->
+        <div class="tab-pane fade show active" id="mcv-pane" role="tabpanel" aria-labelledby="mcv-tab">
+            @if (Model.MonthlyClaimVolume.HasData)
+            {
+                var mcvPivot = Model.MonthlyClaimVolume;
+                var mcvPeriods = mcvPivot.Periods;
+                var mcvYears = mcvPivot.Years;
+                var mcvMonthsByYear = mcvPeriods
+                    .GroupBy(p => p.Year)
+                    .OrderBy(g => g.Key)
+                    .ToDictionary(g => g.Key, g => g.OrderBy(p => p.Month).ToList());
+
+                int McvCellEnc(Dictionary<string, CollectionMonthlyCell>? d, string mk)
+                    => d is not null && d.TryGetValue(mk, out var c) ? c.EncounterCount : 0;
+                decimal McvCellPaid(Dictionary<string, CollectionMonthlyCell>? d, string mk)
+                    => d is not null && d.TryGetValue(mk, out var c) ? c.InsurancePaidAmount : 0m;
+                int McvYearEnc(Dictionary<int, CollectionYearTotal>? d, int y)
+                    => d is not null && d.TryGetValue(y, out var t) ? t.EncounterCount : 0;
+                decimal McvYearPaid(Dictionary<int, CollectionYearTotal>? d, int y)
+                    => d is not null && d.TryGetValue(y, out var t) ? t.InsurancePaidAmount : 0m;
+
+                <div class="cs-rpt-wrap">
+                    <div class="cs-rpt-scroll">
+                        <table class="cs-rpt-table">
+                            <thead>
+                                @* Row 1: year spans *@
+                                <tr>
+                                    <th rowspan="2" style="min-width:40px">&nbsp;</th>
+                                    <th rowspan="2" style="text-align:left;min-width:260px">Panel &amp; Insurance</th>
+                                    @foreach (var year in mcvYears)
+                                    {
+                                        var monthsInYear = mcvMonthsByYear.TryGetValue(year, out var my) ? my : [];
+                                        <th colspan="@(monthsInYear.Count * 2)">@year</th>
+                                        <th colspan="2">@year Total</th>
+                                    }
+                                    <th colspan="2">Grand Total</th>
+                                </tr>
+                                @* Row 2: month sub-headers *@
+                                @{
+                                    var encLabel = Model.UsesLineEncounters ? "Enc." : "Paid Claims";
+                                    var encTotalLabel = Model.UsesLineEncounters ? "No. of Enc." : "No. of Paid Claims";
+                                    var paidLabel = Model.UsesLineEncounters ? "Ins. Paid" : "Billed Charges";
+                                }
+                                <tr>
+                                    @foreach (var year in mcvYears)
+                                    {
+                                        var monthsInYear = mcvMonthsByYear.TryGetValue(year, out var my) ? my : [];
+                                        @foreach (var p in monthsInYear)
+                                        {
+                                            <th>@p.MonthLabel @encLabel</th>
+                                            <th>@p.MonthLabel @paidLabel</th>
+                                        }
+                                        <th>@encTotalLabel</th>
+                                        <th>@paidLabel</th>
+                                    }
+                                    <th>@encTotalLabel</th>
+                                    <th>@paidLabel</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @{ var mcvIdx = 0; }
+                                @foreach (var panel in mcvPivot.PanelRows)
+                                {
+                                    mcvIdx++;
+                                    var letter = mcvIdx <= 26 ? ((char)('A' + mcvIdx - 1)).ToString() : mcvIdx.ToString();
+                                    @* Panel row *@
+                                    <tr>
+                                        <td style="font-weight:700">@letter</td>
+                                        <td style="text-align:left;font-weight:700">@panel.PanelName</td>
+                                        @foreach (var year in mcvYears)
+                                        {
+                                            var monthsInYear = mcvMonthsByYear.TryGetValue(year, out var my) ? my : [];
+                                            @foreach (var p in monthsInYear)
+                                            {
+                                                <td style="text-align:right;font-weight:600">@McvCellEnc(panel.ByMonth, p.Key).ToString("N0")</td>
+                                                <td style="text-align:right;font-weight:600">@McvCellPaid(panel.ByMonth, p.Key).ToString("C0")</td>
+                                            }
+                                            <td style="text-align:right;font-weight:700">@McvYearEnc(panel.ByYear, year).ToString("N0")</td>
+                                            <td style="text-align:right;font-weight:700">@McvYearPaid(panel.ByYear, year).ToString("C0")</td>
+                                        }
+                                        <td style="text-align:right;font-weight:700">@panel.TotalEncounters.ToString("N0")</td>
+                                        <td style="text-align:right;font-weight:700">@panel.TotalInsurancePaid.ToString("C0")</td>
+                                    </tr>
+                                    @* Payer drill-down rows (all payers when table1 mode, top 3 otherwise) *@
+                                    @foreach (var payer in panel.TopPayers)
+                                    {
+                                        <tr class="mcv-drilldown">
+                                            <td></td>
+                                            <td style="text-align:left">@payer.PayerName</td>
+                                            @foreach (var year in mcvYears)
+                                            {
+                                                var monthsInYear = mcvMonthsByYear.TryGetValue(year, out var my) ? my : [];
+                                                @foreach (var p in monthsInYear)
+                                                {
+                                                    <td style="text-align:right">@McvCellEnc(payer.ByMonth, p.Key).ToString("N0")</td>
+                                                    <td style="text-align:right">@McvCellPaid(payer.ByMonth, p.Key).ToString("C0")</td>
+                                                }
+                                                <td style="text-align:right;font-weight:600">@McvYearEnc(payer.ByYear, year).ToString("N0")</td>
+                                                <td style="text-align:right;font-weight:600">@McvYearPaid(payer.ByYear, year).ToString("C0")</td>
+                                            }
+                                            <td style="text-align:right;font-weight:600">@payer.TotalEncounters.ToString("N0")</td>
+                                            <td style="text-align:right;font-weight:600">@payer.TotalInsurancePaid.ToString("C0")</td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
+                                    <td style="color:#fff"></td>
+                                    <td style="text-align:left;color:#fff">Grand Total</td>
+                                    @foreach (var year in mcvYears)
+                                    {
+                                        var monthsInYear = mcvMonthsByYear.TryGetValue(year, out var my) ? my : [];
+                                        @foreach (var p in monthsInYear)
+                                        {
+                                            <td style="text-align:right;color:#fff">@McvCellEnc(mcvPivot.GrandTotalByMonth, p.Key).ToString("N0")</td>
+                                            <td style="text-align:right;color:#fff">@McvCellPaid(mcvPivot.GrandTotalByMonth, p.Key).ToString("C0")</td>
+                                        }
+                                        <td style="text-align:right;color:#fff">@McvYearEnc(mcvPivot.GrandTotalByYear, year).ToString("N0")</td>
+                                        <td style="text-align:right;color:#fff">@McvYearPaid(mcvPivot.GrandTotalByYear, year).ToString("C0")</td>
+                                    }
+                                    <td style="text-align:right;color:#fff">@mcvPivot.GrandTotalEncounters.ToString("N0")</td>
+                                    <td style="text-align:right;color:#fff">@mcvPivot.GrandTotalInsurancePaid.ToString("C0")</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
+                    <strong>Source:</strong> @(Model.UsesLineEncounters ? "Line Level Data (encounters) + Claim Level Data (payments)" : "Claim Level Data") &bull;
+                    <strong>Filter:</strong> InsurancePayment &gt; 0, ClaimStatus IN (Fully Paid, Partially Paid, Paid-Client) &bull;
+                    <strong>Rows:</strong> PanelName &bull;
+                    <strong>Drill-down:</strong> @(Model.UsesLineEncounters ? "All Payers" : "Top 3 PayerName") by @(Model.UsesLineEncounters ? "Encounter Count" : "Paid Claims Count") &bull;
+                    <strong>Columns:</strong> @(Model.UsesLineEncounters ? "CheckDate (claims) / PostingDate (encounters)" : "CheckDate") (Year, Month) &bull;
+                    <strong>Sorted by:</strong> Grand Total @(Model.UsesLineEncounters ? "Encounters" : "Paid Claims") DESC
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5 text-muted">
+                    <div style="font-size:2rem;opacity:.4">&#128202;</div>
+                    <div class="fw-semibold mt-2">No monthly claim volume data available</div>
+                    <div class="small mt-1">No matching claim records found. Try adjusting your filters.</div>
+                </div>
+            }
+        </div>
+
+        <!-- ?? Weekly Claim Volume tab ?????????????????????????? -->
+        <div class="tab-pane fade" id="wcv-pane" role="tabpanel" aria-labelledby="wcv-tab">
+            @if (Model.WeeklyClaimVolume.HasData)
+            {
+                var wcvPivot = Model.WeeklyClaimVolume;
+                var wcvWeeks = wcvPivot.Weeks;
+
+                int WcvCellEnc(Dictionary<string, CollectionMonthlyCell>? d, string wk)
+                    => d is not null && d.TryGetValue(wk, out var c) ? c.EncounterCount : 0;
+                decimal WcvCellPaid(Dictionary<string, CollectionMonthlyCell>? d, string wk)
+                    => d is not null && d.TryGetValue(wk, out var c) ? c.InsurancePaidAmount : 0m;
+
+                var wcvEncLabel = Model.UsesLineEncounters ? "No. of Enc." : "No. of Encounters";
+                var wcvPaidLabel = Model.UsesLineEncounters ? "Total Paid" : "Total Billed Charges";
+
+                <div class="cs-rpt-wrap">
+                    <div class="cs-rpt-scroll">
+                        <table class="cs-rpt-table">
+                            <thead>
+                                <tr>
+                                    <th colspan="@(2 + wcvWeeks.Count * 2 + 2)" style="text-align:center;font-size:.7rem;letter-spacing:.03em">
+                                        Data based on Last 4 Week [Posting Date]
+                                    </th>
+                                </tr>
+                                <tr>
+                                    <th rowspan="2" style="min-width:40px">&nbsp;</th>
+                                    <th rowspan="2" style="text-align:left;min-width:260px">Panel &amp; Insurance</th>
+                                    @foreach (var w in wcvWeeks)
+                                    {
+                                        <th colspan="2">@w.Label</th>
+                                    }
+                                    <th colspan="2">Grand Total</th>
+                                </tr>
+                                <tr>
+                                    @foreach (var w in wcvWeeks)
+                                    {
+                                        <th>@wcvEncLabel</th>
+                                        <th>@wcvPaidLabel</th>
+                                    }
+                                    <th>@wcvEncLabel</th>
+                                    <th>@wcvPaidLabel</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @{ var wcvIdx = 0; }
+                                @foreach (var panel in wcvPivot.PanelRows)
+                                {
+                                    wcvIdx++;
+                                    var letter = wcvIdx <= 26 ? ((char)('A' + wcvIdx - 1)).ToString() : wcvIdx.ToString();
+                                    <tr>
+                                        <td style="font-weight:700">@letter</td>
+                                        <td style="text-align:left;font-weight:700">@panel.PanelName</td>
+                                        @foreach (var w in wcvWeeks)
+                                        {
+                                            <td style="text-align:right;font-weight:600">@WcvCellEnc(panel.ByWeek, w.Key).ToString("N0")</td>
+                                            <td style="text-align:right;font-weight:600">@WcvCellPaid(panel.ByWeek, w.Key).ToString("C0")</td>
+                                        }
+                                        <td style="text-align:right;font-weight:700">@panel.TotalEncounters.ToString("N0")</td>
+                                        <td style="text-align:right;font-weight:700">@panel.TotalInsurancePaid.ToString("C0")</td>
+                                    </tr>
+                                    @foreach (var payer in panel.TopPayers)
+                                    {
+                                        <tr class="mcv-drilldown">
+                                            <td></td>
+                                            <td style="text-align:left">@payer.PayerName</td>
+                                            @foreach (var w in wcvWeeks)
+                                            {
+                                                <td style="text-align:right">@WcvCellEnc(payer.ByWeek, w.Key).ToString("N0")</td>
+                                                <td style="text-align:right">@WcvCellPaid(payer.ByWeek, w.Key).ToString("C0")</td>
+                                            }
+                                            <td style="text-align:right;font-weight:600">@payer.TotalEncounters.ToString("N0")</td>
+                                            <td style="text-align:right;font-weight:600">@payer.TotalInsurancePaid.ToString("C0")</td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
+                                    <td style="color:#fff"></td>
+                                    <td style="text-align:left;color:#fff">Grand Total</td>
+                                    @foreach (var w in wcvWeeks)
+                                    {
+                                        <td style="text-align:right;color:#fff">@WcvCellEnc(wcvPivot.GrandTotalByWeek, w.Key).ToString("N0")</td>
+                                        <td style="text-align:right;color:#fff">@WcvCellPaid(wcvPivot.GrandTotalByWeek, w.Key).ToString("C0")</td>
+                                    }
+                                    <td style="text-align:right;color:#fff">@wcvPivot.GrandTotalEncounters.ToString("N0")</td>
+                                    <td style="text-align:right;color:#fff">@wcvPivot.GrandTotalInsurancePaid.ToString("C0")</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
+                    <strong>Source:</strong> @(Model.UsesLineEncounters ? "Line Level Data (encounters) + Claim Level Data (payments)" : "Claim Level Data") &bull;
+                    <strong>Filter:</strong> InsurancePayment &gt; 0, ClaimStatus IN (Fully Paid, Partially Paid, Paid-Client) &bull;
+                    <strong>Rows:</strong> PanelName &bull;
+                    <strong>Drill-down:</strong> @(Model.UsesLineEncounters ? "All Payers" : "Top 3 PayerName") by @(Model.UsesLineEncounters ? "Encounter Count" : "Paid Claims Count") &bull;
+                    <strong>Columns:</strong> Last 4 Weeks (PostingDate) &bull;
+                    <strong>Sorted by:</strong> Grand Total @(Model.UsesLineEncounters ? "Encounters" : "Paid Claims") DESC
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5 text-muted">
+                    <div style="font-size:2rem;opacity:.4">&#128202;</div>
+                    <div class="fw-semibold mt-2">No weekly claim volume data available</div>
+                    <div class="small mt-1">No matching claim records found for the last 4 weeks. Try adjusting your filters.</div>
+                </div>
+            }
+        </div>
+
+
+        <!-- ?? Panel Averages tab ???????????????????????????????????????????? -->
+        <div class="tab-pane fade" id="panelavg-pane" role="tabpanel" aria-labelledby="panelavg-tab">
+            @if (Model.PanelAverages.Count > 0)
+            {
+                <div class="cs-rpt-wrap">
+                    <div class="cs-rpt-scroll">
+                        <table class="cs-rpt-table">
+                            <thead>
+                                <tr>
+                                    <th colspan="2" rowspan="2" style="text-align:left;min-width:300px">Panel Name | Payer Name</th>
+                                    <th rowspan="2">No of Claims</th>
+                                    <th rowspan="2">Total Charges</th>
+                                    <th rowspan="2">Average Billed Amount</th>
+                                    <th rowspan="2">Carrier Payment</th>
+                                    <th rowspan="2">Average Carrier Payment</th>
+                                    <th colspan="3" style="text-align:center;border-bottom:1px solid rgba(255,255,255,.2)">Fully Paid</th>
+                                    <th colspan="3" style="text-align:center;border-bottom:1px solid rgba(255,255,255,.2)">Adjudicated</th>
+                                    <th colspan="3" style="text-align:center;border-bottom:1px solid rgba(255,255,255,.2)">30 Days</th>
+                                    <th colspan="3" style="text-align:center;border-bottom:1px solid rgba(255,255,255,.2)">60 Days</th>
+                                </tr>
+                                <tr>
+                                    <th>Count</th><th>$</th><th>Avg $</th>
+                                    <th>Count</th><th>$</th><th>Avg $</th>
+                                    <th>Count</th><th>$</th><th>Avg $</th>
+                                    <th>Count</th><th>$</th><th>Avg $</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @{ var paIdx = 0; }
+                                @foreach (var panel in Model.PanelAverages)
+                                {
+                                    paIdx++;
+                                    var letter = paIdx <= 26 ? ((char)('A' + paIdx - 1)).ToString() : paIdx.ToString();
+                                    var m = panel.Metrics;
+                                    <tr>
+                                        <td style="font-weight:700">@letter</td>
+                                        <td style="text-align:left;font-weight:700">@panel.PanelName</td>
+                                        <td style="text-align:right;font-weight:600">@m.ClaimCount.ToString("N0")</td>
+                                        <td style="text-align:right;font-weight:600">@m.TotalCharges.ToString("C0")</td>
+                                        <td style="text-align:right;font-weight:600">@m.AvgBilled.ToString("C2")</td>
+                                        <td style="text-align:right;font-weight:600">@m.CarrierPayment.ToString("C0")</td>
+                                        <td style="text-align:right;font-weight:600">@m.AvgCarrierPayment.ToString("C2")</td>
+                                        <td style="text-align:right;font-weight:600">@m.FullyPaidCount.ToString("N0")</td>
+                                        <td style="text-align:right;font-weight:600">@m.FullyPaidAmount.ToString("C0")</td>
+                                        <td style="text-align:right;font-weight:600">@m.AvgFullyPaid.ToString("C2")</td>
+                                        <td style="text-align:right;font-weight:600">@m.AdjudicatedCount.ToString("N0")</td>
+                                        <td style="text-align:right;font-weight:600">@m.AdjudicatedAmount.ToString("C0")</td>
+                                        <td style="text-align:right;font-weight:600">@m.AvgAdjudicated.ToString("C2")</td>
+                                        <td style="text-align:right;font-weight:600">@m.Days30Count.ToString("N0")</td>
+                                        <td style="text-align:right;font-weight:600">@m.Days30Amount.ToString("C0")</td>
+                                        <td style="text-align:right;font-weight:600">@m.AvgDays30.ToString("C2")</td>
+                                        <td style="text-align:right;font-weight:600">@m.Days60Count.ToString("N0")</td>
+                                        <td style="text-align:right;font-weight:600">@m.Days60Amount.ToString("C0")</td>
+                                        <td style="text-align:right;font-weight:600">@m.AvgDays60.ToString("C2")</td>
+                                    </tr>
+                                    @foreach (var payer in panel.Payers)
+                                    {
+                                        var pm = payer.Metrics;
+                                        <tr class="mcv-drilldown">
+                                            <td></td>
+                                            <td style="text-align:left">@payer.PayerName</td>
+                                            <td style="text-align:right">@pm.ClaimCount.ToString("N0")</td>
+                                            <td style="text-align:right">@pm.TotalCharges.ToString("C0")</td>
+                                            <td style="text-align:right">@pm.AvgBilled.ToString("C2")</td>
+                                            <td style="text-align:right">@pm.CarrierPayment.ToString("C0")</td>
+                                            <td style="text-align:right">@pm.AvgCarrierPayment.ToString("C2")</td>
+                                            <td style="text-align:right">@pm.FullyPaidCount.ToString("N0")</td>
+                                            <td style="text-align:right">@pm.FullyPaidAmount.ToString("C0")</td>
+                                            <td style="text-align:right">@pm.AvgFullyPaid.ToString("C2")</td>
+                                            <td style="text-align:right">@pm.AdjudicatedCount.ToString("N0")</td>
+                                            <td style="text-align:right">@pm.AdjudicatedAmount.ToString("C0")</td>
+                                            <td style="text-align:right">@pm.AvgAdjudicated.ToString("C2")</td>
+                                            <td style="text-align:right">@pm.Days30Count.ToString("N0")</td>
+                                            <td style="text-align:right">@pm.Days30Amount.ToString("C0")</td>
+                                            <td style="text-align:right">@pm.AvgDays30.ToString("C2")</td>
+                                            <td style="text-align:right">@pm.Days60Count.ToString("N0")</td>
+                                            <td style="text-align:right">@pm.Days60Amount.ToString("C0")</td>
+                                            <td style="text-align:right">@pm.AvgDays60.ToString("C2")</td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
+                    <strong>Source:</strong> Claim Level Data &bull;
+                    <strong>Date Range:</strong> Last 6 months by Date of Service &bull;
+                    <strong>Rows:</strong> PanelName ? PayerName drill-down &bull;
+                    <strong>Adjudicated Statuses:</strong> Fully Paid, Partially Paid, Complete W/O, Fully Adjusted, Fully Denied, Denied, Partially Denied, Partially Adjusted, Patient Responsibility &bull;
+                    <strong>30/60 Days:</strong> Adjudicated claims where DaysToDOS ? 30 / 60 &bull;
+                    <strong>Sorted by:</strong> No of Claims DESC
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5 text-muted">
+                    <div style="font-size:2rem;opacity:.4">&#128202;</div>
+                    <div class="fw-semibold mt-2">No panel averages data available</div>
+                    <div class="small mt-1">No matching claim records found for the last 6 months. Try adjusting your filters.</div>
+                </div>
+            }
+        </div>
+
+        <!-- ?? Insurance vs Aging tab ?????????????????????????????????? -->
+        <div class="tab-pane fade" id="aging-pane" role="tabpanel" aria-labelledby="aging-tab">
+            @if (Model.InsuranceAging.Count > 0)
+            {
+                var grandClaimsCurrent = Model.InsuranceAging.Sum(r => r.ClaimsCurrent);
+                var grandBalanceCurrent = Model.InsuranceAging.Sum(r => r.BalanceCurrent);
+                var grandClaims30 = Model.InsuranceAging.Sum(r => r.Claims30);
+                var grandBalance30 = Model.InsuranceAging.Sum(r => r.Balance30);
+                var grandClaims60 = Model.InsuranceAging.Sum(r => r.Claims60);
+                var grandBalance60 = Model.InsuranceAging.Sum(r => r.Balance60);
+                var grandClaims90 = Model.InsuranceAging.Sum(r => r.Claims90);
+                var grandBalance90 = Model.InsuranceAging.Sum(r => r.Balance90);
+                var grandClaims120 = Model.InsuranceAging.Sum(r => r.Claims120);
+                var grandBalance120 = Model.InsuranceAging.Sum(r => r.Balance120);
+                var grandClaimsTotal = Model.InsuranceAging.Sum(r => r.ClaimsTotal);
+                var grandBalanceTotal = Model.InsuranceAging.Sum(r => r.BalanceTotal);
+                <div class="cs-rpt-wrap">
+                    <div class="cs-rpt-scroll">
+                        <table class="cs-rpt-table">
+                            <thead>
+                                <tr>
+                                    <th rowspan="2" style="text-align:left;min-width:220px">Unbilled × Aging</th>
+                                    <th colspan="2">Current</th>
+                                    <th colspan="2">30+</th>
+                                    <th colspan="2">60+</th>
+                                    <th colspan="2">90+</th>
+                                    <th colspan="2">120+</th>
+                                    <th colspan="2">Grand Total</th>
+                                </tr>
+                                <tr>
+                                    <th>No. of Claims</th><th>Insurance Balance</th>
+                                    <th>No. of Claims</th><th>Insurance Balance</th>
+                                    <th>No. of Claims</th><th>Insurance Balance</th>
+                                    <th>No. of Claims</th><th>Insurance Balance</th>
+                                    <th>No. of Claims</th><th>Insurance Balance</th>
+                                    <th>No. of Claims</th><th>Insurance Balance</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in Model.InsuranceAging)
+                                {
+                                    <tr>
+                                        <td style="text-align:left;font-weight:600">@row.PayerName</td>
+                                        <td style="text-align:right">@row.ClaimsCurrent.ToString("N0")</td>
+                                        <td style="text-align:right">@row.BalanceCurrent.ToString("C2")</td>
+                                        <td style="text-align:right">@row.Claims30.ToString("N0")</td>
+                                        <td style="text-align:right">@row.Balance30.ToString("C2")</td>
+                                        <td style="text-align:right">@row.Claims60.ToString("N0")</td>
+                                        <td style="text-align:right">@row.Balance60.ToString("C2")</td>
+                                        <td style="text-align:right">@row.Claims90.ToString("N0")</td>
+                                        <td style="text-align:right">@row.Balance90.ToString("C2")</td>
+                                        <td style="text-align:right">@row.Claims120.ToString("N0")</td>
+                                        <td style="text-align:right">@row.Balance120.ToString("C2")</td>
+                                        <td style="text-align:right;font-weight:700">@row.ClaimsTotal.ToString("N0")</td>
+                                        <td style="text-align:right;font-weight:700">@row.BalanceTotal.ToString("C2")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
+                                    <td style="text-align:left;color:#fff">Grand Total</td>
+                                    <td style="text-align:right;color:#fff">@grandClaimsCurrent.ToString("N0")</td>
+                                    <td style="text-align:right;color:#fff">@grandBalanceCurrent.ToString("C2")</td>
+                                    <td style="text-align:right;color:#fff">@grandClaims30.ToString("N0")</td>
+                                    <td style="text-align:right;color:#fff">@grandBalance30.ToString("C2")</td>
+                                    <td style="text-align:right;color:#fff">@grandClaims60.ToString("N0")</td>
+                                    <td style="text-align:right;color:#fff">@grandBalance60.ToString("C2")</td>
+                                    <td style="text-align:right;color:#fff">@grandClaims90.ToString("N0")</td>
+                                    <td style="text-align:right;color:#fff">@grandBalance90.ToString("C2")</td>
+                                    <td style="text-align:right;color:#fff">@grandClaims120.ToString("N0")</td>
+                                    <td style="text-align:right;color:#fff">@grandBalance120.ToString("C2")</td>
+                                    <td style="text-align:right;color:#fff">@grandClaimsTotal.ToString("N0")</td>
+                                    <td style="text-align:right;color:#fff">@grandBalanceTotal.ToString("C2")</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
+                    <strong>Source:</strong> Claim Level Data &bull;
+                    <strong>Filter:</strong> ClaimStatus = No Response &bull;
+                    <strong>Aging Buckets:</strong> Current (&lt;30 days), 30+, 60+, 90+, 120+ (based on DaysToDOS) &bull;
+                    <strong>Metric:</strong> COUNT(DISTINCT AccessionNumber), SUM(InsuranceBalance)
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5 text-muted">
+                    <div style="font-size:2rem;opacity:.4">&#9203;</div>
+                    <div class="fw-semibold mt-2">No aging data available</div>
+                    <div class="small mt-1">No claims with "No Response" status found. Try adjusting your filters.</div>
+                </div>
+            }
+        </div>
+
+        <!-- ?? Panel vs Payment tab ???????????????????????????????????? -->
+        <div class="tab-pane fade" id="panelpay-pane" role="tabpanel" aria-labelledby="panelpay-tab">
+            @if (Model.PanelPayments.Count > 0)
+            {
+                var grandClaims = Model.PanelPayments.Sum(r => r.NoOfClaims);
+                var grandPayments = Model.PanelPayments.Sum(r => r.InsurancePayments);
+                <div class="cs-rpt-wrap">
+                    <div class="cs-rpt-scroll">
+                        <table class="cs-rpt-table">
+                            <thead>
+                                <tr>
+                                    <th style="text-align:left;min-width:280px">Panel</th>
+                                    <th style="min-width:140px">No. of Claims</th>
+                                    <th style="min-width:180px">Insurance Payments</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in Model.PanelPayments)
+                                {
+                                    <tr>
+                                        <td style="text-align:left;font-weight:600">@row.PanelName</td>
+                                        <td style="text-align:right">@row.NoOfClaims.ToString("N0")</td>
+                                        <td style="text-align:right">@row.InsurancePayments.ToString("C2")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
+                                    <td style="text-align:left;color:#fff">Grand Total</td>
+                                    <td style="text-align:right;color:#fff">@grandClaims.ToString("N0")</td>
+                                    <td style="text-align:right;color:#fff">@grandPayments.ToString("C2")</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
+                    <strong>Source:</strong> Claim Level Data &bull;
+                    <strong>Filter:</strong> InsurancePayment &gt; 0 &bull;
+                    <strong>Sorted by:</strong> SUM(InsurancePayment) DESC &bull;
+                    <strong>Metric:</strong> COUNT(DISTINCT ClaimID), SUM(InsurancePayment)
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5 text-muted">
+                    <div style="font-size:2rem;opacity:.4">&#128202;</div>
+                    <div class="fw-semibold mt-2">No panel payment data available</div>
+                    <div class="small mt-1">No matching claim records found. Try adjusting your filters.</div>
+                </div>
+            }
+        </div>
+
+        <!-- ?? Rep vs Payments tab ????????????????????????????????????? -->
+        <div class="tab-pane fade" id="reppay-pane" role="tabpanel" aria-labelledby="reppay-tab">
+            @if (Model.RepPayments.HasData)
+            {
+                var periods = Model.RepPayments.Periods;
+                var pivotRows = Model.RepPayments.Rows;
+                <div class="cs-rpt-wrap">
+                    <div class="cs-rpt-scroll">
+                        <table class="cs-rpt-table">
+                            <thead>
+                                @{
+                                    // Group periods by year for the first header row
+                                    var yearGroups = periods.GroupBy(p => p.Year).OrderBy(g => g.Key).ToList();
+                                }
+                                <tr>
+                                    <th rowspan="2" style="text-align:left;min-width:220px">Sales Rep</th>
+                                    @foreach (var yg in yearGroups)
+                                    {
+                                        <th colspan="@(yg.Count() * 2)">@yg.Key</th>
+                                    }
+                                    <th colspan="2">Grand Total</th>
+                                </tr>
+                                <tr>
+                                    @foreach (var p in periods)
+                                    {
+                                        var monthName = System.Globalization.CultureInfo.CurrentCulture.DateTimeFormat.GetAbbreviatedMonthName(p.Month);
+                                        <th>@monthName Claims</th>
+                                        <th>@monthName Payments</th>
+                                    }
+                                    <th>No. of Claims</th>
+                                    <th>Insurance Payments</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in pivotRows)
+                                {
+                                    <tr>
+                                        <td style="text-align:left;font-weight:600">@row.SalesRepName</td>
+                                        @foreach (var p in periods)
+                                        {
+                                            var hasCell = row.Cells.TryGetValue(p, out var cell);
+                                            <td style="text-align:right">@(hasCell ? cell!.NoOfClaims.ToString("N0") : "0")</td>
+                                            <td style="text-align:right">@(hasCell ? cell!.InsurancePayments.ToString("C2") : "$0.00")</td>
+                                        }
+                                        <td style="text-align:right;font-weight:700">@row.GrandClaims.ToString("N0")</td>
+                                        <td style="text-align:right;font-weight:700">@row.GrandPayments.ToString("C2")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
+                                    <td style="text-align:left;color:#fff">Grand Total</td>
+                                    @foreach (var p in periods)
+                                    {
+                                        var colClaims = pivotRows.Sum(r => r.Cells.TryGetValue(p, out var c) ? c.NoOfClaims : 0);
+                                        var colPayments = pivotRows.Sum(r => r.Cells.TryGetValue(p, out var c) ? c.InsurancePayments : 0m);
+                                        <td style="text-align:right;color:#fff">@colClaims.ToString("N0")</td>
+                                        <td style="text-align:right;color:#fff">@colPayments.ToString("C2")</td>
+                                    }
+                                    <td style="text-align:right;color:#fff">@pivotRows.Sum(r => r.GrandClaims).ToString("N0")</td>
+                                    <td style="text-align:right;color:#fff">@pivotRows.Sum(r => r.GrandPayments).ToString("C2")</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
+                    <strong>Source:</strong> Claim Level Data &bull;
+                    <strong>Filter:</strong> InsurancePayment &gt; 0, CheckDate is valid &bull;
+                    <strong>Columns:</strong> Year / Month (from CheckDate) &bull;
+                    <strong>Sorted by:</strong> Grand Total (SUM InsurancePayment) DESC &bull;
+                    <strong>Metric:</strong> COUNT(DISTINCT ClaimID), SUM(InsurancePayment)
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5 text-muted">
+                    <div style="font-size:2rem;opacity:.4">&#128100;</div>
+                    <div class="fw-semibold mt-2">No rep payment data available</div>
+                    <div class="small mt-1">No matching claim records found. Try adjusting your filters.</div>
+                </div>
+            }
+        </div>
+
+        <!-- ?? Insurance vs Payment % tab ????????????????????????????????? -->
+        <div class="tab-pane fade" id="inspctpay-pane" role="tabpanel" aria-labelledby="inspctpay-tab">
+            @if (Model.InsurancePaymentPct.Count > 0)
+            {
+                var grandTotalClaims = Model.InsurancePaymentPct.Sum(r => r.TotalClaims);
+                var grandInsPayments = Model.InsurancePaymentPct.Sum(r => r.InsurancePayments);
+                var grandPaidIns = Model.InsurancePaymentPct.Sum(r => r.PaidInsurancePayment);
+                var grandPaidChg = Model.InsurancePaymentPct.Sum(r => r.PaidChargeAmount);
+                var grandPaymentPct = grandPaidChg == 0 ? 0m : Math.Round(grandPaidIns / grandPaidChg * 100m, 2);
+                var maxPct = Model.InsurancePaymentPct.Max(r => r.PaymentPct);
+                <div class="cs-rpt-wrap">
+                    <div class="cs-rpt-scroll">
+                        <table class="cs-rpt-table">
+                            <thead>
+                                <tr>
+                                    <th style="text-align:left;min-width:280px">Payer</th>
+                                    <th style="min-width:140px">Total No. of Claims</th>
+                                    <th style="min-width:180px">Insurance Payments</th>
+                                    <th style="min-width:260px">Payment %</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in Model.InsurancePaymentPct)
+                                {
+                                    var pct = row.PaymentPct;
+                                    var barWidth = maxPct == 0 ? 0m : Math.Round(pct / maxPct * 100m, 1);
+                                    <tr>
+                                        <td style="text-align:left;font-weight:600">@row.PayerName</td>
+                                        <td style="text-align:right">@row.TotalClaims.ToString("N0")</td>
+                                        <td style="text-align:right">@row.InsurancePayments.ToString("C2")</td>
+                                        <td>
+                                            <div class="reimb-bar-bg">
+                                                <div class="reimb-bar-fill" style="width:@(barWidth.ToString("F1"))%"></div>
+                                                <div class="reimb-bar-label">@pct.ToString("F2") %</div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
+                                    <td style="text-align:left;color:#fff">Grand Total</td>
+                                    <td style="text-align:right;color:#fff">@grandTotalClaims.ToString("N0")</td>
+                                    <td style="text-align:right;color:#fff">@grandInsPayments.ToString("C2")</td>
+                                    <td style="text-align:right;color:#fff">@grandPaymentPct.ToString("F2") %</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
+                    <strong>Source:</strong> Claim Level Data &bull;
+                    <strong>Filter:</strong> InsurancePayment &gt; 0 &bull;
+                    <strong>Sorted by:</strong> SUM(InsurancePayment) DESC &bull;
+                    <strong>Payment %:</strong> SUM(InsurancePayment) / SUM(ChargeAmount) × 100 where ClaimStatus IN (Fully Paid, Partially Paid)
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5 text-muted">
+                    <div style="font-size:2rem;opacity:.4">&#128202;</div>
+                    <div class="fw-semibold mt-2">No insurance payment data available</div>
+                    <div class="small mt-1">No matching claim records found. Try adjusting your filters.</div>
+                </div>
+            }
+        </div>
+
+        <!-- ?? CPT vs Payment % tab ?????????????????????????????????????? -->
+        <div class="tab-pane fade" id="cptpctpay-pane" role="tabpanel" aria-labelledby="cptpctpay-tab">
+            @if (Model.CptPaymentPct.Count > 0)
+            {
+                var cptGrandUnits = Model.CptPaymentPct.Sum(r => r.SumServiceUnits);
+                var cptGrandPaidIns = Model.CptPaymentPct.Sum(r => r.PaidInsurancePayment);
+                var cptGrandPaidChg = Model.CptPaymentPct.Sum(r => r.PaidChargeAmount);
+                var cptGrandPct = cptGrandPaidChg == 0 ? 0m : Math.Round(cptGrandPaidIns / cptGrandPaidChg * 100m, 2);
+                var cptMaxPct = Model.CptPaymentPct.Max(r => r.PaymentPct);
+                <div class="cs-rpt-wrap">
+                    <div class="cs-rpt-scroll">
+                        <table class="cs-rpt-table">
+                            <thead>
+                                <tr>
+                                    <th style="text-align:left;min-width:200px">CPT Code</th>
+                                    <th style="min-width:160px">Sum of Service Units</th>
+                                    <th style="min-width:260px">Payment %</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in Model.CptPaymentPct)
+                                {
+                                    var pct = row.PaymentPct;
+                                    var barWidth = cptMaxPct == 0 ? 0m : Math.Round(pct / cptMaxPct * 100m, 1);
+                                    <tr>
+                                        <td style="text-align:left;font-weight:600">@row.CptCode</td>
+                                        <td style="text-align:right">@row.SumServiceUnits.ToString("N0")</td>
+                                        <td>
+                                            <div class="reimb-bar-bg">
+                                                <div class="reimb-bar-fill" style="width:@(barWidth.ToString("F1"))%"></div>
+                                                <div class="reimb-bar-label">@pct.ToString("F2") %</div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
+                                    <td style="text-align:left;color:#fff">Grand Total</td>
+                                    <td style="text-align:right;color:#fff">@cptGrandUnits.ToString("N0")</td>
+                                    <td style="text-align:right;color:#fff">@cptGrandPct.ToString("F2") %</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
+                    <strong>Source:</strong> Line Level Data &bull;
+                    <strong>Sorted by:</strong> SUM(Units) DESC &bull;
+                    <strong>Payment %:</strong> SUM(InsurancePayment) / SUM(ChargeAmount) × 100 where ClaimStatus IN (Fully Paid, Partially Paid)
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5 text-muted">
+                    <div style="font-size:2rem;opacity:.4">&#128202;</div>
+                    <div class="fw-semibold mt-2">No CPT payment data available</div>
+                    <div class="small mt-1">No matching line-level records found. Try adjusting your filters.</div>
+                </div>
+            }
+        </div>
+
+    </div>
+}
+
+<script>
+    // Multi-select dropdown widget
+    document.addEventListener('DOMContentLoaded', function () {
+        document.querySelectorAll('.cs-rpt-ms').forEach(function (ms) {
+            var btn    = ms.querySelector('.cs-rpt-ms-btn');
+            var panel  = ms.querySelector('.cs-rpt-ms-panel');
+            var search = ms.querySelector('.cs-rpt-ms-search');
+            var labels = ms.querySelectorAll('.cs-rpt-ms-list label');
+            var labelEl = ms.querySelector('.cs-rpt-ms-label');
+            var countEl = ms.querySelector('.cs-rpt-ms-count');
+
+            function updateLabel() {
+                var checked = ms.querySelectorAll('.cs-rpt-ms-list input:checked');
+                if (checked.length === 0) {
+                    labelEl.textContent = 'All';
+                    countEl.style.display = 'none';
+                } else if (checked.length === 1) {
+                    labelEl.textContent = checked[0].value;
+                    countEl.style.display = 'none';
+                } else {
+                    labelEl.textContent = checked[0].value;
+                    countEl.textContent = '+' + (checked.length - 1);
+                    countEl.style.display = '';
+                }
+            }
+
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                document.querySelectorAll('.cs-rpt-ms-panel.open').forEach(function (p) {
+                    if (p !== panel) p.classList.remove('open');
+                });
+                panel.classList.toggle('open');
+                if (panel.classList.contains('open') && search) {
+                    search.value = '';
+                    search.focus();
+                    labels.forEach(function (l) { l.classList.remove('cs-rpt-ms-hidden'); });
+                }
+            });
+
+            if (search) {
+                search.addEventListener('input', function () {
+                    var q = this.value.toLowerCase();
+                    labels.forEach(function (l) {
+                        var text = l.textContent.toLowerCase();
+                        l.classList.toggle('cs-rpt-ms-hidden', q.length > 0 && text.indexOf(q) === -1);
+                    });
+                });
+            }
+
+            ms.querySelectorAll('.cs-rpt-ms-list input').forEach(function (cb) {
+                cb.addEventListener('change', updateLabel);
+            });
+
+            panel.addEventListener('click', function (e) { e.stopPropagation(); });
+            updateLabel();
+        });
+
+        document.addEventListener('click', function () {
+            document.querySelectorAll('.cs-rpt-ms-panel.open').forEach(function (p) {
+                p.classList.remove('open');
+            });
+        });
+    });
+</script>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        var exportBtn = document.getElementById('csExportExcelBtn');
+        if (!exportBtn) return;
+
+        var overlay = document.getElementById('csExportOverlay');
+        var bar = document.getElementById('csExportBar');
+        var pctLabel = document.getElementById('csExportPct');
+        var statusLabel = document.getElementById('csExportStatus');
+        var cancelBtn = document.getElementById('csExportCancelBtn');
+
+        var steps = [
+            { pct: 8,  text: 'Connecting to database…' },
+            { pct: 18, text: 'Fetching Monthly Claim Volume…' },
+            { pct: 28, text: 'Fetching Weekly Claim Volume…' },
+            { pct: 38, text: 'Fetching Top 5 Reimbursement & Payments…' },
+            { pct: 48, text: 'Fetching Insurance Aging & Panel data…' },
+            { pct: 56, text: 'Fetching Rep Payments & Payment %…' },
+            { pct: 64, text: 'Fetching CPT Payment % & Panel Averages…' },
+            { pct: 72, text: 'Fetching ClaimLevelData rows…' },
+            { pct: 80, text: 'Fetching LineLevelData rows…' },
+            { pct: 88, text: 'Building Excel workbook…' },
+            { pct: 94, text: 'Finalizing sheets & formatting…' }
+        ];
+
+        function getCookie(name) {
+            var m = document.cookie.match('(^|;)\\s*' + name + '=([^;]*)');
+            return m ? m[2] : null;
+        }
+        function deleteCookie(name) {
+            document.cookie = name + '=; path=/; max-age=0';
+        }
+
+        function cleanup(pollTimer, creepTimer, iframe) {
+            clearInterval(pollTimer);
+            clearInterval(creepTimer);
+            if (iframe && iframe.parentNode) document.body.removeChild(iframe);
+        }
+
+        function setPct(pct, text) {
+            var p = Math.min(Math.round(pct), 99);
+            bar.style.width = p + '%';
+            pctLabel.textContent = p + '%';
+            if (text) statusLabel.textContent = text;
+        }
+
+        exportBtn.addEventListener('click', function () {
+            var form = document.getElementById('csRptFilterForm');
+            if (!form) return;
+
+            deleteCookie('csExportDone');
+
+            overlay.style.display = 'flex';
+            setPct(0, 'Starting export…');
+
+            var startTime = Date.now();
+            function elapsed() {
+                var secs = Math.floor((Date.now() - startTime) / 1000);
+                var m = Math.floor(secs / 60), s = secs % 60;
+                return m > 0 ? m + 'm ' + s + 's' : s + 's';
+            }
+
+            // Walk through scripted steps
+            var stepIdx = 0;
+            var currentPct = 0;
+            var stepTimer = setInterval(function () {
+                if (stepIdx < steps.length) {
+                    var s = steps[stepIdx];
+                    currentPct = s.pct;
+                    setPct(currentPct, s.text);
+                    stepIdx++;
+                } else {
+                    clearInterval(stepTimer);
+                }
+            }, 1800);
+
+            // After scripted steps end, keep creeping slowly toward 99%
+            // and rotate reassuring messages with elapsed time
+            var creepTimer = setInterval(function () {
+                if (stepIdx >= steps.length) {
+                    if (currentPct < 99) currentPct += 0.15;
+                    var p = Math.min(Math.round(currentPct), 99);
+                    bar.style.width = p + '%';
+                    pctLabel.textContent = p + '%';
+
+                    var msgs = [
+                        'Writing ClaimLevelData sheet…',
+                        'Writing LineLevelData sheet…',
+                        'Formatting report sheets…',
+                        'Almost there, please wait…',
+                        'Large dataset — still processing…',
+                        'Compressing workbook…',
+                        'Hang tight, almost done…'
+                    ];
+                    var msgIdx = Math.floor((Date.now() - startTime) / 4000) % msgs.length;
+                    statusLabel.textContent = msgs[msgIdx] + '  (' + elapsed() + ')';
+                }
+            }, 1000);
+
+            // Trigger download via hidden iframe
+            var params = new URLSearchParams(new FormData(form));
+            var url = '@Url.Action("ExportExcel", "CollectionSummary")' + '?' + params.toString();
+            var iframe = document.createElement('iframe');
+            iframe.style.display = 'none';
+            iframe.src = url;
+            document.body.appendChild(iframe);
+
+            // Poll for server cookie
+            var pollTimer = setInterval(function () {
+                if (getCookie('csExportDone')) {
+                    clearInterval(pollTimer);
+                    clearInterval(stepTimer);
+                    clearInterval(creepTimer);
+                    deleteCookie('csExportDone');
+
+                    bar.style.width = '100%';
+                    pctLabel.textContent = '100%';
+                    statusLabel.textContent = 'Download complete!  (' + elapsed() + ')';
+
+                    setTimeout(function () {
+                        overlay.style.display = 'none';
+                        if (iframe.parentNode) document.body.removeChild(iframe);
+                    }, 900);
+                }
+            }, 500);
+
+            // Cancel button
+            var onCancel = function () {
+                cleanup(pollTimer, creepTimer, iframe);
+                clearInterval(stepTimer);
+                deleteCookie('csExportDone');
+                overlay.style.display = 'none';
+                cancelBtn.removeEventListener('click', onCancel);
+            };
+            cancelBtn.addEventListener('click', onCancel);
+
+            // Safety timeout: 10 minutes
+            setTimeout(function () {
+                cleanup(pollTimer, creepTimer, iframe);
+                clearInterval(stepTimer);
+                overlay.style.display = 'none';
+            }, 600000);
+        });
+    });
+</script>

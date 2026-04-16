@@ -13,15 +13,55 @@ public sealed class SqlAppUsageAuditService : IAppUsageAuditService
     private static readonly SemaphoreSlim EnsureSemaphore = new(1, 1);
     private static volatile bool _ensured;
 
+    /// <summary>Consecutive SQL connection failure count for circuit breaker.</summary>
+    private static int _consecutiveFailures;
+    /// <summary>UTC time after which the circuit breaker allows the next attempt.</summary>
+    private static DateTime _retryAfterUtc = DateTime.MinValue;
+    /// <summary>Max back-off duration (5 minutes).</summary>
+    private static readonly TimeSpan MaxBackoff = TimeSpan.FromMinutes(5);
+
     public SqlAppUsageAuditService(IConfiguration configuration, ILogger<SqlAppUsageAuditService> logger)
     {
         _masterConnectionString = configuration.GetConnectionString("DefaultConnection") ?? string.Empty;
         _logger = logger;
     }
 
+    /// <summary>Returns true if the circuit is open (should skip SQL calls).</summary>
+    private static bool IsCircuitOpen()
+        => _consecutiveFailures > 0 && DateTime.UtcNow < _retryAfterUtc;
+
+    /// <summary>Records a successful SQL call and resets the circuit.</summary>
+    private static void RecordSuccess()
+    {
+        _consecutiveFailures = 0;
+        _retryAfterUtc = DateTime.MinValue;
+    }
+
+    /// <summary>Records a failed SQL call and sets exponential back-off.</summary>
+    private void RecordFailure(Exception ex)
+    {
+        var failures = Interlocked.Increment(ref _consecutiveFailures);
+        var delay = TimeSpan.FromSeconds(Math.Min(Math.Pow(2, failures), MaxBackoff.TotalSeconds));
+        _retryAfterUtc = DateTime.UtcNow.Add(delay);
+
+        if (failures <= 3)
+        {
+            _logger.LogWarning(ex,
+                "Audit SQL connection failed (attempt {Count}). Next retry after {Delay:F0}s.",
+                failures, delay.TotalSeconds);
+        }
+        else if (failures == 4)
+        {
+            _logger.LogWarning(
+                "Audit SQL connection still failing after {Count} attempts. Suppressing further warnings until recovery.",
+                failures);
+        }
+        // failures > 4: silent back-off, no log spam
+    }
+
     public async Task LogPageVisitAsync(HttpContext httpContext, string pageName, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(_masterConnectionString))
+        if (string.IsNullOrWhiteSpace(_masterConnectionString) || IsCircuitOpen())
         {
             return;
         }
@@ -66,16 +106,17 @@ VALUES
             command.Parameters.AddWithValue("@UserAgent", DbString(userAgent));
 
             await command.ExecuteNonQueryAsync(cancellationToken);
+            RecordSuccess();
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to log app usage audit record.");
+            RecordFailure(ex);
         }
     }
 
     public async Task TrackHeartbeatAsync(HttpContext httpContext, UsageHeartbeatRequest request, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(_masterConnectionString))
+        if (string.IsNullOrWhiteSpace(_masterConnectionString) || IsCircuitOpen())
         {
             return;
         }
@@ -164,10 +205,11 @@ WHEN NOT MATCHED THEN
             command.Parameters.AddWithValue("@IdleSeconds", idleSeconds);
 
             await command.ExecuteNonQueryAsync(cancellationToken);
+            RecordSuccess();
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to track app heartbeat.");
+            RecordFailure(ex);
         }
     }
 

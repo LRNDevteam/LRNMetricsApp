@@ -29,11 +29,10 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
-        ArgumentException.ThrowIfNullOrWhiteSpace(labName);
 
         // Build WHERE clauses dynamically with IN for multi-select
-        var whereClauses = new List<string> { "LabName = @LabName", "ClinicName IS NOT NULL", "ClinicName <> ''" };
-        var parameters = new List<SqlParameter> { new("@LabName", labName) };
+        var whereClauses = new List<string> { "ClinicName IS NOT NULL", "ClinicName <> ''" };
+        var parameters = new List<SqlParameter>();
 
         AddInClause(whereClauses, parameters, "ClinicName", "@cn", filterClinicNames);
         AddInClause(whereClauses, parameters, "SalesRepName", "@sr", filterSalesRepNames);
@@ -74,12 +73,12 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
             ORDER BY BilledClaimCount DESC
             """;
 
-        // Query for distinct filter option lists (unfiltered, lab-scoped)
+        // Query for distinct filter option lists (unfiltered)
         const string optionsSql = """
-            SELECT DISTINCT ClinicName   FROM dbo.ClaimLevelData WHERE LabName = @LabName AND ClinicName   IS NOT NULL AND ClinicName   <> '' ORDER BY ClinicName;
-            SELECT DISTINCT SalesRepName FROM dbo.ClaimLevelData WHERE LabName = @LabName AND SalesRepName IS NOT NULL AND SalesRepName <> '' ORDER BY SalesRepName;
-            SELECT DISTINCT PayerName    FROM dbo.ClaimLevelData WHERE LabName = @LabName AND PayerName    IS NOT NULL AND PayerName    <> '' ORDER BY PayerName;
-            SELECT DISTINCT PanelName    FROM dbo.ClaimLevelData WHERE LabName = @LabName AND PanelName    IS NOT NULL AND PanelName    <> '' ORDER BY PanelName;
+            SELECT DISTINCT ClinicName   FROM dbo.ClaimLevelData WHERE ClinicName   IS NOT NULL AND ClinicName   <> '' ORDER BY ClinicName;
+            SELECT DISTINCT SalesRepName FROM dbo.ClaimLevelData WHERE SalesRepName IS NOT NULL AND SalesRepName <> '' ORDER BY SalesRepName;
+            SELECT DISTINCT PayerName    FROM dbo.ClaimLevelData WHERE PayerName    IS NOT NULL AND PayerName    <> '' ORDER BY PayerName;
+            SELECT DISTINCT PanelName    FROM dbo.ClaimLevelData WHERE PanelName    IS NOT NULL AND PanelName    <> '' ORDER BY PanelName;
             """;
 
         // Top collected breakdown queries (top 10 by InsurancePayment, grouped by each dimension)
@@ -116,7 +115,6 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
             // 1. Fetch filter option lists
             await using (var optCmd = new SqlCommand(optionsSql, conn) { CommandTimeout = 60 })
             {
-                optCmd.Parameters.AddWithValue("@LabName", labName);
                 await using var optReader = await optCmd.ExecuteReaderAsync(ct);
 
                 while (await optReader.ReadAsync(ct))
@@ -343,5 +341,421 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
             whereClauses.Add($"TRY_CAST({columnName} AS DATE) <= {toParamName}");
             parameters.Add(new SqlParameter(toParamName, System.Data.SqlDbType.Date) { Value = to.Value.ToDateTime(TimeOnly.MinValue) });
         }
+    }
+
+    /// <inheritdoc />
+    public async Task<ClinicPanelStatusViewModel> GetClinicPanelStatusAsync(
+        string connectionString,
+        string labName,
+        List<string>? filterClinicNames = null,
+        List<string>? filterSalesRepNames = null,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+        var whereClauses = new List<string> { "ClinicName IS NOT NULL", "ClinicName <> ''" };
+        var parameters = new List<SqlParameter>();
+        AddInClause(whereClauses, parameters, "ClinicName", "@cn", filterClinicNames);
+        AddInClause(whereClauses, parameters, "SalesRepName", "@sr", filterSalesRepNames);
+        AddInClause(whereClauses, parameters, "PayerName", "@pn", filterPayerNames);
+        AddInClause(whereClauses, parameters, "PanelName", "@pl", filterPanelNames);
+        AddDateRangeClause(whereClauses, parameters, "DateOfService", "@dosFrom", "@dosTo", filterDosFrom, filterDosTo);
+        AddDateRangeClause(whereClauses, parameters, "FirstBilledDate", "@fbFrom", "@fbTo", filterFirstBillFrom, filterFirstBillTo);
+        var whereClause = string.Join(" AND ", whereClauses);
+
+        var sql = $"""
+            SELECT
+                ISNULL(ClinicName, '(Unknown)')   AS ClinicName,
+                ISNULL(PanelName, '(Unknown)')    AS PanelName,
+                ISNULL(ClaimStatus, '(Unknown)')  AS ClaimStatus,
+                COUNT(DISTINCT ClaimID)           AS ClaimCount
+            FROM dbo.ClaimLevelData
+            WHERE {whereClause}
+            GROUP BY ClinicName, PanelName, ClaimStatus
+            ORDER BY ClinicName, PanelName, ClaimStatus
+            """;
+
+        var rawRows = new List<(string Clinic, string Panel, string Status, int Count)>();
+        var allStatuses = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+
+            await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 120 };
+            cmd.Parameters.AddRange(parameters.ToArray());
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+            while (await reader.ReadAsync(ct))
+            {
+                var clinic = reader.GetString(0);
+                var panel = reader.GetString(1);
+                var status = reader.GetString(2);
+                var count = reader.GetInt32(3);
+
+                rawRows.Add((clinic, panel, status, count));
+                allStatuses.Add(status);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load clinic panel status for lab '{LabName}'.", labName);
+            throw;
+        }
+
+        var statuses = allStatuses.ToList();
+
+        // Build pivot structure
+        var clinicMap = new Dictionary<string, ClinicPanelStatusClinicRow>(StringComparer.OrdinalIgnoreCase);
+        var clinicPanelMap = new Dictionary<string, Dictionary<string, ClinicPanelStatusPanelRow>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (clinic, panel, status, count) in rawRows)
+        {
+            // Clinic row
+            if (!clinicMap.TryGetValue(clinic, out var clinicRow))
+            {
+                clinicRow = new ClinicPanelStatusClinicRow
+                {
+                    ClinicName = clinic,
+                    StatusCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
+                    Panels = [],
+                };
+                clinicMap[clinic] = clinicRow;
+                clinicPanelMap[clinic] = new Dictionary<string, ClinicPanelStatusPanelRow>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            // Accumulate clinic-level counts
+            if (clinicRow.StatusCounts.ContainsKey(status))
+                clinicRow.StatusCounts[status] += count;
+            else
+                clinicRow.StatusCounts[status] = count;
+
+            // Panel row
+            if (!clinicPanelMap[clinic].TryGetValue(panel, out var panelRow))
+            {
+                panelRow = new ClinicPanelStatusPanelRow
+                {
+                    PanelName = panel,
+                    StatusCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
+                };
+                clinicPanelMap[clinic][panel] = panelRow;
+            }
+
+            if (panelRow.StatusCounts.ContainsKey(status))
+                panelRow.StatusCounts[status] += count;
+            else
+                panelRow.StatusCounts[status] = count;
+        }
+
+        // Finalize: set grand totals and attach panels
+        var clinics = new List<ClinicPanelStatusClinicRow>();
+        var grandTotals = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var grandTotalAll = 0;
+
+        foreach (var (clinicName, clinicRow) in clinicMap)
+        {
+            var clinicTotal = clinicRow.StatusCounts.Values.Sum();
+            var panels = clinicPanelMap[clinicName].Values
+                .Select(p => new ClinicPanelStatusPanelRow
+                {
+                    PanelName = p.PanelName,
+                    StatusCounts = p.StatusCounts,
+                    GrandTotal = p.StatusCounts.Values.Sum(),
+                })
+                .OrderByDescending(p => p.GrandTotal)
+                .ToList();
+
+            clinics.Add(new ClinicPanelStatusClinicRow
+            {
+                ClinicName = clinicRow.ClinicName,
+                StatusCounts = clinicRow.StatusCounts,
+                GrandTotal = clinicTotal,
+                Panels = panels,
+            });
+
+            grandTotalAll += clinicTotal;
+            foreach (var (status, cnt) in clinicRow.StatusCounts)
+            {
+                if (grandTotals.ContainsKey(status))
+                    grandTotals[status] += cnt;
+                else
+                    grandTotals[status] = cnt;
+            }
+        }
+
+        clinics = clinics.OrderByDescending(c => c.GrandTotal).ToList();
+
+        return new ClinicPanelStatusViewModel
+        {
+            SelectedLab = labName,
+            Statuses = statuses,
+            Clinics = clinics,
+            GrandTotals = grandTotals,
+            GrandTotalAll = grandTotalAll,
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<ClinicDollarAnalysisViewModel> GetClinicDollarAnalysisAsync(
+        string connectionString,
+        string labName,
+        List<string>? filterClinicNames = null,
+        List<string>? filterSalesRepNames = null,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+        var whereClauses = new List<string> { "ClinicName IS NOT NULL", "ClinicName <> ''" };
+        var parameters = new List<SqlParameter>();
+        AddInClause(whereClauses, parameters, "ClinicName", "@cn", filterClinicNames);
+        AddInClause(whereClauses, parameters, "SalesRepName", "@sr", filterSalesRepNames);
+        AddInClause(whereClauses, parameters, "PayerName", "@pn", filterPayerNames);
+        AddInClause(whereClauses, parameters, "PanelName", "@pl", filterPanelNames);
+        AddDateRangeClause(whereClauses, parameters, "DateOfService", "@dosFrom", "@dosTo", filterDosFrom, filterDosTo);
+        AddDateRangeClause(whereClauses, parameters, "FirstBilledDate", "@fbFrom", "@fbTo", filterFirstBillFrom, filterFirstBillTo);
+        var whereClause = string.Join(" AND ", whereClauses);
+
+        var sql = $"""
+            SELECT
+                ISNULL(ClinicName, '(Unknown)')   AS ClinicName,
+                ISNULL(ClaimStatus, '(Unknown)')  AS ClaimStatus,
+                COUNT(DISTINCT ClaimID)            AS ClaimCount,
+                ISNULL(SUM(TRY_CAST(ChargeAmount     AS DECIMAL(18,2))), 0) AS TotalCharge,
+                ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0) AS InsurancePayment
+            FROM dbo.ClaimLevelData
+            WHERE {whereClause}
+            GROUP BY ClinicName, ClaimStatus
+            ORDER BY ClinicName, ClaimStatus
+            """;
+
+        var rawRows = new List<(string Clinic, string Status, int Count, decimal Charge, decimal Payment)>();
+
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+
+            await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 120 };
+            cmd.Parameters.AddRange(parameters.ToArray());
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+            while (await reader.ReadAsync(ct))
+            {
+                rawRows.Add((
+                    reader.GetString(0),
+                    reader.GetString(1),
+                    reader.GetInt32(2),
+                    GetDecimalSafe(reader, "TotalCharge"),
+                    GetDecimalSafe(reader, "InsurancePayment")
+                ));
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load clinic dollar analysis for lab '{LabName}'.", labName);
+            throw;
+        }
+
+        // Build pivot structure grouped by ClinicName
+        var clinicMap = new Dictionary<string, (int Count, decimal Charge, decimal Payment, List<ClinicDollarAnalysisStatusRow> Statuses)>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (clinic, status, count, charge, payment) in rawRows)
+        {
+            if (!clinicMap.TryGetValue(clinic, out var entry))
+            {
+                entry = (0, 0m, 0m, []);
+                clinicMap[clinic] = entry;
+            }
+
+            entry.Statuses.Add(new ClinicDollarAnalysisStatusRow
+            {
+                ClaimStatus = status,
+                ClaimCount = count,
+                TotalCharge = charge,
+                InsurancePayment = payment,
+            });
+
+            clinicMap[clinic] = (entry.Count + count, entry.Charge + charge, entry.Payment + payment, entry.Statuses);
+        }
+
+        var clinics = clinicMap
+            .Select(kvp => new ClinicDollarAnalysisClinicRow
+            {
+                ClinicName = kvp.Key,
+                ClaimCount = kvp.Value.Count,
+                TotalCharge = kvp.Value.Charge,
+                InsurancePayment = kvp.Value.Payment,
+                Statuses = kvp.Value.Statuses
+                    .OrderByDescending(s => s.ClaimCount)
+                    .ToList(),
+            })
+            .OrderByDescending(c => c.ClaimCount)
+            .ToList();
+
+        return new ClinicDollarAnalysisViewModel
+        {
+            SelectedLab = labName,
+            Clinics = clinics,
+            GrandTotalClaims = clinics.Sum(c => c.ClaimCount),
+            GrandTotalCharge = clinics.Sum(c => c.TotalCharge),
+            GrandTotalInsurancePayment = clinics.Sum(c => c.InsurancePayment),
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<ClinicDosCountViewModel> GetClinicDosCountAsync(
+        string connectionString,
+        string labName,
+        List<string>? filterClinicNames = null,
+        List<string>? filterSalesRepNames = null,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+        var whereClauses = new List<string>
+        {
+            "ClinicName IS NOT NULL", "ClinicName <> ''",
+            "TRY_CAST(DateOfService AS DATE) IS NOT NULL"
+        };
+        var parameters = new List<SqlParameter>();
+        AddInClause(whereClauses, parameters, "ClinicName", "@cn", filterClinicNames);
+        AddInClause(whereClauses, parameters, "SalesRepName", "@sr", filterSalesRepNames);
+        AddInClause(whereClauses, parameters, "PayerName", "@pn", filterPayerNames);
+        AddInClause(whereClauses, parameters, "PanelName", "@pl", filterPanelNames);
+        AddDateRangeClause(whereClauses, parameters, "DateOfService", "@dosFrom", "@dosTo", filterDosFrom, filterDosTo);
+        AddDateRangeClause(whereClauses, parameters, "FirstBilledDate", "@fbFrom", "@fbTo", filterFirstBillFrom, filterFirstBillTo);
+        var whereClause = string.Join(" AND ", whereClauses);
+
+        var sql = $"""
+            SELECT
+                ISNULL(ClinicName, '(Unknown)')       AS ClinicName,
+                YEAR(TRY_CAST(DateOfService AS DATE)) AS DosYear,
+                MONTH(TRY_CAST(DateOfService AS DATE)) AS DosMonth,
+                COUNT(DISTINCT ClaimID)                AS ClaimCount
+            FROM dbo.ClaimLevelData
+            WHERE {whereClause}
+            GROUP BY ClinicName,
+                     YEAR(TRY_CAST(DateOfService AS DATE)),
+                     MONTH(TRY_CAST(DateOfService AS DATE))
+            ORDER BY ClinicName, DosYear, DosMonth
+            """;
+
+        var rawRows = new List<(string Clinic, int Year, int Month, int Count)>();
+
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+
+            await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 120 };
+            cmd.Parameters.AddRange(parameters.ToArray());
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+            while (await reader.ReadAsync(ct))
+            {
+                rawRows.Add((
+                    reader.GetString(0),
+                    reader.GetInt32(1),
+                    reader.GetInt32(2),
+                    reader.GetInt32(3)
+                ));
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load clinic DOS count for lab '{LabName}'.", labName);
+            throw;
+        }
+
+        // Collect distinct (Year, Month) columns sorted chronologically
+        var columnSet = rawRows
+            .Select(r => (r.Year, r.Month))
+            .Distinct()
+            .OrderBy(c => c.Year).ThenBy(c => c.Month)
+            .ToList();
+
+        var years = columnSet.Select(c => c.Year).Distinct().OrderBy(y => y).ToList();
+
+        // Build clinic rows
+        var clinicMap = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (clinic, year, month, count) in rawRows)
+        {
+            if (!clinicMap.TryGetValue(clinic, out var months))
+            {
+                months = new Dictionary<string, int>();
+                clinicMap[clinic] = months;
+            }
+
+            var key = ClinicDosCountViewModel.ColKey(year, month);
+            months.TryGetValue(key, out var existing);
+            months[key] = existing + count;
+        }
+
+        var clinics = clinicMap
+            .Select(kvp =>
+            {
+                var yearCounts = new Dictionary<int, int>();
+                foreach (var y in years)
+                {
+                    yearCounts[y] = columnSet
+                        .Where(c => c.Year == y)
+                        .Sum(c => kvp.Value.GetValueOrDefault(ClinicDosCountViewModel.ColKey(c.Year, c.Month)));
+                }
+
+                return new ClinicDosCountRow
+                {
+                    ClinicName = kvp.Key,
+                    MonthCounts = kvp.Value,
+                    YearCounts = yearCounts,
+                    GrandTotal = kvp.Value.Values.Sum(),
+                };
+            })
+            .OrderByDescending(c => c.GrandTotal)
+            .ToList();
+
+        // Column totals
+        var columnTotals = new Dictionary<string, int>();
+        foreach (var col in columnSet)
+        {
+            var key = ClinicDosCountViewModel.ColKey(col.Year, col.Month);
+            columnTotals[key] = clinics.Sum(c => c.MonthCounts.GetValueOrDefault(key));
+        }
+
+        var yearTotals = new Dictionary<int, int>();
+        foreach (var y in years)
+        {
+            yearTotals[y] = clinics.Sum(c => c.YearCounts.GetValueOrDefault(y));
+        }
+
+        return new ClinicDosCountViewModel
+        {
+            SelectedLab = labName,
+            Years = years,
+            Columns = columnSet,
+            Clinics = clinics,
+            ColumnTotals = columnTotals,
+            YearTotals = yearTotals,
+            GrandTotal = clinics.Sum(c => c.GrandTotal),
+        };
     }
 }

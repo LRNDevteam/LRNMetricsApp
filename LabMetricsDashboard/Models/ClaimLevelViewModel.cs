@@ -72,4 +72,7 @@ public sealed class ClaimLevelViewModel
 
     /// <summary>Describes the data source (e.g. "SQL Database" or CSV file path).</summary>
     public string? DataSource { get; init; }
+
+    /// <summary>User-facing error message when the query fails (e.g. timeout).</summary>
+    public string? ErrorMessage { get; init; }
 }
