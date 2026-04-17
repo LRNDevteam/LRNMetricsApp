@@ -18,6 +18,9 @@ public sealed class BreakdownPivotPeriod
     public string Label { get; set; } = string.Empty;
     public DateTime StartDate { get; set; }
     public DateTime EndDate { get; set; }
+    public int Year { get; set; }
+    public int? Month { get; set; }
+    public bool IsYearTotal { get; set; }
 }
 
 public sealed class BreakdownPivotRow

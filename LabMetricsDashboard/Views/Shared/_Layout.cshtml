@@ -14,241 +14,254 @@
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/LabMetricsDashboard.styles.css" asp-append-version="true" />
     <style>
-        /* ── Global overrides ───────────────────────────────────────── */
-        body {
-            background-color: #f0f4f8;
-        }
-
-        /* ── Navbar ─────────────────────────────────────────────────── */
-        .lmd-navbar {
-            background: linear-gradient(135deg, #0d1b2a 0%, #1b3a5c 60%, #1565c0 100%);
-            box-shadow: 0 2px 12px rgba(0, 0, 0, .35);
-        }
-
-        .lmd-navbar .navbar-brand {
-            font-weight: 700;
-            font-size: 1.25rem;
-            letter-spacing: .03em;
-            color: #fff !important;
-        }
-
-        .lmd-navbar .navbar-brand span {
-            color: #64b5f6;
-        }
-
-        .lmd-navbar .nav-link,
-        .lmd-navbar .dropdown-toggle {
-            color: rgba(255, 255, 255, .85) !important;
-            font-size: .9rem;
-        }
-
-        .lmd-navbar .nav-link:hover,
-        .lmd-navbar .dropdown-toggle:hover {
-            color: #fff !important;
-        }
-
-        .lmd-navbar .nav-link.active {
-            color: #64b5f6 !important;
-            font-weight: 600;
-        }
-
-        .lmd-navbar .dropdown-menu {
-            background: #1b3a5c;
-            border: 1px solid rgba(255, 255, 255, .12);
-        }
-
-        .lmd-navbar .dropdown-item {
-            color: rgba(255, 255, 255, .85);
-            font-size: .88rem;
-        }
-
-        .lmd-navbar .dropdown-item:hover {
-            background: rgba(255, 255, 255, .1);
-            color: #fff;
-        }
-
-        .lmd-navbar .navbar-toggler {
-            border-color: rgba(255, 255, 255, .3);
-        }
-
-        /* ── Navbar right-side toolbar (lab selector + future user) ── */
-        .nav-toolbar {
-            display: flex;
-            align-items: center;
-            gap: .6rem;
-            flex-shrink: 0;
-        }
-
-        .nav-lab-wrap {
-            position: relative;
-        }
-
-        .nav-lab-btn {
-            display: flex;
-            align-items: center;
-            gap: .4rem;
-            background: rgba(255, 255, 255, .12);
-            border: 1px solid rgba(255, 255, 255, .25);
-            border-radius: 20px;
-            padding: .25em .85em .25em .7em;
-            color: #fff;
-            font-weight: 700;
-            font-size: .8rem;
-            letter-spacing: .02em;
-            cursor: pointer;
-            white-space: nowrap;
-            transition: background .15s;
-        }
-
-        .nav-lab-btn:hover {
-            background: rgba(255, 255, 255, .22);
-        }
-
-        .nav-lab-btn .bi-chevron-down {
-            font-size: .55rem;
-            opacity: .7;
-            transition: transform .15s;
-        }
-
-        .nav-lab-panel {
-            display: none;
-            position: absolute;
-            right: 0;
-            top: calc(100% + 6px);
-            background: #fff;
-            border: 1px solid #ced4da;
-            border-radius: .5rem;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, .22);
-            min-width: 260px;
-            max-height: 340px;
-            overflow: hidden;
-            z-index: 1100;
-            flex-direction: column;
-        }
-
-        .nav-lab-panel.open {
-            display: flex;
-        }
-
-        .nav-lab-search {
-            border: none;
-            border-bottom: 1px solid #e9ecef;
-            padding: .5rem .75rem;
-            font-size: .8rem;
-            outline: none;
-            width: 100%;
-        }
-
-        .nav-lab-list {
-            overflow-y: auto;
-            max-height: 270px;
-            padding: .25rem 0;
-        }
-
-        .nav-lab-list a {
-            display: block;
-            padding: .4rem .8rem;
-            font-size: .8rem;
-            color: #1e293b;
-            text-decoration: none;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .nav-lab-list a:hover,
-        .nav-lab-list a.active {
-            background: #eef4ff;
-        }
-
-        .nav-lab-list a.active {
-            font-weight: 700;
-            color: #1565c0;
-        }
-
-        .nav-lab-list a.nav-lab-hidden {
-            display: none;
-        }
-
-        /* Separator between toolbar items (future: lab | user) */
-        .nav-toolbar-sep {
-            width: 1px;
-            height: 20px;
-            background: rgba(255, 255, 255, .2);
-        }
-
-        /* ── Breadcrumb bar ──────────────────────────────────────────── */
-        .lmd-breadcrumb {
-            background: linear-gradient(90deg, #1565c0 0%, #0097a7 100%);
-            padding: .45rem 1.5rem;
-            font-size: .82rem;
-        }
-
-        .lmd-breadcrumb a {
-            color: rgba(255, 255, 255, .78);
-            text-decoration: none;
-        }
-
-        .lmd-breadcrumb a:hover {
-            color: #fff;
-            text-decoration: underline;
-        }
-
-        .lmd-breadcrumb .bc-sep {
-            color: rgba(255, 255, 255, .45);
-            margin: 0 .4rem;
-        }
-
-        .lmd-breadcrumb .bc-current {
-            color: #fff;
-            font-weight: 600;
-        }
-
-        /* ── Full-screen loading overlay ─────────────────────────────── */
-        #lmd-loader {
-            display: none;
-            position: fixed;
-            inset: 0;
-            background: rgba(13, 27, 42, .72);
-            backdrop-filter: blur(3px);
-            z-index: 9999;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 1.2rem;
-        }
-
-        #lmd-loader.active {
-            display: flex;
-        }
-
-        .lmd-spinner {
-            width: 56px;
-            height: 56px;
-            border: 5px solid rgba(255, 255, 255, .2);
-            border-top-color: #64b5f6;
-            border-radius: 50%;
-            animation: lmd-spin .75s linear infinite;
-        }
-
-        @@keyframes lmd-spin {
-            to {
-                transform: rotate(360deg);
+            /* ── Global overrides ───────────────────────────────────────── */
+            body {
+                background-color: #f0f4f8;
             }
-        }
 
-        .lmd-loader-text {
-            color: #fff;
-            font-size: 1rem;
-            font-weight: 600;
-            letter-spacing: .04em;
-        }
+            /* ── Navbar ─────────────────────────────────────────────────── */
+            .lmd-navbar {
+                background: linear-gradient(135deg, #0d1b2a 0%, #1b3a5c 60%, #1565c0 100%);
+                box-shadow: 0 2px 12px rgba(0, 0, 0, .35);
+            }
 
-        /* ── Footer ──────────────────────────────────────────────────── */
-        footer {
-            background: #e8edf3;
-            border-top: 1px solid #cdd5e0 !important;
-        }
+                .lmd-navbar .navbar-brand {
+                    font-weight: 700;
+                    font-size: 1.25rem;
+                    letter-spacing: .03em;
+                    color: #fff !important;
+                }
+
+                    .lmd-navbar .navbar-brand span {
+                        color: #64b5f6;
+                    }
+
+                .lmd-navbar .nav-link,
+                .lmd-navbar .dropdown-toggle {
+                    color: rgba(255, 255, 255, .85) !important;
+                    font-size: .9rem;
+                }
+
+                    .lmd-navbar .nav-link:hover,
+                    .lmd-navbar .dropdown-toggle:hover {
+                        color: #fff !important;
+                    }
+
+                    .lmd-navbar .nav-link.active {
+                        color: #64b5f6 !important;
+                        font-weight: 600;
+                    }
+
+                .lmd-navbar .dropdown-menu {
+                    background: #1b3a5c;
+                    border: 1px solid rgba(255, 255, 255, .12);
+                }
+
+                .lmd-navbar .dropdown-item {
+                    color: rgba(255, 255, 255, .85);
+                    font-size: .88rem;
+                }
+
+                    .lmd-navbar .dropdown-item:hover {
+                        background: rgba(255, 255, 255, .1);
+                        color: #fff;
+                    }
+
+                .lmd-navbar .navbar-toggler {
+                    border-color: rgba(255, 255, 255, .3);
+                }
+
+            /* ── Navbar right-side toolbar (lab selector + future user) ── */
+            .nav-toolbar {
+                display: flex;
+                align-items: center;
+                gap: .6rem;
+                flex-shrink: 0;
+            }
+
+            .nav-lab-wrap {
+                position: relative;
+            }
+
+            .nav-lab-btn {
+                display: flex;
+                align-items: center;
+                gap: .4rem;
+                background: rgba(255, 255, 255, .12);
+                border: 1px solid rgba(255, 255, 255, .25);
+                border-radius: 20px;
+                padding: .25em .85em .25em .7em;
+                color: #fff;
+                font-weight: 700;
+                font-size: .8rem;
+                letter-spacing: .02em;
+                cursor: pointer;
+                white-space: nowrap;
+                transition: background .15s;
+            }
+
+                .nav-lab-btn:hover {
+                    background: rgba(255, 255, 255, .22);
+                }
+
+                .nav-lab-btn .bi-chevron-down {
+                    font-size: .55rem;
+                    opacity: .7;
+                    transition: transform .15s;
+                }
+
+            .nav-lab-panel {
+                display: none;
+                position: absolute;
+                right: 0;
+                top: calc(100% + 6px);
+                background: #fff;
+                border: 1px solid #ced4da;
+                border-radius: .5rem;
+                box-shadow: 0 8px 24px rgba(0, 0, 0, .22);
+                min-width: 260px;
+                max-height: 340px;
+                overflow: hidden;
+                z-index: 1100;
+                flex-direction: column;
+            }
+
+                .nav-lab-panel.open {
+                    display: flex;
+                }
+
+            .nav-lab-search {
+                border: none;
+                border-bottom: 1px solid #e9ecef;
+                padding: .5rem .75rem;
+                font-size: .8rem;
+                outline: none;
+                width: 100%;
+            }
+
+            .nav-lab-list {
+                overflow-y: auto;
+                max-height: 270px;
+                padding: .25rem 0;
+            }
+
+                .nav-lab-list a {
+                    display: block;
+                    padding: .4rem .8rem;
+                    font-size: .8rem;
+                    color: #1e293b;
+                    text-decoration: none;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+
+                    .nav-lab-list a:hover,
+                    .nav-lab-list a.active {
+                        background: #eef4ff;
+                    }
+
+                    .nav-lab-list a.active {
+                        font-weight: 700;
+                        color: #1565c0;
+                    }
+
+                    .nav-lab-list a.nav-lab-hidden {
+                        display: none;
+                    }
+
+            /* Separator between toolbar items (future: lab | user) */
+            .nav-toolbar-sep {
+                width: 1px;
+                height: 20px;
+                background: rgba(255, 255, 255, .2);
+            }
+
+            /* ── Breadcrumb bar ──────────────────────────────────────────── */
+            .lmd-breadcrumb {
+                background: linear-gradient(90deg, #1565c0 0%, #0097a7 100%);
+                padding: .45rem 1.5rem;
+                font-size: .82rem;
+            }
+
+                .lmd-breadcrumb a {
+                    color: rgba(255, 255, 255, .78);
+                    text-decoration: none;
+                }
+
+                    .lmd-breadcrumb a:hover {
+                        color: #fff;
+                        text-decoration: underline;
+                    }
+
+                .lmd-breadcrumb .bc-sep {
+                    color: rgba(255, 255, 255, .45);
+                    margin: 0 .4rem;
+                }
+
+                .lmd-breadcrumb .bc-current {
+                    color: #fff;
+                    font-weight: 600;
+                }
+
+            /* ── Full-screen loading overlay ─────────────────────────────── */
+            #lmd-loader {
+                display: none;
+                position: fixed;
+                inset: 0;
+                background: rgba(13, 27, 42, .72);
+                backdrop-filter: blur(3px);
+                z-index: 9999;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 1.2rem;
+            }
+
+                #lmd-loader.active {
+                    display: flex;
+                }
+
+            .lmd-spinner {
+                width: 56px;
+                height: 56px;
+                border: 5px solid rgba(255, 255, 255, .2);
+                border-top-color: #64b5f6;
+                border-radius: 50%;
+                animation: lmd-spin .75s linear infinite;
+            }
+
+            @@keyframes lmd-spin {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+
+            .lmd-loader-text {
+                color: #fff;
+                font-size: 1rem;
+                font-weight: 600;
+                letter-spacing: .04em;
+            }
+
+            /* ── Footer ──────────────────────────────────────────────────── */
+            footer {
+                background: #e8edf3;
+                border-top: 1px solid #cdd5e0 !important;
+            }
+
+            .navbar .nav-link i,
+            .navbar .dropdown-item i {
+                font-size: 1.05rem; /* slightly bigger */
+                margin-right: 6px;
+                vertical-align: middle;
+            }
+
+            .navbar .nav-link {
+                display: flex;
+                align-items: center;
+                gap: 4px;
+            }
     </style>
 </head>
 
@@ -262,8 +275,8 @@
 
     <header>
         @{
-            var selectedLab   = ViewData["SelectedLab"] as string;
-            var pageLabel     = ViewData["PageLabel"]   as string;
+            var selectedLab = ViewData["SelectedLab"] as string;
+            var pageLabel = ViewData["PageLabel"] as string;
             var availableLabs = LabSettingsInstance.Labs.Keys.OrderBy(x => x).ToList();
             // For the navbar lab selector: use ViewData first, then fall back to cookie
             var activeLab = selectedLab;
@@ -294,81 +307,85 @@
                     <span class="navbar-toggler-icon"></span>
                 </button>
                 <div class="navbar-collapse collapse d-sm-inline-flex justify-content-between">
-                    <ul class="navbar-nav flex-grow-1 gap-1">
+                    <ul class="navbar-nav flex-grow-1 gap-2">
+
                         <li class="nav-item">
-                            <a class="nav-link" asp-controller="Home" asp-action="Index">&#8962; Home</a>
+                            <a class="nav-link" asp-controller="Home" asp-action="Index">
+                                <i class="bi bi-house-door-fill"></i> Home
+                            </a>
                         </li>
+
                         <li class="nav-item">
-                            <a class="nav-link" asp-controller="Dashboard" asp-action="Index">&#9700; Revenue Dashboard</a>
+                            <a class="nav-link" asp-controller="Dashboard" asp-action="Index">
+                                <i class="bi bi-speedometer2"></i> Revenue Dashboard
+                            </a>
                         </li>
+
                         <li class="nav-item dropdown">
-                            <a class="nav-link dropdown-toggle" href="#" role="button"
-                               data-bs-toggle="dropdown" aria-expanded="false">
-                                &#9741; Standard Reports
+                            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                                <i class="bi bi-file-earmark-bar-graph"></i> Standard Reports
                             </a>
                             <ul class="dropdown-menu">
                                 <li>
                                     <a class="dropdown-item" asp-controller="Dashboard" asp-action="ProductionReport">
-                                        &#128202; Production Report
+                                        <i class="bi bi-bar-chart-fill"></i> Production Report
                                     </a>
                                 </li>
-                                <li><hr class="dropdown-divider" style="border-color:rgba(255,255,255,.15)"></li>
+                                <li><hr class="dropdown-divider"></li>
                                 <li>
                                     <a class="dropdown-item" asp-controller="Dashboard" asp-action="ClaimLevel">
-                                        Claim Level Details
+                                        <i class="bi bi-file-text"></i> Claim Level Details
                                     </a>
                                 </li>
                                 <li>
                                     <a class="dropdown-item" asp-controller="Dashboard" asp-action="LineLevel">
-                                        Line Level Details
+                                        <i class="bi bi-list-ul"></i> Line Level Details
                                     </a>
                                 </li>
                             </ul>
                         </li>
+
                         <li class="nav-item">
-                            <a class="nav-link" asp-controller="DenialDashboard" asp-action="Index">&#9700; Denial Dashboard</a>
+                            <a class="nav-link" asp-controller="DenialDashboard" asp-action="Index">
+                                <i class="bi bi-exclamation-triangle-fill"></i> Denial Dashboard
+                            </a>
                         </li>
+
                         <li class="nav-item dropdown">
-                            <a class="nav-link dropdown-toggle" href="#" role="button"
-                               data-bs-toggle="dropdown" aria-expanded="false">
-                                &#128202; Analytics
+                            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                                <i class="bi bi-graph-up-arrow"></i> Analytics
                             </a>
                             <ul class="dropdown-menu">
                                 <li>
                                     <a class="dropdown-item" asp-controller="Prediction" asp-action="Index">
-                                        &#128202; Prediction Analysis
+                                        <i class="bi bi-activity"></i> Prediction Analysis
                                     </a>
                                 </li>
                                 <li>
                                     <a class="dropdown-item" asp-controller="Prediction" asp-action="ForecastingSummary">
-                                        &#128197; Forecasting Summary
+                                        <i class="bi bi-calendar3"></i> Forecasting Summary
                                     </a>
                                 </li>
-                                <li><hr class="dropdown-divider" style="border-color:rgba(255,255,255,.15)"></li>
+                                <li><hr class="dropdown-divider"></li>
                                 <li>
                                     <a class="dropdown-item" asp-controller="Coding" asp-action="Summary">
-                                        &#9998; Coding Summary
+                                        <i class="bi bi-pencil-square"></i> Coding Summary
                                     </a>
                                 </li>
                                 <li>
                                     <a class="dropdown-item" asp-controller="Dashboard" asp-action="ClinicSummary">
-                                        &#127973; Clinic Summary
+                                        <i class="bi bi-hospital"></i> Clinic Summary
                                     </a>
                                 </li>
                                 <li>
                                     <a class="dropdown-item" asp-controller="Dashboard" asp-action="SalesRepSummary">
-                                        &#128100; Sales Rep Summary
+                                        <i class="bi bi-people-fill"></i> Sales Rep Summary
                                     </a>
                                 </li>
-                            @*     <li>
-                                    <a class="dropdown-item" asp-controller="Usage" asp-action="Index">
-                                        &#128100; Usage Monitor
-                                    </a>
-                                </li> *@
                             </ul>
                         </li>
-                    </ul>
 
+                    </ul>
                     <!-- ── Right-side toolbar: Lab selector + future user/login ── -->
                     <div class="nav-toolbar">
                         @if (!string.IsNullOrEmpty(activeLab) && !string.IsNullOrEmpty(selectedLab))
@@ -441,230 +458,230 @@
         // Show the loader whenever a lab-selector dropdown changes.
         // Any <select data-lab-selector> on the page triggers this.
         document.addEventListener('change', function (e) {
-            const sel = e.target;
-            if (!sel.matches('[data-lab-selector]')) return;
-            const labName = sel.options[sel.selectedIndex]?.text ?? 'selected lab';
-            const text = document.getElementById('lmd-loader-text');
-            if (text) text.textContent = 'Loading ' + labName + '…';
-            document.getElementById('lmd-loader').classList.add('active');
+        const sel = e.target;
+        if (!sel.matches('[data-lab-selector]')) return;
+        const labName = sel.options[sel.selectedIndex]?.text ?? 'selected lab';
+        const text = document.getElementById('lmd-loader-text');
+        if (text) text.textContent = 'Loading ' + labName + '…';
+        document.getElementById('lmd-loader').classList.add('active');
         });
 
         // Also show loader for Apply-Filter form submissions that contain a lab param.
         document.addEventListener('submit', function (e) {
-            const form = e.target;
-            if (!form.matches('[data-lab-form]')) return;
-            const labInput = form.querySelector('[name="lab"]');
-            const labName  = labInput
-                ? (labInput.tagName === 'SELECT'
-                    ? labInput.options[labInput.selectedIndex]?.text
-                    : labInput.value)
-                : '';
-            const text = document.getElementById('lmd-loader-text');
-            if (text) text.textContent = labName ? 'Loading ' + labName + '…' : 'Loading…';
-            document.getElementById('lmd-loader').classList.add('active');
+        const form = e.target;
+        if (!form.matches('[data-lab-form]')) return;
+        const labInput = form.querySelector('[name="lab"]');
+        const labName  = labInput
+        ? (labInput.tagName === 'SELECT'
+        ? labInput.options[labInput.selectedIndex]?.text
+        : labInput.value)
+        : '';
+        const text = document.getElementById('lmd-loader-text');
+        if (text) text.textContent = labName ? 'Loading ' + labName + '…' : 'Loading…';
+        document.getElementById('lmd-loader').classList.add('active');
         });
 
         // Hide loader when navigating back (bfcache restore).
         window.addEventListener('pageshow', function (e) {
-            if (e.persisted) {
-                document.getElementById('lmd-loader').classList.remove('active');
-            }
+        if (e.persisted) {
+        document.getElementById('lmd-loader').classList.remove('active');
+        }
         });
 
         // Reusable Excel download with loading overlay.
         // Shows the full-screen loader, fetches the file as a blob,
         // triggers a browser download, then hides the loader.
         window.lmdExcelDownload = function (url) {
-            var loader = document.getElementById('lmd-loader');
-            var text   = document.getElementById('lmd-loader-text');
-            if (text)   text.textContent = 'Generating Excel\u2026';
-            if (loader) loader.classList.add('active');
+        var loader = document.getElementById('lmd-loader');
+        var text   = document.getElementById('lmd-loader-text');
+        if (text)   text.textContent = 'Generating Excel\u2026';
+        if (loader) loader.classList.add('active');
 
-            fetch(url, { credentials: 'same-origin' })
-                .then(function (resp) {
-                    if (!resp.ok) throw new Error('Export failed (' + resp.status + ')');
-                    var cd = resp.headers.get('content-disposition') || '';
-                    var match = cd.match(/filename[^;=\n]*=(['"]?)([^'"\n;]+)\1/);
-                    var filename = match ? match[2] : 'export.xlsx';
-                    return resp.blob().then(function (blob) { return { blob: blob, filename: filename }; });
-                })
-                .then(function (result) {
-                    var a = document.createElement('a');
-                    a.href = URL.createObjectURL(result.blob);
-                    a.download = result.filename;
-                    document.body.appendChild(a);
-                    a.click();
-                    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 100);
-                })
-                .catch(function (err) {
-                    console.error('Excel download error:', err);
-                    alert('Excel export failed. Please try again.');
-                })
-                .finally(function () {
-                    if (loader) loader.classList.remove('active');
-                });
+        fetch(url, { credentials: 'same-origin' })
+        .then(function (resp) {
+        if (!resp.ok) throw new Error('Export failed (' + resp.status + ')');
+        var cd = resp.headers.get('content-disposition') || '';
+        var match = cd.match(/filename[^;=\n]*=(['"]?)([^'"\n;]+)\1/);
+        var filename = match ? match[2] : 'export.xlsx';
+        return resp.blob().then(function (blob) { return { blob: blob, filename: filename }; });
+        })
+        .then(function (result) {
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(result.blob);
+        a.download = result.filename;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 100);
+        })
+        .catch(function (err) {
+        console.error('Excel download error:', err);
+        alert('Excel export failed. Please try again.');
+        })
+        .finally(function () {
+        if (loader) loader.classList.remove('active');
+        });
         };
 
         // ── Navbar lab selector ─────────────────────────────────────
         (function () {
-            var btn    = document.getElementById('navLabBtn');
-            var panel  = document.getElementById('navLabPanel');
-            var search = document.getElementById('navLabSearch');
-            var list   = document.getElementById('navLabList');
-            if (!btn || !panel) return;
+        var btn    = document.getElementById('navLabBtn');
+        var panel  = document.getElementById('navLabPanel');
+        var search = document.getElementById('navLabSearch');
+        var list   = document.getElementById('navLabList');
+        if (!btn || !panel) return;
 
-            btn.addEventListener('click', function (e) {
-                e.stopPropagation();
-                panel.classList.toggle('open');
-                if (panel.classList.contains('open') && search) {
-                    search.value = '';
-                    search.focus();
-                    list.querySelectorAll('a').forEach(function (a) { a.classList.remove('nav-lab-hidden'); });
-                }
-            });
+        btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        panel.classList.toggle('open');
+        if (panel.classList.contains('open') && search) {
+        search.value = '';
+        search.focus();
+        list.querySelectorAll('a').forEach(function (a) { a.classList.remove('nav-lab-hidden'); });
+        }
+        });
 
-            if (search) {
-                search.addEventListener('input', function () {
-                    var q = this.value.toLowerCase();
-                    list.querySelectorAll('a').forEach(function (a) {
-                        a.classList.toggle('nav-lab-hidden', q.length > 0 && a.textContent.toLowerCase().indexOf(q) === -1);
-                    });
-                });
-                search.addEventListener('click', function (e) { e.stopPropagation(); });
-            }
+        if (search) {
+        search.addEventListener('input', function () {
+        var q = this.value.toLowerCase();
+        list.querySelectorAll('a').forEach(function (a) {
+        a.classList.toggle('nav-lab-hidden', q.length > 0 && a.textContent.toLowerCase().indexOf(q) === -1);
+        });
+        });
+        search.addEventListener('click', function (e) { e.stopPropagation(); });
+        }
 
-            panel.addEventListener('click', function (e) { e.stopPropagation(); });
+        panel.addEventListener('click', function (e) { e.stopPropagation(); });
 
-            // When a lab is clicked, navigate to the current page with the new lab
-            list.addEventListener('click', function (e) {
-                var a = e.target.closest('a[data-lab]');
-                if (!a) return;
-                e.preventDefault();
-                var newLab = a.getAttribute('data-lab');
-                // Navigate to current path with only the lab param (clear filters)
-                var url = new URL(window.location.pathname, window.location.origin);
-                url.searchParams.set('lab', newLab);
-                // Show loader
-                var text = document.getElementById('lmd-loader-text');
-                if (text) text.textContent = 'Loading ' + newLab + '\u2026';
-                document.getElementById('lmd-loader').classList.add('active');
-                window.location.href = url.toString();
-            });
+        // When a lab is clicked, navigate to the current page with the new lab
+        list.addEventListener('click', function (e) {
+        var a = e.target.closest('a[data-lab]');
+        if (!a) return;
+        e.preventDefault();
+        var newLab = a.getAttribute('data-lab');
+        // Navigate to current path with only the lab param (clear filters)
+        var url = new URL(window.location.pathname, window.location.origin);
+        url.searchParams.set('lab', newLab);
+        // Show loader
+        var text = document.getElementById('lmd-loader-text');
+        if (text) text.textContent = 'Loading ' + newLab + '\u2026';
+        document.getElementById('lmd-loader').classList.add('active');
+        window.location.href = url.toString();
+        });
 
-            // Close on outside click
-            document.addEventListener('click', function () {
-                panel.classList.remove('open');
-            });
+        // Close on outside click
+        document.addEventListener('click', function () {
+        panel.classList.remove('open');
+        });
         })();
     </script>
 
     <script>
         (function () {
-            const heartbeatUrl = '@Url.Action("Heartbeat", "Usage")';
-            if (!heartbeatUrl || !window.fetch || !window.sessionStorage) {
-                return;
-            }
+        const heartbeatUrl = '@Url.Action("Heartbeat", "Usage")';
+        if (!heartbeatUrl || !window.fetch || !window.sessionStorage) {
+        return;
+        }
 
-            const tabStorageKey = 'lmd.usage.tabid';
-            let tabId = sessionStorage.getItem(tabStorageKey);
-            if (!tabId) {
-                tabId = (window.crypto && window.crypto.randomUUID)
-                    ? window.crypto.randomUUID()
-                    : ('tab-' + Math.random().toString(36).slice(2) + Date.now().toString(36));
-                sessionStorage.setItem(tabStorageKey, tabId);
-            }
+        const tabStorageKey = 'lmd.usage.tabid';
+        let tabId = sessionStorage.getItem(tabStorageKey);
+        if (!tabId) {
+        tabId = (window.crypto && window.crypto.randomUUID)
+        ? window.crypto.randomUUID()
+        : ('tab-' + Math.random().toString(36).slice(2) + Date.now().toString(36));
+        sessionStorage.setItem(tabStorageKey, tabId);
+        }
 
-            let lastActionAt = Date.now();
-            let geo = null;
-            let lastSent = 0;
-            let pendingLocationSend = false;
+        let lastActionAt = Date.now();
+        let geo = null;
+        let lastSent = 0;
+        let pendingLocationSend = false;
 
-            function pageTitle() {
-                return (document.title || '').replace(/\s*-\s*Lab Revenue Intelligence\s*$/i, '').trim() || 'Unknown';
-            }
+        function pageTitle() {
+        return (document.title || '').replace(/\s*-\s*Lab Revenue Intelligence\s*$/i, '').trim() || 'Unknown';
+        }
 
-            function currentIdleSeconds() {
-                return Math.max(0, Math.floor((Date.now() - lastActionAt) / 1000));
-            }
+        function currentIdleSeconds() {
+        return Math.max(0, Math.floor((Date.now() - lastActionAt) / 1000));
+        }
 
-            function markActivity() {
-                lastActionAt = Date.now();
-            }
+        function markActivity() {
+        lastActionAt = Date.now();
+        }
 
-            ['click', 'keydown', 'mousemove', 'scroll', 'touchstart', 'focus'].forEach(function (evt) {
-                window.addEventListener(evt, markActivity, { passive: true });
-            });
+        ['click', 'keydown', 'mousemove', 'scroll', 'touchstart', 'focus'].forEach(function (evt) {
+        window.addEventListener(evt, markActivity, { passive: true });
+        });
 
-            document.addEventListener('visibilitychange', function () {
-                if (!document.hidden) {
-                    markActivity();
-                }
-                sendHeartbeat(true);
-            });
+        document.addEventListener('visibilitychange', function () {
+        if (!document.hidden) {
+        markActivity();
+        }
+        sendHeartbeat(true);
+        });
 
-            function buildPayload() {
-                return {
-                    tabId: tabId,
-                    pageName: pageTitle(),
-                    path: window.location.pathname,
-                    queryString: window.location.search || '',
-                    idleSeconds: currentIdleSeconds(),
-                    latitude: geo ? geo.latitude : null,
-                    longitude: geo ? geo.longitude : null,
-                    locationText: geo ? geo.locationText : null
-                };
-            }
+        function buildPayload() {
+        return {
+        tabId: tabId,
+        pageName: pageTitle(),
+        path: window.location.pathname,
+        queryString: window.location.search || '',
+        idleSeconds: currentIdleSeconds(),
+        latitude: geo ? geo.latitude : null,
+        longitude: geo ? geo.longitude : null,
+        locationText: geo ? geo.locationText : null
+        };
+        }
 
-            function sendHeartbeat(force) {
-                const now = Date.now();
-                if (!force && (now - lastSent) < 12000) {
-                    return;
-                }
-                lastSent = now;
+        function sendHeartbeat(force) {
+        const now = Date.now();
+        if (!force && (now - lastSent) < 12000) {
+        return;
+        }
+        lastSent = now;
 
-                const body = JSON.stringify(buildPayload());
-                fetch(heartbeatUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Lmd-TabId': tabId
-                    },
-                    body: body,
-                    credentials: 'same-origin',
-                    keepalive: true
-                }).catch(function () { });
-            }
+        const body = JSON.stringify(buildPayload());
+        fetch(heartbeatUrl, {
+        method: 'POST',
+        headers: {
+        'Content-Type': 'application/json',
+        'X-Lmd-TabId': tabId
+        },
+        body: body,
+        credentials: 'same-origin',
+        keepalive: true
+        }).catch(function () { });
+        }
 
-            window.addEventListener('pagehide', function () {
-                const body = JSON.stringify(buildPayload());
-                if (navigator.sendBeacon) {
-                    const blob = new Blob([body], { type: 'application/json' });
-                    navigator.sendBeacon(heartbeatUrl, blob);
-                } else {
-                    sendHeartbeat(true);
-                }
-            });
+        window.addEventListener('pagehide', function () {
+        const body = JSON.stringify(buildPayload());
+        if (navigator.sendBeacon) {
+        const blob = new Blob([body], { type: 'application/json' });
+        navigator.sendBeacon(heartbeatUrl, blob);
+        } else {
+        sendHeartbeat(true);
+        }
+        });
 
-            if (navigator.permissions && navigator.geolocation) {
-                navigator.permissions.query({ name: 'geolocation' }).then(function (result) {
-                    if (result.state === 'granted') {
-                        navigator.geolocation.getCurrentPosition(function (position) {
-                            geo = {
-                                latitude: Number(position.coords.latitude.toFixed(6)),
-                                longitude: Number(position.coords.longitude.toFixed(6)),
-                                locationText: Number(position.coords.latitude).toFixed(6) + ', ' + Number(position.coords.longitude).toFixed(6)
-                            };
-                            pendingLocationSend = true;
-                            sendHeartbeat(true);
-                        }, function () { }, { enableHighAccuracy: false, maximumAge: 600000, timeout: 8000 });
-                    }
-                }).catch(function () { });
-            }
+        if (navigator.permissions && navigator.geolocation) {
+        navigator.permissions.query({ name: 'geolocation' }).then(function (result) {
+        if (result.state === 'granted') {
+        navigator.geolocation.getCurrentPosition(function (position) {
+        geo = {
+        latitude: Number(position.coords.latitude.toFixed(6)),
+        longitude: Number(position.coords.longitude.toFixed(6)),
+        locationText: Number(position.coords.latitude).toFixed(6) + ', ' + Number(position.coords.longitude).toFixed(6)
+        };
+        pendingLocationSend = true;
+        sendHeartbeat(true);
+        }, function () { }, { enableHighAccuracy: false, maximumAge: 600000, timeout: 8000 });
+        }
+        }).catch(function () { });
+        }
 
-            sendHeartbeat(true);
-            window.setInterval(function () {
-                sendHeartbeat(false);
-            }, 15000);
+        sendHeartbeat(true);
+        window.setInterval(function () {
+        sendHeartbeat(false);
+        }, 15000);
         })();
     </script>
 
