@@ -53,6 +53,20 @@ public sealed class LabCsvConfig
     public string? InsightPath { get; init; }
 
     /// <summary>
+    /// When true the "Top 5 Insurance Total Payments" tab is disabled
+    /// on the Collection Summary page for this lab.
+    /// Defaults to false (tab is enabled).
+    /// </summary>
+    public bool DisableShowTop5TotalPayments { get; init; }
+
+    /// <summary>
+    /// Controls which Collection Report output format is used.
+    /// When set to <c>"table1"</c>, encounter counts come from <c>LineLevelData</c>.
+    /// When absent or empty, encounter counts come from <c>ClaimLevelData</c> (default).
+    /// </summary>
+    public string? CollectionOutput { get; init; }
+
+    /// <summary>
     /// Output folder for the background-generated RCM summary JSON file.
     /// The file is named using the same base name as the Claim Level CSV
     /// but with "Claim Level" replaced by "RCM".

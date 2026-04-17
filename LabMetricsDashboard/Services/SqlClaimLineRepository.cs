@@ -48,10 +48,9 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
-        ArgumentException.ThrowIfNullOrWhiteSpace(labName);
 
-        var where = new List<string> { "LabName = @LabName" };
-        var parameters = new List<SqlParameter> { new("@LabName", labName) };
+        var where = new List<string>();
+        var parameters = new List<SqlParameter>();
 
         AddLikeFilter(where, parameters, "PayerName", "@fpn", filterPayerName);
         AddInClause(where, parameters, "LTRIM(RTRIM(PayerType))", "@fpt", filterPayerTypes);
@@ -94,16 +93,16 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
         AddDateRangeFilter(where, parameters, "ChargeEnteredDate", "@fceFrom", "@fceTo", filterChargeEnteredFrom, filterChargeEnteredTo, filterChargeEnteredNull, filterChargeEnteredExcludeBlank);
         AddDateRangeFilter(where, parameters, "DateOfService", "@fdosFrom", "@fdosTo", filterDosFrom, filterDosTo, filterDosNull);
 
-        var whereStr = string.Join(" AND ", where);
+        var whereStr = where.Count > 0 ? string.Join(" AND ", where) : "1=1";
 
-        // Filter option lists (unfiltered, lab-scoped)
+        // Filter option lists (unfiltered)
         const string optionsSql = """
-            SELECT DISTINCT LTRIM(RTRIM(PayerType))   FROM dbo.ClaimLevelData WHERE LabName = @LabName AND PayerType   IS NOT NULL AND LTRIM(RTRIM(PayerType))   <> '' ORDER BY 1;
-            SELECT DISTINCT LTRIM(RTRIM(ClaimStatus)) FROM dbo.ClaimLevelData WHERE LabName = @LabName AND ClaimStatus IS NOT NULL AND LTRIM(RTRIM(ClaimStatus)) <> ''
+            SELECT DISTINCT LTRIM(RTRIM(PayerType))   FROM dbo.ClaimLevelData WHERE PayerType   IS NOT NULL AND LTRIM(RTRIM(PayerType))   <> '' ORDER BY 1;
+            SELECT DISTINCT LTRIM(RTRIM(ClaimStatus)) FROM dbo.ClaimLevelData WHERE ClaimStatus IS NOT NULL AND LTRIM(RTRIM(ClaimStatus)) <> ''
                 AND TRY_CAST(ClaimStatus AS DATE) IS NULL ORDER BY 1;
-            SELECT DISTINCT LTRIM(RTRIM(ClinicName))  FROM dbo.ClaimLevelData WHERE LabName = @LabName AND ClinicName  IS NOT NULL AND LTRIM(RTRIM(ClinicName))  <> '' ORDER BY 1;
-            SELECT DISTINCT LTRIM(RTRIM(PayerName))   FROM dbo.ClaimLevelData WHERE LabName = @LabName AND PayerName   IS NOT NULL AND LTRIM(RTRIM(PayerName))   <> '' ORDER BY 1;
-            SELECT DISTINCT LTRIM(RTRIM(PanelName))   FROM dbo.ClaimLevelData WHERE LabName = @LabName AND PanelName   IS NOT NULL AND LTRIM(RTRIM(PanelName))   <> '' ORDER BY 1;
+            SELECT DISTINCT LTRIM(RTRIM(ClinicName))  FROM dbo.ClaimLevelData WHERE ClinicName  IS NOT NULL AND LTRIM(RTRIM(ClinicName))  <> '' ORDER BY 1;
+            SELECT DISTINCT LTRIM(RTRIM(PayerName))   FROM dbo.ClaimLevelData WHERE PayerName   IS NOT NULL AND LTRIM(RTRIM(PayerName))   <> '' ORDER BY 1;
+            SELECT DISTINCT LTRIM(RTRIM(PanelName))   FROM dbo.ClaimLevelData WHERE PanelName   IS NOT NULL AND LTRIM(RTRIM(PanelName))   <> '' ORDER BY 1;
             SELECT DISTINCT
                 CASE
                     WHEN TRY_CAST(DaystoDOS AS INT) IS NULL THEN 'Current'
@@ -113,12 +112,12 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
                     WHEN TRY_CAST(DaystoDOS AS INT) < 120   THEN '90+'
                     ELSE '120+'
                 END AS AgingBucket
-            FROM dbo.ClaimLevelData WHERE LabName = @LabName ORDER BY 1;
+            FROM dbo.ClaimLevelData ORDER BY 1;
             """;
 
         // Counts
         var countSql = $"""
-            SELECT COUNT(*) FROM dbo.ClaimLevelData WHERE LabName = @LabName;
+            SELECT COUNT(*) FROM dbo.ClaimLevelData;
             SELECT COUNT(*) FROM dbo.ClaimLevelData WHERE {whereStr};
             """;
 
@@ -126,7 +125,7 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
         int offset = (Math.Max(1, page) - 1) * pageSize;
         var dataSql = $"""
             SELECT
-                ISNULL(ClaimID,'')              AS ClaimID,
+                CASE WHEN ClaimID LIKE '%.00' THEN LEFT(ClaimID, LEN(ClaimID)-3) ELSE ISNULL(ClaimID,'') END AS ClaimID,
                 ISNULL(AccessionNumber,'')      AS AccessionNumber,
                 ISNULL(SourceFileID,'')         AS SourceFileID,
                 ISNULL(IngestedOn,'')           AS IngestedOn,
@@ -198,7 +197,7 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
         await conn.OpenAsync(ct);
 
         // Options
-        await using (var cmd = new SqlCommand(optionsSql, conn))
+        await using (var cmd = new SqlCommand(optionsSql, conn) { CommandTimeout = 180 })
         {
             cmd.Parameters.AddRange(CloneParams(parameters));
             await using var r = await cmd.ExecuteReaderAsync(ct);
@@ -216,7 +215,7 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
         }
 
         // Counts
-        await using (var cmd = new SqlCommand(countSql, conn))
+        await using (var cmd = new SqlCommand(countSql, conn) { CommandTimeout = 180 })
         {
             cmd.Parameters.AddRange(CloneParams(parameters));
             await using var r = await cmd.ExecuteReaderAsync(ct);
@@ -226,7 +225,7 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
         }
 
         // Paged data
-        await using (var cmd = new SqlCommand(dataSql, conn))
+        await using (var cmd = new SqlCommand(dataSql, conn) { CommandTimeout = 180 })
         {
             cmd.Parameters.AddRange(CloneParams(parameters));
             cmd.Parameters.Add(new SqlParameter("@Offset", SqlDbType.Int) { Value = offset });
@@ -315,10 +314,9 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
-        ArgumentException.ThrowIfNullOrWhiteSpace(labName);
 
-        var where = new List<string> { "LabName = @LabName" };
-        var parameters = new List<SqlParameter> { new("@LabName", labName) };
+        var where = new List<string>();
+        var parameters = new List<SqlParameter>();
 
         AddLikeFilter(where, parameters, "PayerName", "@fpn", filterPayerName);
         AddInClause(where, parameters, "LTRIM(RTRIM(PayerType))", "@fpt", filterPayerTypes);
@@ -328,21 +326,21 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
         AddInClause(where, parameters, "LTRIM(RTRIM(ClinicName))", "@fcn", filterClinicNames);
         AddLikeFilter(where, parameters, "DenialCode", "@fdc", filterDenialCode);
 
-        var whereStr = string.Join(" AND ", where);
+        var whereStr = where.Count > 0 ? string.Join(" AND ", where) : "1=1";
 
-        // Filter option lists (unfiltered, lab-scoped)
+        // Filter option lists (unfiltered)
         const string optionsSql = """
-            SELECT DISTINCT LTRIM(RTRIM(PayerType))   FROM dbo.LineLevelData WHERE LabName = @LabName AND PayerType   IS NOT NULL AND LTRIM(RTRIM(PayerType))   <> '' ORDER BY 1;
-            SELECT DISTINCT LTRIM(RTRIM(ClaimStatus)) FROM dbo.LineLevelData WHERE LabName = @LabName AND ClaimStatus IS NOT NULL AND LTRIM(RTRIM(ClaimStatus)) <> ''
+            SELECT DISTINCT LTRIM(RTRIM(PayerType))   FROM dbo.LineLevelData WHERE PayerType   IS NOT NULL AND LTRIM(RTRIM(PayerType))   <> '' ORDER BY 1;
+            SELECT DISTINCT LTRIM(RTRIM(ClaimStatus)) FROM dbo.LineLevelData WHERE ClaimStatus IS NOT NULL AND LTRIM(RTRIM(ClaimStatus)) <> ''
                 AND TRY_CAST(ClaimStatus AS DATE) IS NULL ORDER BY 1;
-            SELECT DISTINCT LTRIM(RTRIM(PayStatus))   FROM dbo.LineLevelData WHERE LabName = @LabName AND PayStatus   IS NOT NULL AND LTRIM(RTRIM(PayStatus))   <> '' ORDER BY 1;
-            SELECT DISTINCT LTRIM(RTRIM(ClinicName))  FROM dbo.LineLevelData WHERE LabName = @LabName AND ClinicName  IS NOT NULL AND LTRIM(RTRIM(ClinicName))  <> '' ORDER BY 1;
-            SELECT DISTINCT LTRIM(RTRIM(CPTCode))     FROM dbo.LineLevelData WHERE LabName = @LabName AND CPTCode     IS NOT NULL AND LTRIM(RTRIM(CPTCode))     <> '' ORDER BY 1;
+            SELECT DISTINCT LTRIM(RTRIM(PayStatus))   FROM dbo.LineLevelData WHERE PayStatus   IS NOT NULL AND LTRIM(RTRIM(PayStatus))   <> '' ORDER BY 1;
+            SELECT DISTINCT LTRIM(RTRIM(ClinicName))  FROM dbo.LineLevelData WHERE ClinicName  IS NOT NULL AND LTRIM(RTRIM(ClinicName))  <> '' ORDER BY 1;
+            SELECT DISTINCT LTRIM(RTRIM(CPTCode))     FROM dbo.LineLevelData WHERE CPTCode     IS NOT NULL AND LTRIM(RTRIM(CPTCode))     <> '' ORDER BY 1;
             """;
 
         // Counts
         var countSql = $"""
-            SELECT COUNT(*) FROM dbo.LineLevelData WHERE LabName = @LabName;
+            SELECT COUNT(*) FROM dbo.LineLevelData;
             SELECT COUNT(*) FROM dbo.LineLevelData WHERE {whereStr};
             """;
 
@@ -350,7 +348,7 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
         int offset = (Math.Max(1, page) - 1) * pageSize;
         var dataSql = $"""
             SELECT
-                ISNULL(ClaimID,'')              AS ClaimID,
+                CASE WHEN ClaimID LIKE '%.00' THEN LEFT(ClaimID, LEN(ClaimID)-3) ELSE ISNULL(ClaimID,'') END AS ClaimID,
                 ISNULL(AccessionNumber,'')      AS AccessionNumber,
                 ISNULL(SourceFileID,'')         AS SourceFileID,
                 ISNULL(IngestedOn,'')           AS IngestedOn,
@@ -366,15 +364,15 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
                 ISNULL(ReferringProvider,'')    AS ReferringProvider,
                 ISNULL(LTRIM(RTRIM(ClinicName)),'') AS ClinicName,
                 ISNULL(SalesRepName,'')         AS SalesRepName,
-                ISNULL(PatientID,'')            AS PatientID,
+                CASE WHEN PatientID LIKE '%.00' THEN LEFT(PatientID, LEN(PatientID)-3) ELSE ISNULL(PatientID,'') END AS PatientID,
                 ISNULL(PatientDOB,'')           AS PatientDOB,
                 ISNULL(DateOfService,'')        AS DateOfService,
                 ISNULL(ChargeEnteredDate,'')    AS ChargeEnteredDate,
                 ISNULL(FirstBilledDate,'')      AS FirstBilledDate,
                 ISNULL(LTRIM(RTRIM(PanelName)),'')  AS PanelName,
-                ISNULL(LTRIM(RTRIM(CPTCode)),'')    AS CPTCode,
-                ISNULL(TRY_CAST(Units AS DECIMAL(18,2)), 0)                  AS Units,
-                ISNULL(Modifier,'')             AS Modifier,
+                CASE WHEN CPTCode LIKE '%.00' THEN LEFT(CPTCode, LEN(CPTCode)-3) ELSE ISNULL(LTRIM(RTRIM(CPTCode)),'') END AS CPTCode,
+                ISNULL(FLOOR(TRY_CAST(Units AS DECIMAL(18,2))), 0) AS Units,
+                CASE WHEN Modifier LIKE '%.00' THEN LEFT(Modifier, LEN(Modifier)-3) ELSE ISNULL(Modifier,'') END AS Modifier,
                 ISNULL(POS,'')                  AS POS,
                 ISNULL(TOS,'')                  AS TOS,
                 ISNULL(TRY_CAST(ChargeAmount         AS DECIMAL(18,2)), 0) AS ChargeAmount,
@@ -421,7 +419,7 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
         await conn.OpenAsync(ct);
 
         // Options
-        await using (var cmd = new SqlCommand(optionsSql, conn))
+        await using (var cmd = new SqlCommand(optionsSql, conn) { CommandTimeout = 180 })
         {
             cmd.Parameters.AddRange(CloneParams(parameters));
             await using var r = await cmd.ExecuteReaderAsync(ct);
@@ -437,7 +435,7 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
         }
 
         // Counts
-        await using (var cmd = new SqlCommand(countSql, conn))
+        await using (var cmd = new SqlCommand(countSql, conn) { CommandTimeout = 180 })
         {
             cmd.Parameters.AddRange(CloneParams(parameters));
             await using var r = await cmd.ExecuteReaderAsync(ct);
@@ -447,7 +445,7 @@ public sealed class SqlClaimLineRepository : IClaimLineRepository
         }
 
         // Paged data
-        await using (var cmd = new SqlCommand(dataSql, conn))
+        await using (var cmd = new SqlCommand(dataSql, conn) { CommandTimeout = 180 })
         {
             cmd.Parameters.AddRange(CloneParams(parameters));
             cmd.Parameters.Add(new SqlParameter("@Offset", SqlDbType.Int) { Value = offset });

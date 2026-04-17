@@ -23,6 +23,9 @@ public static class ClinicSummaryExcelExportBuilder
         IReadOnlyList<TopDeniedItem> topDeniedPayers,
         IReadOnlyList<TopDeniedItem> topDeniedPanels,
         string labName,
+        ClinicPanelStatusViewModel? panelStatus = null,
+        ClinicDollarAnalysisViewModel? dollarAnalysis = null,
+        ClinicDosCountViewModel? dosCount = null,
         IReadOnlyList<(string Label, IReadOnlyList<string>? Values)>? activeFilters = null)
     {
         var wb = new XLWorkbook();
@@ -32,6 +35,15 @@ public static class ClinicSummaryExcelExportBuilder
             topCollectedPayers, topCollectedPanels);
         BuildHighlyDeniedSheet(wb, topDeniedClinics, topDeniedSalesReps,
             topDeniedPayers, topDeniedPanels);
+
+        if (panelStatus is { Clinics.Count: > 0 })
+            BuildPanelStatusSheet(wb, panelStatus);
+
+        if (dollarAnalysis is { Clinics.Count: > 0 })
+            BuildDollarAnalysisSheet(wb, dollarAnalysis);
+
+        if (dosCount is { Clinics.Count: > 0 })
+            BuildDosCountSheet(wb, dosCount);
 
         if (activeFilters is { Count: > 0 })
         {
@@ -295,5 +307,257 @@ public static class ClinicSummaryExcelExportBuilder
         }
 
         return headerRow + 1 + items.Count;
+    }
+
+    // ?? Clinic $ Analysis sheet ??????????????????????????????????????
+
+    private static void BuildDollarAnalysisSheet(XLWorkbook wb, ClinicDollarAnalysisViewModel vm)
+    {
+        var ws = wb.AddWorksheet("Clinic $ Analysis");
+        ws.TabColor = ExcelTheme.TabGreen;
+        ExcelTheme.ApplyDefaults(ws);
+
+        ExcelTheme.WriteHeaderRow(ws, 1, 1,
+            ["Clinic Name", "Claim Status", "No. of Claims", "Total Charge", "Insurance Payments"]);
+
+        int rowNum = 2;
+        int idx = 0;
+        foreach (var clinic in vm.Clinics)
+        {
+            // Clinic-level row (bold)
+            var clinicBg = ExcelTheme.GetRowBg(idx++);
+            ws.Cell(rowNum, 1).Value = clinic.ClinicName;
+            ws.Cell(rowNum, 2).Value = "";
+            ws.Cell(rowNum, 3).Value = clinic.ClaimCount;
+            ws.Cell(rowNum, 4).Value = clinic.TotalCharge;
+            ws.Cell(rowNum, 5).Value = clinic.InsurancePayment;
+            for (int c = 1; c <= 5; c++)
+            {
+                ExcelTheme.StyleDataCell(ws.Cell(rowNum, c), clinicBg);
+                ws.Cell(rowNum, c).Style.Font.SetBold(true);
+            }
+            ws.Cell(rowNum, 3).Style.NumberFormat.Format = "#,##0";
+            ws.Cell(rowNum, 4).Style.NumberFormat.Format = "$#,##0.00";
+            ws.Cell(rowNum, 5).Style.NumberFormat.Format = "$#,##0.00";
+            rowNum++;
+
+            // Status drill-down rows
+            foreach (var status in clinic.Statuses)
+            {
+                var statusBg = ExcelTheme.GetRowBg(idx++);
+                ws.Cell(rowNum, 1).Value = "";
+                ws.Cell(rowNum, 2).Value = status.ClaimStatus;
+                ws.Cell(rowNum, 3).Value = status.ClaimCount;
+                ws.Cell(rowNum, 4).Value = status.TotalCharge;
+                ws.Cell(rowNum, 5).Value = status.InsurancePayment;
+                for (int c = 1; c <= 5; c++)
+                    ExcelTheme.StyleDataCell(ws.Cell(rowNum, c), statusBg);
+                ws.Cell(rowNum, 3).Style.NumberFormat.Format = "#,##0";
+                ws.Cell(rowNum, 4).Style.NumberFormat.Format = "$#,##0.00";
+                ws.Cell(rowNum, 5).Style.NumberFormat.Format = "$#,##0.00";
+                rowNum++;
+            }
+        }
+
+        // Grand Total
+        ws.Cell(rowNum, 1).Value = "Grand Total";
+        ws.Cell(rowNum, 3).Value = vm.GrandTotalClaims;
+        ws.Cell(rowNum, 4).Value = vm.GrandTotalCharge;
+        ws.Cell(rowNum, 5).Value = vm.GrandTotalInsurancePayment;
+        for (int c = 1; c <= 5; c++)
+        {
+            ExcelTheme.StyleDataCell(ws.Cell(rowNum, c), ExcelTheme.TotalRowBg);
+            ws.Cell(rowNum, c).Style.Font.SetBold(true);
+        }
+        ws.Cell(rowNum, 3).Style.NumberFormat.Format = "#,##0";
+        ws.Cell(rowNum, 4).Style.NumberFormat.Format = "$#,##0.00";
+        ws.Cell(rowNum, 5).Style.NumberFormat.Format = "$#,##0.00";
+
+        ws.SheetView.FreezeRows(1);
+        ExcelTheme.AutoFitColumns(ws, 5, minWidth: 16, firstColMinWidth: 30);
+    }
+
+    // ?? Clinic Count by DOS Month sheet ??????????????????????????????
+
+    private static void BuildDosCountSheet(XLWorkbook wb, ClinicDosCountViewModel vm)
+    {
+        var monthNames = new[] { "", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+
+        var ws = wb.AddWorksheet("Count by DOS Month");
+        ws.TabColor = ExcelTheme.TabGreen;
+        ExcelTheme.ApplyDefaults(ws);
+
+        // Row 1: Year headers spanning month columns
+        int col = 2; // col 1 = Clinic Name
+        var yearStartCol = new Dictionary<int, int>();
+        foreach (var year in vm.Years)
+        {
+            yearStartCol[year] = col;
+            var monthsInYear = vm.Columns.Count(c => c.Year == year);
+            var yearCell = ws.Cell(1, col);
+            yearCell.Value = year;
+            if (monthsInYear > 1)
+                ws.Range(1, col, 1, col + monthsInYear - 1).Merge();
+            ExcelTheme.WriteHeaderRow(ws, 1, col, Enumerable.Repeat(year.ToString(), 1).ToArray());
+            col += monthsInYear;
+        }
+        // Grand Total header in row 1
+        var grandCol = col;
+        ExcelTheme.WriteHeaderRow(ws, 1, grandCol, ["Grand Total"]);
+
+        // Row 1 col 1 header
+        ExcelTheme.WriteHeaderRow(ws, 1, 1, ["Clinic Name"]);
+
+        // Row 2: Month sub-headers
+        col = 2;
+        foreach (var (year, month) in vm.Columns)
+        {
+            var cell = ws.Cell(2, col);
+            cell.Value = monthNames[month];
+            ExcelTheme.StyleDataCell(cell, ExcelTheme.TotalRowBg);
+            cell.Style.Font.SetBold(true);
+            cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            col++;
+        }
+        ws.Cell(2, grandCol).Value = "";
+        ExcelTheme.StyleDataCell(ws.Cell(2, grandCol), ExcelTheme.TotalRowBg);
+
+        // Data rows
+        int rowNum = 3;
+        for (int i = 0; i < vm.Clinics.Count; i++)
+        {
+            var clinic = vm.Clinics[i];
+            var bg = ExcelTheme.GetRowBg(i);
+
+            ws.Cell(rowNum, 1).Value = clinic.ClinicName;
+            ExcelTheme.StyleDataCell(ws.Cell(rowNum, 1), bg);
+
+            col = 2;
+            foreach (var (year, month) in vm.Columns)
+            {
+                var key = ClinicDosCountViewModel.ColKey(year, month);
+                var val = clinic.MonthCounts.GetValueOrDefault(key);
+                var cell = ws.Cell(rowNum, col);
+                cell.Value = val;
+                cell.Style.NumberFormat.Format = "#,##0";
+                ExcelTheme.StyleDataCell(cell, bg);
+                col++;
+            }
+
+            ws.Cell(rowNum, grandCol).Value = clinic.GrandTotal;
+            ws.Cell(rowNum, grandCol).Style.NumberFormat.Format = "#,##0";
+            ExcelTheme.StyleDataCell(ws.Cell(rowNum, grandCol), bg);
+            ws.Cell(rowNum, grandCol).Style.Font.SetBold(true);
+            rowNum++;
+        }
+
+        // Grand Total footer
+        ws.Cell(rowNum, 1).Value = "Grand Total";
+        ExcelTheme.StyleDataCell(ws.Cell(rowNum, 1), ExcelTheme.TotalRowBg);
+        ws.Cell(rowNum, 1).Style.Font.SetBold(true);
+
+        col = 2;
+        foreach (var (year, month) in vm.Columns)
+        {
+            var key = ClinicDosCountViewModel.ColKey(year, month);
+            var val = vm.ColumnTotals.GetValueOrDefault(key);
+            var cell = ws.Cell(rowNum, col);
+            cell.Value = val;
+            cell.Style.NumberFormat.Format = "#,##0";
+            ExcelTheme.StyleDataCell(cell, ExcelTheme.TotalRowBg);
+            cell.Style.Font.SetBold(true);
+            col++;
+        }
+
+        ws.Cell(rowNum, grandCol).Value = vm.GrandTotal;
+        ws.Cell(rowNum, grandCol).Style.NumberFormat.Format = "#,##0";
+        ExcelTheme.StyleDataCell(ws.Cell(rowNum, grandCol), ExcelTheme.TotalRowBg);
+        ws.Cell(rowNum, grandCol).Style.Font.SetBold(true);
+
+        ws.SheetView.FreezeRows(2);
+        ws.SheetView.FreezeColumns(1);
+        ExcelTheme.AutoFitColumns(ws, grandCol, minWidth: 8, firstColMinWidth: 28);
+    }
+
+    // ?? Clinic Panel Status sheet ?????????????????????????????????????
+
+    private static void BuildPanelStatusSheet(XLWorkbook wb, ClinicPanelStatusViewModel vm)
+    {
+        var ws = wb.AddWorksheet("Clinic Panel Status");
+        ws.TabColor = ExcelTheme.TabGreen;
+        ExcelTheme.ApplyDefaults(ws);
+
+        var statuses = vm.Statuses;
+        int colCount = 2 + statuses.Count + 1; // Clinic, Panel, statuses..., Grand Total
+
+        // Header row
+        var headers = new List<string> { "Clinic Name", "Panel Name" };
+        headers.AddRange(statuses);
+        headers.Add("Grand Total");
+        ExcelTheme.WriteHeaderRow(ws, 1, 1, headers.ToArray());
+
+        int rowNum = 2;
+        int idx = 0;
+        foreach (var clinic in vm.Clinics)
+        {
+            // Clinic-level row (bold)
+            var clinicBg = ExcelTheme.GetRowBg(idx++);
+            ws.Cell(rowNum, 1).Value = clinic.ClinicName;
+            ws.Cell(rowNum, 2).Value = "";
+            for (int s = 0; s < statuses.Count; s++)
+            {
+                var val = clinic.StatusCounts.GetValueOrDefault(statuses[s]);
+                ws.Cell(rowNum, 3 + s).Value = val;
+                ws.Cell(rowNum, 3 + s).Style.NumberFormat.Format = "#,##0";
+            }
+            ws.Cell(rowNum, colCount).Value = clinic.GrandTotal;
+            ws.Cell(rowNum, colCount).Style.NumberFormat.Format = "#,##0";
+            for (int c = 1; c <= colCount; c++)
+            {
+                ExcelTheme.StyleDataCell(ws.Cell(rowNum, c), clinicBg);
+                ws.Cell(rowNum, c).Style.Font.SetBold(true);
+            }
+            rowNum++;
+
+            // Panel drill-down rows
+            foreach (var panel in clinic.Panels)
+            {
+                var panelBg = ExcelTheme.GetRowBg(idx++);
+                ws.Cell(rowNum, 1).Value = "";
+                ws.Cell(rowNum, 2).Value = panel.PanelName;
+                for (int s = 0; s < statuses.Count; s++)
+                {
+                    var val = panel.StatusCounts.GetValueOrDefault(statuses[s]);
+                    ws.Cell(rowNum, 3 + s).Value = val;
+                    ws.Cell(rowNum, 3 + s).Style.NumberFormat.Format = "#,##0";
+                }
+                ws.Cell(rowNum, colCount).Value = panel.GrandTotal;
+                ws.Cell(rowNum, colCount).Style.NumberFormat.Format = "#,##0";
+                for (int c = 1; c <= colCount; c++)
+                    ExcelTheme.StyleDataCell(ws.Cell(rowNum, c), panelBg);
+                rowNum++;
+            }
+        }
+
+        // Grand Total footer
+        ws.Cell(rowNum, 1).Value = "Grand Total";
+        ws.Cell(rowNum, 2).Value = "";
+        for (int s = 0; s < statuses.Count; s++)
+        {
+            var val = vm.GrandTotals.GetValueOrDefault(statuses[s]);
+            ws.Cell(rowNum, 3 + s).Value = val;
+            ws.Cell(rowNum, 3 + s).Style.NumberFormat.Format = "#,##0";
+        }
+        ws.Cell(rowNum, colCount).Value = vm.GrandTotalAll;
+        ws.Cell(rowNum, colCount).Style.NumberFormat.Format = "#,##0";
+        for (int c = 1; c <= colCount; c++)
+        {
+            ExcelTheme.StyleDataCell(ws.Cell(rowNum, c), ExcelTheme.TotalRowBg);
+            ws.Cell(rowNum, c).Style.Font.SetBold(true);
+        }
+
+        ws.SheetView.FreezeRows(1);
+        ws.SheetView.FreezeColumns(2);
+        ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 12, firstColMinWidth: 30);
     }
 }

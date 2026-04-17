@@ -1,8 +1,19 @@
-using LabMetricsDashboard.Filters;
+﻿using LabMetricsDashboard.Filters;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// ── File logging ─────────────────────────────────────────────────
+// Writes Warning+ logs (DB errors, crashes) to rolling daily text files.
+var fileLogSection = builder.Configuration.GetSection("Logging:File");
+var fileLogOptions = new FileLoggerOptions
+{
+    LogDirectory = fileLogSection["LogDirectory"] ?? "Logs",
+    MinLevel     = Enum.TryParse<LogLevel>(fileLogSection["LogLevel"], true, out var lvl) ? lvl : LogLevel.Warning,
+    RetainDays   = int.TryParse(fileLogSection["RetainDays"], out var rd) ? rd : 30
+};
+builder.Logging.AddProvider(new FileLoggerProvider(fileLogOptions));
 
 // Bind the "LabConfig" section from appsettings.json.
 var labConfigOptions = builder.Configuration
@@ -51,6 +62,7 @@ builder.Services.AddScoped<ISalesRepSummaryRepository, SqlSalesRepSummaryReposit
 builder.Services.AddScoped<IDashboardRepository, SqlDashboardRepository>();
 builder.Services.AddScoped<IProductionReportRepository, SqlProductionReportRepository>();
 builder.Services.AddScoped<IClaimLineRepository, SqlClaimLineRepository>();
+builder.Services.AddScoped<ICollectionSummaryRepository, SqlCollectionSummaryRepository>();
 
 // Add services to the container.
 builder.Services.AddMemoryCache();
@@ -67,9 +79,34 @@ var app = builder.Build();
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Home/Error");
-    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
+
+// ── Global error logging (all environments) ─────────────────────
+// Logs unhandled exceptions with full detail to the text file so
+// deployed-server errors are always captured.
+app.Use(async (context, next) =>
+
+{
+    try
+    {
+        await next();
+    }
+    catch (Exception ex)
+    {
+        var logger = context.RequestServices.GetRequiredService<ILoggerFactory>()
+            .CreateLogger("UnhandledException");
+
+        logger.LogCritical(ex,
+            "Unhandled exception on {Method} {Path}{Query} | TraceId={TraceId}",
+            context.Request.Method,
+            context.Request.Path,
+            context.Request.QueryString,
+            context.TraceIdentifier);
+
+        throw; // re-throw so the standard exception handler page still works
+    }
+});
 
 app.UseHttpsRedirection();
 app.UseStaticFiles();

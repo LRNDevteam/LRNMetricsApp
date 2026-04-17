@@ -1,14 +1,19 @@
 using System.Globalization;
 using LabMetricsDashboard.Models;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace LabMetricsDashboard.Services;
 
 /// <summary>
 /// Parses the Claim Level CSV file into a list of ClaimRecord.
 /// Handles quoted fields with embedded commas.
+/// Parsed results are cached in memory (keyed by path + last-write-time)
+/// so that page navigations and filter changes do not re-parse the file.
 /// </summary>
 public sealed class CsvParserService
 {
+    private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(10);
+
     private static readonly string[] ClaimLevelHeaders =
     [
         "LabID", "LabName", "ClaimID", "AccessionNumber", "SourceFileID",
@@ -26,10 +31,12 @@ public sealed class CsvParserService
     ];
 
     private readonly ILogger<CsvParserService> _logger;
+    private readonly IMemoryCache _cache;
 
-    public CsvParserService(ILogger<CsvParserService> logger)
+    public CsvParserService(ILogger<CsvParserService> logger, IMemoryCache cache)
     {
         _logger = logger;
+        _cache = cache;
     }
 
     public List<ClaimRecord> ParseClaimLevel(string filePath)
@@ -40,6 +47,17 @@ public sealed class CsvParserService
             return [];
         }
 
+        var cacheKey = BuildCacheKey("Claim", filePath);
+        return _cache.GetOrCreate(cacheKey, entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = CacheDuration;
+            _logger.LogInformation("Parsing Claim Level CSV (cache miss): {FilePath}", filePath);
+            return ParseClaimLevelCore(filePath);
+        })!;
+    }
+
+    private List<ClaimRecord> ParseClaimLevelCore(string filePath)
+    {
         var records = new List<ClaimRecord>();
 
         try
@@ -178,6 +196,17 @@ public sealed class CsvParserService
             return [];
         }
 
+        var cacheKey = BuildCacheKey("Line", filePath);
+        return _cache.GetOrCreate(cacheKey, entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = CacheDuration;
+            _logger.LogInformation("Parsing Line Level CSV (cache miss): {FilePath}", filePath);
+            return ParseLineLevelCore(filePath);
+        })!;
+    }
+
+    private List<LineRecord> ParseLineLevelCore(string filePath)
+    {
         var records = new List<LineRecord>();
 
         try
@@ -310,4 +339,14 @@ public sealed class CsvParserService
     private static decimal ParseDecimal(string value) =>
         decimal.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var result)
             ? result : 0m;
+
+    /// <summary>
+    /// Builds a cache key that includes the file's last-write time so the cache
+    /// auto-invalidates when a new CSV is written to the same path.
+    /// </summary>
+    private static string BuildCacheKey(string prefix, string filePath)
+    {
+        var lastWrite = File.GetLastWriteTimeUtc(filePath).Ticks;
+        return $"CsvParser_{prefix}_{filePath}_{lastWrite}";
+    }
 }

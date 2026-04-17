@@ -29,11 +29,10 @@ public sealed class SqlSalesRepSummaryRepository : ISalesRepSummaryRepository
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
-        ArgumentException.ThrowIfNullOrWhiteSpace(labName);
 
         // Build WHERE clauses dynamically with IN for multi-select
-        var whereClauses = new List<string> { "LabName = @LabName", "SalesRepName IS NOT NULL", "SalesRepName <> ''" };
-        var parameters = new List<SqlParameter> { new("@LabName", labName) };
+        var whereClauses = new List<string> { "SalesRepName IS NOT NULL", "SalesRepName <> ''" };
+        var parameters = new List<SqlParameter>();
 
         AddInClause(whereClauses, parameters, "SalesRepName", "@sr", filterSalesRepNames);
         AddInClause(whereClauses, parameters, "ClinicName", "@cn", filterClinicNames);
@@ -71,12 +70,12 @@ public sealed class SqlSalesRepSummaryRepository : ISalesRepSummaryRepository
             ORDER BY BilledClaimCount DESC
             """;
 
-        // Query for distinct filter option lists (unfiltered, lab-scoped)
+        // Query for distinct filter option lists (unfiltered)
         const string optionsSql = """
-            SELECT DISTINCT SalesRepName FROM dbo.ClaimLevelData WHERE LabName = @LabName AND SalesRepName IS NOT NULL AND SalesRepName <> '' ORDER BY SalesRepName;
-            SELECT DISTINCT ClinicName   FROM dbo.ClaimLevelData WHERE LabName = @LabName AND ClinicName   IS NOT NULL AND ClinicName   <> '' ORDER BY ClinicName;
-            SELECT DISTINCT PayerName    FROM dbo.ClaimLevelData WHERE LabName = @LabName AND PayerName    IS NOT NULL AND PayerName    <> '' ORDER BY PayerName;
-            SELECT DISTINCT PanelName    FROM dbo.ClaimLevelData WHERE LabName = @LabName AND PanelName    IS NOT NULL AND PanelName    <> '' ORDER BY PanelName;
+            SELECT DISTINCT SalesRepName FROM dbo.ClaimLevelData WHERE SalesRepName IS NOT NULL AND SalesRepName <> '' ORDER BY SalesRepName;
+            SELECT DISTINCT ClinicName   FROM dbo.ClaimLevelData WHERE ClinicName   IS NOT NULL AND ClinicName   <> '' ORDER BY ClinicName;
+            SELECT DISTINCT PayerName    FROM dbo.ClaimLevelData WHERE PayerName    IS NOT NULL AND PayerName    <> '' ORDER BY PayerName;
+            SELECT DISTINCT PanelName    FROM dbo.ClaimLevelData WHERE PanelName    IS NOT NULL AND PanelName    <> '' ORDER BY PanelName;
             """;
 
         // Top collected breakdown queries (top 10 by InsurancePayment, grouped by each dimension)
@@ -115,7 +114,6 @@ public sealed class SqlSalesRepSummaryRepository : ISalesRepSummaryRepository
             // 1. Fetch filter option lists
             await using (var optCmd = new SqlCommand(optionsSql, conn) { CommandTimeout = 60 })
             {
-                optCmd.Parameters.AddWithValue("@LabName", labName);
                 await using var optReader = await optCmd.ExecuteReaderAsync(ct);
 
                 while (await optReader.ReadAsync(ct))

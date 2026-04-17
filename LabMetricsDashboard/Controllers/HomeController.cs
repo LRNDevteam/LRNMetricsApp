@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 
 namespace LabMetricsDashboard.Controllers;
@@ -116,6 +117,19 @@ public class HomeController : Controller
     }
 
     [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
-    public IActionResult Error() =>
-        View(new ErrorViewModel { RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier });
+    public IActionResult Error()
+    {
+        var requestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier;
+
+        // Capture the exception that triggered the error page and log it to file.
+        var exFeature = HttpContext.Features.Get<IExceptionHandlerPathFeature>();
+        if (exFeature is not null)
+        {
+            _logger.LogError(exFeature.Error,
+                "Error page reached | Path={OriginalPath} | RequestId={RequestId}",
+                exFeature.Path, requestId);
+        }
+
+        return View(new ErrorViewModel { RequestId = requestId });
+    }
 }

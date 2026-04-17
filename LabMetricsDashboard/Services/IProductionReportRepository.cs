@@ -80,6 +80,24 @@ public interface IProductionReportRepository
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
         CancellationToken ct = default);
+
+    /// <summary>Returns all ClaimLevelData rows for Excel export, respecting Production Report filters.</summary>
+    Task<List<Dictionary<string, object?>>> GetClaimLevelDataExportAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        CancellationToken ct = default);
+
+    /// <summary>Returns all LineLevelData rows for Excel export, respecting Production Report filters.</summary>
+    Task<List<Dictionary<string, object?>>> GetLineLevelDataExportAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        CancellationToken ct = default);
 }
 
 /// <summary>Result container for the Monthly Claim Volume table.</summary>

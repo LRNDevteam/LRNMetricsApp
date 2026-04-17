@@ -1,5 +1,7 @@
 using LabMetricsDashboard.Models;
 
+using Microsoft.Extensions.Caching.Memory;
+
 namespace LabMetricsDashboard.Services;
 
 /// <summary>
@@ -13,20 +15,26 @@ namespace LabMetricsDashboard.Services;
 ///   Any other depth, mixed across labs.
 ///
 /// "Latest" = highest LastWriteTimeUtc among all matching files.
+/// Results are cached for 5 minutes to avoid repeated directory scans.
 /// </summary>
 public sealed class LabCsvFileResolver
 {
     private const string ClaimLevelKeyword    = "Claim Level";
     private const string LineLevelKeyword     = "Line Level";
     private const string PredictionKeyword    = "Payer_Policy_ValidationReport";
+    private const string CodingKeyword        = "CodingValidated";
+
+    private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
 
     private readonly LabSettings _labSettings;
     private readonly ILogger<LabCsvFileResolver> _logger;
+    private readonly IMemoryCache _cache;
 
-    public LabCsvFileResolver(LabSettings labSettings, ILogger<LabCsvFileResolver> logger)
+    public LabCsvFileResolver(LabSettings labSettings, ILogger<LabCsvFileResolver> logger, IMemoryCache cache)
     {
         _labSettings = labSettings;
         _logger = logger;
+        _cache = cache;
     }
 
     /// <summary>
@@ -34,14 +42,14 @@ public sealed class LabCsvFileResolver
     /// or null when none is found.
     /// </summary>
     public string? ResolveClaimLevelCsv(string labName) =>
-        Resolve(labName, ClaimLevelKeyword);
+        ResolveCsvCached(labName).ClaimLevelPath;
 
     /// <summary>
     /// Returns the full path of the latest Line Level CSV for the given lab,
     /// or null when none is found.
     /// </summary>
     public string? ResolveLineLevelCsv(string labName) =>
-        Resolve(labName, LineLevelKeyword);
+        ResolveCsvCached(labName).LineLevelPath;
 
     /// <summary>
     /// Resolves both paths for every configured lab in one pass.
@@ -50,9 +58,11 @@ public sealed class LabCsvFileResolver
     {
         return _labSettings.Labs.Keys.ToDictionary(
             labName => labName,
-            labName => new ResolvedLabCsvPaths(
-                ClaimLevelCsvPath: Resolve(labName, ClaimLevelKeyword),
-                LineLevelCsvPath:  Resolve(labName, LineLevelKeyword)),
+            labName =>
+            {
+                var cached = ResolveCsvCached(labName);
+                return new ResolvedLabCsvPaths(cached.ClaimLevelPath, cached.LineLevelPath);
+            },
             StringComparer.OrdinalIgnoreCase);
     }
 
@@ -62,39 +72,46 @@ public sealed class LabCsvFileResolver
     /// </summary>
     public string? ResolvePredictionValidationReport(string labName)
     {
-        if (!_labSettings.Labs.TryGetValue(labName, out var config))
+        var cacheKey = $"LabResolver_Prediction_{labName}";
+
+        return _cache.GetOrCreate(cacheKey, entry =>
         {
-            _logger.LogWarning("Lab '{LabName}' not found in LabSettings.", labName);
-            return null;
-        }
+            entry.AbsoluteExpirationRelativeToNow = CacheDuration;
 
-        var rootPath = config.PayerPolicyValidationReportPath;
+            if (!_labSettings.Labs.TryGetValue(labName, out var config))
+            {
+                _logger.LogWarning("Lab '{LabName}' not found in LabSettings.", labName);
+                return null;
+            }
 
-        if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
-        {
-            _logger.LogWarning(
-                "PayerPolicyValidationReportPath '{Path}' for lab '{LabName}' does not exist or is empty.",
-                rootPath, labName);
-            return null;
-        }
+            var rootPath = config.PayerPolicyValidationReportPath;
 
-        var match = Directory
-            .EnumerateFiles(rootPath, "*.xlsx", SearchOption.AllDirectories)
-            .Where(f => Path.GetFileName(f).Contains(PredictionKeyword, StringComparison.OrdinalIgnoreCase))
-            .Select(f => new FileInfo(f))
-            .MaxBy(fi => fi.LastWriteTimeUtc)
-            ?.FullName;
+            if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+            {
+                _logger.LogWarning(
+                    "PayerPolicyValidationReportPath '{Path}' for lab '{LabName}' does not exist or is empty.",
+                    rootPath, labName);
+                return null;
+            }
 
-        if (match is null)
-            _logger.LogWarning(
-                "No '{Keyword}' Excel file found under '{Path}' for lab '{LabName}'.",
-                PredictionKeyword, rootPath, labName);
-        else
-            _logger.LogInformation(
-                "Resolved prediction report for lab '{LabName}': {FilePath}",
-                labName, match);
+            var match = Directory
+                .EnumerateFiles(rootPath, "*.xlsx", SearchOption.AllDirectories)
+                .Where(f => Path.GetFileName(f).Contains(PredictionKeyword, StringComparison.OrdinalIgnoreCase))
+                .Select(f => new FileInfo(f))
+                .MaxBy(fi => fi.LastWriteTimeUtc)
+                ?.FullName;
 
-        return match;
+            if (match is null)
+                _logger.LogWarning(
+                    "No '{Keyword}' Excel file found under '{Path}' for lab '{LabName}'.",
+                    PredictionKeyword, rootPath, labName);
+            else
+                _logger.LogInformation(
+                    "Resolved prediction report for lab '{LabName}': {FilePath}",
+                    labName, match);
+
+            return match;
+        });
     }
 
     // -------------------------------------------------------------------------
@@ -105,36 +122,61 @@ public sealed class LabCsvFileResolver
     /// </summary>
     public string? ResolveCodingMasterReport(string labName)
     {
-        if (!_labSettings.Labs.TryGetValue(labName, out var config))
+        var cacheKey = $"LabResolver_Coding_{labName}";
+
+        return _cache.GetOrCreate(cacheKey, entry =>
         {
-            _logger.LogWarning("Lab '{LabName}' not found in LabSettings.", labName);
-            return null;
-        }
+            entry.AbsoluteExpirationRelativeToNow = CacheDuration;
 
-        var rootPath = config.Reports;
+            if (!_labSettings.Labs.TryGetValue(labName, out var config))
+            {
+                _logger.LogWarning("Lab '{LabName}' not found in LabSettings.", labName);
+                return null;
+            }
 
-        if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
-            return null;
+            var rootPath = config.Reports;
 
-        var match = Directory
-            .EnumerateFiles(rootPath, "*.xlsx", SearchOption.AllDirectories)
-            .Where(f => Path.GetFileName(f).Contains("CodingValidated", StringComparison.OrdinalIgnoreCase))
-            .Select(f => new FileInfo(f))
-            .MaxBy(fi => fi.LastWriteTimeUtc)
-            ?.FullName;
+            if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+                return null;
 
-        if (match is not null)
-            _logger.LogInformation("Resolved CodingMaster report for lab '{LabName}': {FilePath}", labName, match);
+            var match = Directory
+                .EnumerateFiles(rootPath, "*.xlsx", SearchOption.AllDirectories)
+                .Where(f => Path.GetFileName(f).Contains(CodingKeyword, StringComparison.OrdinalIgnoreCase))
+                .Select(f => new FileInfo(f))
+                .MaxBy(fi => fi.LastWriteTimeUtc)
+                ?.FullName;
 
-        return match;
+            if (match is not null)
+                _logger.LogInformation("Resolved CodingMaster report for lab '{LabName}': {FilePath}", labName, match);
+
+            return match;
+        });
     }
 
-    private string? Resolve(string labName, string keyword)
+    /// <summary>
+    /// Resolves both Claim Level and Line Level CSV paths in a single directory scan,
+    /// cached for <see cref="CacheDuration"/>.
+    /// </summary>
+    private CsvPathPair ResolveCsvCached(string labName)
+    {
+        var cacheKey = $"LabResolver_Csv_{labName}";
+
+        return _cache.GetOrCreate(cacheKey, entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = CacheDuration;
+            return ResolveCsvPair(labName);
+        })!;
+    }
+
+    /// <summary>
+    /// Walks the CSV directory once and finds both Claim Level and Line Level in one pass.
+    /// </summary>
+    private CsvPathPair ResolveCsvPair(string labName)
     {
         if (!_labSettings.Labs.TryGetValue(labName, out var config))
         {
             _logger.LogWarning("Lab '{LabName}' not found in LabSettings.", labName);
-            return null;
+            return CsvPathPair.Empty;
         }
 
         var rootPath = config.ProductionMasterCsvPath;
@@ -144,28 +186,51 @@ public sealed class LabCsvFileResolver
             _logger.LogWarning(
                 "ProductionMasterCsvPath '{Path}' for lab '{LabName}' does not exist or is empty.",
                 rootPath, labName);
-            return null;
+            return CsvPathPair.Empty;
         }
 
-        // Materialise FileInfo once per file so LastWriteTimeUtc is not re-read in MaxBy.
-        // Works regardless of folder depth — year\month\week or month\week or just week, etc.
-        var match = Directory
-            .EnumerateFiles(rootPath, "*.csv", SearchOption.AllDirectories)
-            .Where(f => Path.GetFileName(f).Contains(keyword, StringComparison.OrdinalIgnoreCase))
-            .Select(f => new FileInfo(f))
-            .MaxBy(fi => fi.LastWriteTimeUtc)
-            ?.FullName;
+        // Single directory scan — classify each file into Claim or Line bucket.
+        FileInfo? bestClaim = null;
+        FileInfo? bestLine  = null;
 
-        if (match is null)
-            _logger.LogWarning(
-                "No '{Keyword}' CSV found under '{Path}' for lab '{LabName}'.",
-                keyword, rootPath, labName);
+        foreach (var filePath in Directory.EnumerateFiles(rootPath, "*.csv", SearchOption.AllDirectories))
+        {
+            var fileName = Path.GetFileName(filePath);
+
+            bool isClaim = fileName.Contains(ClaimLevelKeyword, StringComparison.OrdinalIgnoreCase);
+            bool isLine  = fileName.Contains(LineLevelKeyword, StringComparison.OrdinalIgnoreCase);
+
+            if (!isClaim && !isLine) continue;
+
+            var fi = new FileInfo(filePath);
+
+            if (isClaim && (bestClaim is null || fi.LastWriteTimeUtc > bestClaim.LastWriteTimeUtc))
+                bestClaim = fi;
+
+            if (isLine && (bestLine is null || fi.LastWriteTimeUtc > bestLine.LastWriteTimeUtc))
+                bestLine = fi;
+        }
+
+        if (bestClaim is null)
+            _logger.LogWarning("No '{Keyword}' CSV found under '{Path}' for lab '{LabName}'.",
+                ClaimLevelKeyword, rootPath, labName);
         else
-            _logger.LogInformation(
-                "Resolved '{Keyword}' CSV for lab '{LabName}': {FilePath}",
-                keyword, labName, match);
+            _logger.LogInformation("Resolved '{Keyword}' CSV for lab '{LabName}': {FilePath}",
+                ClaimLevelKeyword, labName, bestClaim.FullName);
 
-        return match;
+        if (bestLine is null)
+            _logger.LogWarning("No '{Keyword}' CSV found under '{Path}' for lab '{LabName}'.",
+                LineLevelKeyword, rootPath, labName);
+        else
+            _logger.LogInformation("Resolved '{Keyword}' CSV for lab '{LabName}': {FilePath}",
+                LineLevelKeyword, labName, bestLine.FullName);
+
+        return new CsvPathPair(bestClaim?.FullName, bestLine?.FullName);
+    }
+
+    private sealed record CsvPathPair(string? ClaimLevelPath, string? LineLevelPath)
+    {
+        public static readonly CsvPathPair Empty = new(null, null);
     }
 }
 

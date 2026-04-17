@@ -1,0 +1,141 @@
+@model ClinicDollarAnalysisViewModel
+
+@if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+{
+    <div class="alert alert-warning" style="font-size:.85rem">
+        <i class="bi bi-exclamation-triangle"></i> @Model.ErrorMessage
+    </div>
+    return;
+}
+
+@if (Model.Clinics.Count == 0)
+{
+    <div class="text-center text-muted py-4" style="font-size:.85rem">No data available.</div>
+    return;
+}
+
+<style>
+.cda-scroll { max-height: 72vh; overflow: auto; }
+.cda-table {
+    width: 100%; border-collapse: separate; border-spacing: 0;
+    font-size: .76rem;
+}
+.cda-table thead th {
+    background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
+    color: rgba(255,255,255,.9); font-weight: 700; font-size: .66rem;
+    letter-spacing: .04em; text-transform: uppercase;
+    padding: .6rem .8rem; text-align: right;
+    white-space: nowrap;
+    position: sticky; top: 0; z-index: 3;
+    border-bottom: 2px solid #0a2a4a;
+    border-right: 1px solid rgba(255,255,255,.08);
+}
+.cda-table thead th:last-child { border-right: none; }
+.cda-table thead th:first-child {
+    text-align: left; min-width: 260px;
+    position: sticky; left: 0; z-index: 4;
+    background: linear-gradient(135deg, #0a1628 0%, #0e3460 100%);
+}
+.cda-table tbody tr { border-bottom: 1px solid #f1f5f9; transition: background .1s; }
+.cda-table tbody tr:hover { background: #f0f4ff; }
+.cda-table td {
+    padding: .45rem .8rem; vertical-align: middle;
+    text-align: right; white-space: nowrap;
+    border-right: 1px solid #e5e7eb;
+    border-bottom: 1px solid #e5e7eb;
+    font-variant-numeric: tabular-nums;
+}
+.cda-table td:last-child { border-right: none; }
+.cda-table td:first-child {
+    text-align: left; font-weight: 600; color: #1e293b;
+    position: sticky; left: 0; z-index: 1;
+    background: inherit;
+}
+.cda-table tbody tr:hover td:first-child { background: #f0f4ff; }
+
+/* Clinic-level rows */
+.cda-clinic-row { background: #f8f9fc; cursor: pointer; }
+.cda-clinic-row td:first-child { font-weight: 700; color: #0e3460; }
+.cda-clinic-row:hover { background: #eaf0ff; }
+.cda-clinic-row:hover td:first-child { background: #eaf0ff; }
+
+/* Status drill-down rows (hidden by default) */
+.cda-status-row { display: none; background: #fff; }
+.cda-status-row.cda-open { display: table-row; }
+.cda-status-row td:first-child { padding-left: 2rem; font-weight: 400; color: #475569; }
+
+/* Toggle chevron */
+.cda-toggle { display: inline-block; transition: transform .15s; margin-right: .4rem; font-size: .65rem; color: #64748b; }
+.cda-clinic-row.cda-expanded .cda-toggle { transform: rotate(90deg); }
+
+/* Grand total footer */
+.cda-table tfoot td {
+    background: #f1f5f9; font-weight: 700; color: #0e3460;
+    padding: .5rem .8rem; border-top: 2px solid #0a2a4a;
+    position: sticky; bottom: 0; z-index: 2;
+}
+.cda-table tfoot td:first-child {
+    position: sticky; left: 0; z-index: 3;
+    background: #f1f5f9;
+}
+</style>
+
+<div class="cda-scroll">
+    <table class="cda-table">
+        <thead>
+            <tr>
+                <th><i class="bi bi-building me-1"></i>Clinic Name</th>
+                <th><i class="bi bi-file-earmark-text me-1"></i>No. of Claims</th>
+                <th><i class="bi bi-currency-dollar me-1"></i>Total Charge</th>
+                <th><i class="bi bi-cash-coin me-1"></i>Insurance Payments</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var clinic in Model.Clinics)
+            {
+                var clinicId = $"cda-{clinic.ClinicName.GetHashCode():X8}";
+                <tr class="cda-clinic-row" data-cda-toggle="@clinicId">
+                    <td><span class="cda-toggle">&#9654;</span>@clinic.ClinicName</td>
+                    <td>@clinic.ClaimCount.ToString("N0")</td>
+                    <td>@clinic.TotalCharge.ToString("C2")</td>
+                    <td>@clinic.InsurancePayment.ToString("C2")</td>
+                </tr>
+                @foreach (var status in clinic.Statuses)
+                {
+                    <tr class="cda-status-row" data-cda-parent="@clinicId">
+                        <td>@status.ClaimStatus</td>
+                        <td>@status.ClaimCount.ToString("N0")</td>
+                        <td>@status.TotalCharge.ToString("C2")</td>
+                        <td>@status.InsurancePayment.ToString("C2")</td>
+                    </tr>
+                }
+            }
+        </tbody>
+        <tfoot>
+            <tr>
+                <td>Grand Total</td>
+                <td>@Model.GrandTotalClaims.ToString("N0")</td>
+                <td>@Model.GrandTotalCharge.ToString("C2")</td>
+                <td>@Model.GrandTotalInsurancePayment.ToString("C2")</td>
+            </tr>
+        </tfoot>
+    </table>
+</div>
+
+<div class="text-muted mt-2" style="font-size:.68rem">
+    Source: dbo.ClaimLevelData &middot; Lab: @Model.SelectedLab
+</div>
+
+<script>
+(function () {
+    document.querySelectorAll('.cda-clinic-row[data-cda-toggle]').forEach(function (row) {
+        row.addEventListener('click', function () {
+            var id = row.getAttribute('data-cda-toggle');
+            var isOpen = row.classList.toggle('cda-expanded');
+            document.querySelectorAll('.cda-status-row[data-cda-parent="' + id + '"]').forEach(function (sr) {
+                sr.classList.toggle('cda-open', isOpen);
+            });
+        });
+    });
+})();
+</script>

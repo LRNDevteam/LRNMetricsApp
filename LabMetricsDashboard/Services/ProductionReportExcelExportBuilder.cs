@@ -11,6 +11,9 @@ namespace LabMetricsDashboard.Services;
 /// </summary>
 public static class ProductionReportExcelExportBuilder
 {
+    /// <summary>Maximum rows per raw data sheet to prevent out-of-memory on very large tables.</summary>
+    private const int MaxRawDataRows = 500_000;
+
     /// <summary>Creates the workbook from the Production Report view model.</summary>
     public static XLWorkbook CreateWorkbook(ProductionReportViewModel vm, string labName)
     {
@@ -23,6 +26,30 @@ public static class ProductionReportExcelExportBuilder
         BuildPayerPanelSheet(wb, vm);
         BuildUnbilledAgingSheet(wb, vm);
         BuildCptBreakdownSheet(wb, vm);
+
+        WriteFilterFooter(wb, vm);
+
+        return wb;
+    }
+
+    /// <summary>Creates the workbook with report sheets plus raw ClaimLevelData and LineLevelData sheets.</summary>
+    public static XLWorkbook CreateWorkbook(
+        ProductionReportViewModel vm,
+        string labName,
+        List<Dictionary<string, object?>> claimRows,
+        List<Dictionary<string, object?>> lineRows)
+    {
+        var wb = new XLWorkbook();
+
+        BuildMonthlySheet(wb, vm, labName);
+        BuildWeeklySheet(wb, vm);
+        BuildCodingSheet(wb, vm);
+        BuildPayerBreakdownSheet(wb, vm);
+        BuildPayerPanelSheet(wb, vm);
+        BuildUnbilledAgingSheet(wb, vm);
+        BuildCptBreakdownSheet(wb, vm);
+        BuildRawDataSheet(wb, "ClaimLevelData", claimRows, labName, ExcelTheme.TabBlue);
+        BuildRawDataSheet(wb, "LineLevelData", lineRows, labName, ExcelTheme.TabGold);
 
         WriteFilterFooter(wb, vm);
 
@@ -836,5 +863,109 @@ public static class ProductionReportExcelExportBuilder
         cell.Value = value;
         cell.Style.NumberFormat.Format = "#,##0";
         ExcelTheme.StyleDataCell(cell, bg);
+    }
+
+    // ?? Raw Data Sheets ?????????????????????????????????????????????
+
+    private static void BuildRawDataSheet(
+        XLWorkbook wb, string sheetName, List<Dictionary<string, object?>> rows,
+        string labName, XLColor tabColor)
+    {
+        var ws = wb.AddWorksheet(sheetName);
+        ws.TabColor = tabColor;
+        ExcelTheme.ApplyDefaults(ws);
+
+        if (rows.Count == 0)
+        {
+            ws.Cell(1, 1).Value = "No data available.";
+            ws.Cell(1, 1).Style.Font.Italic = true;
+            return;
+        }
+
+        var columns = rows[0].Keys.ToArray();
+        int colCount = columns.Length;
+        bool truncated = rows.Count > MaxRawDataRows;
+        int rowsToWrite = Math.Min(rows.Count, MaxRawDataRows);
+
+        int row = 1;
+        var titleText = truncated
+            ? $"{sheetName} \u2014 {labName} (showing {rowsToWrite:N0} of {rows.Count:N0} rows)"
+            : $"{sheetName} \u2014 {labName} ({rows.Count:N0} rows)";
+        ExcelTheme.WriteBlueTitleBar(ws, row, colCount, titleText);
+        row++;
+
+        ExcelTheme.WriteHeaderRow(ws, row, 1, columns, ExcelTheme.BlueHeaderBg);
+        row++;
+
+        // Write values only (no per-cell styling for performance on large datasets)
+        for (int r = 0; r < rowsToWrite; r++)
+        {
+            var dataRow = rows[r];
+            for (int c = 0; c < columns.Length; c++)
+            {
+                var val = dataRow[columns[c]];
+                if (val is not null)
+                    SetRawCellValue(ws.Cell(row, c + 1), val);
+            }
+            row++;
+        }
+
+        if (truncated)
+        {
+            var warnCell = ws.Cell(row, 1);
+            warnCell.Value = $"\u26a0 Export truncated at {MaxRawDataRows:N0} rows. Total rows: {rows.Count:N0}. Apply filters to reduce the dataset.";
+            warnCell.Style.Font.Bold = true;
+            warnCell.Style.Font.FontColor = XLColor.FromHtml("#9C0006");
+            warnCell.Style.Fill.BackgroundColor = XLColor.FromHtml("#FFC7CE");
+            ws.Range(row, 1, row, colCount).Merge();
+        }
+
+        // Range-based banded rows (much faster than per-cell)
+        if (rowsToWrite > 0)
+        {
+            int dataStart = 3;
+            int dataEnd = dataStart + rowsToWrite - 1;
+            for (int r = dataStart + 1; r <= dataEnd; r += 2)
+                ws.Range(r, 1, r, colCount).Style.Fill.BackgroundColor = ExcelTheme.BlueBandedRowBg;
+
+            var dataRange = ws.Range(dataStart, 1, dataEnd, colCount);
+            dataRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+            dataRange.Style.Border.InsideBorderColor = XLColor.FromHtml("#E2E8F0");
+            dataRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+            dataRange.Style.Border.OutsideBorderColor = XLColor.FromHtml("#E2E8F0");
+        }
+
+        foreach (var col in ws.ColumnsUsed())
+            col.Width = 18;
+
+        ws.SheetView.FreezeRows(2);
+    }
+
+    private static void SetRawCellValue(IXLCell cell, object val)
+    {
+        switch (val)
+        {
+            case decimal d:
+                cell.Value = d;
+                cell.Style.NumberFormat.Format = "#,##0.00";
+                break;
+            case double dbl:
+                cell.Value = dbl;
+                cell.Style.NumberFormat.Format = "#,##0.00";
+                break;
+            case int i:
+                cell.Value = i;
+                break;
+            case long l:
+                cell.Value = l;
+                break;
+            case DateTime dt:
+                cell.Value = dt;
+                cell.Style.NumberFormat.Format = "yyyy-MM-dd";
+                break;
+            default:
+                cell.Value = val.ToString();
+                break;
+        }
     }
 }

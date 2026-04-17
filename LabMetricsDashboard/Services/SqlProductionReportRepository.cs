@@ -99,7 +99,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         var payerNames = new List<string>();
         var panelNames = new List<string>();
 
-        await using (var optCmd = new SqlCommand(optionsSql, conn))
+        await using (var optCmd = new SqlCommand(optionsSql, conn) { CommandTimeout = 180 })
         {
             await using var rdr = await optCmd.ExecuteReaderAsync(ct);
             while (await rdr.ReadAsync(ct)) payerNames.Add(rdr.GetString(0));
@@ -1182,4 +1182,127 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         int BilledMonth,
         decimal TotalUnits,
         decimal BilledCharges);
+
+    // ?? Raw Data Export ??????????????????????????????????????????????
+
+    /// <inheritdoc />
+    public async Task<List<Dictionary<string, object?>>> GetClaimLevelDataExportAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        CancellationToken ct = default)
+    {
+        var (whereStr, parameters) = BuildExportFilters(filterPayerNames, filterPanelNames, filterFirstBillFrom, filterFirstBillTo, "ce");
+
+        var sql = $"""
+            SELECT [ClaimID],[AccessionNumber],[PayerName],[PayerType],[BillingProvider],[ReferringProvider],
+                   [ClinicName],[SalesRepname],[PatientID],[PatientDOB],[DateofService],[ChargeEnteredDate],
+                   [FirstBilledDate],[Panelname],[CPTCodeXUnitsXModifier],[POS],[TOS],[ChargeAmount],[AllowedAmount],
+                   [InsurancePayment],[PatientPayment],[TotalPayments],[InsuranceAdjustments],[PatientAdjustments],
+                   [TotalAdjustments],[InsuranceBalance],[PatientBalance],[TotalBalance],[CheckDate],[ClaimStatus],
+                   [DenialCode],[ICDCode],[DaystoDOS],[RollingDays],[DaystoBill],[DaystoPost],[ICDPointer],[InsertedDateTime]
+            FROM dbo.ClaimLevelData
+            {whereStr}
+            """;
+
+        return await ExecuteExportQueryAsync(connectionString, sql, parameters, ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<List<Dictionary<string, object?>>> GetLineLevelDataExportAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        CancellationToken ct = default)
+    {
+        var (whereStr, parameters) = BuildExportFilters(filterPayerNames, filterPanelNames, filterFirstBillFrom, filterFirstBillTo, "le");
+
+        var sql = $"""
+            SELECT [ClaimID],[AccessionNumber],[PayerName],[PayerType],[BillingProvider],[ReferringProvider],
+                   [ClinicName],[SalesRepname],[PatientID],[PatientDOB],[DateofService],[ChargeEnteredDate],
+                   [FirstBilledDate],[Panelname],[CPTCode],[Units],[Modifier],[POS],[TOS],
+                   [ChargeAmount],[ChargeAmountPerUnit],[AllowedAmount],[AllowedAmountPerUnit],
+                   [InsurancePayment],[InsurancePaymentPerUnit],[PatientPayment],[PatientPaymentPerUnit],
+                   [TotalPayments],[InsuranceAdjustments],[PatientAdjustments],[TotalAdjustments],
+                   [InsuranceBalance],[PatientBalance],[PatientBalancePerUnit],[TotalBalance],
+                   [CheckDate],[PostingDate],[ClaimStatus],[PayStatus],[DenialCode],[DenialDate],
+                   [ICDCode],[DaystoDOS],[RollingDays],[DaystoBill],[DaystoPost],[ICDPointer]
+            FROM dbo.LineLevelData
+            {whereStr}
+            """;
+
+        return await ExecuteExportQueryAsync(connectionString, sql, parameters, ct);
+    }
+
+    private static (string WhereStr, List<SqlParameter> Parameters) BuildExportFilters(
+        List<string>? filterPayerNames, List<string>? filterPanelNames,
+        DateOnly? filterFirstBillFrom, DateOnly? filterFirstBillTo, string prefix)
+    {
+        var where = new List<string>();
+        var parms = new List<SqlParameter>();
+
+        if (filterPayerNames is { Count: > 0 })
+        {
+            var names = filterPayerNames.Select((n, i) => $"@{prefix}pn{i}").ToList();
+            where.Add($"LTRIM(RTRIM(PayerName)) IN ({string.Join(",", names)})");
+            for (int i = 0; i < filterPayerNames.Count; i++)
+                parms.Add(new SqlParameter($"@{prefix}pn{i}", filterPayerNames[i]));
+        }
+
+        if (filterPanelNames is { Count: > 0 })
+        {
+            var names = filterPanelNames.Select((n, i) => $"@{prefix}pl{i}").ToList();
+            where.Add($"LTRIM(RTRIM(PanelName)) IN ({string.Join(",", names)})");
+            for (int i = 0; i < filterPanelNames.Count; i++)
+                parms.Add(new SqlParameter($"@{prefix}pl{i}", filterPanelNames[i]));
+        }
+
+        if (filterFirstBillFrom.HasValue)
+        {
+            where.Add($"TRY_CAST(FirstBilledDate AS DATE) >= @{prefix}fbFrom");
+            parms.Add(new SqlParameter($"@{prefix}fbFrom", SqlDbType.Date) { Value = filterFirstBillFrom.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        if (filterFirstBillTo.HasValue)
+        {
+            where.Add($"TRY_CAST(FirstBilledDate AS DATE) <= @{prefix}fbTo");
+            parms.Add(new SqlParameter($"@{prefix}fbTo", SqlDbType.Date) { Value = filterFirstBillTo.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        var whereStr = where.Count > 0 ? "WHERE " + string.Join(" AND ", where) : "";
+        return (whereStr, parms);
+    }
+
+    private async Task<List<Dictionary<string, object?>>> ExecuteExportQueryAsync(
+        string connectionString, string sql, List<SqlParameter> parameters, CancellationToken ct)
+    {
+        var rows = new List<Dictionary<string, object?>>();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 300 };
+        foreach (var p in parameters)
+            cmd.Parameters.Add(new SqlParameter(p.ParameterName, p.SqlDbType) { Value = p.Value });
+
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        var columns = Enumerable.Range(0, r.FieldCount).Select(i => r.GetName(i)).ToArray();
+
+        while (await r.ReadAsync(ct))
+        {
+            var row = new Dictionary<string, object?>(columns.Length);
+            for (int i = 0; i < columns.Length; i++)
+                row[columns[i]] = r.IsDBNull(i) ? null : r.GetValue(i);
+            rows.Add(row);
+        }
+
+        _logger.LogInformation("ProductionReport export query: rows={Count}, elapsed={Ms}ms",
+            rows.Count, sw.ElapsedMilliseconds);
+
+        return rows;
+    }
 }

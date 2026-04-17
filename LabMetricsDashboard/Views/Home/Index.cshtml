@@ -307,268 +307,196 @@
     box-shadow: 0 2px 8px rgba(21,101,192,.25);
 }
 
-/* ── Worklist table ─────────────────────────────────────────────── */
-.wl-wrap {
-    border-radius: 16px; overflow: hidden;
-    background: #fff;
-    border: 1px solid rgba(0,0,0,.06);
-    box-shadow: 0 4px 20px rgba(0,0,0,.06);
-}
-.wl-table {
-    width: 100%; border-collapse: collapse;
-    font-size: .78rem;
-}
-.wl-table thead th {
-    background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
-    color: rgba(255,255,255,.88);
-    font-weight: 700; font-size: .66rem; letter-spacing: .06em;
-    text-transform: uppercase;
-    padding: .7rem 1rem;
-    border-bottom: none;
-    text-align: left; white-space: nowrap;
-}
-.wl-table thead th:first-child { border-radius: 0; }
-.wl-table thead th:last-child  { border-radius: 0; }
-.wl-table tbody tr {
-    border-bottom: 1px solid #f0f3f7;
-    transition: all .18s ease;
-}
-.wl-table tbody tr:nth-child(even) { background: #f8fafb; }
-.wl-table tbody tr:last-child { border-bottom: none; }
-.wl-table tbody tr:hover {
-    background: linear-gradient(90deg, rgba(21,101,192,.04), rgba(13,92,116,.06));
-    box-shadow: 0 0 18px rgba(21,101,192,.10), 0 0 6px rgba(13,92,116,.08);
-}
-.wl-table td { padding: .65rem 1rem; vertical-align: middle; }
-
-/* Lab cell with avatar */
-.wl-lab {
-    display: flex; align-items: center; gap: .75rem;
-    min-width: 0;
-}
-.wl-avatar {
-    width: 44px; height: 44px; border-radius: 13px;
-    display: grid; place-items: center;
-    font-size: 1.1rem; font-weight: 900; color: #fff;
-    flex-shrink: 0;
-    position: relative;
-    border: 2.5px solid rgba(255,255,255,.45);
-    box-shadow: 0 4px 14px rgba(0,0,0,.20), inset 0 0 0 1px rgba(255,255,255,.15);
-}
-.wl-avatar::after {
-    content: '';
-    position: absolute; inset: 0;
-    border-radius: 10px;
-    background: linear-gradient(135deg, rgba(255,255,255,.22) 0%, rgba(255,255,255,.05) 100%);
-    pointer-events: none;
-}
-.wl-lab-info { min-width: 0; }
-.wl-lab-name {
-    font-weight: 700; font-size: .88rem; color: #1e293b;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    display: block;
-}
-.wl-lab-sub {
-    display: block; font-size: .62rem; font-weight: 500; color: #94a3b8;
-    margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    max-width: 220px;
-}
-
-/* Status badge */
-.wl-status {
-    display: inline-block; font-size: .64rem; font-weight: 800;
-    letter-spacing: .04em; text-transform: uppercase;
-    padding: .2em .6em; border-radius: 5px; white-space: nowrap;
-}
-.wl-status-ready   { background: #dcfce7; color: #166534; }
-.wl-status-partial { background: #fef9c3; color: #854d0e; }
-.wl-status-none    { background: #fee2e2; color: #991b1b; }
-
-/* Check / dash marks */
-.wl-check { color: #22c55e; font-size: .92rem; font-weight: 700; }
-.wl-dash  { color: #cbd5e1; font-size: .85rem; }
-
-/* Week / Run info chip (inside Lab cell) */
-.wl-week-chip {
-    display: inline-flex; align-items: center; gap: .35rem;
-    margin-top: .35rem;
-    padding: .2rem .55rem;
-    border-radius: 7px;
-    background: linear-gradient(135deg, #eef3ff 0%, #f0f9ff 100%);
-    border: 1px solid #c7d8f4;
-    max-width: 100%; overflow: hidden;
-}
-.wl-week-chip-range {
-    font-size: .62rem; font-weight: 700; color: #1565c0;
-    white-space: nowrap;
-}
-.wl-week-chip-sep {
-    width: 3px; height: 3px; border-radius: 50%;
-    background: #94a3b8; flex-shrink: 0;
-}
-.wl-week-chip-label {
-    font-size: .56rem; font-weight: 600; color: #64748b;
-    white-space: nowrap;
-}
-.wl-week-chip-runid {
-    font-size: .56rem; font-weight: 600; color: #7c8faa;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.wl-no-week {
-    display: inline-flex; align-items: center; gap: .25rem;
-    margin-top: .3rem;
-    font-size: .58rem; font-weight: 500; color: #b0bcc8;
-    font-style: italic;
-}
-
-/* Icon cluster for Claim / Line columns */
-.wl-icons {
-    display: flex; align-items: center; gap: .3rem;
-    justify-content: center; flex-wrap: nowrap;
-}
-.wl-icon-circle {
-    width: 22px; height: 22px; border-radius: 50%;
-    display: inline-flex; align-items: center; justify-content: center;
-    font-size: .62rem; font-weight: 800; flex-shrink: 0;
-    border: 1.5px solid transparent;
-}
-.wl-icon-ok {
-    background: #dcfce7; color: #22c55e;
-    border-color: #bbf7d0;
-}
-.wl-icon-warn {
-    background: #fee2e2; color: #dc2626;
-    border-color: #fecaca;
-}
-.wl-icon-pending {
-    background: #fef3c7; color: #92400e;
-    border-color: #fde68a;
-    font-size: .7rem;
-}
-.wl-age-badge {
-    font-size: .64rem; font-weight: 700; color: #dc2626;
-    white-space: nowrap; margin-left: .1rem;
-}
-.wl-age-badge-ok {
-    color: #475569;
-}
-
-/* Action buttons */
-.wl-actions {
-    display: flex; gap: .35rem; flex-wrap: nowrap; align-items: center;
-}
-.wl-btn {
-    font-size: .68rem; font-weight: 700; letter-spacing: .01em;
-    border-radius: 8px; padding: .35rem .7rem;
-    border: 1.5px solid transparent;
-    text-align: center; text-decoration: none;
-    white-space: nowrap; transition: all .14s; cursor: pointer;
-    display: inline-block; flex-shrink: 0;
-}
-.wl-btn-dash {
-    color: #fff; border-color: transparent;
-    box-shadow: 0 2px 6px rgba(0,0,0,.12);
-}
-.wl-btn-dash:hover { filter: brightness(1.12); color: #fff; box-shadow: 0 3px 10px rgba(0,0,0,.18); }
-.wl-btn-out {
-    color: #4a6080; background: #f4f7fa; border-color: #dde3ed;
-}
-.wl-btn-out:hover { background: #e2e8f4; border-color: #b0bccc; color: #1a2744; }
-.wl-btn-pred {
-    color: #1e293b; background: #fff; border-color: #d1d5db;
-}
-.wl-btn-pred:hover { background: #f3f4f6; border-color: #9ca3af; color: #0d47a1; }
-.wl-btn-code {
-    color: #1565c0; background: #eef3ff; border-color: #c0d4f7;
-}
-.wl-btn-code:hover { background: #dde9fd; color: #0d47a1; }
-.wl-btn-claim {
-    color: #0d7377; background: #e6f7f7; border-color: #b2dfdb;
-}
-.wl-btn-claim:hover { background: #ccefee; color: #004d40; }
-.wl-btn-disabled {
-    color: #c0cad8; background: #f8fafc; border-color: #e8ecf2;
-    pointer-events: none; opacity: .5;
-}
-
-/* Standard Reports column */
-.wl-reports {
-    display: flex; gap: .3rem; flex-wrap: nowrap; align-items: center;
-}
-.wl-rpt-btn {
-    font-size: .64rem; font-weight: 700; letter-spacing: .01em;
-    border-radius: 7px; padding: .3rem .6rem;
-    border: 1.5px solid transparent;
-    text-align: center; text-decoration: none;
-    white-space: nowrap; transition: all .14s; cursor: pointer;
-    display: inline-block; flex-shrink: 0;
-}
-.wl-rpt-production {
-    color: #0d7377; background: #e6f7f7; border-color: #b2dfdb;
-}
-.wl-rpt-production:hover { background: #ccefee; color: #004d40; }
-.wl-rpt-disabled {
-    color: #c0cad8; background: #f8fafc; border-color: #e8ecf2;
-    pointer-events: none; opacity: .5;
-}
-
-/* More dropdown */
-.wl-more-wrap {
-    position: relative; display: inline-block;
-}
-.wl-btn-more {
-    font-size: .68rem; font-weight: 700;
-    border-radius: 8px; padding: .35rem .7rem;
-    border: 1.5px solid #d1d5db;
-    background: #fff; color: #1e293b;
-    cursor: pointer; white-space: nowrap;
-    transition: all .14s;
-    display: inline-flex; align-items: center; gap: .25rem;
-}
-.wl-btn-more:hover { background: #f3f4f6; border-color: #9ca3af; }
-.wl-more-menu {
-    display: none; position: absolute; right: 0; top: calc(100% + 4px);
-    background: #fff; border: 1px solid #e5e7eb;
-    border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.12);
-    min-width: 150px; z-index: 50; padding: .3rem 0;
-}
-.wl-more-wrap.open .wl-more-menu { display: block; }
-.wl-more-menu a {
-    display: block; padding: .4rem .8rem;
-    font-size: .68rem; font-weight: 600; color: #374151;
-    text-decoration: none; white-space: nowrap;
-    transition: background .1s;
-}
-.wl-more-menu a:hover { background: #f3f4f6; color: #1e293b; }
-.wl-more-menu .wl-menu-disabled {
-    color: #c0cad8; pointer-events: none; opacity: .5;
-}
-
-/* Search bar */
+/* ── Worklist search bar ────────────────────────────────────────── */
 .wl-search-bar {
-    display: flex; align-items: center; gap: .5rem;
-    margin-bottom: .75rem;
-    max-width: 320px; margin-left: auto;
+    margin-bottom: 1rem;
 }
 .wl-search-input {
-    width: 100%; padding: .45rem .75rem .45rem 2rem;
-    border: 1.5px solid #d1d5db; border-radius: 10px;
-    font-size: .78rem; font-weight: 500; color: #1e293b;
-    background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='%2394a3b8' viewBox='0 0 24 24'%3E%3Cpath d='M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z'/%3E%3C/svg%3E") no-repeat .6rem center;
-    outline: none; transition: border-color .14s;
+    width: 100%;
+    padding: .55rem 1rem .55rem 2.4rem;
+    font-size: .85rem;
+    font-weight: 500;
+    color: #1e293b;
+    background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%2394a3b8' viewBox='0 0 16 16'%3E%3Cpath d='M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85zm-5.242.156a5 5 0 1 1 0-10 5 5 0 0 1 0 10z'/%3E%3C/svg%3E") no-repeat .75rem center / 16px 16px;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    outline: none;
+    transition: border-color .2s, box-shadow .2s;
 }
-.wl-search-input::placeholder { color: #94a3b8; font-weight: 500; }
-.wl-search-input:focus { border-color: #1565c0; box-shadow: 0 0 0 3px rgba(21,101,192,.1); }
+.wl-search-input::placeholder { color: #94a3b8; font-weight: 400; }
+.wl-search-input:focus {
+    border-color: #93c5fd;
+    box-shadow: 0 0 0 3px rgba(59,130,246,.15);
+}
 
-/* Legend footer */
-.wl-legend {
-    padding: .55rem 1rem;
-    border-top: 1px solid #f0f3f7;
-    font-size: .62rem; font-weight: 500; color: #94a3b8;
-    display: flex; align-items: center; gap: .6rem;
+/* ── Worklist cards (premium) ───────────────────────────────────── */
+
+/* Legend bar (bottom, dark) */
+.wlc-legend-bar {
+    display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+    padding: .6rem 1rem; margin-top: .75rem;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+    border: 1px solid rgba(255,255,255,.08); border-radius: 12px;
+    font-size: .58rem; font-weight: 500; color: rgba(255,255,255,.55);
 }
-.wl-legend-item {
+.wlc-legend-grp { font-weight: 800; color: rgba(255,255,255,.85); text-transform: uppercase; letter-spacing: .06em; font-size: .54rem; }
+.wlc-legend-pipe { color: rgba(255,255,255,.2); margin: 0 .15rem; }
+.wlc-legend-item { display: inline-flex; align-items: center; gap: .2rem; }
+.wlc-legend-item i { font-size: .68rem; opacity: .85; }
+
+/* Card list */
+.wlc-list { display: flex; flex-direction: column; gap: .6rem; }
+
+/* Individual card */
+.wlc-card {
+    display: flex; align-items: stretch;
+    background: #fff;
+    border: 1px solid #e8ecf3;
+    border-radius: 14px;
+    overflow: hidden;
+    transition: all .2s ease;
+    box-shadow: 0 1px 4px rgba(0,0,0,.04);
+    position: relative;
+}
+.wlc-card:hover {
+    border-color: #c5d0e0;
+    box-shadow: 0 6px 24px rgba(0,0,0,.08), 0 0 0 1px rgba(21,101,192,.06);
+    transform: translateY(-1px);
+}
+.wlc-card-alert { border-left-color: #fca5a5; }
+
+/* Accent bar (4px left edge) */
+.wlc-accent {
+    width: 4px; flex-shrink: 0; border-radius: 14px 0 0 14px;
+}
+
+/* Identity section */
+.wlc-identity {
+    display: flex; align-items: center; gap: .7rem;
+    padding: .75rem 1rem;
+    width: 25%; flex-shrink: 0;
+    border-right: 1px solid #f0f3f7;
+    box-sizing: border-box;
+}
+.wlc-avatar {
+    width: 38px; height: 38px; border-radius: 11px;
+    display: grid; place-items: center;
+    font-size: .95rem; font-weight: 900; color: #fff;
+    flex-shrink: 0;
+    border: 2px solid rgba(255,255,255,.35);
+    box-shadow: 0 2px 10px rgba(0,0,0,.15);
+    position: relative;
+}
+.wlc-avatar::after {
+    content: ''; position: absolute; inset: 0; border-radius: 9px;
+    background: linear-gradient(135deg, rgba(255,255,255,.2) 0%, transparent 100%);
+    pointer-events: none;
+}
+.wlc-lab-info { min-width: 0; }
+.wlc-lab-name {
+    font-size: .82rem; font-weight: 700; color: #1e293b;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.wlc-lab-sub {
+    font-size: .58rem; font-weight: 500; color: #94a3b8;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 180px; margin-top: 1px;
+}
+.wlc-lab-sub-alert {
+    color: #dc2626; font-weight: 600;
+    display: flex; align-items: center; gap: .25rem;
+}
+.wlc-lab-sub-alert i { font-size: .6rem; }
+.wlc-week {
     display: inline-flex; align-items: center; gap: .25rem;
+    margin-top: .25rem; padding: .12rem .4rem;
+    border-radius: 6px;
+    background: linear-gradient(135deg, #eef3ff, #f0f9ff);
+    border: 1px solid #c7d8f4;
+    font-size: .55rem; font-weight: 700; color: #1565c0;
+    white-space: nowrap;
+}
+
+/* Status area (center) */
+.wlc-status-area {
+    display: flex; gap: 1.5rem; align-items: flex-start;
+    padding: .65rem 1.25rem;
+    width: 50%; flex-shrink: 0;
+    min-width: 0; box-sizing: border-box;
+}
+.wlc-status-group { min-width: 0; }
+.wlc-section-label {
+    font-size: .5rem; font-weight: 800; color: #94a3b8;
+    text-transform: uppercase; letter-spacing: .08em;
+    margin-bottom: .3rem;
+}
+.wlc-status-grid {
+    display: flex; flex-wrap: wrap; gap: .25rem;
+}
+
+/* Status chips */
+.wlc-chip {
+    display: inline-flex; align-items: center; gap: .3rem;
+    padding: .2rem .5rem;
+    border-radius: 20px;
+    background: #f8fafb;
+    border: 1px solid #eef1f5;
+    transition: all .12s;
+    white-space: nowrap;
+}
+.wlc-chip:hover { background: #f0f4ff; border-color: #d0daf0; }
+.wlc-chip-lbl { font-size: .6rem; font-weight: 600; color: #475569; }
+.wlc-chip-age { font-size: .54rem; font-weight: 700; color: #64748b; }
+.wlc-chip-age-stale { color: #dc2626; }
+
+/* Status dots */
+.wlc-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    flex-shrink: 0; display: inline-block;
+}
+.wlc-dot-ok   { background: #22c55e; box-shadow: 0 0 5px rgba(34,197,94,.45); }
+.wlc-dot-pend { background: #f59e0b; box-shadow: 0 0 5px rgba(245,158,11,.45); animation: wlc-pulse 2s infinite; }
+.wlc-dot-warn { background: #ef4444; box-shadow: 0 0 5px rgba(239,68,68,.45); animation: wlc-pulse 2s infinite; }
+.wlc-dot-off  { background: #d1d5db; }
+@@keyframes wlc-pulse { 0%,100%{ opacity:1 } 50%{ opacity:.35 } }
+
+/* Action buttons (right) */
+.wlc-actions {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: .3rem;
+    padding: .65rem .85rem;
+    border-left: 1px solid #f0f3f7;
+    width: 25%; flex-shrink: 0;
+    box-sizing: border-box;
+}
+.wlc-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: .35rem;
+    padding: .4rem .65rem;
+    border-radius: 9px; border: 1.5px solid transparent;
+    font-size: .68rem; font-weight: 700;
+    text-decoration: none; cursor: pointer;
+    transition: all .15s; white-space: nowrap;
+}
+.wlc-btn-primary {
+    color: #fff;
+}
+.wlc-btn-primary:hover { filter: brightness(1.12); color: #fff; transform: translateY(-1px); }
+.wlc-btn-sm {
+    width: 30px; height: 28px; padding: 0;
+    font-size: .76rem; border-radius: 8px;
+}
+.wlc-btn-pred { color: #3b82f6; background: #eff6ff; border-color: #bfdbfe; }
+.wlc-btn-pred:hover { background: #dbeafe; color: #1d4ed8; transform: translateY(-1px); }
+.wlc-btn-code { color: #10b981; background: #ecfdf5; border-color: #a7f3d0; }
+.wlc-btn-code:hover { background: #d1fae5; color: #047857; transform: translateY(-1px); }
+.wlc-btn-clinic { color: #0d7377; background: #e6f7f7; border-color: #b2dfdb; }
+.wlc-btn-clinic:hover { background: #ccefee; color: #004d40; transform: translateY(-1px); }
+.wlc-btn-rep { color: #7c3aed; background: #f5f3ff; border-color: #ddd6fe; }
+.wlc-btn-rep:hover { background: #ede9fe; color: #5b21b6; transform: translateY(-1px); }
+.wlc-btn-coll { color: #d97706; background: #fffbeb; border-color: #fde68a; }
+.wlc-btn-coll:hover { background: #fef3c7; color: #b45309; transform: translateY(-1px); }
+.wlc-btn-off {
+    color: #c0cad8; background: #f8fafc; border-color: #e8ecf2;
+    pointer-events: none; opacity: .4;
 }
 </style>
 
@@ -812,241 +740,182 @@
         <div class="wl-search-bar">
             <input type="text" class="wl-search-input" id="wlSearchInput" placeholder="Search labs…" oninput="filterWorklistRows()" />
         </div>
-        <div class="wl-wrap">
-            <table class="wl-table">
-                <thead>
-                    <tr>
-                        <th>Lab</th>
-                        <th>Claim</th>
-                        <th>Line</th>
-                        <th>Prediction</th>
-                        <th>Coding</th>
-                        <th>Standard Reports</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="wlTableBody">
-                    @for (int i = 0; i < Model.LabTiles.Count; i++)
-                    {
-                        var tile = Model.LabTiles[i];
-                        var grad = palette[i % palette.Length];
-                        var initial = tile.LabName.Length > 0 ? tile.LabName[0].ToString().ToUpper() : "L";
-                        var claimAgeDays = tile.ClaimFileAgeHours.HasValue ? (int)(tile.ClaimFileAgeHours.Value / 24) : (int?)null;
-                        var lineAgeDays  = tile.LineFileAgeHours.HasValue  ? (int)(tile.LineFileAgeHours.Value  / 24) : (int?)null;
-                        var isHighPriority = tile.IsClaimAgeStale || tile.IsLineAgeStale;
 
-                        @* Build lab sub-text *@
-                        var labSubParts = new List<string>();
-                        if (tile.ClaimFileAgeText is not null)
-                        {
-                            labSubParts.Add($"Last updated: {tile.ClaimFileAgeText}");
-                        }
-                        if (tile.SourceRunId is not null)
-                        {
-                            labSubParts.Add($"Run: {tile.SourceRunId}");
-                        }
-                        var labSubText = labSubParts.Count > 0 ? string.Join(" \u00b7 ", labSubParts) : null;
+        <!-- Card list -->
+        <div class="wlc-list" id="wlCardList">
+            @for (int i = 0; i < Model.LabTiles.Count; i++)
+            {
+                var tile = Model.LabTiles[i];
+                var grad = palette[i % palette.Length];
+                var glow = glows[i % glows.Length];
+                var initial = tile.LabName.Length > 0 ? tile.LabName[0].ToString().ToUpper() : "L";
+                var claimAgeDays = tile.ClaimFileAgeHours.HasValue ? (int)(tile.ClaimFileAgeHours.Value / 24) : (int?)null;
+                var lineAgeDays  = tile.LineFileAgeHours.HasValue  ? (int)(tile.LineFileAgeHours.Value  / 24) : (int?)null;
+                var isHighPriority = tile.IsClaimAgeStale || tile.IsLineAgeStale;
 
-                        @* High priority sub-text *@
-                        var priorityParts = new List<string>();
-                        if (isHighPriority)
-                        {
-                            priorityParts.Add("High priority");
-                            if (tile.IsClaimAgeStale && claimAgeDays.HasValue) priorityParts.Add($"Claim age {claimAgeDays}d");
-                            if (tile.IsLineAgeStale && lineAgeDays.HasValue) priorityParts.Add($"Line age {lineAgeDays}d");
-                        }
-                        var priorityText = priorityParts.Count > 0 ? string.Join(" \u00b7 ", priorityParts) : null;
+                var labSubParts = new List<string>();
+                if (tile.ClaimFileAgeText is not null) labSubParts.Add($"Updated: {tile.ClaimFileAgeText}");
+                if (tile.SourceRunId is not null) labSubParts.Add($"Run: {tile.SourceRunId}");
+                var labSubText = labSubParts.Count > 0 ? string.Join(" · ", labSubParts) : null;
 
-                        <tr data-lab="@tile.LabName.ToLowerInvariant()">
-                            @* Lab + Week/Run info *@
-                            <td>
-                                <div class="wl-lab">
-                                    <div class="wl-avatar" style="background:linear-gradient(@grad)">@initial</div>
-                                    <div class="wl-lab-info">
-                                        <span class="wl-lab-name">@tile.LabName</span>
-                                        @if (isHighPriority && priorityText is not null)
-                                        {
-                                            <span class="wl-lab-sub" style="color:#dc2626" title="@priorityText">@priorityText</span>
-                                        }
-                                        else if (labSubText is not null)
-                                        {
-                                            <span class="wl-lab-sub" title="@labSubText">@labSubText</span>
-                                        }
-                                        @if (tile.WeekRange is not null)
-                                        {
-                                            var weekParts = tile.WeekRange.Split(" to ", StringSplitOptions.TrimEntries);
-                                            <div class="wl-week-chip">
-                                                @if (weekParts.Length == 2)
-                                                {
-                                                    <span class="wl-week-chip-range">@weekParts[0] &rarr; @weekParts[1]</span>
-                                                }
-                                                else
-                                                {
-                                                    <span class="wl-week-chip-range">@tile.WeekRange</span>
-                                                }
-                                                @if (tile.SourceRunId is not null)
-                                                {
-                                                    <span class="wl-week-chip-sep"></span>
-                                                    <span class="wl-week-chip-runid">Run: @tile.SourceRunId</span>
-                                                }
-                                            </div>
-                                        }
-                                        else if (tile.SourceRunId is not null)
-                                        {
-                                            <div class="wl-week-chip">
-                                                <span class="wl-week-chip-runid">Run: @tile.SourceRunId</span>
-                                            </div>
-                                        }
-                                    </div>
+                <!-- Card -->
+                <div class="wlc-card @(isHighPriority ? "wlc-card-alert" : "")" data-lab="@tile.LabName.ToLowerInvariant()">
+                    <!-- Accent bar -->
+                    <div class="wlc-accent" style="background:linear-gradient(180deg,@(grad.Replace("135deg,","")))"></div>
+
+                    <!-- Left: Lab identity -->
+                    <div class="wlc-identity">
+                        <div class="wlc-avatar" style="background:linear-gradient(@grad)">@initial</div>
+                        <div class="wlc-lab-info">
+                            <div class="wlc-lab-name">@tile.LabName</div>
+                            @if (isHighPriority)
+                            {
+                                <div class="wlc-lab-sub wlc-lab-sub-alert">
+                                    <i class="bi bi-exclamation-triangle-fill"></i>
+                                    @if (tile.IsClaimAgeStale && claimAgeDays.HasValue) { <span>Claim @(claimAgeDays)d</span> }
+                                    @if (tile.IsLineAgeStale && lineAgeDays.HasValue) { <span>Line @(lineAgeDays)d</span> }
                                 </div>
-                            </td>
-
-                            @* Claim *@
-                            <td style="text-align:center">
-                                @if (tile.HasClaimFile)
-                                {
-                                    <div class="wl-icons">
-                                        <span class="wl-icon-circle wl-icon-ok" title="@tile.ClaimFilePath">&#10003;</span>
-                                        @if (tile.IsClaimAgeStale)
-                                        {
-                                            <span class="wl-icon-circle wl-icon-warn" title="Stale: @tile.ClaimFileAgeText">!</span>
-                                        }
-                                        @if (claimAgeDays.HasValue)
-                                        {
-                                            <span class="wl-age-badge @(tile.IsClaimAgeStale ? "" : "wl-age-badge-ok")">@(claimAgeDays)d</span>
-                                        }
-                                    </div>
-                                }
-                                else
-                                {
-                                    <span class="wl-dash">&mdash;</span>
-                                }
-                            </td>
-
-                            @* Line *@
-                            <td style="text-align:center">
-                                @if (tile.HasLineFile)
-                                {
-                                    <div class="wl-icons">
-                                        <span class="wl-icon-circle wl-icon-ok" title="@tile.LineFilePath">&#10003;</span>
-                                        @if (tile.IsLineAgeStale)
-                                        {
-                                            <span class="wl-icon-circle wl-icon-warn" title="Stale: @tile.LineFileAgeText">!</span>
-                                        }
-                                        @if (lineAgeDays.HasValue)
-                                        {
-                                            <span class="wl-age-badge @(tile.IsLineAgeStale ? "" : "wl-age-badge-ok")">@(lineAgeDays)d</span>
-                                        }
-                                    </div>
-                                }
-                                else
-                                {
-                                    <span class="wl-dash">&mdash;</span>
-                                }
-                            </td>
-
-                            @* Prediction *@
-                            <td style="text-align:center">
-                                @if (tile.IsPredictionPending)
-                                {
-                                    <span class="wl-icon-circle wl-icon-pending" title="Pending – Source: @tile.SourceRunId | Prediction: @tile.PredictionRunId">&#9203;</span>
-                                }
-                                else if (tile.HasPredictionFile || tile.DBEnabled)
-                                {
-                                    <span class="wl-icon-circle wl-icon-ok">&#10003;</span>
-                                }
-                                else
-                                {
-                                    <span class="wl-dash">&mdash;</span>
-                                }
-                            </td>
-
-                            @* Coding *@
-                            <td style="text-align:center">
-                                @if (tile.IsCodingPending)
-                                {
-                                    <span class="wl-icon-circle wl-icon-pending" title="Pending – Source: @tile.SourceRunId | Coding: @tile.CodingRunId">&#9203;</span>
-                                }
-                                else if (tile.HasCodingMasterFile || tile.CodingEnabled)
-                                {
-                                    <span class="wl-icon-circle wl-icon-ok">&#10003;</span>
-                                }
-                                else
-                                {
-                                    <span class="wl-dash">&mdash;</span>
-                                }
-                            </td>
-
-                            @* Standard Reports *@
-                            <td>
-                                <div class="wl-reports">
-                                    @if (tile.LineClaimEnabled)
-                                    {
-                                        <a asp-controller="Dashboard" asp-action="ProductionReport"
-                                           asp-route-lab="@tile.LabName"
-                                           class="wl-rpt-btn wl-rpt-production">&#128202; Production</a>
-                                    }
+                            }
+                            else if (labSubText is not null)
+                            {
+                                <div class="wlc-lab-sub">@labSubText</div>
+                            }
+                            @if (tile.WeekRange is not null)
+                            {
+                                var weekParts = tile.WeekRange.Split(" to ", StringSplitOptions.TrimEntries);
+                                <div class="wlc-week">
+                                    @if (weekParts.Length == 2)
+                                    { <span>@weekParts[0] → @weekParts[1]</span> }
                                     else
-                                    {
-                                        <span class="wl-rpt-btn wl-rpt-disabled">&#128202; Production</span>
-                                    }
+                                    { <span>@tile.WeekRange</span> }
                                 </div>
-                            </td>
+                            }
+                        </div>
+                    </div>
 
-                            @* Actions *@
-                            <td>
-                                <div class="wl-actions">
-                                    <a asp-controller="Dashboard" asp-action="Index"
-                                       asp-route-lab="@tile.LabName"
-                                       class="wl-btn wl-btn-dash"
-                                       style="background:linear-gradient(@grad)">Dashboard</a>
-                                    @if (tile.PredictionEnabled)
+                    <!-- Center: Status section -->
+                    <div class="wlc-status-area">
+                        <div class="wlc-status-group">
+                            <div class="wlc-section-label">Data Status</div>
+                            <div class="wlc-status-grid">
+                                @{
+                                    var claimDot = tile.HasClaimFile ? (tile.IsClaimAgeStale ? "wlc-dot-warn" : "wlc-dot-ok") : "wlc-dot-off";
+                                    var lineDot = tile.HasLineFile ? (tile.IsLineAgeStale ? "wlc-dot-warn" : "wlc-dot-ok") : "wlc-dot-off";
+                                    var predDot = tile.IsPredictionPending ? "wlc-dot-pend" : (tile.HasPredictionFile || tile.DBEnabled ? "wlc-dot-ok" : "wlc-dot-off");
+                                    var codeDot = tile.IsCodingPending ? "wlc-dot-pend" : (tile.HasCodingMasterFile || tile.CodingEnabled ? "wlc-dot-ok" : "wlc-dot-off");
+                                }
+                                <div class="wlc-chip" title="@(tile.HasClaimFile ? tile.ClaimFilePath : "Not configured")">
+                                    <span class="wlc-dot @claimDot"></span>
+                                    <span class="wlc-chip-lbl">Claim</span>
+                                    @if (claimAgeDays.HasValue && tile.HasClaimFile)
                                     {
-                                        <a asp-controller="Prediction" asp-action="Index"
-                                           asp-route-lab="@tile.LabName"
-                                           class="wl-btn wl-btn-pred">Prediction</a>
-                                    }
-                                    @{
-                                        var hasMoreItems = tile.CodingEnabled || tile.LineClaimEnabled;
-                                    }
-                                    @if (hasMoreItems)
-                                    {
-                                        <div class="wl-more-wrap">
-                                            <button class="wl-btn-more" onclick="toggleMore(this, event)">More &#9662;</button>
-                                            <div class="wl-more-menu">
-                                                @if (tile.CodingEnabled)
-                                                {
-                                                    <a asp-controller="Coding" asp-action="Summary"
-                                                       asp-route-lab="@tile.LabName">Coding</a>
-                                                }
-                                                @if (tile.LineClaimEnabled)
-                                                {
-                                                    <a asp-controller="Dashboard" asp-action="ClinicSummary"
-                                                       asp-route-lab="@tile.LabName">&#127973; Clinic</a>
-                                                    <a asp-controller="Dashboard" asp-action="SalesRepSummary"
-                                                       asp-route-lab="@tile.LabName">&#128100; Sales Rep</a>
-                                                }
-                                            </div>
-                                        </div>
-                                    }
-                                    else
-                                    {
-                                        <span class="wl-btn wl-btn-disabled" style="font-size:.68rem;padding:.35rem .7rem">More &#9662;</span>
+                                        <span class="wlc-chip-age @(tile.IsClaimAgeStale ? "wlc-chip-age-stale" : "")">@(claimAgeDays)d</span>
                                     }
                                 </div>
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-            <div class="wl-legend">
-                <span>Icons:</span>
-                <span class="wl-legend-item"><span class="wl-icon-circle wl-icon-ok" style="width:16px;height:16px;font-size:.5rem">&#10003;</span> done/ready</span>
-                <span>&middot;</span>
-                <span class="wl-legend-item"><span class="wl-icon-circle wl-icon-pending" style="width:16px;height:16px;font-size:.52rem">&#9203;</span> pending</span>
-                <span>&middot;</span>
-                <span class="wl-legend-item"><span class="wl-icon-circle wl-icon-warn" style="width:16px;height:16px;font-size:.5rem">!</span> attention/overdue</span>
-            </div>
+                                <div class="wlc-chip" title="@(tile.HasLineFile ? tile.LineFilePath : "Not configured")">
+                                    <span class="wlc-dot @lineDot"></span>
+                                    <span class="wlc-chip-lbl">Line</span>
+                                    @if (lineAgeDays.HasValue && tile.HasLineFile)
+                                    {
+                                        <span class="wlc-chip-age @(tile.IsLineAgeStale ? "wlc-chip-age-stale" : "")">@(lineAgeDays)d</span>
+                                    }
+                                </div>
+                                <div class="wlc-chip">
+                                    <span class="wlc-dot @predDot"></span>
+                                    <span class="wlc-chip-lbl">Prediction</span>
+                                </div>
+                                <div class="wlc-chip">
+                                    <span class="wlc-dot @codeDot"></span>
+                                    <span class="wlc-chip-lbl">Coding</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="wlc-status-group">
+                            <div class="wlc-section-label">Reports</div>
+                            <div class="wlc-status-grid">
+                                <div class="wlc-chip">
+                                    <span class="wlc-dot @(tile.LineClaimEnabled ? "wlc-dot-ok" : "wlc-dot-off")"></span>
+                                    <span class="wlc-chip-lbl">Production</span>
+                                </div>
+                                <div class="wlc-chip">
+                                    <span class="wlc-dot @(tile.LineClaimEnabled ? "wlc-dot-ok" : "wlc-dot-off")"></span>
+                                    <span class="wlc-chip-lbl">Collection</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right: Action buttons -->
+                    <div class="wlc-actions">
+                        <a asp-controller="Dashboard" asp-action="Index"
+                           asp-route-lab="@tile.LabName"
+                           class="wlc-btn wlc-btn-sm wlc-btn-primary"
+                           style="background:linear-gradient(@grad); box-shadow: 0 2px 8px @glow"
+                           title="Dashboard">
+                            <i class="bi bi-speedometer2"></i>
+                        </a>
+                        @if (tile.PredictionEnabled)
+                        {
+                            <a asp-controller="Prediction" asp-action="Index"
+                               asp-route-lab="@tile.LabName"
+                               class="wlc-btn wlc-btn-sm wlc-btn-pred" title="Prediction">
+                                <i class="bi bi-graph-up-arrow"></i>
+                            </a>
+                        }
+                        else
+                        {
+                            <span class="wlc-btn wlc-btn-sm wlc-btn-off" title="Prediction not enabled"><i class="bi bi-graph-up-arrow"></i></span>
+                        }
+                        @if (tile.CodingEnabled)
+                        {
+                            <a asp-controller="Coding" asp-action="Summary"
+                               asp-route-lab="@tile.LabName"
+                               class="wlc-btn wlc-btn-sm wlc-btn-code" title="Coding">
+                                <i class="bi bi-code-square"></i>
+                            </a>
+                        }
+                        else
+                        {
+                            <span class="wlc-btn wlc-btn-sm wlc-btn-off" title="Coding not enabled"><i class="bi bi-code-square"></i></span>
+                        }
+                        @if (tile.LineClaimEnabled)
+                        {
+                            <a asp-controller="Dashboard" asp-action="ClinicSummary"
+                               asp-route-lab="@tile.LabName"
+                               class="wlc-btn wlc-btn-sm wlc-btn-clinic" title="Clinic">
+                                <i class="bi bi-hospital"></i>
+                            </a>
+                            <a asp-controller="Dashboard" asp-action="SalesRepSummary"
+                               asp-route-lab="@tile.LabName"
+                               class="wlc-btn wlc-btn-sm wlc-btn-rep" title="Sales Rep">
+                                <i class="bi bi-person-badge"></i>
+                            </a>
+                            <a asp-controller="CollectionSummary" asp-action="Index"
+                               asp-route-lab="@tile.LabName"
+                               class="wlc-btn wlc-btn-sm wlc-btn-coll" title="Collection">
+                                <i class="bi bi-cash-coin"></i>
+                            </a>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+
+        <!-- Legend bar (bottom) -->
+        <div class="wlc-legend-bar">
+            <span class="wlc-legend-grp">Status:</span>
+            <span class="wlc-legend-item"><span class="wlc-dot wlc-dot-ok"></span> Ready</span>
+            <span class="wlc-legend-item"><span class="wlc-dot wlc-dot-pend"></span> Pending</span>
+            <span class="wlc-legend-item"><span class="wlc-dot wlc-dot-warn"></span> Attention</span>
+            <span class="wlc-legend-item"><span class="wlc-dot wlc-dot-off"></span> Not configured</span>
+            <span class="wlc-legend-pipe">|</span>
+            <span class="wlc-legend-grp">Actions:</span>
+            <span class="wlc-legend-item"><i class="bi bi-speedometer2" style="color:#6ea8ff"></i> Dashboard</span>
+            <span class="wlc-legend-item"><i class="bi bi-graph-up-arrow" style="color:#60a5fa"></i> Prediction</span>
+            <span class="wlc-legend-item"><i class="bi bi-code-square" style="color:#34d399"></i> Coding</span>
+            <span class="wlc-legend-item"><i class="bi bi-hospital" style="color:#5eead4"></i> Clinic</span>
+            <span class="wlc-legend-item"><i class="bi bi-person-badge" style="color:#a78bfa"></i> Sales Rep</span>
+            <span class="wlc-legend-item"><i class="bi bi-cash-coin" style="color:#fbbf24"></i> Collection</span>
         </div>
         </div><!-- /tableView -->
     }
@@ -1081,23 +950,13 @@ function switchView(view) {
 
 function filterWorklistRows() {
     var q = (document.getElementById('wlSearchInput').value || '').toLowerCase();
-    var rows = document.querySelectorAll('#wlTableBody tr[data-lab]');
-    rows.forEach(function(row) {
-        row.style.display = row.getAttribute('data-lab').indexOf(q) >= 0 ? '' : 'none';
+    var cards = document.querySelectorAll('#wlCardList .wlc-card[data-lab]');
+    cards.forEach(function(card) {
+        card.style.display = card.getAttribute('data-lab').indexOf(q) >= 0 ? '' : 'none';
     });
 }
 
-function toggleMore(btn, e) {
-    e.stopPropagation();
-    var wrap = btn.closest('.wl-more-wrap');
-    var wasOpen = wrap.classList.contains('open');
-    document.querySelectorAll('.wl-more-wrap.open').forEach(function(el) { el.classList.remove('open'); });
-    if (!wasOpen) wrap.classList.add('open');
-}
-
-document.addEventListener('click', function() {
-    document.querySelectorAll('.wl-more-wrap.open').forEach(function(el) { el.classList.remove('open'); });
-});
+document.addEventListener('click', function() {});
 
 document.addEventListener('DOMContentLoaded', function() {
     try {
