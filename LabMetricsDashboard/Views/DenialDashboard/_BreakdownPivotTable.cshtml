@@ -7,6 +7,7 @@
     var tableId = "pivot_" + Guid.NewGuid().ToString("N");
     var groupNumber = 0;
     string? currentGroupKey = null;
+    var monthly = Model.Periods.Any(x => x.IsYearTotal);
 }
 
 <div class="breakdown-pivot-shell">
@@ -19,10 +20,19 @@
                         <th class="pivot-grand-title" colspan="@colSpan">@Model.HeaderTitle</th>
                     </tr>
                     <tr>
-                        <th class="pivot-side-title" colspan="2" rowspan="3">Insurance &amp; Top Denials</th>
+                        <th class="pivot-side-title" colspan="2" rowspan="@(monthly ? 4 : 3)">Insurance &amp; Top Denials</th>
                         <th class="pivot-section-title" colspan="@(Model.Periods.Count * 2)">@Model.SectionTitle</th>
-                        <th class="pivot-total-title" colspan="2" rowspan="2">Total</th>
+                        <th class="pivot-total-title" colspan="2" rowspan="@(monthly ? 3 : 2)">@(monthly ? Model.GrandTotalTitle : "Total")</th>
                     </tr>
+                    @if (monthly)
+                    {
+                        <tr>
+                            @foreach (var group in Model.ColumnGroups.Where(x => !string.Equals(x.Label, Model.GrandTotalTitle, StringComparison.OrdinalIgnoreCase)))
+                            {
+                                <th class="pivot-period-title" colspan="@group.ColumnSpan">@group.Label</th>
+                            }
+                        </tr>
+                    }
                     <tr>
                         @foreach (var period in Model.Periods)
                         {
@@ -33,10 +43,10 @@
                         @foreach (var period in Model.Periods)
                         {
                             <th class="pivot-metric-title">No. of Claims</th>
-                            <th class="pivot-metric-title">Denial Bal</th>
+                            <th class="pivot-metric-title">Insurance Balance</th>
                         }
                         <th class="pivot-metric-title">No. of Claims</th>
-                        <th class="pivot-metric-title">Denial Bal</th>
+                        <th class="pivot-metric-title">Insurance Balance</th>
                     </tr>
                 </thead>
                 <tbody>

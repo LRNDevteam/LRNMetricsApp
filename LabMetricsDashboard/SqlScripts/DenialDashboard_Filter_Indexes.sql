@@ -97,28 +97,3 @@ BEGIN
     END;
 END;
 GO
-
-
-/* Special summary logic indexes for Augustus (19), Certus (18), Northwest (20)
-   Supports ClaimLevelData -> DenialLineItem join on ClaimID = VisitNumber for weekly/monthly insights. */
-IF OBJECT_ID(N'dbo.ClaimLevelData', N'U') IS NOT NULL
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_ClaimLevelData_ClaimID_SummaryJoin' AND object_id = OBJECT_ID(N'dbo.ClaimLevelData'))
-    BEGIN
-        CREATE NONCLUSTERED INDEX IX_ClaimLevelData_ClaimID_SummaryJoin
-        ON dbo.ClaimLevelData (ClaimID)
-        INCLUDE (InsuranceBalance, PayerName, PayerName_Raw, Panelname);
-    END;
-END;
-GO
-
-IF OBJECT_ID(N'dbo.DenialLineItem', N'U') IS NOT NULL
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_DenialLineItem_VisitNumber_SummaryJoin' AND object_id = OBJECT_ID(N'dbo.DenialLineItem'))
-    BEGIN
-        CREATE NONCLUSTERED INDEX IX_DenialLineItem_VisitNumber_SummaryJoin
-        ON dbo.DenialLineItem (VisitNumber, DenialDate)
-        INCLUDE (DenialCodeOriginal, DenialCodeNormalized, DenialDescription, TotalBalance, FirstBilledDate, DateOfService, TaskStatus, Priority, ActionCategory, DenialClassification, SalesRepname, ClinicName, ReferringProvider, PayerType, PayerNameNormalized);
-    END;
-END;
-GO

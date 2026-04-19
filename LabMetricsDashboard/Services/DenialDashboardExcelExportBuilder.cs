@@ -762,6 +762,7 @@ public static class DenialDashboardExcelExportBuilder
 		var ws = wb.AddWorksheet(sheetName);
 		ExcelTheme.ApplyDefaults(ws);
 		var totalColumns = 2 + (model.Periods.Count * 2) + 2;
+		var monthly = model.Periods.Any(x => x.IsYearTotal);
 
 		ws.Cell(1, 1).Value = model.HeaderTitle;
 		ws.Range(1, 1, 1, totalColumns).Merge();
@@ -774,9 +775,10 @@ public static class DenialDashboardExcelExportBuilder
 		titleRange.Style.Fill.BackgroundColor = ExcelTheme.TitleBg;
 		titleRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
 
+		var leftEndRow = monthly ? 4 : 3;
 		ws.Cell(2, 1).Value = "Insurance & Top Denials";
-		ws.Range(2, 1, 3, 2).Merge();
-		var leftHeader = ws.Range(2, 1, 3, 2);
+		ws.Range(2, 1, leftEndRow, 2).Merge();
+		var leftHeader = ws.Range(2, 1, leftEndRow, 2);
 		leftHeader.Style.Font.Bold = true;
 		leftHeader.Style.Font.FontColor = XLColor.White;
 		leftHeader.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
@@ -797,9 +799,10 @@ public static class DenialDashboardExcelExportBuilder
 			sectionHeader.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
 		}
 
-		ws.Cell(2, 3 + (model.Periods.Count * 2)).Value = "Total";
-		ws.Range(2, 3 + (model.Periods.Count * 2), 3, totalColumns).Merge();
-		var totalHeader = ws.Range(2, 3 + (model.Periods.Count * 2), 3, totalColumns);
+		var grandHeaderStart = 3 + (model.Periods.Count * 2);
+		ws.Cell(2, grandHeaderStart).Value = monthly ? model.GrandTotalTitle : "Total";
+		ws.Range(2, grandHeaderStart, monthly ? 4 : 3, totalColumns).Merge();
+		var totalHeader = ws.Range(2, grandHeaderStart, monthly ? 4 : 3, totalColumns);
 		totalHeader.Style.Font.Bold = true;
 		totalHeader.Style.Font.FontColor = XLColor.White;
 		totalHeader.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
@@ -807,37 +810,57 @@ public static class DenialDashboardExcelExportBuilder
 		totalHeader.Style.Fill.BackgroundColor = ExcelTheme.HeaderBg;
 		totalHeader.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
 
+		var metricsRow = monthly ? 5 : 4;
+		var periodHeaderRow = monthly ? 4 : 3;
+		if (monthly)
+		{
+			var col = 3;
+			foreach (var group in model.ColumnGroups.Where(x => !string.Equals(x.Label, model.GrandTotalTitle, StringComparison.OrdinalIgnoreCase)))
+			{
+				ws.Cell(3, col).Value = group.Label;
+				ws.Range(3, col, 3, col + group.ColumnSpan - 1).Merge();
+				var yearHeader = ws.Range(3, col, 3, col + group.ColumnSpan - 1);
+				yearHeader.Style.Font.Bold = true;
+				yearHeader.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+				yearHeader.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+				yearHeader.Style.Fill.BackgroundColor = ExcelTheme.HeaderBg;
+				yearHeader.Style.Font.FontColor = XLColor.White;
+				yearHeader.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+				col += group.ColumnSpan;
+			}
+		}
+
 		var periodCol = 3;
 		foreach (var period in model.Periods)
 		{
-			ws.Cell(3, periodCol).Value = period.Label;
-			ws.Range(3, periodCol, 3, periodCol + 1).Merge();
-			var periodHeader = ws.Range(3, periodCol, 3, periodCol + 1);
+			ws.Cell(periodHeaderRow, periodCol).Value = period.Label;
+			ws.Range(periodHeaderRow, periodCol, periodHeaderRow, periodCol + 1).Merge();
+			var periodHeader = ws.Range(periodHeaderRow, periodCol, periodHeaderRow, periodCol + 1);
 			periodHeader.Style.Font.Bold = true;
 			periodHeader.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
 			periodHeader.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
 			periodHeader.Style.Fill.BackgroundColor = ExcelTheme.GroupRowBg;
 			periodHeader.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
 
-			ws.Cell(4, periodCol).Value = "No. of Claims";
-			ws.Cell(4, periodCol + 1).Value = "Denial Bal";
-			ws.Range(4, periodCol, 4, periodCol + 1).Style.Font.Bold = true;
-			ws.Range(4, periodCol, 4, periodCol + 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-			ws.Range(4, periodCol, 4, periodCol + 1).Style.Fill.BackgroundColor = ExcelTheme.SubLabelBg;
-			ws.Range(4, periodCol, 4, periodCol + 1).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-			ws.Range(4, periodCol, 4, periodCol + 1).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+			ws.Cell(metricsRow, periodCol).Value = "No. of Claims";
+			ws.Cell(metricsRow, periodCol + 1).Value = "Insurance Balance";
+			ws.Range(metricsRow, periodCol, metricsRow, periodCol + 1).Style.Font.Bold = true;
+			ws.Range(metricsRow, periodCol, metricsRow, periodCol + 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+			ws.Range(metricsRow, periodCol, metricsRow, periodCol + 1).Style.Fill.BackgroundColor = ExcelTheme.SubLabelBg;
+			ws.Range(metricsRow, periodCol, metricsRow, periodCol + 1).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+			ws.Range(metricsRow, periodCol, metricsRow, periodCol + 1).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
 			periodCol += 2;
 		}
 
-		ws.Cell(4, periodCol).Value = "No. of Claims";
-		ws.Cell(4, periodCol + 1).Value = "Denial Bal";
-		ws.Range(4, periodCol, 4, periodCol + 1).Style.Font.Bold = true;
-		ws.Range(4, periodCol, 4, periodCol + 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-		ws.Range(4, periodCol, 4, periodCol + 1).Style.Fill.BackgroundColor = ExcelTheme.SubLabelBg;
-		ws.Range(4, periodCol, 4, periodCol + 1).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-		ws.Range(4, periodCol, 4, periodCol + 1).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+		ws.Cell(metricsRow, periodCol).Value = "No. of Claims";
+		ws.Cell(metricsRow, periodCol + 1).Value = "Insurance Balance";
+		ws.Range(metricsRow, periodCol, metricsRow, periodCol + 1).Style.Font.Bold = true;
+		ws.Range(metricsRow, periodCol, metricsRow, periodCol + 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+		ws.Range(metricsRow, periodCol, metricsRow, periodCol + 1).Style.Fill.BackgroundColor = ExcelTheme.SubLabelBg;
+		ws.Range(metricsRow, periodCol, metricsRow, periodCol + 1).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+		ws.Range(metricsRow, periodCol, metricsRow, periodCol + 1).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
 
-		var dataRow = 5;
+		var dataRow = metricsRow + 1;
 		foreach (var row in model.Rows)
 		{
 			ws.Cell(dataRow, 1).Value = row.IndexLabel;
@@ -884,7 +907,6 @@ public static class DenialDashboardExcelExportBuilder
 			}
 			ws.Cell(dataRow, cellCol).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
 			ws.Cell(dataRow, cellCol + 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
-
 			dataRow++;
 		}
 
@@ -923,17 +945,14 @@ public static class DenialDashboardExcelExportBuilder
 			ws.Cell(dataRow, totalCol + 1).Style.NumberFormat.Format = "$#,##0.00";
 		}
 
-		ws.SheetView.FreezeRows(4);
+		ws.SheetView.FreezeRows(metricsRow);
 		ws.SheetView.FreezeColumns(2);
 		ws.Column(1).Width = 6;
 		ws.Column(2).Width = 56;
 		for (var c = 3; c <= totalColumns; c++)
 		{
-			ws.Column(c).Width = 14;
+			ws.Column(c).Width = 16;
 		}
-
-		ws.Rows(1, 4).AdjustToContents();
-		ws.Columns().Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
 	}
 
 	private static decimal ParseDecimal(Dictionary<string, string> row, string key)

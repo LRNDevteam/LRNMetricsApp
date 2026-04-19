@@ -785,16 +785,17 @@ public class DenialDashboardController : Controller
                 .OrderBy(g => g.Key)
                 .SelectMany(yearGroup =>
                 {
+                    var year = yearGroup.Key;
                     var monthPeriods = yearGroup
                         .GroupBy(x => x.DenialDate.Month)
                         .OrderBy(g => g.Key)
                         .Select(g => new BreakdownPivotPeriod
                         {
-                            Key = $"{yearGroup.Key}-{g.Key:00}",
-                            Label = new DateTime(yearGroup.Key, g.Key, 1).ToString("MMM yyyy"),
-                            StartDate = new DateTime(yearGroup.Key, g.Key, 1),
-                            EndDate = new DateTime(yearGroup.Key, g.Key, 1).AddMonths(1).AddDays(-1),
-                            Year = yearGroup.Key,
+                            Key = $"{year}-{g.Key:00}",
+                            Label = new DateTime(year, g.Key, 1).ToString("MMM"),
+                            StartDate = new DateTime(year, g.Key, 1),
+                            EndDate = new DateTime(year, g.Key, 1).AddMonths(1).AddDays(-1),
+                            Year = year,
                             Month = g.Key,
                             IsYearTotal = false
                         })
@@ -802,11 +803,11 @@ public class DenialDashboardController : Controller
 
                     monthPeriods.Add(new BreakdownPivotPeriod
                     {
-                        Key = $"{yearGroup.Key}-TOTAL",
-                        Label = $"{yearGroup.Key} Total",
-                        StartDate = new DateTime(yearGroup.Key, 12, 31),
-                        EndDate = new DateTime(yearGroup.Key, 12, 31),
-                        Year = yearGroup.Key,
+                        Key = $"{year}-TOTAL",
+                        Label = $"{year} Total",
+                        StartDate = new DateTime(year, 12, 31),
+                        EndDate = new DateTime(year, 12, 31),
+                        Year = year,
                         Month = null,
                         IsYearTotal = true
                     });
@@ -822,7 +823,7 @@ public class DenialDashboardController : Controller
                     Label = $"{g.Key:MMM dd} - {g.Key.AddDays(6):MMM dd}",
                     StartDate = g.Key,
                     EndDate = g.Key.AddDays(6),
-                    Year = g.Key.Year,
+                    Year = ISOWeek.GetYear(g.Key),
                     Month = g.Key.Month,
                     IsYearTotal = false
                 })
@@ -833,10 +834,9 @@ public class DenialDashboardController : Controller
 
         var model = new BreakdownPivotViewModel
         {
-            HeaderTitle = monthly
-                ? "All Months | Denials | Covering 80% of the AR | Denial Posted Date"
-                : "Last 4 Weeks | Denials | Covering 80% of the AR | Denial Posted Date",
+            HeaderTitle = monthly ? "All Months | Top 10 Payers | Denial Posted Date" : "Last 4 Weeks | Top 10 Payers | Denial Posted Date",
             SectionTitle = monthly ? "Monthly Breakdown" : "Weekly Breakdown",
+            GrandTotalTitle = "Grand Total",
             Periods = periods
         };
 
@@ -847,9 +847,7 @@ public class DenialDashboardController : Controller
 
         var selectedRows = monthly
             ? prepared
-            : prepared
-                .Where(x => periods.Any(period => PeriodContains(period, x.DenialDate, monthly)))
-                .ToList();
+            : prepared.Where(x => periods.Any(period => PeriodContains(period, x.DenialDate, monthly))).ToList();
 
         if (selectedRows.Count == 0)
         {
@@ -858,29 +856,42 @@ public class DenialDashboardController : Controller
 
         var rankedInsurerGroups = selectedRows
             .GroupBy(x => x.PayerName, StringComparer.OrdinalIgnoreCase)
-            .Select(g => new PreparedInsurerGroup(g.Key, g.Sum(x => x.InsuranceBalance), g.ToList()))
-            .OrderByDescending(x => x.TotalBalance)
+            .Select(g => new PreparedInsurerGroup(
+                g.Key,
+                g.Select(x => x.VisitNumber).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                decimal.Round(g.Sum(x => x.InsuranceBalance), 2),
+                g.ToList()))
+            .OrderByDescending(x => x.TotalClaimCount)
+            .ThenByDescending(x => x.TotalBalance)
             .ThenBy(x => x.PayerName)
+            .Take(10)
             .ToList();
 
-        var insurerGroups = new List<PreparedInsurerGroup>();
-        var grandBalance = rankedInsurerGroups.Sum(x => x.TotalBalance);
-        decimal runningBalance = 0m;
-        foreach (var group in rankedInsurerGroups)
-        {
-            insurerGroups.Add(group);
-            runningBalance += group.TotalBalance;
-            if (insurerGroups.Count >= 10 || (grandBalance > 0 && runningBalance / grandBalance >= 0.80m))
-            {
-                break;
-            }
-        }
+        var allBalance = decimal.Round(selectedRows.Sum(x => x.InsuranceBalance), 2);
+        var selectedBalance = rankedInsurerGroups.Sum(x => x.TotalBalance);
+        model.TopPayerCount = rankedInsurerGroups.Count;
+        model.CoveragePercentage = allBalance <= 0 ? 0 : decimal.Round((selectedBalance / allBalance) * 100m, 1);
+        model.HeaderTitle = monthly
+            ? $"All Months | Top {model.TopPayerCount} Payers | Covering {model.CoveragePercentage:N1}% of the AR | Denial Posted Date"
+            : $"Last 4 Weeks | Top {model.TopPayerCount} Payers | Covering {model.CoveragePercentage:N1}% of the AR | Denial Posted Date";
+
+        model.ColumnGroups = monthly
+            ? periods.GroupBy(x => x.Year)
+                .Select(g => new BreakdownPivotColumnGroup
+                {
+                    Label = g.Key.ToString(CultureInfo.InvariantCulture),
+                    ColumnSpan = g.Count() * 2
+                })
+                .Append(new BreakdownPivotColumnGroup { Label = model.GrandTotalTitle, ColumnSpan = 2 })
+                .ToList()
+            : periods.Select(p => new BreakdownPivotColumnGroup { Label = p.Label, ColumnSpan = 2 })
+                .Append(new BreakdownPivotColumnGroup { Label = "Total", ColumnSpan = 2 })
+                .ToList();
 
         var pivotRows = new List<BreakdownPivotRow>();
-        var insurerIndex = 0;
-
-        foreach (var insurer in insurerGroups)
+        for (var insurerIndex = 0; insurerIndex < rankedInsurerGroups.Count; insurerIndex++)
         {
+            var insurer = rankedInsurerGroups[insurerIndex];
             pivotRows.Add(BuildBreakdownPivotRow(
                 GetAlphaLabel(insurerIndex),
                 insurer.PayerName,
@@ -894,10 +905,12 @@ public class DenialDashboardController : Controller
                 .Select(g => new
                 {
                     DenialLabel = g.Key,
-                    TotalBalance = g.Sum(x => x.InsuranceBalance),
+                    ClaimCount = g.Select(x => x.VisitNumber).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                    TotalBalance = decimal.Round(g.Sum(x => x.InsuranceBalance), 2),
                     Rows = g.ToList()
                 })
-                .OrderByDescending(x => x.TotalBalance)
+                .OrderByDescending(x => x.ClaimCount)
+                .ThenByDescending(x => x.TotalBalance)
                 .ThenBy(x => x.DenialLabel)
                 .Take(3)
                 .ToList();
@@ -912,8 +925,6 @@ public class DenialDashboardController : Controller
                     periods,
                     monthly));
             }
-
-            insurerIndex++;
         }
 
         model.Rows = pivotRows;
@@ -1010,7 +1021,7 @@ public class DenialDashboardController : Controller
     }
 
     private sealed record PreparedBreakdownRow(DateTime DenialDate, string VisitNumber, decimal InsuranceBalance, string PayerName, string DenialLabel);
-    private sealed record PreparedInsurerGroup(string PayerName, decimal TotalBalance, List<PreparedBreakdownRow> Rows);
+    private sealed record PreparedInsurerGroup(string PayerName, int TotalClaimCount, decimal TotalBalance, List<PreparedBreakdownRow> Rows);
 
     private static DateTime StartOfWeek(DateTime value)
     {
