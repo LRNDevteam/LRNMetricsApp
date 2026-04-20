@@ -1,0 +1,164 @@
+@model LabMetricsDashboard.Models.CodingSetupFormModel
+@{
+    var lookups = ViewBag.Lookups as CodingSetupDropdownLookups ?? new();
+    var panelNames = lookups.PanelNames;
+    var record = ViewBag.Record as LabMetricsDashboard.Models.PanelPathogenCptRecord;
+    var auditHistory = ViewBag.AuditHistory as List<LabMetricsDashboard.Models.CodingSetupAuditEntry> ?? new();
+}
+
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card shadow-sm">
+            <div class="card-header bg-warning text-dark">
+                <h5 class="mb-0"><i class="bi bi-pencil"></i> Edit Combination &mdash; @Model.LabName</h5>
+            </div>
+            <div class="card-body">
+                <form asp-action="Edit" method="post" id="editForm">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" asp-for="Id" />
+                    <input type="hidden" asp-for="LabName" />
+
+                    @if (!ViewData.ModelState.IsValid)
+                    {
+                        <div class="alert alert-danger">
+                            @Html.ValidationSummary(false)
+                        </div>
+                    }
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Panel Name <span class="text-danger">*</span></label>
+                        <input asp-for="PanelName" class="form-control" list="panelList" autocomplete="off" />
+                        <datalist id="panelList">
+                            @foreach (var p in panelNames) { <option value="@p"></option> }
+                        </datalist>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Test Name <span class="text-muted">(optional)</span></label>
+                        <input asp-for="TestName" class="form-control" list="testList" autocomplete="off" />
+                        <datalist id="testList">
+                            @foreach (var t in lookups.TestNames) { <option value="@t"></option> }
+                        </datalist>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Pathogen Name <span class="text-danger">*</span></label>
+                        <input asp-for="PathogenName" class="form-control" list="pathogenList" autocomplete="off" />
+                        <datalist id="pathogenList">
+                            @foreach (var p in lookups.PathogenNames) { <option value="@p"></option> }
+                        </datalist>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">CPT Code <span class="text-danger">*</span></label>
+                        <input asp-for="CPTCode" class="form-control" list="cptList" autocomplete="off" />
+                        <datalist id="cptList">
+                            @foreach (var c in lookups.CptCodes) { <option value="@c"></option> }
+                        </datalist>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label fw-bold">Default Units <span class="text-danger">*</span></label>
+                            <input asp-for="DefaultUnits" type="number" step="0.01" min="0.01" class="form-control" />
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label fw-bold">Sort Order</label>
+                            <input asp-for="SortOrder" type="number" class="form-control" />
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label fw-bold">Active</label>
+                            <div class="form-check form-switch mt-2">
+                                <input asp-for="IsActive" class="form-check-input" type="checkbox" role="switch" />
+                                <label class="form-check-label">Active</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Default ICD Codes</label>
+                        <input asp-for="DefaultICDCodes" class="form-control" list="icdList" autocomplete="off" />
+                        <datalist id="icdList">
+                            @foreach (var c in lookups.IcdCodes) { <option value="@c"></option> }
+                        </datalist>
+                    </div>
+
+                    <!-- Procedure String Preview -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Preview Procedure String</label>
+                        <div id="procPreview" class="form-control-plaintext border rounded p-2 bg-light text-muted" style="min-height:40px;">—</div>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-warning"><i class="bi bi-check-lg"></i> Update</button>
+                        <a asp-action="Index" asp-route-lab="@Model.LabName" class="btn btn-outline-secondary">Cancel</a>
+                    </div>
+                </form>
+
+                <!-- Audit / Created / Modified info -->
+                @if (record is not null)
+                {
+                    <hr />
+                    <div class="small text-muted">
+                        <strong>Created:</strong> @(record.CreatedBy ?? "—") on @(record.CreatedDate?.ToString("g") ?? "—")
+                        &nbsp;|&nbsp;
+                        <strong>Last Modified:</strong> @(record.ModifiedBy ?? "—") on @(record.ModifiedDate?.ToString("g") ?? "—")
+                    </div>
+                }
+            </div>
+        </div>
+
+        <!-- Change History -->
+        @if (auditHistory.Count > 0)
+        {
+            <div class="card shadow-sm mt-3">
+                <div class="card-header bg-light">
+                    <h6 class="mb-0"><i class="bi bi-clock-history"></i> Change History</h6>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Field</th>
+                                    <th>Old Value</th>
+                                    <th>New Value</th>
+                                    <th>Changed By</th>
+                                    <th>Date</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var a in auditHistory)
+                                {
+                                    <tr>
+                                        <td>@a.FieldName</td>
+                                        <td class="text-danger">@(a.OldValue ?? "—")</td>
+                                        <td class="text-success">@(a.NewValue ?? "—")</td>
+                                        <td>@(a.ChangedBy ?? "—")</td>
+                                        <td>@a.ChangedDate.ToString("g")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    function updatePreview() {
+        var panel = document.querySelector('[name="PanelName"]').value || '';
+        var test  = document.querySelector('[name="TestName"]').value || '';
+        var path  = document.querySelector('[name="PathogenName"]').value || '';
+        var cpt   = document.querySelector('[name="CPTCode"]').value || '';
+        var units = document.querySelector('[name="DefaultUnits"]').value || '';
+        var parts = [panel, test, path, cpt + '*' + units].filter(function(x){ return x && x !== '*'; });
+        document.getElementById('procPreview').textContent = parts.length > 0 ? parts.join(' | ') : '—';
+    }
+    document.getElementById('editForm').addEventListener('input', updatePreview);
+    updatePreview();
+</script>
+}

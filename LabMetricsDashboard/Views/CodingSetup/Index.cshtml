@@ -1,0 +1,177 @@
+@model LabMetricsDashboard.Models.CodingSetupIndexViewModel
+@{
+    ViewData["Title"] = "Coding Setup";
+    string SortLink(string col)
+    {
+        var dir = Model.SortColumn == col && Model.SortDirection == "asc" ? "desc" : "asc";
+        return Url.Action("Index", new { lab = Model.LabName, search = Model.Search, sortColumn = col, sortDirection = dir, activeFilter = Model.ActiveFilter, page = 1 })!;
+    }
+    string SortIcon(string col)
+    {
+        if (Model.SortColumn != col) return "";
+        return Model.SortDirection == "asc" ? " &#9650;" : " &#9660;";
+    }
+}
+
+<!-- Lab selector + Title -->
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div class="d-flex align-items-center gap-3">
+        <h4 class="mb-0"><i class="bi bi-gear"></i> Coding Setup</h4>
+        <form method="get" asp-action="Index" class="d-flex align-items-center gap-2">
+            <label class="form-label mb-0 fw-bold small">Lab:</label>
+            <select name="lab" class="form-select form-select-sm" style="min-width:180px" onchange="this.form.submit()">
+                @foreach (var l in Model.AvailableLabs)
+                {
+                    <option value="@l" selected="@(l == Model.LabName)">@l</option>
+                }
+            </select>
+        </form>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        <a asp-action="Create" asp-route-lab="@Model.LabName" class="btn btn-primary btn-sm">
+            <i class="bi bi-plus-circle"></i> New Combination
+        </a>
+        <a asp-action="Clone" asp-route-lab="@Model.LabName" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-copy"></i> Clone Panel
+        </a>
+        <a asp-action="Import" asp-route-lab="@Model.LabName" class="btn btn-outline-info btn-sm">
+            <i class="bi bi-upload"></i> Bulk Import
+        </a>
+        <div class="dropdown">
+            <button class="btn btn-outline-success btn-sm dropdown-toggle" data-bs-toggle="dropdown">
+                <i class="bi bi-download"></i> Export
+            </button>
+            <ul class="dropdown-menu">
+                <li><a class="dropdown-item" asp-action="ExportExcel" asp-route-lab="@Model.LabName" asp-route-search="@Model.Search" asp-route-activeFilter="@Model.ActiveFilter">Excel (.xlsx)</a></li>
+                <li><a class="dropdown-item" asp-action="ExportCsv" asp-route-lab="@Model.LabName" asp-route-search="@Model.Search" asp-route-activeFilter="@Model.ActiveFilter">CSV (.csv)</a></li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+@if (TempData["Success"] is string successMsg)
+{
+    <div class="alert alert-success alert-dismissible fade show" role="alert">
+        @successMsg <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
+@if (TempData["Error"] is string errorMsg)
+{
+    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        @errorMsg <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
+
+<!-- Search & Filter -->
+<form method="get" asp-action="Index" class="row g-2 mb-3">
+    <input type="hidden" name="lab" value="@Model.LabName" />
+    <div class="col-auto">
+        <input type="text" name="search" value="@Model.Search" class="form-control form-control-sm"
+               placeholder="Search Panel / Test / Pathogen / CPT…" style="min-width:280px" />
+    </div>
+    <div class="col-auto">
+        <select name="activeFilter" class="form-select form-select-sm">
+            <option value="active" selected="@(Model.ActiveFilter == "active")">Active Only</option>
+            <option value="inactive" selected="@(Model.ActiveFilter == "inactive")">Inactive Only</option>
+            <option value="all" selected="@(Model.ActiveFilter == "all")">All</option>
+        </select>
+    </div>
+    <div class="col-auto">
+        <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-search"></i> Search</button>
+    </div>
+    <input type="hidden" name="sortColumn" value="@Model.SortColumn" />
+    <input type="hidden" name="sortDirection" value="@Model.SortDirection" />
+</form>
+
+<!-- Data Table – Panel-wise grouped view -->
+<div class="table-responsive">
+    <table class="table table-sm table-striped table-hover align-middle">
+        <thead class="table-dark">
+            <tr>
+                <th style="width:40px">#</th>
+                <th><a href="@SortLink("PanelName")" class="text-white text-decoration-none">Panel Name @Html.Raw(SortIcon("PanelName"))</a></th>
+                <th><a href="@SortLink("TestName")" class="text-white text-decoration-none">Test Name @Html.Raw(SortIcon("TestName"))</a></th>
+                <th><a href="@SortLink("PathogenName")" class="text-white text-decoration-none">Pathogen @Html.Raw(SortIcon("PathogenName"))</a></th>
+                <th>Procedure</th>
+                <th><a href="@SortLink("DefaultICDCodes")" class="text-white text-decoration-none">ICD Codes @Html.Raw(SortIcon("DefaultICDCodes"))</a></th>
+                <th><a href="@SortLink("SortOrder")" class="text-white text-decoration-none">Sort @Html.Raw(SortIcon("SortOrder"))</a></th>
+                <th><a href="@SortLink("IsActive")" class="text-white text-decoration-none">Active @Html.Raw(SortIcon("IsActive"))</a></th>
+                <th class="text-center">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (Model.GroupedRecords.Count == 0)
+            {
+                <tr><td colspan="9" class="text-center text-muted py-4">No records found for <strong>@Model.LabName</strong>.</td></tr>
+            }
+            @{ var rowNum = (Model.Page - 1) * Model.PageSize; }
+            @foreach (var g in Model.GroupedRecords)
+            {
+                rowNum++;
+                var firstId = g.RecordIds.FirstOrDefault();
+                <tr class="@(g.IsActive ? "" : "table-secondary")">
+                    <td class="text-muted">@rowNum</td>
+                    <td><strong>@g.PanelName</strong></td>
+                    <td>@(g.TestName ?? "—")</td>
+                    <td>@g.PathogenName</td>
+                    <td>
+                        @foreach (var part in g.Procedure.Split(','))
+                        {
+                            <code class="me-1">@part</code>
+                        }
+                    </td>
+                    <td>@(g.DefaultICDCodes ?? "—")</td>
+                    <td>@g.SortOrder</td>
+                    <td>
+                        @if (g.IsActive)
+                        { <span class="badge bg-success">Active</span> }
+                        else
+                        { <span class="badge bg-secondary">Inactive</span> }
+                    </td>
+                    <td class="text-center text-nowrap">
+                        <a asp-action="Edit" asp-route-id="@firstId" class="btn btn-outline-primary btn-sm" title="Edit">
+                            <i class="bi bi-pencil"></i>
+                        </a>
+                        @if (g.IsActive)
+                        {
+                            <form asp-action="Deactivate" asp-route-id="@firstId" asp-route-lab="@Model.LabName"
+                                  method="post" class="d-inline"
+                                  onsubmit="return confirm('Deactivate all @g.RecordIds.Count record(s) in this group?');">
+                                @Html.AntiForgeryToken()
+                                <button type="submit" class="btn btn-outline-danger btn-sm" title="Deactivate">
+                                    <i class="bi bi-x-circle"></i>
+                                </button>
+                            </form>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+<!-- Pagination -->
+@if (Model.TotalPages > 1)
+{
+    <nav>
+        <ul class="pagination pagination-sm justify-content-center">
+            @for (int p = 1; p <= Model.TotalPages; p++)
+            {
+                <li class="page-item @(p == Model.Page ? "active" : "")">
+                    <a class="page-link"
+                       asp-action="Index" asp-route-lab="@Model.LabName"
+                       asp-route-search="@Model.Search"
+                       asp-route-sortColumn="@Model.SortColumn"
+                       asp-route-sortDirection="@Model.SortDirection"
+                       asp-route-activeFilter="@Model.ActiveFilter"
+                       asp-route-page="@p">@p</a>
+                </li>
+            }
+        </ul>
+    </nav>
+}
+
+<div class="text-muted small">
+    Showing @Model.GroupedRecords.Count group(s) from @Model.TotalCount records &bull; Page @Model.Page of @Math.Max(1, Model.TotalPages)
+    &bull; Lab: <strong>@Model.LabName</strong>
+</div>

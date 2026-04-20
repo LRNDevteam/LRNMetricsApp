@@ -1,0 +1,53 @@
+@model LabMetricsDashboard.Models.ClonePanelRequest
+@{
+    var panelNames = ViewBag.PanelNames as List<string> ?? new List<string>();
+}
+
+<div class="row justify-content-center">
+    <div class="col-lg-6">
+        <div class="card shadow-sm">
+            <div class="card-header bg-secondary text-white">
+                <h5 class="mb-0"><i class="bi bi-copy"></i> Clone Panel &mdash; @Model.LabName</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">
+                    Select an existing panel and provide a new name. All active combinations from the source
+                    panel will be copied to the new panel within the same lab.
+                </p>
+
+                <form asp-action="Clone" method="post">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" asp-for="LabName" />
+
+                    @if (!ViewData.ModelState.IsValid)
+                    {
+                        <div class="alert alert-danger">
+                            @Html.ValidationSummary(false)
+                        </div>
+                    }
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Source Panel <span class="text-danger">*</span></label>
+                        <select asp-for="SourcePanelName" class="form-select">
+                            <option value="">— Select panel —</option>
+                            @foreach (var p in panelNames)
+                            {
+                                <option value="@p">@p</option>
+                            }
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">New Panel Name <span class="text-danger">*</span></label>
+                        <input asp-for="NewPanelName" class="form-control" placeholder="Enter a unique new panel name" />
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-secondary"><i class="bi bi-copy"></i> Clone</button>
+                        <a asp-action="Index" asp-route-lab="@Model.LabName" class="btn btn-outline-secondary">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>

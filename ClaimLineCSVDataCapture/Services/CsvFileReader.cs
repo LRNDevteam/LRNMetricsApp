@@ -104,6 +104,8 @@ public static class CsvFileReader
         foreach (var fm in mapping.Fields)
         {
             var value = GetField(fields, headerIndex, fm.CsvHeader);
+            if (string.Equals(fm.DataType, "integer", StringComparison.OrdinalIgnoreCase))
+                value = TrimDecimalSuffix(value);
             row.Fields[fm.SqlColumn] = value;
         }
 
@@ -230,6 +232,26 @@ public static class CsvFileReader
         if (headerIndex.TryGetValue(headerName, out int idx) && idx < fields.Length)
             return fields[idx].Trim();
         return string.Empty;
+    }
+
+    /// <summary>
+    /// Strips a spurious decimal suffix (e.g., ".00") from values that should be integers.
+    /// CSV exports from some systems write "12345.00" for whole numbers.
+    /// </summary>
+    private static string TrimDecimalSuffix(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return value;
+
+        // Only strip when the value is a valid decimal whose fractional part is zero
+        if (decimal.TryParse(value, System.Globalization.NumberStyles.Any,
+                             System.Globalization.CultureInfo.InvariantCulture, out var parsed)
+            && parsed == decimal.Truncate(parsed))
+        {
+            return decimal.Truncate(parsed).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        return value;
     }
 
     /// <summary>

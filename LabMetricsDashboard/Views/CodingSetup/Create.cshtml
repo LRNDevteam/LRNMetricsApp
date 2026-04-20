@@ -1,0 +1,325 @@
+@model CodingSetupMultiCreateModel
+@{
+    var lookups = ViewBag.Lookups as CodingSetupDropdownLookups ?? new();
+}
+
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card shadow-sm">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="bi bi-plus-circle"></i> New Combination &mdash; @Model.LabName</h5>
+            </div>
+            <div class="card-body">
+                <form asp-action="Create" method="post" id="createForm">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" asp-for="LabName" />
+
+                    @if (!ViewData.ModelState.IsValid)
+                    {
+                        <div class="alert alert-danger">
+                            @Html.ValidationSummary(false)
+                        </div>
+                    }
+
+                    <!-- Panel Name -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Panel Name <span class="text-danger">*</span></label>
+                        <input asp-for="PanelName" class="form-control" list="panelList" placeholder="Select or type new panel name" autocomplete="off" />
+                        <datalist id="panelList">
+                            @foreach (var p in lookups.PanelNames) { <option value="@p"></option> }
+                        </datalist>
+                    </div>
+
+                    <!-- Test Name -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Test Name <span class="text-muted">(optional)</span></label>
+                        <input asp-for="TestName" class="form-control" list="testList" placeholder="Select or type" autocomplete="off" />
+                        <datalist id="testList">
+                            @foreach (var t in lookups.TestNames) { <option value="@t"></option> }
+                        </datalist>
+                    </div>
+
+                    <!-- Pathogen Name -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Pathogen Name <span class="text-danger">*</span></label>
+                        <input asp-for="PathogenName" class="form-control" list="pathogenList" placeholder="Select or type" autocomplete="off" />
+                        <datalist id="pathogenList">
+                            @foreach (var p in lookups.PathogenNames) { <option value="@p"></option> }
+                        </datalist>
+                    </div>
+
+                    <!-- CPT Code(s) with per-code units -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">CPT Code(s) <span class="text-danger">*</span></label>
+                        <div id="cptContainer">
+                            @for (int i = 0; i < Model.CptEntries.Count; i++)
+                            {
+                                <div class="input-group mb-2 cpt-row">
+                                    <input name="CptEntries[@i].CptCode"
+                                           value="@Model.CptEntries[i].CptCode"
+                                           class="form-control cpt-code-input"
+                                           list="cptList"
+                                           placeholder="CPT Code"
+                                           autocomplete="off" />
+                                    <input name="CptEntries[@i].Units"
+                                           value="@Model.CptEntries[i].Units"
+                                           type="number" step="0.01" min="0.01"
+                                           class="form-control cpt-units-input"
+                                           placeholder="Units"
+                                           style="max-width:100px;" />
+                                    @if (i > 0)
+                                    {
+                                        <button type="button" class="btn btn-outline-danger btn-remove-cpt" title="Remove"><i class="bi bi-x-lg"></i></button>
+                                    }
+                                </div>
+                            }
+                        </div>
+                        <datalist id="cptList">
+                            @foreach (var c in lookups.CptCodes) { <option value="@c"></option> }
+                        </datalist>
+                        <button type="button" id="btnAddCpt" class="btn btn-sm btn-outline-primary mt-1">
+                            <i class="bi bi-plus"></i> Add CPT Code
+                        </button>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">Sort Order</label>
+                            <input asp-for="SortOrder" type="number" class="form-control" />
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-bold">Active</label>
+                            <div class="form-check form-switch mt-2">
+                                <input asp-for="IsActive" class="form-check-input" type="checkbox" role="switch" />
+                                <label class="form-check-label">Active</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Default ICD Codes -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Default ICD Codes</label>
+                        <input asp-for="DefaultICDCodes" class="form-control" list="icdList" placeholder="e.g. Z11.59, B34.2" autocomplete="off" />
+                        <datalist id="icdList">
+                            @foreach (var c in lookups.IcdCodes) { <option value="@c"></option> }
+                        </datalist>
+                    </div>
+
+                    <!-- Preview -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Preview Procedure String</label>
+                        <div id="procPreview" class="form-control-plaintext border rounded p-2 bg-light text-muted" style="min-height:40px;">&mdash;</div>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Save</button>
+                        <a asp-action="Index" asp-route-lab="@Model.LabName" class="btn btn-outline-secondary">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+(function () {
+    var cptIdx = @Model.CptEntries.Count;
+    var labName = '@Uri.EscapeDataString(Model.LabName)';
+
+    // Cache all master lookup data loaded from PanelDetails
+    var masterRecords = []; // raw rows: { panelName, testName, pathogenName, cptCode, units }
+
+    document.getElementById('btnAddCpt').addEventListener('click', function () {
+        var row = document.createElement('div');
+        row.className = 'input-group mb-2 cpt-row';
+        row.innerHTML =
+            '<input name="CptEntries[' + cptIdx + '].CptCode" class="form-control cpt-code-input" list="cptList" placeholder="CPT Code" autocomplete="off" />' +
+            '<input name="CptEntries[' + cptIdx + '].Units" type="number" step="0.01" min="0.01" value="1" class="form-control cpt-units-input" placeholder="Units" style="max-width:100px;" />' +
+            '<button type="button" class="btn btn-outline-danger btn-remove-cpt" title="Remove"><i class="bi bi-x-lg"></i></button>';
+        document.getElementById('cptContainer').appendChild(row);
+        cptIdx++;
+        reindex();
+        updatePreview();
+    });
+
+    document.getElementById('cptContainer').addEventListener('click', function (e) {
+        var btn = e.target.closest('.btn-remove-cpt');
+        if (btn) { btn.closest('.cpt-row').remove(); reindex(); updatePreview(); }
+    });
+
+    function reindex() {
+        var rows = document.querySelectorAll('#cptContainer .cpt-row');
+        rows.forEach(function (row, i) {
+            var inputs = row.querySelectorAll('input');
+            inputs[0].name = 'CptEntries[' + i + '].CptCode';
+            inputs[1].name = 'CptEntries[' + i + '].Units';
+        });
+        cptIdx = rows.length;
+    }
+
+    function updatePreview() {
+        var panel = document.querySelector('[name="PanelName"]').value || '';
+        var test = document.querySelector('[name="TestName"]').value || '';
+        var path = document.querySelector('[name="PathogenName"]').value || '';
+        var cptParts = [];
+        document.querySelectorAll('#cptContainer .cpt-row').forEach(function (row) {
+            var code = row.querySelector('.cpt-code-input').value;
+            var units = row.querySelector('.cpt-units-input').value;
+            if (code) cptParts.push(code + '*' + (units || '1'));
+        });
+        var parts = [panel, test, path, cptParts.join(',')].filter(function (x) { return x; });
+        document.getElementById('procPreview').textContent = parts.length > 0 ? parts.join(' | ') : '\u2014';
+    }
+
+    // ?? Helper: rebuild a <datalist> with new option values ??
+    function rebuildDatalist(datalistId, values) {
+        var dl = document.getElementById(datalistId);
+        dl.innerHTML = '';
+        values.forEach(function (v) {
+            var opt = document.createElement('option');
+            opt.value = v;
+            dl.appendChild(opt);
+        });
+    }
+
+    function distinct(arr) {
+        return arr.filter(function (v, i, a) { return v && a.indexOf(v) === i; });
+    }
+
+    // ?? Panel selection ? load master records, cascade dropdowns ??
+    var panelInput = document.querySelector('[name="PanelName"]');
+    var testInput = document.querySelector('[name="TestName"]');
+    var pathogenInput = document.querySelector('[name="PathogenName"]');
+    var knownPanels = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(lookups.PanelNames));
+    var lastLoadedPanel = '';
+
+    panelInput.addEventListener('change', onPanelChange);
+    panelInput.addEventListener('blur', onPanelChange);
+
+    function onPanelChange() {
+        var panel = panelInput.value.trim();
+        if (!panel || panel === lastLoadedPanel) return;
+        if (knownPanels.indexOf(panel) === -1) {
+            // New panel — clear cascaded lists so user can type freely
+            lastLoadedPanel = '';
+            masterRecords = [];
+            rebuildDatalist('testList', []);
+            rebuildDatalist('pathogenList', []);
+            rebuildDatalist('cptList', []);
+            return;
+        }
+        lastLoadedPanel = panel;
+
+        fetch('@Url.Action("PanelDetails", "CodingSetup")?lab=' + labName + '&panelName=' + encodeURIComponent(panel))
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                // Store raw records for cascading
+                masterRecords = data.records || [];
+
+                // Populate Test Name datalist (distinct tests for this panel)
+                var tests = distinct(masterRecords.map(function (r) { return r.testName || ''; }).filter(Boolean));
+                rebuildDatalist('testList', tests);
+
+                // Clear dependent fields so user must pick
+                testInput.value = '';
+                pathogenInput.value = '';
+
+                // Show all pathogens for this panel initially
+                var pathogens = distinct(masterRecords.map(function (r) { return r.pathogenName; }).filter(Boolean));
+                rebuildDatalist('pathogenList', pathogens);
+
+                // Show all CPTs for this panel initially
+                var cpts = distinct(masterRecords.map(function (r) { return r.cptCode; }).filter(Boolean));
+                rebuildDatalist('cptList', cpts);
+
+                // Populate CPT entries
+                if (data.cptEntries && data.cptEntries.length > 0) {
+                    var container = document.getElementById('cptContainer');
+                    container.innerHTML = '';
+                    data.cptEntries.forEach(function (entry, i) {
+                        var row = document.createElement('div');
+                        row.className = 'input-group mb-2 cpt-row';
+                        row.innerHTML =
+                            '<input name="CptEntries[' + i + '].CptCode" value="' + entry.cptCode + '" class="form-control cpt-code-input" list="cptList" placeholder="CPT Code" autocomplete="off" />' +
+                            '<input name="CptEntries[' + i + '].Units" value="' + entry.units + '" type="number" step="0.01" min="0.01" class="form-control cpt-units-input" placeholder="Units" style="max-width:100px;" />' +
+                            (i > 0 ? '<button type="button" class="btn btn-outline-danger btn-remove-cpt" title="Remove"><i class="bi bi-x-lg"></i></button>' : '');
+                        container.appendChild(row);
+                    });
+                    cptIdx = data.cptEntries.length;
+                }
+
+                // Populate ICD Codes
+                if (data.defaultIcdCodes) {
+                    document.querySelector('[name="DefaultICDCodes"]').value = data.defaultIcdCodes;
+                }
+                updatePreview();
+            });
+    }
+
+    // ?? Test Name change ? filter Pathogens & CPTs for selected test ??
+    testInput.addEventListener('change', onTestChange);
+    testInput.addEventListener('input', onTestChange);
+
+    function onTestChange() {
+        if (masterRecords.length === 0) return;
+        var selectedTest = testInput.value.trim();
+
+        // Filter records by selected test (or show all if blank)
+        var filtered = masterRecords;
+        if (selectedTest) {
+            filtered = masterRecords.filter(function (r) {
+                return (r.testName || '').toLowerCase() === selectedTest.toLowerCase();
+            });
+            // If no exact match, don't filter (user may be typing a new value)
+            if (filtered.length === 0) filtered = masterRecords;
+        }
+
+        var pathogens = distinct(filtered.map(function (r) { return r.pathogenName; }).filter(Boolean));
+        rebuildDatalist('pathogenList', pathogens);
+
+        var cpts = distinct(filtered.map(function (r) { return r.cptCode; }).filter(Boolean));
+        rebuildDatalist('cptList', cpts);
+
+        // Clear pathogen if it's no longer valid for the new test
+        if (pathogenInput.value && pathogens.indexOf(pathogenInput.value) === -1) {
+            pathogenInput.value = '';
+        }
+
+        updatePreview();
+    }
+
+    // ?? Pathogen change ? filter CPTs for selected test+pathogen ??
+    pathogenInput.addEventListener('change', onPathogenChange);
+    pathogenInput.addEventListener('input', onPathogenChange);
+
+    function onPathogenChange() {
+        if (masterRecords.length === 0) return;
+        var selectedTest = testInput.value.trim();
+        var selectedPathogen = pathogenInput.value.trim();
+
+        var filtered = masterRecords;
+        if (selectedTest) {
+            var byTest = filtered.filter(function (r) {
+                return (r.testName || '').toLowerCase() === selectedTest.toLowerCase();
+            });
+            if (byTest.length > 0) filtered = byTest;
+        }
+        if (selectedPathogen) {
+            var byPathogen = filtered.filter(function (r) {
+                return (r.pathogenName || '').toLowerCase() === selectedPathogen.toLowerCase();
+            });
+            if (byPathogen.length > 0) filtered = byPathogen;
+        }
+
+        var cpts = distinct(filtered.map(function (r) { return r.cptCode; }).filter(Boolean));
+        rebuildDatalist('cptList', cpts);
+
+        updatePreview();
+    }
+
+    document.getElementById('createForm').addEventListener('input', updatePreview);
+    updatePreview();
+})();
+</script>
+}

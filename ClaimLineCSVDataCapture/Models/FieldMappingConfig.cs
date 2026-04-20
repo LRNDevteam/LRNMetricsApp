@@ -50,4 +50,10 @@ public sealed class FieldMapping
 
     /// <summary>Whether this field's value is included in the RowHash for change detection.</summary>
     public bool IncludeInHash { get; set; } = true;
+
+    /// <summary>
+    /// Optional data type hint (e.g., "integer") used to clean CSV values
+    /// that arrive with spurious decimal suffixes like ".00".
+    /// </summary>
+    public string? DataType { get; set; }
 }

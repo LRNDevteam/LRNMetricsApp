@@ -1,0 +1,48 @@
+@{
+    var labName = ViewBag.LabName as string ?? "";
+}
+
+<div class="row justify-content-center">
+    <div class="col-lg-6">
+        <div class="card shadow-sm">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="bi bi-upload"></i> Bulk Import CSV &mdash; @labName</h5>
+            </div>
+            <div class="card-body">
+                @if (TempData["Error"] is string errorMsg)
+                {
+                    <div class="alert alert-danger">@errorMsg</div>
+                }
+
+                <p class="text-muted">
+                    Upload a CSV file to bulk-import Panel/Pathogen/CPT combinations for <strong>@labName</strong>.
+                    Duplicate rows (same Panel + Test + Pathogen + CPT) are automatically skipped.
+                </p>
+
+                <div class="alert alert-light border">
+                    <strong>Expected CSV format (with header row):</strong>
+                    <code class="d-block mt-1" style="font-size:.85rem">
+                        PanelName,TestName,PathogenName,CPTCode,DefaultUnits,DefaultICDCodes,SortOrder,IsActive
+                    </code>
+                    <small class="text-muted d-block mt-1">
+                        Columns 7 (SortOrder) and 8 (IsActive) are optional. TestName may be empty.
+                    </small>
+                </div>
+
+                <form asp-action="Import" asp-route-lab="@labName" method="post" enctype="multipart/form-data">
+                    @Html.AntiForgeryToken()
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">CSV File <span class="text-danger">*</span></label>
+                        <input type="file" name="csvFile" class="form-control" accept=".csv" required />
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-info text-white"><i class="bi bi-upload"></i> Import</button>
+                        <a asp-action="Index" asp-route-lab="@labName" class="btn btn-outline-secondary">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>

@@ -63,6 +63,8 @@ builder.Services.AddScoped<IDashboardRepository, SqlDashboardRepository>();
 builder.Services.AddScoped<IProductionReportRepository, SqlProductionReportRepository>();
 builder.Services.AddScoped<IClaimLineRepository, SqlClaimLineRepository>();
 builder.Services.AddScoped<ICollectionSummaryRepository, SqlCollectionSummaryRepository>();
+builder.Services.AddScoped<ICodingSetupRepository, SqlCodingSetupRepository>();
+builder.Services.AddSingleton<HelpBotService>();
 
 // Add services to the container.
 builder.Services.AddMemoryCache();
@@ -115,6 +117,8 @@ app.UseRouting();
 app.UseAuthorization();
 
 app.MapStaticAssets();
+
+app.MapControllers();
 
 app.MapControllerRoute(
     name: "default",

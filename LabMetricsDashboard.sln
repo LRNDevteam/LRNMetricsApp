@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.14.37027.9 d17.14
+VisualStudioVersion = 17.14.37027.9
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LabMetricsDashboard", "LabMetricsDashboard\LabMetricsDashboard.csproj", "{28C8D0C9-0B2C-25B1-944F-544054B185DE}"
 EndProject
@@ -14,6 +14,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RcmWatcherService", "RcmWatcherService\RcmWatcherService.csproj", "{5925AD32-6410-77A8-8C2B-339ACD528AA0}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ClaimLineCSVDataCapture", "ClaimLineCSVDataCapture\ClaimLineCSVDataCapture.csproj", "{4BD2A6E2-67E4-444A-B244-F169BC8F8C77}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodingMasterGenerator", "CodingMasterGenerator\CodingMasterGenerator.csproj", "{FC8B7EDE-5518-4358-8664-3D0B51E19DFE}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -45,6 +47,10 @@ Global
 		{4BD2A6E2-67E4-444A-B244-F169BC8F8C77}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{4BD2A6E2-67E4-444A-B244-F169BC8F8C77}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{4BD2A6E2-67E4-444A-B244-F169BC8F8C77}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FC8B7EDE-5518-4358-8664-3D0B51E19DFE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FC8B7EDE-5518-4358-8664-3D0B51E19DFE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FC8B7EDE-5518-4358-8664-3D0B51E19DFE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FC8B7EDE-5518-4358-8664-3D0B51E19DFE}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -107,7 +107,11 @@ public sealed class ClaimLineDbService
         });
 
         var result = cmd.ExecuteScalar();
-        return result is int count ? count : 0;
+        int insertedCount = result is not null and not DBNull
+            ? Convert.ToInt32(result)
+            : 0;
+
+        return insertedCount;
     }
 
     /// <summary>
@@ -175,6 +179,57 @@ public sealed class ClaimLineDbService
 
             dt.Rows.Add(values);
         }
+    }
+
+    /// <summary>
+    /// Strips '.00' decimal suffixes from ClaimID, AccessionNumber, and PatientID
+    /// in the ClaimLevelData table. Returns the number of rows affected.
+    /// </summary>
+    public int CleanClaimLevelDecimalSuffixes()
+    {
+        const string sql = """
+            UPDATE dbo.ClaimLevelData
+            SET    ClaimID          = REPLACE(ClaimID, '.00', ''),
+                   AccessionNumber  = REPLACE(AccessionNumber, '.00', ''),
+                   PatientID        = REPLACE(PatientID, '.00', '')
+            WHERE  ClaimID LIKE '%.00'
+               OR  AccessionNumber LIKE '%.00'
+               OR  PatientID LIKE '%.00'
+            """;
+
+        using var conn = new SqlConnection(_connectionString);
+        conn.Open();
+        using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 600 };
+        return cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Strips '.00' decimal suffixes from ClaimID, AccessionNumber, PatientID,
+    /// CPTCode, Units, and Modifier in the LineLevelData table.
+    /// Returns the number of rows affected.
+    /// </summary>
+    public int CleanLineLevelDecimalSuffixes()
+    {
+        const string sql = """
+            UPDATE dbo.LineLevelData
+            SET    ClaimID          = REPLACE(ClaimID, '.00', ''),
+                   AccessionNumber  = REPLACE(AccessionNumber, '.00', ''),
+                   PatientID        = REPLACE(PatientID, '.00', ''),
+                   CPTCode          = REPLACE(CPTCode, '.00', ''),
+                   Units            = REPLACE(Units, '.00', ''),
+                   Modifier         = REPLACE(Modifier, '.00', '')
+            WHERE  ClaimID LIKE '%.00'
+               OR  AccessionNumber LIKE '%.00'
+               OR  PatientID LIKE '%.00'
+               OR  CPTCode LIKE '%.00'
+               OR  Units LIKE '%.00'
+               OR  Modifier LIKE '%.00'
+            """;
+
+        using var conn = new SqlConnection(_connectionString);
+        conn.Open();
+        using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 600 };
+        return cmd.ExecuteNonQuery();
     }
 
     /// <summary>

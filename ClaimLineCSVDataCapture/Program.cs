@@ -35,7 +35,7 @@ var workingFolder = cfg["AppSettings:WorkingFolder"]
 Directory.CreateDirectory(workingFolder);
 
 // ── Logger ────────────────────────────────────────────────────────────────────
-using var log = new AppLogger(cfg);
+using var log = new ClaimLineCSVDataCapture.Services.AppLogger(cfg);
 log.Header("ClaimLineCSVDataCapture — Claim/Line Level CSV Capture");
 log.Info($"Log file          : {log.LogFilePath}");
 log.Info($"Lab config folder : {labConfigFolder}");
@@ -215,10 +215,30 @@ foreach (var lab in labConfigs)
         labsFailed++;
     }
 
+    // ── Clean decimal suffixes from integer columns after both inserts ────────
     if (anyProcessed)
+    {
+        try
+        {
+            log.Info($"  [Cleanup] Running decimal suffix cleanup for ClaimLevelData…");
+            var claimCleaned = db.CleanClaimLevelDecimalSuffixes();
+            log.Info($"  [Cleanup] ClaimLevelData — {claimCleaned} row(s) updated.");
+
+            log.Info($"  [Cleanup] Running decimal suffix cleanup for LineLevelData…");
+            var lineCleaned = db.CleanLineLevelDecimalSuffixes();
+            log.Info($"  [Cleanup] LineLevelData — {lineCleaned} row(s) updated.");
+        }
+        catch (Exception ex)
+        {
+            log.Error($"  [Cleanup] Decimal suffix cleanup failed: {ex.Message}");
+        }
+
         labsProcessed++;
+    }
     else
+    {
         labsSkipped++;
+    }
 
     log.Blank();
 }
