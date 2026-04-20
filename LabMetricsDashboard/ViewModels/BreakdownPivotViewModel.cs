@@ -4,6 +4,10 @@ public sealed class BreakdownPivotViewModel
 {
     public string HeaderTitle { get; set; } = string.Empty;
     public string SectionTitle { get; set; } = string.Empty;
+    public string GrandTotalTitle { get; set; } = "Grand Total";
+    public decimal CoveragePercentage { get; set; }
+    public int TopPayerCount { get; set; }
+    public List<BreakdownPivotColumnGroup> ColumnGroups { get; set; } = new();
     public List<BreakdownPivotPeriod> Periods { get; set; } = new();
     public List<BreakdownPivotRow> Rows { get; set; } = new();
     public List<BreakdownPivotCell> TotalsByPeriod { get; set; } = new();
@@ -12,12 +16,21 @@ public sealed class BreakdownPivotViewModel
     public bool HasData => Periods.Count > 0 && Rows.Count > 0;
 }
 
+public sealed class BreakdownPivotColumnGroup
+{
+    public string Label { get; set; } = string.Empty;
+    public int ColumnSpan { get; set; }
+}
+
 public sealed class BreakdownPivotPeriod
 {
     public string Key { get; set; } = string.Empty;
     public string Label { get; set; } = string.Empty;
     public DateTime StartDate { get; set; }
     public DateTime EndDate { get; set; }
+    public int Year { get; set; }
+    public int? Month { get; set; }
+    public bool IsYearTotal { get; set; }
 }
 
 public sealed class BreakdownPivotRow

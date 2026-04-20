@@ -8,6 +8,7 @@ namespace LabMetricsDashboard.Services;
 
 public class SqlDenialRecordRepository : IDenialRecordRepository
 {
+	private static readonly HashSet<int> ClaimLevelInsuranceBalanceLabIds = new([18, 19, 20]);
 	private static readonly TimeSpan LabsCacheDuration = TimeSpan.FromMinutes(15);
 	private static readonly TimeSpan TaskBoardCacheDuration = TimeSpan.FromMinutes(5);
 	private static readonly TimeSpan CurrentRunCacheDuration = TimeSpan.FromMinutes(5);
@@ -213,8 +214,75 @@ ORDER BY {OrderBy(cols, "DueDate", "TaskID")};";
 			return Array.Empty<DenialBreakdownSourceRecord>();
 		}
 
-		var where = BuildLineItemWhere(cols, filters, currentRunId);
-		var sql = $@"
+		var useSpecialLabLogic = await ShouldUseClaimLevelInsuranceBalanceAsync(connection, labId, cancellationToken);
+		if (useSpecialLabLogic && await TableExistsAsync(connection, "dbo", "ClaimLevelData", cancellationToken))
+		{
+			var claimLevelCols = await GetTableColumnsAsync(connection, "dbo", "ClaimLevelData", cancellationToken);
+
+			var where = BuildSpecialLabBreakdownWhere(cols, claimLevelCols, filters);
+
+			var payerSelect = claimLevelCols.Contains("PayerName")
+				? "LTRIM(RTRIM(ISNULL(cld.[PayerName], '')))"
+				: claimLevelCols.Contains("PayerName_Raw")
+					? "LTRIM(RTRIM(ISNULL(cld.[PayerName_Raw], '')))"
+					: "''";
+
+			var denialCodeSelect = cols.Contains("DenialCodeNormalized")
+				? "LTRIM(RTRIM(ISNULL(dli.[DenialCodeNormalized], '')))"
+				: cols.Contains("DenialCode")
+					? "LTRIM(RTRIM(ISNULL(dli.[DenialCode], '')))"
+					: "''";
+
+			var denialDescriptionSelect = cols.Contains("DenialDescription")
+				? "LTRIM(RTRIM(ISNULL(dli.[DenialDescription], '')))"
+				: "''";
+
+			var sql = $@"
+SELECT
+    TRY_CONVERT(datetime, dli.[DenialDate]) AS [DenialDate],
+    LTRIM(RTRIM(ISNULL(cld.[ClaimID], ''))) AS [VisitNumber],
+    TRY_CONVERT(decimal(18, 4), cld.[InsuranceBalance]) AS [InsuranceBalance],
+    CAST(0 AS decimal(18, 4)) AS [TotalBalance],
+    {payerSelect} AS [PayerName],
+    {payerSelect} AS [PayerNameNormalized],
+    {denialCodeSelect} AS [DenialCodeNormalized],
+    {denialDescriptionSelect} AS [DenialDescription]
+FROM dbo.ClaimLevelData cld
+INNER JOIN dbo.DenialLineItem dli
+    ON dli.[VisitNumber] = cld.[ClaimID]
+WHERE {where};";
+
+			await using var command = new SqlCommand(sql, connection)
+			{
+				CommandType = CommandType.Text,
+				CommandTimeout = 180
+			};
+
+			AddSpecialLabBreakdownParameters(command, filters);
+
+			var items = new List<DenialBreakdownSourceRecord>();
+			await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+			while (await reader.ReadAsync(cancellationToken))
+			{
+				items.Add(new DenialBreakdownSourceRecord
+				{
+					DenialDate = GetNullableDateTime(reader, "DenialDate"),
+					VisitNumber = GetString(reader, "VisitNumber"),
+					InsuranceBalance = GetNullableDecimal(reader, "InsuranceBalance") ?? 0m,
+					TotalBalance = GetNullableDecimal(reader, "TotalBalance") ?? 0m,
+					PayerName = GetString(reader, "PayerName"),
+					PayerNameNormalized = GetString(reader, "PayerNameNormalized"),
+					DenialCodeNormalized = GetString(reader, "DenialCodeNormalized"),
+					DenialDescription = GetString(reader, "DenialDescription")
+				});
+			}
+
+			return items;
+		}
+
+		var whereLegacy = BuildLineItemWhere(cols, filters, currentRunId);
+
+		var sqlLegacy = $@"
 SELECT
     {SelectDate(cols, "DenialDate")},
     {SelectString(cols, "VisitNumber")},
@@ -224,33 +292,37 @@ SELECT
     {SelectString(cols, "PayerNameNormalized")},
     {SelectString(cols, "DenialCodeNormalized")},
     {SelectString(cols, "DenialDescription")}
-FROM dbo.DenialLineItem
-WHERE {where};";
+FROM dbo.DenialLineItem dli
+WHERE {whereLegacy};";
 
-		await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 180 };
-		AddScopeParameters(command, cols, labId, currentRunId);
-		AddLineItemFilterParameters(command, filters);
-
-		var items = new List<DenialBreakdownSourceRecord>();
-		await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-		while (await reader.ReadAsync(cancellationToken))
+		await using var legacyCommand = new SqlCommand(sqlLegacy, connection)
 		{
-			items.Add(new DenialBreakdownSourceRecord
+			CommandType = CommandType.Text,
+			CommandTimeout = 180
+		};
+
+		AddScopeParameters(legacyCommand, cols, labId, currentRunId);
+		AddLineItemFilterParameters(legacyCommand, filters);
+
+		var legacyItems = new List<DenialBreakdownSourceRecord>();
+		await using var legacyReader = await legacyCommand.ExecuteReaderAsync(cancellationToken);
+		while (await legacyReader.ReadAsync(cancellationToken))
+		{
+			legacyItems.Add(new DenialBreakdownSourceRecord
 			{
-				DenialDate = GetNullableDateTime(reader, "DenialDate"),
-				VisitNumber = GetString(reader, "VisitNumber"),
-				InsuranceBalance = GetNullableDecimal(reader, "InsuranceBalance") ?? 0m,
-				TotalBalance = GetNullableDecimal(reader, "TotalBalance") ?? 0m,
-				PayerName = GetString(reader, "PayerName"),
-				PayerNameNormalized = GetString(reader, "PayerNameNormalized"),
-				DenialCodeNormalized = GetString(reader, "DenialCodeNormalized"),
-				DenialDescription = GetString(reader, "DenialDescription")
+				DenialDate = GetNullableDateTime(legacyReader, "DenialDate"),
+				VisitNumber = GetString(legacyReader, "VisitNumber"),
+				InsuranceBalance = GetNullableDecimal(legacyReader, "InsuranceBalance") ?? 0m,
+				TotalBalance = GetNullableDecimal(legacyReader, "TotalBalance") ?? 0m,
+				PayerName = GetString(legacyReader, "PayerName"),
+				PayerNameNormalized = GetString(legacyReader, "PayerNameNormalized"),
+				DenialCodeNormalized = GetString(legacyReader, "DenialCodeNormalized"),
+				DenialDescription = GetString(legacyReader, "DenialDescription")
 			});
 		}
 
-		return items;
+		return legacyItems;
 	}
-
 	public async Task<int> GetLineItemCountByLabAsync(int labId, DenialDashboardFilters filters, CancellationToken cancellationToken = default)
 	{
 		var currentRunId = await GetCurrentRunIdAsync(labId, cancellationToken);
@@ -566,8 +638,13 @@ SELECT MatchedRows = (SELECT COUNT(1) FROM #MatchedRows);";
 		if (!await TableExistsAsync(connection, "dbo", "DenialLineItem", cancellationToken)) return Array.Empty<DenialLineItemRecord>();
 
 		var cols = await GetTableColumnsAsync(connection, "dbo", "DenialLineItem", cancellationToken);
+		var useClaimLevelInsuranceBalance = await ShouldUseClaimLevelInsuranceBalanceAsync(connection, labId, cancellationToken);
+		var claimLevelCols = useClaimLevelInsuranceBalance
+			? await GetTableColumnsAsync(connection, "dbo", "ClaimLevelData", cancellationToken)
+			: new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var where = BuildLineItemWhere(cols, filters, currentRunId);
 		var pagingSql = withPaging ? " OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY" : string.Empty;
+		var claimLevelApplySql = BuildClaimLevelInsuranceBalanceApplySql(claimLevelCols);
 
 		var sql = $@"
 SELECT
@@ -607,7 +684,7 @@ SELECT
     {SelectDecimal(cols, "InsuranceAdjustment", 4)},
     {SelectDecimal(cols, "PatientPaidAmount", 4)},
     {SelectDecimal(cols, "PatientAdjustment", 4)},
-    {SelectDecimal(cols, "InsuranceBalance", 4)},
+    {SelectInsuranceBalance(cols, claimLevelCols, useClaimLevelInsuranceBalance, 4)},
     {SelectDecimal(cols, "PatientBalance", 4)},
     {SelectDecimal(cols, "TotalBalance", 4)},
     {SelectDecimal(cols, "MedicareFee", 4)},
@@ -678,7 +755,8 @@ SELECT
     {SelectInt(cols, "DaystoPost")},
     {SelectString(cols, "RunId")},
     {SelectDate(cols, "CreatedOn")}
-FROM dbo.DenialLineItem
+FROM dbo.DenialLineItem dli
+{claimLevelApplySql}
 WHERE {where}
 ORDER BY {OrderBy(cols, "DateOfService", "AccessionNo")}{pagingSql};";
 
@@ -836,6 +914,66 @@ ORDER BY {OrderBy(cols, "DateOfService", "AccessionNo")}{pagingSql};";
 			?? throw new InvalidOperationException($"Active lab '{labId}' was not found in dbo.LRNMetricsLab.");
 	}
 
+	private static async Task<bool> ShouldUseClaimLevelInsuranceBalanceAsync(SqlConnection connection, int labId, CancellationToken cancellationToken)
+	{
+		if (!ClaimLevelInsuranceBalanceLabIds.Contains(labId))
+		{
+			return false;
+		}
+
+		const string sql = @"
+SELECT CASE WHEN EXISTS (
+    SELECT 1
+    FROM INFORMATION_SCHEMA.TABLES
+    WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'ClaimLevelData'
+) THEN 1 ELSE 0 END;";
+
+		await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 60 };
+		var result = await command.ExecuteScalarAsync(cancellationToken);
+		return result != null && result != DBNull.Value && Convert.ToInt32(result) == 1;
+	}
+
+	private static string BuildClaimLevelInsuranceBalanceApplySql(HashSet<string> claimLevelCols)
+	{
+		if (!claimLevelCols.Contains("ClaimID") || !claimLevelCols.Contains("InsuranceBalance"))
+		{
+			return string.Empty;
+		}
+
+		var orderBy = claimLevelCols.Contains("InsertedDateTime")
+			? "ORDER BY TRY_CONVERT(datetime, cld.[InsertedDateTime]) DESC, TRY_CONVERT(int, cld.[RecordId]) DESC"
+			: claimLevelCols.Contains("RecordId")
+				? "ORDER BY TRY_CONVERT(int, cld.[RecordId]) DESC"
+				: string.Empty;
+
+		return $@"
+OUTER APPLY
+(
+    SELECT TOP (1)
+        TRY_CONVERT(decimal(18, 4), cld.[InsuranceBalance]) AS OverrideInsuranceBalance
+    FROM dbo.ClaimLevelData cld WITH (INDEX(IX_ClaimLevelData_ClaimID_Latest))
+    WHERE cld.[ClaimID] = dli.[VisitNumber]
+      AND cld.[ClaimID] IS NOT NULL
+      AND cld.[InsuranceBalance] IS NOT NULL
+      AND cld.[InsuranceBalance] <> ''
+    {orderBy}
+) claimBal";
+	}
+
+	private static string SelectInsuranceBalance(HashSet<string> cols, HashSet<string> claimLevelCols, bool useClaimLevelInsuranceBalance, int scale)
+	{
+		if (useClaimLevelInsuranceBalance && claimLevelCols.Contains("ClaimID") && claimLevelCols.Contains("InsuranceBalance"))
+		{
+			var fallback = cols.Contains("InsuranceBalance")
+				? $"TRY_CONVERT(decimal(18, {scale}), [InsuranceBalance])"
+				: $"CAST(0 AS decimal(18, {scale}))";
+
+			return $"COALESCE(claimBal.OverrideInsuranceBalance, {fallback}) AS [InsuranceBalance]";
+		}
+
+		return SelectDecimal(cols, "InsuranceBalance", scale);
+	}
+
 	private static async Task<IReadOnlyList<string>> GetAutocompleteValuesAsync(
 		SqlConnection connection,
 		int labId,
@@ -977,8 +1115,6 @@ WHERE TABLE_SCHEMA = @Schema AND TABLE_NAME = @Table;";
 	private static string BuildLineItemWhere(HashSet<string> cols, DenialDashboardFilters filters, string? currentRunId)
 	{
 		var where = new List<string>();
-		if (cols.Contains("LabId")) where.Add("[LabId] = @LabId");
-		if (!string.IsNullOrWhiteSpace(currentRunId) && cols.Contains("RunId")) where.Add("[RunId] = @RunId");
 
 		AddExact(where, cols, "TaskStatus", filters.Status, "@Status");
 		AddExactNormalized(where, cols, "Priority", filters.Priority, "@Priority");
@@ -1054,6 +1190,74 @@ WHERE TABLE_SCHEMA = @Schema AND TABLE_NAME = @Table;";
 		if (filters.FirstBilledDateTo.HasValue) command.Parameters.AddWithValue("@FirstBilledDateTo", filters.FirstBilledDateTo.Value.Date);
 		if (filters.DateOfServiceFrom.HasValue) command.Parameters.AddWithValue("@DateOfServiceFrom", filters.DateOfServiceFrom.Value.Date);
 		if (filters.DateOfServiceTo.HasValue) command.Parameters.AddWithValue("@DateOfServiceTo", filters.DateOfServiceTo.Value.Date);
+	}
+
+
+	private static string BuildSpecialLabBreakdownWhere(HashSet<string> dliCols, HashSet<string> cldCols, DenialDashboardFilters filters)
+	{
+		var denialCodeExpression = dliCols.Contains("DenialCode")
+			? "ISNULL(LTRIM(RTRIM(CONVERT(nvarchar(max), dli.[DenialCode]))), '') <> ''"
+			: dliCols.Contains("DenialCodeNormalized")
+				? "ISNULL(LTRIM(RTRIM(CONVERT(nvarchar(max), dli.[DenialCodeNormalized]))), '') <> ''"
+				: "1 = 1";
+
+		var where = new List<string>
+		{
+			"TRY_CONVERT(datetime, dli.[DenialDate]) IS NOT NULL",
+			denialCodeExpression,
+			"TRY_CONVERT(decimal(18, 4), cld.[InsuranceBalance]) > 0"
+		};
+
+		AddStartsWithClamped(where, cldCols, "PayerName", filters.PayerName, "@PayerName", alias: "cld");
+		if (!cldCols.Contains("PayerName"))
+		{
+			AddStartsWithClamped(where, cldCols, "PayerName_Raw", filters.PayerName, "@PayerNameRaw", alias: "cld");
+		}
+		AddStartsWithClamped(where, cldCols, "PayerType", filters.PayerType, "@PayerType", alias: "cld");
+		AddStartsWithClamped(where, cldCols, "Panelname", filters.PanelName, "@PanelName", alias: "cld");
+		AddStartsWithClamped(where, cldCols, "ReferringProvider", filters.ReferringProvider, "@ReferringProvider", alias: "cld");
+		AddStartsWithClamped(where, cldCols, "ClinicName", filters.ClinicName, "@ClinicName", alias: "cld");
+		AddStartsWithClamped(where, cldCols, "SalesRepname", filters.SalesRepname, "@SalesRepname", alias: "cld");
+		AddDateRangeClamped(where, cldCols, "FirstBilledDate", filters.FirstBilledDateFrom, filters.FirstBilledDateTo, "@FirstBilledDateFrom", "@FirstBilledDateTo", alias: "cld");
+		AddDateRangeClamped(where, cldCols, "DateofService", filters.DateOfServiceFrom, filters.DateOfServiceTo, "@DateOfServiceFrom", "@DateOfServiceTo", alias: "cld");
+		AddDateRangeClamped(where, dliCols, "DenialDate", filters.DenialDateFrom, filters.DenialDateTo, "@DenialDateFrom", "@DenialDateTo", alias: "dli");
+
+		return string.Join(" AND ", where);
+	}
+
+	private static void AddSpecialLabBreakdownParameters(SqlCommand command, DenialDashboardFilters filters)
+	{
+		if (!string.IsNullOrWhiteSpace(filters.PayerName))
+		{
+			command.Parameters.AddWithValue("@PayerName", $"{filters.PayerName.Trim()}%");
+			command.Parameters.AddWithValue("@PayerNameRaw", $"{filters.PayerName.Trim()}%");
+		}
+		if (!string.IsNullOrWhiteSpace(filters.PayerType)) command.Parameters.AddWithValue("@PayerType", $"{filters.PayerType.Trim()}%");
+		if (!string.IsNullOrWhiteSpace(filters.PanelName)) command.Parameters.AddWithValue("@PanelName", $"{filters.PanelName.Trim()}%");
+		if (!string.IsNullOrWhiteSpace(filters.ReferringProvider)) command.Parameters.AddWithValue("@ReferringProvider", $"{filters.ReferringProvider.Trim()}%");
+		if (!string.IsNullOrWhiteSpace(filters.ClinicName)) command.Parameters.AddWithValue("@ClinicName", $"{filters.ClinicName.Trim()}%");
+		if (!string.IsNullOrWhiteSpace(filters.SalesRepname)) command.Parameters.AddWithValue("@SalesRepname", $"{filters.SalesRepname.Trim()}%");
+		if (filters.FirstBilledDateFrom.HasValue) command.Parameters.AddWithValue("@FirstBilledDateFrom", filters.FirstBilledDateFrom.Value.Date);
+		if (filters.FirstBilledDateTo.HasValue) command.Parameters.AddWithValue("@FirstBilledDateTo", filters.FirstBilledDateTo.Value.Date);
+		if (filters.DateOfServiceFrom.HasValue) command.Parameters.AddWithValue("@DateOfServiceFrom", filters.DateOfServiceFrom.Value.Date);
+		if (filters.DateOfServiceTo.HasValue) command.Parameters.AddWithValue("@DateOfServiceTo", filters.DateOfServiceTo.Value.Date);
+		if (filters.DenialDateFrom.HasValue) command.Parameters.AddWithValue("@DenialDateFrom", filters.DenialDateFrom.Value.Date);
+		if (filters.DenialDateTo.HasValue) command.Parameters.AddWithValue("@DenialDateTo", filters.DenialDateTo.Value.Date);
+	}
+
+	private static void AddStartsWithClamped(List<string> where, HashSet<string> cols, string column, string? value, string parameter, string alias)
+	{
+		if (cols.Contains(column) && !string.IsNullOrWhiteSpace(value))
+		{
+			where.Add($"[{alias}].[{column}] LIKE {parameter}");
+		}
+	}
+
+	private static void AddDateRangeClamped(List<string> where, HashSet<string> cols, string column, DateTime? from, DateTime? to, string fromParameter, string toParameter, string alias)
+	{
+		if (!cols.Contains(column)) return;
+		if (from.HasValue) where.Add($"TRY_CONVERT(date, [{alias}].[{column}]) >= {fromParameter}");
+		if (to.HasValue) where.Add($"TRY_CONVERT(date, [{alias}].[{column}]) <= {toParameter}");
 	}
 
 	private static IReadOnlyList<DenialInsightRecord> BuildInsights(IEnumerable<DenialRecord> records)

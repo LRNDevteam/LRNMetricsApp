@@ -65,3 +65,35 @@ BEGIN
     END;
 END;
 GO
+
+
+IF OBJECT_ID(N'dbo.ClaimLevelData', N'U') IS NOT NULL
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_ClaimLevelData_ClaimID_Latest' AND object_id = OBJECT_ID(N'dbo.ClaimLevelData'))
+    BEGIN
+        CREATE NONCLUSTERED INDEX IX_ClaimLevelData_ClaimID_Latest
+        ON dbo.ClaimLevelData (ClaimID, InsertedDateTime DESC, RecordId DESC)
+        INCLUDE (InsuranceBalance)
+        WHERE ClaimID IS NOT NULL AND InsuranceBalance IS NOT NULL;
+    END;
+END;
+GO
+
+/* Optional indexes when you want better denial performance without depending on RunId. */
+IF OBJECT_ID(N'dbo.DenialLineItem', N'U') IS NOT NULL
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_DenialLineItem_FilterDates_NoRun' AND object_id = OBJECT_ID(N'dbo.DenialLineItem'))
+    BEGIN
+        CREATE NONCLUSTERED INDEX IX_DenialLineItem_FilterDates_NoRun
+        ON dbo.DenialLineItem (FirstBilledDate, DateOfService)
+        INCLUDE (VisitNumber, AccessionNo, DenialDate, TaskStatus, Priority, ActionCategory, DenialClassification, PayerName, PayerType, PanelName, ReferringProvider, ClinicName, SalesRepname, InsuranceBalance, TotalBalance);
+    END;
+
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_DenialLineItem_VisitNumber_DenialDate' AND object_id = OBJECT_ID(N'dbo.DenialLineItem'))
+    BEGIN
+        CREATE NONCLUSTERED INDEX IX_DenialLineItem_VisitNumber_DenialDate
+        ON dbo.DenialLineItem (VisitNumber, DenialDate)
+        INCLUDE (InsuranceBalance, TotalBalance, PayerName, DenialCodeNormalized, DenialDescription, DateOfService, FirstBilledDate, TaskStatus, Priority, ActionCategory, DenialClassification);
+    END;
+END;
+GO
