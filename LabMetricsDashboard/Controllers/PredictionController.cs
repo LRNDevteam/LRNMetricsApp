@@ -56,6 +56,19 @@ public class PredictionController : Controller
         var labConfig = !string.IsNullOrEmpty(selectedLab) && _labSettings.Labs.TryGetValue(selectedLab, out var cfg)
             ? cfg : null;
 
+        // Check if Prediction feature is enabled for this lab
+        if (labConfig?.EnablePrediction == false)
+        {
+            return View(new PredictionAnalysisViewModel
+            {
+                AvailableLabs        = availableLabs,
+                SelectedLab          = selectedLab,
+                PredictionAvailable  = false,
+                ErrorMessage         = $"Prediction Analysis feature is not enabled for {selectedLab}. Please contact your administrator.",
+                CurrentWeekStartDate = DateOnly.FromDateTime(DateTime.Today),
+            });
+        }
+
         // If DBEnabled is false return immediately with a "not available" view model
         if (labConfig?.DBEnabled == false)
         {
@@ -296,6 +309,18 @@ public class PredictionController : Controller
 
         var labConfig = !string.IsNullOrEmpty(selectedLab) && _labSettings.Labs.TryGetValue(selectedLab, out var cfg)
             ? cfg : null;
+
+        // Check if Forecasting feature is enabled for this lab
+        if (labConfig?.EnableForcast == false)
+        {
+            return View(new ForecastingSummaryViewModel
+            {
+                AvailableLabs       = availableLabs,
+                SelectedLab         = selectedLab,
+                PredictionAvailable = false,
+                ErrorMessage        = $"Forecasting Summary feature is not enabled for {selectedLab}. Please contact your administrator.",
+            });
+        }
 
         // If DBEnabled is false return immediately with a "not available" view model
         if (labConfig?.DBEnabled == false)

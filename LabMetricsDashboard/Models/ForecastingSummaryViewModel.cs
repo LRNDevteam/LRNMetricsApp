@@ -13,6 +13,9 @@ public sealed class ForecastingSummaryViewModel
     /// <summary>False when the selected lab has DBEnabled=false — shows a "not available" banner.</summary>
     public bool PredictionAvailable { get; init; } = true;
 
+    /// <summary>Error message to display when feature is disabled or unavailable.</summary>
+    public string? ErrorMessage { get; init; }
+
     /// <summary>Monday of the current week — the global filter cutoff date.</summary>
     public DateOnly CurrentWeekStartDate { get; init; }
 

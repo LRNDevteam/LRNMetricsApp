@@ -1000,7 +1000,27 @@ public class DashboardController : Controller
         if (string.IsNullOrWhiteSpace(selectedLab))
             return View(new ClinicSummaryViewModel { AvailableLabs = availableLabs });
 
-        if (!_labSettings.Labs.TryGetValue(selectedLab, out var config) || !config.LineClaimEnable)
+        if (!_labSettings.Labs.TryGetValue(selectedLab, out var config))
+        {
+            return View(new ClinicSummaryViewModel
+            {
+                AvailableLabs = availableLabs,
+                SelectedLab   = selectedLab,
+                ErrorMessage  = $"Configuration not found for {selectedLab}.",
+            });
+        }
+
+        if (!config.EnableClinicsummary)
+        {
+            return View(new ClinicSummaryViewModel
+            {
+                AvailableLabs = availableLabs,
+                SelectedLab   = selectedLab,
+                ErrorMessage  = $"Clinic Summary feature is not enabled for {selectedLab}. Please contact your administrator.",
+            });
+        }
+
+        if (!config.LineClaimEnable)
         {
             return View(new ClinicSummaryViewModel
             {
@@ -1449,7 +1469,27 @@ public class DashboardController : Controller
         if (string.IsNullOrWhiteSpace(selectedLab))
             return View(new SalesRepSummaryViewModel { AvailableLabs = availableLabs });
 
-        if (!_labSettings.Labs.TryGetValue(selectedLab, out var config) || !config.LineClaimEnable)
+        if (!_labSettings.Labs.TryGetValue(selectedLab, out var config))
+        {
+            return View(new SalesRepSummaryViewModel
+            {
+                AvailableLabs = availableLabs,
+                SelectedLab   = selectedLab,
+                ErrorMessage  = $"Configuration not found for {selectedLab}.",
+            });
+        }
+
+        if (!config.EnableSalesRepsummary)
+        {
+            return View(new SalesRepSummaryViewModel
+            {
+                AvailableLabs = availableLabs,
+                SelectedLab   = selectedLab,
+                ErrorMessage  = $"Sales Rep Summary feature is not enabled for {selectedLab}. Please contact your administrator.",
+            });
+        }
+
+        if (!config.LineClaimEnable)
         {
             return View(new SalesRepSummaryViewModel
             {
@@ -1935,7 +1975,27 @@ public class DashboardController : Controller
         if (string.IsNullOrWhiteSpace(selectedLab))
             return View(new ProductionReportViewModel { AvailableLabs = availableLabs });
 
-        if (!_labSettings.Labs.TryGetValue(selectedLab, out var config) || !config.LineClaimEnable)
+        if (!_labSettings.Labs.TryGetValue(selectedLab, out var config))
+        {
+            return View(new ProductionReportViewModel
+            {
+                AvailableLabs = availableLabs,
+                SelectedLab   = selectedLab,
+                ErrorMessage  = $"Configuration not found for {selectedLab}.",
+            });
+        }
+
+        if (!config.EnableProductionReport)
+        {
+            return View(new ProductionReportViewModel
+            {
+                AvailableLabs = availableLabs,
+                SelectedLab   = selectedLab,
+                ErrorMessage  = $"Production Report feature is not enabled for {selectedLab}. Please contact your administrator.",
+            });
+        }
+
+        if (!config.LineClaimEnable)
         {
             return View(new ProductionReportViewModel
             {
@@ -1959,6 +2019,15 @@ public class DashboardController : Controller
         DateOnly.TryParse(filterFirstBillFrom, out var fbFrom);
         DateOnly.TryParse(filterFirstBillTo, out var fbTo);
 
+        // Resolve the per-lab Production Summary rule (e.g. "Rule1" => use ChargeEnteredDate columns).
+        var productionRule = config.ProductionSummary?.Rule;
+        // Per-lab Weekly Claim Volume rule. Falls back to the monthly Rule when not configured.
+        var weekRule = !string.IsNullOrWhiteSpace(config.ProductionSummary?.WeekRule)
+            ? config.ProductionSummary!.WeekRule
+            : productionRule;
+        // Per-lab week boundary (e.g. "Mon to Sun", "Thu to Wed"). Null/empty => Monday-to-Sunday.
+        var weekRange = config.ProductionSummary?.WeekRange;
+
         try
         {
             var monthlyTask = _productionReportRepo.GetMonthlyClaimVolumeAsync(
@@ -1967,6 +2036,7 @@ public class DashboardController : Controller
                 filterPanelNames.Count > 0 ? filterPanelNames : null,
                 fbFrom != default ? fbFrom : null,
                 fbTo != default ? fbTo : null,
+                productionRule,
                 ct);
 
             var weeklyTask = _productionReportRepo.GetWeeklyClaimVolumeAsync(
@@ -1975,6 +2045,8 @@ public class DashboardController : Controller
                 filterPanelNames.Count > 0 ? filterPanelNames : null,
                 fbFrom != default ? fbFrom : null,
                 fbTo != default ? fbTo : null,
+                weekRule,
+                weekRange,
                 ct);
 
             var codingTask = _productionReportRepo.GetCodingAsync(
@@ -2019,6 +2091,9 @@ public class DashboardController : Controller
             {
                 AvailableLabs      = availableLabs,
                 SelectedLab        = selectedLab,
+                ProductionSummaryRule = productionRule,
+                ProductionSummaryWeekRule = weekRule,
+                ProductionSummaryWeekRange = weekRange,
                 FilterPayerNames   = filterPayerNames,
                 FilterPanelNames   = filterPanelNames,
                 FilterFirstBillFrom = filterFirstBillFrom,
@@ -2092,10 +2167,11 @@ public class DashboardController : Controller
 
         if (string.IsNullOrWhiteSpace(selectedLab)
             || !_labSettings.Labs.TryGetValue(selectedLab, out var config)
+            || !config.EnableProductionReport
             || !config.LineClaimEnable
             || string.IsNullOrWhiteSpace(config.DbConnectionString))
         {
-            TempData["ExportError"] = "Export is not available for the selected lab.";
+            TempData["ExportError"] = "Production Report export is not available for the selected lab.";
             return RedirectToAction(nameof(ProductionReport), new { lab });
         }
 
@@ -2103,6 +2179,15 @@ public class DashboardController : Controller
 
         DateOnly.TryParse(filterFirstBillFrom, out var fbFrom);
         DateOnly.TryParse(filterFirstBillTo, out var fbTo);
+
+        // Resolve the per-lab Production Summary rule (e.g. "Rule1" => use ChargeEnteredDate columns).
+        var productionRule = config.ProductionSummary?.Rule;
+        // Per-lab Weekly Claim Volume rule. Falls back to the monthly Rule when not configured.
+        var weekRule = !string.IsNullOrWhiteSpace(config.ProductionSummary?.WeekRule)
+            ? config.ProductionSummary!.WeekRule
+            : productionRule;
+        // Per-lab week boundary (e.g. "Mon to Sun", "Thu to Wed"). Null/empty => Monday-to-Sunday.
+        var weekRange = config.ProductionSummary?.WeekRange;
 
         try
         {
@@ -2112,6 +2197,7 @@ public class DashboardController : Controller
                 filterPanelNames.Count > 0 ? filterPanelNames : null,
                 fbFrom != default ? fbFrom : null,
                 fbTo != default ? fbTo : null,
+                productionRule,
                 ct);
 
             var weeklyTask = _productionReportRepo.GetWeeklyClaimVolumeAsync(
@@ -2120,6 +2206,8 @@ public class DashboardController : Controller
                 filterPanelNames.Count > 0 ? filterPanelNames : null,
                 fbFrom != default ? fbFrom : null,
                 fbTo != default ? fbTo : null,
+                weekRule,
+                weekRange,
                 ct);
 
             var codingTask = _productionReportRepo.GetCodingAsync(

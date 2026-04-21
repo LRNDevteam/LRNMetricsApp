@@ -52,7 +52,27 @@ public class CollectionSummaryController : Controller
         if (string.IsNullOrWhiteSpace(selectedLab))
             return View(new CollectionSummaryViewModel { AvailableLabs = availableLabs });
 
-        if (!_labSettings.Labs.TryGetValue(selectedLab, out var config) || !config.LineClaimEnable)
+        if (!_labSettings.Labs.TryGetValue(selectedLab, out var config))
+        {
+            return View(new CollectionSummaryViewModel
+            {
+                AvailableLabs = availableLabs,
+                SelectedLab = selectedLab,
+                ErrorMessage = $"Configuration not found for {selectedLab}.",
+            });
+        }
+
+        if (!config.EnableCollectionReport)
+        {
+            return View(new CollectionSummaryViewModel
+            {
+                AvailableLabs = availableLabs,
+                SelectedLab = selectedLab,
+                ErrorMessage = $"Collection Summary feature is not enabled for {selectedLab}. Please contact your administrator.",
+            });
+        }
+
+        if (!config.LineClaimEnable)
         {
             return View(new CollectionSummaryViewModel
             {
@@ -431,7 +451,11 @@ public class CollectionSummaryController : Controller
             using var workbook = CollectionSummaryExcelExportBuilder.CreateWorkbook(
                 vm, claimRows, lineRows, selectedLab, activeFilters);
 
-            await using var stream = new MemoryStream();
+            // Free raw data lists early to reduce peak memory before SaveAs
+            claimRows.Clear();
+            lineRows.Clear();
+
+            var stream = new MemoryStream();
             workbook.SaveAs(stream);
             stream.Position = 0;
 
@@ -449,7 +473,7 @@ public class CollectionSummaryController : Controller
             });
 
             return File(
-                stream.ToArray(),
+                stream,
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 fileName);
         }

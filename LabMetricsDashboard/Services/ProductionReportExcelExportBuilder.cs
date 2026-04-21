@@ -11,6 +11,9 @@ namespace LabMetricsDashboard.Services;
 /// </summary>
 public static class ProductionReportExcelExportBuilder
 {
+    /// <summary>Row threshold above which data is split into multiple sheets.</summary>
+    private const int SplitThreshold = 400_000;
+
     /// <summary>Maximum rows per raw data sheet to prevent out-of-memory on very large tables.</summary>
     private const int MaxRawDataRows = 500_000;
 
@@ -48,8 +51,8 @@ public static class ProductionReportExcelExportBuilder
         BuildPayerPanelSheet(wb, vm);
         BuildUnbilledAgingSheet(wb, vm);
         BuildCptBreakdownSheet(wb, vm);
-        BuildRawDataSheet(wb, "ClaimLevelData", claimRows, labName, ExcelTheme.TabBlue);
-        BuildRawDataSheet(wb, "LineLevelData", lineRows, labName, ExcelTheme.TabGold);
+        BuildSplitRawDataSheets(wb, "ClaimLevelData", claimRows, labName, ExcelTheme.TabBlue);
+        BuildSplitRawDataSheets(wb, "LineLevelData", lineRows, labName, ExcelTheme.TabGold);
 
         WriteFilterFooter(wb, vm);
 
@@ -867,6 +870,79 @@ public static class ProductionReportExcelExportBuilder
 
     // ?? Raw Data Sheets ?????????????????????????????????????????????
 
+    /// <summary>
+    /// Builds raw data sheets, splitting by year (FirstBillDate) when row count exceeds
+    /// <see cref="SplitThreshold"/>. If a single year still exceeds the threshold, it is
+    /// further split into two 6-month halves (Jan-Jun, Jul-Dec).
+    /// </summary>
+    private static void BuildSplitRawDataSheets(
+        XLWorkbook wb, string baseSheetName, List<Dictionary<string, object?>> rows,
+        string labName, XLColor tabColor)
+    {
+        if (rows.Count <= SplitThreshold)
+        {
+            BuildRawDataSheet(wb, baseSheetName, rows, labName, tabColor);
+            return;
+        }
+
+        var grouped = rows
+            .GroupBy(r => GetFirstBillDateYear(r))
+            .OrderBy(g => g.Key)
+            .ToList();
+
+        foreach (var yearGroup in grouped)
+        {
+            var yearRows = yearGroup.ToList();
+            int year = yearGroup.Key;
+            string yearLabel = year > 0 ? year.ToString() : "Unknown";
+
+            if (yearRows.Count <= SplitThreshold)
+            {
+                string sheetName = TruncateSheetName($"{baseSheetName}_{yearLabel}");
+                BuildRawDataSheet(wb, sheetName, yearRows, labName, tabColor);
+            }
+            else
+            {
+                var h1 = yearRows.Where(r => GetFirstBillDateMonth(r) <= 6).ToList();
+                var h2 = yearRows.Where(r => GetFirstBillDateMonth(r) > 6).ToList();
+
+                if (h1.Count > 0)
+                {
+                    string sheetName = TruncateSheetName($"{baseSheetName}_{yearLabel}_H1");
+                    BuildRawDataSheet(wb, sheetName, h1, labName, tabColor);
+                }
+                if (h2.Count > 0)
+                {
+                    string sheetName = TruncateSheetName($"{baseSheetName}_{yearLabel}_H2");
+                    BuildRawDataSheet(wb, sheetName, h2, labName, tabColor);
+                }
+            }
+        }
+    }
+
+    private static int GetFirstBillDateYear(Dictionary<string, object?> row)
+    {
+        if (row.TryGetValue("FirstBillDate", out var val))
+        {
+            if (val is DateTime dt) return dt.Year;
+            if (val is string s && DateTime.TryParse(s, out var parsed)) return parsed.Year;
+        }
+        return 0;
+    }
+
+    private static int GetFirstBillDateMonth(Dictionary<string, object?> row)
+    {
+        if (row.TryGetValue("FirstBillDate", out var val))
+        {
+            if (val is DateTime dt) return dt.Month;
+            if (val is string s && DateTime.TryParse(s, out var parsed)) return parsed.Month;
+        }
+        return 1;
+    }
+
+    private static string TruncateSheetName(string name) =>
+        name.Length <= 31 ? name : name[..31];
+
     private static void BuildRawDataSheet(
         XLWorkbook wb, string sheetName, List<Dictionary<string, object?>> rows,
         string labName, XLColor tabColor)
@@ -920,8 +996,8 @@ public static class ProductionReportExcelExportBuilder
             ws.Range(row, 1, row, colCount).Merge();
         }
 
-        // Range-based banded rows (much faster than per-cell)
-        if (rowsToWrite > 0)
+        // Apply banded rows and borders only for smaller datasets to avoid OOM
+        if (rowsToWrite > 0 && rowsToWrite <= 50_000)
         {
             int dataStart = 3;
             int dataEnd = dataStart + rowsToWrite - 1;

@@ -8,10 +8,30 @@ namespace LabMetricsDashboard.Models;
 /// </summary>
 public sealed class ProductionReportViewModel
 {
-    public List<string> AvailableLabs { get; init; } = [];
-    public string SelectedLab { get; init; } = string.Empty;
+public List<string> AvailableLabs { get; init; } = [];
+public string SelectedLab { get; init; } = string.Empty;
 
-    // Filters
+    /// <summary>
+    /// Active per-lab Production Summary rule applied to the Monthly Claim Volume tab
+    /// (e.g. <c>"Rule1"</c>). Null/empty when the lab uses the legacy default behavior.
+    /// </summary>
+    public string? ProductionSummaryRule { get; init; }
+
+    /// <summary>
+    /// Active per-lab rule applied to the Weekly Claim Volume tab
+    /// (e.g. <c>"Rule5"</c>). Independent from <see cref="ProductionSummaryRule"/>;
+    /// when the lab does not configure a separate <c>weekrule</c>, falls back to it.
+    /// </summary>
+    public string? ProductionSummaryWeekRule { get; init; }
+
+    /// <summary>
+    /// Active per-lab week boundary applied to the Weekly Claim Volume tab
+    /// (e.g. <c>"Mon to Sun"</c>, <c>"Thu to Wed"</c>). Null/empty when the lab uses
+    /// the default Monday-to-Sunday week.
+    /// </summary>
+    public string? ProductionSummaryWeekRange { get; init; }
+
+// Filters
     public List<string> FilterPayerNames { get; init; } = [];
     public List<string> FilterPanelNames { get; init; } = [];
     public string? FilterFirstBillFrom { get; init; }

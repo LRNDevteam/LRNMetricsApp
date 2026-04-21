@@ -30,7 +30,27 @@ public class CodingController : Controller
         if (string.IsNullOrWhiteSpace(selectedLab))
             return View(new CodingSummaryViewModel { AvailableLabs = availableLabs });
 
-        if (!_labSettings.Labs.TryGetValue(selectedLab, out var config) || !config.DBEnabled)
+        if (!_labSettings.Labs.TryGetValue(selectedLab, out var config))
+        {
+            return View(new CodingSummaryViewModel
+            {
+                LabName       = selectedLab,
+                AvailableLabs = availableLabs,
+                ErrorMessage  = $"Configuration not found for {selectedLab}.",
+            });
+        }
+
+        if (!config.EnableCoding)
+        {
+            return View(new CodingSummaryViewModel
+            {
+                LabName       = selectedLab,
+                AvailableLabs = availableLabs,
+                ErrorMessage  = $"Coding Summary feature is not enabled for {selectedLab}. Please contact your administrator.",
+            });
+        }
+
+        if (!config.DBEnabled)
         {
             return View(new CodingSummaryViewModel
             {
@@ -81,10 +101,11 @@ public class CodingController : Controller
 
         if (string.IsNullOrWhiteSpace(selectedLab)
             || !_labSettings.Labs.TryGetValue(selectedLab, out var config)
+            || !config.EnableCoding
             || !config.DBEnabled
             || string.IsNullOrWhiteSpace(config.DbConnectionString))
         {
-            TempData["ExportError"] = "Export is not available for the selected lab.";
+            TempData["ExportError"] = "Coding Summary export is not available for the selected lab.";
             return RedirectToAction(nameof(Summary), new { lab });
         }
 

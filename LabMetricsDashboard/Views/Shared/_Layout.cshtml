@@ -67,6 +67,13 @@
                         color: #fff;
                     }
 
+                    .lmd-navbar .dropdown-item.disabled {
+                        color: rgba(255, 255, 255, .3) !important;
+                        background: transparent;
+                        cursor: not-allowed;
+                        pointer-events: none;
+                    }
+
                 .lmd-navbar .navbar-toggler {
                     border-color: rgba(255, 255, 255, .3);
                 }
@@ -293,6 +300,13 @@
                     activeLab = availableLabs.FirstOrDefault();
                 }
             }
+
+            // Get lab-specific feature toggles
+            LabCsvConfig? labConfig = null;
+            if (!string.IsNullOrEmpty(activeLab) && LabSettingsInstance.Labs.ContainsKey(activeLab))
+            {
+                labConfig = LabSettingsInstance.Labs[activeLab];
+            }
         }
         <!-- Main navbar -->
         <nav class="navbar navbar-expand-sm lmd-navbar mb-0 py-2">
@@ -326,11 +340,38 @@
                                 <i class="bi bi-file-earmark-bar-graph"></i> Standard Reports
                             </a>
                             <ul class="dropdown-menu">
-                                <li>
-                                    <a class="dropdown-item" asp-controller="Dashboard" asp-action="ProductionReport">
-                                        <i class="bi bi-bar-chart-fill"></i> Production Report
-                                    </a>
-                                </li>
+                                @if (labConfig?.EnableProductionReport ?? true)
+                                {
+                                    <li>
+                                        <a class="dropdown-item" asp-controller="Dashboard" asp-action="ProductionReport">
+                                            <i class="bi bi-bar-chart-fill"></i> Production Report
+                                        </a>
+                                    </li>
+                                }
+                                else
+                                {
+                                    <li>
+                                        <span class="dropdown-item disabled" title="This feature is not enabled for the selected lab">
+                                            <i class="bi bi-bar-chart-fill"></i> Production Report
+                                        </span>
+                                    </li>
+                                }
+                                @if (labConfig?.EnableCollectionReport ?? true)
+                                {
+                                    <li>
+                                        <a class="dropdown-item" asp-controller="CollectionSummary" asp-action="Index">
+                                            <i class="bi bi-cash-stack"></i> Collection Summary
+                                        </a>
+                                    </li>
+                                }
+                                else
+                                {
+                                    <li>
+                                        <span class="dropdown-item disabled" title="This feature is not enabled for the selected lab">
+                                            <i class="bi bi-cash-stack"></i> Collection Summary
+                                        </span>
+                                    </li>
+                                }
                                 <li><hr class="dropdown-divider"></li>
                                 <li>
                                     <a class="dropdown-item" asp-controller="Dashboard" asp-action="ClaimLevel">
@@ -356,37 +397,92 @@
                                 <i class="bi bi-graph-up-arrow"></i> Analytics
                             </a>
                             <ul class="dropdown-menu">
-                                <li>
-                                    <a class="dropdown-item" asp-controller="Prediction" asp-action="Index">
-                                        <i class="bi bi-activity"></i> Prediction Analysis
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item" asp-controller="Prediction" asp-action="ForecastingSummary">
-                                        <i class="bi bi-calendar3"></i> Forecasting Summary
-                                    </a>
-                                </li>
+                                @if (labConfig?.EnablePrediction ?? true)
+                                {
+                                    <li>
+                                        <a class="dropdown-item" asp-controller="Prediction" asp-action="Index">
+                                            <i class="bi bi-activity"></i> Prediction Analysis
+                                        </a>
+                                    </li>
+                                }
+                                else
+                                {
+                                    <li>
+                                        <span class="dropdown-item disabled" title="This feature is not enabled for the selected lab">
+                                            <i class="bi bi-activity"></i> Prediction Analysis
+                                        </span>
+                                    </li>
+                                }
+                                @if (labConfig?.EnableForcast ?? true)
+                                {
+                                    <li>
+                                        <a class="dropdown-item" asp-controller="Prediction" asp-action="ForecastingSummary">
+                                            <i class="bi bi-calendar3"></i> Forecasting Summary
+                                        </a>
+                                    </li>
+                                }
+                                else
+                                {
+                                    <li>
+                                        <span class="dropdown-item disabled" title="This feature is not enabled for the selected lab">
+                                            <i class="bi bi-calendar3"></i> Forecasting Summary
+                                        </span>
+                                    </li>
+                                }
                                 <li><hr class="dropdown-divider"></li>
-                                <li>
-                                    <a class="dropdown-item" asp-controller="Coding" asp-action="Summary">
-                                        <i class="bi bi-pencil-square"></i> Coding Summary
-                                    </a>
-                                </li>
+                                @if (labConfig?.EnableCoding ?? true)
+                                {
+                                    <li>
+                                        <a class="dropdown-item" asp-controller="Coding" asp-action="Summary">
+                                            <i class="bi bi-pencil-square"></i> Coding Summary
+                                        </a>
+                                    </li>
+                                }
+                                else
+                                {
+                                    <li>
+                                        <span class="dropdown-item disabled" title="This feature is not enabled for the selected lab">
+                                            <i class="bi bi-pencil-square"></i> Coding Summary
+                                        </span>
+                                    </li>
+                                }
                             @*  <li>
                                     <a class="dropdown-item" asp-controller="CodingSetup" asp-action="Index">
                                         &#9881; Coding Setup
                                     </a>
                                 </li> *@
-                                <li>
-                                    <a class="dropdown-item" asp-controller="Dashboard" asp-action="ClinicSummary">
-                                        <i class="bi bi-hospital"></i> Clinic Summary
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item" asp-controller="Dashboard" asp-action="SalesRepSummary">
-                                        <i class="bi bi-people-fill"></i> Sales Rep Summary
-                                    </a>
-                                </li>
+                                @if (labConfig?.EnableClinicsummary ?? true)
+                                {
+                                    <li>
+                                        <a class="dropdown-item" asp-controller="Dashboard" asp-action="ClinicSummary">
+                                            <i class="bi bi-hospital"></i> Clinic Summary
+                                        </a>
+                                    </li>
+                                }
+                                else
+                                {
+                                    <li>
+                                        <span class="dropdown-item disabled" title="This feature is not enabled for the selected lab">
+                                            <i class="bi bi-hospital"></i> Clinic Summary
+                                        </span>
+                                    </li>
+                                }
+                                @if (labConfig?.EnableSalesRepsummary ?? true)
+                                {
+                                    <li>
+                                        <a class="dropdown-item" asp-controller="Dashboard" asp-action="SalesRepSummary">
+                                            <i class="bi bi-people-fill"></i> Sales Rep Summary
+                                        </a>
+                                    </li>
+                                }
+                                else
+                                {
+                                    <li>
+                                        <span class="dropdown-item disabled" title="This feature is not enabled for the selected lab">
+                                            <i class="bi bi-people-fill"></i> Sales Rep Summary
+                                        </span>
+                                    </li>
+                                }
                             </ul>
                         </li>
 

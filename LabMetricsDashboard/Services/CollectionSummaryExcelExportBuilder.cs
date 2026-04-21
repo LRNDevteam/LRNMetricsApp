@@ -35,8 +35,8 @@ public static class CollectionSummaryExcelExportBuilder
         BuildInsurancePaymentPctSheet(wb, vm.InsurancePaymentPct, labName);
         BuildCptPaymentPctSheet(wb, vm.CptPaymentPct, labName);
         BuildPanelAveragesSheet(wb, vm.PanelAverages, labName);
-        BuildRawDataSheet(wb, "ClaimLevelData", claimRows, labName, ExcelTheme.TabBlue);
-        BuildRawDataSheet(wb, "LineLevelData", lineRows, labName, ExcelTheme.TabGold);
+        BuildSplitRawDataSheets(wb, "ClaimLevelData", claimRows, labName, ExcelTheme.TabBlue);
+        BuildSplitRawDataSheets(wb, "LineLevelData", lineRows, labName, ExcelTheme.TabGold);
 
         if (activeFilters is { Count: > 0 })
         {
@@ -644,8 +644,71 @@ public static class CollectionSummaryExcelExportBuilder
 
     // ?? Raw Data Sheets ?????????????????????????????????????????????
 
+    /// <summary>Row threshold above which data is split into multiple sheets.</summary>
+    private const int SplitThreshold = 400_000;
+
     /// <summary>Maximum rows per raw data sheet to prevent out-of-memory on very large tables.</summary>
     private const int MaxRawDataRows = 500_000;
+
+    /// <summary>
+    /// Builds raw data sheets. When row count exceeds <see cref="SplitThreshold"/>,
+    /// data is split into separate sheets by FirstBillDate year and month
+    /// (e.g. ClaimLevelData_2025_Jan, ClaimLevelData_2025_Feb).
+    /// Each sheet writes and formats data in <see cref="FormatChunkSize"/> batches to avoid OOM.
+    /// </summary>
+    private static void BuildSplitRawDataSheets(
+        XLWorkbook wb, string baseSheetName, List<Dictionary<string, object?>> rows,
+        string labName, XLColor tabColor)
+    {
+        if (rows.Count <= SplitThreshold)
+        {
+            BuildRawDataSheet(wb, baseSheetName, rows, labName, tabColor);
+            return;
+        }
+
+        // Group rows by year and month from FirstBillDate
+        var grouped = rows
+            .GroupBy(r => (Year: GetFirstBillDateYear(r), Month: GetFirstBillDateMonth(r)))
+            .OrderBy(g => g.Key.Year).ThenBy(g => g.Key.Month)
+            .ToList();
+
+        foreach (var group in grouped)
+        {
+            var monthRows = group.ToList();
+            int year = group.Key.Year;
+            int month = group.Key.Month;
+            string yearLabel = year > 0 ? year.ToString() : "Unknown";
+            string monthLabel = year > 0
+                ? new DateTime(year, month, 1).ToString("MMM")
+                : "Unknown";
+            string sheetName = TruncateSheetName($"{baseSheetName}_{yearLabel}_{monthLabel}");
+            BuildRawDataSheet(wb, sheetName, monthRows, labName, tabColor);
+        }
+    }
+
+    private static int GetFirstBillDateYear(Dictionary<string, object?> row)
+    {
+        if (row.TryGetValue("FirstBillDate", out var val))
+        {
+            if (val is DateTime dt) return dt.Year;
+            if (val is string s && DateTime.TryParse(s, out var parsed)) return parsed.Year;
+        }
+        return 0;
+    }
+
+    private static int GetFirstBillDateMonth(Dictionary<string, object?> row)
+    {
+        if (row.TryGetValue("FirstBillDate", out var val))
+        {
+            if (val is DateTime dt) return dt.Month;
+            if (val is string s && DateTime.TryParse(s, out var parsed)) return parsed.Month;
+        }
+        return 1;
+    }
+
+    /// <summary>Excel sheet names are limited to 31 characters.</summary>
+    private static string TruncateSheetName(string name) =>
+        name.Length <= 31 ? name : name[..31];
 
     private static void BuildRawDataSheet(
         XLWorkbook wb, string sheetName, List<Dictionary<string, object?>> rows,
@@ -679,7 +742,7 @@ public static class CollectionSummaryExcelExportBuilder
         ExcelTheme.WriteHeaderRow(ws, row, 1, columns, ExcelTheme.BlueHeaderBg);
         row++;
 
-        // Data rows — write values only (no per-cell styling for performance)
+        // Write data rows — values only, no formatting for raw data sheets
         for (int r = 0; r < rowsToWrite; r++)
         {
             var dataRow = rows[r];
@@ -692,6 +755,8 @@ public static class CollectionSummaryExcelExportBuilder
             row++;
         }
 
+
+
         // Truncation warning
         if (truncated)
         {
@@ -701,27 +766,6 @@ public static class CollectionSummaryExcelExportBuilder
             warnCell.Style.Font.FontColor = XLColor.FromHtml("#9C0006");
             warnCell.Style.Fill.BackgroundColor = XLColor.FromHtml("#FFC7CE");
             ws.Range(row, 1, row, colCount).Merge();
-        }
-
-        // Apply banded rows via range styling (much faster than per-cell)
-        if (rowsToWrite > 0)
-        {
-            int dataStart = 3; // row after header
-            int dataEnd = dataStart + rowsToWrite - 1;
-
-            // Style odd data rows (0-based: rows 0, 2, 4… = Excel rows 3, 5, 7…)
-            for (int r = dataStart + 1; r <= dataEnd; r += 2)
-            {
-                var bandRange = ws.Range(r, 1, r, colCount);
-                bandRange.Style.Fill.BackgroundColor = ExcelTheme.BlueBandedRowBg;
-            }
-
-            // Thin border for entire data area
-            var dataRange = ws.Range(dataStart, 1, dataEnd, colCount);
-            dataRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
-            dataRange.Style.Border.InsideBorderColor = XLColor.FromHtml("#E2E8F0");
-            dataRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-            dataRange.Style.Border.OutsideBorderColor = XLColor.FromHtml("#E2E8F0");
         }
 
         // Set fixed column widths instead of AutoFitColumns (avoids scanning all rows)

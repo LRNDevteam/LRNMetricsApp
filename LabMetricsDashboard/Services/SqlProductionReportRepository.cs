@@ -11,6 +11,12 @@ namespace LabMetricsDashboard.Services;
 /// </summary>
 public sealed class SqlProductionReportRepository : IProductionReportRepository
 {
+    /// <summary>
+    /// Rule1 / legacy drill-down limit: keep only the Top N <c>PayerName</c> rows per
+    /// <c>PanelName</c>, ranked by <c>COUNT(DISTINCT ClaimID)</c> descending.
+    /// </summary>
+    private const int TopPayerDrillDownCount = 3;
+
     private readonly ILogger<SqlProductionReportRepository> _logger;
 
     public SqlProductionReportRepository(ILogger<SqlProductionReportRepository> logger)
@@ -22,18 +28,84 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         List<string>? filterPanelNames = null,
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
+        string? rule = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
+        // Rule1 / Rule2 / Rule3 / Rule4: column date source = ChargeEnteredDate (Year, Month).
+        // Default (legacy): column date source = FirstBilledDate.
+        // The row filter (FirstBilledDate IS NOT NULL) is preserved in all modes.
+        // - Rule2 additionally excludes specific PayerName_Raw keywords (Certus Laboratories spec).
+        // - Rule3 (Augustus Laboratories) is functionally identical to Rule1 today; it exists
+        //   so the lab can be configured now and the row column can later be switched from
+        //   PanelName to PanelNameNew when that column becomes available, without any
+        //   controller / view / config changes.
+        // - Rule4 (NorthWest) is currently identical to Rule3 (same filters, ChargeEnteredDate
+        //   columns, PanelName fallback). Kept as a distinct rule so it can diverge from
+        //   Rule3 later without touching other labs.
+        // - Rule5 (Cove, Elixir) is intentionally routed through the legacy/default branch
+        //   (FirstBilledDate columns, PayerName not blank + FirstBilledDate IS NOT NULL).
+        //   Kept as a named rule so these labs can be explicitly tagged and so Rule5 can
+        //   diverge later without affecting un-tagged labs.
+        var isRule1 = string.Equals(rule, "Rule1", StringComparison.OrdinalIgnoreCase);
+        var isRule2 = string.Equals(rule, "Rule2", StringComparison.OrdinalIgnoreCase);
+        var isRule3 = string.Equals(rule, "Rule3", StringComparison.OrdinalIgnoreCase);
+        var isRule4 = string.Equals(rule, "Rule4", StringComparison.OrdinalIgnoreCase);
+        var isRule5 = string.Equals(rule, "Rule5", StringComparison.OrdinalIgnoreCase);
+        _ = isRule5; // currently no behavior change vs default; flag kept for future divergence
+        var useChargeEnteredDate = isRule1 || isRule2 || isRule3 || isRule4;
+        var columnDateExpr = useChargeEnteredDate
+            ? "TRY_CAST(ChargeEnteredDate AS DATE)"
+            : "TRY_CAST(FirstBilledDate AS DATE)";
+
+        // TODO[Rule3/Rule4]: when the ClaimLevelData.PanelNameNew column is introduced, change
+        // the Rule3/Rule4 branch below from "PanelName" to "PanelNameNew". No other code
+        // change required.
+        var panelColumnExpr = (isRule3 || isRule4)
+            ? "PanelName" /* fallback until PanelNameNew column is added */
+            : "PanelName";
+
         var whereClauses = new List<string>
         {
-            "LTRIM(RTRIM(PayerName)) <> ''",
-            "PayerName IS NOT NULL",
             "TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL",
             "YEAR(TRY_CAST(FirstBilledDate AS DATE)) > 1900"
         };
         var parameters = new List<SqlParameter>();
+
+        if (isRule2)
+        {
+            // Rule2 (Certus Laboratories): exclude PayerName_Raw containing any of these keywords
+            // (case-insensitive). Treat NULL/empty PayerName_Raw as "exclude as well" by requiring it
+            // to be present. This matches the spec: "Exclude PayerName_Raw contains None, Accu Labs,
+            // Client Bill, Client, Patient, Patient Pay".
+            var excludeKeywords = new[] { "None", "Accu Labs", "Client Bill", "Client", "Patient", "Patient Pay" };
+            var notLikeClauses = new List<string>
+            {
+                "PayerName_Raw IS NOT NULL",
+                "LTRIM(RTRIM(PayerName_Raw)) <> ''"
+            };
+            for (int i = 0; i < excludeKeywords.Length; i++)
+            {
+                var pName = $"@exKw{i}";
+                notLikeClauses.Add($"PayerName_Raw NOT LIKE {pName}");
+                parameters.Add(new SqlParameter(pName, $"%{excludeKeywords[i]}%"));
+            }
+            whereClauses.AddRange(notLikeClauses);
+        }
+        else
+        {
+            // Rule1 / Rule3 / Rule4 / legacy: PayerName must not be blank.
+            whereClauses.Add("LTRIM(RTRIM(PayerName)) <> ''");
+            whereClauses.Add("PayerName IS NOT NULL");
+        }
+
+        // For Rule1/Rule2/Rule3/Rule4 ensure the column-date is also valid so we don't get NULL year/month rows.
+        if (useChargeEnteredDate)
+        {
+            whereClauses.Add("TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL");
+            whereClauses.Add("YEAR(TRY_CAST(ChargeEnteredDate AS DATE)) > 1900");
+        }
 
         if (filterPayerNames is { Count: > 0 })
         {
@@ -51,15 +123,20 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                 parameters.Add(new SqlParameter($"@fpl{i}", filterPanelNames[i]));
         }
 
+        // Apply the user-supplied date-range filter against whichever date column the
+        // active rule uses for its Year/Month columns (ChargeEnteredDate for Rule1–Rule4,
+        // FirstBilledDate for Default/Rule5). This keeps the visible columns and the
+        // filter range aligned, so a "From/To" range always trims the same axis the user
+        // sees in the table.
         if (filterFirstBillFrom.HasValue)
         {
-            whereClauses.Add("TRY_CAST(FirstBilledDate AS DATE) >= @fbFrom");
+            whereClauses.Add($"{columnDateExpr} >= @fbFrom");
             parameters.Add(new SqlParameter("@fbFrom", SqlDbType.Date) { Value = filterFirstBillFrom.Value.ToDateTime(TimeOnly.MinValue) });
         }
 
         if (filterFirstBillTo.HasValue)
         {
-            whereClauses.Add("TRY_CAST(FirstBilledDate AS DATE) <= @fbTo");
+            whereClauses.Add($"{columnDateExpr} <= @fbTo");
             parameters.Add(new SqlParameter("@fbTo", SqlDbType.Date) { Value = filterFirstBillTo.Value.ToDateTime(TimeOnly.MinValue) });
         }
 
@@ -73,22 +150,25 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             WHERE PanelName IS NOT NULL AND PanelName <> '' ORDER BY 1;
             """;
 
-        // Query 2: panel × month aggregation (unique claim count + sum charges)
+        // Query 2: panel × month aggregation (unique claim count + sum charges).
+        // Year/Month columns come from the rule-selected date source (FirstBilledDate by default,
+        // ChargeEnteredDate when rule = "Rule1" / "Rule2" / "Rule3" / "Rule4").
+        // Row column comes from panelColumnExpr ("PanelName" today; will be "PanelNameNew" for Rule3/Rule4 in future).
         var pivotSql = $"""
             SELECT
-                LTRIM(RTRIM(PanelName))                                 AS PanelName,
+                LTRIM(RTRIM({panelColumnExpr}))                          AS PanelName,
                 LTRIM(RTRIM(PayerName))                                 AS PayerName,
-                YEAR(TRY_CAST(FirstBilledDate AS DATE))                 AS BillYear,
-                MONTH(TRY_CAST(FirstBilledDate AS DATE))                AS BillMonth,
+                YEAR({columnDateExpr})                                  AS BillYear,
+                MONTH({columnDateExpr})                                 AS BillMonth,
                 COUNT(DISTINCT ClaimID)                                  AS ClaimCount,
                 ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))),0)  AS BilledCharges
             FROM dbo.ClaimLevelData
             WHERE {whereStr}
             GROUP BY
-                LTRIM(RTRIM(PanelName)),
+                LTRIM(RTRIM({panelColumnExpr})),
                 LTRIM(RTRIM(PayerName)),
-                YEAR(TRY_CAST(FirstBilledDate AS DATE)),
-                MONTH(TRY_CAST(FirstBilledDate AS DATE))
+                YEAR({columnDateExpr}),
+                MONTH({columnDateExpr})
             ORDER BY PanelName, PayerName, BillYear, BillMonth
             """;
 
@@ -178,8 +258,13 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             int panelTotalClaims = panelByMonth.Values.Sum(c => c.ClaimCount);
             decimal panelTotalCharges = panelByMonth.Values.Sum(c => c.BilledCharges);
 
-            // Top 3 payers by unique claim count for this panel
+            // Rule1 / Rule2: Drill-down = Top 3 PayerName per panel by COUNT(DISTINCT ClaimID).
+            // Tie-breaker on PayerName (case-insensitive ascending) keeps the result
+            // deterministic when several payers share the same claim count. Empty/whitespace
+            // PayerName values are excluded from the drill-down (they still contribute to
+            // the panel total).
             var payerGroups = rows
+                .Where(r => !string.IsNullOrWhiteSpace(r.PayerName))
                 .GroupBy(r => r.PayerName, StringComparer.OrdinalIgnoreCase)
                 .Select(g =>
                 {
@@ -211,7 +296,8 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                     };
                 })
                 .OrderByDescending(p => p.TotalClaims)
-                .Take(3)
+                .ThenBy(p => p.PayerName, StringComparer.OrdinalIgnoreCase)
+                .Take(TopPayerDrillDownCount)
                 .ToList();
 
             panelRows.Add(new ProductionPanelRow
@@ -278,29 +364,78 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         List<string>? filterPanelNames = null,
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
+        string? rule = null,
+        string? weekRange = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
-        // Determine the last 4 ISO weeks based on today
+        // Weekly Claim Volume rule semantics (per shared spec):
+        //   Rule2 ? FirstBilledDate week columns; filter PayerName not blank + FirstBilledDate is date.
+        //   Rule3 ? ChargeEnteredDate week columns; PayerName/ChargeEnteredDate not blank + FirstBilledDate is date.
+        //   Rule4 ? Same as Rule3 (kept distinct so it can diverge later; Northwest).
+        //   Rule5 ? ChargeEnteredDate week columns; exclude PayerName_Raw keywords + FirstBilledDate not blank.
+        //   Rule1 / default / unset ? FirstBilledDate week columns + PayerName not blank (legacy).
+        var isRule1 = string.Equals(rule, "Rule1", StringComparison.OrdinalIgnoreCase);
+        var isRule2 = string.Equals(rule, "Rule2", StringComparison.OrdinalIgnoreCase);
+        var isRule3 = string.Equals(rule, "Rule3", StringComparison.OrdinalIgnoreCase);
+        var isRule4 = string.Equals(rule, "Rule4", StringComparison.OrdinalIgnoreCase);
+        var isRule5 = string.Equals(rule, "Rule5", StringComparison.OrdinalIgnoreCase);
+        _ = isRule1; // legacy default behavior; flag kept for readability
+        _ = isRule2; // FirstBilledDate + PayerName not blank — same as default branch
+        var useChargeEnteredDate = isRule3 || isRule4 || isRule5;
+        var weekDateExpr = useChargeEnteredDate
+            ? "TRY_CAST(ChargeEnteredDate AS DATE)"
+            : "TRY_CAST(FirstBilledDate AS DATE)";
+
+        // Resolve lab-specific week boundary (Mon–Sun by default).
+        var weekStartDay = WeekRangeHelper.ResolveWeekStart(weekRange);
+
+        // Determine the last 4 complete weeks based on today + chosen week-start day.
         var today = DateOnly.FromDateTime(DateTime.Today);
-        var weekColumns = BuildLast4Weeks(today);
+        var weekColumns = BuildLast4Weeks(today, weekStartDay);
         var earliest = weekColumns[0].WeekStart;
         var latest = weekColumns[^1].WeekEnd;
 
         var whereClauses = new List<string>
         {
-            "LTRIM(RTRIM(PayerName)) <> ''",
-            "PayerName IS NOT NULL",
+            // FirstBilledDate must be a real date in every rule (also part of legacy filter).
             "TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL",
-            "TRY_CAST(FirstBilledDate AS DATE) >= @WeekStart",
-            "TRY_CAST(FirstBilledDate AS DATE) <= @WeekEnd"
+            // Trim to the visible 4-week window using the rule's column date source.
+            $"{weekDateExpr} >= @WeekStart",
+            $"{weekDateExpr} <= @WeekEnd",
         };
         var parameters = new List<SqlParameter>
         {
             new("@WeekStart", SqlDbType.Date) { Value = earliest.ToDateTime(TimeOnly.MinValue) },
-            new("@WeekEnd", SqlDbType.Date) { Value = latest.ToDateTime(TimeOnly.MinValue) },
+            new("@WeekEnd",   SqlDbType.Date) { Value = latest.ToDateTime(TimeOnly.MinValue) },
         };
+
+        if (isRule5)
+        {
+            // Rule5: exclude PayerName_Raw containing keywords (Cove / Elixir spec).
+            var excludeKeywords = new[] { "None", "Accu Labs", "Client Bill", "Client", "Patient", "Patient Pay" };
+            whereClauses.Add("PayerName_Raw IS NOT NULL");
+            whereClauses.Add("LTRIM(RTRIM(PayerName_Raw)) <> ''");
+            for (int i = 0; i < excludeKeywords.Length; i++)
+            {
+                var pName = $"@wExKw{i}";
+                whereClauses.Add($"PayerName_Raw NOT LIKE {pName}");
+                parameters.Add(new SqlParameter(pName, $"%{excludeKeywords[i]}%"));
+            }
+        }
+        else
+        {
+            // Rule1 / Rule2 / Rule3 / Rule4 / default: PayerName must not be blank.
+            whereClauses.Add("LTRIM(RTRIM(PayerName)) <> ''");
+            whereClauses.Add("PayerName IS NOT NULL");
+        }
+
+        // Rule3 / Rule4 also require ChargeEnteredDate to be a real date.
+        if (isRule3 || isRule4)
+        {
+            whereClauses.Add("TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL");
+        }
 
         if (filterPayerNames is { Count: > 0 })
         {
@@ -318,26 +453,29 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                 parameters.Add(new SqlParameter($"@wfpl{i}", filterPanelNames[i]));
         }
 
+        // The user-supplied date range narrows the window further on the same column the rule uses.
         if (filterFirstBillFrom.HasValue)
         {
-            whereClauses.Add("TRY_CAST(FirstBilledDate AS DATE) >= @wfbFrom");
+            whereClauses.Add($"{weekDateExpr} >= @wfbFrom");
             parameters.Add(new SqlParameter("@wfbFrom", SqlDbType.Date) { Value = filterFirstBillFrom.Value.ToDateTime(TimeOnly.MinValue) });
         }
 
         if (filterFirstBillTo.HasValue)
         {
-            whereClauses.Add("TRY_CAST(FirstBilledDate AS DATE) <= @wfbTo");
+            whereClauses.Add($"{weekDateExpr} <= @wfbTo");
             parameters.Add(new SqlParameter("@wfbTo", SqlDbType.Date) { Value = filterFirstBillTo.Value.ToDateTime(TimeOnly.MinValue) });
         }
 
         var whereStr = string.Join(" AND ", whereClauses);
 
-        // Query: panel × payer × date aggregation within last 4 weeks
+        // Query: panel × payer × week-date aggregation within the 4-week window.
+        // The grouped date is the rule's column date source so the dashboard can bucket
+        // each row into the correct week using ResolveWeekKey().
         var pivotSql = $"""
             SELECT
                 LTRIM(RTRIM(PanelName))                                 AS PanelName,
                 LTRIM(RTRIM(PayerName))                                 AS PayerName,
-                TRY_CAST(FirstBilledDate AS DATE)                       AS BillDate,
+                {weekDateExpr}                                          AS BillDate,
                 COUNT(DISTINCT ClaimID)                                  AS ClaimCount,
                 ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))),0)  AS BilledCharges
             FROM dbo.ClaimLevelData
@@ -345,7 +483,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             GROUP BY
                 LTRIM(RTRIM(PanelName)),
                 LTRIM(RTRIM(PayerName)),
-                TRY_CAST(FirstBilledDate AS DATE)
+                {weekDateExpr}
             ORDER BY PanelName, PayerName, BillDate
             """;
 
@@ -371,26 +509,31 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             }
         }
 
-        _logger.LogInformation("Weekly Claim Volume: {RawCount} raw rows", rawRows.Count);
+        _logger.LogInformation(
+            "Weekly Claim Volume: {RawCount} raw rows (rule={Rule}, weekStart={WeekStart})",
+            rawRows.Count, rule ?? "Default", weekStartDay);
 
         return BuildWeeklyResult(weekColumns, rawRows);
     }
 
-    /// <summary>Builds the last 4 complete ISO weeks ending before today's week.</summary>
-    private static List<WeekColumn> BuildLast4Weeks(DateOnly today)
+    /// <summary>
+    /// Builds the last 4 complete weeks ending before today's week, using the supplied
+    /// <paramref name="weekStartDay"/> as the first day of each week.
+    /// </summary>
+    private static List<WeekColumn> BuildLast4Weeks(DateOnly today, DayOfWeek weekStartDay)
     {
-        // Find the Monday of the current week
-        int daysSinceMonday = ((int)today.DayOfWeek + 6) % 7;
-        var currentWeekMonday = today.AddDays(-daysSinceMonday);
+        // Days from "today" back to the most recent occurrence of weekStartDay (0..6).
+        int daysSinceWeekStart = ((int)today.DayOfWeek - (int)weekStartDay + 7) % 7;
+        var currentWeekStart = today.AddDays(-daysSinceWeekStart);
 
         var weeks = new List<WeekColumn>();
         for (int i = 4; i >= 1; i--)
         {
-            var monday = currentWeekMonday.AddDays(-7 * i);
-            var sunday = monday.AddDays(6);
-            var isoWeek = System.Globalization.ISOWeek.GetWeekOfYear(monday.ToDateTime(TimeOnly.MinValue));
-            var key = $"{monday.Year:D4}-W{isoWeek:D2}";
-            weeks.Add(new WeekColumn(key, monday, sunday));
+            var start = currentWeekStart.AddDays(-7 * i);
+            var end = start.AddDays(6);
+            // Key uses the week-start date so it is unambiguous across week boundaries.
+            var key = $"{start:yyyy-MM-dd}";
+            weeks.Add(new WeekColumn(key, start, end));
         }
         return weeks;
     }
@@ -436,8 +579,11 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             int panelTotalClaims = panelByWeek.Values.Sum(c => c.ClaimCount);
             decimal panelTotalCharges = panelByWeek.Values.Sum(c => c.BilledCharges);
 
-            // Top 3 payers by unique claim count for this panel
+            // Top 3 payers per panel by COUNT(DISTINCT ClaimID), with deterministic
+            // tiebreaker on PayerName. Empty PayerName entries are excluded from drill-down
+            // (they still contribute to the panel total).
             var payerGroups = entries
+                .Where(x => !string.IsNullOrWhiteSpace(x.Row.PayerName))
                 .GroupBy(x => x.Row.PayerName, StringComparer.OrdinalIgnoreCase)
                 .Select(g =>
                 {
@@ -459,7 +605,8 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                     };
                 })
                 .OrderByDescending(p => p.TotalClaims)
-                .Take(3)
+                .ThenBy(p => p.PayerName, StringComparer.OrdinalIgnoreCase)
+                .Take(TopPayerDrillDownCount)
                 .ToList();
 
             panelRows.Add(new WeeklyPanelRow
@@ -528,10 +675,10 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
 
         var codingSql = $"""
             SELECT
-                LTRIM(RTRIM(PanelName))                                 AS PanelName,
-                ISNULL(LTRIM(RTRIM(CPTCodeXUnitsXModifier)), '')        AS CptCode,
-                COUNT(DISTINCT ClaimID)                                  AS ClaimCount,
-                ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))),0)  AS TotalCharges
+                LTRIM(RTRIM(PanelName))                                                         AS PanelName,
+                ISNULL(LTRIM(RTRIM(CPTCodeXUnitsXModifier)), '')                                AS CptCode,
+                COUNT(DISTINCT NULLIF(LTRIM(RTRIM(AccessionNumber)), ''))                       AS ClaimCount,
+                ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))),0)                          AS TotalCharges
             FROM dbo.ClaimLevelData
             WHERE {whereStr}
             GROUP BY

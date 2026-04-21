@@ -1,6 +1,6 @@
-@model LabMetricsDashboard.Models.ProductionReportViewModel
+﻿@model LabMetricsDashboard.Models.ProductionReportViewModel
 @{
-    ViewData["Title"]       = $"Production Report � {Model.SelectedLab}";
+    ViewData["Title"]       = $"Production Report – {Model.SelectedLab}";
     ViewData["SelectedLab"] = Model.SelectedLab;
     ViewData["PageLabel"]   = "Production Report";
 
@@ -149,7 +149,7 @@
     overflow: hidden; text-overflow: ellipsis;
 }
 
-/* Month data columns � narrowed to ~70% */
+/* Month data columns — narrowed to ~70% */
 th.pr-month-data, td.pr-month-data {
     padding-left: .2rem; padding-right: .2rem;
     font-size: .60rem;
@@ -193,7 +193,7 @@ th.pr-month-data, td.pr-month-data {
     background: #92400e !important;
 }
 
-/* Filter panel � matches Clinic Summary style */
+/* Filter panel — matches Clinic Summary style */
 .pr-filter-panel {
     background: #fff; border-radius: 12px;
     box-shadow: 0 2px 10px rgba(0,0,0,.07);
@@ -322,7 +322,7 @@ th.pr-month-data, td.pr-month-data {
                                 <span class="pr-ms-count" style="display:none">0</span>
                             </div>
                             <div class="pr-ms-panel">
-                                <input type="text" class="pr-ms-search" placeholder="Search payers�" autocomplete="off" />
+                                <input type="text" class="pr-ms-search" placeholder="Search payers…" autocomplete="off" />
                                 <div class="pr-ms-list">
                                     @foreach (var pn in Model.PayerNames)
                                     {
@@ -343,7 +343,7 @@ th.pr-month-data, td.pr-month-data {
                                 <span class="pr-ms-count" style="display:none">0</span>
                             </div>
                             <div class="pr-ms-panel">
-                                <input type="text" class="pr-ms-search" placeholder="Search panels�" autocomplete="off" />
+                                <input type="text" class="pr-ms-search" placeholder="Search panels…" autocomplete="off" />
                                 <div class="pr-ms-list">
                                     @foreach (var pl in Model.PanelNames)
                                     {
@@ -355,15 +355,30 @@ th.pr-month-data, td.pr-month-data {
                         </div>
                     </div>
 
-                    <!-- First Billed Date From -->
+                    @{
+                        // The date-range filter is applied against ChargeEnteredDate when the
+                        // active rule uses ChargeEnteredDate columns (Rule1–Rule4), and against
+                        // FirstBilledDate otherwise (Default / Rule5). Keep the label aligned with
+                        // the actual filtered column so users aren't misled.
+                        var rule = Model.ProductionSummaryRule;
+                        var dateFilterUsesChargeEntered =
+                            string.Equals(rule, "Rule1", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(rule, "Rule2", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(rule, "Rule3", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(rule, "Rule4", StringComparison.OrdinalIgnoreCase);
+                        var dateFilterFromLabel = dateFilterUsesChargeEntered ? "CHARGE ENTERED DATE FROM" : "FIRST BILL DATE FROM";
+                        var dateFilterToLabel   = dateFilterUsesChargeEntered ? "CHARGE ENTERED DATE TO"   : "FIRST BILL DATE TO";
+                    }
+
+                    <!-- Date filter From (label switches based on the active rule) -->
                     <div class="col-sm-6 col-md-3">
-                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">FIRST BILL DATE FROM</label>
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">@dateFilterFromLabel</label>
                         <input type="date" name="filterFirstBillFrom" class="form-control form-control-sm"
                                value="@Model.FilterFirstBillFrom" />
                     </div>
-                    <!-- First Billed Date To -->
+                    <!-- Date filter To (label switches based on the active rule) -->
                     <div class="col-sm-6 col-md-3">
-                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">FIRST BILL DATE TO</label>
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">@dateFilterToLabel</label>
                         <input type="date" name="filterFirstBillTo" class="form-control form-control-sm"
                                value="@Model.FilterFirstBillTo" />
                     </div>
@@ -392,7 +407,7 @@ th.pr-month-data, td.pr-month-data {
             <i class="bi bi-file-earmark-excel"></i>
         </div>
         <div style="font-size:1.05rem;font-weight:700;color:#1e293b;margin-bottom:.25rem">Generating Excel Report</div>
-        <div id="prExportStatus" style="font-size:.78rem;color:#64748b;margin-bottom:1rem">Starting export�</div>
+        <div id="prExportStatus" style="font-size:.78rem;color:#64748b;margin-bottom:1rem">Starting export…</div>
         <div style="width:100%;height:10px;background:#e2e8f0;border-radius:6px;overflow:hidden">
             <div id="prExportBar" style="height:100%;border-radius:6px;background:linear-gradient(90deg,#047857,#0d8553,#10b981);transition:width .4s ease;width:0%"></div>
         </div>
@@ -618,6 +633,85 @@ th.pr-month-data, td.pr-month-data {
                     <div class="small mt-1">Try adjusting your filters or selecting a different lab.</div>
                 </div>
             }
+
+            @* ── Active rule footer (dull) ────────────────────────────── *@
+            @{
+                var activeRule = string.IsNullOrWhiteSpace(Model.ProductionSummaryRule)
+                    ? "Default"
+                    : Model.ProductionSummaryRule!;
+                var isRule1 = string.Equals(Model.ProductionSummaryRule, "Rule1", StringComparison.OrdinalIgnoreCase);
+                var isRule2 = string.Equals(Model.ProductionSummaryRule, "Rule2", StringComparison.OrdinalIgnoreCase);
+                var isRule3 = string.Equals(Model.ProductionSummaryRule, "Rule3", StringComparison.OrdinalIgnoreCase);
+                var isRule4 = string.Equals(Model.ProductionSummaryRule, "Rule4", StringComparison.OrdinalIgnoreCase);
+                var isRule5 = string.Equals(Model.ProductionSummaryRule, "Rule5", StringComparison.OrdinalIgnoreCase);
+            }
+            <div class="pr-rule-footer mt-3 small text-muted" style="opacity:.65;line-height:1.45;border-top:1px dashed #cfd6df;padding-top:.5rem">
+                <div><span class="fw-semibold">Active Rule:</span> @activeRule</div>
+                @if (isRule1)
+                {
+                    <div class="mt-1"><span class="fw-semibold">Rule1 Logic:</span></div>
+                    <ul class="mb-0 ps-3" style="font-size:.78rem">
+                        <li>Source: <code>ClaimLevelData</code> (all rows)</li>
+                        <li>Rows: <code>PanelName</code> &nbsp;·&nbsp; Drill-down: Top 3 <code>PayerName</code> by <code>COUNT(DISTINCT ClaimID)</code></li>
+                        <li>Columns: <code>YEAR(ChargeEnteredDate)</code> / <code>MONTH(ChargeEnteredDate)</code></li>
+                        <li>Filter: <code>PayerName</code> not blank &nbsp;·&nbsp; <code>FirstBilledDate</code> is a valid date</li>
+                        <li>Rank by: <code>COUNT(DISTINCT ClaimID)</code> &nbsp;·&nbsp; Sort: Grand Total descending</li>
+                        <li>Cell metrics: <code>COUNT(DISTINCT ClaimID)</code> + <code>SUM(ChargeAmount)</code></li>
+                    </ul>
+                }
+                else if (isRule2)
+                {
+                    <div class="mt-1"><span class="fw-semibold">Rule2 Logic</span> <span class="fst-italic">(Certus Laboratories)</span><span class="fw-semibold">:</span></div>
+                    <ul class="mb-0 ps-3" style="font-size:.78rem">
+                        <li>Source: <code>ClaimLevelData</code> (all rows)</li>
+                        <li>Rows: <code>PanelName</code> &nbsp;·&nbsp; Drill-down: Top 3 <code>PayerName</code> by <code>COUNT(DISTINCT ClaimID)</code></li>
+                        <li>Columns: <code>YEAR(ChargeEnteredDate)</code> / <code>MONTH(ChargeEnteredDate)</code></li>
+                        <li>Filter: Exclude <code>PayerName_Raw</code> containing <code>None</code>, <code>Accu Labs</code>, <code>Client Bill</code>, <code>Client</code>, <code>Patient</code>, <code>Patient Pay</code> &nbsp;·&nbsp; <code>FirstBilledDate</code> is a valid date</li>
+                        <li>Rank by: <code>COUNT(DISTINCT ClaimID)</code> &nbsp;·&nbsp; Sort: Grand Total descending</li>
+                        <li>Cell metrics: <code>COUNT(DISTINCT ClaimID)</code> + <code>SUM(ChargeAmount)</code></li>
+                    </ul>
+                }
+                else if (isRule3)
+                {
+                    <div class="mt-1"><span class="fw-semibold">Rule3 Logic</span> <span class="fst-italic">(Augustus Laboratories)</span><span class="fw-semibold">:</span></div>
+                    <ul class="mb-0 ps-3" style="font-size:.78rem">
+                        <li>Source: <code>ClaimLevelData</code> (all rows)</li>
+                        <li>Rows: <code>PanelName</code> <span class="fst-italic">(will switch to <code>PanelNameNew</code> once that column is available)</span> &nbsp;·&nbsp; Drill-down: Top 3 <code>PayerName</code> by <code>COUNT(DISTINCT ClaimID)</code></li>
+                        <li>Columns: <code>YEAR(ChargeEnteredDate)</code> / <code>MONTH(ChargeEnteredDate)</code></li>
+                        <li>Filter: <code>PayerName</code> not blank &nbsp;·&nbsp; <code>ChargeEnteredDate</code> is a valid date &nbsp;·&nbsp; <code>FirstBilledDate</code> is a valid date</li>
+                        <li>Rank by: <code>COUNT(DISTINCT ClaimID)</code> &nbsp;·&nbsp; Sort: Grand Total descending</li>
+                        <li>Cell metrics: <code>COUNT(DISTINCT ClaimID)</code> + <code>SUM(ChargeAmount)</code></li>
+                    </ul>
+                }
+                else if (isRule4)
+                {
+                    <div class="mt-1"><span class="fw-semibold">Rule4 Logic</span> <span class="fst-italic">(NorthWest)</span><span class="fw-semibold">:</span></div>
+                    <ul class="mb-0 ps-3" style="font-size:.78rem">
+                        <li>Source: <code>ClaimLevelData</code> (all rows)</li>
+                        <li>Rows: <code>PanelName</code> <span class="fst-italic">(will switch to <code>PanelNameNew</code> once that column is available)</span> &nbsp;·&nbsp; Drill-down: Top 3 <code>PayerName</code> by <code>COUNT(DISTINCT ClaimID)</code></li>
+                        <li>Columns: <code>YEAR(ChargeEnteredDate)</code> / <code>MONTH(ChargeEnteredDate)</code></li>
+                        <li>Filter: <code>PayerName</code> not blank &nbsp;·&nbsp; <code>ChargeEnteredDate</code> is a valid date &nbsp;·&nbsp; <code>FirstBilledDate</code> is a valid date</li>
+                        <li>Rank by: <code>COUNT(DISTINCT ClaimID)</code> &nbsp;·&nbsp; Sort: Grand Total descending</li>
+                        <li>Cell metrics: <code>COUNT(DISTINCT ClaimID)</code> + <code>SUM(ChargeAmount)</code></li>
+                    </ul>
+                }
+                else if (isRule5)
+                {
+                    <div class="mt-1"><span class="fw-semibold">Rule5 Logic</span> <span class="fst-italic">(Cove, Elixir)</span><span class="fw-semibold">:</span></div>
+                    <ul class="mb-0 ps-3" style="font-size:.78rem">
+                        <li>Source: <code>ClaimLevelData</code> (all rows)</li>
+                        <li>Rows: <code>PanelName</code> &nbsp;·&nbsp; Drill-down: Top 3 <code>PayerName</code> by <code>COUNT(DISTINCT ClaimID)</code></li>
+                        <li>Columns: <code>YEAR(FirstBilledDate)</code> / <code>MONTH(FirstBilledDate)</code></li>
+                        <li>Filter: <code>PayerName</code> not blank &nbsp;·&nbsp; <code>FirstBilledDate</code> is a valid date</li>
+                        <li>Rank by: <code>COUNT(DISTINCT ClaimID)</code> &nbsp;·&nbsp; Sort: Grand Total descending</li>
+                        <li>Cell metrics: <code>COUNT(DISTINCT ClaimID)</code> + <code>SUM(ChargeAmount)</code></li>
+                    </ul>
+                }
+                else
+                {
+                    <div class="mt-1"><span class="fw-semibold">Default Logic:</span> columns grouped by <code>YEAR/MONTH(FirstBilledDate)</code>; rows = <code>PanelName</code> with Top 3 <code>PayerName</code> drill-down by <code>COUNT(DISTINCT ClaimID)</code>; sort by Grand Total.</div>
+                }
+            </div>
         </div>
 
         <!-- ??? Weekly Claim Volume tab pane ?????????????????????? -->
@@ -625,10 +719,18 @@ th.pr-month-data, td.pr-month-data {
             @if (Model.WeeklyPanelRows.Count > 0 && Model.WeekColumns.Count > 0)
             {
                 var weeks = Model.WeekColumns;
+                var headerWeekRule = !string.IsNullOrWhiteSpace(Model.ProductionSummaryWeekRule)
+                    ? Model.ProductionSummaryWeekRule
+                    : Model.ProductionSummaryRule;
+                var headerUsesChargeEntered =
+                    string.Equals(headerWeekRule, "Rule3", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(headerWeekRule, "Rule4", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(headerWeekRule, "Rule5", StringComparison.OrdinalIgnoreCase);
+                var headerDateLabel = headerUsesChargeEntered ? "ChargeEnteredDate" : "FirstBilledDate";
 
                 <div class="pr-wrap">
                     <div class="pr-scroll">
-                        <table class="pr-table">
+                        <table class="pr-table" style="width:100%; min-width:838px;">
                             <colgroup>
                                 <col style="width:200px" />
                                 @foreach (var wk in weeks)
@@ -643,7 +745,7 @@ th.pr-month-data, td.pr-month-data {
                                 <tr>
                                     <th rowspan="3">Panel &amp; Insurance</th>
                                     <th colspan="@(weeks.Count * 2)">
-                                        Data based on Last 4 Week [FirstBilledDate]
+                                        Data based on Last 4 Week [@headerDateLabel]
                                     </th>
                                     <th colspan="2" class="pr-grand-total">Grand Total</th>
                                 </tr>
@@ -723,6 +825,48 @@ th.pr-month-data, td.pr-month-data {
                     <div class="small mt-1">No billed claims found in the last 4 weeks. Try adjusting your filters.</div>
                 </div>
             }
+
+            @* ── Active rule + week-range footer (dull) ────────────────── *@
+            @{
+                var weeklyRule = !string.IsNullOrWhiteSpace(Model.ProductionSummaryWeekRule)
+                    ? Model.ProductionSummaryWeekRule
+                    : Model.ProductionSummaryRule;
+                var weeklyActiveRule = string.IsNullOrWhiteSpace(weeklyRule) ? "Default" : weeklyRule!;
+                var weeklyActiveWeek = string.IsNullOrWhiteSpace(Model.ProductionSummaryWeekRange)
+                    ? "Mon to Sun (default)"
+                    : Model.ProductionSummaryWeekRange!;
+                var weeklyUsesChargeEntered =
+                    string.Equals(weeklyRule, "Rule3", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(weeklyRule, "Rule4", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(weeklyRule, "Rule5", StringComparison.OrdinalIgnoreCase);
+                var weeklyDateColumn = weeklyUsesChargeEntered ? "ChargeEnteredDate" : "FirstBilledDate";
+                var weeklyIsRule5 = string.Equals(weeklyRule, "Rule5", StringComparison.OrdinalIgnoreCase);
+                var weeklyIsRule34 =
+                    string.Equals(weeklyRule, "Rule3", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(weeklyRule, "Rule4", StringComparison.OrdinalIgnoreCase);
+            }
+            <div class="pr-rule-footer mt-3 small text-muted" style="opacity:.65;line-height:1.45;border-top:1px dashed #cfd6df;padding-top:.5rem">
+                <div><span class="fw-semibold">Active Rule:</span> @weeklyActiveRule &nbsp;·&nbsp; <span class="fw-semibold">Week Range:</span> @weeklyActiveWeek</div>
+                <ul class="mb-0 ps-3" style="font-size:.78rem">
+                    <li>Source: <code>ClaimLevelData</code> · Last 4 complete <code>@weeklyActiveWeek</code> weeks</li>
+                    <li>Rows: <code>PanelName</code> &nbsp;·&nbsp; Drill-down: Top 3 <code>PayerName</code> by <code>COUNT(DISTINCT ClaimID)</code></li>
+                    <li>Columns: Week of <code>@weeklyDateColumn</code></li>
+                    @if (weeklyIsRule5)
+                    {
+                        <li>Filter: Exclude <code>PayerName_Raw</code> containing <code>None</code>, <code>Accu Labs</code>, <code>Client Bill</code>, <code>Client</code>, <code>Patient</code>, <code>Patient Pay</code> &nbsp;·&nbsp; <code>FirstBilledDate</code> is a valid date</li>
+                    }
+                    else if (weeklyIsRule34)
+                    {
+                        <li>Filter: <code>PayerName</code> not blank &nbsp;·&nbsp; <code>ChargeEnteredDate</code> is a valid date &nbsp;·&nbsp; <code>FirstBilledDate</code> is a valid date</li>
+                    }
+                    else
+                    {
+                        <li>Filter: <code>PayerName</code> not blank &nbsp;·&nbsp; <code>FirstBilledDate</code> is a valid date</li>
+                    }
+                    <li>Rank by: <code>COUNT(DISTINCT ClaimID)</code> &nbsp;·&nbsp; Sort: Grand Total descending</li>
+                    <li>Cell metrics: <code>COUNT(DISTINCT ClaimID)</code> + <code>SUM(ChargeAmount)</code></li>
+                </ul>
+            </div>
         </div>
 
         <!-- ??? Coding tab pane ?????????????????????????????????? -->

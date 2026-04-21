@@ -12,6 +12,26 @@ public interface IProductionReportRepository
     /// Returns the pivot data for the Monthly Claim Volume table:
     /// grouped by PanelName × Year(FirstBilledDate) / Month(FirstBilledDate).
     /// Each panel includes top-3 payer drill-down rows.
+    /// When <paramref name="rule"/> is <c>"Rule1"</c> the column date source
+    /// switches to <c>ChargeEnteredDate</c> while the row filter retains
+    /// <c>FirstBilledDate IS NOT NULL</c> and <c>PayerName &lt;&gt; ''</c>.
+    /// When <paramref name="rule"/> is <c>"Rule2"</c> the column date source is
+    /// also <c>ChargeEnteredDate</c>, but the row filter excludes any row whose
+    /// <c>PayerName_Raw</c> contains <c>None</c>, <c>Accu Labs</c>, <c>Client Bill</c>,
+    /// <c>Client</c>, <c>Patient</c>, or <c>Patient Pay</c> (Certus Laboratories spec).
+    /// When <paramref name="rule"/> is <c>"Rule3"</c> the column date source is
+    /// also <c>ChargeEnteredDate</c> and the row filter requires
+    /// <c>PayerName &lt;&gt; ''</c>, <c>ChargeEnteredDate IS NOT NULL</c> and
+    /// <c>FirstBilledDate IS NOT NULL</c> (Augustus Laboratories spec).
+    /// Row source is <c>PanelName</c> until the <c>PanelNameNew</c> column is added.
+    /// When <paramref name="rule"/> is <c>"Rule4"</c> the behavior is currently identical
+    /// to <c>"Rule3"</c> (same filters, ChargeEnteredDate columns, <c>PanelName</c> fallback);
+    /// it exists as a distinct rule so its assigned lab can be tagged today and Rule4 can
+    /// diverge later without touching other labs.
+    /// When <paramref name="rule"/> is <c>"Rule5"</c> the behavior is identical to the
+    /// legacy default: column date source = <c>FirstBilledDate</c>, filter requires
+    /// <c>PayerName &lt;&gt; ''</c> and <c>FirstBilledDate IS NOT NULL</c>, with Top 3
+    /// <c>PayerName</c> drill-down per panel by <c>COUNT(DISTINCT ClaimID)</c>.
     /// </summary>
     Task<ProductionReportResult> GetMonthlyClaimVolumeAsync(
         string connectionString,
@@ -19,11 +39,18 @@ public interface IProductionReportRepository
         List<string>? filterPanelNames = null,
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
+        string? rule = null,
         CancellationToken ct = default);
     /// <summary>
     /// Returns the pivot data for the Weekly Claim Volume table:
-    /// grouped by PanelName × Week(FirstBilledDate) for the last 4 weeks.
-    /// Each panel includes top-3 payer drill-down rows.
+    /// grouped by PanelName × Week for the last 4 weeks. Each panel includes
+    /// top-3 payer drill-down rows.
+    /// The <paramref name="rule"/> selects the column date source and filter:
+    /// <c>"Rule2"</c> and the default use <c>FirstBilledDate</c> with <c>PayerName</c> not blank;
+    /// <c>"Rule3"</c>/<c>"Rule4"</c> use <c>ChargeEnteredDate</c> with both date columns required;
+    /// <c>"Rule5"</c> uses <c>ChargeEnteredDate</c> with the <c>PayerName_Raw</c> exclusion list.
+    /// The <paramref name="weekRange"/> string (e.g. <c>"Mon to Sun"</c>, <c>"Thu to Wed"</c>)
+    /// controls week boundaries; unset/unrecognized falls back to Monday-to-Sunday.
     /// </summary>
     Task<WeeklyClaimVolumeResult> GetWeeklyClaimVolumeAsync(
         string connectionString,
@@ -31,11 +58,15 @@ public interface IProductionReportRepository
         List<string>? filterPanelNames = null,
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
+        string? rule = null,
+        string? weekRange = null,
         CancellationToken ct = default);
 
     /// <summary>
     /// Returns the Coding table data: rows where FirstBilledDate is blank,
     /// grouped by PanelName with CPT Code drill-down.
+    /// Claim Count is <c>COUNT(DISTINCT AccessionNumber)</c> (unique visit number),
+    /// Total Charge is <c>SUM(ChargeAmount)</c>. Sorted by Grand Total descending.
     /// </summary>
     Task<CodingResult> GetCodingAsync(
         string connectionString,
