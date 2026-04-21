@@ -8,13 +8,34 @@ var builder = WebApplication.CreateBuilder(args);
 // ── File logging ─────────────────────────────────────────────────
 // Writes Warning+ logs (DB errors, crashes) to rolling daily text files.
 var fileLogSection = builder.Configuration.GetSection("Logging:File");
+
+var configuredLogDir = fileLogSection["LogDirectory"];
+var resolvedLogDir = string.IsNullOrWhiteSpace(configuredLogDir)
+	? Path.Combine(AppContext.BaseDirectory, "Logs")
+	: (Path.IsPathRooted(configuredLogDir)
+		? configuredLogDir
+		: Path.Combine(AppContext.BaseDirectory, configuredLogDir));
+
 var fileLogOptions = new FileLoggerOptions
 {
-	LogDirectory = fileLogSection["LogDirectory"] ?? "Logs",
-	MinLevel = Enum.TryParse<LogLevel>(fileLogSection["LogLevel"], true, out var lvl) ? lvl : LogLevel.Warning,
-	RetainDays = int.TryParse(fileLogSection["RetainDays"], out var rd) ? rd : 30
+	LogDirectory = resolvedLogDir,
+	MinLevel = Enum.TryParse<LogLevel>(fileLogSection["LogLevel"], true, out var lvl)
+		? lvl
+		: LogLevel.Warning,
+	RetainDays = int.TryParse(fileLogSection["RetainDays"], out var rd)
+		? rd
+		: 30
 };
-builder.Logging.AddProvider(new FileLoggerProvider(fileLogOptions));
+
+try
+{
+	builder.Logging.AddProvider(new FileLoggerProvider(fileLogOptions));
+}
+catch (Exception ex)
+{
+	// Do not fail app startup because custom file logger failed.
+	Console.Error.WriteLine($"File logger initialization failed: {ex}");
+}
 
 // Bind the "LabConfig" section from appsettings.json.
 var labConfigOptions = builder.Configuration
@@ -186,8 +207,6 @@ if (!app.Environment.IsDevelopment())
 }
 
 // ── Global error logging (all environments) ─────────────────────
-// Logs unhandled exceptions with full detail to the text file so
-// deployed-server errors are always captured.
 app.Use(async (context, next) =>
 {
 	try
@@ -206,7 +225,7 @@ app.Use(async (context, next) =>
 			context.Request.QueryString,
 			context.TraceIdentifier);
 
-		throw; // re-throw so the standard exception handler page still works
+		throw;
 	}
 });
 
