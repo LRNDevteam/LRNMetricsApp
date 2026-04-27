@@ -23,17 +23,17 @@ public static class CodingExcelExportBuilder
         if (vm.FinancialRows.Count > 0)
             BuildFinancialSheet(wb, vm.FinancialRows, labName);
 
-        if (vm.InsightRows.Count > 0)
-            BuildYtdInsightsSheet(wb, vm.InsightRows);
-
         if (vm.SummaryRows.Count > 0)
             BuildYtdSummarySheet(wb, vm.SummaryRows);
 
-        if (vm.WtdInsightRows.Count > 0)
-            BuildWtdInsightsSheet(wb, vm.WtdInsightRows);
+        if (vm.InsightRows.Count > 0)
+            BuildYtdInsightsSheet(wb, vm.InsightRows);
 
         if (vm.WtdSummaryRows.Count > 0)
             BuildWtdSummarySheet(wb, vm.WtdSummaryRows);
+
+        if (vm.WtdInsightRows.Count > 0)
+            BuildWtdInsightsSheet(wb, vm.WtdInsightRows);
 
         if (vm.DetailRows.Count > 0)
             BuildValidationDetailSheet(wb, vm.DetailRows);
@@ -353,170 +353,108 @@ public static class CodingExcelExportBuilder
         return ValueNavy;
     }
 
-    // ── Shared UI-matching colours for data sheets ─────────────────────
+    // ── Shared helpers for data sheets ───────────────────────────────────
+    // All data sheets (Financial Dashboard, YTD/WTD Insights & Summary,
+    // Validation Detail) use the same blue/amber palette and helpers as the
+    // Production Report so all reports share a single visual language.
 
-    private static readonly XLColor UiHeaderBg    = XLColor.FromHtml("#1B3A5C");
-    private static readonly XLColor UiHeaderEnd   = XLColor.FromHtml("#1565C0");
-    private static readonly XLColor UiYearPillBg  = XLColor.FromHtml("#1565C0");
-    private static readonly XLColor UiPanelChipBg = XLColor.FromHtml("#E3F2FD");
-    private static readonly XLColor UiPanelChipFg = XLColor.FromHtml("#1565C0");
-    private static readonly XLColor UiCptBg       = XLColor.FromHtml("#F8FAFC");
-    private static readonly XLColor UiCptFg       = XLColor.FromHtml("#37474F");
-    private static readonly XLColor UiMoneyNeg    = XLColor.FromHtml("#C62828");
-    private static readonly XLColor UiMoneyPos    = XLColor.FromHtml("#1565C0");
-    private static readonly XLColor UiMoneyNeutral = XLColor.FromHtml("#37474F");
-    private static readonly XLColor UiImpactNegBg = XLColor.FromHtml("#FDECEA");
-    private static readonly XLColor UiImpactPosBg = XLColor.FromHtml("#E3F2FD");
-    private static readonly XLColor UiImpactZeroBg = XLColor.FromHtml("#F5F5F5");
-    private static readonly XLColor UiImpactZeroFg = XLColor.FromHtml("#757575");
-    private static readonly XLColor UiRowBorder   = XLColor.FromHtml("#EEF2F7");
-    private static readonly XLColor UiBodyText    = XLColor.FromHtml("#2A3A54");
-    private static readonly XLColor UiRowAltBg    = XLColor.FromHtml("#F0F8FF");
-    private static readonly XLColor UiStatusGreen = XLColor.FromHtml("#2E7D32");
-    private static readonly XLColor UiStatusGreenBg = XLColor.FromHtml("#E8F5E9");
-    private static readonly XLColor UiStatusOrangeBg = XLColor.FromHtml("#FFF3E0");
-    private static readonly XLColor UiStatusOrangeFg = XLColor.FromHtml("#E65100");
-    private static readonly XLColor UiStatusRedBg = XLColor.FromHtml("#FDECEA");
-
-    // ── Shared helpers for UI-style sheets ───────────────────────────────
-
-    /// <summary>Writes a dark navy title bar matching the web gradient header.</summary>
+    /// <summary>Writes the dark-green title bar (Accent 6 darker 50 %).</summary>
     private static void WriteUiTitleBar(IXLWorksheet ws, int row, int colCount, string text)
-    {
-        var range = ws.Range(row, 1, row, colCount);
-        range.Merge();
-        var cell = ws.Cell(row, 1);
-        cell.Value = text;
-        cell.Style.Font.Bold = true;
-        cell.Style.Font.FontSize = 13;
-        cell.Style.Font.FontColor = XLColor.White;
-        cell.Style.Fill.BackgroundColor = NavyBg;
-        cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-        cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-        range.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-        range.Style.Border.OutsideBorderColor = NavyBg;
-        ws.Row(row).Height = 30;
-    }
+        => ExcelTheme.WriteTitleBar(ws, row, colCount, text);
 
-    /// <summary>Writes a navy-to-blue gradient-style header row matching the web table headers.</summary>
+    /// <summary>Writes a single-row column header band (Accent 6 darker 25 % green).</summary>
     private static void WriteUiHeaderRow(IXLWorksheet ws, int row, string[] headers)
     {
-        for (int c = 0; c < headers.Length; c++)
-        {
-            var cell = ws.Cell(row, c + 1);
-            cell.Value = headers[c];
-            cell.Style.Font.Bold = true;
-            cell.Style.Font.FontSize = 10;
-            cell.Style.Font.FontColor = XLColor.White;
-            cell.Style.Fill.BackgroundColor = UiHeaderBg;
-            cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-            cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-            cell.Style.Alignment.WrapText = true;
-            cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-            cell.Style.Border.OutsideBorderColor = XLColor.FromHtml("#FFFFFF");
-        }
+        ExcelTheme.WriteHeaderRow(ws, row, 1, headers, ExcelTheme.HeaderBg);
         ws.Row(row).Height = 28;
     }
 
-    /// <summary>Writes a year/week group header row resembling the blue pill on the web UI.</summary>
+    /// <summary>
+    /// Writes a year/week section title bar between data sets, using the
+    /// lighter green (Accent 6 base, <c>#70AD47</c>) so it sits visibly
+    /// between the dark-green column header and the light banded data rows.
+    /// </summary>
     private static void WriteUiGroupRow(IXLWorksheet ws, int row, int colCount, string label)
     {
-        var range = ws.Range(row, 1, row, colCount);
-        range.Merge();
-        var cell = ws.Cell(row, 1);
-        cell.Value = label;
-        cell.Style.Font.Bold = true;
-        cell.Style.Font.FontSize = 11;
-        cell.Style.Font.FontColor = XLColor.White;
-        cell.Style.Fill.BackgroundColor = UiYearPillBg;
-        cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-        range.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-        range.Style.Border.OutsideBorderColor = UiYearPillBg;
+        ExcelTheme.WriteSectionTitle(ws, row, 1, colCount, label, ExcelTheme.SubHeaderBg);
         ws.Row(row).Height = 22;
     }
 
-    /// <summary>Applies base data-cell styling matching the web UI body text and borders.</summary>
+    /// <summary>
+    /// Applies the standard banded data-cell styling. <paramref name="isAlt"/>
+    /// alternates between white and the Accent 6 lighter-80 % band.
+    /// </summary>
     private static void StyleUiDataCell(IXLCell cell, bool isAlt)
     {
-        cell.Style.Font.FontColor = UiBodyText;
-        cell.Style.Fill.BackgroundColor = isAlt ? UiRowAltBg : XLColor.White;
-        cell.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
-        cell.Style.Border.BottomBorderColor = UiRowBorder;
-        cell.Style.Border.RightBorder = XLBorderStyleValues.Thin;
-        cell.Style.Border.RightBorderColor = UiRowBorder;
-        cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        var bg = isAlt ? ExcelTheme.BandedRowBg : XLColor.White;
+        ExcelTheme.StyleDataCell(cell, bg);
     }
 
-    /// <summary>Styles a panel-name cell with the blue chip look.</summary>
+    /// <summary>Bold panel-name cell (no chip background to match Production Report).</summary>
     private static void StylePanelChip(IXLCell cell)
     {
         cell.Style.Font.Bold = true;
-        cell.Style.Font.FontColor = UiPanelChipFg;
-        cell.Style.Fill.BackgroundColor = UiPanelChipBg;
+        cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
     }
 
-    /// <summary>Styles a CPT code cell with monospace-like lighter background.</summary>
+    /// <summary>Monospace font for CPT-code cells; background inherited from band.</summary>
     private static void StyleCptCell(IXLCell cell)
     {
-        cell.Style.Font.FontColor = UiCptFg;
-        cell.Style.Fill.BackgroundColor = UiCptBg;
         cell.Style.Font.FontName = "Consolas";
         cell.Style.Font.FontSize = 9;
+        cell.Style.Alignment.WrapText = true;
     }
 
-    /// <summary>Colours a money cell: negative = red, positive = blue, zero = neutral gray.</summary>
+    /// <summary>Right-aligned currency. Negative values shown red; non-zero bold.</summary>
     private static void StyleMoneyCell(IXLCell cell, decimal value)
     {
-        cell.Style.Font.Bold = value != 0;
         cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+        cell.Style.Font.Bold = value != 0;
         if (value < 0)
-            cell.Style.Font.FontColor = UiMoneyNeg;
-        else if (value > 0)
-            cell.Style.Font.FontColor = UiMoneyPos;
-        else
-            cell.Style.Font.FontColor = UiMoneyNeutral;
+            cell.Style.Font.FontColor = ExcelTheme.BadFg;
     }
 
-    /// <summary>Styles a Net Impact cell with chip-like colouring.</summary>
+    /// <summary>Net-impact cell with semantic colour coding using ExcelTheme palette.</summary>
     private static void StyleImpactCell(IXLCell cell, decimal value)
     {
         cell.Style.Font.Bold = true;
         cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
         if (value < 0)
         {
-            cell.Style.Font.FontColor = UiMoneyNeg;
-            cell.Style.Fill.BackgroundColor = UiImpactNegBg;
+            cell.Style.Font.FontColor = ExcelTheme.BadFg;
+            cell.Style.Fill.BackgroundColor = ExcelTheme.BadBg;
         }
         else if (value > 0)
         {
-            cell.Style.Font.FontColor = UiMoneyPos;
-            cell.Style.Fill.BackgroundColor = UiImpactPosBg;
+            cell.Style.Font.FontColor = ExcelTheme.GoodFg;
+            cell.Style.Fill.BackgroundColor = ExcelTheme.GoodBg;
         }
         else
         {
-            cell.Style.Font.FontColor = UiImpactZeroFg;
-            cell.Style.Fill.BackgroundColor = UiImpactZeroBg;
+            cell.Style.Font.FontColor = ExcelTheme.NeutralFg;
+            cell.Style.Fill.BackgroundColor = ExcelTheme.NeutralBg;
         }
     }
 
-    /// <summary>Styles a validation status cell with green/orange/red background.</summary>
+    /// <summary>Validation status cell using ExcelTheme good / neutral / bad colours.</summary>
     private static void StyleStatusCell(IXLCell cell, string status)
     {
         cell.Style.Font.Bold = true;
+        cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
         if (status.Contains("Match", StringComparison.OrdinalIgnoreCase))
         {
-            cell.Style.Font.FontColor = UiStatusGreen;
-            cell.Style.Fill.BackgroundColor = UiStatusGreenBg;
+            cell.Style.Font.FontColor = ExcelTheme.GoodFg;
+            cell.Style.Fill.BackgroundColor = ExcelTheme.GoodBg;
         }
         else if (status.Contains("Missing", StringComparison.OrdinalIgnoreCase))
         {
-            cell.Style.Font.FontColor = UiMoneyNeg;
-            cell.Style.Fill.BackgroundColor = UiStatusRedBg;
+            cell.Style.Font.FontColor = ExcelTheme.BadFg;
+            cell.Style.Fill.BackgroundColor = ExcelTheme.BadBg;
         }
         else if (status.Contains("Additional", StringComparison.OrdinalIgnoreCase))
         {
-            cell.Style.Font.FontColor = UiStatusOrangeFg;
-            cell.Style.Fill.BackgroundColor = UiStatusOrangeBg;
+            cell.Style.Font.FontColor = ExcelTheme.NeutralFg;
+            cell.Style.Fill.BackgroundColor = ExcelTheme.NeutralBg;
         }
     }
 
@@ -526,7 +464,7 @@ public static class CodingExcelExportBuilder
         List<CodingFinancialSummaryRow> rows, string labName)
     {
         var ws = wb.AddWorksheet("Financial Dashboard");
-        ws.TabColor = ExcelTheme.TabBlue;
+        ws.TabColor = ExcelTheme.TabGreen;
         ExcelTheme.ApplyDefaults(ws);
 
         string[] headers =
@@ -605,7 +543,7 @@ public static class CodingExcelExportBuilder
     private static void BuildYtdInsightsSheet(XLWorkbook wb, List<CodingInsightRow> rows)
     {
         var ws = wb.AddWorksheet("YTD Insights");
-        ws.TabColor = ExcelTheme.TabBlue;
+        ws.TabColor = ExcelTheme.TabGreen;
         ExcelTheme.ApplyDefaults(ws);
 
         string[] headers =
@@ -693,16 +631,17 @@ public static class CodingExcelExportBuilder
     private static void BuildYtdSummarySheet(XLWorkbook wb, List<CodingSummaryRow> rows)
     {
         var ws = wb.AddWorksheet("YTD Summary");
-        ws.TabColor = ExcelTheme.TabBlue;
+        ws.TabColor = ExcelTheme.TabGreen;
         ExcelTheme.ApplyDefaults(ws);
 
+        // CPT-combination columns are intentionally omitted - they are surfaced
+        // in the YTD Insights sheet (per-combination breakdown).
         string[] headers =
         [
-            "Year", "Panel Name", "Billable CPT Combo", "Billed CPT Combo",
-            "Missing CPTs", "Additional CPTs",
-            "Total Claims", "Total Billed Charges",
-            "Claims w/ Missing", "Billed Charges (Missing)",
-            "Claims w/ Additional", "Billed Charges (Additional)",
+            "Year", "Panel",
+            "Total No. of Claims", "Total Billed Charges",
+            "Distinct claims with Missing CPTs", "Total Billed Charges for Missing CPTs",
+            "Distinct claims with Additional CPTs", "Total Billed Charges for Additional CPTs",
             "Lost Revenue", "Revenue at Risk", "Net Impact"
         ];
         int colCount = headers.Length;
@@ -714,13 +653,14 @@ public static class CodingExcelExportBuilder
 
         foreach (var year in years)
         {
-            var yearRows = rows.Where(r => r.Year == year).ToList();
+            // Blank spacer row between groups (except the first)
+            if (rowNum > 2) rowNum++;
 
-            WriteUiGroupRow(ws, rowNum, colCount, $"{year}   ({yearRows.Count} panel{(yearRows.Count != 1 ? "s" : "")})");
-            rowNum++;
+            // Repeat header row per year section
             WriteUiHeaderRow(ws, rowNum, headers);
             rowNum++;
 
+            var yearRows = rows.Where(r => r.Year == year).ToList();
             for (int r = 0; r < yearRows.Count; r++)
             {
                 bool isAlt = r % 2 != 0;
@@ -728,45 +668,37 @@ public static class CodingExcelExportBuilder
 
                 ws.Cell(rowNum, 1).Value = s.Year;
                 ws.Cell(rowNum, 2).Value = s.PanelName;
-                ws.Cell(rowNum, 3).Value = s.BillableCptCombo;
-                ws.Cell(rowNum, 4).Value = s.BilledCptCombo;
-                ws.Cell(rowNum, 5).Value = s.MissingCpts;
-                ws.Cell(rowNum, 6).Value = s.AdditionalCpts;
-                ws.Cell(rowNum, 7).Value = s.TotalClaims;
-                ws.Cell(rowNum, 8).Value = s.TotalBilledCharges;
-                ws.Cell(rowNum, 9).Value = s.DistinctClaimsWithMissingCpts;
-                ws.Cell(rowNum, 10).Value = s.TotalBilledChargesForMissingCpts;
-                ws.Cell(rowNum, 11).Value = s.DistinctClaimsWithAdditionalCpts;
-                ws.Cell(rowNum, 12).Value = s.TotalBilledChargesForAdditionalCpts;
-                ws.Cell(rowNum, 13).Value = s.LostRevenue;
-                ws.Cell(rowNum, 14).Value = s.RevenueAtRisk;
-                ws.Cell(rowNum, 15).Value = s.NetImpact;
+                ws.Cell(rowNum, 3).Value = s.TotalClaims;
+                ws.Cell(rowNum, 4).Value = s.TotalBilledCharges;
+                ws.Cell(rowNum, 5).Value = s.DistinctClaimsWithMissingCpts;
+                ws.Cell(rowNum, 6).Value = s.TotalBilledChargesForMissingCpts;
+                ws.Cell(rowNum, 7).Value = s.DistinctClaimsWithAdditionalCpts;
+                ws.Cell(rowNum, 8).Value = s.TotalBilledChargesForAdditionalCpts;
+                ws.Cell(rowNum, 9).Value = s.LostRevenue;
+                ws.Cell(rowNum, 10).Value = s.RevenueAtRisk;
+                ws.Cell(rowNum, 11).Value = s.NetImpact;
 
                 for (int c = 1; c <= colCount; c++)
                     StyleUiDataCell(ws.Cell(rowNum, c), isAlt);
 
                 StylePanelChip(ws.Cell(rowNum, 2));
-                StyleCptCell(ws.Cell(rowNum, 3));
-                StyleCptCell(ws.Cell(rowNum, 4));
-                StyleCptCell(ws.Cell(rowNum, 5));
-                StyleCptCell(ws.Cell(rowNum, 6));
-                ws.Cell(rowNum, 7).Style.Font.Bold = true;
-                StyleMoneyCell(ws.Cell(rowNum, 8), s.TotalBilledCharges);
-                StyleMoneyCell(ws.Cell(rowNum, 10), s.TotalBilledChargesForMissingCpts);
-                StyleMoneyCell(ws.Cell(rowNum, 12), s.TotalBilledChargesForAdditionalCpts);
-                StyleMoneyCell(ws.Cell(rowNum, 13), s.LostRevenue != 0 ? -1 : 0);
-                StyleMoneyCell(ws.Cell(rowNum, 14), s.RevenueAtRisk);
-                StyleImpactCell(ws.Cell(rowNum, 15), s.NetImpact);
+                ws.Cell(rowNum, 3).Style.Font.Bold = true;
+                StyleMoneyCell(ws.Cell(rowNum, 4), s.TotalBilledCharges);
+                StyleMoneyCell(ws.Cell(rowNum, 6), s.TotalBilledChargesForMissingCpts);
+                StyleMoneyCell(ws.Cell(rowNum, 8), s.TotalBilledChargesForAdditionalCpts);
+                StyleMoneyCell(ws.Cell(rowNum, 9), s.LostRevenue != 0 ? -1 : 0);
+                StyleMoneyCell(ws.Cell(rowNum, 10), s.RevenueAtRisk);
+                StyleImpactCell(ws.Cell(rowNum, 11), s.NetImpact);
 
                 rowNum++;
             }
         }
 
-        foreach (int c in new[] { 7, 9, 11 }) ws.Column(c).Style.NumberFormat.Format = "#,##0";
-        foreach (int c in new[] { 8, 10, 12, 13, 14, 15 }) ws.Column(c).Style.NumberFormat.Format = "$#,##0.00";
+        foreach (int c in new[] { 3, 5, 7 }) ws.Column(c).Style.NumberFormat.Format = "#,##0";
+        foreach (int c in new[] { 4, 6, 8, 9, 10, 11 }) ws.Column(c).Style.NumberFormat.Format = "$#,##0.00";
 
         ws.SheetView.FreezeRows(1);
-        ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 14, firstColMinWidth: 12);
+        ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 14, firstColMinWidth: 8);
     }
 
     // ── WTD Insights sheet ──────────────────────────────────────────────
@@ -774,7 +706,7 @@ public static class CodingExcelExportBuilder
     private static void BuildWtdInsightsSheet(XLWorkbook wb, List<CodingWtdInsightRow> rows)
     {
         var ws = wb.AddWorksheet("WTD Insights");
-        ws.TabColor = ExcelTheme.TabBlue;
+        ws.TabColor = ExcelTheme.TabGreen;
         ExcelTheme.ApplyDefaults(ws);
 
         string[] headers =
@@ -852,15 +784,16 @@ public static class CodingExcelExportBuilder
     private static void BuildWtdSummarySheet(XLWorkbook wb, List<CodingWtdSummaryRow> rows)
     {
         var ws = wb.AddWorksheet("WTD Summary");
-        ws.TabColor = ExcelTheme.TabBlue;
+        ws.TabColor = ExcelTheme.TabGreen;
         ExcelTheme.ApplyDefaults(ws);
 
+        // CPT-combination columns are intentionally omitted - they are surfaced
+        // in the WTD Insights sheet (per-combination breakdown).
         string[] headers =
         [
-            "Week", "Panel Name", "Billable CPT Combo", "Billed CPT Combo",
-            "Missing CPTs", "Additional CPTs",
-            "Total Claims", "Claims w/ Missing",
-            "Billed Charges (Missing)", "Avg Allowed (Missing)"
+            "Week", "Panel",
+            "Total No. of Claims", "Distinct claims with Missing CPTs",
+            "Total Billed Charges for Missing CPTs", "Avg Allowed Amount for Missing CPTs"
         ];
         int colCount = headers.Length;
 
@@ -871,13 +804,14 @@ public static class CodingExcelExportBuilder
 
         foreach (var week in weeks)
         {
-            var weekRows = rows.Where(r => r.WeekFolder == week).ToList();
+            // Blank spacer row between groups (except the first)
+            if (rowNum > 2) rowNum++;
 
-            WriteUiGroupRow(ws, rowNum, colCount, $"{week}   ({weekRows.Count} panel{(weekRows.Count != 1 ? "s" : "")})");
-            rowNum++;
+            // Repeat header row per week section
             WriteUiHeaderRow(ws, rowNum, headers);
             rowNum++;
 
+            var weekRows = rows.Where(r => r.WeekFolder == week).ToList();
             for (int r = 0; r < weekRows.Count; r++)
             {
                 bool isAlt = r % 2 != 0;
@@ -885,36 +819,28 @@ public static class CodingExcelExportBuilder
 
                 ws.Cell(rowNum, 1).Value = s.WeekFolder;
                 ws.Cell(rowNum, 2).Value = s.PanelName;
-                ws.Cell(rowNum, 3).Value = s.BillableCptCombo;
-                ws.Cell(rowNum, 4).Value = s.BilledCptCombo;
-                ws.Cell(rowNum, 5).Value = s.MissingCpts;
-                ws.Cell(rowNum, 6).Value = s.AdditionalCpts;
-                ws.Cell(rowNum, 7).Value = s.TotalClaims;
-                ws.Cell(rowNum, 8).Value = s.DistinctClaimsWithMissingCpts;
-                ws.Cell(rowNum, 9).Value = s.TotalBilledChargesForMissingCpts;
-                ws.Cell(rowNum, 10).Value = s.AvgAllowedAmountForMissingCpts;
+                ws.Cell(rowNum, 3).Value = s.TotalClaims;
+                ws.Cell(rowNum, 4).Value = s.DistinctClaimsWithMissingCpts;
+                ws.Cell(rowNum, 5).Value = s.TotalBilledChargesForMissingCpts;
+                ws.Cell(rowNum, 6).Value = s.AvgAllowedAmountForMissingCpts;
 
                 for (int c = 1; c <= colCount; c++)
                     StyleUiDataCell(ws.Cell(rowNum, c), isAlt);
 
                 StylePanelChip(ws.Cell(rowNum, 2));
-                StyleCptCell(ws.Cell(rowNum, 3));
-                StyleCptCell(ws.Cell(rowNum, 4));
-                StyleCptCell(ws.Cell(rowNum, 5));
-                StyleCptCell(ws.Cell(rowNum, 6));
-                ws.Cell(rowNum, 7).Style.Font.Bold = true;
-                StyleMoneyCell(ws.Cell(rowNum, 9), s.TotalBilledChargesForMissingCpts);
-                StyleMoneyCell(ws.Cell(rowNum, 10), s.AvgAllowedAmountForMissingCpts);
+                ws.Cell(rowNum, 3).Style.Font.Bold = true;
+                StyleMoneyCell(ws.Cell(rowNum, 5), s.TotalBilledChargesForMissingCpts);
+                StyleMoneyCell(ws.Cell(rowNum, 6), s.AvgAllowedAmountForMissingCpts);
 
                 rowNum++;
             }
         }
 
-        foreach (int c in new[] { 7, 8 }) ws.Column(c).Style.NumberFormat.Format = "#,##0";
-        foreach (int c in new[] { 9, 10 }) ws.Column(c).Style.NumberFormat.Format = "$#,##0.00";
+        foreach (int c in new[] { 3, 4 }) ws.Column(c).Style.NumberFormat.Format = "#,##0";
+        foreach (int c in new[] { 5, 6 }) ws.Column(c).Style.NumberFormat.Format = "$#,##0.00";
 
         ws.SheetView.FreezeRows(1);
-        ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 14, firstColMinWidth: 16);
+        ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 14, firstColMinWidth: 22);
     }
 
     // ── Validation Detail sheet ─────────────────────────────────────────

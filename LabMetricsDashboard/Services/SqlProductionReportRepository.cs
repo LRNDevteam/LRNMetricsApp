@@ -26,8 +26,12 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
         string? rule = null,
         CancellationToken ct = default)
     {
@@ -95,9 +99,9 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         }
         else
         {
-            // Rule1 / Rule3 / Rule4 / legacy: PayerName must not be blank.
-            whereClauses.Add("LTRIM(RTRIM(PayerName)) <> ''");
-            whereClauses.Add("PayerName IS NOT NULL");
+            // Rule1 / Rule3 / Rule4 / legacy: PayerName_Raw must not be blank.
+            whereClauses.Add("LTRIM(RTRIM(PayerName_Raw)) <> ''");
+            whereClauses.Add("PayerName_Raw IS NOT NULL");
         }
 
         // For Rule1/Rule2/Rule3/Rule4 ensure the column-date is also valid so we don't get NULL year/month rows.
@@ -110,7 +114,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         if (filterPayerNames is { Count: > 0 })
         {
             var pNames = filterPayerNames.Select((n, i) => $"@fpn{i}").ToList();
-            whereClauses.Add($"LTRIM(RTRIM(PayerName)) IN ({string.Join(",", pNames)})");
+            whereClauses.Add($"LTRIM(RTRIM(PayerName_Raw)) IN ({string.Join(",", pNames)})");
             for (int i = 0; i < filterPayerNames.Count; i++)
                 parameters.Add(new SqlParameter($"@fpn{i}", filterPayerNames[i]));
         }
@@ -140,12 +144,38 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             parameters.Add(new SqlParameter("@fbTo", SqlDbType.Date) { Value = filterFirstBillTo.Value.ToDateTime(TimeOnly.MinValue) });
         }
 
+        // Date of Service filters (optional)
+        if (filterDosFrom.HasValue)
+        {
+            whereClauses.Add("TRY_CAST(DateOfService AS DATE) >= @dosFrom");
+            parameters.Add(new SqlParameter("@dosFrom", SqlDbType.Date) { Value = filterDosFrom.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        if (filterDosTo.HasValue)
+        {
+            whereClauses.Add("TRY_CAST(DateOfService AS DATE) <= @dosTo");
+            parameters.Add(new SqlParameter("@dosTo", SqlDbType.Date) { Value = filterDosTo.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        // Explicit FirstBilledDate range filter (always applied when provided)
+        if (filterFirstBilledFrom.HasValue)
+        {
+            whereClauses.Add("TRY_CAST(FirstBilledDate AS DATE) >= @firstBilledFrom");
+            parameters.Add(new SqlParameter("@firstBilledFrom", SqlDbType.Date) { Value = filterFirstBilledFrom.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        if (filterFirstBilledTo.HasValue)
+        {
+            whereClauses.Add("TRY_CAST(FirstBilledDate AS DATE) <= @firstBilledTo");
+            parameters.Add(new SqlParameter("@firstBilledTo", SqlDbType.Date) { Value = filterFirstBilledTo.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
         var whereStr = string.Join(" AND ", whereClauses);
 
         // Query 1: filter option lists (unfiltered)
         const string optionsSql = """
-            SELECT DISTINCT LTRIM(RTRIM(PayerName)) FROM dbo.ClaimLevelData
-            WHERE PayerName IS NOT NULL AND PayerName <> '' ORDER BY 1;
+            SELECT DISTINCT LTRIM(RTRIM(PayerName_Raw)) FROM dbo.ClaimLevelData
+            WHERE PayerName_Raw IS NOT NULL AND PayerName_Raw <> '' ORDER BY 1;
             SELECT DISTINCT LTRIM(RTRIM(PanelName)) FROM dbo.ClaimLevelData
             WHERE PanelName IS NOT NULL AND PanelName <> '' ORDER BY 1;
             """;
@@ -157,7 +187,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         var pivotSql = $"""
             SELECT
                 LTRIM(RTRIM({panelColumnExpr}))                          AS PanelName,
-                LTRIM(RTRIM(PayerName))                                 AS PayerName,
+                LTRIM(RTRIM(PayerName_Raw))                            AS PayerName,
                 YEAR({columnDateExpr})                                  AS BillYear,
                 MONTH({columnDateExpr})                                 AS BillMonth,
                 COUNT(DISTINCT ClaimID)                                  AS ClaimCount,
@@ -166,7 +196,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             WHERE {whereStr}
             GROUP BY
                 LTRIM(RTRIM({panelColumnExpr})),
-                LTRIM(RTRIM(PayerName)),
+                LTRIM(RTRIM(PayerName_Raw)),
                 YEAR({columnDateExpr}),
                 MONTH({columnDateExpr})
             ORDER BY PanelName, PayerName, BillYear, BillMonth
@@ -362,8 +392,12 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
         string? rule = null,
         string? weekRange = null,
         CancellationToken ct = default)
@@ -426,9 +460,9 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         }
         else
         {
-            // Rule1 / Rule2 / Rule3 / Rule4 / default: PayerName must not be blank.
-            whereClauses.Add("LTRIM(RTRIM(PayerName)) <> ''");
-            whereClauses.Add("PayerName IS NOT NULL");
+            // Rule1 / Rule2 / Rule3 / Rule4 / default: PayerName_Raw must not be blank.
+            whereClauses.Add("LTRIM(RTRIM(PayerName_Raw)) <> ''");
+            whereClauses.Add("PayerName_Raw IS NOT NULL");
         }
 
         // Rule3 / Rule4 also require ChargeEnteredDate to be a real date.
@@ -440,7 +474,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         if (filterPayerNames is { Count: > 0 })
         {
             var pNames = filterPayerNames.Select((n, i) => $"@wfpn{i}").ToList();
-            whereClauses.Add($"LTRIM(RTRIM(PayerName)) IN ({string.Join(",", pNames)})");
+            whereClauses.Add($"LTRIM(RTRIM(PayerName_Raw)) IN ({string.Join(",", pNames)})");
             for (int i = 0; i < filterPayerNames.Count; i++)
                 parameters.Add(new SqlParameter($"@wfpn{i}", filterPayerNames[i]));
         }
@@ -466,6 +500,32 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             parameters.Add(new SqlParameter("@wfbTo", SqlDbType.Date) { Value = filterFirstBillTo.Value.ToDateTime(TimeOnly.MinValue) });
         }
 
+        // Date of Service filters for weekly query
+        if (filterDosFrom.HasValue)
+        {
+            whereClauses.Add("TRY_CAST(DateOfService AS DATE) >= @wDosFrom");
+            parameters.Add(new SqlParameter("@wDosFrom", SqlDbType.Date) { Value = filterDosFrom.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        if (filterDosTo.HasValue)
+        {
+            whereClauses.Add("TRY_CAST(DateOfService AS DATE) <= @wDosTo");
+            parameters.Add(new SqlParameter("@wDosTo", SqlDbType.Date) { Value = filterDosTo.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        // Explicit FirstBilledDate range filter for weekly queries
+        if (filterFirstBilledFrom.HasValue)
+        {
+            whereClauses.Add("TRY_CAST(FirstBilledDate AS DATE) >= @wFirstBilledFrom");
+            parameters.Add(new SqlParameter("@wFirstBilledFrom", SqlDbType.Date) { Value = filterFirstBilledFrom.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        if (filterFirstBilledTo.HasValue)
+        {
+            whereClauses.Add("TRY_CAST(FirstBilledDate AS DATE) <= @wFirstBilledTo");
+            parameters.Add(new SqlParameter("@wFirstBilledTo", SqlDbType.Date) { Value = filterFirstBilledTo.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
         var whereStr = string.Join(" AND ", whereClauses);
 
         // Query: panel × payer × week-date aggregation within the 4-week window.
@@ -474,7 +534,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         var pivotSql = $"""
             SELECT
                 LTRIM(RTRIM(PanelName))                                 AS PanelName,
-                LTRIM(RTRIM(PayerName))                                 AS PayerName,
+                LTRIM(RTRIM(PayerName_Raw))                            AS PayerName,
                 {weekDateExpr}                                          AS BillDate,
                 COUNT(DISTINCT ClaimID)                                  AS ClaimCount,
                 ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))),0)  AS BilledCharges
@@ -482,7 +542,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             WHERE {whereStr}
             GROUP BY
                 LTRIM(RTRIM(PanelName)),
-                LTRIM(RTRIM(PayerName)),
+                LTRIM(RTRIM(PayerName_Raw)),
                 {weekDateExpr}
             ORDER BY PanelName, PayerName, BillDate
             """;
@@ -765,23 +825,48 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        string? rule = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
+        var isRule1 = string.Equals(rule, "Rule1", StringComparison.OrdinalIgnoreCase);
+        var isRule2 = string.Equals(rule, "Rule2", StringComparison.OrdinalIgnoreCase);
+        var isRule3 = string.Equals(rule, "Rule3", StringComparison.OrdinalIgnoreCase);
+        var isRule4 = string.Equals(rule, "Rule4", StringComparison.OrdinalIgnoreCase);
+        var useChargeEnteredDate = isRule1 || isRule2 || isRule3 || isRule4;
+        var columnDateExpr = useChargeEnteredDate
+            ? "TRY_CAST(ChargeEnteredDate AS DATE)"
+            : "TRY_CAST(FirstBilledDate AS DATE)";
+
         var whereClauses = new List<string>
         {
-            "LTRIM(RTRIM(PayerName)) <> ''",
-            "PayerName IS NOT NULL",
-            "TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL",
-            "YEAR(TRY_CAST(ChargeEnteredDate AS DATE)) > 1900"
+            "LTRIM(RTRIM(PayerName_Raw)) <> ''",
+            "PayerName_Raw IS NOT NULL",
         };
         var parameters = new List<SqlParameter>();
+
+        if (useChargeEnteredDate)
+        {
+            whereClauses.Add("TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL");
+            whereClauses.Add("YEAR(TRY_CAST(ChargeEnteredDate AS DATE)) > 1900");
+        }
+        else
+        {
+            whereClauses.Add("TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL");
+            whereClauses.Add("YEAR(TRY_CAST(FirstBilledDate AS DATE)) > 1900");
+        }
 
         if (filterPayerNames is { Count: > 0 })
         {
             var pNames = filterPayerNames.Select((n, i) => $"@pbpn{i}").ToList();
-            whereClauses.Add($"LTRIM(RTRIM(PayerName)) IN ({string.Join(",", pNames)})");
+            whereClauses.Add($"LTRIM(RTRIM(PayerName_Raw)) IN ({string.Join(",", pNames)})");
             for (int i = 0; i < filterPayerNames.Count; i++)
                 parameters.Add(new SqlParameter($"@pbpn{i}", filterPayerNames[i]));
         }
@@ -794,20 +879,45 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                 parameters.Add(new SqlParameter($"@pbpl{i}", filterPanelNames[i]));
         }
 
+        // Apply optional date filters against the active date column determined by the rule
+        if (filterFirstBillFrom.HasValue)
+        {
+            whereClauses.Add($"{columnDateExpr} >= @pbFbFrom");
+            parameters.Add(new SqlParameter("@pbFbFrom", SqlDbType.Date) { Value = filterFirstBillFrom.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        if (filterFirstBillTo.HasValue)
+        {
+            whereClauses.Add($"{columnDateExpr} <= @pbFbTo");
+            parameters.Add(new SqlParameter("@pbFbTo", SqlDbType.Date) { Value = filterFirstBillTo.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        if (filterDosFrom.HasValue)
+        {
+            whereClauses.Add("TRY_CAST(DateOfService AS DATE) >= @pbDosFrom");
+            parameters.Add(new SqlParameter("@pbDosFrom", SqlDbType.Date) { Value = filterDosFrom.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        if (filterDosTo.HasValue)
+        {
+            whereClauses.Add("TRY_CAST(DateOfService AS DATE) <= @pbDosTo");
+            parameters.Add(new SqlParameter("@pbDosTo", SqlDbType.Date) { Value = filterDosTo.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
         var whereStr = string.Join(" AND ", whereClauses);
 
         var pivotSql = $"""
             SELECT
-                LTRIM(RTRIM(PayerName))                     AS PayerName,
-                YEAR(TRY_CAST(ChargeEnteredDate AS DATE))   AS EnteredYear,
-                MONTH(TRY_CAST(ChargeEnteredDate AS DATE))  AS EnteredMonth,
+            LTRIM(RTRIM(PayerName_Raw))                AS PayerName,
+                YEAR({columnDateExpr})                       AS EnteredYear,
+                MONTH({columnDateExpr})                      AS EnteredMonth,
                 COUNT(DISTINCT ClaimID)                      AS ClaimCount
             FROM dbo.ClaimLevelData
             WHERE {whereStr}
             GROUP BY
-                LTRIM(RTRIM(PayerName)),
-                YEAR(TRY_CAST(ChargeEnteredDate AS DATE)),
-                MONTH(TRY_CAST(ChargeEnteredDate AS DATE))
+                LTRIM(RTRIM(PayerName_Raw)),
+                YEAR({columnDateExpr}),
+                MONTH({columnDateExpr})
             ORDER BY PayerName, EnteredYear, EnteredMonth
             """;
 
@@ -904,23 +1014,48 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        string? rule = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
+        var isRule1 = string.Equals(rule, "Rule1", StringComparison.OrdinalIgnoreCase);
+        var isRule2 = string.Equals(rule, "Rule2", StringComparison.OrdinalIgnoreCase);
+        var isRule3 = string.Equals(rule, "Rule3", StringComparison.OrdinalIgnoreCase);
+        var isRule4 = string.Equals(rule, "Rule4", StringComparison.OrdinalIgnoreCase);
+        var useChargeEnteredDate = isRule1 || isRule2 || isRule3 || isRule4;
+        var columnDateExpr = useChargeEnteredDate
+            ? "TRY_CAST(ChargeEnteredDate AS DATE)"
+            : "TRY_CAST(FirstBilledDate AS DATE)";
+
         var whereClauses = new List<string>
         {
-            "LTRIM(RTRIM(PayerName)) <> ''",
-            "PayerName IS NOT NULL",
-            "TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL",
-            "YEAR(TRY_CAST(ChargeEnteredDate AS DATE)) > 1900"
+            "LTRIM(RTRIM(PayerName_Raw)) <> ''",
+            "PayerName_Raw IS NOT NULL",
         };
         var parameters = new List<SqlParameter>();
+
+        if (useChargeEnteredDate)
+        {
+            whereClauses.Add("TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL");
+            whereClauses.Add("YEAR(TRY_CAST(ChargeEnteredDate AS DATE)) > 1900");
+        }
+        else
+        {
+            whereClauses.Add("TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL");
+            whereClauses.Add("YEAR(TRY_CAST(FirstBilledDate AS DATE)) > 1900");
+        }
 
         if (filterPayerNames is { Count: > 0 })
         {
             var pNames = filterPayerNames.Select((n, i) => $"@pxpn{i}").ToList();
-            whereClauses.Add($"LTRIM(RTRIM(PayerName)) IN ({string.Join(",", pNames)})");
+            whereClauses.Add($"LTRIM(RTRIM(PayerName_Raw)) IN ({string.Join(",", pNames)})");
             for (int i = 0; i < filterPayerNames.Count; i++)
                 parameters.Add(new SqlParameter($"@pxpn{i}", filterPayerNames[i]));
         }
@@ -933,18 +1068,43 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                 parameters.Add(new SqlParameter($"@pxpl{i}", filterPanelNames[i]));
         }
 
+        // Apply optional date filters against the active column determined by the rule
+        if (filterFirstBillFrom.HasValue)
+        {
+            whereClauses.Add($"{columnDateExpr} >= @ppFbFrom");
+            parameters.Add(new SqlParameter("@ppFbFrom", SqlDbType.Date) { Value = filterFirstBillFrom.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        if (filterFirstBillTo.HasValue)
+        {
+            whereClauses.Add($"{columnDateExpr} <= @ppFbTo");
+            parameters.Add(new SqlParameter("@ppFbTo", SqlDbType.Date) { Value = filterFirstBillTo.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        if (filterDosFrom.HasValue)
+        {
+            whereClauses.Add("TRY_CAST(DateOfService AS DATE) >= @ppDosFrom");
+            parameters.Add(new SqlParameter("@ppDosFrom", SqlDbType.Date) { Value = filterDosFrom.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        if (filterDosTo.HasValue)
+        {
+            whereClauses.Add("TRY_CAST(DateOfService AS DATE) <= @ppDosTo");
+            parameters.Add(new SqlParameter("@ppDosTo", SqlDbType.Date) { Value = filterDosTo.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
         var whereStr = string.Join(" AND ", whereClauses);
 
         var pivotSql = $"""
             SELECT
-                LTRIM(RTRIM(PayerName))                                 AS PayerName,
+                LTRIM(RTRIM(PayerName_Raw))                            AS PayerName,
                 LTRIM(RTRIM(PanelName))                                 AS PanelName,
                 COUNT(DISTINCT ClaimID)                                  AS ClaimCount,
                 ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))),0)  AS BilledCharges
             FROM dbo.ClaimLevelData
             WHERE {whereStr}
             GROUP BY
-                LTRIM(RTRIM(PayerName)),
+                LTRIM(RTRIM(PayerName_Raw)),
                 LTRIM(RTRIM(PanelName))
             ORDER BY PayerName, PanelName
             """;
@@ -1047,9 +1207,25 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
     public async Task<UnbilledAgingResult> GetUnbilledAgingAsync(
         string connectionString,
         List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        string? rule = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+        var isRule1 = string.Equals(rule, "Rule1", StringComparison.OrdinalIgnoreCase);
+        var isRule2 = string.Equals(rule, "Rule2", StringComparison.OrdinalIgnoreCase);
+        var isRule3 = string.Equals(rule, "Rule3", StringComparison.OrdinalIgnoreCase);
+        var isRule4 = string.Equals(rule, "Rule4", StringComparison.OrdinalIgnoreCase);
+        var useChargeEnteredDate = isRule1 || isRule2 || isRule3 || isRule4;
+        var columnDateExpr = useChargeEnteredDate
+            ? "TRY_CAST(ChargeEnteredDate AS DATE)"
+            : "TRY_CAST(FirstBilledDate AS DATE)";
 
         var whereClauses = new List<string>
         {
@@ -1063,6 +1239,31 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             whereClauses.Add($"LTRIM(RTRIM(PanelName)) IN ({string.Join(",", plNames)})");
             for (int i = 0; i < filterPanelNames.Count; i++)
                 parameters.Add(new SqlParameter($"@uapl{i}", filterPanelNames[i]));
+        }
+
+        // Apply optional date filters against the active date column determined by the rule
+        if (filterFirstBillFrom.HasValue)
+        {
+            whereClauses.Add($"{columnDateExpr} >= @uaFbFrom");
+            parameters.Add(new SqlParameter("@uaFbFrom", SqlDbType.Date) { Value = filterFirstBillFrom.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        if (filterFirstBillTo.HasValue)
+        {
+            whereClauses.Add($"{columnDateExpr} <= @uaFbTo");
+            parameters.Add(new SqlParameter("@uaFbTo", SqlDbType.Date) { Value = filterFirstBillTo.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        if (filterDosFrom.HasValue)
+        {
+            whereClauses.Add("TRY_CAST(DateOfService AS DATE) >= @uaDosFrom");
+            parameters.Add(new SqlParameter("@uaDosFrom", SqlDbType.Date) { Value = filterDosFrom.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        if (filterDosTo.HasValue)
+        {
+            whereClauses.Add("TRY_CAST(DateOfService AS DATE) <= @uaDosTo");
+            parameters.Add(new SqlParameter("@uaDosTo", SqlDbType.Date) { Value = filterDosTo.Value.ToDateTime(TimeOnly.MinValue) });
         }
 
         var whereStr = string.Join(" AND ", whereClauses);
@@ -1182,8 +1383,12 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
 
     public async Task<CptBreakdownResult> GetCptBreakdownAsync(
         string connectionString,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
@@ -1205,6 +1410,32 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         {
             whereClauses.Add("TRY_CAST(FirstBilledDate AS DATE) <= @cptFbTo");
             parameters.Add(new SqlParameter("@cptFbTo", SqlDbType.Date) { Value = filterFirstBillTo.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        // CPT: optional DateOfService range
+        if (filterDosFrom.HasValue)
+        {
+            whereClauses.Add("TRY_CAST(DateOfService AS DATE) >= @cptDosFrom");
+            parameters.Add(new SqlParameter("@cptDosFrom", SqlDbType.Date) { Value = filterDosFrom.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        if (filterDosTo.HasValue)
+        {
+            whereClauses.Add("TRY_CAST(DateOfService AS DATE) <= @cptDosTo");
+            parameters.Add(new SqlParameter("@cptDosTo", SqlDbType.Date) { Value = filterDosTo.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        // CPT: explicit FirstBilledDate range filter
+        if (filterFirstBilledFrom.HasValue)
+        {
+            whereClauses.Add("TRY_CAST(FirstBilledDate AS DATE) >= @cptFirstBilledFrom");
+            parameters.Add(new SqlParameter("@cptFirstBilledFrom", SqlDbType.Date) { Value = filterFirstBilledFrom.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        if (filterFirstBilledTo.HasValue)
+        {
+            whereClauses.Add("TRY_CAST(FirstBilledDate AS DATE) <= @cptFirstBilledTo");
+            parameters.Add(new SqlParameter("@cptFirstBilledTo", SqlDbType.Date) { Value = filterFirstBilledTo.Value.ToDateTime(TimeOnly.MinValue) });
         }
 
         var whereStr = string.Join(" AND ", whereClauses);
@@ -1337,11 +1568,15 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default)
     {
-        var (whereStr, parameters) = BuildExportFilters(filterPayerNames, filterPanelNames, filterFirstBillFrom, filterFirstBillTo, "ce");
+        var (whereStr, parameters) = BuildExportFilters(filterPayerNames, filterPanelNames, filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo, filterFirstBilledFrom, filterFirstBilledTo, "ce");
 
         var sql = $"""
             SELECT [ClaimID],[AccessionNumber],[PayerName],[PayerType],[BillingProvider],[ReferringProvider],
@@ -1362,11 +1597,15 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default)
     {
-        var (whereStr, parameters) = BuildExportFilters(filterPayerNames, filterPanelNames, filterFirstBillFrom, filterFirstBillTo, "le");
+        var (whereStr, parameters) = BuildExportFilters(filterPayerNames, filterPanelNames, filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo, filterFirstBilledFrom, filterFirstBilledTo, "le");
 
         var sql = $"""
             SELECT [ClaimID],[AccessionNumber],[PayerName],[PayerType],[BillingProvider],[ReferringProvider],
@@ -1385,9 +1624,12 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         return await ExecuteExportQueryAsync(connectionString, sql, parameters, ct);
     }
 
-    private static (string WhereStr, List<SqlParameter> Parameters) BuildExportFilters(
+    internal static (string WhereStr, List<SqlParameter> Parameters) BuildExportFilters(
         List<string>? filterPayerNames, List<string>? filterPanelNames,
-        DateOnly? filterFirstBillFrom, DateOnly? filterFirstBillTo, string prefix)
+        DateOnly? filterDosFrom, DateOnly? filterDosTo,
+        DateOnly? filterFirstBillFrom, DateOnly? filterFirstBillTo,
+        DateOnly? filterFirstBilledFrom, DateOnly? filterFirstBilledTo,
+        string prefix)
     {
         var where = new List<string>();
         var parms = new List<SqlParameter>();
@@ -1395,7 +1637,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         if (filterPayerNames is { Count: > 0 })
         {
             var names = filterPayerNames.Select((n, i) => $"@{prefix}pn{i}").ToList();
-            where.Add($"LTRIM(RTRIM(PayerName)) IN ({string.Join(",", names)})");
+            where.Add($"LTRIM(RTRIM(PayerName_Raw)) IN ({string.Join(",", names)})");
             for (int i = 0; i < filterPayerNames.Count; i++)
                 parms.Add(new SqlParameter($"@{prefix}pn{i}", filterPayerNames[i]));
         }
@@ -1418,6 +1660,32 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         {
             where.Add($"TRY_CAST(FirstBilledDate AS DATE) <= @{prefix}fbTo");
             parms.Add(new SqlParameter($"@{prefix}fbTo", SqlDbType.Date) { Value = filterFirstBillTo.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        // Explicit FirstBilledDate filters (different param names) for exports
+        if (filterFirstBilledFrom.HasValue)
+        {
+            where.Add($"TRY_CAST(FirstBilledDate AS DATE) >= @{prefix}firstBilledFrom");
+            parms.Add(new SqlParameter($"@{prefix}firstBilledFrom", SqlDbType.Date) { Value = filterFirstBilledFrom.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        if (filterFirstBilledTo.HasValue)
+        {
+            where.Add($"TRY_CAST(FirstBilledDate AS DATE) <= @{prefix}firstBilledTo");
+            parms.Add(new SqlParameter($"@{prefix}firstBilledTo", SqlDbType.Date) { Value = filterFirstBilledTo.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        // DateOfService filters for exports
+        if (filterDosFrom.HasValue)
+        {
+            where.Add($"TRY_CAST(DateOfService AS DATE) >= @{prefix}dosFrom");
+            parms.Add(new SqlParameter($"@{prefix}dosFrom", SqlDbType.Date) { Value = filterDosFrom.Value.ToDateTime(TimeOnly.MinValue) });
+        }
+
+        if (filterDosTo.HasValue)
+        {
+            where.Add($"TRY_CAST(DateOfService AS DATE) <= @{prefix}dosTo");
+            parms.Add(new SqlParameter($"@{prefix}dosTo", SqlDbType.Date) { Value = filterDosTo.Value.ToDateTime(TimeOnly.MinValue) });
         }
 
         var whereStr = where.Count > 0 ? "WHERE " + string.Join(" AND ", where) : "";

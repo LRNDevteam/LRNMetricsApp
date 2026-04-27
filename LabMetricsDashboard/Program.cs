@@ -1,7 +1,12 @@
 ﻿using LabMetricsDashboard.Filters;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Configuration.Json;
+using Microsoft.Extensions.Primitives;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc.Authorization;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -148,13 +153,36 @@ if (skippedLabNames.Count > 0)
 var configuration = builder.Configuration;
 
 // Build LabSettings: each lab file is expected to have a root section matching the lab name.
-var labSettings = new LabSettings
+// IMPORTANT: configuration uses reloadOnChange=true for lab files, but LabSettings is a singleton.
+// If we build it once at startup, the app will NOT see lab config changes until an app restart.
+// Hook configuration reload and rebuild LabSettings in-memory automatically.
+var labSettings = new LabSettings();
+
+void RebuildLabSettings()
 {
-	Labs = validLabNames.ToDictionary(
+	// Replace the dictionary reference atomically (do not mutate in-place).
+	labSettings.Labs = validLabNames.ToDictionary(
 		labName => labName,
 		labName => configuration.GetSection(labName).Get<LabCsvConfig>() ?? new LabCsvConfig(),
-		StringComparer.OrdinalIgnoreCase)
-};
+		StringComparer.OrdinalIgnoreCase);
+}
+
+RebuildLabSettings();
+
+ChangeToken.OnChange(
+	() => ((IConfigurationRoot)configuration).GetReloadToken(),
+	() =>
+	{
+		try
+		{
+			RebuildLabSettings();
+			LogStartupWarning($"Lab config reloaded: {string.Join(", ", validLabNames)}");
+		}
+		catch (Exception ex)
+		{
+			LogStartupError("Failed to rebuild LabSettings after configuration reload.", ex);
+		}
+	});
 
 var useMockData = builder.Configuration.GetValue<bool>("DashboardData:UseMockData");
 if (useMockData)
@@ -167,6 +195,7 @@ else
 }
 
 builder.Services.AddSingleton(labSettings);
+builder.Services.AddSingleton(labConfigOptions);
 builder.Services.AddSingleton<LabCsvFileResolver>();
 builder.Services.AddSingleton<CsvParserService>();
 builder.Services.AddSingleton<PredictionInsightLoader>();
@@ -181,14 +210,44 @@ builder.Services.AddScoped<IProductionReportRepository, SqlProductionReportRepos
 builder.Services.AddScoped<IClaimLineRepository, SqlClaimLineRepository>();
 builder.Services.AddScoped<ICollectionSummaryRepository, SqlCollectionSummaryRepository>();
 
+// User management repository (uses DefaultConnection from appsettings.json)
+builder.Services.AddScoped<IUserManagementRepository, SqlUserManagementRepository>();
+// Password hasher
+builder.Services.AddSingleton<IPasswordHasher, PasswordHasher>();
+
 // Add services to the container.
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IAppUsageAuditService, SqlAppUsageAuditService>();
 builder.Services.AddScoped<AppUsageAuditFilter>();
+
+// In-app Help Bot (singleton - loads topic file once at startup)
+builder.Services.AddSingleton<HelpBotService>();
+
 builder.Services.AddControllersWithViews(options =>
 {
 	options.Filters.AddService<AppUsageAuditFilter>();
+    // Require authenticated user for every action by default.
+    // Use [AllowAnonymous] on Account/Login etc.
+    var policy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
+    options.Filters.Add(new AuthorizeFilter(policy));
 });
+
+// ── Cookie authentication ─────────────────────────────────────────
+builder.Services
+    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
+    {
+        options.LoginPath        = "/Account/Login";
+        options.LogoutPath       = "/Account/Logout";
+        options.AccessDeniedPath = "/Account/AccessDenied";
+        options.ExpireTimeSpan   = TimeSpan.FromHours(8);
+        options.SlidingExpiration = true;
+        options.Cookie.Name      = "LRN.Auth";
+        options.Cookie.HttpOnly  = true;
+        options.Cookie.SameSite  = SameSiteMode.Lax;
+    });
 
 var app = builder.Build();
 
@@ -233,6 +292,7 @@ app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseRouting();
 
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapStaticAssets();
@@ -241,5 +301,8 @@ app.MapControllerRoute(
 	name: "default",
 	pattern: "{controller=Home}/{action=Index}/{id?}")
 	.WithStaticAssets();
+
+// Map attribute-routed controllers (e.g. HelpBotController -> /api/helpbot/*)
+app.MapControllers();
 
 app.Run();

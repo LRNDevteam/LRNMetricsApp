@@ -1,0 +1,57 @@
+@model LabMetricsDashboard.Models.LabUser
+
+@{
+    ViewData["Title"] = "Edit User";
+}
+
+<div class="container">
+    <h2>Edit User</h2>
+
+    @if (TempData["AdminError"] is string adminError && !string.IsNullOrWhiteSpace(adminError))
+    {
+        <div class="alert alert-danger">@adminError</div>
+    }
+
+    <form asp-action="Edit" method="post">
+        @Html.AntiForgeryToken()
+        <input type="hidden" name="LabUserID" value="@Model.LabUserID" />
+        <div class="mb-2">
+            <label class="form-label">UserName</label>
+            <input class="form-control" name="UserName" value="@Model.UserName" required />
+        </div>
+        <div class="mb-2">
+            <label class="form-label">First Name</label>
+            <input class="form-control" name="FirstName" value="@Model.FirstName" />
+        </div>
+        <div class="mb-2">
+            <label class="form-label">Last Name</label>
+            <input class="form-control" name="LastName" value="@Model.LastName" />
+        </div>
+        <div class="mb-2">
+            <label class="form-label">Email</label>
+            <input class="form-control" name="Email" value="@Model.Email" />
+        </div>
+        <div class="mb-2">
+            <label class="form-label">Mobile</label>
+            <input class="form-control" name="Mobile" value="@Model.Mobile" />
+        </div>
+        <div class="mb-2 form-check">
+            <input class="form-check-input" type="checkbox" name="IsActive" value="true" @(Model.IsActive ? "checked" : "") />
+            <label class="form-check-label">Active</label>
+        </div>
+
+        <h5>Change Password (optional)</h5>
+        <div class="mb-2">
+            <label class="form-label">New Password</label>
+            <input class="form-control" name="Password" type="password" />
+        </div>
+        <div class="mb-2">
+            <label class="form-label">Confirm Password</label>
+            <input class="form-control" name="ConfirmPassword" type="password" />
+        </div>
+
+        <div class="d-grid">
+            <button class="btn btn-primary">Save Changes</button>
+        </div>
+    </form>
+</div>

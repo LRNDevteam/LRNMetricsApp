@@ -3,6 +3,13 @@
     ViewData["Title"]       = $"Production Report – {Model.SelectedLab}";
     ViewData["SelectedLab"] = Model.SelectedLab;
     ViewData["PageLabel"]   = "Production Report";
+                <style>
+                .pr-filter-summary { font-size:.85rem; color:#6b7280; padding:.45rem .75rem; }
+                .pr-filter-summary .filter-dot { display:inline-block; width:10px; color:#9ca3af; margin-right:.5rem; }
+                .pr-filter-summary .filter-label { font-weight:600; margin-right:.35rem; }
+                .pr-filter-summary .filter-key { color:#d946ef; font-weight:600; }
+                .pr-filter-summary .filter-key-2 { color:#16a34a; font-weight:600; }
+                </style>
 
     // Filter out year 1900 on the view side as well
     var validYears  = Model.Years.Where(y => y > 1900).ToList();
@@ -382,6 +389,30 @@ th.pr-month-data, td.pr-month-data {
                         <input type="date" name="filterFirstBillTo" class="form-control form-control-sm"
                                value="@Model.FilterFirstBillTo" />
                     </div>
+                    <!-- Date of Service From -->
+                    <div class="col-sm-6 col-md-3">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">DATE OF SERVICE FROM</label>
+                        <input type="date" name="filterDosFrom" class="form-control form-control-sm"
+                               value="@Model.FilterDosFrom" />
+                    </div>
+                    <!-- Date of Service To -->
+                    <div class="col-sm-6 col-md-3">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">DATE OF SERVICE TO</label>
+                        <input type="date" name="filterDosTo" class="form-control form-control-sm"
+                               value="@Model.FilterDosTo" />
+                    </div>
+    <!-- First Billed Date From -->
+    <div class="col-sm-6 col-md-3">
+        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">FIRST BILLED DATE FROM</label>
+        <input type="date" name="filterFirstBilledFrom" class="form-control form-control-sm"
+               value="@Model.FilterFirstBilledFrom" />
+    </div>
+    <!-- First Billed Date To -->
+    <div class="col-sm-6 col-md-3">
+        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">FIRST BILLED DATE TO</label>
+        <input type="date" name="filterFirstBilledTo" class="form-control form-control-sm"
+               value="@Model.FilterFirstBilledTo" />
+    </div>
                 </div>
 
                 <div class="d-flex gap-2 mt-2">
@@ -623,6 +654,27 @@ th.pr-month-data, td.pr-month-data {
                             </tfoot>
                         </table>
                     </div>
+                    
+                    <div class="px-3 py-2 small text-muted">
+                        @{
+                            var ppRule = Model.ProductionSummaryRule;
+                            var ppUsesCharge = string.Equals(ppRule, "Rule1", StringComparison.OrdinalIgnoreCase)
+                                || string.Equals(ppRule, "Rule2", StringComparison.OrdinalIgnoreCase)
+                                || string.Equals(ppRule, "Rule3", StringComparison.OrdinalIgnoreCase)
+                                || string.Equals(ppRule, "Rule4", StringComparison.OrdinalIgnoreCase);
+                            var ppDateLabel = ppUsesCharge ? "Charge Entered Date" : "First Billed Date";
+                            var ppSelectedPayers = Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0
+                                ? string.Join(", ", Model.FilterPayerNames) : "All";
+                            var ppSelectedPanels = Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0
+                                ? string.Join(", ", Model.FilterPanelNames) : "All";
+                            var ppFbFromLbl = string.IsNullOrWhiteSpace(Model.FilterFirstBillFrom) ? "-" : Model.FilterFirstBillFrom;
+                            var ppFbToLbl = string.IsNullOrWhiteSpace(Model.FilterFirstBillTo) ? "-" : Model.FilterFirstBillTo;
+                        }
+                        <strong>Date axis & filters:</strong> @ppDateLabel (rule: @(!string.IsNullOrWhiteSpace(ppRule) ? ppRule : "Default"))
+                        &nbsp;|&nbsp; <strong>Payers:</strong> @ppSelectedPayers
+                        &nbsp;|&nbsp; <strong>Panels:</strong> @ppSelectedPanels
+                        &nbsp;|&nbsp; <strong>Filter Range:</strong> @ppFbFromLbl — @ppFbToLbl
+                    </div>
                 </div>
             }
             else
@@ -816,6 +868,23 @@ th.pr-month-data, td.pr-month-data {
                         </table>
                     </div>
                 </div>
+                <div class="px-3 py-2 small text-muted">
+                    @{
+                        var uaRule = Model.ProductionSummaryRule;
+                        var uaUsesCharge = string.Equals(uaRule, "Rule1", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(uaRule, "Rule2", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(uaRule, "Rule3", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(uaRule, "Rule4", StringComparison.OrdinalIgnoreCase);
+                        var uaDateLabel = uaUsesCharge ? "Charge Entered Date" : "First Billed Date";
+                        var uaSelectedPanels = Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0
+                            ? string.Join(", ", Model.FilterPanelNames) : "All";
+                        var uaFbFromLbl = string.IsNullOrWhiteSpace(Model.FilterFirstBillFrom) ? "-" : Model.FilterFirstBillFrom;
+                        var uaFbToLbl = string.IsNullOrWhiteSpace(Model.FilterFirstBillTo) ? "-" : Model.FilterFirstBillTo;
+                    }
+                    <strong>Date axis & filters:</strong> @uaDateLabel (rule: @(!string.IsNullOrWhiteSpace(uaRule) ? uaRule : "Default"))
+                    &nbsp;|&nbsp; <strong>Panels:</strong> @uaSelectedPanels
+                    &nbsp;|&nbsp; <strong>Filter Range:</strong> @uaFbFromLbl — @uaFbToLbl
+                </div>
             }
             else
             {
@@ -836,6 +905,7 @@ th.pr-month-data, td.pr-month-data {
                     ? "Mon to Sun (default)"
                     : Model.ProductionSummaryWeekRange!;
                 var weeklyUsesChargeEntered =
+                    string.Equals(weeklyRule, "Rule1", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(weeklyRule, "Rule3", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(weeklyRule, "Rule4", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(weeklyRule, "Rule5", StringComparison.OrdinalIgnoreCase);
@@ -929,7 +999,7 @@ th.pr-month-data, td.pr-month-data {
                 <div class="text-center py-5 text-muted">
                     <div style="font-size:2rem;opacity:.4">&#128202;</div>
                     <div class="fw-semibold mt-2">No coding data available</div>
-                    <div class="small mt-1">No claims with blank FirstBilledDate found. Try adjusting your filters.</div>
+                    <div class="small mt-1"><strong>Reason:</strong> No claims with blank <code>FirstBilledDate</code> found. Try adjusting your filters.</div>
                 </div>
             }
         </div>
@@ -939,6 +1009,20 @@ th.pr-month-data, td.pr-month-data {
             @if (Model.PayerBreakdownRows.Count > 0 && pbYears.Count > 0)
             {
                 <div class="pr-wrap">
+                    <div class="pr-filter-summary">
+                        @{
+                            var pbRuleLocal = Model.ProductionSummaryRule;
+                            var pbUsesChargeLocal = string.Equals(pbRuleLocal, "Rule1", StringComparison.OrdinalIgnoreCase)
+                                || string.Equals(pbRuleLocal, "Rule2", StringComparison.OrdinalIgnoreCase)
+                                || string.Equals(pbRuleLocal, "Rule3", StringComparison.OrdinalIgnoreCase)
+                                || string.Equals(pbRuleLocal, "Rule4", StringComparison.OrdinalIgnoreCase);
+                            var pbDateColLocal = pbUsesChargeLocal ? "ChargeEnteredDate" : "FirstBilledDate";
+                        }
+                        <span class="filter-dot">•</span>
+                        <span><span class="filter-label">Filter:</span>
+                            <span class="filter-key">PayerName</span> not blank &nbsp;·&nbsp;
+                            <span class="filter-key-2">@pbDateColLocal</span> is a valid date</span>
+                    </div>
                     <div class="pr-scroll">
                         <table class="pr-table">
                             <colgroup>
@@ -1016,10 +1100,17 @@ th.pr-month-data, td.pr-month-data {
             }
             else
             {
+                var pbRuleLocal = Model.ProductionSummaryRule;
+                var pbUsesChargeLocal = string.Equals(pbRuleLocal, "Rule1", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(pbRuleLocal, "Rule2", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(pbRuleLocal, "Rule3", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(pbRuleLocal, "Rule4", StringComparison.OrdinalIgnoreCase);
+                var pbDateColLocal = pbUsesChargeLocal ? "ChargeEnteredDate" : "FirstBilledDate";
+                var pbReason = $"No rows match: PayerName_Raw not blank · {pbDateColLocal} is a valid date";
                 <div class="text-center py-5 text-muted">
                     <div style="font-size:2rem;opacity:.4">&#128202;</div>
                     <div class="fw-semibold mt-2">No payer breakdown data available</div>
-                    <div class="small mt-1">Try adjusting your filters or selecting a different lab.</div>
+                    <div class="small mt-1"><strong>Reason:</strong> @pbReason. Try adjusting your filters or selecting a different lab.</div>
                 </div>
             }
         </div>
@@ -1029,6 +1120,20 @@ th.pr-month-data, td.pr-month-data {
             @if (Model.PayerPanelRows.Count > 0 && pxpPanels.Count > 0)
             {
                 <div class="pr-wrap">
+                    <div class="pr-filter-summary">
+                        @{
+                            var ppRuleLocal = Model.ProductionSummaryRule;
+                            var ppUsesChargeLocal = string.Equals(ppRuleLocal, "Rule1", StringComparison.OrdinalIgnoreCase)
+                                || string.Equals(ppRuleLocal, "Rule2", StringComparison.OrdinalIgnoreCase)
+                                || string.Equals(ppRuleLocal, "Rule3", StringComparison.OrdinalIgnoreCase)
+                                || string.Equals(ppRuleLocal, "Rule4", StringComparison.OrdinalIgnoreCase);
+                            var ppDateColLocal = ppUsesChargeLocal ? "ChargeEnteredDate" : "FirstBilledDate";
+                        }
+                        <span class="filter-dot">•</span>
+                        <span><span class="filter-label">Filter:</span>
+                            <span class="filter-key">PayerName</span> not blank &nbsp;·&nbsp;
+                            <span class="filter-key-2">@ppDateColLocal</span> is a valid date</span>
+                    </div>
                     <div class="pr-scroll">
                         <table class="pr-table">
                             <colgroup>
@@ -1093,10 +1198,17 @@ th.pr-month-data, td.pr-month-data {
             }
             else
             {
+                var ppRuleLocal = Model.ProductionSummaryRule;
+                var ppUsesChargeLocal = string.Equals(ppRuleLocal, "Rule1", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(ppRuleLocal, "Rule2", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(ppRuleLocal, "Rule3", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(ppRuleLocal, "Rule4", StringComparison.OrdinalIgnoreCase);
+                var ppDateColLocal = ppUsesChargeLocal ? "ChargeEnteredDate" : "FirstBilledDate";
+                var ppReason = $"No rows match: PayerName_Raw not blank · {ppDateColLocal} is a valid date";
                 <div class="text-center py-5 text-muted">
                     <div style="font-size:2rem;opacity:.4">&#128202;</div>
                     <div class="fw-semibold mt-2">No payer x panel data available</div>
-                    <div class="small mt-1">Try adjusting your filters or selecting a different lab.</div>
+                    <div class="small mt-1"><strong>Reason:</strong> @ppReason. Try adjusting your filters or selecting a different lab.</div>
                 </div>
             }
         </div>
@@ -1106,6 +1218,20 @@ th.pr-month-data, td.pr-month-data {
             @if (Model.UnbilledAgingRows.Count > 0)
             {
                 <div class="pr-wrap">
+                    <div class="pr-filter-summary">
+                        @{
+                            var uaRuleLocal = Model.ProductionSummaryRule;
+                            var uaUsesChargeLocal = string.Equals(uaRuleLocal, "Rule1", StringComparison.OrdinalIgnoreCase)
+                                || string.Equals(uaRuleLocal, "Rule2", StringComparison.OrdinalIgnoreCase)
+                                || string.Equals(uaRuleLocal, "Rule3", StringComparison.OrdinalIgnoreCase)
+                                || string.Equals(uaRuleLocal, "Rule4", StringComparison.OrdinalIgnoreCase);
+                            var uaDateColLocal = uaUsesChargeLocal ? "ChargeEnteredDate" : "FirstBilledDate";
+                        }
+                        <span class="filter-dot">•</span>
+                        <span><span class="filter-label">Filter:</span>
+                            <span class="filter-key">PayerName</span> not blank &nbsp;·&nbsp;
+                            <span class="filter-key-2">@uaDateColLocal</span> is a valid date</span>
+                    </div>
                     <div class="pr-scroll">
                         <table class="pr-table">
                             <colgroup>
@@ -1173,7 +1299,7 @@ th.pr-month-data, td.pr-month-data {
                 <div class="text-center py-5 text-muted">
                     <div style="font-size:2rem;opacity:.4">&#128202;</div>
                     <div class="fw-semibold mt-2">No unbilled aging data available</div>
-                    <div class="small mt-1">No claims with blank FirstBilledDate found. Try adjusting your filters.</div>
+                    <div class="small mt-1"><strong>Reason:</strong> No claims with blank <code>FirstBilledDate</code> found (unbilled = FirstBilledDate blank). Try adjusting your filters.</div>
                 </div>
             }
         </div>
@@ -1289,7 +1415,7 @@ th.pr-month-data, td.pr-month-data {
                 <div class="text-center py-5 text-muted">
                     <div style="font-size:2rem;opacity:.4">&#128202;</div>
                     <div class="fw-semibold mt-2">No CPT breakdown data available</div>
-                    <div class="small mt-1">No billed line-level data found. Try adjusting your filters.</div>
+                    <div class="small mt-1"><strong>Reason:</strong> No billed line-level data found. Try adjusting your filters.</div>
                 </div>
             }
         </div>

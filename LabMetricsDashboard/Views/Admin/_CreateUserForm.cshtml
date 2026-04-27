@@ -1,0 +1,137 @@
+@model LabMetricsDashboard.Models.AdminViewModel
+
+<style>
+  .create-card {
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 6px 18px rgba(20,45,80,0.06);
+  }
+  .create-card .card-header {
+    background: linear-gradient(90deg,#0d6efd,#1177ff);
+    color: #fff;
+    border-bottom: none;
+  }
+  .form-control.smooth {
+    border-radius: 10px;
+    padding: 18px 14px;
+    background-color: #f6f9ff;
+    border: 1px solid rgba(25, 86, 255, 0.06);
+  }
+  .select-smooth {
+    border-radius: 10px;
+    padding: .5rem 1rem;
+    background-color: #f6f9ff;
+  }
+  .action-row .btn { min-width: 120px; }
+</style>
+
+<div class="card create-card">
+  <div class="card-header d-flex align-items-center justify-content-between">
+    <div>
+      <h5 class="mb-0"><i class="bi bi-person-plus-fill me-2"></i> Create User</h5>
+      <small class="text-white-50">Add a new user and assign role & lab access</small>
+    </div>
+    <div class="text-end text-white-50">Required fields <span class="text-danger">*</span></div>
+  </div>
+  <div class="card-body">
+    <form id="frmCreateUserModal" method="post" asp-action="CreateUser">
+      @Html.AntiForgeryToken()
+      <div id="createUserErrors" class="alert alert-danger d-none"></div>
+      @* Server-side fallback validation (in case JS is blocked/disabled) *@
+      @Html.ValidationSummary(excludePropertyErrors: false, message: "", htmlAttributes: new { @class = "text-danger mb-2" })
+
+      <h6 class="text-muted mb-3">Account Credentials</h6>
+      <div class="row g-3 mb-3">
+        <div class="col-12">
+          <label class="form-label">UserName <span class="text-danger">*</span></label>
+          <div class="input-group">
+            <input id="createUserUserName" class="form-control smooth" name="NewUser.UserName" placeholder="e.g. john.doe" required />
+            <span class="input-group-text bg-transparent"><i class="bi bi-at"></i></span>
+            <div class="invalid-feedback" id="createUserUserNameFeedback"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="form-label">Password <span class="text-danger">*</span></label>
+          <div class="input-group">
+            <input id="createUserPassword" class="form-control smooth" name="NewUserPassword" type="password" placeholder="Min 8 characters" minlength="8" required />
+            <span class="input-group-text bg-transparent"><i class="bi bi-lock"></i></span>
+            <div class="invalid-feedback" id="createUserPasswordFeedback"></div>
+          </div>
+          @Html.ValidationMessageFor(m => m.NewUserPassword, "", new { @class = "text-danger small" })
+          <div class="progress mt-2" style="height:8px">
+            <div id="createUserPwdStrength" class="progress-bar" role="progressbar" style="width:0%"></div>
+          </div>
+          <small id="createUserPwdStrengthText" class="form-text text-muted"></small>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Confirm Password <span class="text-danger">*</span></label>
+          <div class="input-group">
+            <input id="createUserConfirm" class="form-control smooth" name="NewUserConfirmPassword" type="password" placeholder="Re-enter password" minlength="8" required />
+            <span class="input-group-text bg-transparent"><i class="bi bi-lock-fill"></i></span>
+          </div>
+          <div class="invalid-feedback" id="createUserConfirmFeedback"></div>
+          @Html.ValidationMessageFor(m => m.NewUserConfirmPassword, "", new { @class = "text-danger small" })
+        </div>
+      </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-md-3">
+          <label class="form-label">First Name</label>
+          <input class="form-control smooth" name="NewUser.FirstName" placeholder="First name" />
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Last Name</label>
+          <input class="form-control smooth" name="NewUser.LastName" placeholder="Last name" />
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Email Address</label>
+          <div class="input-group">
+            <input id="createUserEmail" class="form-control smooth" name="NewUser.Email" placeholder="user@example.com" type="email" />
+            <span class="input-group-text bg-transparent"><i class="bi bi-envelope"></i></span>
+            <div class="invalid-feedback" id="createUserEmailFeedback"></div>
+          </div>
+          <small class="text-muted">Notifications and login recovery will be sent here</small>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Mobile Number</label>
+          <div class="input-group">
+            <input id="createUserMobile" class="form-control smooth" name="NewUser.Mobile" placeholder="+1 (000) 000-0000" />
+            <span class="input-group-text bg-transparent"><i class="bi bi-telephone"></i></span>
+            <div class="invalid-feedback" id="createUserMobileFeedback"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3 mb-4">
+        <div class="col-md-6">
+          <label class="form-label">Role <span class="text-danger">*</span></label>
+          <select id="createUserRole" class="form-select select-smooth" name="NewUserRoleId" required>
+            <option value="">-- select role --</option>
+            @foreach(var r in Model.Roles) { <option value="@r.RoleID">@r.RoleName</option> }
+          </select>
+          <div class="invalid-feedback" id="createUserRoleFeedback"></div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Lab <span class="text-danger">*</span></label>
+          <select id="createUserLab" class="form-select select-smooth" name="NewUserLabId" required>
+            <option value="">-- select lab --</option>
+            @foreach(var l in Model.Labs) { <option value="@l.LabId">@l.LabName</option> }
+          </select>
+          <div class="invalid-feedback" id="createUserLabFeedback"></div>
+        </div>
+      </div>
+
+      <div class="d-flex gap-2 action-row">
+        <button type="reset" class="btn btn-outline-secondary">Reset</button>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <div class="ms-auto">
+          <button type="submit" class="btn btn-primary"><i class="bi bi-person-plus me-2"></i> Create User</button>
+        </div>
+      </div>
+
+    </form>
+  </div>
+</div>

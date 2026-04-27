@@ -37,8 +37,12 @@ public interface IProductionReportRepository
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
         string? rule = null,
         CancellationToken ct = default);
     /// <summary>
@@ -56,8 +60,12 @@ public interface IProductionReportRepository
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
         string? rule = null,
         string? weekRange = null,
         CancellationToken ct = default);
@@ -81,6 +89,13 @@ public interface IProductionReportRepository
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        string? rule = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -91,6 +106,13 @@ public interface IProductionReportRepository
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        string? rule = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -100,6 +122,13 @@ public interface IProductionReportRepository
     Task<UnbilledAgingResult> GetUnbilledAgingAsync(
         string connectionString,
         List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        string? rule = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -108,8 +137,12 @@ public interface IProductionReportRepository
     /// </summary>
     Task<CptBreakdownResult> GetCptBreakdownAsync(
         string connectionString,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default);
 
     /// <summary>Returns all ClaimLevelData rows for Excel export, respecting Production Report filters.</summary>
@@ -117,8 +150,12 @@ public interface IProductionReportRepository
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default);
 
     /// <summary>Returns all LineLevelData rows for Excel export, respecting Production Report filters.</summary>
@@ -126,8 +163,12 @@ public interface IProductionReportRepository
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default);
 }
 

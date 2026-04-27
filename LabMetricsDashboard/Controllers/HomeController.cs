@@ -24,6 +24,13 @@ public class HomeController : Controller
 
     public IActionResult Index(string? sort)
     {
+        // Non-admin users should never see the Home landing (lab tiles).
+        // Send them straight to the Revenue Dashboard.
+        if (User?.Identity?.IsAuthenticated == true && !User.IsInRole("Admin"))
+        {
+            return RedirectToAction("Index", "Dashboard");
+        }
+
         var resolvedSort = string.IsNullOrWhiteSpace(sort) ? "latest" : sort;
 
         var tiles = _labSettings.Labs.Keys

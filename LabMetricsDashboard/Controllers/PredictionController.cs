@@ -975,7 +975,7 @@ public class PredictionController : Controller
 
         var actualAllowed = rows.Sum(r => r.AllowedAmount);
         var actualIns     = rows.Sum(r => r.InsurancePayment);
-        var variance      = predictedAllowed - actualAllowed;
+        var variance      = actualAllowed - predictedAllowed;
 
         return new PredictionBucketRow(name, claimCount, predictedAllowed, predictedIns,
                                        actualAllowed, actualIns, variance);

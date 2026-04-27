@@ -1,14 +1,27 @@
 @model LabMetricsDashboard.Models.CodingSummaryViewModel
 @{
-    ViewData["Title"]       = $"Coding Summary � {Model.LabName}";
-    ViewData["SelectedLab"] = Model.LabName;
-    ViewData["PageLabel"]   = "Coding Summary";
+ViewData["Title"]       = $"Coding Summary � {Model.LabName}";
+ViewData["SelectedLab"] = Model.LabName;
+ViewData["PageLabel"]   = "Coding Summary";
 
-    var years = Model.InsightRows.Select(r => r.Year)
-                     .Union(Model.SummaryRows.Select(r => r.Year))
-                     .Distinct().OrderByDescending(y => y).ToList();
+var years = Model.InsightRows.Select(r => r.Year)
+                 .Union(Model.SummaryRows.Select(r => r.Year))
+                 .Distinct().OrderByDescending(y => y).ToList();
 
-    // KPI values � driven from the latest financial summary row when available,
+// Shared filter option lists - union across all four YTD/WTD tabs so the
+// single filter bar has a complete dropdown set.
+var sharedWeeks = Model.WtdInsightRows.Select(r => r.WeekFolder)
+                      .Union(Model.WtdSummaryRows.Select(r => r.WeekFolder))
+                      .Where(w => !string.IsNullOrWhiteSpace(w))
+                      .Distinct().OrderByDescending(w => w).ToList();
+var sharedPanels = Model.InsightRows.Select(r => r.PanelName)
+                      .Union(Model.SummaryRows.Select(r => r.PanelName))
+                      .Union(Model.WtdInsightRows.Select(r => r.PanelName))
+                      .Union(Model.WtdSummaryRows.Select(r => r.PanelName))
+                      .Where(p => !string.IsNullOrWhiteSpace(p))
+                      .Distinct().OrderBy(p => p).ToList();
+
+// KPI values � driven from the latest financial summary row when available,
     // falling back to aggregated SummaryRows for labs without financial data.
     var fin = Model.LatestFinancial;
     var kpiClaims     = fin?.TotalClaims     ?? Model.SummaryRows.Sum(r => r.TotalClaims);
@@ -19,6 +32,77 @@
     var kpiNetImpact  = kpiAtRisk - kpiLost;
     var kpiCompliance = fin?.ComplianceRatePct ?? string.Empty;
     var kpiWeek       = fin?.WeekFolder ?? string.Empty;
+}
+
+@functions {
+    // Renders a "CPT*Units(Modifier)" comma-separated combo into styled pills.
+    // variant: "billable" | "billed" | "missing" | "additional"
+    // The pill container is clamped to ~3 lines via CSS; if it overflows JS
+    // reveals a "+ more" toggle that expands to show all pills.
+    static string FormatCptPills(string? combo, string variant)
+    {
+        if (string.IsNullOrWhiteSpace(combo))
+            return "<span class=\"cpt-empty\">&#8212;</span>";
+
+        var tokens = combo.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                          .Select(t => t.Trim())
+                          .Where(t => t.Length > 0)
+                          .ToList();
+        if (tokens.Count == 0)
+            return "<span class=\"cpt-empty\">&#8212;</span>";
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append("<span class=\"cpt-pill-block\">");
+        sb.Append("<span class=\"cpt-pills cpt-pills-collapsed\" data-total=\"")
+          .Append(tokens.Count).Append("\">");
+
+        foreach (var token in tokens)
+        {
+            string code = token;
+            string? units = null, mod = null;
+
+            var starIdx = token.IndexOf('*');
+            if (starIdx >= 0)
+            {
+                code = token.Substring(0, starIdx).Trim();
+                var rest = token.Substring(starIdx + 1).Trim();
+                var lp = rest.IndexOf('(');
+                if (lp >= 0)
+                {
+                    units = rest.Substring(0, lp).Trim();
+                    var rp = rest.IndexOf(')', lp);
+                    mod = rp > lp
+                        ? rest.Substring(lp + 1, rp - lp - 1).Trim()
+                        : rest.Substring(lp + 1).Trim();
+                }
+                else
+                {
+                    units = rest;
+                }
+            }
+
+            sb.Append("<span class=\"cpt-pill cpt-pill-").Append(variant).Append("\">");
+            sb.Append("<span class=\"cpt-pill-code\">").Append(System.Net.WebUtility.HtmlEncode(code)).Append("</span>");
+            if (!string.IsNullOrWhiteSpace(units))
+            {
+                sb.Append("<span class=\"cpt-pill-units\">&times;").Append(System.Net.WebUtility.HtmlEncode(units)).Append("</span>");
+            }
+            if (!string.IsNullOrWhiteSpace(mod))
+            {
+                sb.Append("<span class=\"cpt-pill-mod\">").Append(System.Net.WebUtility.HtmlEncode(mod)).Append("</span>");
+            }
+            sb.Append("</span>");
+        }
+        sb.Append("</span>"); // /.cpt-pills
+
+        // Toggle button starts hidden; JS reveals it only if the pills container overflows.
+        sb.Append("<button type=\"button\" class=\"cpt-pill-toggle\" onclick=\"cptPillsToggle(this, event)\" ")
+          .Append("data-more=\"+ more\" data-less=\"&minus; less\" aria-expanded=\"false\" ")
+          .Append("style=\"display:none\">+ more</button>");
+
+        sb.Append("</span>"); // /.cpt-pill-block
+        return sb.ToString();
+    }
 }
 
 <style>
@@ -195,6 +279,14 @@
     margin-left:auto; white-space:nowrap;
 }
 .cs-row-hidden { display:none !important; }
+
+/* Hide legacy per-tab filter bars (we use the single shared filter bar at top). */
+#pane-insights > .cs-filter-bar,
+#pane-summary > .cs-filter-bar,
+#pane-wtd-insights > .cs-filter-bar,
+#pane-wtd-summary > .cs-filter-bar {
+    display:none;
+}
 
 /* ?? Financial Dashboard cards ????????????????????????????????? */
 .cs-fin-card {
@@ -442,6 +534,105 @@
 .cpt-tag-missing  { background:#fdecea; color:#c62828; border:1px solid #f5c6c6; }
 .cpt-tag-extra    { background:#fff3e0; color:#e65100; border:1px solid #ffe0b2; }
 
+/* ?? CPT *Units (Modifier) pills - used inside child sub-tables ?? */
+.cpt-pills {
+    display:flex; flex-wrap:wrap; gap:.3rem; align-items:center;
+    width:100%; max-width:100%;
+}
+.cpt-empty { color:#aaa; font-size:.72rem; }
+
+.cpt-pill {
+    display:inline-flex; align-items:stretch; overflow:hidden;
+    border-radius:6px; border:1px solid #cfd6df;
+    background:#fff;
+    font-family:'Consolas','Courier New',monospace;
+    font-size:.66rem; font-weight:700; line-height:1;
+    box-shadow:0 1px 2px rgba(15,35,55,.04);
+    white-space:nowrap;
+    flex:0 0 auto;            /* never shrink/grow - whole pill wraps to next line */
+    max-width:none;
+}
+.cpt-pill > span {
+    display:inline-flex; align-items:center;
+    padding:.18em .42em;
+    white-space:nowrap;       /* keep code/units/mod on a single line */
+    word-break:keep-all;
+}
+.cpt-pill-code  { color:#1a2744; }
+.cpt-pill-units {
+    background:#eef1f5; color:#4a5462;
+    border-left:1px solid #d8dee6;
+    font-weight:600;
+}
+.cpt-pill-mod {
+    background:#fff8e1; color:#7a5b00;
+    border-left:1px solid #ead7a0;
+    font-style:italic; font-weight:700;
+    letter-spacing:.02em;
+}
+
+/* color variants per column */
+.cpt-pill-billable   { border-color:#bbdefb; }
+.cpt-pill-billable   .cpt-pill-code  { color:#0d47a1; }
+.cpt-pill-billable   .cpt-pill-units { background:#e3f2fd; color:#1565c0; border-left-color:#bbdefb; }
+
+.cpt-pill-billed     { border-color:#d1c4e9; }
+.cpt-pill-billed     .cpt-pill-code  { color:#4527a0; }
+.cpt-pill-billed     .cpt-pill-units { background:#ede7f6; color:#5e35b1; border-left-color:#d1c4e9; }
+
+.cpt-pill-missing    { border-color:#f5c6c6; }
+.cpt-pill-missing    .cpt-pill-code  { color:#b71c1c; }
+.cpt-pill-missing    .cpt-pill-units { background:#fdecea; color:#c62828; border-left-color:#f5c6c6; }
+
+.cpt-pill-additional { border-color:#ffe0b2; }
+.cpt-pill-additional .cpt-pill-code  { color:#bf360c; }
+.cpt-pill-additional .cpt-pill-units { background:#fff3e0; color:#e65100; border-left-color:#ffe0b2; }
+
+/* Truncated state - clamp to ~3 visible lines of pills */
+.cpt-pill-block {
+    /* display:block + fixed width => table cell reports this width to layout
+       so pills inside actually wrap instead of expanding the column. */
+    display:block;
+    width:240px;
+    max-width:240px;
+}
+.cpt-pills-collapsed {
+    /* ~3 rows of pills (each row ~1.15rem incl. gap). Keep slightly tight so
+       the 4th row is fully clipped, signalling to JS that overflow exists. */
+    max-height:3.55rem;
+    overflow:hidden;
+}
+.cpt-pills-expanded { max-height:none; }
+
+/* Show more / show less chip */
+.cpt-pill-toggle {
+    display:inline-flex; align-items:center; gap:.2em;
+    margin-top:.3rem;
+    border:1px dashed #99a3b3; background:#f3f5f8; color:#4a5462;
+    border-radius:6px; padding:.2em .55em;
+    font-family:'Consolas','Courier New',monospace;
+    font-size:.65rem; font-weight:800; letter-spacing:.02em;
+    cursor:pointer; line-height:1;
+    transition:background .12s, border-color .12s, color .12s;
+}
+.cpt-pill-toggle:hover {
+    background:#e6ebf2; border-color:#1565c0; color:#1565c0;
+}
+.cpt-pill-toggle[aria-expanded="true"] {
+    background:#e3f2fd; border-style:solid; border-color:#bbdefb; color:#1565c0;
+}
+
+/* Cell wrapper for pills - reset .cpt monospace look */
+.cpt-cell {
+    background:transparent !important;
+    font-family:inherit !important;
+    word-break:normal !important;
+    width:240px;
+    max-width:240px;
+    padding:.45rem .6rem !important;
+    vertical-align:top !important;
+}
+
 /* ?? Shared expand/collapse rows (Detail + YTD/WTD tables) ??????? */
 .det-row-main, .row-main  { cursor:pointer; }
 .det-row-main:hover, .row-main:hover { background:#f0f8ff !important; }
@@ -480,6 +671,44 @@
 .det-expand-label { font-size:.62rem; font-weight:700; letter-spacing:.07em;
                     text-transform:uppercase; color:#8a9ab8; margin-bottom:.3rem; }
 .det-expand-toggle { font-size:.7rem; color:#8a9ab8; float:right; }
+
+/* ?? Child sub-table inside expanded row (mild grey) ?????????????? */
+.row-expand .cs-table-wrap {
+    box-shadow:none;
+    border:1px solid #d8dee6;
+    background:#f4f6f8;
+}
+.row-expand .cs-table thead tr {
+    background:linear-gradient(135deg,#6b7480 0%,#8a95a3 100%);
+}
+.row-expand .cs-table thead th {
+    color:#f5f7fa;
+    border-right:1px solid rgba(255,255,255,.18);
+    font-size:.66rem;
+}
+.row-expand .cs-table tbody tr {
+    background:#fafbfc;
+    border-bottom:1px solid #e3e7ec;
+}
+.row-expand .cs-table tbody tr:nth-child(even) { background:#eef1f5; }
+.row-expand .cs-table tbody tr:hover           { background:#e3e7ec; }
+.row-expand .cs-table td {
+    color:#3a4452;
+    border-right:1px solid #e3e7ec;
+}
+.row-expand .cs-table td.cpt {
+    background:#eceff3;
+    color:#4a5462;
+}
+.row-expand .panel-chip {
+    background:#e3e7ec;
+    color:#4a5462;
+    border:1px solid #cdd3da;
+}
+.row-expand .impact-chip.neg  { background:#ecdede; color:#7a3a3a; border-color:#d9c5c5; }
+.row-expand .impact-chip.pos  { background:#dde4ec; color:#3a4a60; border-color:#c5cfdb; }
+.row-expand .impact-chip.zero { background:#e3e7ec; color:#6a7280; border-color:#cdd3da; }
+.row-expand .money-neg        { color:#8a3a3a !important; }
 
 /* ?? Pager ???????????????????????????????????????????????????????? */
 .det-pager {
@@ -721,27 +950,72 @@ else if (!Model.HasData)
 }
 else
 {
+    <!-- Coding Summary Excel export loading overlay -->
+    <div id="csExportOverlay" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.55);backdrop-filter:blur(4px);align-items:center;justify-content:center">
+        <div style="background:#fff;border-radius:16px;box-shadow:0 8px 40px rgba(0,0,0,.18);padding:2rem 2.5rem;width:380px;text-align:center">
+            <div style="font-size:2.4rem;color:#0d8553;margin-bottom:.6rem;animation:csPulse 1.4s ease-in-out infinite">
+                <i class="bi bi-file-earmark-excel"></i>
+            </div>
+            <div style="font-size:1.05rem;font-weight:700;color:#1e293b;margin-bottom:.25rem">Generating Excel Report</div>
+            <div id="csExportStatus" style="font-size:.78rem;color:#64748b;margin-bottom:1rem">Starting export&hellip;</div>
+            <div style="width:100%;height:10px;background:#e2e8f0;border-radius:6px;overflow:hidden">
+                <div id="csExportBar" style="height:100%;border-radius:6px;background:linear-gradient(90deg,#047857,#0d8553,#10b981);transition:width .4s ease;width:0%"></div>
+            </div>
+            <div id="csExportPct" style="font-size:.82rem;font-weight:700;color:#0d8553;margin-top:.5rem">0%</div>
+            <button type="button" id="csExportCancelBtn" class="btn btn-sm btn-outline-secondary mt-3">
+                <i class="bi bi-x-circle me-1"></i>Cancel
+            </button>
+        </div>
+    </div>
+    <style>@@keyframes csPulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.6;transform:scale(.92)} }</style>
+
     <!-- Tabs -->
     <div class="cs-tabs" id="csTabs">
-        <button class="cs-tab-btn active" data-tab="insights">
-            <span class="tab-icon">&#128202;</span>YTD Coding Insights
-        </button>
-        <button class="cs-tab-btn" data-tab="summary">
+        <button class="cs-tab-btn active" data-tab="summary">
             <span class="tab-icon">&#128203;</span>YTD Summary
         </button>
-        <button class="cs-tab-btn" data-tab="wtd-insights">
-            <span class="tab-icon">&#128197;</span>WTD Coding Insights
+        <button class="cs-tab-btn" data-tab="insights">
+            <span class="tab-icon">&#128202;</span>YTD Coding Insights
         </button>
         <button class="cs-tab-btn" data-tab="wtd-summary">
             <span class="tab-icon">&#128196;</span>WTD Summary
+        </button>
+        <button class="cs-tab-btn" data-tab="wtd-insights">
+            <span class="tab-icon">&#128197;</span>WTD Coding Insights
         </button>
         <button class="cs-tab-btn" data-tab="detail">
             <span class="tab-icon">&#128203;</span>Validation Detail
         </button>
     </div>
 
+    <!-- Shared filter bar (applies to YTD Summary / YTD Insights / WTD Summary / WTD Insights) -->
+    <div class="cs-filter-bar mt-3" id="csSharedFilterBar">
+        <span class="cs-filter-label">&#9660; Filter</span>
+        <span class="cs-filter-label" id="csSharedYearLabel" style="margin-left:.25rem">Year</span>
+        <select id="flt-shared-year" class="cs-filter-select" aria-label="Year filter">
+            <option value="">All Years</option>
+            @foreach (var y in years) { <option value="@y">@y</option> }
+        </select>
+        <span class="cs-filter-label" id="csSharedWeekLabel">Week</span>
+        <select id="flt-shared-week" class="cs-filter-select" style="min-width:240px" aria-label="Week filter">
+            <option value="">All Weeks</option>
+            @foreach (var w in sharedWeeks) { <option value="@w">@w</option> }
+        </select>
+        <span class="cs-filter-label">Panel</span>
+        <select id="flt-shared-panel" class="cs-filter-select" aria-label="Panel filter">
+            <option value="">All Panels</option>
+            @foreach (var p in sharedPanels) { <option value="@p">@p</option> }
+        </select>
+        <button class="cs-filter-reset" type="button" id="flt-shared-clear">&#10005; Clear</button>
+        <span class="cs-filter-count" id="flt-shared-count"></span>
+        <button type="button" class="exportCodingExcelBtn btn btn-sm btn-outline-success"
+                style="margin-left:auto;font-size:.76rem;border-radius:20px;padding:.3em .9em">
+            <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
+        </button>
+    </div>
+
     <!-- ?? Tab: YTD Coding Insights ??????????????????????????????? -->
-    <div class="cs-tab-pane active mt-3" id="pane-insights">
+    <div class="cs-tab-pane mt-3" id="pane-insights">
         <!-- Filter bar -->
         <div class="cs-filter-bar">
             <span class="cs-filter-label">&#9660; Filter</span>
@@ -776,13 +1050,17 @@ else
                         <table class="cs-table">
                             <thead>
                                 <tr>
-                                    <th style="width:28px"></th>
+                                    <th style="text-align:left">Year</th>
                                     <th style="text-align:left">Panel Name</th>
-                                    <th>No. of<br/>Claims</th>
-                                    <th>Billed Charges<br/>/ Claim</th>
-                                    <th>Total Billed for<br/>Missing CPTs</th>
+                                    <th style="text-align:left">Billable CPT Combination</th>
+                                    <th>Number of<br/>claims impacted</th>
+                                    <th>Billed Charges<br/>per claim</th>
+                                    <th style="text-align:left">Billed CPT Combination</th>
+                                    <th style="text-align:left">Missing CPTs / Units</th>
+                                    <th>Total Billed Charges for<br/>Missing CPTs / Units</th>
                                     <th>Lost<br/>Revenue</th>
-                                    <th>Total Billed for<br/>Additional CPTs</th>
+                                    <th style="text-align:left">Additional CPTs / Units</th>
+                                    <th>Total Billed Charges for<br/>Additional CPTs / Units</th>
                                     <th>Revenue<br/>at Risk</th>
                                     <th>Net Impact</th>
                                 </tr>
@@ -791,59 +1069,25 @@ else
                                 @foreach (var r in rows)
                                 {
                                     var ni = r.NetImpact;
-                                    var billableTags   = r.BillableCptCombo.Split(new[]{'*',','}, StringSplitOptions.RemoveEmptyEntries);
-                                    var billedTags     = r.BilledCptCombo.Split(new[]{'*',','}, StringSplitOptions.RemoveEmptyEntries);
-                                    var missingTags    = r.MissingCpts.Split(new[]{'*',','}, StringSplitOptions.RemoveEmptyEntries);
-                                    var additionalTags = r.AdditionalCpts.Split(new[]{'*',','}, StringSplitOptions.RemoveEmptyEntries);
-                                    <tr class="row-main" data-year="@r.Year" data-panel="@r.PanelName" onclick="rowToggle(this)">
-                                        <td class="row-toggle-cell"><div class="row-arrow"></div></td>
+                                    <tr data-year="@r.Year" data-panel="@r.PanelName">
+                                        <td class="year-cell">@r.Year</td>
                                         <td><span class="panel-chip">@r.PanelName</span></td>
+                                        <td class="cpt-cell">@Html.Raw(FormatCptPills(r.BillableCptCombo, "billable"))</td>
                                         <td class="r"><strong>@r.TotalClaims.ToString("N0")</strong></td>
                                         <td class="r money money-neutral">$&thinsp;@r.BilledChargesPerClaim.ToString("N2")</td>
+                                        <td class="cpt-cell">@Html.Raw(FormatCptPills(r.BilledCptCombo, "billed"))</td>
+                                        <td class="cpt-cell">@Html.Raw(FormatCptPills(r.MissingCpts, "missing"))</td>
                                         <td class="r money money-neutral">$&thinsp;@r.TotalBilledChargesForMissingCpts.ToString("N2")</td>
                                         <td class="r money @(r.LostRevenue != 0 ? "money-neg" : "money-neutral")">
                                             $&thinsp;@r.LostRevenue.ToString("N2")
                                         </td>
+                                        <td class="cpt-cell">@Html.Raw(FormatCptPills(r.AdditionalCpts, "additional"))</td>
                                         <td class="r money money-neutral">$&thinsp;@r.TotalBilledChargesForAdditionalCpts.ToString("N2")</td>
                                         <td class="r money money-neutral">$&thinsp;@r.RevenueAtRisk.ToString("N2")</td>
                                         <td class="r">
                                             <span class="impact-chip @(ni < 0 ? "neg" : ni > 0 ? "pos" : "zero")">
                                                 @(ni < 0 ? "-" : ni > 0 ? "+" : "")$@Math.Abs(ni).ToString("N2")
                                             </span>
-                                        </td>
-                                    </tr>
-                                    <tr class="row-expand">
-                                        <td colspan="9" class="det-expand-inner">
-                                            <div class="det-expand-grid">
-                                                <div class="det-expand-block">
-                                                    <div class="det-expand-label">Billable CPT Combination</div>
-                                                    <div class="cpt-tags">
-                                                        @if (!billableTags.Any()) { <span style="color:#aaa;font-size:.72rem">&#8212;</span> }
-                                                        @foreach (var t in billableTags) { <span class="cpt-tag cpt-tag-actual">@t</span> }
-                                                    </div>
-                                                </div>
-                                                <div class="det-expand-block">
-                                                    <div class="det-expand-label">Billed CPT Combination</div>
-                                                    <div class="cpt-tags">
-                                                        @if (!billedTags.Any()) { <span style="color:#aaa;font-size:.72rem">&#8212;</span> }
-                                                        @foreach (var t in billedTags) { <span class="cpt-tag cpt-tag-expected">@t</span> }
-                                                    </div>
-                                                </div>
-                                                <div class="det-expand-block">
-                                                    <div class="det-expand-label" style="color:#c62828">Missing CPTs / Units</div>
-                                                    <div class="cpt-tags">
-                                                        @if (!missingTags.Any()) { <span style="color:#aaa;font-size:.72rem">&#8212;</span> }
-                                                        @foreach (var t in missingTags) { <span class="cpt-tag cpt-tag-missing">@t</span> }
-                                                    </div>
-                                                </div>
-                                                <div class="det-expand-block">
-                                                    <div class="det-expand-label" style="color:#e65100">Additional CPTs / Units</div>
-                                                    <div class="cpt-tags">
-                                                        @if (!additionalTags.Any()) { <span style="color:#aaa;font-size:.72rem">&#8212;</span> }
-                                                        @foreach (var t in additionalTags) { <span class="cpt-tag cpt-tag-extra">@t</span> }
-                                                    </div>
-                                                </div>
-                                            </div>
                                         </td>
                                     </tr>
                                 }
@@ -856,7 +1100,7 @@ else
     </div>
 
     <!-- ?? Tab: YTD Summary ???????????????????????????????????????? -->
-    <div class="cs-tab-pane mt-3" id="pane-summary">
+    <div class="cs-tab-pane active mt-3" id="pane-summary">
         <!-- Filter bar -->
         <div class="cs-filter-bar">
             <span class="cs-filter-label">&#9660; Filter</span>
@@ -908,10 +1152,9 @@ else
                                 @foreach (var r in rows)
                                 {
                                     var ni = r.NetImpact;
-                                    var billableTags   = r.BillableCptCombo.Split(new[]{'*',','}, StringSplitOptions.RemoveEmptyEntries);
-                                    var billedTags     = r.BilledCptCombo.Split(new[]{'*',','}, StringSplitOptions.RemoveEmptyEntries);
-                                    var missingTags    = r.MissingCpts.Split(new[]{'*',','}, StringSplitOptions.RemoveEmptyEntries);
-                                    var additionalTags = r.AdditionalCpts.Split(new[]{'*',','}, StringSplitOptions.RemoveEmptyEntries);
+                                    var detailInsights = Model.InsightRows
+                                        .Where(i => i.Year == r.Year && i.PanelName == r.PanelName)
+                                        .ToList();
                                     <tr class="row-main" data-year="@r.Year" data-panel="@r.PanelName" onclick="rowToggle(this)">
                                         <td class="row-toggle-cell"><div class="row-arrow"></div></td>
                                         <td><span class="panel-chip">@r.PanelName</span></td>
@@ -933,36 +1176,61 @@ else
                                     </tr>
                                     <tr class="row-expand">
                                         <td colspan="11" class="det-expand-inner">
-                                            <div class="det-expand-grid">
-                                                <div class="det-expand-block">
-                                                    <div class="det-expand-label">Billable CPT Combination</div>
-                                                    <div class="cpt-tags">
-                                                        @if (!billableTags.Any()) { <span style="color:#aaa;font-size:.72rem">&#8212;</span> }
-                                                        @foreach (var t in billableTags) { <span class="cpt-tag cpt-tag-actual">@t</span> }
+                                            @if (!detailInsights.Any())
+                                            {
+                                                <div style="font-size:.78rem;color:#8a9ab8;padding:.5rem 0">No detail rows available for this panel.</div>
+                                            }
+                                            else
+                                            {
+                                                <div class="cs-table-wrap" style="margin:0">
+                                                    <div class="cs-table-scroll">
+                                                        <table class="cs-table" style="min-width:1200px">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th style="text-align:left">Year</th>
+                                                                    <th style="text-align:left">Panel Name</th>
+                                                                    <th style="text-align:left">Billable CPT Combination</th>
+                                                                    <th>Total No. of Claims</th>
+                                                                    <th>Billed Charges / Claim</th>
+                                                                    <th style="text-align:left">Billed CPT Combination</th>
+                                                                    <th style="text-align:left">Missing CPTs / Units</th>
+                                                                    <th>Total Billed for<br/>Missing CPTs</th>
+                                                                    <th>Lost Revenue</th>
+                                                                    <th style="text-align:left">Additional CPTs / Units</th>
+                                                                    <th>Total Billed for<br/>Additional CPTs</th>
+                                                                    <th>Revenue at Risk</th>
+                                                                    <th>Net Impact</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                @foreach (var di in detailInsights)
+                                                                {
+                                                                    var dni = di.NetImpact;
+                                                                    <tr>
+                                                                        <td class="year-cell">@di.Year</td>
+                                                                        <td><span class="panel-chip">@di.PanelName</span></td>
+                                                                        <td class="cpt-cell">@Html.Raw(FormatCptPills(di.BillableCptCombo, "billable"))</td>
+                                                                        <td class="r"><strong>@di.TotalClaims.ToString("N0")</strong></td>
+                                                                        <td class="r money money-neutral">$&thinsp;@di.BilledChargesPerClaim.ToString("N2")</td>
+                                                                        <td class="cpt-cell">@Html.Raw(FormatCptPills(di.BilledCptCombo, "billed"))</td>
+                                                                        <td class="cpt-cell">@Html.Raw(FormatCptPills(di.MissingCpts, "missing"))</td>
+                                                                        <td class="r money money-neutral">$&thinsp;@di.TotalBilledChargesForMissingCpts.ToString("N2")</td>
+                                                                        <td class="r money @(di.LostRevenue != 0 ? "money-neg" : "money-neutral")">$&thinsp;@di.LostRevenue.ToString("N2")</td>
+                                                                        <td class="cpt-cell">@Html.Raw(FormatCptPills(di.AdditionalCpts, "additional"))</td>
+                                                                        <td class="r money money-neutral">$&thinsp;@di.TotalBilledChargesForAdditionalCpts.ToString("N2")</td>
+                                                                        <td class="r money money-neutral">$&thinsp;@di.RevenueAtRisk.ToString("N2")</td>
+                                                                        <td class="r">
+                                                                            <span class="impact-chip @(dni < 0 ? "neg" : dni > 0 ? "pos" : "zero")">
+                                                                                @(dni < 0 ? "-" : dni > 0 ? "+" : "")$@Math.Abs(dni).ToString("N2")
+                                                                            </span>
+                                                                        </td>
+                                                                    </tr>
+                                                                }
+                                                            </tbody>
+                                                        </table>
                                                     </div>
                                                 </div>
-                                                <div class="det-expand-block">
-                                                    <div class="det-expand-label">Billed CPT Combination</div>
-                                                    <div class="cpt-tags">
-                                                        @if (!billedTags.Any()) { <span style="color:#aaa;font-size:.72rem">&#8212;</span> }
-                                                        @foreach (var t in billedTags) { <span class="cpt-tag cpt-tag-expected">@t</span> }
-                                                    </div>
-                                                </div>
-                                                <div class="det-expand-block">
-                                                    <div class="det-expand-label" style="color:#c62828">Missing CPTs / Units</div>
-                                                    <div class="cpt-tags">
-                                                        @if (!missingTags.Any()) { <span style="color:#aaa;font-size:.72rem">&#8212;</span> }
-                                                        @foreach (var t in missingTags) { <span class="cpt-tag cpt-tag-missing">@t</span> }
-                                                    </div>
-                                                </div>
-                                                <div class="det-expand-block">
-                                                    <div class="det-expand-label" style="color:#e65100">Additional CPTs / Units</div>
-                                                    <div class="cpt-tags">
-                                                        @if (!additionalTags.Any()) { <span style="color:#aaa;font-size:.72rem">&#8212;</span> }
-                                                        @foreach (var t in additionalTags) { <span class="cpt-tag cpt-tag-extra">@t</span> }
-                                                    </div>
-                                                </div>
-                                            </div>
+                                            }
                                         </td>
                                     </tr>
                                 }
@@ -1023,12 +1291,16 @@ else
                         <table class="cs-table">
                             <thead>
                                 <tr>
-                                    <th style="width:28px"></th>
+                                    <th style="text-align:left">Week</th>
                                     <th style="text-align:left">Panel Name</th>
+                                    <th style="text-align:left">Billable CPT Combination</th>
                                     <th>Total No.<br/>of Claims</th>
                                     <th>Billed<br/>Charges</th>
+                                    <th style="text-align:left">Billed CPT Combination</th>
+                                    <th style="text-align:left">Missing CPTs / Units</th>
                                     <th>Billed Charges for<br/>Missing CPTs / Units</th>
                                     <th>Revenue<br/>Loss</th>
+                                    <th style="text-align:left">Additional CPTs / Units</th>
                                     <th>Billed Charges for<br/>Additional CPTs / Units</th>
                                     <th>Potential<br/>Recoupment</th>
                                     <th>Net Impact</th>
@@ -1038,63 +1310,25 @@ else
                                 @foreach (var r in wrows)
                                 {
                                     var ni = r.NetImpact;
-                                    var billableTags   = r.BillableCptCombo.Split(new[]{'*',',',' '}, StringSplitOptions.RemoveEmptyEntries);
-                                    var billedTags     = r.BilledCptCombo.Split(new[]{'*',',',' '}, StringSplitOptions.RemoveEmptyEntries);
-                                    var missingTags    = r.MissingCpts.Split(new[]{'*',',',' '}, StringSplitOptions.RemoveEmptyEntries);
-                                    var additionalTags = r.AdditionalCpts.Split(new[]{'*',',',' '}, StringSplitOptions.RemoveEmptyEntries);
-                                    <tr class="row-main" data-week="@r.WeekFolder" data-panel="@r.PanelName" onclick="rowToggle(this)">
-                                        <td class="row-toggle-cell"><div class="row-arrow"></div></td>
+                                    <tr data-week="@r.WeekFolder" data-panel="@r.PanelName">
+                                        <td>@r.WeekFolder</td>
                                         <td><span class="panel-chip">@r.PanelName</span></td>
+                                        <td class="cpt-cell">@Html.Raw(FormatCptPills(r.BillableCptCombo, "billable"))</td>
                                         <td class="r"><strong>@r.TotalClaims.ToString("N0")</strong></td>
                                         <td class="r money money-neutral">$&thinsp;@r.TotalBilledCharges.ToString("N2")</td>
+                                        <td class="cpt-cell">@Html.Raw(FormatCptPills(r.BilledCptCombo, "billed"))</td>
+                                        <td class="cpt-cell">@Html.Raw(FormatCptPills(r.MissingCpts, "missing"))</td>
                                         <td class="r money money-neutral">$&thinsp;@r.BilledChargesForMissingCpts.ToString("N2")</td>
                                         <td class="r money @(r.RevenueLoss != 0 ? "money-neg" : "money-neutral")">
                                             $&thinsp;@r.RevenueLoss.ToString("N2")
                                         </td>
+                                        <td class="cpt-cell">@Html.Raw(FormatCptPills(r.AdditionalCpts, "additional"))</td>
                                         <td class="r money money-neutral">$&thinsp;@r.BilledChargesForAdditionalCpts.ToString("N2")</td>
                                         <td class="r money money-neutral">$&thinsp;@r.PotentialRecoupment.ToString("N2")</td>
                                         <td class="r">
                                             <span class="impact-chip @(ni < 0 ? "neg" : ni > 0 ? "pos" : "zero")">
                                                 @(ni < 0 ? "-" : ni > 0 ? "+" : "")$@Math.Abs(ni).ToString("N2")
                                             </span>
-                                        </td>
-                                    </tr>
-                                    <tr class="row-expand">
-                                        <td colspan="9" class="det-expand-inner">
-                                            <div class="det-expand-grid">
-                                                <div class="det-expand-block">
-                                                    <div class="det-expand-label">Billable CPT Codes</div>
-                                                    <div class="cpt-tags">
-                                                        @if (!billableTags.Any()) { <span style="color:#aaa;font-size:.72rem">�</span> }
-                                                        @foreach (var t in billableTags) { <span class="cpt-tag cpt-tag-actual">@t</span> }
-                                                    </div>
-                                                </div>
-                                                <div class="det-expand-block">
-                                                    <div class="det-expand-label">Billed CPT Codes</div>
-                                                    <div class="cpt-tags">
-                                                        @if (!billedTags.Any()) { <span style="color:#aaa;font-size:.72rem">�</span> }
-                                                        @foreach (var t in billedTags) { <span class="cpt-tag cpt-tag-expected">@t</span> }
-                                                    </div>
-                                                </div>
-                                                @if (missingTags.Any())
-                                                {
-                                                    <div class="det-expand-block">
-                                                        <div class="det-expand-label" style="color:#c62828">Missing CPTs</div>
-                                                        <div class="cpt-tags">
-                                                            @foreach (var t in missingTags) { <span class="cpt-tag cpt-tag-missing">@t</span> }
-                                                        </div>
-                                                    </div>
-                                                }
-                                                @if (additionalTags.Any())
-                                                {
-                                                    <div class="det-expand-block">
-                                                        <div class="det-expand-label" style="color:#e65100">Additional CPTs</div>
-                                                        <div class="cpt-tags">
-                                                            @foreach (var t in additionalTags) { <span class="cpt-tag cpt-tag-extra">@t</span> }
-                                                        </div>
-                                                    </div>
-                                                }
-                                            </div>
                                         </td>
                                     </tr>
                                 }
@@ -1166,10 +1400,9 @@ else
                             <tbody id="tbody-wtd-summary-@week.GetHashCode()">
                                 @foreach (var r in wrows)
                                 {
-                                    var billableTags   = r.BillableCptCombo.Split(new[]{'*',',',' '}, StringSplitOptions.RemoveEmptyEntries);
-                                    var billedTags     = r.BilledCptCombo.Split(new[]{'*',',',' '}, StringSplitOptions.RemoveEmptyEntries);
-                                    var missingTags    = r.MissingCpts.Split(new[]{'*',',',' '}, StringSplitOptions.RemoveEmptyEntries);
-                                    var additionalTags = r.AdditionalCpts.Split(new[]{'*',',',' '}, StringSplitOptions.RemoveEmptyEntries);
+                                    var detailInsights = Model.WtdInsightRows
+                                        .Where(i => i.WeekFolder == r.WeekFolder && i.PanelName == r.PanelName)
+                                        .ToList();
                                     <tr class="row-main" data-week="@r.WeekFolder" data-panel="@r.PanelName" onclick="rowToggle(this)">
                                         <td class="row-toggle-cell"><div class="row-arrow"></div></td>
                                         <td><span class="panel-chip">@r.PanelName</span></td>
@@ -1180,36 +1413,61 @@ else
                                     </tr>
                                     <tr class="row-expand">
                                         <td colspan="6" class="det-expand-inner">
-                                            <div class="det-expand-grid">
-                                                <div class="det-expand-block">
-                                                    <div class="det-expand-label">Billable CPT Combination</div>
-                                                    <div class="cpt-tags">
-                                                        @if (!billableTags.Any()) { <span style="color:#aaa;font-size:.72rem">&#8212;</span> }
-                                                        @foreach (var t in billableTags) { <span class="cpt-tag cpt-tag-actual">@t</span> }
+                                            @if (!detailInsights.Any())
+                                            {
+                                                <div style="font-size:.78rem;color:#8a9ab8;padding:.5rem 0">No detail rows available for this panel.</div>
+                                            }
+                                            else
+                                            {
+                                                <div class="cs-table-wrap" style="margin:0">
+                                                    <div class="cs-table-scroll">
+                                                        <table class="cs-table" style="min-width:1200px">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th style="text-align:left">Week</th>
+                                                                    <th style="text-align:left">Panel Name</th>
+                                                                    <th style="text-align:left">Billable CPT Combination</th>
+                                                                    <th>Total No. of Claims</th>
+                                                                    <th>Billed Charges</th>
+                                                                    <th style="text-align:left">Billed CPT Combination</th>
+                                                                    <th style="text-align:left">Missing CPTs / Units</th>
+                                                                    <th>Billed Charges for<br/>Missing CPTs / Units</th>
+                                                                    <th>Revenue Loss</th>
+                                                                    <th style="text-align:left">Additional CPTs / Units</th>
+                                                                    <th>Billed Charges for<br/>Additional CPTs / Units</th>
+                                                                    <th>Potential Recoupment</th>
+                                                                    <th>Net Impact</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                @foreach (var di in detailInsights)
+                                                                {
+                                                                    var ni = di.NetImpact;
+                                                                    <tr>
+                                                                        <td>@di.WeekFolder</td>
+                                                                        <td><span class="panel-chip">@di.PanelName</span></td>
+                                                                        <td class="cpt-cell">@Html.Raw(FormatCptPills(di.BillableCptCombo, "billable"))</td>
+                                                                        <td class="r"><strong>@di.TotalClaims.ToString("N0")</strong></td>
+                                                                        <td class="r money money-neutral">$&thinsp;@di.TotalBilledCharges.ToString("N2")</td>
+                                                                        <td class="cpt-cell">@Html.Raw(FormatCptPills(di.BilledCptCombo, "billed"))</td>
+                                                                        <td class="cpt-cell">@Html.Raw(FormatCptPills(di.MissingCpts, "missing"))</td>
+                                                                        <td class="r money money-neutral">$&thinsp;@di.BilledChargesForMissingCpts.ToString("N2")</td>
+                                                                        <td class="r money @(di.RevenueLoss != 0 ? "money-neg" : "money-neutral")">$&thinsp;@di.RevenueLoss.ToString("N2")</td>
+                                                                        <td class="cpt-cell">@Html.Raw(FormatCptPills(di.AdditionalCpts, "additional"))</td>
+                                                                        <td class="r money money-neutral">$&thinsp;@di.BilledChargesForAdditionalCpts.ToString("N2")</td>
+                                                                        <td class="r money money-neutral">$&thinsp;@di.PotentialRecoupment.ToString("N2")</td>
+                                                                        <td class="r">
+                                                                            <span class="impact-chip @(ni < 0 ? "neg" : ni > 0 ? "pos" : "zero")">
+                                                                                @(ni < 0 ? "-" : ni > 0 ? "+" : "")$@Math.Abs(ni).ToString("N2")
+                                                                            </span>
+                                                                        </td>
+                                                                    </tr>
+                                                                }
+                                                            </tbody>
+                                                        </table>
                                                     </div>
                                                 </div>
-                                                <div class="det-expand-block">
-                                                    <div class="det-expand-label">Billed CPT Combination</div>
-                                                    <div class="cpt-tags">
-                                                        @if (!billedTags.Any()) { <span style="color:#aaa;font-size:.72rem">&#8212;</span> }
-                                                        @foreach (var t in billedTags) { <span class="cpt-tag cpt-tag-expected">@t</span> }
-                                                    </div>
-                                                </div>
-                                                <div class="det-expand-block">
-                                                    <div class="det-expand-label" style="color:#c62828">Missing CPTs / Units</div>
-                                                    <div class="cpt-tags">
-                                                        @if (!missingTags.Any()) { <span style="color:#aaa;font-size:.72rem">&#8212;</span> }
-                                                        @foreach (var t in missingTags) { <span class="cpt-tag cpt-tag-missing">@t</span> }
-                                                    </div>
-                                                </div>
-                                                <div class="det-expand-block">
-                                                    <div class="det-expand-label" style="color:#e65100">Additional CPTs / Units</div>
-                                                    <div class="cpt-tags">
-                                                        @if (!additionalTags.Any()) { <span style="color:#aaa;font-size:.72rem">&#8212;</span> }
-                                                        @foreach (var t in additionalTags) { <span class="cpt-tag cpt-tag-extra">@t</span> }
-                                                    </div>
-                                                </div>
-                                            </div>
+                                            }
                                         </td>
                                     </tr>
                                 }
@@ -1607,40 +1865,62 @@ else
         {
             pane:    'pane-insights',
             rowSel:  '#pane-insights tbody tr',
-            countId: 'flt-ytd-insights-count',
+            countId: 'flt-shared-count',
             filters: [
-                { selId: 'flt-ytd-insights-year',  attr: 'data-year'  },
-                { selId: 'flt-ytd-insights-panel', attr: 'data-panel' }
+                { selId: 'flt-shared-year',  attr: 'data-year'  },
+                { selId: 'flt-shared-panel', attr: 'data-panel' }
             ]
         },
         {
             pane:    'pane-summary',
             rowSel:  '#pane-summary tbody tr',
-            countId: 'flt-ytd-summary-count',
+            countId: 'flt-shared-count',
             filters: [
-                { selId: 'flt-ytd-summary-year',  attr: 'data-year'  },
-                { selId: 'flt-ytd-summary-panel', attr: 'data-panel' }
+                { selId: 'flt-shared-year',  attr: 'data-year'  },
+                { selId: 'flt-shared-panel', attr: 'data-panel' }
             ]
         },
         {
             pane:    'pane-wtd-insights',
             rowSel:  '#pane-wtd-insights tbody tr',
-            countId: 'flt-wtd-insights-count',
+            countId: 'flt-shared-count',
             filters: [
-                { selId: 'flt-wtd-insights-week',  attr: 'data-week'  },
-                { selId: 'flt-wtd-insights-panel', attr: 'data-panel' }
+                { selId: 'flt-shared-week',  attr: 'data-week'  },
+                { selId: 'flt-shared-panel', attr: 'data-panel' }
             ]
         },
         {
             pane:    'pane-wtd-summary',
             rowSel:  '#pane-wtd-summary tbody tr',
-            countId: 'flt-wtd-summary-count',
+            countId: 'flt-shared-count',
             filters: [
-                { selId: 'flt-wtd-summary-week',  attr: 'data-week'  },
-                { selId: 'flt-wtd-summary-panel', attr: 'data-panel' }
+                { selId: 'flt-shared-week',  attr: 'data-week'  },
+                { selId: 'flt-shared-panel', attr: 'data-panel' }
             ]
         }
     ];
+
+    function getActivePaneId() {
+        var active = document.querySelector('.cs-tab-pane.active');
+        return active ? active.id : 'pane-summary';
+    }
+
+    function updateSharedFilterVisibility() {
+        // Show Year filters for YTD tabs; Week for WTD tabs; both hidden for others.
+        var paneId = getActivePaneId();
+        var isWtd  = paneId === 'pane-wtd-summary' || paneId === 'pane-wtd-insights';
+        var isYtd  = paneId === 'pane-summary' || paneId === 'pane-insights';
+
+        var yearLabel = document.getElementById('csSharedYearLabel');
+        var yearSel   = document.getElementById('flt-shared-year');
+        var weekLabel = document.getElementById('csSharedWeekLabel');
+        var weekSel   = document.getElementById('flt-shared-week');
+
+        if (yearLabel) yearLabel.style.display = isYtd ? '' : 'none';
+        if (yearSel)   yearSel.style.display   = isYtd ? '' : 'none';
+        if (weekLabel) weekLabel.style.display = isWtd ? '' : 'none';
+        if (weekSel)   weekSel.style.display   = isWtd ? '' : 'none';
+    }
 
     function applyFilter(cfg) {
         var rows    = document.querySelectorAll(cfg.rowSel);
@@ -1661,36 +1941,207 @@ else
             var anyVisible = sec.querySelectorAll('tbody tr:not(.cs-row-hidden)').length > 0;
             sec.style.display = anyVisible ? '' : 'none';
         });
-        var countEl = document.getElementById(cfg.countId);
-        if (countEl) countEl.textContent = visible + ' row' + (visible !== 1 ? 's' : '');
+        // Only show counts for the active tab in the shared filter bar.
+        if (cfg.pane === getActivePaneId()) {
+            var countEl = document.getElementById(cfg.countId);
+            if (countEl) countEl.textContent = visible + ' row' + (visible !== 1 ? 's' : '');
+        }
     }
 
-    // Wire up change listeners for every filter select
-    tabFilters.forEach(function (cfg) {
-        cfg.filters.forEach(function (f) {
-            var sel = document.getElementById(f.selId);
-            if (sel) sel.addEventListener('change', function () { applyFilter(cfg); });
-        });
-        applyFilter(cfg); // init counts
+    function applyAllTabFilters() {
+        tabFilters.forEach(function (cfg) { applyFilter(cfg); });
+    }
+
+    // Wire up shared filter bar change listeners
+    ['flt-shared-year', 'flt-shared-week', 'flt-shared-panel'].forEach(function (id) {
+        var sel = document.getElementById(id);
+        if (sel) sel.addEventListener('change', function () { applyAllTabFilters(); });
     });
 
-    // Global reset helper called by the Clear buttons
-    window.resetFilter = function (tabKey) {
-        var cfg = tabFilters.find(function (c) { return c.pane === 'pane-' + tabKey; });
-        if (!cfg) return;
-        cfg.filters.forEach(function (f) {
-            var sel = document.getElementById(f.selId);
-            if (sel) sel.value = '';
+    // Shared clear button
+    var sharedClear = document.getElementById('flt-shared-clear');
+    if (sharedClear) {
+        sharedClear.addEventListener('click', function () {
+            var y = document.getElementById('flt-shared-year'); if (y) y.value = '';
+            var w = document.getElementById('flt-shared-week'); if (w) w.value = '';
+            var p = document.getElementById('flt-shared-panel'); if (p) p.value = '';
+            applyAllTabFilters();
         });
-        applyFilter(cfg);
+    }
+
+    // Init
+    updateSharedFilterVisibility();
+    applyAllTabFilters();
+
+    // Toggle full / clamped CPT pills inside any cpt-pill-block
+    window.cptPillsToggle = function (btn, evt) {
+        if (!btn) return;
+        var block = btn.closest('.cpt-pill-block');
+        if (!block) return;
+        var pills = block.querySelector('.cpt-pills');
+        if (!pills) return;
+        var collapsed = pills.classList.toggle('cpt-pills-collapsed');
+        pills.classList.toggle('cpt-pills-expanded', !collapsed);
+        btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        var more = btn.getAttribute('data-more') || '+ more';
+        var less = btn.getAttribute('data-less') || '- less';
+        btn.innerHTML = collapsed ? more : less;
+        // Don't bubble click into row toggles in the Summary tabs
+        if (evt && evt.stopPropagation) evt.stopPropagation();
     };
 
-    // Wire up all Download Excel buttons (class-based)
-    document.querySelectorAll('.exportCodingExcelBtn').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-            lmdExcelDownload('@Url.Action("ExportCodingExcel", "Coding", new { lab = Model.LabName })');
+    // After render, reveal "+ more" only where the clamped pills actually overflow.
+    function refreshCptPillToggles() {
+        document.querySelectorAll('.cpt-pill-block').forEach(function (block) {
+            var pills  = block.querySelector('.cpt-pills');
+            var toggle = block.querySelector('.cpt-pill-toggle');
+            if (!pills || !toggle) return;
+            // Only meaningful while collapsed; if user expanded, leave toggle visible.
+            if (!pills.classList.contains('cpt-pills-collapsed')) {
+                toggle.style.display = '';
+                return;
+            }
+            var overflowing = pills.scrollHeight > pills.clientHeight + 1;
+            toggle.style.display = overflowing ? '' : 'none';
+        });
+    }
+    // Expose globally so handlers in nested IIFEs (rowToggle) can re-trigger it.
+    window.refreshCptPillToggles = refreshCptPillToggles;
+    // Initial pass + re-run on resize (column widths change → wrapping changes)
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', refreshCptPillToggles);
+    } else {
+        refreshCptPillToggles();
+    }
+    var _cptResizeTimer;
+    window.addEventListener('resize', function () {
+        clearTimeout(_cptResizeTimer);
+        _cptResizeTimer = setTimeout(refreshCptPillToggles, 150);
+    });
+    // Re-evaluate when a tab becomes visible (hidden panes have 0 height → bad measurements)
+    document.querySelectorAll('#csTabs .cs-tab-btn').forEach(function (b) {
+        b.addEventListener('click', function () {
+            updateSharedFilterVisibility();
+            // Re-apply filters so the shared count matches the newly active pane.
+            applyAllTabFilters();
+            setTimeout(refreshCptPillToggles, 30);
         });
     });
+
+    // Wire up all Download Excel buttons (class-based) with progress overlay.
+    (function () {
+        var overlay     = document.getElementById('csExportOverlay');
+        var bar         = document.getElementById('csExportBar');
+        var pctLabel    = document.getElementById('csExportPct');
+        var statusLabel = document.getElementById('csExportStatus');
+        var cancelBtn   = document.getElementById('csExportCancelBtn');
+        if (!overlay || !bar || !pctLabel || !statusLabel || !cancelBtn) return;
+
+        var exportUrl = '@Url.Action("ExportCodingExcel", "Coding", new { lab = Model.LabName })';
+
+        var steps = [
+            { pct:  8, text: 'Connecting to database\u2026' },
+            { pct: 18, text: 'Fetching YTD Insights\u2026' },
+            { pct: 28, text: 'Fetching YTD Summary\u2026' },
+            { pct: 38, text: 'Fetching WTD Insights\u2026' },
+            { pct: 48, text: 'Fetching WTD Summary\u2026' },
+            { pct: 58, text: 'Fetching Financial Dashboard\u2026' },
+            { pct: 68, text: 'Fetching Validation Detail rows\u2026' },
+            { pct: 80, text: 'Building Excel workbook\u2026' },
+            { pct: 92, text: 'Finalizing sheets & formatting\u2026' }
+        ];
+
+        function csGetCookie(name) {
+            var m = document.cookie.match('(^|;)\\s*' + name + '=([^;]*)');
+            return m ? m[2] : null;
+        }
+        function csDeleteCookie(name) {
+            document.cookie = name + '=; path=/; max-age=0';
+        }
+        function csCleanup(p, c, s, iframe) {
+            clearInterval(p); clearInterval(c); clearInterval(s);
+            if (iframe && iframe.parentNode) document.body.removeChild(iframe);
+        }
+
+        function startExport() {
+            csDeleteCookie('csExportDone');
+            overlay.style.display = 'flex';
+            bar.style.width = '0%';
+            pctLabel.textContent = '0%';
+            statusLabel.textContent = 'Starting export\u2026';
+
+            var startTime = Date.now();
+            function elapsed() {
+                var secs = Math.floor((Date.now() - startTime) / 1000);
+                var m = Math.floor(secs / 60), s = secs % 60;
+                return m > 0 ? m + 'm ' + s + 's' : s + 's';
+            }
+
+            var stepIdx = 0, currentPct = 0;
+            var stepTimer = setInterval(function () {
+                if (stepIdx < steps.length) {
+                    currentPct = steps[stepIdx].pct;
+                    bar.style.width = currentPct + '%';
+                    pctLabel.textContent = currentPct + '%';
+                    statusLabel.textContent = steps[stepIdx].text;
+                    stepIdx++;
+                } else { clearInterval(stepTimer); }
+            }, 1500);
+
+            var creepTimer = setInterval(function () {
+                if (stepIdx >= steps.length) {
+                    if (currentPct < 99) currentPct += 0.15;
+                    var p = Math.min(Math.round(currentPct), 99);
+                    bar.style.width = p + '%';
+                    pctLabel.textContent = p + '%';
+                    var msgs = [
+                        'Writing Validation Detail sheet\u2026',
+                        'Writing YTD/WTD sheets\u2026',
+                        'Formatting report sheets\u2026',
+                        'Almost there, please wait\u2026',
+                        'Compressing workbook\u2026',
+                        'Hang tight, almost done\u2026'
+                    ];
+                    var msgIdx = Math.floor((Date.now() - startTime) / 4000) % msgs.length;
+                    statusLabel.textContent = msgs[msgIdx] + '  (' + elapsed() + ')';
+                }
+            }, 1000);
+
+            var iframe = document.createElement('iframe');
+            iframe.style.display = 'none';
+            iframe.src = exportUrl;
+            document.body.appendChild(iframe);
+
+            var pollTimer = setInterval(function () {
+                if (csGetCookie('csExportDone')) {
+                    csCleanup(pollTimer, creepTimer, stepTimer, iframe);
+                    csDeleteCookie('csExportDone');
+                    bar.style.width = '100%';
+                    pctLabel.textContent = '100%';
+                    statusLabel.textContent = 'Download complete!  (' + elapsed() + ')';
+                    setTimeout(function () { overlay.style.display = 'none'; }, 900);
+                }
+            }, 500);
+
+            var onCancel = function () {
+                csCleanup(pollTimer, creepTimer, stepTimer, iframe);
+                csDeleteCookie('csExportDone');
+                overlay.style.display = 'none';
+                cancelBtn.removeEventListener('click', onCancel);
+            };
+            cancelBtn.addEventListener('click', onCancel);
+
+            // Safety timeout: hide overlay after 10 minutes regardless.
+            setTimeout(function () {
+                csCleanup(pollTimer, creepTimer, stepTimer, iframe);
+                overlay.style.display = 'none';
+            }, 600000);
+        }
+
+        document.querySelectorAll('.exportCodingExcelBtn').forEach(function (btn) {
+            btn.addEventListener('click', startExport);
+        });
+    }());
 
 
     // ?? Validation Detail: filter + pager + expand ???????????????????????
@@ -1795,6 +2246,10 @@ else
             var open = exp.classList.toggle('open');
             mainRow.classList.toggle('open', open);
             exp.style.display = open ? '' : 'none';
+            // Child sub-table just became visible/hidden � re-evaluate CPT pill clamping.
+            if (typeof refreshCptPillToggles === 'function') {
+                setTimeout(refreshCptPillToggles, 30);
+            }
         };
 
         window.resetDetailFilter = function () {

@@ -16,6 +16,12 @@ public sealed class CollectionSummaryViewModel
     public List<string> AvailableLabs { get; init; } = [];
     public string SelectedLab { get; init; } = string.Empty;
 
+    /// <summary>
+    /// Active per-lab Collection Summary rule applied to the Monthly Claim Volume tab
+    /// (e.g. <c>"Northwestlabs Rule"</c>). Null/empty when the lab uses the legacy default behavior.
+    /// </summary>
+    public string? CollectionSummaryRule { get; init; }
+
     // Filters (same dimensions as Production Report)
     public List<string> FilterPayerNames { get; init; } = [];
     public List<string> FilterPanelNames { get; init; } = [];

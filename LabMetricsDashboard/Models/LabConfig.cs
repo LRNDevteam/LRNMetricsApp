@@ -130,6 +130,29 @@ public sealed class LabCsvConfig
     /// the legacy default behavior is used (columns by FirstBilledDate).
     /// </summary>
     public ProductionSummaryConfig? ProductionSummary { get; init; }
+
+    /// <summary>
+    /// Optional per-lab Collection Summary settings.
+    /// When null or when <see cref="CollectionSummaryConfig.Rule"/> is empty,
+    /// the legacy default behavior is used.
+    /// </summary>
+    public CollectionSummaryConfig? CollectionSummary { get; init; }
+}
+
+/// <summary>
+/// Per-lab settings that control how the Collection Summary Monthly Claim Volume
+/// table is computed.
+/// </summary>
+public sealed class CollectionSummaryConfig
+{
+    /// <summary>
+    /// Rule name (e.g. <c>Northwestlabs Rule</c>). Case-insensitive.
+    /// When set to <c>Northwestlabs Rule</c>, the Monthly Claim Volume query:
+    /// - groups columns by <c>CheckDate</c> Year/Month (existing behavior)
+    /// - filters out rows with blank/invalid <c>PostedDate</c>
+    /// - uses <c>PayerName_Raw</c> for payer drill-down grouping.
+    /// </summary>
+    public string? Rule { get; init; }
 }
 
 /// <summary>

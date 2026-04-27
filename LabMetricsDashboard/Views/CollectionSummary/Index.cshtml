@@ -996,7 +996,7 @@
 
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
                     <strong>Source:</strong> @(Model.UsesLineEncounters ? "Line Level Data (encounters) + Claim Level Data (payments)" : "Claim Level Data") &bull;
-                    <strong>Filter:</strong> InsurancePayment &gt; 0, ClaimStatus IN (Fully Paid, Partially Paid, Paid-Client) &bull;
+                    <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &nbsp;|&nbsp; FirstBilledDate: @(string.IsNullOrWhiteSpace(Model.FilterFirstBillFrom) ? "-" : Model.FilterFirstBillFrom) — @(string.IsNullOrWhiteSpace(Model.FilterFirstBillTo) ? "-" : Model.FilterFirstBillTo) &bull;
                     <strong>Rows:</strong> PanelName &bull;
                     <strong>Drill-down:</strong> @(Model.UsesLineEncounters ? "All Payers" : "Top 3 PayerName") by @(Model.UsesLineEncounters ? "Encounter Count" : "Paid Claims Count") &bull;
                     <strong>Columns:</strong> @(Model.UsesLineEncounters ? "CheckDate (claims) / PostingDate (encounters)" : "CheckDate") (Year, Month) &bull;
@@ -1005,10 +1005,11 @@
             }
             else
             {
+                var mcvReason = "No rows match: PayerName_Raw not blank · CheckDate is a valid date";
                 <div class="text-center py-5 text-muted">
                     <div style="font-size:2rem;opacity:.4">&#128202;</div>
                     <div class="fw-semibold mt-2">No monthly claim volume data available</div>
-                    <div class="small mt-1">No matching claim records found. Try adjusting your filters.</div>
+                    <div class="small mt-1"><strong>Reason:</strong> @mcvReason. Try adjusting your filters.</div>
                 </div>
             }
         </div>
@@ -1519,17 +1520,18 @@
 
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
                     <strong>Source:</strong> Claim Level Data &bull;
-                    <strong>Filter:</strong> InsurancePayment &gt; 0 &bull;
+                    <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &nbsp;|&nbsp; FirstBilledDate: @(string.IsNullOrWhiteSpace(Model.FilterFirstBillFrom) ? "-" : Model.FilterFirstBillFrom) — @(string.IsNullOrWhiteSpace(Model.FilterFirstBillTo) ? "-" : Model.FilterFirstBillTo) &bull;
                     <strong>Sorted by:</strong> SUM(InsurancePayment) DESC &bull;
                     <strong>Payment %:</strong> SUM(InsurancePayment) / SUM(ChargeAmount) × 100 where ClaimStatus IN (Fully Paid, Partially Paid)
                 </div>
             }
             else
             {
+                var inspReason = "No rows match: PayerName_Raw not blank · InsurancePayment > 0";
                 <div class="text-center py-5 text-muted">
                     <div style="font-size:2rem;opacity:.4">&#128202;</div>
                     <div class="fw-semibold mt-2">No insurance payment data available</div>
-                    <div class="small mt-1">No matching claim records found. Try adjusting your filters.</div>
+                    <div class="small mt-1"><strong>Reason:</strong> @inspReason. Try adjusting your filters.</div>
                 </div>
             }
         </div>
@@ -1583,6 +1585,7 @@
 
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
                     <strong>Source:</strong> Line Level Data &bull;
+                    <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &nbsp;|&nbsp; FirstBilledDate: @(string.IsNullOrWhiteSpace(Model.FilterFirstBillFrom) ? "-" : Model.FilterFirstBillFrom) — @(string.IsNullOrWhiteSpace(Model.FilterFirstBillTo) ? "-" : Model.FilterFirstBillTo) &bull;
                     <strong>Sorted by:</strong> SUM(Units) DESC &bull;
                     <strong>Payment %:</strong> SUM(InsurancePayment) / SUM(ChargeAmount) × 100 where ClaimStatus IN (Fully Paid, Partially Paid)
                 </div>
@@ -1592,11 +1595,38 @@
                 <div class="text-center py-5 text-muted">
                     <div style="font-size:2rem;opacity:.4">&#128202;</div>
                     <div class="fw-semibold mt-2">No CPT payment data available</div>
-                    <div class="small mt-1">No matching line-level records found. Try adjusting your filters.</div>
+                    <div class="small mt-1"><strong>Reason:</strong> No rows match: CPTCode not blank (line-level). Try adjusting your filters.</div>
                 </div>
             }
         </div>
 
+    </div>
+
+    @* ?? Active rule footer (dull) ?????????????????????????????? *@
+    <div class="cs-rule-footer mt-3 small text-muted" style="opacity:.65;line-height:1.45;border-top:1px dashed #cfd6df;padding-top:.5rem">
+        <div>
+            <span class="fw-semibold">Active Rule:</span>
+            @(string.IsNullOrWhiteSpace(Model.CollectionSummaryRule) ? "Default" : Model.CollectionSummaryRule)
+        </div>
+        @if (string.Equals(Model.CollectionSummaryRule, "Northwestlabs Rule", StringComparison.OrdinalIgnoreCase))
+        {
+            <div class="mt-1"><span class="fw-semibold">Northwestlabs Rule Logic:</span></div>
+            <ul class="mb-0 ps-3" style="font-size:.78rem">
+                <li>Source: <code>ClaimLevelData</code> (payments) @if (Model.UsesLineEncounters) { <text>+ <code>LineLevelData</code> (encounters)</text> }</li>
+                <li>Rows: <code>PanelName</code> &nbsp;·&nbsp; Drill-down: @if (Model.UsesLineEncounters) { <text>All</text> } else { <text>Top 3</text> } <code>PayerName_Raw</code> by encounter count</li>
+                <li>Columns: <code>YEAR(CheckDate)</code> / <code>MONTH(CheckDate)</code></li>
+                <li>Filter: <code>InsurancePayment</code> &gt; 0 &nbsp;·&nbsp; <code>ClaimStatus</code> IN (Fully Paid, Partially Paid, Paid-Client) &nbsp;·&nbsp; <code>PostedDate</code> is a valid date</li>
+            </ul>
+        }
+        else
+        {
+            <div class="mt-1">
+                <span class="fw-semibold">Default Logic:</span>
+                Monthly columns grouped by <code>YEAR/MONTH(CheckDate)</code>; rows = <code>PanelName</code>
+                with @if (Model.UsesLineEncounters) { <text>all</text> } else { <text>Top 3</text> }
+                <code>PayerName</code> drill-down by encounter count.
+            </div>
+        }
     </div>
 }
 

@@ -1,0 +1,365 @@
+@* Shared admin JS for AJAX forms and mapping refresh *@
+<script>
+(function(){
+    function jsonFormData(form) { return new FormData(form); }
+
+    // Generic helper to POST FormData and handle JSON errors
+    async function postForm(url, fd){
+        const resp = await fetch(url, { method: 'POST', body: fd, credentials: 'same-origin' });
+        if (!resp.ok) {
+            let data = null; try { data = await resp.json(); } catch(e) {}
+            if (data && data.errors) throw new Error(data.errors.join('; '));
+            throw new Error('Request failed');
+        }
+        return resp.json().catch(()=>null);
+    }
+
+    // Wire page-level create user if present
+    // Support both modal and page forms, and scope validation to the correct form
+    function wireCreateUserValidation(formId, pwdId, confId, feedbackId) {
+        const form = document.getElementById(formId);
+        if (!form) return;
+        const pwd = form.querySelector('#' + pwdId) || form.querySelector('[name="NewUserPassword"]');
+        const conf = form.querySelector('#' + confId) || form.querySelector('[name="NewUserConfirmPassword"]');
+        const fb = form.querySelector('#' + feedbackId) || form.querySelector('.create-confirm-feedback');
+        if (!pwd || !conf) return;
+        function checkMatch() {
+            if (!conf.value) {
+                conf.classList.remove('is-invalid');
+                if (fb) fb.textContent = '';
+                try { conf.setCustomValidity(''); } catch(e){}
+                return;
+            }
+            if (pwd.value !== conf.value) {
+                conf.classList.add('is-invalid');
+                if (fb) fb.textContent = 'Passwords do not match';
+                try { conf.setCustomValidity('Passwords do not match'); } catch(e){}
+            } else {
+                conf.classList.remove('is-invalid');
+                if (fb) fb.textContent = '';
+                try { conf.setCustomValidity(''); } catch(e){}
+            }
+        }
+        pwd.addEventListener('input', checkMatch);
+        conf.addEventListener('input', checkMatch);
+        conf.addEventListener('blur', function(){ checkMatch(); if (conf.classList.contains('is-invalid')) try{ conf.reportValidity(); }catch(e){} });
+    }
+
+    wireCreateUserValidation('frmCreateUserModal', 'createUserPassword', 'createUserConfirm', 'createUserConfirmFeedback');
+    wireCreateUserValidation('frmCreateUserPage', 'NewUserPassword', 'NewUserConfirmPassword', '');
+
+    const frmCreateUser = document.getElementById('frmCreateUserModal') || document.getElementById('frmCreateUser') || document.getElementById('frmCreateUserPage') || document.getElementById('frmCreateUserPageOnly') || document.getElementById('frmCreateUser');
+    if (frmCreateUser){
+        function clearCreateUserValidation(){
+            ['createUserUserName','createUserPassword','createUserConfirm','createUserEmail','createUserMobile','createUserRole','createUserLab'].forEach(id=>{
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.classList.remove('is-invalid');
+                const fb = document.getElementById(id + 'Feedback');
+                if (fb) {
+                    fb.textContent = '';
+                    try { fb.style.display = ''; } catch(e) {}
+                }
+            });
+            const errEl = document.getElementById('createUserErrors'); if (errEl) { errEl.classList.add('d-none'); errEl.textContent = ''; }
+        }
+
+        function validateCreateUserForm(){
+            clearCreateUserValidation();
+            let ok = true;
+            const user = document.getElementById('createUserUserName');
+            const pwd = document.getElementById('createUserPassword');
+            const conf = document.getElementById('createUserConfirm');
+            const role = document.getElementById('createUserRole');
+            const lab = document.getElementById('createUserLab');
+
+            if (!user || !user.value.trim()) { if(user){ user.classList.add('is-invalid'); } const fb = document.getElementById('createUserUserNameFeedback'); if(fb) fb.textContent = 'UserName is required'; ok = false; }
+            if (!pwd || pwd.value.length < 8) { if(pwd){ pwd.classList.add('is-invalid'); } const fb = document.getElementById('createUserPasswordFeedback'); if(fb) fb.textContent = 'Password must be at least 8 characters'; ok = false; }
+            if (!conf || conf.value !== (pwd ? pwd.value : '')) {
+                if(conf){
+                    conf.classList.add('is-invalid');
+                    try { conf.setCustomValidity('Passwords do not match'); } catch(e){}
+                }
+                const fb = document.getElementById('createUserConfirmFeedback');
+                if(fb) {
+                    fb.textContent = 'Passwords do not match';
+                    try { fb.style.display = 'block'; } catch(e) {}
+                }
+                ok = false;
+            } else {
+                try { conf.setCustomValidity(''); } catch(e){}
+            }
+            if (role && (!role.value || role.value === '')) { role.classList.add('is-invalid'); const fb = document.getElementById('createUserRoleFeedback'); if(fb) fb.textContent = 'Role is required'; ok = false; }
+            if (lab && (!lab.value || lab.value === '')) { lab.classList.add('is-invalid'); const fb = document.getElementById('createUserLabFeedback'); if(fb) fb.textContent = 'Lab is required'; ok = false; }
+
+            // Trigger native validation bubble when something is invalid
+            if (!ok) {
+                try { frmCreateUser.reportValidity(); } catch (e) {}
+            }
+            return ok;
+        }
+
+        // Password strength scoring and live feedback
+        function scorePassword(p) {
+            let score = 0;
+            if (!p) return 0;
+            if (p.length >= 8) score += 30;
+            if (/[a-z]/.test(p)) score += 15;
+            if (/[A-Z]/.test(p)) score += 20;
+            if (/[0-9]/.test(p)) score += 20;
+            if (/[^A-Za-z0-9]/.test(p)) score += 15;
+            return Math.min(100, score);
+        }
+
+        function updatePasswordStrength() {
+            const pwd = document.getElementById('createUserPassword');
+            const bar = document.getElementById('createUserPwdStrength');
+            const txt = document.getElementById('createUserPwdStrengthText');
+            if (!pwd || !bar) return;
+            const s = scorePassword(pwd.value);
+            bar.style.width = s + '%';
+            bar.className = 'progress-bar';
+            if (s < 40) bar.classList.add('bg-danger');
+            else if (s < 70) bar.classList.add('bg-warning');
+            else bar.classList.add('bg-success');
+            if (txt) txt.textContent = s < 40 ? 'Weak' : (s < 70 ? 'Medium' : 'Strong');
+        }
+
+        // live confirm match
+        function updateConfirmMatch(){
+            const pwd = document.getElementById('createUserPassword');
+            const conf = document.getElementById('createUserConfirm');
+            const fb = document.getElementById('createUserConfirmFeedback');
+            if (!pwd || !conf) return;
+            if (conf.value && pwd.value !== conf.value) {
+                conf.classList.add('is-invalid');
+                if (fb) { fb.textContent = 'Passwords do not match'; fb.style.display = 'block'; }
+                // set native validation message for non-AJAX submit
+                try { conf.setCustomValidity('Passwords do not match'); } catch(e){}
+            } else {
+                conf.classList.remove('is-invalid');
+                if (fb) { fb.textContent = ''; fb.style.display = 'none'; }
+                try { conf.setCustomValidity(''); } catch(e){}
+            }
+        }
+
+        // live email validation
+        function validateEmailLive(){
+            const email = document.getElementById('createUserEmail');
+            const fb = document.getElementById('createUserEmailFeedback');
+            if (!email) return true;
+            if (!email.value) { email.classList.remove('is-invalid'); if (fb) fb.textContent = ''; return true; }
+            // build regex pattern without at-sign literal so Razor will not parse it
+            const at = String.fromCharCode(64);
+            const pattern = '^[^' + at + '\\s]+' + at + '[^' + at + '\\s]+\\.[^' + at + '\\s]+$';
+            const re = new RegExp(pattern);
+            if (!re.test(email.value)) { email.classList.add('is-invalid'); if (fb) fb.textContent = 'Enter a valid email address'; return false; }
+            email.classList.remove('is-invalid'); if (fb) fb.textContent = ''; return true;
+        }
+
+        // set native email validity using setCustomValidity for non-AJAX fallback
+        function updateEmailValidity(){
+            const email = document.getElementById('createUserEmail');
+            const fb = document.getElementById('createUserEmailFeedback');
+            if (!email) return;
+            if (!validateEmailLive()) {
+                try { email.setCustomValidity('Enter a valid email address'); } catch(e){}
+            } else {
+                try { email.setCustomValidity(''); } catch(e){}
+            }
+        }
+
+        // Attach live listeners if modal fields exist
+        const pwdEl = document.getElementById('createUserPassword');
+        if (pwdEl) {
+            pwdEl.addEventListener('input', function(){ updatePasswordStrength(); updateConfirmMatch(); validateEmailLive(); updateEmailValidity(); });
+            pwdEl.addEventListener('blur', function(){ updateConfirmMatch(); try{ if(document.getElementById('createUserConfirm')?.classList.contains('is-invalid')) document.getElementById('createUserConfirm').reportValidity(); }catch(e){} });
+        }
+        const confEl = document.getElementById('createUserConfirm');
+        if (confEl) {
+            confEl.addEventListener('input', function(){ updateConfirmMatch(); updateEmailValidity(); });
+            confEl.addEventListener('blur', function(){ updateConfirmMatch(); try{ if(confEl.classList.contains('is-invalid')) confEl.reportValidity(); }catch(e){} });
+        }
+        const emailEl = document.getElementById('createUserEmail');
+        if (emailEl) emailEl.addEventListener('input', function(){ validateEmailLive(); updateEmailValidity(); });
+
+        // Delegate input events in case elements are added dynamically
+        document.addEventListener('input', function(e){
+            try {
+                const id = e.target && e.target.id;
+                if (id === 'createUserPassword') { updatePasswordStrength(); updateConfirmMatch(); }
+                if (id === 'createUserConfirm') { updateConfirmMatch(); }
+                if (id === 'createUserEmail') { validateEmailLive(); updateEmailValidity(); }
+            } catch (ex) { /* ignore */ }
+        });
+
+        // When modal shown, refresh validation UI
+        const modalEl = document.getElementById('createUserModal');
+        if (modalEl) {
+            modalEl.addEventListener('shown.bs.modal', function(){
+                try { updatePasswordStrength(); updateConfirmMatch(); validateEmailLive(); updateEmailValidity(); } catch(e){}
+            });
+        }
+
+        frmCreateUser.addEventListener('submit', function(e){
+            e.preventDefault();
+            clearCreateUserValidation();
+            if (!validateCreateUserForm()) return;
+            const fd = jsonFormData(frmCreateUser);
+            fetch('/Admin/CreateUserAjax', { method: 'POST', body: fd, credentials: 'same-origin' })
+            .then(async r=>{
+                if (!r.ok) { const d = await r.json().catch(()=>null); const msg = d && d.errors ? d.errors.join('; ') : 'Create user failed';
+                    const errEl = document.getElementById('createUserErrors'); if (errEl) { errEl.classList.remove('d-none'); errEl.textContent = msg; }
+                    else alert(msg);
+                    return; }
+                await refreshUsers();
+                frmCreateUser.reset();
+                const modalEl = document.getElementById('createUserModal');
+                if (modalEl) { const m = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl); m.hide(); }
+            }).catch(err=>{ console.error(err); alert(err.message||'Error'); });
+        });
+    }
+
+    const frmCreateRole = document.getElementById('frmCreateRole') || document.getElementById('frmCreateRolePage');
+    if (frmCreateRole){
+        frmCreateRole.addEventListener('submit', function(e){
+            e.preventDefault();
+            const fd = jsonFormData(frmCreateRole);
+            fetch('/Admin/CreateRoleAjax', { method: 'POST', body: fd, credentials: 'same-origin' })
+            .then(async r=>{ if (!r.ok){ const d = await r.json().catch(()=>null); alert(d && d.errors? d.errors.join('; '): 'Create role failed'); return;} await refreshRoles(); frmCreateRole.reset(); }).catch(err=>{ console.error(err); alert(err.message||'Error'); });
+        });
+    }
+
+    // Assign role forms
+    const frmAssignRole = document.getElementById('frmAssignRole') || document.getElementById('frmAssignRolePage');
+    if (frmAssignRole){
+        frmAssignRole.addEventListener('submit', function(e){ e.preventDefault(); const fd = jsonFormData(frmAssignRole); fetch('/Admin/AssignRoleAjax',{method:'POST',body:fd,credentials:'same-origin'}).then(r=>{ if (!r.ok) { alert('Assign failed'); return;} const uid = (document.getElementById('mapUserSelect')||document.getElementById('mapUserSelectPage')).value; if (uid) loadMappingsForUser(uid); }).catch(err=>{console.error(err); alert('Network error');}); });
+    }
+
+    // Assign lab forms
+    const frmAssignLab = document.getElementById('frmAssignLab') || document.getElementById('frmAssignLabPage');
+    if (frmAssignLab){
+        frmAssignLab.addEventListener('submit', function(e){ e.preventDefault(); const fd = jsonFormData(frmAssignLab); fetch('/Admin/AssignUserLabAjax',{method:'POST',body:fd,credentials:'same-origin'}).then(r=>{ if (!r.ok){ alert('Assign lab failed'); return;} const uid = (document.getElementById('mapUserSelect2')||document.getElementById('mapUserSelectPage2')).value; if (uid) loadMappingsForUser(uid); }).catch(err=>{console.error(err); alert('Network error');}); });
+    }
+
+    // Remove delegated
+    document.addEventListener('click', function(e){ const tr = e.target.closest('[data-remove-role]'); if (tr){ const id = tr.getAttribute('data-remove-role'); fetch('/Admin/RemoveUserRole',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'userRoleId='+encodeURIComponent(id),credentials:'same-origin'}).then(r=>{ if(r.ok){ const uid = (document.getElementById('mapUserSelect')||document.getElementById('mapUserSelectPage')).value; if(uid) loadMappingsForUser(uid);} else alert('Remove failed');}); } });
+    document.addEventListener('click', function(e){ const tr = e.target.closest('[data-remove-ul]'); if (tr){ const id = tr.getAttribute('data-remove-ul'); fetch('/Admin/RemoveUserLab',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'ulid='+encodeURIComponent(id),credentials:'same-origin'}).then(r=>{ if(r.ok){ const uid = (document.getElementById('mapUserSelect2')||document.getElementById('mapUserSelectPage2')).value; if(uid) loadMappingsForUser(uid);} else alert('Remove failed');}); } });
+
+    // Refresh helpers
+    window.refreshUsers = async function(){ try{ const r = await fetch('/Admin/GetUsersJson', {credentials:'same-origin'}); const data = await r.json(); const tbody = document.getElementById('tblUsersBody'); if(tbody){ tbody.innerHTML=''; data.forEach(u=>{ const tr = document.createElement('tr'); tr.setAttribute('data-userid', u.labUserID); const labs = (u.labs||[]).map(x=>x.labName||x.labId).join(', '); tr.innerHTML = `<td>${u.userName}</td><td>${(u.firstName||'')+' '+(u.lastName||'')}</td><td>${u.email||''}</td><td>${u.mobile||''}</td><td>${labs}</td><td>${u.isActive? 'Yes':'No'}</td><td><a class="btn btn-sm btn-outline-primary" href="/Admin/Edit/${u.labUserID}">Edit</a></td>`; tbody.appendChild(tr); }); populateUserSelects(data);}catch(e){console.error(e);} };
+    window.refreshRoles = async function(){ try{ const r = await fetch('/Admin/GetRolesJson', {credentials:'same-origin'}); const data = await r.json(); document.querySelectorAll('#mapRoleSelect, #mapRoleSelectPage').forEach(sel=>{ if(!sel) return; sel.innerHTML = '<option value="">-- select role --</option>'; data.forEach(r=>{ const id = r.roleID||r.RoleID||r.roleId||r.RoleId; const name = r.roleName||r.RoleName||r.name||r.role; const opt = document.createElement('option'); opt.value = id; opt.textContent = name; sel.appendChild(opt); }); }); // labs
+        const lr = await fetch('/Admin/GetLabsJson', {credentials:'same-origin'}); const labs = await lr.json(); const labSel = document.getElementById('mapLabSelect')||document.getElementById('mapLabSelectPage'); if(labSel){ labSel.innerHTML = '<option value="">-- select lab --</option>'; labs.forEach(l=>{ const id = l.labId||l.LabId||l.labID||l.LabID; const name = l.labName||l.LabName||l.name; const o = document.createElement('option'); o.value = id; o.textContent = name; labSel.appendChild(o); }); }
+    }catch(e){console.error(e);} };
+
+    function populateUserSelects(data){ ['mapUserSelect','mapUserSelect2','mapUserSelectPage','mapUserSelectPage2','mapUserSelect'].forEach(id=>{ const sel = document.getElementById(id); if(!sel) return; sel.innerHTML = '<option value="">-- select user --</option>'; data.forEach(u=>{ const opt = document.createElement('option'); opt.value = u.labUserID; opt.textContent = u.userName; sel.appendChild(opt); }); }); }
+
+    window.loadMappingsForUser = async function(userId){ try{ const r = await fetch('/Admin/GetUserRolesJson?userId='+encodeURIComponent(userId), {credentials:'same-origin'}); const roles = await r.json(); const tbody = document.querySelector('#tblUserRoles tbody')||document.querySelector('#tblUserRolesPage tbody'); if(tbody){ tbody.innerHTML=''; roles.forEach(ur=>{ const tr = document.createElement('tr'); tr.innerHTML = `<td>${ur.roleName||ur.roleID||ur.roleId}</td><td><button class="btn btn-sm btn-outline-danger" data-remove-role="${ur.userRoleId}">Remove</button></td>`; tbody.appendChild(tr); }); }
+        const r2 = await fetch('/Admin/GetUserLabsJson?userId='+encodeURIComponent(userId), {credentials:'same-origin'}); const labs = await r2.json(); const tbody2 = document.querySelector('#tblUserLabs tbody')||document.querySelector('#tblUserLabsPage tbody'); if(tbody2){ tbody2.innerHTML=''; labs.forEach(ul=>{ const tr = document.createElement('tr'); tr.innerHTML = `<td>${ul.labName||ul.labId}</td><td><button class="btn btn-sm btn-outline-danger" data-remove-ul="${ul.ulid}">Remove</button></td>`; tbody2.appendChild(tr); }); }
+    }catch(e){console.error(e);} };
+
+    // wire change events
+    ['mapUserSelect','mapUserSelect2','mapUserSelectPage','mapUserSelectPage2'].forEach(id=>{ const s = document.getElementById(id); if(s) s.addEventListener('change', function(){ if(this.value) loadMappingsForUser(this.value); }); });
+
+    // initial load intentionally omitted (avoid AJAX-driven overwrites of server-rendered UI)
+})();
+</script>
+
+<script>
+// jQuery-only validation for Create User (modal + page forms)
+$(function(){
+    function isValidEmail(value){
+        if (!value) return true;
+        var at = String.fromCharCode(64);
+        var pattern = new RegExp('^[^' + at + '\\s]+' + at + '[^' + at + '\\s]+\\.[^' + at + '\\s]+$');
+        return pattern.test(value);
+    }
+
+    function ensureFeedback($afterEl, selectorClass){
+        var $fb = $afterEl.parent().find(selectorClass);
+        if ($fb.length) return $fb;
+        $fb = $('<div/>', { 'class': 'text-danger small mt-1 ' + selectorClass.replace('.', ''), 'style': 'display:none' });
+        $afterEl.after($fb);
+        return $fb;
+    }
+
+    function setFieldError($field, $fb, message){
+        $field.addClass('is-invalid');
+        if ($fb && $fb.length) $fb.text(message).show();
+        try { if ($field[0]) $field[0].setCustomValidity(message); } catch(e){}
+    }
+
+    function clearFieldError($field, $fb){
+        $field.removeClass('is-invalid');
+        if ($fb && $fb.length) $fb.text('').hide();
+        try { if ($field[0]) $field[0].setCustomValidity(''); } catch(e){}
+    }
+
+    function wireCreateUserForm($form){
+        if (!$form || !$form.length) return;
+        if ($form.data('createUserWired')) return;
+        $form.data('createUserWired', true);
+
+        var $user = $form.find('#createUserUserName, [name="NewUser.UserName"]');
+        var $pwd = $form.find('#createUserPassword, [name="NewUserPassword"]');
+        var $conf = $form.find('#createUserConfirm, [name="NewUserConfirmPassword"]');
+        var $email = $form.find('#createUserEmail, [name="NewUser.Email"]');
+        var $role = $form.find('#createUserRole, [name="NewUserRoleId"]');
+        var $lab  = $form.find('#createUserLab, [name="NewUserLabId"]');
+
+        var $confFb = $form.find('#createUserConfirmFeedback');
+        if (!$confFb.length && $conf.length) $confFb = ensureFeedback($conf, '.create-confirm-feedback');
+        var $emailFb = $form.find('#createUserEmailFeedback');
+        if (!$emailFb.length && $email.length) $emailFb = ensureFeedback($email.closest('.input-group').length ? $email.closest('.input-group') : $email, '.create-email-feedback');
+
+        function validateConfirm(){
+            if (!$pwd.length || !$conf.length) return true;
+            var pv = ($pwd.val() || '').toString();
+            var cv = ($conf.val() || '').toString();
+            if (!cv) { clearFieldError($conf, $confFb); return true; }
+            if (pv !== cv) { setFieldError($conf, $confFb, 'Passwords do not match'); return false; }
+            clearFieldError($conf, $confFb);
+            return true;
+        }
+
+        function validateEmail(){
+            if (!$email.length) return true;
+            var ev = ($email.val() || '').toString();
+            if (!ev) { clearFieldError($email, $emailFb); return true; }
+            if (!isValidEmail(ev)) { setFieldError($email, $emailFb, 'Enter a valid email address'); return false; }
+            clearFieldError($email, $emailFb);
+            return true;
+        }
+
+        $pwd.on('input', validateConfirm);
+        $conf.on('input blur', function(){ validateConfirm(); if ($conf.hasClass('is-invalid')) try { $conf[0].reportValidity(); } catch(e){} });
+        $email.on('input blur', validateEmail);
+
+        $form.on('submit', function(e){
+            var ok = true;
+            if ($user.length && !($.trim($user.val()||''))) ok = false;
+            if ($pwd.length && (($pwd.val()||'').toString().length < 8)) ok = false;
+            if (!validateConfirm()) ok = false;
+            if (!validateEmail()) ok = false;
+            if ($role.length && !$role.val()) ok = false;
+            if ($lab.length && !$lab.val()) ok = false;
+            if (!ok) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+            }
+        });
+    }
+
+    $('form').each(function(){
+        var $f = $(this);
+        if ($f.find('[name="NewUserPassword"]').length && $f.find('[name="NewUserConfirmPassword"]').length) wireCreateUserForm($f);
+    });
+
+    $(document).on('shown.bs.modal', '#createUserModal', function(){
+        var $f = $(this).find('form').first();
+        wireCreateUserForm($f);
+        // validate immediately if values are already there (browser autofill)
+        $f.find('#createUserConfirm, [name="NewUserConfirmPassword"]').trigger('blur');
+    });
+});
+</script>

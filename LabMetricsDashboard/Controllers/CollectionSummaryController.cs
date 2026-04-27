@@ -121,8 +121,10 @@ public class CollectionSummaryController : Controller
             DateOnly? cdFromN = cdFrom == default ? null : cdFrom;
             DateOnly? cdToN   = cdTo   == default ? null : cdTo;
 
+            var monthlyRule = config.CollectionSummary?.Rule;
+
             var monthlyVolumeTask = _repo.GetCollectionMonthlyVolumeAsync(
-                connStr, useLineEncounters, payerFilter, panelFilter,
+                connStr, monthlyRule, useLineEncounters, payerFilter, panelFilter,
                 fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
 
             var weeklyVolumeTask = _repo.GetCollectionWeeklyVolumeAsync(
@@ -186,6 +188,7 @@ public class CollectionSummaryController : Controller
             {
                 AvailableLabs = availableLabs,
                 SelectedLab = selectedLab,
+                CollectionSummaryRule = monthlyRule,
                 FilterPayerNames = filterPayerNames,
                 FilterPanelNames = filterPanelNames,
                 FilterFirstBillFrom = filterFirstBillFrom,
@@ -344,6 +347,8 @@ public class CollectionSummaryController : Controller
         var useLineEncounters = !string.IsNullOrWhiteSpace(config.CollectionOutput)
             && string.Equals(config.CollectionOutput, "table1", StringComparison.OrdinalIgnoreCase);
 
+        var monthlyRule = config.CollectionSummary?.Rule;
+
         DateOnly.TryParse(filterFirstBillFrom, out var fbFrom);
         DateOnly.TryParse(filterFirstBillTo, out var fbTo);
         DateOnly.TryParse(filterDosFrom, out var dosFrom);
@@ -365,7 +370,7 @@ public class CollectionSummaryController : Controller
         {
             // Fetch all report data in parallel
             var monthlyVolumeTask = _repo.GetCollectionMonthlyVolumeAsync(
-                connStr, useLineEncounters, payerFilter, panelFilter,
+                connStr, monthlyRule, useLineEncounters, payerFilter, panelFilter,
                 fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
             var weeklyVolumeTask = _repo.GetCollectionWeeklyVolumeAsync(
                 connStr, useLineEncounters, payerFilter, panelFilter,
@@ -412,6 +417,7 @@ public class CollectionSummaryController : Controller
             var vm = new CollectionSummaryViewModel
             {
                 SelectedLab = selectedLab,
+                CollectionSummaryRule = monthlyRule,
                 MonthlyClaimVolume = BuildCollectionMonthlyPivot(await monthlyVolumeTask),
                 WeeklyClaimVolume = BuildCollectionWeeklyPivot(await weeklyVolumeTask),
                 UsesLineEncounters = useLineEncounters,

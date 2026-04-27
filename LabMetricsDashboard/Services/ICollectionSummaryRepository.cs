@@ -27,6 +27,7 @@ public interface ICollectionSummaryRepository
     /// </summary>
     Task<CollectionMonthlyVolumeResult> GetCollectionMonthlyVolumeAsync(
         string connectionString,
+        string? rule = null,
         bool useLineEncounters = false,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,

@@ -9,6 +9,22 @@ public sealed class LabConfigOptions
 
     public string LabConfigFolder { get; init; } = string.Empty;
     public List<string> Labs { get; init; } = [];
+    public List<LabIdInfo> LabsID { get; init; } = [];
+
+    public string? GetLabNameById(int id) =>
+        LabsID.FirstOrDefault(l => l.Id == id)?.Name;
+
+    public int? GetLabIdByName(string name) =>
+        LabsID.FirstOrDefault(l => string.Equals(l.Name, name, StringComparison.OrdinalIgnoreCase))?.Id;
+}
+
+/// <summary>
+/// Lab Id ? Name mapping, sourced from <c>LabConfig:LabsID</c> in appsettings.json.
+/// </summary>
+public sealed class LabIdInfo
+{
+    public int Id { get; init; }
+    public string Name { get; init; } = string.Empty;
 }
 
 /// <summary>
@@ -17,5 +33,7 @@ public sealed class LabConfigOptions
 /// </summary>
 public sealed class LabSettings
 {
-    public Dictionary<string, LabCsvConfig> Labs { get; init; } = [];
+    // NOTE: This is updated at runtime when lab JSON files change (reloadOnChange).
+    // Replace the dictionary reference atomically to avoid thread-safety issues.
+    public Dictionary<string, LabCsvConfig> Labs { get; set; } = [];
 }

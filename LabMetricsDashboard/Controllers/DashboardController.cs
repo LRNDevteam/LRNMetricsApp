@@ -1962,8 +1962,12 @@ public class DashboardController : Controller
         string? lab,
         List<string>? filterPayerNames,
         List<string>? filterPanelNames,
+        string? filterDosFrom,
+        string? filterDosTo,
         string? filterFirstBillFrom,
         string? filterFirstBillTo,
+        string? filterFirstBilledFrom,
+        string? filterFirstBilledTo,
         CancellationToken ct = default)
     {
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
@@ -2018,6 +2022,10 @@ public class DashboardController : Controller
 
         DateOnly.TryParse(filterFirstBillFrom, out var fbFrom);
         DateOnly.TryParse(filterFirstBillTo, out var fbTo);
+        DateOnly.TryParse(filterDosFrom, out var dosFrom);
+        DateOnly.TryParse(filterDosTo, out var dosTo);
+        DateOnly.TryParse(filterFirstBilledFrom, out var fbldFrom);
+        DateOnly.TryParse(filterFirstBilledTo, out var fbldTo);
 
         // Resolve the per-lab Production Summary rule (e.g. "Rule1" => use ChargeEnteredDate columns).
         var productionRule = config.ProductionSummary?.Rule;
@@ -2034,8 +2042,12 @@ public class DashboardController : Controller
                 connStr,
                 filterPayerNames.Count > 0 ? filterPayerNames : null,
                 filterPanelNames.Count > 0 ? filterPanelNames : null,
+                dosFrom != default ? dosFrom : null,
+                dosTo != default ? dosTo : null,
                 fbFrom != default ? fbFrom : null,
                 fbTo != default ? fbTo : null,
+                fbldFrom != default ? fbldFrom : null,
+                fbldTo != default ? fbldTo : null,
                 productionRule,
                 ct);
 
@@ -2043,8 +2055,12 @@ public class DashboardController : Controller
                 connStr,
                 filterPayerNames.Count > 0 ? filterPayerNames : null,
                 filterPanelNames.Count > 0 ? filterPanelNames : null,
+                dosFrom != default ? dosFrom : null,
+                dosTo != default ? dosTo : null,
                 fbFrom != default ? fbFrom : null,
                 fbTo != default ? fbTo : null,
+                fbldFrom != default ? fbldFrom : null,
+                fbldTo != default ? fbldTo : null,
                 weekRule,
                 weekRange,
                 ct);
@@ -2058,23 +2074,48 @@ public class DashboardController : Controller
                 connStr,
                 filterPayerNames.Count > 0 ? filterPayerNames : null,
                 filterPanelNames.Count > 0 ? filterPanelNames : null,
+                dosFrom != default ? dosFrom : null,
+                dosTo != default ? dosTo : null,
+                fbFrom != default ? fbFrom : null,
+                fbTo != default ? fbTo : null,
+                fbldFrom != default ? fbldFrom : null,
+                fbldTo != default ? fbldTo : null,
+                productionRule,
                 ct);
 
             var payerPanelTask = _productionReportRepo.GetPayerPanelAsync(
                 connStr,
                 filterPayerNames.Count > 0 ? filterPayerNames : null,
                 filterPanelNames.Count > 0 ? filterPanelNames : null,
+                dosFrom != default ? dosFrom : null,
+                dosTo != default ? dosTo : null,
+                fbFrom != default ? fbFrom : null,
+                fbTo != default ? fbTo : null,
+                fbldFrom != default ? fbldFrom : null,
+                fbldTo != default ? fbldTo : null,
+                productionRule,
                 ct);
 
             var unbilledAgingTask = _productionReportRepo.GetUnbilledAgingAsync(
                 connStr,
                 filterPanelNames.Count > 0 ? filterPanelNames : null,
+                dosFrom != default ? dosFrom : null,
+                dosTo != default ? dosTo : null,
+                fbFrom != default ? fbFrom : null,
+                fbTo != default ? fbTo : null,
+                fbldFrom != default ? fbldFrom : null,
+                fbldTo != default ? fbldTo : null,
+                productionRule,
                 ct);
 
             var cptBreakdownTask = _productionReportRepo.GetCptBreakdownAsync(
                 connStr,
+                dosFrom != default ? dosFrom : null,
+                dosTo != default ? dosTo : null,
                 fbFrom != default ? fbFrom : null,
                 fbTo != default ? fbTo : null,
+                fbldFrom != default ? fbldFrom : null,
+                fbldTo != default ? fbldTo : null,
                 ct);
 
             await Task.WhenAll(monthlyTask, weeklyTask, codingTask, payerBreakdownTask, payerPanelTask, unbilledAgingTask, cptBreakdownTask);
@@ -2098,6 +2139,10 @@ public class DashboardController : Controller
                 FilterPanelNames   = filterPanelNames,
                 FilterFirstBillFrom = filterFirstBillFrom,
                 FilterFirstBillTo  = filterFirstBillTo,
+                FilterDosFrom = filterDosFrom,
+                FilterDosTo = filterDosTo,
+                FilterFirstBilledFrom = filterFirstBilledFrom,
+                FilterFirstBilledTo = filterFirstBilledTo,
                 PayerNames         = result.PayerNames,
                 PanelNames         = result.PanelNames,
                 Months             = result.Months,
@@ -2155,8 +2200,12 @@ public class DashboardController : Controller
         string? lab,
         List<string>? filterPayerNames,
         List<string>? filterPanelNames,
+        string? filterDosFrom,
+        string? filterDosTo,
         string? filterFirstBillFrom,
         string? filterFirstBillTo,
+        string? filterFirstBilledFrom,
+        string? filterFirstBilledTo,
         CancellationToken ct = default)
     {
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
@@ -2179,6 +2228,10 @@ public class DashboardController : Controller
 
         DateOnly.TryParse(filterFirstBillFrom, out var fbFrom);
         DateOnly.TryParse(filterFirstBillTo, out var fbTo);
+        DateOnly.TryParse(filterDosFrom, out var dosFrom);
+        DateOnly.TryParse(filterDosTo, out var dosTo);
+        DateOnly.TryParse(filterFirstBilledFrom, out var fbldFrom);
+        DateOnly.TryParse(filterFirstBilledTo, out var fbldTo);
 
         // Resolve the per-lab Production Summary rule (e.g. "Rule1" => use ChargeEnteredDate columns).
         var productionRule = config.ProductionSummary?.Rule;
@@ -2195,8 +2248,12 @@ public class DashboardController : Controller
                 connStr,
                 filterPayerNames.Count > 0 ? filterPayerNames : null,
                 filterPanelNames.Count > 0 ? filterPanelNames : null,
+                dosFrom != default ? dosFrom : null,
+                dosTo != default ? dosTo : null,
                 fbFrom != default ? fbFrom : null,
                 fbTo != default ? fbTo : null,
+                fbldFrom != default ? fbldFrom : null,
+                fbldTo != default ? fbldTo : null,
                 productionRule,
                 ct);
 
@@ -2204,8 +2261,12 @@ public class DashboardController : Controller
                 connStr,
                 filterPayerNames.Count > 0 ? filterPayerNames : null,
                 filterPanelNames.Count > 0 ? filterPanelNames : null,
+                dosFrom != default ? dosFrom : null,
+                dosTo != default ? dosTo : null,
                 fbFrom != default ? fbFrom : null,
                 fbTo != default ? fbTo : null,
+                fbldFrom != default ? fbldFrom : null,
+                fbldTo != default ? fbldTo : null,
                 weekRule,
                 weekRange,
                 ct);
@@ -2219,23 +2280,48 @@ public class DashboardController : Controller
                 connStr,
                 filterPayerNames.Count > 0 ? filterPayerNames : null,
                 filterPanelNames.Count > 0 ? filterPanelNames : null,
+                dosFrom != default ? dosFrom : null,
+                dosTo != default ? dosTo : null,
+                fbFrom != default ? fbFrom : null,
+                fbTo != default ? fbTo : null,
+                fbldFrom != default ? fbldFrom : null,
+                fbldTo != default ? fbldTo : null,
+                productionRule,
                 ct);
 
             var payerPanelTask = _productionReportRepo.GetPayerPanelAsync(
                 connStr,
                 filterPayerNames.Count > 0 ? filterPayerNames : null,
                 filterPanelNames.Count > 0 ? filterPanelNames : null,
+                dosFrom != default ? dosFrom : null,
+                dosTo != default ? dosTo : null,
+                fbFrom != default ? fbFrom : null,
+                fbTo != default ? fbTo : null,
+                fbldFrom != default ? fbldFrom : null,
+                fbldTo != default ? fbldTo : null,
+                productionRule,
                 ct);
 
             var unbilledAgingTask = _productionReportRepo.GetUnbilledAgingAsync(
                 connStr,
                 filterPanelNames.Count > 0 ? filterPanelNames : null,
+                dosFrom != default ? dosFrom : null,
+                dosTo != default ? dosTo : null,
+                fbFrom != default ? fbFrom : null,
+                fbTo != default ? fbTo : null,
+                fbldFrom != default ? fbldFrom : null,
+                fbldTo != default ? fbldTo : null,
+                productionRule,
                 ct);
 
             var cptBreakdownTask = _productionReportRepo.GetCptBreakdownAsync(
                 connStr,
+                dosFrom != default ? dosFrom : null,
+                dosTo != default ? dosTo : null,
                 fbFrom != default ? fbFrom : null,
                 fbTo != default ? fbTo : null,
+                fbldFrom != default ? fbldFrom : null,
+                fbldTo != default ? fbldTo : null,
                 ct);
 
             await Task.WhenAll(monthlyTask, weeklyTask, codingTask, payerBreakdownTask, payerPanelTask, unbilledAgingTask, cptBreakdownTask);
@@ -2253,11 +2339,15 @@ public class DashboardController : Controller
             var panelFilter = filterPanelNames.Count > 0 ? filterPanelNames : null;
             var fbFromFilter = fbFrom != default ? fbFrom : (DateOnly?)null;
             var fbToFilter = fbTo != default ? fbTo : (DateOnly?)null;
+            var dosFromFilter = dosFrom != default ? dosFrom : (DateOnly?)null;
+            var dosToFilter = dosTo != default ? dosTo : (DateOnly?)null;
+            var fbldFromFilter = fbldFrom != default ? fbldFrom : (DateOnly?)null;
+            var fbldToFilter = fbldTo != default ? fbldTo : (DateOnly?)null;
 
             var claimExportTask = _productionReportRepo.GetClaimLevelDataExportAsync(
-                connStr, payerFilter, panelFilter, fbFromFilter, fbToFilter, ct);
+                connStr, payerFilter, panelFilter, dosFromFilter, dosToFilter, fbFromFilter, fbToFilter, fbldFromFilter, fbldToFilter, ct);
             var lineExportTask = _productionReportRepo.GetLineLevelDataExportAsync(
-                connStr, payerFilter, panelFilter, fbFromFilter, fbToFilter, ct);
+                connStr, payerFilter, panelFilter, dosFromFilter, dosToFilter, fbFromFilter, fbToFilter, fbldFromFilter, fbldToFilter, ct);
 
             await Task.WhenAll(claimExportTask, lineExportTask);
 
@@ -2272,6 +2362,10 @@ public class DashboardController : Controller
                 FilterPanelNames    = filterPanelNames,
                 FilterFirstBillFrom = filterFirstBillFrom,
                 FilterFirstBillTo   = filterFirstBillTo,
+                FilterDosFrom = filterDosFrom,
+                FilterDosTo = filterDosTo,
+                FilterFirstBilledFrom = filterFirstBilledFrom,
+                FilterFirstBilledTo = filterFirstBilledTo,
                 PayerNames          = result.PayerNames,
                 PanelNames          = result.PanelNames,
                 Months              = result.Months,

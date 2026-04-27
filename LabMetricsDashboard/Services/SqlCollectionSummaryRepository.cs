@@ -24,8 +24,8 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
         const string sql = """
-            SELECT DISTINCT LTRIM(RTRIM(PayerName)) FROM dbo.ClaimLevelData
-            WHERE PayerName IS NOT NULL AND LTRIM(RTRIM(PayerName)) <> '' ORDER BY 1;
+            SELECT DISTINCT LTRIM(RTRIM(PayerName_Raw)) FROM dbo.ClaimLevelData
+            WHERE PayerName_Raw IS NOT NULL AND LTRIM(RTRIM(PayerName_Raw)) <> '' ORDER BY 1;
             SELECT DISTINCT LTRIM(RTRIM(PanelName)) FROM dbo.ClaimLevelData
             WHERE PanelName IS NOT NULL AND LTRIM(RTRIM(PanelName)) <> '' ORDER BY 1;
             """;
@@ -50,6 +50,7 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
 
     public async Task<CollectionMonthlyVolumeResult> GetCollectionMonthlyVolumeAsync(
         string connectionString,
+        string? rule = null,
         bool useLineEncounters = false,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -59,6 +60,9 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+        var useNorthwestRule = !string.IsNullOrWhiteSpace(rule)
+            && string.Equals(rule.Trim(), "Northwestlabs Rule", StringComparison.OrdinalIgnoreCase);
 
         // ClaimLevelData always uses CheckDate for Year/Month grouping.
         // When useLineEncounters=true, encounter counts are fetched separately
@@ -77,7 +81,7 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
         };
         var parameters = new List<SqlParameter>();
 
-        AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PayerName))", "@mvpn", filterPayerNames);
+        AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PayerName_Raw))", "@mvpn", filterPayerNames);
         AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PanelName))", "@mvpl", filterPanelNames);
         AddAllDateFilters(whereClauses, parameters, "mv", filterFirstBillFrom, filterFirstBillTo, filterDosFrom, filterDosTo, filterCheckDateFrom, filterCheckDateTo);
 
@@ -85,10 +89,25 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
 
         const string countExpr = "COUNT(DISTINCT ClaimID)";
 
+        var payerGroupExpr = useNorthwestRule
+            ? "LTRIM(RTRIM(PayerName_Raw))"
+            : "LTRIM(RTRIM(PayerName))";
+
+        if (useNorthwestRule)
+        {
+            // Northwestlabs Monthly Claim Volume:
+            // - Filter out rows where PostedDate is blank/invalid
+            // - Use PayerName_Raw for payer drill-down
+            whereClauses.Add("PayerName_Raw IS NOT NULL");
+            whereClauses.Add("LTRIM(RTRIM(PayerName_Raw)) <> ''");
+            whereClauses.Add("TRY_CAST(PostedDate AS DATE) IS NOT NULL");
+            whereClauses.Add("YEAR(TRY_CAST(PostedDate AS DATE)) > 1900");
+        }
+
         var pivotSql = $"""
             SELECT
                 LTRIM(RTRIM(PanelName))                                 AS PanelName,
-                LTRIM(RTRIM(PayerName))                                 AS PayerName,
+                {payerGroupExpr}                                        AS PayerName,
                 YEAR(TRY_CAST({dateColumn} AS DATE))                    AS BillYear,
                 MONTH(TRY_CAST({dateColumn} AS DATE))                   AS BillMonth,
                 {countExpr}                                             AS LineItemCount,
@@ -97,7 +116,7 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
             WHERE {whereStr}
             GROUP BY
                 LTRIM(RTRIM(PanelName)),
-                LTRIM(RTRIM(PayerName)),
+                {payerGroupExpr},
                 YEAR(TRY_CAST({dateColumn} AS DATE)),
                 MONTH(TRY_CAST({dateColumn} AS DATE))
             ORDER BY PanelName, PayerName, BillYear, BillMonth
@@ -159,7 +178,7 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
         };
         var llParams = new List<SqlParameter>();
 
-        AddInClause(llWhere, llParams, "LTRIM(RTRIM(PayerName))", "@llpn", filterPayerNames);
+        AddInClause(llWhere, llParams, "LTRIM(RTRIM(PayerName_Raw))", "@llpn", filterPayerNames);
         AddInClause(llWhere, llParams, "LTRIM(RTRIM(PanelName))", "@llpl", filterPanelNames);
 
         var llWhereStr = string.Join(" AND ", llWhere);
@@ -414,7 +433,7 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
             $"TRY_CAST(CheckDate AS DATE) BETWEEN '{week1Start:yyyy-MM-dd}' AND '{week4End:yyyy-MM-dd}'"
         };
         var clParams = new List<SqlParameter>();
-        AddInClause(clWhere, clParams, "LTRIM(RTRIM(PayerName))", "@wvpn", filterPayerNames);
+        AddInClause(clWhere, clParams, "LTRIM(RTRIM(PayerName_Raw))", "@wvpn", filterPayerNames);
         AddInClause(clWhere, clParams, "LTRIM(RTRIM(PanelName))", "@wvpl", filterPanelNames);
         AddAllDateFilters(clWhere, clParams, "wv", filterFirstBillFrom, filterFirstBillTo, filterDosFrom, filterDosTo, filterCheckDateFrom, filterCheckDateTo);
         var clWhereStr = string.Join(" AND ", clWhere);
@@ -633,12 +652,12 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
         {
             "ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0",
             "LTRIM(RTRIM(ClaimStatus)) IN ('Fully Paid','Partially Paid','Patient Responsibility')",
-            "PayerName IS NOT NULL",
-            "LTRIM(RTRIM(PayerName)) <> ''"
+            "PayerName_Raw IS NOT NULL",
+            "LTRIM(RTRIM(PayerName_Raw)) <> ''"
         };
         var parameters = new List<SqlParameter>();
 
-        AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PayerName))", "@fpn", filterPayerNames);
+        AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PayerName_Raw))", "@fpn", filterPayerNames);
         AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PanelName))", "@fpl", filterPanelNames);
         AddAllDateFilters(whereClauses, parameters, "f", filterFirstBillFrom, filterFirstBillTo, filterDosFrom, filterDosTo, filterCheckDateFrom, filterCheckDateTo);
 
@@ -646,13 +665,13 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
 
         var dataSql = $"""
             SELECT TOP 5
-                LTRIM(RTRIM(PayerName))                                                AS PayerName,
+                LTRIM(RTRIM(PayerName_Raw))                                           AS PayerName,
                 ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)            AS SumInsPayment,
                 ISNULL(SUM(TRY_CAST(ChargeAmount     AS DECIMAL(18,2))), 0)            AS SumCharges,
                 COUNT(DISTINCT AccessionNumber)                                         AS UniqueVisits
             FROM dbo.ClaimLevelData
             WHERE {whereStr}
-            GROUP BY LTRIM(RTRIM(PayerName))
+            GROUP BY LTRIM(RTRIM(PayerName_Raw))
             ORDER BY COUNT(DISTINCT AccessionNumber) DESC
             """;
 
@@ -702,12 +721,12 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
         {
             "ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0",
             "LTRIM(RTRIM(ClaimStatus)) IN ('Fully Paid','Partially Paid','Patient Responsibility')",
-            "PayerName IS NOT NULL",
-            "LTRIM(RTRIM(PayerName)) <> ''"
+            "PayerName_Raw IS NOT NULL",
+            "LTRIM(RTRIM(PayerName_Raw)) <> ''"
         };
         var parameters = new List<SqlParameter>();
 
-        AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PayerName))", "@tpn", filterPayerNames);
+        AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PayerName_Raw))", "@tpn", filterPayerNames);
         AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PanelName))", "@tpl", filterPanelNames);
         AddAllDateFilters(whereClauses, parameters, "t", filterFirstBillFrom, filterFirstBillTo, filterDosFrom, filterDosTo, filterCheckDateFrom, filterCheckDateTo);
 
@@ -717,12 +736,12 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
         // SUM(InsurancePayment) per PayerName, ranked by COUNT(DISTINCT AccessionNumber) desc.
         var dataSql = $"""
             SELECT TOP 5
-                LTRIM(RTRIM(PayerName))                                                AS PayerName,
+                LTRIM(RTRIM(PayerName_Raw))                                           AS PayerName,
                 ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)            AS TotalPayments,
                 COUNT(DISTINCT AccessionNumber)                                         AS UniqueVisits
             FROM dbo.ClaimLevelData
             WHERE {whereStr}
-            GROUP BY LTRIM(RTRIM(PayerName))
+            GROUP BY LTRIM(RTRIM(PayerName_Raw))
             ORDER BY COUNT(DISTINCT AccessionNumber) DESC
             """;
 
@@ -770,12 +789,12 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
         var whereClauses = new List<string>
         {
             "LTRIM(RTRIM(ClaimStatus)) = 'No Response'",
-            "PayerName IS NOT NULL",
-            "LTRIM(RTRIM(PayerName)) <> ''"
+            "PayerName_Raw IS NOT NULL",
+            "LTRIM(RTRIM(PayerName_Raw)) <> ''"
         };
         var parameters = new List<SqlParameter>();
 
-        AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PayerName))", "@apn", filterPayerNames);
+        AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PayerName_Raw))", "@apn", filterPayerNames);
         AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PanelName))", "@apl", filterPanelNames);
         AddAllDateFilters(whereClauses, parameters, "a", filterFirstBillFrom, filterFirstBillTo, filterDosFrom, filterDosTo, filterCheckDateFrom, filterCheckDateTo);
 
@@ -783,7 +802,7 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
 
         // Aging buckets are derived from DaysToDOS (NVARCHAR ? INT).
         // Current = days < 30, 30+ = 30..59, 60+ = 60..89, 90+ = 90..119, 120+ = >= 120.
-        var dataSql = $"""
+            var dataSql = $"""
             ;WITH src AS (
                 SELECT
                     LTRIM(RTRIM(PayerName))                              AS PayerName,
@@ -868,7 +887,7 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
         };
         var parameters = new List<SqlParameter>();
 
-        AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PayerName))", "@ppn", filterPayerNames);
+        AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PayerName_Raw))", "@ppn", filterPayerNames);
         AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PanelName))", "@ppl", filterPanelNames);
         AddAllDateFilters(whereClauses, parameters, "pp", filterFirstBillFrom, filterFirstBillTo, filterDosFrom, filterDosTo, filterCheckDateFrom, filterCheckDateTo);
 
@@ -934,7 +953,7 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
         };
         var parameters = new List<SqlParameter>();
 
-        AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PayerName))", "@rpn", filterPayerNames);
+        AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PayerName_Raw))", "@rpn", filterPayerNames);
         AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PanelName))", "@rpl", filterPanelNames);
         AddAllDateFilters(whereClauses, parameters, "r", filterFirstBillFrom, filterFirstBillTo, filterDosFrom, filterDosTo, filterCheckDateFrom, filterCheckDateTo);
 
@@ -1008,7 +1027,7 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
         };
         var parameters = new List<SqlParameter>();
 
-        AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PayerName))", "@ipn", filterPayerNames);
+        AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PayerName_Raw))", "@ipn", filterPayerNames);
         AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PanelName))", "@ipl", filterPanelNames);
         AddAllDateFilters(whereClauses, parameters, "i", filterFirstBillFrom, filterFirstBillTo, filterDosFrom, filterDosTo, filterCheckDateFrom, filterCheckDateTo);
 
@@ -1083,7 +1102,7 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
         };
         var parameters = new List<SqlParameter>();
 
-        AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PayerName))", "@cpn", filterPayerNames);
+        AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PayerName_Raw))", "@cpn", filterPayerNames);
         AddInClause(whereClauses, parameters, "LTRIM(RTRIM(PanelName))", "@cpl", filterPanelNames);
         AddAllDateFilters(whereClauses, parameters, "c", filterFirstBillFrom, filterFirstBillTo, filterDosFrom, filterDosTo, filterCheckDateFrom, filterCheckDateTo);
 

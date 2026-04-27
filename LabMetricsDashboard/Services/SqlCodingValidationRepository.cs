@@ -16,80 +16,54 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
         => _logger = logger;
 
     /// <summary>
-    /// Returns the YTD Coding Insights rows grouped by Year / PanelName,
-    /// matching the detail breakdown table shown in the dashboard image.
+    /// Returns the YTD Coding Insights rows, grouped by Year / PanelName plus
+    /// the four CPT combination columns so each distinct combination appears
+    /// as its own row (matches the per-combination breakdown image).
     /// </summary>
     public async Task<List<CodingInsightRow>> GetYtdInsightsAsync(
         string connectionString, string labName, CancellationToken ct = default)
     {
-        // STRING_AGG(DISTINCT ...) requires SQL Server 2022+.
-        // Use STUFF/FOR XML PATH for distinct concatenation — works on SQL Server 2016+.
+        // BillableCptCombo = ExpectedCPTCode (the panel master / what should have been billed,
+        // typically clean codes like "87481*5, 87529*2, ...")
+        // BilledCptCombo   = ActualCPTCode   (what was actually billed, often with modifier
+        // markers such as "87481*5(59), 87529*2(59), ...")
+        // The four CPT columns already contain the full comma-separated combo per claim row,
+        // so we select them as-is and add them to the GROUP BY to keep distinct combinations
+        // as separate rows (no STUFF / FOR XML aggregation needed).
         const string sql = """
             SELECT
-                g.ServiceYear,
-                g.PanelName,
-                -- Distinct ActualCPTCode values concatenated with '*'
-                STUFF((
-                    SELECT DISTINCT '*' + d1.ActualCPTCode
-                    FROM dbo.CodingValidation d1
-                    WHERE YEAR(TRY_CAST(d1.DateofService AS DATE)) = g.ServiceYear
-                      AND d1.PanelName = g.PanelName
-                      AND d1.ActualCPTCode IS NOT NULL AND d1.ActualCPTCode <> ''
-                    ORDER BY '*' + d1.ActualCPTCode
-                    FOR XML PATH(''), TYPE).value('.','NVARCHAR(MAX)'), 1, 1, '') AS BillableCptCombo,
-                g.TotalClaims,
-                g.BilledChargesPerClaim,
-                -- Distinct ExpectedCPTCode values
-                STUFF((
-                    SELECT DISTINCT '*' + d2.ExpectedCPTCode
-                    FROM dbo.CodingValidation d2
-                    WHERE YEAR(TRY_CAST(d2.DateofService AS DATE)) = g.ServiceYear
-                      AND d2.PanelName = g.PanelName
-                      AND d2.ExpectedCPTCode IS NOT NULL AND d2.ExpectedCPTCode <> ''
-                    ORDER BY '*' + d2.ExpectedCPTCode
-                    FOR XML PATH(''), TYPE).value('.','NVARCHAR(MAX)'), 1, 1, '') AS BilledCptCombo,
-                -- Distinct MissingCPTCodes values
-                STUFF((
-                    SELECT DISTINCT '*' + d3.MissingCPTCodes
-                    FROM dbo.CodingValidation d3
-                    WHERE YEAR(TRY_CAST(d3.DateofService AS DATE)) = g.ServiceYear
-                      AND d3.PanelName = g.PanelName
-                      AND d3.MissingCPTCodes IS NOT NULL AND d3.MissingCPTCodes <> ''
-                    ORDER BY '*' + d3.MissingCPTCodes
-                    FOR XML PATH(''), TYPE).value('.','NVARCHAR(MAX)'), 1, 1, '') AS MissingCpts,
-                g.TotalBilledChargesForMissingCpts,
-                g.LostRevenue,
-                -- Distinct AdditionalCPTCodes values
-                STUFF((
-                    SELECT DISTINCT '*' + d4.AdditionalCPTCodes
-                    FROM dbo.CodingValidation d4
-                    WHERE YEAR(TRY_CAST(d4.DateofService AS DATE)) = g.ServiceYear
-                      AND d4.PanelName = g.PanelName
-                      AND d4.AdditionalCPTCodes IS NOT NULL AND d4.AdditionalCPTCodes <> ''
-                    ORDER BY '*' + d4.AdditionalCPTCodes
-                    FOR XML PATH(''), TYPE).value('.','NVARCHAR(MAX)'), 1, 1, '') AS AdditionalCpts,
-                g.TotalBilledChargesForAdditionalCpts,
-                g.RevenueAtRisk
-            FROM (
-                SELECT
-                    YEAR(TRY_CAST(DateofService AS DATE))                        AS ServiceYear,
-                    PanelName,
-                    COUNT(*)                                                      AS TotalClaims,
-                    AVG(TRY_CAST(TotalCharge AS DECIMAL(18,2)))                  AS BilledChargesPerClaim,
-                    SUM(TRY_CAST(MissingCPT_Charges AS DECIMAL(18,2)))           AS TotalBilledChargesForMissingCpts,
-                    SUM(TRY_CAST(MissingCPT_AvgPaidAmount AS DECIMAL(18,2)))     AS LostRevenue,
-                    SUM(TRY_CAST(AdditionalCPT_Charges AS DECIMAL(18,2)))        AS TotalBilledChargesForAdditionalCpts,
-                    SUM(TRY_CAST(AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2)))  AS RevenueAtRisk
-                FROM dbo.CodingValidation
-                WHERE PanelName IS NOT NULL AND PanelName <> ''
-                  AND YEAR(TRY_CAST(DateofService AS DATE)) IS NOT NULL
-                GROUP BY
-                    YEAR(TRY_CAST(DateofService AS DATE)),
-                    PanelName
-            ) g
+                YEAR(TRY_CAST(DateofService AS DATE))                        AS ServiceYear,
+                PanelName,
+                ISNULL(ExpectedCPTCode,    '')                               AS BillableCptCombo,
+                ISNULL(ActualCPTCode,      '')                               AS BilledCptCombo,
+                ISNULL(MissingCPTCodes,    '')                               AS MissingCpts,
+                ISNULL(AdditionalCPTCodes, '')                               AS AdditionalCpts,
+                COUNT(*)                                                     AS TotalClaims,
+                AVG(TRY_CAST(TotalCharge              AS DECIMAL(18,2)))     AS BilledChargesPerClaim,
+                SUM(TRY_CAST(MissingCPT_Charges       AS DECIMAL(18,2)))     AS TotalBilledChargesForMissingCpts,
+                SUM(TRY_CAST(MissingCPT_AvgPaidAmount AS DECIMAL(18,2)))     AS LostRevenue,
+                SUM(TRY_CAST(AdditionalCPT_Charges    AS DECIMAL(18,2)))     AS TotalBilledChargesForAdditionalCpts,
+                SUM(TRY_CAST(AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2)))  AS RevenueAtRisk
+            FROM dbo.CodingValidation
+            WHERE PanelName IS NOT NULL AND PanelName <> ''
+              AND YEAR(TRY_CAST(DateofService AS DATE)) IS NOT NULL
+            GROUP BY
+                YEAR(TRY_CAST(DateofService AS DATE)),
+                PanelName,
+                ISNULL(ExpectedCPTCode,    ''),
+                ISNULL(ActualCPTCode,      ''),
+                ISNULL(MissingCPTCodes,    ''),
+                ISNULL(AdditionalCPTCodes, ''),
+                TRY_CAST(TotalCharge                 AS DECIMAL(18,2)),
+                TRY_CAST(MissingCPT_Charges          AS DECIMAL(18,2)),
+                TRY_CAST(MissingCPT_AvgPaidAmount    AS DECIMAL(18,2)),
+                TRY_CAST(AdditionalCPT_Charges       AS DECIMAL(18,2)),
+                TRY_CAST(AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2))
             ORDER BY
-                g.ServiceYear DESC,
-                g.PanelName;
+                ServiceYear DESC,
+                PanelName,
+                BillableCptCombo,
+                BilledCptCombo;
             """;
 
         return await QueryAsync(connectionString, sql, labName,
@@ -122,23 +96,23 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
             SELECT
                 g.ServiceYear,
                 g.PanelName,
-                -- Distinct ActualCPTCode values concatenated with '*'
+                -- BillableCptCombo = ExpectedCPTCode (panel master / what should be billed)
                 STUFF((
-                    SELECT DISTINCT '*' + d1.ActualCPTCode
+                    SELECT DISTINCT '*' + d1.ExpectedCPTCode
                     FROM dbo.CodingValidation d1
                     WHERE YEAR(TRY_CAST(d1.DateofService AS DATE)) = g.ServiceYear
                       AND d1.PanelName = g.PanelName
-                      AND d1.ActualCPTCode IS NOT NULL AND d1.ActualCPTCode <> ''
-                    ORDER BY '*' + d1.ActualCPTCode
+                      AND d1.ExpectedCPTCode IS NOT NULL AND d1.ExpectedCPTCode <> ''
+                    ORDER BY '*' + d1.ExpectedCPTCode
                     FOR XML PATH(''), TYPE).value('.','NVARCHAR(MAX)'), 1, 1, '') AS BillableCptCombo,
-                -- Distinct ExpectedCPTCode values
+                -- BilledCptCombo = ActualCPTCode (what was actually billed)
                 STUFF((
-                    SELECT DISTINCT '*' + d2.ExpectedCPTCode
+                    SELECT DISTINCT '*' + d2.ActualCPTCode
                     FROM dbo.CodingValidation d2
                     WHERE YEAR(TRY_CAST(d2.DateofService AS DATE)) = g.ServiceYear
                       AND d2.PanelName = g.PanelName
-                      AND d2.ExpectedCPTCode IS NOT NULL AND d2.ExpectedCPTCode <> ''
-                    ORDER BY '*' + d2.ExpectedCPTCode
+                      AND d2.ActualCPTCode IS NOT NULL AND d2.ActualCPTCode <> ''
+                    ORDER BY '*' + d2.ActualCPTCode
                     FOR XML PATH(''), TYPE).value('.','NVARCHAR(MAX)'), 1, 1, '') AS BilledCptCombo,
                 -- Distinct MissingCPTCodes values
                 STUFF((
@@ -218,73 +192,54 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
     // ?? helpers ???????????????????????????????????????????????????????????????
 
     /// <summary>
-    /// Returns WTD Coding Insights rows grouped by WeekFolder / PanelName,
-    /// ordered by WeekFolder descending then PanelName.
-    /// WeekFolder values come directly from the CodingValidation.WeekFolder column
+    /// Returns WTD Coding Insights rows grouped by WeekFolder / PanelName plus
+    /// the four CPT combination columns so each distinct combination appears
+    /// as its own row (matches the per-combination breakdown image).
+    /// WeekFolder values come directly from CodingValidation.WeekFolder
     /// (e.g. "03/20/2026 to 03/26/2026") as stored by CaptureDataApp.
     /// </summary>
     public async Task<List<CodingWtdInsightRow>> GetWtdInsightsAsync(
         string connectionString, string labName, CancellationToken ct = default)
     {
-        // Use STUFF/FOR XML PATH for distinct CPT concat — compatible with SQL Server 2016+.
+        // BillableCptCombo = ExpectedCPTCode (panel master / what should have been billed)
+        // BilledCptCombo   = ActualCPTCode   (what was actually billed, often with modifiers)
+        // Each distinct (Billable / Billed / Missing / Additional) combination becomes
+        // its own row. The CPT columns already contain the full comma-separated combo
+        // string per claim, so they are selected as-is.
         const string sql = """
             SELECT
-                g.WeekFolder,
-                g.PanelName,
-                STUFF((
-                    SELECT DISTINCT '*' + d1.ActualCPTCode
-                    FROM dbo.CodingValidation d1
-                    WHERE d1.WeekFolder  = g.WeekFolder
-                      AND d1.PanelName   = g.PanelName
-                      AND d1.ActualCPTCode IS NOT NULL AND d1.ActualCPTCode <> ''
-                    ORDER BY '*' + d1.ActualCPTCode
-                    FOR XML PATH(''), TYPE).value('.','NVARCHAR(MAX)'), 1, 1, '') AS BillableCptCombo,
-                g.TotalClaims,
-                g.TotalBilledCharges,
-                STUFF((
-                    SELECT DISTINCT '*' + d2.ExpectedCPTCode
-                    FROM dbo.CodingValidation d2
-                    WHERE d2.WeekFolder  = g.WeekFolder
-                      AND d2.PanelName   = g.PanelName
-                      AND d2.ExpectedCPTCode IS NOT NULL AND d2.ExpectedCPTCode <> ''
-                    ORDER BY '*' + d2.ExpectedCPTCode
-                    FOR XML PATH(''), TYPE).value('.','NVARCHAR(MAX)'), 1, 1, '') AS BilledCptCombo,
-                STUFF((
-                    SELECT DISTINCT '*' + d3.MissingCPTCodes
-                    FROM dbo.CodingValidation d3
-                    WHERE d3.WeekFolder  = g.WeekFolder
-                      AND d3.PanelName   = g.PanelName
-                      AND d3.MissingCPTCodes IS NOT NULL AND d3.MissingCPTCodes <> ''
-                    ORDER BY '*' + d3.MissingCPTCodes
-                    FOR XML PATH(''), TYPE).value('.','NVARCHAR(MAX)'), 1, 1, '') AS MissingCpts,
-                g.BilledChargesForMissingCpts,
-                g.RevenueLoss,
-                STUFF((
-                    SELECT DISTINCT '*' + d4.AdditionalCPTCodes
-                    FROM dbo.CodingValidation d4
-                    WHERE d4.WeekFolder  = g.WeekFolder
-                      AND d4.PanelName   = g.PanelName
-                      AND d4.AdditionalCPTCodes IS NOT NULL AND d4.AdditionalCPTCodes <> ''
-                    ORDER BY '*' + d4.AdditionalCPTCodes
-                    FOR XML PATH(''), TYPE).value('.','NVARCHAR(MAX)'), 1, 1, '') AS AdditionalCpts,
-                g.BilledChargesForAdditionalCpts,
-                g.PotentialRecoupment
-            FROM (
-                SELECT
-                    WeekFolder,
-                    PanelName,
-                    COUNT(*)                                                      AS TotalClaims,
-                    SUM(TRY_CAST(TotalCharge              AS DECIMAL(18,2)))      AS TotalBilledCharges,
-                    SUM(TRY_CAST(MissingCPT_Charges       AS DECIMAL(18,2)))      AS BilledChargesForMissingCpts,
-                    SUM(TRY_CAST(MissingCPT_AvgPaidAmount AS DECIMAL(18,2)))      AS RevenueLoss,
-                    SUM(TRY_CAST(AdditionalCPT_Charges    AS DECIMAL(18,2)))      AS BilledChargesForAdditionalCpts,
-                    SUM(TRY_CAST(AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2)))   AS PotentialRecoupment
-                FROM dbo.CodingValidation
-                WHERE WeekFolder IS NOT NULL AND WeekFolder <> ''
-                  AND PanelName  IS NOT NULL AND PanelName  <> ''
-                GROUP BY WeekFolder, PanelName
-            ) g
-            ORDER BY g.WeekFolder DESC, g.PanelName;
+                WeekFolder,
+                PanelName,
+                ISNULL(ExpectedCPTCode,    '')                               AS BillableCptCombo,
+                ISNULL(ActualCPTCode,      '')                               AS BilledCptCombo,
+                ISNULL(MissingCPTCodes,    '')                               AS MissingCpts,
+                ISNULL(AdditionalCPTCodes, '')                               AS AdditionalCpts,
+                COUNT(*)                                                     AS TotalClaims,
+                SUM(TRY_CAST(TotalCharge              AS DECIMAL(18,2)))     AS TotalBilledCharges,
+                SUM(TRY_CAST(MissingCPT_Charges       AS DECIMAL(18,2)))     AS BilledChargesForMissingCpts,
+                SUM(TRY_CAST(MissingCPT_AvgPaidAmount AS DECIMAL(18,2)))     AS RevenueLoss,
+                SUM(TRY_CAST(AdditionalCPT_Charges    AS DECIMAL(18,2)))     AS BilledChargesForAdditionalCpts,
+                SUM(TRY_CAST(AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2)))  AS PotentialRecoupment
+            FROM dbo.CodingValidation
+            WHERE WeekFolder IS NOT NULL AND WeekFolder <> ''
+              AND PanelName  IS NOT NULL AND PanelName  <> ''
+            GROUP BY
+                WeekFolder,
+                PanelName,
+                ISNULL(ExpectedCPTCode,    ''),
+                ISNULL(ActualCPTCode,      ''),
+                ISNULL(MissingCPTCodes,    ''),
+                ISNULL(AdditionalCPTCodes, ''),
+                TRY_CAST(TotalCharge                 AS DECIMAL(18,2)),
+                TRY_CAST(MissingCPT_Charges          AS DECIMAL(18,2)),
+                TRY_CAST(MissingCPT_AvgPaidAmount    AS DECIMAL(18,2)),
+                TRY_CAST(AdditionalCPT_Charges       AS DECIMAL(18,2)),
+                TRY_CAST(AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2))
+            ORDER BY
+                WeekFolder DESC,
+                PanelName,
+                BillableCptCombo,
+                BilledCptCombo;
             """;
 
         return await QueryAsync(connectionString, sql, labName,
@@ -316,23 +271,23 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
             SELECT
                 g.WeekFolder,
                 g.PanelName,
-                -- Distinct ActualCPTCode values concatenated with '*'
+                -- BillableCptCombo = ExpectedCPTCode (panel master / what should be billed)
                 STUFF((
-                    SELECT DISTINCT '*' + d1.ActualCPTCode
+                    SELECT DISTINCT '*' + d1.ExpectedCPTCode
                     FROM dbo.CodingValidation d1
                     WHERE d1.WeekFolder  = g.WeekFolder
                       AND d1.PanelName   = g.PanelName
-                      AND d1.ActualCPTCode IS NOT NULL AND d1.ActualCPTCode <> ''
-                    ORDER BY '*' + d1.ActualCPTCode
+                      AND d1.ExpectedCPTCode IS NOT NULL AND d1.ExpectedCPTCode <> ''
+                    ORDER BY '*' + d1.ExpectedCPTCode
                     FOR XML PATH(''), TYPE).value('.','NVARCHAR(MAX)'), 1, 1, '') AS BillableCptCombo,
-                -- Distinct ExpectedCPTCode values
+                -- BilledCptCombo = ActualCPTCode (what was actually billed)
                 STUFF((
-                    SELECT DISTINCT '*' + d2.ExpectedCPTCode
+                    SELECT DISTINCT '*' + d2.ActualCPTCode
                     FROM dbo.CodingValidation d2
                     WHERE d2.WeekFolder  = g.WeekFolder
                       AND d2.PanelName   = g.PanelName
-                      AND d2.ExpectedCPTCode IS NOT NULL AND d2.ExpectedCPTCode <> ''
-                    ORDER BY '*' + d2.ExpectedCPTCode
+                      AND d2.ActualCPTCode IS NOT NULL AND d2.ActualCPTCode <> ''
+                    ORDER BY '*' + d2.ActualCPTCode
                     FOR XML PATH(''), TYPE).value('.','NVARCHAR(MAX)'), 1, 1, '') AS BilledCptCombo,
                 -- Distinct MissingCPTCodes values
                 STUFF((
