@@ -1,0 +1,82 @@
+﻿@model LabMetricsDashboard.Models.CollectionSummaryViewModel
+            @if (Model.RepPayments.HasData)
+            {
+                var periods = Model.RepPayments.Periods;
+                var pivotRows = Model.RepPayments.Rows;
+                <div class="cs-rpt-wrap">
+                    <div class="cs-rpt-scroll">
+                        <table class="cs-rpt-table">
+                            <thead>
+                                @{
+                                    // Group periods by year for the first header row
+                                    var yearGroups = periods.GroupBy(p => p.Year).OrderBy(g => g.Key).ToList();
+                                }
+                                <tr>
+                                    <th rowspan="2" style="text-align:left;min-width:220px">Sales Rep</th>
+                                    @foreach (var yg in yearGroups)
+                                    {
+                                        <th colspan="@(yg.Count() * 2)">@yg.Key</th>
+                                    }
+                                    <th colspan="2">Grand Total</th>
+                                </tr>
+                                <tr>
+                                    @foreach (var p in periods)
+                                    {
+                                        var monthName = System.Globalization.CultureInfo.CurrentCulture.DateTimeFormat.GetAbbreviatedMonthName(p.Month);
+                                        <th>@monthName Claims</th>
+                                        <th>@monthName Payments</th>
+                                    }
+                                    <th>No. of Claims</th>
+                                    <th>Insurance Payments</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in pivotRows)
+                                {
+                                    <tr>
+                                        <td style="text-align:left;font-weight:600">@row.SalesRepName</td>
+                                        @foreach (var p in periods)
+                                        {
+                                            var hasCell = row.Cells.TryGetValue(p, out var cell);
+                                            <td style="text-align:right">@(hasCell ? cell!.NoOfClaims.ToString("N0") : "0")</td>
+                                            <td style="text-align:right">@(hasCell ? cell!.InsurancePayments.ToString("C2") : "$0.00")</td>
+                                        }
+                                        <td style="text-align:right;font-weight:700">@row.GrandClaims.ToString("N0")</td>
+                                        <td style="text-align:right;font-weight:700">@row.GrandPayments.ToString("C2")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
+                                    <td style="text-align:left;color:#fff">Grand Total</td>
+                                    @foreach (var p in periods)
+                                    {
+                                        var colClaims = pivotRows.Sum(r => r.Cells.TryGetValue(p, out var c) ? c.NoOfClaims : 0);
+                                        var colPayments = pivotRows.Sum(r => r.Cells.TryGetValue(p, out var c) ? c.InsurancePayments : 0m);
+                                        <td style="text-align:right;color:#fff">@colClaims.ToString("N0")</td>
+                                        <td style="text-align:right;color:#fff">@colPayments.ToString("C2")</td>
+                                    }
+                                    <td style="text-align:right;color:#fff">@pivotRows.Sum(r => r.GrandClaims).ToString("N0")</td>
+                                    <td style="text-align:right;color:#fff">@pivotRows.Sum(r => r.GrandPayments).ToString("C2")</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
+                    <strong>Source:</strong> Claim Level Data &bull;
+                    <strong>Filter:</strong> InsurancePayment &gt; 0, CheckDate is valid &bull;
+                    <strong>Columns:</strong> Year / Month (from CheckDate) &bull;
+                    <strong>Sorted by:</strong> Grand Total (SUM InsurancePayment) DESC &bull;
+                    <strong>Metric:</strong> COUNT(DISTINCT ClaimID), SUM(InsurancePayment)
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5 text-muted">
+                    <div style="font-size:2rem;opacity:.4">&#128100;</div>
+                    <div class="fw-semibold mt-2">No rep payment data available</div>
+                    <div class="small mt-1">No matching claim records found. Try adjusting your filters.</div>
+                </div>
+            }

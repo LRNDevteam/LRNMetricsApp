@@ -119,6 +119,15 @@ public sealed class LabCsvConfig
     public bool EnableProductionReport { get; init; } = true;
 
     /// <summary>
+    /// Enables the Production Summary Report page (SP-backed aggregate view).
+    /// Only meaningful for NorthWest. Defaults to false.
+    /// When true and the lab is NorthWest, a "Production Summary Report" page
+    /// reads from pre-aggregated NW_* tables instead of querying ClaimLevelData directly.
+    /// Filtered queries still hit the live tables.
+    /// </summary>
+    public bool EnableProductionSummaryReport { get; init; } = false;
+
+    /// <summary>
     /// Enables the Collection Summary page under Standard Reports menu.
     /// Defaults to true for backward compatibility.
     /// </summary>
@@ -130,6 +139,51 @@ public sealed class LabCsvConfig
     /// the legacy default behavior is used (columns by FirstBilledDate).
     /// </summary>
     public ProductionSummaryConfig? ProductionSummary { get; init; }
+
+    /// <summary>
+    /// Optional per-lab Collection Summary settings.
+    /// When null or when <see cref="CollectionSummaryConfig.Rule"/> is empty,
+    /// the legacy default behavior is used.
+    /// </summary>
+    public CollectionSummaryConfig? CollectionSummary { get; init; }
+
+    /// <summary>
+    /// When <c>true</c>, the Revenue Dashboard loads KPIs and charts from
+    /// pre-aggregated snapshot tables (populated by <c>dbo.usp_RefreshDashboard</c>)
+    /// instead of querying <c>ClaimLevelData</c> / <c>LineLevelData</c> directly.
+    /// Live queries are used automatically whenever any filter is active.
+    /// Resetting filters restores the snapshot view.
+    /// </summary>
+    public bool UseDBDashboard { get; init; } = false;
+}
+
+/// <summary>
+/// Per-lab settings that control how the Collection Summary Monthly Claim Volume
+/// table is computed.
+/// </summary>
+public sealed class CollectionSummaryConfig
+{
+    /// <summary>
+    /// Rule name (e.g. <c>Northwestlabs Rule</c>). Case-insensitive.
+    /// When set to <c>Northwestlabs Rule</c>, the Monthly Claim Volume query:
+    /// - groups columns by <c>CheckDate</c> Year/Month (existing behavior)
+    /// - filters out rows with blank/invalid <c>PostedDate</c>
+    /// - uses <c>PayerName_Raw</c> for payer drill-down grouping.
+    /// </summary>
+    public string? Rule { get; init; }
+
+    /// <summary>
+    /// Optional rule applied independently to the Weekly Claim Volume tab.
+    /// When set to <c>Northwestlabs Rule</c> (case-insensitive), the Weekly
+    /// Claim Volume query:
+    /// - keeps the legacy source (ClaimLevelData by <c>CheckDate</c>) and
+    ///   the legacy filter (<c>InsurancePayment &gt; 0</c>, paid statuses, last 4 Mon-Sun weeks),
+    /// - groups payer drill-down rows by <c>PayerName_Raw</c> instead of the cleaned <c>PayerName</c>,
+    /// - shows the Top 3 payers per panel ranked by <c>COUNT(DISTINCT ClaimID)</c>,
+    /// - sorts panels by Grand Total encounters descending.
+    /// When unset or empty the legacy weekly behavior (group by <c>PayerName</c>) is used.
+    /// </summary>
+    public string? Week { get; init; }
 }
 
 /// <summary>

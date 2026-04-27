@@ -233,6 +233,231 @@ public sealed class ClaimLineDbService
     }
 
     /// <summary>
+    /// Refreshes all Revenue Dashboard aggregate tables by calling
+    /// <c>dbo.usp_RefreshDashboard</c>. The SP runs inside a single transaction,
+    /// populates DashboardKPISummary, DashboardClaimStatusBreakdown,
+    /// DashboardInsightBreakdown, DashboardMonthlyTrends, DashboardTopCPT,
+    /// DashboardPayStatusBreakdown, DashboardPanelMonthlyAllowed, and
+    /// DashboardPayerTypePayments, and logs execution to DashboardRefreshLog.
+    /// Call this after both ClaimLevel and LineLevel ingestion are complete.
+    /// </summary>
+    public void RefreshDashboard()
+    {
+        using var conn = new SqlConnection(_connectionString);
+        conn.Open();
+        using var cmd = new SqlCommand("dbo.usp_RefreshDashboard", conn)
+        {
+            CommandType    = CommandType.StoredProcedure,
+            CommandTimeout = 1800
+        };
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Runs all NorthWest-specific production report stored procedures after ingestion.
+    /// Each SP is executed independently so a failure in one does not block the others.
+    /// Returns a list of (SpName, ElapsedMs, ErrorMessage?) for caller logging.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshNorthWestProductionReports()
+    {
+        // All seven NorthWest production-report SPs in execution order.
+        string[] procedures =
+        [
+            "dbo.usp_RefreshNW_MonthlyBilledProductionSummary",
+            "dbo.usp_RefreshNW_WeeklyBilledProductionSummary",
+            "dbo.usp_RefreshNW_PayerBreakdown",
+            "dbo.usp_RefreshNW_PayerByPanel",
+            "dbo.usp_RefreshNW_UnbilledAging",
+            "dbo.usp_RefreshNW_CPTBreakdown",
+            "dbo.usp_RefreshNW_CodingBreakdown_Unbilled",
+        ];
+
+        return RunProductionReportSPs(procedures);
+    }
+
+    /// <summary>
+    /// Runs all Elixir Labs-specific production report stored procedures after ingestion.
+    /// Each SP is executed independently so a failure in one does not block the others.
+    /// Returns a list of (SpName, ElapsedMs, ErrorMessage?) for caller logging.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshElixirProductionReports()
+    {
+        string[] procedures =
+        [
+            "dbo.usp_RefreshElix_MonthlyBilledProductionSummary",
+            "dbo.usp_RefreshElix_WeeklyBilledProductionSummary",
+            "dbo.usp_RefreshElix_PayerBreakdown",
+            "dbo.usp_RefreshElix_PayerByPanel",
+            "dbo.usp_RefreshElix_UnbilledAging",
+            "dbo.usp_RefreshElix_CPTBreakdown",
+            "dbo.usp_RefreshElix_CodingBreakdown_Unbilled",
+        ];
+
+        return RunProductionReportSPs(procedures);
+    }
+
+    /// <summary>
+    /// Runs all PCRLabsofAmerica-specific production report stored procedures after ingestion.
+    /// Each SP is executed independently so a failure in one does not block the others.
+    /// Returns a list of (SpName, ElapsedMs, ErrorMessage?) for caller logging.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshPCRLabsProductionReports()
+    {
+        string[] procedures =
+        [
+            "dbo.usp_RefreshPCR_MonthlyBilledProductionSummary",
+            "dbo.usp_RefreshPCR_WeeklyBilledProductionSummary",
+            "dbo.usp_RefreshPCR_PayerBreakdown",
+            "dbo.usp_RefreshPCR_PayerByPanel",
+            "dbo.usp_RefreshPCR_CodingBreakdown_Billed",
+            "dbo.usp_RefreshPCR_UnbilledAging",
+            "dbo.usp_RefreshPCR_CPTBreakdown",
+        ];
+
+        return RunProductionReportSPs(procedures);
+    }
+
+    /// <summary>
+    /// Runs all BeechTree-specific production report stored procedures after ingestion.
+    /// Each SP is executed independently so a failure in one does not block the others.
+    /// Returns a list of (SpName, ElapsedMs, ErrorMessage?) for caller logging.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshBeechTreeProductionReports()
+    {
+        string[] procedures =
+        [
+            "dbo.usp_RefreshBT_MonthlyBilledProductionSummary",
+            "dbo.usp_RefreshBT_WeeklyBilledProductionSummary",
+            "dbo.usp_RefreshBT_PayerBreakdown",
+            "dbo.usp_RefreshBT_PayerByPanel",
+            "dbo.usp_RefreshBT_CodingBreakdown_Billed",
+            "dbo.usp_RefreshBT_UnbilledAging",
+            "dbo.usp_RefreshBT_CPTBreakdown",
+        ];
+
+        return RunProductionReportSPs(procedures);
+    }
+
+    /// <summary>
+    /// Runs all RisingTides-specific production report stored procedures after ingestion.
+    /// Each SP is executed independently so a failure in one does not block the others.
+    /// Returns a list of (SpName, ElapsedMs, ErrorMessage?) for caller logging.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshRisingTidesProductionReports()
+    {
+        string[] procedures =
+        [
+            "dbo.usp_RefreshRT_MonthlyBilledProductionSummary",
+            "dbo.usp_RefreshRT_WeeklyBilledProductionSummary",
+            "dbo.usp_RefreshRT_PayerBreakdown",
+            "dbo.usp_RefreshRT_PayerByPanel",
+            "dbo.usp_RefreshRT_CodingBreakdown_Billed",
+            "dbo.usp_RefreshRT_UnbilledAging",
+            "dbo.usp_RefreshRT_CPTBreakdown",
+        ];
+
+        return RunProductionReportSPs(procedures);
+    }
+
+    /// <summary>
+    /// Runs all Certus Labs-specific production report stored procedures after ingestion.
+    /// Each SP is executed independently so a failure in one does not block the others.
+    /// Returns a list of (SpName, ElapsedMs, ErrorMessage?) for caller logging.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshCertusProductionReports()
+    {
+        string[] procedures =
+        [
+            "dbo.usp_RefreshCert_MonthlyBilledProductionSummary",
+            "dbo.usp_RefreshCert_WeeklyBilledProductionSummary",
+            "dbo.usp_RefreshCert_PayerBreakdown",
+            "dbo.usp_RefreshCert_PayerByPanel",
+            "dbo.usp_RefreshCert_UnbilledAging",
+            "dbo.usp_RefreshCert_CPTBreakdown",
+        ];
+
+        return RunProductionReportSPs(procedures);
+    }
+
+    /// <summary>
+    /// Runs all COVE Labs-specific production report stored procedures after ingestion.
+    /// Each SP is executed independently so a failure in one does not block the others.
+    /// Returns a list of (SpName, ElapsedMs, ErrorMessage?) for caller logging.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshCoveProductionReports()
+    {
+        string[] procedures =
+        [
+            "dbo.usp_RefreshCove_MonthlyBilledProductionSummary",
+            "dbo.usp_RefreshCove_WeeklyBilledProductionSummary",
+            "dbo.usp_RefreshCove_PayerBreakdown",
+            "dbo.usp_RefreshCove_PayerByPanel",
+            "dbo.usp_RefreshCove_UnbilledAging",
+            "dbo.usp_RefreshCove_CPTBreakdown",
+            "dbo.usp_RefreshCove_CodingBreakdown_Unbilled",
+        ];
+
+        return RunProductionReportSPs(procedures);
+    }
+
+    /// <summary>
+    /// Runs all Augustus Labs-specific production report stored procedures after ingestion.
+    /// Each SP is executed independently so a failure in one does not block the others.
+    /// Returns a list of (SpName, ElapsedMs, ErrorMessage?) for caller logging.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshAugustusProductionReports()
+    {
+        string[] procedures =
+        [
+            "dbo.usp_RefreshAug_MonthlyBilledProductionSummary",
+            "dbo.usp_RefreshAug_WeeklyBilledProductionSummary",
+            "dbo.usp_RefreshAug_PayerBreakdown",
+            "dbo.usp_RefreshAug_PayerByPanel",
+            "dbo.usp_RefreshAug_UnbilledAging",
+            "dbo.usp_RefreshAug_CPTBreakdown",
+            "dbo.usp_RefreshAug_CodingBreakdown_Unbilled",
+        ];
+
+        return RunProductionReportSPs(procedures);
+    }
+
+    /// <summary>
+    /// Executes a list of stored procedures sequentially on an open connection.
+    /// Each SP runs independently — a failure in one does not stop the others.
+    /// </summary>
+    private List<(string SpName, long ElapsedMs, string? Error)> RunProductionReportSPs(
+        string[] procedures)
+    {
+        var results = new List<(string, long, string?)>();
+
+        using var conn = new SqlConnection(_connectionString);
+        conn.Open();
+
+        foreach (var spName in procedures)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                using var cmd = new SqlCommand(spName, conn)
+                {
+                    CommandType    = CommandType.StoredProcedure,
+                    CommandTimeout = 1800
+                };
+                cmd.ExecuteNonQuery();
+                sw.Stop();
+                results.Add((spName, sw.ElapsedMilliseconds, null));
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                results.Add((spName, sw.ElapsedMilliseconds, ex.Message));
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>
     /// Extracts RunId from a file path by taking the prefix before the first underscore
     /// in the filename (e.g., "20260226R0029_Cove_Claim Level_...csv" ? "20260226R0029").
     /// Falls back to the full filename without extension if no underscore is found or on error.

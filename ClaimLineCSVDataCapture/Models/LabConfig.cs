@@ -44,6 +44,12 @@ public sealed class LabPaths
     public string PayerMaster { get; set; } = string.Empty;
     public string CodingMaster { get; set; } = string.Empty;
     public string CptFeeSchedule { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional path to a lab-specific FieldMappings.json.
+    /// When set and the file exists, it overrides the global FieldMappingsPath from appsettings.json.
+    /// </summary>
+    public string? LabFieldMappingsPath { get; set; }
 }
 
 public sealed class LabOutput

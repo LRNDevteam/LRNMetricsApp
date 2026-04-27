@@ -1,0 +1,53 @@
+@model LabMetricsDashboard.Models.DashboardViewModel
+
+<!-- Average Allowed by Panel x Month -->
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header fw-semibold" style="background:linear-gradient(135deg,#0d47a1,#29b6f6);color:#fff;border-radius:12px 12px 0 0">
+        Average Allowed by Panel X Month &mdash; Top 10 Panels
+    </div>
+    <div class="card-body p-0">
+        <div class="text-muted px-3 pt-2 pb-1" style="font-size:.75rem">Source : Claim Level Data</div>
+        @if (!Model.AvgAllowedMonths.Any() || !Model.AvgAllowedByPanelMonth.Any())
+        {
+            <p class="text-muted px-3 py-2 mb-0" style="font-size:.82rem">No data available.</p>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-bordered table-sm mb-0" style="font-size:.8rem;min-width:600px">
+                    <thead class="table-light">
+                        <tr>
+                            <th class="fw-bold" style="white-space:nowrap;min-width:160px">Panel Name</th>
+                            @foreach (var month in Model.AvgAllowedMonths)
+                            {
+                                var label = DateTime.ParseExact(month, "yyyy-MM",
+                                    System.Globalization.CultureInfo.InvariantCulture)
+                                    .ToString("MMMM-yy");
+                                <th class="text-center fw-bold" style="white-space:nowrap">@label</th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in Model.AvgAllowedByPanelMonth)
+                        {
+                            <tr>
+                                <td style="white-space:nowrap">@row.PanelName</td>
+                                @foreach (var month in Model.AvgAllowedMonths)
+                                {
+                                    if (row.AvgByMonth.TryGetValue(month, out var avg))
+                                    {
+                                        <td class="text-end">@avg.ToString("C0")</td>
+                                    }
+                                    else
+                                    {
+                                        <td class="text-center text-muted">–</td>
+                                    }
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>

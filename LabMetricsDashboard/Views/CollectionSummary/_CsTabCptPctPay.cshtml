@@ -1,0 +1,61 @@
+﻿@model LabMetricsDashboard.Models.CollectionSummaryViewModel
+            @if (Model.CptPaymentPct.Count > 0)
+            {
+                var cptGrandUnits = Model.CptPaymentPct.Sum(r => r.SumServiceUnits);
+                var cptGrandPaidIns = Model.CptPaymentPct.Sum(r => r.PaidInsurancePayment);
+                var cptGrandPaidChg = Model.CptPaymentPct.Sum(r => r.PaidChargeAmount);
+                var cptGrandPct = cptGrandPaidChg == 0 ? 0m : Math.Round(cptGrandPaidIns / cptGrandPaidChg * 100m, 2);
+                var cptMaxPct = Model.CptPaymentPct.Max(r => r.PaymentPct);
+                <div class="cs-rpt-wrap">
+                    <div class="cs-rpt-scroll">
+                        <table class="cs-rpt-table">
+                            <thead>
+                                <tr>
+                                    <th style="text-align:left;min-width:200px">CPT Code</th>
+                                    <th style="min-width:160px">Sum of Service Units</th>
+                                    <th style="min-width:260px">Payment %</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in Model.CptPaymentPct)
+                                {
+                                    var pct = row.PaymentPct;
+                                    var barWidth = cptMaxPct == 0 ? 0m : Math.Round(pct / cptMaxPct * 100m, 1);
+                                    <tr>
+                                        <td style="text-align:left;font-weight:600">@row.CptCode</td>
+                                        <td style="text-align:right">@row.SumServiceUnits.ToString("N0")</td>
+                                        <td>
+                                            <div class="reimb-bar-bg">
+                                                <div class="reimb-bar-fill" style="width:@(barWidth.ToString("F1"))%"></div>
+                                                <div class="reimb-bar-label">@pct.ToString("F2") %</div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
+                                    <td style="text-align:left;color:#fff">Grand Total</td>
+                                    <td style="text-align:right;color:#fff">@cptGrandUnits.ToString("N0")</td>
+                                    <td style="text-align:right;color:#fff">@cptGrandPct.ToString("F2") %</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
+                    <strong>Source:</strong> Line Level Data &bull;
+                    <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &nbsp;|&nbsp; FirstBilledDate: @(string.IsNullOrWhiteSpace(Model.FilterFirstBillFrom) ? "-" : Model.FilterFirstBillFrom) — @(string.IsNullOrWhiteSpace(Model.FilterFirstBillTo) ? "-" : Model.FilterFirstBillTo) &bull;
+                    <strong>Sorted by:</strong> SUM(Units) DESC &bull;
+                    <strong>Payment %:</strong> SUM(InsurancePayment) / SUM(ChargeAmount) × 100 where ClaimStatus IN (Fully Paid, Partially Paid)
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5 text-muted">
+                    <div style="font-size:2rem;opacity:.4">&#128202;</div>
+                    <div class="fw-semibold mt-2">No CPT payment data available</div>
+                    <div class="small mt-1"><strong>Reason:</strong> No rows match: CPTCode not blank (line-level). Try adjusting your filters.</div>
+                </div>
+            }

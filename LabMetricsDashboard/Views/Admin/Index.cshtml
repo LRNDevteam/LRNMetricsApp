@@ -1,0 +1,503 @@
+@model LabMetricsDashboard.Models.AdminViewModel
+@inherits Microsoft.AspNetCore.Mvc.Razor.RazorPage<LabMetricsDashboard.Models.AdminViewModel>
+@{
+    ViewData["Title"] = "User / Role Management";
+}
+
+<div class="container-fluid">
+    <div class="d-flex align-items-center mb-4">
+        <h1 class="me-3">User / Role Management</h1>
+    </div>
+
+    @if (TempData["AdminError"] != null)
+    {
+        <div class="alert alert-danger">@TempData["AdminError"]</div>
+    }
+
+    <div class="card">
+        <div class="card-body">
+            <ul class="nav nav-tabs" id="adminTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="users-tab" data-bs-toggle="tab" data-bs-target="#users" type="button" role="tab">Users</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="roles-tab" data-bs-toggle="tab" data-bs-target="#roles" type="button" role="tab">Roles</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="mappings-tab" data-bs-toggle="tab" data-bs-target="#mappings" type="button" role="tab">Mappings</button>
+                </li>
+            </ul>
+            <div class="tab-content mt-3" id="adminTabsContent">
+                <div class="tab-pane fade show active" id="users" role="tabpanel" aria-labelledby="users-tab">
+                    <div class="row">
+                        <div class="col-md-5">
+                            <div class="card mb-3">
+                                <div class="card-body">
+                                    <h5 class="card-title">Create User</h5>
+                                    <form id="frmCreateUser" asp-action="CreateUser" method="post">
+                                        @Html.AntiForgeryToken()
+                                        <div id="indexCreateUserErrors" class="alert alert-danger d-none"></div>
+                                        <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+                                        <div class="mb-2">
+                                            <label class="form-label">UserName</label>
+                                            <input class="form-control" asp-for="NewUser.UserName" />
+                                            <span asp-validation-for="NewUser.UserName" class="text-danger"></span>
+                                        </div>
+                                        <div class="mb-2">
+                                            <label class="form-label">Password</label>
+                                            <div class="input-group">
+                                                <input id="pwd" class="form-control" asp-for="NewUserPassword" type="password" minlength="8" required />
+                                                <button class="btn btn-outline-secondary" type="button" id="pwdToggle" title="Show/Hide">
+                                                    <i class="bi bi-eye"></i>
+                                                </button>
+                                            </div>
+                                            <div class="progress mt-2" style="height:8px">
+                                                <div id="pwdStrength" class="progress-bar" role="progressbar" style="width:0%"></div>
+                                            </div>
+                                            <small id="pwdStrengthText" class="form-text text-muted"></small>
+                                            <span asp-validation-for="NewUserPassword" class="text-danger"></span>
+                                        </div>
+                                        <div class="mb-2">
+                                            <label class="form-label">Confirm Password</label>
+                                            <input id="pwdConfirm" class="form-control" asp-for="NewUserConfirmPassword" type="password" minlength="8" required />
+                                            <span asp-validation-for="NewUserConfirmPassword" class="text-danger"></span>
+                                        </div>
+                                        <div class="mb-2">
+                                            <label class="form-label">First Name</label>
+                                            <input class="form-control" asp-for="NewUser.FirstName" />
+                                        </div>
+                                        <div class="mb-2">
+                                            <label class="form-label">Last Name</label>
+                                            <input class="form-control" asp-for="NewUser.LastName" />
+                                        </div>
+                                        <div class="mb-2">
+                                            <label class="form-label">Email</label>
+                                            <input class="form-control" asp-for="NewUser.Email" type="email" />
+                                        </div>
+                                        <div class="mb-2">
+                                            <label class="form-label">Mobile</label>
+                                            <input class="form-control" asp-for="NewUser.Mobile" />
+                                        </div>
+                                        <div class="d-grid">
+                                            <button id="btnCreateUser" class="btn btn-primary">Create User</button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-7">
+                            <h5>Existing Users</h5>
+                            <table class="table table-sm table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>UserName</th>
+                                        <th>Name</th>
+                                        <th>Email</th>
+                                        <th>Mobile</th>
+                                        <th>Labs</th>
+                                        <th>Active</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tblUsersBody">
+                                    @foreach (var u in Model.Users)
+                                    {
+                                        <tr data-userid="@u.LabUserID">
+                                            <td>@u.UserName</td>
+                                            <td>@(string.IsNullOrWhiteSpace(u.FirstName) ? "" : u.FirstName) @u.LastName</td>
+                                            <td>@u.Email</td>
+                                            <td>@u.Mobile</td>
+                                            <td>@(u.IsActive ? "Yes" : "No")</td>
+                                            <td>
+                                                <a class="btn btn-sm btn-outline-primary" asp-controller="Admin" asp-action="Edit" asp-route-id="@u.LabUserID">Edit</a>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tab-pane fade" id="roles" role="tabpanel" aria-labelledby="roles-tab">
+                    <div class="row">
+                        <div class="col-md-5">
+                            <div class="card mb-3">
+                                <div class="card-body">
+                                    <h5 class="card-title">Create Role</h5>
+                                    <form id="frmCreateRole" asp-action="CreateRole" method="post">
+                                        @Html.AntiForgeryToken()
+                                        <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+                                        <div class="mb-2">
+                                            <label class="form-label">Role Name</label>
+                                            <input class="form-control" asp-for="NewRole.RoleName" />
+                                            <span asp-validation-for="NewRole.RoleName" class="text-danger"></span>
+                                        </div>
+                                        <div class="d-grid">
+                                            <button id="btnCreateRole" class="btn btn-primary">Create Role</button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-7">
+                            <h5>Existing Roles</h5>
+                            <table class="table table-sm table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Role Name</th>
+                                        <th>Active</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var r in Model.Roles)
+                                    {
+                                        <tr>
+                                            <td>@r.RoleName</td>
+                                            <td>@(r.IsActive ? "Yes" : "No")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tab-pane fade" id="mappings" role="tabpanel" aria-labelledby="mappings-tab">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="card mb-3">
+                                <div class="card-body">
+                                    <h5 class="card-title">Assign Role to User</h5>
+                                    <form id="frmAssignRole" asp-action="AssignRole" method="post">
+                                        @Html.AntiForgeryToken()
+                                        <div class="mb-2">
+                                            <label class="form-label">User</label>
+                                            <select class="form-select" id="mapUserSelect" name="assignUserId" required>
+                                                <option value="">-- select user --</option>
+                                                @foreach (var u in Model.Users)
+                                                {
+                                                    <option value="@u.LabUserID">@u.UserName</option>
+                                                }
+                                            </select>
+                                        </div>
+                                        <div class="mb-2">
+                                            <label class="form-label">Role</label>
+                                            <select class="form-select" id="mapRoleSelect" name="assignRoleId" required>
+                                                <option value="">-- select role --</option>
+                                                @foreach (var r in Model.Roles)
+                                                {
+                                                    <option value="@r.RoleID">@r.RoleName</option>
+                                                }
+                                            </select>
+                                        </div>
+                                        <div class="d-grid">
+                                            <button id="btnAssignRole" class="btn btn-primary">Assign Role</button>
+                                        </div>
+                                    </form>
+                                    <hr />
+                                    <h6 class="mt-3">Assigned Roles</h6>
+                                    <table class="table table-sm" id="tblUserRoles">
+                                        <thead><tr><th>RoleID</th><th>Action</th></tr></thead>
+                                        <tbody></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card mb-3">
+                                <div class="card-body">
+                                    <h5 class="card-title">Assign User to Lab</h5>
+                                    <form id="frmAssignLab" asp-action="AssignUserLab" method="post">
+                                        @Html.AntiForgeryToken()
+                                        <div class="mb-2">
+                                            <label class="form-label">User</label>
+                                            <select class="form-select" id="mapUserSelect2" name="assignUserId" required>
+                                                <option value="">-- select user --</option>
+                                                @foreach (var u in Model.Users)
+                                                {
+                                                    <option value="@u.LabUserID">@u.UserName</option>
+                                                }
+                                            </select>
+                                        </div>
+                                        <div class="mb-2">
+                                            <label class="form-label">Lab</label>
+                                            <select class="form-select" id="mapLabSelect" name="labId"></select>
+                                        </div>
+                                        <div class="d-grid">
+                                            <button id="btnAssignLab" class="btn btn-primary">Assign Lab</button>
+                                        </div>
+                                    </form>
+                                    <hr />
+                                    <h6 class="mt-3">Assigned Labs</h6>
+                                    <table class="table table-sm" id="tblUserLabs">
+                                        <thead><tr><th>LabId</th><th>Action</th></tr></thead>
+                                        <tbody></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+<script>
+    (function(){
+        const pwd = document.getElementById('pwd');
+        const pwdConfirm = document.getElementById('pwdConfirm');
+        const pwdToggle = document.getElementById('pwdToggle');
+        const pwdStrength = document.getElementById('pwdStrength');
+        const pwdStrengthText = document.getElementById('pwdStrengthText');
+        const form = document.getElementById('frmCreateUser');
+        const errEl = document.getElementById('indexCreateUserErrors');
+
+        function showErr(msg){
+            if (!errEl) return;
+            errEl.textContent = msg;
+            errEl.classList.remove('d-none');
+        }
+        function clearErr(){
+            if (!errEl) return;
+            errEl.textContent = '';
+            errEl.classList.add('d-none');
+        }
+
+        function scorePassword(p) {
+            let score = 0;
+            if (!p) return 0;
+            if (p.length >= 8) score += 30;
+            if (/[a-z]/.test(p)) score += 15;
+            if (/[A-Z]/.test(p)) score += 20;
+            if (/[0-9]/.test(p)) score += 20;
+            if (/[^A-Za-z0-9]/.test(p)) score += 15;
+            return Math.min(100, score);
+        }
+
+        if (pwd) {
+            pwd.addEventListener('input', function(){
+                const s = scorePassword(pwd.value);
+                pwdStrength.style.width = s + '%';
+                pwdStrength.className = 'progress-bar';
+                if (s < 40) pwdStrength.classList.add('bg-danger');
+                else if (s < 70) pwdStrength.classList.add('bg-warning');
+                else pwdStrength.classList.add('bg-success');
+                pwdStrengthText.textContent = s < 40 ? 'Weak' : (s < 70 ? 'Medium' : 'Strong');
+            });
+        }
+
+        if (pwdToggle && pwd) {
+            pwdToggle.addEventListener('click', function(){
+                if (pwd.type === 'password') { pwd.type = 'text'; pwdToggle.innerHTML = '<i class="bi bi-eye-slash"></i>'; }
+                else { pwd.type = 'password'; pwdToggle.innerHTML = '<i class="bi bi-eye"></i>'; }
+            });
+        }
+
+        if (form) {
+            form.addEventListener('submit', function(e){
+                clearErr();
+                if (pwd && pwdConfirm && pwd.value !== pwdConfirm.value) {
+                    e.preventDefault();
+                    showErr('Passwords do not match.');
+                    try { pwdConfirm.setCustomValidity('Passwords do not match.'); } catch(e2) {}
+                    try { form.reportValidity(); } catch(e3) {}
+                    pwdConfirm.focus();
+                    return false;
+                }
+                try { pwdConfirm.setCustomValidity(''); } catch(e4) {}
+            });
+        }
+    })();
+</script>
+<script>
+    // AJAX handlers for create user/role and mapping actions
+    (function(){
+        function jsonFormData(form) {
+            const fd = new FormData(form);
+            return fd;
+        }
+
+        // Create User AJAX
+        const frmUser = document.getElementById('frmCreateUser');
+        if (frmUser) {
+            frmUser.addEventListener('submit', function(e){
+                e.preventDefault();
+                const errEl = document.getElementById('indexCreateUserErrors');
+                if (errEl) { errEl.classList.add('d-none'); errEl.textContent = ''; }
+                const fd = jsonFormData(frmUser);
+                fetch('@Url.Action("CreateUserAjax", "Admin")', { method: 'POST', body: fd, credentials: 'same-origin' })
+                .then(async r => {
+                    if (!r.ok) {
+                        const data = await r.json().catch(()=>null);
+                        if (data && data.errors) {
+                            const msg = data.errors.join('; ');
+                            if (errEl) { errEl.textContent = msg; errEl.classList.remove('d-none'); }
+                            else alert(msg);
+                        } else {
+                            alert('Create user failed');
+                        }
+                        return;
+                    }
+                    // success - refresh users list
+                    refreshUsers();
+                    frmUser.reset();
+                    if (errEl) { errEl.classList.add('d-none'); errEl.textContent = ''; }
+                })
+                .catch(err=>{ console.error(err); alert('Network error'); });
+            });
+        }
+
+        // Create Role AJAX
+        const frmRole = document.getElementById('frmCreateRole');
+        if (frmRole) {
+            frmRole.addEventListener('submit', function(e){
+                e.preventDefault();
+                const fd = jsonFormData(frmRole);
+                fetch('@Url.Action("CreateRoleAjax", "Admin")', { method: 'POST', body: fd, credentials: 'same-origin' })
+                .then(async r => {
+                    if (!r.ok) {
+                        const data = await r.json().catch(()=>null);
+                        if (data && data.errors) {
+                            const sum = frmRole.querySelector('[asp-validation-summary]');
+                            if (sum) sum.textContent = data.errors.join('; ');
+                        } else alert('Create role failed');
+                        return;
+                    }
+                    // refresh roles list
+                    refreshRoles();
+                    frmRole.reset();
+                })
+                .catch(err=>{ console.error(err); alert('Network error'); });
+            });
+        }
+
+        // Assign Role AJAX
+        const frmAssignRole = document.getElementById('frmAssignRole');
+        if (frmAssignRole) {
+            frmAssignRole.addEventListener('submit', function(e){
+                e.preventDefault();
+                const fd = jsonFormData(frmAssignRole);
+                fetch('@Url.Action("AssignRoleAjax", "Admin")', { method: 'POST', body: fd, credentials: 'same-origin' })
+                .then(async r => {
+                    if (!r.ok) { alert('Assign failed'); return; }
+                    const uid = document.getElementById('mapUserSelect').value;
+                    if (uid) loadMappingsForUser(uid);
+                })
+                .catch(err=>{ console.error(err); alert('Network error'); });
+            });
+        }
+
+        // Assign Lab AJAX
+        const frmAssignLab = document.getElementById('frmAssignLab');
+        if (frmAssignLab) {
+            frmAssignLab.addEventListener('submit', function(e){
+                e.preventDefault();
+                const fd = jsonFormData(frmAssignLab);
+                fetch('@Url.Action("AssignUserLabAjax", "Admin")', { method: 'POST', body: fd, credentials: 'same-origin' })
+                .then(async r => {
+                    if (!r.ok) { alert('Assign lab failed'); return; }
+                    const uid = document.getElementById('mapUserSelect2').value;
+                    if (uid) loadMappingsForUser(uid);
+                })
+                .catch(err=>{ console.error(err); alert('Network error'); });
+            });
+        }
+
+        // Remove actions (delegated)
+        document.addEventListener('click', function(e){
+            const target = e.target.closest('[data-remove-role]');
+            if (target) {
+                const id = target.getAttribute('data-remove-role');
+                fetch('@Url.Action("RemoveUserRole", "Admin")', { method: 'POST', headers: { 'Content-Type':'application/x-www-form-urlencoded' }, body: 'userRoleId=' + encodeURIComponent(id), credentials: 'same-origin' })
+                .then(r=>{ if (r.ok) { const uid = document.getElementById('mapUserSelect').value; if (uid) loadMappingsForUser(uid); } else alert('Remove failed'); });
+            }
+        });
+
+        document.addEventListener('click', function(e){
+            const target = e.target.closest('[data-remove-ul]');
+            if (target) {
+                const id = target.getAttribute('data-remove-ul');
+                fetch('@Url.Action("RemoveUserLab", "Admin")', { method: 'POST', headers: { 'Content-Type':'application/x-www-form-urlencoded' }, body: 'ulid=' + encodeURIComponent(id), credentials: 'same-origin' })
+                .then(r=>{ if (r.ok) { const uid = document.getElementById('mapUserSelect2').value; if (uid) loadMappingsForUser(uid); } else alert('Remove failed'); });
+            }
+        });
+
+        // Refresh functions
+        function refreshUsers(){
+            fetch('@Url.Action("GetUsersJson","Admin")', { credentials: 'same-origin' })
+            .then(r=>r.json()).then(data=>{
+                const tbody = document.getElementById('tblUsersBody');
+                if (!tbody) return;
+                tbody.innerHTML = '';
+                data.forEach(u=>{
+                    const tr = document.createElement('tr'); tr.setAttribute('data-userid', u.labUserID);
+                    const labs = (u.labs || []).map(x => x.labName || x.labId).join(', ');
+                    tr.innerHTML = `<td>${u.userName}</td><td>${(u.firstName||'') + ' ' + (u.lastName||'')}</td><td>${u.email||''}</td><td>${u.mobile||''}</td><td>${labs}</td><td>${u.isActive? 'Yes':'No'}</td><td><a class="btn btn-sm btn-outline-primary" href="/Admin/Edit/${u.labUserID}">Edit</a></td>`;
+                    tbody.appendChild(tr);
+                });
+                // also refresh user selects
+                populateUserSelects(data);
+            }).catch(err=>console.error(err));
+        }
+
+        function refreshRoles(){
+            fetch('@Url.Action("GetRolesJson","Admin")', { credentials: 'same-origin' })
+                .then(r=>r.json()).then(data=>{
+                // refresh role selects
+                const roleSelects = document.querySelectorAll('#mapRoleSelect');
+                roleSelects.forEach(sel=>{
+                    sel.innerHTML = '<option value="">-- select role --</option>';
+                    data.forEach(r=>{
+                        const id = r.roleID || r.RoleID || r.roleId || r.RoleId;
+                        const name = r.roleName || r.RoleName || r.name || r.role;
+                        const opt = document.createElement('option'); opt.value = id; opt.textContent = name; sel.appendChild(opt);
+                    });
+                });
+                // Also refresh labs select after roles (keep grouped refresh)
+                fetch('@Url.Action("GetLabsJson","Admin")', { credentials: 'same-origin' })
+                .then(lr => lr.json()).then(labs => {
+                    const labSel = document.getElementById('mapLabSelect');
+                    if (labSel) {
+                        labSel.innerHTML = '<option value="">-- select lab --</option>';
+                        labs.forEach(l => { const id = l.labId || l.LabId || l.labID || l.LabID; const name = l.labName || l.LabName || l.name; const o = document.createElement('option'); o.value = id; o.textContent = name; labSel.appendChild(o); });
+                    }
+                }).catch(err=>console.error('labs refresh', err));
+            }).catch(err=>console.error(err));
+        }
+
+        function populateUserSelects(data){
+            ['mapUserSelect','mapUserSelect2','mapUserSelect'].forEach(id=>{
+                const sel = document.getElementById(id);
+                if (!sel) return;
+                sel.innerHTML = '<option value="">-- select user --</option>';
+                data.forEach(u=>{ const opt = document.createElement('option'); opt.value = u.labUserID; opt.textContent = u.userName; sel.appendChild(opt); });
+            });
+        }
+
+        // load mappings for selected user
+        window.loadMappingsForUser = function(userId){
+            fetch('@Url.Action("GetUserRolesJson","Admin")' + '?userId=' + encodeURIComponent(userId), { credentials: 'same-origin' })
+            .then(r=>r.json()).then(data=>{
+                const tbody = document.querySelector('#tblUserRoles tbody'); if (!tbody) return; tbody.innerHTML = '';
+                data.forEach(ur=>{ const tr = document.createElement('tr'); tr.innerHTML = `<td>${ur.roleID}</td><td><button class="btn btn-sm btn-outline-danger" data-remove-role="${ur.userRoleId}">Remove</button></td>`; tbody.appendChild(tr); });
+            }).catch(err=>console.error(err));
+
+            fetch('@Url.Action("GetUserLabsJson","Admin")' + '?userId=' + encodeURIComponent(userId), { credentials: 'same-origin' })
+            .then(r=>r.json()).then(data=>{
+                const tbody = document.querySelector('#tblUserLabs tbody'); if (!tbody) return; tbody.innerHTML = '';
+                data.forEach(ul=>{ const tr = document.createElement('tr'); tr.innerHTML = `<td>${ul.labId}</td><td><button class="btn btn-sm btn-outline-danger" data-remove-ul="${ul.ulid}">Remove</button></td>`; tbody.appendChild(tr); });
+            }).catch(err=>console.error(err));
+        }
+
+        // when user select changes, load mappings
+        ['mapUserSelect','mapUserSelect2'].forEach(id=>{
+            const sel = document.getElementById(id);
+            if (sel) sel.addEventListener('change', function(){ if (this.value) loadMappingsForUser(this.value); });
+        });
+        // Initial refresh to populate user/role lists and lab mappings
+        refreshUsers();
+        refreshRoles();
+    })();
+</script>
+            </div>
+        </div>
+    </div>
+</div>

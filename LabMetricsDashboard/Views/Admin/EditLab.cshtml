@@ -1,0 +1,169 @@
+@model LabMetricsDashboard.Models.Lab
+@{
+    ViewData["Title"] = "Admin - Edit Lab";
+    var initial = string.IsNullOrWhiteSpace(Model.LabName) ? "?" : Model.LabName.Trim().Substring(0, 1).ToUpperInvariant();
+}
+
+<style>
+    .lab-edit-header {
+        background: linear-gradient(135deg,#0d1b2a 0%,#1b3a5c 55%,#1565c0 100%);
+        color:#fff; border-radius:18px;
+        padding:1.1rem 1.4rem; margin-bottom:1.25rem;
+        box-shadow:0 6px 22px rgba(13,27,42,.18);
+        display:flex; align-items:center; gap:1rem; flex-wrap:wrap;
+    }
+    .lab-edit-avatar {
+        width:54px; height:54px; border-radius:14px;
+        display:grid; place-items:center;
+        background:rgba(255,255,255,.15); border:1.5px solid rgba(255,255,255,.3);
+        color:#fff; font-weight:800; font-size:1.5rem; flex-shrink:0;
+    }
+    .lab-edit-header h2 { margin:0; font-weight:800; }
+    .lab-edit-header .subtitle { color:rgba(255,255,255,.78); font-size:.86rem; }
+    .lab-edit-card {
+        background:#fff; border-radius:16px;
+        box-shadow:0 2px 16px rgba(13,27,42,.08);
+        padding:1.5rem;
+    }
+    .lab-edit-card .form-label {
+        font-weight:700; font-size:.78rem;
+        text-transform:uppercase; letter-spacing:.05em; color:#5a6a8a;
+    }
+    .lab-edit-card .form-control {
+        border-radius:10px; padding:.55rem .85rem;
+    }
+    .lab-edit-card .form-control:focus {
+        border-color:#1565c0; box-shadow:0 0 0 3px rgba(21,101,192,.15);
+    }
+    .lab-edit-audit {
+        background:#f8fafc; border:1px solid #e4eaf3; border-radius:12px;
+        padding:.85rem 1rem; font-size:.8rem; color:#5a6a8a;
+        display:grid; grid-template-columns:1fr 1fr; gap:.5rem 1.25rem;
+    }
+    .lab-edit-audit .label {
+        font-size:.66rem; text-transform:uppercase; letter-spacing:.06em;
+        color:#8a9ab8; font-weight:700;
+    }
+    .lab-edit-audit .who { color:#243049; font-weight:700; }
+    @@media (max-width:600px) { .lab-edit-audit { grid-template-columns:1fr; } }
+</style>
+
+<div class="lab-edit-header">
+    <div class="lab-edit-avatar">@initial</div>
+    <div style="flex:1 1 280px">
+        <h2><i class="bi bi-pencil-square me-2"></i>Edit Lab</h2>
+        <div class="subtitle mt-1">Update lab details. Lab Name must remain unique across the system.</div>
+    </div>
+    <a class="btn btn-light fw-bold" asp-action="ManageLabs"
+       style="border-radius:10px;color:#1565c0">
+        <i class="bi bi-arrow-left me-1"></i> Back to Labs
+    </a>
+</div>
+
+<div class="lab-edit-card">
+    <form id="frmEditLab" method="post" asp-action="EditLab">
+        @Html.AntiForgeryToken()
+        <input type="hidden" asp-for="LabId" />
+        <input type="hidden" asp-for="CreatedBy" />
+        <input type="hidden" asp-for="CreatedDate" />
+
+        <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+
+        <div class="row g-3 mb-3">
+            <div class="col-md-3">
+                <label class="form-label">Lab ID</label>
+                <input class="form-control" value="@Model.LabId" disabled />
+            </div>
+            <div class="col-md-9">
+                <label class="form-label">Lab Name <span class="text-danger">*</span></label>
+                <input id="editLabName" asp-for="LabName" class="form-control"
+                       maxlength="200" required autocomplete="off" />
+                <span asp-validation-for="LabName" class="text-danger"></span>
+                <div class="invalid-feedback" id="editLabNameFeedback"></div>
+                <small id="editLabNameHint" class="form-text text-muted">Lab name must be unique.</small>
+            </div>
+        </div>
+
+        <div class="mb-3 form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="IsActive" name="IsActive" value="true" @(Model.IsActive ? "checked" : "") />
+            <input type="hidden" name="IsActive" value="false" />
+            <label class="form-check-label fw-semibold" for="IsActive">Active</label>
+            <small class="text-muted ms-2">When inactive, the lab will be hidden from selectors.</small>
+        </div>
+
+        <div class="lab-edit-audit mb-3">
+            <div>
+                <div class="label">Created By</div>
+                <div class="who">@(string.IsNullOrWhiteSpace(Model.CreatedBy) ? "—" : Model.CreatedBy)</div>
+            </div>
+            <div>
+                <div class="label">Created Date</div>
+                <div>@(Model.CreatedDate?.ToString("yyyy-MM-dd HH:mm") ?? "—")</div>
+            </div>
+            <div>
+                <div class="label">Modified By</div>
+                <div class="who">@(string.IsNullOrWhiteSpace(Model.ModifiedBy) ? "—" : Model.ModifiedBy)</div>
+            </div>
+            <div>
+                <div class="label">Modified Date</div>
+                <div>@(Model.ModifiedDate?.ToString("yyyy-MM-dd HH:mm") ?? "—")</div>
+            </div>
+        </div>
+
+        <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary px-4"><i class="bi bi-check2 me-1"></i> Save Changes</button>
+            <a class="btn btn-outline-secondary" asp-action="ManageLabs">Cancel</a>
+        </div>
+    </form>
+</div>
+
+@section Scripts {
+<script>
+(function () {
+    var nameEl  = document.getElementById('editLabName');
+    var fb      = document.getElementById('editLabNameFeedback');
+    var hint    = document.getElementById('editLabNameHint');
+    var labId   = @Model.LabId;
+    if (!nameEl) return;
+
+    var checkUrl = '@Url.Action("IsLabNameAvailable", "Admin")';
+    var debounceTimer = null;
+    var originalName = nameEl.value;
+
+    function setError(msg) {
+        nameEl.classList.add('is-invalid');
+        if (fb) fb.textContent = msg;
+        try { nameEl.setCustomValidity(msg); } catch (e) {}
+    }
+    function clearError() {
+        nameEl.classList.remove('is-invalid');
+        if (fb) fb.textContent = '';
+        try { nameEl.setCustomValidity(''); } catch (e) {}
+    }
+
+    function check() {
+        var name = (nameEl.value || '').trim();
+        if (!name) { clearError(); return; }
+        if (name === originalName) { clearError(); return; }
+        fetch(checkUrl + '?labName=' + encodeURIComponent(name) + '&excludeId=' + labId, { credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+                if (!data) return;
+                if (data.available) {
+                    clearError();
+                    if (hint) { hint.textContent = '? Name is available.'; hint.className = 'form-text text-success'; }
+                } else {
+                    setError('A lab with this name already exists.');
+                    if (hint) { hint.textContent = ''; hint.className = 'form-text text-muted'; }
+                }
+            }).catch(function () {});
+    }
+
+    nameEl.addEventListener('input', function () {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(check, 300);
+    });
+    nameEl.addEventListener('blur', check);
+})();
+</script>
+}

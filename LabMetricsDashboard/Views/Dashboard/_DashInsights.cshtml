@@ -1,0 +1,55 @@
+@model LabMetricsDashboard.Models.DashboardViewModel
+@functions {
+    Microsoft.AspNetCore.Html.HtmlString InsightTable(
+        string title, string gradient,
+        IReadOnlyList<LabMetricsDashboard.Models.InsightRow> rows)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"<div class=\"col-12 col-lg-6\"><div class=\"card insight-card h-100\"><div class=\"card-header text-white\" style=\"background:{gradient}\">{title}</div><div class=\"card-body p-0\"><table class=\"table table-sm table-hover insight-table mb-0\"><thead class=\"table-light\"><tr><th>Label</th><th class=\"text-center\">Claims</th><th class=\"text-end\">Charges</th><th class=\"text-end\">Payments</th><th class=\"text-end\">Balance</th><th style=\"min-width:110px\">Rate</th></tr></thead><tbody>");
+        var maxRate = rows.Any() ? rows.Max(r => r.CollectionRate) : 1m;
+        foreach (var row in rows)
+        {
+            var barPct    = maxRate > 0 ? Math.Round((double)(row.CollectionRate / maxRate) * 100, 1) : 0;
+            var rateColor = row.CollectionRate >= 80 ? "#1565c0" : row.CollectionRate >= 50 ? "#1565c0" : "#e53935";
+            sb.Append($"<tr><td>{System.Net.WebUtility.HtmlEncode(row.Label)}</td><td class=\"text-center\">{row.Claims:N0}</td><td class=\"text-end\">{row.Charges:C0}</td><td class=\"text-end text-success\">{row.Payments:C0}</td><td class=\"text-end text-danger\">{row.Balance:C0}</td><td><div style=\"background:#e9ecef;border-radius:4px;height:6px;overflow:hidden;margin-bottom:3px\"><div style=\"width:{barPct}%;height:6px;border-radius:4px;background:linear-gradient(90deg,#1565c0,#42a5f5)\"></div></div><span style=\"font-size:.72rem;font-weight:700;color:{rateColor}\">{row.CollectionRate}%</span></td></tr>");
+        }
+        sb.Append("</tbody></table></div></div></div>");
+        return new Microsoft.AspNetCore.Html.HtmlString(sb.ToString());
+    }
+
+    Microsoft.AspNetCore.Html.HtmlString MonthBar(
+        string title, string gradient,
+        IReadOnlyList<(string Month, int Count)> items)
+    {
+        var maxCount = items.Any() ? items.Max(x => x.Count) : 1;
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"<div class=\"card insight-card h-100\"><div class=\"card-header text-white\" style=\"background:{gradient}\">{title}</div><div class=\"card-body\"><div class=\"table-responsive\"><table class=\"table table-sm insight-table mb-0\"><thead class=\"table-light\"><tr><th>Month</th><th>Claims</th><th class=\"w-50\">Bar</th></tr></thead><tbody>");
+        foreach (var (month, count) in items)
+        {
+            var pct = maxCount > 0 ? Math.Round((double)count / maxCount * 100, 1) : 0;
+            sb.Append($"<tr><td class=\"text-nowrap\">{month}</td><td class=\"text-center fw-semibold\">{count:N0}</td><td><div style=\"background:#e9ecef;border-radius:3px;height:8px;overflow:hidden\"><div style=\"width:{pct}%;height:8px;border-radius:3px;background:{gradient}\"></div></div></td></tr>");
+        }
+        sb.Append("</tbody></table></div></div></div>");
+        return new Microsoft.AspNetCore.Html.HtmlString(sb.ToString());
+    }
+}
+
+<hr class="my-4" />
+<h5 class="fw-bold mb-3">&#128202; Insights</h5>
+
+<div class="row g-4 mb-4">
+    @InsightTable("Payer Level",  "linear-gradient(135deg,#1565c0,#42a5f5)", Model.PayerLevelInsights)
+    @InsightTable("Panel Level",  "linear-gradient(135deg,#6a1b9a,#ab47bc)", Model.PanelLevelInsights)
+</div>
+<div class="row g-4 mb-4">
+    @InsightTable("Clinic Level",          "linear-gradient(135deg,#00695c,#26a69a)", Model.ClinicLevelInsights)
+    @InsightTable("Referring Physician",   "linear-gradient(135deg,#e65100,#ffa726)", Model.ReferringPhysicianInsights)
+</div>
+<div class="row g-4 mb-4">
+    <div class="col-12 col-lg-6">
+        @MonthBar("Date of Service – Monthly Claims",    "linear-gradient(135deg,#1b5e20,#66bb6a)", Model.DOSMonthly)
+    </div>
+    <div class="col-12 col-lg-6">
+        @MonthBar("First Bill Date – Monthly Claims",   "linear-gradient(135deg,#880e4f,#f06292)", Model.FirstBillMonthly)
+    </div>
+</div>

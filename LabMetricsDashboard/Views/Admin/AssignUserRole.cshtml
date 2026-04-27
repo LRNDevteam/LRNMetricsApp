@@ -1,0 +1,40 @@
+@model LabMetricsDashboard.Models.AdminViewModel
+@{
+    ViewData["Title"] = "Admin - Assign User Role";
+}
+
+<h2>Assign User Role</h2>
+<div class="row">
+    <div class="col-md-6">
+        <div class="card mb-3">
+            <div class="card-body">
+                <form id="frmAssignRolePage" method="post" asp-action="AssignRole">
+                    @Html.AntiForgeryToken()
+                    <div class="mb-2">
+                        <label class="form-label">User</label>
+                        <select class="form-select" id="mapUserSelectPage" name="assignUserId">
+                            <option value="">-- select user --</option>
+                            @foreach(var u in Model.Users){<option value="@u.LabUserID">@u.UserName</option>}
+                        </select>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">Role</label>
+                        <select class="form-select" id="mapRoleSelectPage" name="assignRoleId">
+                            <option value="">-- select role --</option>
+                            @foreach(var r in Model.Roles){<option value="@r.RoleID">@r.RoleName</option>}
+                        </select>
+                    </div>
+                    <div class="d-grid">
+                        <button class="btn btn-primary">Assign Role</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <h5>Assigned Roles</h5>
+        <table class="table table-sm" id="tblUserRolesPage"><thead><tr><th>Role</th><th>Action</th></tr></thead><tbody></tbody></table>
+    </div>
+</div>
+
+@await Html.PartialAsync("_AdminScripts")

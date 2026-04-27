@@ -52,6 +52,12 @@ public sealed class DashboardViewModel
 
     public string? ResolvedClaimFilePath { get; init; }
 
+    /// <summary>True when data was loaded from the database (not a CSV file).</summary>
+    public bool IsDbMode { get; init; }
+
+    /// <summary>The most recently ingested RunId from ClaimLevelData; null when no data exists.</summary>
+    public string? DbLatestRunId { get; init; }
+
     // ?? Line Level KPIs ??????????????????????????????????????????????????????
     public int     TotalLines        { get; init; }
     public decimal LineTotalCharges  { get; init; }
@@ -85,6 +91,19 @@ public sealed class DashboardViewModel
 
     // Top CPT by Charges enriched (source: Line Level)
     public IReadOnlyList<CptDetailRow> TopCptDetail { get; init; } = [];
+
+    /// <summary>
+    /// True when the page is serving data from pre-aggregated snapshot tables
+    /// (<c>UseDBDashboard = true</c> and no active filters).
+    /// False when data comes from live <c>ClaimLevelData</c> / <c>LineLevelData</c> queries.
+    /// </summary>
+    public bool IsAggregateMode { get; init; }
+
+    /// <summary>
+    /// True when the selected lab has snapshot mode enabled
+    /// (<c>UseDBDashboard = true</c>), regardless of current filters.
+    /// </summary>
+    public bool SupportsAggregateMode { get; init; }
 }
 
 /// <summary>One row in a charges / payments / balance insight table.</summary>

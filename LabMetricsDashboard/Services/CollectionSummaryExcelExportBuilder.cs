@@ -35,6 +35,9 @@ public static class CollectionSummaryExcelExportBuilder
         BuildInsurancePaymentPctSheet(wb, vm.InsurancePaymentPct, labName);
         BuildCptPaymentPctSheet(wb, vm.CptPaymentPct, labName);
         BuildPanelAveragesSheet(wb, vm.PanelAverages, labName);
+        BuildAvgPaymentsSheet(wb, vm.AvgPayments, labName);
+        BuildStatusSummarySheet(wb, vm.StatusSummary, labName);
+        BuildProviderSummarySheet(wb, vm.ProviderSummary, labName);
         BuildSplitRawDataSheets(wb, "ClaimLevelData", claimRows, labName, ExcelTheme.TabBlue);
         BuildSplitRawDataSheets(wb, "LineLevelData", lineRows, labName, ExcelTheme.TabGold);
 
@@ -642,10 +645,304 @@ public static class CollectionSummaryExcelExportBuilder
         WriteCell(ws, row, col, m.AvgDays60, bg, isCurrency: true);
     }
 
-    // ?? Raw Data Sheets ?????????????????????????????????????????????
+    // ?? Average Payments (Per Panel | Last 6 Months | Posted Date) ?????
+
+    private static void BuildAvgPaymentsSheet(XLWorkbook wb, PanelAveragesResult result, string labName)
+    {
+        if (result.PanelRows.Count == 0) return;
+
+        var ws = wb.AddWorksheet("Avg Payments");
+        ws.TabColor = ExcelTheme.TabBlue;
+        ExcelTheme.ApplyDefaults(ws);
+
+        string[] headers =
+        [
+            "Panel / Payer", "No of Claims", "Total Charges", "Avg Billed $",
+            "Fully Paid #", "Fully Paid $", "Avg Fully Paid $",
+            "Adjudicated #", "Adjudicated $", "Avg Adjudicated $",
+            "30-Day #", "30-Day $", "Avg 30-Day $",
+            "60-Day #", "60-Day $", "Avg 60-Day $"
+        ];
+        int colCount = headers.Length;
+
+        int row = 1;
+        ExcelTheme.WriteBlueTitleBar(ws, row, colCount,
+            $"Average Payments \u2014 Per Panel | Last 6 Months | Posted Date \u2014 {labName}");
+        row++;
+
+        // Two-row header: span group columns
+        var groupBg = ExcelTheme.BlueSubHeaderBg;
+        WriteMergedHeader(ws, row, row, 1, 4, "Panel / Payer — Summary", ExcelTheme.BlueHeaderBg);
+        WriteMergedHeader(ws, row, row, 5, 7,  "Fully Paid",   groupBg);
+        WriteMergedHeader(ws, row, row, 8, 10, "Adjudicated",  groupBg);
+        WriteMergedHeader(ws, row, row, 11, 13, "30 Days",     groupBg);
+        WriteMergedHeader(ws, row, row, 14, 16, "60 Days",     groupBg);
+        row++;
+
+        ExcelTheme.WriteHeaderRow(ws, row, 1, headers, ExcelTheme.BlueHeaderBg);
+        row++;
+        int freezeRow = row;
+
+        int idx = 0;
+        foreach (var panel in result.PanelRows)
+        {
+            var bg = idx % 2 == 0 ? XLColor.White : ExcelTheme.BlueBandedRowBg;
+            WriteAvgPayMetricsRow(ws, row, panel.PanelName, panel.Metrics, bg, bold: true);
+            row++;
+
+            foreach (var payer in panel.Payers)
+            {
+                WriteAvgPayMetricsRow(ws, row, $"  {payer.PayerName}", payer.Metrics, bg, bold: false);
+                row++;
+            }
+            idx++;
+        }
+
+        AutoFitColumns(ws);
+        ws.SheetView.FreezeRows(freezeRow - 1);
+    }
+
+    private static void WriteAvgPayMetricsRow(
+        IXLWorksheet ws, int row, string label, PanelAveragesMetrics m, XLColor bg, bool bold)
+    {
+        int col = 1;
+        WriteCell(ws, row, col++, label,             bg, isText: true, bold: bold);
+        WriteCell(ws, row, col++, m.ClaimCount,      bg);
+        WriteCell(ws, row, col++, m.TotalCharges,    bg, isCurrency: true);
+        WriteCell(ws, row, col++, m.AvgBilled,       bg, isCurrency: true);
+        WriteCell(ws, row, col++, m.FullyPaidCount,  bg);
+        WriteCell(ws, row, col++, m.FullyPaidAmount, bg, isCurrency: true);
+        WriteCell(ws, row, col++, m.AvgFullyPaid,    bg, isCurrency: true);
+        WriteCell(ws, row, col++, m.AdjudicatedCount,  bg);
+        WriteCell(ws, row, col++, m.AdjudicatedAmount, bg, isCurrency: true);
+        WriteCell(ws, row, col++, m.AvgAdjudicated,    bg, isCurrency: true);
+        WriteCell(ws, row, col++, m.Days30Count,  bg);
+        WriteCell(ws, row, col++, m.Days30Amount, bg, isCurrency: true);
+        WriteCell(ws, row, col++, m.AvgDays30,   bg, isCurrency: true);
+        WriteCell(ws, row, col++, m.Days60Count,  bg);
+        WriteCell(ws, row, col++, m.Days60Amount, bg, isCurrency: true);
+        WriteCell(ws, row, col,   m.AvgDays60,   bg, isCurrency: true);
+    }
+
+    // ?? Status Summary ??????????????????????????????????????????????
+
+    private static void BuildStatusSummarySheet(XLWorkbook wb, StatusSummaryResult result, string labName)
+    {
+
+        if (!result.HasData) return;
+
+        var ws = wb.AddWorksheet("Status Summary");
+        ws.TabColor = ExcelTheme.TabBlue;
+        ExcelTheme.ApplyDefaults(ws);
+
+        // Summary rows appear ABOVE their detail rows (parent before children)
+        ws.Outline.SummaryVLocation = XLOutlineSummaryVLocation.Top;
+
+        // Colour palette – matches the screenshot feel
+        var claimStatusBg = XLColor.FromHtml("#0D3460"); // dark navy  – ClaimStatus header
+        var panelBg       = XLColor.FromHtml("#17548A"); // dark blue  – Panel
+        var cptBg         = XLColor.FromHtml("#DCE8FF"); // light blue – CPT
+        var payerBg       = XLColor.White;               // white      – Payer
+        var grandBg       = XLColor.FromHtml("#0A2540"); // deepest    – Grand Total
+
+        // 5 columns – no separate "Level" column; hierarchy is visual
+        string[] headers = ["Row Labels", "Count of Claims", "Ins. Payments", "Ins. Balance", "Pt Balance"];
+        int colCount = headers.Length;
+
+        int row = 1;
+        ExcelTheme.WriteBlueTitleBar(ws, row, colCount, $"Status Summary \u2014 {labName}");
+        row++;
+        ExcelTheme.WriteHeaderRow(ws, row, 1, headers, ExcelTheme.BlueHeaderBg);
+        row++;
+        ws.SheetView.FreezeRows(row - 1);
+
+        foreach (var csRow in result.Rows)
+        {
+            // L1 – ClaimStatus: no outline level (always visible), dark header
+            WriteSsRow(ws, row++, csRow.ClaimStatus,
+                csRow.NoClaims, csRow.InsurancePayments, csRow.InsuranceBalance, csRow.PatientBalance,
+                claimStatusBg, XLColor.White, bold: true, indent: 0, outlineLevel: 0);
+
+            foreach (var panelRow in csRow.PanelRows)
+            {
+                // L2 – Panel: outline level 1
+                WriteSsRow(ws, row++, panelRow.PanelName,
+                    panelRow.NoClaims, panelRow.InsurancePayments, panelRow.InsuranceBalance, panelRow.PatientBalance,
+                    panelBg, XLColor.White, bold: true, indent: 1, outlineLevel: 1);
+
+                foreach (var cptRow in panelRow.CptRows)
+                {
+                    // L3 – CPT: outline level 2
+                    WriteSsRow(ws, row++, cptRow.CptCode,
+                        cptRow.NoClaims, cptRow.InsurancePayments, cptRow.InsuranceBalance, cptRow.PatientBalance,
+                        cptBg, XLColor.FromHtml("#0D3460"), bold: true, indent: 2, outlineLevel: 2);
+
+                    foreach (var payerRow in cptRow.Payers)
+                    {
+                        // L4 – Payer: outline level 3 (deepest, initially visible)
+                        WriteSsRow(ws, row++, payerRow.PayerName,
+                            payerRow.NoClaims, payerRow.InsurancePayments, payerRow.InsuranceBalance, payerRow.PatientBalance,
+                            payerBg, XLColor.FromHtml("#334155"), bold: false, indent: 4, outlineLevel: 3);
+                    }
+                }
+            }
+        }
+
+        // Grand Total
+        var grandLabel = ws.Cell(row, 1);
+        grandLabel.Value = "Grand Total";
+        grandLabel.Style.Fill.BackgroundColor = grandBg;
+        grandLabel.Style.Font.Bold = true;
+        grandLabel.Style.Font.FontColor = XLColor.White;
+
+        WriteGrandTotalCell(ws, row, 2, result.GrandNoClaims,          grandBg);
+        WriteGrandTotalCell(ws, row, 3, result.GrandInsurancePayments, grandBg, isCurrency: true);
+        WriteGrandTotalCell(ws, row, 4, result.GrandInsuranceBalance,  grandBg, isCurrency: true);
+        WriteGrandTotalCell(ws, row, 5, result.GrandPatientBalance,    grandBg, isCurrency: true);
+
+        ws.Column(1).Width = 46;
+        ws.Column(2).Width = 16;
+        ws.Column(3).Width = 20;
+        ws.Column(4).Width = 20;
+        ws.Column(5).Width = 18;
+    }
+
+    /// <summary>Writes one Status Summary data row with outline grouping and accounting-style currency.</summary>
+    private static void WriteSsRow(
+        IXLWorksheet ws, int rowNum, string label,
+        int noClaims, decimal insPayments, decimal insBalance, decimal ptBalance,
+        XLColor bg, XLColor fontColor, bool bold, int indent, int outlineLevel)
+    {
+        if (outlineLevel > 0)
+            ws.Row(rowNum).OutlineLevel = outlineLevel;
+
+        ApplySsStyle(ws.Cell(rowNum, 1), bg, fontColor, bold, indent);
+        ws.Cell(rowNum, 1).Value = label;
+
+        var claimsCell = ws.Cell(rowNum, 2);
+        claimsCell.Value = noClaims;
+        claimsCell.Style.NumberFormat.Format = "#,##0";
+        claimsCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+        ApplySsStyle(claimsCell, bg, fontColor, bold, 0);
+
+        WriteSsCurrency(ws.Cell(rowNum, 3), insPayments, bg, fontColor, bold);
+        WriteSsCurrency(ws.Cell(rowNum, 4), insBalance,  bg, fontColor, bold);
+        WriteSsCurrency(ws.Cell(rowNum, 5), ptBalance,   bg, fontColor, bold);
+    }
+
+    private static void ApplySsStyle(IXLCell cell, XLColor bg, XLColor fontColor, bool bold, int indent)
+    {
+        cell.Style.Fill.BackgroundColor = bg;
+        cell.Style.Font.FontColor = fontColor;
+        cell.Style.Font.Bold = bold;
+        if (indent > 0) cell.Style.Alignment.Indent = indent;
+        cell.Style.Border.BottomBorder = XLBorderStyleValues.Hair;
+        cell.Style.Border.BottomBorderColor = XLColor.FromHtml("#C5D0E6");
+    }
+
+    /// <summary>
+    /// Writes a currency cell using Excel accounting format: left-aligned $, right-aligned amount,
+    /// "$ -" for zero — exactly matching the screenshot layout.
+    /// </summary>
+    private static void WriteSsCurrency(IXLCell cell, decimal value, XLColor bg, XLColor fontColor, bool bold)
+    {
+        if (value == 0m)
+        {
+            cell.Value = "-";
+            cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+        }
+        else
+        {
+            cell.Value = value;
+            cell.Style.NumberFormat.Format = @"_($* #,##0.00_);_($* (#,##0.00);_($* ""-""??_);_(@_)";
+        }
+        cell.Style.Fill.BackgroundColor = bg;
+        cell.Style.Font.FontColor = fontColor;
+        cell.Style.Font.Bold = bold;
+        cell.Style.Border.BottomBorder = XLBorderStyleValues.Hair;
+        cell.Style.Border.BottomBorderColor = XLColor.FromHtml("#C5D0E6");
+    }
+
+    private static void WriteGrandTotalCell(IXLWorksheet ws, int row, int col, object value, XLColor bg, bool isCurrency = false)
+    {
+        var cell = ws.Cell(row, col);
+        if (value is int i) cell.Value = i;
+        else if (value is decimal d) { cell.Value = d; if (isCurrency) cell.Style.NumberFormat.Format = "#,##0.00"; }
+        cell.Style.Fill.BackgroundColor = bg;
+        cell.Style.Font.Bold = true;
+        cell.Style.Font.FontColor = XLColor.White;
+        cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+    }
+
+
+    // ?? Provider Summary ??????????????????????????????????????????????
+
+    private static void BuildProviderSummarySheet(XLWorkbook wb, ProviderSummaryResult result, string labName)
+    {
+        if (!result.HasData) return;
+
+        var ws = wb.AddWorksheet("Provider Summary");
+        ws.TabColor = ExcelTheme.TabBlue;
+        ExcelTheme.ApplyDefaults(ws);
+
+        string[] headers = ["#", "Referring Provider", "No. of Claims", "Insurance Payments", "Insurance Balance", "Patient Balance", "Claim Share %"];
+        int colCount = headers.Length;
+
+        int row = 1;
+        ExcelTheme.WriteBlueTitleBar(ws, row, colCount, $"Provider Summary \u2014 {labName}");
+        row++;
+        ExcelTheme.WriteHeaderRow(ws, row, 1, headers, ExcelTheme.BlueHeaderBg);
+        row++;
+        int freezeRow = row;
+
+        for (int i = 0; i < result.Rows.Count; i++)
+        {
+            var r = result.Rows[i];
+            var bg = i % 2 == 0 ? XLColor.White : ExcelTheme.BlueBandedRowBg;
+            var sharePct = result.GrandNoClaims > 0
+                ? Math.Round((decimal)r.NoOfClaims / result.GrandNoClaims * 100m, 2)
+                : 0m;
+
+            WriteCell(ws, row, 1, r.Rank,              bg);
+            WriteCell(ws, row, 2, r.ReferringProvider, bg, isText: true);
+            WriteCell(ws, row, 3, r.NoOfClaims,        bg);
+            WriteCell(ws, row, 4, r.InsurancePayments, bg, isCurrency: true);
+            WriteCell(ws, row, 5, r.InsuranceBalance,  bg, isCurrency: true);
+            WriteCell(ws, row, 6, r.PatientBalance,    bg, isCurrency: true);
+            WriteCell(ws, row, 7, sharePct,            bg, isPct: true);
+            row++;
+        }
+
+        // Grand Total row
+        var grandBg = XLColor.FromHtml("#0D3460");
+        var grandLbl = ws.Cell(row, 1);
+        grandLbl.Value = "Grand Total";
+        grandLbl.Style.Fill.BackgroundColor = grandBg;
+        grandLbl.Style.Font.Bold = true;
+        grandLbl.Style.Font.FontColor = XLColor.White;
+        ws.Cell(row, 2).Style.Fill.BackgroundColor = grandBg;
+
+        WriteGrandTotalCell(ws, row, 3, result.GrandNoClaims,        grandBg);
+        WriteGrandTotalCell(ws, row, 4, result.GrandInsurancePayments, grandBg, isCurrency: true);
+        WriteGrandTotalCell(ws, row, 5, result.GrandInsuranceBalance,  grandBg, isCurrency: true);
+        WriteGrandTotalCell(ws, row, 6, result.GrandPatientBalance,    grandBg, isCurrency: true);
+        var shareCell = ws.Cell(row, 7);
+        shareCell.Value = 100m;
+        shareCell.Style.NumberFormat.Format = "#,##0.00\"%\"";
+        shareCell.Style.Fill.BackgroundColor = grandBg;
+        shareCell.Style.Font.Bold = true;
+        shareCell.Style.Font.FontColor = XLColor.White;
+        shareCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+
+        AutoFitColumns(ws);
+        ws.SheetView.FreezeRows(freezeRow - 1);
+    }
+
+    // ?? Raw Data Sheets ??????????????????????????????????????????????
 
     /// <summary>Row threshold above which data is split into multiple sheets.</summary>
     private const int SplitThreshold = 400_000;
+
 
     /// <summary>Maximum rows per raw data sheet to prevent out-of-memory on very large tables.</summary>
     private const int MaxRawDataRows = 500_000;

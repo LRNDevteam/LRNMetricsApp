@@ -143,6 +143,16 @@ public class CodingController : Controller
             var safeLabName = string.Join("_", selectedLab.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)).Trim('_');
             var fileName = $"{safeLabName}_CodingSummary_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
 
+            // Signal the client-side progress overlay (csExportDone cookie) so it
+            // can stop polling and close once the file download starts.
+            Response.Cookies.Append("csExportDone", "1", new CookieOptions
+            {
+                Path = "/",
+                HttpOnly = false,
+                SameSite = SameSiteMode.Lax,
+                MaxAge = TimeSpan.FromSeconds(30),
+            });
+
             return File(
                 stream.ToArray(),
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

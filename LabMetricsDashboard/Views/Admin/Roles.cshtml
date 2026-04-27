@@ -1,0 +1,43 @@
+@model LabMetricsDashboard.Models.AdminViewModel
+@{
+    ViewData["Title"] = "Admin - Roles";
+}
+
+<h2>Roles</h2>
+<div class="row">
+    <div class="col-md-4">
+        <div class="card mb-3">
+            <div class="card-body">
+                <h5>Create Role</h5>
+                <form id="frmCreateRolePage" method="post" asp-action="CreateRole">
+                    @Html.AntiForgeryToken()
+                    <div class="mb-2">
+                        <label class="form-label">Role Name</label>
+                        <input class="form-control" asp-for="NewRole.RoleName" />
+                        <span asp-validation-for="NewRole.RoleName" class="text-danger"></span>
+                    </div>
+                    <div class="d-grid">
+                        <button class="btn btn-primary">Create Role</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-8">
+        <h5>Existing Roles</h5>
+        <table class="table table-sm table-striped">
+            <thead><tr><th>Role Name</th><th>Active</th></tr></thead>
+            <tbody>
+                @foreach(var r in Model.Roles)
+                {
+                    <tr>
+                        <td>@r.RoleName</td>
+                        <td>@(r.IsActive?"Yes":"No")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@await Html.PartialAsync("_AdminScripts")

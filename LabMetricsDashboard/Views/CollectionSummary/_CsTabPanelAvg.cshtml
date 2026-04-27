@@ -1,0 +1,103 @@
+﻿@model LabMetricsDashboard.Models.CollectionSummaryViewModel
+            @if (Model.PanelAverages.Count > 0)
+            {
+                <div class="cs-rpt-wrap">
+                    <div class="cs-rpt-scroll">
+                        <table class="cs-rpt-table">
+                            <thead>
+                                <tr>
+                                    <th colspan="2" rowspan="2" style="text-align:left;min-width:300px">Panel Name | Payer Name</th>
+                                    <th rowspan="2">No of Claims</th>
+                                    <th rowspan="2">Total Charges</th>
+                                    <th rowspan="2">Average Billed Amount</th>
+                                    <th rowspan="2">Carrier Payment</th>
+                                    <th rowspan="2">Average Carrier Payment</th>
+                                    <th colspan="3" style="text-align:center;border-bottom:1px solid rgba(255,255,255,.2)">Fully Paid</th>
+                                    <th colspan="3" style="text-align:center;border-bottom:1px solid rgba(255,255,255,.2)">Adjudicated</th>
+                                    <th colspan="3" style="text-align:center;border-bottom:1px solid rgba(255,255,255,.2)">30 Days</th>
+                                    <th colspan="3" style="text-align:center;border-bottom:1px solid rgba(255,255,255,.2)">60 Days</th>
+                                </tr>
+                                <tr>
+                                    <th>Count</th><th>$</th><th>Avg $</th>
+                                    <th>Count</th><th>$</th><th>Avg $</th>
+                                    <th>Count</th><th>$</th><th>Avg $</th>
+                                    <th>Count</th><th>$</th><th>Avg $</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @{ var paIdx = 0; }
+                                @foreach (var panel in Model.PanelAverages)
+                                {
+                                    paIdx++;
+                                    var letter = paIdx <= 26 ? ((char)('A' + paIdx - 1)).ToString() : paIdx.ToString();
+                                    var m = panel.Metrics;
+                                    <tr>
+                                        <td style="font-weight:700">@letter</td>
+                                        <td style="text-align:left;font-weight:700">@panel.PanelName</td>
+                                        <td style="text-align:right;font-weight:600">@m.ClaimCount.ToString("N0")</td>
+                                        <td style="text-align:right;font-weight:600">@m.TotalCharges.ToString("C0")</td>
+                                        <td style="text-align:right;font-weight:600">@m.AvgBilled.ToString("C2")</td>
+                                        <td style="text-align:right;font-weight:600">@m.CarrierPayment.ToString("C0")</td>
+                                        <td style="text-align:right;font-weight:600">@m.AvgCarrierPayment.ToString("C2")</td>
+                                        <td style="text-align:right;font-weight:600">@m.FullyPaidCount.ToString("N0")</td>
+                                        <td style="text-align:right;font-weight:600">@m.FullyPaidAmount.ToString("C0")</td>
+                                        <td style="text-align:right;font-weight:600">@m.AvgFullyPaid.ToString("C2")</td>
+                                        <td style="text-align:right;font-weight:600">@m.AdjudicatedCount.ToString("N0")</td>
+                                        <td style="text-align:right;font-weight:600">@m.AdjudicatedAmount.ToString("C0")</td>
+                                        <td style="text-align:right;font-weight:600">@m.AvgAdjudicated.ToString("C2")</td>
+                                        <td style="text-align:right;font-weight:600">@m.Days30Count.ToString("N0")</td>
+                                        <td style="text-align:right;font-weight:600">@m.Days30Amount.ToString("C0")</td>
+                                        <td style="text-align:right;font-weight:600">@m.AvgDays30.ToString("C2")</td>
+                                        <td style="text-align:right;font-weight:600">@m.Days60Count.ToString("N0")</td>
+                                        <td style="text-align:right;font-weight:600">@m.Days60Amount.ToString("C0")</td>
+                                        <td style="text-align:right;font-weight:600">@m.AvgDays60.ToString("C2")</td>
+                                    </tr>
+                                    @foreach (var payer in panel.Payers)
+                                    {
+                                        var pm = payer.Metrics;
+                                        <tr class="mcv-drilldown">
+                                            <td></td>
+                                            <td style="text-align:left">@payer.PayerName</td>
+                                            <td style="text-align:right">@pm.ClaimCount.ToString("N0")</td>
+                                            <td style="text-align:right">@pm.TotalCharges.ToString("C0")</td>
+                                            <td style="text-align:right">@pm.AvgBilled.ToString("C2")</td>
+                                            <td style="text-align:right">@pm.CarrierPayment.ToString("C0")</td>
+                                            <td style="text-align:right">@pm.AvgCarrierPayment.ToString("C2")</td>
+                                            <td style="text-align:right">@pm.FullyPaidCount.ToString("N0")</td>
+                                            <td style="text-align:right">@pm.FullyPaidAmount.ToString("C0")</td>
+                                            <td style="text-align:right">@pm.AvgFullyPaid.ToString("C2")</td>
+                                            <td style="text-align:right">@pm.AdjudicatedCount.ToString("N0")</td>
+                                            <td style="text-align:right">@pm.AdjudicatedAmount.ToString("C0")</td>
+                                            <td style="text-align:right">@pm.AvgAdjudicated.ToString("C2")</td>
+                                            <td style="text-align:right">@pm.Days30Count.ToString("N0")</td>
+                                            <td style="text-align:right">@pm.Days30Amount.ToString("C0")</td>
+                                            <td style="text-align:right">@pm.AvgDays30.ToString("C2")</td>
+                                            <td style="text-align:right">@pm.Days60Count.ToString("N0")</td>
+                                            <td style="text-align:right">@pm.Days60Amount.ToString("C0")</td>
+                                            <td style="text-align:right">@pm.AvgDays60.ToString("C2")</td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
+                    <strong>Source:</strong> Claim Level Data &bull;
+                    <strong>Date Range:</strong> Last 6 months by Date of Service &bull;
+                    <strong>Rows:</strong> PanelName ? PayerName drill-down &bull;
+                    <strong>Adjudicated Statuses:</strong> Fully Paid, Partially Paid, Complete W/O, Fully Adjusted, Fully Denied, Denied, Partially Denied, Partially Adjusted, Patient Responsibility &bull;
+                    <strong>30/60 Days:</strong> Adjudicated claims where DaysToDOS ? 30 / 60 &bull;
+                    <strong>Sorted by:</strong> No of Claims DESC
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5 text-muted">
+                    <div style="font-size:2rem;opacity:.4">&#128202;</div>
+                    <div class="fw-semibold mt-2">No panel averages data available</div>
+                    <div class="small mt-1">No matching claim records found for the last 6 months. Try adjusting your filters.</div>
+                </div>
+            }
+        

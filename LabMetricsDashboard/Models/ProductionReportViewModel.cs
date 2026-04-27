@@ -1,15 +1,15 @@
-namespace LabMetricsDashboard.Models;
+ï»¿namespace LabMetricsDashboard.Models;
 
 /// <summary>
 /// View model for the Production Report page.
 /// Contains the lab selector, filter state, and the "Monthly Claim Volume"
-/// pivot table grouped by PanelName (rows) × Year/Month of FirstBilledDate (columns).
+/// pivot table grouped by PanelName (rows)  Year/Month of FirstBilledDate (columns).
 /// Each panel row includes drill-down sub-rows for its top 3 payers by unique claim count.
 /// </summary>
 public sealed class ProductionReportViewModel
 {
-public List<string> AvailableLabs { get; init; } = [];
-public string SelectedLab { get; init; } = string.Empty;
+    public List<string> AvailableLabs { get; init; } = [];
+    public string SelectedLab { get; init; } = string.Empty;
 
     /// <summary>
     /// Active per-lab Production Summary rule applied to the Monthly Claim Volume tab
@@ -31,11 +31,27 @@ public string SelectedLab { get; init; } = string.Empty;
     /// </summary>
     public string? ProductionSummaryWeekRange { get; init; }
 
-// Filters
+    // Filters
     public List<string> FilterPayerNames { get; init; } = [];
     public List<string> FilterPanelNames { get; init; } = [];
+
+    /// <summary>
+    /// When <c>true</c>, the selected <see cref="FilterPayerNames"/> are <em>excluded</em>
+    /// from results rather than included. Only used by the Production Summary Report.
+    /// </summary>
+    public bool FilterPayerNamesExclude { get; init; }
+
+    /// <summary>
+    /// When <c>true</c>, the selected <see cref="FilterPanelNames"/> are <em>excluded</em>
+    /// from results rather than included. Only used by the Production Summary Report.
+    /// </summary>
+    public bool FilterPanelNamesExclude { get; init; }
     public string? FilterFirstBillFrom { get; init; }
     public string? FilterFirstBillTo { get; init; }
+    public string? FilterDosFrom { get; init; }
+    public string? FilterDosTo { get; init; }
+    public string? FilterFirstBilledFrom { get; init; }
+    public string? FilterFirstBilledTo { get; init; }
 
     // Filter option lists
     public List<string> PayerNames { get; init; } = [];
@@ -160,8 +176,14 @@ public string SelectedLab { get; init; } = string.Empty;
 
     public bool HasFilters => FilterPayerNames.Count > 0
         || FilterPanelNames.Count > 0
+        || FilterPayerNamesExclude
+        || FilterPanelNamesExclude
         || !string.IsNullOrWhiteSpace(FilterFirstBillFrom)
-        || !string.IsNullOrWhiteSpace(FilterFirstBillTo);
+        || !string.IsNullOrWhiteSpace(FilterFirstBillTo)
+        || !string.IsNullOrWhiteSpace(FilterDosFrom)
+        || !string.IsNullOrWhiteSpace(FilterDosTo)
+        || !string.IsNullOrWhiteSpace(FilterFirstBilledFrom)
+        || !string.IsNullOrWhiteSpace(FilterFirstBilledTo);
 }
 
 /// <summary>One panel's row in the Monthly Claim Volume table.</summary>
@@ -247,9 +269,8 @@ public sealed class WeeklyPayerDrillDown
     public decimal TotalCharges { get; init; }
 }
 
-// ?? Coding models ????????????????????????????????????????????????????????????
+// ?? Coding ????????????????????????????????????????????????????????????
 
-/// <summary>One panel's row in the Coding table.</summary>
 public sealed class CodingPanelRow
 {
     public string PanelName { get; init; } = string.Empty;
@@ -264,7 +285,6 @@ public sealed class CodingPanelRow
     public List<CodingCptDrillDown> CptRows { get; init; } = [];
 }
 
-/// <summary>CPT Code drill-down sub-row under a Coding panel row.</summary>
 public sealed class CodingCptDrillDown
 {
     public string CptCodeUnitsModifier { get; init; } = string.Empty;
@@ -278,7 +298,6 @@ public sealed class CodingCptDrillDown
 
 // ?? Payer Breakdown models ?????????????????????????????????????????????????
 
-/// <summary>One payer’s row in the Payer Breakdown table.</summary>
 public sealed class PayerBreakdownRow
 {
     public string PayerName { get; init; } = string.Empty;
@@ -295,7 +314,6 @@ public sealed class PayerBreakdownRow
 
 // ?? Payer X Panel models ???????????????????????????????????????????????????
 
-/// <summary>One payer's row in the Payer X Panel cross-tab table.</summary>
 public sealed class PayerPanelRow
 {
     public string PayerName { get; init; } = string.Empty;
@@ -310,9 +328,8 @@ public sealed class PayerPanelRow
     public decimal GrandTotalCharges { get; init; }
 }
 
-// ?? Unbilled X Aging models ?????????????????????????????????????????????
+// ?? Unbilled X Aging ?????????????????????????????????????????????
 
-/// <summary>Ordered aging bucket keys used as column headers.</summary>
 public static class AgingBuckets
 {
     public const string Current = "Current";
@@ -325,7 +342,6 @@ public static class AgingBuckets
     public static readonly IReadOnlyList<string> All = [Current, Over30, Over60, Over90, Over120];
 }
 
-/// <summary>One panel's row in the Unbilled X Aging table.</summary>
 public sealed class UnbilledAgingRow
 {
     public string PanelName { get; init; } = string.Empty;
@@ -340,12 +356,10 @@ public sealed class UnbilledAgingRow
     public decimal GrandTotalCharges { get; init; }
 }
 
-// ?? CPT Breakdown models ????????????????????????????????????????????????
+// ?? CPT Breakdown ???????????????????????????????????????????????
 
-/// <summary>A single cell in the CPT Breakdown pivot (units + billed charges).</summary>
 public sealed record CptBreakdownCell(decimal Units, decimal BilledCharges);
 
-/// <summary>One CPT code's row in the CPT Breakdown table.</summary>
 public sealed class CptBreakdownRow
 {
     public string CptCode { get; init; } = string.Empty;

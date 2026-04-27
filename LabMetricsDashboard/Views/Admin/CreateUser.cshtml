@@ -1,0 +1,14 @@
+@inherits Microsoft.AspNetCore.Mvc.Razor.RazorPage<LabMetricsDashboard.Models.AdminViewModel>
+@{
+    ViewData["Title"] = "Admin - Create User";
+}
+
+<h2>Create User</h2>
+
+<div class="card mb-3">
+    <div class="card-body">
+        @await Html.PartialAsync("_CreateUserForm", Model)
+    </div>
+</div>
+
+@await Html.PartialAsync("_AdminScripts")

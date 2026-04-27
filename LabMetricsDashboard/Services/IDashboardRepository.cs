@@ -27,6 +27,16 @@ public interface IDashboardRepository
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns Dashboard data from pre-aggregated snapshot tables populated by
+    /// <c>dbo.usp_RefreshDashboard</c>. No filters are applied — the result reflects
+    /// the full dataset at the time the snapshot was last refreshed.
+    /// Called when <c>UseDBDashboard = true</c> and no active filters are present.
+    /// </summary>
+    Task<DashboardResult> GetDashboardFromAggregatesAsync(
+        string connectionString,
+        CancellationToken ct = default);
 }
 
 /// <summary>Result container for the Dashboard Index page.</summary>
@@ -83,4 +93,7 @@ public sealed record DashboardResult(
     Dictionary<string, int> PayStatusBreakdown,
 
     // Top CPT detail rows
-    List<CptDetailRow> TopCptDetail);
+    List<CptDetailRow> TopCptDetail,
+
+    /// <summary>The most recently ingested RunId in ClaimLevelData, or null when no data exists.</summary>
+    string? LatestRunId);

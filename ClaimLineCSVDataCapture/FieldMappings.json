@@ -52,6 +52,40 @@
         { "CsvHeader": "DaystoBill",                   "SqlColumn": "DaystoBill",             "IncludeInHash": false },
         { "CsvHeader": "DaystoPost",                   "SqlColumn": "DaystoPost",             "IncludeInHash": false },
         { "CsvHeader": "ICD Pointer",                  "SqlColumn": "ICDPointer",             "IncludeInHash": true }
+        ,{ "CsvHeader": "UID",                          "SqlColumn": "UID",                     "IncludeInHash": false }
+        ,{ "CsvHeader": "Aging",                        "SqlColumn": "Aging",                   "IncludeInHash": false }
+        ,{ "CsvHeader": "Pat name",                     "SqlColumn": "PatientName",            "IncludeInHash": false }
+        ,{ "CsvHeader": "LIS Pat Name",                 "SqlColumn": "LISPatientName",         "IncludeInHash": false }
+        ,{ "CsvHeader": "Subscriber Id",               "SqlColumn": "SubscriberId",           "IncludeInHash": false }
+        ,{ "CsvHeader": "Panel Type",                   "SqlColumn": "PanelType",              "IncludeInHash": false }
+        ,{ "CsvHeader": "Entered Week",                 "SqlColumn": "EnteredWeek",            "IncludeInHash": false }
+        ,{ "CsvHeader": "Entered Status",               "SqlColumn": "EnteredStatus",          "IncludeInHash": false }
+        ,{ "CsvHeader": "Last Activity Date",           "SqlColumn": "LastActivityDate",       "IncludeInHash": false }
+        ,{ "CsvHeader": "Emedix Submission Date",      "SqlColumn": "EmedixSubmissionDate",   "IncludeInHash": false }
+        ,{ "CsvHeader": "Claim Type",                   "SqlColumn": "ClaimType",              "IncludeInHash": false }
+        ,{ "CsvHeader": "Billed Status",                "SqlColumn": "BilledStatus",           "IncludeInHash": false }
+        ,{ "CsvHeader": "Billed Week",                  "SqlColumn": "BilledWeek",             "IncludeInHash": false }
+        ,{ "CsvHeader": "Posted Week",                  "SqlColumn": "PostedWeek",             "IncludeInHash": false }
+        ,{ "CsvHeader": "Mod",                          "SqlColumn": "ModField",               "IncludeInHash": false }
+        ,{ "CsvHeader": "Cheq no",                      "SqlColumn": "CheqNo",                 "IncludeInHash": false }
+        ,{ "CsvHeader": "Duplicate Payment Posted",    "SqlColumn": "DuplicatePaymentPosted", "IncludeInHash": false }
+        ,{ "CsvHeader": "Actual Payment",               "SqlColumn": "ActualPayment",          "IncludeInHash": false }
+        ,{ "CsvHeader": "Proc-Total Bal $",             "SqlColumn": "ProcTotalBal",          "IncludeInHash": false }
+        ,{ "CsvHeader": "Denied Status",               "SqlColumn": "DeniedStatus",           "IncludeInHash": false }
+        ,{ "CsvHeader": "Scrubber Edit Reason",        "SqlColumn": "ScrubberEditReason",     "IncludeInHash": false }
+        ,{ "CsvHeader": "Emedix Rejection Date",       "SqlColumn": "EmedixRejectionDate",    "IncludeInHash": false }
+        ,{ "CsvHeader": "Emedix Rejection",            "SqlColumn": "EmedixRejection",        "IncludeInHash": false }
+        ,{ "CsvHeader": "Rejection Category",          "SqlColumn": "RejectionCategory",      "IncludeInHash": false }
+        ,{ "CsvHeader": "Time To Pay",                 "SqlColumn": "TimeToPay",              "IncludeInHash": false }
+        ,{ "CsvHeader": "Payment %",                   "SqlColumn": "PaymentPercent",         "IncludeInHash": false }
+        ,{ "CsvHeader": "Fully paid #",                "SqlColumn": "FullyPaidCount",         "IncludeInHash": false }
+        ,{ "CsvHeader": "Fully paid $",                "SqlColumn": "FullyPaidAmount",        "IncludeInHash": false }
+        ,{ "CsvHeader": "Adjudicated",                 "SqlColumn": "Adjudicated",            "IncludeInHash": false }
+        ,{ "CsvHeader": "Adjudicated $",               "SqlColumn": "AdjudicatedAmount",      "IncludeInHash": false }
+        ,{ "CsvHeader": "30 Bucket",                   "SqlColumn": "Bucket30",               "IncludeInHash": false }
+        ,{ "CsvHeader": "30 Bucket $",                 "SqlColumn": "Bucket30Amount",         "IncludeInHash": false }
+        ,{ "CsvHeader": "60 Bucket",                   "SqlColumn": "Bucket60",               "IncludeInHash": false }
+        ,{ "CsvHeader": "60 Bucket $",                 "SqlColumn": "Bucket60Amount",         "IncludeInHash": false }
       ]
     },
     "LineLevel": {
@@ -117,6 +151,24 @@
         { "CsvHeader": "DaystoBill",                   "SqlColumn": "DaystoBill",               "IncludeInHash": false },
         { "CsvHeader": "DaystoPost",                   "SqlColumn": "DaystoPost",               "IncludeInHash": false },
         { "CsvHeader": "ICD Pointer",                  "SqlColumn": "ICDPointer",               "IncludeInHash": true }
+        ,{ "CsvHeader": "UID",                          "SqlColumn": "UID",                     "IncludeInHash": false }
+        ,{ "CsvHeader": "T/F",                          "SqlColumn": "T_F",                     "IncludeInHash": false }
+        ,{ "CsvHeader": "Pat name",                     "SqlColumn": "PatientName",            "IncludeInHash": false }
+        ,{ "CsvHeader": "Combined Line Level ICD",      "SqlColumn": "CombinedLineLevelICD",   "IncludeInHash": false }
+        ,{ "CsvHeader": "Subscriber Id",               "SqlColumn": "SubscriberId",           "IncludeInHash": false }
+        ,{ "CsvHeader": "Claim amount",                "SqlColumn": "ClaimAmount",            "IncludeInHash": false }
+        ,{ "CsvHeader": "Cpt With units",              "SqlColumn": "CptWithUnits",          "IncludeInHash": false }
+        ,{ "CsvHeader": "Proc",                         "SqlColumn": "Proc",                   "IncludeInHash": false }
+        ,{ "CsvHeader": "Entered Status",              "SqlColumn": "EnteredStatus",          "IncludeInHash": false }
+        ,{ "CsvHeader": "Billed Status",               "SqlColumn": "BilledStatus",           "IncludeInHash": false }
+        ,{ "CsvHeader": "Proc-Total Bal $",            "SqlColumn": "ProcTotalBal",          "IncludeInHash": false }
+        ,{ "CsvHeader": "Updated Denial Code",         "SqlColumn": "UpdatedDenialCode",      "IncludeInHash": false }
+        ,{ "CsvHeader": "Combined Line Level Denial code", "SqlColumn": "CombinedLineLevelDenialCode", "IncludeInHash": false }
+        ,{ "CsvHeader": "Loc",                          "SqlColumn": "Loc",                    "IncludeInHash": false }
+        ,{ "CsvHeader": "Proc-Ins Last Refiled/Denied Reason", "SqlColumn": "ProcInsLastRefiledDeniedReason", "IncludeInHash": false }
+        ,{ "CsvHeader": "Proc-Ins Responsible Carrier Original Filing Date", "SqlColumn": "ProcInsResponsibleCarrierOriginalFilingDate", "IncludeInHash": false }
+        ,{ "CsvHeader": "Proc-Ins Status",             "SqlColumn": "ProcInsStatus",          "IncludeInHash": false }
+        ,{ "CsvHeader": "Proc-Ins Last Refiled/Denied Date", "SqlColumn": "ProcInsLastRefiledDeniedDate", "IncludeInHash": false }
       ]
     }
   }

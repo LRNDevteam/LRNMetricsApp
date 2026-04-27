@@ -1,0 +1,177 @@
+﻿@model LabMetricsDashboard.Models.CollectionSummaryViewModel
+@if (Model.StatusSummary.HasData)
+{
+    int ssIdx = 0;
+    <style>
+    /* Status Summary – tree toggle button */
+    .ss-toggle {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 15px; height: 15px; border-radius: 3px;
+        border: 1px solid #b0bec5; background: #f8fafc;
+        color: #607d8b; font-size: 10px; font-weight: 400; line-height: 1;
+        margin-right: 5px; flex-shrink: 0; vertical-align: middle;
+        transition: background .12s, color .12s;
+    }
+    .ss-toggle.open { background: #e3f0ff; color: #1565c0; border-color: #90caf9; }
+    /* Lightweight font weights per level */
+    .ss-lvl1 td { font-weight: 500; }
+    .ss-lvl2 td { font-weight: 400; }
+    .ss-lvl3 td { font-weight: 400; }
+    .ss-lvl4 td { font-weight: 400; font-size: .75rem; color: #64748b; }
+    </style>
+    <div class="cs-rpt-wrap">
+        <div class="cs-rpt-scroll">
+            <table class="cs-rpt-table" id="tblStatusSummary">
+                <thead>
+                    <tr>
+                        <th style="text-align:left;min-width:280px">Row Labels</th>
+                        <th style="min-width:130px">Count of Claims</th>
+                        <th style="min-width:160px">Ins. Payments</th>
+                        <th style="min-width:160px">Ins. Balance</th>
+                        <th style="min-width:150px">Pt Balance</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var csRow in Model.StatusSummary.Rows)
+                {
+                    var csKey = "ssc" + ssIdx.ToString();
+                    var csHasChildren = csRow.PanelRows.Count > 0;
+                    ssIdx++;
+                    <tr class="ss-lvl1" data-sskey="@csKey" style="cursor:pointer;background:#dce8ff">
+                        <td style="text-align:left;color:#0d3460;padding-left:.5rem;white-space:nowrap">
+                            @if (csHasChildren) { <span class="ss-toggle" data-sskey="@csKey">+</span> }
+                            else { <span style="display:inline-block;width:20px"></span> }
+                            @csRow.ClaimStatus
+                        </td>
+                        <td style="text-align:right">@csRow.NoClaims.ToString("N0")</td>
+                        <td style="text-align:right">@(csRow.InsurancePayments == 0 ? "-" : csRow.InsurancePayments.ToString("C2"))</td>
+                        <td style="text-align:right">@(csRow.InsuranceBalance  == 0 ? "-" : csRow.InsuranceBalance.ToString("C2"))</td>
+                        <td style="text-align:right">@(csRow.PatientBalance    == 0 ? "-" : csRow.PatientBalance.ToString("C2"))</td>
+                    </tr>
+                    int panelIdx = 0;
+                    foreach (var panelRow in csRow.PanelRows)
+                    {
+                        var panelKey = csKey + "p" + panelIdx.ToString();
+                        var panelHasChildren = panelRow.CptRows.Count > 0;
+                        panelIdx++;
+                        <tr class="ss-lvl2" data-parent="@csKey" data-sskey="@panelKey" style="cursor:pointer;display:none;background:#eef3ff">
+                            <td style="text-align:left;color:#1b3a5c;padding-left:1.6rem;white-space:nowrap">
+                                @if (panelHasChildren) { <span class="ss-toggle" data-sskey="@panelKey">+</span> }
+                                else { <span style="display:inline-block;width:20px"></span> }
+                                <i class="bi bi-grid-3x3-gap" style="font-size:.7rem;opacity:.55;margin-right:3px"></i>@panelRow.PanelName
+                            </td>
+                            <td style="text-align:right">@panelRow.NoClaims.ToString("N0")</td>
+                            <td style="text-align:right">@(panelRow.InsurancePayments == 0 ? "-" : panelRow.InsurancePayments.ToString("C2"))</td>
+                            <td style="text-align:right">@(panelRow.InsuranceBalance  == 0 ? "-" : panelRow.InsuranceBalance.ToString("C2"))</td>
+                            <td style="text-align:right">@(panelRow.PatientBalance    == 0 ? "-" : panelRow.PatientBalance.ToString("C2"))</td>
+                        </tr>
+                        int cptIdx = 0;
+                        foreach (var cptRow in panelRow.CptRows)
+                        {
+                            var cptKey = panelKey + "c" + cptIdx.ToString();
+                            var cptHasChildren = cptRow.Payers.Count > 0;
+                            cptIdx++;
+                            <tr class="ss-lvl3" data-parent="@panelKey" data-sskey="@cptKey" style="cursor:pointer;display:none;background:#f6f8ff">
+                                <td style="text-align:left;color:#334155;padding-left:3rem;white-space:nowrap">
+                                    @if (cptHasChildren) { <span class="ss-toggle" data-sskey="@cptKey">+</span> }
+                                    else { <span style="display:inline-block;width:20px"></span> }
+                                    <i class="bi bi-tag" style="font-size:.65rem;opacity:.45;margin-right:3px"></i>@cptRow.CptCode
+                                </td>
+                                <td style="text-align:right">@cptRow.NoClaims.ToString("N0")</td>
+                                <td style="text-align:right">@(cptRow.InsurancePayments == 0 ? "-" : cptRow.InsurancePayments.ToString("C2"))</td>
+                                <td style="text-align:right">@(cptRow.InsuranceBalance  == 0 ? "-" : cptRow.InsuranceBalance.ToString("C2"))</td>
+                                <td style="text-align:right">@(cptRow.PatientBalance    == 0 ? "-" : cptRow.PatientBalance.ToString("C2"))</td>
+                            </tr>
+                            foreach (var payerRow in cptRow.Payers)
+                            {
+                                <tr class="ss-lvl4" data-parent="@cptKey" style="display:none;background:#fff">
+                                    <td style="text-align:left;padding-left:4.4rem;white-space:nowrap">
+                                        <i class="bi bi-building" style="font-size:.65rem;opacity:.4;margin-right:3px"></i>@payerRow.PayerName
+                                    </td>
+                                    <td style="text-align:right">@payerRow.NoClaims.ToString("N0")</td>
+                                    <td style="text-align:right">@(payerRow.InsurancePayments == 0 ? "-" : payerRow.InsurancePayments.ToString("C2"))</td>
+                                    <td style="text-align:right">@(payerRow.InsuranceBalance  == 0 ? "-" : payerRow.InsuranceBalance.ToString("C2"))</td>
+                                    <td style="text-align:right">@(payerRow.PatientBalance    == 0 ? "-" : payerRow.PatientBalance.ToString("C2"))</td>
+                                </tr>
+                            }
+                        }
+                    }
+                }
+                </tbody>
+                <tfoot>
+                    <tr style="background:#0d3460;color:#fff;font-weight:600;font-size:.79rem">
+                        <td style="text-align:left;padding-left:.5rem">Grand Total</td>
+                        <td style="text-align:right">@Model.StatusSummary.GrandNoClaims.ToString("N0")</td>
+                        <td style="text-align:right">@(Model.StatusSummary.GrandInsurancePayments == 0 ? "-" : Model.StatusSummary.GrandInsurancePayments.ToString("C2"))</td>
+                        <td style="text-align:right">@(Model.StatusSummary.GrandInsuranceBalance  == 0 ? "-" : Model.StatusSummary.GrandInsuranceBalance.ToString("C2"))</td>
+                        <td style="text-align:right">@(Model.StatusSummary.GrandPatientBalance    == 0 ? "-" : Model.StatusSummary.GrandPatientBalance.ToString("C2"))</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+    <div class="mt-2" style="font-size:.68rem;color:#94a3b8">
+        <strong>Source:</strong> ClaimLevelData (all rows) &bull;
+        <strong>Rows:</strong> ClaimStatus &rarr; PanelName &rarr; CPT Code &times; Units &times; Modifier &rarr; PayerName_Raw &bull;
+        <strong>Sorted by:</strong> Count of Claims DESC &bull; Click any row to expand / collapse
+    </div>
+    <script>
+    (function () {
+        var tbl = document.getElementById('tblStatusSummary');
+        if (!tbl) return;
+
+        var childMap = {};
+        tbl.querySelectorAll('tr[data-parent]').forEach(function (tr) {
+            var p = tr.getAttribute('data-parent');
+            if (!childMap[p]) childMap[p] = [];
+            childMap[p].push(tr);
+        });
+
+        function setToggle(key, open) {
+            var btn = tbl.querySelector('.ss-toggle[data-sskey="' + key + '"]');
+            if (!btn) return;
+            btn.textContent = open ? '\u2212' : '+';
+            if (open) btn.classList.add('open'); else btn.classList.remove('open');
+        }
+
+        function collapseAll(key) {
+            var stack = [key];
+            while (stack.length) {
+                var k = stack.pop();
+                var kids = childMap[k];
+                if (!kids) continue;
+                kids.forEach(function (child) {
+                    child.style.display = 'none';
+                    child.setAttribute('data-open', '0');
+                    var ck = child.getAttribute('data-sskey');
+                    if (ck) { setToggle(ck, false); stack.push(ck); }
+                });
+            }
+        }
+
+        tbl.querySelectorAll('tr.ss-lvl1, tr.ss-lvl2, tr.ss-lvl3').forEach(function (tr) {
+            tr.addEventListener('click', function () {
+                var key = tr.getAttribute('data-sskey');
+                if (!childMap[key] || !childMap[key].length) return;
+                var open = tr.getAttribute('data-open') === '1';
+                if (open) {
+                    collapseAll(key);
+                    tr.setAttribute('data-open', '0');
+                    setToggle(key, false);
+                } else {
+                    childMap[key].forEach(function (c) { c.style.display = ''; });
+                    tr.setAttribute('data-open', '1');
+                    setToggle(key, true);
+                }
+            });
+        });
+    })();
+    </script>
+}
+else
+{
+    <div class="text-center py-5 text-muted">
+        <div style="font-size:2rem;opacity:.4">&#128202;</div>
+        <div class="fw-semibold mt-2">No Status Summary data available</div>
+    </div>
+}

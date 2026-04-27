@@ -1,0 +1,28 @@
+@model LabMetricsDashboard.Models.ProductionReportViewModel
+@{
+    // Override page metadata for the Summary Report variant.
+    ViewData["Title"]       = $"Production Summary Report – {Model.SelectedLab}";
+    ViewData["SelectedLab"] = Model.SelectedLab;
+    ViewData["PageLabel"]   = "Production Summary Report";
+
+    // Tell ProductionReport.cshtml to target this action for filter form submits and Clear links.
+    ViewData["FormAction"]  = "ProductionSummaryReport";
+
+    // Enable "Exclude selected" checkboxes in the Payer and Panel filter dropdowns.
+    ViewData["ShowExcludeOptions"] = true;
+
+    // Pass the data-source icon state so ProductionReport.cshtml can render it
+    // inside the filter bar (top-right corner), matching the attached design.
+    ViewData["DataSourceIcon"]    = Model.HasFilters ? "bi-lightning-charge-fill" : "bi-lightning-fill";
+    ViewData["DataSourceColor"]   = Model.HasFilters ? "#f59e0b" : "#3b82f6";
+    ViewData["DataSourceTooltip"] = Model.HasFilters
+        ? "Live Query — filters applied, reading ClaimLevelData / LineLevelData in real-time."
+        : "Pre-computed Snapshot — data summarised by a scheduled stored procedure.";
+}
+
+@* The data-source icon is rendered inside the filter bar header by ProductionReport.cshtml
+   via the ViewData keys set above. No separate banner needed here. *@
+
+@await Html.PartialAsync("ProductionReport", Model)
+
+

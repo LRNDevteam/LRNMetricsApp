@@ -1,0 +1,77 @@
+@inherits Microsoft.AspNetCore.Mvc.Razor.RazorPage<LabMetricsDashboard.Models.AdminViewModel>
+@model LabMetricsDashboard.Models.AdminViewModel
+@{
+    ViewData["Title"] = "Admin - User List";
+}
+
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <h2 class="m-0">Manage Users</h2>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createUserModal">Create User</button>
+</div>
+
+@if (ViewData["OpenCreateUserModal"] as bool? == true)
+{
+    <script>
+        document.addEventListener('DOMContentLoaded', function(){
+            try {
+                var modalEl = document.getElementById('createUserModal');
+                if (modalEl) {
+                    var m = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+                    m.show();
+                }
+            } catch (e) { }
+        });
+    </script>
+}
+
+<!-- Create User modal -->
+<div class="modal fade" id="createUserModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Create User</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        @await Html.PartialAsync("_CreateUserForm", Model)
+      </div>
+    </div>
+  </div>
+</div>
+
+<div>
+    <table class="table table-sm table-striped">
+        <thead>
+            <tr><th>UserName</th><th>Name</th><th>Email</th><th>Mobile</th><th>Labs</th><th>Active</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="tblUsersBody">
+            @foreach(var u in Model.Users)
+            {
+                <tr>
+                    <td class="text-nowrap">@u.UserName</td>
+                    <td>@u.FirstName @u.LastName</td>
+                    <td class="text-truncate" style="max-width:180px">@u.Email</td>
+                    <td>@u.Mobile</td>
+                    <td>
+                        @if (Model.UserLabsMap != null && Model.UserLabsMap.TryGetValue(u.LabUserID, out var labs))
+                        {
+                            foreach (var lab in labs)
+                            {
+                                <span class="badge bg-secondary me-1">@lab.LabName</span>
+                            }
+                        }
+                    </td>
+                    <td>@(u.IsActive?"Yes":"No")</td>
+                    <td>
+                        <div class="btn-group" role="group">
+                            <a class="btn btn-sm btn-outline-primary" asp-action="Edit" asp-route-id="@u.LabUserID">Edit</a>
+                            <button class="btn btn-sm btn-outline-danger" data-remove-userid="@u.LabUserID">Remove</button>
+                        </div>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@await Html.PartialAsync("_AdminScripts")

@@ -1,0 +1,82 @@
+@model LabMetricsDashboard.Models.CollectionSummaryViewModel
+@using LabMetricsDashboard.Services
+
+@if (Model.ProviderSummary.HasData)
+{
+    var ps = Model.ProviderSummary;
+    var maxClaims = ps.Rows.Count > 0 ? ps.Rows.Max(r => r.NoOfClaims) : 1;
+
+    <div class="cs-rpt-wrap">
+        <div class="cs-rpt-scroll">
+            <table class="cs-rpt-table" id="tblProviderSummary">
+                <thead>
+                    <tr>
+                        <th style="text-align:center;width:46px">#</th>
+                        <th style="text-align:left;min-width:260px">Referring Provider</th>
+                        <th style="min-width:140px">No. of Claims</th>
+                        <th style="min-width:170px">Insurance Payments</th>
+                        <th style="min-width:170px">Insurance Balance</th>
+                        <th style="min-width:160px">Patient Balance</th>
+                        <th style="min-width:180px">Claim Share</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in ps.Rows)
+                    {
+                        var barPct = maxClaims > 0
+                            ? Math.Round((double)row.NoOfClaims / maxClaims * 100, 1)
+                            : 0;
+                        <tr>
+                            <td style="text-align:center;font-weight:700;color:#0d3460">@row.Rank</td>
+                            <td style="text-align:left;font-weight:600;color:#1e293b">@row.ReferringProvider</td>
+                            <td style="text-align:right;font-weight:700">@row.NoOfClaims.ToString("N0")</td>
+                            <td style="text-align:right">@(row.InsurancePayments == 0 ? "-" : row.InsurancePayments.ToString("C2"))</td>
+                            <td style="text-align:right">@(row.InsuranceBalance  == 0 ? "-" : row.InsuranceBalance.ToString("C2"))</td>
+                            <td style="text-align:right">@(row.PatientBalance    == 0 ? "-" : row.PatientBalance.ToString("C2"))</td>
+                            <td style="padding:.4rem .7rem">
+                                <div style="background:#e2e8f0;border-radius:5px;height:20px;overflow:hidden;position:relative;min-width:120px">
+                                    <div style="width:@(barPct.ToString("F1"))%;height:100%;border-radius:5px;
+                                                background:linear-gradient(90deg,#0d3460,#1565c0)"></div>
+                                    <div style="position:absolute;inset:0;display:flex;align-items:center;
+                                                justify-content:center;font-size:.68rem;font-weight:800;
+                                                color:#1e293b;text-shadow:0 0 3px #fff,0 0 3px #fff">
+                                        @(ps.GrandNoClaims > 0
+                                            ? Math.Round((double)row.NoOfClaims / ps.GrandNoClaims * 100, 1).ToString("F1") + "%"
+                                            : "-")
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+                <tfoot>
+                    <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:800">
+                        <td style="text-align:center;color:#fff">—</td>
+                        <td style="text-align:left;color:#fff">Grand Total</td>
+                        <td style="text-align:right;color:#fff">@ps.GrandNoClaims.ToString("N0")</td>
+                        <td style="text-align:right;color:#fff">@(ps.GrandInsurancePayments == 0 ? "-" : ps.GrandInsurancePayments.ToString("C2"))</td>
+                        <td style="text-align:right;color:#fff">@(ps.GrandInsuranceBalance  == 0 ? "-" : ps.GrandInsuranceBalance.ToString("C2"))</td>
+                        <td style="text-align:right;color:#fff">@(ps.GrandPatientBalance    == 0 ? "-" : ps.GrandPatientBalance.ToString("C2"))</td>
+                        <td style="text-align:center;color:#fff">100%</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+
+    <div class="mt-2" style="font-size:.68rem;color:#94a3b8">
+        <strong>Source:</strong> ClaimLevelData (all rows) &bull;
+        <strong>Rows:</strong> ReferringProvider &bull;
+        <strong>Metrics:</strong> COUNT(DISTINCT ClaimID) · SUM(InsurancePayment) · SUM(InsuranceBalance) · SUM(PatientBalance) &bull;
+        <strong>Sorted by:</strong> No. of Claims DESC &bull;
+        <strong>Claim Share:</strong> Row claims / Grand Total claims × 100
+    </div>
+}
+else
+{
+    <div class="text-center py-5 text-muted">
+        <div style="font-size:2rem;opacity:.4">&#128100;</div>
+        <div class="fw-semibold mt-2">No Provider Summary data available</div>
+        <div class="small mt-1">No referring provider records found. Try adjusting your filters.</div>
+    </div>
+}

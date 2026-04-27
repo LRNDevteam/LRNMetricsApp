@@ -241,6 +241,7 @@ public sealed class SqlDashboardRepository : IDashboardRepository
         var topCptCharges = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
         var payStatusBreakdown = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var topCptDetail = new List<CptDetailRow>();
+        string? latestRunId = null;
 
         try
         {
@@ -408,6 +409,19 @@ public sealed class SqlDashboardRepository : IDashboardRepository
                         NoResponseRate: charges == 0 ? 0 : Math.Round(noResp / charges * 100, 1)));
                 }
             }
+
+            // 12. Latest RunId — used to show data source on the dashboard
+            const string runIdSql = """
+                SELECT TOP 1 LTRIM(RTRIM(RunId))
+                FROM dbo.ClaimLevelData
+                WHERE RunId IS NOT NULL AND RunId <> ''
+                ORDER BY IngestedOn DESC
+                """;
+            await using (var cmdRunId = new SqlCommand(runIdSql, conn) { CommandTimeout = 30 })
+            {
+                var val = await cmdRunId.ExecuteScalarAsync(ct);
+                latestRunId = val is DBNull or null ? null : val.ToString();
+            }
         }
         catch (Exception ex)
         {
@@ -447,7 +461,8 @@ public sealed class SqlDashboardRepository : IDashboardRepository
             dosMonthly, fbMonthly,
             avgMonths, avgAllowedByPanelMonth,
             totalLines, lineTotalCharges, lineTotalPayments, lineTotalBalance,
-            topCptCharges, payStatusBreakdown, topCptDetail);
+            topCptCharges, payStatusBreakdown, topCptDetail,
+            LatestRunId: latestRunId);
     }
 
     // ?? Helpers ??????????????????????????????????????????????????????????
@@ -502,5 +517,233 @@ public sealed class SqlDashboardRepository : IDashboardRepository
         for (var i = 0; i < source.Count; i++)
             cloned[i] = new SqlParameter(source[i].ParameterName, source[i].Value);
         return cloned;
+    }
+
+    /// <summary>
+    /// Reads Dashboard data from pre-aggregated snapshot tables by calling the
+    /// individual <c>usp_GetDashboard*</c> stored procedures.
+    /// No filters are applied; the result reflects the full dataset at the time
+    /// the snapshot was last refreshed via <c>dbo.usp_RefreshDashboard</c>.
+    /// </summary>
+    public async Task<DashboardResult> GetDashboardFromAggregatesAsync(
+        string connectionString, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+        var payerNames         = new List<string>();
+        var payerTypes         = new List<string>();
+        var panelNames         = new List<string>();
+        var clinicNames        = new List<string>();
+        var referringProviders = new List<string>();
+
+        int totalClaims = 0;
+        decimal totalCharges = 0, totalPayments = 0, totalBalance = 0;
+        decimal collNumerator = 0, denNumerator = 0, adjNumerator = 0, outNumerator = 0;
+        int totalLines = 0;
+        decimal lineTotalCharges = 0, lineTotalPayments = 0, lineTotalBalance = 0;
+
+        var claimStatusRows    = new List<ClaimStatusRow>();
+        var payerTypePayments  = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+        var payerInsights      = new List<InsightRow>();
+        var panelInsights      = new List<InsightRow>();
+        var clinicInsights     = new List<InsightRow>();
+        var refPhysInsights    = new List<InsightRow>();
+        var dosMonthly         = new List<(string, int)>();
+        var fbMonthly          = new List<(string, int)>();
+        var panelMonthRaw      = new List<(string Panel, string Month, decimal Avg)>();
+        var topCptCharges      = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+        var payStatusBreakdown = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var topCptDetail       = new List<CptDetailRow>();
+
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+
+            // 1. Filter lookup values
+            await using (var cmd = new SqlCommand("dbo.usp_GetDashboardFilterLookup", conn)
+                         { CommandType = CommandType.StoredProcedure, CommandTimeout = 60 })
+            await using (var r = await cmd.ExecuteReaderAsync(ct))
+            {
+                while (await r.ReadAsync(ct))
+                {
+                    var filterType  = r.GetString(r.GetOrdinal("FilterType"));
+                    var filterValue = r.GetString(r.GetOrdinal("FilterValue"));
+                    switch (filterType)
+                    {
+                        case "PayerName":          payerNames.Add(filterValue);         break;
+                        case "PayerType":          payerTypes.Add(filterValue);         break;
+                        case "PanelType":          panelNames.Add(filterValue);         break;
+                        case "ClinicName":         clinicNames.Add(filterValue);        break;
+                        case "ReferringProvider":  referringProviders.Add(filterValue); break;
+                    }
+                }
+            }
+
+            // 2. KPI Summary
+            await using (var cmd = new SqlCommand("dbo.usp_GetDashboardKPI", conn)
+                         { CommandType = CommandType.StoredProcedure, CommandTimeout = 60 })
+            await using (var r = await cmd.ExecuteReaderAsync(ct))
+            {
+                if (await r.ReadAsync(ct))
+                {
+                    totalClaims       = r.GetInt32(r.GetOrdinal("TotalClaims"));
+                    totalCharges      = GetDec(r, "TotalCharges");
+                    totalPayments     = GetDec(r, "TotalPayments");
+                    totalBalance      = GetDec(r, "TotalBalance");
+                    collNumerator     = GetDec(r, "CollectionNumerator");
+                    denNumerator      = GetDec(r, "DenialNumerator");
+                    adjNumerator      = GetDec(r, "AdjustmentNumerator");
+                    outNumerator      = GetDec(r, "OutstandingNumerator");
+                    totalLines        = r.GetInt32(r.GetOrdinal("TotalLines"));
+                    lineTotalCharges  = GetDec(r, "LineTotalCharges");
+                    lineTotalPayments = GetDec(r, "LineTotalPayments");
+                    lineTotalBalance  = GetDec(r, "LineTotalBalance");
+                }
+            }
+
+            // 3. Claim Status Breakdown
+            await using (var cmd = new SqlCommand("dbo.usp_GetDashboardClaimStatus", conn)
+                         { CommandType = CommandType.StoredProcedure, CommandTimeout = 60 })
+            await using (var r = await cmd.ExecuteReaderAsync(ct))
+            {
+                while (await r.ReadAsync(ct))
+                {
+                    claimStatusRows.Add(new ClaimStatusRow(
+                        r.GetString(r.GetOrdinal("Status")),
+                        r.GetInt32(r.GetOrdinal("Claims")),
+                        GetDec(r, "Charges"),
+                        GetDec(r, "Payments"),
+                        GetDec(r, "Balance")));
+                }
+            }
+
+            // 4. Payer Type Payments
+            await using (var cmd = new SqlCommand("dbo.usp_GetDashboardPayerTypePayments", conn)
+                         { CommandType = CommandType.StoredProcedure, CommandTimeout = 60 })
+            await using (var r = await cmd.ExecuteReaderAsync(ct))
+            {
+                while (await r.ReadAsync(ct))
+                    payerTypePayments[r.GetString(r.GetOrdinal("PayerType"))] = GetDec(r, "TotalPayments");
+            }
+
+            // 5. Insight Breakdowns (4 result sets: Payer, Panel, Clinic, Referring)
+            await using (var cmd = new SqlCommand("dbo.usp_GetDashboardInsights", conn)
+                         { CommandType = CommandType.StoredProcedure, CommandTimeout = 60 })
+            await using (var r = await cmd.ExecuteReaderAsync(ct))
+            {
+                ReadInsightRows(r, payerInsights);
+                await r.NextResultAsync(ct);
+                ReadInsightRows(r, panelInsights);
+                await r.NextResultAsync(ct);
+                ReadInsightRows(r, clinicInsights);
+                await r.NextResultAsync(ct);
+                ReadInsightRows(r, refPhysInsights);
+            }
+
+            // 6. Monthly Trends (2 result sets: DOS and FirstBilledDate)
+            await using (var cmd = new SqlCommand("dbo.usp_GetDashboardMonthlyTrends", conn)
+                         { CommandType = CommandType.StoredProcedure, CommandTimeout = 60 })
+            await using (var r = await cmd.ExecuteReaderAsync(ct))
+            {
+                while (await r.ReadAsync(ct))
+                {
+                    var mth = r.IsDBNull(0) ? null : r.GetString(0);
+                    if (!string.IsNullOrWhiteSpace(mth))
+                        dosMonthly.Add((mth, r.GetInt32(1)));
+                }
+                await r.NextResultAsync(ct);
+                while (await r.ReadAsync(ct))
+                {
+                    var mth = r.IsDBNull(0) ? null : r.GetString(0);
+                    if (!string.IsNullOrWhiteSpace(mth))
+                        fbMonthly.Add((mth, r.GetInt32(1)));
+                }
+            }
+
+            // 7. Panel x Month Avg Allowed
+            await using (var cmd = new SqlCommand("dbo.usp_GetDashboardPanelMonthlyAllowed", conn)
+                         { CommandType = CommandType.StoredProcedure, CommandTimeout = 60 })
+            await using (var r = await cmd.ExecuteReaderAsync(ct))
+            {
+                while (await r.ReadAsync(ct))
+                {
+                    var panel = r.GetString(r.GetOrdinal("PanelType"));
+                    var mth   = r.IsDBNull(r.GetOrdinal("Month")) ? null : r.GetString(r.GetOrdinal("Month"));
+                    if (!string.IsNullOrWhiteSpace(mth))
+                        panelMonthRaw.Add((panel, mth, GetDec(r, "AvgAllowed")));
+                }
+            }
+
+            // 8. Top CPT
+            await using (var cmd = new SqlCommand("dbo.usp_GetDashboardTopCPT", conn)
+                         { CommandType = CommandType.StoredProcedure, CommandTimeout = 60 })
+            await using (var r = await cmd.ExecuteReaderAsync(ct))
+            {
+                while (await r.ReadAsync(ct))
+                {
+                    var cpt     = r.GetString(r.GetOrdinal("CPTCode"));
+                    var charges = GetDec(r, "Charges");
+                    var collAllowed  = GetDec(r, "CollectionAllowed");
+                    var denCharges   = GetDec(r, "DenialCharges");
+                    var noResp       = GetDec(r, "NoRespCharges");
+
+                    topCptCharges[cpt] = charges;
+                    topCptDetail.Add(new CptDetailRow(
+                        CPTCode:          cpt,
+                        Charges:          charges,
+                        AllowedAmount:    GetDec(r, "AllowedAmount"),
+                        InsuranceBalance: GetDec(r, "InsuranceBalance"),
+                        CollectionRate:   charges == 0 ? 0 : Math.Round(collAllowed / charges * 100, 1),
+                        DenialRate:       charges == 0 ? 0 : Math.Round(denCharges  / charges * 100, 1),
+                        NoResponseRate:   charges == 0 ? 0 : Math.Round(noResp      / charges * 100, 1)));
+                }
+            }
+
+            // 9. Pay Status Breakdown
+            await using (var cmd = new SqlCommand("dbo.usp_GetDashboardPayStatus", conn)
+                         { CommandType = CommandType.StoredProcedure, CommandTimeout = 60 })
+            await using (var r = await cmd.ExecuteReaderAsync(ct))
+            {
+                while (await r.ReadAsync(ct))
+                    payStatusBreakdown[r.GetString(r.GetOrdinal("PayStatus"))] = r.GetInt32(r.GetOrdinal("Cnt"));
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Aggregate dashboard query failed.");
+            throw;
+        }
+
+        // Build Panel x Month pivot (same logic as live query path)
+        var avgMonths = panelMonthRaw
+            .Select(x => x.Month).Distinct().OrderBy(m => m).ToList();
+
+        var avgAllowedByPanelMonth = panelMonthRaw
+            .GroupBy(x => x.Panel, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new
+            {
+                PanelName  = g.First().Panel,
+                TotalAvg   = g.Sum(x => x.Avg),
+                AvgByMonth = g.GroupBy(x => x.Month)
+                              .ToDictionary(mg => mg.Key, mg => Math.Round(mg.Average(x => x.Avg), 0)),
+            })
+            .OrderByDescending(x => x.TotalAvg)
+            .Take(10)
+            .OrderBy(x => x.PanelName, StringComparer.OrdinalIgnoreCase)
+            .Select(x => new PanelMonthRow { PanelName = x.PanelName, AvgByMonth = x.AvgByMonth })
+            .ToList();
+
+        return new DashboardResult(
+            payerNames, payerTypes, panelNames, clinicNames, referringProviders,
+            totalClaims, totalCharges, totalPayments, totalBalance,
+            collNumerator, denNumerator, adjNumerator, outNumerator,
+            claimStatusRows, payerTypePayments,
+            payerInsights, panelInsights, clinicInsights, refPhysInsights,
+            dosMonthly, fbMonthly,
+            avgMonths, avgAllowedByPanelMonth,
+            totalLines, lineTotalCharges, lineTotalPayments, lineTotalBalance,
+            topCptCharges, payStatusBreakdown, topCptDetail,
+            LatestRunId: null);
     }
 }

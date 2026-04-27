@@ -37,10 +37,15 @@ public interface IProductionReportRepository
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
         string? rule = null,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        bool panelNewStrict = false);   // true ? PanelNew only (ProductionSummaryReport); false ? PanelNew with PanelName fallback (ProductionReport)
     /// <summary>
     /// Returns the pivot data for the Weekly Claim Volume table:
     /// grouped by PanelName × Week for the last 4 weeks. Each panel includes
@@ -56,11 +61,16 @@ public interface IProductionReportRepository
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
         string? rule = null,
         string? weekRange = null,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        bool panelNewStrict = false);   // true ? PanelNew only (ProductionSummaryReport); false ? PanelNew with PanelName fallback
 
     /// <summary>
     /// Returns the Coding table data: rows where FirstBilledDate is blank,
@@ -81,7 +91,15 @@ public interface IProductionReportRepository
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
-        CancellationToken ct = default);
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        string? rule = null,
+        CancellationToken ct = default,
+        bool panelNewStrict = false);   // true ? PanelNew only (ProductionSummaryReport); false ? PanelNew with PanelName fallback
 
     /// <summary>
     /// Returns the Payer X Panel cross-tab data:
@@ -91,7 +109,15 @@ public interface IProductionReportRepository
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
-        CancellationToken ct = default);
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        string? rule = null,
+        CancellationToken ct = default,
+        bool panelNewStrict = false);   // true ? PanelNew only (ProductionSummaryReport); false ? PanelNew with PanelName fallback
 
     /// <summary>
     /// Returns the Unbilled X Aging table data:
@@ -100,6 +126,13 @@ public interface IProductionReportRepository
     Task<UnbilledAgingResult> GetUnbilledAgingAsync(
         string connectionString,
         List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        string? rule = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -108,17 +141,26 @@ public interface IProductionReportRepository
     /// </summary>
     Task<CptBreakdownResult> GetCptBreakdownAsync(
         string connectionString,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
-        CancellationToken ct = default);
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default,
+        string? rule = null);   // Rule3 (Augustus) ? COUNT DISTINCT CPTCode instead of SUM Units
 
     /// <summary>Returns all ClaimLevelData rows for Excel export, respecting Production Report filters.</summary>
     Task<List<Dictionary<string, object?>>> GetClaimLevelDataExportAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default);
 
     /// <summary>Returns all LineLevelData rows for Excel export, respecting Production Report filters.</summary>
@@ -126,8 +168,12 @@ public interface IProductionReportRepository
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
         DateOnly? filterFirstBillFrom = null,
         DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default);
 }
 

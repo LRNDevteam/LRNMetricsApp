@@ -1,0 +1,110 @@
+﻿@model LabMetricsDashboard.Models.CollectionSummaryViewModel
+            @if (Model.WeeklyClaimVolume.HasData)
+            {
+                var wcvPivot = Model.WeeklyClaimVolume;
+                var wcvWeeks = wcvPivot.Weeks;
+
+                int WcvCellEnc(Dictionary<string, CollectionMonthlyCell>? d, string wk)
+                    => d is not null && d.TryGetValue(wk, out var c) ? c.EncounterCount : 0;
+                decimal WcvCellPaid(Dictionary<string, CollectionMonthlyCell>? d, string wk)
+                    => d is not null && d.TryGetValue(wk, out var c) ? c.InsurancePaidAmount : 0m;
+
+                var wcvEncLabel = Model.UsesLineEncounters ? "No. of Enc." : "No. of Encounters";
+                var wcvPaidLabel = Model.UsesLineEncounters ? "Total Paid" : "Total Billed Charges";
+
+                <div class="cs-rpt-wrap">
+                    <div class="cs-rpt-scroll">
+                        <table class="cs-rpt-table">
+                            <thead>
+                                <tr>
+                                    <th colspan="@(2 + wcvWeeks.Count * 2 + 2)" style="text-align:center;font-size:.7rem;letter-spacing:.03em">
+                                        Data based on Last 4 Week [Posting Date]
+                                    </th>
+                                </tr>
+                                <tr>
+                                    <th rowspan="2" style="min-width:40px">&nbsp;</th>
+                                    <th rowspan="2" style="text-align:left;min-width:260px">Panel &amp; Insurance</th>
+                                    @foreach (var w in wcvWeeks)
+                                    {
+                                        <th colspan="2">@w.Label</th>
+                                    }
+                                    <th colspan="2">Grand Total</th>
+                                </tr>
+                                <tr>
+                                    @foreach (var w in wcvWeeks)
+                                    {
+                                        <th>@wcvEncLabel</th>
+                                        <th>@wcvPaidLabel</th>
+                                    }
+                                    <th>@wcvEncLabel</th>
+                                    <th>@wcvPaidLabel</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @{ var wcvIdx = 0; }
+                                @foreach (var panel in wcvPivot.PanelRows)
+                                {
+                                    wcvIdx++;
+                                    var letter = wcvIdx <= 26 ? ((char)('A' + wcvIdx - 1)).ToString() : wcvIdx.ToString();
+                                    <tr>
+                                        <td style="font-weight:700">@letter</td>
+                                        <td style="text-align:left;font-weight:700">@panel.PanelName</td>
+                                        @foreach (var w in wcvWeeks)
+                                        {
+                                            <td style="text-align:right;font-weight:600">@WcvCellEnc(panel.ByWeek, w.Key).ToString("N0")</td>
+                                            <td style="text-align:right;font-weight:600">@WcvCellPaid(panel.ByWeek, w.Key).ToString("C0")</td>
+                                        }
+                                        <td style="text-align:right;font-weight:700">@panel.TotalEncounters.ToString("N0")</td>
+                                        <td style="text-align:right;font-weight:700">@panel.TotalInsurancePaid.ToString("C0")</td>
+                                    </tr>
+                                    @foreach (var payer in panel.TopPayers)
+                                    {
+                                        <tr class="mcv-drilldown">
+                                            <td></td>
+                                            <td style="text-align:left">@payer.PayerName</td>
+                                            @foreach (var w in wcvWeeks)
+                                            {
+                                                <td style="text-align:right">@WcvCellEnc(payer.ByWeek, w.Key).ToString("N0")</td>
+                                                <td style="text-align:right">@WcvCellPaid(payer.ByWeek, w.Key).ToString("C0")</td>
+                                            }
+                                            <td style="text-align:right;font-weight:600">@payer.TotalEncounters.ToString("N0")</td>
+                                            <td style="text-align:right;font-weight:600">@payer.TotalInsurancePaid.ToString("C0")</td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
+                                    <td style="color:#fff"></td>
+                                    <td style="text-align:left;color:#fff">Grand Total</td>
+                                    @foreach (var w in wcvWeeks)
+                                    {
+                                        <td style="text-align:right;color:#fff">@WcvCellEnc(wcvPivot.GrandTotalByWeek, w.Key).ToString("N0")</td>
+                                        <td style="text-align:right;color:#fff">@WcvCellPaid(wcvPivot.GrandTotalByWeek, w.Key).ToString("C0")</td>
+                                    }
+                                    <td style="text-align:right;color:#fff">@wcvPivot.GrandTotalEncounters.ToString("N0")</td>
+                                    <td style="text-align:right;color:#fff">@wcvPivot.GrandTotalInsurancePaid.ToString("C0")</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
+                    <strong>Source:</strong> @(Model.UsesLineEncounters ? "Line Level Data (encounters) + Claim Level Data (payments)" : "Claim Level Data") &bull;
+                    <strong>Filter:</strong> InsurancePayment &gt; 0, ClaimStatus IN (Fully Paid, Partially Paid, Paid-Client) &bull;
+                    <strong>Rows:</strong> PanelName &bull;
+                    <strong>Drill-down:</strong> @(Model.UsesLineEncounters ? "All Payers" : "Top 3 PayerName") by @(Model.UsesLineEncounters ? "Encounter Count" : "Paid Claims Count") &bull;
+                    <strong>Columns:</strong> Last 4 Weeks (PostingDate) &bull;
+                    <strong>Sorted by:</strong> Grand Total @(Model.UsesLineEncounters ? "Encounters" : "Paid Claims") DESC
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5 text-muted">
+                    <div style="font-size:2rem;opacity:.4">&#128202;</div>
+                    <div class="fw-semibold mt-2">No weekly claim volume data available</div>
+                    <div class="small mt-1">No matching claim records found for the last 4 weeks. Try adjusting your filters.</div>
+                </div>
+            }
+        

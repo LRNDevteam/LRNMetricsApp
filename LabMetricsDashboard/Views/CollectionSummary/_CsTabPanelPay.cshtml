@@ -1,0 +1,51 @@
+﻿@model LabMetricsDashboard.Models.CollectionSummaryViewModel
+            @if (Model.PanelPayments.Count > 0)
+            {
+                var grandClaims = Model.PanelPayments.Sum(r => r.NoOfClaims);
+                var grandPayments = Model.PanelPayments.Sum(r => r.InsurancePayments);
+                <div class="cs-rpt-wrap">
+                    <div class="cs-rpt-scroll">
+                        <table class="cs-rpt-table">
+                            <thead>
+                                <tr>
+                                    <th style="text-align:left;min-width:280px">Panel</th>
+                                    <th style="min-width:140px">No. of Claims</th>
+                                    <th style="min-width:180px">Insurance Payments</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in Model.PanelPayments)
+                                {
+                                    <tr>
+                                        <td style="text-align:left;font-weight:600">@row.PanelName</td>
+                                        <td style="text-align:right">@row.NoOfClaims.ToString("N0")</td>
+                                        <td style="text-align:right">@row.InsurancePayments.ToString("C2")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
+                                    <td style="text-align:left;color:#fff">Grand Total</td>
+                                    <td style="text-align:right;color:#fff">@grandClaims.ToString("N0")</td>
+                                    <td style="text-align:right;color:#fff">@grandPayments.ToString("C2")</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
+                    <strong>Source:</strong> Claim Level Data &bull;
+                    <strong>Filter:</strong> InsurancePayment &gt; 0 &bull;
+                    <strong>Sorted by:</strong> SUM(InsurancePayment) DESC &bull;
+                    <strong>Metric:</strong> COUNT(DISTINCT ClaimID), SUM(InsurancePayment)
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5 text-muted">
+                    <div style="font-size:2rem;opacity:.4">&#128202;</div>
+                    <div class="fw-semibold mt-2">No panel payment data available</div>
+                    <div class="small mt-1">No matching claim records found. Try adjusting your filters.</div>
+                </div>
+            }

@@ -24,6 +24,13 @@ public class HomeController : Controller
 
     public IActionResult Index(string? sort)
     {
+        // Non-admin users should never see the Home landing (lab tiles).
+        // Send them straight to the Revenue Dashboard.
+        if (User?.Identity?.IsAuthenticated == true && !User.IsInRole("Admin"))
+        {
+            return RedirectToAction("Index", "Dashboard");
+        }
+
         var resolvedSort = string.IsNullOrWhiteSpace(sort) ? "latest" : sort;
 
         var tiles = _labSettings.Labs.Keys
@@ -77,6 +84,7 @@ public class HomeController : Controller
         return View(new HomeViewModel { LabTiles = tiles, Sort = resolvedSort });
     }
 
+    [Microsoft.AspNetCore.Authorization.AllowAnonymous]
     public IActionResult Privacy() => View();
 
     /// <summary>
@@ -117,6 +125,7 @@ public class HomeController : Controller
     }
 
     [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
+    [Microsoft.AspNetCore.Authorization.AllowAnonymous]
     public IActionResult Error()
     {
         var requestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier;

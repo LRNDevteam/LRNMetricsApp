@@ -78,6 +78,41 @@ CREATE TABLE dbo.ClaimLevelData
     DaystoBill            NVARCHAR(500)  NULL,
     DaystoPost            NVARCHAR(500)  NULL,
     ICDPointer            NVARCHAR(500)  NULL,
+    -- Additional lab-specific fields
+    UID                   NVARCHAR(500)  NULL,
+    Aging                 NVARCHAR(100)  NULL,
+    PatientName           NVARCHAR(1000) NULL,
+    LISPatientName        NVARCHAR(1000) NULL,
+    SubscriberId          NVARCHAR(1000) NULL,
+    PanelType             NVARCHAR(MAX)  NULL,
+    EnteredWeek           NVARCHAR(500)  NULL,
+    EnteredStatus         NVARCHAR(1000) NULL,
+    LastActivityDate      NVARCHAR(100)  NULL,
+    EmedixSubmissionDate  NVARCHAR(100)  NULL,
+    ClaimType             NVARCHAR(MAX)  NULL,
+    BilledStatus          NVARCHAR(MAX)  NULL,
+    BilledWeek            NVARCHAR(500)  NULL,
+    PostedWeek            NVARCHAR(500)  NULL,
+    ModField              NVARCHAR(100)  NULL,
+    CheqNo                NVARCHAR(500)  NULL,
+    DuplicatePaymentPosted NVARCHAR(100) NULL,
+    ActualPayment         NVARCHAR(500)  NULL,
+    ProcTotalBal          NVARCHAR(500)  NULL,
+    DeniedStatus          NVARCHAR(500)  NULL,
+    ScrubberEditReason    NVARCHAR(MAX)  NULL,
+    EmedixRejectionDate   NVARCHAR(100)  NULL,
+    EmedixRejection       NVARCHAR(500)  NULL,
+    RejectionCategory     NVARCHAR(MAX)  NULL,
+    TimeToPay             NVARCHAR(500)  NULL,
+    PaymentPercent        NVARCHAR(100)  NULL,
+    FullyPaidCount        NVARCHAR(500)  NULL,
+    FullyPaidAmount       NVARCHAR(500)  NULL,
+    Adjudicated           NVARCHAR(500)  NULL,
+    AdjudicatedAmount     NVARCHAR(500)  NULL,
+    Bucket30              NVARCHAR(500)  NULL,
+    Bucket30Amount        NVARCHAR(500)  NULL,
+    Bucket60              NVARCHAR(500)  NULL,
+    Bucket60Amount        NVARCHAR(500)  NULL,
     InsertedDateTime      DATETIME       NOT NULL DEFAULT GETDATE()
 );
 GO
@@ -144,6 +179,41 @@ CREATE TABLE dbo.ClaimLevelDataArchive
     DaystoBill            NVARCHAR(500)  NULL,
     DaystoPost            NVARCHAR(500)  NULL,
     ICDPointer            NVARCHAR(500)  NULL,
+    -- Additional lab-specific fields (archived)
+    UID                   NVARCHAR(500)  NULL,
+    Aging                 NVARCHAR(100)  NULL,
+    PatientName           NVARCHAR(1000) NULL,
+    LISPatientName        NVARCHAR(1000) NULL,
+    SubscriberId          NVARCHAR(1000) NULL,
+    PanelType             NVARCHAR(MAX)  NULL,
+    EnteredWeek           NVARCHAR(500)  NULL,
+    EnteredStatus         NVARCHAR(1000) NULL,
+    LastActivityDate      NVARCHAR(100)  NULL,
+    EmedixSubmissionDate  NVARCHAR(100)  NULL,
+    ClaimType             NVARCHAR(MAX)  NULL,
+    BilledStatus          NVARCHAR(MAX)  NULL,
+    BilledWeek            NVARCHAR(500)  NULL,
+    PostedWeek            NVARCHAR(500)  NULL,
+    ModField              NVARCHAR(100)  NULL,
+    CheqNo                NVARCHAR(500)  NULL,
+    DuplicatePaymentPosted NVARCHAR(100) NULL,
+    ActualPayment         NVARCHAR(500)  NULL,
+    ProcTotalBal          NVARCHAR(500)  NULL,
+    DeniedStatus          NVARCHAR(500)  NULL,
+    ScrubberEditReason    NVARCHAR(MAX)  NULL,
+    EmedixRejectionDate   NVARCHAR(100)  NULL,
+    EmedixRejection       NVARCHAR(500)  NULL,
+    RejectionCategory     NVARCHAR(MAX)  NULL,
+    TimeToPay             NVARCHAR(500)  NULL,
+    PaymentPercent        NVARCHAR(100)  NULL,
+    FullyPaidCount        NVARCHAR(500)  NULL,
+    FullyPaidAmount       NVARCHAR(500)  NULL,
+    Adjudicated           NVARCHAR(500)  NULL,
+    AdjudicatedAmount     NVARCHAR(500)  NULL,
+    Bucket30              NVARCHAR(500)  NULL,
+    Bucket30Amount        NVARCHAR(500)  NULL,
+    Bucket60              NVARCHAR(500)  NULL,
+    Bucket60Amount        NVARCHAR(500)  NULL,
     OriginalInsertedDateTime DATETIME    NULL
 );
 GO
@@ -355,6 +425,41 @@ CREATE TYPE dbo.ClaimLevelDataTVP AS TABLE
     DaystoBill            NVARCHAR(500),
     DaystoPost            NVARCHAR(500),
     ICDPointer            NVARCHAR(500)
+    -- Additional lab-specific fields for TVP
+    , UID                   NVARCHAR(500)
+    , Aging                 NVARCHAR(100)
+    , PatientName           NVARCHAR(1000)
+    , LISPatientName        NVARCHAR(1000)
+    , SubscriberId          NVARCHAR(1000)
+    , PanelType             NVARCHAR(MAX)
+    , EnteredWeek           NVARCHAR(500)
+    , EnteredStatus         NVARCHAR(1000)
+    , LastActivityDate      NVARCHAR(100)
+    , EmedixSubmissionDate  NVARCHAR(100)
+    , ClaimType             NVARCHAR(MAX)
+    , BilledStatus          NVARCHAR(MAX)
+    , BilledWeek            NVARCHAR(500)
+    , PostedWeek            NVARCHAR(500)
+    , ModField              NVARCHAR(100)
+    , CheqNo                NVARCHAR(500)
+    , DuplicatePaymentPosted NVARCHAR(100)
+    , ActualPayment         NVARCHAR(500)
+    , ProcTotalBal          NVARCHAR(500)
+    , DeniedStatus          NVARCHAR(500)
+    , ScrubberEditReason    NVARCHAR(MAX)
+    , EmedixRejectionDate   NVARCHAR(100)
+    , EmedixRejection       NVARCHAR(500)
+    , RejectionCategory     NVARCHAR(MAX)
+    , TimeToPay             NVARCHAR(500)
+    , PaymentPercent        NVARCHAR(100)
+    , FullyPaidCount        NVARCHAR(500)
+    , FullyPaidAmount       NVARCHAR(500)
+    , Adjudicated           NVARCHAR(500)
+    , AdjudicatedAmount     NVARCHAR(500)
+    , Bucket30              NVARCHAR(500)
+    , Bucket30Amount        NVARCHAR(500)
+    , Bucket60              NVARCHAR(500)
+    , Bucket60Amount        NVARCHAR(500)
 );
 GO
 
@@ -483,6 +588,14 @@ BEGIN
             InsuranceBalance, PatientBalance, TotalBalance,
             CheckDate, ClaimStatus, DenialCode, ICDCode,
             ICDPointer,
+            UID, Aging, PatientName, LISPatientName, SubscriberId, PanelType,
+            EnteredWeek, EnteredStatus, LastActivityDate, EmedixSubmissionDate,
+            ClaimType, BilledStatus, BilledWeek, PostedWeek, ModField, CheqNo,
+            DuplicatePaymentPosted, ActualPayment, ProcTotalBal, DeniedStatus,
+            ScrubberEditReason, EmedixRejectionDate, EmedixRejection, RejectionCategory,
+            TimeToPay, PaymentPercent, FullyPaidCount, FullyPaidAmount,
+            Adjudicated, AdjudicatedAmount, Bucket30, Bucket30Amount,
+            Bucket60, Bucket60Amount,
             OriginalInsertedDateTime
         )
         SELECT
@@ -524,6 +637,7 @@ BEGIN
                 CASE WHEN ISNULL(c.DenialCode,'')         <> ISNULL(n.DenialCode,'')         THEN 'DenialCode,' ELSE '' END +
                 CASE WHEN ISNULL(c.ICDCode,'')            <> ISNULL(n.ICDCode,'')            THEN 'ICDCode,' ELSE '' END +
                 CASE WHEN ISNULL(c.ICDPointer,'')         <> ISNULL(n.ICDPointer,'')         THEN 'ICDPointer,' ELSE '' END,
+            -- include archived column values
             c.FileLogId, c.RunId, c.WeekFolder, c.SourceFullPath, c.FileName, c.FileType, c.RowHash,
             c.LabID, c.LabName, c.ClaimID, c.AccessionNumber, c.SourceFileID, c.IngestedOn, c.CsvRowHash,
             c.PayerName_Raw, c.PayerName, c.Payer_Code, c.Payer_Common_Code, c.Payer_Group_Code, c.Global_Payer_ID, c.PayerType,
@@ -535,6 +649,14 @@ BEGIN
             c.InsuranceBalance, c.PatientBalance, c.TotalBalance,
             c.CheckDate, c.ClaimStatus, c.DenialCode, c.ICDCode,
             c.ICDPointer,
+            c.UID, c.Aging, c.PatientName, c.LISPatientName, c.SubscriberId, c.PanelType,
+            c.EnteredWeek, c.EnteredStatus, c.LastActivityDate, c.EmedixSubmissionDate,
+            c.ClaimType, c.BilledStatus, c.BilledWeek, c.PostedWeek, c.ModField, c.CheqNo,
+            c.DuplicatePaymentPosted, c.ActualPayment, c.ProcTotalBal, c.DeniedStatus,
+            c.ScrubberEditReason, c.EmedixRejectionDate, c.EmedixRejection, c.RejectionCategory,
+            c.TimeToPay, c.PaymentPercent, c.FullyPaidCount, c.FullyPaidAmount,
+            c.Adjudicated, c.AdjudicatedAmount, c.Bucket30, c.Bucket30Amount,
+            c.Bucket60, c.Bucket60Amount,
             c.InsertedDateTime
         FROM dbo.ClaimLevelData c
         INNER JOIN @Rows n ON n.ClaimID = c.ClaimID AND n.LabID = c.LabID
@@ -555,6 +677,14 @@ BEGIN
             InsuranceBalance, PatientBalance, TotalBalance,
             CheckDate, ClaimStatus, DenialCode, ICDCode,
             ICDPointer,
+            UID, Aging, PatientName, LISPatientName, SubscriberId, PanelType,
+            EnteredWeek, EnteredStatus, LastActivityDate, EmedixSubmissionDate,
+            ClaimType, BilledStatus, BilledWeek, PostedWeek, ModField, CheqNo,
+            DuplicatePaymentPosted, ActualPayment, ProcTotalBal, DeniedStatus,
+            ScrubberEditReason, EmedixRejectionDate, EmedixRejection, RejectionCategory,
+            TimeToPay, PaymentPercent, FullyPaidCount, FullyPaidAmount,
+            Adjudicated, AdjudicatedAmount, Bucket30, Bucket30Amount,
+            Bucket60, Bucket60Amount,
             OriginalInsertedDateTime
         )
         SELECT
@@ -571,6 +701,14 @@ BEGIN
             c.InsuranceBalance, c.PatientBalance, c.TotalBalance,
             c.CheckDate, c.ClaimStatus, c.DenialCode, c.ICDCode,
             c.ICDPointer,
+            c.UID, c.Aging, c.PatientName, c.LISPatientName, c.SubscriberId, c.PanelType,
+            c.EnteredWeek, c.EnteredStatus, c.LastActivityDate, c.EmedixSubmissionDate,
+            c.ClaimType, c.BilledStatus, c.BilledWeek, c.PostedWeek, c.ModField, c.CheqNo,
+            c.DuplicatePaymentPosted, c.ActualPayment, c.ProcTotalBal, c.DeniedStatus,
+            c.ScrubberEditReason, c.EmedixRejectionDate, c.EmedixRejection, c.RejectionCategory,
+            c.TimeToPay, c.PaymentPercent, c.FullyPaidCount, c.FullyPaidAmount,
+            c.Adjudicated, c.AdjudicatedAmount, c.Bucket30, c.Bucket30Amount,
+            c.Bucket60, c.Bucket60Amount,
             c.InsertedDateTime
         FROM dbo.ClaimLevelData c
         LEFT JOIN @Rows n ON n.ClaimID = c.ClaimID AND n.LabID = c.LabID

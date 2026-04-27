@@ -121,13 +121,16 @@ public class CollectionSummaryController : Controller
             DateOnly? cdFromN = cdFrom == default ? null : cdFrom;
             DateOnly? cdToN   = cdTo   == default ? null : cdTo;
 
+            var monthlyRule = config.CollectionSummary?.Rule;
+            var weeklyRule  = config.CollectionSummary?.Week;
+
             var monthlyVolumeTask = _repo.GetCollectionMonthlyVolumeAsync(
-                connStr, useLineEncounters, payerFilter, panelFilter,
+                connStr, monthlyRule, useLineEncounters, payerFilter, panelFilter,
                 fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
 
             var weeklyVolumeTask = _repo.GetCollectionWeeklyVolumeAsync(
                 connStr, useLineEncounters, payerFilter, panelFilter,
-                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, weeklyRule, ct);
 
             var reimbursementTask = _repo.GetTop5ReimbursementAsync(
                 connStr, payerFilter, panelFilter,
@@ -162,9 +165,21 @@ public class CollectionSummaryController : Controller
                 connStr, payerFilter, panelFilter,
                 fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
 
+            var statusSummaryTask = _repo.GetStatusSummaryAsync(
+                connStr, payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
+
+            var avgPaymentsTask = _repo.GetAvgPaymentsAsync(
+                connStr, payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
+
+            var providerSummaryTask = _repo.GetProviderSummaryAsync(
+                connStr, payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
+
             await Task.WhenAll(monthlyVolumeTask, weeklyVolumeTask, reimbursementTask, totalPaymentsTask,
                 insuranceAgingTask, panelPaymentTask, repPaymentTask, insurancePaymentPctTask, cptPaymentPctTask,
-                panelAveragesTask);
+                panelAveragesTask, statusSummaryTask, avgPaymentsTask, providerSummaryTask);
 
             var monthlyVolumeResult = await monthlyVolumeTask;
             var weeklyVolumeResult = await weeklyVolumeTask;
@@ -176,6 +191,9 @@ public class CollectionSummaryController : Controller
             var insurancePaymentPctResult = await insurancePaymentPctTask;
             var cptPaymentPctResult = await cptPaymentPctTask;
             var panelAveragesResult = await panelAveragesTask;
+            var statusSummaryResult = await statusSummaryTask;
+            var avgPaymentsResult = await avgPaymentsTask;
+            var providerSummaryResult = await providerSummaryTask;
 
             var repPivot = BuildRepPaymentPivot(repPaymentResult.Rows);
 
@@ -186,6 +204,7 @@ public class CollectionSummaryController : Controller
             {
                 AvailableLabs = availableLabs,
                 SelectedLab = selectedLab,
+                CollectionSummaryRule = monthlyRule,
                 FilterPayerNames = filterPayerNames,
                 FilterPanelNames = filterPanelNames,
                 FilterFirstBillFrom = filterFirstBillFrom,
@@ -208,6 +227,9 @@ public class CollectionSummaryController : Controller
                 InsurancePaymentPct = insurancePaymentPctResult.Rows,
                 CptPaymentPct = cptPaymentPctResult.Rows,
                 PanelAverages = panelAveragesResult.PanelRows,
+                StatusSummary = statusSummaryResult,
+                AvgPayments = avgPaymentsResult,
+                ProviderSummary = providerSummaryResult,
             });
         }
         catch (Exception ex)
@@ -344,6 +366,9 @@ public class CollectionSummaryController : Controller
         var useLineEncounters = !string.IsNullOrWhiteSpace(config.CollectionOutput)
             && string.Equals(config.CollectionOutput, "table1", StringComparison.OrdinalIgnoreCase);
 
+        var monthlyRule = config.CollectionSummary?.Rule;
+        var weeklyRule  = config.CollectionSummary?.Week;
+
         DateOnly.TryParse(filterFirstBillFrom, out var fbFrom);
         DateOnly.TryParse(filterFirstBillTo, out var fbTo);
         DateOnly.TryParse(filterDosFrom, out var dosFrom);
@@ -365,11 +390,11 @@ public class CollectionSummaryController : Controller
         {
             // Fetch all report data in parallel
             var monthlyVolumeTask = _repo.GetCollectionMonthlyVolumeAsync(
-                connStr, useLineEncounters, payerFilter, panelFilter,
+                connStr, monthlyRule, useLineEncounters, payerFilter, panelFilter,
                 fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
             var weeklyVolumeTask = _repo.GetCollectionWeeklyVolumeAsync(
                 connStr, useLineEncounters, payerFilter, panelFilter,
-                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, weeklyRule, ct);
             var reimbursementTask = _repo.GetTop5ReimbursementAsync(
                 connStr, payerFilter, panelFilter,
                 fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
@@ -395,6 +420,15 @@ public class CollectionSummaryController : Controller
             var panelAveragesTask = _repo.GetPanelAveragesAsync(
                 connStr, payerFilter, panelFilter,
                 fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
+            var avgPaymentsTask = _repo.GetAvgPaymentsAsync(
+                connStr, payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
+            var statusSummaryTask = _repo.GetStatusSummaryAsync(
+                connStr, payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
+            var providerSummaryTask = _repo.GetProviderSummaryAsync(
+                connStr, payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
 
             // Fetch raw data in parallel
             var claimTask = _repo.GetClaimLevelDataExportAsync(
@@ -407,11 +441,14 @@ public class CollectionSummaryController : Controller
             await Task.WhenAll(
                 monthlyVolumeTask, weeklyVolumeTask, reimbursementTask, totalPaymentsTask,
                 insuranceAgingTask, panelPaymentTask, repPaymentTask, insurancePaymentPctTask,
-                cptPaymentPctTask, panelAveragesTask, claimTask, lineTask);
+                cptPaymentPctTask, panelAveragesTask, avgPaymentsTask,
+                statusSummaryTask, providerSummaryTask,
+                claimTask, lineTask);
 
             var vm = new CollectionSummaryViewModel
             {
                 SelectedLab = selectedLab,
+                CollectionSummaryRule = monthlyRule,
                 MonthlyClaimVolume = BuildCollectionMonthlyPivot(await monthlyVolumeTask),
                 WeeklyClaimVolume = BuildCollectionWeeklyPivot(await weeklyVolumeTask),
                 UsesLineEncounters = useLineEncounters,
@@ -424,6 +461,9 @@ public class CollectionSummaryController : Controller
                 InsurancePaymentPct = (await insurancePaymentPctTask).Rows,
                 CptPaymentPct = (await cptPaymentPctTask).Rows,
                 PanelAverages = (await panelAveragesTask).PanelRows,
+                AvgPayments = await avgPaymentsTask,
+                StatusSummary = await statusSummaryTask,
+                ProviderSummary = await providerSummaryTask,
             };
 
             var claimRows = await claimTask;

@@ -527,23 +527,24 @@
                             <th class="text-end" style="width:12%">Predicted Insurance Payment ($)</th>
                             <th class="text-end" style="width:12%">Actual Allowed Amount ($)</th>
                             <th class="text-end" style="width:12%">Actual Insurance Payment ($)</th>
-                            <th class="text-end" style="width:13%">Allowed Amount - Predicted Vs Actual ($)</th>
-                            <th class="text-end" style="width:14%">Insurance Paid - Predicted Vs Actual ($)</th>
+                            <th class="text-end" style="width:13%">Allowed Amount - Actual Vs Predicted ($)</th>
+                            <th class="text-end" style="width:14%">Insurance Paid -  Actual  vs Predicted ($)</th>
                         </tr>
                     </thead>
                     <tbody>
                         @{
-                            string FmtVariance(decimal? pred, decimal? actual)
-                            {
-                                if (pred is null || actual is null) return "\u2014";
-                                var v = pred.Value - actual.Value;
-                                return (v >= 0 ? "+" : "") + v.ToString("N2");
-                            }
-                            string VarClass(decimal? pred, decimal? actual)
-                            {
-                                if (pred is null || actual is null) return "na-cell";
-                                return (pred.Value - actual.Value) >= 0 ? "text-success" : "text-danger";
-                            }
+                        string FmtVariance(decimal? pred, decimal? actual)
+                        {
+                            // Show Actual - Predicted as positive when actual > predicted
+                            if (pred is null || actual is null) return "\u2014";
+                            var v = actual.Value - pred.Value;
+                            return (v >= 0 ? "+" : "") + v.ToString("N2");
+                        }
+                        string VarClass(decimal? pred, decimal? actual)
+                        {
+                            if (pred is null || actual is null) return "na-cell";
+                            return (actual.Value - pred.Value) >= 0 ? "text-success" : "text-danger";
+                        }
                         }
 
                         <!-- Predicted To Pay -->

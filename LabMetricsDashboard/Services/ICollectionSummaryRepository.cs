@@ -25,8 +25,14 @@ public interface ICollectionSummaryRepository
     /// When <paramref name="useLineEncounters"/> is true, encounter counts
     /// are read from <c>dbo.LineLevelData</c> instead.
     /// </summary>
+    /// Returns the Monthly Claim Volume pivot data for the Collection Report.
+    /// Source: ClaimLevelData where InsurancePayment &gt; 0 and CheckDate is valid.
+    /// Rows: PanelName with top-3 PayerName_Raw drill-down by unique claim count.
+    /// Columns: Year/Month from CheckDate (Posted Date).
+    /// Cells: COUNT(DISTINCT ClaimID), SUM(InsurancePayment).
     Task<CollectionMonthlyVolumeResult> GetCollectionMonthlyVolumeAsync(
         string connectionString,
+        string? rule = null,
         bool useLineEncounters = false,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -53,6 +59,7 @@ public interface ICollectionSummaryRepository
         DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
         DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? weeklyRule = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -179,6 +186,23 @@ public interface ICollectionSummaryRepository
         CancellationToken ct = default);
 
     /// <summary>
+    /// Returns Average Payments per Panel data.
+    /// Source: ClaimLevelData WHERE InsurancePayment &gt; 0, last 6 months by CheckDate (Posted Date).
+    /// Rows: PanelName with PayerName_Raw drill-down.
+    /// Columns: No. of Claims, Total Charges, Avg Billed, Fully Paid metrics,
+    ///          Adjudicated metrics, 30-day metrics, 60-day metrics.
+    /// Ranked by COUNT(DISTINCT ClaimID) descending.
+    /// </summary>
+    Task<PanelAveragesResult> GetAvgPaymentsAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
+        DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
+        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Returns all ClaimLevelData rows for Excel export, respecting the active filters.
     /// </summary>
     Task<List<Dictionary<string, object?>>> GetClaimLevelDataExportAsync(
@@ -194,6 +218,41 @@ public interface ICollectionSummaryRepository
     /// Returns all LineLevelData rows for Excel export, respecting the active filters.
     /// </summary>
     Task<List<Dictionary<string, object?>>> GetLineLevelDataExportAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
+        DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
+        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns Status Summary data: three groupings of ClaimLevelData (all records).
+    /// Grouping 1: by ClaimStatus
+    /// Grouping 2: by CPTCodeXUnitsXModifier
+    /// Grouping 3: by PayerName_Raw
+    /// Each grouping: COUNT(DISTINCT ClaimID) as NoClaims,
+    ///                SUM(InsurancePayment), SUM(InsuranceBalance), SUM(PatientBalance).
+    /// Also returns a Grand Total row.
+    /// Sorted by NoClaims descending within each grouping.
+    /// </summary>
+    Task<StatusSummaryResult> GetStatusSummaryAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
+        DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
+        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Provider Summary tab.
+    /// Source: ClaimLevelData [All rows – no InsurancePayment filter].
+    /// Rows: ReferringProvider.
+    /// Columns: COUNT(DISTINCT ClaimID), SUM(InsurancePayment), SUM(InsuranceBalance), SUM(PatientBalance).
+    /// Sorted by COUNT(DISTINCT ClaimID) DESC (Grand Total rank).
+    /// </summary>
+    Task<ProviderSummaryResult> GetProviderSummaryAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -341,4 +400,25 @@ public sealed class PanelAveragesPayerRow
 {
     public required string PayerName { get; init; }
     public required PanelAveragesMetrics Metrics { get; init; }
+}
+
+/// <summary>One row in the Provider Summary tab.</summary>
+public sealed record ProviderSummaryRow(
+    int     Rank,
+    string  ReferringProvider,
+    int     NoOfClaims,
+    decimal InsurancePayments,
+    decimal InsuranceBalance,
+    decimal PatientBalance);
+
+/// <summary>Result container for the Provider Summary tab.</summary>
+public sealed class ProviderSummaryResult
+{
+    public static readonly ProviderSummaryResult Empty = new();
+    public List<ProviderSummaryRow> Rows             { get; set; } = [];
+    public int     GrandNoClaims          { get; set; }
+    public decimal GrandInsurancePayments { get; set; }
+    public decimal GrandInsuranceBalance  { get; set; }
+    public decimal GrandPatientBalance    { get; set; }
+    public bool    HasData                => Rows.Count > 0;
 }

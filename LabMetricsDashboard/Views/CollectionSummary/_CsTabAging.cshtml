@@ -1,0 +1,93 @@
+﻿@model LabMetricsDashboard.Models.CollectionSummaryViewModel
+            @if (Model.InsuranceAging.Count > 0)
+            {
+                var grandClaimsCurrent = Model.InsuranceAging.Sum(r => r.ClaimsCurrent);
+                var grandBalanceCurrent = Model.InsuranceAging.Sum(r => r.BalanceCurrent);
+                var grandClaims30 = Model.InsuranceAging.Sum(r => r.Claims30);
+                var grandBalance30 = Model.InsuranceAging.Sum(r => r.Balance30);
+                var grandClaims60 = Model.InsuranceAging.Sum(r => r.Claims60);
+                var grandBalance60 = Model.InsuranceAging.Sum(r => r.Balance60);
+                var grandClaims90 = Model.InsuranceAging.Sum(r => r.Claims90);
+                var grandBalance90 = Model.InsuranceAging.Sum(r => r.Balance90);
+                var grandClaims120 = Model.InsuranceAging.Sum(r => r.Claims120);
+                var grandBalance120 = Model.InsuranceAging.Sum(r => r.Balance120);
+                var grandClaimsTotal = Model.InsuranceAging.Sum(r => r.ClaimsTotal);
+                var grandBalanceTotal = Model.InsuranceAging.Sum(r => r.BalanceTotal);
+                <div class="cs-rpt-wrap">
+                    <div class="cs-rpt-scroll">
+                        <table class="cs-rpt-table">
+                            <thead>
+                                <tr>
+                                    <th rowspan="2" style="text-align:left;min-width:220px">Unbilled × Aging</th>
+                                    <th colspan="2">Current</th>
+                                    <th colspan="2">30+</th>
+                                    <th colspan="2">60+</th>
+                                    <th colspan="2">90+</th>
+                                    <th colspan="2">120+</th>
+                                    <th colspan="2">Grand Total</th>
+                                </tr>
+                                <tr>
+                                    <th>No. of Claims</th><th>Insurance Balance</th>
+                                    <th>No. of Claims</th><th>Insurance Balance</th>
+                                    <th>No. of Claims</th><th>Insurance Balance</th>
+                                    <th>No. of Claims</th><th>Insurance Balance</th>
+                                    <th>No. of Claims</th><th>Insurance Balance</th>
+                                    <th>No. of Claims</th><th>Insurance Balance</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in Model.InsuranceAging)
+                                {
+                                    <tr>
+                                        <td style="text-align:left;font-weight:600">@row.PayerName</td>
+                                        <td style="text-align:right">@row.ClaimsCurrent.ToString("N0")</td>
+                                        <td style="text-align:right">@row.BalanceCurrent.ToString("C2")</td>
+                                        <td style="text-align:right">@row.Claims30.ToString("N0")</td>
+                                        <td style="text-align:right">@row.Balance30.ToString("C2")</td>
+                                        <td style="text-align:right">@row.Claims60.ToString("N0")</td>
+                                        <td style="text-align:right">@row.Balance60.ToString("C2")</td>
+                                        <td style="text-align:right">@row.Claims90.ToString("N0")</td>
+                                        <td style="text-align:right">@row.Balance90.ToString("C2")</td>
+                                        <td style="text-align:right">@row.Claims120.ToString("N0")</td>
+                                        <td style="text-align:right">@row.Balance120.ToString("C2")</td>
+                                        <td style="text-align:right;font-weight:700">@row.ClaimsTotal.ToString("N0")</td>
+                                        <td style="text-align:right;font-weight:700">@row.BalanceTotal.ToString("C2")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
+                                    <td style="text-align:left;color:#fff">Grand Total</td>
+                                    <td style="text-align:right;color:#fff">@grandClaimsCurrent.ToString("N0")</td>
+                                    <td style="text-align:right;color:#fff">@grandBalanceCurrent.ToString("C2")</td>
+                                    <td style="text-align:right;color:#fff">@grandClaims30.ToString("N0")</td>
+                                    <td style="text-align:right;color:#fff">@grandBalance30.ToString("C2")</td>
+                                    <td style="text-align:right;color:#fff">@grandClaims60.ToString("N0")</td>
+                                    <td style="text-align:right;color:#fff">@grandBalance60.ToString("C2")</td>
+                                    <td style="text-align:right;color:#fff">@grandClaims90.ToString("N0")</td>
+                                    <td style="text-align:right;color:#fff">@grandBalance90.ToString("C2")</td>
+                                    <td style="text-align:right;color:#fff">@grandClaims120.ToString("N0")</td>
+                                    <td style="text-align:right;color:#fff">@grandBalance120.ToString("C2")</td>
+                                    <td style="text-align:right;color:#fff">@grandClaimsTotal.ToString("N0")</td>
+                                    <td style="text-align:right;color:#fff">@grandBalanceTotal.ToString("C2")</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
+                    <strong>Source:</strong> Claim Level Data &bull;
+                    <strong>Filter:</strong> ClaimStatus = No Response &bull;
+                    <strong>Aging Buckets:</strong> Current (&lt;30 days), 30+, 60+, 90+, 120+ (based on DaysToDOS) &bull;
+                    <strong>Metric:</strong> COUNT(DISTINCT AccessionNumber), SUM(InsuranceBalance)
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5 text-muted">
+                    <div style="font-size:2rem;opacity:.4">&#9203;</div>
+                    <div class="fw-semibold mt-2">No aging data available</div>
+                    <div class="small mt-1">No claims with "No Response" status found. Try adjusting your filters.</div>
+                </div>
+            }

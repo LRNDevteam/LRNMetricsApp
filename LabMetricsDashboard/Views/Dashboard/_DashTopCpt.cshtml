@@ -1,0 +1,76 @@
+@model LabMetricsDashboard.Models.DashboardViewModel
+
+<!-- Top CPT By Charges -->
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header fw-semibold">Top CPT By Charges</div>
+    <div class="card-body p-0">
+        <div class="text-muted px-3 pt-2 pb-1" style="font-size:.75rem">Source : Line Level Data</div>
+        @if (!Model.TopCptDetail.Any())
+        {
+            <p class="text-muted px-3 py-2 mb-0" style="font-size:.82rem">No data available.</p>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-bordered table-sm mb-0" style="font-size:.8rem">
+                    <thead class="table-light">
+                        <tr>
+                            <th class="align-middle" rowspan="2">CPT Code</th>
+                            <th class="align-middle text-end" rowspan="2">Charges</th>
+                            <th class="align-middle text-end" rowspan="2">Allowed Amount</th>
+                            <th class="align-middle text-end" rowspan="2">Insurance Balance</th>
+                            <th class="text-center fw-bold" style="border-bottom:0">Collection Rate</th>
+                            <th class="text-center fw-bold" style="border-bottom:0">Denial Rate</th>
+                            <th class="text-center fw-bold" style="border-bottom:0">No Response Rate</th>
+                        </tr>
+                        <tr>
+                            <th class="text-center" style="font-size:.65rem;font-weight:400;color:#666;white-space:normal">
+                                Filter By: Pay Status = Paid, Patient Responsibility<br />
+                                Sum {AllowedAmount} / Sum {ChargeAmount}
+                            </th>
+                            <th class="text-center" style="font-size:.65rem;font-weight:400;color:#666;white-space:normal">
+                                Filter By: Pay Status = Denied<br />
+                                Sum {ChargeAmount} / Sum {ChargeAmount}
+                            </th>
+                            <th class="text-center" style="font-size:.65rem;font-weight:400;color:#666;white-space:normal">
+                                Filter By: Pay Status = No Response<br />
+                                Sum {ChargeAmount} / Sum {ChargeAmount}
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var cpt in Model.TopCptDetail)
+                        {
+                            var colBg = cpt.CollectionRate == 0 ? "#c62828" : "#1565c0";
+                            var denBg = cpt.DenialRate     == 0 ? "#2e7d32" : "#c62828";
+                            var nrBg  = cpt.NoResponseRate == 0 ? "#2e7d32" : "#e65100";
+                            <tr>
+                                <td class="fw-semibold">@cpt.CPTCode</td>
+                                <td class="text-end">@cpt.Charges.ToString("C0")</td>
+                                <td class="text-end">@cpt.AllowedAmount.ToString("C0")</td>
+                                <td class="text-end">@cpt.InsuranceBalance.ToString("C0")</td>
+                                <td class="text-center">
+                                    <span class="badge rounded-pill px-3 py-1 fw-bold"
+                                          style="background:@colBg;font-size:.75rem">@cpt.CollectionRate%</span>
+                                </td>
+                                <td class="text-center">
+                                    <span class="badge rounded-pill px-3 py-1 fw-bold"
+                                          style="background:@denBg;font-size:.75rem">@cpt.DenialRate%</span>
+                                </td>
+                                <td class="text-center">
+                                    <span class="badge rounded-pill px-3 py-1 fw-bold"
+                                          style="background:@nrBg;font-size:.75rem">@cpt.NoResponseRate%</span>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+<div class="mb-3">
+    <a asp-controller="Dashboard" asp-action="LineLevel" asp-route-lab="@Model.SelectedLab"
+       class="btn btn-outline-primary btn-sm">View Line Level Details &rarr;</a>
+</div>
