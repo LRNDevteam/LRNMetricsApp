@@ -209,6 +209,7 @@ builder.Services.AddScoped<IDashboardRepository, SqlDashboardRepository>();
 builder.Services.AddScoped<IProductionReportRepository, SqlProductionReportRepository>();
 builder.Services.AddScoped<IClaimLineRepository, SqlClaimLineRepository>();
 builder.Services.AddScoped<ICollectionSummaryRepository, SqlCollectionSummaryRepository>();
+builder.Services.AddScoped<ILisSummaryRepository, SqlLisSummaryRepository>();
 
 // User management repository (uses DefaultConnection from appsettings.json)
 builder.Services.AddScoped<IUserManagementRepository, SqlUserManagementRepository>();
