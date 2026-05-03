@@ -22,198 +22,7 @@
 }
 
 <style>
-    .lis-wrap {
-        border-radius: 14px;
-        overflow: hidden;
-        background: #fff;
-        border: 1px solid #e0e6ed;
-        box-shadow: 0 2px 12px rgba(0,0,0,.05);
-    }
-
-    .lis-scroll {
-        max-height: 78vh;
-        overflow: auto;
-    }
-
-    .lis-table {
-        border-collapse: separate;
-        border-spacing: 0;
-        font-size: .72rem;
-        table-layout: fixed;
-        min-width: 100%;
-    }
-
-        .lis-table thead th {
-            background: linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);
-            color: rgba(255,255,255,.94);
-            font-weight: 700;
-            font-size: .62rem;
-            letter-spacing: .04em;
-            text-transform: uppercase;
-            padding: .5rem .4rem;
-            text-align: center;
-            position: sticky;
-            top: 0;
-            z-index: 5;
-            border-bottom: 1px solid #0a2a4a;
-            border-right: 1px solid rgba(255,255,255,.08);
-            line-height: 1.25;
-        }
-
-        .lis-table thead tr:nth-child(2) th {
-            top: 30px;
-            z-index: 4;
-            background: linear-gradient(135deg,#162d50 0%,#1b4a6c 100%);
-            font-size: .58rem;
-        }
-
-        .lis-table thead tr:nth-child(3) th {
-            top: 56px;
-            z-index: 3;
-            background: #1e5a8a;
-            font-size: .56rem;
-            font-weight: 600;
-        }
-
-        .lis-table thead th:first-child, .lis-table thead th:nth-child(2) {
-            position: sticky;
-            z-index: 7;
-        }
-
-        .lis-table thead th:first-child {
-            left: 0;
-        }
-
-        .lis-table thead th:nth-child(2) {
-            left: 52px;
-            text-align: left;
-        }
-
-        .lis-table td {
-            padding: .35rem .5rem;
-            vertical-align: middle;
-            text-align: right;
-            white-space: nowrap;
-            border-right: 1px solid #e2e8f0;
-            border-bottom: 1px solid #e2e8f0;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-            .lis-table td:first-child {
-                position: sticky;
-                left: 0;
-                z-index: 1;
-                background: #fff;
-                text-align: center;
-                font-weight: 700;
-                width: 52px;
-                color: #334155;
-            }
-
-            .lis-table td:nth-child(2) {
-                position: sticky;
-                left: 52px;
-                z-index: 1;
-                background: #fff;
-                text-align: left;
-                font-weight: 600;
-                color: #1e293b;
-                min-width: 260px;
-                max-width: 320px;
-            }
-
-    .lis-section td {
-        background: #f0fdf4;
-        font-weight: 800;
-    }
-
-        .lis-section td:first-child, .lis-section td:nth-child(2) {
-            background: #f0fdf4;
-            color: #166534;
-        }
-
-    .lis-bullet td {
-        background: #fff;
-        color: #475569;
-        font-weight: 400;
-    }
-
-        .lis-bullet td:nth-child(2) {
-            padding-left: 1.5rem;
-            font-weight: 500;
-            color: #64748b;
-        }
-
-    .lis-bullet:hover td {
-        background: #f8fafc;
-    }
-
-        .lis-bullet:hover td:first-child, .lis-bullet:hover td:nth-child(2) {
-            background: #f8fafc;
-        }
-
-    .lis-total-row td {
-        background: #0e3460 !important;
-        color: #fff !important;
-        font-weight: 800;
-        border-top: 2px solid #0a2a4a;
-    }
-
-    .lis-year-total {
-        background-color: #fefce8 !important;
-        font-weight: 700;
-    }
-
-    .lis-table thead th.lis-year-total {
-        background: linear-gradient(135deg,#854d0e 0%,#a16207 100%) !important;
-    }
-
-    .lis-grand-total {
-        background-color: #fef3c7 !important;
-        font-weight: 800;
-    }
-
-    .lis-table thead th.lis-grand-total {
-        background: linear-gradient(135deg,#78350f 0%,#92400e 100%) !important;
-    }
-
-    .lis-filter-panel {
-        background: #fff;
-        border-radius: 12px;
-        box-shadow: 0 2px 10px rgba(0,0,0,.07);
-    }
-
-    .lis-kpi {
-        border: 1px solid #e5e7eb;
-        border-radius: 12px;
-        padding: .75rem 1rem;
-        background: linear-gradient(135deg,#f8fafc,#ffffff);
-    }
-
-        .lis-kpi .label {
-            font-size: .72rem;
-            color: #64748b;
-            text-transform: uppercase;
-            letter-spacing: .04em;
-        }
-
-        .lis-kpi .value {
-            font-size: 1.15rem;
-            font-weight: 800;
-            color: #0f172a;
-        }
-
-    .lis-filter-actions {
-        display: flex;
-        gap: .5rem;
-        align-items: end;
-    }
-
-        .lis-filter-actions .btn {
-            height: 31px;
-            white-space: nowrap;
-        }
+    .lis-wrap{border-radius:14px;background:#fff;border:1px solid #dbe6f3;box-shadow:0 2px 12px rgba(0,0,0,.05);overflow:hidden}.lis-scroll{width:100%;max-height:78vh;overflow:auto;position:relative;background:#fff}.lis-table{border-collapse:separate!important;border-spacing:0!important;font-size:.72rem;table-layout:fixed;width:max-content!important;min-width:100%!important;margin:0!important}.lis-table th,.lis-table td{box-sizing:border-box;border-right:1px solid #dbe5f1;border-bottom:1px solid #dbe5f1;white-space:nowrap}.lis-table thead th{background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:800;font-size:.62rem;letter-spacing:.04em;text-transform:uppercase;padding:.5rem .4rem;text-align:center;vertical-align:middle;position:sticky;top:0;z-index:20;border-top:0;border-bottom:1px solid #0a2a4a;border-right:1px solid rgba(255,255,255,.14);line-height:1.25;height:32px}.lis-table thead tr:nth-child(2) th{top:32px;z-index:19;background:linear-gradient(135deg,#162d50 0%,#1b4a6c 100%);font-size:.58rem;height:30px}.lis-table thead tr:nth-child(3) th{top:62px;z-index:18;background:#1e5a8a;font-size:.56rem;font-weight:700;height:28px}.lis-table tbody td{padding:.35rem .5rem;vertical-align:middle;text-align:right;overflow:hidden;text-overflow:ellipsis;background:#fff;color:#0b2945}.lis-freeze-1{position:sticky!important;left:0!important;width:52px!important;min-width:52px!important;max-width:52px!important;text-align:center!important;z-index:35!important;background-clip:padding-box!important}.lis-freeze-2{position:sticky!important;left:52px!important;width:320px!important;min-width:320px!important;max-width:320px!important;text-align:left!important;z-index:34!important;background-clip:padding-box!important}.lis-table thead .lis-freeze-1,.lis-table thead .lis-freeze-2{z-index:60!important;background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%)!important;color:#fff!important}.lis-table tbody .lis-freeze-1,.lis-table tbody .lis-freeze-2{background:#fff!important;font-weight:700;color:#1e293b}.lis-section td{background:#e9f8ef!important;font-weight:800}.lis-section .lis-freeze-1,.lis-section .lis-freeze-2{background:#e9f8ef!important;color:#047857!important}.lis-bullet td{background:#fff;color:#475569;font-weight:400}.lis-bullet .lis-freeze-2{padding-left:1.5rem;font-weight:600;color:#47617f!important}.lis-bullet:hover td,.lis-bullet:hover .lis-freeze-1,.lis-bullet:hover .lis-freeze-2{background:#f8fafc!important}.lis-total-row td,.lis-total-row .lis-freeze-1,.lis-total-row .lis-freeze-2{background:#0e3460!important;color:#fff!important;font-weight:800;border-top:2px solid #0a2a4a}.lis-year-total{background-color:#fffbe6!important;font-weight:800}.lis-table thead th.lis-year-total{background:linear-gradient(135deg,#854d0e 0%,#a16207 100%)!important}.lis-grand-total{background-color:#fff2cc!important;font-weight:900}.lis-table thead th.lis-grand-total{background:linear-gradient(135deg,#78350f 0%,#92400e 100%)!important}.lis-filter-panel{background:#fff;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.07)}.lis-kpi{border:1px solid #e5e7eb;border-radius:12px;padding:.75rem 1rem;background:linear-gradient(135deg,#f8fafc,#fff)}.lis-kpi .label{font-size:.72rem;color:#64748b;text-transform:uppercase;letter-spacing:.04em}.lis-kpi .value{font-size:1.15rem;font-weight:800;color:#0f172a}.lis-filter-actions{display:flex;gap:.5rem;align-items:end}.lis-filter-actions .btn{height:31px;white-space:nowrap}
 </style>
 
 <div class="container-fluid px-3 px-lg-4 py-3">
@@ -299,8 +108,8 @@
                 <table class="lis-table">
                     <thead>
                         <tr>
-                            <th rowspan="3" style="width:52px;">#</th>
-                            <th rowspan="3" style="width:300px;">LIS Status Summary</th>
+                            <th rowspan="3" class="lis-freeze-1">#</th>
+                            <th rowspan="3" class="lis-freeze-2">LIS Status Summary</th>
                             @foreach (var y in monthsByYear.Keys)
                             {
                                 <th colspan="@(monthsByYear[y].Count + 1)">@y</th>
@@ -334,8 +143,8 @@
                         {
                             var css = row.IsSection ? "lis-section" : row.IsBullet ? "lis-bullet" : string.Empty;
                             <tr class="@css" title="@row.Logic">
-                                <td>@row.Code</td>
-                                <td>@row.Description</td>
+                                <td class="lis-freeze-1">@row.Code</td>
+                                <td class="lis-freeze-2" title="@row.Description">@row.Description</td>
                                 @foreach (var kv in monthsByYear)
                                 {
                                     foreach (var m in kv.Value)
@@ -348,8 +157,8 @@
                             </tr>
                         }
                         <tr class="lis-total-row">
-                            <td></td>
-                            <td>Grand Total</td>
+                            <td class="lis-freeze-1"></td>
+                            <td class="lis-freeze-2">Grand Total</td>
                             @foreach (var kv in monthsByYear)
                             {
                                 foreach (var m in kv.Value)

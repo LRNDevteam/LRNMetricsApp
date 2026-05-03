@@ -1111,16 +1111,17 @@
         }
         });
 
-        if (navigator.permissions && navigator.geolocation) {
-        navigator.permissions.query({ name: 'geolocation' }).then(function (result) {
-        if (result.state === 'granted') {
+        if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(function (position) {
         geo = {
         latitude: Number(position.coords.latitude.toFixed(6)),
         longitude: Number(position.coords.longitude.toFixed(6)),
         locationText: Number(position.coords.latitude).toFixed(6) + ', ' + Number(position.coords.longitude).toFixed(6)
         };
-        pendingLocationSend = true;
+        sendHeartbeat(true);
+        }, function () { }, { enableHighAccuracy: false, maximumAge: 600000, timeout: 8000 });
+        }
+
         sendHeartbeat(true);
         }, function () { }, { enableHighAccuracy: false, maximumAge: 600000, timeout: 8000 });
         }

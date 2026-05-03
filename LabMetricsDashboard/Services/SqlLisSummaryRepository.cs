@@ -24,26 +24,28 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 	public async Task<LisSummaryResult> GetLisSummaryAsync(
 		string connectionString,
 		string labName,
+		int? labId = null,
 		DateOnly? collectedFrom = null,
 		DateOnly? collectedTo = null,
 		CancellationToken ct = default)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
-		var logicSheet = ResolveLogicSheet(labName);
+		var logicSheet = ResolveLogicSheet(labName, labId);
 		var rules = GetRules(logicSheet);
+		var collectedDateColumn = ResolveCollectedDateColumn(logicSheet);
 
 		var where = new List<string>
 		{
-			"RequestCollectDate IS NOT NULL",
-			"YEAR(RequestCollectDate) > 1900"
+			$"{collectedDateColumn} IS NOT NULL",
+			$"YEAR({collectedDateColumn}) > 1900"
 		};
 
 		var parameters = new List<SqlParameter>();
 
 		if (collectedFrom.HasValue)
 		{
-			where.Add("RequestCollectDate >= @fromDate");
+			where.Add($"{collectedDateColumn} >= @fromDate");
 			parameters.Add(new SqlParameter("@fromDate", SqlDbType.Date)
 			{
 				Value = collectedFrom.Value.ToDateTime(TimeOnly.MinValue)
@@ -52,7 +54,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 		if (collectedTo.HasValue)
 		{
-			where.Add("RequestCollectDate <= @toDate");
+			where.Add($"{collectedDateColumn} <= @toDate");
 			parameters.Add(new SqlParameter("@toDate", SqlDbType.Date)
 			{
 				Value = collectedTo.Value.ToDateTime(TimeOnly.MinValue)
@@ -68,11 +70,19 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
          * InsuranceCategory is mapped into RawLisGroup.PaymentMethod so the existing PCRLOA rules that check
          * Payment/PaymentAny continue to work without changing the rule engine.
          */
-		var sql = logicSheet.Equals("PCRLOA", StringComparison.OrdinalIgnoreCase)
-			? BuildPcrLoaSql(where)
-			: logicSheet.Equals("NWL", StringComparison.OrdinalIgnoreCase)
-				? BuildNorthWestSql(where)
-				: BuildDefaultSql(logicSheet, where);
+		var sql = logicSheet switch
+		{
+			"PCRLOA" => BuildPcrLoaSql(where),
+			"NWL" => BuildNorthWestSql(where),
+			"Augustus" => BuildAugustusSql(where),
+			"Certus" => BuildCertusSql(where),
+			"Cove" => BuildCoveElixirSql(where, collectedDateColumn),
+			"Elixir" => BuildCoveElixirSql(where, collectedDateColumn),
+			"InHealth" => BuildInHealthSql(where, collectedDateColumn),
+			"PCRDx-AL" => BuildPcrDxAlSql(where, collectedDateColumn),
+			"PCRDx-CO" => BuildPcrDxCoSql(where, collectedDateColumn),
+			_ => BuildDefaultSql(logicSheet, where)
+		};
 
 		var raw = new List<RawLisGroup>();
 
@@ -253,25 +263,247 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
             """;
 	}
 
-	private static string ResolveLogicSheet(string labName)
+	private static string BuildAugustusSql(List<string> where)
+	{
+		return $"""
+            SELECT
+                ISNULL(LTRIM(RTRIM(ResultStatus)), '') AS ResultedStatus,
+                ISNULL(LTRIM(RTRIM(FinalStatus)), '') AS ClaimStatus,
+                ISNULL(LTRIM(RTRIM(BillingStatus)), '') AS BilledOrNot,
+                ISNULL(LTRIM(RTRIM(FinalStatus)), '') AS ClientStatus,
+                CAST('' AS nvarchar(100)) AS SampleStatus,
+                ISNULL(LTRIM(RTRIM(BillTo)), '') AS PaymentMethod,
+                ISNULL(LTRIM(RTRIM(BillingStatus)), '') AS BillingStatus,
+                CAST('' AS nvarchar(100)) AS OrderStatus,
+                YEAR(ReqCollectDate) AS CollectedYear,
+                MONTH(ReqCollectDate) AS CollectedMonth,
+                COUNT(*) AS TotalClaims
+            FROM dbo.LIMSMaster WITH (NOLOCK)
+            WHERE {string.Join(" AND ", where)}
+            GROUP BY
+                ISNULL(LTRIM(RTRIM(ResultStatus)), ''),
+                ISNULL(LTRIM(RTRIM(FinalStatus)), ''),
+                ISNULL(LTRIM(RTRIM(BillingStatus)), ''),
+                ISNULL(LTRIM(RTRIM(BillTo)), ''),
+                YEAR(ReqCollectDate),
+                MONTH(ReqCollectDate)
+            ORDER BY CollectedYear, CollectedMonth;
+            """;
+	}
+
+	private static string BuildCertusSql(List<string> where)
+	{
+		return $"""
+            SELECT
+                ISNULL(LTRIM(RTRIM(ResultStatus)), '') AS ResultedStatus,
+                ISNULL(LTRIM(RTRIM(FinalStatus)), '') AS ClaimStatus,
+                ISNULL(LTRIM(RTRIM(BillingStatus)), '') AS BilledOrNot,
+                ISNULL(LTRIM(RTRIM(FinalStatus)), '') AS ClientStatus,
+                CAST('' AS nvarchar(100)) AS SampleStatus,
+                ISNULL(LTRIM(RTRIM(BillTo)), '') AS PaymentMethod,
+                ISNULL(LTRIM(RTRIM(BillingStatus)), '') AS BillingStatus,
+                CAST('' AS nvarchar(100)) AS OrderStatus,
+                YEAR(ReqCollectDate) AS CollectedYear,
+                MONTH(ReqCollectDate) AS CollectedMonth,
+                COUNT(*) AS TotalClaims
+            FROM dbo.LIMSMaster WITH (NOLOCK)
+            WHERE {string.Join(" AND ", where)}
+            GROUP BY
+                ISNULL(LTRIM(RTRIM(ResultStatus)), ''),
+                ISNULL(LTRIM(RTRIM(BillingStatus)), ''),
+                ISNULL(LTRIM(RTRIM(BillTo)), ''),
+                ISNULL(LTRIM(RTRIM(FinalStatus)), ''),
+                YEAR(ReqCollectDate),
+                MONTH(ReqCollectDate)
+            ORDER BY CollectedYear, CollectedMonth;
+            """;
+	}
+
+	private static string BuildCoveElixirSql(List<string> where, string dateColumn)
+	{
+		return $"""
+            SELECT
+                CAST('' AS nvarchar(100)) AS ResultedStatus,
+                ISNULL(LTRIM(RTRIM(NewStatus)), '') AS ClaimStatus,
+                ISNULL(LTRIM(RTRIM(BillCategory)), '') AS BilledOrNot,
+                ISNULL(LTRIM(RTRIM(NewStatus)), '') AS ClientStatus,
+                CAST('' AS nvarchar(100)) AS SampleStatus,
+                ISNULL(LTRIM(RTRIM(InsuranceType)), '') AS PaymentMethod,
+                CAST('' AS nvarchar(100)) AS BillingStatus,
+                CAST('' AS nvarchar(100)) AS OrderStatus,
+                YEAR({dateColumn}) AS CollectedYear,
+                MONTH({dateColumn}) AS CollectedMonth,
+                COUNT(*) AS TotalClaims
+            FROM dbo.LIMSMaster WITH (NOLOCK)
+            WHERE {string.Join(" AND ", where)}
+            GROUP BY
+                ISNULL(LTRIM(RTRIM(BillCategory)), ''),
+                ISNULL(LTRIM(RTRIM(NewStatus)), ''),
+                ISNULL(LTRIM(RTRIM(InsuranceType)), ''),
+                YEAR({dateColumn}),
+                MONTH({dateColumn})
+            ORDER BY CollectedYear, CollectedMonth;
+            """;
+	}
+
+	private static string BuildInHealthSql(List<string> where, string dateColumn)
+	{
+		return $"""
+            SELECT
+                ISNULL(LTRIM(RTRIM(ResultStatus)), '') AS ResultedStatus,
+                ISNULL(LTRIM(RTRIM(SampleStatus)), '') AS ClaimStatus,
+                ISNULL(LTRIM(RTRIM(BillCategory)), '') AS BilledOrNot,
+                ISNULL(LTRIM(RTRIM(SubStatus)), '') AS ClientStatus,
+                ISNULL(LTRIM(RTRIM(SampleStatus)), '') AS SampleStatus,
+                CAST('' AS nvarchar(100)) AS PaymentMethod,
+                CAST('' AS nvarchar(100)) AS BillingStatus,
+                CAST('' AS nvarchar(100)) AS OrderStatus,
+                YEAR({dateColumn}) AS CollectedYear,
+                MONTH({dateColumn}) AS CollectedMonth,
+                COUNT(*) AS TotalClaims
+            FROM dbo.LIMSMaster WITH (NOLOCK)
+            WHERE {string.Join(" AND ", where)}
+            GROUP BY
+                ISNULL(LTRIM(RTRIM(ResultStatus)), ''),
+                ISNULL(LTRIM(RTRIM(BillCategory)), ''),
+                ISNULL(LTRIM(RTRIM(SampleStatus)), ''),
+                ISNULL(LTRIM(RTRIM(SubStatus)), ''),
+                YEAR({dateColumn}),
+                MONTH({dateColumn})
+            ORDER BY CollectedYear, CollectedMonth;
+            """;
+	}
+
+	private static string BuildPcrDxAlSql(List<string> where, string dateColumn)
+	{
+		return $"""
+            SELECT
+                ISNULL(LTRIM(RTRIM(LRNResultStatus)), '') AS ResultedStatus,
+                ISNULL(LTRIM(RTRIM(LRNSampleStatus)), '') AS ClaimStatus,
+                ISNULL(LTRIM(RTRIM(LRNBillCategory)), '') AS BilledOrNot,
+                ISNULL(LTRIM(RTRIM(LRNSampleStatus)), '') AS ClientStatus,
+                ISNULL(LTRIM(RTRIM(LRNSampleStatus)), '') AS SampleStatus,
+                CAST('' AS nvarchar(100)) AS PaymentMethod,
+                CAST('' AS nvarchar(100)) AS BillingStatus,
+                CAST('' AS nvarchar(100)) AS OrderStatus,
+                YEAR({dateColumn}) AS CollectedYear,
+                MONTH({dateColumn}) AS CollectedMonth,
+                COUNT(*) AS TotalClaims
+            FROM dbo.LIMSMaster WITH (NOLOCK)
+            WHERE {string.Join(" AND ", where)}
+            GROUP BY
+                ISNULL(LTRIM(RTRIM(LRNResultStatus)), ''),
+                ISNULL(LTRIM(RTRIM(LRNBillCategory)), ''),
+                ISNULL(LTRIM(RTRIM(LRNSampleStatus)), ''),
+                YEAR({dateColumn}),
+                MONTH({dateColumn})
+            ORDER BY CollectedYear, CollectedMonth;
+            """;
+	}
+
+	private static string BuildPcrDxCoSql(List<string> where, string dateColumn)
+	{
+		return $"""
+            SELECT
+                ISNULL(LTRIM(RTRIM(ResultStatus)), '') AS ResultedStatus,
+                ISNULL(LTRIM(RTRIM(LRNSampleStatus)), '') AS ClaimStatus,
+                ISNULL(LTRIM(RTRIM(LRNBillCategory)), '') AS BilledOrNot,
+                ISNULL(LTRIM(RTRIM(LRNSubStatus)), '') AS ClientStatus,
+                ISNULL(LTRIM(RTRIM(LRNSampleStatus)), '') AS SampleStatus,
+                CAST('' AS nvarchar(100)) AS PaymentMethod,
+                CAST('' AS nvarchar(100)) AS BillingStatus,
+                CAST('' AS nvarchar(100)) AS OrderStatus,
+                YEAR({dateColumn}) AS CollectedYear,
+                MONTH({dateColumn}) AS CollectedMonth,
+                COUNT(*) AS TotalClaims
+            FROM dbo.LIMSMaster WITH (NOLOCK)
+            WHERE {string.Join(" AND ", where)}
+            GROUP BY
+                ISNULL(LTRIM(RTRIM(ResultStatus)), ''),
+                ISNULL(LTRIM(RTRIM(LRNBillCategory)), ''),
+                ISNULL(LTRIM(RTRIM(LRNSampleStatus)), ''),
+                ISNULL(LTRIM(RTRIM(LRNSubStatus)), ''),
+                YEAR({dateColumn}),
+                MONTH({dateColumn})
+            ORDER BY CollectedYear, CollectedMonth;
+            """;
+	}
+
+	private static string ResolveCollectedDateColumn(string logicSheet) => logicSheet switch
+	{
+		"Augustus" => "ReqCollectDate",
+		"Certus" => "ReqCollectDate",
+		"Cove" => "DateOfCollection",
+		"Elixir" => "DateOfCollection",
+		"InHealth" => "Entry_DateCreated",
+		"PCRDx-AL" => "ReceivedDate",
+		"PCRDx-CO" => "CollectionDate",
+		_ => "RequestCollectDate"
+	};
+
+	private static string ResolveLogicSheet(string labName, int? labId)
+	{
+		if (labId.HasValue)
+		{
+			return labId.Value switch
+			{
+				2 => "InHealth",
+				4 => "Cove",
+				7 => "PCRDx-AL",
+				8 => "PCRDx-CO",
+				13 => "PCRLOA",
+				16 => "Elixir",
+				18 => "Certus",
+				19 => "Augustus",
+				20 => "NWL",
+				_ => ResolveLogicSheetByName(labName)
+			};
+		}
+
+		return ResolveLogicSheetByName(labName);
+	}
+
+	private static string ResolveLogicSheetByName(string labName)
 	{
 		var n = Normalize(labName);
 		if (n.Contains("BEECH")) return "Beech Tree";
 		if (n.Contains("NORTHWEST") || n.Contains("NORTH WEST") || n.Contains("NWL")) return "NWL";
+		if (n.Contains("AUGUSTUS")) return "Augustus";
+		if (n.Contains("CERTUS")) return "Certus";
+		if (n.Contains("COVE")) return "Cove";
+		if (n.Contains("ELIXIR")) return "Elixir";
+		if (n.Contains("INHEALTH") || n.Contains("IN HEALTH")) return "InHealth";
+		if ((n.Contains("PCRDX") || n.Contains("PCR DX")) && (n.Contains("AL") || n.Contains("ALABAMA"))) return "PCRDx-AL";
+		if ((n.Contains("PCRDX") || n.Contains("PCR DX")) && (n.Contains("CO") || n.Contains("COLORADO"))) return "PCRDx-CO";
 		if (n.Contains("PCRLOA") || n.Contains("PCR LABS") || n.Contains("PCR LAB")) return "PCRLOA";
 		if (n.Contains("PHILIFE") || n.Contains("PHI LIFE")) return "PhiLife";
 		if (n.Contains("RISING")) return "Rising Tides";
-		return "Beech Tree";
+		return "Common";
 	}
 
 	private static List<LisRule> GetRules(string sheet) => sheet switch
 	{
 		"PCRLOA" => PcrloaRules(),
 		"NWL" => NorthWestRules(),
+		"Augustus" => AugustusRules(),
+		"Certus" => CertusRules(),
 		"PhiLife" => PhiLifeRules(),
 		"Rising Tides" => RisingTidesRules(),
-		_ => BeechTreeRules()
+		"Beech Tree" => BeechTreeRules(),
+		_ => CommonRules()
 	};
+
+	private static List<LisRule> CommonRules() =>
+	[
+		R("", "Total Samples", "Count all LIMSMaster rows for the selected collected date range", 0, x => true),
+		R("A", "Resulted Samples", "ResultedStatus = Resulted", 0, x => Resulted(x)),
+		R("B", "Not Resulted Samples", "ResultedStatus = Not Resulted", 0, x => NotResulted(x)),
+		R("1", "Billed", "BilledOrNot / BillCategory / BillingStatus = Billed", 1, x => BilledAny(x, "Billed", "Billable", "Yes")),
+		R("2", "Unbilled", "BilledOrNot / BillCategory / BillingStatus = Unbilled", 1, x => BilledAny(x, "UnBilled", "Unbilled", "Not Billed", "No")),
+		R("3", "Client Bill", "BillTo / InsuranceType / SubStatus = Client Bill", 1, x => PaymentAny(x, "Client Bill", "Client Bills") || ClientAny(x, "Client Bill", "Client Bills")),
+		R("4", "Self Pay", "BillTo / InsuranceType / SubStatus = Self Pay", 1, x => PaymentAny(x, "Self Pay", "Self pay") || ClientAny(x, "Self Pay", "Self pay")),
+		R("5", "Rejected / Non Billable", "FinalStatus / SampleStatus / SubStatus contains rejection or non-billable statuses", 1, x => ClientAny(x, "Rejected", "Rejected Sample", "Sample Rejected", "Non Billable") || SampleAny(x, "Rejected", "Rejected Sample", "Sample Rejected", "Non Billable"))
+	];
 
 	private static List<LisRule> BeechTreeRules() =>
 	[
@@ -334,6 +566,65 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		R("2", "Client Bill", "Not Resulted, Client Bill", 1, x => NotResulted(x) && Billed(x,"UnBilled") && Claim(x,"Not Entered in AMD") && Client(x,"Client Bill")),
 		R("3", "Test Entries", "Not Resulted, Test Entries", 1, x => NotResulted(x) && Billed(x,"UnBilled") && Claim(x,"Not Entered in AMD") && Client(x,"Test Entries")),
 		R("4", "Self Pay", "Not Resulted, Self Pay", 1, x => NotResulted(x) && Billed(x,"UnBilled") && Claim(x,"Not Entered in AMD") && Client(x,"Self Pay"))
+	];
+
+	private static List<LisRule> AugustusRules() =>
+	[
+		R("A", "Insurance Bills", "Bill to = Insurance Bills", 0, x => Payment(x, "Insurance Bills")),
+		R("1", "Billed", "Bill to = Insurance Bills AND Bill status = Billed", 1, x => Payment(x, "Insurance Bills") && Billing(x, "Billed")),
+		R("•", "Claim Submitted in IRCM", "Bill to = Insurance Bills AND Bill status = Billed AND Final Status = Claim Submitted in IRCM", 2, x => Payment(x, "Insurance Bills") && Billing(x, "Billed") && Client(x, "Claim Submitted in IRCM")),
+		R("•", "Claim Submitted in Daqbilling", "Bill to = Insurance Bills AND Bill status = Billed AND Final Status = Claim Submitted in Daqbilling", 2, x => Payment(x, "Insurance Bills") && Billing(x, "Billed") && Client(x, "Claim Submitted in Daqbilling")),
+		R("2", "Unbilled", "Bill to = Insurance Bills AND Bill status = Unbilled", 1, x => Payment(x, "Insurance Bills") && Billing(x, "Unbilled")),
+		R("•", "Resulted yet to be billed", "Bill to = Insurance Bills AND Bill status = Unbilled AND Final Status = Resulted yet to be billed", 2, x => Payment(x, "Insurance Bills") && Billing(x, "Unbilled") && Client(x, "Resulted yet to be billed")),
+		R("*", "Ready to bill", "Bill to = Insurance Bills AND Bill status = Unbilled AND Final Status = Resulted yet to be billed AND Client Status 2 = Ready to bill", 3, x => Payment(x, "Insurance Bills") && Billing(x, "Unbilled") && Client(x, "Resulted yet to be billed") && Order(x, "Ready to bill")),
+		R("•", "Insurance name not listed", "Bill to = Insurance Bills AND Bill status = Unbilled AND Final Status = Insurance Name Not Listed", 2, x => Payment(x, "Insurance Bills") && Billing(x, "Unbilled") && Client(x, "Insurance Name Not Listed")),
+
+		R("B", "Yet to be Validated", "Bill to = Yet to be Validated", 0, x => Payment(x, "Yet to be Validated")),
+		R("1", "Billed", "Bill to = Yet to be Validated AND Bill Status = Billed", 1, x => Payment(x, "Yet to be Validated") && Billing(x, "Billed")),
+
+		R("C", "Client Bills", "Bill to = Client Bills", 0, x => Payment(x, "Client Bills")),
+		R("1", "Billed", "Bill to = Client Bills AND Bill Status = Billed", 1, x => Payment(x, "Client Bills") && Billing(x, "Billed")),
+
+		R("D", "System Test", "Bill to = System Test", 0, x => Payment(x, "System Test")),
+		R("1", "Billed", "Bill to = System Test AND Bill Status = Billed", 1, x => Payment(x, "System Test") && Billing(x, "Billed")),
+
+		R("E", "Self pay", "Bill to = Self pay", 0, x => PaymentAny(x, "Self pay", "Self Pay", "Selfpay")),
+		R("1", "Billed", "Bill to = Self pay AND Bill Status = Billed", 1, x => PaymentAny(x, "Self pay", "Self Pay", "Selfpay") && Billing(x, "Billed"))
+	];
+
+	private static List<LisRule> CertusRules() =>
+	[
+		R("A", "Insurance Bill", "Bill to = Insurance Bill", 0, x => Payment(x, "Insurance Bill")),
+		R("1", "Billed", "Bill to = Insurance Bill AND Billing status = Billed", 1, x => Payment(x, "Insurance Bill") && Billing(x, "Billed")),
+		R("•", "Claim submitted in Daqbilling", "Bill to = Insurance Bill AND Billing status = Billed AND Final Status = Claim submitted in Daqbilling", 2, x => Payment(x, "Insurance Bill") && Billing(x, "Billed") && Client(x, "Claim submitted in Daqbilling")),
+		R("2", "Not Billed", "Bill to = Insurance Bill AND Billing status = Not Billed", 1, x => Payment(x, "Insurance Bill") && Billing(x, "Not Billed")),
+		R("•", "Claim Entered in Daqbilling", "Bill to = Insurance Bill AND Billing status = Billed AND Final Status = Claim Entered in Daqbilling", 2, x => Payment(x, "Insurance Bill") && Billing(x, "Billed") && Client(x, "Claim Entered in Daqbilling")),
+		R("•", "Resulted yet to be billed", "Bill to = Insurance Bill AND Billing status = Billed AND Final Status = Resulted yet to be billed", 2, x => Payment(x, "Insurance Bill") && Billing(x, "Billed") && Client(x, "Resulted yet to be billed")),
+		R("•", "D/L Isomer", "Bill to = Insurance Bill AND Billing status = Billed AND Final Status = D/L Isomer", 2, x => Payment(x, "Insurance Bill") && Billing(x, "Billed") && Client(x, "D/L Isomer")),
+
+		R("B", "Duplicate", "Bill to = Duplicate", 0, x => PaymentAny(x, "Duplicate", "Duplicate Bill")),
+		R("1", "Billed", "Bill to = Duplicate Bill AND Billing status = Billed", 1, x => PaymentAny(x, "Duplicate", "Duplicate Bill") && Billing(x, "Billed")),
+		R("•", "Claim submitted in Daqbilling", "Bill to = Duplicate Bill AND Billing status = Billed AND Final Status = Claim submitted in Daqbilling", 2, x => PaymentAny(x, "Duplicate", "Duplicate Bill") && Billing(x, "Billed") && Client(x, "Claim submitted in Daqbilling")),
+
+		R("C", "Client Bill", "Bill to = Client Bill", 0, x => Payment(x, "Client Bill")),
+		R("1", "Billed", "Bill to = Client Bill AND Billing status = Billed", 1, x => Payment(x, "Client Bill") && Billing(x, "Billed")),
+		R("•", "Claim submitted in Daqbilling", "Bill to = Client Bill AND Billing status = Billed AND Final Status = Claim submitted in Daqbilling", 2, x => Payment(x, "Client Bill") && Billing(x, "Billed") && Client(x, "Claim submitted in Daqbilling")),
+
+		R("D", "Yet to be Validated", "Bill to = Yet to be Validated", 0, x => Payment(x, "Yet to be Validated")),
+		R("1", "Billed", "Bill to = Yet to be Validated AND Billing status = Billed", 1, x => Payment(x, "Yet to be Validated") && Billing(x, "Billed")),
+		R("•", "Claim submitted in Daqbilling", "Bill to = Yet to be Validated AND Billing status = Billed AND Final Status = Claim submitted in Daqbilling", 2, x => Payment(x, "Yet to be Validated") && Billing(x, "Billed") && Client(x, "Claim submitted in Daqbilling")),
+
+		R("E", "Selfpay", "Bill to = Selfpay", 0, x => PaymentAny(x, "Selfpay", "Self pay", "Self Pay")),
+		R("1", "Billed", "Bill to = Selfpay AND Billing status = Billed", 1, x => PaymentAny(x, "Selfpay", "Self pay", "Self Pay") && Billing(x, "Billed")),
+		R("•", "Claim submitted in Daqbilling", "Bill to = Selfpay AND Billing status = Billed AND Final Status = Claim submitted in Daqbilling", 2, x => PaymentAny(x, "Selfpay", "Self pay", "Self Pay") && Billing(x, "Billed") && Client(x, "Claim submitted in Daqbilling")),
+
+		R("F", "Rejection", "Bill to = Rejection", 0, x => Payment(x, "Rejection")),
+		R("1", "Billed", "Bill to = Rejection AND Billing status = Billed", 1, x => Payment(x, "Rejection") && Billing(x, "Billed")),
+		R("•", "Claim submitted in Daqbilling", "Bill to = Rejection AND Billing status = Billed AND Final Status = Claim submitted in Daqbilling", 2, x => Payment(x, "Rejection") && Billing(x, "Billed") && Client(x, "Claim submitted in Daqbilling")),
+
+		R("G", "System Test", "Bill to = System Test", 0, x => Payment(x, "System Test")),
+		R("1", "Billed", "Bill to = System Test AND Billing status = Billed", 1, x => Payment(x, "System Test") && Billing(x, "Billed")),
+		R("•", "Claim submitted in Daqbilling", "Bill to = System Test AND Billing status = Billed AND Final Status = Claim submitted in Daqbilling", 2, x => Payment(x, "System Test") && Billing(x, "Billed") && Client(x, "Claim submitted in Daqbilling"))
 	];
 
 	private static List<LisRule> PhiLifeRules() =>

@@ -2539,6 +2539,7 @@ public class DashboardController : Controller
 			var result = await _lisSummaryRepo.GetLisSummaryAsync(
 				connectionString,
 				currentLab.LabName,
+				currentLab.LabId,
 				fromDate != default ? fromDate : null,
 				toDate != default ? toDate : null,
 				ct);

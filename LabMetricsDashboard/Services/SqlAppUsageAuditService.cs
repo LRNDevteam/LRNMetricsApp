@@ -450,8 +450,17 @@ END;";
 
     private static string ResolveUserName(HttpContext httpContext)
     {
-        var name = httpContext.User?.Identity?.Name;
-        return string.IsNullOrWhiteSpace(name) ? "Anonymous" : name.Trim();
+        var fullName = httpContext.User?.FindFirst("FullName")?.Value
+            ?? httpContext.User?.FindFirst("name")?.Value
+            ?? httpContext.User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
+
+        if (!string.IsNullOrWhiteSpace(fullName))
+        {
+            return fullName.Trim();
+        }
+
+        var userName = httpContext.User?.Identity?.Name;
+        return string.IsNullOrWhiteSpace(userName) ? "Anonymous" : userName.Trim();
     }
 
     private static string ResolveIpAddress(HttpContext httpContext)

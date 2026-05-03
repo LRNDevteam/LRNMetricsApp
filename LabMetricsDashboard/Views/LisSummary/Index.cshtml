@@ -21,6 +21,9 @@
         }
     }
 
+    var useUploadedLogicTemplate = result?.LogicSheetName?.Equals("Augustus", StringComparison.OrdinalIgnoreCase) == true
+        || result?.LogicSheetName?.Equals("Certus", StringComparison.OrdinalIgnoreCase) == true;
+    var logicTemplateCss = useUploadedLogicTemplate ? "lis-template-with-logic" : string.Empty;
     string DateValue(DateOnly? value) => value?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty;
     string RowCss(int level) => level <= 0 ? "lis-summary-section-row" : level == 1 ? "lis-summary-level-one" : "lis-summary-level-two";
 }
@@ -106,6 +109,12 @@
     .lis-summary-level-two td:nth-child(2) {
         padding-left: 2rem;
     }
+    .lis-summary-table.lis-template-with-logic .logic-col {
+        width: 420px !important;
+        min-width: 420px !important;
+        max-width: 420px !important;
+        white-space: normal;
+    }
     .year-total-cell {
         background: #f8fbff;
         font-weight: 700;
@@ -115,6 +124,78 @@
         background: #fff2cc !important;
         font-weight: 800;
     }
+
+
+    /* Excel-style LIS freeze pane */
+    .lis-freeze-scroll {
+        width: 100%;
+        max-height: min(74vh, calc(100vh - 230px));
+        overflow: auto;
+        position: relative;
+        border: 1px solid #d8e2ee;
+        border-radius: .85rem;
+        background: #fff;
+        scrollbar-gutter: stable both-edges;
+    }
+    .lis-summary-table.lis-freeze-table {
+        width: max-content !important;
+        min-width: 100% !important;
+        table-layout: fixed;
+        border-collapse: separate !important;
+        border-spacing: 0 !important;
+    }
+    .lis-summary-table.lis-freeze-table th,
+    .lis-summary-table.lis-freeze-table td {
+        background-clip: padding-box;
+    }
+    .lis-summary-table.lis-freeze-table thead th {
+        position: sticky;
+        top: var(--lis-sticky-top, 0px);
+        z-index: 40;
+    }
+    .lis-summary-table.lis-freeze-table .lis-code-col {
+        width: 56px !important;
+        min-width: 56px !important;
+        max-width: 56px !important;
+        text-align: center;
+    }
+    .lis-summary-table.lis-freeze-table .desc-col {
+        width: 300px !important;
+        min-width: 300px !important;
+        max-width: 300px !important;
+        white-space: normal;
+    }
+    .lis-summary-table.lis-freeze-table .sticky-col-1,
+    .lis-summary-table.lis-freeze-table .sticky-col-2,
+    .lis-summary-table.lis-freeze-table .sticky-col-3 {
+        position: sticky;
+        background: #fff;
+        z-index: 18;
+    }
+    .lis-summary-table.lis-freeze-table .sticky-col-1 { left: 0; }
+    .lis-summary-table.lis-freeze-table .sticky-col-2 { left: 56px; box-shadow: 1px 0 0 #dde7f0; }
+    .lis-summary-table.lis-freeze-table .sticky-col-3 { left: 356px; box-shadow: 1px 0 0 #dde7f0; }
+    .lis-summary-table.lis-freeze-table thead .sticky-col-1,
+    .lis-summary-table.lis-freeze-table thead .sticky-col-2,
+    .lis-summary-table.lis-freeze-table thead .sticky-col-3 {
+        z-index: 70;
+        background: #123b63;
+        color: #fff;
+    }
+    .lis-summary-table.lis-freeze-table .count-cell,
+    .lis-summary-table.lis-freeze-table th:not(.desc-col):not(.lis-code-col):not(.logic-col) {
+        width: 96px;
+        min-width: 96px;
+        max-width: 96px;
+        white-space: nowrap;
+    }
+    .lis-summary-section-row .sticky-col-1,
+    .lis-summary-section-row .sticky-col-2,
+    .lis-summary-section-row .sticky-col-3 { background: #f6f9fc !important; }
+    .grand-total-row .sticky-col-1,
+    .grand-total-row .sticky-col-2,
+    .grand-total-row .sticky-col-3 { background: #fff2cc !important; }
+
 </style>
 
 @if (TempData["LisSummaryError"] is string error && !string.IsNullOrWhiteSpace(error))
@@ -196,13 +277,16 @@ else
                 <span class="chip">Rows: @result.Rows.Count.ToString("N0")</span>
             </div>
 
-            <div class="table-responsive">
-                <table class="table table-sm lis-summary-table align-middle mb-0">
+            <div class="lis-freeze-scroll" id="lisSummaryFreeze">
+                <table class="table table-sm lis-summary-table lis-freeze-table align-middle mb-0 @logicTemplateCss">
                     <thead>
                         <tr class="year-header">
-                            <th rowspan="2">Logic</th>
-                            <th rowspan="2" class="desc-col">Description</th>
-                            <th rowspan="2" class="logic-col">Formula Logic</th>
+                            <th rowspan="2" class="lis-code-col sticky-col-1">@(useUploadedLogicTemplate ? "S.No" : "#")</th>
+                            <th rowspan="2" class="desc-col sticky-col-2">LIS STATUS SUMMARY</th>
+                            @if (useUploadedLogicTemplate)
+                            {
+                                <th rowspan="2" class="logic-col sticky-col-3">Logic</th>
+                            }
                             @foreach (var year in result.Years.OrderBy(x => x))
                             {
                                 var yearMonthCount = monthColumns.Count(x => x.Year == year);
@@ -224,9 +308,12 @@ else
                         @foreach (var row in result.Rows)
                         {
                             <tr class="@RowCss(row.Level)">
-                                <td>@row.Code</td>
-                                <td>@row.Description</td>
-                                <td class="logic-col">@row.Logic</td>
+                                <td class="lis-code-col sticky-col-1">@row.Code</td>
+                                <td class="desc-col sticky-col-2">@row.Description</td>
+                                @if (useUploadedLogicTemplate)
+                                {
+                                    <td class="logic-col sticky-col-3">@row.Logic</td>
+                                }
                                 @foreach (var column in monthColumns)
                                 {
                                     if (column.IsYearTotal)
@@ -242,9 +329,12 @@ else
                             </tr>
                         }
                         <tr class="grand-total-row">
-                            <td></td>
-                            <td>Grand Total</td>
-                            <td>Total samples from selected LIS data</td>
+                            <td class="lis-code-col sticky-col-1"></td>
+                            <td class="desc-col sticky-col-2">Grand Total</td>
+                            @if (useUploadedLogicTemplate)
+                            {
+                                <td class="logic-col sticky-col-3"></td>
+                            }
                             @foreach (var column in monthColumns)
                             {
                                 if (column.IsYearTotal)
@@ -264,3 +354,22 @@ else
         </div>
     </div>
 }
+
+
+<script>
+    (function () {
+        const root = document.getElementById('lisSummaryFreeze');
+        if (!root) return;
+
+        const updateLisHeaderOffsets = () => {
+            let top = 0;
+            root.querySelectorAll('thead tr').forEach(row => {
+                row.querySelectorAll('th').forEach(cell => cell.style.setProperty('--lis-sticky-top', `${top}px`));
+                top += row.getBoundingClientRect().height;
+            });
+        };
+
+        requestAnimationFrame(updateLisHeaderOffsets);
+        window.addEventListener('resize', updateLisHeaderOffsets, { passive: true });
+    })();
+</script>

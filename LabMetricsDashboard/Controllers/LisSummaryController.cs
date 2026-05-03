@@ -53,6 +53,7 @@ public class LisSummaryController : Controller
             var result = await _lisSummaryRepository.GetLisSummaryAsync(
                 connectionString,
                 selectedLab.LabName,
+                selectedLab.LabId,
                 filters.CollectedFrom,
                 filters.CollectedTo,
                 cancellationToken);
@@ -102,6 +103,7 @@ public class LisSummaryController : Controller
             var result = await _lisSummaryRepository.GetLisSummaryAsync(
                 connectionString,
                 selectedLab.LabName,
+                selectedLab.LabId,
                 filters.CollectedFrom,
                 filters.CollectedTo,
                 cancellationToken);

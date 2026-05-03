@@ -29,9 +29,10 @@ public static class LisSummaryExcelExportBuilder
     {
         var monthColumns = BuildMonthColumns(result.Months, result.Years);
 
-        // Formula Logic column removed. Columns are:
-        // 1 = Logic/Code, 2 = Description, 3+ = month/year totals/grand total
-        var firstDataColumn = 3;
+        var includeLogicColumn = ShouldUseUploadedLogicTemplate(result.LogicSheetName);
+        // Default export keeps previous compact format: Code, Description, months.
+        // Augustus and Certus use the uploaded workbook template: S.No, Description, Logic, months.
+        var firstDataColumn = includeLogicColumn ? 4 : 3;
         var titleRow = 1;
         var metaStartRow = 2;
         var sampleNoteRow = 6;
@@ -66,10 +67,15 @@ public static class LisSummaryExcelExportBuilder
         sheet.Cell(sampleNoteRow, 1).Style.Font.Italic = true;
         sheet.Cell(sampleNoteRow, 1).Style.Font.FontColor = XLColor.FromHtml("#5C738A");
 
-        sheet.Cell(yearHeaderRow, 1).Value = "Logic";
+        sheet.Cell(yearHeaderRow, 1).Value = includeLogicColumn ? "S.No" : "Logic";
         sheet.Cell(yearHeaderRow, 2).Value = "Description";
         sheet.Range(yearHeaderRow, 1, monthHeaderRow, 1).Merge();
         sheet.Range(yearHeaderRow, 2, monthHeaderRow, 2).Merge();
+        if (includeLogicColumn)
+        {
+            sheet.Cell(yearHeaderRow, 3).Value = "Logic";
+            sheet.Range(yearHeaderRow, 3, monthHeaderRow, 3).Merge();
+        }
 
         var col = firstDataColumn;
         foreach (var year in result.Years.OrderBy(x => x))
@@ -110,7 +116,7 @@ public static class LisSummaryExcelExportBuilder
         var rowNumber = dataStartRow;
         foreach (var row in result.Rows)
         {
-            WriteDataRow(sheet, rowNumber, row, monthColumns, result.Years, firstDataColumn);
+            WriteDataRow(sheet, rowNumber, row, monthColumns, result.Years, firstDataColumn, includeLogicColumn);
             ApplyRowStyle(sheet, rowNumber, row.Level, lastColumn);
             rowNumber++;
         }
@@ -132,11 +138,16 @@ public static class LisSummaryExcelExportBuilder
         tableRange.Style.Border.InsideBorderColor = BorderColor;
 
         sheet.SheetView.FreezeRows(monthHeaderRow);
-        sheet.SheetView.FreezeColumns(2);
+        sheet.SheetView.FreezeColumns(includeLogicColumn ? 3 : 2);
 
         sheet.Columns(firstDataColumn, lastColumn).Style.NumberFormat.Format = "#,##0";
         sheet.Column(1).Width = 10;
         sheet.Column(2).Width = 36;
+        if (includeLogicColumn)
+        {
+            sheet.Column(3).Width = 58;
+            sheet.Range(dataStartRow, 3, rowNumber, 3).Style.Alignment.WrapText = true;
+        }
         sheet.Columns(firstDataColumn, lastColumn).Width = 14;
 
         sheet.Range(dataStartRow, 2, rowNumber, 2).Style.Alignment.WrapText = true;
@@ -147,16 +158,20 @@ public static class LisSummaryExcelExportBuilder
         sheet.Range(1, 1, rowNumber, lastColumn).Style.Font.FontName = "Calibri";
         sheet.Range(1, 1, rowNumber, lastColumn).Style.Font.FontSize = 10;
         sheet.Range(dataStartRow, firstDataColumn, rowNumber, lastColumn).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
-        sheet.Range(dataStartRow, 1, rowNumber, 2).Style.Alignment.Vertical = XLAlignmentVerticalValues.Top;
+        sheet.Range(dataStartRow, 1, rowNumber, includeLogicColumn ? 3 : 2).Style.Alignment.Vertical = XLAlignmentVerticalValues.Top;
 
         sheet.PageSetup.PageOrientation = XLPageOrientation.Landscape;
         sheet.PageSetup.FitToPages(1, 0);
     }
 
-    private static void WriteDataRow(IXLWorksheet sheet, int rowNumber, LisSummaryRow row, IReadOnlyList<MonthColumn> monthColumns, IReadOnlyList<int> years, int firstDataColumn)
+    private static void WriteDataRow(IXLWorksheet sheet, int rowNumber, LisSummaryRow row, IReadOnlyList<MonthColumn> monthColumns, IReadOnlyList<int> years, int firstDataColumn, bool includeLogicColumn)
     {
         sheet.Cell(rowNumber, 1).Value = row.Code;
         sheet.Cell(rowNumber, 2).Value = row.Description;
+        if (includeLogicColumn)
+        {
+            sheet.Cell(rowNumber, 3).Value = row.Logic;
+        }
 
         var col = firstDataColumn;
         foreach (var year in years.OrderBy(x => x))
@@ -181,6 +196,10 @@ public static class LisSummaryExcelExportBuilder
     {
         sheet.Cell(rowNumber, 1).Value = string.Empty;
         sheet.Cell(rowNumber, 2).Value = "Grand Total";
+        if (firstDataColumn == 4)
+        {
+            sheet.Cell(rowNumber, 3).Value = string.Empty;
+        }
 
         var col = firstDataColumn;
         foreach (var year in years.OrderBy(x => x))
@@ -218,6 +237,10 @@ public static class LisSummaryExcelExportBuilder
             sheet.Cell(rowNumber, 2).Style.Alignment.Indent = 2;
         }
     }
+
+    private static bool ShouldUseUploadedLogicTemplate(string logicSheetName)
+        => logicSheetName.Equals("Augustus", StringComparison.OrdinalIgnoreCase)
+           || logicSheetName.Equals("Certus", StringComparison.OrdinalIgnoreCase);
 
     private static List<MonthColumn> BuildMonthColumns(IReadOnlyList<string> months, IReadOnlyList<int> years)
     {
