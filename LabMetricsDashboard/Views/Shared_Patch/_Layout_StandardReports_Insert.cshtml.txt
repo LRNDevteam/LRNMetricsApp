@@ -1,0 +1,7 @@
+Add this menu item under Standard Reports, after Production Report:
+
+<li>
+    <a class="dropdown-item" asp-controller="Dashboard" asp-action="LisSummary">
+        <i class="bi bi-clipboard2-pulse-fill"></i> LIS Summary
+    </a>
+</li>

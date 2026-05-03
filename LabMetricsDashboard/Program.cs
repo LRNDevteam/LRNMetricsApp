@@ -1,8 +1,11 @@
 ﻿using LabMetricsDashboard.Filters;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
+<<<<<<< HEAD
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
+=======
+>>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Configuration.Json;
 using Microsoft.Extensions.Primitives;
@@ -205,6 +208,7 @@ ChangeToken.OnChange(
 			LogStartupError("Failed to rebuild LabSettings after configuration reload.", ex);
 		}
 	});
+<<<<<<< HEAD
 
 // ── Data Protection ─────────────────────────────────────────────────────────
 // Keys must be persisted to disk so that:
@@ -253,6 +257,8 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     options.KnownNetworks.Clear();
     options.KnownProxies.Clear();
 });
+=======
+>>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
 
 var useMockData = builder.Configuration.GetValue<bool>("DashboardData:UseMockData");
 if (useMockData)
@@ -297,6 +303,12 @@ builder.Services.AddSingleton<IReadOnlyDictionary<string, ILabProductionSummaryR
 });
 builder.Services.AddScoped<IClaimLineRepository, SqlClaimLineRepository>();
 builder.Services.AddScoped<ICollectionSummaryRepository, SqlCollectionSummaryRepository>();
+builder.Services.AddScoped<ILisSummaryRepository, SqlLisSummaryRepository>();
+
+// User management repository (uses DefaultConnection from appsettings.json)
+builder.Services.AddScoped<IUserManagementRepository, SqlUserManagementRepository>();
+// Password hasher
+builder.Services.AddSingleton<IPasswordHasher, PasswordHasher>();
 
 // User management repository (uses DefaultConnection from appsettings.json)
 builder.Services.AddScoped<IUserManagementRepository, SqlUserManagementRepository>();
@@ -332,6 +344,7 @@ builder.Services
         options.AccessDeniedPath = "/Account/AccessDenied";
         options.ExpireTimeSpan   = TimeSpan.FromHours(8);
         options.SlidingExpiration = true;
+<<<<<<< HEAD
         options.Cookie.Name         = "LRN.Auth";
         options.Cookie.HttpOnly     = true;
         options.Cookie.SameSite     = SameSiteMode.Lax;
@@ -380,6 +393,11 @@ builder.Services
                 return Task.CompletedTask;
             },
         };
+=======
+        options.Cookie.Name      = "LRN.Auth";
+        options.Cookie.HttpOnly  = true;
+        options.Cookie.SameSite  = SameSiteMode.Lax;
+>>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
     });
 
 var app = builder.Build();

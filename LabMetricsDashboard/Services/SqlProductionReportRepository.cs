@@ -105,6 +105,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         }
         else
         {
+<<<<<<< HEAD
         // For Rule1 / Rule3 / Rule4 / legacy: PayerName_Raw must not be blank.
             whereClauses.Add("LTRIM(RTRIM(PayerName_Raw)) <> ''");
             whereClauses.Add("PayerName_Raw IS NOT NULL");
@@ -123,6 +124,11 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         {
             whereClauses.Add("TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL");
             whereClauses.Add("YEAR(TRY_CAST(ChargeEnteredDate AS DATE)) > 1900");
+=======
+            // Rule1 / Rule3 / Rule4 / legacy: PayerName_Raw must not be blank.
+            whereClauses.Add("LTRIM(RTRIM(PayerName_Raw)) <> ''");
+            whereClauses.Add("PayerName_Raw IS NOT NULL");
+>>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
         }
 
         // For Rule1/Rule2/Rule3/Rule4 ensure the column-date is also valid so we don't get NULL year/month rows.
@@ -197,6 +203,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
 
         var whereStr = string.Join(" AND ", whereClauses);
 
+<<<<<<< HEAD
         // Query 1: filter option lists (unfiltered).
         // Rule4 = PanelType; Rule3 (Augustus) = PanelNew; others = PanelName.
         // Dropdown options: always use the real PanelNew column so '(No PanelNew)' rows are
@@ -207,6 +214,14 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             WHERE PayerName_Raw IS NOT NULL AND PayerName_Raw <> '' ORDER BY 1;
             SELECT DISTINCT LTRIM(RTRIM({panelOptionsCol})) FROM dbo.ClaimLevelData
             WHERE {panelOptionsCol} IS NOT NULL AND LTRIM(RTRIM({panelOptionsCol})) <> '' ORDER BY 1;
+=======
+        // Query 1: filter option lists (unfiltered)
+        const string optionsSql = """
+            SELECT DISTINCT LTRIM(RTRIM(PayerName_Raw)) FROM dbo.ClaimLevelData
+            WHERE PayerName_Raw IS NOT NULL AND PayerName_Raw <> '' ORDER BY 1;
+            SELECT DISTINCT LTRIM(RTRIM(PanelName)) FROM dbo.ClaimLevelData
+            WHERE PanelName IS NOT NULL AND PanelName <> '' ORDER BY 1;
+>>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
             """;
 
         // Query 2: panel × month aggregation (unique claim count + sum charges).
@@ -596,7 +611,11 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         var weekPanelExpr = isRule4 ? "PanelType" : isRule3 ? rule3WeekPanelExpr : "PanelName";
         var pivotSql = $"""
             SELECT
+<<<<<<< HEAD
                 LTRIM(RTRIM({weekPanelExpr}))                           AS PanelName,
+=======
+                LTRIM(RTRIM(PanelName))                                 AS PanelName,
+>>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
                 LTRIM(RTRIM(PayerName_Raw))                            AS PayerName,
                 {weekDateExpr}                                          AS BillDate,
                 COUNT(DISTINCT ClaimID)                                  AS ClaimCount,
@@ -604,7 +623,11 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             FROM dbo.ClaimLevelData
             WHERE {whereStr}
             GROUP BY
+<<<<<<< HEAD
                 LTRIM(RTRIM({weekPanelExpr})),
+=======
+                LTRIM(RTRIM(PanelName)),
+>>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
                 LTRIM(RTRIM(PayerName_Raw)),
                 {weekDateExpr}
             ORDER BY PanelName, PayerName, BillDate
@@ -895,8 +918,12 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         DateOnly? filterFirstBilledFrom = null,
         DateOnly? filterFirstBilledTo = null,
         string? rule = null,
+<<<<<<< HEAD
         CancellationToken ct = default,
         bool panelNewStrict = false)
+=======
+        CancellationToken ct = default)
+>>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
@@ -927,6 +954,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             whereClauses.Add("YEAR(TRY_CAST(FirstBilledDate AS DATE)) > 1900");
         }
 
+<<<<<<< HEAD
         // Rule4 (NorthWest): exclude unbilled/zero-charge statuses.
         if (isRule4)
         {
@@ -936,6 +964,8 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         // Rule3 (Augustus): ChargeEnteredDate + FirstBilledDate already guarded above.
         // No additional ClaimStatus exclusion needed.
 
+=======
+>>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
         if (filterPayerNames is { Count: > 0 })
         {
             var pNames = filterPayerNames.Select((n, i) => $"@pbpn{i}").ToList();
@@ -955,6 +985,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                 parameters.Add(new SqlParameter($"@pbpl{i}", filterPanelNames[i]));
         }
 
+<<<<<<< HEAD
         // When strict (ProductionSummaryReport) add PanelNew guard to match aggregate table rows.
         if (isRule3 && panelNewStrict)
             whereClauses.Add("NULLIF(LTRIM(RTRIM(PanelNew)), '') IS NOT NULL");
@@ -966,12 +997,22 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         if (filterFirstBillFrom.HasValue)
         {
             whereClauses.Add($"{pbFilterDateExpr} >= @pbFbFrom");
+=======
+        // Apply optional date filters against the active date column determined by the rule
+        if (filterFirstBillFrom.HasValue)
+        {
+            whereClauses.Add($"{columnDateExpr} >= @pbFbFrom");
+>>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
             parameters.Add(new SqlParameter("@pbFbFrom", SqlDbType.Date) { Value = filterFirstBillFrom.Value.ToDateTime(TimeOnly.MinValue) });
         }
 
         if (filterFirstBillTo.HasValue)
         {
+<<<<<<< HEAD
             whereClauses.Add($"{pbFilterDateExpr} <= @pbFbTo");
+=======
+            whereClauses.Add($"{columnDateExpr} <= @pbFbTo");
+>>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
             parameters.Add(new SqlParameter("@pbFbTo", SqlDbType.Date) { Value = filterFirstBillTo.Value.ToDateTime(TimeOnly.MinValue) });
         }
 
@@ -1104,8 +1145,12 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         DateOnly? filterFirstBilledFrom = null,
         DateOnly? filterFirstBilledTo = null,
         string? rule = null,
+<<<<<<< HEAD
         CancellationToken ct = default,
         bool panelNewStrict = false)
+=======
+        CancellationToken ct = default)
+>>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
@@ -1136,6 +1181,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             whereClauses.Add("YEAR(TRY_CAST(FirstBilledDate AS DATE)) > 1900");
         }
 
+<<<<<<< HEAD
         // Rule4 (NorthWest): exclude unbilled/zero-charge statuses.
         // Matches usp_RefreshNW_PayerByPanel filter exactly.
         if (isRule4)
@@ -1143,6 +1189,8 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             whereClauses.Add("LTRIM(RTRIM(ClaimStatus)) NOT IN ('Unbilled in Daq','Unbilled in Daq - PR','Unbilled in Webpm','Unbilled in Webpm - PR','Billed amount 0')");
         }
 
+=======
+>>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
         if (filterPayerNames is { Count: > 0 })
         {
             var pNames = filterPayerNames.Select((n, i) => $"@pxpn{i}").ToList();
@@ -1163,6 +1211,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                 parameters.Add(new SqlParameter($"@pxpl{i}", filterPanelNames[i]));
         }
 
+<<<<<<< HEAD
         // When strict (ProductionSummaryReport) add PanelNew guard to match aggregate table rows.
         if (isRule3 && panelNewStrict)
             whereClauses.Add("NULLIF(LTRIM(RTRIM(PanelNew)), '') IS NOT NULL");
@@ -1174,12 +1223,22 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         if (filterFirstBillFrom.HasValue)
         {
             whereClauses.Add($"{ppFilterDateExpr} >= @ppFbFrom");
+=======
+        // Apply optional date filters against the active column determined by the rule
+        if (filterFirstBillFrom.HasValue)
+        {
+            whereClauses.Add($"{columnDateExpr} >= @ppFbFrom");
+>>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
             parameters.Add(new SqlParameter("@ppFbFrom", SqlDbType.Date) { Value = filterFirstBillFrom.Value.ToDateTime(TimeOnly.MinValue) });
         }
 
         if (filterFirstBillTo.HasValue)
         {
+<<<<<<< HEAD
             whereClauses.Add($"{ppFilterDateExpr} <= @ppFbTo");
+=======
+            whereClauses.Add($"{columnDateExpr} <= @ppFbTo");
+>>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
             parameters.Add(new SqlParameter("@ppFbTo", SqlDbType.Date) { Value = filterFirstBillTo.Value.ToDateTime(TimeOnly.MinValue) });
         }
 
@@ -1204,14 +1263,22 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         var pivotSql = $"""
             SELECT
                 LTRIM(RTRIM(PayerName_Raw))                            AS PayerName,
+<<<<<<< HEAD
                 LTRIM(RTRIM({pxpPanelExpr}))                           AS PanelName,
+=======
+                LTRIM(RTRIM(PanelName))                                 AS PanelName,
+>>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
                 COUNT(DISTINCT ClaimID)                                  AS ClaimCount,
                 ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))),0)  AS BilledCharges
             FROM dbo.ClaimLevelData
             WHERE {whereStr}
             GROUP BY
                 LTRIM(RTRIM(PayerName_Raw)),
+<<<<<<< HEAD
                 LTRIM(RTRIM({pxpPanelExpr}))
+=======
+                LTRIM(RTRIM(PanelName))
+>>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
             ORDER BY PayerName, PanelName
             """;
 
@@ -1333,6 +1400,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             ? "TRY_CAST(ChargeEnteredDate AS DATE)"
             : "TRY_CAST(FirstBilledDate AS DATE)";
 
+<<<<<<< HEAD
         // Rule4 (NorthWest): filter by ClaimStatus IN unbilled list + PayerName_Raw NOT NULL.
         // All other rules: filter by FirstBilledDate IS NULL (legacy unbilled definition).
         var whereClauses = isRule4
@@ -1345,6 +1413,12 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             {
                 "(FirstBilledDate IS NULL OR LTRIM(RTRIM(FirstBilledDate)) = '')"
             };
+=======
+        var whereClauses = new List<string>
+        {
+            "(FirstBilledDate IS NULL OR LTRIM(RTRIM(FirstBilledDate)) = '')"
+        };
+>>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
         var parameters = new List<SqlParameter>();
 
         // Panel filter only applies to legacy (non-Rule4, non-Rule3) path where PanelName is the row.
@@ -1553,8 +1627,12 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         DateOnly? filterFirstBillTo = null,
         DateOnly? filterFirstBilledFrom = null,
         DateOnly? filterFirstBilledTo = null,
+<<<<<<< HEAD
         CancellationToken ct = default,
         string? rule = null)   // Rule3 (Augustus) ? COUNT DISTINCT CPTCode instead of SUM Units
+=======
+        CancellationToken ct = default)
+>>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         var isRule3 = string.Equals(rule, "Rule3", StringComparison.OrdinalIgnoreCase);

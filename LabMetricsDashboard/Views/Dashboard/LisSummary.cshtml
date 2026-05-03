@@ -1,0 +1,215 @@
+@model LabMetricsDashboard.Models.LisSummaryViewModel
+@{
+    ViewData["Title"] = $"LIS Summary – {Model.SelectedLab}";
+    ViewData["SelectedLab"] = Model.SelectedLab;
+    ViewData["PageLabel"] = "LIS Summary";
+
+    var validMonths = Model.Months.Where(m => int.Parse(m[..4]) > 1900).ToList();
+    var years = Model.Years.Where(y => y > 1900).ToList();
+    var monthsByYear = validMonths
+        .GroupBy(m => int.Parse(m[..4]))
+        .OrderBy(g => g.Key)
+        .ToDictionary(g => g.Key, g => g.OrderBy(m => m).ToList());
+
+    string MonthLabel(string ym)
+    {
+        var parts = ym.Split('-');
+        return new DateTime(int.Parse(parts[0]), int.Parse(parts[1]), 1).ToString("MMM");
+    }
+
+    int Cell(Dictionary<string, int>? d, string mk) => d is not null && d.TryGetValue(mk, out var v) ? v : 0;
+    int YearCell(Dictionary<int, int>? d, int y) => d is not null && d.TryGetValue(y, out var v) ? v : 0;
+}
+
+<style>
+    .lis-wrap{border-radius:14px;background:#fff;border:1px solid #dbe6f3;box-shadow:0 2px 12px rgba(0,0,0,.05);overflow:hidden}.lis-scroll{width:100%;max-height:78vh;overflow:auto;position:relative;background:#fff}.lis-table{border-collapse:separate!important;border-spacing:0!important;font-size:.72rem;table-layout:fixed;width:max-content!important;min-width:100%!important;margin:0!important}.lis-table th,.lis-table td{box-sizing:border-box;border-right:1px solid #dbe5f1;border-bottom:1px solid #dbe5f1;white-space:nowrap}.lis-table thead th{background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:800;font-size:.62rem;letter-spacing:.04em;text-transform:uppercase;padding:.5rem .4rem;text-align:center;vertical-align:middle;position:sticky;top:0;z-index:20;border-top:0;border-bottom:1px solid #0a2a4a;border-right:1px solid rgba(255,255,255,.14);line-height:1.25;height:32px}.lis-table thead tr:nth-child(2) th{top:32px;z-index:19;background:linear-gradient(135deg,#162d50 0%,#1b4a6c 100%);font-size:.58rem;height:30px}.lis-table thead tr:nth-child(3) th{top:62px;z-index:18;background:#1e5a8a;font-size:.56rem;font-weight:700;height:28px}.lis-table tbody td{padding:.35rem .5rem;vertical-align:middle;text-align:right;overflow:hidden;text-overflow:ellipsis;background:#fff;color:#0b2945}.lis-freeze-1{position:sticky!important;left:0!important;width:52px!important;min-width:52px!important;max-width:52px!important;text-align:center!important;z-index:35!important;background-clip:padding-box!important}.lis-freeze-2{position:sticky!important;left:52px!important;width:320px!important;min-width:320px!important;max-width:320px!important;text-align:left!important;z-index:34!important;background-clip:padding-box!important}.lis-table thead .lis-freeze-1,.lis-table thead .lis-freeze-2{z-index:60!important;background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%)!important;color:#fff!important}.lis-table tbody .lis-freeze-1,.lis-table tbody .lis-freeze-2{background:#fff!important;font-weight:700;color:#1e293b}.lis-section td{background:#e9f8ef!important;font-weight:800}.lis-section .lis-freeze-1,.lis-section .lis-freeze-2{background:#e9f8ef!important;color:#047857!important}.lis-bullet td{background:#fff;color:#475569;font-weight:400}.lis-bullet .lis-freeze-2{padding-left:1.5rem;font-weight:600;color:#47617f!important}.lis-bullet:hover td,.lis-bullet:hover .lis-freeze-1,.lis-bullet:hover .lis-freeze-2{background:#f8fafc!important}.lis-total-row td,.lis-total-row .lis-freeze-1,.lis-total-row .lis-freeze-2{background:#0e3460!important;color:#fff!important;font-weight:800;border-top:2px solid #0a2a4a}.lis-year-total{background-color:#fffbe6!important;font-weight:800}.lis-table thead th.lis-year-total{background:linear-gradient(135deg,#854d0e 0%,#a16207 100%)!important}.lis-grand-total{background-color:#fff2cc!important;font-weight:900}.lis-table thead th.lis-grand-total{background:linear-gradient(135deg,#78350f 0%,#92400e 100%)!important}.lis-filter-panel{background:#fff;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.07)}.lis-kpi{border:1px solid #e5e7eb;border-radius:12px;padding:.75rem 1rem;background:linear-gradient(135deg,#f8fafc,#fff)}.lis-kpi .label{font-size:.72rem;color:#64748b;text-transform:uppercase;letter-spacing:.04em}.lis-kpi .value{font-size:1.15rem;font-weight:800;color:#0f172a}.lis-filter-actions{display:flex;gap:.5rem;align-items:end}.lis-filter-actions .btn{height:31px;white-space:nowrap}
+</style>
+
+<div class="container-fluid px-3 px-lg-4 py-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+        <div>
+            <h2 class="mb-1">LIS Summary</h2>
+            <div class="text-muted small">
+                Lab: <strong>@Model.SelectedLab</strong>
+                @if (!string.IsNullOrWhiteSpace(Model.LogicSheetName))
+                {
+                    <span class="ms-2 badge bg-info text-dark">Logic: @Model.LogicSheetName</span>
+                }
+            </div>
+        </div>
+        <div class="d-flex gap-2">
+            <a class="btn btn-sm btn-outline-secondary" asp-action="LisSummary" asp-route-labId="@Model.SelectedLabId">Reset</a>
+        </div>
+    </div>
+
+    <form method="get" asp-action="LisSummary" class="lis-filter-panel p-3 mb-3" id="lisSummaryFilterForm">
+        <div class="row g-2 align-items-end">
+            <div class="col-12 col-md-3">
+                <label class="form-label small fw-semibold">Lab</label>
+                <select name="labId" class="form-select form-select-sm" required>
+                    @if (Model.LabOptions.Any())
+                    {
+                        @foreach (var lab in Model.LabOptions)
+                        {
+                            if (lab.LabId == Model.SelectedLabId)
+                            {
+                                <option value="@lab.LabId" selected>@lab.LabName</option>
+                            }
+                            else
+                            {
+                                <option value="@lab.LabId">@lab.LabName</option>
+                            }
+                        }
+                    }
+                    else
+                    {
+                        <option value="">No labs available</option>
+                    }
+                </select>
+            </div>
+            <div class="col-12 col-md-3">
+                <label class="form-label small fw-semibold">Collected Date From</label>
+                <input type="date" class="form-control form-control-sm" id="collectedFromInput" name="collectedFrom" value="@Model.FilterCollectedFrom" />
+                <input type="hidden" id="filterCollectedFromInput" name="filterCollectedFrom" value="@Model.FilterCollectedFrom" />
+            </div>
+            <div class="col-12 col-md-3">
+                <label class="form-label small fw-semibold">Collected Date To</label>
+                <input type="date" class="form-control form-control-sm" id="collectedToInput" name="collectedTo" value="@Model.FilterCollectedTo" />
+                <input type="hidden" id="filterCollectedToInput" name="filterCollectedTo" value="@Model.FilterCollectedTo" />
+            </div>
+            <div class="col-12 col-md-3">
+                <div class="lis-filter-actions">
+                    <button type="submit" class="btn btn-sm btn-primary flex-fill">
+                        <i class="bi bi-funnel"></i> Apply Filter
+                    </button>
+                    <button type="button" id="exportLisExcelBtn" class="btn btn-sm btn-outline-success flex-fill">
+                        <i class="bi bi-file-earmark-excel me-1"></i> Download Excel
+                    </button>
+                </div>
+            </div>
+        </div>
+    </form>
+
+    @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+    {
+        <div class="alert alert-danger">@Model.ErrorMessage</div>
+    }
+    else
+    {
+        <div class="row g-3 mb-3">
+            <div class="col-md-3"><div class="lis-kpi"><div class="label">Total Samples</div><div class="value">@Model.GrandTotal.ToString("N0")</div></div></div>
+            <div class="col-md-3"><div class="lis-kpi"><div class="label">Years</div><div class="value">@years.Count</div></div></div>
+            <div class="col-md-3"><div class="lis-kpi"><div class="label">Months</div><div class="value">@validMonths.Count</div></div></div>
+            <div class="col-md-3"><div class="lis-kpi"><div class="label">Rows</div><div class="value">@Model.Rows.Count</div></div></div>
+        </div>
+
+        <div class="lis-wrap">
+            <div class="lis-scroll">
+                <table class="lis-table">
+                    <thead>
+                        <tr>
+                            <th rowspan="3" class="lis-freeze-1">#</th>
+                            <th rowspan="3" class="lis-freeze-2">LIS Status Summary</th>
+                            @foreach (var y in monthsByYear.Keys)
+                            {
+                                <th colspan="@(monthsByYear[y].Count + 1)">@y</th>
+                            }
+                            <th rowspan="2" class="lis-grand-total">Total</th>
+                        </tr>
+                        <tr>
+                            @foreach (var kv in monthsByYear)
+                            {
+                                foreach (var m in kv.Value)
+                                {
+                                    <th>@MonthLabel(m)</th>
+                                }
+                                <th class="lis-year-total">@kv.Key Total</th>
+                            }
+                        </tr>
+                        <tr>
+                            @foreach (var kv in monthsByYear)
+                            {
+                                foreach (var m in kv.Value)
+                                {
+                                    <th>Samples</th>
+                                }
+                                <th class="lis-year-total">Samples</th>
+                            }
+                            <th class="lis-grand-total">Samples</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in Model.Rows)
+                        {
+                            var css = row.IsSection ? "lis-section" : row.IsBullet ? "lis-bullet" : string.Empty;
+                            <tr class="@css" title="@row.Logic">
+                                <td class="lis-freeze-1">@row.Code</td>
+                                <td class="lis-freeze-2" title="@row.Description">@row.Description</td>
+                                @foreach (var kv in monthsByYear)
+                                {
+                                    foreach (var m in kv.Value)
+                                    {
+                                        <td>@Cell(row.ByMonth, m).ToString("N0")</td>
+                                    }
+                                    <td class="lis-year-total">@YearCell(row.ByYear, kv.Key).ToString("N0")</td>
+                                }
+                                <td class="lis-grand-total">@row.Total.ToString("N0")</td>
+                            </tr>
+                        }
+                        <tr class="lis-total-row">
+                            <td class="lis-freeze-1"></td>
+                            <td class="lis-freeze-2">Grand Total</td>
+                            @foreach (var kv in monthsByYear)
+                            {
+                                foreach (var m in kv.Value)
+                                {
+                                    <td>@Cell(Model.GrandTotalByMonth, m).ToString("N0")</td>
+                                }
+                                <td>@YearCell(Model.GrandTotalByYear, kv.Key).ToString("N0")</td>
+                            }
+                            <td>@Model.GrandTotal.ToString("N0")</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const form = document.getElementById('lisSummaryFilterForm');
+        const fromInput = document.getElementById('collectedFromInput');
+        const toInput = document.getElementById('collectedToInput');
+        const hiddenFrom = document.getElementById('filterCollectedFromInput');
+        const hiddenTo = document.getElementById('filterCollectedToInput');
+
+        function syncDateAliases() {
+            if (hiddenFrom && fromInput) hiddenFrom.value = fromInput.value || '';
+            if (hiddenTo && toInput) hiddenTo.value = toInput.value || '';
+        }
+
+        form?.addEventListener('submit', function () {
+            syncDateAliases();
+        });
+
+        document.getElementById('exportLisExcelBtn')?.addEventListener('click', function () {
+            if (!form) {
+                alert('Filter form not found');
+                return;
+            }
+
+            syncDateAliases();
+
+            const formData = new FormData(form);
+            const params = new URLSearchParams();
+
+            formData.forEach((value, key) => {
+                const text = value == null ? '' : value.toString().trim();
+                if (text) params.append(key, text);
+            });
+
+            window.location.href = '/LisSummary/ExportToExcel?' + params.toString();
+        });
+    });
+</script>
