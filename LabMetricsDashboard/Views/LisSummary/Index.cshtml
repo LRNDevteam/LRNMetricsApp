@@ -21,8 +21,7 @@
         }
     }
 
-    var useUploadedLogicTemplate = result?.LogicSheetName?.Equals("Augustus", StringComparison.OrdinalIgnoreCase) == true
-        || result?.LogicSheetName?.Equals("Certus", StringComparison.OrdinalIgnoreCase) == true;
+    var useUploadedLogicTemplate = result is not null;
     var logicTemplateCss = useUploadedLogicTemplate ? "lis-template-with-logic" : string.Empty;
     string DateValue(DateOnly? value) => value?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty;
     string RowCss(int level) => level <= 0 ? "lis-summary-section-row" : level == 1 ? "lis-summary-level-one" : "lis-summary-level-two";

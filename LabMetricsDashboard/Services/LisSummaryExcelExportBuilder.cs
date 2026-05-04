@@ -239,8 +239,7 @@ public static class LisSummaryExcelExportBuilder
     }
 
     private static bool ShouldUseUploadedLogicTemplate(string logicSheetName)
-        => logicSheetName.Equals("Augustus", StringComparison.OrdinalIgnoreCase)
-           || logicSheetName.Equals("Certus", StringComparison.OrdinalIgnoreCase);
+        => true;
 
     private static List<MonthColumn> BuildMonthColumns(IReadOnlyList<string> months, IReadOnlyList<int> years)
     {
