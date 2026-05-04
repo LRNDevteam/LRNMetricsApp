@@ -550,8 +550,14 @@
                                     var summaryEnabled = labConfig?.EnableProductionSummaryReport ?? false;
                                     var hideStandardProductionReport = !isAdmin && summaryEnabled;
                                 }
+
                                 @if (!hideStandardProductionReport)
                                 {
+                                    <li>
+                                        <a class="dropdown-item" asp-controller="Dashboard" asp-action="LisSummary">
+                                            <i class="bi bi-clipboard2-pulse-fill"></i> LIS Summary
+                                        </a>
+                                    </li>
                                     @if (labConfig?.EnableProductionReport ?? true)
                                     {
                                         <li>

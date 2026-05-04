@@ -7,8 +7,9 @@ namespace LabMetricsDashboard.Controllers;
 public class DashboardController : Controller
 {
     private const int PageSize = 50;
+	private const string PreferredInitialLabName = "PCR Labs of America";
 
-    private readonly LabSettings _labSettings;
+	private readonly LabSettings _labSettings;
     private readonly LabCsvFileResolver _resolver;
     private readonly CsvParserService _csvParser;
     private readonly IClinicSummaryRepository _clinicSummaryRepo;
@@ -20,7 +21,9 @@ public class DashboardController : Controller
     private readonly IReadOnlyDictionary<string, ILabProductionSummaryRepository> _labSummaryRepos;
     private readonly IClaimLineRepository _claimLineRepo;
     private readonly ILogger<DashboardController> _logger;
-
+	private readonly ILisSummaryRepository _lisSummaryRepo;
+	private readonly IDenialRecordRepository _labOptionRepository;
+	private readonly IConfiguration _configuration;
     public DashboardController(
         LabSettings labSettings,
         LabCsvFileResolver resolver,
@@ -33,7 +36,10 @@ public class DashboardController : Controller
         IAugustusProductionSummaryRepository augSummaryRepo,
         IReadOnlyDictionary<string, ILabProductionSummaryRepository> labSummaryRepos,
         IClaimLineRepository claimLineRepo,
-        ILogger<DashboardController> logger)
+        ILogger<DashboardController> logger,
+	   ILisSummaryRepository lisSummaryRepo,
+	   IDenialRecordRepository labOptionRepository,
+	   IConfiguration configuration)
     {
         _labSettings = labSettings;
         _resolver = resolver;
@@ -47,7 +53,10 @@ public class DashboardController : Controller
         _labSummaryRepos = labSummaryRepos;
         _claimLineRepo = claimLineRepo;
         _logger = logger;
-    }
+		_lisSummaryRepo = lisSummaryRepo;
+		_labOptionRepository = labOptionRepository;
+		_configuration = configuration;
+	}
 
     // GET /Dashboard  or  /Dashboard/Index?lab=PCRLabsofAmerica&filterPayerName=...
     public async Task<IActionResult> Index(
@@ -2856,4 +2865,105 @@ public class DashboardController : Controller
             fbTo != default ? fbTo : null);
     }
 
+	// DashboardController LIS Summary patch - uses LabOption repository like Denial Dashboard.
+	// Add fields:
+	// private readonly ILisSummaryRepository _lisSummaryRepo;
+	// private readonly IDenialRecordRepository _labOptionRepository;
+	// private readonly IConfiguration _configuration;
+	// private const string PreferredInitialLabName = "PCR Labs of America";
+	// Inject and assign them in DashboardController constructor.
+
+	public async Task<IActionResult> LisSummary(int? labId, string? filterCollectedFrom, string? filterCollectedTo, CancellationToken ct = default)
+	{
+		var labs = (await _labOptionRepository.GetLabsAsync(ct))
+			.OrderBy(x => x.LabName)
+			.ThenBy(x => x.LabId)
+			.ToList();
+
+		if (labs.Count == 0)
+		{
+			return View(new LisSummaryViewModel
+			{
+				LabOptions = [],
+				ErrorMessage = "No active labs were found in LRNMaster.dbo.LRNMetricsLab."
+			});
+		}
+
+		var preferredLab = labs.FirstOrDefault(x => x.LabName.Equals(PreferredInitialLabName, StringComparison.OrdinalIgnoreCase))
+			?? labs.First();
+
+		var selectedLabId = labId;
+		if (!selectedLabId.HasValue || labs.All(x => x.LabId != selectedLabId.Value))
+		{
+			selectedLabId = preferredLab.LabId;
+		}
+
+		var currentLab = labs.First(x => x.LabId == selectedLabId.Value);
+		var connectionString = ResolveLabConnectionString(currentLab);
+
+		if (string.IsNullOrWhiteSpace(connectionString))
+		{
+			return View(new LisSummaryViewModel
+			{
+				LabOptions = labs,
+				SelectedLabId = currentLab.LabId,
+				SelectedLab = currentLab.LabName,
+				FilterCollectedFrom = filterCollectedFrom,
+				FilterCollectedTo = filterCollectedTo,
+				ErrorMessage = $"LIS Summary is currently not available for {currentLab.LabName}. Connection string key '{currentLab.ConnectionKey}' is missing."
+			});
+		}
+
+		DateOnly.TryParse(filterCollectedFrom, out var fromDate);
+		DateOnly.TryParse(filterCollectedTo, out var toDate);
+
+		try
+		{
+			var result = await _lisSummaryRepo.GetLisSummaryAsync(
+				connectionString,
+				currentLab.LabName,
+				currentLab.LabId,
+				fromDate != default ? fromDate : null,
+				toDate != default ? toDate : null,
+				ct);
+
+			return View(new LisSummaryViewModel
+			{
+				LabOptions = labs,
+				SelectedLabId = currentLab.LabId,
+				SelectedLab = currentLab.LabName,
+				FilterCollectedFrom = filterCollectedFrom,
+				FilterCollectedTo = filterCollectedTo,
+				LogicSheetName = result.LogicSheetName,
+				Months = result.Months,
+				Years = result.Years,
+				Rows = result.Rows,
+				GrandTotalByMonth = result.GrandTotalByMonth,
+				GrandTotalByYear = result.GrandTotalByYear,
+				GrandTotal = result.GrandTotal
+			});
+		}
+		catch (Exception ex)
+		{
+			_logger.LogError(ex, "LIS Summary query failed for LabId {LabId}, LabName '{LabName}'.", currentLab.LabId, currentLab.LabName);
+			return View(new LisSummaryViewModel
+			{
+				LabOptions = labs,
+				SelectedLabId = currentLab.LabId,
+				SelectedLab = currentLab.LabName,
+				FilterCollectedFrom = filterCollectedFrom,
+				FilterCollectedTo = filterCollectedTo,
+				ErrorMessage = $"Failed to load LIS Summary: {ex.Message}"
+			});
+		}
+	}
+
+	private string? ResolveLabConnectionString(LabOption lab)
+	{
+		if (lab is null || string.IsNullOrWhiteSpace(lab.ConnectionKey)) return null;
+		var value = _configuration.GetConnectionString(lab.ConnectionKey);
+		if (!string.IsNullOrWhiteSpace(value)) return value;
+		value = _configuration[$"ConnectionStrings:{lab.ConnectionKey}"];
+		return string.IsNullOrWhiteSpace(value) ? null : value;
+	}
 }
