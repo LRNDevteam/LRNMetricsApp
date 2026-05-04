@@ -3,6 +3,8 @@ using LabMetricsDashboard.Models;
 using System.Diagnostics;
 using Microsoft.Data.SqlClient;
 
+//fix
+
 namespace LabMetricsDashboard.Services;
 
 /// <summary>
@@ -63,16 +65,7 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
         _ = rule;
         _ = useLineEncounters;
 
-<<<<<<< HEAD
         // Data based on Posted Date (CheckDate)
-=======
-        var useNorthwestRule = !string.IsNullOrWhiteSpace(rule)
-            && string.Equals(rule.Trim(), "Northwestlabs Rule", StringComparison.OrdinalIgnoreCase);
-
-        // ClaimLevelData always uses CheckDate for Year/Month grouping.
-        // When useLineEncounters=true, encounter counts are fetched separately
-        // from LineLevelData (using PostingDate).
->>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
         const string dateColumn = "CheckDate";
 
         // Base WHERE for ClaimLevelData (monthly): only InsurancePayment > 0 and
@@ -101,20 +94,20 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
         const string countExpr = "COUNT(DISTINCT ClaimID)";
         const string payerGroupExpr = "LTRIM(RTRIM(PayerName_Raw))";
 
-        var payerGroupExpr = useNorthwestRule
-            ? "LTRIM(RTRIM(PayerName_Raw))"
-            : "LTRIM(RTRIM(PayerName))";
+        //var payerGroupExpr = useNorthwestRule
+        //    ? "LTRIM(RTRIM(PayerName_Raw))"
+        //    : "LTRIM(RTRIM(PayerName))";
 
-        if (useNorthwestRule)
-        {
-            // Northwestlabs Monthly Claim Volume:
-            // - Filter out rows where PostedDate is blank/invalid
-            // - Use PayerName_Raw for payer drill-down
-            whereClauses.Add("PayerName_Raw IS NOT NULL");
-            whereClauses.Add("LTRIM(RTRIM(PayerName_Raw)) <> ''");
-            whereClauses.Add("TRY_CAST(PostedDate AS DATE) IS NOT NULL");
-            whereClauses.Add("YEAR(TRY_CAST(PostedDate AS DATE)) > 1900");
-        }
+        //if (useNorthwestRule)
+        //{
+        //    // Northwestlabs Monthly Claim Volume:
+        //    // - Filter out rows where PostedDate is blank/invalid
+        //    // - Use PayerName_Raw for payer drill-down
+        //    whereClauses.Add("PayerName_Raw IS NOT NULL");
+        //    whereClauses.Add("LTRIM(RTRIM(PayerName_Raw)) <> ''");
+        //    whereClauses.Add("TRY_CAST(PostedDate AS DATE) IS NOT NULL");
+        //    whereClauses.Add("YEAR(TRY_CAST(PostedDate AS DATE)) > 1900");
+        //}
 
         var pivotSql = $"""
             SELECT

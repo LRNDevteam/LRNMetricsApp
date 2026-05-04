@@ -1,11 +1,8 @@
 ﻿using LabMetricsDashboard.Filters;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
-<<<<<<< HEAD
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
-=======
->>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Configuration.Json;
 using Microsoft.Extensions.Primitives;
@@ -208,7 +205,6 @@ ChangeToken.OnChange(
 			LogStartupError("Failed to rebuild LabSettings after configuration reload.", ex);
 		}
 	});
-<<<<<<< HEAD
 
 // ── Data Protection ─────────────────────────────────────────────────────────
 // Keys must be persisted to disk so that:
@@ -257,8 +253,6 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     options.KnownNetworks.Clear();
     options.KnownProxies.Clear();
 });
-=======
->>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
 
 var useMockData = builder.Configuration.GetValue<bool>("DashboardData:UseMockData");
 if (useMockData)
@@ -344,10 +338,9 @@ builder.Services
         options.AccessDeniedPath = "/Account/AccessDenied";
         options.ExpireTimeSpan   = TimeSpan.FromHours(8);
         options.SlidingExpiration = true;
-<<<<<<< HEAD
-        options.Cookie.Name         = "LRN.Auth";
-        options.Cookie.HttpOnly     = true;
-        options.Cookie.SameSite     = SameSiteMode.Lax;
+        options.Cookie.Name = "LRN.Auth";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Lax;
         // Always mark the auth cookie as Secure in production so Chrome accepts it after
         // the HTTPS redirect that follows a successful login.
         // SameAsRequest is kept for local development (HTTP) so the dev experience is unaffected.
@@ -374,8 +367,8 @@ builder.Services
                 // pages — those would just trigger another redirect cycle.
                 var isSafeReturn =
                     !string.IsNullOrWhiteSpace(returnUrl)
-                    && !returnUrl.Contains("/Home/Error",     StringComparison.OrdinalIgnoreCase)
-                    && !returnUrl.Contains("/Account/Login",  StringComparison.OrdinalIgnoreCase)
+                    && !returnUrl.Contains("/Home/Error", StringComparison.OrdinalIgnoreCase)
+                    && !returnUrl.Contains("/Account/Login", StringComparison.OrdinalIgnoreCase)
                     && !returnUrl.Contains("/Account/Logout", StringComparison.OrdinalIgnoreCase);
 
                 // Build the login URL using PathBase so sub-app deployments (e.g. /LRNMetrics)
@@ -393,11 +386,10 @@ builder.Services
                 return Task.CompletedTask;
             },
         };
-=======
-        options.Cookie.Name      = "LRN.Auth";
-        options.Cookie.HttpOnly  = true;
-        options.Cookie.SameSite  = SameSiteMode.Lax;
->>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
+
+
+
+
     });
 
 var app = builder.Build();
@@ -441,7 +433,7 @@ app.Use(async (context, next) =>
         || ex.InnerException is System.Security.Cryptography.CryptographicException)
     {
         var staleCookieNames = context.Request.Cookies.Keys
-            .Where(k => k.StartsWith("LRN.",         StringComparison.OrdinalIgnoreCase)
+            .Where(k => k.StartsWith("LRN.", StringComparison.OrdinalIgnoreCase)
                      || k.StartsWith(".AspNetCore.", StringComparison.OrdinalIgnoreCase))
             .ToList();
 
@@ -458,11 +450,12 @@ app.Use(async (context, next) =>
         {
             // Send the user back to the same URL so the request runs again with fresh cookies.
             var pathBase = context.Request.PathBase.HasValue ? context.Request.PathBase.Value : string.Empty;
-            var path     = context.Request.Path.HasValue     ? context.Request.Path.Value     : "/";
+            var path = context.Request.Path.HasValue ? context.Request.Path.Value : "/";
             context.Response.Redirect($"{pathBase}{path}");
         }
     }
 });
+
 
 // ── Global error logging (all environments) ─────────────────────
 app.Use(async (context, next) =>

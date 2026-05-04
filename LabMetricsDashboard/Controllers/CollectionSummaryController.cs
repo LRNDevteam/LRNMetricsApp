@@ -122,10 +122,7 @@ public class CollectionSummaryController : Controller
             DateOnly? cdToN   = cdTo   == default ? null : cdTo;
 
             var monthlyRule = config.CollectionSummary?.Rule;
-<<<<<<< HEAD
             var weeklyRule  = config.CollectionSummary?.Week;
-=======
->>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
 
             var monthlyVolumeTask = _repo.GetCollectionMonthlyVolumeAsync(
                 connStr, monthlyRule, useLineEncounters, payerFilter, panelFilter,
@@ -370,10 +367,7 @@ public class CollectionSummaryController : Controller
             && string.Equals(config.CollectionOutput, "table1", StringComparison.OrdinalIgnoreCase);
 
         var monthlyRule = config.CollectionSummary?.Rule;
-<<<<<<< HEAD
         var weeklyRule  = config.CollectionSummary?.Week;
-=======
->>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
 
         DateOnly.TryParse(filterFirstBillFrom, out var fbFrom);
         DateOnly.TryParse(filterFirstBillTo, out var fbTo);

@@ -98,12 +98,8 @@ public interface IProductionReportRepository
         DateOnly? filterFirstBilledFrom = null,
         DateOnly? filterFirstBilledTo = null,
         string? rule = null,
-<<<<<<< HEAD
         CancellationToken ct = default,
         bool panelNewStrict = false);   // true ? PanelNew only (ProductionSummaryReport); false ? PanelNew with PanelName fallback
-=======
-        CancellationToken ct = default);
->>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
 
     /// <summary>
     /// Returns the Payer X Panel cross-tab data:
@@ -120,12 +116,8 @@ public interface IProductionReportRepository
         DateOnly? filterFirstBilledFrom = null,
         DateOnly? filterFirstBilledTo = null,
         string? rule = null,
-<<<<<<< HEAD
         CancellationToken ct = default,
         bool panelNewStrict = false);   // true ? PanelNew only (ProductionSummaryReport); false ? PanelNew with PanelName fallback
-=======
-        CancellationToken ct = default);
->>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
 
     /// <summary>
     /// Returns the Unbilled X Aging table data:
@@ -155,12 +147,8 @@ public interface IProductionReportRepository
         DateOnly? filterFirstBillTo = null,
         DateOnly? filterFirstBilledFrom = null,
         DateOnly? filterFirstBilledTo = null,
-<<<<<<< HEAD
         CancellationToken ct = default,
         string? rule = null);   // Rule3 (Augustus) ? COUNT DISTINCT CPTCode instead of SUM Units
-=======
-        CancellationToken ct = default);
->>>>>>> 94cd7d605ea1571223aada4e985df6dfd6b2b3b5
 
     /// <summary>Returns all ClaimLevelData rows for Excel export, respecting Production Report filters.</summary>
     Task<List<Dictionary<string, object?>>> GetClaimLevelDataExportAsync(
