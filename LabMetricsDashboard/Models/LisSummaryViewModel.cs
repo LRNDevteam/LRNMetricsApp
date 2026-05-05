@@ -38,7 +38,14 @@ public sealed record LisSummaryResult(
     List<LisSummaryRow> Rows,
     Dictionary<string, int> GrandTotalByMonth,
     Dictionary<int, int> GrandTotalByYear,
-    int GrandTotal);
+    int GrandTotal,
+    LisSummaryKpiCards KpiCards);
+
+public sealed record LisSummaryKpiCards(
+    int TotalSamples,
+    int BilledCount,
+    int UnbilledCount,
+    int SelfPayCount);
     
 public sealed class LisSummaryFilters
 {

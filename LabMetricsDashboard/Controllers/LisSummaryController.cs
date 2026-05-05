@@ -24,7 +24,7 @@ public class LisSummaryController : Controller
     }
 
     [HttpGet]
-    public async Task<IActionResult> Index([FromQuery] LisSummaryFilters filters, CancellationToken cancellationToken)
+    public async Task<IActionResult> Index([FromQuery] LisSummaryFilters filters, [FromQuery] string? lab, CancellationToken cancellationToken)
     {
         filters ??= new LisSummaryFilters();
 
@@ -44,7 +44,7 @@ public class LisSummaryController : Controller
             });
         }
 
-        var selectedLab = ResolveSelectedLab(labs, filters.LabId);
+        var selectedLab = ResolveSelectedLab(labs, filters.LabId, lab);
         filters.LabId = selectedLab.LabId;
 
         try
@@ -79,7 +79,7 @@ public class LisSummaryController : Controller
     }
 
     [HttpGet]
-    public async Task<IActionResult> ExportToExcel([FromQuery] LisSummaryFilters filters, CancellationToken cancellationToken)
+    public async Task<IActionResult> ExportToExcel([FromQuery] LisSummaryFilters filters, [FromQuery] string? lab, CancellationToken cancellationToken)
     {
         filters ??= new LisSummaryFilters();
 
@@ -94,7 +94,7 @@ public class LisSummaryController : Controller
             return RedirectToAction(nameof(Index));
         }
 
-        var selectedLab = ResolveSelectedLab(labs, filters.LabId);
+        var selectedLab = ResolveSelectedLab(labs, filters.LabId, lab);
         filters.LabId = selectedLab.LabId;
 
         try
@@ -127,6 +127,7 @@ public class LisSummaryController : Controller
             TempData["LisSummaryError"] = $"Failed to export LIS Summary: {ex.Message}";
             return RedirectToAction(nameof(Index), new
             {
+                lab = selectedLab.LabName,
                 LabId = filters.LabId,
                 CollectedFrom = filters.CollectedFrom?.ToString("yyyy-MM-dd"),
                 CollectedTo = filters.CollectedTo?.ToString("yyyy-MM-dd")
@@ -134,8 +135,20 @@ public class LisSummaryController : Controller
         }
     }
 
-    private LabOption ResolveSelectedLab(IReadOnlyList<LabOption> labs, int? requestedLabId)
+    private LabOption ResolveSelectedLab(IReadOnlyList<LabOption> labs, int? requestedLabId, string? requestedLabName)
     {
+        // 1) Common header lab selector sends the selected lab as ?lab=LabName.
+        //    Keep LabId support also, because export/autocomplete links may still pass LabId.
+        if (!string.IsNullOrWhiteSpace(requestedLabName))
+        {
+            var requestedToken = NormalizeLabToken(requestedLabName);
+            var requestedLab = labs.FirstOrDefault(x =>
+                x.LabName.Equals(requestedLabName, StringComparison.OrdinalIgnoreCase)
+                || NormalizeLabToken(x.LabName).Equals(requestedToken, StringComparison.OrdinalIgnoreCase));
+
+            if (requestedLab is not null) return requestedLab;
+        }
+
         if (requestedLabId.HasValue)
         {
             var requestedLab = labs.FirstOrDefault(x => x.LabId == requestedLabId.Value);
@@ -145,6 +158,12 @@ public class LisSummaryController : Controller
         return labs.FirstOrDefault(x => x.LabName.Equals(PreferredInitialLabName, StringComparison.OrdinalIgnoreCase))
             ?? labs.First();
     }
+
+    private static string NormalizeLabToken(string value)
+        => new string((value ?? string.Empty)
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToUpperInvariant)
+            .ToArray());
 
     private string ResolveConnectionString(LabOption lab)
     {

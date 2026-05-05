@@ -290,6 +290,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			.GroupBy(x => x.CollectedYear)
 			.ToDictionary(g => g.Key, g => g.Sum(x => x.TotalClaims));
 
+		var kpiCards = BuildKpiCards(raw, grandByMonth.Values.Sum());
+
 		return new LisSummaryResult(
 			profile.LogicSheetName,
 			months,
@@ -297,7 +299,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			rows,
 			grandByMonth,
 			grandByYear,
-			grandByMonth.Values.Sum());
+			grandByMonth.Values.Sum(),
+			kpiCards);
 	}
 
 	private static async Task<HashSet<string>> GetLimsMasterColumnsAsync(SqlConnection conn, CancellationToken ct)
@@ -431,6 +434,53 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		}
 
 		return raw;
+	}
+
+	private static LisSummaryKpiCards BuildKpiCards(List<RawLisGroup> raw, int totalSamples)
+	{
+		var billedCount = raw
+			.Where(x => IsBilledStatus(GetField(x, "Billing Status"))
+				|| IsBilledStatus(GetField(x, "Bill Status"))
+				|| IsBilledStatus(GetField(x, "Billed/Not")))
+			.Sum(x => x.TotalClaims);
+
+		var unbilledCount = raw
+			.Where(x => IsUnbilledStatus(GetField(x, "Billing Status"))
+				|| IsUnbilledStatus(GetField(x, "Bill Status"))
+				|| IsUnbilledStatus(GetField(x, "Billed/Not")))
+			.Sum(x => x.TotalClaims);
+
+		var selfPayCount = raw
+			.Where(x => IsSelfPay(GetField(x, "Bill To"))
+				|| IsSelfPay(GetField(x, "Payment Method"))
+				|| IsSelfPay(GetField(x, "Client Status")))
+			.Sum(x => x.TotalClaims);
+
+		return new LisSummaryKpiCards(totalSamples, billedCount, unbilledCount, selfPayCount);
+	}
+
+	private static bool IsBilledStatus(string? value)
+	{
+		var key = CompareKey(value);
+		return key is "BILLED" or "SUBMITTED" or "CLAIMSUBMITTED"
+			|| key.Contains("BILLED", StringComparison.OrdinalIgnoreCase) && !IsUnbilledStatus(value)
+			|| key.Contains("SUBMITTED", StringComparison.OrdinalIgnoreCase);
+	}
+
+	private static bool IsUnbilledStatus(string? value)
+	{
+		var key = CompareKey(value);
+		return key.Contains("UNBILL", StringComparison.OrdinalIgnoreCase)
+			|| key.Contains("NOTBILL", StringComparison.OrdinalIgnoreCase)
+			|| key.Contains("NOBILL", StringComparison.OrdinalIgnoreCase)
+			|| key.Contains("PENDINGBILL", StringComparison.OrdinalIgnoreCase);
+	}
+
+	private static bool IsSelfPay(string? value)
+	{
+		var key = CompareKey(value);
+		return key.Contains("SELFPAY", StringComparison.OrdinalIgnoreCase)
+			|| key.Contains("PATIENTPAY", StringComparison.OrdinalIgnoreCase);
 	}
 
 	private static List<LisSummaryRow> BuildTemplatePivotRows(string logicSheetName, List<RawLisGroup> raw)

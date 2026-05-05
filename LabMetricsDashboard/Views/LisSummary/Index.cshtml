@@ -21,8 +21,8 @@
         }
     }
 
-    var useUploadedLogicTemplate = result is not null;
-    var logicTemplateCss = useUploadedLogicTemplate ? "lis-template-with-logic" : string.Empty;
+    var useUploadedLogicTemplate = false;
+    var logicTemplateCss = string.Empty;
     string DateValue(DateOnly? value) => value?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty;
     string RowCss(int level) => level <= 0 ? "lis-summary-section-row" : level == 1 ? "lis-summary-level-one" : "lis-summary-level-two";
 }
@@ -32,21 +32,25 @@
         border-radius: 1rem;
         background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
     }
+
     .section-title {
         font-size: 1.05rem;
         font-weight: 700;
         color: #1b3a5c;
     }
+
     .section-subtitle {
         color: #6b7280;
         font-size: .92rem;
         margin-top: .15rem;
     }
+
     .filter-select {
         border-radius: .75rem;
         border: 1px solid #d8e2ee;
         min-height: 42px;
     }
+
     .chip {
         display: inline-flex;
         align-items: center;
@@ -59,65 +63,124 @@
         font-weight: 600;
         border: 1px solid #d9e5f2;
     }
+
+    .lis-kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 1rem;
+        margin-bottom: 1rem;
+    }
+
+    .lis-kpi-card {
+        border: 1px solid #e0e7ef;
+        border-radius: .85rem;
+        background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+        box-shadow: 0 6px 16px rgba(15, 23, 42, .05);
+        padding: .95rem 1rem;
+        min-height: 74px;
+    }
+
+    .lis-kpi-label {
+        font-size: .72rem;
+        font-weight: 700;
+        color: #58708c;
+        letter-spacing: .03em;
+        text-transform: uppercase;
+        margin-bottom: .25rem;
+    }
+
+    .lis-kpi-value {
+        font-size: 1.35rem;
+        font-weight: 800;
+        line-height: 1.1;
+        color: #001b44;
+        font-variant-numeric: tabular-nums;
+    }
+
+    @@media (max-width: 992px) {
+        .lis-kpi-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+
+    @@media (max-width: 576px) {
+        .lis-kpi-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
     .table-card {
         border: 1px solid #e3ebf5;
         border-radius: 1rem;
         background: #fff;
         padding: 1rem;
     }
+
     .lis-summary-table {
         border-color: #d8e2ee;
         font-size: .86rem;
     }
-    .lis-summary-table thead th {
-        background: #dce8f6;
-        color: #1b3a5c;
-        font-weight: 700;
-        text-align: center;
-        vertical-align: middle;
-        white-space: nowrap;
-        border: 1px solid #afc4df;
-    }
-    .lis-summary-table thead .year-header th {
-        background: #bfd5ee;
-    }
-    .lis-summary-table tbody td {
-        border: 1px solid #dde7f0;
-        vertical-align: top;
-    }
-    .lis-summary-table .logic-col {
-        min-width: 420px;
-        max-width: 620px;
-        white-space: normal;
-    }
-    .lis-summary-table .desc-col {
-        min-width: 250px;
-    }
-    .lis-summary-table .count-cell {
-        text-align: right;
-        white-space: nowrap;
-        font-variant-numeric: tabular-nums;
-    }
+
+        .lis-summary-table thead th {
+            background: #dce8f6;
+            color: #1b3a5c;
+            font-weight: 700;
+            text-align: center;
+            vertical-align: middle;
+            white-space: nowrap;
+            border: 1px solid #afc4df;
+        }
+
+        .lis-summary-table thead .year-header th {
+            background: #bfd5ee;
+        }
+
+        .lis-summary-table tbody td {
+            border: 1px solid #dde7f0;
+            vertical-align: top;
+        }
+
+        .lis-summary-table .logic-col {
+            min-width: 420px;
+            max-width: 620px;
+            white-space: normal;
+        }
+
+        .lis-summary-table .desc-col {
+            min-width: 250px;
+        }
+
+        .lis-summary-table .count-cell {
+            text-align: right;
+            white-space: nowrap;
+            font-variant-numeric: tabular-nums;
+        }
+
     .lis-summary-section-row td {
         background: #f6f9fc;
         font-weight: 700;
     }
+
     .lis-summary-level-one td:nth-child(2) {
         font-weight: 700;
     }
+
     .lis-summary-level-two td:nth-child(2) {
         padding-left: 2rem;
     }
+
     .lis-summary-table.lis-template-with-logic .logic-col {
         width: 420px !important;
         min-width: 420px !important;
         max-width: 420px !important;
         white-space: normal;
     }
+
     .year-total-cell {
         background: #f8fbff;
         font-weight: 700;
     }
+
     .grand-total-cell,
     .grand-total-row td {
         background: #fff2cc !important;
@@ -136,6 +199,7 @@
         background: #fff;
         scrollbar-gutter: stable both-edges;
     }
+
     .lis-summary-table.lis-freeze-table {
         width: max-content !important;
         min-width: 100% !important;
@@ -143,58 +207,288 @@
         border-collapse: separate !important;
         border-spacing: 0 !important;
     }
-    .lis-summary-table.lis-freeze-table th,
-    .lis-summary-table.lis-freeze-table td {
-        background-clip: padding-box;
-    }
-    .lis-summary-table.lis-freeze-table thead th {
-        position: sticky;
-        top: var(--lis-sticky-top, 0px);
-        z-index: 40;
-    }
-    .lis-summary-table.lis-freeze-table .lis-code-col {
-        width: 56px !important;
-        min-width: 56px !important;
-        max-width: 56px !important;
-        text-align: center;
-    }
-    .lis-summary-table.lis-freeze-table .desc-col {
-        width: 300px !important;
-        min-width: 300px !important;
-        max-width: 300px !important;
-        white-space: normal;
-    }
-    .lis-summary-table.lis-freeze-table .sticky-col-1,
-    .lis-summary-table.lis-freeze-table .sticky-col-2,
-    .lis-summary-table.lis-freeze-table .sticky-col-3 {
-        position: sticky;
-        background: #fff;
-        z-index: 18;
-    }
-    .lis-summary-table.lis-freeze-table .sticky-col-1 { left: 0; }
-    .lis-summary-table.lis-freeze-table .sticky-col-2 { left: 56px; box-shadow: 1px 0 0 #dde7f0; }
-    .lis-summary-table.lis-freeze-table .sticky-col-3 { left: 356px; box-shadow: 1px 0 0 #dde7f0; }
-    .lis-summary-table.lis-freeze-table thead .sticky-col-1,
-    .lis-summary-table.lis-freeze-table thead .sticky-col-2,
-    .lis-summary-table.lis-freeze-table thead .sticky-col-3 {
-        z-index: 70;
-        background: #123b63;
-        color: #fff;
-    }
-    .lis-summary-table.lis-freeze-table .count-cell,
-    .lis-summary-table.lis-freeze-table th:not(.desc-col):not(.lis-code-col):not(.logic-col) {
-        width: 96px;
-        min-width: 96px;
-        max-width: 96px;
-        white-space: nowrap;
-    }
+
+        .lis-summary-table.lis-freeze-table th,
+        .lis-summary-table.lis-freeze-table td {
+            background-clip: padding-box;
+        }
+
+        .lis-summary-table.lis-freeze-table thead th {
+            position: sticky;
+            top: var(--lis-sticky-top, 0px);
+            z-index: 40;
+        }
+
+        .lis-summary-table.lis-freeze-table .lis-code-col {
+            width: 56px !important;
+            min-width: 56px !important;
+            max-width: 56px !important;
+            text-align: center;
+        }
+
+        .lis-summary-table.lis-freeze-table .desc-col {
+            width: 300px !important;
+            min-width: 300px !important;
+            max-width: 300px !important;
+            white-space: normal;
+        }
+
+        .lis-summary-table.lis-freeze-table .sticky-col-1,
+        .lis-summary-table.lis-freeze-table .sticky-col-2,
+        .lis-summary-table.lis-freeze-table .sticky-col-3 {
+            position: sticky;
+            background: #fff;
+            z-index: 18;
+        }
+
+        .lis-summary-table.lis-freeze-table .sticky-col-1 {
+            left: 0;
+        }
+
+        .lis-summary-table.lis-freeze-table .sticky-col-2 {
+            left: 56px;
+            box-shadow: 1px 0 0 #dde7f0;
+        }
+
+        .lis-summary-table.lis-freeze-table .sticky-col-3 {
+            left: 356px;
+            box-shadow: 1px 0 0 #dde7f0;
+        }
+
+        .lis-summary-table.lis-freeze-table thead .sticky-col-1,
+        .lis-summary-table.lis-freeze-table thead .sticky-col-2,
+        .lis-summary-table.lis-freeze-table thead .sticky-col-3 {
+            z-index: 70;
+            background: #123b63;
+            color: #fff;
+        }
+
+        .lis-summary-table.lis-freeze-table .count-cell,
+        .lis-summary-table.lis-freeze-table th:not(.desc-col):not(.lis-code-col):not(.logic-col) {
+            width: 96px;
+            min-width: 96px;
+            max-width: 96px;
+            white-space: nowrap;
+        }
+
     .lis-summary-section-row .sticky-col-1,
     .lis-summary-section-row .sticky-col-2,
-    .lis-summary-section-row .sticky-col-3 { background: #f6f9fc !important; }
+    .lis-summary-section-row .sticky-col-3 {
+        background: #f6f9fc !important;
+    }
+
     .grand-total-row .sticky-col-1,
     .grand-total-row .sticky-col-2,
-    .grand-total-row .sticky-col-3 { background: #fff2cc !important; }
+    .grand-total-row .sticky-col-3 {
+        background: #fff2cc !important;
+    }
 
+    /* LIS Summary Excel/Pivot style - same as old LisSummary.cshtml */
+    .table-card {
+        border: 0 !important;
+        border-radius: .9rem;
+        background: #fff;
+        padding: 0 !important;
+        overflow: hidden;
+    }
+
+    .lis-freeze-scroll {
+        width: 100%;
+        max-height: min(76vh, calc(100vh - 210px));
+        overflow: auto;
+        position: relative;
+        border: 1px solid #cbd8e6;
+        border-radius: .85rem;
+        background: #fff;
+        scrollbar-gutter: stable both-edges;
+    }
+
+    .lis-summary-table.lis-freeze-table {
+        width: max-content !important;
+        min-width: 100% !important;
+        table-layout: fixed;
+        border-collapse: separate !important;
+        border-spacing: 0 !important;
+        font-size: .74rem;
+        color: #00214d;
+    }
+
+        .lis-summary-table.lis-freeze-table th,
+        .lis-summary-table.lis-freeze-table td {
+            border: 1px solid #d5e1ef !important;
+            padding: .38rem .45rem;
+            background-clip: padding-box;
+            height: 29px;
+        }
+
+        .lis-summary-table.lis-freeze-table thead th {
+            position: sticky;
+            top: var(--lis-sticky-top, 0px);
+            z-index: 40;
+            background: #123b63 !important;
+            color: #fff !important;
+            font-weight: 800;
+            text-align: center;
+            vertical-align: middle;
+            text-transform: uppercase;
+            font-size: .67rem;
+            letter-spacing: .015em;
+            white-space: nowrap;
+            border-color: #284f75 !important;
+        }
+
+        .lis-summary-table.lis-freeze-table thead .year-header th {
+            background: #08294d !important;
+            color: #fff !important;
+        }
+
+        .lis-summary-table.lis-freeze-table thead .month-header th {
+            background: #174c76 !important;
+            color: #fff !important;
+        }
+
+        .lis-summary-table.lis-freeze-table thead .sample-header th {
+            background: #0d5f93 !important;
+            color: #fff !important;
+        }
+
+        .lis-summary-table.lis-freeze-table thead th.year-total-head {
+            background: #a46500 !important;
+            color: #fff !important;
+        }
+
+        .lis-summary-table.lis-freeze-table .lis-code-col {
+            width: 52px !important;
+            min-width: 52px !important;
+            max-width: 52px !important;
+            text-align: center;
+        }
+
+        .lis-summary-table.lis-freeze-table .desc-col {
+            width: 320px !important;
+            min-width: 320px !important;
+            max-width: 320px !important;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .lis-summary-table.lis-freeze-table .sticky-col-1,
+        .lis-summary-table.lis-freeze-table .sticky-col-2 {
+            position: sticky;
+            background: #fff;
+            z-index: 18;
+        }
+
+        .lis-summary-table.lis-freeze-table .sticky-col-1 {
+            left: 0;
+        }
+
+        .lis-summary-table.lis-freeze-table .sticky-col-2 {
+            left: 52px;
+            box-shadow: 2px 0 0 #cbd8e6;
+        }
+
+        .lis-summary-table.lis-freeze-table thead .sticky-col-1,
+        .lis-summary-table.lis-freeze-table thead .sticky-col-2 {
+            z-index: 80;
+            background: #123b63 !important;
+            color: #fff !important;
+        }
+
+        .lis-summary-table.lis-freeze-table .count-cell,
+        .lis-summary-table.lis-freeze-table th:not(.desc-col):not(.lis-code-col) {
+            width: 56px;
+            min-width: 56px;
+            max-width: 56px;
+            white-space: nowrap;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .lis-summary-table.lis-freeze-table tbody td {
+            color: #00214d;
+            background: #fff;
+            vertical-align: middle;
+        }
+
+    .lis-summary-section-row td,
+    .lis-summary-section-row .sticky-col-1,
+    .lis-summary-section-row .sticky-col-2 {
+        background: #ffffff !important;
+        font-weight: 800;
+        color: #001b44;
+    }
+
+    .lis-summary-level-one td:nth-child(2),
+    .lis-summary-level-two td:nth-child(2) {
+        font-weight: 700;
+    }
+
+    .lis-summary-level-two td:nth-child(2) {
+        padding-left: 1.5rem !important;
+    }
+
+    .year-total-cell {
+        background: #fff8df !important;
+        font-weight: 800;
+        color: #001b44;
+    }
+
+    .grand-total-cell,
+    .grand-total-row td {
+        background: #fff2cc !important;
+        font-weight: 900;
+        color: #001b44;
+    }
+
+    .grand-total-row .sticky-col-1,
+    .grand-total-row .sticky-col-2 {
+        background: #fff2cc !important;
+    }
+
+    .lis-summary-table.lis-freeze-table tbody tr:last-child td,
+    .lis-summary-table.lis-freeze-table tbody tr.lis-summary-section-row:last-child td {
+        background: #e5f4ee !important;
+        color: #007044;
+        font-weight: 900;
+    }
+
+    .lis-filter-row {
+        display: flex;
+        align-items: end;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .lis-filter-item {
+        width: 285px;
+    }
+
+    .lis-filter-actions {
+        display: flex;
+        align-items: center;
+        gap: .75rem;
+        padding-bottom: 1px;
+    }
+
+        .lis-filter-actions .btn {
+            height: 42px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+    @@media (max-width: 768px) {
+        .lis-filter-item {
+            width: 100%;
+        }
+
+        .lis-filter-actions {
+            width: 100%;
+            flex-wrap: wrap;
+        }
+    }
 </style>
 
 @if (TempData["LisSummaryError"] is string error && !string.IsNullOrWhiteSpace(error))
@@ -213,42 +507,33 @@
                 <span class="chip">Lab: @(string.IsNullOrWhiteSpace(Model.CurrentLabName) ? "-" : Model.CurrentLabName)</span>
                 @if (result is not null)
                 {
-                    <span class="chip">Logic: @result.LogicSheetName</span>
                     <span class="chip">Total: @result.GrandTotal.ToString("N0")</span>
                 }
             </div>
         </div>
 
-        <form method="get" asp-action="Index" asp-controller="LisSummary" class="row g-3 align-items-end">
-            <div class="col-12 col-md-4 col-xl-3">
-                <label class="form-label">Lab <span class="text-danger">*</span></label>
-                <select class="form-select filter-select" name="LabId" required>
-                    @foreach (var lab in Model.LabOptions)
-                    {
-                        if (lab.LabId == Model.Filters.LabId)
-                        {
-                            <option value="@lab.LabId" selected>@lab.LabName</option>
-                        }
-                        else
-                        {
-                            <option value="@lab.LabId">@lab.LabName</option>
-                        }
-                    }
-                </select>
-            </div>
-            <div class="col-12 col-md-4 col-xl-3">
+        <form method="get" asp-action="Index" asp-controller="LisSummary" class="lis-filter-row">
+            <input type="hidden" name="LabId" value="@Model.Filters.LabId" />
+
+            <div class="lis-filter-item">
                 <label class="form-label">Collected From</label>
-                <input class="form-control filter-select" type="date" name="CollectedFrom" value="@DateValue(Model.Filters.CollectedFrom)" />
+                <input class="form-control filter-select" type="date" name="CollectedFrom"
+                       value="@DateValue(Model.Filters.CollectedFrom)" />
             </div>
-            <div class="col-12 col-md-4 col-xl-3">
+
+            <div class="lis-filter-item">
                 <label class="form-label">Collected To</label>
-                <input class="form-control filter-select" type="date" name="CollectedTo" value="@DateValue(Model.Filters.CollectedTo)" />
+                <input class="form-control filter-select" type="date" name="CollectedTo"
+                       value="@DateValue(Model.Filters.CollectedTo)" />
             </div>
-            <div class="col-12 col-xl-3 d-flex flex-wrap gap-2">
+
+            <div class="lis-filter-actions">
                 <button type="submit" class="btn btn-primary rounded-pill px-4">
                     <i class="bi bi-funnel me-1"></i>Apply Filters
                 </button>
-                <a class="btn btn-outline-success rounded-pill px-3" href="@Url.Action("ExportToExcel", "LisSummary", new { LabId = Model.Filters.LabId, CollectedFrom = Model.Filters.CollectedFrom?.ToString("yyyy-MM-dd"), CollectedTo = Model.Filters.CollectedTo?.ToString("yyyy-MM-dd") })">
+
+                <a class="btn btn-outline-success rounded-pill px-4"
+                   href="@Url.Action("ExportToExcel", "LisSummary", new { LabId = Model.Filters.LabId, CollectedFrom = Model.Filters.CollectedFrom?.ToString("yyyy-MM-dd"), CollectedTo = Model.Filters.CollectedTo?.ToString("yyyy-MM-dd") })">
                     <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
                 </a>
             </div>
@@ -266,6 +551,25 @@ else if (result is null)
 }
 else
 {
+    <div class="lis-kpi-grid">
+        <div class="lis-kpi-card">
+            <div class="lis-kpi-label">Total Samples</div>
+            <div class="lis-kpi-value">@result.KpiCards.TotalSamples.ToString("N0")</div>
+        </div>
+        <div class="lis-kpi-card">
+            <div class="lis-kpi-label">Billed Count</div>
+            <div class="lis-kpi-value">@result.KpiCards.BilledCount.ToString("N0")</div>
+        </div>
+        <div class="lis-kpi-card">
+            <div class="lis-kpi-label">Unbilled Count</div>
+            <div class="lis-kpi-value">@result.KpiCards.UnbilledCount.ToString("N0")</div>
+        </div>
+        <div class="lis-kpi-card">
+            <div class="lis-kpi-label">Self Pay Count</div>
+            <div class="lis-kpi-value">@result.KpiCards.SelfPayCount.ToString("N0")</div>
+        </div>
+    </div>
+
     <div class="card border-0 shadow-sm table-card">
         <div class="card-body">
             <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
@@ -273,19 +577,14 @@ else
                     <div class="section-title">@result.LogicSheetName Summary</div>
                     <div class="section-subtitle">Format follows the attached Excel logic workbook.</div>
                 </div>
-                <span class="chip">Rows: @result.Rows.Count.ToString("N0")</span>
             </div>
 
             <div class="lis-freeze-scroll" id="lisSummaryFreeze">
-                <table class="table table-sm lis-summary-table lis-freeze-table align-middle mb-0 @logicTemplateCss">
+                <table class="table table-sm lis-summary-table lis-freeze-table align-middle mb-0">
                     <thead>
                         <tr class="year-header">
-                            <th rowspan="2" class="lis-code-col sticky-col-1">@(useUploadedLogicTemplate ? "S.No" : "#")</th>
-                            <th rowspan="2" class="desc-col sticky-col-2">LIS STATUS SUMMARY</th>
-                            @if (useUploadedLogicTemplate)
-                            {
-                                <th rowspan="2" class="logic-col sticky-col-3">Logic</th>
-                            }
+                            <th rowspan="3" class="lis-code-col sticky-col-1">#</th>
+                            <th rowspan="3" class="desc-col sticky-col-2 text-start">LIS STATUS SUMMARY</th>
                             @foreach (var year in result.Years.OrderBy(x => x))
                             {
                                 var yearMonthCount = monthColumns.Count(x => x.Year == year);
@@ -294,12 +593,19 @@ else
                                     <th colspan="@yearMonthCount">@year</th>
                                 }
                             }
-                            <th rowspan="2" class="grand-total-cell">Total</th>
+                            <th rowspan="3" class="grand-total-cell">TOTAL</th>
                         </tr>
-                        <tr>
+                        <tr class="month-header">
                             @foreach (var column in monthColumns)
                             {
-                                <th class="@(column.IsYearTotal ? "year-total-cell" : "")">@column.Label</th>
+                                var label = column.IsYearTotal ? $"{column.Year} TOTAL" : new DateTime(column.Year, int.Parse(column.Key[^2..]), 1).ToString("MMM", CultureInfo.InvariantCulture).ToUpperInvariant();
+                                <th class="@(column.IsYearTotal ? "year-total-head" : "")">@label</th>
+                            }
+                        </tr>
+                        <tr class="sample-header">
+                            @foreach (var column in monthColumns)
+                            {
+                                <th class="@(column.IsYearTotal ? "year-total-head" : "")">SAMPLES</th>
                             }
                         </tr>
                     </thead>
@@ -309,10 +615,6 @@ else
                             <tr class="@RowCss(row.Level)">
                                 <td class="lis-code-col sticky-col-1">@row.Code</td>
                                 <td class="desc-col sticky-col-2">@row.Description</td>
-                                @if (useUploadedLogicTemplate)
-                                {
-                                    <td class="logic-col sticky-col-3">@row.Logic</td>
-                                }
                                 @foreach (var column in monthColumns)
                                 {
                                     if (column.IsYearTotal)
@@ -330,10 +632,6 @@ else
                         <tr class="grand-total-row">
                             <td class="lis-code-col sticky-col-1"></td>
                             <td class="desc-col sticky-col-2">Grand Total</td>
-                            @if (useUploadedLogicTemplate)
-                            {
-                                <td class="logic-col sticky-col-3"></td>
-                            }
                             @foreach (var column in monthColumns)
                             {
                                 if (column.IsYearTotal)

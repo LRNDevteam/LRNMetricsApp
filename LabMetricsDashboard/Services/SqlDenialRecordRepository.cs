@@ -8,7 +8,7 @@ namespace LabMetricsDashboard.Services;
 
 public class SqlDenialRecordRepository : IDenialRecordRepository
 {
-	private static readonly HashSet<int> ClaimLevelInsuranceBalanceLabIds = new([18, 19, 20]);
+	private static readonly HashSet<int> BilledAmountInsuranceBalanceLabIds = new([18, 19, 20]);
 	private static readonly TimeSpan LabsCacheDuration = TimeSpan.FromMinutes(15);
 	private static readonly TimeSpan TaskBoardCacheDuration = TimeSpan.FromMinutes(5);
 	private static readonly TimeSpan CurrentRunCacheDuration = TimeSpan.FromMinutes(5);
@@ -214,71 +214,7 @@ ORDER BY {OrderBy(cols, "DueDate", "TaskID")};";
 			return Array.Empty<DenialBreakdownSourceRecord>();
 		}
 
-		var useSpecialLabLogic = await ShouldUseClaimLevelInsuranceBalanceAsync(connection, labId, cancellationToken);
-		if (useSpecialLabLogic && await TableExistsAsync(connection, "dbo", "ClaimLevelData", cancellationToken))
-		{
-			var claimLevelCols = await GetTableColumnsAsync(connection, "dbo", "ClaimLevelData", cancellationToken);
-
-			var where = BuildSpecialLabBreakdownWhere(cols, claimLevelCols, filters);
-
-			var payerSelect = claimLevelCols.Contains("PayerName")
-				? "LTRIM(RTRIM(ISNULL(cld.[PayerName], '')))"
-				: claimLevelCols.Contains("PayerName_Raw")
-					? "LTRIM(RTRIM(ISNULL(cld.[PayerName_Raw], '')))"
-					: "''";
-
-			var denialCodeSelect = cols.Contains("DenialCodeNormalized")
-				? "LTRIM(RTRIM(ISNULL(dli.[DenialCodeNormalized], '')))"
-				: cols.Contains("DenialCode")
-					? "LTRIM(RTRIM(ISNULL(dli.[DenialCode], '')))"
-					: "''";
-
-			var denialDescriptionSelect = cols.Contains("DenialDescription")
-				? "LTRIM(RTRIM(ISNULL(dli.[DenialDescription], '')))"
-				: "''";
-
-			var sql = $@"
-SELECT
-    TRY_CONVERT(datetime, dli.[DenialDate]) AS [DenialDate],
-    LTRIM(RTRIM(ISNULL(cld.[ClaimID], ''))) AS [VisitNumber],
-    TRY_CONVERT(decimal(18, 4), cld.[InsuranceBalance]) AS [InsuranceBalance],
-    CAST(0 AS decimal(18, 4)) AS [TotalBalance],
-    {payerSelect} AS [PayerName],
-    {payerSelect} AS [PayerNameNormalized],
-    {denialCodeSelect} AS [DenialCodeNormalized],
-    {denialDescriptionSelect} AS [DenialDescription]
-FROM dbo.ClaimLevelData cld
-INNER JOIN dbo.DenialLineItem dli
-    ON dli.[VisitNumber] = cld.[ClaimID]
-WHERE {where};";
-
-			await using var command = new SqlCommand(sql, connection)
-			{
-				CommandType = CommandType.Text,
-				CommandTimeout = 180
-			};
-
-			AddSpecialLabBreakdownParameters(command, filters);
-
-			var items = new List<DenialBreakdownSourceRecord>();
-			await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-			while (await reader.ReadAsync(cancellationToken))
-			{
-				items.Add(new DenialBreakdownSourceRecord
-				{
-					DenialDate = GetNullableDateTime(reader, "DenialDate"),
-					VisitNumber = GetString(reader, "VisitNumber"),
-					InsuranceBalance = GetNullableDecimal(reader, "InsuranceBalance") ?? 0m,
-					TotalBalance = GetNullableDecimal(reader, "TotalBalance") ?? 0m,
-					PayerName = GetString(reader, "PayerName"),
-					PayerNameNormalized = GetString(reader, "PayerNameNormalized"),
-					DenialCodeNormalized = GetString(reader, "DenialCodeNormalized"),
-					DenialDescription = GetString(reader, "DenialDescription")
-				});
-			}
-
-			return items;
-		}
+		var useBilledAmountInsuranceBalance = ShouldUseBilledAmountInsuranceBalance(labId);
 
 		var whereLegacy = BuildLineItemWhere(cols, filters, currentRunId);
 
@@ -286,7 +222,7 @@ WHERE {where};";
 SELECT
     {SelectDate(cols, "DenialDate")},
     {SelectString(cols, "VisitNumber")},
-    {SelectDecimal(cols, "InsuranceBalance", 4)},
+    {SelectInsuranceBalance(cols, useBilledAmountInsuranceBalance, 4)},
     {SelectDecimal(cols, "TotalBalance", 4)},
     {SelectString(cols, "PayerName")},
     {SelectString(cols, "PayerNameNormalized")},
@@ -638,13 +574,10 @@ SELECT MatchedRows = (SELECT COUNT(1) FROM #MatchedRows);";
 		if (!await TableExistsAsync(connection, "dbo", "DenialLineItem", cancellationToken)) return Array.Empty<DenialLineItemRecord>();
 
 		var cols = await GetTableColumnsAsync(connection, "dbo", "DenialLineItem", cancellationToken);
-		var useClaimLevelInsuranceBalance = await ShouldUseClaimLevelInsuranceBalanceAsync(connection, labId, cancellationToken);
-		var claimLevelCols = useClaimLevelInsuranceBalance
-			? await GetTableColumnsAsync(connection, "dbo", "ClaimLevelData", cancellationToken)
-			: new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var useBilledAmountInsuranceBalance = ShouldUseBilledAmountInsuranceBalance(labId);
 		var where = BuildLineItemWhere(cols, filters, currentRunId);
 		var pagingSql = withPaging ? " OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY" : string.Empty;
-		var claimLevelApplySql = BuildClaimLevelInsuranceBalanceApplySql(claimLevelCols);
+		var claimLevelApplySql = string.Empty;
 
 		var sql = $@"
 SELECT
@@ -684,7 +617,7 @@ SELECT
     {SelectDecimal(cols, "InsuranceAdjustment", 4)},
     {SelectDecimal(cols, "PatientPaidAmount", 4)},
     {SelectDecimal(cols, "PatientAdjustment", 4)},
-    {SelectInsuranceBalance(cols, claimLevelCols, useClaimLevelInsuranceBalance, 4)},
+    {SelectInsuranceBalance(cols, useBilledAmountInsuranceBalance, 4)},
     {SelectDecimal(cols, "PatientBalance", 4)},
     {SelectDecimal(cols, "TotalBalance", 4)},
     {SelectDecimal(cols, "MedicareFee", 4)},
@@ -914,23 +847,9 @@ ORDER BY {OrderBy(cols, "DateOfService", "AccessionNo")}{pagingSql};";
 			?? throw new InvalidOperationException($"Active lab '{labId}' was not found in dbo.LRNMetricsLab.");
 	}
 
-	private static async Task<bool> ShouldUseClaimLevelInsuranceBalanceAsync(SqlConnection connection, int labId, CancellationToken cancellationToken)
+	private static bool ShouldUseBilledAmountInsuranceBalance(int labId)
 	{
-		if (!ClaimLevelInsuranceBalanceLabIds.Contains(labId))
-		{
-			return false;
-		}
-
-		const string sql = @"
-SELECT CASE WHEN EXISTS (
-    SELECT 1
-    FROM INFORMATION_SCHEMA.TABLES
-    WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'ClaimLevelData'
-) THEN 1 ELSE 0 END;";
-
-		await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 60 };
-		var result = await command.ExecuteScalarAsync(cancellationToken);
-		return result != null && result != DBNull.Value && Convert.ToInt32(result) == 1;
+		return BilledAmountInsuranceBalanceLabIds.Contains(labId);
 	}
 
 	private static string BuildClaimLevelInsuranceBalanceApplySql(HashSet<string> claimLevelCols)
@@ -960,15 +879,11 @@ OUTER APPLY
 ) claimBal";
 	}
 
-	private static string SelectInsuranceBalance(HashSet<string> cols, HashSet<string> claimLevelCols, bool useClaimLevelInsuranceBalance, int scale)
+	private static string SelectInsuranceBalance(HashSet<string> cols, bool useBilledAmountInsuranceBalance, int scale)
 	{
-		if (useClaimLevelInsuranceBalance && claimLevelCols.Contains("ClaimID") && claimLevelCols.Contains("InsuranceBalance"))
+		if (useBilledAmountInsuranceBalance && cols.Contains("BilledAmount"))
 		{
-			var fallback = cols.Contains("InsuranceBalance")
-				? $"TRY_CONVERT(decimal(18, {scale}), [InsuranceBalance])"
-				: $"CAST(0 AS decimal(18, {scale}))";
-
-			return $"COALESCE(claimBal.OverrideInsuranceBalance, {fallback}) AS [InsuranceBalance]";
+			return $"TRY_CONVERT(decimal(18, {scale}), [BilledAmount]) AS [InsuranceBalance]";
 		}
 
 		return SelectDecimal(cols, "InsuranceBalance", scale);

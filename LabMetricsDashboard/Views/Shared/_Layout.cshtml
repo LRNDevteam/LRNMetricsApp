@@ -14,375 +14,509 @@
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/LabMetricsDashboard.styles.css" asp-append-version="true" />
     <style>
-            /* ── Global overrides ───────────────────────────────────────── */
-            body {
-                background-color: #f0f4f8;
-            }
+        /* ── Global overrides ───────────────────────────────────────── */
+        body {
+        background-color: #f0f4f8;
+        }
 
-            /* ── Navbar ─────────────────────────────────────────────────── */
-            .lmd-navbar {
-                background: linear-gradient(135deg, #0d1b2a 0%, #1b3a5c 60%, #1565c0 100%);
-                box-shadow: 0 2px 12px rgba(0, 0, 0, .35);
-            }
+        /* ── Navbar ─────────────────────────────────────────────────── */
+        .lmd-navbar {
+        background: linear-gradient(135deg, #0d1b2a 0%, #1b3a5c 60%, #1565c0 100%);
+        box-shadow: 0 2px 12px rgba(0, 0, 0, .35);
+        }
 
-                .lmd-navbar .navbar-brand {
-                    font-weight: 700;
-                    font-size: 1.25rem;
-                    letter-spacing: .03em;
-                    color: #fff !important;
-                }
+        .lmd-navbar .navbar-brand {
+        font-weight: 700;
+        font-size: 1.25rem;
+        letter-spacing: .03em;
+        color: #fff !important;
+        }
 
-                    .lmd-navbar .navbar-brand span {
-                        color: #64b5f6;
-                    }
+        .lmd-navbar .navbar-brand span {
+        color: #64b5f6;
+        }
 
-                .lmd-navbar .nav-link,
-                .lmd-navbar .dropdown-toggle {
-                    color: rgba(255, 255, 255, .85) !important;
-                    font-size: .9rem;
-                }
+        .lmd-navbar .nav-link,
+        .lmd-navbar .dropdown-toggle {
+        color: rgba(255, 255, 255, .85) !important;
+        font-size: .9rem;
+        }
 
-                    .lmd-navbar .nav-link:hover,
-                    .lmd-navbar .dropdown-toggle:hover {
-                        color: #fff !important;
-                    }
+        .lmd-navbar .nav-link:hover,
+        .lmd-navbar .dropdown-toggle:hover {
+        color: #fff !important;
+        }
 
-                    .lmd-navbar .nav-link.active {
-                        color: #64b5f6 !important;
-                        font-weight: 600;
-                    }
+        .lmd-navbar .nav-link.active {
+        color: #64b5f6 !important;
+        font-weight: 600;
+        }
 
-                .lmd-navbar .dropdown-menu {
-                    background: #1b3a5c;
-                    border: 1px solid rgba(255, 255, 255, .12);
-                }
+        .lmd-navbar .dropdown-menu {
+        background: #1b3a5c;
+        border: 1px solid rgba(255, 255, 255, .12);
+        }
 
-                .lmd-navbar .dropdown-item {
-                    color: rgba(255, 255, 255, .85);
-                    font-size: .88rem;
-                }
+        .lmd-navbar .dropdown-item {
+        color: rgba(255, 255, 255, .85);
+        font-size: .88rem;
+        }
 
-                    .lmd-navbar .dropdown-item:hover {
-                        background: rgba(255, 255, 255, .1);
-                        color: #fff;
-                    }
+        .lmd-navbar .dropdown-item:hover {
+        background: rgba(255, 255, 255, .1);
+        color: #fff;
+        }
 
-                    .lmd-navbar .dropdown-item.disabled {
-                        color: rgba(255, 255, 255, .3) !important;
-                        background: transparent;
-                        cursor: not-allowed;
-                        pointer-events: none;
-                    }
+        .lmd-navbar .dropdown-item.disabled {
+        color: rgba(255, 255, 255, .3) !important;
+        background: transparent;
+        cursor: not-allowed;
+        pointer-events: none;
+        }
 
-                .lmd-navbar .navbar-toggler {
-                    border-color: rgba(255, 255, 255, .3);
-                }
+        .lmd-navbar .navbar-toggler {
+        border-color: rgba(255, 255, 255, .3);
+        }
 
-            /* ── Navbar right-side toolbar (lab selector + future user) ── */
-            .nav-toolbar {
-                display: flex;
-                align-items: center;
-                gap: .6rem;
-                flex-shrink: 0;
-            }
+        /* ── Navbar right-side toolbar (lab selector + future user) ── */
+        .nav-toolbar {
+        display: flex;
+        align-items: center;
+        gap: .6rem;
+        flex-shrink: 0;
+        }
 
-            .nav-lab-wrap {
-                position: relative;
-            }
+        .nav-lab-wrap {
+        position: relative;
+        }
 
-            .nav-lab-btn {
-                display: flex;
-                align-items: center;
-                gap: .4rem;
-                background: rgba(255, 255, 255, .12);
-                border: 1px solid rgba(255, 255, 255, .25);
-                border-radius: 20px;
-                padding: .25em .85em .25em .7em;
-                color: #fff;
-                font-weight: 700;
-                font-size: .8rem;
-                letter-spacing: .02em;
-                cursor: pointer;
-                white-space: nowrap;
-                transition: background .15s;
-            }
+        .nav-lab-btn {
+        display: flex;
+        align-items: center;
+        gap: .4rem;
+        background: rgba(255, 255, 255, .12);
+        border: 1px solid rgba(255, 255, 255, .25);
+        border-radius: 20px;
+        padding: .25em .85em .25em .7em;
+        color: #fff;
+        font-weight: 700;
+        font-size: .8rem;
+        letter-spacing: .02em;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: background .15s;
+        }
 
-                .nav-lab-btn:hover {
-                    background: rgba(255, 255, 255, .22);
-                }
+        .nav-lab-btn:hover {
+        background: rgba(255, 255, 255, .22);
+        }
 
-                .nav-lab-btn .bi-chevron-down {
-                    font-size: .55rem;
-                    opacity: .7;
-                    transition: transform .15s;
-                }
+        .nav-lab-btn .bi-chevron-down {
+        font-size: .55rem;
+        opacity: .7;
+        transition: transform .15s;
+        }
 
-            .nav-lab-panel {
-                display: none;
-                position: absolute;
-                right: 0;
-                top: calc(100% + 6px);
-                background: #fff;
-                border: 1px solid #ced4da;
-                border-radius: .5rem;
-                box-shadow: 0 8px 24px rgba(0, 0, 0, .22);
-                min-width: 260px;
-                max-height: 340px;
-                overflow: hidden;
-                z-index: 1100;
-                flex-direction: column;
-            }
+        .nav-lab-panel {
+        display: none;
+        position: absolute;
+        right: 0;
+        top: calc(100% + 6px);
+        background: #fff;
+        border: 1px solid #ced4da;
+        border-radius: .5rem;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, .22);
+        min-width: 260px;
+        max-height: 340px;
+        overflow: hidden;
+        z-index: 1100;
+        flex-direction: column;
+        }
 
-                .nav-lab-panel.open {
-                    display: flex;
-                }
+        .nav-lab-panel.open {
+        display: flex;
+        }
 
-            .nav-lab-search {
-                border: none;
-                border-bottom: 1px solid #e9ecef;
-                padding: .5rem .75rem;
-                font-size: .8rem;
-                outline: none;
-                width: 100%;
-            }
+        .nav-lab-search {
+        border: none;
+        border-bottom: 1px solid #e9ecef;
+        padding: .5rem .75rem;
+        font-size: .8rem;
+        outline: none;
+        width: 100%;
+        }
 
-            .nav-lab-list {
-                overflow-y: auto;
-                max-height: 270px;
-                padding: .25rem 0;
-            }
+        .nav-lab-list {
+        overflow-y: auto;
+        max-height: 270px;
+        padding: .25rem 0;
+        }
 
-                .nav-lab-list a {
-                    display: block;
-                    padding: .4rem .8rem;
-                    font-size: .8rem;
-                    color: #1e293b;
-                    text-decoration: none;
-                    white-space: nowrap;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                }
+        .nav-lab-list a {
+        display: block;
+        padding: .4rem .8rem;
+        font-size: .8rem;
+        color: #1e293b;
+        text-decoration: none;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        }
 
-                    .nav-lab-list a:hover,
-                    .nav-lab-list a.active {
-                        background: #eef4ff;
-                    }
+        .nav-lab-list a:hover,
+        .nav-lab-list a.active {
+        background: #eef4ff;
+        }
 
-                    .nav-lab-list a.active {
-                        font-weight: 700;
-                        color: #1565c0;
-                    }
+        .nav-lab-list a.active {
+        font-weight: 700;
+        color: #1565c0;
+        }
 
-                    .nav-lab-list a.nav-lab-hidden {
-                        display: none;
-                    }
+        .nav-lab-list a.nav-lab-hidden {
+        display: none;
+        }
 
-            /* Separator between toolbar items (future: lab | user) */
-            .nav-toolbar-sep {
-                width: 1px;
-                height: 20px;
-                background: rgba(255, 255, 255, .2);
-            }
+        /* Separator between toolbar items (future: lab | user) */
+        .nav-toolbar-sep {
+        width: 1px;
+        height: 20px;
+        background: rgba(255, 255, 255, .2);
+        }
 
-            /* ── Breadcrumb bar ──────────────────────────────────────────── */
-            .lmd-breadcrumb {
-                background: linear-gradient(90deg, #1565c0 0%, #0097a7 100%);
-                padding: .45rem 1.5rem;
-                font-size: .82rem;
-            }
+        /* ── Breadcrumb bar ──────────────────────────────────────────── */
+        .lmd-breadcrumb {
+        background: linear-gradient(90deg, #1565c0 0%, #0097a7 100%);
+        padding: .45rem 1.5rem;
+        font-size: .82rem;
+        }
 
-                .lmd-breadcrumb a {
-                    color: rgba(255, 255, 255, .78);
-                    text-decoration: none;
-                }
+        .lmd-breadcrumb a {
+        color: rgba(255, 255, 255, .78);
+        text-decoration: none;
+        }
 
-                    .lmd-breadcrumb a:hover {
-                        color: #fff;
-                        text-decoration: underline;
-                    }
+        .lmd-breadcrumb a:hover {
+        color: #fff;
+        text-decoration: underline;
+        }
 
-                .lmd-breadcrumb .bc-sep {
-                    color: rgba(255, 255, 255, .45);
-                    margin: 0 .4rem;
-                }
+        .lmd-breadcrumb .bc-sep {
+        color: rgba(255, 255, 255, .45);
+        margin: 0 .4rem;
+        }
 
-                .lmd-breadcrumb .bc-current {
-                    color: #fff;
-                    font-weight: 600;
-                }
+        .lmd-breadcrumb .bc-current {
+        color: #fff;
+        font-weight: 600;
+        }
 
-            /* ── Full-screen loading overlay ─────────────────────────────── */
-            #lmd-loader {
-                display: none;
-                position: fixed;
-                inset: 0;
-                background: rgba(13, 27, 42, .72);
-                backdrop-filter: blur(3px);
-                z-index: 9999;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                gap: 1.2rem;
-            }
+        /* ── Full-screen loading overlay ─────────────────────────────── */
+        #lmd-loader {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(13, 27, 42, .72);
+        backdrop-filter: blur(3px);
+        z-index: 9999;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1.2rem;
+        }
 
-                #lmd-loader.active {
-                    display: flex;
-                }
+        #lmd-loader.active {
+        display: flex;
+        }
 
-            .lmd-spinner {
-                width: 56px;
-                height: 56px;
-                border: 5px solid rgba(255, 255, 255, .2);
-                border-top-color: #64b5f6;
-                border-radius: 50%;
-                animation: lmd-spin .75s linear infinite;
-            }
+        .lmd-spinner {
+        width: 56px;
+        height: 56px;
+        border: 5px solid rgba(255, 255, 255, .2);
+        border-top-color: #64b5f6;
+        border-radius: 50%;
+        animation: lmd-spin .75s linear infinite;
+        }
 
-            @@keyframes lmd-spin {
-                to {
-                    transform: rotate(360deg);
-                }
-            }
+        @@keyframes lmd-spin {
+        to {
+        transform: rotate(360deg);
+        }
+        }
 
-            .lmd-loader-text {
-                color: #fff;
-                font-size: 1rem;
-                font-weight: 600;
-                letter-spacing: .04em;
-            }
+        .lmd-loader-text {
+        color: #fff;
+        font-size: 1rem;
+        font-weight: 600;
+        letter-spacing: .04em;
+        }
 
-            /* ── Footer ──────────────────────────────────────────────────── */
-            footer {
-                background: #e8edf3;
-                border-top: 1px solid #cdd5e0 !important;
-            }
+        /* ── Footer ──────────────────────────────────────────────────── */
+        footer {
+        background: #e8edf3;
+        border-top: 1px solid #cdd5e0 !important;
+        }
 
-            .navbar .nav-link i,
-            .navbar .dropdown-item i {
-                font-size: 1.05rem; /* slightly bigger */
-                margin-right: 6px;
-                vertical-align: middle;
-            }
+        .navbar .nav-link i,
+        .navbar .dropdown-item i {
+        font-size: 1.05rem; /* slightly bigger */
+        margin-right: 6px;
+        vertical-align: middle;
+        }
 
-            .navbar .nav-link {
-                display: flex;
-                align-items: center;
-                gap: 4px;
-                white-space: nowrap;
-            }
+        .navbar .nav-link {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        white-space: nowrap;
+        }
 
-            /* Keep navbar items on a single row; collapse to hamburger when too narrow. */
-            .lmd-navbar .navbar-nav { flex-wrap: nowrap; }
-            .lmd-navbar .dropdown-toggle { white-space: nowrap; }
+        /* Keep navbar items on a single row; collapse to hamburger when too narrow. */
+        .lmd-navbar .navbar-nav {
+        flex-wrap: nowrap;
+        }
 
-            /* ── Two-row top header: brand bar + menu bar ───────────────── */
-            .lmd-brandbar {
-                background: linear-gradient(135deg, #0d1b2a 0%, #1b3a5c 60%, #1565c0 100%);
-                box-shadow: 0 1px 0 rgba(255,255,255,.05);
-                padding: .55rem 1.25rem;
-                display: flex; align-items: center; gap: 1rem;
-            }
-            .lmd-brandbar .brand-link {
-                display: inline-flex; align-items: center; gap: .55rem;
-                color: #fff; text-decoration: none;
-            }
-            .lmd-brandbar .brand-link img { height: 36px; width: auto; object-fit: contain; }
-            .lmd-brandbar .brand-spacer { flex: 1 1 auto; }
+        .lmd-navbar .dropdown-toggle {
+        white-space: nowrap;
+        }
 
-            .lmd-menubar {
-                background: #102b46;                /* darker shade so menu sits visually below brand bar */
-                border-top: 1px solid rgba(255,255,255,.06);
-                box-shadow: 0 2px 12px rgba(0,0,0,.25);
-            }
-            .lmd-menubar .navbar { padding-top: .25rem; padding-bottom: .25rem; }
-            .lmd-menubar .nav-link, .lmd-menubar .dropdown-toggle {
-                color: rgba(255,255,255,.85) !important;
-                font-size: .9rem; padding-top: .55rem; padding-bottom: .55rem;
-            }
-            .lmd-menubar .nav-link:hover, .lmd-menubar .dropdown-toggle:hover { color: #fff !important; }
-            .lmd-menubar .nav-link.active { color: #64b5f6 !important; font-weight: 600; }
-            .lmd-menubar .dropdown-menu {
-                background: #1b3a5c;
-                border: 1px solid rgba(255, 255, 255, .12);
-            }
-            .lmd-menubar .dropdown-item { color: rgba(255, 255, 255, .85); font-size: .88rem; }
-            .lmd-menubar .dropdown-item:hover { background: rgba(255, 255, 255, .1); color: #fff; }
-            .lmd-menubar .dropdown-item.disabled {
-                color: rgba(255, 255, 255, .3) !important;
-                background: transparent; cursor: not-allowed; pointer-events: none;
-            }
-            .lmd-menubar .navbar-toggler { border-color: rgba(255,255,255,.3); }
+        /* ── Two-row top header: brand bar + menu bar ───────────────── */
+        .lmd-brandbar {
+        background: linear-gradient(135deg, #0d1b2a 0%, #1b3a5c 60%, #1565c0 100%);
+        box-shadow: 0 1px 0 rgba(255,255,255,.05);
+        padding: .55rem 1.25rem;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        }
 
-            /* ── User chip + dropdown ────────────────────────────────── */
-            .lmd-userchip {
-                display: inline-flex; align-items: center; gap: .5rem;
-                background: rgba(255,255,255,.1);
-                border: 1px solid rgba(255,255,255,.22);
-                color: #fff;
-                border-radius: 22px;
-                padding: .2rem .85rem .2rem .25rem;
-                font-weight: 600; font-size: .82rem;
-                cursor: pointer;
-                transition: background .15s, border-color .15s;
-            }
-            .lmd-userchip:hover { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.35); color:#fff; }
-            .lmd-userchip:focus { outline:none; box-shadow:0 0 0 3px rgba(100,181,246,.35); }
-            .lmd-userchip::after {
-                content: ""; display: inline-block;
-                width: 0; height: 0; margin-left: .15rem;
-                border-left: 4px solid transparent;
-                border-right: 4px solid transparent;
-                border-top: 5px solid rgba(255,255,255,.85);
-            }
-            .lmd-useravatar {
-                width: 30px; height: 30px; border-radius: 50%;
-                display: grid; place-items: center;
-                background: linear-gradient(135deg, #64b5f6, #1565c0);
-                color: #fff; font-weight: 800; font-size: .72rem;
-                box-shadow: 0 2px 8px rgba(0,0,0,.25);
-                flex: 0 0 auto;
-            }
-            .lmd-usermenu {
-                min-width: 260px; padding: 0; overflow: hidden;
-                border: 1px solid #e4eaf3;
-                border-radius: 14px;
-                box-shadow: 0 18px 50px rgba(13,27,42,.22);
-            }
-            .lmd-usermenu .um-header {
-                padding: 1rem 1rem .85rem;
-                background: linear-gradient(135deg,#0d1b2a 0%,#1565c0 100%);
-                color: #fff; display: flex; align-items: center; gap: .7rem;
-            }
-            .lmd-usermenu .um-header .um-avatar {
-                width: 42px; height: 42px; border-radius: 50%;
-                display: grid; place-items: center;
-                background: rgba(255,255,255,.2);
-                border: 1.5px solid rgba(255,255,255,.4);
-                font-weight: 800; font-size: .9rem;
-            }
-            .lmd-usermenu .um-name { font-weight: 700; font-size: .95rem; line-height: 1.2; }
-            .lmd-usermenu .um-handle { font-size: .76rem; color: rgba(255,255,255,.78); }
-            .lmd-usermenu .um-roles { padding: .5rem 1rem .25rem; display: flex; flex-wrap: wrap; gap: .25rem; }
-            .lmd-usermenu .um-role-pill {
-                font-size: .68rem; font-weight: 700; letter-spacing: .04em;
-                background: #e3f2fd; color: #1565c0;
-                border: 1px solid #bbdefb; border-radius: 20px;
-                padding: .15em .65em; text-transform: uppercase;
-            }
-            .lmd-usermenu .um-role-pill.admin { background:#e8f5e9; color:#2e7d32; border-color:#c8e6c9; }
-            .lmd-usermenu .um-divider { height:1px; background:#eef2f7; margin:.4rem 0; }
-            .lmd-usermenu .um-action {
-                width: 100%; text-align: left;
-                background: none; border: none;
-                padding: .55rem 1rem;
-                font-size: .85rem; color: #243049; font-weight: 600;
-                display: flex; align-items: center; gap: .55rem;
-                transition: background .12s;
-            }
-            .lmd-usermenu .um-action:hover { background:#f0f8ff; color:#1565c0; }
-            .lmd-usermenu .um-action.danger { color:#c62828; }
-            .lmd-usermenu .um-action.danger:hover { background:#fdecea; color:#b71c1c; }
-            .lmd-usermenu form { margin: 0; }
+        .lmd-brandbar .brand-link {
+        display: inline-flex;
+        align-items: center;
+        gap: .55rem;
+        color: #fff;
+        text-decoration: none;
+        }
+
+        .lmd-brandbar .brand-link img {
+        height: 36px;
+        width: auto;
+        object-fit: contain;
+        }
+
+        .lmd-brandbar .brand-spacer {
+        flex: 1 1 auto;
+        }
+
+        .lmd-menubar {
+        background: #102b46; /* darker shade so menu sits visually below brand bar */
+        border-top: 1px solid rgba(255,255,255,.06);
+        box-shadow: 0 2px 12px rgba(0,0,0,.25);
+        }
+
+        .lmd-menubar .navbar {
+        padding-top: .25rem;
+        padding-bottom: .25rem;
+        }
+
+        .lmd-menubar .nav-link, .lmd-menubar .dropdown-toggle {
+        color: rgba(255,255,255,.85) !important;
+        font-size: .9rem;
+        padding-top: .55rem;
+        padding-bottom: .55rem;
+        }
+
+        .lmd-menubar .nav-link:hover, .lmd-menubar .dropdown-toggle:hover {
+        color: #fff !important;
+        }
+
+        .lmd-menubar .nav-link.active {
+        color: #64b5f6 !important;
+        font-weight: 600;
+        }
+
+        .lmd-menubar .dropdown-menu {
+        background: #1b3a5c;
+        border: 1px solid rgba(255, 255, 255, .12);
+        }
+
+        .lmd-menubar .dropdown-item {
+        color: rgba(255, 255, 255, .85);
+        font-size: .88rem;
+        }
+
+        .lmd-menubar .dropdown-item:hover {
+        background: rgba(255, 255, 255, .1);
+        color: #fff;
+        }
+
+        .lmd-menubar .dropdown-item.disabled {
+        color: rgba(255, 255, 255, .3) !important;
+        background: transparent;
+        cursor: not-allowed;
+        pointer-events: none;
+        }
+
+        .lmd-menubar .navbar-toggler {
+        border-color: rgba(255,255,255,.3);
+        }
+
+        /* ── User chip + dropdown ────────────────────────────────── */
+        .lmd-userchip {
+        display: inline-flex;
+        align-items: center;
+        gap: .5rem;
+        background: rgba(255,255,255,.1);
+        border: 1px solid rgba(255,255,255,.22);
+        color: #fff;
+        border-radius: 22px;
+        padding: .2rem .85rem .2rem .25rem;
+        font-weight: 600;
+        font-size: .82rem;
+        cursor: pointer;
+        transition: background .15s, border-color .15s;
+        }
+
+        .lmd-userchip:hover {
+        background: rgba(255,255,255,.18);
+        border-color: rgba(255,255,255,.35);
+        color: #fff;
+        }
+
+        .lmd-userchip:focus {
+        outline: none;
+        box-shadow: 0 0 0 3px rgba(100,181,246,.35);
+        }
+
+        .lmd-userchip::after {
+        content: "";
+        display: inline-block;
+        width: 0;
+        height: 0;
+        margin-left: .15rem;
+        border-left: 4px solid transparent;
+        border-right: 4px solid transparent;
+        border-top: 5px solid rgba(255,255,255,.85);
+        }
+
+        .lmd-useravatar {
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(135deg, #64b5f6, #1565c0);
+        color: #fff;
+        font-weight: 800;
+        font-size: .72rem;
+        box-shadow: 0 2px 8px rgba(0,0,0,.25);
+        flex: 0 0 auto;
+        }
+
+        .lmd-usermenu {
+        min-width: 260px;
+        padding: 0;
+        overflow: hidden;
+        border: 1px solid #e4eaf3;
+        border-radius: 14px;
+        box-shadow: 0 18px 50px rgba(13,27,42,.22);
+        }
+
+        .lmd-usermenu .um-header {
+        padding: 1rem 1rem .85rem;
+        background: linear-gradient(135deg,#0d1b2a 0%,#1565c0 100%);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        gap: .7rem;
+        }
+
+        .lmd-usermenu .um-header .um-avatar {
+        width: 42px;
+        height: 42px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: rgba(255,255,255,.2);
+        border: 1.5px solid rgba(255,255,255,.4);
+        font-weight: 800;
+        font-size: .9rem;
+        }
+
+        .lmd-usermenu .um-name {
+        font-weight: 700;
+        font-size: .95rem;
+        line-height: 1.2;
+        }
+
+        .lmd-usermenu .um-handle {
+        font-size: .76rem;
+        color: rgba(255,255,255,.78);
+        }
+
+        .lmd-usermenu .um-roles {
+        padding: .5rem 1rem .25rem;
+        display: flex;
+        flex-wrap: wrap;
+        gap: .25rem;
+        }
+
+        .lmd-usermenu .um-role-pill {
+        font-size: .68rem;
+        font-weight: 700;
+        letter-spacing: .04em;
+        background: #e3f2fd;
+        color: #1565c0;
+        border: 1px solid #bbdefb;
+        border-radius: 20px;
+        padding: .15em .65em;
+        text-transform: uppercase;
+        }
+
+        .lmd-usermenu .um-role-pill.admin {
+        background: #e8f5e9;
+        color: #2e7d32;
+        border-color: #c8e6c9;
+        }
+
+        .lmd-usermenu .um-divider {
+        height: 1px;
+        background: #eef2f7;
+        margin: .4rem 0;
+        }
+
+        .lmd-usermenu .um-action {
+        width: 100%;
+        text-align: left;
+        background: none;
+        border: none;
+        padding: .55rem 1rem;
+        font-size: .85rem;
+        color: #243049;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: .55rem;
+        transition: background .12s;
+        }
+
+        .lmd-usermenu .um-action:hover {
+        background: #f0f8ff;
+        color: #1565c0;
+        }
+
+        .lmd-usermenu .um-action.danger {
+        color: #c62828;
+        }
+
+        .lmd-usermenu .um-action.danger:hover {
+        background: #fdecea;
+        color: #b71c1c;
+        }
+
+        .lmd-usermenu form {
+        margin: 0;
+        }
     </style>
 </head>
 
@@ -554,7 +688,7 @@
                                 @if (!hideStandardProductionReport)
                                 {
                                     <li>
-                                        <a class="dropdown-item" asp-controller="Dashboard" asp-action="LisSummary">
+                                        <a class="dropdown-item" asp-controller="LisSummary" asp-action="Index">
                                             <i class="bi bi-clipboard2-pulse-fill"></i> LIS Summary
                                         </a>
                                     </li>
@@ -673,7 +807,7 @@
                                         </span>
                                     </li>
                                 }
-                            @*  <li>
+                                @*  <li>
                                     <a class="dropdown-item" asp-controller="CodingSetup" asp-action="Index">
                                         &#9881; Coding Setup
                                     </a>
@@ -715,38 +849,38 @@
 
                         @if (isAdmin)
                         {
-                        <li class="nav-item dropdown">
-                            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-                                <i class="bi bi-shield-lock"></i> Admin
-                            </a>
-                            <ul class="dropdown-menu">
-                                <li>
-                                    <a class="dropdown-item" asp-controller="Admin" asp-action="ListUsers">
-                                        <i class="bi bi-people"></i> Manage Users
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item" asp-controller="Admin" asp-action="AssignUserRole">
-                                        <i class="bi bi-person-badge"></i> Assign User Role
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item" asp-controller="Admin" asp-action="AssignUserLabs">
-                                        <i class="bi bi-building"></i> Assign User Labs
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item" asp-controller="Admin" asp-action="Roles">
-                                        <i class="bi bi-shield-check"></i> Roles
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item" asp-controller="Admin" asp-action="ManageLabs">
-                                        <i class="bi bi-buildings"></i> Manage Labs
-                                    </a>
-                                </li>
-                            </ul>
-                        </li>
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                                    <i class="bi bi-shield-lock"></i> Admin
+                                </a>
+                                <ul class="dropdown-menu">
+                                    <li>
+                                        <a class="dropdown-item" asp-controller="Admin" asp-action="ListUsers">
+                                            <i class="bi bi-people"></i> Manage Users
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a class="dropdown-item" asp-controller="Admin" asp-action="AssignUserRole">
+                                            <i class="bi bi-person-badge"></i> Assign User Role
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a class="dropdown-item" asp-controller="Admin" asp-action="AssignUserLabs">
+                                            <i class="bi bi-building"></i> Assign User Labs
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a class="dropdown-item" asp-controller="Admin" asp-action="Roles">
+                                            <i class="bi bi-shield-check"></i> Roles
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a class="dropdown-item" asp-controller="Admin" asp-action="ManageLabs">
+                                            <i class="bi bi-buildings"></i> Manage Labs
+                                        </a>
+                                    </li>
+                                </ul>
+                            </li>
                         }
 
                     </ul>
@@ -804,7 +938,7 @@
         const form = e.target;
         if (!form.matches('[data-lab-form]')) return;
         const labInput = form.querySelector('[name="lab"]');
-        const labName  = labInput
+        const labName = labInput
         ? (labInput.tagName === 'SELECT'
         ? labInput.options[labInput.selectedIndex]?.text
         : labInput.value)
@@ -838,8 +972,8 @@
         // triggers a browser download, then hides the loader.
         window.lmdExcelDownload = function (url) {
         var loader = document.getElementById('lmd-loader');
-        var text   = document.getElementById('lmd-loader-text');
-        if (text)   text.textContent = 'Generating Excel\u2026';
+        var text = document.getElementById('lmd-loader-text');
+        if (text) text.textContent = 'Generating Excel\u2026';
         if (loader) loader.classList.add('active');
 
         fetch(url, { credentials: 'same-origin' })
@@ -869,10 +1003,10 @@
 
         // ── Navbar lab selector ─────────────────────────────────────
         (function () {
-        var btn    = document.getElementById('navLabBtn');
-        var panel  = document.getElementById('navLabPanel');
+        var btn = document.getElementById('navLabBtn');
+        var panel = document.getElementById('navLabPanel');
         var search = document.getElementById('navLabSearch');
-        var list   = document.getElementById('navLabList');
+        var list = document.getElementById('navLabList');
         if (!btn || !panel) return;
 
         btn.addEventListener('click', function (e) {
