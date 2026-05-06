@@ -536,7 +536,9 @@
             // Restrict the navbar lab selector to labs the signed-in user is assigned to.
             // Admins see every lab. Anonymous (login screen) sees nothing.
             var isAdmin = User?.IsInRole("Admin") ?? false;
-            var isArReviewer = (User?.IsInRole("AR Reviewer") ?? false) || (User?.IsInRole("ARReviewer") ?? false);
+            var isArManager = (User?.IsInRole("AR Manager") ?? false) || (User?.IsInRole("ARManager") ?? false);
+            var isArReviewer = (User?.IsInRole("AR Reviewer") ?? false) || (User?.IsInRole("ARReviewer") ?? false) || (User?.IsInRole("AR Analyser") ?? false) || (User?.IsInRole("ARAnalyser") ?? false) || (User?.IsInRole("AR Analyzer") ?? false) || (User?.IsInRole("ARAnalyzer") ?? false);
+            var isArRestricted = isArManager || isArReviewer;
             var userLabClaims = User?.Claims?
             .Where(c => c.Type == "LabName")
             .Select(c => c.Value)
@@ -654,19 +656,28 @@
                         aria-expanded="false" aria-label="Toggle navigation">
                     <span class="navbar-toggler-icon"></span>
                 </button>
+
                 <div class="navbar-collapse collapse" id="lmdMainMenu">
                     <ul class="navbar-nav gap-2">
-                        @if (isAdmin)
+                        @if (isArRestricted)
                         {
                             <li class="nav-item">
-                                <a class="nav-link" asp-controller="Home" asp-action="Index">
-                                    <i class="bi bi-house-door-fill"></i> Home
+                                <a class="nav-link active" asp-controller="DenialDashboard" asp-action="Index">
+                                    <i class="bi bi-exclamation-triangle-fill"></i> Denial Dashboard
                                 </a>
                             </li>
                         }
-
-                        @if (!isArReviewer)
+                        else
                         {
+                            @if (isAdmin)
+                            {
+                                <li class="nav-item">
+                                    <a class="nav-link" asp-controller="Home" asp-action="Index">
+                                        <i class="bi bi-house-door-fill"></i> Home
+                                    </a>
+                                </li>
+                            }
+
                             <li class="nav-item">
                                 <a class="nav-link" asp-controller="Dashboard" asp-action="Index">
                                     <i class="bi bi-speedometer2"></i> Revenue Dashboard
@@ -690,7 +701,6 @@
                                                 <i class="bi bi-clipboard2-pulse-fill"></i> LIS Summary
                                             </a>
                                         </li>
-
                                         @if (labConfig?.EnableProductionReport ?? true)
                                         {
                                             <li>
@@ -735,7 +745,7 @@
                                         </li>
                                     }
 
-                                    <li><hr class="dropdown-divider"></li>
+                                    <li><hr class="dropdown-divider" /></li>
                                     <li>
                                         <a class="dropdown-item" asp-controller="Dashboard" asp-action="ClaimLevel">
                                             <i class="bi bi-file-text"></i> Claim Level Details
@@ -748,16 +758,13 @@
                                     </li>
                                 </ul>
                             </li>
-                        }
 
-                        <li class="nav-item">
-                            <a class="nav-link" asp-controller="DenialDashboard" asp-action="Index">
-                                <i class="bi bi-exclamation-triangle-fill"></i> Denial Dashboard
-                            </a>
-                        </li>
+                            <li class="nav-item">
+                                <a class="nav-link" asp-controller="DenialDashboard" asp-action="Index">
+                                    <i class="bi bi-exclamation-triangle-fill"></i> Denial Dashboard
+                                </a>
+                            </li>
 
-                        @if (!isArReviewer)
-                        {
                             <li class="nav-item dropdown">
                                 <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
                                     <i class="bi bi-graph-up-arrow"></i> Analytics
@@ -797,7 +804,7 @@
                                         </li>
                                     }
 
-                                    <li><hr class="dropdown-divider"></li>
+                                    <li><hr class="dropdown-divider" /></li>
 
                                     @if (labConfig?.EnableCoding ?? true)
                                     {
@@ -851,42 +858,22 @@
                                     }
                                 </ul>
                             </li>
-                        }
 
-                        @if (isAdmin)
-                        {
-                            <li class="nav-item dropdown">
-                                <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-                                    <i class="bi bi-shield-lock"></i> Admin
-                                </a>
-                                <ul class="dropdown-menu">
-                                    <li>
-                                        <a class="dropdown-item" asp-controller="Admin" asp-action="ListUsers">
-                                            <i class="bi bi-people"></i> Manage Users
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <a class="dropdown-item" asp-controller="Admin" asp-action="AssignUserRole">
-                                            <i class="bi bi-person-badge"></i> Assign User Role
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <a class="dropdown-item" asp-controller="Admin" asp-action="AssignUserLabs">
-                                            <i class="bi bi-building"></i> Assign User Labs
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <a class="dropdown-item" asp-controller="Admin" asp-action="Roles">
-                                            <i class="bi bi-shield-check"></i> Roles
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <a class="dropdown-item" asp-controller="Admin" asp-action="ManageLabs">
-                                            <i class="bi bi-buildings"></i> Manage Labs
-                                        </a>
-                                    </li>
-                                </ul>
-                            </li>
+                            @if (isAdmin)
+                            {
+                                <li class="nav-item dropdown">
+                                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                                        <i class="bi bi-shield-lock"></i> Admin
+                                    </a>
+                                    <ul class="dropdown-menu">
+                                        <li><a class="dropdown-item" asp-controller="Admin" asp-action="ListUsers"><i class="bi bi-people"></i> Manage Users</a></li>
+                                        <li><a class="dropdown-item" asp-controller="Admin" asp-action="AssignUserRole"><i class="bi bi-person-badge"></i> Assign User Role</a></li>
+                                        <li><a class="dropdown-item" asp-controller="Admin" asp-action="AssignUserLabs"><i class="bi bi-building"></i> Assign User Labs</a></li>
+                                        <li><a class="dropdown-item" asp-controller="Admin" asp-action="Roles"><i class="bi bi-shield-check"></i> Roles</a></li>
+                                        <li><a class="dropdown-item" asp-controller="Admin" asp-action="ManageLabs"><i class="bi bi-buildings"></i> Manage Labs</a></li>
+                                    </ul>
+                                </li>
+                            }
                         }
                     </ul>
                 </div>

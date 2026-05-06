@@ -608,15 +608,8 @@ SELECT MatchedRows = (SELECT COUNT(1) FROM #MatchedRows);";
 		return updatedTaskCount;
 	}
 
-	private async Task TryUpdateDenialInsightAssignedToAsync(
-	SqlConnection connection,
-	int labId,
-	string denialCode,
-	string payerName,
-	string reviewerUserName,
-	string? runId,
-	CancellationToken cancellationToken)
-	{ 
+	private async Task TryUpdateDenialInsightAssignedToAsync(SqlConnection connection, int labId, string denialCode, string payerName, string reviewerUserName, string? runId, CancellationToken cancellationToken)
+	{
 		if (!await TableExistsAsync(connection, "dbo", "DenialInsight", cancellationToken)) return;
 
 		var cols = await GetTableColumnsAsync(connection, "dbo", "DenialInsight", cancellationToken);

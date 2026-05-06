@@ -63,9 +63,13 @@ public class DenialDashboardController : Controller
 		var isArManager = HasAnyRole("AR Manager", "ARManager");
 		var isArReviewer = HasAnyRole("AR Reviewer", "ARReviewer", "AR Analyser", "ARAnalyser", "AR Analyzer", "ARAnalyzer");
 		var currentUserName = User.Identity?.Name?.Trim() ?? string.Empty;
-		if (isArReviewer && !isArManager && normalizedFilters.ActiveTab is not ("task-board" or "denial-insight"))
+		if (isArReviewer && !isArManager && normalizedFilters.ActiveTab is not ("task-board" or "line-item"))
 		{
 			normalizedFilters.ActiveTab = "task-board";
+		}
+		else if (isArManager && normalizedFilters.ActiveTab is not ("denial-insight" or "task-board" or "line-item"))
+		{
+			normalizedFilters.ActiveTab = "denial-insight";
 		}
 
 		var allRecords = (await _repository.GetByLabAsync(selectedLabId, cancellationToken))
@@ -99,12 +103,10 @@ public class DenialDashboardController : Controller
 		var pagedInsights = insights.Skip((insightPage - 1) * insightPageSize).Take(insightPageSize).ToList();
 
 		var lineItemPageSize = Math.Clamp(normalizedFilters.LineItemPageSize <= 0 ? 100 : normalizedFilters.LineItemPageSize, 25, 250);
-		var lineItemCount = isArReviewer && !isArManager ? 0 : await _repository.GetLineItemCountByLabAsync(selectedLabId, normalizedFilters, cancellationToken);
+		var lineItemCount = await _repository.GetLineItemCountByLabAsync(selectedLabId, normalizedFilters, cancellationToken);
 		var lineItemTotalPages = Math.Max(1, (int)Math.Ceiling(lineItemCount / (double)lineItemPageSize));
 		var lineItemPage = Math.Clamp(Math.Max(1, normalizedFilters.LineItemPage <= 0 ? 1 : normalizedFilters.LineItemPage), 1, lineItemTotalPages);
-		var pagedLineItems = isArReviewer && !isArManager
-			? new List<DenialLineItemRecord>()
-			: (await _repository.GetLineItemsByLabAsync(selectedLabId, lineItemPage, lineItemPageSize, normalizedFilters, cancellationToken)).ToList();
+		var pagedLineItems = (await _repository.GetLineItemsByLabAsync(selectedLabId, lineItemPage, lineItemPageSize, normalizedFilters, cancellationToken)).ToList();
 
 		var breakdownSource = (await _repository.GetBreakdownSourceByLabAsync(selectedLabId, normalizedFilters, cancellationToken)).ToList();
 		var weeklyBreakdowns = BuildTrendBreakdowns(breakdownSource, monthly: false);

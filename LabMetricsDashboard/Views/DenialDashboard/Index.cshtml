@@ -30,12 +30,7 @@
     }
     ViewData["Title"] = "Denial Dashboard";
     var today = DateTime.Today;
-    var isArReviewer = (User?.IsInRole("AR Reviewer") ?? false) || (User?.IsInRole("ARReviewer") ?? false);
     var activeTab = Model.Filters.ActiveTab;
-    if (isArReviewer && activeTab != "task-board" && activeTab != "line-item")
-    {
-        activeTab = "task-board";
-    }
     var activeFilters = new List<KeyValuePair<string, string?>>
 {
     new("Lab", string.IsNullOrWhiteSpace(Model.CurrentLabName) ? "-" : Model.CurrentLabName),
@@ -456,31 +451,6 @@
         white-space: normal;
     }
 
-    .wide-description-cell {
-        min-width: 320px;
-        max-width: 460px;
-        white-space: normal;
-    }
-
-    .wide-task-cell {
-        min-width: 280px;
-        max-width: 460px;
-        white-space: normal;
-    }
-
-    .status-edit-cell {
-        min-width: 170px;
-    }
-
-    .reviewer-comment-cell {
-        min-width: 300px;
-    }
-
-    .reviewer-comment-cell textarea {
-        min-width: 280px;
-        min-height: 40px;
-    }
-
     .badge-soft-primary {
         background: #e8f1ff;
         color: #1557b0;
@@ -631,6 +601,32 @@
                 <input type="hidden" id="labIdHidden" name="LabId" value="@Model.Filters.LabId" />
 
                 <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label">Lab <span class="text-danger">*</span></label>
+                    <select class="form-select filter-select" id="labSelect" name="lab" required>
+                        @if (Model.LabOptions.Any())
+                        {
+                            @foreach (var option in Model.LabOptions)
+                            {
+                                var isSelected = option.LabId == Model.Filters.LabId
+                                    || option.LabName.Equals(Model.CurrentLabName, StringComparison.OrdinalIgnoreCase);
+
+                                if (isSelected)
+                                {
+                                    <option value="@option.LabName" data-lab-id="@option.LabId" selected>@option.LabName</option>
+                                }
+                                else
+                                {
+                                    <option value="@option.LabName" data-lab-id="@option.LabId">@option.LabName</option>
+                                }
+                            }
+                        }
+                        else
+                        {
+                            <option value="">No labs available</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-12 col-md-6 col-xl-3">
                     <label class="form-label">Task Status</label>
                     <div class="multi-select-filter" data-name="Status" data-placeholder="All statuses" data-options='@Html.Raw(JsonSerializer.Serialize(Model.StatusOptions.Where(x => x != "(All)")))' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.Status, true)))'></div>
                 </div>
@@ -737,22 +733,28 @@
         </div>
     </div>
 </div>
-</div>
 <ul class="nav nav-pills dashboard-tabs mb-4" id="dashboardTabs" role="tablist">
-    @if (!isArReviewer)
+    @if (Model.IsArReviewer && !Model.IsArManager)
+    {
+        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "task-board" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#task-board" type="button"><i class="bi bi-clipboard-data me-2"></i>Task Board</button></li>
+        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "line-item" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#line-item" type="button"><i class="bi bi-list-ul me-2"></i>Line Item</button></li>
+    }
+    else if (Model.IsArManager)
+    {
+        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "denial-insight" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#denial-insight" type="button"><i class="bi bi-lightbulb me-2"></i>Denial Insight</button></li>
+        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "task-board" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#task-board" type="button"><i class="bi bi-clipboard-data me-2"></i>Task Board</button></li>
+        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "line-item" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#line-item" type="button"><i class="bi bi-list-ul me-2"></i>Line Item</button></li>
+    }
+    else
     {
         <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "dashboard" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#dashboard" type="button"><i class="bi bi-bar-chart me-2"></i>Dashboard</button></li>
         <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "weekly-breakdown" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#weekly-breakdown" type="button"><i class="bi bi-calendar-week me-2"></i>Weekly Breakdown</button></li>
         <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "monthly-breakdown" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#monthly-breakdown" type="button"><i class="bi bi-calendar-month me-2"></i>Monthly Breakdown</button></li>
         <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "filter-panel" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#filter-panel" type="button"><i class="bi bi-search me-2"></i>Filter Panel</button></li>
         <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "denial-input" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#denial-input" type="button"><i class="bi bi-table me-2"></i>Denial Input</button></li>
-    }
-    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "task-board" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#task-board" type="button"><i class="bi bi-clipboard-data me-2"></i>Task Board</button></li>
-    @if (!isArReviewer)
-    {
+        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "task-board" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#task-board" type="button"><i class="bi bi-clipboard-data me-2"></i>Task Board</button></li>
         <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "sla-tracker" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#sla-tracker" type="button"><i class="bi bi-alarm me-2"></i>SLA Tracker</button></li>
         <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "denial-insight" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#denial-insight" type="button"><i class="bi bi-lightbulb me-2"></i>Denial Insight</button></li>
-
         <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "line-item" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#line-item" type="button"><i class="bi bi-list-ul me-2"></i>Line Item</button></li>
     }
 </ul>
@@ -1180,9 +1182,7 @@
                     <div class="small text-muted mb-3">Download the task list, update only <strong>Status</strong>, <strong>AssignedTo</strong>, and <strong>DateCompleted</strong> (or Closed Date), then upload the CSV back here.</div>
                 }
 
-                @if (Model.IsArReviewer && !Model.IsArManager)
-                {
-                    @:<form id="reviewerBulkTaskForm" action='@Url.Action("UpdateReviewerTasksOverall", "DenialDashboard")' method="post">
+                <form id="reviewerBulkTaskForm" asp-action="UpdateReviewerTasksOverall" asp-controller="DenialDashboard" method="post">
                     @Html.AntiForgeryToken()
                     <input type="hidden" name="lab" value="@Model.CurrentLabName" />
                     <input type="hidden" name="labId" value="@Model.Filters.LabId" />
@@ -1211,7 +1211,6 @@
                     <input type="hidden" name="InsightPageSize" value="@Model.Filters.InsightPageSize" />
                     <input type="hidden" name="LineItemPage" value="@Model.Filters.LineItemPage" />
                     <input type="hidden" name="LineItemPageSize" value="@Model.Filters.LineItemPageSize" />
-                }
 
                 <div class="table-responsive table-frame">
                     <table class="table table-hover align-middle app-table polished-table line-table zebra-table sortable-table" id="taskBoardTable">
@@ -1291,10 +1290,7 @@
                     </table>
                 </div>
 
-                @if (Model.IsArReviewer && !Model.IsArManager)
-                {
-                    @:</form>
-                }
+                </form>
                 @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "task-board", Page = Model.RecordsPage, TotalPages = Model.RecordsTotalPages, TotalItems = Model.FilteredRecordCount, PageSize = Model.RecordsPageSize, ItemLabel = "rows", BuildUrl = RecordsPageUrl })
             </div>
         </div>
@@ -1403,70 +1399,115 @@
                     </div>
                 </div>
 
-                <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-                    <div>
-                        <div class="mini-panel-title insight-summary-title mb-1">Insight Summary Rows</div>
-                        <div class="section-subtitle">$ Impact (%) is calculated as <code>(InsuranceBalance / TotalBalance) * 100</code>.</div>
-                    </div>
-                    <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search denial insights on this page..." data-target-table="denialInsightTable" /></div>
-                </div>
+                <form asp-action="AssignInsightReviewersOverall" asp-controller="DenialDashboard" method="post" id="denialInsightAssignmentForm">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="labId" value="@Model.Filters.LabId" />
+                    <input type="hidden" name="lab" value="@Model.CurrentLabName" />
+                    <input type="hidden" name="runId" value="@Model.CurrentRunId" />
+                    <input type="hidden" name="ActiveTab" value="denial-insight" />
+                    <input type="hidden" name="InsightPage" value="@Model.InsightPage" />
+                    <input type="hidden" name="InsightPageSize" value="@Model.InsightPageSize" />
 
-                <div class="table-responsive table-frame table-frame-bordered">
-                    <table class="table table-hover align-middle app-table polished-table bordered-grid-table zebra-table sortable-table" id="denialInsightTable">
-                        <thead>
-                            <tr>
-                                <th>Denial Codes</th>
-                                <th>Description</th>
-                                <th class="text-end"># of Denial</th>
-                                <th class="text-end"># of Claims</th>
-                                <th class="text-end">Total Balance</th>
-                                <th>High Impact Insurance</th>
-                                <th class="text-end">Insurance Balance</th>
-                                <th class="text-end">$ Impact (%)</th>
-                                <th>Action Category</th>
-                                <th>Action Code</th>
-                                <th>Action</th>
-                                <th>Task</th>
-                                <th>Feedback</th>
-                                <th>Responsibility</th>
-                                <th>Discussion Date</th>
-                                <th>ETA</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @if (Model.PagedInsights.Any())
+                    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+                        <div>
+                            <div class="mini-panel-title insight-summary-title mb-1">Insight Summary Rows</div>
+                            <div class="section-subtitle">
+                                $ Impact (%) is calculated as <code>(InsuranceBalance / TotalBalance) * 100</code>.
+                                @if (Model.IsArManager)
+                                {
+                                    <span class="ms-2">Select AR Reviewers in multiple rows, then submit once to assign all matching denial tasks.</span>
+                                }
+                            </div>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2 align-items-center">
+                            @if (Model.IsArManager)
                             {
-                                @foreach (var item in Model.PagedInsights)
+                                <button type="submit" class="btn btn-sm btn-primary rounded-pill px-3">
+                                    <i class="bi bi-check2-circle me-1"></i> Submit Reviewer Assignments
+                                </button>
+                            }
+                            <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search denial insights on this page..." data-target-table="denialInsightTable" /></div>
+                        </div>
+                    </div>
+
+                    <div class="table-responsive table-frame table-frame-bordered">
+                        <table class="table table-hover align-middle app-table polished-table bordered-grid-table zebra-table sortable-table" id="denialInsightTable">
+                            <thead>
+                                <tr>
+                                    <th>Denial Codes</th>
+                                    <th>Description</th>
+                                    <th class="text-end"># of Denial</th>
+                                    <th class="text-end"># of Claims</th>
+                                    <th class="text-end">Total Balance</th>
+                                    <th>High Impact Insurance</th>
+                                    <th class="text-end">Insurance Balance</th>
+                                    <th class="text-end">$ Impact (%)</th>
+                                    <th>Action Category</th>
+                                    <th>Action Code</th>
+                                    <th>Action</th>
+                                    <th>Task</th>
+                                    <th>Feedback</th>
+                                    <th>Responsibility</th>
+                                    <th>Responsibility Reviewer</th>
+                                    <th>Discussion Date</th>
+                                    <th>ETA</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (Model.PagedInsights.Any())
+                                {
+                                    @foreach (var item in Model.PagedInsights)
+                                    {
+                                        <tr>
+                                            <td class="fw-semibold">@item.DenialCodes</td>
+                                            <td class="text-wrap narrow-cell">@item.Descriptions</td>
+                                            <td class="text-end">@item.NoOfDenialCount.ToString("N0")</td>
+                                            <td class="text-end">@item.NoOfClaimsCount.ToString("N0")</td>
+                                            <td class="text-end">@Money(item.TotalBalance)</td>
+                                            <td class="text-wrap narrow-cell">@item.HighImpactInsurance</td>
+                                            <td class="text-end">@Money(item.InsuranceBalance)</td>
+                                            <td class="text-end">@item.ImpactPercentageDisplay</td>
+                                            <td class="text-wrap narrow-cell">@item.ActionCategory</td>
+                                            <td>@item.ActionCode</td>
+                                            <td class="text-wrap narrow-cell">@item.Action</td>
+                                            <td class="text-wrap narrow-cell">@item.Task</td>
+                                            <td class="text-wrap narrow-cell">@(string.IsNullOrWhiteSpace(item.Feedback) ? "-" : item.Feedback)</td>
+                                            <td>@(string.IsNullOrWhiteSpace(item.Responsibility) ? "-" : item.Responsibility)</td>
+                                            <td>
+                                                @if (Model.IsArManager)
+                                                {
+                                                    <div class="min-w-260">
+                                                        <input type="hidden" name="denialCodes" value="@item.DenialCodes" />
+                                                        <input type="hidden" name="payerNames" value="@item.HighImpactInsurance" />
+                                                        <select name="reviewerUserNames" class="form-select form-select-sm denial-reviewer-select">
+                                                            <option value="">Select Reviewer</option>
+                                                            @foreach (var reviewer in Model.ReviewerOptions)
+                                                            {
+                                                                <option value="@reviewer.UserName" selected="@(string.Equals(item.ResponsibilityReviewer, reviewer.UserName, StringComparison.OrdinalIgnoreCase))">@reviewer.DisplayName</option>
+                                                            }
+                                                        </select>
+                                                    </div>
+                                                }
+                                                else
+                                                {
+                                                    @(string.IsNullOrWhiteSpace(item.ResponsibilityReviewer) ? "-" : item.ResponsibilityReviewer)
+                                                }
+                                            </td>
+                                            <td>@(item.DiscussionDate?.ToString("dd MMM yyyy") ?? "-")</td>
+                                            <td>@(string.IsNullOrWhiteSpace(item.ETA) ? "-" : item.ETA)</td>
+                                        </tr>
+                                    }
+                                }
+                                else
                                 {
                                     <tr>
-                                        <td class="fw-semibold">@item.DenialCodes</td>
-                                        <td class="text-wrap narrow-cell">@item.Descriptions</td>
-                                        <td class="text-end">@item.NoOfDenialCount.ToString("N0")</td>
-                                        <td class="text-end">@item.NoOfClaimsCount.ToString("N0")</td>
-                                        <td class="text-end">@Money(item.TotalBalance)</td>
-                                        <td class="text-wrap narrow-cell">@item.HighImpactInsurance</td>
-                                        <td class="text-end">@Money(item.InsuranceBalance)</td>
-                                        <td class="text-end">@item.ImpactPercentageDisplay</td>
-                                        <td class="text-wrap narrow-cell">@item.ActionCategory</td>
-                                        <td>@item.ActionCode</td>
-                                        <td class="text-wrap narrow-cell">@item.Action</td>
-                                        <td class="text-wrap narrow-cell">@item.Task</td>
-                                        <td class="text-wrap narrow-cell">@(string.IsNullOrWhiteSpace(item.Feedback) ? "-" : item.Feedback)</td>
-                                        <td>@(string.IsNullOrWhiteSpace(item.Responsibility) ? "-" : item.Responsibility)</td>
-                                        <td>@(item.DiscussionDate?.ToString("dd MMM yyyy") ?? "-")</td>
-                                        <td>@(string.IsNullOrWhiteSpace(item.ETA) ? "-" : item.ETA)</td>
+                                        <td colspan="17" class="text-center text-muted py-4">No denial insight rows were found for the selected lab.</td>
                                     </tr>
                                 }
-                            }
-                            else
-                            {
-                                <tr>
-                                    <td colspan="16" class="text-center text-muted py-4">No denial insight rows were found for the selected lab.</td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
+                            </tbody>
+                        </table>
+                    </div>
+                </form>
                 @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "denial-insight", Page = Model.InsightPage, TotalPages = Model.InsightTotalPages, TotalItems = Model.InsightCount, PageSize = Model.InsightPageSize, ItemLabel = "insight rows", BuildUrl = (page, _) => InsightPageUrl(page) })
             </div>
         </div>
