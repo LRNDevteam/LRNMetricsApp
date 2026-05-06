@@ -106,8 +106,8 @@ public class AccountController : Controller
         }
 
         var isAdmin = roleNames.Any(r => string.Equals(r, "Admin", StringComparison.OrdinalIgnoreCase));
-        var isArManager = roleNames.Any(r => string.Equals(r, "AR Manager", StringComparison.OrdinalIgnoreCase));
-        var isArReviewer = roleNames.Any(r => string.Equals(r, "AR Reviewer", StringComparison.OrdinalIgnoreCase) || string.Equals(r, "AR Analyser", StringComparison.OrdinalIgnoreCase) || string.Equals(r, "AR Analyzer", StringComparison.OrdinalIgnoreCase));
+        var isArManager = roleNames.Any(r => IsRole(r, "AR Manager") || IsRole(r, "ARManager"));
+        var isArReviewer = roleNames.Any(r => IsRole(r, "AR Reviewer") || IsRole(r, "ARReviewer") || IsRole(r, "AR Analyser") || IsRole(r, "ARAnalyser") || IsRole(r, "AR Analyzer") || IsRole(r, "ARAnalyzer"));
 
         // Build claims
         var claims = new List<Claim>
@@ -201,6 +201,12 @@ public class AccountController : Controller
 
     [HttpGet]
     public IActionResult AccessDenied() => View();
+
+    private static bool IsRole(string? actual, string expected)
+        => string.Equals(NormalizeRoleToken(actual), NormalizeRoleToken(expected), StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeRoleToken(string? value)
+        => new string((value ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
 }
 
 public sealed class LoginViewModel

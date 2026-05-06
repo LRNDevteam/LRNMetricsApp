@@ -30,7 +30,12 @@
     }
     ViewData["Title"] = "Denial Dashboard";
     var today = DateTime.Today;
+    var isArReviewer = (User?.IsInRole("AR Reviewer") ?? false) || (User?.IsInRole("ARReviewer") ?? false);
     var activeTab = Model.Filters.ActiveTab;
+    if (isArReviewer && activeTab != "task-board" && activeTab != "line-item")
+    {
+        activeTab = "task-board";
+    }
     var activeFilters = new List<KeyValuePair<string, string?>>
 {
     new("Lab", string.IsNullOrWhiteSpace(Model.CurrentLabName) ? "-" : Model.CurrentLabName),
@@ -451,6 +456,31 @@
         white-space: normal;
     }
 
+    .wide-description-cell {
+        min-width: 320px;
+        max-width: 460px;
+        white-space: normal;
+    }
+
+    .wide-task-cell {
+        min-width: 280px;
+        max-width: 460px;
+        white-space: normal;
+    }
+
+    .status-edit-cell {
+        min-width: 170px;
+    }
+
+    .reviewer-comment-cell {
+        min-width: 300px;
+    }
+
+    .reviewer-comment-cell textarea {
+        min-width: 280px;
+        min-height: 40px;
+    }
+
     .badge-soft-primary {
         background: #e8f1ff;
         color: #1557b0;
@@ -601,32 +631,6 @@
                 <input type="hidden" id="labIdHidden" name="LabId" value="@Model.Filters.LabId" />
 
                 <div class="col-12 col-md-6 col-xl-3">
-                    <label class="form-label">Lab <span class="text-danger">*</span></label>
-                    <select class="form-select filter-select" id="labSelect" name="lab" required>
-                        @if (Model.LabOptions.Any())
-                        {
-                            @foreach (var option in Model.LabOptions)
-                            {
-                                var isSelected = option.LabId == Model.Filters.LabId
-                                    || option.LabName.Equals(Model.CurrentLabName, StringComparison.OrdinalIgnoreCase);
-
-                                if (isSelected)
-                                {
-                                    <option value="@option.LabName" data-lab-id="@option.LabId" selected>@option.LabName</option>
-                                }
-                                else
-                                {
-                                    <option value="@option.LabName" data-lab-id="@option.LabId">@option.LabName</option>
-                                }
-                            }
-                        }
-                        else
-                        {
-                            <option value="">No labs available</option>
-                        }
-                    </select>
-                </div>
-                <div class="col-12 col-md-6 col-xl-3">
                     <label class="form-label">Task Status</label>
                     <div class="multi-select-filter" data-name="Status" data-placeholder="All statuses" data-options='@Html.Raw(JsonSerializer.Serialize(Model.StatusOptions.Where(x => x != "(All)")))' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.Status, true)))'></div>
                 </div>
@@ -735,15 +739,22 @@
 </div>
 </div>
 <ul class="nav nav-pills dashboard-tabs mb-4" id="dashboardTabs" role="tablist">
-    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "dashboard" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#dashboard" type="button"><i class="bi bi-bar-chart me-2"></i>Dashboard</button></li>
-    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "weekly-breakdown" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#weekly-breakdown" type="button"><i class="bi bi-calendar-week me-2"></i>Weekly Breakdown</button></li>
-    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "monthly-breakdown" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#monthly-breakdown" type="button"><i class="bi bi-calendar-month me-2"></i>Monthly Breakdown</button></li>
-    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "filter-panel" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#filter-panel" type="button"><i class="bi bi-search me-2"></i>Filter Panel</button></li>
-    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "denial-input" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#denial-input" type="button"><i class="bi bi-table me-2"></i>Denial Input</button></li>
+    @if (!isArReviewer)
+    {
+        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "dashboard" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#dashboard" type="button"><i class="bi bi-bar-chart me-2"></i>Dashboard</button></li>
+        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "weekly-breakdown" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#weekly-breakdown" type="button"><i class="bi bi-calendar-week me-2"></i>Weekly Breakdown</button></li>
+        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "monthly-breakdown" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#monthly-breakdown" type="button"><i class="bi bi-calendar-month me-2"></i>Monthly Breakdown</button></li>
+        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "filter-panel" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#filter-panel" type="button"><i class="bi bi-search me-2"></i>Filter Panel</button></li>
+        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "denial-input" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#denial-input" type="button"><i class="bi bi-table me-2"></i>Denial Input</button></li>
+    }
     <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "task-board" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#task-board" type="button"><i class="bi bi-clipboard-data me-2"></i>Task Board</button></li>
-    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "sla-tracker" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#sla-tracker" type="button"><i class="bi bi-alarm me-2"></i>SLA Tracker</button></li>
-    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "denial-insight" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#denial-insight" type="button"><i class="bi bi-lightbulb me-2"></i>Denial Insight</button></li>
-    <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "line-item" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#line-item" type="button"><i class="bi bi-list-ul me-2"></i>Line Item</button></li>
+    @if (!isArReviewer)
+    {
+        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "sla-tracker" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#sla-tracker" type="button"><i class="bi bi-alarm me-2"></i>SLA Tracker</button></li>
+        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "denial-insight" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#denial-insight" type="button"><i class="bi bi-lightbulb me-2"></i>Denial Insight</button></li>
+
+        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "line-item" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#line-item" type="button"><i class="bi bi-list-ul me-2"></i>Line Item</button></li>
+    }
 </ul>
 <div class="tab-content">
     <div class="tab-pane fade @(activeTab == "filter-panel" ? "show active" : "")" id="filter-panel" role="tabpanel">
@@ -1155,7 +1166,53 @@
                         <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search this page..." data-target-table="taskBoardTable" /></div>
                     </div>
                 </div>
-                <div class="small text-muted mb-3">Download the task list, update only <strong>Status</strong>, <strong>AssignedTo</strong>, and <strong>DateCompleted</strong> (or Closed Date), then upload the CSV back here.</div>
+                @if (Model.IsArReviewer && !Model.IsArManager)
+                {
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                        <div class="small text-muted">Update multiple assigned tasks, then click <strong>Save All Task Updates</strong>.</div>
+                        <button type="submit" form="reviewerBulkTaskForm" class="btn btn-success rounded-pill px-4">
+                            <i class="bi bi-check2-circle me-1"></i>Save All Task Updates
+                        </button>
+                    </div>
+                }
+                else
+                {
+                    <div class="small text-muted mb-3">Download the task list, update only <strong>Status</strong>, <strong>AssignedTo</strong>, and <strong>DateCompleted</strong> (or Closed Date), then upload the CSV back here.</div>
+                }
+
+                @if (Model.IsArReviewer && !Model.IsArManager)
+                {
+                    @:<form id="reviewerBulkTaskForm" action='@Url.Action("UpdateReviewerTasksOverall", "DenialDashboard")' method="post">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="lab" value="@Model.CurrentLabName" />
+                    <input type="hidden" name="labId" value="@Model.Filters.LabId" />
+                    <input type="hidden" name="runId" value="@Model.CurrentRunId" />
+                    <input type="hidden" name="Status" value="@Model.Filters.Status" />
+                    <input type="hidden" name="Priority" value="@Model.Filters.Priority" />
+                    <input type="hidden" name="ActionCategory" value="@Model.Filters.ActionCategory" />
+                    <input type="hidden" name="Deadline" value="@Model.Filters.Deadline" />
+                    <input type="hidden" name="Classification" value="@Model.Filters.Classification" />
+                    <input type="hidden" name="SalesRepname" value="@Model.Filters.SalesRepname" />
+                    <input type="hidden" name="ClinicName" value="@Model.Filters.ClinicName" />
+                    <input type="hidden" name="ReferringProvider" value="@Model.Filters.ReferringProvider" />
+                    <input type="hidden" name="PayerName" value="@Model.Filters.PayerName" />
+                    <input type="hidden" name="PayerType" value="@Model.Filters.PayerType" />
+                    <input type="hidden" name="PanelName" value="@Model.Filters.PanelName" />
+                    <input type="hidden" name="FirstBilledDateFrom" value="@(Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"))" />
+                    <input type="hidden" name="FirstBilledDateTo" value="@(Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"))" />
+                    <input type="hidden" name="DateOfServiceFrom" value="@(Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"))" />
+                    <input type="hidden" name="DateOfServiceTo" value="@(Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"))" />
+                    <input type="hidden" name="DenialDateFrom" value="@(Model.Filters.DenialDateFrom?.ToString("yyyy-MM-dd"))" />
+                    <input type="hidden" name="DenialDateTo" value="@(Model.Filters.DenialDateTo?.ToString("yyyy-MM-dd"))" />
+                    <input type="hidden" name="ActiveTab" value="task-board" />
+                    <input type="hidden" name="Page" value="@Model.Filters.Page" />
+                    <input type="hidden" name="PageSize" value="@Model.Filters.PageSize" />
+                    <input type="hidden" name="InsightPage" value="@Model.Filters.InsightPage" />
+                    <input type="hidden" name="InsightPageSize" value="@Model.Filters.InsightPageSize" />
+                    <input type="hidden" name="LineItemPage" value="@Model.Filters.LineItemPage" />
+                    <input type="hidden" name="LineItemPageSize" value="@Model.Filters.LineItemPageSize" />
+                }
+
                 <div class="table-responsive table-frame">
                     <table class="table table-hover align-middle app-table polished-table line-table zebra-table sortable-table" id="taskBoardTable">
                         <thead>
@@ -1164,14 +1221,18 @@
                                 <th>Claim ID</th>
                                 <th>CPT Code</th>
                                 <th>Denial Code</th>
-                                <th>Denial Description</th>
+                                <th class="wide-description-cell">Denial Description</th>
                                 <th>Patient / Acct #</th>
-                                <th>Task</th>
+                                <th class="wide-task-cell">Task</th>
                                 <th>Action Category</th>
                                 <th>Assigned To</th>
                                 <th>Priority</th>
                                 <th>Insurance Balance</th>
-                                <th>Status</th>
+                                <th class="status-edit-cell">Status</th>
+                                @if (Model.IsArReviewer && !Model.IsArManager)
+                                {
+                                    <th class="reviewer-comment-cell">Reviewer Comments</th>
+                                }
                                 <th>Due Date</th>
                                 <th>Days Remaining</th>
                                 <th>SLA Status</th>
@@ -1181,18 +1242,46 @@
                             @foreach (var item in Model.PagedRecords)
                             {
                                 <tr>
-                                    <td class="fw-semibold">@item.TaskId</td>
+                                    <td class="fw-semibold">
+                                        @item.TaskId
+                                        @if (Model.IsArReviewer && !Model.IsArManager)
+                                        {
+                                            <input type="hidden" name="taskIds" value="@item.TaskId" />
+                                        }
+                                    </td>
                                     <td>@item.ClaimId</td>
                                     <td>@item.CptCode</td>
                                     <td>@item.DenialCode</td>
-                                    <td>@item.DenialDescription</td>
+                                    <td class="text-wrap wide-description-cell">@item.DenialDescription</td>
                                     <td>@item.PatientAccountNumber</td>
-                                    <td class="text-wrap narrow-cell">@item.Task</td>
+                                    <td class="text-wrap wide-task-cell">@item.Task</td>
                                     <td class="text-wrap narrow-cell">@item.EffectiveActionCategory</td>
                                     <td>@(string.IsNullOrWhiteSpace(item.AssignedTo) ? "-" : item.AssignedTo)</td>
                                     <td><span class="badge @PriorityBadge(item.Priority)">@item.Priority</span></td>
                                     <td class="text-end">@Money(item.InsuranceBalance)</td>
-                                    <td><span class="badge @StatusBadge(item.Status)">@item.Status</span></td>
+                                    <td class="status-edit-cell">
+                                        @if (Model.IsArReviewer && !Model.IsArManager)
+                                        {
+                                            var statusValue = string.IsNullOrWhiteSpace(item.Status) ? "Open" : item.Status;
+                                            <select name="statuses" class="form-select form-select-sm">
+                                                <option value="Open" selected="@(statusValue.Equals("Open", StringComparison.OrdinalIgnoreCase))">Open</option>
+                                                <option value="In Progress" selected="@(statusValue.Equals("In Progress", StringComparison.OrdinalIgnoreCase))">In Progress</option>
+                                                <option value="On Hold" selected="@(statusValue.Equals("On Hold", StringComparison.OrdinalIgnoreCase))">On Hold</option>
+                                                <option value="Closed" selected="@(statusValue.Equals("Closed", StringComparison.OrdinalIgnoreCase))">Closed</option>
+                                                <option value="Completed" selected="@(statusValue.Equals("Completed", StringComparison.OrdinalIgnoreCase))">Completed</option>
+                                            </select>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge @StatusBadge(item.Status)">@item.Status</span>
+                                        }
+                                    </td>
+                                    @if (Model.IsArReviewer && !Model.IsArManager)
+                                    {
+                                        <td class="reviewer-comment-cell">
+                                            <textarea name="reviewerComments" class="form-control form-control-sm" placeholder="Add comments">@(string.IsNullOrWhiteSpace(item.Feedback) ? string.Empty : item.Feedback)</textarea>
+                                        </td>
+                                    }
                                     <td>@item.DueDate.ToString("dd MMM yyyy")</td>
                                     <td>@(item.DaysRemaining?.ToString() ?? "Done")</td>
                                     <td><span class="badge @SlaBadge(item.SlaStatus)">@item.SlaStatus</span></td>
@@ -1201,6 +1290,11 @@
                         </tbody>
                     </table>
                 </div>
+
+                @if (Model.IsArReviewer && !Model.IsArManager)
+                {
+                    @:</form>
+                }
                 @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "task-board", Page = Model.RecordsPage, TotalPages = Model.RecordsTotalPages, TotalItems = Model.FilteredRecordCount, PageSize = Model.RecordsPageSize, ItemLabel = "rows", BuildUrl = RecordsPageUrl })
             </div>
         </div>

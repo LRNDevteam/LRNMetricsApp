@@ -599,9 +599,55 @@ SELECT MatchedRows = (SELECT COUNT(1) FROM #MatchedRows);";
 		command.Parameters.AddWithValue("@Reviewer", reviewerUserName.Trim());
 		command.Parameters.AddWithValue("@UpdatedBy", reviewerUserName.Trim());
 		var updated = await command.ExecuteScalarAsync(cancellationToken);
+		var updatedTaskCount = updated == null || updated == DBNull.Value ? 0 : Convert.ToInt32(updated);
+
+		await TryUpdateDenialInsightAssignedToAsync(connection, labId, denialCode.Trim(), payerName.Trim(), reviewerUserName.Trim(), currentRunId, cancellationToken);
+
 		_cache.Remove(TaskBoardCacheKey(labId));
 		if (!string.IsNullOrWhiteSpace(currentRunId)) _cache.Remove($"{TaskBoardCacheKey(labId)}:{currentRunId}");
-		return updated == null || updated == DBNull.Value ? 0 : Convert.ToInt32(updated);
+		return updatedTaskCount;
+	}
+
+	private async Task TryUpdateDenialInsightAssignedToAsync(
+	SqlConnection connection,
+	int labId,
+	string denialCode,
+	string payerName,
+	string reviewerUserName,
+	string? runId,
+	CancellationToken cancellationToken)
+	{ 
+		if (!await TableExistsAsync(connection, "dbo", "DenialInsight", cancellationToken)) return;
+
+		var cols = await GetTableColumnsAsync(connection, "dbo", "DenialInsight", cancellationToken);
+		if (!cols.Contains("DenialCodes")) return;
+
+		var setParts = new List<string>();
+		if (cols.Contains("AssignedTo")) setParts.Add("[AssignedTo] = @Reviewer");
+		if (cols.Contains("ResponsibilityReviewer")) setParts.Add("[ResponsibilityReviewer] = @Reviewer");
+		if (setParts.Count == 0) return;
+
+		var whereParts = new List<string>
+		{
+			"LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [DenialCodes]), ''))) = @DenialCode"
+		};
+
+		if (cols.Contains("HighImpactInsurance"))
+		{
+			whereParts.Add("LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [HighImpactInsurance]), ''))) = @PayerName");
+		}
+
+		if (cols.Contains("LabId")) whereParts.Add("([LabId] = @LabId OR [LabId] IS NULL)");
+		if (!string.IsNullOrWhiteSpace(runId) && cols.Contains("RunId")) whereParts.Add("(ISNULL([RunId], '') = '' OR [RunId] = @RunId)");
+
+		var sql = $"UPDATE dbo.DenialInsight SET {string.Join(", ", setParts)} WHERE {string.Join(" AND ", whereParts)};";
+		await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 120 };
+		command.Parameters.AddWithValue("@Reviewer", reviewerUserName);
+		command.Parameters.AddWithValue("@DenialCode", denialCode);
+		command.Parameters.AddWithValue("@PayerName", payerName);
+		command.Parameters.AddWithValue("@LabId", labId);
+		command.Parameters.AddWithValue("@RunId", runId ?? string.Empty);
+		await command.ExecuteNonQueryAsync(cancellationToken);
 	}
 
 	public async Task<int> UpdateReviewerTaskAsync(int labId, string taskId, string status, string comments, string reviewerUserName, string? runId, CancellationToken cancellationToken = default)
@@ -1274,6 +1320,17 @@ WHERE TABLE_SCHEMA = @Schema AND TABLE_NAME = @Table;";
 					.FirstOrDefault();
 
 				var highImpactInsuranceBalance = topPayer?.Balance ?? 0m;
+				var assignedUsers = group
+					.Select(x => x.AssignedTo?.Trim())
+					.Where(x => !string.IsNullOrWhiteSpace(x))
+					.Distinct(StringComparer.OrdinalIgnoreCase)
+					.ToList();
+				var assignedTo = assignedUsers.Count switch
+				{
+					0 => string.Empty,
+					1 => assignedUsers[0] ?? string.Empty,
+					_ => string.Join(", ", assignedUsers)
+				};
 
 				return new DenialInsightRecord
 				{
@@ -1291,6 +1348,7 @@ WHERE TABLE_SCHEMA = @Schema AND TABLE_NAME = @Table;";
 					Task = group.Key.Task,
 					Feedback = group.Select(x => x.Feedback).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)) ?? string.Empty,
 					Responsibility = group.Select(x => x.Responsibility).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)) ?? string.Empty,
+					AssignedTo = assignedTo,
 					DiscussionDate = group.Select(x => x.DiscussionDate).FirstOrDefault(x => x.HasValue),
 					ETA = group.Select(x => x.ETA).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)) ?? string.Empty,
 					LabId = group.Select(x => x.LabId).FirstOrDefault(),

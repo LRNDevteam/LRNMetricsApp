@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Claims;
 using CsvHelper;
 using CsvHelper.Configuration;
 using LabMetricsDashboard.Models;
@@ -22,10 +23,12 @@ public class DenialDashboardController : Controller
 	];
 
 	private readonly IDenialRecordRepository _repository;
+	private readonly IUserManagementRepository _userRepository;
 
-	public DenialDashboardController(IDenialRecordRepository repository)
+	public DenialDashboardController(IDenialRecordRepository repository, IUserManagementRepository userRepository)
 	{
 		_repository = repository;
+		_userRepository = userRepository;
 	}
 
 	[HttpGet]
@@ -57,10 +60,25 @@ public class DenialDashboardController : Controller
 		var normalizedFilters = Normalize(filters, selectedLabId);
 		var currentRunId = await _repository.GetCurrentRunIdAsync(selectedLabId, cancellationToken) ?? string.Empty;
 
+		var isArManager = HasAnyRole("AR Manager", "ARManager");
+		var isArReviewer = HasAnyRole("AR Reviewer", "ARReviewer", "AR Analyser", "ARAnalyser", "AR Analyzer", "ARAnalyzer");
+		var currentUserName = User.Identity?.Name?.Trim() ?? string.Empty;
+		if (isArReviewer && !isArManager && normalizedFilters.ActiveTab is not ("task-board" or "denial-insight"))
+		{
+			normalizedFilters.ActiveTab = "task-board";
+		}
+
 		var allRecords = (await _repository.GetByLabAsync(selectedLabId, cancellationToken))
 			.OrderBy(x => x.DueDate)
 			.ThenBy(x => x.TaskId)
 			.ToList();
+
+		if (isArReviewer && !isArManager)
+		{
+			allRecords = allRecords
+				.Where(x => string.Equals(x.AssignedTo?.Trim(), currentUserName, StringComparison.OrdinalIgnoreCase))
+				.ToList();
+		}
 
 		var filteredRecords = ApplyFilters(allRecords, normalizedFilters)
 			.OrderBy(x => x.DueDate)
@@ -81,16 +99,22 @@ public class DenialDashboardController : Controller
 		var pagedInsights = insights.Skip((insightPage - 1) * insightPageSize).Take(insightPageSize).ToList();
 
 		var lineItemPageSize = Math.Clamp(normalizedFilters.LineItemPageSize <= 0 ? 100 : normalizedFilters.LineItemPageSize, 25, 250);
-		var lineItemCount = await _repository.GetLineItemCountByLabAsync(selectedLabId, normalizedFilters, cancellationToken);
+		var lineItemCount = isArReviewer && !isArManager ? 0 : await _repository.GetLineItemCountByLabAsync(selectedLabId, normalizedFilters, cancellationToken);
 		var lineItemTotalPages = Math.Max(1, (int)Math.Ceiling(lineItemCount / (double)lineItemPageSize));
 		var lineItemPage = Math.Clamp(Math.Max(1, normalizedFilters.LineItemPage <= 0 ? 1 : normalizedFilters.LineItemPage), 1, lineItemTotalPages);
-		var pagedLineItems = (await _repository.GetLineItemsByLabAsync(selectedLabId, lineItemPage, lineItemPageSize, normalizedFilters, cancellationToken)).ToList();
+		var pagedLineItems = isArReviewer && !isArManager
+			? new List<DenialLineItemRecord>()
+			: (await _repository.GetLineItemsByLabAsync(selectedLabId, lineItemPage, lineItemPageSize, normalizedFilters, cancellationToken)).ToList();
 
 		var breakdownSource = (await _repository.GetBreakdownSourceByLabAsync(selectedLabId, normalizedFilters, cancellationToken)).ToList();
 		var weeklyBreakdowns = BuildTrendBreakdowns(breakdownSource, monthly: false);
 		var monthlyBreakdowns = BuildTrendBreakdowns(breakdownSource, monthly: true);
 		var weeklyPivot = BuildBreakdownPivot(breakdownSource, monthly: false);
 		var monthlyPivot = BuildBreakdownPivot(breakdownSource, monthly: true);
+
+		var reviewerOptions = isArManager
+			? (await _userRepository.GetUsersByRoleNamesAsync(new[] { "AR Reviewer", "ARReviewer", "AR Analyser", "ARAnalyser", "AR Analyzer", "ARAnalyzer" })).ToList()
+			: new List<ReviewerOption>();
 
 		var viewModel = new DashboardPageViewModel
 		{
@@ -132,7 +156,10 @@ public class DenialDashboardController : Controller
 			WeeklyBreakdowns = weeklyBreakdowns,
 			MonthlyBreakdowns = monthlyBreakdowns,
 			WeeklyPivot = weeklyPivot,
-			MonthlyPivot = monthlyPivot
+			MonthlyPivot = monthlyPivot,
+			IsArManager = isArManager,
+			IsArReviewer = isArReviewer,
+			ReviewerOptions = reviewerOptions
 		};
 
 		viewModel.Filters.Page = recordsPage;
@@ -223,6 +250,144 @@ public class DenialDashboardController : Controller
 		return File(stream.ToArray(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileNameFiltered);
 	}
 
+	[HttpPost]
+	[ValidateAntiForgeryToken]
+	public async Task<IActionResult> AssignInsightReviewersOverall(
+		int labId,
+		string? lab,
+		string? runId,
+		[FromForm] string[] denialCodes,
+		[FromForm] string[] payerNames,
+		[FromForm] string[] reviewerUserNames,
+		[FromForm] DenialDashboardFilters filters,
+		CancellationToken cancellationToken)
+	{
+		filters ??= new DenialDashboardFilters();
+		filters.ActiveTab = "denial-insight";
+
+		if (!HasAnyRole("AR Manager", "ARManager", "Admin"))
+		{
+			TempData["DenialDashboardError"] = "Only AR Manager can assign denial insight rows.";
+			return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
+		}
+
+		if (denialCodes.Length == 0 || payerNames.Length == 0 || reviewerUserNames.Length == 0)
+		{
+			TempData["DenialDashboardError"] = "No denial insight rows were submitted for assignment.";
+			return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
+		}
+
+		var rowCount = Math.Min(denialCodes.Length, Math.Min(payerNames.Length, reviewerUserNames.Length));
+		var totalUpdated = 0;
+		var selectedRows = 0;
+		var assignedUsers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+		for (var i = 0; i < rowCount; i++)
+		{
+			var denialCode = denialCodes[i]?.Trim();
+			var payerName = payerNames[i]?.Trim();
+			var reviewerUserName = reviewerUserNames[i]?.Trim();
+
+			if (string.IsNullOrWhiteSpace(denialCode) || string.IsNullOrWhiteSpace(payerName) || string.IsNullOrWhiteSpace(reviewerUserName))
+			{
+				continue;
+			}
+
+			selectedRows++;
+			assignedUsers.Add(reviewerUserName);
+			totalUpdated += await _repository.AssignReviewerByInsightAsync(labId, denialCode, payerName, reviewerUserName, runId, cancellationToken);
+		}
+
+		if (selectedRows == 0)
+		{
+			TempData["DenialDashboardError"] = "Please select at least one AR Reviewer before submitting.";
+		}
+		else if (totalUpdated > 0)
+		{
+			TempData["DenialDashboardSuccess"] = $"Submitted {selectedRows:N0} insight assignment row(s). Assigned {totalUpdated:N0} denial task(s) to {assignedUsers.Count:N0} reviewer(s).";
+		}
+		else
+		{
+			TempData["DenialDashboardError"] = "Assignments were submitted, but no matching denial tasks were found for the selected denial code and payer rows.";
+		}
+
+		return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
+	}
+
+	[HttpPost]
+	[ValidateAntiForgeryToken]
+	public async Task<IActionResult> UpdateReviewerTask(
+		int labId,
+		string? lab,
+		string taskId,
+		string status,
+		string? reviewerComments,
+		string? runId,
+		[FromForm] DenialDashboardFilters filters,
+		CancellationToken cancellationToken)
+	{
+		filters ??= new DenialDashboardFilters();
+		filters.ActiveTab = "task-board";
+
+		if (!HasAnyRole("AR Reviewer", "ARReviewer", "AR Analyser", "ARAnalyser", "AR Analyzer", "ARAnalyzer", "Admin"))
+		{
+			TempData["DenialDashboardError"] = "Only AR Reviewer can update task status and comments.";
+			return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
+		}
+
+		var reviewerUserName = User.Identity?.Name?.Trim() ?? string.Empty;
+		var updated = await _repository.UpdateReviewerTaskAsync(labId, taskId, status, reviewerComments ?? string.Empty, reviewerUserName, runId, cancellationToken);
+		TempData[updated > 0 ? "DenialDashboardSuccess" : "DenialDashboardError"] =
+			updated > 0 ? "Task updated successfully." : "Task update failed. Please confirm the task is assigned to you.";
+
+		return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
+	}
+
+	[HttpPost]
+	[ValidateAntiForgeryToken]
+	public async Task<IActionResult> UpdateReviewerTasksOverall(
+		int labId,
+		string? lab,
+		string? runId,
+		[FromForm] string[] taskIds,
+		[FromForm] string[] statuses,
+		[FromForm] string[] reviewerComments,
+		[FromForm] DenialDashboardFilters filters,
+		CancellationToken cancellationToken)
+	{
+		filters ??= new DenialDashboardFilters();
+		filters.ActiveTab = "task-board";
+
+		if (!HasAnyRole("AR Reviewer", "ARReviewer", "AR Analyser", "ARAnalyser", "AR Analyzer", "ARAnalyzer", "Admin"))
+		{
+			TempData["DenialDashboardError"] = "Only AR Reviewer can update task status and comments.";
+			return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
+		}
+
+		var reviewerUserName = User.Identity?.Name?.Trim() ?? string.Empty;
+		var rowCount = Math.Min(taskIds?.Length ?? 0, Math.Max(statuses?.Length ?? 0, reviewerComments?.Length ?? 0));
+		var updated = 0;
+		var submitted = 0;
+
+		for (var i = 0; i < rowCount; i++)
+		{
+			var taskId = taskIds[i]?.Trim();
+			if (string.IsNullOrWhiteSpace(taskId)) continue;
+
+			var status = i < statuses.Length ? statuses[i] : string.Empty;
+			var comments = i < reviewerComments.Length ? reviewerComments[i] : string.Empty;
+			submitted++;
+			updated += await _repository.UpdateReviewerTaskAsync(labId, taskId, status, comments ?? string.Empty, reviewerUserName, runId, cancellationToken);
+		}
+
+		TempData[updated > 0 ? "DenialDashboardSuccess" : "DenialDashboardError"] =
+			updated > 0
+				? $"Saved {updated:N0} of {submitted:N0} assigned task update(s)."
+				: "No task updates were saved. Please confirm the tasks are assigned to you.";
+
+		return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
+	}
+
 	[HttpGet]
 	public async Task<IActionResult> DownloadTaskBoardCsv(
 		[FromQuery] DenialDashboardFilters filters,
@@ -246,6 +411,16 @@ public class DenialDashboardController : Controller
 			.OrderBy(x => x.DueDate)
 			.ThenBy(x => x.TaskId)
 			.ToList();
+
+		var isArManager = HasAnyRole("AR Manager", "ARManager");
+		var isArReviewer = HasAnyRole("AR Reviewer", "ARReviewer", "AR Analyser", "ARAnalyser", "AR Analyzer", "ARAnalyzer");
+		var currentUserName = User.Identity?.Name?.Trim() ?? string.Empty;
+		if (isArReviewer && !isArManager)
+		{
+			records = records
+				.Where(x => string.Equals(x.AssignedTo?.Trim(), currentUserName, StringComparison.OrdinalIgnoreCase))
+				.ToList();
+		}
 
 		var rows = records.Select(x => new TaskBoardCsvRow
 		{
@@ -342,6 +517,22 @@ public class DenialDashboardController : Controller
 		TempData[result.Errors.Count > 0 ? "DenialDashboardError" : "DenialDashboardSuccess"] = message;
 		return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
 	}
+
+	private bool HasAnyRole(params string[] roleNames)
+	{
+		var wanted = roleNames
+			.Where(x => !string.IsNullOrWhiteSpace(x))
+			.Select(NormalizeRoleToken)
+			.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+		return User.Claims
+			.Where(c => c.Type == ClaimTypes.Role || c.Type.Equals("role", StringComparison.OrdinalIgnoreCase))
+			.Select(c => NormalizeRoleToken(c.Value))
+			.Any(wanted.Contains);
+	}
+
+	private static string NormalizeRoleToken(string? value)
+		=> new string((value ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
 
 	private static RouteValueDictionary BuildIndexRouteValues(DenialDashboardFilters filters, int? labId, string? labName = null) => new(new Dictionary<string, object?>
 	{
