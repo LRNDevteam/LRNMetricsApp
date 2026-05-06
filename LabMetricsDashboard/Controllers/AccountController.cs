@@ -106,6 +106,8 @@ public class AccountController : Controller
         }
 
         var isAdmin = roleNames.Any(r => string.Equals(r, "Admin", StringComparison.OrdinalIgnoreCase));
+        var isArManager = roleNames.Any(r => string.Equals(r, "AR Manager", StringComparison.OrdinalIgnoreCase));
+        var isArReviewer = roleNames.Any(r => string.Equals(r, "AR Reviewer", StringComparison.OrdinalIgnoreCase) || string.Equals(r, "AR Analyser", StringComparison.OrdinalIgnoreCase) || string.Equals(r, "AR Analyzer", StringComparison.OrdinalIgnoreCase));
 
         // Build claims
         var claims = new List<Claim>
@@ -166,9 +168,7 @@ public class AccountController : Controller
             return RedirectToAction(nameof(Login));
         }
 
-        // 3) Non-admin (1 or many labs) ? Revenue Dashboard.
-        //    Default to the first mapped lab from LabConfig:LabsID and persist it
-        //    via cookie so the navbar lab selector reflects the choice.
+        // 3) Non-admin (1 or many labs). AR users go directly to Denial Database.
         var defaultLabName = mappedLabs[0].Name!;
         Response.Cookies.Append("lmd_selected_lab", defaultLabName, new CookieOptions
         {
@@ -177,6 +177,17 @@ public class AccountController : Controller
             SameSite    = SameSiteMode.Lax,
             IsEssential = true
         });
+
+        if (isArManager)
+        {
+            return RedirectToAction("Index", "DenialDashboard", new { lab = defaultLabName, ActiveTab = "denial-insight" });
+        }
+
+        if (isArReviewer)
+        {
+            return RedirectToAction("Index", "DenialDashboard", new { lab = defaultLabName, ActiveTab = "task-board" });
+        }
+
         return RedirectToAction("Index", "Dashboard", new { lab = defaultLabName });
     }
 

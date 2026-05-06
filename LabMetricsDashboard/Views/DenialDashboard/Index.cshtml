@@ -80,6 +80,7 @@
     };
     string RecordsPageUrl(int page, string? tabOverride = null) => Url.Action("Index", "DenialDashboard", new
     {
+        lab = Model.CurrentLabName,
         LabId = Model.Filters.LabId,
         Status = Model.Filters.Status,
         Priority = Model.Filters.Priority,
@@ -106,8 +107,10 @@
         LineItemPage = Model.Filters.LineItemPage,
         LineItemPageSize = Model.Filters.LineItemPageSize
     }) ?? "#";
+
     string InsightPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
     {
+        lab = Model.CurrentLabName,
         LabId = Model.Filters.LabId,
         Status = Model.Filters.Status,
         Priority = Model.Filters.Priority,
@@ -134,8 +137,10 @@
         LineItemPage = Model.Filters.LineItemPage,
         LineItemPageSize = Model.Filters.LineItemPageSize
     }) ?? "#";
+
     string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
     {
+        lab = Model.CurrentLabName,
         LabId = Model.Filters.LabId,
         Status = Model.Filters.Status,
         Priority = Model.Filters.Priority,
@@ -593,20 +598,25 @@
                 <input type="hidden" name="InsightPageSize" value="@Model.Filters.InsightPageSize" />
                 <input type="hidden" name="LineItemPageSize" value="@Model.Filters.LineItemPageSize" />
 
+                <input type="hidden" id="labIdHidden" name="LabId" value="@Model.Filters.LabId" />
+
                 <div class="col-12 col-md-6 col-xl-3">
                     <label class="form-label">Lab <span class="text-danger">*</span></label>
-                    <select class="form-select filter-select" id="labSelect" name="LabId" required>
+                    <select class="form-select filter-select" id="labSelect" name="lab" required>
                         @if (Model.LabOptions.Any())
                         {
                             @foreach (var option in Model.LabOptions)
                             {
-                                if (option.LabId == Model.Filters.LabId)
+                                var isSelected = option.LabId == Model.Filters.LabId
+                                    || option.LabName.Equals(Model.CurrentLabName, StringComparison.OrdinalIgnoreCase);
+
+                                if (isSelected)
                                 {
-                                    <option value="@option.LabId" selected>@option.LabName</option>
+                                    <option value="@option.LabName" data-lab-id="@option.LabId" selected>@option.LabName</option>
                                 }
                                 else
                                 {
-                                    <option value="@option.LabId">@option.LabName</option>
+                                    <option value="@option.LabName" data-lab-id="@option.LabId">@option.LabName</option>
                                 }
                             }
                         }
@@ -714,7 +724,7 @@
                         <button type="submit" class="btn btn-primary rounded-pill px-4 js-loader-button">
                             <i class="bi bi-funnel me-1"></i> Apply Filters
                         </button>
-                        <a class="btn btn-outline-secondary rounded-pill px-3 js-loader-link" href="@Url.Action("Index", "DenialDashboard", new { LabId = Model.Filters.LabId, ActiveTab = activeTab, Page = 1, InsightPage = 1, LineItemPage = 1, PageSize = Model.Filters.PageSize, InsightPageSize = Model.Filters.InsightPageSize, LineItemPageSize = Model.Filters.LineItemPageSize })">
+                        <a class="btn btn-outline-secondary rounded-pill px-3 js-loader-link" href="@Url.Action("Index", "DenialDashboard", new { lab = Model.CurrentLabName, LabId = Model.Filters.LabId, ActiveTab = activeTab, Page = 1, InsightPage = 1, LineItemPage = 1, PageSize = Model.Filters.PageSize, InsightPageSize = Model.Filters.InsightPageSize, LineItemPageSize = Model.Filters.LineItemPageSize })">
                             <i class="bi bi-arrow-counterclockwise me-1"></i> Reset
                         </a>
                     </div>
@@ -909,7 +919,7 @@
                 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
                     <div>
                         <div class="section-title">Denial Input &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
-                        @* 
+                        @*
             <div class="section-subtitle">This is the raw grid from <code>dbo.DenialTaskBoard</code> for the selected lab.</div>
             *@
                     </div>
@@ -1106,11 +1116,12 @@
                         <div class="section-subtitle">Operational work queue for denial follow-up.</div>
                     </div>
                     <div class="d-flex flex-wrap align-items-center gap-2 ms-auto">
-                        <a class="btn btn-outline-success rounded-pill px-3 js-loader-link" href="@Url.Action("DownloadTaskBoardCsv", "DenialDashboard", new { LabId = Model.Filters.LabId, Status = Model.Filters.Status, Priority = Model.Filters.Priority, ActionCategory = Model.Filters.ActionCategory, Deadline = Model.Filters.Deadline, Classification = Model.Filters.Classification, SalesRepname = Model.Filters.SalesRepname, ClinicName = Model.Filters.ClinicName, ReferringProvider = Model.Filters.ReferringProvider, PayerName = Model.Filters.PayerName, PayerType = Model.Filters.PayerType, PanelName = Model.Filters.PanelName, FirstBilledDateFrom = Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"), FirstBilledDateTo = Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"), DateOfServiceFrom = Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"), DateOfServiceTo = Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"), DenialDateFrom = Model.Filters.DenialDateFrom?.ToString("yyyy-MM-dd"), DenialDateTo = Model.Filters.DenialDateTo?.ToString("yyyy-MM-dd"), ActiveTab = "task-board", Page = Model.Filters.Page, PageSize = Model.Filters.PageSize, InsightPage = Model.Filters.InsightPage, InsightPageSize = Model.Filters.InsightPageSize, LineItemPage = Model.Filters.LineItemPage, LineItemPageSize = Model.Filters.LineItemPageSize })">
+                        <a class="btn btn-outline-success rounded-pill px-3 js-loader-link" href="@Url.Action("DownloadTaskBoardCsv", "DenialDashboard", new { lab = Model.CurrentLabName, LabId = Model.Filters.LabId, Status = Model.Filters.Status, Priority = Model.Filters.Priority, ActionCategory = Model.Filters.ActionCategory, Deadline = Model.Filters.Deadline, Classification = Model.Filters.Classification, SalesRepname = Model.Filters.SalesRepname, ClinicName = Model.Filters.ClinicName, ReferringProvider = Model.Filters.ReferringProvider, PayerName = Model.Filters.PayerName, PayerType = Model.Filters.PayerType, PanelName = Model.Filters.PanelName, FirstBilledDateFrom = Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"), FirstBilledDateTo = Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"), DateOfServiceFrom = Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"), DateOfServiceTo = Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"), DenialDateFrom = Model.Filters.DenialDateFrom?.ToString("yyyy-MM-dd"), DenialDateTo = Model.Filters.DenialDateTo?.ToString("yyyy-MM-dd"), ActiveTab = "task-board", Page = Model.Filters.Page, PageSize = Model.Filters.PageSize, InsightPage = Model.Filters.InsightPage, InsightPageSize = Model.Filters.InsightPageSize, LineItemPage = Model.Filters.LineItemPage, LineItemPageSize = Model.Filters.LineItemPageSize })">
                             <i class="bi bi-download me-1"></i>Download CSV
                         </a>
                         <form asp-action="UploadTaskBoardCsv" asp-controller="DenialDashboard" method="post" enctype="multipart/form-data" class="d-inline-flex align-items-center gap-2 task-upload-form">
                             @Html.AntiForgeryToken()
+                            <input type="hidden" name="lab" value="@Model.CurrentLabName" />
                             <input type="hidden" name="LabId" value="@Model.Filters.LabId" />
                             <input type="hidden" name="Status" value="@Model.Filters.Status" />
                             <input type="hidden" name="Priority" value="@Model.Filters.Priority" />
@@ -1237,16 +1248,19 @@
                                     <td>@item.SlaDays</td>
                                     <td>@item.DueDate.ToString("dd MMM yyyy")</td>
                                     <td>@(item.DaysRemaining?.ToString() ?? "Done")</td>
-                                    <td>@if (string.IsNullOrWhiteSpace(item.EscalationFlag)){
-                                    <span class="text-muted">-</span>
-                                }else
-                                {
+                                    <td>
+                                        @if (string.IsNullOrWhiteSpace(item.EscalationFlag))
+                                        {
+                                            <span class="text-muted">-</span>
+                                        }
+                                        else
+                                        {
 
-                                    <span class="badge @(item.EscalationFlag.Contains("Escalate") ? "badge-soft-danger" : "badge-soft-warning")">@item.EscalationFlag</span>
-                                }
-</td>
-                            </tr>
-                                                        }
+                                            <span class="badge @(item.EscalationFlag.Contains("Escalate") ? "badge-soft-danger" : "badge-soft-warning")">@item.EscalationFlag</span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
                         </tbody>
                     </table>
                 </div>
@@ -1711,7 +1725,7 @@
 
         const autocompleteUrl = '@Url.Action("GetFilterAutocompleteOptions", "DenialDashboard")';
         const autocompleteCachePrefix = 'denial-dashboard:autocomplete:';
-        const labSelect2 = form ? form.querySelector('select[name="LabId"]') : null;
+        const labIdHidden = document.getElementById('labIdHidden');
 
         function uniqueValues(values) {
             const seen = new Set();
@@ -1744,16 +1758,16 @@
             container.innerHTML = '';
             container.classList.add('msf');
             container.innerHTML = `
-                <input type="hidden" name="${name}" class="msf-hidden" />
-                <button type="button" class="form-select filter-select text-start msf-toggle"></button>
-                <div class="msf-menu shadow-sm d-none">
-                    <div class="msf-search-wrap"><input type="text" class="form-control form-control-sm msf-search" placeholder="Search..." autocomplete="off" /></div>
-                    <div class="msf-actions">
-                        <button type="button" class="btn btn-link btn-sm p-0 msf-select-all">Select all</button>
-                        <button type="button" class="btn btn-link btn-sm p-0 msf-clear">Clear</button>
-                    </div>
-                    <div class="msf-options"></div>
-                </div>`;
+                    <input type="hidden" name="${name}" class="msf-hidden" />
+                    <button type="button" class="form-select filter-select text-start msf-toggle"></button>
+                    <div class="msf-menu shadow-sm d-none">
+                        <div class="msf-search-wrap"><input type="text" class="form-control form-control-sm msf-search" placeholder="Search..." autocomplete="off" /></div>
+                        <div class="msf-actions">
+                            <button type="button" class="btn btn-link btn-sm p-0 msf-select-all">Select all</button>
+                            <button type="button" class="btn btn-link btn-sm p-0 msf-clear">Clear</button>
+                        </div>
+                        <div class="msf-options"></div>
+                    </div>`;
 
             const hiddenInput = container.querySelector('.msf-hidden');
             const toggle = container.querySelector('.msf-toggle');
@@ -1848,8 +1862,17 @@
         });
 
         function getAutocompleteLabId() {
-            return labSelect2 ? (labSelect2.value || '').trim() : '';
+            return labIdHidden ? (labIdHidden.value || '').trim() : '';
         }
+
+        function syncSelectedLabId() {
+            if (!labSelect || !labIdHidden) return;
+            const selectedOption = labSelect.options[labSelect.selectedIndex];
+            const nextLabId = selectedOption ? (selectedOption.getAttribute('data-lab-id') || '') : '';
+            labIdHidden.value = nextLabId;
+        }
+
+        syncSelectedLabId();
 
         function applyAutocompletePayload(payload) {
             if (!payload) return;
@@ -1921,6 +1944,7 @@
             }
 
             labSelect.addEventListener('change', function () {
+                syncSelectedLabId();
                 loadAutocompleteIfVisible(true);
             });
         }

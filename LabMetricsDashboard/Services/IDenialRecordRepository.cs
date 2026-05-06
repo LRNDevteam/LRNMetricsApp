@@ -18,4 +18,7 @@ public interface IDenialRecordRepository
     Task<string?> GetCurrentRunIdAsync(int labId, CancellationToken cancellationToken = default);
     Task<string?> GetLatestExportFilePathForLabAsync(int labId, CancellationToken cancellationToken = default);
     Task<TaskBoardUploadResult> UpdateTaskBoardAsync(int labId, IReadOnlyList<TaskBoardCsvUpdate> updates, CancellationToken cancellationToken = default);
+    Task<int> AssignReviewerByInsightAsync(int labId, string denialCode, string payerName, string reviewerUserName, string? runId, CancellationToken cancellationToken = default);
+    Task<int> UpdateReviewerTaskAsync(int labId, string taskId, string status, string comments, string reviewerUserName, string? runId, CancellationToken cancellationToken = default);
 }
+

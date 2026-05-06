@@ -538,13 +538,13 @@
             // Admins see every lab. Anonymous (login screen) sees nothing.
             var isAdmin = User?.IsInRole("Admin") ?? false;
             var userLabClaims = User?.Claims?
-                .Where(c => c.Type == "LabName")
-                .Select(c => c.Value)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            .Where(c => c.Type == "LabName")
+            .Select(c => c.Value)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             var availableLabs = isAdmin
-                ? allLabKeys
-                : allLabKeys.Where(l => userLabClaims.Contains(l)).ToList();
+            ? allLabKeys
+            : allLabKeys.Where(l => userLabClaims.Contains(l)).ToList();
 
             // For the navbar lab selector: use ViewData first, then fall back to cookie
             var activeLab = selectedLab;
@@ -552,7 +552,7 @@
             {
                 Context.Request.Cookies.TryGetValue("lmd_selected_lab", out var cookieLab);
                 if (!string.IsNullOrWhiteSpace(cookieLab)
-                    && availableLabs.Contains(cookieLab, StringComparer.OrdinalIgnoreCase))
+                && availableLabs.Contains(cookieLab, StringComparer.OrdinalIgnoreCase))
                 {
                     activeLab = cookieLab;
                 }
@@ -576,7 +576,7 @@
             </a>
             <div class="brand-spacer"></div>
             <div class="nav-toolbar">
-                @if (!string.IsNullOrEmpty(activeLab) && !string.IsNullOrEmpty(selectedLab) && availableLabs.Count > 0)
+                @if (!string.IsNullOrEmpty(activeLab) && availableLabs.Count > 0)
                 {
                     <span class="nav-lab-wrap" id="navLabWrap">
                         <span class="nav-lab-btn" id="navLabBtn" tabindex="0" title="Switch lab">
@@ -602,10 +602,10 @@
                     var fullName = User.Claims.FirstOrDefault(c => c.Type == "FullName")?.Value;
                     if (string.IsNullOrWhiteSpace(fullName)) fullName = User.Identity!.Name;
                     var initials = string.IsNullOrWhiteSpace(fullName) ? "U"
-                        : string.Concat(fullName.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                            .Take(2).Select(p => char.ToUpperInvariant(p[0])));
+                    : string.Concat(fullName.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                    .Take(2).Select(p => char.ToUpperInvariant(p[0])));
                     var userRoles = User.Claims.Where(c => c.Type == System.Security.Claims.ClaimTypes.Role)
-                                              .Select(c => c.Value).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    .Select(c => c.Value).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
                     <div class="nav-toolbar-sep"></div>
                     <div class="dropdown">

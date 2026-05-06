@@ -7,184 +7,236 @@ namespace LabMetricsDashboard.Controllers;
 
 public class LisSummaryController : Controller
 {
-    private const string PreferredInitialLabName = "PCR Labs of America";
+	private const string PreferredInitialLabName = "PCRLabsofAmerica";
 
-    private readonly ILisSummaryRepository _lisSummaryRepository;
-    private readonly IDenialRecordRepository _labRepository;
-    private readonly IConfiguration _configuration;
+	private readonly ILisSummaryRepository _lisSummaryRepository;
+	private readonly IDenialRecordRepository _labRepository;
+	private readonly LabSettings _labSettings;
+	private readonly ILogger<LisSummaryController> _logger;
 
-    public LisSummaryController(
-        ILisSummaryRepository lisSummaryRepository,
-        IDenialRecordRepository labRepository,
-        IConfiguration configuration)
-    {
-        _lisSummaryRepository = lisSummaryRepository;
-        _labRepository = labRepository;
-        _configuration = configuration;
-    }
+	public LisSummaryController(
+		ILisSummaryRepository lisSummaryRepository,
+		IDenialRecordRepository labRepository,
+		LabSettings labSettings,
+		ILogger<LisSummaryController> logger)
+	{
+		_lisSummaryRepository = lisSummaryRepository;
+		_labRepository = labRepository;
+		_labSettings = labSettings;
+		_logger = logger;
+	}
 
-    [HttpGet]
-    public async Task<IActionResult> Index([FromQuery] LisSummaryFilters filters, [FromQuery] string? lab, CancellationToken cancellationToken)
-    {
-        filters ??= new LisSummaryFilters();
+	[HttpGet]
+	public async Task<IActionResult> Index(
+		[FromQuery] LisSummaryFilters filters,
+		[FromQuery] string? lab,
+		CancellationToken cancellationToken)
+	{
+		filters ??= new LisSummaryFilters();
 
-        var labs = (await _labRepository.GetLabsAsync(cancellationToken))
-            .OrderBy(x => x.LabName)
-            .ThenBy(x => x.LabId)
-            .ToList();
+		var availableLabs = GetAvailableLisLabs();
+		var selectedLabName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
-        if (labs.Count == 0)
-        {
-            return View(new LisSummaryPageViewModel
-            {
-                Filters = filters,
-                LabOptions = new List<LabOption>(),
-                CurrentLabName = string.Empty,
-                ErrorMessage = "No active labs were found."
-            });
-        }
+		if (availableLabs.Count == 0 || string.IsNullOrWhiteSpace(selectedLabName))
+		{
+			return View(new LisSummaryPageViewModel
+			{
+				Filters = filters,
+				LabOptions = [],
+				CurrentLabName = string.Empty,
+				ErrorMessage = "No LIS Summary enabled labs were found."
+			});
+		}
 
-        var selectedLab = ResolveSelectedLab(labs, filters.LabId, lab);
-        filters.LabId = selectedLab.LabId;
+		var labOptions = await GetLabOptionsAsync(availableLabs, cancellationToken);
+		var selectedLabOption = ResolveSelectedLabOption(labOptions, selectedLabName, filters.LabId);
+		filters.LabId = selectedLabOption?.LabId;
 
-        try
-        {
-            var connectionString = ResolveConnectionString(selectedLab);
-            var result = await _lisSummaryRepository.GetLisSummaryAsync(
-                connectionString,
-                selectedLab.LabName,
-                selectedLab.LabId,
-                filters.CollectedFrom,
-                filters.CollectedTo,
-                cancellationToken);
+		if (!_labSettings.Labs.TryGetValue(selectedLabName, out var config))
+		{
+			return View(new LisSummaryPageViewModel
+			{
+				Filters = filters,
+				LabOptions = labOptions,
+				CurrentLabName = selectedLabName,
+				ErrorMessage = $"Configuration not found for {selectedLabName}."
+			});
+		}
 
-            return View(new LisSummaryPageViewModel
-            {
-                Filters = filters,
-                LabOptions = labs,
-                CurrentLabName = selectedLab.LabName,
-                Result = result
-            });
-        }
-        catch (Exception ex)
-        {
-            return View(new LisSummaryPageViewModel
-            {
-                Filters = filters,
-                LabOptions = labs,
-                CurrentLabName = selectedLab.LabName,
-                ErrorMessage = $"Failed to load LIS Summary: {ex.Message}"
-            });
-        }
-    }
+		if (!config.LineClaimEnable || string.IsNullOrWhiteSpace(config.DbConnectionString))
+		{
+			return View(new LisSummaryPageViewModel
+			{
+				Filters = filters,
+				LabOptions = labOptions,
+				CurrentLabName = selectedLabName,
+				ErrorMessage = $"LIS Summary is currently not available for {selectedLabName}."
+			});
+		}
 
-    [HttpGet]
-    public async Task<IActionResult> ExportToExcel([FromQuery] LisSummaryFilters filters, [FromQuery] string? lab, CancellationToken cancellationToken)
-    {
-        filters ??= new LisSummaryFilters();
+		try
+		{
+			var result = await _lisSummaryRepository.GetLisSummaryAsync(
+				config.DbConnectionString,
+				selectedLabOption?.LabName ?? selectedLabName,
+				selectedLabOption?.LabId ?? 0,
+				filters.CollectedFrom,
+				filters.CollectedTo,
+				cancellationToken);
 
-        var labs = (await _labRepository.GetLabsAsync(cancellationToken))
-            .OrderBy(x => x.LabName)
-            .ThenBy(x => x.LabId)
-            .ToList();
+			ViewData["SelectedLab"] = selectedLabName;
+			ViewData["PageLabel"] = "LIS Summary";
 
-        if (labs.Count == 0)
-        {
-            TempData["LisSummaryError"] = "No active labs were found for LIS Summary export.";
-            return RedirectToAction(nameof(Index));
-        }
+			return View(new LisSummaryPageViewModel
+			{
+				Filters = filters,
+				LabOptions = labOptions,
+				CurrentLabName = selectedLabOption?.LabName ?? selectedLabName,
+				Result = result
+			});
+		}
+		catch (Exception ex)
+		{
+			_logger.LogError(ex, "LIS Summary query failed for lab '{LabName}'.", selectedLabName);
+			return View(new LisSummaryPageViewModel
+			{
+				Filters = filters,
+				LabOptions = labOptions,
+				CurrentLabName = selectedLabOption?.LabName ?? selectedLabName,
+				ErrorMessage = $"Failed to load LIS Summary: {ex.Message}"
+			});
+		}
+	}
 
-        var selectedLab = ResolveSelectedLab(labs, filters.LabId, lab);
-        filters.LabId = selectedLab.LabId;
+	[HttpGet]
+	public async Task<IActionResult> ExportToExcel(
+		[FromQuery] LisSummaryFilters filters,
+		[FromQuery] string? lab,
+		CancellationToken cancellationToken)
+	{
+		filters ??= new LisSummaryFilters();
 
-        try
-        {
-            var connectionString = ResolveConnectionString(selectedLab);
-            var result = await _lisSummaryRepository.GetLisSummaryAsync(
-                connectionString,
-                selectedLab.LabName,
-                selectedLab.LabId,
-                filters.CollectedFrom,
-                filters.CollectedTo,
-                cancellationToken);
+		var availableLabs = GetAvailableLisLabs();
+		var selectedLabName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
-            using var workbook = LisSummaryExcelExportBuilder.CreateWorkbook(
-                result,
-                selectedLab.LabName,
-                filters.CollectedFrom,
-                filters.CollectedTo);
+		if (availableLabs.Count == 0 || string.IsNullOrWhiteSpace(selectedLabName))
+		{
+			TempData["LisSummaryError"] = "No LIS Summary enabled labs were found for export.";
+			return RedirectToAction(nameof(Index));
+		}
 
-            await using var stream = new MemoryStream();
-            workbook.SaveAs(stream);
-            stream.Position = 0;
+		var labOptions = await GetLabOptionsAsync(availableLabs, cancellationToken);
+		var selectedLabOption = ResolveSelectedLabOption(labOptions, selectedLabName, filters.LabId);
+		filters.LabId = selectedLabOption?.LabId;
 
-            var safeLabName = MakeSafeFileName(selectedLab.LabName);
-            var fileName = $"{safeLabName}_LIS_Summary_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
-            return File(stream.ToArray(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
-        }
-        catch (Exception ex)
-        {
-            TempData["LisSummaryError"] = $"Failed to export LIS Summary: {ex.Message}";
-            return RedirectToAction(nameof(Index), new
-            {
-                lab = selectedLab.LabName,
-                LabId = filters.LabId,
-                CollectedFrom = filters.CollectedFrom?.ToString("yyyy-MM-dd"),
-                CollectedTo = filters.CollectedTo?.ToString("yyyy-MM-dd")
-            });
-        }
-    }
+		if (!_labSettings.Labs.TryGetValue(selectedLabName, out var config)
+			|| !config.LineClaimEnable
+			|| string.IsNullOrWhiteSpace(config.DbConnectionString))
+		{
+			TempData["LisSummaryError"] = "LIS Summary export is not available for the selected lab.";
+			return RedirectToAction(nameof(Index), new
+			{
+				lab = selectedLabName,
+				CollectedFrom = filters.CollectedFrom?.ToString("yyyy-MM-dd"),
+				CollectedTo = filters.CollectedTo?.ToString("yyyy-MM-dd")
+			});
+		}
 
-    private LabOption ResolveSelectedLab(IReadOnlyList<LabOption> labs, int? requestedLabId, string? requestedLabName)
-    {
-        // 1) Common header lab selector sends the selected lab as ?lab=LabName.
-        //    Keep LabId support also, because export/autocomplete links may still pass LabId.
-        if (!string.IsNullOrWhiteSpace(requestedLabName))
-        {
-            var requestedToken = NormalizeLabToken(requestedLabName);
-            var requestedLab = labs.FirstOrDefault(x =>
-                x.LabName.Equals(requestedLabName, StringComparison.OrdinalIgnoreCase)
-                || NormalizeLabToken(x.LabName).Equals(requestedToken, StringComparison.OrdinalIgnoreCase));
+		try
+		{
+			var result = await _lisSummaryRepository.GetLisSummaryAsync(
+				config.DbConnectionString,
+				selectedLabOption?.LabName ?? selectedLabName,
+				selectedLabOption?.LabId ?? 0,
+				filters.CollectedFrom,
+				filters.CollectedTo,
+				cancellationToken);
 
-            if (requestedLab is not null) return requestedLab;
-        }
+			using var workbook = LisSummaryExcelExportBuilder.CreateWorkbook(
+				result,
+				selectedLabOption?.LabName ?? selectedLabName,
+				filters.CollectedFrom,
+				filters.CollectedTo);
 
-        if (requestedLabId.HasValue)
-        {
-            var requestedLab = labs.FirstOrDefault(x => x.LabId == requestedLabId.Value);
-            if (requestedLab is not null) return requestedLab;
-        }
+			await using var stream = new MemoryStream();
+			workbook.SaveAs(stream);
+			stream.Position = 0;
 
-        return labs.FirstOrDefault(x => x.LabName.Equals(PreferredInitialLabName, StringComparison.OrdinalIgnoreCase))
-            ?? labs.First();
-    }
+			var safeLabName = MakeSafeFileName(selectedLabOption?.LabName ?? selectedLabName);
+			var fileName = $"{safeLabName}_LIS_Summary_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
+			return File(stream.ToArray(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+		}
+		catch (Exception ex)
+		{
+			_logger.LogError(ex, "LIS Summary Excel export failed for lab '{LabName}'.", selectedLabName);
+			TempData["LisSummaryError"] = $"Failed to export LIS Summary: {ex.Message}";
+			return RedirectToAction(nameof(Index), new
+			{
+				lab = selectedLabName,
+				CollectedFrom = filters.CollectedFrom?.ToString("yyyy-MM-dd"),
+				CollectedTo = filters.CollectedTo?.ToString("yyyy-MM-dd")
+			});
+		}
+	}
 
-    private static string NormalizeLabToken(string value)
-        => new string((value ?? string.Empty)
-            .Where(char.IsLetterOrDigit)
-            .Select(char.ToUpperInvariant)
-            .ToArray());
+	private List<string> GetAvailableLisLabs()
+	{
+		// Same source and selection style as ProductionReport:
+		// appsettings LabSettings drives the common header lab dropdown.
+		return _labSettings.Labs
+			.Where(x => x.Value.LineClaimEnable && !string.IsNullOrWhiteSpace(x.Value.DbConnectionString))
+			.Select(x => x.Key)
+			.OrderBy(x => x)
+			.ToList();
+	}
 
-    private string ResolveConnectionString(LabOption lab)
-    {
-        if (string.IsNullOrWhiteSpace(lab.ConnectionKey))
-        {
-            throw new InvalidOperationException($"Lab '{lab.LabName}' does not have a ConnectionKey in dbo.LRNMetricsLab.");
-        }
+	private async Task<List<LabOption>> GetLabOptionsAsync(IReadOnlyCollection<string> availableLabs, CancellationToken cancellationToken)
+	{
+		var configuredTokens = availableLabs
+			.Select(NormalizeLabToken)
+			.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var connectionString = _configuration.GetConnectionString(lab.ConnectionKey);
-        if (string.IsNullOrWhiteSpace(connectionString))
-        {
-            throw new InvalidOperationException($"Connection string '{lab.ConnectionKey}' was not found in appsettings.json.");
-        }
+		var dbLabs = (await _labRepository.GetLabsAsync(cancellationToken))
+			.Where(x => configuredTokens.Contains(NormalizeLabToken(x.LabName)))
+			.OrderBy(x => x.LabName)
+			.ThenBy(x => x.LabId)
+			.ToList();
 
-        return connectionString;
-    }
+		return dbLabs;
+	}
 
-    private static string MakeSafeFileName(string value)
-    {
-        var invalidChars = Path.GetInvalidFileNameChars();
-        var safe = new string(value.Select(ch => invalidChars.Contains(ch) ? '_' : ch).ToArray()).Trim('_');
-        return string.IsNullOrWhiteSpace(safe) ? "Lab" : safe;
-    }
+	private static LabOption? ResolveSelectedLabOption(
+		IReadOnlyList<LabOption> labOptions,
+		string selectedLabName,
+		int? requestedLabId)
+	{
+		if (requestedLabId.HasValue)
+		{
+			var byId = labOptions.FirstOrDefault(x => x.LabId == requestedLabId.Value);
+			if (byId is not null && SameLab(byId.LabName, selectedLabName))
+				return byId;
+		}
+
+		var selectedToken = NormalizeLabToken(selectedLabName);
+		return labOptions.FirstOrDefault(x => SameLab(x.LabName, selectedLabName))
+			?? labOptions.FirstOrDefault(x => NormalizeLabToken(x.LabName).Equals(selectedToken, StringComparison.OrdinalIgnoreCase))
+			?? labOptions.FirstOrDefault(x => SameLab(x.LabName, PreferredInitialLabName));
+	}
+
+	private static bool SameLab(string left, string right)
+		=> left.Equals(right, StringComparison.OrdinalIgnoreCase)
+		   || NormalizeLabToken(left).Equals(NormalizeLabToken(right), StringComparison.OrdinalIgnoreCase);
+
+	private static string NormalizeLabToken(string value)
+		=> new string((value ?? string.Empty)
+			.Where(char.IsLetterOrDigit)
+			.Select(char.ToUpperInvariant)
+			.ToArray());
+
+	private static string MakeSafeFileName(string value)
+	{
+		var invalidChars = Path.GetInvalidFileNameChars();
+		var safe = new string(value.Select(ch => invalidChars.Contains(ch) ? '_' : ch).ToArray()).Trim('_');
+		return string.IsNullOrWhiteSpace(safe) ? "Lab" : safe;
+	}
 }

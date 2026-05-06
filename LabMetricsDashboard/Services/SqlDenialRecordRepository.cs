@@ -122,6 +122,9 @@ SELECT
     {SelectDate(cols, "FirstBilledDate")},
     {SelectDate(cols, "DateOfService")},
     {SelectString(cols, "Feedback")},
+    {SelectString(cols, "ReviewerComments")},
+    {SelectString(cols, "ReviewerUpdatedBy")},
+    {SelectDate(cols, "ReviewerUpdatedOn")},
     {SelectString(cols, "Responsibility")},
     {SelectDate(cols, "DiscussionDate")},
     {SelectString(cols, "ETA")}
@@ -175,7 +178,7 @@ ORDER BY {OrderBy(cols, "DueDate", "TaskID")};";
 					PanelName = GetString(reader, "PanelName"),
 					FirstBilledDate = GetNullableDateTime(reader, "FirstBilledDate"),
 					DateOfService = GetNullableDateTime(reader, "DateOfService"),
-					Feedback = GetString(reader, "Feedback"),
+					Feedback = !string.IsNullOrWhiteSpace(GetString(reader, "ReviewerComments")) ? GetString(reader, "ReviewerComments") : GetString(reader, "Feedback"),
 					Responsibility = GetString(reader, "Responsibility"),
 					DiscussionDate = GetNullableDateTime(reader, "DiscussionDate"),
 					ETA = GetString(reader, "ETA")
@@ -565,6 +568,76 @@ SELECT MatchedRows = (SELECT COUNT(1) FROM #MatchedRows);";
 			result.Errors.Add(ex.Message);
 			return result;
 		}
+	}
+
+
+	public async Task<int> AssignReviewerByInsightAsync(int labId, string denialCode, string payerName, string reviewerUserName, string? runId, CancellationToken cancellationToken = default)
+	{
+		if (string.IsNullOrWhiteSpace(denialCode) || string.IsNullOrWhiteSpace(payerName) || string.IsNullOrWhiteSpace(reviewerUserName)) return 0;
+
+		var currentRunId = string.IsNullOrWhiteSpace(runId) ? await GetCurrentRunIdAsync(labId, cancellationToken) : runId;
+		await using var connection = await OpenLabConnectionAsync(labId, cancellationToken);
+		if (!await TableExistsAsync(connection, "dbo", "DenialTaskBoard", cancellationToken)) return 0;
+
+		var cols = await GetTableColumnsAsync(connection, "dbo", "DenialTaskBoard", cancellationToken);
+		if (!cols.Contains("AssignedTo") || !cols.Contains("DenialCode")) return 0;
+
+		var payerColumn = cols.Contains("PayerNameNormalized") ? "PayerNameNormalized" : cols.Contains("PayerName") ? "PayerName" : null;
+		if (payerColumn is null) return 0;
+
+		var setParts = new List<string> { "[AssignedTo] = @Reviewer" };
+		if (cols.Contains("Status")) setParts.Add("[Status] = CASE WHEN ISNULL([Status], '') = '' THEN 'Open' ELSE [Status] END");
+		if (cols.Contains("ReviewerUpdatedBy")) setParts.Add("[ReviewerUpdatedBy] = @UpdatedBy");
+		if (cols.Contains("ReviewerUpdatedOn")) setParts.Add("[ReviewerUpdatedOn] = SYSUTCDATETIME()");
+
+		var where = new List<string> { BuildScopedWhere(cols, currentRunId), "LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [DenialCode]), ''))) = @DenialCode", $"LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [{payerColumn}]), ''))) = @PayerName" };
+		var sql = $"UPDATE dbo.DenialTaskBoard SET {string.Join(", ", setParts)} WHERE {string.Join(" AND ", where)}; SELECT @@ROWCOUNT;";
+		await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 180 };
+		AddScopeParameters(command, cols, labId, currentRunId);
+		command.Parameters.AddWithValue("@DenialCode", denialCode.Trim());
+		command.Parameters.AddWithValue("@PayerName", payerName.Trim());
+		command.Parameters.AddWithValue("@Reviewer", reviewerUserName.Trim());
+		command.Parameters.AddWithValue("@UpdatedBy", reviewerUserName.Trim());
+		var updated = await command.ExecuteScalarAsync(cancellationToken);
+		_cache.Remove(TaskBoardCacheKey(labId));
+		if (!string.IsNullOrWhiteSpace(currentRunId)) _cache.Remove($"{TaskBoardCacheKey(labId)}:{currentRunId}");
+		return updated == null || updated == DBNull.Value ? 0 : Convert.ToInt32(updated);
+	}
+
+	public async Task<int> UpdateReviewerTaskAsync(int labId, string taskId, string status, string comments, string reviewerUserName, string? runId, CancellationToken cancellationToken = default)
+	{
+		if (string.IsNullOrWhiteSpace(taskId) || string.IsNullOrWhiteSpace(reviewerUserName)) return 0;
+		var allowedStatuses = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Open", "In Progress", "Closed", "Completed", "On Hold" };
+		if (!allowedStatuses.Contains(status ?? string.Empty)) status = "Open";
+
+		var currentRunId = string.IsNullOrWhiteSpace(runId) ? await GetCurrentRunIdAsync(labId, cancellationToken) : runId;
+		await using var connection = await OpenLabConnectionAsync(labId, cancellationToken);
+		if (!await TableExistsAsync(connection, "dbo", "DenialTaskBoard", cancellationToken)) return 0;
+		var cols = await GetTableColumnsAsync(connection, "dbo", "DenialTaskBoard", cancellationToken);
+		if (!cols.Contains("TaskID") || !cols.Contains("AssignedTo")) return 0;
+
+		var setParts = new List<string>();
+		if (cols.Contains("Status")) setParts.Add("[Status] = @Status");
+		if (cols.Contains("ReviewerComments")) setParts.Add("[ReviewerComments] = @Comments");
+		else if (cols.Contains("Feedback")) setParts.Add("[Feedback] = @Comments");
+		if (cols.Contains("ReviewerUpdatedBy")) setParts.Add("[ReviewerUpdatedBy] = @UpdatedBy");
+		if (cols.Contains("ReviewerUpdatedOn")) setParts.Add("[ReviewerUpdatedOn] = SYSUTCDATETIME()");
+		if (cols.Contains("DateCompleted")) setParts.Add("[DateCompleted] = CASE WHEN @Status IN ('Closed','Completed') THEN COALESCE([DateCompleted], SYSUTCDATETIME()) ELSE NULL END");
+		if (setParts.Count == 0) return 0;
+
+		var where = new List<string> { BuildScopedWhere(cols, currentRunId), "[TaskID] = @TaskID", "LTRIM(RTRIM(ISNULL([AssignedTo], ''))) = @Reviewer" };
+		var sql = $"UPDATE dbo.DenialTaskBoard SET {string.Join(", ", setParts)} WHERE {string.Join(" AND ", where)}; SELECT @@ROWCOUNT;";
+		await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 180 };
+		AddScopeParameters(command, cols, labId, currentRunId);
+		command.Parameters.AddWithValue("@TaskID", taskId.Trim());
+		command.Parameters.AddWithValue("@Status", status.Trim());
+		command.Parameters.AddWithValue("@Comments", comments?.Trim() ?? string.Empty);
+		command.Parameters.AddWithValue("@Reviewer", reviewerUserName.Trim());
+		command.Parameters.AddWithValue("@UpdatedBy", reviewerUserName.Trim());
+		var updated = await command.ExecuteScalarAsync(cancellationToken);
+		_cache.Remove(TaskBoardCacheKey(labId));
+		if (!string.IsNullOrWhiteSpace(currentRunId)) _cache.Remove($"{TaskBoardCacheKey(labId)}:{currentRunId}");
+		return updated == null || updated == DBNull.Value ? 0 : Convert.ToInt32(updated);
 	}
 
 	private async Task<IReadOnlyList<DenialLineItemRecord>> QueryLineItemsAsync(int labId, DenialDashboardFilters filters, CancellationToken cancellationToken, bool withPaging, int page, int pageSize)

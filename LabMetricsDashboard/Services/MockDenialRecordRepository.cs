@@ -165,6 +165,36 @@ public class MockDenialRecordRepository : IDenialRecordRepository
         return result;
     }
 
+
+    public async Task<int> AssignReviewerByInsightAsync(int labId, string denialCode, string payerName, string reviewerUserName, string? runId, CancellationToken cancellationToken = default)
+    {
+        var records = (await GetOrLoadAsync(cancellationToken)).ToList();
+        var matched = records.Where(x =>
+            x.LabId == labId &&
+            (string.IsNullOrWhiteSpace(runId) || string.Equals(x.RunId, runId, StringComparison.OrdinalIgnoreCase)) &&
+            string.Equals(x.DenialCode, denialCode, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(string.IsNullOrWhiteSpace(x.PayerNameNormalized) ? x.PayerName : x.PayerNameNormalized, payerName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        foreach (var record in matched) record.AssignedTo = reviewerUserName;
+        _cache = records;
+        return matched.Count;
+    }
+
+    public async Task<int> UpdateReviewerTaskAsync(int labId, string taskId, string status, string comments, string reviewerUserName, string? runId, CancellationToken cancellationToken = default)
+    {
+        var records = (await GetOrLoadAsync(cancellationToken)).ToList();
+        var record = records.FirstOrDefault(x => x.LabId == labId
+            && string.Equals(x.TaskId, taskId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(x.AssignedTo, reviewerUserName, StringComparison.OrdinalIgnoreCase)
+            && (string.IsNullOrWhiteSpace(runId) || string.Equals(x.RunId, runId, StringComparison.OrdinalIgnoreCase)));
+        if (record is null) return 0;
+        record.Status = status;
+        record.Feedback = comments;
+        record.DateCompleted = status.Equals("Closed", StringComparison.OrdinalIgnoreCase) || status.Equals("Completed", StringComparison.OrdinalIgnoreCase) ? DateTime.Now : null;
+        _cache = records;
+        return 1;
+    }
+
     private IEnumerable<DenialLineItemRecord> ApplyLineItemFilters(IEnumerable<DenialLineItemRecord> records, DenialDashboardFilters filters)
     {
         var statusSet = ParseSelection(filters.Status, true);
