@@ -61,12 +61,12 @@ BEGIN
         TRY_CAST(ChargeAmount AS DECIMAL(18,2))                                          AS Charge
     INTO #Raw
     FROM dbo.ClaimLevelData
-    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL;
+    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL  AND LTRIM(RTRIM(FirstBilledDate)) != '';
 
-    SELECT Panelname, COUNT(DISTINCT VisitKey) AS ClaimCount, ISNULL(SUM(Charge), 0) AS TotalCharges
+    SELECT Panelname, COUNT( VisitKey) AS ClaimCount, ISNULL(SUM(Charge), 0) AS TotalCharges
     INTO #PanelSummary FROM #Raw GROUP BY Panelname;
 
-    SELECT Panelname, CPTDetail, COUNT(DISTINCT VisitKey) AS ClaimCount, ISNULL(SUM(Charge), 0) AS TotalCharges
+    SELECT Panelname, CPTDetail, COUNT( VisitKey) AS ClaimCount, ISNULL(SUM(Charge), 0) AS TotalCharges
     INTO #CPTDetail FROM #Raw WHERE CPTDetail <> '' GROUP BY Panelname, CPTDetail;
 
     TRUNCATE TABLE dbo.RT_CodingPanelSummary;

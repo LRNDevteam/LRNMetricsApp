@@ -22,6 +22,16 @@ public sealed class LabConfig
     public bool ClaimLineInsert { get; set; }
 
     /// <summary>
+    /// When <c>true</c>, the latest ClaimLevel and LineLevel CSV files are always
+    /// re-processed, even if the same file or RunId was already loaded.
+    /// Existing data for the lab is purged from <c>ClaimLevelData</c>,
+    /// <c>LineLevelData</c>, and <c>LineClaimFileLogs</c> before re-inserting,
+    /// ensuring the tables reflect the current file contents with no duplicates.
+    /// Requires <see cref="ClaimLineInsert"/> to also be <c>true</c>.
+    /// </summary>
+    public bool ClaimLineRefresh { get; set; }
+
+    /// <summary>
     /// Combined path: <c>ServerMastersBasePath</c> \ <c>ServerMasterFolderName</c>.
     /// This is where Claim Level and Line Level CSV files are located.
     /// </summary>

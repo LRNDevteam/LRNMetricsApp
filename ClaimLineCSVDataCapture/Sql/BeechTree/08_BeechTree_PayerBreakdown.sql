@@ -34,7 +34,6 @@ CREATE TABLE dbo.BT_PayerByPanel
     RefreshedAt  DATETIME        NOT NULL DEFAULT GETDATE()
 );
 GO
-
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshBT_PayerBreakdown
 AS
 BEGIN
@@ -47,7 +46,7 @@ BEGIN
         ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0)         AS TotalCharges
     INTO #RawPM
     FROM dbo.ClaimLevelData
-    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL AND LTRIM(RTRIM(FirstBilledDate)) <> ''
       AND NULLIF(LTRIM(RTRIM(PayerName_Raw)), '') IS NOT NULL
     GROUP BY
         LTRIM(RTRIM(PayerName_Raw)),
@@ -78,7 +77,7 @@ BEGIN
         ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0)                          AS TotalCharges
     INTO #RawPP
     FROM dbo.ClaimLevelData
-    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL AND LTRIM(RTRIM(FirstBilledDate)) <> ''
       AND NULLIF(LTRIM(RTRIM(PayerName_Raw)), '') IS NOT NULL
     GROUP BY
         LTRIM(RTRIM(PayerName_Raw)),
@@ -96,5 +95,6 @@ BEGIN
     PRINT 'usp_RefreshBT_PayerByPanel completed — ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
 END
 GO
+
 
 PRINT '08_BeechTree_PayerBreakdown.sql completed.';

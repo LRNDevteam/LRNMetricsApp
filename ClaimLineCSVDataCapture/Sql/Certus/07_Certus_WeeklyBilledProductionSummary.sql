@@ -38,30 +38,71 @@ BEGIN
     SET NOCOUNT ON;
 
     -- Week boundary: Mon–Sun. Reference Monday: 1900-01-01.
-    DECLARE @Today         DATE = CAST(GETDATE() AS DATE);
-    DECLARE @ThisWeekStart DATE = DATEADD(day, -(DATEDIFF(day, '1900-01-01', @Today) % 7), @Today);
+    --DECLARE @Today         DATE = CAST(GETDATE() AS DATE);
+    --DECLARE @ThisWeekStart DATE = DATEADD(day, -(DATEDIFF(day, '1900-01-01', @Today) % 7), @Today);
 
-    -- Build last 4 complete Mon–Sun weeks (index 1 = most recent complete week).
-    DECLARE @i INT = 1;
-    CREATE TABLE #Weeks
-    (
-        WeekIndex INT PRIMARY KEY,
-        WeekStart DATE,
-        WeekEnd   DATE,
-        WeekLabel NVARCHAR(32)
-    );
+    ---- Build last 4 complete Mon–Sun weeks (index 1 = most recent complete week).
+    --DECLARE @i INT = 1;
+    --CREATE TABLE #Weeks
+    --(
+    --    WeekIndex INT PRIMARY KEY,
+    --    WeekStart DATE,
+    --    WeekEnd   DATE,
+    --    WeekLabel NVARCHAR(32)
+    --);
 
-    WHILE @i <= 4
-    BEGIN
-        DECLARE @ws DATE = DATEADD(week, -@i, @ThisWeekStart);
-        DECLARE @we DATE = DATEADD(day, 6, @ws);   -- Mon + 6 = Sun
-        INSERT INTO #Weeks (WeekIndex, WeekStart, WeekEnd, WeekLabel)
-        VALUES (@i, @ws, @we, FORMAT(@ws, 'yyyy-MM-dd') + ' - ' + FORMAT(@we, 'yyyy-MM-dd'));
-        SET @i = @i + 1;
-    END
+    --WHILE @i <= 4
+    --BEGIN
+    --    DECLARE @ws DATE = DATEADD(week, -@i, @ThisWeekStart);
+    --    DECLARE @we DATE = DATEADD(day, 6, @ws);   -- Mon + 6 = Sun
+    --    INSERT INTO #Weeks (WeekIndex, WeekStart, WeekEnd, WeekLabel)
+    --    VALUES (@i, @ws, @we, FORMAT(@ws, 'yyyy-MM-dd') + ' - ' + FORMAT(@we, 'yyyy-MM-dd'));
+    --    SET @i = @i + 1;
+    --END
+	DECLARE @Today              DATE = CAST(GETDATE() AS DATE);
+	DECLARE @ThisWeekThuStart   DATE;
+	DECLARE @DateFromData       DATE;
 
-    -- Aggregate by Panelname x PayerName_Raw x week, joined on FirstBilledDate.
-    -- Payer exclusions: None, Accu, Client, Patient.
+-- Thu–Wed week anchor: 1900-01-05 is a known Friday
+	SELECT
+		@DateFromData     = MAX(TRY_CAST(ChargeEnteredDate AS DATE)),
+		@ThisWeekThuStart = DATEADD(day,
+			-(DATEDIFF(day, '1900-01-01', ISNULL(MAX(TRY_CAST(ChargeEnteredDate AS DATE)), @Today)) % 7),
+			ISNULL(MAX(TRY_CAST(ChargeEnteredDate AS DATE)), @Today))
+	FROM dbo.ClaimLevelData
+	WHERE TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL
+	  AND TRY_CAST(ChargeEnteredDate AS DATE) <= @Today;
+
+	-- If max date >= Wednesday of current Thu–Wed week,
+	-- then current week is complete, else start from last complete week
+	DECLARE @StartIndex INT = CASE
+		WHEN @DateFromData >= DATEADD(day, 6, @ThisWeekThuStart) THEN 0    -- Mon + 6 = Sun
+		ELSE 1
+	END;
+
+	DECLARE @i INT = @StartIndex;
+
+	CREATE TABLE #Weeks
+	(
+		WeekIndex INT PRIMARY KEY,
+		WeekStart DATE,
+		WeekEnd   DATE,
+		WeekLabel NVARCHAR(32)
+	);
+
+	WHILE @i <= @StartIndex + 3   -- always 4 weeks
+	BEGIN
+		DECLARE @ws DATE = DATEADD(week, -@i, @ThisWeekThuStart);
+		DECLARE @we DATE = DATEADD(day, 6, @ws);   -- Thu + 6 = Wed
+
+		INSERT INTO #Weeks (WeekIndex, WeekStart, WeekEnd, WeekLabel)
+		VALUES (@i, @ws, @we, FORMAT(@ws, 'yyyy-MM-dd') + ' - ' + FORMAT(@we, 'yyyy-MM-dd'));
+
+		SET @i = @i + 1;
+	END
+    -- Bug-fix: drive the join from #Weeks (LEFT JOIN) so every one of the 4 weeks
+    -- always produces at least one row in the snapshot, even when zero billed claims
+    -- existed that week. Payer exclusions: None, Accu, Client, Patient.
     SELECT
         LTRIM(RTRIM(ISNULL(cl.Panelname,      'Unknown')))              AS Panelname,
         LTRIM(RTRIM(ISNULL(cl.PayerName_Raw,  'Unknown')))              AS PayerName_Raw,
@@ -71,19 +112,20 @@ BEGIN
         COUNT(DISTINCT NULLIF(LTRIM(RTRIM(cl.ClaimID)), ''))            AS ClaimCount,
         ISNULL(SUM(TRY_CAST(cl.ChargeAmount AS DECIMAL(18,2))), 0)      AS TotalCharges
     INTO #BilledRaw
-    FROM dbo.ClaimLevelData cl
-    JOIN #Weeks w ON TRY_CAST(cl.FirstBilledDate AS DATE) BETWEEN w.WeekStart AND w.WeekEnd
-    WHERE TRY_CAST(cl.FirstBilledDate AS DATE) IS NOT NULL
-      AND UPPER(LTRIM(RTRIM(ISNULL(cl.PayerName_Raw, '')))) NOT LIKE '%NONE%'
-      AND UPPER(LTRIM(RTRIM(ISNULL(cl.PayerName_Raw, '')))) NOT LIKE '%ACCU%'
-      AND UPPER(LTRIM(RTRIM(ISNULL(cl.PayerName_Raw, '')))) NOT LIKE '%CLIENT%'
-      AND UPPER(LTRIM(RTRIM(ISNULL(cl.PayerName_Raw, '')))) NOT LIKE '%PATIENT%'
+    FROM #Weeks w
+    LEFT JOIN dbo.ClaimLevelData cl
+           ON TRY_CAST(cl.FirstBilledDate AS DATE) BETWEEN w.WeekStart AND w.WeekEnd
+          AND LTRIM(RTRIM(cl.FirstBilledDate)) <> ''
+          AND UPPER(LTRIM(RTRIM(ISNULL(cl.PayerName_Raw, '')))) NOT LIKE '%NONE%'
+          AND UPPER(LTRIM(RTRIM(ISNULL(cl.PayerName_Raw, '')))) NOT LIKE '%ACCU%'
+          AND UPPER(LTRIM(RTRIM(ISNULL(cl.PayerName_Raw, '')))) NOT LIKE '%CLIENT%'
+          AND UPPER(LTRIM(RTRIM(ISNULL(cl.PayerName_Raw, '')))) NOT LIKE '%PATIENT%'
     GROUP BY
         LTRIM(RTRIM(ISNULL(cl.Panelname,      'Unknown'))),
         LTRIM(RTRIM(ISNULL(cl.PayerName_Raw,  'Unknown'))),
         w.WeekStart, w.WeekEnd, w.WeekLabel;
 
-    -- Rank payers within each Panelname (Top 3) across the 4-week window.
+    -- Rank payers within each Panelname across the 4-week window.
     SELECT
         Panelname,
         PayerName_Raw,
@@ -92,6 +134,7 @@ BEGIN
     FROM #BilledRaw
     GROUP BY Panelname, PayerName_Raw;
 
+    -- Keep all payers (rank filter removed) so the read SP can derive panel totals.
     SELECT
         b.Panelname,
         b.PayerName_Raw,
@@ -100,8 +143,7 @@ BEGIN
         b.ClaimCount, b.TotalCharges
     INTO #Top3
     FROM #BilledRaw b
-    JOIN #PayerRanks r ON r.Panelname = b.Panelname AND r.PayerName_Raw = b.PayerName_Raw
-    WHERE r.PayerRank <= 3;
+    JOIN #PayerRanks r ON r.Panelname = b.Panelname AND r.PayerName_Raw = b.PayerName_Raw;
 
     TRUNCATE TABLE dbo.Cert_WeeklyBilledProductionSummary;
 
@@ -122,6 +164,7 @@ BEGIN
     PRINT 'usp_RefreshCert_WeeklyBilledProductionSummary completed — ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
 END
 GO
+
 
 /*
 SELECT PanelType, PayerName, PayerRank, WeekStart, WeekEnd, WeekLabel, ClaimCount, TotalCharges

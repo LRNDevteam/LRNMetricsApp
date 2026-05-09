@@ -29,6 +29,9 @@ GO
 -- ============================================================
 -- Step 2: Stored procedure
 -- ============================================================
+-- ============================================================
+-- Step 2: Stored procedure
+-- ============================================================
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshCert_MonthlyBilledProductionSummary
 AS
 BEGIN
@@ -44,11 +47,13 @@ BEGIN
         ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0)          AS TotalCharges
     INTO #BilledRaw
     FROM dbo.ClaimLevelData
-    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL AND LTRIM(RTRIM(FirstBilledDate)) <> ''
       AND UPPER(LTRIM(RTRIM(ISNULL(PayerName_Raw, '')))) NOT LIKE '%NONE%'
       AND UPPER(LTRIM(RTRIM(ISNULL(PayerName_Raw, '')))) NOT LIKE '%ACCU%'
       AND UPPER(LTRIM(RTRIM(ISNULL(PayerName_Raw, '')))) NOT LIKE '%CLIENT%'
       AND UPPER(LTRIM(RTRIM(ISNULL(PayerName_Raw, '')))) NOT LIKE '%PATIENT%'
+	 -- AND PayerName_Raw NOT IN (SELECT Payername from ExcludedPayers)
+	 
     GROUP BY
         LTRIM(RTRIM(ISNULL(Panelname,      'Unknown'))),
         LTRIM(RTRIM(ISNULL(PayerName_Raw,  'Unknown'))),
@@ -76,7 +81,7 @@ BEGIN
     INTO #Top3
     FROM #BilledRaw b
     JOIN #PayerRanks r ON r.Panelname = b.Panelname AND r.PayerName_Raw = b.PayerName_Raw
-    WHERE r.PayerRank <= 3;
+   -- WHERE r.PayerRank <= 3;
 
     TRUNCATE TABLE dbo.Cert_MonthlyBilledProductionSummary;
 
@@ -101,3 +106,89 @@ ORDER BY PanelType, PayerRank, BilledYearMonth;
 */
 
 PRINT '06_Certus_MonthlyBilledProductionSummary.sql completed.';
+
+
+
+-----
+
+
+---- =============================================
+---- Create ExcludedPayers Table
+---- =============================================
+--IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'ExcludedPayers')
+--CREATE TABLE dbo.ExcludedPayers
+--(
+--    ExcludeId   INT           NOT NULL IDENTITY(1,1) PRIMARY KEY,
+--    PayerName   NVARCHAR(500) NOT NULL,
+--    CreatedAt   DATETIME      NOT NULL DEFAULT GETDATE()
+--);
+--GO
+
+---- =============================================
+---- Insert Excluded Payers
+---- =============================================
+--INSERT INTO dbo.ExcludedPayers (PayerName)
+--VALUES
+--('MISSISSIPPI HEALTH PARTNERS'),
+--('BCBS NY'),
+--('Starmark/Trustmark'),
+--('PHCS'),
+--('SISCO'),
+--('CLIENT'),
+--('Southern Benefit Administrators'),
+--('Global Care'),
+--('TEXAS CHILDREN''S HEALTH PLAN'),
+--('HEALTH EZ'),
+--('GEHA'),
+--('WC - Workers Comp Other'),
+--('COMMUNITY CARE'),
+--('VETERANS AFFAIRS'),
+--('TRICARE WEST REGION'),
+--('Healthy Mississippi'),
+--('American Health Plan of MS'),
+--('INC'),
+--('AmFirst Insurance Company'),
+--('INSURANCE'),
+--('BCBS - Alabama'),
+--('Veterans Choice Program - VACAA'),
+--('AETNA BETTER HEALTH OF LA'),
+--('PRIORITY HEALTH'),
+--('Teamcare'),
+--('CHRISTUS HEALTH PLAN - US FAMILY HEALTH PLAN (USFHP)'),
+--('Assyred Benefits'),
+--('Advantage Care'),
+--('Christus Health Medicare Advantage'),
+--('Oscar'),
+--('First Health/Coventry Healthcare'),
+--('First Choice VIP Care'),
+--('HEALTHSMART'),
+--('L W P ELITE TRUCKING LLS'),
+--('Champ VA Center'),
+--('BENEFIT HEALTH PLAN INC'),
+--('VERDEGARD ADMINISTRATORS LLC'),
+--('SELECT ADMINISTRATIVE SERVICES'),
+--('CAREGUARD'),
+--('UNITED HEALTHCARE COMMUNITY'),
+--('FRONTIER HEALTH'),
+--('Nippon Life Insurance'),
+--('AMERICAN FEDERATED INSURANCE'),
+--('AMTRUST NOTHE AMERICA'),
+--('AMERIHEALTH CARITA/LA-MEDICAID'),
+--('ACCU LABS NON BILLABLE'),
+--('CLIENT BILL - ELXIR LABORATORIES'),
+--('CLIENT BILL - COVE DIAGNOSTICS'),
+--('CLIENT BILL - GULF COAST PSYCHOTHERAPY BLOOD'),
+--('CLIENT BILL GULF COAST PSYCHOTHERAPY'),
+--('CLIENT BILL - INTERNAL MEDICINE CLINIC OF GRENADA'),
+--('CLIENT BILL - Tallahatchie general hospital'),
+--('CLIENT BILL - YALOBUSHA GENERAL HOSIPITAL'),
+--('Client Bill - Costal Chronic Pain Services');
+--GO
+
+---- =============================================
+---- Verify
+---- =============================================
+--SELECT ExcludeId, PayerName, CreatedAt
+--FROM dbo.ExcludedPayers
+--ORDER BY PayerName;
+--GO

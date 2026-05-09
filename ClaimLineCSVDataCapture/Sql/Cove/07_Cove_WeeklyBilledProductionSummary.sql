@@ -33,37 +33,57 @@ GO
 -- ============================================================
 -- Step 2: Stored procedure
 -- ============================================================
+-- ============================================================
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshCove_WeeklyBilledProductionSummary
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    -- Week boundary: Fri–Thu.
-    -- Reference Friday anchor: 1900-01-05 (a known Friday).
-    -- DATEDIFF(day, '1900-01-05', @Today) % 7 gives days elapsed since last Friday (0=Fri, 6=Thu).
-    DECLARE @Today            DATE = CAST(GETDATE() AS DATE);
-    DECLARE @ThisWeekFriStart DATE = DATEADD(day, -(DATEDIFF(day, '1900-01-05', @Today) % 7), @Today);
+	DECLARE @Today              DATE = CAST(GETDATE() AS DATE);
+	DECLARE @ThisWeekThuStart   DATE;
+	DECLARE @DateFromData       DATE;
 
-    -- Build last 4 complete Fri–Thu weeks (index 1 = most recent complete week).
-    DECLARE @i INT = 1;
-    CREATE TABLE #Weeks
-    (
-        WeekIndex INT PRIMARY KEY,
-        WeekStart DATE,
-        WeekEnd   DATE,
-        WeekLabel NVARCHAR(32)
-    );
+-- Thu–Wed week anchor: 1900-01-05 is a known Friday
+	SELECT
+		@DateFromData     = MAX(TRY_CAST(FirstBilledDate AS DATE)),
+		@ThisWeekThuStart = DATEADD(day,
+			-(DATEDIFF(day, '1900-01-03', ISNULL(MAX(TRY_CAST(FirstBilledDate AS DATE)), @Today)) % 7),
+			ISNULL(MAX(TRY_CAST(FirstBilledDate AS DATE)), @Today))
+	FROM dbo.ClaimLevelData
+	WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+	  AND TRY_CAST(FirstBilledDate AS DATE) <= @Today;
 
-    WHILE @i <= 4
-    BEGIN
-        DECLARE @ws DATE = DATEADD(week, -@i, @ThisWeekFriStart);
-        DECLARE @we DATE = DATEADD(day, 6, @ws);   -- Fri + 6 = Thu
-        INSERT INTO #Weeks (WeekIndex, WeekStart, WeekEnd, WeekLabel)
-        VALUES (@i, @ws, @we, FORMAT(@ws, 'yyyy-MM-dd') + ' - ' + FORMAT(@we, 'yyyy-MM-dd'));
-        SET @i = @i + 1;
-    END
+	-- If max date >= Wednesday of current Thu–Wed week,
+	-- then current week is complete, else start from last complete week
+	DECLARE @StartIndex INT = CASE
+		WHEN @DateFromData >= DATEADD(day, 6, @ThisWeekThuStart) THEN 0   -- Thu + 6 = Wed
+		ELSE 1
+	END;
 
-    -- Aggregate by Panelname x PayerName_Raw x week, joined on FirstBilledDate.
+	DECLARE @i INT = @StartIndex;
+
+	CREATE TABLE #Weeks
+	(
+		WeekIndex INT PRIMARY KEY,
+		WeekStart DATE,
+		WeekEnd   DATE,
+		WeekLabel NVARCHAR(32)
+	);
+
+	WHILE @i <= @StartIndex + 3   -- always 4 weeks
+	BEGIN
+		DECLARE @ws DATE = DATEADD(week, -@i, @ThisWeekThuStart);
+		DECLARE @we DATE = DATEADD(day, 6, @ws);   -- Thu + 6 = Wed
+
+		INSERT INTO #Weeks (WeekIndex, WeekStart, WeekEnd, WeekLabel)
+		VALUES (@i, @ws, @we, FORMAT(@ws, 'yyyy-MM-dd') + ' - ' + FORMAT(@we, 'yyyy-MM-dd'));
+
+		SET @i = @i + 1;
+	END
+
+    -- Bug-fix: drive the join from #Weeks (LEFT JOIN) so every one of the 4 weeks
+    -- always produces at least one row in the snapshot, even when zero billed claims
+    -- existed that week.
     SELECT
         LTRIM(RTRIM(ISNULL(cl.Panelname,      'Unknown')))              AS Panelname,
         LTRIM(RTRIM(ISNULL(cl.PayerName_Raw,  'Unknown')))              AS PayerName_Raw,
@@ -73,15 +93,16 @@ BEGIN
         COUNT(DISTINCT NULLIF(LTRIM(RTRIM(cl.ClaimID)), ''))            AS ClaimCount,
         ISNULL(SUM(TRY_CAST(cl.ChargeAmount AS DECIMAL(18,2))), 0)      AS TotalCharges
     INTO #BilledRaw
-    FROM dbo.ClaimLevelData cl
-    JOIN #Weeks w ON TRY_CAST(cl.FirstBilledDate AS DATE) BETWEEN w.WeekStart AND w.WeekEnd
-    WHERE TRY_CAST(cl.FirstBilledDate AS DATE) IS NOT NULL
+    FROM #Weeks w
+    LEFT JOIN dbo.ClaimLevelData cl
+           ON TRY_CAST(cl.FirstBilledDate AS DATE) BETWEEN w.WeekStart AND w.WeekEnd
+          AND LTRIM(RTRIM(cl.FirstBilledDate)) <> ''
     GROUP BY
         LTRIM(RTRIM(ISNULL(cl.Panelname,      'Unknown'))),
         LTRIM(RTRIM(ISNULL(cl.PayerName_Raw,  'Unknown'))),
         w.WeekStart, w.WeekEnd, w.WeekLabel;
 
-    -- Rank payers within each Panelname (Top 3) across the 4-week window.
+    -- Rank payers within each Panelname across the 4-week window.
     SELECT
         Panelname,
         PayerName_Raw,
@@ -90,6 +111,7 @@ BEGIN
     FROM #BilledRaw
     GROUP BY Panelname, PayerName_Raw;
 
+    -- Keep all payers (rank filter removed) so the read SP can derive panel totals.
     SELECT
         b.Panelname,
         b.PayerName_Raw,
@@ -98,8 +120,7 @@ BEGIN
         b.ClaimCount, b.TotalCharges
     INTO #Top3
     FROM #BilledRaw b
-    JOIN #PayerRanks r ON r.Panelname = b.Panelname AND r.PayerName_Raw = b.PayerName_Raw
-    WHERE r.PayerRank <= 3;
+    JOIN #PayerRanks r ON r.Panelname = b.Panelname AND r.PayerName_Raw = b.PayerName_Raw;
 
     TRUNCATE TABLE dbo.Cove_WeeklyBilledProductionSummary;
 

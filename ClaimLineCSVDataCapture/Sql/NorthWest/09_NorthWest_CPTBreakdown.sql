@@ -1,73 +1,58 @@
--- ============================================================
--- NorthWest Lab - CPT Breakdown (line-level)
+-- RisingTides — CPT Breakdown (line-level)
 -- Rule:
---   Filter  : LineLevel rows where FirstBilledDate IS NOT NULL and ChargeEnteredDate IS NOT NULL
---   Rows    : PayerName
---   Columns : ChargeEnteredDate month-year (yyyy-MM) | Count of CPT (lines) | Sum of charge amount
---
--- Creates aggregate table + stored procedure to populate it.
+--   Source  : LineLevelData
+--   Filter  : TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+--   Rows    : CPTCode
+--   Columns : ChargeEnteredDate month (yyyy-MM)
+--             | CPTCount (COUNT of lines) | SUM(Units) | SUM(ChargeAmount)
 -- ============================================================
-
+drop table NW_CPTBreakdown;
 SET NOCOUNT ON;
 GO
 
--- ============================================================
--- Step 1: Aggregate table
--- ============================================================
 IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'NW_CPTBreakdown')
 CREATE TABLE dbo.NW_CPTBreakdown
 (
     SummaryId       INT             NOT NULL IDENTITY(1,1) PRIMARY KEY,
-    PayerName       NVARCHAR(500)   NOT NULL,
-    BilledYearMonth NVARCHAR(7)     NOT NULL,   -- 'yyyy-MM'
+    CPTCode         NVARCHAR(200)   NOT NULL,
+    BilledYearMonth NVARCHAR(7)     NOT NULL,
     CPTCount        INT             NOT NULL DEFAULT 0,
+    BilledUnits     DECIMAL(18,2)   NOT NULL DEFAULT 0,
     TotalCharges    DECIMAL(18,2)   NOT NULL DEFAULT 0,
     RefreshedAt     DATETIME        NOT NULL DEFAULT GETDATE()
 );
 GO
 
--- ============================================================
--- Step 2: Stored procedure
--- ============================================================
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshNW_CPTBreakdown
 AS
 BEGIN
     SET NOCOUNT ON;
 
     SELECT
-        LTRIM(RTRIM(ISNULL(cl.PayerName_Raw, 'Unknown')))                        AS PayerName_Raw,
-        FORMAT(TRY_CAST(cl.ChargeEnteredDate AS DATE), 'yyyy-MM')            AS BilledYearMonth,
-        COUNT(*)                                                               AS CPTCount,
-        ISNULL(SUM(TRY_CAST(cl.ChargeAmount AS DECIMAL(18,2))), 0)           AS TotalCharges
+        LTRIM(RTRIM(ISNULL(CPTCode, 'Unknown')))                        AS CPTCode,
+        FORMAT(TRY_CAST(ChargeEnteredDate AS DATE), 'yyyy-MM')          AS BilledYearMonth,
+        COUNT(*)                                                         AS CPTCount,
+        ISNULL(SUM(TRY_CAST(Units        AS DECIMAL(18,2))), 0)         AS BilledUnits,
+        ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0)         AS TotalCharges
     INTO #Raw
-    FROM dbo.LineLevelData cl
-    WHERE TRY_CAST(cl.FirstBilledDate AS DATE) IS NOT NULL
-      AND TRY_CAST(cl.ChargeEnteredDate AS DATE) IS NOT NULL
-      AND NULLIF(LTRIM(RTRIM(cl.PayerName_Raw)), '') IS NOT NULL
+    FROM dbo.LineLevelData
+    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL and FirstBilledDate !=''
+      --AND NULLIF(LTRIM(RTRIM(CPTCode)), '') IS NOT NULL
     GROUP BY
-        LTRIM(RTRIM(ISNULL(cl.PayerName_Raw, 'Unknown'))),
-        FORMAT(TRY_CAST(cl.ChargeEnteredDate AS DATE), 'yyyy-MM');
+        LTRIM(RTRIM(ISNULL(CPTCode, 'Unknown'))),
+        FORMAT(TRY_CAST(ChargeEnteredDate AS DATE), 'yyyy-MM');
 
     TRUNCATE TABLE dbo.NW_CPTBreakdown;
 
-    INSERT INTO dbo.NW_CPTBreakdown (PayerName, BilledYearMonth, CPTCount, TotalCharges, RefreshedAt)
-    SELECT PayerName_Raw, BilledYearMonth, CPTCount, TotalCharges, GETDATE()
-    FROM #Raw
-    ORDER BY PayerName_Raw, BilledYearMonth;
+    INSERT INTO dbo.NW_CPTBreakdown
+        (CPTCode, BilledYearMonth, CPTCount, BilledUnits, TotalCharges, RefreshedAt)
+    SELECT CPTCode, BilledYearMonth, CPTCount, BilledUnits, TotalCharges, GETDATE()
+    FROM #Raw ORDER BY CPTCode, BilledYearMonth;
 
     DROP TABLE IF EXISTS #Raw;
 
-    PRINT 'usp_RefreshNW_CPTBreakdown completed - ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows loaded.';
+    PRINT 'usp_RefreshNW_CPTBreakdown completed — ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
 END
 GO
 
--- ============================================================
--- Quick verification queries
--- ============================================================
-/*
-SELECT PayerName, BilledYearMonth, CPTCount, TotalCharges
-FROM dbo.NW_CPTBreakdown
-ORDER BY PayerName, BilledYearMonth;
-*/
-
-PRINT '09_NorthWest_CPTBreakdown.sql completed.';
+PRINT 'usp_RefreshNW_CPTBreakdown sql completed.';

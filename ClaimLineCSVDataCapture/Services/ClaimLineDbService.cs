@@ -233,6 +233,45 @@ public sealed class ClaimLineDbService
     }
 
     /// <summary>
+    /// Purges all data from <c>ClaimLevelData</c>, <c>LineLevelData</c>, and
+    /// <c>LineClaimFileLogs</c> in the lab's own database (each lab has a dedicated DB,
+    /// so no <c>LabName</c> filter is needed). Runs inside a single transaction so a
+    /// mid-purge failure leaves the tables untouched.
+    /// Used exclusively when <c>ClaimLineRefresh = true</c> in the lab config.
+    /// </summary>
+    /// <returns>A tuple of (claimRows, lineRows, logRows) deleted.</returns>
+    public (int ClaimRows, int LineRows, int LogRows) PurgeLabClaimLineData()
+    {
+        using var conn = new SqlConnection(_connectionString);
+        conn.Open();
+        using var tx = conn.BeginTransaction();
+        try
+        {
+            int claimRows, lineRows, logRows;
+
+            using (var cmd = new SqlCommand("DELETE FROM dbo.ClaimLevelData", conn, tx)
+                   { CommandTimeout = 600 })
+                claimRows = cmd.ExecuteNonQuery();
+
+            using (var cmd = new SqlCommand("DELETE FROM dbo.LineLevelData", conn, tx)
+                   { CommandTimeout = 600 })
+                lineRows = cmd.ExecuteNonQuery();
+
+            using (var cmd = new SqlCommand("DELETE FROM dbo.LineClaimFileLogs", conn, tx)
+                   { CommandTimeout = 120 })
+                logRows = cmd.ExecuteNonQuery();
+
+            tx.Commit();
+            return (claimRows, lineRows, logRows);
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Refreshes all Revenue Dashboard aggregate tables by calling
     /// <c>dbo.usp_RefreshDashboard</c>. The SP runs inside a single transaction,
     /// populates DashboardKPISummary, DashboardClaimStatusBreakdown,
@@ -360,6 +399,36 @@ public sealed class ClaimLineDbService
     }
 
     /// <summary>
+    /// Runs all RisingTides-specific Collection Summary aggregate stored procedures
+    /// after ingestion. Pre-computes the data behind the 13 Collection Summary tabs
+    /// (Top 5 Reimbursement %/$, Monthly/Weekly Volume, Panel Averages, AvgPayments,
+    /// Insurance vs Aging, Panel vs Payment, Rep vs Payment, Insurance vs Payment %,
+    /// CPT vs Payment %, Status Summary, Provider Summary).
+    /// Each SP runs independently so a failure in one does not block the others.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshRisingTidesCollectionReports()
+    {
+        string[] procedures =
+        [
+            "dbo.usp_RefreshRT_CS_Top5ReimbursementPct",
+            "dbo.usp_RefreshRT_CS_Top5ReimbursementPay",
+            "dbo.usp_RefreshRT_CS_MonthlyClaimVolume",
+            "dbo.usp_RefreshRT_CS_WeeklyClaimVolume",
+            "dbo.usp_RefreshRT_CS_PanelAverages",
+            "dbo.usp_RefreshRT_CS_AvgPayments",
+            "dbo.usp_RefreshRT_CS_InsuranceVsAging",
+            "dbo.usp_RefreshRT_CS_PanelVsPayment",
+            "dbo.usp_RefreshRT_CS_RepVsPayment",
+            "dbo.usp_RefreshRT_CS_InsuranceVsPaymentPct",
+            "dbo.usp_RefreshRT_CS_CptVsPaymentPct",
+            "dbo.usp_RefreshRT_CS_StatusSummary",
+            "dbo.usp_RefreshRT_CS_ProviderSummary",
+        ];
+
+        return RunProductionReportSPs(procedures);
+    }
+
+    /// <summary>
     /// Runs all Certus Labs-specific production report stored procedures after ingestion.
     /// Each SP is executed independently so a failure in one does not block the others.
     /// Returns a list of (SpName, ElapsedMs, ErrorMessage?) for caller logging.
@@ -420,6 +489,61 @@ public sealed class ClaimLineDbService
 
         return RunProductionReportSPs(procedures);
     }
+
+    // ??? Collection Summary aggregate refreshers (one set of 13 SPs per lab) ??
+    // Each method runs the 13 RefreshXxx_CS_* SPs that pre-compute the data
+    // behind the Collection Summary tabs in the LabMetricsDashboard web app.
+    // SPs run independently — one failure does not block the others.
+
+    /// <summary>Refreshes the Augustus Collection Summary aggregates.</summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshAugustusCollectionReports()
+        => RunProductionReportSPs(BuildCollectionSummarySpList("Aug"));
+
+    /// <summary>Refreshes the BeechTree Collection Summary aggregates.</summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshBeechTreeCollectionReports()
+        => RunProductionReportSPs(BuildCollectionSummarySpList("BT"));
+
+    /// <summary>Refreshes the Certus Collection Summary aggregates.</summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshCertusCollectionReports()
+        => RunProductionReportSPs(BuildCollectionSummarySpList("Cert"));
+
+    /// <summary>Refreshes the COVE Collection Summary aggregates.</summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshCoveCollectionReports()
+        => RunProductionReportSPs(BuildCollectionSummarySpList("Cove"));
+
+    /// <summary>Refreshes the Elixir Collection Summary aggregates.</summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshElixirCollectionReports()
+        => RunProductionReportSPs(BuildCollectionSummarySpList("Elix"));
+
+    /// <summary>Refreshes the NorthWest Collection Summary aggregates.</summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshNorthWestCollectionReports()
+        => RunProductionReportSPs(BuildCollectionSummarySpList("NW"));
+
+    /// <summary>Refreshes the PCRLabsofAmerica Collection Summary aggregates.</summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshPCRLabsCollectionReports()
+        => RunProductionReportSPs(BuildCollectionSummarySpList("PCR"));
+
+    /// <summary>
+    /// Builds the standard 13-element ordered list of Collection Summary SP names
+    /// for a given lab prefix (e.g. "Aug", "BT", "Cert", ...). Keeps every lab's
+    /// invocation in lockstep with the SQL files that ship under Sql\&lt;Lab&gt;.
+    /// </summary>
+    private static string[] BuildCollectionSummarySpList(string prefix) =>
+    [
+        $"dbo.usp_Refresh{prefix}_CS_Top5ReimbursementPct",
+        $"dbo.usp_Refresh{prefix}_CS_Top5ReimbursementPay",
+        $"dbo.usp_Refresh{prefix}_CS_MonthlyClaimVolume",
+        $"dbo.usp_Refresh{prefix}_CS_WeeklyClaimVolume",
+        $"dbo.usp_Refresh{prefix}_CS_PanelAverages",
+        $"dbo.usp_Refresh{prefix}_CS_AvgPayments",
+        $"dbo.usp_Refresh{prefix}_CS_InsuranceVsAging",
+        $"dbo.usp_Refresh{prefix}_CS_PanelVsPayment",
+        $"dbo.usp_Refresh{prefix}_CS_RepVsPayment",
+        $"dbo.usp_Refresh{prefix}_CS_InsuranceVsPaymentPct",
+        $"dbo.usp_Refresh{prefix}_CS_CptVsPaymentPct",
+        $"dbo.usp_Refresh{prefix}_CS_StatusSummary",
+        $"dbo.usp_Refresh{prefix}_CS_ProviderSummary",
+    ];
 
     /// <summary>
     /// Executes a list of stored procedures sequentially on an open connection.

@@ -37,7 +37,7 @@ BEGIN
     SELECT
         LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown')))        AS PayerName_Raw,
         ISNULL(LTRIM(RTRIM(ISNULL(Aging, 'Unknown'))), 'Unknown') AS Aging,
-        COUNT(*)                                           AS ClaimCount,
+        COUNT(*)                                           AS ClaiamCount,
         ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0) AS TotalCharges
     INTO #Raw
     FROM dbo.ClaimLevelData
@@ -45,7 +45,8 @@ BEGIN
           'Unbilled in Daq',
           'Unbilled in Webpm'
       )
-      AND NULLIF(LTRIM(RTRIM(PayerName_Raw)), '') IS NOT NULL
+    --  AND NULLIF(LTRIM(RTRIM(PayerName_Raw)), '') IS NOT NULL
+    -- and  (FirstBilledDate IS NULL OR LTRIM(RTRIM(FirstBilledDate)) = '')
     GROUP BY
         LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))),
         ISNULL(LTRIM(RTRIM(ISNULL(Aging, 'Unknown'))), 'Unknown');

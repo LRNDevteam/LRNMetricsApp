@@ -77,12 +77,13 @@ BEGIN
         TRY_CAST(ChargeAmount AS DECIMAL(18,2))                                          AS Charge
     INTO #Raw
     FROM dbo.ClaimLevelData
-    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL;
+    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL and FirstBilledDate !='';
 
     -- Panel summary
     SELECT
         Panelname,
-        COUNT(DISTINCT VisitKey)    AS ClaimCount,
+        --COUNT(DISTINCT VisitKey)    AS ClaimCount,
+		COUNT( VisitKey)    AS ClaimCount,
         ISNULL(SUM(Charge), 0)      AS TotalCharges
     INTO #PanelSummary
     FROM #Raw
@@ -120,9 +121,103 @@ BEGIN
 END
 GO
 
+
 /*
 SELECT PanelName, ClaimCount, TotalCharges FROM dbo.PCR_CodingPanelSummary ORDER BY TotalCharges DESC;
 SELECT PanelName, CPTCodeXUnitsXModifier, ClaimCount, TotalCharges FROM dbo.PCR_CodingCPTDetail ORDER BY PanelName, TotalCharges DESC;
 */
+
+-- ============================================================
+-- Step 3: Read stored procedure
+-- Called by LabMetricsDashboard.SqlLabProductionSummaryRepository.
+-- Returns TWO result sets (panel summary, then CPT detail). See
+-- usp_GetPCR_MonthlyBilledProductionSummary header for the parameter
+-- contract (no params -> snapshot tables; any param -> live aggregate).
+-- The Coding tab only filters on PanelNames + dates; the other parameters
+-- are accepted for a uniform call signature and otherwise ignored.
+-- ============================================================
+CREATE OR ALTER PROCEDURE dbo.usp_GetPCR_CodingBreakdown
+    @PayerNames      NVARCHAR(MAX) = NULL,   -- accepted for signature parity; not used
+    @PanelNames      NVARCHAR(MAX) = NULL,
+    @DosFrom         DATE          = NULL,
+    @DosTo           DATE          = NULL,
+    @FirstBillFrom   DATE          = NULL,
+    @FirstBillTo     DATE          = NULL,
+    @FirstBilledFrom DATE          = NULL,
+    @FirstBilledTo   DATE          = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @HasFilter BIT =
+        CASE
+            WHEN NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL THEN 1
+            WHEN @DosFrom         IS NOT NULL OR @DosTo         IS NOT NULL THEN 1
+            WHEN @FirstBillFrom   IS NOT NULL OR @FirstBillTo   IS NOT NULL THEN 1
+            WHEN @FirstBilledFrom IS NOT NULL OR @FirstBilledTo IS NOT NULL THEN 1
+            ELSE 0
+        END;
+
+    IF @HasFilter = 0
+    BEGIN
+        SELECT  PanelName, ClaimCount, TotalCharges
+        FROM    dbo.PCR_CodingPanelSummary
+        ORDER BY TotalCharges DESC;
+
+        SELECT  PanelName, CPTCodeXUnitsXModifier, ClaimCount, TotalCharges
+        FROM    dbo.PCR_CodingCPTDetail
+        ORDER BY PanelName, TotalCharges DESC;
+        RETURN;
+    END
+
+    DECLARE @PanelList TABLE (Value NVARCHAR(500) NOT NULL PRIMARY KEY);
+    IF NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL
+        INSERT INTO @PanelList(Value)
+        SELECT DISTINCT LTRIM(RTRIM(value)) FROM STRING_SPLIT(@PanelNames, '|')
+        WHERE  NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+    -- Filtered live aggregate over billed claims (matches usp_RefreshPCR_CodingBreakdown_Billed body
+    -- with the additional filter clauses).
+    SELECT
+        LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(Panelname)), ''), '(No Panelname)'))) AS Panelname,
+        LTRIM(RTRIM(ISNULL(CPTCodeXUnitsXModifier, '')))                            AS CPTDetail,
+        COALESCE(
+            NULLIF(LTRIM(RTRIM(AccessionNumber)), ''),
+            NULLIF(LTRIM(RTRIM(ClaimID)),         '')
+        )                                                                            AS VisitKey,
+        TRY_CAST(ChargeAmount AS DECIMAL(18,2))                                      AS Charge
+    INTO #Raw
+    FROM dbo.ClaimLevelData
+    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+      AND LTRIM(RTRIM(FirstBilledDate)) <> ''
+      AND (@HasPanelFilter    = 0 OR LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(Panelname)), ''), '(No Panelname)'))) IN (SELECT Value FROM @PanelList))
+      AND (@DosFrom           IS NULL OR TRY_CAST(DateOfService    AS DATE) >= @DosFrom)
+      AND (@DosTo             IS NULL OR TRY_CAST(DateOfService    AS DATE) <= @DosTo)
+      AND (@FirstBillFrom     IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) >= @FirstBillFrom)
+      AND (@FirstBillTo       IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) <= @FirstBillTo)
+      AND (@FirstBilledFrom   IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) >= @FirstBilledFrom)
+      AND (@FirstBilledTo     IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) <= @FirstBilledTo);
+
+    SELECT  Panelname             AS PanelName,
+            COUNT(VisitKey)        AS ClaimCount,
+            ISNULL(SUM(Charge), 0) AS TotalCharges
+    FROM    #Raw
+    GROUP BY Panelname
+    ORDER BY TotalCharges DESC;
+
+    SELECT  Panelname                AS PanelName,
+            CPTDetail                AS CPTCodeXUnitsXModifier,
+            COUNT(DISTINCT VisitKey) AS ClaimCount,
+            ISNULL(SUM(Charge), 0)   AS TotalCharges
+    FROM    #Raw
+    WHERE   CPTDetail <> ''
+    GROUP BY Panelname, CPTDetail
+    ORDER BY PanelName, TotalCharges DESC;
+
+    DROP TABLE IF EXISTS #Raw;
+END
+GO
 
 PRINT '09_PCRLabsofAmerica_CodingBreakdown.sql completed.';

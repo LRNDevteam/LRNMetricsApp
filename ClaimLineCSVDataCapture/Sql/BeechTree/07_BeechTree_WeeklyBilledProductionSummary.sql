@@ -1,8 +1,8 @@
--- BeechTree � Weekly Claim Production Billed Summary
+﻿-- BeechTree — Weekly Claim Production Billed Summary
 -- Rule:
 --   Filter  : TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
 --   Rows    : Panelname  x  Top 3 Payer (by COUNT(DISTINCT ClaimID), per Panelname)
---   Columns : ChargeEnteredDate week range Thu�Wed, last 4 complete weeks
+--   Columns : ChargeEnteredDate week range Thu–Wed, last 4 complete weeks
 --             | COUNT(DISTINCT ClaimID) | SUM(ChargeAmount)
 --   Note    : BeechTree week runs Thursday through Wednesday.
 --             Reference Thursday anchor: 1900-01-04.
@@ -27,32 +27,55 @@ CREATE TABLE dbo.BT_WeeklyBilledProductionSummary
 );
 GO
 
+
+
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshBT_WeeklyBilledProductionSummary
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @Today            DATE = CAST(GETDATE() AS DATE);
-    DECLARE @ThisWeekThuStart DATE = DATEADD(day, -(DATEDIFF(day, '1900-01-04', @Today) % 7), @Today);
+	 DECLARE @Today            DATE = CAST(GETDATE() AS DATE);  
+    DECLARE @ThisWeekFriStart DATE;  
+    DECLARE @DateFromData     DATE;  
 
-    DECLARE @i INT = 1;
-    CREATE TABLE #Weeks
-    (
-        WeekIndex INT PRIMARY KEY,
-        WeekStart DATE,
-        WeekEnd   DATE,
-        WeekLabel NVARCHAR(32)
-    );
+     SELECT   
+        @DateFromData     = MAX(TRY_CAST(ChargeEnteredDate AS DATE)),  
+        @ThisWeekFriStart = DATEADD(day,  
+            -(DATEDIFF(day, '1900-01-05', ISNULL(MAX(TRY_CAST(ChargeEnteredDate AS DATE)), @Today)) % 7),  
+            ISNULL(MAX(TRY_CAST(ChargeEnteredDate AS DATE)), @Today))  
+    FROM dbo.ClaimLevelData  
+    WHERE TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL  
+      AND TRY_CAST(ChargeEnteredDate AS DATE) <= @Today;  
+  
+    -- ✅ If max date >= Thursday of current week → current week is complete → start from 0  
+    -- Otherwise current week is incomplete → start from 1 (last complete week)  
+    DECLARE @StartIndex INT = CASE  
+        WHEN @DateFromData >= DATEADD(day, 6, @ThisWeekFriStart) THEN 0   -- ← current week complete (Thu)  
+        ELSE 1                                                             -- ← current week incomplete  
+    END;  
+  
+    DECLARE @i INT = @StartIndex;  
+    CREATE TABLE #Weeks  
+    (  
+        WeekIndex INT PRIMARY KEY,  
+        WeekStart DATE,  
+        WeekEnd   DATE,  
+        WeekLabel NVARCHAR(32)  
+    );  
+  
+    WHILE @i <= @StartIndex + 3   -- ← always 4 weeks  
+    BEGIN  
+        DECLARE @ws DATE = DATEADD(week, -@i, @ThisWeekFriStart);  
+        DECLARE @we DATE = DATEADD(day, 6, @ws);   -- Fri + 6 = Thu  
+        INSERT INTO #Weeks (WeekIndex, WeekStart, WeekEnd, WeekLabel)  
+        VALUES (@i, @ws, @we, FORMAT(@ws, 'yyyy-MM-dd') + ' - ' + FORMAT(@we, 'yyyy-MM-dd'));  
+        SET @i = @i + 1;  
+    END  
+  
 
-    WHILE @i <= 4
-    BEGIN
-        DECLARE @ws DATE = DATEADD(week, -@i, @ThisWeekThuStart);
-        DECLARE @we DATE = DATEADD(day, 6, @ws);
-        INSERT INTO #Weeks (WeekIndex, WeekStart, WeekEnd, WeekLabel)
-        VALUES (@i, @ws, @we, FORMAT(@ws, 'yyyy-MM-dd') + ' - ' + FORMAT(@we, 'yyyy-MM-dd'));
-        SET @i = @i + 1;
-    END
-
+    -- Bug-fix: drive the join from #Weeks (LEFT JOIN) so every one of the 4 weeks
+    -- always produces at least one row in the snapshot, even when zero billed claims
+    -- existed that week.
     SELECT
         LTRIM(RTRIM(ISNULL(cl.Panelname,     'Unknown')))              AS Panelname,
         LTRIM(RTRIM(ISNULL(cl.PayerName_Raw, 'Unknown')))              AS PayerName_Raw,
@@ -60,9 +83,11 @@ BEGIN
         COUNT(DISTINCT NULLIF(LTRIM(RTRIM(cl.ClaimID)), ''))           AS ClaimCount,
         ISNULL(SUM(TRY_CAST(cl.ChargeAmount AS DECIMAL(18,2))), 0)     AS TotalCharges
     INTO #BilledRaw
-    FROM dbo.ClaimLevelData cl
-    JOIN #Weeks w ON TRY_CAST(cl.ChargeEnteredDate AS DATE) BETWEEN w.WeekStart AND w.WeekEnd
-    WHERE TRY_CAST(cl.FirstBilledDate AS DATE) IS NOT NULL
+    FROM #Weeks w
+    LEFT JOIN dbo.ClaimLevelData cl
+           ON TRY_CAST(cl.ChargeEnteredDate AS DATE) BETWEEN w.WeekStart AND w.WeekEnd
+          AND TRY_CAST(cl.FirstBilledDate   AS DATE) IS NOT NULL
+          AND LTRIM(RTRIM(cl.FirstBilledDate)) <> ''
     GROUP BY
         LTRIM(RTRIM(ISNULL(cl.Panelname,     'Unknown'))),
         LTRIM(RTRIM(ISNULL(cl.PayerName_Raw, 'Unknown'))),
@@ -76,13 +101,14 @@ BEGIN
     FROM #BilledRaw
     GROUP BY Panelname, PayerName_Raw;
 
+    -- Keep all payers (rank filter removed) so the read SP can derive panel totals.
     SELECT
         b.Panelname, b.PayerName_Raw, CAST(r.PayerRank AS TINYINT) AS PayerRank,
         b.WeekStart, b.WeekEnd, b.WeekLabel, b.ClaimCount, b.TotalCharges
     INTO #Top3
     FROM #BilledRaw b
     JOIN #PayerRanks r ON r.Panelname = b.Panelname AND r.PayerName_Raw = b.PayerName_Raw
-    WHERE r.PayerRank <= 3;
+    
 
     TRUNCATE TABLE dbo.BT_WeeklyBilledProductionSummary;
 
@@ -99,8 +125,10 @@ BEGIN
     DROP TABLE IF EXISTS #Top3;
     DROP TABLE IF EXISTS #Weeks;
 
-    PRINT 'usp_RefreshBT_WeeklyBilledProductionSummary completed � ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
+    PRINT 'usp_RefreshBT_WeeklyBilledProductionSummary completed — ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
 END
-GO
+
 
 PRINT '07_BeechTree_WeeklyBilledProductionSummary.sql completed.';
+
+

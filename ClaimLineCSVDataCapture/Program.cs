@@ -60,7 +60,7 @@ var processedLabNames = new List<string>();
 
 foreach (var lab in labConfigs)
 {
-    log.Info($"[Lab] {lab.LabName} — ClaimLineInsert={lab.ClaimLineInsert}, DBEnabled={lab.DBEnabled}");
+    log.Info($"[Lab] {lab.LabName} — ClaimLineInsert={lab.ClaimLineInsert}, ClaimLineRefresh={lab.ClaimLineRefresh}, DBEnabled={lab.DBEnabled}");
 
     // ── Gate: only proceed when ClaimLineInsert is enabled ─────────────────
     if (!lab.ClaimLineInsert)
@@ -115,6 +115,23 @@ foreach (var lab in labConfigs)
     var claimInserted = false;
     var lineInserted = false;
 
+    // ── Refresh mode: purge existing lab data so the latest file re-inserts cleanly ──
+    if (lab.ClaimLineRefresh)
+    {
+        log.Info($"  [Refresh] ClaimLineRefresh=true — purging existing data for {lab.LabName}…");
+        try
+        {
+            var (purgedClaim, purgedLine, purgedLog) = db.PurgeLabClaimLineData();
+            log.Info($"  [Refresh] Purged {purgedClaim} ClaimLevelData row(s), {purgedLine} LineLevelData row(s), {purgedLog} LineClaimFileLogs row(s).");
+        }
+        catch (Exception ex)
+        {
+            log.Error($"  [Refresh] Purge failed — {ex.Message}. Skipping lab to avoid partial data.");
+            labsFailed++;
+            continue;
+        }
+    }
+
     // ── Process Claim Level CSV ───────────────────────────────────────────────
     try
     {
@@ -139,14 +156,17 @@ foreach (var lab in labConfigs)
             log.Info($"  [Claim Level] File        : {claimFileName}");
             log.Info($"  [Claim Level] Week folder : {claimWeekFolder}");
 
-            // Early skip if same file already loaded
+            // Skip if same file already loaded — bypassed when ClaimLineRefresh=true so the
+            // latest file is always re-processed (a newer file may have dropped during the run).
             var liveClaimPath = db.GetLatestSourcePath(lab.LabName, "claimlevel");
-            if (string.Equals(liveClaimPath, claimFilePath, StringComparison.OrdinalIgnoreCase))
+            if (!lab.ClaimLineRefresh && string.Equals(liveClaimPath, claimFilePath, StringComparison.OrdinalIgnoreCase))
             {
                 log.Info($"  [Claim Level] Already loaded — same file, skipping.");
             }
             else
             {
+                if (lab.ClaimLineRefresh && liveClaimPath is not null)
+                    log.Info($"  [Claim Level] Refresh mode — re-processing (previously loaded: {Path.GetFileName(liveClaimPath)}).");
                 var runId = ClaimLineDbService.ExtractRunId(claimFilePath);
                 var claimWorkingPath = Path.Combine(workingFolder, Path.GetFileName(claimFilePath));
                 try
@@ -211,13 +231,17 @@ foreach (var lab in labConfigs)
             log.Info($"  [Line Level] File        : {lineFileName}");
             log.Info($"  [Line Level] Week folder : {lineWeekFolder}");
 
+            // Skip if same file already loaded — bypassed when ClaimLineRefresh=true so the
+            // latest file is always re-processed (a newer file may have dropped during the run).
             var livLinePath = db.GetLatestSourcePath(lab.LabName, "linelevel");
-            if (string.Equals(livLinePath, lineFilePath, StringComparison.OrdinalIgnoreCase))
+            if (!lab.ClaimLineRefresh && string.Equals(livLinePath, lineFilePath, StringComparison.OrdinalIgnoreCase))
             {
                 log.Info($"  [Line Level] Already loaded — same file, skipping.");
             }
             else
             {
+                if (lab.ClaimLineRefresh && livLinePath is not null)
+                    log.Info($"  [Line Level] Refresh mode — re-processing (previously loaded: {Path.GetFileName(livLinePath)}).");
                 var runId = ClaimLineDbService.ExtractRunId(lineFilePath);
                 var lineWorkingPath = Path.Combine(workingFolder, Path.GetFileName(lineFilePath));
                 try
@@ -322,6 +346,8 @@ foreach (var lab in labConfigs)
                 // Unexpected error setting up the connection (not inside an individual SP)
                 log.Error($"  [NW Reports] Unexpected error running NorthWest production report SPs: {ex.Message}");
             }
+
+            RunCollectionSummary(log, db, "NW CS", db.RefreshNorthWestCollectionReports);
         }
 
         // ── Augustus Labs production report aggregates ───────────────────────
@@ -352,6 +378,8 @@ foreach (var lab in labConfigs)
             {
                 log.Error($"  [Aug Reports] Unexpected error running Augustus production report SPs: {ex.Message}");
             }
+
+            RunCollectionSummary(log, db, "Aug CS", db.RefreshAugustusCollectionReports);
         }
 
         // ── Certus Labs production report aggregates ─────────────────────────
@@ -381,6 +409,8 @@ foreach (var lab in labConfigs)
             {
                 log.Error($"  [Cert Reports] Unexpected error running Certus production report SPs: {ex.Message}");
             }
+
+            RunCollectionSummary(log, db, "Cert CS", db.RefreshCertusCollectionReports);
         }
 
         // ── COVE Labs production report aggregates ────────────────────────────
@@ -410,6 +440,8 @@ foreach (var lab in labConfigs)
             {
                 log.Error($"  [COVE Reports] Unexpected error running COVE production report SPs: {ex.Message}");
             }
+
+            RunCollectionSummary(log, db, "COVE CS", db.RefreshCoveCollectionReports);
         }
 
         // ── Elixir Labs production report aggregates ──────────────────────────
@@ -439,6 +471,8 @@ foreach (var lab in labConfigs)
             {
                 log.Error($"  [Elix Reports] Unexpected error running Elixir production report SPs: {ex.Message}");
             }
+
+            RunCollectionSummary(log, db, "Elix CS", db.RefreshElixirCollectionReports);
         }
 
         // ── PCRLabsofAmerica production report aggregates ─────────────────────
@@ -469,6 +503,8 @@ foreach (var lab in labConfigs)
             {
                 log.Error($"  [PCR Reports] Unexpected error running PCRLabsofAmerica production report SPs: {ex.Message}");
             }
+
+            RunCollectionSummary(log, db, "PCR CS", db.RefreshPCRLabsCollectionReports);
         }
 
         // ── Beech_Tree production report aggregates ───────────────────────────
@@ -499,6 +535,8 @@ foreach (var lab in labConfigs)
             {
                 log.Error($"  [BT Reports] Unexpected error running BeechTree production report SPs: {ex.Message}");
             }
+
+            RunCollectionSummary(log, db, "BT CS", db.RefreshBeechTreeCollectionReports);
         }
 
         // ── RisingTides production report aggregates ──────────────────────────
@@ -528,10 +566,43 @@ foreach (var lab in labConfigs)
             {
                 log.Error($"  [RT Reports] Unexpected error running RisingTides production report SPs: {ex.Message}");
             }
+
+            // ── RisingTides Collection Summary aggregates ─────────────────────
+            // Pre-computes the data behind the 13 Collection Summary tabs in the
+            // LabMetricsDashboard web app. Same isolation pattern — one SP failure
+            // does not block the others, and never blocks the main ingestion flow.
+            log.Info($"  [RT CS Reports] Running RisingTides Collection Summary SPs…");
+            try
+            {
+                var rtCsResults = db.RefreshRisingTidesCollectionReports();
+                foreach (var (spName, elapsedMs, error) in rtCsResults)
+                {
+                    if (error is null)
+                        log.Info($"  [RT CS Reports] {spName} — OK ({elapsedMs} ms).");
+                    else
+                        log.Error($"  [RT CS Reports] {spName} — FAILED ({elapsedMs} ms): {error}");
+                }
+
+                var failed = rtCsResults.Count(r => r.Error is not null);
+                var passed = rtCsResults.Count(r => r.Error is null);
+                log.Info($"  [RT CS Reports] {passed}/{rtCsResults.Count} SP(s) succeeded.");
+                if (failed > 0)
+                    log.Warn($"  [RT CS Reports] {failed} SP(s) failed — see errors above.");
+            }
+            catch (Exception ex)
+            {
+                log.Error($"  [RT CS Reports] Unexpected error running RisingTides Collection Summary SPs: {ex.Message}");
+            }
         }
 
         processedLabNames.Add(lab.LabName);
         labsProcessed++;
+
+        // ── Reset ClaimLineRefresh after a successful full refresh ────────────
+        // Only resets when both files were actually inserted (not just skipped),
+        // so a failed or partial run keeps the flag true and retries next cycle.
+        if (lab.ClaimLineRefresh)
+            LabConfigLoader.TryResetClaimLineRefresh(labConfigFolder, lab.LabName, log);
     }
     else
     {
@@ -550,4 +621,40 @@ log.Info($"  Skipped   : {labsSkipped}");
 log.Info($"  Failed    : {labsFailed}");
 
 return labsFailed > 0 ? 1 : 0;
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Local helper: runs a lab's Collection Summary refresher and logs each SP's
+// result, mirroring the production-report logging pattern used elsewhere.
+// ─────────────────────────────────────────────────────────────────────────────
+static void RunCollectionSummary(
+    ClaimLineCSVDataCapture.Services.AppLogger log,
+    ClaimLineCSVDataCapture.Services.ClaimLineDbService db,
+    string tag,
+    Func<List<(string SpName, long ElapsedMs, string? Error)>> refresher)
+{
+    log.Info($"  [{tag}] Running Collection Summary SPs…");
+    try
+    {
+        var results = refresher();
+        foreach (var (spName, elapsedMs, error) in results)
+        {
+            if (error is null)
+                log.Info($"  [{tag}] {spName} — OK ({elapsedMs} ms).");
+            else
+                log.Error($"  [{tag}] {spName} — FAILED ({elapsedMs} ms): {error}");
+        }
+
+        var failed = results.Count(r => r.Error is not null);
+        var passed = results.Count(r => r.Error is null);
+        log.Info($"  [{tag}] {passed}/{results.Count} SP(s) succeeded.");
+        if (failed > 0)
+            log.Warn($"  [{tag}] {failed} SP(s) failed — see errors above.");
+    }
+    catch (Exception ex)
+    {
+        log.Error($"  [{tag}] Unexpected error running Collection Summary SPs: {ex.Message}");
+    }
+}
+
 

@@ -81,7 +81,7 @@ BEGIN
     -- Panel summary: distinct visit count + total charges
     SELECT
         Panelname,
-        COUNT(DISTINCT VisitKey)    AS ClaimCount,
+        COUNT(VisitKey)    AS ClaimCount,
         ISNULL(SUM(Charge), 0)      AS TotalCharges
     INTO #PanelSummary
     FROM #Raw
@@ -91,7 +91,7 @@ BEGIN
     SELECT
         Panelname,
         CPTDetail,
-        COUNT(DISTINCT VisitKey)    AS ClaimCount,
+        COUNT( VisitKey)    AS ClaimCount,
         ISNULL(SUM(Charge), 0)      AS TotalCharges
     INTO #CPTDetail
     FROM #Raw

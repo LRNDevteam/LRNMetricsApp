@@ -1,10 +1,10 @@
--- ============================================================
--- Augustus Labs � Weekly Claim Production Billed Summary
+﻿-- ============================================================
+-- Augustus Labs — Weekly Claim Production Billed Summary
 -- Rule:
 --   Filter  : TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL
 --             AND TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
 --   Rows    : PanelNew  x  Top 3 Payer (by claim count, per PanelNew)
---   Columns : ChargeEnteredDate week range (Mon�Sun), last 4 complete weeks
+--   Columns : ChargeEnteredDate week range (Mon–Sun), last 4 complete weeks
 --   Note    : No PayerName_Raw NULL exclusion.
 -- ============================================================
 
@@ -38,31 +38,47 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    -- Week boundary: Mon�Sun.
+    -- Week boundary: Mon–Sun.
     -- Reference Monday: 1900-01-01.
-    DECLARE @Today DATE = CAST(GETDATE() AS DATE);
-    DECLARE @ThisWeekStart DATE = DATEADD(day, -(DATEDIFF(day, '1900-01-01', @Today) % 7), @Today);
+		DECLARE @Today            DATE = CAST(GETDATE() AS DATE);
+		DECLARE @ThisWeekMonStart DATE;
+		DECLARE @DateFromData     DATE;
 
-    -- Build last 4 complete Mon�Sun weeks (0 = most recent complete week).
-    DECLARE @i INT = 1;   -- start at 1: skip the current (possibly partial) week
-    CREATE TABLE #Weeks
-    (
-        WeekIndex INT PRIMARY KEY,
-        WeekStart DATE,
-        WeekEnd   DATE,
-        WeekLabel NVARCHAR(32)
-    );
+		-- ✅ Mon–Sun week anchor: 1900-01-01 is a known Monday
+		SELECT
+			@DateFromData      = MAX(TRY_CAST(ChargeEnteredDate AS DATE)),
+			@ThisWeekMonStart  = DATEADD(day,
+				-(DATEDIFF(day, '1900-01-01', ISNULL(MAX(TRY_CAST(ChargeEnteredDate AS DATE)), @Today)) % 7),
+				ISNULL(MAX(TRY_CAST(ChargeEnteredDate AS DATE)), @Today))
+		FROM dbo.ClaimLevelData
+		WHERE TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL
+		  AND TRY_CAST(ChargeEnteredDate AS DATE) <= @Today;
 
-    WHILE @i <= 4
-    BEGIN
-        DECLARE @ws DATE = DATEADD(week, -@i, @ThisWeekStart);
-        DECLARE @we DATE = DATEADD(day, 6, @ws);   -- Mon + 6 = Sun
-        INSERT INTO #Weeks (WeekIndex, WeekStart, WeekEnd, WeekLabel)
-        VALUES (@i, @ws, @we, FORMAT(@ws, 'yyyy-MM-dd') + ' - ' + FORMAT(@we, 'yyyy-MM-dd'));
-        SET @i = @i + 1;
-    END
+		-- ✅ If max date >= Sunday of current week → current week is complete → start from 0
+		-- Otherwise current week is incomplete → start from 1 (last complete week)
+		DECLARE @StartIndex INT = CASE
+			WHEN @DateFromData >= DATEADD(day, 6, @ThisWeekMonStart) THEN 0   -- ← current week complete (Sun)
+			ELSE 1                                                             -- ← current week incomplete
+		END;
 
-    -- Aggregate by PanelNew � PayerName_Raw � week, filtered by ChargeEnteredDate.
+		DECLARE @i INT = @StartIndex;
+		CREATE TABLE #Weeks
+		(
+			WeekIndex INT PRIMARY KEY,
+			WeekStart DATE,
+			WeekEnd   DATE,
+			WeekLabel NVARCHAR(32)
+		);
+
+		WHILE @i <= @StartIndex + 3   -- ← always 4 weeks
+		BEGIN
+			DECLARE @ws DATE = DATEADD(week, -@i, @ThisWeekMonStart);
+			DECLARE @we DATE = DATEADD(day, 6, @ws);   -- Mon + 6 = Sun
+			INSERT INTO #Weeks (WeekIndex, WeekStart, WeekEnd, WeekLabel)
+			VALUES (@i, @ws, @we, FORMAT(@ws, 'yyyy-MM-dd') + ' - ' + FORMAT(@we, 'yyyy-MM-dd'));
+			SET @i = @i + 1;
+		END
+    -- Aggregate by PanelNew × PayerName_Raw × week, filtered by ChargeEnteredDate.
     SELECT
         LTRIM(RTRIM(ISNULL(cl.PanelNew,      'Unknown')))       AS PanelNew,
         LTRIM(RTRIM(ISNULL(cl.PayerName_Raw, 'Unknown')))       AS PayerName_Raw,
@@ -74,7 +90,7 @@ BEGIN
     INTO #BilledRaw
     FROM dbo.ClaimLevelData cl
     JOIN #Weeks w ON TRY_CAST(cl.ChargeEnteredDate AS DATE) BETWEEN w.WeekStart AND w.WeekEnd
-    WHERE TRY_CAST(cl.FirstBilledDate   AS DATE) IS NOT NULL
+    WHERE TRY_CAST(cl.FirstBilledDate   AS DATE) IS NOT NULL and cl.FirstBilledDate <>''
         --AND TRY_CAST(cl.ChargeEnteredDate AS DATE) IS NOT NULL
         --AND NULLIF(LTRIM(RTRIM(cl.PanelNew)), '') IS NOT NULL
     GROUP BY
@@ -100,7 +116,7 @@ BEGIN
     INTO #Top3
     FROM #BilledRaw b
     JOIN #PayerRanks r ON r.PanelNew = b.PanelNew AND r.PayerName_Raw = b.PayerName_Raw
-    WHERE r.PayerRank <= 3;
+   -- WHERE r.PayerRank <= 3;
 
     TRUNCATE TABLE dbo.Aug_WeeklyBilledProductionSummary;
 
@@ -118,7 +134,7 @@ BEGIN
     DROP TABLE IF EXISTS #Top3;
     DROP TABLE IF EXISTS #Weeks;
 
-    PRINT 'usp_RefreshAug_WeeklyBilledProductionSummary completed � ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
+    PRINT 'usp_RefreshAug_WeeklyBilledProductionSummary completed — ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
 END
 GO
 

@@ -53,6 +53,10 @@ BEGIN
         SET @i = @i + 1;
     END
 
+    -- Bug-fix: drive the join from #Weeks (LEFT JOIN) so every one of the 4 weeks
+    -- always produces at least one row in the snapshot, even when zero billed claims
+    -- existed that week. Empty weeks land as a single placeholder row with
+    -- ClaimCount = 0 / TotalCharges = 0 so the dashboard always renders 4 weeks.
     SELECT
         LTRIM(RTRIM(ISNULL(cl.Panelname,     'Unknown')))              AS Panelname,
         LTRIM(RTRIM(ISNULL(cl.PayerName_Raw, 'Unknown')))              AS PayerName_Raw,
@@ -60,9 +64,11 @@ BEGIN
         COUNT(DISTINCT NULLIF(LTRIM(RTRIM(cl.ClaimID)), ''))           AS ClaimCount,
         ISNULL(SUM(TRY_CAST(cl.ChargeAmount AS DECIMAL(18,2))), 0)     AS TotalCharges
     INTO #BilledRaw
-    FROM dbo.ClaimLevelData cl
-    JOIN #Weeks w ON TRY_CAST(cl.ChargeEnteredDate AS DATE) BETWEEN w.WeekStart AND w.WeekEnd
-    WHERE TRY_CAST(cl.FirstBilledDate AS DATE) IS NOT NULL
+    FROM #Weeks w
+    LEFT JOIN dbo.ClaimLevelData cl
+           ON TRY_CAST(cl.ChargeEnteredDate AS DATE) BETWEEN w.WeekStart AND w.WeekEnd
+          AND TRY_CAST(cl.FirstBilledDate   AS DATE) IS NOT NULL
+          AND LTRIM(RTRIM(cl.FirstBilledDate)) <> ''
     GROUP BY
         LTRIM(RTRIM(ISNULL(cl.Panelname,     'Unknown'))),
         LTRIM(RTRIM(ISNULL(cl.PayerName_Raw, 'Unknown'))),
@@ -74,13 +80,14 @@ BEGIN
     INTO #PayerRanks
     FROM #BilledRaw GROUP BY Panelname, PayerName_Raw;
 
+    -- Keep all payers (rank filter intentionally removed) so the read SP can derive
+    -- panel-level totals (PayerRank=0) from the same snapshot rows.
     SELECT
         b.Panelname, b.PayerName_Raw, CAST(r.PayerRank AS TINYINT) AS PayerRank,
         b.WeekStart, b.WeekEnd, b.WeekLabel, b.ClaimCount, b.TotalCharges
     INTO #Top3
     FROM #BilledRaw b
-    JOIN #PayerRanks r ON r.Panelname = b.Panelname AND r.PayerName_Raw = b.PayerName_Raw
-    WHERE r.PayerRank <= 3;
+    JOIN #PayerRanks r ON r.Panelname = b.Panelname AND r.PayerName_Raw = b.PayerName_Raw;
 
     TRUNCATE TABLE dbo.RT_WeeklyBilledProductionSummary;
 

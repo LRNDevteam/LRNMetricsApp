@@ -76,7 +76,7 @@ BEGIN
               'Unbilled in Webpm - PR',
               'Billed amount 0'
           )
-      AND TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+      --AND TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL and FirstBilledDate<>''
       --AND NULLIF(LTRIM(RTRIM(PayerName_Raw)), '') IS NOT NULL
     GROUP BY
         LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))),
@@ -94,7 +94,6 @@ BEGIN
     PRINT 'usp_RefreshNW_PayerBreakdown completed - ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows loaded.';
 END
 GO
-
 -- ============================================================
 -- Step 2b: Stored procedure – Payer × PanelType
 -- ============================================================
@@ -113,7 +112,7 @@ BEGIN
                 ISNULL(PanelName, 'Unknown')
             )
         ))                                                               AS PanelType,
-        COUNT(DISTINCT
+        COUNT(
             COALESCE(
                 NULLIF(LTRIM(RTRIM(AccessionNumber)), ''),
                 NULLIF(LTRIM(RTRIM(ClaimID)), '')
@@ -129,7 +128,7 @@ BEGIN
               'Unbilled in Webpm - PR',
               'Billed amount 0'
           )
-      AND TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+     -- AND TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL and FirstBilledDate<>''
     GROUP BY
         LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))),
         LTRIM(RTRIM(

@@ -67,7 +67,7 @@ BEGIN
         ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))),0)  AS TotalCharges
     INTO #RawPM
     FROM dbo.ClaimLevelData
-    WHERE TRY_CAST(FirstBilledDate   AS DATE) IS NOT NULL
+    WHERE TRY_CAST(FirstBilledDate   AS DATE) IS NOT NULL and FirstBilledDate<>''
      -- AND TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL
     GROUP BY
         LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))),
@@ -97,15 +97,16 @@ BEGIN
     SELECT
         LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown')))          AS PayerName_Raw,
         LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(PanelNew)),''), '(No PanelNew)'))) AS PanelNew,
-        COUNT(DISTINCT
-            COALESCE(
-                NULLIF(LTRIM(RTRIM(AccessionNumber)), ''),
-                NULLIF(LTRIM(RTRIM(ClaimID)), '')
-            ))                                                   AS ClaimCount,
+        --COUNT(DISTINCT
+        --    COALESCE(
+        --        NULLIF(LTRIM(RTRIM(AccessionNumber)), ''),
+        --        NULLIF(LTRIM(RTRIM(ClaimID)), '')
+        --    ))                                                   AS ClaimCount,
+		COUNT (ClaimID) as ClaimCount,
         ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))),0)  AS TotalCharges
     INTO #RawPP
     FROM dbo.ClaimLevelData
-    WHERE TRY_CAST(FirstBilledDate   AS DATE) IS NOT NULL
+    WHERE TRY_CAST(FirstBilledDate   AS DATE) IS NOT NULL and FirstBilledDate<>''
      -- AND TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL
     GROUP BY
         LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))),
@@ -123,6 +124,7 @@ BEGIN
     PRINT 'usp_RefreshAug_PayerByPanel completed — ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
 END
 GO
+
 
 -- ============================================================
 -- Quick verification queries

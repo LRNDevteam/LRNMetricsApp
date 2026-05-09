@@ -48,7 +48,7 @@ BEGIN
         ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))),0)  AS TotalCharges
     INTO #BilledRaw
     FROM dbo.ClaimLevelData
-    WHERE TRY_CAST(FirstBilledDate   AS DATE) IS NOT NULL
+    WHERE TRY_CAST(FirstBilledDate   AS DATE) IS NOT NULL and FirstBilledDate<>''
       --AND TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL
       --AND NULLIF(LTRIM(RTRIM(PanelNew)), '') IS NOT NULL
     GROUP BY
@@ -78,7 +78,7 @@ BEGIN
     INTO #Top3
     FROM #BilledRaw b
     JOIN #PayerRanks r ON r.PanelNew = b.PanelNew AND r.PayerName_Raw = b.PayerName_Raw
-    WHERE r.PayerRank <= 3;
+   -- WHERE r.PayerRank <= 3;
 
     TRUNCATE TABLE dbo.Aug_MonthlyBilledProductionSummary;
 

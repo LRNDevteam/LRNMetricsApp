@@ -57,9 +57,9 @@ BEGIN
               'Unbilled in Webpm - PR',
               'Billed amount 0'
           )
-      AND TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL
-      AND NULLIF(LTRIM(RTRIM(PanelType)), '') IS NOT NULL
-      AND NULLIF(LTRIM(RTRIM(Payername_Raw)), '') IS NOT NULL
+      --AND TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL AND ChargeEnteredDate<>''
+      --AND NULLIF(LTRIM(RTRIM(PanelType)), '') IS NOT NULL
+      --AND NULLIF(LTRIM(RTRIM(Payername_Raw)), '') IS NOT NULL
     GROUP BY
         LTRIM(RTRIM(ISNULL(PanelType, 'Unknown'))),
         LTRIM(RTRIM(ISNULL(Payername_Raw, 'Unknown'))),
@@ -90,7 +90,7 @@ BEGIN
     JOIN #PayerRanks r
       ON r.PanelType = b.PanelType
      AND r.Payername_Raw = b.Payername_Raw
-    WHERE r.PayerRank <= 3;
+  --  WHERE r.PayerRank <= 3;
 
     TRUNCATE TABLE dbo.NW_MonthlyBilledProductionSummary;
 

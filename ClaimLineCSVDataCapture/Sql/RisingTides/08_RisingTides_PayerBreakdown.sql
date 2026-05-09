@@ -47,7 +47,7 @@ BEGIN
         ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0)         AS TotalCharges
     INTO #RawPM
     FROM dbo.ClaimLevelData
-    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL AND LTRIM(RTRIM(FirstBilledDate)) != ''
       AND NULLIF(LTRIM(RTRIM(PayerName_Raw)), '') IS NOT NULL
     GROUP BY
         LTRIM(RTRIM(PayerName_Raw)),
@@ -77,7 +77,7 @@ BEGIN
         ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0)                          AS TotalCharges
     INTO #RawPP
     FROM dbo.ClaimLevelData
-    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL AND LTRIM(RTRIM(FirstBilledDate)) != ''
       AND NULLIF(LTRIM(RTRIM(PayerName_Raw)), '') IS NOT NULL
     GROUP BY
         LTRIM(RTRIM(PayerName_Raw)),

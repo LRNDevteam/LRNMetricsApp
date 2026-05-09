@@ -37,12 +37,13 @@ BEGIN
         LTRIM(RTRIM(ISNULL(CPTCode, 'Unknown')))                AS CPTCode,
         FORMAT(TRY_CAST(ChargeEnteredDate AS DATE), 'yyyy-MM')  AS BilledYearMonth,
         -- Augustus metric: distinct CPT codes (not SUM of Units)
-        COUNT(DISTINCT LTRIM(RTRIM(ISNULL(CPTCode, ''))))       AS CPTCount,
+       -- COUNT(DISTINCT LTRIM(RTRIM(ISNULL(CPTCode, ''))))       AS CPTCount,
+		 COUNT(LTRIM(RTRIM(ISNULL(CPTCode, ''))))       AS CPTCount,
         ISNULL(SUM(TRY_CAST(Units          AS DECIMAL(18,2))),0) AS BilledUnits,
         ISNULL(SUM(TRY_CAST(ChargeAmount   AS DECIMAL(18,2))),0) AS TotalCharges
     INTO #Raw
     FROM dbo.LineLevelData
-    WHERE TRY_CAST(FirstBilledDate   AS DATE) IS NOT NULL
+    WHERE TRY_CAST(FirstBilledDate   AS DATE) IS NOT NULL and FirstBilledDate<>''
      -- AND TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL
       AND NULLIF(LTRIM(RTRIM(CPTCode)), '') IS NOT NULL
     GROUP BY
@@ -62,7 +63,6 @@ BEGIN
     PRINT 'usp_RefreshAug_CPTBreakdown completed — ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
 END
 GO
-
 /*
 SELECT CPTCode, BilledYearMonth, CPTCount, BilledUnits, TotalCharges
 FROM dbo.Aug_CPTBreakdown ORDER BY CPTCode, BilledYearMonth;

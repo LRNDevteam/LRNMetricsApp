@@ -24,7 +24,6 @@ CREATE TABLE dbo.Cove_CPTBreakdown
     RefreshedAt     DATETIME        NOT NULL DEFAULT GETDATE()
 );
 GO
-
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshCove_CPTBreakdown
 AS
 BEGIN
@@ -38,7 +37,7 @@ BEGIN
         ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0)         AS TotalCharges
     INTO #Raw
     FROM dbo.LineLevelData
-    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL and FirstBilledDate<>''
       AND NULLIF(LTRIM(RTRIM(CPTCode)), '') IS NOT NULL
     GROUP BY
         LTRIM(RTRIM(ISNULL(CPTCode, 'Unknown'))),
