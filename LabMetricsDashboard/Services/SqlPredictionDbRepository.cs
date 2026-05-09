@@ -36,38 +36,114 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
 
         var records = new List<PredictionRecord>();
 
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        await using var cmd = new SqlCommand("dbo.usp_GetPayerValidationReport", conn)
+        {
+            CommandType    = CommandType.StoredProcedure,
+            CommandTimeout = 120
+        };
+
+        cmd.Parameters.AddWithValue("@RunId",                     (object?)runId                    ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterPayerName",           (object?)filterPayerName          ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterPayerType",           (object?)filterPayerType          ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterPanelName",           (object?)filterPanelName          ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterFinalCoverageStatus", (object?)filterFinalCoverageStatus ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterPayability",          (object?)filterPayability         ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterCPTCode",             (object?)filterCPTCode            ?? DBNull.Value);
+
+        // NOTE: exceptions are intentionally NOT swallowed here. The caller (controller)
+        // catches them and surfaces an actionable error message via the view-model —
+        // hiding errors here was the root cause of the silent "all fields empty" bug.
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            records.Add(MapRow(reader));
+
+        _logger.LogInformation("usp_GetPayerValidationReport returned {Count} rows.", records.Count);
+        return records;
+    }
+
+    /// <inheritdoc/>
+    public async Task<PredictionDbDiagnostic> ProbeAsync(
+        string connectionString,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+            return new PredictionDbDiagnostic(false, false, 0, null, null,
+                "DbConnectionString is empty in the lab configuration.");
+
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(cancellationToken);
 
-            await using var cmd = new SqlCommand("dbo.usp_GetPayerValidationReport", conn)
+            const string probeSql = """
+                SELECT
+                    CAST(CASE WHEN OBJECT_ID('dbo.PayerValidationReport','U')        IS NOT NULL THEN 1 ELSE 0 END AS BIT) AS TableExists,
+                    CAST(CASE WHEN OBJECT_ID('dbo.usp_GetPayerValidationReport','P') IS NOT NULL THEN 1 ELSE 0 END AS BIT) AS ProcExists;
+                """;
+
+            bool tableExists, procExists;
+            await using (var cmd = new SqlCommand(probeSql, conn) { CommandTimeout = 30 })
+            await using (var r = await cmd.ExecuteReaderAsync(cancellationToken))
             {
-                CommandType    = CommandType.StoredProcedure,
-                CommandTimeout = 120
-            };
+                if (!await r.ReadAsync(cancellationToken))
+                    return new PredictionDbDiagnostic(false, false, 0, null, null,
+                        "Database probe returned no rows (unexpected).");
+                tableExists = r.GetBoolean(0);
+                procExists  = r.GetBoolean(1);
+            }
 
-            cmd.Parameters.AddWithValue("@RunId",                     (object?)runId                    ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@FilterPayerName",           (object?)filterPayerName          ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@FilterPayerType",           (object?)filterPayerType          ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@FilterPanelName",           (object?)filterPanelName          ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@FilterFinalCoverageStatus", (object?)filterFinalCoverageStatus ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@FilterPayability",          (object?)filterPayability         ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@FilterCPTCode",             (object?)filterCPTCode            ?? DBNull.Value);
+            if (!tableExists)
+                return new PredictionDbDiagnostic(false, procExists, 0, null, null,
+                    "Table dbo.PayerValidationReport does not exist in this lab's database. " +
+                    "Run PredictionAnalysisApp/Database/01_CreateTables.sql against this lab's database.");
 
-            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            if (!procExists)
+                return new PredictionDbDiagnostic(true, false, 0, null, null,
+                    "Stored procedure dbo.usp_GetPayerValidationReport is missing. " +
+                    "Run PredictionAnalysisApp/Database/02_CreateStoredProcedures.sql against this lab's database.");
 
-            while (await reader.ReadAsync(cancellationToken))
-                records.Add(MapRow(reader));
+            // Latest run + total row count in one round-trip
+            const string statsSql = """
+                SELECT TOP 1
+                    RunId,
+                    InsertedDateTime,
+                    (SELECT COUNT_BIG(*) FROM dbo.PayerValidationReport) AS TotalRows
+                FROM   dbo.PayerValidationReport
+                WHERE  RunId IS NOT NULL
+                ORDER  BY InsertedDateTime DESC;
+                """;
 
-            _logger.LogInformation("usp_GetPayerValidationReport returned {Count} rows.", records.Count);
+            await using (var cmd = new SqlCommand(statsSql, conn) { CommandTimeout = 60 })
+            await using (var r = await cmd.ExecuteReaderAsync(cancellationToken))
+            {
+                if (!await r.ReadAsync(cancellationToken))
+                {
+                    return new PredictionDbDiagnostic(true, true, 0, null, null,
+                        "dbo.PayerValidationReport exists but is empty. " +
+                        "Run the PredictionAnalysisApp pipeline against this lab's source files to populate it.");
+                }
+
+                var runId    = r.IsDBNull(0) ? null : r.GetString(0);
+                var inserted = r.IsDBNull(1) ? (DateTime?)null : r.GetDateTime(1);
+                var rows     = r.IsDBNull(2) ? 0L : r.GetInt64(2);
+                return new PredictionDbDiagnostic(true, true, rows, runId, inserted, null);
+            }
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogError(ex, "Prediction DB probe failed.");
+            return new PredictionDbDiagnostic(false, false, 0, null, null,
+                $"SQL error while probing Prediction database: {ex.Message}");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to read from usp_GetPayerValidationReport — returning empty dataset.");
+            _logger.LogError(ex, "Prediction DB probe failed.");
+            return new PredictionDbDiagnostic(false, false, 0, null, null,
+                $"Failed to probe Prediction database: {ex.Message}");
         }
-
-        return records;
     }
 
     // ?? Row mapper ????????????????????????????????????????????????????????????

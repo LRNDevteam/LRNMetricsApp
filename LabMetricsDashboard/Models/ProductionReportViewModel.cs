@@ -174,6 +174,12 @@ public sealed class ProductionReportViewModel
     /// <summary>Error message when the DB query fails or is unavailable.</summary>
     public string? ErrorMessage { get; init; }
 
+    /// <summary>The most recent WeekFolder from LineClaimFileLogs (e.g. "04.20.2026 - 04.26.2026").</summary>
+    public string? ReportWeekFolder { get; init; }
+
+    /// <summary>The most recent RunId from LineClaimFileLogs.</summary>
+    public string? ReportRunId { get; init; }
+
     public bool HasFilters => FilterPayerNames.Count > 0
         || FilterPanelNames.Count > 0
         || FilterPayerNamesExclude
@@ -358,7 +364,11 @@ public sealed class UnbilledAgingRow
 
 // ?? CPT Breakdown ???????????????????????????????????????????????
 
-public sealed record CptBreakdownCell(decimal Units, decimal BilledCharges);
+/// <summary>Per-cell metrics for the CPT Breakdown table (line-level).</summary>
+/// <param name="Units">Sum of <c>Units</c> in this group (or distinct CPTCode count under Rule3).</param>
+/// <param name="BilledCharges">Sum of <c>ChargeAmount</c> in this group.</param>
+/// <param name="ClaimCount">Number of line rows in this group (used for the "No. of Claims" column).</param>
+ public sealed record CptBreakdownCell(decimal Units, decimal BilledCharges, int ClaimCount = 0);
 
 public sealed class CptBreakdownRow
 {
@@ -375,4 +385,7 @@ public sealed class CptBreakdownRow
 
     /// <summary>Grand total billed charges for this CPT code.</summary>
     public decimal GrandTotalCharges { get; init; }
+
+    /// <summary>Grand total claim (line) count for this CPT code.</summary>
+    public int GrandTotalClaims { get; init; }
 }

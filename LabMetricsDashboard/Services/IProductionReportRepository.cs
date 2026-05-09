@@ -163,6 +163,19 @@ public interface IProductionReportRepository
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default);
 
+    /// <summary>Returns ClaimLevelData rows pre-split into Excel sheet segments, respecting Production Report filters.</summary>
+    Task<List<RawDataSegment>> GetClaimLevelDataExportSegmentsAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default);
+
     /// <summary>Returns all LineLevelData rows for Excel export, respecting Production Report filters.</summary>
     Task<List<Dictionary<string, object?>>> GetLineLevelDataExportAsync(
         string connectionString,
@@ -175,6 +188,22 @@ public interface IProductionReportRepository
         DateOnly? filterFirstBilledFrom = null,
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default);
+
+    /// <summary>Returns LineLevelData rows pre-split into Excel sheet segments, respecting Production Report filters.</summary>
+    Task<List<RawDataSegment>> GetLineLevelDataExportSegmentsAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default);
+
+    /// <summary>Returns the most recent WeekFolder and RunId from LineClaimFileLogs.</summary>
+    Task<(string? WeekFolder, string? RunId)> GetRunInfoAsync(string connectionString, CancellationToken ct = default);
 }
 
 /// <summary>Result container for the Monthly Claim Volume table.</summary>
@@ -232,4 +261,5 @@ public sealed record CptBreakdownResult(
     List<CptBreakdownRow> CptRows,
     Dictionary<string, CptBreakdownCell> GrandTotalByMonth,
     decimal GrandTotalUnits,
-    decimal GrandTotalCharges);
+    decimal GrandTotalCharges,
+    int GrandTotalClaims = 0);

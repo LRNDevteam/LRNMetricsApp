@@ -218,6 +218,23 @@ public static class ExcelTheme
         }
     }
 
+    /// <summary>Applies dark-green total-row styling (dark forest green background, white bold text).</summary>
+    public static void StyleGreenTotalRow(IXLWorksheet ws, int row, int startCol, int endCol)
+    {
+        for (int c = startCol; c <= endCol; c++)
+        {
+            var cell = ws.Cell(row, c);
+            cell.Style.Font.Bold = true;
+            cell.Style.Font.FontColor = XLColor.White;
+            cell.Style.Fill.BackgroundColor = TitleBg;
+            cell.Style.Border.TopBorder = XLBorderStyleValues.Medium;
+            cell.Style.Border.TopBorderColor = TitleBg;
+            cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+            cell.Style.Border.OutsideBorderColor = BorderColor;
+            cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        }
+    }
+
     /// <summary>Applies blue-themed total-row styling (dark navy background, white text).</summary>
     public static void StyleBlueTotalRow(IXLWorksheet ws, int row, int startCol, int endCol)
     {

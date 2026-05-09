@@ -10,26 +10,39 @@ namespace LabMetricsDashboard.Services;
 /// <summary>
 /// SQL Server implementation of <see cref="ICollectionSummaryRepository"/>.
 /// Reads from <c>dbo.ClaimLevelData</c>.
+/// Aggregate-table fast-path methods are implemented in
+/// <c>SqlCollectionSummaryRepository.Aggregates.cs</c>.
 /// </summary>
-public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepository
+public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryRepository
 {
     private readonly ILogger<SqlCollectionSummaryRepository> _logger;
 
     public SqlCollectionSummaryRepository(ILogger<SqlCollectionSummaryRepository> logger)
         => _logger = logger;
 
-    /// <summary>Fetches distinct PayerName/PanelName lists once for filter dropdowns.</summary>
+    /// <summary>Fetches distinct PayerName_Raw and panel values from <c>dbo.ClaimLevelData</c>.</summary>
     public async Task<CollectionFilterOptions> GetFilterOptionsAsync(
         string connectionString,
+        string panelColumn,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+        ArgumentException.ThrowIfNullOrWhiteSpace(panelColumn);
 
-        const string sql = """
-            SELECT DISTINCT LTRIM(RTRIM(PayerName_Raw)) FROM dbo.ClaimLevelData
-            WHERE PayerName_Raw IS NOT NULL AND LTRIM(RTRIM(PayerName_Raw)) <> '' ORDER BY 1;
-            SELECT DISTINCT LTRIM(RTRIM(PanelName)) FROM dbo.ClaimLevelData
-            WHERE PanelName IS NOT NULL AND LTRIM(RTRIM(PanelName)) <> '' ORDER BY 1;
+        // Payer  : always PayerName_Raw for all labs.
+        // Panel  : lab-specific column — PanelType (NorthWest), PanelNew (Augustus),
+        //          or PanelName (all other labs). Caller resolves via
+        //          LabCollectionPrefix.GetPanelColumn(labName).
+        var sql = $"""
+            SELECT DISTINCT PayerName_Raw
+            FROM   dbo.ClaimLevelData
+            WHERE  PayerName_Raw IS NOT NULL AND LTRIM(RTRIM(PayerName_Raw)) <> ''
+            ORDER  BY PayerName_Raw;
+
+            SELECT DISTINCT {panelColumn}
+            FROM   dbo.ClaimLevelData
+            WHERE  {panelColumn} IS NOT NULL AND LTRIM(RTRIM({panelColumn})) <> ''
+            ORDER  BY {panelColumn};
             """;
 
         var sw = Stopwatch.StartNew();
@@ -44,8 +57,9 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
         await r.NextResultAsync(ct);
         while (await r.ReadAsync(ct)) panelNames.Add(r.GetString(0));
 
-        _logger.LogInformation("CollectionSummary FilterOptions: payers={Payers}, panels={Panels}, elapsed={Ms}ms",
-            payerNames.Count, panelNames.Count, sw.ElapsedMilliseconds);
+        _logger.LogInformation(
+            "CollectionSummary FilterOptions: payers={Payers}, panels={Panels} (col={Col}), elapsed={Ms}ms",
+            payerNames.Count, panelNames.Count, panelColumn, sw.ElapsedMilliseconds);
 
         return new CollectionFilterOptions(payerNames, panelNames);
     }
@@ -336,9 +350,10 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
                 .OrderByDescending(kv => kv.Value.totalEnc);
 
             var topPayers = (lineEncounters is not null ? payerQuery : payerQuery.Take(3))
-                .Select(kv => new CollectionPayerDrillDown
+                .Select((kv, idx) => new CollectionPayerDrillDown
                 {
                     PayerName = kv.Key,
+                    PayerRank = (byte)(idx + 1),
                     ByMonth = kv.Value.byMonth.ToDictionary(
                         m => m.Key,
                         m => new CollectionMonthlyCell(m.Value.enc, m.Value.paid)),
@@ -379,10 +394,11 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
     private sealed record CollectionRawPivotRow(
         string PanelName,
         string PayerName,
-        int BillYear,
-        int BillMonth,
-        int LineItemCount,
-        decimal InsurancePaid);
+        int    BillYear,
+        int    BillMonth,
+        int    LineItemCount,
+        decimal InsurancePaid,
+        byte   PayerRank = 0);  // 0 = unranked (live query); >0 = DB-computed rank from aggregate table
 
 
     // ?? Weekly Claim Volume ??????????????????????????????????????
@@ -618,9 +634,10 @@ public sealed class SqlCollectionSummaryRepository : ICollectionSummaryRepositor
 
             var payerQuery = payerAgg.OrderByDescending(kv => kv.Value.totalEnc);
             var topPayers = (useLineEncounters ? payerQuery : payerQuery.Take(3))
-                .Select(kv => new CollectionWeeklyPayerDrillDown
+                .Select((kv, idx) => new CollectionWeeklyPayerDrillDown
                 {
                     PayerName = kv.Key,
+                    PayerRank = (byte)(idx + 1),
                     ByWeek = kv.Value.byWeek.ToDictionary(
                         m => m.Key, m => new CollectionMonthlyCell(m.Value.enc, m.Value.paid)),
                     TotalEncounters = kv.Value.totalEnc,

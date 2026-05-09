@@ -6,6 +6,10 @@
 
     // Allows ProductionSummaryReport.cshtml to reuse this view by overriding the form target.
     var formAction = ViewData["FormAction"] as string ?? "ProductionReport";
+    var exportAction = formAction == "ProductionSummaryReport"
+                       && string.Equals(Model.SelectedLab, "NorthWest", StringComparison.OrdinalIgnoreCase)
+        ? "ExportNorthWestProductionReportExcel"
+        : "ExportProductionReportExcel";
                 <style>
                 .pr-filter-summary { font-size:.85rem; color:#6b7280; padding:.45rem .75rem; }
                 .pr-filter-summary .filter-dot { display:inline-block; width:10px; color:#9ca3af; margin-right:.5rem; }
@@ -92,18 +96,26 @@
         => d is not null && d.TryGetValue(mk, out var c) ? c.Units : 0m;
     decimal CptCharges(Dictionary<string, LabMetricsDashboard.Models.CptBreakdownCell>? d, string mk)
         => d is not null && d.TryGetValue(mk, out var c) ? c.BilledCharges : 0m;
+    int CptClaims(Dictionary<string, LabMetricsDashboard.Models.CptBreakdownCell>? d, string mk)
+        => d is not null && d.TryGetValue(mk, out var c) ? c.ClaimCount : 0;
     decimal CptYearUnits(Dictionary<int, LabMetricsDashboard.Models.CptBreakdownCell>? d, int y)
         => d is not null && d.TryGetValue(y, out var t) ? t.Units : 0m;
     decimal CptYearCharges(Dictionary<int, LabMetricsDashboard.Models.CptBreakdownCell>? d, int y)
         => d is not null && d.TryGetValue(y, out var t) ? t.BilledCharges : 0m;
+    int CptYearClaims(Dictionary<int, LabMetricsDashboard.Models.CptBreakdownCell>? d, int y)
+        => d is not null && d.TryGetValue(y, out var t) ? t.ClaimCount : 0;
     decimal CptGrandYearUnits(int year) =>
         Model.CptBreakdownGrandByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value.Units);
     decimal CptGrandYearCharges(int year) =>
         Model.CptBreakdownGrandByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value.BilledCharges);
+    int CptGrandYearClaims(int year) =>
+        Model.CptBreakdownGrandByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value.ClaimCount);
     decimal cptGrandUnits = Model.CptBreakdownGrandByMonth
         .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.Units);
     decimal cptGrandCharges = Model.CptBreakdownGrandByMonth
         .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.BilledCharges);
+    int cptGrandClaims = Model.CptBreakdownGrandByMonth
+        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.ClaimCount);
 }
 
 <style>
@@ -297,6 +309,29 @@ th.pr-month-data, td.pr-month-data {
     </a>
 </div>
 
+@if (!string.IsNullOrWhiteSpace(Model.SelectedLab))
+{
+    <div class="d-flex flex-wrap gap-3 align-items-center mb-3 px-1" style="font-size:.82rem;color:#374151;">
+        <span>
+            <span class="fw-semibold text-secondary" style="font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;">Analysis Range:</span>
+            <span class="ms-1 fw-semibold text-dark">Billed Date</span>
+            @if (!string.IsNullOrWhiteSpace(Model.ReportWeekFolder))
+            {
+                <span class="ms-1 text-muted">&mdash;</span>
+                <span class="ms-1 fw-semibold" style="color:#0e3460;">@Model.ReportWeekFolder</span>
+            }
+        </span>
+        @if (!string.IsNullOrWhiteSpace(Model.ReportRunId))
+        {
+            <span class="vr" style="height:1.1em;align-self:center;opacity:.3;"></span>
+            <span>
+                <span class="fw-semibold text-secondary" style="font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;">ReportId (RunID):</span>
+                <span class="ms-1 fw-semibold" style="color:#0e3460;">@Model.ReportRunId</span>
+            </span>
+        }
+    </div>
+}
+
 
 
 <!-- ??? Collapsible Filter panel ?????????????????????????????? -->
@@ -409,6 +444,7 @@ th.pr-month-data, td.pr-month-data {
                         var dateFilterUsesChargeEntered =
                             string.Equals(rule, "Rule1", StringComparison.OrdinalIgnoreCase) ||
                             string.Equals(rule, "Rule2", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(rule, "Rule3", StringComparison.OrdinalIgnoreCase) ||
                             string.Equals(rule, "Rule4", StringComparison.OrdinalIgnoreCase);
                         var dateFilterFromLabel = dateFilterUsesChargeEntered ? "CHARGE ENTERED DATE FROM" : "FIRST BILLED DATE FROM";
                         var dateFilterToLabel   = dateFilterUsesChargeEntered ? "CHARGE ENTERED DATE TO"   : "FIRST BILLED DATE TO";
@@ -734,7 +770,7 @@ th.pr-month-data, td.pr-month-data {
                 var isRule4 = string.Equals(Model.ProductionSummaryRule, "Rule4", StringComparison.OrdinalIgnoreCase);
                 var isRule5 = string.Equals(Model.ProductionSummaryRule, "Rule5", StringComparison.OrdinalIgnoreCase);
             }
-            <div class="pr-rule-footer mt-3 small text-muted" style="opacity:.65;line-height:1.45;border-top:1px dashed #cfd6df;padding-top:.5rem">
+            @* <div class="pr-rule-footer mt-3 small text-muted" style="opacity:.65;line-height:1.45;border-top:1px dashed #cfd6df;padding-top:.5rem">
                 <div><span class="fw-semibold">Active Rule:</span> @activeRule</div>
                 @if (isRule1)
                 {
@@ -767,7 +803,7 @@ th.pr-month-data, td.pr-month-data {
                         <li>Source: <code>ClaimLevelData</code> (all rows)</li>
                         <li>Rows: <code>PanelName</code> <span class="fst-italic">(will switch to <code>PanelNameNew</code> once that column is available)</span> &nbsp;·&nbsp; Drill-down: Top 3 <code>PayerName</code> by <code>COUNT(DISTINCT ClaimID)</code></li>
                         <li>Columns: <code>YEAR(ChargeEnteredDate)</code> / <code>MONTH(ChargeEnteredDate)</code></li>
-                        <li>Filter: <code>PayerName</code> not blank &nbsp;·&nbsp; <code>ChargeEnteredDate</code> is a valid date &nbsp;·&nbsp; <code>FirstBilledDate</code> is a valid date</li>
+                        <li>Filter: <code></code>  <code>ChargeEnteredDate</code> is a valid date &nbsp;·&nbsp; <code>FirstBilledDate</code> is a valid date</li>
                         <li>Rank by: <code>COUNT(DISTINCT ClaimID)</code> &nbsp;·&nbsp; Sort: Grand Total descending</li>
                         <li>Cell metrics: <code>COUNT(DISTINCT ClaimID)</code> + <code>SUM(ChargeAmount)</code></li>
                     </ul>
@@ -779,7 +815,7 @@ th.pr-month-data, td.pr-month-data {
                         <li>Source: <code>ClaimLevelData</code> (all rows)</li>
                         <li>Rows: <code>PanelName</code> <span class="fst-italic">(will switch to <code>PanelNameNew</code> once that column is available)</span> &nbsp;·&nbsp; Drill-down: Top 3 <code>PayerName</code> by <code>COUNT(DISTINCT ClaimID)</code></li>
                         <li>Columns: <code>YEAR(ChargeEnteredDate)</code> / <code>MONTH(ChargeEnteredDate)</code></li>
-                        <li>Filter: <code>PayerName</code> not blank &nbsp;·&nbsp; <code>ChargeEnteredDate</code> is a valid date &nbsp;·&nbsp; <code>FirstBilledDate</code> is a valid date</li>
+                        <li>Filter: <code></code>  <code>ChargeEnteredDate</code> is a valid date &nbsp;·&nbsp; <code>FirstBilledDate</code> is a valid date</li>
                         <li>Rank by: <code>COUNT(DISTINCT ClaimID)</code> &nbsp;·&nbsp; Sort: Grand Total descending</li>
                         <li>Cell metrics: <code>COUNT(DISTINCT ClaimID)</code> + <code>SUM(ChargeAmount)</code></li>
                     </ul>
@@ -800,7 +836,7 @@ th.pr-month-data, td.pr-month-data {
                 {
                     <div class="mt-1"><span class="fw-semibold">Default Logic:</span> columns grouped by <code>YEAR/MONTH(FirstBilledDate)</code>; rows = <code>PanelName</code> with Top 3 <code>PayerName</code> drill-down by <code>COUNT(DISTINCT ClaimID)</code>; sort by Grand Total.</div>
                 }
-            </div>
+            </div> *@
         </div>
 
         <!-- ??? Weekly Claim Volume tab pane ?????????????????????? -->
@@ -1057,7 +1093,7 @@ th.pr-month-data, td.pr-month-data {
                         }
                         <span class="filter-dot">•</span>
                         <span><span class="filter-label">Filter:</span>
-                            <span class="filter-key">PayerName</span> not blank &nbsp;·&nbsp;
+                            @* <span class="filter-key">PayerName</span> not blank &nbsp;·&nbsp; *@
                             <span class="filter-key-2">@pbDateColLocal</span> is a valid date</span>
                     </div>
                     <div class="pr-scroll">
@@ -1168,7 +1204,7 @@ th.pr-month-data, td.pr-month-data {
                         }
                         <span class="filter-dot">•</span>
                         <span><span class="filter-label">Filter:</span>
-                            <span class="filter-key">PayerName</span> not blank &nbsp;·&nbsp;
+                          @*   <span class="filter-key">PayerName</span> not blank &nbsp;·&nbsp; *@
                             <span class="filter-key-2">@ppDateColLocal</span> is a valid date</span>
                     </div>
                     <div class="pr-scroll">
@@ -1266,7 +1302,7 @@ th.pr-month-data, td.pr-month-data {
                         }
                         <span class="filter-dot">•</span>
                         <span><span class="filter-label">Filter:</span>
-                            <span class="filter-key">PayerName</span> not blank &nbsp;·&nbsp;
+                           @*  <span class="filter-key">PayerName</span> not blank &nbsp;·&nbsp; *@
                             <span class="filter-key-2">@uaDateColLocal</span> is a valid date</span>
                     </div>
                     <div class="pr-scroll">
@@ -1394,13 +1430,13 @@ th.pr-month-data, td.pr-month-data {
                                         var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
                                         foreach (var mk in mons)
                                         {
-                                            <th class="pr-month-data">Billed Units</th>
+                                            <th class="pr-month-data">No. of Claims</th>
                                             <th class="pr-month-data">Billed Amount</th>
                                         }
-                                        <th class="pr-year-total">Billed Units</th>
+                                        <th class="pr-year-total">No. of Claims</th>
                                         <th class="pr-year-total">Billed Amount</th>
                                     }
-                                    <th class="pr-grand-total">Billed Units</th>
+                                    <th class="pr-grand-total">No. of Claims</th>
                                     <th class="pr-grand-total">Billed Amount</th>
                                 </tr>
                             </thead>
@@ -1414,13 +1450,13 @@ th.pr-month-data, td.pr-month-data {
                                             var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
                                             foreach (var mk in mons)
                                             {
-                                                <td class="pr-month-data">@CptUnits(row.ByMonth, mk).ToString("N0")</td>
+                                                <td class="pr-month-data">@CptClaims(row.ByMonth, mk).ToString("N0")</td>
                                                 <td class="pr-month-data">@CptCharges(row.ByMonth, mk).ToString("C0")</td>
                                             }
-                                            <td class="pr-year-total">@CptYearUnits(row.ByYear, year).ToString("N0")</td>
+                                            <td class="pr-year-total">@CptYearClaims(row.ByYear, year).ToString("N0")</td>
                                             <td class="pr-year-total">@CptYearCharges(row.ByYear, year).ToString("C0")</td>
                                         }
-                                        <td class="pr-grand-total">@row.GrandTotalUnits.ToString("N0")</td>
+                                        <td class="pr-grand-total">@row.GrandTotalClaims.ToString("N0")</td>
                                         <td class="pr-grand-total">@row.GrandTotalCharges.ToString("C0")</td>
                                     </tr>
                                 }
@@ -1433,13 +1469,13 @@ th.pr-month-data, td.pr-month-data {
                                         var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
                                         foreach (var mk in mons)
                                         {
-                                            <td class="pr-month-data">@CptUnits(Model.CptBreakdownGrandByMonth, mk).ToString("N0")</td>
+                                            <td class="pr-month-data">@CptClaims(Model.CptBreakdownGrandByMonth, mk).ToString("N0")</td>
                                             <td class="pr-month-data">@CptCharges(Model.CptBreakdownGrandByMonth, mk).ToString("C0")</td>
                                         }
-                                        <td class="pr-year-total">@CptGrandYearUnits(year).ToString("N0")</td>
+                                        <td class="pr-year-total">@CptGrandYearClaims(year).ToString("N0")</td>
                                         <td class="pr-year-total">@CptGrandYearCharges(year).ToString("C0")</td>
                                     }
-                                    <td class="pr-grand-total">@cptGrandUnits.ToString("N0")</td>
+                                    <td class="pr-grand-total">@cptGrandClaims.ToString("N0")</td>
                                     <td class="pr-grand-total">@cptGrandCharges.ToString("C0")</td>
                                 </tr>
                             </tfoot>
@@ -1609,7 +1645,7 @@ th.pr-month-data, td.pr-month-data {
                 }, 1000);
 
                 var params = new URLSearchParams(new FormData(form));
-                var url = '@Url.Action("ExportProductionReportExcel", "Dashboard")' + '?' + params.toString();
+                var url = '@Url.Action(exportAction, "Dashboard")' + '?' + params.toString();
                 var iframe = document.createElement('iframe');
                 iframe.style.display = 'none';
                 iframe.src = url;

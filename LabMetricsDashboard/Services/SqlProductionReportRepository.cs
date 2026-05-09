@@ -1,6 +1,7 @@
 using System.Data;
 using LabMetricsDashboard.Models;
 using Microsoft.Data.SqlClient;
+using System.Globalization;
 
 namespace LabMetricsDashboard.Services;
 
@@ -11,6 +12,8 @@ namespace LabMetricsDashboard.Services;
 /// </summary>
 public sealed class SqlProductionReportRepository : IProductionReportRepository
 {
+    private const int ExportSplitThreshold = 300_000;
+
     /// <summary>
     /// Rule1 / legacy drill-down limit: keep only the Top N <c>PayerName</c> rows per
     /// <c>PanelName</c>, ranked by <c>COUNT(DISTINCT ClaimID)</c> descending.
@@ -1618,7 +1621,8 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                 YEAR(TRY_CAST(FirstBilledDate AS DATE))                     AS BilledYear,
                 MONTH(TRY_CAST(FirstBilledDate AS DATE))                    AS BilledMonth,
                 {unitsExpr}                                                  AS TotalUnits,
-                ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))),0)      AS BilledCharges
+                ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))),0)      AS BilledCharges,
+                COUNT(*)                                                     AS ClaimCount
             FROM dbo.LineLevelData
             WHERE {whereStr}
               AND CPTCode IS NOT NULL AND LTRIM(RTRIM(CPTCode)) <> ''
@@ -1646,7 +1650,8 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                     rdr.GetInt32(1),
                     rdr.GetInt32(2),
                     rdr.GetDecimal(3),
-                    rdr.GetDecimal(4)));
+                    rdr.GetDecimal(4),
+                    rdr.GetInt32(5)));
             }
         }
 
@@ -1683,18 +1688,19 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             {
                 var mk = $"{r.BilledYear:D4}-{r.BilledMonth:D2}";
                 if (byMonth.TryGetValue(mk, out var em))
-                    byMonth[mk] = new CptBreakdownCell(em.Units + r.TotalUnits, em.BilledCharges + r.BilledCharges);
+                    byMonth[mk] = new CptBreakdownCell(em.Units + r.TotalUnits, em.BilledCharges + r.BilledCharges, em.ClaimCount + r.ClaimCount);
                 else
-                    byMonth[mk] = new CptBreakdownCell(r.TotalUnits, r.BilledCharges);
+                    byMonth[mk] = new CptBreakdownCell(r.TotalUnits, r.BilledCharges, r.ClaimCount);
 
                 if (byYear.TryGetValue(r.BilledYear, out var ey))
-                    byYear[r.BilledYear] = new CptBreakdownCell(ey.Units + r.TotalUnits, ey.BilledCharges + r.BilledCharges);
+                    byYear[r.BilledYear] = new CptBreakdownCell(ey.Units + r.TotalUnits, ey.BilledCharges + r.BilledCharges, ey.ClaimCount + r.ClaimCount);
                 else
-                    byYear[r.BilledYear] = new CptBreakdownCell(r.TotalUnits, r.BilledCharges);
+                    byYear[r.BilledYear] = new CptBreakdownCell(r.TotalUnits, r.BilledCharges, r.ClaimCount);
             }
 
             decimal totalUnits = byMonth.Values.Sum(c => c.Units);
             decimal totalCharges = byMonth.Values.Sum(c => c.BilledCharges);
+            int     totalClaims  = byMonth.Values.Sum(c => c.ClaimCount);
 
             cptRows.Add(new CptBreakdownRow
             {
@@ -1703,6 +1709,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                 ByYear = byYear,
                 GrandTotalUnits = totalUnits,
                 GrandTotalCharges = totalCharges,
+                GrandTotalClaims = totalClaims,
             });
         }
 
@@ -1714,16 +1721,17 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             foreach (var (mk, cell) in c.ByMonth)
             {
                 if (grandByMonth.TryGetValue(mk, out var eg))
-                    grandByMonth[mk] = new CptBreakdownCell(eg.Units + cell.Units, eg.BilledCharges + cell.BilledCharges);
+                    grandByMonth[mk] = new CptBreakdownCell(eg.Units + cell.Units, eg.BilledCharges + cell.BilledCharges, eg.ClaimCount + cell.ClaimCount);
                 else
-                    grandByMonth[mk] = new CptBreakdownCell(cell.Units, cell.BilledCharges);
+                    grandByMonth[mk] = new CptBreakdownCell(cell.Units, cell.BilledCharges, cell.ClaimCount);
             }
         }
 
         decimal grandUnits = cptRows.Sum(c => c.GrandTotalUnits);
         decimal grandCharges = cptRows.Sum(c => c.GrandTotalCharges);
+        int     grandClaims  = cptRows.Sum(c => c.GrandTotalClaims);
 
-        return new CptBreakdownResult(months, years, cptRows, grandByMonth, grandUnits, grandCharges);
+        return new CptBreakdownResult(months, years, cptRows, grandByMonth, grandUnits, grandCharges, grandClaims);
     }
 
     private sealed record RawCptBreakdownRow(
@@ -1731,7 +1739,8 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         int BilledYear,
         int BilledMonth,
         decimal TotalUnits,
-        decimal BilledCharges);
+        decimal BilledCharges,
+        int ClaimCount);
 
     // ?? Raw Data Export ??????????????????????????????????????????????
 
@@ -1765,6 +1774,23 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
     }
 
     /// <inheritdoc />
+    public Task<List<RawDataSegment>> GetClaimLevelDataExportSegmentsAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default)
+    {
+        var (whereStr, parameters) = BuildExportFilters(filterPayerNames, filterPanelNames, filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo, filterFirstBilledFrom, filterFirstBilledTo, "ces");
+        return GetRawDataExportSegmentsAsync(connectionString, "dbo.ClaimLevelData", GetClaimLevelExportColumns(), "ClaimLevel", whereStr, parameters, ct);
+    }
+
+    /// <inheritdoc />
     public async Task<List<Dictionary<string, object?>>> GetLineLevelDataExportAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
@@ -1794,6 +1820,153 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             """;
 
         return await ExecuteExportQueryAsync(connectionString, sql, parameters, ct);
+    }
+
+    /// <inheritdoc />
+    public Task<List<RawDataSegment>> GetLineLevelDataExportSegmentsAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default)
+    {
+        var (whereStr, parameters) = BuildExportFilters(filterPayerNames, filterPanelNames, filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo, filterFirstBilledFrom, filterFirstBilledTo, "les");
+        return GetRawDataExportSegmentsAsync(connectionString, "dbo.LineLevelData", GetLineLevelExportColumns(), "LineLevel", whereStr, parameters, ct);
+    }
+
+    private async Task<List<RawDataSegment>> GetRawDataExportSegmentsAsync(
+        string connectionString,
+        string tableName,
+        string selectColumns,
+        string baseSheetName,
+        string whereStr,
+        List<SqlParameter> parameters,
+        CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        _logger.LogInformation(
+            "[ProdExcelExportSplit] SQL split START Sheet={Sheet} Table={Table} Threshold={Threshold:N0}",
+            baseSheetName, tableName, ExportSplitThreshold);
+
+        var totalRows = await ExecuteCountAsync(connectionString, tableName, whereStr, parameters, null, ct);
+        _logger.LogInformation(
+            "[ProdExcelExportSplit] SQL split total Sheet={Sheet} Rows={Rows:N0}",
+            baseSheetName, totalRows);
+
+        if (totalRows == 0)
+        {
+            _logger.LogInformation(
+                "[ProdExcelExportSplit] SQL split DONE Sheet={Sheet} Segments=1 Empty=true ElapsedMs={Ms}",
+                baseSheetName, sw.ElapsedMilliseconds);
+            return [new RawDataSegment(baseSheetName, [])];
+        }
+
+        if (totalRows <= ExportSplitThreshold)
+        {
+            var rows = await ExecuteSegmentQueryAsync(connectionString, tableName, selectColumns, whereStr, parameters, null, null, null, null, null, ct);
+            _logger.LogInformation(
+                "[ProdExcelExportSplit] SQL split DONE Sheet={Sheet} Segments=1 Rows={Rows:N0} ElapsedMs={Ms}",
+                baseSheetName, rows.Count, sw.ElapsedMilliseconds);
+            return [new RawDataSegment(baseSheetName, rows)];
+        }
+
+        var segments = new List<RawDataSegment>();
+        var usedSheetNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var yearCounts = await ExecuteYearCountsAsync(connectionString, tableName, whereStr, parameters, ct);
+
+        foreach (var (year, yearRows) in yearCounts)
+        {
+            var yearLabel = year > 0 ? year.ToString() : "Unknown";
+            _logger.LogInformation(
+                "[ProdExcelExportSplit] SQL year split Sheet={Sheet} Year={Year} Rows={Rows:N0}",
+                baseSheetName, yearLabel, yearRows);
+
+            var yearFilter = BuildYearFilter(year);
+            if (yearRows <= ExportSplitThreshold || year == 0)
+            {
+                await AddPagedSegmentsAsync(connectionString, tableName, selectColumns, baseSheetName, whereStr, parameters, yearFilter, year > 0 ? year : null, null, yearLabel, null, yearRows, segments, usedSheetNames, ct);
+                continue;
+            }
+
+            var monthCounts = await ExecuteMonthCountsAsync(connectionString, tableName, whereStr, parameters, year, ct);
+            foreach (var (month, monthRows) in monthCounts)
+            {
+                _logger.LogInformation(
+                    "[ProdExcelExportSplit] SQL month split Sheet={Sheet} Year={Year} Month={Month:D2} Rows={Rows:N0}",
+                    baseSheetName, yearLabel, month, monthRows);
+
+                await AddPagedSegmentsAsync(connectionString, tableName, selectColumns, baseSheetName, whereStr, parameters, BuildMonthFilter(year, month), year, month, yearLabel, month, monthRows, segments, usedSheetNames, ct);
+            }
+        }
+
+        _logger.LogInformation(
+            "[ProdExcelExportSplit] SQL split DONE Sheet={Sheet} Segments={Segments} Rows={Rows:N0} ElapsedMs={Ms} Details=[{Details}]",
+            baseSheetName,
+            segments.Count,
+            segments.Sum(s => s.Rows.Count),
+            sw.ElapsedMilliseconds,
+            string.Join(", ", segments.Select(s => $"'{s.SheetName}'({s.Rows.Count:N0})")));
+
+        return segments;
+    }
+
+    private async Task AddPagedSegmentsAsync(
+        string connectionString,
+        string tableName,
+        string selectColumns,
+        string baseSheetName,
+        string whereStr,
+        List<SqlParameter> parameters,
+        string splitFilter,
+        int? splitYear,
+        int? splitMonth,
+        string yearLabel,
+        int? month,
+        long rowCount,
+        List<RawDataSegment> segments,
+        HashSet<string> usedSheetNames,
+        CancellationToken ct)
+    {
+        var pageCount = Math.Max(1, (int)Math.Ceiling(rowCount / (double)ExportSplitThreshold));
+        for (var page = 0; page < pageCount; page++)
+        {
+            var offset = page * ExportSplitThreshold;
+            var partSuffix = pageCount > 1 ? $"_Part{page + 1}" : string.Empty;
+            var sheetNamePrefix = month.HasValue
+                ? $"{yearLabel}_{month.Value:D2}_{baseSheetName}{partSuffix}"
+                : $"{yearLabel}_{baseSheetName}{partSuffix}";
+            var sheetName = CreateUniqueSheetName(sheetNamePrefix, usedSheetNames);
+
+            _logger.LogInformation(
+                "[ProdExcelExportSplit] SQL segment query START Sheet={SheetName} Source={BaseSheet} Offset={Offset:N0} Take={Take:N0}",
+                sheetName, baseSheetName, offset, ExportSplitThreshold);
+
+            var rows = await ExecuteSegmentQueryAsync(
+                connectionString,
+                tableName,
+                selectColumns,
+                whereStr,
+                parameters,
+                splitFilter,
+                splitYear,
+                splitMonth,
+                offset,
+                ExportSplitThreshold,
+                ct);
+
+            _logger.LogInformation(
+                "[ProdExcelExportSplit] SQL segment query DONE Sheet={SheetName} Rows={Rows:N0}",
+                sheetName, rows.Count);
+
+            segments.Add(new RawDataSegment(sheetName, rows));
+        }
     }
 
     internal static (string WhereStr, List<SqlParameter> Parameters) BuildExportFilters(
@@ -1864,6 +2037,225 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         return (whereStr, parms);
     }
 
+    // ?? Run Info ?????????????????????????????????????????????????????
+
+    /// <inheritdoc />
+    public async Task<(string? WeekFolder, string? RunId)> GetRunInfoAsync(
+        string connectionString, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+        const string sql = "SELECT TOP 1 WeekFolder, CAST(RunId AS NVARCHAR(50)) FROM LineClaimFileLogs ORDER BY 1 DESC";
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+            await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 30 };
+            await using var rdr = await cmd.ExecuteReaderAsync(ct);
+            if (await rdr.ReadAsync(ct))
+            {
+                var weekFolder = rdr.IsDBNull(0) ? null : rdr.GetString(0);
+                var runId      = rdr.IsDBNull(1) ? null : rdr.GetString(1);
+                return (weekFolder, runId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read RunInfo from LineClaimFileLogs.");
+        }
+        return (null, null);
+    }
+
+    private static string GetClaimLevelExportColumns() => """
+        [ClaimID],[AccessionNumber],[PayerName],[PayerType],[BillingProvider],[ReferringProvider],
+        [ClinicName],[SalesRepname],[PatientID],[PatientDOB],[DateofService],[ChargeEnteredDate],
+        [FirstBilledDate],[Panelname],[CPTCodeXUnitsXModifier],[POS],[TOS],[ChargeAmount],[AllowedAmount],
+        [InsurancePayment],[PatientPayment],[TotalPayments],[InsuranceAdjustments],[PatientAdjustments],
+        [TotalAdjustments],[InsuranceBalance],[PatientBalance],[TotalBalance],[CheckDate],[ClaimStatus],
+        [DenialCode],[ICDCode],[DaystoDOS],[RollingDays],[DaystoBill],[DaystoPost],[ICDPointer],[InsertedDateTime]
+        """;
+
+    private static string GetLineLevelExportColumns() => """
+        [ClaimID],[AccessionNumber],[PayerName],[PayerType],[BillingProvider],[ReferringProvider],
+        [ClinicName],[SalesRepname],[PatientID],[PatientDOB],[DateofService],[ChargeEnteredDate],
+        [FirstBilledDate],[Panelname],[CPTCode],[Units],[Modifier],[POS],[TOS],
+        [ChargeAmount],[ChargeAmountPerUnit],[AllowedAmount],[AllowedAmountPerUnit],
+        [InsurancePayment],[InsurancePaymentPerUnit],[PatientPayment],[PatientPaymentPerUnit],
+        [TotalPayments],[InsuranceAdjustments],[PatientAdjustments],[TotalAdjustments],
+        [InsuranceBalance],[PatientBalance],[PatientBalancePerUnit],[TotalBalance],
+        [CheckDate],[PostingDate],[ClaimStatus],[PayStatus],[DenialCode],[DenialDate],
+        [ICDCode],[DaystoDOS],[RollingDays],[DaystoBill],[DaystoPost],[ICDPointer]
+        """;
+
+    private static string BuildYearFilter(int year) => year > 0
+        ? "YEAR(TRY_CAST(FirstBilledDate AS DATE)) = @splitYear"
+        : "(TRY_CAST(FirstBilledDate AS DATE) IS NULL OR YEAR(TRY_CAST(FirstBilledDate AS DATE)) <= 1900)";
+
+    private static string BuildMonthFilter(int year, int month) =>
+        "YEAR(TRY_CAST(FirstBilledDate AS DATE)) = @splitYear AND MONTH(TRY_CAST(FirstBilledDate AS DATE)) = @splitMonth";
+
+    private static string AppendWhere(string whereStr, string? extraFilter)
+    {
+        if (string.IsNullOrWhiteSpace(extraFilter))
+            return whereStr;
+
+        return string.IsNullOrWhiteSpace(whereStr)
+            ? "WHERE " + extraFilter
+            : whereStr + " AND " + extraFilter;
+    }
+
+    private static string CreateUniqueSheetName(string requestedName, HashSet<string> usedSheetNames)
+    {
+        static string Clean(string value)
+        {
+            var cleaned = value.Trim();
+            foreach (var invalid in new[] { ':', '\\', '/', '?', '*', '[', ']' })
+                cleaned = cleaned.Replace(invalid, '_');
+            return string.IsNullOrWhiteSpace(cleaned) ? "Sheet" : cleaned;
+        }
+
+        var baseName = Clean(requestedName);
+        var candidate = baseName.Length <= 31 ? baseName : baseName[..31];
+        var suffix = 1;
+        while (!usedSheetNames.Add(candidate))
+        {
+            var tail = $"_{suffix++}";
+            var maxBaseLength = 31 - tail.Length;
+            candidate = (baseName.Length <= maxBaseLength ? baseName : baseName[..maxBaseLength]) + tail;
+        }
+
+        return candidate;
+    }
+
+    private async Task<long> ExecuteCountAsync(
+        string connectionString,
+        string tableName,
+        string whereStr,
+        List<SqlParameter> parameters,
+        string? extraFilter,
+        CancellationToken ct)
+    {
+        var sql = $"SELECT COUNT_BIG(*) FROM {tableName} {AppendWhere(whereStr, extraFilter)}";
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 300 };
+        AddClonedParameters(cmd, parameters);
+        AddSplitParameters(cmd, extraFilter, year: null, month: null, offset: null, take: null);
+        var value = await cmd.ExecuteScalarAsync(ct);
+        return Convert.ToInt64(value, CultureInfo.InvariantCulture);
+    }
+
+    private async Task<List<(int Year, long Rows)>> ExecuteYearCountsAsync(
+        string connectionString,
+        string tableName,
+        string whereStr,
+        List<SqlParameter> parameters,
+        CancellationToken ct)
+    {
+        var sql = $"""
+            SELECT
+                CASE
+                    WHEN TRY_CAST(FirstBilledDate AS DATE) IS NULL OR YEAR(TRY_CAST(FirstBilledDate AS DATE)) <= 1900 THEN 0
+                    ELSE YEAR(TRY_CAST(FirstBilledDate AS DATE))
+                END AS SplitYear,
+                COUNT_BIG(*) AS RowCount
+            FROM {tableName}
+            {whereStr}
+            GROUP BY
+                CASE
+                    WHEN TRY_CAST(FirstBilledDate AS DATE) IS NULL OR YEAR(TRY_CAST(FirstBilledDate AS DATE)) <= 1900 THEN 0
+                    ELSE YEAR(TRY_CAST(FirstBilledDate AS DATE))
+                END
+            ORDER BY SplitYear
+            """;
+
+        var rows = new List<(int Year, long Rows)>();
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 300 };
+        AddClonedParameters(cmd, parameters);
+        await using var rdr = await cmd.ExecuteReaderAsync(ct);
+        while (await rdr.ReadAsync(ct))
+            rows.Add((rdr.GetInt32(0), rdr.GetInt64(1)));
+        return rows;
+    }
+
+    private async Task<List<(int Month, long Rows)>> ExecuteMonthCountsAsync(
+        string connectionString,
+        string tableName,
+        string whereStr,
+        List<SqlParameter> parameters,
+        int year,
+        CancellationToken ct)
+    {
+        var sql = $"""
+            SELECT MONTH(TRY_CAST(FirstBilledDate AS DATE)) AS SplitMonth, COUNT_BIG(*) AS RowCount
+            FROM {tableName}
+            {AppendWhere(whereStr, BuildYearFilter(year))}
+            GROUP BY MONTH(TRY_CAST(FirstBilledDate AS DATE))
+            ORDER BY SplitMonth
+            """;
+
+        var rows = new List<(int Month, long Rows)>();
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 300 };
+        AddClonedParameters(cmd, parameters);
+        cmd.Parameters.Add(new SqlParameter("@splitYear", SqlDbType.Int) { Value = year });
+        await using var rdr = await cmd.ExecuteReaderAsync(ct);
+        while (await rdr.ReadAsync(ct))
+            rows.Add((rdr.GetInt32(0), rdr.GetInt64(1)));
+        return rows;
+    }
+
+    private async Task<List<Dictionary<string, object?>>> ExecuteSegmentQueryAsync(
+        string connectionString,
+        string tableName,
+        string selectColumns,
+        string whereStr,
+        List<SqlParameter> parameters,
+        string? extraFilter,
+        int? splitYear,
+        int? splitMonth,
+        int? offset,
+        int? take,
+        CancellationToken ct)
+    {
+        var pagingSql = offset.HasValue && take.HasValue
+            ? "ORDER BY TRY_CAST(FirstBilledDate AS DATE), ClaimID, AccessionNumber OFFSET @splitOffset ROWS FETCH NEXT @splitTake ROWS ONLY"
+            : "ORDER BY TRY_CAST(FirstBilledDate AS DATE), ClaimID, AccessionNumber";
+        var sql = $"""
+            SELECT {selectColumns}
+            FROM {tableName}
+            {AppendWhere(whereStr, extraFilter)}
+            {pagingSql}
+            """;
+
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 300 };
+        AddClonedParameters(cmd, parameters);
+        AddSplitParameters(cmd, extraFilter, splitYear, splitMonth, offset, take);
+        return await ExecuteReaderToDictionaryListAsync(cmd, ct);
+    }
+
+    private static void AddClonedParameters(SqlCommand cmd, List<SqlParameter> parameters)
+    {
+        foreach (var p in parameters)
+            cmd.Parameters.Add(new SqlParameter(p.ParameterName, p.SqlDbType) { Value = p.Value });
+    }
+
+    private static void AddSplitParameters(SqlCommand cmd, string? extraFilter, int? year, int? month, int? offset, int? take)
+    {
+        if (!string.IsNullOrWhiteSpace(extraFilter) && extraFilter.Contains("@splitYear", StringComparison.Ordinal) && year.HasValue)
+            cmd.Parameters.Add(new SqlParameter("@splitYear", SqlDbType.Int) { Value = year.Value });
+        if (!string.IsNullOrWhiteSpace(extraFilter) && extraFilter.Contains("@splitMonth", StringComparison.Ordinal) && month.HasValue)
+            cmd.Parameters.Add(new SqlParameter("@splitMonth", SqlDbType.Int) { Value = month.Value });
+        if (offset.HasValue)
+            cmd.Parameters.Add(new SqlParameter("@splitOffset", SqlDbType.Int) { Value = offset.Value });
+        if (take.HasValue)
+            cmd.Parameters.Add(new SqlParameter("@splitTake", SqlDbType.Int) { Value = take.Value });
+    }
+
     private async Task<List<Dictionary<string, object?>>> ExecuteExportQueryAsync(
         string connectionString, string sql, List<SqlParameter> parameters, CancellationToken ct)
     {
@@ -1875,6 +2267,14 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 300 };
         foreach (var p in parameters)
             cmd.Parameters.Add(new SqlParameter(p.ParameterName, p.SqlDbType) { Value = p.Value });
+
+        return await ExecuteReaderToDictionaryListAsync(cmd, ct);
+    }
+
+    private async Task<List<Dictionary<string, object?>>> ExecuteReaderToDictionaryListAsync(SqlCommand cmd, CancellationToken ct)
+    {
+        var rows = new List<Dictionary<string, object?>>();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
 
         await using var r = await cmd.ExecuteReaderAsync(ct);
         var columns = Enumerable.Range(0, r.FieldCount).Select(i => r.GetName(i)).ToArray();

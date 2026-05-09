@@ -424,6 +424,15 @@
 .mcv-drilldown td { font-size: .72rem !important; color: #475569; }
 .mcv-drilldown td:nth-child(2) { padding-left: 1.8rem !important; font-weight: 500 !important; }
 
+/* Payer rank badge (1 / 2 / 3) in drill-down rows */
+.mcv-payer-rank {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border-radius: 50%;
+    font-size: .6rem; font-weight: 800; color: #fff;
+    background: linear-gradient(135deg, #0e3460, #0d5c74);
+    flex-shrink: 0;
+}
+
 /* ?? Weekly Claim Volume sticky columns ????????????????????????? */
 #wcv-pane .cs-rpt-table thead tr:first-child th:nth-child(1),
 #wcv-pane .cs-rpt-table thead tr:first-child th:nth-child(2) {
@@ -1062,7 +1071,12 @@
                                     @foreach (var payer in panel.TopPayers)
                                     {
                                         <tr class="mcv-drilldown">
-                                            <td></td>
+                                            <td style="text-align:center">
+                                                @if (payer.PayerRank > 0)
+                                                {
+                                                    <span class="mcv-payer-rank">@payer.PayerRank</span>
+                                                }
+                                            </td>
                                             <td style="text-align:left">@payer.PayerName</td>
                                             @foreach (var year in mcvYears)
                                             {
@@ -1142,25 +1156,25 @@
         </div>
 
         <!-- Weekly Claim Volume tab -->
-        <div class="tab-pane fade" id="wcv-pane"           role="tabpanel" aria-labelledby="wcv-tab"           data-cs-tab="wcv">@await Html.PartialAsync("_CsTabWcv",          Model)</div>
+        <div class="tab-pane fade" id="wcv-pane"           role="tabpanel" aria-labelledby="wcv-tab"           data-cs-tab="wcv">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabWcv",          Model) } else { <div class="cs-lazy-pane" data-lazy-tab="wcv"></div> }</div>
         <!-- Panel Averages tab -->
-        <div class="tab-pane fade" id="panelavg-pane"      role="tabpanel" aria-labelledby="panelavg-tab"      data-cs-tab="panelavg">@await Html.PartialAsync("_CsTabPanelAvg",     Model)</div>
+        <div class="tab-pane fade" id="panelavg-pane"      role="tabpanel" aria-labelledby="panelavg-tab"      data-cs-tab="panelavg">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabPanelAvg",     Model) } else { <div class="cs-lazy-pane" data-lazy-tab="panelavg"></div> }</div>
         <!-- Average Payments tab -->
-        <div class="tab-pane fade" id="avgpay-pane"        role="tabpanel" aria-labelledby="avgpay-tab"        data-cs-tab="avgpay">@await Html.PartialAsync("_CsTabAvgPayments",  Model)</div>
+        <div class="tab-pane fade" id="avgpay-pane"        role="tabpanel" aria-labelledby="avgpay-tab"        data-cs-tab="avgpay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabAvgPayments",  Model) } else { <div class="cs-lazy-pane" data-lazy-tab="avgpay"></div> }</div>
         <!-- Insurance vs Aging tab -->
-        <div class="tab-pane fade" id="aging-pane"         role="tabpanel" aria-labelledby="aging-tab"         data-cs-tab="aging">@await Html.PartialAsync("_CsTabAging",        Model)</div>
+        <div class="tab-pane fade" id="aging-pane"         role="tabpanel" aria-labelledby="aging-tab"         data-cs-tab="aging">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabAging",        Model) } else { <div class="cs-lazy-pane" data-lazy-tab="aging"></div> }</div>
         <!-- Panel vs Payment tab -->
-        <div class="tab-pane fade" id="panelpay-pane"      role="tabpanel" aria-labelledby="panelpay-tab"      data-cs-tab="panelpay">@await Html.PartialAsync("_CsTabPanelPay",     Model)</div>
+        <div class="tab-pane fade" id="panelpay-pane"      role="tabpanel" aria-labelledby="panelpay-tab"      data-cs-tab="panelpay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabPanelPay",     Model) } else { <div class="cs-lazy-pane" data-lazy-tab="panelpay"></div> }</div>
         <!-- Rep vs Payments tab -->
-        <div class="tab-pane fade" id="reppay-pane"        role="tabpanel" aria-labelledby="reppay-tab"        data-cs-tab="reppay">@await Html.PartialAsync("_CsTabRepPay",       Model)</div>
+        <div class="tab-pane fade" id="reppay-pane"        role="tabpanel" aria-labelledby="reppay-tab"        data-cs-tab="reppay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabRepPay",       Model) } else { <div class="cs-lazy-pane" data-lazy-tab="reppay"></div> }</div>
         <!-- Insurance vs Payment % tab -->
-        <div class="tab-pane fade" id="inspctpay-pane"     role="tabpanel" aria-labelledby="inspctpay-tab"     data-cs-tab="inspctpay">@await Html.PartialAsync("_CsTabInsPctPay",    Model)</div>
+        <div class="tab-pane fade" id="inspctpay-pane"     role="tabpanel" aria-labelledby="inspctpay-tab"     data-cs-tab="inspctpay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabInsPctPay",    Model) } else { <div class="cs-lazy-pane" data-lazy-tab="inspctpay"></div> }</div>
         <!-- CPT vs Payment % tab -->
-        <div class="tab-pane fade" id="cptpctpay-pane"     role="tabpanel" aria-labelledby="cptpctpay-tab"     data-cs-tab="cptpctpay">@await Html.PartialAsync("_CsTabCptPctPay",    Model)</div>
+        <div class="tab-pane fade" id="cptpctpay-pane"     role="tabpanel" aria-labelledby="cptpctpay-tab"     data-cs-tab="cptpctpay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabCptPctPay",    Model) } else { <div class="cs-lazy-pane" data-lazy-tab="cptpctpay"></div> }</div>
         <!-- Status Summary tab -->
-        <div class="tab-pane fade" id="statussummary-pane" role="tabpanel" aria-labelledby="statussummary-tab" data-cs-tab="statussummary">@await Html.PartialAsync("_CsTabStatusSummary", Model)</div>
+        <div class="tab-pane fade" id="statussummary-pane" role="tabpanel" aria-labelledby="statussummary-tab" data-cs-tab="statussummary">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabStatusSummary", Model) } else { <div class="cs-lazy-pane" data-lazy-tab="statussummary"></div> }</div>
         <!-- Provider tab -->
-        <div class="tab-pane fade" id="provider-pane"      role="tabpanel" aria-labelledby="provider-tab"      data-cs-tab="provider">@await Html.PartialAsync("_CsTabProvider",     Model)</div>
+        <div class="tab-pane fade" id="provider-pane"      role="tabpanel" aria-labelledby="provider-tab"      data-cs-tab="provider">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabProvider",     Model) } else { <div class="cs-lazy-pane" data-lazy-tab="provider"></div> }</div>
 
     </div>
 }
@@ -1365,4 +1379,153 @@
         hideOverlay();
     });
 })();
+</script>
+
+@if (Model.LazyLoadTabs)
+{
+<style>
+.cs-lazy-placeholder {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; padding: 4rem 1rem; color: #64748b;
+}
+.cs-lazy-placeholder .lmd-spinner {
+    width: 2.2rem; height: 2.2rem; margin-bottom: .9rem;
+    border: 3px solid #e2e8f0; border-top-color: #0d5c74;
+    border-radius: 50%; animation: spin .75s linear infinite;
+}
+@@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+<script>
+(function () {
+    'use strict';
+    // Base URL for lazy tab AJAX calls — carries all current filter params.
+    var baseParams = (function () {
+        var qs = window.location.search;
+        return qs ? qs.substring(1) : '';
+    }());
+
+    function lazyLoadPane(pane) {
+        var placeholder = pane.querySelector('.cs-lazy-pane');
+        if (!placeholder) return; // already loaded or not lazy
+        var tab = placeholder.getAttribute('data-lazy-tab');
+        if (!tab) return;
+
+        // Replace placeholder with spinner immediately.
+        pane.innerHTML =
+            '<div class="cs-lazy-placeholder">' +
+            '<div class="lmd-spinner"></div>' +
+            '<div>Loading\u2026</div>' +
+            '</div>';
+
+        var url = '@Url.Action("GetTabPartial", "CollectionSummary")' +
+                  '?tab=' + encodeURIComponent(tab) +
+                  (baseParams ? '&' + baseParams : '');
+
+        fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function (r) { return r.text(); })
+            .then(function (html) { pane.innerHTML = html; })
+            .catch(function () {
+                pane.innerHTML =
+                    '<div class="alert alert-warning m-3">' +
+                    '<i class="bi bi-exclamation-triangle-fill me-1"></i>' +
+                    'Failed to load tab data. Please refresh the page and try again.' +
+                    '</div>';
+            });
+    }
+
+    // Trigger lazy load when a tab is shown.
+    var tabList = document.getElementById('csRptTabs');
+    if (tabList) {
+        tabList.addEventListener('show.bs.tab', function (e) {
+            var target = e.target ? e.target.getAttribute('data-bs-target') : null;
+            if (target) {
+                var pane = document.querySelector(target);
+                if (pane) lazyLoadPane(pane);
+            }
+        });
+    }
+}());
+</script>
+}
+
+<script>
+/* ?? Collection Summary filter multiselect widget ?????????????????????????
+   Handles every .cs-rpt-ms container on this page:
+     - Click button  ? toggle dropdown panel open/closed
+     - Click outside ? close all open panels
+     - Check/uncheck ? update button label ("All" or "3 selected")
+     - Search input  ? live-filter the visible checkbox labels
+     - Form submit   ? checked values travel as query-string params naturally
+   ???????????????????????????????????????????????????????????????????????? */
+(function () {
+    'use strict';
+
+    function updateLabel(widget) {
+        var checked = widget.querySelectorAll('input[type="checkbox"]:checked');
+        var label   = widget.querySelector('.cs-rpt-ms-label');
+        var count   = widget.querySelector('.cs-rpt-ms-count');
+        if (!label) return;
+        if (checked.length === 0) {
+            label.textContent    = 'All';
+            if (count) { count.style.display = 'none'; count.textContent = '0'; }
+        } else {
+            // show first value; if more than 1 show "+N more"
+            var first = checked[0].value;
+            label.textContent = checked.length === 1
+                ? first
+                : first + ' +' + (checked.length - 1) + ' more';
+            if (count) { count.style.display = 'inline-block'; count.textContent = checked.length; }
+        }
+    }
+
+    function closeAll(except) {
+        document.querySelectorAll('.cs-rpt-ms-panel.open').forEach(function (p) {
+            if (p !== except) p.classList.remove('open');
+        });
+    }
+
+    document.querySelectorAll('.cs-rpt-ms').forEach(function (widget) {
+        var btn    = widget.querySelector('.cs-rpt-ms-btn');
+        var panel  = widget.querySelector('.cs-rpt-ms-panel');
+        var search = widget.querySelector('.cs-rpt-ms-search');
+
+        if (!btn || !panel) return;
+
+        // Initialise label based on any pre-checked items (page reload with filter)
+        updateLabel(widget);
+
+        // Toggle open/close on button click
+        btn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            var isOpen = panel.classList.contains('open');
+            closeAll(null);
+            if (!isOpen) {
+                panel.classList.add('open');
+                if (search) { search.value = ''; search.focus(); filterList(search, widget); }
+            }
+        });
+
+        // Keep panel open when clicking inside it
+        panel.addEventListener('click', function (e) { e.stopPropagation(); });
+
+        // Update label whenever a checkbox changes
+        widget.addEventListener('change', function () { updateLabel(widget); });
+
+        // Live search filter
+        if (search) {
+            search.addEventListener('input', function () { filterList(search, widget); });
+        }
+    });
+
+    function filterList(searchInput, widget) {
+        var term = searchInput.value.toLowerCase().trim();
+        widget.querySelectorAll('.cs-rpt-ms-list label').forEach(function (lbl) {
+            var text = lbl.textContent.toLowerCase();
+            lbl.classList.toggle('cs-rpt-ms-hidden', term !== '' && text.indexOf(term) === -1);
+        });
+    }
+
+    // Close all panels when clicking anywhere outside
+    document.addEventListener('click', function () { closeAll(null); });
+}());
 </script>

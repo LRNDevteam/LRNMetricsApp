@@ -14,6 +14,9 @@ public sealed class FileLoggerOptions
     /// <summary>Minimum log level written to file. Defaults to Warning.</summary>
     public LogLevel MinLevel { get; set; } = LogLevel.Warning;
 
+    /// <summary>Minimum log level written to the Production Excel split log. Defaults to Information.</summary>
+    public LogLevel ProductionExcelSplitMinLevel { get; set; } = LogLevel.Information;
+
     /// <summary>Number of days to retain log files. 0 = keep forever.</summary>
     public int RetainDays { get; set; } = 30;
 }
@@ -28,6 +31,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
     private readonly FileLoggerOptions _options;
     private readonly ConcurrentDictionary<string, FileLogger> _loggers = new(StringComparer.OrdinalIgnoreCase);
     private readonly FileLogWriter _writer;
+    private readonly FileLogWriter _productionExcelSplitWriter;
 
     public FileLoggerProvider(FileLoggerOptions options)
     {
@@ -39,15 +43,22 @@ public sealed class FileLoggerProvider : ILoggerProvider
             : Path.Combine(AppContext.BaseDirectory, options.LogDirectory);
 
         Directory.CreateDirectory(dir);
-        _writer = new FileLogWriter(dir, options.RetainDays);
+        _writer = new FileLogWriter(dir, "app", options.RetainDays);
+        _productionExcelSplitWriter = new FileLogWriter(dir, "prod-excel-export-split", options.RetainDays);
     }
 
     public ILogger CreateLogger(string categoryName) =>
-        _loggers.GetOrAdd(categoryName, name => new FileLogger(name, _options.MinLevel, _writer));
+        _loggers.GetOrAdd(categoryName, name => new FileLogger(
+            name,
+            _options.MinLevel,
+            _options.ProductionExcelSplitMinLevel,
+            _writer,
+            _productionExcelSplitWriter));
 
     public void Dispose()
     {
         _writer.Dispose();
+        _productionExcelSplitWriter.Dispose();
         _loggers.Clear();
     }
 }
@@ -59,28 +70,39 @@ internal sealed class FileLogger : ILogger
 {
     private readonly string _category;
     private readonly LogLevel _minLevel;
+    private readonly LogLevel _productionExcelSplitMinLevel;
     private readonly FileLogWriter _writer;
+    private readonly FileLogWriter _productionExcelSplitWriter;
 
-    internal FileLogger(string category, LogLevel minLevel, FileLogWriter writer)
+    internal FileLogger(
+        string category,
+        LogLevel minLevel,
+        LogLevel productionExcelSplitMinLevel,
+        FileLogWriter writer,
+        FileLogWriter productionExcelSplitWriter)
     {
         _category = category;
         _minLevel = minLevel;
+        _productionExcelSplitMinLevel = productionExcelSplitMinLevel;
         _writer = writer;
+        _productionExcelSplitWriter = productionExcelSplitWriter;
     }
 
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
-    public bool IsEnabled(LogLevel logLevel) => logLevel >= _minLevel;
+    public bool IsEnabled(LogLevel logLevel) =>
+        logLevel >= _minLevel || logLevel >= _productionExcelSplitMinLevel;
 
     public void Log<TState>(LogLevel logLevel, EventId eventId, TState state,
         Exception? exception, Func<TState, Exception?, string> formatter)
     {
-        if (!IsEnabled(logLevel))
-            return;
-
         var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture);
         var level = logLevel.ToString().ToUpperInvariant();
         var message = formatter(state, exception);
+        var isProductionExcelSplitLog = message.Contains("[ProdExcelExportSplit]", StringComparison.Ordinal);
+
+        if (logLevel < _minLevel && (!isProductionExcelSplitLog || logLevel < _productionExcelSplitMinLevel))
+            return;
 
         var entry = $"[{timestamp}] [{level}] [{_category}] {message}";
 
@@ -89,7 +111,11 @@ internal sealed class FileLogger : ILogger
             entry += Environment.NewLine + FormatException(exception);
         }
 
-        _writer.Write(entry);
+        if (logLevel >= _minLevel)
+            _writer.Write(entry);
+
+        if (isProductionExcelSplitLog && logLevel >= _productionExcelSplitMinLevel)
+            _productionExcelSplitWriter.Write(entry);
     }
 
     private static string FormatException(Exception ex)
@@ -122,13 +148,15 @@ internal sealed class FileLogger : ILogger
 internal sealed class FileLogWriter : IDisposable
 {
     private readonly string _directory;
+    private readonly string _filePrefix;
     private readonly Lock _lock = new();
     private StreamWriter? _currentWriter;
     private string _currentDate = string.Empty;
 
-    internal FileLogWriter(string directory, int retainDays)
+    internal FileLogWriter(string directory, string filePrefix, int retainDays)
     {
         _directory = directory;
+        _filePrefix = filePrefix;
         PurgeOldFiles(retainDays);
     }
 
@@ -143,7 +171,7 @@ internal sealed class FileLogWriter : IDisposable
                 _currentWriter?.Flush();
                 _currentWriter?.Dispose();
 
-                var path = Path.Combine(_directory, $"app-{today}.log");
+                var path = Path.Combine(_directory, $"{_filePrefix}-{today}.log");
                 _currentWriter = new StreamWriter(path, append: true, System.Text.Encoding.UTF8)
                 {
                     AutoFlush = true
@@ -172,7 +200,7 @@ internal sealed class FileLogWriter : IDisposable
         try
         {
             var cutoff = DateTime.Now.AddDays(-retainDays);
-            foreach (var file in Directory.GetFiles(_directory, "app-*.log"))
+            foreach (var file in Directory.GetFiles(_directory, $"{_filePrefix}-*.log"))
             {
                 if (File.GetLastWriteTime(file) < cutoff)
                     File.Delete(file);

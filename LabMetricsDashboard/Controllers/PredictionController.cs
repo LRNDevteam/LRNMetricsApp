@@ -93,16 +93,54 @@ public class PredictionController : Controller
 
         if (usingDb)
         {
-            var rawRecords = await _dbRepo.GetRecordsAsync(
-                labConfig!.DbConnectionString ?? string.Empty,
-                cancellationToken: HttpContext.RequestAborted);
+            try
+            {
+                var rawRecords = await _dbRepo.GetRecordsAsync(
+                    labConfig!.DbConnectionString ?? string.Empty,
+                    cancellationToken: HttpContext.RequestAborted);
 
-            _logger.LogInformation("[{Lab}] DB source returned {Count} raw records before global filter.", selectedLab, rawRecords.Count);
+                _logger.LogInformation("[{Lab}] DB source returned {Count} raw records before global filter.", selectedLab, rawRecords.Count);
 
-            baseDataset = PredictionReportParserService.ApplyGlobalFilter(rawRecords, weekStart);
+                baseDataset = PredictionReportParserService.ApplyGlobalFilter(rawRecords, weekStart);
 
-            _logger.LogInformation("[{Lab}] After global filter (ForecastPayability + ExpPmtDate < {WeekStart}): {Count} records.",
-                selectedLab, weekStart, baseDataset.Count);
+                _logger.LogInformation("[{Lab}] After global filter (ForecastPayability + ExpPmtDate < {WeekStart}): {Count} records.",
+                    selectedLab, weekStart, baseDataset.Count);
+
+                // If the SP returned 0 rows, run a diagnostic probe so the page can
+                // explain *why* the dataset is empty (table missing, SP missing,
+                // never populated for this lab, etc.) instead of rendering blanks.
+                if (rawRecords.Count == 0)
+                {
+                    var diag = await _dbRepo.ProbeAsync(labConfig.DbConnectionString ?? string.Empty, HttpContext.RequestAborted);
+                    if (!diag.IsReady)
+                    {
+                        _logger.LogWarning("[{Lab}] Prediction DB probe: TableExists={T}, ProcExists={P}, Rows={N}, LatestRunId={R}, LastRun={D}, Error={E}",
+                            selectedLab, diag.TableExists, diag.ProcedureExists, diag.RowCount, diag.LatestRunId, diag.LatestRunInsertedAt, diag.ErrorMessage);
+                        return View(new PredictionAnalysisViewModel
+                        {
+                            AvailableLabs        = availableLabs,
+                            SelectedLab          = selectedLab,
+                            PredictionAvailable  = false,
+                            ErrorMessage         = $"Prediction Analysis is not yet available for {selectedLab}. {diag.ErrorMessage}",
+                            CurrentWeekStartDate = weekStart,
+                        });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[{Lab}] Prediction DB read failed; running diagnostic probe.", selectedLab);
+                var diag = await _dbRepo.ProbeAsync(labConfig!.DbConnectionString ?? string.Empty, HttpContext.RequestAborted);
+                var detail = diag.ErrorMessage ?? ex.Message;
+                return View(new PredictionAnalysisViewModel
+                {
+                    AvailableLabs        = availableLabs,
+                    SelectedLab          = selectedLab,
+                    PredictionAvailable  = false,
+                    ErrorMessage         = $"Failed to load Prediction Analysis for {selectedLab}: {detail}",
+                    CurrentWeekStartDate = weekStart,
+                });
+            }
         }
         else
         {

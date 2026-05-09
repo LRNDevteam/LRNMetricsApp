@@ -1,4 +1,5 @@
 using LabMetricsDashboard.Models;
+using System.Data;
 using Microsoft.Data.SqlClient;
 
 namespace LabMetricsDashboard.Services;
@@ -21,6 +22,9 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
         _logger = logger;
         _cfg    = cfg;
     }
+
+    /// <inheritdoc/>
+    public bool SupportsFilteredMonthlyWeeklySp => _cfg.SupportsFilteredMonthlyWeeklySp;
 
     // ?? Filter Options ????????????????????????????????????????????????????
     /// <inheritdoc/>
@@ -65,24 +69,44 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
     // ?? Monthly Claim Volume ??????????????????????????????????????????????
     /// <inheritdoc/>
     public async Task<ProductionReportResult> GetMonthlyAsync(
-        string connectionString, CancellationToken ct = default)
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default)
     {
-        var sql = $"""
-            SELECT PanelType AS PanelName, PayerName, PayerRank, BilledYearMonth, ClaimCount, TotalCharges
-            FROM   dbo.{_cfg.Prefix}MonthlyBilledProductionSummary
-            ORDER  BY PanelName, BilledYearMonth, PayerRank
-            """;
+        // Single SP per lab (naming convention: usp_Get{Prefix}MonthlyBilledProductionSummary).
+        // When no filter params are supplied the SP serves rows from the pre-aggregated
+        // snapshot table; when any filter is supplied the SP aggregates live from
+        // dbo.ClaimLevelData using the same filter semantics. Output schema is identical:
+        //   PayerRank = 0  -> panel-level totals across ALL payers (panel row).
+        //   PayerRank 1..N -> top payer drill-down sub-rows.
+        var spName = $"dbo.usp_Get{_cfg.Prefix}MonthlyBilledProductionSummary";
 
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand(sql, conn) { CommandTimeout = 120 };
+            await using var cmd  = new SqlCommand(spName, conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 180,
+            };
+            AddProductionFilterParameters(
+                cmd,
+                filterPayerNames, filterPanelNames,
+                filterDosFrom, filterDosTo,
+                filterFirstBillFrom, filterFirstBillTo,
+                filterFirstBilledFrom, filterFirstBilledTo);
             await using var rdr  = await cmd.ExecuteReaderAsync(ct);
 
             var panelMonth    = new Dictionary<string, Dictionary<string, (int c, decimal ch)>>(StringComparer.OrdinalIgnoreCase);
             var payerMonthMap = new Dictionary<string, Dictionary<string, Dictionary<string, (int c, decimal ch)>>>(StringComparer.OrdinalIgnoreCase);
-            var payerRankMap  = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
             var allMonths     = new SortedSet<string>();
 
             while (await rdr.ReadAsync(ct))
@@ -96,21 +120,39 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
 
                 allMonths.Add(month);
 
-                if (!panelMonth.TryGetValue(panel, out var pm)) panelMonth[panel] = pm = [];
-                pm[month] = pm.TryGetValue(month, out var p0) ? (p0.c + count, p0.ch + charges) : (count, charges);
-
-                if (!payerMonthMap.TryGetValue(panel, out var payM)) payerMonthMap[panel] = payM = new(StringComparer.OrdinalIgnoreCase);
-                if (!payM.TryGetValue(payer, out var mDict)) payM[payer] = mDict = [];
-                mDict[month] = mDict.TryGetValue(month, out var m0) ? (m0.c + count, m0.ch + charges) : (count, charges);
-
-                if (!payerRankMap.TryGetValue(panel, out var rankD)) payerRankMap[panel] = rankD = new(StringComparer.OrdinalIgnoreCase);
-                rankD[payer] = rank;
+                if (rank == 0)
+                {
+                    // PayerRank 0 = panel-level total across ALL payers.
+                    if (!panelMonth.TryGetValue(panel, out var pm)) panelMonth[panel] = pm = [];
+                    pm[month] = (count, charges);
+                }
+                else
+                {
+                    // PayerRank 1-3 = top payer drill-down.
+                    if (!payerMonthMap.TryGetValue(panel, out var payM)) payerMonthMap[panel] = payM = new(StringComparer.OrdinalIgnoreCase);
+                    if (!payM.TryGetValue(payer, out var mDict)) payM[payer] = mDict = [];
+                    mDict[month] = mDict.TryGetValue(month, out var m0) ? (m0.c + count, m0.ch + charges) : (count, charges);
+                }
             }
 
-            var months      = allMonths.ToList();
-            var years       = months.Select(m => int.Parse(m[..4])).Distinct().OrderBy(y => y).ToList();
+            var months       = allMonths.ToList();
+            var years        = months.Select(m => int.Parse(m[..4])).Distinct().OrderBy(y => y).ToList();
             var grandByMonth = new Dictionary<string, ProductionMonthCell>();
             var panelRows    = new List<ProductionPanelRow>();
+
+
+            // Fallback: if the SP table pre-dates the PayerRank=0 change (no all-payer
+            // totals rows yet), derive panel totals by summing the PayerRank 1-3 rows.
+            if (panelMonth.Count == 0)
+            {
+                foreach (var (panel, payM) in payerMonthMap)
+                {
+                    if (!panelMonth.TryGetValue(panel, out var pm)) panelMonth[panel] = pm = [];
+                    foreach (var (_, mDict) in payM)
+                        foreach (var (month, v) in mDict)
+                            pm[month] = pm.TryGetValue(month, out var p0) ? (p0.c + v.c, p0.ch + v.ch) : v;
+                }
+            }
 
             foreach (var (panel, pm) in panelMonth.OrderByDescending(x => x.Value.Values.Sum(v => v.c)))
             {
@@ -122,21 +164,22 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                     else grandByMonth[mk] = new ProductionMonthCell(g.ClaimCount + cell.ClaimCount, g.BilledCharges + cell.BilledCharges);
                 }
 
-                var topPayers = new List<ProductionPayerDrillDown>();
-                if (payerMonthMap.TryGetValue(panel, out var payM) && payerRankMap.TryGetValue(panel, out var rankD))
-                {
-                    foreach (var (payer, mDict) in payM.OrderBy(p => rankD.GetValueOrDefault(p.Key, 99)))
-                    {
-                        topPayers.Add(new ProductionPayerDrillDown
+                // Top 3 payers ranked by total claim count across all months.
+                var topPayers = payerMonthMap.TryGetValue(panel, out var payM)
+                    ? payM
+                        .Select(kv => (Payer: kv.Key, ByMonth: kv.Value, Total: kv.Value.Values.Sum(v => v.c)))
+                        .OrderByDescending(x => x.Total)
+                        .Take(3)
+                        .Select(x => new ProductionPayerDrillDown
                         {
-                            PayerName    = payer,
-                            ByMonth      = mDict.ToDictionary(kv => kv.Key, kv => new ProductionMonthCell(kv.Value.c, kv.Value.ch)),
-                            ByYear       = mDict.GroupBy(kv => int.Parse(kv.Key[..4])).ToDictionary(g => g.Key, g => new ProductionYearTotal(g.Sum(kv => kv.Value.c), g.Sum(kv => kv.Value.ch))),
-                            TotalClaims  = mDict.Values.Sum(v => v.c),
-                            TotalCharges = mDict.Values.Sum(v => v.ch),
-                        });
-                    }
-                }
+                            PayerName    = x.Payer,
+                            ByMonth      = x.ByMonth.ToDictionary(kv => kv.Key, kv => new ProductionMonthCell(kv.Value.c, kv.Value.ch)),
+                            ByYear       = x.ByMonth.GroupBy(kv => int.Parse(kv.Key[..4])).ToDictionary(g => g.Key, g => new ProductionYearTotal(g.Sum(kv => kv.Value.c), g.Sum(kv => kv.Value.ch))),
+                            TotalClaims  = x.ByMonth.Values.Sum(v => v.c),
+                            TotalCharges = x.ByMonth.Values.Sum(v => v.ch),
+                        })
+                        .ToList()
+                    : [];
 
                 panelRows.Add(new ProductionPanelRow
                 {
@@ -169,26 +212,43 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
     // ?? Weekly Claim Volume ???????????????????????????????????????????????
     /// <inheritdoc/>
     public async Task<WeeklyClaimVolumeResult> GetWeeklyAsync(
-        string connectionString, CancellationToken ct = default)
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default)
     {
-        var sql = $"""
-            SELECT PanelType AS PanelName, PayerName, PayerRank,
-                   WeekStart, WeekEnd, WeekLabel, ClaimCount, TotalCharges
-            FROM   dbo.{_cfg.Prefix}WeeklyBilledProductionSummary
-            ORDER  BY WeekStart DESC, PanelName, PayerRank
-            """;
+        // Single SP per lab (naming convention: usp_Get{Prefix}WeeklyBilledProductionSummary).
+        // See GetMonthlyAsync for filter-parameter behaviour. Output schema is identical:
+        //   PayerRank = 0  -> panel-level totals across ALL payers (panel row).
+        //   PayerRank 1..N -> top payer drill-down sub-rows.
+        var spName = $"dbo.usp_Get{_cfg.Prefix}WeeklyBilledProductionSummary";
 
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand(sql, conn) { CommandTimeout = 120 };
+            await using var cmd  = new SqlCommand(spName, conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 180,
+            };
+            AddProductionFilterParameters(
+                cmd,
+                filterPayerNames, filterPanelNames,
+                filterDosFrom, filterDosTo,
+                filterFirstBillFrom, filterFirstBillTo,
+                filterFirstBilledFrom, filterFirstBilledTo);
             await using var rdr  = await cmd.ExecuteReaderAsync(ct);
 
             var weekCols     = new Dictionary<string, WeekColumn>();
             var panelWeek    = new Dictionary<string, Dictionary<string, (int c, decimal ch)>>(StringComparer.OrdinalIgnoreCase);
             var payerWeekMap = new Dictionary<string, Dictionary<string, Dictionary<string, (int c, decimal ch)>>>(StringComparer.OrdinalIgnoreCase);
-            var payerRankMap = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
 
             while (await rdr.ReadAsync(ct))
             {
@@ -204,20 +264,37 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                 if (!weekCols.ContainsKey(weekKey))
                     weekCols[weekKey] = new WeekColumn(weekKey, weekStart, weekEnd);
 
-                if (!panelWeek.TryGetValue(panel, out var pw)) panelWeek[panel] = pw = [];
-                pw[weekKey] = pw.TryGetValue(weekKey, out var p0) ? (p0.c + count, p0.ch + charges) : (count, charges);
-
-                if (!payerWeekMap.TryGetValue(panel, out var payW)) payerWeekMap[panel] = payW = new(StringComparer.OrdinalIgnoreCase);
-                if (!payW.TryGetValue(payer, out var wDict)) payW[payer] = wDict = [];
-                wDict[weekKey] = wDict.TryGetValue(weekKey, out var w0) ? (w0.c + count, w0.ch + charges) : (count, charges);
-
-                if (!payerRankMap.TryGetValue(panel, out var rankD)) payerRankMap[panel] = rankD = new(StringComparer.OrdinalIgnoreCase);
-                rankD[payer] = rank;
+                if (rank == 0)
+                {
+                    // PayerRank 0 = panel-level total across ALL payers.
+                    if (!panelWeek.TryGetValue(panel, out var pw)) panelWeek[panel] = pw = [];
+                    pw[weekKey] = (count, charges);
+                }
+                else
+                {
+                    // PayerRank 1-3 = top payer drill-down.
+                    if (!payerWeekMap.TryGetValue(panel, out var payW)) payerWeekMap[panel] = payW = new(StringComparer.OrdinalIgnoreCase);
+                    if (!payW.TryGetValue(payer, out var wDict)) payW[payer] = wDict = [];
+                    wDict[weekKey] = wDict.TryGetValue(weekKey, out var w0) ? (w0.c + count, w0.ch + charges) : (count, charges);
+                }
             }
 
-            var columns     = weekCols.Values.OrderByDescending(w => w.WeekStart).ToList();
+            var columns     = weekCols.Values.OrderBy(w => w.WeekStart).ToList();
             var grandByWeek = new Dictionary<string, ProductionMonthCell>();
             var panelRows   = new List<WeeklyPanelRow>();
+
+            // Fallback: if the SP table pre-dates the PayerRank=0 change (no all-payer
+            // totals rows yet), derive panel totals by summing the PayerRank 1-3 rows.
+            if (panelWeek.Count == 0)
+            {
+                foreach (var (panel, payW) in payerWeekMap)
+                {
+                    if (!panelWeek.TryGetValue(panel, out var pw)) panelWeek[panel] = pw = [];
+                    foreach (var (_, wDict) in payW)
+                        foreach (var (wk, v) in wDict)
+                            pw[wk] = pw.TryGetValue(wk, out var p0) ? (p0.c + v.c, p0.ch + v.ch) : v;
+                }
+            }
 
             foreach (var (panel, pw) in panelWeek.OrderByDescending(x => x.Value.Values.Sum(v => v.c)))
             {
@@ -229,20 +306,21 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                     else grandByWeek[wk] = new ProductionMonthCell(g.ClaimCount + cell.ClaimCount, g.BilledCharges + cell.BilledCharges);
                 }
 
-                var topPayers = new List<WeeklyPayerDrillDown>();
-                if (payerWeekMap.TryGetValue(panel, out var payW) && payerRankMap.TryGetValue(panel, out var rankD))
-                {
-                    foreach (var (payer, wDict) in payW.OrderBy(p => rankD.GetValueOrDefault(p.Key, 99)))
-                    {
-                        topPayers.Add(new WeeklyPayerDrillDown
+                // Top 3 payers ranked by total claim count across all 4 weeks.
+                var topPayers = payerWeekMap.TryGetValue(panel, out var payW)
+                    ? payW
+                        .Select(kv => (Payer: kv.Key, ByWeek: kv.Value, Total: kv.Value.Values.Sum(v => v.c)))
+                        .OrderByDescending(x => x.Total)
+                        .Take(3)
+                        .Select(x => new WeeklyPayerDrillDown
                         {
-                            PayerName    = payer,
-                            ByWeek       = wDict.ToDictionary(kv => kv.Key, kv => new ProductionMonthCell(kv.Value.c, kv.Value.ch)),
-                            TotalClaims  = wDict.Values.Sum(v => v.c),
-                            TotalCharges = wDict.Values.Sum(v => v.ch),
-                        });
-                    }
-                }
+                            PayerName    = x.Payer,
+                            ByWeek       = x.ByWeek.ToDictionary(kv => kv.Key, kv => new ProductionMonthCell(kv.Value.c, kv.Value.ch)),
+                            TotalClaims  = x.ByWeek.Values.Sum(v => v.c),
+                            TotalCharges = x.ByWeek.Values.Sum(v => v.ch),
+                        })
+                        .ToList()
+                    : [];
 
                 panelRows.Add(new WeeklyPanelRow
                 {
@@ -271,31 +349,68 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
     // ?? Coding ????????????????????????????????????????????????????????????
     /// <inheritdoc/>
     public async Task<CodingResult> GetCodingAsync(
-        string connectionString, CancellationToken ct = default)
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default)
     {
         // Certus has no coding tables — return empty so the tab shows the "no data" state.
         if (!_cfg.HasCodingTables)
             return new CodingResult([], 0, 0m);
 
-        var panelSql  = $"SELECT PanelName, ClaimCount, TotalCharges FROM dbo.{_cfg.Prefix}CodingPanelSummary ORDER BY TotalCharges DESC";
-        var detailSql = $"SELECT PanelName, CPTCodeXUnitsXModifier, ClaimCount, TotalCharges FROM dbo.{_cfg.Prefix}CodingCPTDetail ORDER BY PanelName, TotalCharges DESC";
+        // When the lab's read SPs are parameterised (SupportsFilteredMonthlyWeeklySp == true)
+        // we call usp_Get{Prefix}CodingBreakdown which returns two result sets and serves
+        // either the snapshot tables (no filters) or a live aggregate (any filter).
+        // For labs that haven't been upgraded yet we fall back to the legacy two-SELECT
+        // batch against the snapshot tables (filters are silently ignored).
+        var spName = $"dbo.usp_Get{_cfg.Prefix}CodingBreakdown";
 
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
 
-            var panelMap = new Dictionary<string, (int c, decimal ch)>(StringComparer.OrdinalIgnoreCase);
-            await using (var cmd = new SqlCommand(panelSql, conn) { CommandTimeout = 120 })
-            await using (var rdr = await cmd.ExecuteReaderAsync(ct))
+            SqlCommand cmd;
+            if (_cfg.SupportsFilteredMonthlyWeeklySp)
             {
-                while (await rdr.ReadAsync(ct))
-                    panelMap[rdr.GetString(0)] = (rdr.GetInt32(1), rdr.GetDecimal(2));
+                cmd = new SqlCommand(spName, conn)
+                {
+                    CommandType    = CommandType.StoredProcedure,
+                    CommandTimeout = 180,
+                };
+                AddProductionFilterParameters(
+                    cmd,
+                    filterPayerNames, filterPanelNames,
+                    filterDosFrom, filterDosTo,
+                    filterFirstBillFrom, filterFirstBillTo,
+                    filterFirstBilledFrom, filterFirstBilledTo);
             }
+            else
+            {
+                var legacySql =
+                    $"SELECT PanelName, ClaimCount, TotalCharges FROM dbo.{_cfg.Prefix}CodingPanelSummary ORDER BY TotalCharges DESC; " +
+                    $"SELECT PanelName, CPTCodeXUnitsXModifier, ClaimCount, TotalCharges FROM dbo.{_cfg.Prefix}CodingCPTDetail ORDER BY PanelName, TotalCharges DESC";
+                cmd = new SqlCommand(legacySql, conn) { CommandTimeout = 120 };
+            }
+            await using var _cmd = cmd;
 
-            var cptMap = new Dictionary<string, List<CodingCptDrillDown>>(StringComparer.OrdinalIgnoreCase);
-            await using (var cmd = new SqlCommand(detailSql, conn) { CommandTimeout = 120 })
-            await using (var rdr = await cmd.ExecuteReaderAsync(ct))
+            var panelMap = new Dictionary<string, (int c, decimal ch)>(StringComparer.OrdinalIgnoreCase);
+            var cptMap   = new Dictionary<string, List<CodingCptDrillDown>>(StringComparer.OrdinalIgnoreCase);
+
+            await using var rdr = await cmd.ExecuteReaderAsync(ct);
+
+            // Result set 1: panel summary (PanelName, ClaimCount, TotalCharges)
+            while (await rdr.ReadAsync(ct))
+                panelMap[rdr.GetString(0)] = (rdr.GetInt32(1), rdr.GetDecimal(2));
+
+            // Result set 2: CPT detail (PanelName, CPTCodeXUnitsXModifier, ClaimCount, TotalCharges)
+            if (await rdr.NextResultAsync(ct))
             {
                 while (await rdr.ReadAsync(ct))
                 {
@@ -309,6 +424,7 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                     });
                 }
             }
+
 
             var panelRows = panelMap
                 .OrderByDescending(kv => kv.Value.ch)
@@ -333,20 +449,50 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
     // ?? Payer Breakdown ???????????????????????????????????????????????????
     /// <inheritdoc/>
     public async Task<PayerBreakdownResult> GetPayerBreakdownAsync(
-        string connectionString, CancellationToken ct = default)
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default)
     {
-        var sql = $"""
-            SELECT PayerName, BilledYearMonth, ClaimCount, TotalCharges
-            FROM   dbo.{_cfg.Prefix}PayerBreakdown
-            ORDER  BY PayerName, BilledYearMonth
-            """;
+        // When the lab's read SP is parameterised, call it. Otherwise fall back to the
+        // legacy direct SELECT against the snapshot table (filters silently ignored).
+        var spName = $"dbo.usp_Get{_cfg.Prefix}PayerBreakdown";
 
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand(sql, conn) { CommandTimeout = 120 };
-            await using var rdr  = await cmd.ExecuteReaderAsync(ct);
+
+            SqlCommand cmd;
+            if (_cfg.SupportsFilteredMonthlyWeeklySp)
+            {
+                cmd = new SqlCommand(spName, conn)
+                {
+                    CommandType    = CommandType.StoredProcedure,
+                    CommandTimeout = 180,
+                };
+                AddProductionFilterParameters(
+                    cmd,
+                    filterPayerNames, filterPanelNames,
+                    filterDosFrom, filterDosTo,
+                    filterFirstBillFrom, filterFirstBillTo,
+                    filterFirstBilledFrom, filterFirstBilledTo);
+            }
+            else
+            {
+                var legacySql =
+                    $"SELECT PayerName, BilledYearMonth, ClaimCount, TotalCharges " +
+                    $"FROM dbo.{_cfg.Prefix}PayerBreakdown ORDER BY PayerName, BilledYearMonth";
+                cmd = new SqlCommand(legacySql, conn) { CommandTimeout = 120 };
+            }
+            await using var _cmd = cmd;
+            await using var rdr = await cmd.ExecuteReaderAsync(ct);
 
             var payerMonth = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
             var allMonths  = new SortedSet<string>();
@@ -394,20 +540,50 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
     // ?? Payer × Panel ?????????????????????????????????????????????????????
     /// <inheritdoc/>
     public async Task<PayerPanelResult> GetPayerByPanelAsync(
-        string connectionString, CancellationToken ct = default)
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default)
     {
-        var sql = $"""
-            SELECT PayerName, PanelType AS PanelName, ClaimCount, TotalCharges
-            FROM   dbo.{_cfg.Prefix}PayerByPanel
-            ORDER  BY PayerName, PanelName
-            """;
+        // When the lab's read SP is parameterised, call it. Otherwise fall back to the
+        // legacy direct SELECT against the snapshot table (filters silently ignored).
+        var spName = $"dbo.usp_Get{_cfg.Prefix}PayerByPanel";
 
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand(sql, conn) { CommandTimeout = 120 };
-            await using var rdr  = await cmd.ExecuteReaderAsync(ct);
+
+            SqlCommand cmd;
+            if (_cfg.SupportsFilteredMonthlyWeeklySp)
+            {
+                cmd = new SqlCommand(spName, conn)
+                {
+                    CommandType    = CommandType.StoredProcedure,
+                    CommandTimeout = 180,
+                };
+                AddProductionFilterParameters(
+                    cmd,
+                    filterPayerNames, filterPanelNames,
+                    filterDosFrom, filterDosTo,
+                    filterFirstBillFrom, filterFirstBillTo,
+                    filterFirstBilledFrom, filterFirstBilledTo);
+            }
+            else
+            {
+                var legacySql =
+                    $"SELECT PayerName, PanelType AS PanelName, ClaimCount, TotalCharges " +
+                    $"FROM dbo.{_cfg.Prefix}PayerByPanel ORDER BY PayerName, PanelName";
+                cmd = new SqlCommand(legacySql, conn) { CommandTimeout = 120 };
+            }
+            await using var _cmd = cmd;
+            await using var rdr = await cmd.ExecuteReaderAsync(ct);
 
             var payerPanel = new Dictionary<string, Dictionary<string, (int c, decimal ch)>>(StringComparer.OrdinalIgnoreCase);
             var allPanels  = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -462,22 +638,55 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
     // ?? Unbilled Aging ????????????????????????????????????????????????????
     /// <inheritdoc/>
     public async Task<UnbilledAgingResult> GetUnbilledAgingAsync(
-        string connectionString, CancellationToken ct = default)
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default)
     {
-        // The TotalCharges column may not exist in some tables (e.g. Cove).
-        var chargesCol = _cfg.UnbilledAgingHasCharges ? ", TotalCharges" : ", CAST(0 AS DECIMAL(18,2)) AS TotalCharges";
-        var sql = $"""
-            SELECT {_cfg.UnbilledAgingRowKey}, {_cfg.UnbilledAgingBucketCol}, ClaimCount{chargesCol}
-            FROM   dbo.{_cfg.Prefix}UnbilledAging
-            ORDER  BY {_cfg.UnbilledAgingRowKey}, {_cfg.UnbilledAgingBucketCol}
-            """;
+        // When the lab's read SP is parameterised, call it. Otherwise fall back to the
+        // legacy direct SELECT against the snapshot table (filters silently ignored).
+        var spName = $"dbo.usp_Get{_cfg.Prefix}UnbilledAging";
 
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand(sql, conn) { CommandTimeout = 120 };
-            await using var rdr  = await cmd.ExecuteReaderAsync(ct);
+
+            SqlCommand cmd;
+            if (_cfg.SupportsFilteredMonthlyWeeklySp)
+            {
+                cmd = new SqlCommand(spName, conn)
+                {
+                    CommandType    = CommandType.StoredProcedure,
+                    CommandTimeout = 180,
+                };
+                AddProductionFilterParameters(
+                    cmd,
+                    filterPayerNames, filterPanelNames,
+                    filterDosFrom, filterDosTo,
+                    filterFirstBillFrom, filterFirstBillTo,
+                    filterFirstBilledFrom, filterFirstBilledTo);
+            }
+            else
+            {
+                // The TotalCharges column may not exist in some tables (e.g. Cove).
+                var chargesCol = _cfg.UnbilledAgingHasCharges
+                    ? ", TotalCharges"
+                    : ", CAST(0 AS DECIMAL(18,2)) AS TotalCharges";
+                var legacySql =
+                    $"SELECT {_cfg.UnbilledAgingRowKey}, {_cfg.UnbilledAgingBucketCol}, ClaimCount{chargesCol} " +
+                    $"FROM dbo.{_cfg.Prefix}UnbilledAging " +
+                    $"ORDER BY {_cfg.UnbilledAgingRowKey}, {_cfg.UnbilledAgingBucketCol}";
+                cmd = new SqlCommand(legacySql, conn) { CommandTimeout = 120 };
+            }
+            await using var _cmd = cmd;
+            await using var rdr = await cmd.ExecuteReaderAsync(ct);
 
             var rowBucket  = new Dictionary<string, Dictionary<string, (int c, decimal ch)>>(StringComparer.OrdinalIgnoreCase);
             var allBuckets = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -530,20 +739,50 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
     // ?? CPT Breakdown ?????????????????????????????????????????????????????
     /// <inheritdoc/>
     public async Task<CptBreakdownResult> GetCptBreakdownAsync(
-        string connectionString, CancellationToken ct = default)
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default)
     {
-        var sql = $"""
-            SELECT CPTCode, BilledYearMonth, CPTCount, BilledUnits, TotalCharges
-            FROM   dbo.{_cfg.Prefix}CPTBreakdown
-            ORDER  BY CPTCode, BilledYearMonth
-            """;
+        // When the lab's read SP is parameterised, call it. Otherwise fall back to the
+        // legacy direct SELECT against the snapshot table (filters silently ignored).
+        var spName = $"dbo.usp_Get{_cfg.Prefix}CPTBreakdown";
 
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand(sql, conn) { CommandTimeout = 120 };
-            await using var rdr  = await cmd.ExecuteReaderAsync(ct);
+
+            SqlCommand cmd;
+            if (_cfg.SupportsFilteredMonthlyWeeklySp)
+            {
+                cmd = new SqlCommand(spName, conn)
+                {
+                    CommandType    = CommandType.StoredProcedure,
+                    CommandTimeout = 180,
+                };
+                AddProductionFilterParameters(
+                    cmd,
+                    filterPayerNames, filterPanelNames,
+                    filterDosFrom, filterDosTo,
+                    filterFirstBillFrom, filterFirstBillTo,
+                    filterFirstBilledFrom, filterFirstBilledTo);
+            }
+            else
+            {
+                var legacySql =
+                    $"SELECT CPTCode, BilledYearMonth, CPTCount, BilledUnits, TotalCharges " +
+                    $"FROM dbo.{_cfg.Prefix}CPTBreakdown ORDER BY CPTCode, BilledYearMonth";
+                cmd = new SqlCommand(legacySql, conn) { CommandTimeout = 120 };
+            }
+            await using var _cmd = cmd;
+            await using var rdr = await cmd.ExecuteReaderAsync(ct);
 
             var cptMonth  = new Dictionary<string, Dictionary<string, (decimal u, decimal ch)>>(StringComparer.OrdinalIgnoreCase);
             var allMonths = new SortedSet<string>();
@@ -552,7 +791,7 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
             {
                 var cpt     = rdr.GetString(0);
                 var month   = rdr.GetString(1);
-                var units   = rdr.GetDecimal(2);   // CPTCount column used for count/units
+                var units   = (decimal)rdr.GetInt32(2);   // CPTCount column is INT
                 var charges = rdr.GetDecimal(4);
 
                 allMonths.Add(month);
@@ -595,5 +834,54 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
             _logger.LogError(ex, "[{Prefix}] GetCptBreakdownAsync failed.", _cfg.Prefix);
             return new CptBreakdownResult([], [], [], new Dictionary<string, CptBreakdownCell>(), 0m, 0m);
         }
+    }
+
+    // Adds the @PayerNames / @PanelNames / @Dos*/@FirstBill*/@FirstBilled* parameters
+    // expected by the parameterised Monthly/Weekly read SPs. List parameters are
+    // joined with '|' so values containing commas survive intact. NULL is sent for
+    // missing values; the SP treats NULL as "no filter".
+    private static void AddProductionFilterParameters(
+        SqlCommand cmd,
+        List<string>? filterPayerNames,
+        List<string>? filterPanelNames,
+        DateOnly? filterDosFrom,
+        DateOnly? filterDosTo,
+        DateOnly? filterFirstBillFrom,
+        DateOnly? filterFirstBillTo,
+        DateOnly? filterFirstBilledFrom,
+        DateOnly? filterFirstBilledTo)
+    {
+        cmd.Parameters.Add(new SqlParameter("@PayerNames", SqlDbType.NVarChar, -1)
+        {
+            Value = JoinList(filterPayerNames),
+        });
+        cmd.Parameters.Add(new SqlParameter("@PanelNames", SqlDbType.NVarChar, -1)
+        {
+            Value = JoinList(filterPanelNames),
+        });
+        cmd.Parameters.Add(DateParam("@DosFrom",         filterDosFrom));
+        cmd.Parameters.Add(DateParam("@DosTo",           filterDosTo));
+        cmd.Parameters.Add(DateParam("@FirstBillFrom",   filterFirstBillFrom));
+        cmd.Parameters.Add(DateParam("@FirstBillTo",     filterFirstBillTo));
+        cmd.Parameters.Add(DateParam("@FirstBilledFrom", filterFirstBilledFrom));
+        cmd.Parameters.Add(DateParam("@FirstBilledTo",   filterFirstBilledTo));
+
+        static object JoinList(List<string>? values)
+        {
+            if (values is null || values.Count == 0) return DBNull.Value;
+            var cleaned = values
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .Select(v => v.Trim())
+                .ToList();
+            return cleaned.Count == 0 ? DBNull.Value : string.Join('|', cleaned);
+        }
+
+        static SqlParameter DateParam(string name, DateOnly? value) =>
+            new(name, SqlDbType.Date)
+            {
+                Value = value.HasValue
+                    ? value.Value.ToDateTime(TimeOnly.MinValue)
+                    : DBNull.Value,
+            };
     }
 }

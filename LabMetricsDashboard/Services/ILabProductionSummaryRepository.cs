@@ -24,31 +24,122 @@ public interface ILabProductionSummaryRepository
     Task<(List<string> PayerNames, List<string> PanelNames)> GetFilterOptionsAsync(
         string connectionString, CancellationToken ct = default);
 
+    /// <summary>
+    /// <c>true</c> when this lab's <c>usp_Get{Prefix}MonthlyBilledProductionSummary</c>
+    /// and <c>usp_Get{Prefix}WeeklyBilledProductionSummary</c> stored procedures
+    /// accept filter parameters and aggregate live from <c>dbo.ClaimLevelData</c>
+    /// when filters are supplied. When <c>false</c>, callers must fall back to
+    /// <see cref="IProductionReportRepository"/> for the filtered query.
+    /// </summary>
+    bool SupportsFilteredMonthlyWeeklySp { get; }
+
     /// <summary>Reads <c>{prefix}MonthlyBilledProductionSummary</c> ? monthly panel + top-3 payer pivot.</summary>
-    Task<ProductionReportResult> GetMonthlyAsync(string connectionString, CancellationToken ct = default);
+    /// <remarks>
+    /// When <see cref="SupportsFilteredMonthlyWeeklySp"/> is <c>true</c>, the optional filter
+    /// parameters are passed to the read SP which switches to a live aggregation against
+    /// <c>dbo.ClaimLevelData</c>. When all filter parameters are <c>null</c> the SP returns
+    /// rows from the pre-aggregated snapshot table (fast path).
+    /// </remarks>
+    Task<ProductionReportResult> GetMonthlyAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default);
 
     /// <summary>Reads <c>{prefix}WeeklyBilledProductionSummary</c> ? last-4-week panel + top-3 payer pivot.</summary>
-    Task<WeeklyClaimVolumeResult> GetWeeklyAsync(string connectionString, CancellationToken ct = default);
+    /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
+    Task<WeeklyClaimVolumeResult> GetWeeklyAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Reads <c>{prefix}CodingPanelSummary</c> + <c>{prefix}CodingCPTDetail</c>.
     /// Returns an empty result when the lab has no coding tables
     /// (<see cref="LabSummaryTableConfig.HasCodingTables"/> is <c>false</c>).
     /// </summary>
-    Task<CodingResult> GetCodingAsync(string connectionString, CancellationToken ct = default);
+    /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
+    Task<CodingResult> GetCodingAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default);
 
     /// <summary>Reads <c>{prefix}PayerBreakdown</c> ? payer × month pivot.</summary>
-    Task<PayerBreakdownResult> GetPayerBreakdownAsync(string connectionString, CancellationToken ct = default);
+    /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
+    Task<PayerBreakdownResult> GetPayerBreakdownAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default);
 
     /// <summary>Reads <c>{prefix}PayerByPanel</c> ? payer × panel pivot.</summary>
-    Task<PayerPanelResult> GetPayerByPanelAsync(string connectionString, CancellationToken ct = default);
+    /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
+    Task<PayerPanelResult> GetPayerByPanelAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Reads <c>{prefix}UnbilledAging</c> ? panel/payer × aging-bucket pivot.
     /// The row key column and bucket column vary per lab (see <see cref="LabSummaryTableConfig"/>).
     /// </summary>
-    Task<UnbilledAgingResult> GetUnbilledAgingAsync(string connectionString, CancellationToken ct = default);
+    /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
+    Task<UnbilledAgingResult> GetUnbilledAgingAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default);
 
     /// <summary>Reads <c>{prefix}CPTBreakdown</c> ? CPT × month pivot.</summary>
-    Task<CptBreakdownResult> GetCptBreakdownAsync(string connectionString, CancellationToken ct = default);
+    /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
+    Task<CptBreakdownResult> GetCptBreakdownAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default);
 }

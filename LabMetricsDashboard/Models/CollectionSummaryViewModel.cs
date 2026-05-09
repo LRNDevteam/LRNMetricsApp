@@ -89,8 +89,34 @@ public sealed class CollectionSummaryViewModel
 
     public ProviderSummaryResult ProviderSummary { get; set; } = ProviderSummaryResult.Empty;
 
+    /// <summary>
+    /// True when the page was rendered from the pre-aggregated <c>{prefix}_CS_*</c> snapshot
+    /// tables (fast path, no filters active). False when the data was queried live from
+    /// <c>ClaimLevelData</c> / <c>LineLevelData</c>.
+    /// </summary>
+    public bool IsAggregateMode { get; set; }
+
+    /// <summary>
+    /// True when the selected lab has <c>EnableCollectionSummaryReport</c> set to true and a
+    /// known table prefix. Indicates that aggregate snapshots are available for fast loads.
+    /// </summary>
+    public bool SupportsAggregateMode { get; set; }
+
+    /// <summary>
+    /// Most recent <c>RefreshedAt</c> timestamp across the aggregate snapshot tables consulted
+    /// for this page render. Null when the page was rendered live.
+    /// </summary>
+    public DateTime? AggregateRefreshedAt { get; set; }
+
     /// <summary>Error message when the DB query fails or is unavailable.</summary>
     public string? ErrorMessage { get; set; }
+
+    /// <summary>
+    /// When true, tab panes that were not pre-loaded will fetch their content lazily via AJAX
+    /// the first time the tab is activated. This is set when the page is rendered in live mode
+    /// (not from aggregates) to avoid blocking the initial page load on heavy ClaimLevel/LineLevel queries.
+    /// </summary>
+    public bool LazyLoadTabs { get; set; }
 }
 
 // ?? Status Summary types ??????????????????????????????????????????????????????
@@ -274,6 +300,8 @@ public sealed record CollectionYearTotal(int EncounterCount, decimal InsurancePa
 public sealed class CollectionPayerDrillDown
 {
     public required string PayerName { get; set; }
+    /// <summary>1-based rank of this payer within the panel (DB-computed or position-based for live queries).</summary>
+    public byte PayerRank { get; set; }
     public Dictionary<string, CollectionMonthlyCell> ByMonth { get; set; } = [];
     public Dictionary<int, CollectionYearTotal> ByYear { get; set; } = [];
     public int TotalEncounters { get; set; }

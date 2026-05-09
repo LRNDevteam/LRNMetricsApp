@@ -134,6 +134,17 @@ public sealed class LabCsvConfig
     public bool EnableCollectionReport { get; init; } = true;
 
     /// <summary>
+    /// When <c>true</c>, the Collection Summary page loads the 13 tabs from the
+    /// pre-aggregated <c>{prefix}_CS_*</c> snapshot tables (populated by the
+    /// <c>usp_Refresh{prefix}_CS_*</c> stored procedures) instead of querying
+    /// <c>ClaimLevelData</c> / <c>LineLevelData</c> directly.
+    /// Live queries are used automatically whenever any filter is active.
+    /// Resetting the filters restores the snapshot view.
+    /// Defaults to false.
+    /// </summary>
+    public bool EnableCollectionSummaryReport { get; init; } = false;
+
+    /// <summary>
     /// Optional per-lab Production Summary settings (rule selection, etc.).
     /// When null or when <see cref="ProductionSummaryConfig.Rule"/> is empty,
     /// the legacy default behavior is used (columns by FirstBilledDate).

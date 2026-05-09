@@ -29,6 +29,9 @@ var fileLogOptions = new FileLoggerOptions
 	MinLevel = Enum.TryParse<LogLevel>(fileLogSection["LogLevel"], true, out var lvl)
 		? lvl
 		: LogLevel.Warning,
+	ProductionExcelSplitMinLevel = Enum.TryParse<LogLevel>(fileLogSection["ProductionExcelSplitLogLevel"], true, out var splitLvl)
+		? splitLvl
+		: LogLevel.Information,
 	RetainDays = int.TryParse(fileLogSection["RetainDays"], out var rd)
 		? rd
 		: 30
@@ -229,15 +232,15 @@ builder.Services
     .SetApplicationName("LRNMetricsDashboard");
 
 // ── Anti-forgery ─────────────────────────────────────────────────────────────
-// Explicit configuration ensures Chrome receives the anti-forgery cookie correctly
-// under both HTTP (dev) and HTTPS (production IIS) without the browser blocking it.
+// SameAsRequest means: Secure flag is set only when the request itself is HTTPS.
+// This works correctly on both HTTP (intranet IIS) and HTTPS deployments.
+// Using Always on an HTTP-only server caused Chrome to silently drop the cookie,
+// making the login form return 400 or loop back to the login page.
 builder.Services.AddAntiforgery(options =>
 {
     options.Cookie.Name         = "LRN.Antiforgery";
     options.Cookie.SameSite     = SameSiteMode.Lax;
-    options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
-        ? CookieSecurePolicy.SameAsRequest
-        : CookieSecurePolicy.Always;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
     options.Cookie.HttpOnly     = true;
 });
 
@@ -338,15 +341,13 @@ builder.Services
         options.AccessDeniedPath = "/Account/AccessDenied";
         options.ExpireTimeSpan   = TimeSpan.FromHours(8);
         options.SlidingExpiration = true;
-        options.Cookie.Name = "LRN.Auth";
-        options.Cookie.HttpOnly = true;
-        options.Cookie.SameSite = SameSiteMode.Lax;
-        // Always mark the auth cookie as Secure in production so Chrome accepts it after
-        // the HTTPS redirect that follows a successful login.
-        // SameAsRequest is kept for local development (HTTP) so the dev experience is unaffected.
-        options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
-            ? CookieSecurePolicy.SameAsRequest
-            : CookieSecurePolicy.Always;
+        options.Cookie.Name     = "LRN.Auth";
+        options.Cookie.HttpOnly  = true;
+        options.Cookie.SameSite  = SameSiteMode.Lax;
+        // SameAsRequest: Secure flag is added only when the connection is already HTTPS.
+        // Using Always on an HTTP-only IIS server caused Chrome to silently drop the
+        // auth cookie after login, so every request was redirected back to the login page.
+        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
 
         // ── ReturnUrl loop guard ──────────────────────────────────────────────
         // Prevent the error and login pages from being embedded as a ReturnUrl.
@@ -478,6 +479,49 @@ app.Use(async (context, next) =>
 
 		throw;
 	}
+});
+
+// ── Login antiforgery 400 self-healing ────────────────────────────────────────
+// After every publish the DataProtection key ring may change (especially on a fresh
+// IIS app pool / new worker process). Browsers — Chrome in particular, which is
+// stricter than Edge about persisting cookies across HTTPS reconnections — still
+// hold the old LRN.Antiforgery / LRN.Auth cookies. On the next POST /Account/Login
+// the [ValidateAntiForgeryToken] filter inside MVC silently fails validation and
+// returns HTTP 400 *without* throwing — so the cookie-clearing exception handler
+// above never sees it and the user is stuck on Chrome's "This page isn't working"
+// screen. This middleware runs AFTER the MVC pipeline (it inspects the response
+// status code), and when it sees a 400 on a POST under /Account/, deletes the
+// stale cookies and redirects to GET /Account/Login so the next request gets a
+// fresh antiforgery token from the current key ring.
+app.Use(async (context, next) =>
+{
+    await next();
+
+    if (context.Response.StatusCode != StatusCodes.Status400BadRequest) return;
+    if (context.Response.HasStarted) return;
+    if (!HttpMethods.IsPost(context.Request.Method)) return;
+
+    var path = context.Request.Path.Value ?? string.Empty;
+    if (!path.StartsWith("/Account/", StringComparison.OrdinalIgnoreCase)) return;
+
+    var staleCookieNames = context.Request.Cookies.Keys
+        .Where(k => k.StartsWith("LRN.", StringComparison.OrdinalIgnoreCase)
+                 || k.StartsWith(".AspNetCore.", StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    foreach (var cookieName in staleCookieNames)
+        context.Response.Cookies.Delete(cookieName);
+
+    context.RequestServices.GetRequiredService<ILoggerFactory>()
+        .CreateLogger("LoginCookieRecovery")
+        .LogWarning(
+            "POST {Path} returned 400 (likely stale antiforgery/auth cookie after publish). " +
+            "Cleared {Count} cookie(s) [{Names}] and redirecting to login.",
+            path, staleCookieNames.Count, string.Join(",", staleCookieNames));
+
+    var pathBase = context.Request.PathBase.HasValue ? context.Request.PathBase.Value : string.Empty;
+    context.Response.Clear();
+    context.Response.Redirect($"{pathBase}/Account/Login");
 });
 
 // HTTPS redirection: only useful when running standalone (Visual Studio / Kestrel).

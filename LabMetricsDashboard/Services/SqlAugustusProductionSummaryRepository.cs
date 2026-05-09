@@ -1,4 +1,5 @@
 using LabMetricsDashboard.Models;
+using System.Data;
 using Microsoft.Data.SqlClient;
 
 namespace LabMetricsDashboard.Services;
@@ -62,20 +63,38 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
 
     // ?? Monthly Claim Volume ????????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<ProductionReportResult> GetMonthlyAsync(string connectionString, CancellationToken ct = default)
+    public async Task<ProductionReportResult> GetMonthlyAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default)
     {
-        // PanelType column stores PanelNew value (same schema as NW table).
-        const string sql = """
-            SELECT PanelType AS PanelName, PayerName, PayerRank, BilledYearMonth, ClaimCount, TotalCharges
-            FROM   dbo.Aug_MonthlyBilledProductionSummary
-            ORDER  BY PanelName, BilledYearMonth, PayerRank
-            """;
-
+        // Always route through dbo.usp_GetAug_MonthlyBilledProductionSummary so the SP
+        // owns the SQL surface. With all filter params NULL, the SP serves rows from the
+        // pre-aggregated dbo.Aug_MonthlyBilledProductionSummary snapshot table.
+        // Output schema:
+        //   PayerRank = 0  -> panel-level total across ALL payers (panel row).
+        //   PayerRank 1..N -> ranked payer drill-down sub-rows.
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand(sql, conn) { CommandTimeout = 120 };
+            await using var cmd  = new SqlCommand("dbo.usp_GetAug_MonthlyBilledProductionSummary", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 180,
+            };
+            AddAugFilterParameters(cmd,
+                filterPayerNames, filterPanelNames,
+                filterDosFrom, filterDosTo,
+                filterFirstBillFrom, filterFirstBillTo,
+                filterFirstBilledFrom, filterFirstBilledTo);
             await using var rdr  = await cmd.ExecuteReaderAsync(ct);
 
             var panelMonth    = new Dictionary<string, Dictionary<string, (int c, decimal ch)>>(StringComparer.OrdinalIgnoreCase);
@@ -94,17 +113,33 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
 
                 allMonths.Add(month);
 
-                if (!panelMonth.TryGetValue(panel, out var pm)) panelMonth[panel] = pm = [];
-                if (!pm.TryGetValue(month, out var pt)) pm[month] = (count, charges);
-                else pm[month] = (pt.c + count, pt.ch + charges);
+                if (rank == 0)
+                {
+                    // Panel-level total row from the SP.
+                    if (!panelMonth.TryGetValue(panel, out var pm)) panelMonth[panel] = pm = [];
+                    pm[month] = (count, charges);
+                    continue;
+                }
 
                 if (!payerMonthMap.TryGetValue(panel, out var payM)) payerMonthMap[panel] = payM = new(StringComparer.OrdinalIgnoreCase);
                 if (!payM.TryGetValue(payer, out var mDict)) payM[payer] = mDict = [];
-                if (!mDict.TryGetValue(month, out var md)) mDict[month] = (count, charges);
-                else mDict[month] = (md.c + count, md.ch + charges);
+                mDict[month] = mDict.TryGetValue(month, out var md) ? (md.c + count, md.ch + charges) : (count, charges);
 
                 if (!payerRankMap.TryGetValue(panel, out var rankD)) payerRankMap[panel] = rankD = new(StringComparer.OrdinalIgnoreCase);
                 rankD[payer] = rank;
+            }
+
+            // Fallback: if the snapshot pre-dates the PayerRank=0 panel-total rows,
+            // derive panel totals by summing the rank>0 drill-down rows.
+            if (panelMonth.Count == 0)
+            {
+                foreach (var (panel, payM) in payerMonthMap)
+                {
+                    if (!panelMonth.TryGetValue(panel, out var pm)) panelMonth[panel] = pm = [];
+                    foreach (var (_, mDict) in payM)
+                        foreach (var (month, v) in mDict)
+                            pm[month] = pm.TryGetValue(month, out var p0) ? (p0.c + v.c, p0.ch + v.ch) : v;
+                }
             }
 
             var months   = allMonths.ToList();
@@ -122,21 +157,20 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
                     else grandByMonth[mk] = new ProductionMonthCell(g.ClaimCount + cell.ClaimCount, g.BilledCharges + cell.BilledCharges);
                 }
 
-                var topPayers = new List<ProductionPayerDrillDown>();
-                if (payerMonthMap.TryGetValue(panel, out var payM) && payerRankMap.TryGetValue(panel, out var rankD))
-                {
-                    foreach (var (payer, mDict) in payM.OrderBy(p => rankD.GetValueOrDefault(p.Key, 99)))
-                    {
-                        topPayers.Add(new ProductionPayerDrillDown
+                var topPayers = payerMonthMap.TryGetValue(panel, out var payM) && payerRankMap.TryGetValue(panel, out var rankD)
+                    ? payM
+                        .OrderBy(p => rankD.GetValueOrDefault(p.Key, 99))
+                        .Take(3)
+                        .Select(p => new ProductionPayerDrillDown
                         {
-                            PayerName    = payer,
-                            ByMonth      = mDict.ToDictionary(kv => kv.Key, kv => new ProductionMonthCell(kv.Value.c, kv.Value.ch)),
-                            ByYear       = mDict.GroupBy(kv => int.Parse(kv.Key[..4])).ToDictionary(g => g.Key, g => new ProductionYearTotal(g.Sum(kv => kv.Value.c), g.Sum(kv => kv.Value.ch))),
-                            TotalClaims  = mDict.Values.Sum(v => v.c),
-                            TotalCharges = mDict.Values.Sum(v => v.ch),
-                        });
-                    }
-                }
+                            PayerName    = p.Key,
+                            ByMonth      = p.Value.ToDictionary(kv => kv.Key, kv => new ProductionMonthCell(kv.Value.c, kv.Value.ch)),
+                            ByYear       = p.Value.GroupBy(kv => int.Parse(kv.Key[..4])).ToDictionary(g => g.Key, g => new ProductionYearTotal(g.Sum(kv => kv.Value.c), g.Sum(kv => kv.Value.ch))),
+                            TotalClaims  = p.Value.Values.Sum(v => v.c),
+                            TotalCharges = p.Value.Values.Sum(v => v.ch),
+                        })
+                        .ToList()
+                    : [];
 
                 panelRows.Add(new ProductionPanelRow
                 {
@@ -168,20 +202,35 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
 
     // ?? Weekly Claim Volume ?????????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<WeeklyClaimVolumeResult> GetWeeklyAsync(string connectionString, CancellationToken ct = default)
+    public async Task<WeeklyClaimVolumeResult> GetWeeklyAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default)
     {
-        const string sql = """
-            SELECT PanelType AS PanelName, PayerName, PayerRank,
-                   WeekStart, WeekEnd, WeekLabel, ClaimCount, TotalCharges
-            FROM   dbo.Aug_WeeklyBilledProductionSummary
-            ORDER  BY WeekStart DESC, PanelName, PayerRank
-            """;
-
+        // Always route through dbo.usp_GetAug_WeeklyBilledProductionSummary; with all
+        // filter params NULL the SP serves rows from dbo.Aug_WeeklyBilledProductionSummary.
+        // PayerRank semantics match the monthly SP (0 = panel total, 1..N = drilldowns).
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand(sql, conn) { CommandTimeout = 120 };
+            await using var cmd  = new SqlCommand("dbo.usp_GetAug_WeeklyBilledProductionSummary", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 180,
+            };
+            AddAugFilterParameters(cmd,
+                filterPayerNames, filterPanelNames,
+                filterDosFrom, filterDosTo,
+                filterFirstBillFrom, filterFirstBillTo,
+                filterFirstBilledFrom, filterFirstBilledTo);
             await using var rdr  = await cmd.ExecuteReaderAsync(ct);
 
             var weekCols     = new Dictionary<string, WeekColumn>();
@@ -196,7 +245,6 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
                 var rank      = (int)rdr.GetByte(2);
                 var weekStart = DateOnly.FromDateTime(rdr.GetDateTime(3));
                 var weekEnd   = DateOnly.FromDateTime(rdr.GetDateTime(4));
-                var label     = rdr.GetString(5);
                 var count     = rdr.GetInt32(6);
                 var charges   = rdr.GetDecimal(7);
                 var weekKey   = weekStart.ToString("yyyy-MM-dd");
@@ -204,20 +252,37 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
                 if (!weekCols.ContainsKey(weekKey))
                     weekCols[weekKey] = new WeekColumn(weekKey, weekStart, weekEnd);
 
-                if (!panelWeek.TryGetValue(panel, out var pw)) panelWeek[panel] = pw = [];
-                if (!pw.TryGetValue(weekKey, out var pt)) pw[weekKey] = (count, charges);
-                else pw[weekKey] = (pt.c + count, pt.ch + charges);
+                if (rank == 0)
+                {
+                    if (!panelWeek.TryGetValue(panel, out var pw)) panelWeek[panel] = pw = [];
+                    pw[weekKey] = (count, charges);
+                    continue;
+                }
 
                 if (!payerWeekMap.TryGetValue(panel, out var payW)) payerWeekMap[panel] = payW = new(StringComparer.OrdinalIgnoreCase);
                 if (!payW.TryGetValue(payer, out var wDict)) payW[payer] = wDict = [];
-                if (!wDict.TryGetValue(weekKey, out var wd)) wDict[weekKey] = (count, charges);
-                else wDict[weekKey] = (wd.c + count, wd.ch + charges);
+                wDict[weekKey] = wDict.TryGetValue(weekKey, out var wd) ? (wd.c + count, wd.ch + charges) : (count, charges);
 
                 if (!payerRankMap.TryGetValue(panel, out var rankD)) payerRankMap[panel] = rankD = new(StringComparer.OrdinalIgnoreCase);
                 rankD[payer] = rank;
             }
 
-            var columns   = weekCols.Values.OrderByDescending(w => w.WeekStart).ToList();
+            // Fallback when the snapshot has no PayerRank=0 rows.
+            if (panelWeek.Count == 0)
+            {
+                foreach (var (panel, payW) in payerWeekMap)
+                {
+                    if (!panelWeek.TryGetValue(panel, out var pw)) panelWeek[panel] = pw = [];
+                    foreach (var (_, wDict) in payW)
+                        foreach (var (wk, v) in wDict)
+                            pw[wk] = pw.TryGetValue(wk, out var p0) ? (p0.c + v.c, p0.ch + v.ch) : v;
+                }
+            }
+
+            // Sort weeks oldest -> newest (left -> right) so the most recent
+            // week (closest to today / "end date") is rendered on the right,
+            // matching the BeechTree/Cove/Elixir/PCR/Rising_Tides Weekly tables.
+            var columns   = weekCols.Values.OrderBy(w => w.WeekStart).ToList();
             var panelRows = new List<WeeklyPanelRow>();
             var grandByWeek = new Dictionary<string, ProductionMonthCell>();
 
@@ -231,20 +296,19 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
                     else grandByWeek[wk] = new ProductionMonthCell(g.ClaimCount + cell.ClaimCount, g.BilledCharges + cell.BilledCharges);
                 }
 
-                var topPayers = new List<WeeklyPayerDrillDown>();
-                if (payerWeekMap.TryGetValue(panel, out var payW) && payerRankMap.TryGetValue(panel, out var rankD))
-                {
-                    foreach (var (payer, wDict) in payW.OrderBy(p => rankD.GetValueOrDefault(p.Key, 99)))
-                    {
-                        topPayers.Add(new WeeklyPayerDrillDown
+                var topPayers = payerWeekMap.TryGetValue(panel, out var payW) && payerRankMap.TryGetValue(panel, out var rankD)
+                    ? payW
+                        .OrderBy(p => rankD.GetValueOrDefault(p.Key, 99))
+                        .Take(3)
+                        .Select(p => new WeeklyPayerDrillDown
                         {
-                            PayerName    = payer,
-                            ByWeek       = wDict.ToDictionary(kv => kv.Key, kv => new ProductionMonthCell(kv.Value.c, kv.Value.ch)),
-                            TotalClaims  = wDict.Values.Sum(v => v.c),
-                            TotalCharges = wDict.Values.Sum(v => v.ch),
-                        });
-                    }
-                }
+                            PayerName    = p.Key,
+                            ByWeek       = p.Value.ToDictionary(kv => kv.Key, kv => new ProductionMonthCell(kv.Value.c, kv.Value.ch)),
+                            TotalClaims  = p.Value.Values.Sum(v => v.c),
+                            TotalCharges = p.Value.Values.Sum(v => v.ch),
+                        })
+                        .ToList()
+                    : [];
 
                 panelRows.Add(new WeeklyPanelRow
                 {
@@ -272,27 +336,46 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
 
     // ?? Coding ??????????????????????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<CodingResult> GetCodingAsync(string connectionString, CancellationToken ct = default)
+    public async Task<CodingResult> GetCodingAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default)
     {
-        const string panelSql  = "SELECT PanelName, ClaimCount, TotalCharges FROM dbo.Aug_CodingPanelSummary ORDER BY TotalCharges DESC";
-        const string detailSql = "SELECT PanelName, CPTCodeXUnitsXModifier, ClaimCount, TotalCharges FROM dbo.Aug_CodingCPTDetail ORDER BY PanelName, TotalCharges DESC";
-
+        // Always route through dbo.usp_GetAug_CodingBreakdown which returns two result
+        // sets (panel summary + CPT detail). With NULL filters it serves the snapshot.
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
+            await using var cmd  = new SqlCommand("dbo.usp_GetAug_CodingBreakdown", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 180,
+            };
+            AddAugFilterParameters(cmd,
+                filterPayerNames, filterPanelNames,
+                filterDosFrom, filterDosTo,
+                filterFirstBillFrom, filterFirstBillTo,
+                filterFirstBilledFrom, filterFirstBilledTo);
 
             var panelMap = new Dictionary<string, (int c, decimal ch)>(StringComparer.OrdinalIgnoreCase);
-            await using (var cmd = new SqlCommand(panelSql, conn) { CommandTimeout = 120 })
-            await using (var rdr = await cmd.ExecuteReaderAsync(ct))
-            {
-                while (await rdr.ReadAsync(ct))
-                    panelMap[rdr.GetString(0)] = (rdr.GetInt32(1), rdr.GetDecimal(2));
-            }
+            var cptMap   = new Dictionary<string, List<CodingCptDrillDown>>(StringComparer.OrdinalIgnoreCase);
 
-            var cptMap = new Dictionary<string, List<CodingCptDrillDown>>(StringComparer.OrdinalIgnoreCase);
-            await using (var cmd = new SqlCommand(detailSql, conn) { CommandTimeout = 120 })
-            await using (var rdr = await cmd.ExecuteReaderAsync(ct))
+            await using var rdr = await cmd.ExecuteReaderAsync(ct);
+
+            // Result set 1: panel summary (PanelName, ClaimCount, TotalCharges)
+            while (await rdr.ReadAsync(ct))
+                panelMap[rdr.GetString(0)] = (rdr.GetInt32(1), rdr.GetDecimal(2));
+
+            // Result set 2: CPT detail (PanelName, CPTCodeXUnitsXModifier, ClaimCount, TotalCharges)
+            if (await rdr.NextResultAsync(ct))
             {
                 while (await rdr.ReadAsync(ct))
                 {
@@ -329,19 +412,33 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
 
     // ?? Payer Breakdown ?????????????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<PayerBreakdownResult> GetPayerBreakdownAsync(string connectionString, CancellationToken ct = default)
+    public async Task<PayerBreakdownResult> GetPayerBreakdownAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default)
     {
-        const string sql = """
-            SELECT PayerName, BilledYearMonth, ClaimCount
-            FROM   dbo.Aug_PayerBreakdown
-            ORDER  BY PayerName, BilledYearMonth
-            """;
-
+        // Always route through dbo.usp_GetAug_PayerBreakdown.
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand(sql, conn) { CommandTimeout = 120 };
+            await using var cmd  = new SqlCommand("dbo.usp_GetAug_PayerBreakdown", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 180,
+            };
+            AddAugFilterParameters(cmd,
+                filterPayerNames, filterPanelNames,
+                filterDosFrom, filterDosTo,
+                filterFirstBillFrom, filterFirstBillTo,
+                filterFirstBilledFrom, filterFirstBilledTo);
             await using var rdr  = await cmd.ExecuteReaderAsync(ct);
 
             var payerMonth = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
@@ -389,20 +486,33 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
 
     // ?? Payer × Panel ???????????????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<PayerPanelResult> GetPayerByPanelAsync(string connectionString, CancellationToken ct = default)
+    public async Task<PayerPanelResult> GetPayerByPanelAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default)
     {
-        // PanelType column stores PanelNew value (aliased as PanelName in UI).
-        const string sql = """
-            SELECT PayerName, PanelType AS PanelName, ClaimCount, TotalCharges
-            FROM   dbo.Aug_PayerByPanel
-            ORDER  BY PayerName, PanelName
-            """;
-
+        // Always route through dbo.usp_GetAug_PayerByPanel.
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand(sql, conn) { CommandTimeout = 120 };
+            await using var cmd  = new SqlCommand("dbo.usp_GetAug_PayerByPanel", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 180,
+            };
+            AddAugFilterParameters(cmd,
+                filterPayerNames, filterPanelNames,
+                filterDosFrom, filterDosTo,
+                filterFirstBillFrom, filterFirstBillTo,
+                filterFirstBilledFrom, filterFirstBilledTo);
             await using var rdr  = await cmd.ExecuteReaderAsync(ct);
 
             var payerPanel = new Dictionary<string, Dictionary<string, (int c, decimal ch)>>(StringComparer.OrdinalIgnoreCase);
@@ -458,20 +568,34 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
 
     // ?? Unbilled × Aging ????????????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<UnbilledAgingResult> GetUnbilledAgingAsync(string connectionString, CancellationToken ct = default)
+    public async Task<UnbilledAgingResult> GetUnbilledAgingAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default)
     {
-        // Row = PanelName (stores PanelNew value), Bucket = Aging column.
-        const string sql = """
-            SELECT PanelName, Aging, ClaimCount, TotalCharges
-            FROM   dbo.Aug_UnbilledAging
-            ORDER  BY PanelName, Aging
-            """;
-
+        // Always route through dbo.usp_GetAug_UnbilledAging.
+        // SP returns: PanelName, AgingBucket, ClaimCount, TotalCharges.
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand(sql, conn) { CommandTimeout = 120 };
+            await using var cmd  = new SqlCommand("dbo.usp_GetAug_UnbilledAging", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 180,
+            };
+            AddAugFilterParameters(cmd,
+                filterPayerNames, filterPanelNames,
+                filterDosFrom, filterDosTo,
+                filterFirstBillFrom, filterFirstBillTo,
+                filterFirstBilledFrom, filterFirstBilledTo);
             await using var rdr  = await cmd.ExecuteReaderAsync(ct);
 
             var rowBucket  = new Dictionary<string, Dictionary<string, (int c, decimal ch)>>(StringComparer.OrdinalIgnoreCase);
@@ -525,22 +649,35 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
 
     // ?? CPT Breakdown ???????????????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<CptBreakdownResult> GetCptBreakdownAsync(string connectionString, CancellationToken ct = default)
+    public async Task<CptBreakdownResult> GetCptBreakdownAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default)
     {
-        // The CPT tab always uses the live query (GetCptBreakdownAsync with rule:"Rule3")
-        // in the controller. This method reads the pre-computed Aug_CPTBreakdown table
-        // for completeness (the controller does not call it directly).
-        const string sql = """
-            SELECT CPTCode, BilledYearMonth, CPTCount, BilledUnits, TotalCharges
-            FROM   dbo.Aug_CPTBreakdown
-            ORDER  BY CPTCode, BilledYearMonth
-            """;
-
+        // The CPT tab in the controller always uses the live query path; this method
+        // surfaces the pre-aggregated data for completeness, routed through
+        // dbo.usp_GetAug_CPTBreakdown to keep a single SQL surface.
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand(sql, conn) { CommandTimeout = 120 };
+            await using var cmd  = new SqlCommand("dbo.usp_GetAug_CPTBreakdown", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 180,
+            };
+            AddAugFilterParameters(cmd,
+                filterPayerNames, filterPanelNames,
+                filterDosFrom, filterDosTo,
+                filterFirstBillFrom, filterFirstBillTo,
+                filterFirstBilledFrom, filterFirstBilledTo);
             await using var rdr  = await cmd.ExecuteReaderAsync(ct);
 
             var cptMonth  = new Dictionary<string, Dictionary<string, (decimal u, decimal ch)>>(StringComparer.OrdinalIgnoreCase);
@@ -597,4 +734,41 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
     }
 
     // (Year-total helpers are inlined as LINQ at the call sites above.)
+
+    // Adds the filter parameters expected by every dbo.usp_GetAug_* read SP.
+    // When all values are null the SP takes its no-filter branch and returns snapshot rows.
+    // When any value is supplied the SP aggregates live from dbo.ClaimLevelData.
+    private static void AddAugFilterParameters(
+        SqlCommand cmd,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null)
+    {
+        cmd.Parameters.Add(new SqlParameter("@PayerNames", SqlDbType.NVarChar, -1) { Value = JoinList(filterPayerNames) });
+        cmd.Parameters.Add(new SqlParameter("@PanelNames", SqlDbType.NVarChar, -1) { Value = JoinList(filterPanelNames) });
+        cmd.Parameters.Add(DateParam("@DosFrom",         filterDosFrom));
+        cmd.Parameters.Add(DateParam("@DosTo",           filterDosTo));
+        cmd.Parameters.Add(DateParam("@FirstBillFrom",   filterFirstBillFrom));
+        cmd.Parameters.Add(DateParam("@FirstBillTo",     filterFirstBillTo));
+        cmd.Parameters.Add(DateParam("@FirstBilledFrom", filterFirstBilledFrom));
+        cmd.Parameters.Add(DateParam("@FirstBilledTo",   filterFirstBilledTo));
+
+        static object JoinList(List<string>? values)
+        {
+            if (values is null || values.Count == 0) return DBNull.Value;
+            var cleaned = values.Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v.Trim()).ToList();
+            return cleaned.Count == 0 ? DBNull.Value : (object)string.Join('|', cleaned);
+        }
+
+        static SqlParameter DateParam(string name, DateOnly? value) =>
+            new(name, SqlDbType.Date)
+            {
+                Value = value.HasValue ? value.Value.ToDateTime(TimeOnly.MinValue) : DBNull.Value,
+            };
+    }
 }

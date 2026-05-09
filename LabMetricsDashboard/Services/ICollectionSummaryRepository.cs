@@ -11,8 +11,27 @@ public interface ICollectionSummaryRepository
     /// Returns the distinct PayerName and PanelName lists for filter dropdowns.
     /// Source: ClaimLevelData (unfiltered).
     /// </summary>
+    /// <summary>
+    /// Fetches distinct payer and panel names from <c>dbo.ClaimLevelData</c> for filter dropdowns.
+    /// <paramref name="panelColumn"/> must be the exact column name to read panel values from —
+    /// pass the result of <c>LabCollectionPrefix.GetPanelColumn(labName)</c>:
+    /// <c>PanelType</c> for NorthWest, <c>PanelNew</c> for Augustus, <c>PanelName</c> for all others.
+    /// </summary>
     Task<CollectionFilterOptions> GetFilterOptionsAsync(
         string connectionString,
+        string panelColumn,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns filter dropdown values (payer names + panel names) from the pre-aggregated
+    /// <c>{prefix}_CS_MonthlyClaimVolume</c> snapshot table. The snapshot is tiny compared to
+    /// <c>ClaimLevelData</c>, so this is orders of magnitude faster than the live query and
+    /// avoids the column-existence probe needed for cross-lab compatibility.
+    /// Used when <c>EnableCollectionSummaryReport=true</c> and no active filter.
+    /// </summary>
+    Task<CollectionFilterOptions> GetFilterOptionsFromAggregatesAsync(
+        string connectionString,
+        string prefix,
         CancellationToken ct = default);
 
     /// <summary>
@@ -260,6 +279,35 @@ public interface ICollectionSummaryRepository
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
         DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
         CancellationToken ct = default);
+
+    // ?? Aggregate-table fast path ??????????????????????????????????????????????
+    // The methods below read from the pre-aggregated `{prefix}_CS_*` snapshot tables
+    // (e.g. NW_CS_*, Aug_CS_*) populated by the `usp_Refresh{prefix}_CS_*` procedures.
+    // Used by the controller on first page load when no filters are active and the lab
+    // has `EnableCollectionSummaryReport=true`. Each method returns the same shape as
+    // its live counterpart; the latest snapshot `RefreshedAt` is reported via the
+    // out parameter for surfacing in the UI.
+
+    Task<Top5ReimbursementResult>      GetTop5ReimbursementFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
+    Task<Top5TotalPaymentsResult>      GetTop5TotalPaymentsFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
+    Task<CollectionMonthlyVolumeResult>GetCollectionMonthlyVolumeFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
+    Task<CollectionWeeklyVolumeResult> GetCollectionWeeklyVolumeFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
+    Task<PanelAveragesResult>          GetPanelAveragesFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
+    Task<PanelAveragesResult>          GetAvgPaymentsFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
+    Task<InsuranceAgingResult>         GetInsuranceAgingFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
+    Task<PanelPaymentResult>           GetPanelPaymentFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
+    Task<RepPaymentResult>             GetRepPaymentFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
+    Task<InsurancePaymentPctResult>    GetInsurancePaymentPctFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
+    Task<CptPaymentPctResult>          GetCptPaymentPctFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
+    Task<StatusSummaryResult>          GetStatusSummaryFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
+    Task<ProviderSummaryResult>        GetProviderSummaryFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns the most recent <c>RefreshedAt</c> timestamp across all
+    /// <c>{prefix}_CS_*</c> snapshot tables that exist for the lab, or <c>null</c>
+    /// when no snapshot has ever been written.
+    /// </summary>
+    Task<DateTime?> GetAggregateLastRefreshedAtAsync(string connectionString, string prefix, CancellationToken ct = default);
 }
 
 /// <summary>Distinct PayerName and PanelName lists for the filter dropdowns.</summary>
@@ -311,6 +359,8 @@ public sealed class CollectionWeeklyPanelRow
 public sealed class CollectionWeeklyPayerDrillDown
 {
     public required string PayerName { get; init; }
+    /// <summary>1-based rank of this payer within the panel (DB-computed or position-based for live queries).</summary>
+    public byte PayerRank { get; init; }
     public Dictionary<string, CollectionMonthlyCell> ByWeek { get; init; } = [];
     public int TotalEncounters { get; init; }
     public decimal TotalInsurancePaid { get; init; }

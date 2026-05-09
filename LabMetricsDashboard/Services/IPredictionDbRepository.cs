@@ -25,4 +25,30 @@ public interface IPredictionDbRepository
         string? filterPayability         = null,
         string? filterCPTCode            = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Probes the target database for Prediction-Analysis readiness. Returns a
+    /// short diagnostic record describing why the report is empty (table missing,
+    /// SP missing, no rows, schema mismatch, etc.) so the controller can surface
+    /// an actionable message to the operator instead of an empty page.
+    /// </summary>
+    Task<PredictionDbDiagnostic> ProbeAsync(
+        string connectionString,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Lightweight diagnostic returned by <see cref="IPredictionDbRepository.ProbeAsync"/>.
+/// Used by the Prediction page to explain why the dataset is empty.
+/// </summary>
+public sealed record PredictionDbDiagnostic(
+    bool      TableExists,
+    bool      ProcedureExists,
+    long      RowCount,
+    string?   LatestRunId,
+    DateTime? LatestRunInsertedAt,
+    string?   ErrorMessage)
+{
+    /// <summary>True when the database is set up AND has at least one row.</summary>
+    public bool IsReady => TableExists && ProcedureExists && RowCount > 0 && ErrorMessage is null;
 }
