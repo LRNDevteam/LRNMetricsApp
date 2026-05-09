@@ -207,21 +207,75 @@ ChangeToken.OnChange(
 	});
 
 // ── Data Protection ─────────────────────────────────────────────────────────
-// Keys must be persisted to disk so that:
-//   a) auth cookies + anti-forgery tokens remain valid across IIS app-pool recycles, and
-//   b) multiple IIS worker processes share the same key ring.
-// Without this, Chrome (which enforces anti-forgery token validation strictly) loops back
-// to the login page after a valid credential submit whenever the key rotates between the
-// GET (login page) and POST (form submit) requests. Edge masks the problem by being more
-// lenient about cookie/session state on failed decryption.
-var dpKeysPath = builder.Configuration["DataProtection:KeysPath"];
-var dpKeysDir = new DirectoryInfo(
-	string.IsNullOrWhiteSpace(dpKeysPath)
-		? Path.Combine(AppContext.BaseDirectory, "DataProtectionKeys")
-		: dpKeysPath);
+// IMPORTANT FOR IIS PUBLISHING:
+// Do NOT store DataProtection keys under the published web root unless IIS AppPool
+// has write permission. In production the app was failing on /Account/Login because
+// ASP.NET Core could not create/read:
+//   C:\inetpub\wwwroot\LRNMetrics\DataProtectionKeys
+// That breaks antiforgery token generation before the login page can render.
+//
+// Preferred production location:
+//   C:\ProgramData\LRNMetrics\DataProtectionKeys
+// Grant Modify permission to the IIS AppPool identity for that folder.
 
-try { dpKeysDir.Create(); }
-catch (Exception ex) { Console.Error.WriteLine($"[DataProtection] Could not create keys directory '{dpKeysDir.FullName}': {ex.Message}"); }
+static bool TryEnsureWritableDirectory(string path, out DirectoryInfo directory, out string? error)
+{
+	directory = new DirectoryInfo(path);
+	error = null;
+
+	try
+	{
+		directory.Create();
+
+		// Verify write permission now, during startup, instead of failing later
+		// when the Login form tries to create an antiforgery token.
+		var testFile = Path.Combine(directory.FullName, $".__write_test_{Guid.NewGuid():N}.tmp");
+		File.WriteAllText(testFile, "ok");
+		File.Delete(testFile);
+
+		return true;
+	}
+	catch (Exception ex)
+	{
+		error = ex.Message;
+		return false;
+	}
+}
+
+var configuredDpKeysPath = builder.Configuration["DataProtection:KeysPath"];
+
+var preferredDpKeysPath = string.IsNullOrWhiteSpace(configuredDpKeysPath)
+	? Path.Combine(
+		Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+		"LRNMetrics",
+		"DataProtectionKeys")
+	: (Path.IsPathRooted(configuredDpKeysPath)
+		? configuredDpKeysPath
+		: Path.Combine(AppContext.BaseDirectory, configuredDpKeysPath));
+
+if (!TryEnsureWritableDirectory(preferredDpKeysPath, out var dpKeysDir, out var dpError))
+{
+	LogStartupWarning($"DataProtection keys path is not writable: {preferredDpKeysPath}. Error: {dpError}");
+
+	// Fallback keeps the application alive even when the configured IIS folder has
+	// no permission. This prevents the login page from crashing. For best stability
+	// across app-pool recycles, fix folder permission and use ProgramData path.
+	var fallbackDpKeysPath = Path.Combine(AppContext.BaseDirectory, "App_Data", "DataProtectionKeys");
+
+	if (!TryEnsureWritableDirectory(fallbackDpKeysPath, out dpKeysDir, out var fallbackError))
+	{
+		throw new InvalidOperationException(
+			$"DataProtection key storage is not writable. Preferred path: '{preferredDpKeysPath}' ({dpError}). " +
+			$"Fallback path: '{fallbackDpKeysPath}' ({fallbackError}). " +
+			"Grant Modify permission to the IIS AppPool identity or set DataProtection:KeysPath to a writable folder.");
+	}
+
+	LogStartupWarning($"DataProtection keys path fallback is being used: {dpKeysDir.FullName}");
+}
+else
+{
+	LogStartupWarning($"DataProtection keys path: {dpKeysDir.FullName}");
+}
 
 builder.Services
 	.AddDataProtection()
@@ -298,11 +352,6 @@ builder.Services.AddSingleton<IReadOnlyDictionary<string, ILabProductionSummaryR
 builder.Services.AddScoped<IClaimLineRepository, SqlClaimLineRepository>();
 builder.Services.AddScoped<ICollectionSummaryRepository, SqlCollectionSummaryRepository>();
 builder.Services.AddScoped<ILisSummaryRepository, SqlLisSummaryRepository>();
-
-// User management repository (uses DefaultConnection from appsettings.json)
-builder.Services.AddScoped<IUserManagementRepository, SqlUserManagementRepository>();
-// Password hasher
-builder.Services.AddSingleton<IPasswordHasher, PasswordHasher>();
 
 // User management repository (uses DefaultConnection from appsettings.json)
 builder.Services.AddScoped<IUserManagementRepository, SqlUserManagementRepository>();
