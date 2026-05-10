@@ -180,12 +180,12 @@ public class AccountController : Controller
 
         if (isArManager)
         {
-            return RedirectToAction("Index", "DenialDashboard", new { lab = defaultLabName, ActiveTab = "denial-insight" });
+            return RedirectToAction("Index", "DenialWorkflow", new { tab = "dashboard" });
         }
 
         if (isArReviewer)
         {
-            return RedirectToAction("Index", "DenialDashboard", new { lab = defaultLabName, ActiveTab = "task-board" });
+            return RedirectToAction("Index", "DenialWorkflow", new { tab = "dashboard" });
         }
 
         return RedirectToAction("Index", "Dashboard", new { lab = defaultLabName });

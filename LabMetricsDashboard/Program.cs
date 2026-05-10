@@ -1,6 +1,8 @@
 ﻿using LabMetricsDashboard.Filters;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
+using LabMetricsDashboard.Services.DenialWorkflow;
+using LabMetricsDashboard.Models.DenialWorkflow;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
@@ -292,26 +294,26 @@ builder.Services
 // making the login form return 400 or loop back to the login page.
 builder.Services.AddAntiforgery(options =>
 {
-    //<<<<<<< HEAD
-    //    options.Cookie.Name         = "LRN.Antiforgery";
-    //    options.Cookie.SameSite     = SameSiteMode.Lax;
-    //    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
-    //    options.Cookie.HttpOnly     = true;
-    //=======
-    //	options.Cookie.Name = "LRN.Antiforgery";
-    //	options.Cookie.SameSite = SameSiteMode.Lax;
-    //	options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
-    //		? CookieSecurePolicy.SameAsRequest
-    //		: CookieSecurePolicy.Always;
-    //	options.Cookie.HttpOnly = true;
-    //>>>>>>> 23cf9fdcfbffecee7d6826a98b7baa4821a4bc13
+	//<<<<<<< HEAD
+	//    options.Cookie.Name         = "LRN.Antiforgery";
+	//    options.Cookie.SameSite     = SameSiteMode.Lax;
+	//    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+	//    options.Cookie.HttpOnly     = true;
+	//=======
+	//	options.Cookie.Name = "LRN.Antiforgery";
+	//	options.Cookie.SameSite = SameSiteMode.Lax;
+	//	options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+	//		? CookieSecurePolicy.SameAsRequest
+	//		: CookieSecurePolicy.Always;
+	//	options.Cookie.HttpOnly = true;
+	//>>>>>>> 23cf9fdcfbffecee7d6826a98b7baa4821a4bc13
 
-    options.Cookie.Name = "LRN.Antiforgery";
-    options.Cookie.SameSite = SameSiteMode.Lax;
-    options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
-        ? CookieSecurePolicy.SameAsRequest
-        : CookieSecurePolicy.Always;
-    options.Cookie.HttpOnly = true;
+	options.Cookie.Name = "LRN.Antiforgery";
+	options.Cookie.SameSite = SameSiteMode.Lax;
+	options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+		? CookieSecurePolicy.SameAsRequest
+		: CookieSecurePolicy.Always;
+	options.Cookie.HttpOnly = true;
 });
 
 // ── Forwarded Headers (IIS reverse-proxy / SSL termination) ────────────────────
@@ -385,6 +387,9 @@ builder.Services.AddScoped<AppUsageAuditFilter>();
 // In-app Help Bot (singleton - loads topic file once at startup)
 builder.Services.AddSingleton<HelpBotService>();
 
+builder.Services.Configure<DenialWorkflowOptions>(builder.Configuration.GetSection("DenialWorkflowApi"));
+builder.Services.AddHttpClient<IDenialWorkflowApiClient, DenialWorkflowApiClient>();
+
 builder.Services.AddControllersWithViews(options =>
 {
 	options.Filters.AddService<AppUsageAuditFilter>();
@@ -398,23 +403,23 @@ builder.Services.AddControllersWithViews(options =>
 
 // ── Cookie authentication ─────────────────────────────────────────
 builder.Services
-//<<<<<<< HEAD
-//    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-//    .AddCookie(options =>
-//    {
-//        options.LoginPath        = "/Account/Login";
-//        options.LogoutPath       = "/Account/Logout";
-//        options.AccessDeniedPath = "/Account/AccessDenied";
-//        options.ExpireTimeSpan   = TimeSpan.FromHours(8);
-//        options.SlidingExpiration = true;
-//        options.Cookie.Name     = "LRN.Auth";
-//        options.Cookie.HttpOnly  = true;
-//        options.Cookie.SameSite  = SameSiteMode.Lax;
-//        // SameAsRequest: Secure flag is added only when the connection is already HTTPS.
-//        // Using Always on an HTTP-only IIS server caused Chrome to silently drop the
-//        // auth cookie after login, so every request was redirected back to the login page.
-//        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
-//=======
+	//<<<<<<< HEAD
+	//    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+	//    .AddCookie(options =>
+	//    {
+	//        options.LoginPath        = "/Account/Login";
+	//        options.LogoutPath       = "/Account/Logout";
+	//        options.AccessDeniedPath = "/Account/AccessDenied";
+	//        options.ExpireTimeSpan   = TimeSpan.FromHours(8);
+	//        options.SlidingExpiration = true;
+	//        options.Cookie.Name     = "LRN.Auth";
+	//        options.Cookie.HttpOnly  = true;
+	//        options.Cookie.SameSite  = SameSiteMode.Lax;
+	//        // SameAsRequest: Secure flag is added only when the connection is already HTTPS.
+	//        // Using Always on an HTTP-only IIS server caused Chrome to silently drop the
+	//        // auth cookie after login, so every request was redirected back to the login page.
+	//        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+	//=======
 	.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
 	.AddCookie(options =>
 	{
@@ -432,7 +437,6 @@ builder.Services
 		options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
 			? CookieSecurePolicy.SameAsRequest
 			: CookieSecurePolicy.Always;
-//>>>>>>> 23cf9fdcfbffecee7d6826a98b7baa4821a4bc13
 
 		// ── ReturnUrl loop guard ──────────────────────────────────────────────
 		// Prevent the error and login pages from being embedded as a ReturnUrl.
@@ -580,33 +584,33 @@ app.Use(async (context, next) =>
 // fresh antiforgery token from the current key ring.
 app.Use(async (context, next) =>
 {
-    await next();
+	await next();
 
-    if (context.Response.StatusCode != StatusCodes.Status400BadRequest) return;
-    if (context.Response.HasStarted) return;
-    if (!HttpMethods.IsPost(context.Request.Method)) return;
+	if (context.Response.StatusCode != StatusCodes.Status400BadRequest) return;
+	if (context.Response.HasStarted) return;
+	if (!HttpMethods.IsPost(context.Request.Method)) return;
 
-    var path = context.Request.Path.Value ?? string.Empty;
-    if (!path.StartsWith("/Account/", StringComparison.OrdinalIgnoreCase)) return;
+	var path = context.Request.Path.Value ?? string.Empty;
+	if (!path.StartsWith("/Account/", StringComparison.OrdinalIgnoreCase)) return;
 
-    var staleCookieNames = context.Request.Cookies.Keys
-        .Where(k => k.StartsWith("LRN.", StringComparison.OrdinalIgnoreCase)
-                 || k.StartsWith(".AspNetCore.", StringComparison.OrdinalIgnoreCase))
-        .ToList();
+	var staleCookieNames = context.Request.Cookies.Keys
+		.Where(k => k.StartsWith("LRN.", StringComparison.OrdinalIgnoreCase)
+				 || k.StartsWith(".AspNetCore.", StringComparison.OrdinalIgnoreCase))
+		.ToList();
 
-    foreach (var cookieName in staleCookieNames)
-        context.Response.Cookies.Delete(cookieName);
+	foreach (var cookieName in staleCookieNames)
+		context.Response.Cookies.Delete(cookieName);
 
-    context.RequestServices.GetRequiredService<ILoggerFactory>()
-        .CreateLogger("LoginCookieRecovery")
-        .LogWarning(
-            "POST {Path} returned 400 (likely stale antiforgery/auth cookie after publish). " +
-            "Cleared {Count} cookie(s) [{Names}] and redirecting to login.",
-            path, staleCookieNames.Count, string.Join(",", staleCookieNames));
+	context.RequestServices.GetRequiredService<ILoggerFactory>()
+		.CreateLogger("LoginCookieRecovery")
+		.LogWarning(
+			"POST {Path} returned 400 (likely stale antiforgery/auth cookie after publish). " +
+			"Cleared {Count} cookie(s) [{Names}] and redirecting to login.",
+			path, staleCookieNames.Count, string.Join(",", staleCookieNames));
 
-    var pathBase = context.Request.PathBase.HasValue ? context.Request.PathBase.Value : string.Empty;
-    context.Response.Clear();
-    context.Response.Redirect($"{pathBase}/Account/Login");
+	var pathBase = context.Request.PathBase.HasValue ? context.Request.PathBase.Value : string.Empty;
+	context.Response.Clear();
+	context.Response.Redirect($"{pathBase}/Account/Login");
 });
 
 // HTTPS redirection: only useful when running standalone (Visual Studio / Kestrel).

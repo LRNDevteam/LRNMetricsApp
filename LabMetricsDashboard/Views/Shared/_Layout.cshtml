@@ -662,8 +662,8 @@
                         @if (isArRestricted)
                         {
                             <li class="nav-item">
-                                <a class="nav-link active" asp-controller="DenialDashboard" asp-action="Index">
-                                    <i class="bi bi-exclamation-triangle-fill"></i> Denial Dashboard
+                                <a class="nav-link @(ViewContext.RouteData.Values["controller"]?.ToString() == "DenialWorkflow" ? "active" : "")" asp-controller="DenialWorkflow" asp-action="Index">
+                                    <i class="bi bi-kanban-fill"></i> Denial Workflow
                                 </a>
                             </li>
                         }
@@ -762,6 +762,12 @@
                             <li class="nav-item">
                                 <a class="nav-link" asp-controller="DenialDashboard" asp-action="Index">
                                     <i class="bi bi-exclamation-triangle-fill"></i> Denial Dashboard
+                                </a>
+                            </li>
+
+                            <li class="nav-item">
+                                <a class="nav-link @(ViewContext.RouteData.Values["controller"]?.ToString() == "DenialWorkflow" ? "active" : "")" asp-controller="DenialWorkflow" asp-action="Index">
+                                    <i class="bi bi-kanban-fill"></i> Denial Workflow
                                 </a>
                             </li>
 
