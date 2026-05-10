@@ -8,7 +8,7 @@ namespace LabMetricsDashboard.Services;
 
 public class SqlDenialRecordRepository : IDenialRecordRepository
 {
-	private static readonly HashSet<int> ClaimLevelInsuranceBalanceLabIds = new([18, 19, 20]);
+	private static readonly HashSet<int> BilledAmountInsuranceBalanceLabIds = new([18, 19, 20]);
 	private static readonly TimeSpan LabsCacheDuration = TimeSpan.FromMinutes(15);
 	private static readonly TimeSpan TaskBoardCacheDuration = TimeSpan.FromMinutes(5);
 	private static readonly TimeSpan CurrentRunCacheDuration = TimeSpan.FromMinutes(5);
@@ -122,6 +122,9 @@ SELECT
     {SelectDate(cols, "FirstBilledDate")},
     {SelectDate(cols, "DateOfService")},
     {SelectString(cols, "Feedback")},
+    {SelectString(cols, "ReviewerComments")},
+    {SelectString(cols, "ReviewerUpdatedBy")},
+    {SelectDate(cols, "ReviewerUpdatedOn")},
     {SelectString(cols, "Responsibility")},
     {SelectDate(cols, "DiscussionDate")},
     {SelectString(cols, "ETA")}
@@ -175,7 +178,7 @@ ORDER BY {OrderBy(cols, "DueDate", "TaskID")};";
 					PanelName = GetString(reader, "PanelName"),
 					FirstBilledDate = GetNullableDateTime(reader, "FirstBilledDate"),
 					DateOfService = GetNullableDateTime(reader, "DateOfService"),
-					Feedback = GetString(reader, "Feedback"),
+					Feedback = !string.IsNullOrWhiteSpace(GetString(reader, "ReviewerComments")) ? GetString(reader, "ReviewerComments") : GetString(reader, "Feedback"),
 					Responsibility = GetString(reader, "Responsibility"),
 					DiscussionDate = GetNullableDateTime(reader, "DiscussionDate"),
 					ETA = GetString(reader, "ETA")
@@ -214,71 +217,7 @@ ORDER BY {OrderBy(cols, "DueDate", "TaskID")};";
 			return Array.Empty<DenialBreakdownSourceRecord>();
 		}
 
-		var useSpecialLabLogic = await ShouldUseClaimLevelInsuranceBalanceAsync(connection, labId, cancellationToken);
-		if (useSpecialLabLogic && await TableExistsAsync(connection, "dbo", "ClaimLevelData", cancellationToken))
-		{
-			var claimLevelCols = await GetTableColumnsAsync(connection, "dbo", "ClaimLevelData", cancellationToken);
-
-			var where = BuildSpecialLabBreakdownWhere(cols, claimLevelCols, filters);
-
-			var payerSelect = claimLevelCols.Contains("PayerName")
-				? "LTRIM(RTRIM(ISNULL(cld.[PayerName], '')))"
-				: claimLevelCols.Contains("PayerName_Raw")
-					? "LTRIM(RTRIM(ISNULL(cld.[PayerName_Raw], '')))"
-					: "''";
-
-			var denialCodeSelect = cols.Contains("DenialCodeNormalized")
-				? "LTRIM(RTRIM(ISNULL(dli.[DenialCodeNormalized], '')))"
-				: cols.Contains("DenialCode")
-					? "LTRIM(RTRIM(ISNULL(dli.[DenialCode], '')))"
-					: "''";
-
-			var denialDescriptionSelect = cols.Contains("DenialDescription")
-				? "LTRIM(RTRIM(ISNULL(dli.[DenialDescription], '')))"
-				: "''";
-
-			var sql = $@"
-SELECT
-    TRY_CONVERT(datetime, dli.[DenialDate]) AS [DenialDate],
-    LTRIM(RTRIM(ISNULL(cld.[ClaimID], ''))) AS [VisitNumber],
-    TRY_CONVERT(decimal(18, 4), cld.[InsuranceBalance]) AS [InsuranceBalance],
-    CAST(0 AS decimal(18, 4)) AS [TotalBalance],
-    {payerSelect} AS [PayerName],
-    {payerSelect} AS [PayerNameNormalized],
-    {denialCodeSelect} AS [DenialCodeNormalized],
-    {denialDescriptionSelect} AS [DenialDescription]
-FROM dbo.ClaimLevelData cld
-INNER JOIN dbo.DenialLineItem dli
-    ON dli.[VisitNumber] = cld.[ClaimID]
-WHERE {where};";
-
-			await using var command = new SqlCommand(sql, connection)
-			{
-				CommandType = CommandType.Text,
-				CommandTimeout = 180
-			};
-
-			AddSpecialLabBreakdownParameters(command, filters);
-
-			var items = new List<DenialBreakdownSourceRecord>();
-			await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-			while (await reader.ReadAsync(cancellationToken))
-			{
-				items.Add(new DenialBreakdownSourceRecord
-				{
-					DenialDate = GetNullableDateTime(reader, "DenialDate"),
-					VisitNumber = GetString(reader, "VisitNumber"),
-					InsuranceBalance = GetNullableDecimal(reader, "InsuranceBalance") ?? 0m,
-					TotalBalance = GetNullableDecimal(reader, "TotalBalance") ?? 0m,
-					PayerName = GetString(reader, "PayerName"),
-					PayerNameNormalized = GetString(reader, "PayerNameNormalized"),
-					DenialCodeNormalized = GetString(reader, "DenialCodeNormalized"),
-					DenialDescription = GetString(reader, "DenialDescription")
-				});
-			}
-
-			return items;
-		}
+		var useBilledAmountInsuranceBalance = ShouldUseBilledAmountInsuranceBalance(labId);
 
 		var whereLegacy = BuildLineItemWhere(cols, filters, currentRunId);
 
@@ -286,7 +225,7 @@ WHERE {where};";
 SELECT
     {SelectDate(cols, "DenialDate")},
     {SelectString(cols, "VisitNumber")},
-    {SelectDecimal(cols, "InsuranceBalance", 4)},
+    {SelectInsuranceBalance(cols, useBilledAmountInsuranceBalance, 4)},
     {SelectDecimal(cols, "TotalBalance", 4)},
     {SelectString(cols, "PayerName")},
     {SelectString(cols, "PayerNameNormalized")},
@@ -631,6 +570,115 @@ SELECT MatchedRows = (SELECT COUNT(1) FROM #MatchedRows);";
 		}
 	}
 
+
+	public async Task<int> AssignReviewerByInsightAsync(int labId, string denialCode, string payerName, string reviewerUserName, string? runId, CancellationToken cancellationToken = default)
+	{
+		if (string.IsNullOrWhiteSpace(denialCode) || string.IsNullOrWhiteSpace(payerName) || string.IsNullOrWhiteSpace(reviewerUserName)) return 0;
+
+		var currentRunId = string.IsNullOrWhiteSpace(runId) ? await GetCurrentRunIdAsync(labId, cancellationToken) : runId;
+		await using var connection = await OpenLabConnectionAsync(labId, cancellationToken);
+		if (!await TableExistsAsync(connection, "dbo", "DenialTaskBoard", cancellationToken)) return 0;
+
+		var cols = await GetTableColumnsAsync(connection, "dbo", "DenialTaskBoard", cancellationToken);
+		if (!cols.Contains("AssignedTo") || !cols.Contains("DenialCode")) return 0;
+
+		var payerColumn = cols.Contains("PayerNameNormalized") ? "PayerNameNormalized" : cols.Contains("PayerName") ? "PayerName" : null;
+		if (payerColumn is null) return 0;
+
+		var setParts = new List<string> { "[AssignedTo] = @Reviewer" };
+		if (cols.Contains("Status")) setParts.Add("[Status] = CASE WHEN ISNULL([Status], '') = '' THEN 'Open' ELSE [Status] END");
+		if (cols.Contains("ReviewerUpdatedBy")) setParts.Add("[ReviewerUpdatedBy] = @UpdatedBy");
+		if (cols.Contains("ReviewerUpdatedOn")) setParts.Add("[ReviewerUpdatedOn] = SYSUTCDATETIME()");
+
+		var where = new List<string> { BuildScopedWhere(cols, currentRunId), "LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [DenialCode]), ''))) = @DenialCode", $"LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [{payerColumn}]), ''))) = @PayerName" };
+		var sql = $"UPDATE dbo.DenialTaskBoard SET {string.Join(", ", setParts)} WHERE {string.Join(" AND ", where)}; SELECT @@ROWCOUNT;";
+		await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 180 };
+		AddScopeParameters(command, cols, labId, currentRunId);
+		command.Parameters.AddWithValue("@DenialCode", denialCode.Trim());
+		command.Parameters.AddWithValue("@PayerName", payerName.Trim());
+		command.Parameters.AddWithValue("@Reviewer", reviewerUserName.Trim());
+		command.Parameters.AddWithValue("@UpdatedBy", reviewerUserName.Trim());
+		var updated = await command.ExecuteScalarAsync(cancellationToken);
+		var updatedTaskCount = updated == null || updated == DBNull.Value ? 0 : Convert.ToInt32(updated);
+
+		await TryUpdateDenialInsightAssignedToAsync(connection, labId, denialCode.Trim(), payerName.Trim(), reviewerUserName.Trim(), currentRunId, cancellationToken);
+
+		_cache.Remove(TaskBoardCacheKey(labId));
+		if (!string.IsNullOrWhiteSpace(currentRunId)) _cache.Remove($"{TaskBoardCacheKey(labId)}:{currentRunId}");
+		return updatedTaskCount;
+	}
+
+	private async Task TryUpdateDenialInsightAssignedToAsync(SqlConnection connection, int labId, string denialCode, string payerName, string reviewerUserName, string? runId, CancellationToken cancellationToken)
+	{
+		if (!await TableExistsAsync(connection, "dbo", "DenialInsight", cancellationToken)) return;
+
+		var cols = await GetTableColumnsAsync(connection, "dbo", "DenialInsight", cancellationToken);
+		if (!cols.Contains("DenialCodes")) return;
+
+		var setParts = new List<string>();
+		if (cols.Contains("AssignedTo")) setParts.Add("[AssignedTo] = @Reviewer");
+		if (cols.Contains("ResponsibilityReviewer")) setParts.Add("[ResponsibilityReviewer] = @Reviewer");
+		if (setParts.Count == 0) return;
+
+		var whereParts = new List<string>
+		{
+			"LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [DenialCodes]), ''))) = @DenialCode"
+		};
+
+		if (cols.Contains("HighImpactInsurance"))
+		{
+			whereParts.Add("LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [HighImpactInsurance]), ''))) = @PayerName");
+		}
+
+		if (cols.Contains("LabId")) whereParts.Add("([LabId] = @LabId OR [LabId] IS NULL)");
+		if (!string.IsNullOrWhiteSpace(runId) && cols.Contains("RunId")) whereParts.Add("(ISNULL([RunId], '') = '' OR [RunId] = @RunId)");
+
+		var sql = $"UPDATE dbo.DenialInsight SET {string.Join(", ", setParts)} WHERE {string.Join(" AND ", whereParts)};";
+		await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 120 };
+		command.Parameters.AddWithValue("@Reviewer", reviewerUserName);
+		command.Parameters.AddWithValue("@DenialCode", denialCode);
+		command.Parameters.AddWithValue("@PayerName", payerName);
+		command.Parameters.AddWithValue("@LabId", labId);
+		command.Parameters.AddWithValue("@RunId", runId ?? string.Empty);
+		await command.ExecuteNonQueryAsync(cancellationToken);
+	}
+
+	public async Task<int> UpdateReviewerTaskAsync(int labId, string taskId, string status, string comments, string reviewerUserName, string? runId, CancellationToken cancellationToken = default)
+	{
+		if (string.IsNullOrWhiteSpace(taskId) || string.IsNullOrWhiteSpace(reviewerUserName)) return 0;
+		var allowedStatuses = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Open", "In Progress", "Closed", "Completed", "On Hold" };
+		if (!allowedStatuses.Contains(status ?? string.Empty)) status = "Open";
+
+		var currentRunId = string.IsNullOrWhiteSpace(runId) ? await GetCurrentRunIdAsync(labId, cancellationToken) : runId;
+		await using var connection = await OpenLabConnectionAsync(labId, cancellationToken);
+		if (!await TableExistsAsync(connection, "dbo", "DenialTaskBoard", cancellationToken)) return 0;
+		var cols = await GetTableColumnsAsync(connection, "dbo", "DenialTaskBoard", cancellationToken);
+		if (!cols.Contains("TaskID") || !cols.Contains("AssignedTo")) return 0;
+
+		var setParts = new List<string>();
+		if (cols.Contains("Status")) setParts.Add("[Status] = @Status");
+		if (cols.Contains("ReviewerComments")) setParts.Add("[ReviewerComments] = @Comments");
+		else if (cols.Contains("Feedback")) setParts.Add("[Feedback] = @Comments");
+		if (cols.Contains("ReviewerUpdatedBy")) setParts.Add("[ReviewerUpdatedBy] = @UpdatedBy");
+		if (cols.Contains("ReviewerUpdatedOn")) setParts.Add("[ReviewerUpdatedOn] = SYSUTCDATETIME()");
+		if (cols.Contains("DateCompleted")) setParts.Add("[DateCompleted] = CASE WHEN @Status IN ('Closed','Completed') THEN COALESCE([DateCompleted], SYSUTCDATETIME()) ELSE NULL END");
+		if (setParts.Count == 0) return 0;
+
+		var where = new List<string> { BuildScopedWhere(cols, currentRunId), "[TaskID] = @TaskID", "LTRIM(RTRIM(ISNULL([AssignedTo], ''))) = @Reviewer" };
+		var sql = $"UPDATE dbo.DenialTaskBoard SET {string.Join(", ", setParts)} WHERE {string.Join(" AND ", where)}; SELECT @@ROWCOUNT;";
+		await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 180 };
+		AddScopeParameters(command, cols, labId, currentRunId);
+		command.Parameters.AddWithValue("@TaskID", taskId.Trim());
+		command.Parameters.AddWithValue("@Status", status.Trim());
+		command.Parameters.AddWithValue("@Comments", comments?.Trim() ?? string.Empty);
+		command.Parameters.AddWithValue("@Reviewer", reviewerUserName.Trim());
+		command.Parameters.AddWithValue("@UpdatedBy", reviewerUserName.Trim());
+		var updated = await command.ExecuteScalarAsync(cancellationToken);
+		_cache.Remove(TaskBoardCacheKey(labId));
+		if (!string.IsNullOrWhiteSpace(currentRunId)) _cache.Remove($"{TaskBoardCacheKey(labId)}:{currentRunId}");
+		return updated == null || updated == DBNull.Value ? 0 : Convert.ToInt32(updated);
+	}
+
 	private async Task<IReadOnlyList<DenialLineItemRecord>> QueryLineItemsAsync(int labId, DenialDashboardFilters filters, CancellationToken cancellationToken, bool withPaging, int page, int pageSize)
 	{
 		var currentRunId = await GetCurrentRunIdAsync(labId, cancellationToken);
@@ -638,13 +686,10 @@ SELECT MatchedRows = (SELECT COUNT(1) FROM #MatchedRows);";
 		if (!await TableExistsAsync(connection, "dbo", "DenialLineItem", cancellationToken)) return Array.Empty<DenialLineItemRecord>();
 
 		var cols = await GetTableColumnsAsync(connection, "dbo", "DenialLineItem", cancellationToken);
-		var useClaimLevelInsuranceBalance = await ShouldUseClaimLevelInsuranceBalanceAsync(connection, labId, cancellationToken);
-		var claimLevelCols = useClaimLevelInsuranceBalance
-			? await GetTableColumnsAsync(connection, "dbo", "ClaimLevelData", cancellationToken)
-			: new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var useBilledAmountInsuranceBalance = ShouldUseBilledAmountInsuranceBalance(labId);
 		var where = BuildLineItemWhere(cols, filters, currentRunId);
 		var pagingSql = withPaging ? " OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY" : string.Empty;
-		var claimLevelApplySql = BuildClaimLevelInsuranceBalanceApplySql(claimLevelCols);
+		var claimLevelApplySql = string.Empty;
 
 		var sql = $@"
 SELECT
@@ -684,7 +729,7 @@ SELECT
     {SelectDecimal(cols, "InsuranceAdjustment", 4)},
     {SelectDecimal(cols, "PatientPaidAmount", 4)},
     {SelectDecimal(cols, "PatientAdjustment", 4)},
-    {SelectInsuranceBalance(cols, claimLevelCols, useClaimLevelInsuranceBalance, 4)},
+    {SelectInsuranceBalance(cols, useBilledAmountInsuranceBalance, 4)},
     {SelectDecimal(cols, "PatientBalance", 4)},
     {SelectDecimal(cols, "TotalBalance", 4)},
     {SelectDecimal(cols, "MedicareFee", 4)},
@@ -914,23 +959,9 @@ ORDER BY {OrderBy(cols, "DateOfService", "AccessionNo")}{pagingSql};";
 			?? throw new InvalidOperationException($"Active lab '{labId}' was not found in dbo.LRNMetricsLab.");
 	}
 
-	private static async Task<bool> ShouldUseClaimLevelInsuranceBalanceAsync(SqlConnection connection, int labId, CancellationToken cancellationToken)
+	private static bool ShouldUseBilledAmountInsuranceBalance(int labId)
 	{
-		if (!ClaimLevelInsuranceBalanceLabIds.Contains(labId))
-		{
-			return false;
-		}
-
-		const string sql = @"
-SELECT CASE WHEN EXISTS (
-    SELECT 1
-    FROM INFORMATION_SCHEMA.TABLES
-    WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'ClaimLevelData'
-) THEN 1 ELSE 0 END;";
-
-		await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 60 };
-		var result = await command.ExecuteScalarAsync(cancellationToken);
-		return result != null && result != DBNull.Value && Convert.ToInt32(result) == 1;
+		return BilledAmountInsuranceBalanceLabIds.Contains(labId);
 	}
 
 	private static string BuildClaimLevelInsuranceBalanceApplySql(HashSet<string> claimLevelCols)
@@ -960,15 +991,11 @@ OUTER APPLY
 ) claimBal";
 	}
 
-	private static string SelectInsuranceBalance(HashSet<string> cols, HashSet<string> claimLevelCols, bool useClaimLevelInsuranceBalance, int scale)
+	private static string SelectInsuranceBalance(HashSet<string> cols, bool useBilledAmountInsuranceBalance, int scale)
 	{
-		if (useClaimLevelInsuranceBalance && claimLevelCols.Contains("ClaimID") && claimLevelCols.Contains("InsuranceBalance"))
+		if (useBilledAmountInsuranceBalance && cols.Contains("BilledAmount"))
 		{
-			var fallback = cols.Contains("InsuranceBalance")
-				? $"TRY_CONVERT(decimal(18, {scale}), [InsuranceBalance])"
-				: $"CAST(0 AS decimal(18, {scale}))";
-
-			return $"COALESCE(claimBal.OverrideInsuranceBalance, {fallback}) AS [InsuranceBalance]";
+			return $"TRY_CONVERT(decimal(18, {scale}), [BilledAmount]) AS [InsuranceBalance]";
 		}
 
 		return SelectDecimal(cols, "InsuranceBalance", scale);
@@ -1286,6 +1313,17 @@ WHERE TABLE_SCHEMA = @Schema AND TABLE_NAME = @Table;";
 					.FirstOrDefault();
 
 				var highImpactInsuranceBalance = topPayer?.Balance ?? 0m;
+				var assignedUsers = group
+					.Select(x => x.AssignedTo?.Trim())
+					.Where(x => !string.IsNullOrWhiteSpace(x))
+					.Distinct(StringComparer.OrdinalIgnoreCase)
+					.ToList();
+				var assignedTo = assignedUsers.Count switch
+				{
+					0 => string.Empty,
+					1 => assignedUsers[0] ?? string.Empty,
+					_ => string.Join(", ", assignedUsers)
+				};
 
 				return new DenialInsightRecord
 				{
@@ -1303,6 +1341,7 @@ WHERE TABLE_SCHEMA = @Schema AND TABLE_NAME = @Table;";
 					Task = group.Key.Task,
 					Feedback = group.Select(x => x.Feedback).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)) ?? string.Empty,
 					Responsibility = group.Select(x => x.Responsibility).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)) ?? string.Empty,
+					AssignedTo = assignedTo,
 					DiscussionDate = group.Select(x => x.DiscussionDate).FirstOrDefault(x => x.HasValue),
 					ETA = group.Select(x => x.ETA).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)) ?? string.Empty,
 					LabId = group.Select(x => x.LabId).FirstOrDefault(),

@@ -37,6 +37,46 @@ public sealed class SqlUserManagementRepository : IUserManagementRepository
         return result;
     }
 
+
+    public async Task<IEnumerable<ReviewerOption>> GetUsersByRoleNamesAsync(IEnumerable<string> roleNames)
+    {
+        var roles = roleNames?.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? new List<string>();
+        if (roles.Count == 0) return Array.Empty<ReviewerOption>();
+
+        var roleParams = roles.Select((_, i) => "@Role" + i).ToList();
+        var sql = $@"
+SELECT DISTINCT
+    u.LabUserID,
+    ISNULL(u.UserName, '') AS UserName,
+    LTRIM(RTRIM(CONCAT(ISNULL(u.FirstName, ''), ' ', ISNULL(u.LastName, '')))) AS FullName,
+    ISNULL(u.Email, '') AS Email
+FROM dbo.LabUsers u
+INNER JOIN dbo.UserRoles ur ON ur.LabUserID = u.LabUserID
+INNER JOIN dbo.Roles r ON r.RoleID = ur.RoleID
+WHERE ISNULL(u.IsActive, 0) = 1
+  AND ISNULL(r.IsActive, 0) = 1
+  AND r.RoleName IN ({string.Join(",", roleParams)})
+ORDER BY FullName, UserName;";
+
+        var result = new List<ReviewerOption>();
+        await using var conn = new SqlConnection(_conn);
+        await conn.OpenAsync();
+        await using var cmd = new SqlCommand(sql, conn);
+        for (var i = 0; i < roles.Count; i++) cmd.Parameters.AddWithValue("@Role" + i, roles[i]);
+        await using var r = await cmd.ExecuteReaderAsync();
+        while (await r.ReadAsync())
+        {
+            result.Add(new ReviewerOption
+            {
+                LabUserId = r.GetInt32(r.GetOrdinal("LabUserID")),
+                UserName = r.GetString(r.GetOrdinal("UserName")),
+                FullName = r.GetString(r.GetOrdinal("FullName")),
+                Email = r.GetString(r.GetOrdinal("Email"))
+            });
+        }
+        return result;
+    }
+
     public async Task<IEnumerable<LabMetricsDashboard.Models.Lab>> GetAllLabsAsync()
     {
         const string sql = @"SELECT LabId, LabName, IsActive, CreatedBy, CreatedDate, ModifiedBy, ModifiedDate

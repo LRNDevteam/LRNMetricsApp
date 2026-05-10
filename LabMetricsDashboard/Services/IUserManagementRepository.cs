@@ -21,6 +21,7 @@ public interface IUserManagementRepository
     Task RemoveUserRoleAsync(int userRoleId);
     Task RemoveUserLabAsync(int ulid);
     Task<IEnumerable<LabMetricsDashboard.Models.Lab>> GetAllLabsAsync();
+    Task<IEnumerable<ReviewerOption>> GetUsersByRoleNamesAsync(IEnumerable<string> roleNames);
 
     // ?? Lab management (LabMaster) ?????????????????????????????????
     Task<LabMetricsDashboard.Models.Lab?> GetLabByIdAsync(int labId);

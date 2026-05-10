@@ -210,26 +210,80 @@ ChangeToken.OnChange(
 	});
 
 // ── Data Protection ─────────────────────────────────────────────────────────
-// Keys must be persisted to disk so that:
-//   a) auth cookies + anti-forgery tokens remain valid across IIS app-pool recycles, and
-//   b) multiple IIS worker processes share the same key ring.
-// Without this, Chrome (which enforces anti-forgery token validation strictly) loops back
-// to the login page after a valid credential submit whenever the key rotates between the
-// GET (login page) and POST (form submit) requests. Edge masks the problem by being more
-// lenient about cookie/session state on failed decryption.
-var dpKeysPath = builder.Configuration["DataProtection:KeysPath"];
-var dpKeysDir  = new DirectoryInfo(
-    string.IsNullOrWhiteSpace(dpKeysPath)
-        ? Path.Combine(AppContext.BaseDirectory, "DataProtectionKeys")
-        : dpKeysPath);
+// IMPORTANT FOR IIS PUBLISHING:
+// Do NOT store DataProtection keys under the published web root unless IIS AppPool
+// has write permission. In production the app was failing on /Account/Login because
+// ASP.NET Core could not create/read:
+//   C:\inetpub\wwwroot\LRNMetrics\DataProtectionKeys
+// That breaks antiforgery token generation before the login page can render.
+//
+// Preferred production location:
+//   C:\ProgramData\LRNMetrics\DataProtectionKeys
+// Grant Modify permission to the IIS AppPool identity for that folder.
 
-try { dpKeysDir.Create(); }
-catch (Exception ex) { Console.Error.WriteLine($"[DataProtection] Could not create keys directory '{dpKeysDir.FullName}': {ex.Message}"); }
+static bool TryEnsureWritableDirectory(string path, out DirectoryInfo directory, out string? error)
+{
+	directory = new DirectoryInfo(path);
+	error = null;
+
+	try
+	{
+		directory.Create();
+
+		// Verify write permission now, during startup, instead of failing later
+		// when the Login form tries to create an antiforgery token.
+		var testFile = Path.Combine(directory.FullName, $".__write_test_{Guid.NewGuid():N}.tmp");
+		File.WriteAllText(testFile, "ok");
+		File.Delete(testFile);
+
+		return true;
+	}
+	catch (Exception ex)
+	{
+		error = ex.Message;
+		return false;
+	}
+}
+
+var configuredDpKeysPath = builder.Configuration["DataProtection:KeysPath"];
+
+var preferredDpKeysPath = string.IsNullOrWhiteSpace(configuredDpKeysPath)
+	? Path.Combine(
+		Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+		"LRNMetrics",
+		"DataProtectionKeys")
+	: (Path.IsPathRooted(configuredDpKeysPath)
+		? configuredDpKeysPath
+		: Path.Combine(AppContext.BaseDirectory, configuredDpKeysPath));
+
+if (!TryEnsureWritableDirectory(preferredDpKeysPath, out var dpKeysDir, out var dpError))
+{
+	LogStartupWarning($"DataProtection keys path is not writable: {preferredDpKeysPath}. Error: {dpError}");
+
+	// Fallback keeps the application alive even when the configured IIS folder has
+	// no permission. This prevents the login page from crashing. For best stability
+	// across app-pool recycles, fix folder permission and use ProgramData path.
+	var fallbackDpKeysPath = Path.Combine(AppContext.BaseDirectory, "App_Data", "DataProtectionKeys");
+
+	if (!TryEnsureWritableDirectory(fallbackDpKeysPath, out dpKeysDir, out var fallbackError))
+	{
+		throw new InvalidOperationException(
+			$"DataProtection key storage is not writable. Preferred path: '{preferredDpKeysPath}' ({dpError}). " +
+			$"Fallback path: '{fallbackDpKeysPath}' ({fallbackError}). " +
+			"Grant Modify permission to the IIS AppPool identity or set DataProtection:KeysPath to a writable folder.");
+	}
+
+	LogStartupWarning($"DataProtection keys path fallback is being used: {dpKeysDir.FullName}");
+}
+else
+{
+	LogStartupWarning($"DataProtection keys path: {dpKeysDir.FullName}");
+}
 
 builder.Services
-    .AddDataProtection()
-    .PersistKeysToFileSystem(dpKeysDir)
-    .SetApplicationName("LRNMetricsDashboard");
+	.AddDataProtection()
+	.PersistKeysToFileSystem(dpKeysDir)
+	.SetApplicationName("LRNMetricsDashboard");
 
 // ── Anti-forgery ─────────────────────────────────────────────────────────────
 // SameAsRequest means: Secure flag is set only when the request itself is HTTPS.
@@ -238,10 +292,26 @@ builder.Services
 // making the login form return 400 or loop back to the login page.
 builder.Services.AddAntiforgery(options =>
 {
-    options.Cookie.Name         = "LRN.Antiforgery";
-    options.Cookie.SameSite     = SameSiteMode.Lax;
-    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
-    options.Cookie.HttpOnly     = true;
+    //<<<<<<< HEAD
+    //    options.Cookie.Name         = "LRN.Antiforgery";
+    //    options.Cookie.SameSite     = SameSiteMode.Lax;
+    //    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+    //    options.Cookie.HttpOnly     = true;
+    //=======
+    //	options.Cookie.Name = "LRN.Antiforgery";
+    //	options.Cookie.SameSite = SameSiteMode.Lax;
+    //	options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+    //		? CookieSecurePolicy.SameAsRequest
+    //		: CookieSecurePolicy.Always;
+    //	options.Cookie.HttpOnly = true;
+    //>>>>>>> 23cf9fdcfbffecee7d6826a98b7baa4821a4bc13
+
+    options.Cookie.Name = "LRN.Antiforgery";
+    options.Cookie.SameSite = SameSiteMode.Lax;
+    options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+        ? CookieSecurePolicy.SameAsRequest
+        : CookieSecurePolicy.Always;
+    options.Cookie.HttpOnly = true;
 });
 
 // ── Forwarded Headers (IIS reverse-proxy / SSL termination) ────────────────────
@@ -251,10 +321,10 @@ builder.Services.AddAntiforgery(options =>
 // This also covers out-of-process (reverse-proxy) deployments.
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
-    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-    // Trust loopback (127.0.0.1 / ::1) — the address IIS uses when forwarding internally.
-    options.KnownNetworks.Clear();
-    options.KnownProxies.Clear();
+	options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+	// Trust loopback (127.0.0.1 / ::1) — the address IIS uses when forwarding internally.
+	options.KnownNetworks.Clear();
+	options.KnownProxies.Clear();
 });
 
 var useMockData = builder.Configuration.GetValue<bool>("DashboardData:UseMockData");
@@ -287,25 +357,20 @@ builder.Services.AddScoped<IAugustusProductionSummaryRepository, SqlAugustusProd
 // One SqlLabProductionSummaryRepository per lab, keyed by the lab name used in the LabSettings config.
 builder.Services.AddSingleton<IReadOnlyDictionary<string, ILabProductionSummaryRepository>>(sp =>
 {
-    var logger = sp.GetRequiredService<ILogger<SqlLabProductionSummaryRepository>>();
-    return new Dictionary<string, ILabProductionSummaryRepository>(StringComparer.OrdinalIgnoreCase)
-    {
-        ["Certus"]           = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Certus),
-        ["Cove"]             = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Cove),
-        ["Elixir"]           = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Elixir),
-        ["PCRLabsofAmerica"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.PCRLabsofAmerica),
-        ["Beech_Tree"]       = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.BeechTree),
-        ["Rising_Tides"]     = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.RisingTides),
-    };
+	var logger = sp.GetRequiredService<ILogger<SqlLabProductionSummaryRepository>>();
+	return new Dictionary<string, ILabProductionSummaryRepository>(StringComparer.OrdinalIgnoreCase)
+	{
+		["Certus"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Certus),
+		["Cove"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Cove),
+		["Elixir"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Elixir),
+		["PCRLabsofAmerica"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.PCRLabsofAmerica),
+		["Beech_Tree"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.BeechTree),
+		["Rising_Tides"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.RisingTides),
+	};
 });
 builder.Services.AddScoped<IClaimLineRepository, SqlClaimLineRepository>();
 builder.Services.AddScoped<ICollectionSummaryRepository, SqlCollectionSummaryRepository>();
 builder.Services.AddScoped<ILisSummaryRepository, SqlLisSummaryRepository>();
-
-// User management repository (uses DefaultConnection from appsettings.json)
-builder.Services.AddScoped<IUserManagementRepository, SqlUserManagementRepository>();
-// Password hasher
-builder.Services.AddSingleton<IPasswordHasher, PasswordHasher>();
 
 // User management repository (uses DefaultConnection from appsettings.json)
 builder.Services.AddScoped<IUserManagementRepository, SqlUserManagementRepository>();
@@ -323,75 +388,95 @@ builder.Services.AddSingleton<HelpBotService>();
 builder.Services.AddControllersWithViews(options =>
 {
 	options.Filters.AddService<AppUsageAuditFilter>();
-    // Require authenticated user for every action by default.
-    // Use [AllowAnonymous] on Account/Login etc.
-    var policy = new AuthorizationPolicyBuilder()
-        .RequireAuthenticatedUser()
-        .Build();
-    options.Filters.Add(new AuthorizeFilter(policy));
+	// Require authenticated user for every action by default.
+	// Use [AllowAnonymous] on Account/Login etc.
+	var policy = new AuthorizationPolicyBuilder()
+		.RequireAuthenticatedUser()
+		.Build();
+	options.Filters.Add(new AuthorizeFilter(policy));
 });
 
 // ── Cookie authentication ─────────────────────────────────────────
 builder.Services
-    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-    .AddCookie(options =>
-    {
-        options.LoginPath        = "/Account/Login";
-        options.LogoutPath       = "/Account/Logout";
-        options.AccessDeniedPath = "/Account/AccessDenied";
-        options.ExpireTimeSpan   = TimeSpan.FromHours(8);
-        options.SlidingExpiration = true;
-        options.Cookie.Name     = "LRN.Auth";
-        options.Cookie.HttpOnly  = true;
-        options.Cookie.SameSite  = SameSiteMode.Lax;
-        // SameAsRequest: Secure flag is added only when the connection is already HTTPS.
-        // Using Always on an HTTP-only IIS server caused Chrome to silently drop the
-        // auth cookie after login, so every request was redirected back to the login page.
-        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+//<<<<<<< HEAD
+//    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+//    .AddCookie(options =>
+//    {
+//        options.LoginPath        = "/Account/Login";
+//        options.LogoutPath       = "/Account/Logout";
+//        options.AccessDeniedPath = "/Account/AccessDenied";
+//        options.ExpireTimeSpan   = TimeSpan.FromHours(8);
+//        options.SlidingExpiration = true;
+//        options.Cookie.Name     = "LRN.Auth";
+//        options.Cookie.HttpOnly  = true;
+//        options.Cookie.SameSite  = SameSiteMode.Lax;
+//        // SameAsRequest: Secure flag is added only when the connection is already HTTPS.
+//        // Using Always on an HTTP-only IIS server caused Chrome to silently drop the
+//        // auth cookie after login, so every request was redirected back to the login page.
+//        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+//=======
+	.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+	.AddCookie(options =>
+	{
+		options.LoginPath = "/Account/Login";
+		options.LogoutPath = "/Account/Logout";
+		options.AccessDeniedPath = "/Account/AccessDenied";
+		options.ExpireTimeSpan = TimeSpan.FromHours(8);
+		options.SlidingExpiration = true;
+		options.Cookie.Name = "LRN.Auth";
+		options.Cookie.HttpOnly = true;
+		options.Cookie.SameSite = SameSiteMode.Lax;
+		// Always mark the auth cookie as Secure in production so Chrome accepts it after
+		// the HTTPS redirect that follows a successful login.
+		// SameAsRequest is kept for local development (HTTP) so the dev experience is unaffected.
+		options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+			? CookieSecurePolicy.SameAsRequest
+			: CookieSecurePolicy.Always;
+//>>>>>>> 23cf9fdcfbffecee7d6826a98b7baa4821a4bc13
 
-        // ── ReturnUrl loop guard ──────────────────────────────────────────────
-        // Prevent the error and login pages from being embedded as a ReturnUrl.
-        // Without this guard, a failing error page causes an exponentially growing
-        // ReturnUrl query string (/Home/Error?ReturnUrl=/Home/Error?...) until IIS
-        // rejects the request with HTTP 404.15 (query string too long).
-        //
-        // CRITICAL: when the app is hosted as an IIS sub-application (e.g. /LRNMetrics),
-        // every redirect URL MUST be prefixed with Request.PathBase, otherwise IIS routes
-        // the redirect to the root site and returns 404.0 (file not found).
-        options.Events = new CookieAuthenticationEvents
-        {
-            OnRedirectToLogin = ctx =>
-            {
-                var returnUrl = ctx.Properties.RedirectUri ?? string.Empty;
+		// ── ReturnUrl loop guard ──────────────────────────────────────────────
+		// Prevent the error and login pages from being embedded as a ReturnUrl.
+		// Without this guard, a failing error page causes an exponentially growing
+		// ReturnUrl query string (/Home/Error?ReturnUrl=/Home/Error?...) until IIS
+		// rejects the request with HTTP 404.15 (query string too long).
+		//
+		// CRITICAL: when the app is hosted as an IIS sub-application (e.g. /LRNMetrics),
+		// every redirect URL MUST be prefixed with Request.PathBase, otherwise IIS routes
+		// the redirect to the root site and returns 404.0 (file not found).
+		options.Events = new CookieAuthenticationEvents
+		{
+			OnRedirectToLogin = ctx =>
+			{
+				var returnUrl = ctx.Properties.RedirectUri ?? string.Empty;
 
-                // A "safe" ReturnUrl is one that does NOT point at the error/login/logout
-                // pages — those would just trigger another redirect cycle.
-                var isSafeReturn =
-                    !string.IsNullOrWhiteSpace(returnUrl)
-                    && !returnUrl.Contains("/Home/Error", StringComparison.OrdinalIgnoreCase)
-                    && !returnUrl.Contains("/Account/Login", StringComparison.OrdinalIgnoreCase)
-                    && !returnUrl.Contains("/Account/Logout", StringComparison.OrdinalIgnoreCase);
+				// A "safe" ReturnUrl is one that does NOT point at the error/login/logout
+				// pages — those would just trigger another redirect cycle.
+				var isSafeReturn =
+					!string.IsNullOrWhiteSpace(returnUrl)
+					&& !returnUrl.Contains("/Home/Error", StringComparison.OrdinalIgnoreCase)
+					&& !returnUrl.Contains("/Account/Login", StringComparison.OrdinalIgnoreCase)
+					&& !returnUrl.Contains("/Account/Logout", StringComparison.OrdinalIgnoreCase);
 
-                // Build the login URL using PathBase so sub-app deployments (e.g. /LRNMetrics)
-                // work correctly. Without PathBase the redirect goes to the IIS root site.
-                var pathBase = ctx.Request.PathBase.HasValue ? ctx.Request.PathBase.Value : string.Empty;
-                var loginUri = $"{pathBase}{options.LoginPath}";
+				// Build the login URL using PathBase so sub-app deployments (e.g. /LRNMetrics)
+				// work correctly. Without PathBase the redirect goes to the IIS root site.
+				var pathBase = ctx.Request.PathBase.HasValue ? ctx.Request.PathBase.Value : string.Empty;
+				var loginUri = $"{pathBase}{options.LoginPath}";
 
-                if (isSafeReturn)
-                {
-                    // Preserve the ReturnUrl exactly as the framework would have built it.
-                    loginUri = $"{loginUri}?ReturnUrl={Uri.EscapeDataString(returnUrl)}";
-                }
+				if (isSafeReturn)
+				{
+					// Preserve the ReturnUrl exactly as the framework would have built it.
+					loginUri = $"{loginUri}?ReturnUrl={Uri.EscapeDataString(returnUrl)}";
+				}
 
-                ctx.Response.Redirect(loginUri);
-                return Task.CompletedTask;
-            },
-        };
-
-
+				ctx.Response.Redirect(loginUri);
+				return Task.CompletedTask;
+			},
+		};
 
 
-    });
+
+
+	});
 
 var app = builder.Build();
 
@@ -424,37 +509,37 @@ app.UseForwardedHeaders();
 // to the same URL so the next request gets fresh cookies issued by the current key ring.
 app.Use(async (context, next) =>
 {
-    try
-    {
-        await next();
-    }
-    catch (Exception ex) when (
-        ex is System.Security.Cryptography.CryptographicException
-        || ex is Microsoft.AspNetCore.Antiforgery.AntiforgeryValidationException
-        || ex.InnerException is System.Security.Cryptography.CryptographicException)
-    {
-        var staleCookieNames = context.Request.Cookies.Keys
-            .Where(k => k.StartsWith("LRN.", StringComparison.OrdinalIgnoreCase)
-                     || k.StartsWith(".AspNetCore.", StringComparison.OrdinalIgnoreCase))
-            .ToList();
+	try
+	{
+		await next();
+	}
+	catch (Exception ex) when (
+		ex is System.Security.Cryptography.CryptographicException
+		|| ex is Microsoft.AspNetCore.Antiforgery.AntiforgeryValidationException
+		|| ex.InnerException is System.Security.Cryptography.CryptographicException)
+	{
+		var staleCookieNames = context.Request.Cookies.Keys
+			.Where(k => k.StartsWith("LRN.", StringComparison.OrdinalIgnoreCase)
+					 || k.StartsWith(".AspNetCore.", StringComparison.OrdinalIgnoreCase))
+			.ToList();
 
-        foreach (var cookieName in staleCookieNames)
-            context.Response.Cookies.Delete(cookieName);
+		foreach (var cookieName in staleCookieNames)
+			context.Response.Cookies.Delete(cookieName);
 
-        var staleLogger = context.RequestServices.GetRequiredService<ILoggerFactory>()
-            .CreateLogger("StaleCookieRecovery");
-        staleLogger.LogWarning(ex,
-            "Stale auth/antiforgery cookie(s) cleared for {Path} (cookies: {Cookies}). Redirecting to retry.",
-            context.Request.Path, string.Join(",", staleCookieNames));
+		var staleLogger = context.RequestServices.GetRequiredService<ILoggerFactory>()
+			.CreateLogger("StaleCookieRecovery");
+		staleLogger.LogWarning(ex,
+			"Stale auth/antiforgery cookie(s) cleared for {Path} (cookies: {Cookies}). Redirecting to retry.",
+			context.Request.Path, string.Join(",", staleCookieNames));
 
-        if (!context.Response.HasStarted)
-        {
-            // Send the user back to the same URL so the request runs again with fresh cookies.
-            var pathBase = context.Request.PathBase.HasValue ? context.Request.PathBase.Value : string.Empty;
-            var path = context.Request.Path.HasValue ? context.Request.Path.Value : "/";
-            context.Response.Redirect($"{pathBase}{path}");
-        }
-    }
+		if (!context.Response.HasStarted)
+		{
+			// Send the user back to the same URL so the request runs again with fresh cookies.
+			var pathBase = context.Request.PathBase.HasValue ? context.Request.PathBase.Value : string.Empty;
+			var path = context.Request.Path.HasValue ? context.Request.Path.Value : "/";
+			context.Response.Redirect($"{pathBase}{path}");
+		}
+	}
 });
 
 
@@ -530,7 +615,7 @@ app.Use(async (context, next) =>
 // cannot infer the port behind the reverse proxy. Disable it for production.
 if (app.Environment.IsDevelopment())
 {
-    app.UseHttpsRedirection();
+	app.UseHttpsRedirection();
 }
 app.UseStaticFiles();
 app.UseRouting();

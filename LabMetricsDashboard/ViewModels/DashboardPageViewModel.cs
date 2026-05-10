@@ -52,4 +52,9 @@ public class DashboardPageViewModel
 
     public BreakdownPivotViewModel WeeklyPivot { get; set; } = new();
     public BreakdownPivotViewModel MonthlyPivot { get; set; } = new();
+
+    public bool IsArManager { get; set; }
+    public bool IsArReviewer { get; set; }
+    public List<ReviewerOption> ReviewerOptions { get; set; } = new();
 }
+

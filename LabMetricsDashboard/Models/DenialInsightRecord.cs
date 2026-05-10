@@ -16,6 +16,12 @@ public sealed class DenialInsightRecord
     public string Task { get; set; } = string.Empty;
     public string Feedback { get; set; } = string.Empty;
     public string Responsibility { get; set; } = string.Empty;
+    public string AssignedTo { get; set; } = string.Empty;
+    public string ResponsibilityReviewer
+    {
+        get => AssignedTo;
+        set => AssignedTo = value ?? string.Empty;
+    }
     public DateTime? DiscussionDate { get; set; }
     public string ETA { get; set; } = string.Empty;
     public string LabName { get; set; } = string.Empty;
