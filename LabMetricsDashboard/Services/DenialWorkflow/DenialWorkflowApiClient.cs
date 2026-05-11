@@ -65,13 +65,13 @@ public sealed class DenialWorkflowApiClient : IDenialWorkflowApiClient
 			};
 	}
 	public async Task<int> AssignByInsightAsync(AssignInsightRequest request, CancellationToken ct)
-        => await PostForIntAsync("api/denial-workflow/assign-by-insight", request, ct);
+        => await PostForRowsAffectedAsync("api/denial-workflow/assign-insight", request, ct);
 
     public async Task<int> UpdateTaskAsync(UpdateTaskRequest request, CancellationToken ct)
-        => await PostForIntAsync("api/denial-workflow/task/update", request, ct);
+        => await PostForRowsAffectedAsync("api/denial-workflow/update-task", request, ct);
 
     public async Task<int> DecideVerificationAsync(VerificationDecisionRequest request, CancellationToken ct)
-        => await PostForIntAsync("api/denial-workflow/verification/decision", request, ct);
+        => await PostForRowsAffectedAsync("api/denial-workflow/decide-verification", request, ct);
 
     private static string ToQueryString(DenialWorkflowFilter f)
     {
@@ -84,10 +84,11 @@ public sealed class DenialWorkflowApiClient : IDenialWorkflowApiClient
         return "?" + string.Join("&", values.Where(x => !string.IsNullOrWhiteSpace(x.Value)).Select(x => $"{Uri.EscapeDataString(x.Key)}={Uri.EscapeDataString(x.Value!)}"));
     }
 
-    private async Task<int> PostForIntAsync<T>(string url, T payload, CancellationToken ct)
+    private async Task<int> PostForRowsAffectedAsync<T>(string url, T payload, CancellationToken ct)
     {
         using var response = await _http.PostAsJsonAsync(url, payload, ct);
         response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<int>(cancellationToken: ct);
+        var result = await response.Content.ReadFromJsonAsync<DenialWorkflowResult>(cancellationToken: ct);
+        return result?.RowsAffected ?? 0;
     }
 }

@@ -4,6 +4,11 @@ namespace LRN.ReportsApi.Services;
 
 public interface IDenialWorkflowRepository
 {
+    Task<IReadOnlyList<DenialWorkflowLabOption>> GetLabsAsync(CancellationToken ct);
+    Task<IReadOnlyList<DenialWorkflowLabOption>> GetLabsForUserAsync(string userName, CancellationToken ct);
+    Task<DenialWorkflowDashboardSummary> GetDashboardSummaryAsync(DenialWorkflowFilter filter, CancellationToken ct);
+    Task<DenialWorkflowFilterOptions> GetFilterOptionsAsync(int labId, CancellationToken ct);
+    Task<IReadOnlyList<ReviewerOption>> GetReviewerOptionsAsync(int labId, CancellationToken ct);
     Task<IReadOnlyList<WorkflowTaskRow>> GetActiveTasksAsync(int labId, CancellationToken ct);
     Task<IReadOnlyList<WorkflowTaskRow>> GetHistoryTasksByUidAsync(int labId, IEnumerable<string> uniqueTrackIds, CancellationToken ct);
     Task<DenialWorkflowSummary> GetSummaryAsync(int labId, string role, string userName, CancellationToken ct);

@@ -69,10 +69,10 @@
     </form>
 
     <ul class="nav nav-tabs mb-3">
-        <li class="nav-item"><a class="nav-link @(active == "dashboard" ? "active" : "")" asp-action="Index" asp-route-tab="dashboard">Dashboard</a></li>
-        <li class="nav-item"><a class="nav-link @(active == "insight" ? "active" : "")" asp-action="Index" asp-route-tab="insight">Denial Insight</a></li>
-        <li class="nav-item"><a class="nav-link @(active == "tasks" ? "active" : "")" asp-action="Index" asp-route-tab="tasks">Task Board</a></li>
-        <li class="nav-item"><a class="nav-link @(active == "verification" ? "active" : "")" asp-action="Index" asp-route-tab="verification">Verification</a></li>
+        <li class="nav-item"><a class="nav-link @(active == "dashboard" ? "active" : "")" href='@TabUrl("dashboard")'>Dashboard</a></li>
+        <li class="nav-item"><a class="nav-link @(active == "insight" ? "active" : "")" href='@TabUrl("insight")'>Denial Insight</a></li>
+        <li class="nav-item"><a class="nav-link @(active == "tasks" ? "active" : "")" href='@TabUrl("tasks")'>Task Board</a></li>
+        <li class="nav-item"><a class="nav-link @(active == "verification" ? "active" : "")" href='@TabUrl("verification")'>Verification</a></li>
     </ul>
 
     @if (active == "dashboard")
@@ -118,35 +118,70 @@
         }
         else
         {
-            <div class="d-flex justify-content-between align-items-center small text-muted mb-2"><span>Showing @Model.Insights.Items.Count of @Model.Insights.TotalCount records.</span><a class="btn btn-success btn-sm" href="@ExportUrl("insight")"><i class="bi bi-file-earmark-excel me-1"></i>Export</a></div>
-            <div class="table-responsive workflow-table-wrap">
-                <table class="table table-sm table-bordered table-hover align-middle text-nowrap workflow-table">
-                    <thead><tr><th>Denial Code</th><th>Description</th><th>Denial Count</th><th>Claims</th><th>Total Balance</th><th>High Impact Insurance</th><th>Insurance Balance</th><th>Impact %</th><th>Action Category</th><th>Action Code</th><th>Action</th><th>Task</th><th>Feedback</th><th>Responsibility</th><th>Assigned To</th><th>Run Id</th><th>Assign</th></tr></thead>
-                    <tbody>
-                    @foreach (var i in Model.Insights.Items)
-                    {
-                        <tr>
-                            <td>@i.DenialCodes</td><td class="text-wrap min-w-300">@i.Descriptions</td><td>@i.NoOfDenialCount</td><td>@i.NoOfClaimsCount</td><td>@i.TotalBalance?.ToString("N2")</td><td>@i.HighImpactInsurance</td><td>@i.InsuranceBalance.ToString("N2")</td><td>@i.ImpactPercentage?.ToString("N2")</td><td>@i.ActionCategory</td><td>@i.ActionCode</td><td class="text-wrap min-w-300">@i.Action</td><td class="text-wrap min-w-300">@i.Task</td><td>@i.Feedback</td><td>@i.Responsibility</td><td>@i.AssignedTo</td><td>@i.RunId</td>
-                            <td>
-                                <form asp-action="AssignInsight" method="post" class="d-flex gap-2">
-                                    @Html.AntiForgeryToken()
-                                    <input type="hidden" name="labId" value="@Model.LabId" />
-                                    <input type="hidden" name="runId" value="@i.RunId" />
-                                    <input type="hidden" name="denialCode" value="@i.DenialCodes" />
-                                    <input type="hidden" name="payerName" value="@i.HighImpactInsurance" />
-                                    <select name="reviewerUserName" class="form-select form-select-sm" required>
+            <form asp-action="AssignInsightGrid" method="post" id="insightGridAssignForm">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="labId" value="@Model.LabId" />
+                <input type="hidden" name="returnTab" value="insight" />
+                <input type="hidden" name="status" value="@Model.Filter.Status" />
+                <input type="hidden" name="reviewer" value="@Model.Filter.Reviewer" />
+                <input type="hidden" name="assignedTo" value="@Model.Filter.AssignedTo" />
+                <input type="hidden" name="denialCode" value="@Model.Filter.DenialCode" />
+                <input type="hidden" name="payerName" value="@Model.Filter.PayerName" />
+                <input type="hidden" name="page" value="@Model.Insights.Page" />
+
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 small text-muted mb-2">
+                    <span>Showing @Model.Insights.Items.Count of @Model.Insights.TotalCount records.</span>
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        <label class="fw-semibold text-dark mb-0">Assign selected rows to</label>
+                        <select name="gridReviewerUserName" class="form-select form-select-sm workflow-grid-reviewer-select">
+                            <option value="">Select Reviewer</option>
+                            @foreach (var r in Model.ReviewerOptions)
+                            { <option value="@r.UserName">@r.DisplayName</option> }
+                        </select>
+                        <button class="btn btn-primary btn-sm" type="submit">Assign Selected</button>
+                        <a class="btn btn-success btn-sm" href="@ExportUrl("insight")"><i class="bi bi-file-earmark-excel me-1"></i>Export</a>
+                    </div>
+                </div>
+
+                <div class="table-responsive workflow-table-wrap">
+                    <table class="table table-sm table-bordered table-hover align-middle text-nowrap workflow-table workflow-insight-table">
+                        <thead>
+                            <tr>
+                                <th class="workflow-sticky-col sticky-select-col text-center"><input class="form-check-input" type="checkbox" id="selectAllInsightRows" title="Select all visible rows" /></th>
+                                <th class="workflow-sticky-col sticky-reviewer-col">Reviewer</th>
+                                <th class="workflow-sticky-col sticky-assign-col">Assign</th>
+                                <th>Denial Code</th><th>Description</th><th>Denial Count</th><th>Claims</th><th>Total Balance</th><th>High Impact Insurance</th><th>Insurance Balance</th><th>Impact %</th><th>Action Category</th><th>Action Code</th><th>Action</th><th>Task</th><th>Feedback</th><th>Responsibility</th><th>Assigned To</th><th>Run Id</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @for (var rowIndex = 0; rowIndex < Model.Insights.Items.Count; rowIndex++)
+                        {
+                            var i = Model.Insights.Items[rowIndex];
+                            <tr>
+                                <td class="workflow-sticky-col sticky-select-col text-center">
+                                    <input type="hidden" name="rows[@rowIndex].IsSelected" value="false" />
+                                    <input class="form-check-input workflow-insight-row-check" type="checkbox" name="rows[@rowIndex].IsSelected" value="true" />
+                                </td>
+                                <td class="workflow-sticky-col sticky-reviewer-col">
+                                    <input type="hidden" name="rows[@rowIndex].RunId" value="@i.RunId" />
+                                    <input type="hidden" name="rows[@rowIndex].DenialCode" value="@i.DenialCodes" />
+                                    <input type="hidden" name="rows[@rowIndex].PayerName" value="@i.HighImpactInsurance" />
+                                    <select name="rows[@rowIndex].ReviewerUserName" class="form-select form-select-sm workflow-row-reviewer-select">
                                         <option value="">Reviewer</option>
                                         @foreach (var r in Model.ReviewerOptions)
                                         { <option value="@r.UserName">@r.DisplayName</option> }
                                     </select>
-                                    <button class="btn btn-sm btn-primary" type="submit">Assign</button>
-                                </form>
-                            </td>
-                        </tr>
-                    }
-                    </tbody>
-                </table>
-            </div>
+                                </td>
+                                <td class="workflow-sticky-col sticky-assign-col">
+                                    <button class="btn btn-sm btn-primary" type="submit" name="singleRowIndex" value="@rowIndex">Assign</button>
+                                </td>
+                                <td>@i.DenialCodes</td><td class="text-wrap min-w-300">@i.Descriptions</td><td>@i.NoOfDenialCount</td><td>@i.NoOfClaimsCount</td><td>@i.TotalBalance?.ToString("N2")</td><td>@i.HighImpactInsurance</td><td>@i.InsuranceBalance.ToString("N2")</td><td>@i.ImpactPercentage?.ToString("N2")</td><td>@i.ActionCategory</td><td>@i.ActionCode</td><td class="text-wrap min-w-300">@i.Action</td><td class="text-wrap min-w-300">@i.Task</td><td>@i.Feedback</td><td>@i.Responsibility</td><td>@i.AssignedTo</td><td>@i.RunId</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            </form>
             @RenderPager(Model.Insights)
         }
     }
@@ -155,13 +190,13 @@
         <div class="d-flex justify-content-between align-items-center small text-muted mb-2"><span>Showing @Model.Tasks.Items.Count of @Model.Tasks.TotalCount records.</span><a class="btn btn-success btn-sm" href="@ExportUrl("tasks")"><i class="bi bi-file-earmark-excel me-1"></i>Export</a></div>
         <div class="table-responsive workflow-table-wrap">
             <table class="table table-sm table-bordered table-hover align-middle text-nowrap workflow-table">
-                <thead><tr><th>Edit</th><th>Task ID</th><th>Claim</th><th>Patient</th><th>CPT</th><th>Denial</th><th>Description</th><th>Classification</th><th>Action Code</th><th>Recommended Action</th><th>Action Category</th><th>Task</th><th>Priority</th><th>Status</th><th>Assigned To</th><th>Insurance Balance</th><th>Date Opened</th><th>Due</th><th>Days Remaining</th><th>SLA</th><th>Payer</th><th>Payer Type</th><th>Clinic</th><th>Sales Rep</th><th>Referring Provider</th><th>Panel</th><th>DOS</th><th>Comments</th></tr></thead>
+                <thead><tr><th class="workflow-sticky-col sticky-edit-col">Edit</th><th>Task ID</th><th>Claim</th><th>Patient</th><th>CPT</th><th>Denial</th><th>Description</th><th>Classification</th><th>Action Code</th><th>Recommended Action</th><th>Action Category</th><th>Task</th><th>Priority</th><th>Status</th><th>Assigned To</th><th>Insurance Balance</th><th>Date Opened</th><th>Due</th><th>Days Remaining</th><th>SLA</th><th>Payer</th><th>Payer Type</th><th>Clinic</th><th>Sales Rep</th><th>Referring Provider</th><th>Panel</th><th>DOS</th><th>Comments</th></tr></thead>
                 <tbody>
                 @foreach (var t in Model.Tasks.Items)
                 {
                     var modalId = "task_" + (t.TaskID ?? string.Empty).Replace("-", "_").Replace(".", "_");
                     <tr>
-                        <td><button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#@modalId">Edit</button></td>
+                        <td class="workflow-sticky-col sticky-edit-col"><button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#@modalId">Edit</button></td>
                         <td>@t.TaskID</td><td>@t.ClaimID</td><td>@t.PatientId</td><td>@t.CPTCode</td><td>@t.DenialCode</td><td class="text-wrap min-w-300">@t.DenialDescription</td><td>@t.DenialClassification</td><td>@t.ActionCode</td><td class="text-wrap min-w-300">@t.RecommendedAction</td><td>@t.ActionCategory</td><td class="text-wrap min-w-300">@t.Task</td><td>@t.Priority</td><td>@t.Status</td><td>@t.AssignedTo</td><td>@t.InsuranceBalance.ToString("N2")</td><td>@t.DateOpened?.ToString("MM/dd/yyyy")</td><td>@t.DueDate?.ToString("MM/dd/yyyy")</td><td>@t.DaysRemaining</td><td>@t.SLAStatus</td><td>@t.PayerName</td><td>@t.PayerType</td><td>@t.ClinicName</td><td>@t.SalesRepname</td><td>@t.ReferringProvider</td><td>@t.PanelName</td><td>@t.DateOfService?.ToString("MM/dd/yyyy")</td><td class="text-wrap min-w-300">@t.ReviewerComments</td>
                     </tr>
                     <div class="modal fade" id="@modalId" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content">
@@ -222,6 +257,18 @@
 </div>
 
 @functions {
+    private string TabUrl(string tabName) => Url.Action("Index", "DenialWorkflow", new
+    {
+        labId = Model.LabId,
+        tab = tabName,
+        status = Model.Filter.Status,
+        reviewer = Model.Filter.Reviewer,
+        assignedTo = Model.Filter.AssignedTo,
+        denialCode = Model.Filter.DenialCode,
+        payerName = Model.Filter.PayerName,
+        page = 1
+    }) ?? "#";
+
     private Microsoft.AspNetCore.Html.IHtmlContent RenderPager<T>(LabMetricsDashboard.Models.DenialWorkflow.PagedResult<T> result)
     {
         if (result.TotalPages <= 1) return Microsoft.AspNetCore.Html.HtmlString.Empty;
@@ -245,6 +292,14 @@
 .workflow-table thead th { position: sticky; top: 0; z-index: 2; background: #f8fafc; color: #111827; font-weight: 700; border-bottom: 1px solid #cbd5e1; }
 .workflow-table tbody tr:nth-child(even) { background: #fbfdff; }
 .workflow-table tbody tr:hover { background: #eef6ff; }
+.workflow-sticky-col { position: sticky; z-index: 3; background: #fff; box-shadow: 1px 0 0 #dee2e6; }
+.workflow-table thead .workflow-sticky-col { z-index: 5; background: #f8fafc; }
+.sticky-select-col { left: 0; min-width: 54px; width: 54px; text-align: center; }
+.sticky-reviewer-col { left: 54px; min-width: 260px; width: 260px; }
+.sticky-assign-col { left: 314px; min-width: 95px; width: 95px; text-align: center; }
+.sticky-edit-col { left: 0; min-width: 90px; width: 90px; text-align: center; }
+.workflow-row-reviewer-select { min-width: 240px; }
+.workflow-grid-reviewer-select { min-width: 230px; }
 .min-w-300 { min-width: 300px; white-space: normal !important; }
 </style>
 
@@ -254,4 +309,27 @@ function toggleWorkflowFilters() {
     if (!panel) return;
     panel.style.display = panel.style.display === 'none' ? '' : 'none';
 }
+
+
+document.addEventListener('DOMContentLoaded', function () {
+    const selectAll = document.getElementById('selectAllInsightRows');
+    if (!selectAll) return;
+
+    const rowChecks = Array.from(document.querySelectorAll('.workflow-insight-row-check'));
+
+    function refreshSelectAllState() {
+        const checkedCount = rowChecks.filter(x => x.checked).length;
+        selectAll.checked = rowChecks.length > 0 && checkedCount === rowChecks.length;
+        selectAll.indeterminate = checkedCount > 0 && checkedCount < rowChecks.length;
+    }
+
+    selectAll.addEventListener('change', function () {
+        rowChecks.forEach(x => x.checked = selectAll.checked);
+        refreshSelectAllState();
+    });
+
+    rowChecks.forEach(x => x.addEventListener('change', refreshSelectAllState));
+    refreshSelectAllState();
+});
+
 </script>

@@ -147,17 +147,87 @@ public sealed class DenialWorkflowController : Controller
     public async Task<IActionResult> AssignInsight(int labId, string denialCode, string payerName, string reviewerUserName, string? runId, CancellationToken cancellationToken)
     {
         if (!HasAnyRole("Admin", "AR Manager", "ARManager")) return Forbid();
-        var updated = await _workflowApi.AssignByInsightAsync(new AssignInsightRequest
+        var updated = await AssignInsightRowAsync(labId, runId, denialCode, payerName, reviewerUserName, cancellationToken);
+        TempData[updated > 0 ? "DenialWorkflowSuccess" : "DenialWorkflowError"] = updated > 0 ? $"Assigned {updated:N0} task(s)." : "No matching task was found.";
+        return RedirectToAction(nameof(Index), new { labId, tab = "insight" });
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> AssignInsightGrid(
+        int labId,
+        List<InsightAssignmentRow> rows,
+        string? gridReviewerUserName,
+        int? singleRowIndex,
+        string? status,
+        string? reviewer,
+        string? assignedTo,
+        string? denialCode,
+        string? payerName,
+        int page = 1,
+        CancellationToken cancellationToken = default)
+    {
+        if (!HasAnyRole("Admin", "AR Manager", "ARManager")) return Forbid();
+
+        var totalUpdated = 0;
+        if (singleRowIndex.HasValue)
+        {
+            var row = rows.ElementAtOrDefault(singleRowIndex.Value);
+            if (row == null || string.IsNullOrWhiteSpace(row.ReviewerUserName))
+            {
+                TempData["DenialWorkflowError"] = "Please select a reviewer for the row before assigning.";
+            }
+            else
+            {
+                totalUpdated = await AssignInsightRowAsync(labId, row.RunId, row.DenialCode, row.PayerName, row.ReviewerUserName, cancellationToken);
+            }
+        }
+        else
+        {
+            var selectedRows = rows
+                .Where(x => x.IsSelected && (!string.IsNullOrWhiteSpace(x.DenialCode) || !string.IsNullOrWhiteSpace(x.PayerName)))
+                .ToList();
+
+            if (string.IsNullOrWhiteSpace(gridReviewerUserName))
+            {
+                TempData["DenialWorkflowError"] = "Please select a reviewer for the selected rows assignment.";
+            }
+            else if (selectedRows.Count == 0)
+            {
+                TempData["DenialWorkflowError"] = "Please select at least one Denial Insight row using the checkbox.";
+            }
+            else
+            {
+                foreach (var row in selectedRows)
+                {
+                    totalUpdated += await AssignInsightRowAsync(labId, row.RunId, row.DenialCode, row.PayerName, gridReviewerUserName, cancellationToken);
+                }
+            }
+        }
+
+        if (totalUpdated > 0)
+        {
+            TempData["DenialWorkflowSuccess"] = $"Assigned {totalUpdated:N0} task(s).";
+        }
+        else if (TempData["DenialWorkflowError"] == null)
+        {
+            TempData["DenialWorkflowError"] = "No matching task was found.";
+        }
+
+        return RedirectToAction(nameof(Index), new { labId, tab = "insight", status, reviewer, assignedTo, denialCode, payerName, page });
+    }
+
+    private async Task<int> AssignInsightRowAsync(int labId, string? runId, string? denialCode, string? payerName, string reviewerUserName, CancellationToken cancellationToken)
+    {
+        return await _workflowApi.AssignByInsightAsync(new AssignInsightRequest
         {
             LabId = labId,
-            DenialCode = denialCode,
-            PayerName = payerName,
+            DenialCode = denialCode ?? string.Empty,
+            PayerName = payerName ?? string.Empty,
             ReviewerUserName = reviewerUserName,
             RunId = runId,
             ActionBy = User.Identity?.Name ?? "system"
         }, cancellationToken);
-        TempData[updated > 0 ? "DenialWorkflowSuccess" : "DenialWorkflowError"] = updated > 0 ? $"Assigned {updated:N0} task(s)." : "No matching task was found.";
-        return RedirectToAction(nameof(Index), new { labId, tab = "insight" });
     }
 
     [HttpPost]
@@ -378,4 +448,13 @@ public sealed class DenialWorkflowController : Controller
     }
 
     private bool HasAnyRole(params string[] roles) => roles.Any(role => User.IsInRole(role));
+}
+
+public sealed class InsightAssignmentRow
+{
+    public bool IsSelected { get; set; }
+    public string? RunId { get; set; }
+    public string? DenialCode { get; set; }
+    public string? PayerName { get; set; }
+    public string? ReviewerUserName { get; set; }
 }

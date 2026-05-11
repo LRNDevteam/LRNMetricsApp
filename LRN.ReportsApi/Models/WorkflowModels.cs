@@ -1,5 +1,21 @@
 namespace LRN.ReportsApi.Models;
 
+
+public sealed class DenialWorkflowLabOption
+{
+    public int LabId { get; set; }
+    public string LabName { get; set; } = string.Empty;
+}
+
+public sealed class ReviewerOption
+{
+    public int LabUserId { get; set; }
+    public string UserName { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string FullName { get => DisplayName; set => DisplayName = value ?? string.Empty; }
+    public string Email { get; set; } = string.Empty;
+}
+
 public sealed class DenialWorkflowOptions
 {
     public string[] ClosedStatuses { get; set; } = ["Closed", "Completed"];
@@ -26,12 +42,72 @@ public sealed class DenialWorkflowFilter
     public string AssignedTo { get; set; } = string.Empty;
     public string DenialCode { get; set; } = string.Empty;
     public string PayerName { get; set; } = string.Empty;
+    public string ActionCategory { get; set; } = string.Empty;
+    public string Priority { get; set; } = string.Empty;
     public string RunId { get; set; } = string.Empty;
     public string SearchText { get; set; } = string.Empty;
     public DateTime? FromDate { get; set; }
     public DateTime? ToDate { get; set; }
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 100;
+}
+
+
+
+public sealed class DenialWorkflowFilterOptions
+{
+    public IReadOnlyList<string> Statuses { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> ActionCategories { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> Priorities { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> DenialCodes { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> PayerNames { get; set; } = Array.Empty<string>();
+}
+
+public sealed class DenialWorkflowUserContext
+{
+    public string UserName { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string Role { get; set; } = string.Empty;
+    public IReadOnlyList<DenialWorkflowLabOption> Labs { get; set; } = Array.Empty<DenialWorkflowLabOption>();
+}
+
+public sealed class DenialWorkflowDashboardSummary
+{
+    public int TotalDenials { get; set; }
+    public decimal OutstandingAmount { get; set; }
+    public int OpenInProgressCount { get; set; }
+    public int ClosedCount { get; set; }
+    public IReadOnlyList<DenialClassificationSummaryRow> DenialClassifications { get; set; } = Array.Empty<DenialClassificationSummaryRow>();
+    public IReadOnlyList<ReviewerWorkflowSummaryRow> AnalystWorkload { get; set; } = Array.Empty<ReviewerWorkflowSummaryRow>();
+    public IReadOnlyList<ActionCategorySummaryRow> ActionCategories { get; set; } = Array.Empty<ActionCategorySummaryRow>();
+    public IReadOnlyList<SlaSummaryRow> SlaTiles { get; set; } = Array.Empty<SlaSummaryRow>();
+}
+
+public sealed class DenialClassificationSummaryRow
+{
+    public string Classification { get; set; } = string.Empty;
+    public int Count { get; set; }
+    public decimal Outstanding { get; set; }
+    public decimal PercentageOfTotal { get; set; }
+    public int Open { get; set; }
+    public int InProgress { get; set; }
+    public int Closed { get; set; }
+}
+
+public sealed class ActionCategorySummaryRow
+{
+    public string ActionCategory { get; set; } = string.Empty;
+    public int Count { get; set; }
+    public decimal Outstanding { get; set; }
+    public decimal PercentageOfTotal { get; set; }
+}
+
+public sealed class SlaSummaryRow
+{
+    public string Label { get; set; } = string.Empty;
+    public int Count { get; set; }
+    public string Status { get; set; } = string.Empty;
 }
 
 public sealed class DenialTaskImportRequest

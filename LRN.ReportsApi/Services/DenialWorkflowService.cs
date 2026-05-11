@@ -7,6 +7,11 @@ namespace LRN.ReportsApi.Services;
 public interface IDenialWorkflowService
 {
     Task<DenialWorkflowImportResult> ImportAsync(DenialTaskImportRequest request, CancellationToken ct);
+    Task<IReadOnlyList<DenialWorkflowLabOption>> GetLabsAsync(CancellationToken ct);
+    Task<IReadOnlyList<DenialWorkflowLabOption>> GetLabsForUserAsync(string userName, CancellationToken ct);
+    Task<DenialWorkflowDashboardSummary> GetDashboardSummaryAsync(DenialWorkflowFilter filter, CancellationToken ct);
+    Task<DenialWorkflowFilterOptions> GetFilterOptionsAsync(int labId, CancellationToken ct);
+    Task<IReadOnlyList<ReviewerOption>> GetReviewerOptionsAsync(int labId, CancellationToken ct);
     Task<DenialWorkflowSummary> GetSummaryAsync(int labId, string role, string userName, CancellationToken ct);
     Task<IReadOnlyList<ReviewerWorkflowSummaryRow>> GetReviewerSummaryAsync(DenialWorkflowFilter filter, CancellationToken ct);
     Task<PagedResult<DenialWorkflowInsightRow>> GetInsightsAsync(DenialWorkflowFilter filter, CancellationToken ct);
@@ -103,6 +108,12 @@ public sealed class DenialWorkflowService : IDenialWorkflowService
 
         return result;
     }
+
+    public Task<IReadOnlyList<DenialWorkflowLabOption>> GetLabsAsync(CancellationToken ct) => _repo.GetLabsAsync(ct);
+    public Task<IReadOnlyList<DenialWorkflowLabOption>> GetLabsForUserAsync(string userName, CancellationToken ct) => _repo.GetLabsForUserAsync(userName, ct);
+    public Task<DenialWorkflowDashboardSummary> GetDashboardSummaryAsync(DenialWorkflowFilter filter, CancellationToken ct) => _repo.GetDashboardSummaryAsync(filter, ct);
+    public Task<DenialWorkflowFilterOptions> GetFilterOptionsAsync(int labId, CancellationToken ct) => _repo.GetFilterOptionsAsync(labId, ct);
+    public Task<IReadOnlyList<ReviewerOption>> GetReviewerOptionsAsync(int labId, CancellationToken ct) => _repo.GetReviewerOptionsAsync(labId, ct);
 
     public Task<DenialWorkflowSummary> GetSummaryAsync(int labId, string role, string userName, CancellationToken ct) => _repo.GetSummaryAsync(labId, role, userName, ct);
     public Task<IReadOnlyList<ReviewerWorkflowSummaryRow>> GetReviewerSummaryAsync(DenialWorkflowFilter filter, CancellationToken ct) => _repo.GetReviewerSummaryAsync(filter, ct);

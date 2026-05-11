@@ -1228,3 +1228,56 @@ footer {
 	}
 }
 
+
+
+/* Denial Insight assignment sticky columns - May 2026 */
+#denialInsightTable .sticky-col {
+	position: sticky;
+	background: #fff;
+	background-clip: padding-box;
+	z-index: 5;
+	box-shadow: 1px 0 0 #d4deea;
+}
+
+#denialInsightTable thead .sticky-col {
+	z-index: 9;
+	background: #eef5ff;
+}
+
+#denialInsightTable .sticky-col-1 {
+	left: 0;
+}
+
+#denialInsightTable .sticky-col-2 {
+	left: 310px;
+}
+
+#denialInsightTable .insight-reviewer-col {
+	min-width: 310px;
+	width: 310px;
+}
+
+#denialInsightTable .insight-assign-col {
+	min-width: 115px;
+	width: 115px;
+}
+
+#denialInsightTable .denial-reviewer-select {
+	min-width: 275px;
+}
+
+/* Task Board reviewer edit/status sticky column */
+#taskBoardTable .task-edit-sticky {
+	position: sticky;
+	left: 0;
+	z-index: 5;
+	min-width: 175px;
+	background: #fff;
+	background-clip: padding-box;
+	box-shadow: 1px 0 0 #d4deea;
+}
+
+#taskBoardTable thead .task-edit-sticky {
+	z-index: 9;
+	background: #eef5ff;
+}
