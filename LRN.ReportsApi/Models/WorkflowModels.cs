@@ -42,6 +42,10 @@ public sealed class DenialWorkflowFilter
     public string AssignedTo { get; set; } = string.Empty;
     public string DenialCode { get; set; } = string.Empty;
     public string PayerName { get; set; } = string.Empty;
+    public string Clinic { get; set; } = string.Empty;
+    public string SalesRepname { get; set; } = string.Empty;
+    public string ReferringProvider { get; set; } = string.Empty;
+    public string DenialClassification { get; set; } = string.Empty;
     public string ActionCategory { get; set; } = string.Empty;
     public string Priority { get; set; } = string.Empty;
     public string RunId { get; set; } = string.Empty;
@@ -61,6 +65,10 @@ public sealed class DenialWorkflowFilterOptions
     public IReadOnlyList<string> Priorities { get; set; } = Array.Empty<string>();
     public IReadOnlyList<string> DenialCodes { get; set; } = Array.Empty<string>();
     public IReadOnlyList<string> PayerNames { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> DenialClassifications { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> Clinics { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> SalesReps { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> ReferringProviders { get; set; } = Array.Empty<string>();
 }
 
 public sealed class DenialWorkflowUserContext
@@ -255,6 +263,10 @@ public class WorkflowTaskRow
     public string ReviewerComments { get; set; } = string.Empty;
     public DateTime? ReviewerUpdatedOn { get; set; }
     public string ReviewerUpdatedBy { get; set; } = string.Empty;
+    public string ICDCodes { get; set; } = string.Empty;
+    public string CoverageStatus { get; set; } = string.Empty;
+    public string ICDComplianceStatus { get; set; } = string.Empty;
+    public string DenialValidity { get; set; } = string.Empty;
 }
 
 public class VerificationTaskRow : WorkflowTaskRow
@@ -267,6 +279,48 @@ public class VerificationTaskRow : WorkflowTaskRow
     public DateTime? MovedOn { get; set; }
     public string VerifiedBy { get; set; } = string.Empty;
     public DateTime? VerifiedOn { get; set; }
+}
+
+public sealed class ClaimLevelRow
+{
+    public string ClaimId { get; set; } = string.Empty;
+    public string PatientName { get; set; } = string.Empty;
+    public DateTime? PatientDOB { get; set; }
+    public string PatientId { get; set; } = string.Empty;
+    public string ClinicName { get; set; } = string.Empty;
+    public string SalesRepname { get; set; } = string.Empty;
+    public string ReferringProvider { get; set; } = string.Empty;
+    public string PayerName { get; set; } = string.Empty;
+    public DateTime? DateOfService { get; set; }
+    public string AssignedTo { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public int TaskCount { get; set; }
+    public decimal InsuranceBalance { get; set; }
+}
+
+public sealed class ClaimAssignmentConflict
+{
+    public string ClaimId { get; set; } = string.Empty;
+    public string TaskId { get; set; } = string.Empty;
+    public string AssignedTo { get; set; } = string.Empty;
+}
+
+public sealed class AssignClaimRequest
+{
+    public int LabId { get; set; }
+    public List<string> ClaimIds { get; set; } = new();
+    public string ReviewerUserName { get; set; } = string.Empty;
+    public string ActionBy { get; set; } = string.Empty;
+    public bool OverwriteExisting { get; set; }
+}
+
+public sealed class ClaimAssignmentResult
+{
+    public bool Success { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public int RowsAffected { get; set; }
+    public bool HasConflicts { get; set; }
+    public IReadOnlyList<ClaimAssignmentConflict> Conflicts { get; set; } = Array.Empty<ClaimAssignmentConflict>();
 }
 
 public sealed class AssignInsightRequest

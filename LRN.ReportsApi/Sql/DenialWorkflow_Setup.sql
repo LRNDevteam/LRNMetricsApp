@@ -1,12 +1,18 @@
 /* Run this once in each lab database before enabling LRN.ReportsApi workflow. */
 IF OBJECT_ID('dbo.DenialStatusMaster','U') IS NULL
 BEGIN
-CREATE TABLE dbo.DenialStatusMaster(StatusId int IDENTITY(1,1) PRIMARY KEY, StatusName nvarchar(100) NOT NULL UNIQUE, IsClosed bit NOT NULL DEFAULT(0), IsVerificationStatus bit NOT NULL DEFAULT(0), SortOrder int NOT NULL DEFAULT(100), IsActive bit NOT NULL DEFAULT(1));
+CREATE TABLE dbo.DenialStatusMaster(StatusId int IDENTITY(1,1) PRIMARY KEY, StatusName nvarchar(100) NOT NULL UNIQUE, IsClosedStatus bit NOT NULL DEFAULT(0), IsVerificationStatus bit NOT NULL DEFAULT(0), SortOrder int NOT NULL DEFAULT(100), IsActive bit NOT NULL DEFAULT(1));
 END
+
+IF COL_LENGTH('dbo.DenialStatusMaster','IsClosedStatus') IS NULL ALTER TABLE dbo.DenialStatusMaster ADD IsClosedStatus bit NOT NULL CONSTRAINT DF_DenialStatusMaster_IsClosedStatus DEFAULT(0);
+IF COL_LENGTH('dbo.DenialStatusMaster','IsVerificationStatus') IS NULL ALTER TABLE dbo.DenialStatusMaster ADD IsVerificationStatus bit NOT NULL CONSTRAINT DF_DenialStatusMaster_IsVerificationStatus DEFAULT(0);
+IF COL_LENGTH('dbo.DenialStatusMaster','SortOrder') IS NULL ALTER TABLE dbo.DenialStatusMaster ADD SortOrder int NOT NULL CONSTRAINT DF_DenialStatusMaster_SortOrder DEFAULT(100);
+IF COL_LENGTH('dbo.DenialStatusMaster','IsActive') IS NULL ALTER TABLE dbo.DenialStatusMaster ADD IsActive bit NOT NULL CONSTRAINT DF_DenialStatusMaster_IsActive DEFAULT(1);
 MERGE dbo.DenialStatusMaster AS t USING (VALUES
 ('Closed',1,0,10),('Completed',1,0,20),('Duplicate',0,1,30),('Verification Pending',0,1,40),('Pending Review',0,0,50),('In-Progress',0,0,60),('New',0,0,70)
-) AS s(StatusName,IsClosed,IsVerificationStatus,SortOrder) ON t.StatusName=s.StatusName
-WHEN NOT MATCHED THEN INSERT(StatusName,IsClosed,IsVerificationStatus,SortOrder) VALUES(s.StatusName,s.IsClosed,s.IsVerificationStatus,s.SortOrder);
+) AS s(StatusName,IsClosedStatus,IsVerificationStatus,SortOrder) ON t.StatusName=s.StatusName
+WHEN MATCHED THEN UPDATE SET IsClosedStatus=s.IsClosedStatus, IsVerificationStatus=s.IsVerificationStatus, SortOrder=s.SortOrder, IsActive=1
+WHEN NOT MATCHED THEN INSERT(StatusName,IsClosedStatus,IsVerificationStatus,SortOrder) VALUES(s.StatusName,s.IsClosedStatus,s.IsVerificationStatus,s.SortOrder);
 
 IF OBJECT_ID('dbo.DenialActionCategoryMaster','U') IS NULL
 BEGIN

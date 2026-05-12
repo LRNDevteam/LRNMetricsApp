@@ -69,7 +69,36 @@ public sealed class DenialWorkflowController : ControllerBase
     public async Task<ActionResult<PagedResult<DenialWorkflowInsightRow>>> Insights([FromQuery] DenialWorkflowFilter filter, CancellationToken ct)
         => Ok(await _service.GetInsightsAsync(Normalize(filter), ct));
 
-    [HttpGet("tasks")]
+    [HttpGet("claims")]
+    [HttpGet("claim-level")]
+    public async Task<ActionResult<PagedResult<ClaimLevelRow>>> Claims([FromQuery] DenialWorkflowFilter filter, CancellationToken ct)
+        => Ok(await _service.GetClaimsAsync(Normalize(filter), ct));
+
+	[HttpGet("claim-tasks")]
+	public async Task<ActionResult<IReadOnlyList<WorkflowTaskRow>>> ClaimTasksQuery(
+	   [FromQuery] int labId,
+	   [FromQuery] string? claimId,
+	   CancellationToken ct)
+	{
+		if (labId <= 0) return BadRequest("LabId is required.");
+		if (string.IsNullOrWhiteSpace(claimId)) return BadRequest("ClaimId is required.");
+
+		return Ok(await _service.GetTasksByClaimAsync(labId, claimId.Trim(), ct));
+	}
+
+	[HttpGet("claims/{claimId}/tasks")]
+	public async Task<ActionResult<IReadOnlyList<WorkflowTaskRow>>> ClaimTasksRoute(
+		[FromQuery] int labId,
+		[FromRoute] string? claimId,
+		CancellationToken ct)
+	{
+		if (labId <= 0) return BadRequest("LabId is required.");
+		if (string.IsNullOrWhiteSpace(claimId)) return BadRequest("ClaimId is required.");
+
+		return Ok(await _service.GetTasksByClaimAsync(labId, claimId.Trim(), ct));
+	}
+
+	[HttpGet("tasks")]
     public async Task<ActionResult<PagedResult<WorkflowTaskRow>>> Tasks([FromQuery] DenialWorkflowFilter filter, CancellationToken ct)
         => Ok(await _service.GetTasksAsync(Normalize(filter), ct));
 
@@ -83,6 +112,14 @@ public sealed class DenialWorkflowController : ControllerBase
     {
         var rows = await _service.AssignByInsightAsync(request, ct);
         return Ok(new DenialWorkflowResult { Success = rows > 0, RowsAffected = rows, Message = rows > 0 ? "Assigned successfully." : "No matching task found." });
+    }
+
+    [HttpPost("assign-claims")]
+    [HttpPost("assign-by-claim")]
+    public async Task<ActionResult<ClaimAssignmentResult>> AssignClaims(AssignClaimRequest request, CancellationToken ct)
+    {
+        var result = await _service.AssignClaimsAsync(request, ct);
+        return Ok(result);
     }
 
     [HttpPost("update-task")]
@@ -114,7 +151,7 @@ public sealed class DenialWorkflowController : ControllerBase
     private static DenialWorkflowFilter Normalize(DenialWorkflowFilter filter)
     {
         if (filter.Page <= 0) filter.Page = 1;
-        filter.PageSize = 100;
+        filter.PageSize = filter.PageSize <= 0 ? 50 : Math.Clamp(filter.PageSize, 25, 200);
         return filter;
     }
 }

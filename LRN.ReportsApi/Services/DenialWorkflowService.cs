@@ -15,6 +15,9 @@ public interface IDenialWorkflowService
     Task<DenialWorkflowSummary> GetSummaryAsync(int labId, string role, string userName, CancellationToken ct);
     Task<IReadOnlyList<ReviewerWorkflowSummaryRow>> GetReviewerSummaryAsync(DenialWorkflowFilter filter, CancellationToken ct);
     Task<PagedResult<DenialWorkflowInsightRow>> GetInsightsAsync(DenialWorkflowFilter filter, CancellationToken ct);
+    Task<PagedResult<ClaimLevelRow>> GetClaimsAsync(DenialWorkflowFilter filter, CancellationToken ct);
+    Task<IReadOnlyList<WorkflowTaskRow>> GetTasksByClaimAsync(int labId, string claimId, CancellationToken ct);
+    Task<ClaimAssignmentResult> AssignClaimsAsync(AssignClaimRequest request, CancellationToken ct);
     Task<PagedResult<WorkflowTaskRow>> GetTasksAsync(DenialWorkflowFilter filter, CancellationToken ct);
     Task<PagedResult<VerificationTaskRow>> GetVerificationAsync(DenialWorkflowFilter filter, CancellationToken ct);
     Task<int> AssignByInsightAsync(AssignInsightRequest request, CancellationToken ct);
@@ -118,6 +121,9 @@ public sealed class DenialWorkflowService : IDenialWorkflowService
     public Task<DenialWorkflowSummary> GetSummaryAsync(int labId, string role, string userName, CancellationToken ct) => _repo.GetSummaryAsync(labId, role, userName, ct);
     public Task<IReadOnlyList<ReviewerWorkflowSummaryRow>> GetReviewerSummaryAsync(DenialWorkflowFilter filter, CancellationToken ct) => _repo.GetReviewerSummaryAsync(filter, ct);
     public Task<PagedResult<DenialWorkflowInsightRow>> GetInsightsAsync(DenialWorkflowFilter filter, CancellationToken ct) => _repo.GetInsightsAsync(filter, ct);
+    public Task<PagedResult<ClaimLevelRow>> GetClaimsAsync(DenialWorkflowFilter filter, CancellationToken ct) => _repo.GetClaimsAsync(filter, ct);
+    public Task<IReadOnlyList<WorkflowTaskRow>> GetTasksByClaimAsync(int labId, string claimId, CancellationToken ct) => _repo.GetTasksByClaimAsync(labId, claimId, ct);
+    public Task<ClaimAssignmentResult> AssignClaimsAsync(AssignClaimRequest request, CancellationToken ct) => _repo.AssignClaimsAsync(request, ct);
     public Task<PagedResult<WorkflowTaskRow>> GetTasksAsync(DenialWorkflowFilter filter, CancellationToken ct) => _repo.GetTasksAsync(filter, ct);
     public Task<PagedResult<VerificationTaskRow>> GetVerificationAsync(DenialWorkflowFilter filter, CancellationToken ct) => _repo.GetVerificationAsync(filter, ct);
     public Task<int> AssignByInsightAsync(AssignInsightRequest request, CancellationToken ct) => _repo.AssignByInsightAsync(request, ct);

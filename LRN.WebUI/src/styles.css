@@ -25,3 +25,27 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 @media(max-width:1100px){.sla-card .sla-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:700px){.sla-card .sla-grid{grid-template-columns:1fr}.kpi-grid.four{grid-template-columns:1fr}}
 .summary-card{margin-bottom:14px}.summary-table th{white-space:nowrap}.summary-table td{vertical-align:middle}.summary-pill{display:inline-block;padding:2px 9px;border-radius:12px;font-size:10px;font-weight:700;margin-right:6px}.summary-pill.open{background:#dbeafe;color:#1e40af}.summary-pill.progress{background:#fef3c7;color:#92400e}.summary-pill.closed{background:#dcfce7;color:#166534}.summary-action{text-align:center;width:90px}.badge-appeal{background:#dbeafe;color:#1e40af}.badge-rebill{background:#dcfce7;color:#166534}.badge-woff{background:#fee2e2;color:#991b1b}.badge-cip{background:#fef3c7;color:#92400e}.badge-review{background:#f3f4f6;color:#374151}
+.link-btn{background:none;border:0;color:#00a896;font-weight:700;text-decoration:none;cursor:pointer;padding:0}
+.link-btn:hover{text-decoration:underline}.drill-row td{background:#f8fafc!important}.drill-panel{padding:12px;border:1px solid #dbe3ee;border-radius:12px;background:white}.drill-title{font-weight:800;margin-bottom:8px;color:#0f2742}.drill-table{font-size:12px}.drill-table th,.drill-table td{white-space:nowrap}.drill-table .wrap-cell{white-space:normal;min-width:220px}
+
+/* Claim CPT popup */
+.modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:2000;display:flex;align-items:center;justify-content:center;padding:24px}
+.claim-modal{width:min(1280px,96vw);max-height:90vh;background:#fff;border-radius:12px;box-shadow:0 24px 80px rgba(0,0,0,.35);display:flex;flex-direction:column;overflow:hidden;border:1px solid #dbe3ee}
+.claim-modal-header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--c-border);background:#f8fafc}
+.claim-modal-title{font-size:15px;font-weight:800;color:var(--lrn-navy)}
+.claim-modal-header small{font-size:11px;color:var(--c-muted)}
+.modal-close{border:0;background:#fff;border:1px solid var(--c-border);width:32px;height:32px;border-radius:50%;cursor:pointer;color:var(--c-text)}
+.modal-close:hover{background:#eefdfa;color:var(--lrn-teal)}
+.claim-modal-body{padding:14px;overflow:auto}
+.claim-modal-body .drill-panel{border:0;padding:0}
+.claim-modal-body .drill-title{display:none}
+.claim-modal-body .drill-table th{top:0}
+
+.classification-link {
+  font-weight: 700;
+  text-align: left;
+  color: #0f3f66;
+}
+.classification-link:hover {
+  text-decoration: underline;
+}
