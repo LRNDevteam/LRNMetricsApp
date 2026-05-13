@@ -26,4 +26,11 @@ public interface IDenialWorkflowRepository
     Task<int> AssignByInsightAsync(AssignInsightRequest request, CancellationToken ct);
     Task<int> UpdateTaskAsync(UpdateTaskRequest request, bool isClosed, bool isDuplicate, CancellationToken ct);
     Task<int> DecideVerificationAsync(VerificationDecisionRequest request, bool isClosed, CancellationToken ct);
+    Task EnsureClaimSupportTablesAsync(int labId, CancellationToken ct);
+    Task<IReadOnlyList<DenialNoteRow>> GetNotesAsync(int labId, string claimId, string? taskId, string? cptCode, string noteLevel, CancellationToken ct);
+    Task<DenialNoteRow> SaveNoteAsync(SaveDenialNoteRequest request, CancellationToken ct);
+    Task<IReadOnlyList<ClaimDocumentRow>> GetClaimDocumentsAsync(int labId, string claimId, CancellationToken ct);
+    Task<ClaimDocumentRow> SaveClaimDocumentAsync(ClaimDocumentRow row, CancellationToken ct);
+    Task<IReadOnlyList<DenialEscalationRow>> GetEscalationsAsync(int labId, string claimId, string? taskId, string? cptCode, string escalationLevel, CancellationToken ct);
+    Task<DenialEscalationRow> SaveEscalationAsync(SaveDenialEscalationRequest request, CancellationToken ct);
 }

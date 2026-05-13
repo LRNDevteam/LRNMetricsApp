@@ -5,13 +5,13 @@ import { denialWorkflowService, qs } from './services/denialWorkflowService';
 import { claimRole, claimUser, getJwt, parseJwt } from './utils/auth';
 import { canAssignRole, initials } from './utils/formatters';
 import DashboardFilter from './components/DashboardFilter';
-import ClaimTaskModal from './components/ClaimTaskModal';
 import DashboardPage from './pages/DashboardPage';
 import DenialSummaryPage from './pages/DenialSummaryPage';
 import InsightPage from './pages/InsightPage';
 import ClaimAssignmentPage from './pages/ClaimAssignmentPage';
 import TasksPage from './pages/TasksPage';
 import VerificationPage from './pages/VerificationPage';
+import MyWorklistPage from './pages/MyWorklistPage';
 
 export default function App() {
   const jwtClaims = useMemo(() => parseJwt(getJwt()), []);
@@ -31,7 +31,6 @@ export default function App() {
   const [selectedClaims, setSelectedClaims] = useState({});
   const [claimTasks, setClaimTasks] = useState({});
   const [expandedClaim, setExpandedClaim] = useState('');
-  const [claimTaskModal, setClaimTaskModal] = useState({ open: false, claimId: '' });
   const [bulkReviewer, setBulkReviewer] = useState('');
   const [rowReviewers, setRowReviewers] = useState({});
   const [message, setMessage] = useState(null);
@@ -112,7 +111,7 @@ export default function App() {
   }, [labId, view, query]);
 
   const labName = labs.find(l => Number(l.labId ?? l.LabId) === Number(labId))?.labName || 'Select Lab';
-  const pageTitle = { dashboard: 'Denial Workflow Dashboard', summary: 'Denial Summary', insight: 'Denial Insight', claims: 'Claim Level Assignment', tasks: 'Task Board', verification: 'Verification Queue' }[view] || 'Denial Workflow';
+  const pageTitle = { dashboard: 'Denial Workflow Dashboard', summary: 'Denial Summary', insight: 'Denial Insight', claims: 'Claim Level Assignment', myworklist: 'My Worklist', tasks: 'Task Board', verification: 'Verification Queue' }[view] || 'Denial Workflow';
 
   function setFilterValue(k, v) { setFilter(f => ({ ...f, [k]: v, page: 1 })); }
   function clearFilter() { setFilter(emptyFilter); }
@@ -130,6 +129,21 @@ export default function App() {
       text: classification
         ? `Showing Claim Assignment filtered by Denial Classification: ${classification}`
         : 'Showing Claim Assignment filtered by Unclassified denial classification.'
+    });
+  }
+
+  function openClaimsByActionCategory(actionCategory) {
+    setFilter(f => ({
+      ...f,
+      actionCategory: actionCategory || '',
+      page: 1
+    }));
+    setView('claims');
+    setMessage({
+      type: 'info',
+      text: actionCategory
+        ? `Showing Claim Assignment filtered by Action Category: ${actionCategory}`
+        : 'Showing Claim Assignment filtered by Unclassified action category.'
     });
   }
 
@@ -155,9 +169,8 @@ export default function App() {
   async function loadClaimTasks(rawClaimId) {
     const claimId = String(rawClaimId || '').trim();
     if (!claimId) return setMessage({ type: 'warning', text: 'ClaimId is missing for this row.' });
-    if (claimTaskModal.open && claimTaskModal.claimId === claimId) { setClaimTaskModal({ open: false, claimId: '' }); return; }
+    if (expandedClaim === claimId) { setExpandedClaim(''); return; }
     setExpandedClaim(claimId);
-    setClaimTaskModal({ open: true, claimId });
     if (claimTasks[claimId]) return;
     try {
       const rows = await denialWorkflowService.getClaimTasks(labId, claimId);
@@ -208,6 +221,7 @@ export default function App() {
         <button className={`lrn-nav-item ${view === 'summary' ? 'active' : ''}`} onClick={() => setView('summary')}><i className="bi bi-table" />Denial Summary</button>
         <button className={`lrn-nav-item ${view === 'insight' ? 'active' : ''}`} onClick={() => setView('insight')}><i className="bi bi-file-earmark-text" />Denial Insight</button>
         <button className={`lrn-nav-item ${view === 'claims' ? 'active' : ''}`} onClick={() => setView('claims')}><i className="bi bi-folder-check" />Claim Assignment</button>
+        <button className={`lrn-nav-item ${view === 'myworklist' ? 'active' : ''}`} onClick={() => setView('myworklist')}><i className="bi bi-person-check" />My Worklist</button>
         <button className={`lrn-nav-item ${view === 'tasks' ? 'active' : ''}`} onClick={() => setView('tasks')}><i className="bi bi-list-check" />Task Board<span className="lrn-nav-badge">{dashboard.openInProgressCount || 0}</span></button>
         <button className={`lrn-nav-item ${view === 'verification' ? 'active' : ''}`} onClick={() => setView('verification')}><i className="bi bi-shield-check" />Verification</button>
       </nav>
@@ -216,16 +230,16 @@ export default function App() {
     <div className="lrn-main">
       <header className="lrn-topbar"><div><div className="lrn-page-title">{pageTitle}</div><div className="lrn-breadcrumb">LRN Analytics / <span>{pageTitle}</span></div></div><div className="topbar-actions"><select className="top-lab-select" value={labId || ''} onChange={e => setLabId(Number(e.target.value))}>{labs.map(l => <option key={l.labId ?? l.LabId} value={l.labId ?? l.LabId}>{l.labName ?? l.LabName}</option>)}</select><span className="current-lab">{labName}</span><button className="topbar-btn teal" onClick={() => setMessage({ type: 'info', text: 'Use backend export endpoint for Excel download.' })}><i className="bi bi-download" />Export</button></div></header>
       <main className="lrn-content">
-        <DashboardFilter filter={filter} setFilterValue={setFilterValue} clearFilter={clearFilter} reviewers={reviewers} options={filterOptions} />
+        {view !== 'myworklist' && <DashboardFilter filter={filter} setFilterValue={setFilterValue} clearFilter={clearFilter} reviewers={reviewers} options={filterOptions} />}
         {message && <div className={`lrn-alert ${message.type}`}>{message.text}</div>}
         {loading && <div className="loading-line" />}
         {view === 'dashboard' && <DashboardPage data={dashboard} />}
-        {view === 'summary' && <DenialSummaryPage data={dashboard} canAssign={canAssignRole(user.role)} onClassificationClick={openClaimsByClassification} onAssign={() => { setView('insight'); setMessage({ type: 'info', text: 'Select the required rows in Denial Insight, choose reviewer, then assign.' }); }} />}
-        {view === 'insight' && <InsightPage data={insights} reviewers={reviewers} selected={selected} setSelected={setSelected} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} rowReviewers={rowReviewers} setRowReviewers={setRowReviewers} assignRows={assignRows} changePage={changePage} />}
-        {view === 'claims' && <ClaimAssignmentPage data={claims} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} assignClaims={assignClaims} changePage={changePage} />}
-        {view === 'tasks' && <TasksPage data={tasks} saveTask={saveTask} changePage={changePage} />}
-        {view === 'verification' && <VerificationPage data={verification} changePage={changePage} />}
-        <ClaimTaskModal open={claimTaskModal.open} claimId={claimTaskModal.claimId} tasks={claimTasks[claimTaskModal.claimId] || []} onClose={() => setClaimTaskModal({ open: false, claimId: '' })} />
+        {view === 'summary' && <DenialSummaryPage data={dashboard} canAssign={canAssignRole(user.role)} onClassificationClick={openClaimsByClassification} onActionCategoryClick={openClaimsByActionCategory} onAssign={() => { setView('insight'); setMessage({ type: 'info', text: 'Select the required rows in Denial Insight, choose reviewer, then assign.' }); }} />}
+        {view === 'insight' && <InsightPage data={insights} reviewers={reviewers} selected={selected} setSelected={setSelected} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} rowReviewers={rowReviewers} setRowReviewers={setRowReviewers} assignRows={assignRows} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} />}
+        {view === 'claims' && <ClaimAssignmentPage data={claims} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} />}
+        {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setMessage} />}
+        {view === 'tasks' && <TasksPage data={tasks} saveTask={saveTask} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} />}
+        {view === 'verification' && <VerificationPage data={verification} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} />}
       </main>
     </div>
   </div>;

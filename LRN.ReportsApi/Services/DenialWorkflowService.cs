@@ -23,6 +23,12 @@ public interface IDenialWorkflowService
     Task<int> AssignByInsightAsync(AssignInsightRequest request, CancellationToken ct);
     Task<int> UpdateTaskAsync(UpdateTaskRequest request, CancellationToken ct);
     Task<int> DecideVerificationAsync(VerificationDecisionRequest request, CancellationToken ct);
+    Task<IReadOnlyList<DenialNoteRow>> GetNotesAsync(int labId, string claimId, string? taskId, string? cptCode, string noteLevel, CancellationToken ct);
+    Task<DenialNoteRow> SaveNoteAsync(SaveDenialNoteRequest request, CancellationToken ct);
+    Task<IReadOnlyList<ClaimDocumentRow>> GetClaimDocumentsAsync(int labId, string claimId, CancellationToken ct);
+    Task<ClaimDocumentRow> SaveClaimDocumentAsync(ClaimDocumentRow row, CancellationToken ct);
+    Task<IReadOnlyList<DenialEscalationRow>> GetEscalationsAsync(int labId, string claimId, string? taskId, string? cptCode, string escalationLevel, CancellationToken ct);
+    Task<DenialEscalationRow> SaveEscalationAsync(SaveDenialEscalationRequest request, CancellationToken ct);
 }
 
 public sealed class DenialWorkflowService : IDenialWorkflowService
@@ -129,6 +135,12 @@ public sealed class DenialWorkflowService : IDenialWorkflowService
     public Task<int> AssignByInsightAsync(AssignInsightRequest request, CancellationToken ct) => _repo.AssignByInsightAsync(request, ct);
     public Task<int> UpdateTaskAsync(UpdateTaskRequest request, CancellationToken ct) => _repo.UpdateTaskAsync(request, IsClosed(request.Status), request.Status.Equals("Duplicate", StringComparison.OrdinalIgnoreCase), ct);
     public Task<int> DecideVerificationAsync(VerificationDecisionRequest request, CancellationToken ct) => _repo.DecideVerificationAsync(request, !request.IsValidDenial || IsClosed(request.Status), ct);
+    public Task<IReadOnlyList<DenialNoteRow>> GetNotesAsync(int labId, string claimId, string? taskId, string? cptCode, string noteLevel, CancellationToken ct) => _repo.GetNotesAsync(labId, claimId, taskId, cptCode, noteLevel, ct);
+    public async Task<DenialNoteRow> SaveNoteAsync(SaveDenialNoteRequest request, CancellationToken ct) { await _repo.EnsureClaimSupportTablesAsync(request.LabId, ct); return await _repo.SaveNoteAsync(request, ct); }
+    public Task<IReadOnlyList<ClaimDocumentRow>> GetClaimDocumentsAsync(int labId, string claimId, CancellationToken ct) => _repo.GetClaimDocumentsAsync(labId, claimId, ct);
+    public async Task<ClaimDocumentRow> SaveClaimDocumentAsync(ClaimDocumentRow row, CancellationToken ct) { await _repo.EnsureClaimSupportTablesAsync(row.LabId, ct); return await _repo.SaveClaimDocumentAsync(row, ct); }
+    public Task<IReadOnlyList<DenialEscalationRow>> GetEscalationsAsync(int labId, string claimId, string? taskId, string? cptCode, string escalationLevel, CancellationToken ct) => _repo.GetEscalationsAsync(labId, claimId, taskId, cptCode, escalationLevel, ct);
+    public async Task<DenialEscalationRow> SaveEscalationAsync(SaveDenialEscalationRequest request, CancellationToken ct) { await _repo.EnsureClaimSupportTablesAsync(request.LabId, ct); return await _repo.SaveEscalationAsync(request, ct); }
 
     private bool IsClosed(string? status) => !string.IsNullOrWhiteSpace(status) && _closedStatuses.Contains(status.Trim());
     private static bool IsReviewerOnly(string role) => role.Contains("Reviewer", StringComparison.OrdinalIgnoreCase) && !role.Contains("Manager", StringComparison.OrdinalIgnoreCase) && !role.Contains("Admin", StringComparison.OrdinalIgnoreCase);

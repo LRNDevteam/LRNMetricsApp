@@ -1,18 +1,122 @@
-import React from 'react';
-import { money, actionBadgeClass } from '../utils/formatters';
-function StatusPill({ label, value, cls }) { return <span className={`summary-pill ${cls}`}>{label}</span>; }
+import React, { useMemo } from 'react';
+import { money } from '../utils/formatters';
 
-export default function DenialSummaryPage({ data, canAssign, onAssign, onClassificationClick }) {
+function getBilled(row) {
+  return Number(row.billed ?? row.billedAmount ?? row.totalBilled ?? row.charges ?? row.outstanding ?? 0);
+}
+
+function getInsBalance(row) {
+  return Number(row.insuranceBalance ?? row.insBalance ?? row.outstanding ?? 0);
+}
+
+function SummaryProgress({ value, max }) {
+  const width = max > 0 ? Math.min(100, Math.max(3, (Number(value || 0) / max) * 100)) : 0;
+  return <span className="summary-mini-progress"><span style={{ width: `${width}%` }} /></span>;
+}
+
+export default function DenialSummaryPage({ data, onClassificationClick, onActionCategoryClick }) {
   const classifications = data.denialClassifications || [];
   const actions = data.actionCategories || [];
-  return <>
-    <div className="lrn-card summary-card">
-      <div className="lrn-card-header"><div className="lrn-card-title">Summary by denial classification</div></div>
-      <div className="dt-wrap"><table className="lrn-table summary-table"><thead><tr><th>Classification</th><th>Total</th><th>Outstanding</th><th>Open</th><th>In Progress</th><th>Closed</th>{canAssign && <th></th>}</tr></thead><tbody>{classifications.length ? classifications.map((r, i) => <tr key={`${r.classification}-${i}`}><td><button className="link-btn classification-link" type="button" onClick={() => onClassificationClick?.(r.classification || '')}><strong>{r.classification || 'Unclassified'}</strong></button></td><td>{Number(r.count || 0).toLocaleString()}</td><td>{money(r.outstanding)}</td><td><StatusPill label="Open" cls="open" /> <span>{Number(r.open || 0).toLocaleString()}</span></td><td><StatusPill label="In Progress" cls="progress" /> <span>{Number(r.inProgress || 0).toLocaleString()}</span></td><td><StatusPill label="Closed" cls="closed" /> <span>{Number(r.closed || 0).toLocaleString()}</span></td>{canAssign && <td className="summary-action"><button className="mini-btn outline" onClick={onAssign}>Assign</button></td>}</tr>) : <tr><td colSpan={canAssign ? 7 : 6} className="empty-cell">No denial classification summary found.</td></tr>}</tbody></table></div>
+
+  const classTotals = useMemo(() => ({
+    claims: classifications.reduce((s, r) => s + Number(r.count || 0), 0),
+    billed: classifications.reduce((s, r) => s + getBilled(r), 0),
+    ins: classifications.reduce((s, r) => s + getInsBalance(r), 0),
+    maxIns: Math.max(0, ...classifications.map(getInsBalance))
+  }), [classifications]);
+
+  const actionTotals = useMemo(() => ({
+    claims: actions.reduce((s, r) => s + Number(r.count || 0), 0),
+    billed: actions.reduce((s, r) => s + getBilled(r), 0),
+    ins: actions.reduce((s, r) => s + getInsBalance(r), 0),
+    maxIns: Math.max(0, ...actions.map(getInsBalance))
+  }), [actions]);
+
+  return (
+    <div className="row-2 summary-style-grid">
+      <div className="summary-style-card">
+        <div className="summary-style-title">Denial classification summary</div>
+        <div className="summary-style-table-wrap">
+          <div className="summary-style-hint">Click a classification to view and assign claims</div>
+          <table className="summary-style-table">
+            <thead>
+              <tr>
+                <th>Classification</th>
+                <th className="num">Claims</th>
+                <th className="num">Billed</th>
+                <th className="num">Ins. Balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {classifications.length ? classifications.map((r, i) => {
+                const ins = getInsBalance(r);
+                return (
+                  <tr key={`${r.classification}-${i}`}>
+                    <td>
+                      <button className="summary-link-text" type="button" onClick={() => onClassificationClick?.(r.classification || '')}>
+                        {r.classification || 'Unclassified'}
+                      </button>
+                    </td>
+                    <td className="num">{Number(r.count || 0).toLocaleString()}</td>
+                    <td className="num">{money(getBilled(r))}</td>
+                    <td className="num ins-cell"><span>{money(ins)}</span><SummaryProgress value={ins} max={classTotals.maxIns} /></td>
+                  </tr>
+                );
+              }) : <tr><td colSpan="4" className="empty-cell">No denial classification summary found.</td></tr>}
+              {classifications.length > 0 && (
+                <tr className="summary-total-row">
+                  <td>Total</td>
+                  <td className="num">{classTotals.claims.toLocaleString()}</td>
+                  <td className="num">{money(classTotals.billed)}</td>
+                  <td className="num total-balance">{money(classTotals.ins)}</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="summary-style-card">
+        <div className="summary-style-title">Action / task summary</div>
+        <div className="summary-style-table-wrap">
+          <div className="summary-style-hint">Click an action/task to view and assign claims</div>
+          <table className="summary-style-table">
+            <thead>
+              <tr>
+                <th>Action / Task</th>
+                <th className="num">Claims</th>
+                <th className="num">Billed</th>
+                <th className="num">Ins. Balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {actions.length ? actions.map((r, i) => {
+                const ins = getInsBalance(r);
+                return (
+                  <tr key={`${r.actionCategory}-${i}`}>
+                    <td>
+                      <button className="summary-link-text" type="button" onClick={() => onActionCategoryClick?.(r.actionCategory || '')}>
+                        {r.actionCategory || 'Unclassified'}
+                      </button>
+                    </td>
+                    <td className="num">{Number(r.count || 0).toLocaleString()}</td>
+                    <td className="num">{money(getBilled(r))}</td>
+                    <td className="num ins-cell"><span>{money(ins)}</span><SummaryProgress value={ins} max={actionTotals.maxIns} /></td>
+                  </tr>
+                );
+              }) : <tr><td colSpan="4" className="empty-cell">No action/task summary found.</td></tr>}
+              {actions.length > 0 && (
+                <tr className="summary-total-row">
+                  <td>Total</td>
+                  <td className="num">{actionTotals.claims.toLocaleString()}</td>
+                  <td className="num">{money(actionTotals.billed)}</td>
+                  <td className="num total-balance">{money(actionTotals.ins)}</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
-    <div className="lrn-card summary-card">
-      <div className="lrn-card-header"><div className="lrn-card-title">Summary by action category</div></div>
-      <div className="dt-wrap"><table className="lrn-table summary-table"><thead><tr><th>Action Category</th><th>Count</th><th>Outstanding</th><th>Share</th></tr></thead><tbody>{actions.length ? actions.map((r, i) => <tr key={`${r.actionCategory}-${i}`}><td><span className={`badge ${actionBadgeClass(r.actionCategory)}`}>{r.actionCategory || 'Unclassified'}</span></td><td>{Number(r.count || 0).toLocaleString()}</td><td>{money(r.outstanding)}</td><td><div className="progress-bar"><div className="pb-fill" style={{ width: `${Math.min(100, Number(r.percentageOfTotal || 0))}%` }} /></div></td></tr>) : <tr><td colSpan="4" className="empty-cell">No action category summary found.</td></tr>}</tbody></table></div>
-    </div>
-  </>;
+  );
 }

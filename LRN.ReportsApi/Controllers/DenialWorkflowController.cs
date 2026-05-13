@@ -130,6 +130,93 @@ public sealed class DenialWorkflowController : ControllerBase
         return Ok(new DenialWorkflowResult { Success = rows > 0, RowsAffected = rows, Message = rows > 0 ? "Task updated." : "Task update failed." });
     }
 
+
+
+    [HttpGet("notes")]
+    public async Task<ActionResult<IReadOnlyList<DenialNoteRow>>> Notes([FromQuery] int labId, [FromQuery] string claimId, [FromQuery] string? taskId, [FromQuery] string? cptCode, [FromQuery] string noteLevel = "Claim", CancellationToken ct = default)
+    {
+        if (labId <= 0) return BadRequest("LabId is required.");
+        if (string.IsNullOrWhiteSpace(claimId)) return BadRequest("ClaimId is required.");
+        return Ok(await _service.GetNotesAsync(labId, claimId.Trim(), taskId, cptCode, noteLevel, ct));
+    }
+
+    [HttpPost("notes")]
+    public async Task<ActionResult<DenialNoteRow>> SaveNote(SaveDenialNoteRequest request, CancellationToken ct)
+    {
+        if (request.LabId <= 0) return BadRequest("LabId is required.");
+        if (string.IsNullOrWhiteSpace(request.ClaimId)) return BadRequest("ClaimId is required.");
+        if (string.IsNullOrWhiteSpace(request.NoteText)) return BadRequest("Note text is required.");
+        request.CreatedBy = string.IsNullOrWhiteSpace(request.CreatedBy) ? (FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "ReactWorkflow") : request.CreatedBy;
+        return Ok(await _service.SaveNoteAsync(request, ct));
+    }
+
+    [HttpGet("claim-documents")]
+    public async Task<ActionResult<IReadOnlyList<ClaimDocumentRow>>> ClaimDocuments([FromQuery] int labId, [FromQuery] string claimId, CancellationToken ct)
+    {
+        if (labId <= 0) return BadRequest("LabId is required.");
+        if (string.IsNullOrWhiteSpace(claimId)) return BadRequest("ClaimId is required.");
+        return Ok(await _service.GetClaimDocumentsAsync(labId, claimId.Trim(), ct));
+    }
+
+    [HttpPost("claim-documents")]
+    [RequestSizeLimit(100_000_000)]
+    public async Task<ActionResult<IReadOnlyList<ClaimDocumentRow>>> UploadClaimDocuments([FromForm] int labId, [FromForm] string claimId, [FromForm] string? comment, [FromForm] string? uploadedBy, [FromForm] List<IFormFile> files, CancellationToken ct)
+    {
+        if (labId <= 0) return BadRequest("LabId is required.");
+        if (string.IsNullOrWhiteSpace(claimId)) return BadRequest("ClaimId is required.");
+        if (files == null || files.Count == 0) return BadRequest("Select at least one file.");
+
+        uploadedBy = string.IsNullOrWhiteSpace(uploadedBy) ? (FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "ReactWorkflow") : uploadedBy;
+        var root = Path.Combine(AppContext.BaseDirectory, "ClaimDocuments", labId.ToString(), SafePath(claimId));
+        Directory.CreateDirectory(root);
+        var saved = new List<ClaimDocumentRow>();
+        foreach (var file in files.Where(f => f.Length > 0))
+        {
+            var ext = Path.GetExtension(file.FileName);
+            var stored = $"{Guid.NewGuid():N}{ext}";
+            var path = Path.Combine(root, stored);
+            await using (var fs = System.IO.File.Create(path)) await file.CopyToAsync(fs, ct);
+            saved.Add(await _service.SaveClaimDocumentAsync(new ClaimDocumentRow
+            {
+                LabId = labId,
+                ClaimId = claimId.Trim(),
+                OriginalFileName = Path.GetFileName(file.FileName),
+                StoredFileName = stored,
+                ContentType = file.ContentType ?? "application/octet-stream",
+                FileSizeBytes = file.Length,
+                FilePath = path,
+                Comment = comment ?? string.Empty,
+                UploadedBy = uploadedBy ?? "ReactWorkflow"
+            }, ct));
+        }
+        return Ok(saved);
+    }
+
+    private static string SafePath(string value)
+    {
+        foreach (var c in Path.GetInvalidFileNameChars()) value = value.Replace(c, '_');
+        return value.Trim();
+    }
+
+
+    [HttpGet("escalations")]
+    public async Task<ActionResult<IReadOnlyList<DenialEscalationRow>>> Escalations([FromQuery] int labId, [FromQuery] string claimId, [FromQuery] string? taskId, [FromQuery] string? cptCode, [FromQuery] string escalationLevel = "Claim", CancellationToken ct = default)
+    {
+        if (labId <= 0) return BadRequest("LabId is required.");
+        if (string.IsNullOrWhiteSpace(claimId)) return BadRequest("ClaimId is required.");
+        return Ok(await _service.GetEscalationsAsync(labId, claimId.Trim(), taskId, cptCode, escalationLevel, ct));
+    }
+
+    [HttpPost("escalations")]
+    public async Task<ActionResult<DenialEscalationRow>> SaveEscalation(SaveDenialEscalationRequest request, CancellationToken ct)
+    {
+        if (request.LabId <= 0) return BadRequest("LabId is required.");
+        if (string.IsNullOrWhiteSpace(request.ClaimId)) return BadRequest("ClaimId is required.");
+        if (string.IsNullOrWhiteSpace(request.EscalationReason)) return BadRequest("Escalation reason is required.");
+        request.CreatedBy = string.IsNullOrWhiteSpace(request.CreatedBy) ? (FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "ReactWorkflow") : request.CreatedBy;
+        return Ok(await _service.SaveEscalationAsync(request, ct));
+    }
+
     [HttpPost("decide-verification")]
     [HttpPost("verification/decision")]
     public async Task<ActionResult<DenialWorkflowResult>> VerificationDecision(VerificationDecisionRequest request, CancellationToken ct)

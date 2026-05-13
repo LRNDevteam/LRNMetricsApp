@@ -132,6 +132,8 @@ public sealed class DenialTaskImportRow
     public string ClaimId { get; set; } = string.Empty;
     public string PatientId { get; set; } = string.Empty;
     public string CptCode { get; set; } = string.Empty;
+    public int? Units { get; set; }
+    public string Modifier { get; set; } = string.Empty;
     public string DenialCode { get; set; } = string.Empty;
     public string DenialDescription { get; set; } = string.Empty;
     public string DenialClassification { get; set; } = string.Empty;
@@ -226,6 +228,8 @@ public class WorkflowTaskRow
     public string ClaimId { get; set; } = string.Empty;
     public string PatientId { get; set; } = string.Empty;
     public string CptCode { get; set; } = string.Empty;
+    public int? Units { get; set; }
+    public string Modifier { get; set; } = string.Empty;
     public string DenialCode { get; set; } = string.Empty;
     public string DenialDescription { get; set; } = string.Empty;
     public string DenialClassification { get; set; } = string.Empty;
@@ -291,6 +295,7 @@ public sealed class ClaimLevelRow
     public string SalesRepname { get; set; } = string.Empty;
     public string ReferringProvider { get; set; } = string.Empty;
     public string PayerName { get; set; } = string.Empty;
+    public string PanelName { get; set; } = string.Empty;
     public DateTime? DateOfService { get; set; }
     public string AssignedTo { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
@@ -350,4 +355,72 @@ public sealed class VerificationDecisionRequest
     public string Status { get; set; } = string.Empty;
     public string Comments { get; set; } = string.Empty;
     public string ActionBy { get; set; } = string.Empty;
+}
+
+public sealed class DenialNoteRow
+{
+    public long NoteId { get; set; }
+    public int LabId { get; set; }
+    public string ClaimId { get; set; } = string.Empty;
+    public string? TaskId { get; set; }
+    public string? CptCode { get; set; }
+    public string NoteLevel { get; set; } = string.Empty;
+    public string NoteText { get; set; } = string.Empty;
+    public string CreatedBy { get; set; } = string.Empty;
+    public DateTime CreatedOn { get; set; }
+}
+
+public sealed class SaveDenialNoteRequest
+{
+    public int LabId { get; set; }
+    public string ClaimId { get; set; } = string.Empty;
+    public string? TaskId { get; set; }
+    public string? CptCode { get; set; }
+    public string NoteLevel { get; set; } = "Claim";
+    public string NoteText { get; set; } = string.Empty;
+    public string CreatedBy { get; set; } = string.Empty;
+}
+
+public sealed class ClaimDocumentRow
+{
+    public long DocumentId { get; set; }
+    public int LabId { get; set; }
+    public string ClaimId { get; set; } = string.Empty;
+    public string OriginalFileName { get; set; } = string.Empty;
+    public string StoredFileName { get; set; } = string.Empty;
+    public string ContentType { get; set; } = string.Empty;
+    public long FileSizeBytes { get; set; }
+    public string FilePath { get; set; } = string.Empty;
+    public string Comment { get; set; } = string.Empty;
+    public string UploadedBy { get; set; } = string.Empty;
+    public DateTime UploadedOn { get; set; }
+}
+
+
+public sealed class DenialEscalationRow
+{
+    public long EscalationId { get; set; }
+    public int LabId { get; set; }
+    public string ClaimId { get; set; } = string.Empty;
+    public string? TaskId { get; set; }
+    public string? CptCode { get; set; }
+    public string EscalationLevel { get; set; } = "Claim";
+    public string EscalationReason { get; set; } = string.Empty;
+    public string Comments { get; set; } = string.Empty;
+    public string Status { get; set; } = "Open";
+    public string CreatedBy { get; set; } = string.Empty;
+    public DateTime CreatedOn { get; set; }
+}
+
+public sealed class SaveDenialEscalationRequest
+{
+    public int LabId { get; set; }
+    public string ClaimId { get; set; } = string.Empty;
+    public string? TaskId { get; set; }
+    public string? CptCode { get; set; }
+    public string EscalationLevel { get; set; } = "Claim";
+    public string EscalationReason { get; set; } = string.Empty;
+    public string Comments { get; set; } = string.Empty;
+    public string Status { get; set; } = "Open";
+    public string CreatedBy { get; set; } = string.Empty;
 }
