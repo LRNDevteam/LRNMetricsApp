@@ -92,7 +92,7 @@ export default function TasksPage({ data, saveTask, changePage, labId, currentUs
   return <>
     <div className="lrn-card">
       <div className="lrn-card-header"><div className="lrn-card-title">Task Board</div><span className="table-count">Showing {items.length} of {data.totalCount || 0}</span></div>
-      <div className="dt-wrap workflow-scroll"><table className="lrn-table workflow-table"><thead><tr><th className="sticky-col task-tools-col">Actions</th><th>Task ID</th><th>Claim</th><th>Patient</th><th>CPT</th><th>Units</th><th>Modifier</th><th>Denial</th><th>Description</th><th>Classification</th><th>Action Category</th><th>Priority</th><th>Status</th><th>Assigned To</th><th>Insurance Balance</th><th>Due</th><th>SLA</th><th>Payer</th><th>Comments</th></tr></thead><tbody>{items.map((t, i) => <TaskRow key={t.taskId || i} task={t} openNote={openNote} openDocs={openDocs} openEsc={openEsc} />)}</tbody></table></div>
+      <div className="dt-wrap workflow-scroll"><table className="lrn-table workflow-table thin-bordered"><thead><tr><th className="sticky-col task-tools-col">Actions</th><th>Task ID</th><th>Claim</th><th>Patient</th><th>CPT</th><th>Units</th><th>Modifier</th><th>Denial</th><th>Description</th><th>Classification</th><th>Action Category</th><th>Priority</th><th>Status</th><th>Assigned To</th><th>Insurance Balance</th><th>Due</th><th>SLA</th><th>Payer</th><th>Comments</th></tr></thead><tbody>{items.map((t, i) => <TaskRow key={t.taskId || i} task={t} openNote={openNote} openDocs={openDocs} openEsc={openEsc} />)}</tbody></table></div>
     </div>
     <Pager data={data} changePage={changePage} />
 

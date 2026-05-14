@@ -29,7 +29,7 @@ function Modal({ title, children, onClose }) {
   return <div className="wl-modal-bg"><div className="wl-modal"><div className="wl-modal-hd"><strong>{title}</strong><button className="wl-btn xs" onClick={onClose}>✕</button></div>{children}</div></div>;
 }
 
-export default function MyWorklistPage({ labId, user, options, filter, setMessage, onRefreshToken }) {
+export default function MyWorklistPage({ labId, user, options, filter, setMessage, onRefreshToken, onSaved }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState('');
@@ -91,6 +91,7 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
       for (const l of claim.lines) await denialWorkflowService.updateTask({ labId, taskId: l.taskId, status: noteStatus, comments: noteText, actionBy: user?.userName || 'ReactWorkflow' });
     }
     setMessage?.({ type: 'success', text: 'Comment and status saved.' });
+    onSaved?.();
     setNoteCtx(null); await load();
   }
 
@@ -102,6 +103,7 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
     if (!docFiles?.length) return setMessage?.({ type: 'warning', text: 'Select at least one document.' });
     await denialWorkflowService.uploadClaimDocuments(labId, docCtx.claimId, docComment, user?.userName || 'ReactWorkflow', docFiles);
     setMessage?.({ type: 'success', text: 'Document uploaded.' });
+    onSaved?.();
     setDocs(await denialWorkflowService.getClaimDocuments(labId, docCtx.claimId));
     setDocFiles([]); setDocComment('');
   }
@@ -117,6 +119,7 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
     const affected = task ? [task] : claim.lines;
     for (const l of affected) await denialWorkflowService.updateTask({ labId, taskId: l.taskId, status: 'Escalated', comments: `${escReason}${escComment ? ' - ' + escComment : ''}`, actionBy: user?.userName || 'ReactWorkflow' });
     setMessage?.({ type: 'success', text: `${level} escalation saved.` });
+    onSaved?.();
     setEscCtx(null); await load();
   }
 

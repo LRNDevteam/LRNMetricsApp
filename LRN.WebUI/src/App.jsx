@@ -49,6 +49,7 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
   const [authError, setAuthError] = useState('');
+  const [reviewerNotification, setReviewerNotification] = useState({ assignedTasks: 0, pendingTasks: 0, loading: false });
   const claimRequestSeq = useRef(0);
   const reviewerOnly = roleIsReviewerOnly(user.role);
   const canAssign = canAssignRole(user.role);
@@ -209,6 +210,45 @@ export default function App() {
     pageSize: 50
   }), [labId, user, debouncedFilter, reviewerOnly]);
 
+
+  async function refreshReviewerNotification() {
+    if (!authReady || !labId || !reviewerOnly || !user.userName) {
+      setReviewerNotification({ assignedTasks: 0, pendingTasks: 0, loading: false });
+      return;
+    }
+
+    setReviewerNotification(prev => ({ ...prev, loading: true }));
+    try {
+      const baseQuery = {
+        labId,
+        role: user.role,
+        userName: user.userName,
+        reviewer: user.userName,
+        assignedTo: user.userName,
+        page: 1,
+        pageSize: 1
+      };
+
+      const [assignedResult, closedResult] = await Promise.all([
+        denialWorkflowService.getTasks(baseQuery),
+        denialWorkflowService.getTasks({ ...baseQuery, status: 'Closed' })
+      ]);
+
+      const assignedTasks = Number(assignedResult?.totalCount || assignedResult?.items?.length || 0);
+      const closedTasks = Number(closedResult?.totalCount || closedResult?.items?.length || 0);
+      setReviewerNotification({ assignedTasks, pendingTasks: Math.max(assignedTasks - closedTasks, 0), loading: false });
+    } catch {
+      setReviewerNotification(prev => ({ ...prev, loading: false }));
+    }
+  }
+
+  useEffect(() => {
+    if (!authReady || !labId || !reviewerOnly) return;
+    refreshReviewerNotification();
+    const timer = window.setInterval(refreshReviewerNotification, 60000);
+    return () => window.clearInterval(timer);
+  }, [authReady, labId, reviewerOnly, user.userName, user.role]);
+
   useEffect(() => {
     if (!authReady || !labId) return;
     setLoading(true);
@@ -350,6 +390,7 @@ export default function App() {
       const result = await denialWorkflowService.updateTask({ labId, taskId: task.taskId, status, comments, actionBy: user.userName || 'ReactWorkflow' });
       setMessage({ type: result.success ? 'success' : 'warning', text: result.message || 'Task saved.' });
       setTasks(await denialWorkflowService.getTasks(query));
+      refreshReviewerNotification();
     } catch (err) { setMessage({ type: 'danger', text: err.message }); }
     finally { setLoading(false); }
   }
@@ -393,7 +434,7 @@ export default function App() {
       <div className="sidebar-logout"><button type="button" className="sidebar-logout-btn" onClick={logoutWorkflow}><i className="bi bi-box-arrow-right" />Logout</button></div>
     </aside>
     <div className="lrn-main">
-      <header className="lrn-topbar"><div><div className="lrn-page-title">{pageTitle}</div><div className="lrn-breadcrumb">LRN Analytics / <span>{pageTitle}</span></div></div><div className="topbar-actions"><select className="top-lab-select" value={labId || ''} onChange={e => setLabId(Number(e.target.value))}>{labs.map(l => <option key={l.labId ?? l.LabId} value={l.labId ?? l.LabId}>{l.labName ?? l.LabName}</option>)}</select><span className="current-lab">{labName}</span><button className="topbar-btn teal" onClick={() => setMessage({ type: 'info', text: 'Use backend export endpoint for Excel download.' })}><i className="bi bi-download" />Export</button><button type="button" className="topbar-btn" onClick={logoutWorkflow}><i className="bi bi-box-arrow-right" />Logout</button></div></header>
+      <header className="lrn-topbar"><div><div className="lrn-page-title">{pageTitle}</div><div className="lrn-breadcrumb">LRN Analytics / <span>{pageTitle}</span></div></div><div className="topbar-actions">{reviewerOnly && <button type="button" className="notification-btn" title="Pending assigned tasks" onClick={() => setView('myworklist')}><i className="bi bi-bell-fill" /><span className="notification-count">{reviewerNotification.pendingTasks}</span><span className="notification-text"><b>{reviewerNotification.pendingTasks}</b> pending / {reviewerNotification.assignedTasks} assigned</span></button>}<select className="top-lab-select" value={labId || ''} onChange={e => setLabId(Number(e.target.value))}>{labs.map(l => <option key={l.labId ?? l.LabId} value={l.labId ?? l.LabId}>{l.labName ?? l.LabName}</option>)}</select><span className="current-lab">{labName}</span><button className="topbar-btn teal" onClick={() => setMessage({ type: 'info', text: 'Use backend export endpoint for Excel download.' })}><i className="bi bi-download" />Export</button><button type="button" className="topbar-btn" onClick={logoutWorkflow}><i className="bi bi-box-arrow-right" />Logout</button></div></header>
       <main className="lrn-content">
         {view !== 'myworklist' && <DashboardFilter filter={filter} setFilterValue={setFilterValue} clearFilter={clearFilter} reviewers={reviewers} options={filterOptions} />}
         {message && <div className={`lrn-alert ${message.type}`}>{message.text}</div>}
@@ -401,7 +442,7 @@ export default function App() {
         {view === 'dashboard' && <DashboardPage data={dashboard} />}
         {view === 'summary' && <DenialSummaryPage data={dashboard} canAssign={canAssign} onClassificationClick={openClaimsByClassification} onActionCategoryClick={openClaimsByActionCategory} onAssign={() => { setView('claims'); setMessage({ type: 'info', text: 'Select the required claim rows, choose reviewer, then assign.' }); }} />}
         {view === 'claims' && <ClaimAssignmentPage data={claims} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} loadMoreClaims={loadMoreClaims} isLoadingClaims={loading} labId={labId} currentUser={user.userName || 'ReactWorkflow'} canAssign={canAssign} />}
-        {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setMessage} />}
+        {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setMessage} onSaved={refreshReviewerNotification} />}
         {view === 'tasks' && <TasksPage data={tasks} saveTask={saveTask} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} />}
         {view === 'verification' && <VerificationPage data={verification} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} />}
       </main>
