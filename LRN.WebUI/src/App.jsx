@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { API_BASE, LOGOUT_URL } from './config/apiConfig';
 import { emptyDashboard, emptyFilter, emptyFilterOptions, emptyPagedResult } from './dto/denialWorkflowDtos';
 import { denialWorkflowService, qs } from './services/denialWorkflowService';
@@ -26,7 +26,12 @@ export default function App() {
   const [reviewers, setReviewers] = useState([]);
   const [filterOptions, setFilterOptions] = useState(emptyFilterOptions);
   const [labId, setLabId] = useState(Number(localStorage.getItem('denial.labId') || 0));
-  const [view, setView] = useState('dashboard');
+  const workflowViews = ['dashboard', 'summary', 'claims', 'myworklist', 'tasks', 'verification'];
+  const getStoredView = () => {
+    const hashView = String(window.location.hash || '').replace('#', '').trim().toLowerCase();
+    return workflowViews.includes(hashView) ? hashView : '';
+  };
+  const [view, setViewState] = useState(getStoredView() || 'dashboard');
   const [filter, setFilter] = useState(emptyFilter);
   const [debouncedFilter, setDebouncedFilter] = useState(emptyFilter);
   const [dashboard, setDashboard] = useState(emptyDashboard);
@@ -44,10 +49,26 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
   const [authError, setAuthError] = useState('');
+  const claimRequestSeq = useRef(0);
   const reviewerOnly = roleIsReviewerOnly(user.role);
+  const canAssign = canAssignRole(user.role);
 
-  async function refreshLoginUserFromMetrics() {
-    await ensureWorkflowJwt({ forceRefresh: true });
+  function setView(nextView) {
+    const safeView = workflowViews.includes(nextView) ? nextView : 'dashboard';
+    setViewState(safeView);
+    if (window.location.hash !== `#${safeView}`) {
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${safeView}`);
+    }
+  }
+
+  function resolveLandingView(role) {
+    const stored = getStoredView();
+    if (stored) return stored;
+    return roleIsReviewerOnly(role) ? 'myworklist' : 'dashboard';
+  }
+
+  async function refreshLoginUserFromMetrics({ forceRefresh = true, resetData = false, applyLanding = false } = {}) {
+    await ensureWorkflowJwt({ forceRefresh });
     const me = await denialWorkflowService.getMe();
     setUser(me);
 
@@ -60,14 +81,18 @@ export default function App() {
       localStorage.setItem('denial.labId', String(allowedLabIds[0]));
     }
 
-    setDashboard(emptyDashboard);
-    setClaims(emptyPagedResult);
-    setTasks(emptyPagedResult);
-    setVerification(emptyPagedResult);
-    setSelected({});
-    setSelectedClaims({});
-    setClaimTasks({});
-    setExpandedClaim('');
+    if (applyLanding) setView(resolveLandingView(me.role));
+
+    if (resetData) {
+      setDashboard(emptyDashboard);
+      setClaims(emptyPagedResult);
+      setTasks(emptyPagedResult);
+      setVerification(emptyPagedResult);
+      setSelected({});
+      setSelectedClaims({});
+      setClaimTasks({});
+      setExpandedClaim('');
+    }
 
     return me;
   }
@@ -77,7 +102,7 @@ export default function App() {
 
     async function bootAuth() {
       try {
-        const me = await refreshLoginUserFromMetrics();
+        const me = await refreshLoginUserFromMetrics({ forceRefresh: true, resetData: false, applyLanding: true });
         if (cancelled) return;
 
         setAuthReady(true);
@@ -103,7 +128,7 @@ export default function App() {
       if (refreshing) return;
       refreshing = true;
       try {
-        await refreshLoginUserFromMetrics();
+        await refreshLoginUserFromMetrics({ forceRefresh: true, resetData: false, applyLanding: false });
       } catch (err) {
         setAuthReady(false);
         setAuthError(err?.message || 'Login required.');
@@ -125,7 +150,7 @@ export default function App() {
   }, [filter]);
 
   useEffect(() => {
-    if (!authReady || !labId) { setReviewers([]); return; }
+    if (!authReady || !labId || !canAssign) { setReviewers([]); return; }
     const cacheKey = `denial.reviewers.${labId}`;
     try {
       const cached = sessionStorage.getItem(cacheKey);
@@ -142,7 +167,7 @@ export default function App() {
         if (!reviewers.length) setReviewers([]);
         setMessage({ type: 'danger', text: `Reviewer load failed: ${err.message}` });
       });
-  }, [authReady, labId]);
+  }, [authReady, labId, canAssign]);
 
   useEffect(() => {
     if (!authReady || !labId) return;
@@ -194,7 +219,37 @@ export default function App() {
     if (view === 'dashboard' || view === 'summary') {
       call = denialWorkflowService.getDashboard(query).then(setDashboard);
     } else if (view === 'claims') {
-      call = denialWorkflowService.getClaims(query).then(c => { setClaims(c || emptyPagedResult); setSelectedClaims({}); setClaimTasks({}); setExpandedClaim(''); });
+      const requestId = ++claimRequestSeq.current;
+      call = denialWorkflowService.getClaims(query).then(c => {
+        if (requestId !== claimRequestSeq.current) return;
+        const next = c || emptyPagedResult;
+        const nextPage = Number(next.pageNumber || query.page || 1);
+
+        setClaims(prev => {
+          if (nextPage <= 1) return next;
+
+          const seen = new Set((prev.items || [])
+            .map(r => String(r?.claimId ?? r?.claimID ?? r?.ClaimId ?? r?.ClaimID ?? '').trim())
+            .filter(Boolean));
+          const mergedItems = [...(prev.items || [])];
+
+          (next.items || []).forEach(row => {
+            const id = String(row?.claimId ?? row?.claimID ?? row?.ClaimId ?? row?.ClaimID ?? '').trim();
+            if (!id || !seen.has(id)) {
+              if (id) seen.add(id);
+              mergedItems.push(row);
+            }
+          });
+
+          return { ...next, items: mergedItems };
+        });
+
+        if (nextPage <= 1) {
+          setSelectedClaims({});
+          setClaimTasks({});
+          setExpandedClaim('');
+        }
+      });
     } else if (view === 'tasks') {
       call = denialWorkflowService.getTasks(query).then(t => setTasks(t || emptyPagedResult));
     } else if (view === 'verification') {
@@ -256,9 +311,20 @@ export default function App() {
     } catch (err) { setMessage({ type: 'danger', text: err.message }); }
   }
 
+  const loadMoreClaims = useCallback(() => {
+    if (view !== 'claims' || loading) return;
+    const loaded = claims.items?.length || 0;
+    const total = claims.totalCount || 0;
+    if (!total || loaded >= total) return;
+
+    const currentPage = Number(claims.pageNumber || debouncedFilter.page || 1);
+    setFilter(f => ({ ...f, page: currentPage + 1 }));
+  }, [view, loading, claims, debouncedFilter.page]);
+
   async function assignClaims(claimIds, reviewer, overwriteExisting = false) {
+    if (!canAssign) return setMessage({ type: 'warning', text: 'Only Admin and AR Manager users can assign claims.' });
     if (!reviewer) return setMessage({ type: 'warning', text: 'Please select a reviewer.' });
-    if (!claimIds.length) return setMessage({ type: 'warning', text: 'Please tick one or more claim rows.' });
+    if (!claimIds.length) return setMessage({ type: 'warning', text: 'Please select one or more claim rows.' });
     setLoading(true);
     try {
       const result = await denialWorkflowService.assignClaims({ labId, claimIds, reviewerUserName: reviewer, actionBy: user.userName || 'ReactWorkflow', overwriteExisting });
@@ -317,7 +383,7 @@ export default function App() {
         <button className={`lrn-nav-item ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}><i className="bi bi-grid-1x2-fill" />Dashboard</button>
         <div className="lrn-nav-section">Denial Workflow</div>
         <button className={`lrn-nav-item ${view === 'summary' ? 'active' : ''}`} onClick={() => setView('summary')}><i className="bi bi-table" />Denial Summary</button>
-        <button className={`lrn-nav-item ${view === 'claims' ? 'active' : ''}`} onClick={() => setView('claims')}><i className="bi bi-folder-check" />Claim Assignment</button>
+        <button className={`lrn-nav-item ${view === 'claims' ? 'active' : ''}`} onClick={() => setView('claims')}><i className="bi bi-folder-check" />{canAssign ? 'Claim Assignment' : 'Claim View'}</button>
         <div className="lrn-nav-section">My Tasks</div>
         <button className={`lrn-nav-item ${view === 'myworklist' ? 'active' : ''}`} onClick={() => setView('myworklist')}><i className="bi bi-person-check" />My Worklist</button>
         <button className={`lrn-nav-item ${view === 'tasks' ? 'active' : ''}`} onClick={() => setView('tasks')}><i className="bi bi-list-check" />Task Board<span className="lrn-nav-badge">{dashboard.openInProgressCount || 0}</span></button>
@@ -333,8 +399,8 @@ export default function App() {
         {message && <div className={`lrn-alert ${message.type}`}>{message.text}</div>}
         {loading && <div className="loading-line" />}
         {view === 'dashboard' && <DashboardPage data={dashboard} />}
-        {view === 'summary' && <DenialSummaryPage data={dashboard} canAssign={canAssignRole(user.role)} onClassificationClick={openClaimsByClassification} onActionCategoryClick={openClaimsByActionCategory} onAssign={() => { setView('claims'); setMessage({ type: 'info', text: 'Select the required claim rows, choose reviewer, then assign.' }); }} />}
-        {view === 'claims' && <ClaimAssignmentPage data={claims} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} />}
+        {view === 'summary' && <DenialSummaryPage data={dashboard} canAssign={canAssign} onClassificationClick={openClaimsByClassification} onActionCategoryClick={openClaimsByActionCategory} onAssign={() => { setView('claims'); setMessage({ type: 'info', text: 'Select the required claim rows, choose reviewer, then assign.' }); }} />}
+        {view === 'claims' && <ClaimAssignmentPage data={claims} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} loadMoreClaims={loadMoreClaims} isLoadingClaims={loading} labId={labId} currentUser={user.userName || 'ReactWorkflow'} canAssign={canAssign} />}
         {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setMessage} />}
         {view === 'tasks' && <TasksPage data={tasks} saveTask={saveTask} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} />}
         {view === 'verification' && <VerificationPage data={verification} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} />}

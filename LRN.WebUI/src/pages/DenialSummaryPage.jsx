@@ -14,7 +14,7 @@ function SummaryProgress({ value, max }) {
   return <span className="summary-mini-progress"><span style={{ width: `${width}%` }} /></span>;
 }
 
-export default function DenialSummaryPage({ data, onClassificationClick, onActionCategoryClick }) {
+export default function DenialSummaryPage({ data, canAssign = false, onClassificationClick, onActionCategoryClick }) {
   const classifications = data.denialClassifications || [];
   const actions = data.actionCategories || [];
 
@@ -37,7 +37,7 @@ export default function DenialSummaryPage({ data, onClassificationClick, onActio
       <div className="summary-style-card">
         <div className="summary-style-title">Denial classification summary</div>
         <div className="summary-style-table-wrap">
-          <div className="summary-style-hint">Click a classification to view and assign claims</div>
+          <div className="summary-style-hint">{canAssign ? 'Click a classification to view and assign claims' : 'Click a classification to view matching claims'}</div>
           <table className="summary-style-table">
             <thead>
               <tr>
@@ -79,7 +79,7 @@ export default function DenialSummaryPage({ data, onClassificationClick, onActio
       <div className="summary-style-card">
         <div className="summary-style-title">Action / task summary</div>
         <div className="summary-style-table-wrap">
-          <div className="summary-style-hint">Click an action/task to view and assign claims</div>
+          <div className="summary-style-hint">{canAssign ? 'Click an action/task to view and assign claims' : 'Click an action/task to view matching claims'}</div>
           <table className="summary-style-table">
             <thead>
               <tr>
