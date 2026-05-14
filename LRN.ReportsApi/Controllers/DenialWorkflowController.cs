@@ -31,13 +31,21 @@ public sealed class DenialWorkflowController : ControllerBase
         var email = FirstClaim(ClaimTypes.Email, "email") ?? string.Empty;
         var displayName = FirstClaim("display_name", "given_name") ?? userName;
         var role = FirstClaim(ClaimTypes.Role, "role", "roles") ?? string.Empty;
-        var labs = await _service.GetLabsForUserAsync(string.IsNullOrWhiteSpace(userName) ? email : userName, ct);
+
+        var labsFromToken = LabsFromToken();
+        var labs = labsFromToken.Count > 0
+            ? labsFromToken
+            : await _service.GetLabsForUserAsync(string.IsNullOrWhiteSpace(userName) ? email : userName, ct);
+
         return Ok(new DenialWorkflowUserContext { UserName = userName, Email = email, DisplayName = displayName, Role = role, Labs = labs });
     }
 
     [HttpGet("labs")]
     public async Task<ActionResult<IReadOnlyList<DenialWorkflowLabOption>>> Labs(CancellationToken ct)
     {
+        var labsFromToken = LabsFromToken();
+        if (labsFromToken.Count > 0) return Ok(labsFromToken);
+
         var userName = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? FirstClaim(ClaimTypes.Email, "email") ?? string.Empty;
         return Ok(await _service.GetLabsForUserAsync(userName, ct));
     }
@@ -223,6 +231,27 @@ public sealed class DenialWorkflowController : ControllerBase
     {
         var rows = await _service.DecideVerificationAsync(request, ct);
         return Ok(new DenialWorkflowResult { Success = rows > 0, RowsAffected = rows, Message = rows > 0 ? "Verification saved." : "Verification update failed." });
+    }
+
+
+    private IReadOnlyList<DenialWorkflowLabOption> LabsFromToken()
+    {
+        var ids = User.Claims.Where(c => string.Equals(c.Type, "lab_id", StringComparison.OrdinalIgnoreCase)).Select(c => c.Value).ToList();
+        var names = User.Claims.Where(c => string.Equals(c.Type, "lab_name", StringComparison.OrdinalIgnoreCase)).Select(c => c.Value).ToList();
+        var result = new List<DenialWorkflowLabOption>();
+
+        for (var i = 0; i < ids.Count; i++)
+        {
+            if (!int.TryParse(ids[i], out var labId) || labId <= 0) continue;
+            var labName = i < names.Count ? names[i] : string.Empty;
+            result.Add(new DenialWorkflowLabOption { LabId = labId, LabName = labName });
+        }
+
+        return result
+            .GroupBy(x => x.LabId)
+            .Select(g => g.First())
+            .OrderBy(x => x.LabName)
+            .ToList();
     }
 
     private string? FirstClaim(params string[] names)

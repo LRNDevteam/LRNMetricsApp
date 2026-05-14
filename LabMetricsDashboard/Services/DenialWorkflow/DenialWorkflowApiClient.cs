@@ -1,5 +1,7 @@
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using LabMetricsDashboard.Models.DenialWorkflow;
+using LabMetricsDashboard.Services.Security;
 using Microsoft.Extensions.Options;
 
 namespace LabMetricsDashboard.Services.DenialWorkflow;
@@ -18,26 +20,41 @@ public interface IDenialWorkflowApiClient
 public sealed class DenialWorkflowApiClient : IDenialWorkflowApiClient
 {
     private readonly HttpClient _http;
-    public DenialWorkflowApiClient(HttpClient http, IOptions<DenialWorkflowOptions> options)
+    private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly WorkflowJwtIssuer _jwtIssuer;
+
+    public DenialWorkflowApiClient(HttpClient http, IOptions<DenialWorkflowOptions> options, IHttpContextAccessor httpContextAccessor, WorkflowJwtIssuer jwtIssuer)
     {
         _http = http;
         _http.BaseAddress = new Uri(options.Value.BaseUrl.TrimEnd('/') + "/");
+        _httpContextAccessor = httpContextAccessor;
+        _jwtIssuer = jwtIssuer;
     }
 
     public async Task<DenialWorkflowSummary> GetSummaryAsync(int labId, string role, string userName, CancellationToken ct)
-        => await _http.GetFromJsonAsync<DenialWorkflowSummary>($"api/denial-workflow/summary?labId={labId}&role={Uri.EscapeDataString(role)}&userName={Uri.EscapeDataString(userName)}", ct) ?? new();
+    {
+        await AuthorizeAsync(ct);
+        return await _http.GetFromJsonAsync<DenialWorkflowSummary>($"api/denial-workflow/summary?labId={labId}&role={Uri.EscapeDataString(role)}&userName={Uri.EscapeDataString(userName)}", ct) ?? new();
+    }
 
     public async Task<IReadOnlyList<ReviewerWorkflowSummaryRow>> GetReviewerSummaryAsync(DenialWorkflowFilter filter, CancellationToken ct)
-        => await _http.GetFromJsonAsync<List<ReviewerWorkflowSummaryRow>>("api/denial-workflow/reviewer-summary" + ToQueryString(filter), ct) ?? [];
+    {
+        await AuthorizeAsync(ct);
+        return await _http.GetFromJsonAsync<List<ReviewerWorkflowSummaryRow>>("api/denial-workflow/reviewer-summary" + ToQueryString(filter), ct) ?? [];
+    }
 
     public async Task<PagedResult<WorkflowTaskRow>> GetTasksAsync(DenialWorkflowFilter filter, CancellationToken ct)
-        => await _http.GetFromJsonAsync<PagedResult<WorkflowTaskRow>>("api/denial-workflow/tasks" + ToQueryString(filter), ct) ?? new();
+    {
+        await AuthorizeAsync(ct);
+        return await _http.GetFromJsonAsync<PagedResult<WorkflowTaskRow>>("api/denial-workflow/tasks" + ToQueryString(filter), ct) ?? new();
+    }
 
 	public async Task<PagedResult<VerificationTaskRow>> GetVerificationAsync(
 		DenialWorkflowFilter filter,
 		CancellationToken ct = default)
 	{
-		using var response = await _http.GetAsync(
+			await AuthorizeAsync(ct);
+	using var response = await _http.GetAsync(
 			"api/denial-workflow/verification" + ToQueryString(filter),
 			ct);
 
@@ -73,6 +90,14 @@ public sealed class DenialWorkflowApiClient : IDenialWorkflowApiClient
     public async Task<int> DecideVerificationAsync(VerificationDecisionRequest request, CancellationToken ct)
         => await PostForRowsAffectedAsync("api/denial-workflow/decide-verification", request, ct);
 
+    private async Task AuthorizeAsync(CancellationToken ct)
+    {
+        var user = _httpContextAccessor.HttpContext?.User;
+        if (user?.Identity?.IsAuthenticated != true) return;
+        var tokenResult = await _jwtIssuer.CreateTokenAsync(user, ct);
+        _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokenResult.Token);
+    }
+
     private static string ToQueryString(DenialWorkflowFilter f)
     {
         var values = new Dictionary<string, string?>
@@ -86,6 +111,7 @@ public sealed class DenialWorkflowApiClient : IDenialWorkflowApiClient
 
     private async Task<int> PostForRowsAffectedAsync<T>(string url, T payload, CancellationToken ct)
     {
+        await AuthorizeAsync(ct);
         using var response = await _http.PostAsJsonAsync(url, payload, ct);
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<DenialWorkflowResult>(cancellationToken: ct);

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { API_BASE } from './config/apiConfig';
 import { emptyDashboard, emptyFilter, emptyFilterOptions, emptyPagedResult } from './dto/denialWorkflowDtos';
 import { denialWorkflowService, qs } from './services/denialWorkflowService';
-import { claimRole, claimUser, getJwt, parseJwt } from './utils/auth';
+import { claimRole, claimUser, ensureWorkflowJwt, getJwt, parseJwt } from './utils/auth';
 import { canAssignRole, initials } from './utils/formatters';
 import DashboardFilter from './components/DashboardFilter';
 import DashboardPage from './pages/DashboardPage';
@@ -22,6 +22,7 @@ export default function App() {
   const [labId, setLabId] = useState(Number(localStorage.getItem('denial.labId') || 0));
   const [view, setView] = useState('dashboard');
   const [filter, setFilter] = useState(emptyFilter);
+  const [debouncedFilter, setDebouncedFilter] = useState(emptyFilter);
   const [dashboard, setDashboard] = useState(emptyDashboard);
   const [insights, setInsights] = useState(emptyPagedResult);
   const [claims, setClaims] = useState(emptyPagedResult);
@@ -35,60 +36,108 @@ export default function App() {
   const [rowReviewers, setRowReviewers] = useState({});
   const [message, setMessage] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
+  const [authChecking, setAuthChecking] = useState(true);
+  const [authError, setAuthError] = useState('');
 
   useEffect(() => {
-    Promise.allSettled([denialWorkflowService.getMe()]).then(([me]) => {
-      const meData = me.status === 'fulfilled' ? me.value : { userName: claimUser(jwtClaims), role: claimRole(jwtClaims), labs: [] };
-      setUser(meData);
-      const labData = meData.labs?.length ? meData.labs : [];
-      setLabs(labData);
-      if (!labId && labData.length) setLabId(labData[0].labId ?? labData[0].LabId);
-      if (me.status === 'rejected') {
-        denialWorkflowService.getLabs()
-          .then(x => { setLabs(x || []); if (!labId && x?.length) setLabId(x[0].labId ?? x[0].LabId); })
-          .catch(err => setMessage({ type: 'danger', text: err.message }));
+    let cancelled = false;
+
+    async function bootAuth() {
+      try {
+        await ensureWorkflowJwt();
+        const me = await denialWorkflowService.getMe();
+        if (cancelled) return;
+
+        setUser(me);
+        const labData = me.labs?.length ? me.labs : [];
+        setLabs(labData);
+        if (!labId && labData.length) setLabId(labData[0].labId ?? labData[0].LabId);
+        setAuthReady(true);
+      } catch (err) {
+        if (!cancelled) {
+          setAuthReady(false);
+          setAuthError(err?.message || 'Login required.');
+        }
+      } finally {
+        if (!cancelled) setAuthChecking(false);
       }
-    });
+    }
+
+    bootAuth();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => { if (labId) localStorage.setItem('denial.labId', labId); }, [labId]);
 
+  // Avoid reloading 300k+ row queries on every keystroke in Search/Clinic/Sales Rep/Provider.
   useEffect(() => {
-    if (!labId) { setReviewers([]); return; }
-    denialWorkflowService.getReviewers(labId)
-      .then(x => setReviewers(x || []))
-      .catch(err => { setReviewers([]); setMessage({ type: 'danger', text: `Reviewer load failed: ${err.message}` }); });
-  }, [labId]);
+    const handle = window.setTimeout(() => setDebouncedFilter(filter), 450);
+    return () => window.clearTimeout(handle);
+  }, [filter]);
 
   useEffect(() => {
-    if (!labId) return;
+    if (!authReady || !labId) { setReviewers([]); return; }
+    const cacheKey = `denial.reviewers.${labId}`;
+    try {
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) setReviewers(JSON.parse(cached) || []);
+    } catch { /* ignore bad browser cache */ }
+
+    denialWorkflowService.getReviewers(labId)
+      .then(x => {
+        const rows = x || [];
+        setReviewers(rows);
+        try { sessionStorage.setItem(cacheKey, JSON.stringify(rows)); } catch { /* ignore storage quota */ }
+      })
+      .catch(err => {
+        if (!reviewers.length) setReviewers([]);
+        setMessage({ type: 'danger', text: `Reviewer load failed: ${err.message}` });
+      });
+  }, [authReady, labId]);
+
+  useEffect(() => {
+    if (!authReady || !labId) return;
+    const cacheKey = `denial.filterOptions.${labId}`;
+    try {
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) setFilterOptions({ ...emptyFilterOptions, ...(JSON.parse(cached) || {}) });
+    } catch { /* ignore bad browser cache */ }
+
+    // Load dropdown/autocomplete values in the background. This should not block the page.
     denialWorkflowService.getFilterOptions(labId)
-      .then(x => setFilterOptions({ ...emptyFilterOptions, ...(x || {}) }))
-      .catch(() => setFilterOptions(emptyFilterOptions));
-  }, [labId]);
+      .then(x => {
+        const options = { ...emptyFilterOptions, ...(x || {}) };
+        setFilterOptions(options);
+        try { sessionStorage.setItem(cacheKey, JSON.stringify(options)); } catch { /* ignore storage quota */ }
+      })
+      .catch(() => {
+        if (!sessionStorage.getItem(cacheKey)) setFilterOptions(emptyFilterOptions);
+      });
+  }, [authReady, labId]);
 
   const query = useMemo(() => ({
     labId,
     role: user.role,
     userName: user.userName,
-    status: filter.status,
-    reviewer: filter.reviewer,
-    assignedTo: filter.reviewer,
-    actionCategory: filter.actionCategory,
-    priority: filter.priority,
-    denialCode: filter.denialCode,
-    payerName: filter.payerName,
-    clinic: filter.clinic,
-    salesRepname: filter.salesRepname,
-    referringProvider: filter.referringProvider,
-    denialClassification: filter.denialClassification,
-    searchText: filter.searchText,
-    page: filter.page || 1,
+    status: debouncedFilter.status,
+    reviewer: debouncedFilter.reviewer,
+    assignedTo: debouncedFilter.reviewer,
+    actionCategory: debouncedFilter.actionCategory,
+    priority: debouncedFilter.priority,
+    denialCode: debouncedFilter.denialCode,
+    payerName: debouncedFilter.payerName,
+    clinic: debouncedFilter.clinic,
+    salesRepname: debouncedFilter.salesRepname,
+    referringProvider: debouncedFilter.referringProvider,
+    denialClassification: debouncedFilter.denialClassification,
+    searchText: debouncedFilter.searchText,
+    page: debouncedFilter.page || 1,
     pageSize: 50
-  }), [labId, user, filter]);
+  }), [labId, user, debouncedFilter]);
 
   useEffect(() => {
-    if (!labId) return;
+    if (!authReady || !labId) return;
     setLoading(true);
     setMessage(null);
 
@@ -108,7 +157,7 @@ export default function App() {
     }
 
     call.catch(err => setMessage({ type: 'danger', text: err.message })).finally(() => setLoading(false));
-  }, [labId, view, query]);
+  }, [authReady, labId, view, query]);
 
   const labName = labs.find(l => Number(l.labId ?? l.LabId) === Number(labId))?.labName || 'Select Lab';
   const pageTitle = { dashboard: 'Denial Workflow Dashboard', summary: 'Denial Summary', insight: 'Denial Insight', claims: 'Claim Level Assignment', myworklist: 'My Worklist', tasks: 'Task Board', verification: 'Verification Queue' }[view] || 'Denial Workflow';
@@ -116,6 +165,7 @@ export default function App() {
   function setFilterValue(k, v) { setFilter(f => ({ ...f, [k]: v, page: 1 })); }
   function clearFilter() { setFilter(emptyFilter); }
   function changePage(page) { setFilter(f => ({ ...f, page })); }
+
 
   function openClaimsByClassification(classification) {
     setFilter(f => ({
@@ -208,6 +258,14 @@ export default function App() {
       setTasks(await denialWorkflowService.getTasks(query));
     } catch (err) { setMessage({ type: 'danger', text: err.message }); }
     finally { setLoading(false); }
+  }
+
+  if (authChecking) {
+    return <div className="auth-gate"><div className="auth-card"><strong>Checking LRN Metrics login...</strong><span>Please wait.</span></div></div>;
+  }
+
+  if (!authReady) {
+    return <div className="auth-gate"><div className="auth-card"><strong>LRN Metrics login/auth failed</strong><span>{authError || 'This page is protected.'}</span><button type="button" className="topbar-btn teal" onClick={() => window.location.reload()}>Retry</button></div></div>;
   }
 
   return <div className="lrn-wrap">

@@ -8,7 +8,12 @@ namespace LRN.ReportsApi.Services;
 public sealed class SqlDenialWorkflowRepository : IDenialWorkflowRepository
 {
 	private static readonly ConcurrentDictionary<int, FilterOptionsCacheEntry> FilterOptionsCache = new();
-	private static readonly TimeSpan FilterOptionsCacheDuration = TimeSpan.FromMinutes(15);
+	private static readonly TimeSpan FilterOptionsCacheDuration = TimeSpan.FromMinutes(30);
+
+	// Dashboard cards and summary tables are expensive on large DenialTaskBoard tables.
+	// Cache them briefly per lab/filter so navigating between pages does not rescan 300k+ rows each time.
+	private static readonly ConcurrentDictionary<string, DashboardCacheEntry> DashboardCache = new();
+	private static readonly TimeSpan DashboardCacheDuration = TimeSpan.FromSeconds(90);
 
 	private readonly IConfiguration _configuration;
 	private readonly string _masterConnectionString;
@@ -91,9 +96,18 @@ END";
 
 	public async Task<DenialWorkflowDashboardSummary> GetDashboardSummaryAsync(DenialWorkflowFilter filter, CancellationToken ct)
 	{
+		var cacheKey = BuildFilterCacheKey("dashboard", filter);
+		if (DashboardCache.TryGetValue(cacheKey, out var cachedDashboard)
+			&& DateTime.UtcNow - cachedDashboard.CachedOnUtc < DashboardCacheDuration)
+		{
+			return cachedDashboard.Summary;
+		}
+
 		var where = BuildCommonWhere(filter, "t", includeStatus: true, includeAssigned: true);
 		var sql = $@"
 IF OBJECT_ID('tempdb..#TaskBoardBase') IS NOT NULL DROP TABLE #TaskBoardBase;
+
+DECLARE @HasTaskLab bit = CASE WHEN EXISTS (SELECT 1 FROM dbo.DenialTaskBoard WITH (NOLOCK) WHERE LabId = @LabId) THEN 1 ELSE 0 END;
 
 SELECT
     InsuranceBalance = ISNULL(t.InsuranceBalance, 0),
@@ -103,8 +117,8 @@ SELECT
     ActionCategory = LTRIM(RTRIM(ISNULL(t.ActionCategory, ''))),
     DueDate = t.DueDate
 INTO #TaskBoardBase
-FROM dbo.DenialTaskBoard t
-WHERE (t.LabId = @LabId OR NOT EXISTS (SELECT 1 FROM dbo.DenialTaskBoard WHERE LabId = @LabId)) {where.WhereClause};
+FROM dbo.DenialTaskBoard t WITH (NOLOCK)
+WHERE (@HasTaskLab = 0 OR t.LabId = @LabId) {where.WhereClause};
 
 SELECT
     TotalDenials = COUNT(1),
@@ -234,6 +248,7 @@ DROP TABLE #TaskBoardBase;";
 		if (await rd.NextResultAsync(ct)) while (await rd.ReadAsync(ct)) reviewers.Add(new ReviewerWorkflowSummaryRow { ReviewerName = GetString(rd, "ReviewerName"), TotalAssigned = GetInt(rd, "TotalAssigned"), Closed = GetInt(rd, "Closed"), Pending = GetInt(rd, "Pending") });
 		if (await rd.NextResultAsync(ct)) while (await rd.ReadAsync(ct)) sla.Add(new SlaSummaryRow { Label = GetString(rd, "Label"), Count = GetInt(rd, "Count"), Status = GetString(rd, "Status") });
 		result.DenialClassifications = cls; result.ActionCategories = actions; result.AnalystWorkload = reviewers; result.SlaTiles = sla;
+		DashboardCache[cacheKey] = new DashboardCacheEntry(DateTime.UtcNow, result);
 		return result;
 	}
 
@@ -428,7 +443,8 @@ Assigned = SUM(CASE WHEN ISNULL(AssignedTo,'')<>'' AND ISNULL(Status,'') NOT IN 
 Completed = SUM(CASE WHEN ISNULL(Status,'') IN ('Closed','Completed') THEN 1 ELSE 0 END),
 Pending = SUM(CASE WHEN ISNULL(Status,'') NOT IN ('Closed','Completed') THEN 1 ELSE 0 END),
 Unassigned = SUM(CASE WHEN ISNULL(AssignedTo,'')='' AND ISNULL(Status,'') NOT IN ('Closed','Completed') THEN 1 ELSE 0 END)
-FROM dbo.DenialTaskBoard WHERE (LabId = @LabId OR NOT EXISTS (SELECT 1 FROM dbo.DenialTaskBoard WHERE LabId = @LabId)) {reviewerWhere};
+FROM dbo.DenialTaskBoard WITH (NOLOCK)
+WHERE (LabId = @LabId OR @LabId <= 0) {reviewerWhere};
 SELECT VerificationPending = COUNT(1) FROM dbo.DenialVerificationTask WHERE LabId=@LabId {verificationReviewerWhere};";
 		await using var con = OpenLab(labId); await con.OpenAsync(ct);
 		await using var cmd = new SqlCommand(sql, con); cmd.Parameters.AddWithValue("@LabId", labId); cmd.Parameters.AddWithValue("@UserName", userName ?? string.Empty);
@@ -445,8 +461,8 @@ SELECT VerificationPending = COUNT(1) FROM dbo.DenialVerificationTask WHERE LabI
 TotalAssigned = COUNT(1),
 Closed = SUM(CASE WHEN ISNULL(Status,'') IN ('Closed','Completed') THEN 1 ELSE 0 END),
 Pending = SUM(CASE WHEN ISNULL(Status,'') NOT IN ('Closed','Completed') THEN 1 ELSE 0 END)
-FROM dbo.DenialTaskBoard
-WHERE (LabId = @LabId OR NOT EXISTS (SELECT 1 FROM dbo.DenialTaskBoard WHERE LabId = @LabId))
+FROM dbo.DenialTaskBoard WITH (NOLOCK)
+WHERE (LabId = @LabId OR @LabId <= 0)
 GROUP BY COALESCE(NULLIF(AssignedTo,''), 'Unassigned')
 ORDER BY TotalAssigned DESC;";
 		var rows = new List<ReviewerWorkflowSummaryRow>();
@@ -1037,7 +1053,33 @@ DELETE FROM dbo.DenialVerificationTask WHERE (LabId = @LabId OR NOT EXISTS (SELE
 	private static string NormalizeKey(string value)
 		=> new string((value ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
 
+	private static string BuildFilterCacheKey(string prefix, DenialWorkflowFilter f)
+	{
+		static string Clean(string? value) => (value ?? string.Empty).Trim().ToUpperInvariant();
+		return string.Join('|',
+			prefix,
+			f.LabId,
+			Clean(f.Role),
+			Clean(f.UserName),
+			Clean(f.Status),
+			Clean(f.Reviewer),
+			Clean(f.AssignedTo),
+			Clean(f.DenialCode),
+			Clean(f.PayerName),
+			Clean(f.Clinic),
+			Clean(f.SalesRepname),
+			Clean(f.ReferringProvider),
+			Clean(f.DenialClassification),
+			Clean(f.ActionCategory),
+			Clean(f.Priority),
+			Clean(f.RunId),
+			Clean(f.SearchText),
+			f.FromDate?.Date.ToString("yyyyMMdd") ?? string.Empty,
+			f.ToDate?.Date.ToString("yyyyMMdd") ?? string.Empty);
+	}
+
 	private sealed record FilterOptionsCacheEntry(DateTime CachedOnUtc, DenialWorkflowFilterOptions Options);
+	private sealed record DashboardCacheEntry(DateTime CachedOnUtc, DenialWorkflowDashboardSummary Summary);
 
 	private sealed class LabConfigItem
 	{

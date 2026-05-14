@@ -4,6 +4,7 @@ using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Models.DenialWorkflow;
 using LabMetricsDashboard.Services;
 using LabMetricsDashboard.Services.DenialWorkflow;
+using LabMetricsDashboard.Services.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -17,12 +18,22 @@ public sealed class DenialWorkflowController : Controller
     private readonly IDenialWorkflowApiClient _workflowApi;
     private readonly IDenialRecordRepository _denialRepository;
     private readonly IUserManagementRepository _userRepository;
+    private readonly WorkflowJwtIssuer _jwtIssuer;
 
-    public DenialWorkflowController(IDenialWorkflowApiClient workflowApi, IDenialRecordRepository denialRepository, IUserManagementRepository userRepository)
+    public DenialWorkflowController(IDenialWorkflowApiClient workflowApi, IDenialRecordRepository denialRepository, IUserManagementRepository userRepository, WorkflowJwtIssuer jwtIssuer)
     {
         _workflowApi = workflowApi;
         _denialRepository = denialRepository;
         _userRepository = userRepository;
+        _jwtIssuer = jwtIssuer;
+    }
+
+    [AllowAnonymous]
+    [HttpGet("/DenialWorkflow/AuthToken")]
+    public async Task<IActionResult> AuthToken(CancellationToken cancellationToken = default)
+    {
+        if (!(User?.Identity?.IsAuthenticated ?? false)) return Unauthorized(new { message = "Login required." });
+        return Json(await _jwtIssuer.CreateTokenAsync(User, cancellationToken));
     }
 
     [HttpGet]

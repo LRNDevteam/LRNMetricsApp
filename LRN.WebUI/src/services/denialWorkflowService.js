@@ -26,12 +26,9 @@ export const denialWorkflowService = {
     form.append('comment', comment || '');
     form.append('uploadedBy', uploadedBy || 'ReactWorkflow');
     Array.from(files || []).forEach(f => form.append('files', f));
-    const { API_BASE } = await import('../config/apiConfig');
-    const { getJwt } = await import('../utils/auth');
-    const token = getJwt();
-    const response = await fetch(`${API_BASE}/claim-documents`, { method: 'POST', headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: form });
-    if (!response.ok) throw new Error(await response.text() || `API error ${response.status}`);
-    return response.json();
+
+    const { api } = await import('./httpClient');
+    return api('/claim-documents', { method: 'POST', body: form });
   }
 };
 

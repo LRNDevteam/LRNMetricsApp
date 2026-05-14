@@ -1,8 +1,9 @@
-﻿using LabMetricsDashboard.Filters;
+using LabMetricsDashboard.Filters;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
 using LabMetricsDashboard.Services.DenialWorkflow;
 using LabMetricsDashboard.Models.DenialWorkflow;
+using LabMetricsDashboard.Services.Security;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
@@ -13,6 +14,13 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc.Authorization;
 
 var builder = WebApplication.CreateBuilder(args);
+
+const string DenialWorkflowLocalDevCorsPolicy = "DenialWorkflowLocalDevCors";
+
+// Local React/Vite runs on http://localhost:5173 and calls MVC on https://localhost:44350.
+// For fetch(..., credentials: "include") the auth cookie must be SameSite=None and Secure.
+var useWorkflowCrossOriginCookie = builder.Environment.IsDevelopment()
+	|| builder.Configuration.GetValue<bool>("DenialWorkflowAuth:UseCrossOriginCookies");
 
 // ── File logging ─────────────────────────────────────────────────
 // Writes Warning+ logs (DB errors, crashes) to rolling daily text files.
@@ -301,7 +309,8 @@ builder.Services.AddAntiforgery(options =>
 	//    options.Cookie.HttpOnly     = true;
 	//=======
 	//	options.Cookie.Name = "LRN.Antiforgery";
-	//	options.Cookie.SameSite = SameSiteMode.Lax;
+	//	options.Cookie.SameSite = builder.Environment.IsDevelopment() ? SameSiteMode.Lax : SameSiteMode.None;
+		options.Cookie.Path = "/";
 	//	options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
 	//		? CookieSecurePolicy.SameAsRequest
 	//		: CookieSecurePolicy.Always;
@@ -309,7 +318,8 @@ builder.Services.AddAntiforgery(options =>
 	//>>>>>>> 23cf9fdcfbffecee7d6826a98b7baa4821a4bc13
 
 	options.Cookie.Name = "LRN.Antiforgery";
-	options.Cookie.SameSite = SameSiteMode.Lax;
+	options.Cookie.SameSite = builder.Environment.IsDevelopment() ? SameSiteMode.Lax : SameSiteMode.None;
+		options.Cookie.Path = "/";
 	options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
 		? CookieSecurePolicy.SameAsRequest
 		: CookieSecurePolicy.Always;
@@ -376,11 +386,13 @@ builder.Services.AddScoped<ILisSummaryRepository, SqlLisSummaryRepository>();
 
 // User management repository (uses DefaultConnection from appsettings.json)
 builder.Services.AddScoped<IUserManagementRepository, SqlUserManagementRepository>();
+builder.Services.AddScoped<WorkflowJwtIssuer>();
 // Password hasher
 builder.Services.AddSingleton<IPasswordHasher, PasswordHasher>();
 
 // Add services to the container.
 builder.Services.AddMemoryCache();
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IAppUsageAuditService, SqlAppUsageAuditService>();
 builder.Services.AddScoped<AppUsageAuditFilter>();
 
@@ -389,6 +401,35 @@ builder.Services.AddSingleton<HelpBotService>();
 
 builder.Services.Configure<DenialWorkflowOptions>(builder.Configuration.GetSection("DenialWorkflowApi"));
 builder.Services.AddHttpClient<IDenialWorkflowApiClient, DenialWorkflowApiClient>();
+
+// Allow local Vite React dev server to call MVC AuthToken endpoint with cookies.
+// Production stays same-origin, but these origins are useful while debugging React locally.
+var denialWorkflowCorsOrigins = builder.Configuration
+	.GetSection("DenialWorkflowCors:AllowedOrigins")
+	.Get<string[]>()
+	?.Where(x => !string.IsNullOrWhiteSpace(x))
+	.Select(x => x.Trim().TrimEnd('/'))
+	.Distinct(StringComparer.OrdinalIgnoreCase)
+	.ToArray()
+	?? new[]
+	{
+		"http://localhost:5173",
+		"https://localhost:5173",
+		"http://127.0.0.1:5173",
+		"https://127.0.0.1:5173"
+	};
+
+builder.Services.AddCors(options =>
+{
+	options.AddPolicy(DenialWorkflowLocalDevCorsPolicy, policy =>
+	{
+		policy
+			.WithOrigins(denialWorkflowCorsOrigins)
+			.AllowAnyHeader()
+			.AllowAnyMethod()
+			.AllowCredentials();
+	});
+});
 
 builder.Services.AddControllersWithViews(options =>
 {
@@ -430,12 +471,13 @@ builder.Services
 		options.SlidingExpiration = true;
 		options.Cookie.Name = "LRN.Auth";
 		options.Cookie.HttpOnly = true;
-		options.Cookie.SameSite = SameSiteMode.Lax;
-		// Always mark the auth cookie as Secure in production so Chrome accepts it after
-		// the HTTPS redirect that follows a successful login.
-		// SameAsRequest is kept for local development (HTTP) so the dev experience is unaffected.
-		options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
-			? CookieSecurePolicy.SameAsRequest
+		options.Cookie.SameSite = useWorkflowCrossOriginCookie ? SameSiteMode.None : SameSiteMode.None;
+		options.Cookie.Path = "/";
+		// Required for local React/Vite cross-origin AuthToken fetch.
+		// If this is SameAsRequest/Lax in Development, Chrome will not send LRN.Auth
+		// from http://localhost:5173 to https://localhost:44350, causing login loops.
+		options.Cookie.SecurePolicy = useWorkflowCrossOriginCookie
+			? CookieSecurePolicy.Always
 			: CookieSecurePolicy.Always;
 
 		// ── ReturnUrl loop guard ──────────────────────────────────────────────
@@ -623,6 +665,10 @@ if (app.Environment.IsDevelopment())
 }
 app.UseStaticFiles();
 app.UseRouting();
+
+// Must be after UseRouting and before UseAuthentication so preflight/AuthToken
+// responses include Access-Control-Allow-Origin for local React dev.
+app.UseCors(DenialWorkflowLocalDevCorsPolicy);
 
 app.UseAuthentication();
 app.UseAuthorization();
