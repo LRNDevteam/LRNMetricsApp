@@ -68,3 +68,5 @@ export const API_BASE = REPORTS_API_BASE_URL;
 
 export const AUTH_TOKEN_URL = `${LRN_METRICS_BASE_URL}/DenialWorkflow/AuthToken`;
 export const LOGIN_URL = `${LRN_METRICS_BASE_URL}/Account/Login`;
+
+export const LOGOUT_URL = `${LRN_METRICS_BASE_URL}/DenialWorkflow/Logout`;

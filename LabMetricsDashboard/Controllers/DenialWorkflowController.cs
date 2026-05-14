@@ -5,6 +5,8 @@ using LabMetricsDashboard.Models.DenialWorkflow;
 using LabMetricsDashboard.Services;
 using LabMetricsDashboard.Services.DenialWorkflow;
 using LabMetricsDashboard.Services.Security;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -34,6 +36,17 @@ public sealed class DenialWorkflowController : Controller
     {
         if (!(User?.Identity?.IsAuthenticated ?? false)) return Unauthorized(new { message = "Login required." });
         return Json(await _jwtIssuer.CreateTokenAsync(User, cancellationToken));
+    }
+
+    [HttpGet("/DenialWorkflow/Logout")]
+    public async Task<IActionResult> Logout()
+    {
+        await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+
+        Response.Cookies.Delete("LRN.Auth", new CookieOptions { Path = "/" });
+        Response.Cookies.Delete("lmd_selected_lab", new CookieOptions { Path = "/" });
+
+        return RedirectToAction("Login", "Account");
     }
 
     [HttpGet]

@@ -91,7 +91,8 @@ public sealed class DenialWorkflowController : ControllerBase
 		if (labId <= 0) return BadRequest("LabId is required.");
 		if (string.IsNullOrWhiteSpace(claimId)) return BadRequest("ClaimId is required.");
 
-		return Ok(await _service.GetTasksByClaimAsync(labId, claimId.Trim(), ct));
+		var rows = await _service.GetTasksByClaimAsync(labId, claimId.Trim(), ct);
+		return Ok(ScopeRowsForReviewer(rows));
 	}
 
 	[HttpGet("claims/{claimId}/tasks")]
@@ -103,7 +104,8 @@ public sealed class DenialWorkflowController : ControllerBase
 		if (labId <= 0) return BadRequest("LabId is required.");
 		if (string.IsNullOrWhiteSpace(claimId)) return BadRequest("ClaimId is required.");
 
-		return Ok(await _service.GetTasksByClaimAsync(labId, claimId.Trim(), ct));
+		var rows = await _service.GetTasksByClaimAsync(labId, claimId.Trim(), ct);
+		return Ok(ScopeRowsForReviewer(rows));
 	}
 
 	[HttpGet("tasks")]
@@ -234,6 +236,17 @@ public sealed class DenialWorkflowController : ControllerBase
     }
 
 
+    private IReadOnlyList<WorkflowTaskRow> ScopeRowsForReviewer(IReadOnlyList<WorkflowTaskRow> rows)
+    {
+        var role = FirstClaim(ClaimTypes.Role, "role", "roles") ?? string.Empty;
+        if (!IsReviewerOnly(role)) return rows;
+
+        var userName = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? string.Empty;
+        return rows
+            .Where(r => string.Equals((r.AssignedTo ?? string.Empty).Trim(), userName.Trim(), StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
     private IReadOnlyList<DenialWorkflowLabOption> LabsFromToken()
     {
         var ids = User.Claims.Where(c => string.Equals(c.Type, "lab_id", StringComparison.OrdinalIgnoreCase)).Select(c => c.Value).ToList();
@@ -264,10 +277,36 @@ public sealed class DenialWorkflowController : ControllerBase
         return null;
     }
 
-    private static DenialWorkflowFilter Normalize(DenialWorkflowFilter filter)
+    private DenialWorkflowFilter Normalize(DenialWorkflowFilter filter)
     {
         if (filter.Page <= 0) filter.Page = 1;
         filter.PageSize = filter.PageSize <= 0 ? 50 : Math.Clamp(filter.PageSize, 25, 200);
+
+        var tokenUserName = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? filter.UserName ?? string.Empty;
+        var tokenRole = FirstClaim(ClaimTypes.Role, "role", "roles") ?? filter.Role ?? string.Empty;
+
+        // Never trust role/userName passed from React query string. Always scope from JWT.
+        filter.UserName = tokenUserName;
+        filter.Role = tokenRole;
+
+        if (IsReviewerOnly(tokenRole))
+        {
+            // AR Reviewer must see only claims/tasks assigned to himself/herself.
+            filter.AssignedTo = tokenUserName;
+            filter.Reviewer = tokenUserName;
+        }
+
         return filter;
     }
+
+    private static bool IsReviewerOnly(string? role)
+    {
+        var r = NormalizeRoleToken(role);
+        return (r.Contains("ARREVIEWER") || r.Contains("ARANALYSER") || r.Contains("ARANALYZER") || r.Contains("REVIEWER"))
+            && !r.Contains("MANAGER")
+            && !r.Contains("ADMIN");
+    }
+
+    private static string NormalizeRoleToken(string? value)
+        => new string((value ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
 }

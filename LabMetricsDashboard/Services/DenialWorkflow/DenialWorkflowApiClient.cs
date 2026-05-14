@@ -22,13 +22,24 @@ public sealed class DenialWorkflowApiClient : IDenialWorkflowApiClient
     private readonly HttpClient _http;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly WorkflowJwtIssuer _jwtIssuer;
+    private readonly string _baseUrl;
 
     public DenialWorkflowApiClient(HttpClient http, IOptions<DenialWorkflowOptions> options, IHttpContextAccessor httpContextAccessor, WorkflowJwtIssuer jwtIssuer)
     {
         _http = http;
-        _http.BaseAddress = new Uri(options.Value.BaseUrl.TrimEnd('/') + "/");
         _httpContextAccessor = httpContextAccessor;
         _jwtIssuer = jwtIssuer;
+
+        // Do NOT throw from the constructor.
+        // MVC creates DenialWorkflowController for /DenialWorkflow/AuthToken also,
+        // and AuthToken only needs WorkflowJwtIssuer. If BaseUrl is empty/invalid,
+        // throwing here breaks login/token generation before the action runs.
+        _baseUrl = options.Value.BaseUrl?.Trim() ?? string.Empty;
+
+        if (TryBuildBaseUri(_baseUrl, out var baseUri))
+        {
+            _http.BaseAddress = baseUri;
+        }
     }
 
     public async Task<DenialWorkflowSummary> GetSummaryAsync(int labId, string role, string userName, CancellationToken ct)
@@ -92,10 +103,35 @@ public sealed class DenialWorkflowApiClient : IDenialWorkflowApiClient
 
     private async Task AuthorizeAsync(CancellationToken ct)
     {
+        EnsureBaseAddressConfigured();
+
         var user = _httpContextAccessor.HttpContext?.User;
         if (user?.Identity?.IsAuthenticated != true) return;
         var tokenResult = await _jwtIssuer.CreateTokenAsync(user, ct);
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokenResult.Token);
+    }
+
+    private void EnsureBaseAddressConfigured()
+    {
+        if (_http.BaseAddress != null) return;
+
+        throw new InvalidOperationException(
+            "DenialWorkflowApi:BaseUrl is missing or invalid. " +
+            "Set it in LabMetricsDashboard appsettings.json. Example: " +
+            "\"DenialWorkflowApi\": { \"BaseUrl\": \"https://www.lrnanalytics.com/lrnapi/\" }");
+    }
+
+    private static bool TryBuildBaseUri(string? configuredBaseUrl, out Uri? baseUri)
+    {
+        baseUri = null;
+
+        if (string.IsNullOrWhiteSpace(configuredBaseUrl)) return false;
+
+        var value = configuredBaseUrl.Trim();
+        if (!value.EndsWith("/", StringComparison.Ordinal)) value += "/";
+
+        return Uri.TryCreate(value, UriKind.Absolute, out baseUri)
+            && (baseUri.Scheme == Uri.UriSchemeHttp || baseUri.Scheme == Uri.UriSchemeHttps);
     }
 
     private static string ToQueryString(DenialWorkflowFilter f)

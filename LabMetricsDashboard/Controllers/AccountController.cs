@@ -16,19 +16,22 @@ public class AccountController : Controller
     private readonly LabConfigOptions _labConfig;
     private readonly LabSettings _labSettings;
     private readonly ILogger<AccountController> _logger;
+    private readonly IConfiguration _configuration;
 
     public AccountController(
         IUserManagementRepository repo,
         IPasswordHasher hasher,
         LabConfigOptions labConfig,
         LabSettings labSettings,
-        ILogger<AccountController> logger)
+        ILogger<AccountController> logger,
+        IConfiguration configuration)
     {
         _repo = repo;
         _hasher = hasher;
         _labConfig = labConfig;
         _labSettings = labSettings;
         _logger = logger;
+        _configuration = configuration;
     }
 
     [HttpGet]
@@ -185,7 +188,13 @@ public class AccountController : Controller
 
         if (isArReviewer)
         {
-            return RedirectToAction("Index", "DenialWorkflow", new { tab = "dashboard" });
+            var workflowUrl = _configuration["DenialWorkflowReactUrl"];
+            if (!string.IsNullOrWhiteSpace(workflowUrl))
+            {
+                return Redirect(workflowUrl);
+            }
+
+            return RedirectToAction("Index", "DenialWorkflow", new { tab = "myworklist" });
         }
 
         return RedirectToAction("Index", "Dashboard", new { lab = defaultLabName });

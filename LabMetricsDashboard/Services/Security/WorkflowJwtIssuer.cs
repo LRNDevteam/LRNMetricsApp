@@ -29,29 +29,27 @@ public sealed class WorkflowJwtIssuer
         var displayName = user.FindFirstValue("FullName") ?? userName;
         var roles = user.Claims.Where(c => c.Type == ClaimTypes.Role).Select(c => c.Value).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
-        var isAdmin = roles.Any(IsAdminRole);
+        var isAdmin = roles.Any(r => string.Equals(r, "Admin", StringComparison.OrdinalIgnoreCase));
 
-        // Admin must be able to see every configured lab in Denial Workflow.
-        // Non-admin users must remain restricted to their UserLabs assignments.
-        var labs = isAdmin
-            ? _labConfig.LabsID
+        var labs = new List<object>();
+        if (isAdmin)
+        {
+            labs = (_labConfig.LabsID ?? new List<LabIdInfo>())
                 .Where(l => l.Id > 0 && !string.IsNullOrWhiteSpace(l.Name))
                 .OrderBy(l => l.Name)
-                .GroupBy(l => l.Id)
-                .Select(g => new { labId = g.Key, labName = g.First().Name.Trim() })
+                .DistinctBy(l => l.Id)
+                .Select(l => new { labId = l.Id, labName = l.Name })
                 .Cast<object>()
-                .ToList()
-            : new List<object>();
-
-        if (!isAdmin && labUserId > 0)
+                .ToList();
+        }
+        else if (labUserId > 0)
         {
             var userLabs = (await _users.GetUserLabsAsync(labUserId)).ToList();
             labs = userLabs
                 .Select(ul => new { labId = ul.LabId, labName = _labConfig.GetLabNameById(ul.LabId) ?? ul.LabName ?? string.Empty })
                 .Where(x => x.labId > 0 && !string.IsNullOrWhiteSpace(x.labName))
                 .OrderBy(x => x.labName)
-                .GroupBy(x => x.labId)
-                .Select(g => new { labId = g.Key, labName = g.First().labName.Trim() })
+                .DistinctBy(x => x.labId)
                 .Cast<object>()
                 .ToList();
         }
@@ -74,13 +72,6 @@ public sealed class WorkflowJwtIssuer
         var token = Sign(payload);
         return new WorkflowJwtTokenResult(token, expires.UtcDateTime, userName, displayName, roles.FirstOrDefault() ?? string.Empty, roles, labs);
     }
-
-
-    private static bool IsAdminRole(string? role)
-        => string.Equals(NormalizeRole(role), "ADMIN", StringComparison.OrdinalIgnoreCase);
-
-    private static string NormalizeRole(string? role)
-        => new string((role ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
 
     private string Sign(Dictionary<string, object?> payload)
     {
