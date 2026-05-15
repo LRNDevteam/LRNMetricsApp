@@ -42,6 +42,7 @@ export default function App() {
   const [selectedClaims, setSelectedClaims] = useState({});
   const [claimTasks, setClaimTasks] = useState({});
   const [expandedClaim, setExpandedClaim] = useState('');
+  const [claimTaskView, setClaimTaskView] = useState('unassigned');
   const [bulkReviewer, setBulkReviewer] = useState('');
   const [rowReviewers, setRowReviewers] = useState({});
   const [message, setMessage] = useState(null);
@@ -206,9 +207,10 @@ export default function App() {
     referringProvider: debouncedFilter.referringProvider,
     denialClassification: debouncedFilter.denialClassification,
     searchText: debouncedFilter.searchText,
+    taskView: view === 'claims' ? claimTaskView : '',
     page: debouncedFilter.page || 1,
-    pageSize: 50
-  }), [labId, user, debouncedFilter, reviewerOnly]);
+    pageSize: 100
+  }), [labId, user, debouncedFilter, reviewerOnly, view, claimTaskView]);
 
 
   async function refreshReviewerNotification() {
@@ -263,32 +265,10 @@ export default function App() {
       call = denialWorkflowService.getClaims(query).then(c => {
         if (requestId !== claimRequestSeq.current) return;
         const next = c || emptyPagedResult;
-        const nextPage = Number(next.pageNumber || query.page || 1);
-
-        setClaims(prev => {
-          if (nextPage <= 1) return next;
-
-          const seen = new Set((prev.items || [])
-            .map(r => String(r?.claimId ?? r?.claimID ?? r?.ClaimId ?? r?.ClaimID ?? '').trim())
-            .filter(Boolean));
-          const mergedItems = [...(prev.items || [])];
-
-          (next.items || []).forEach(row => {
-            const id = String(row?.claimId ?? row?.claimID ?? row?.ClaimId ?? row?.ClaimID ?? '').trim();
-            if (!id || !seen.has(id)) {
-              if (id) seen.add(id);
-              mergedItems.push(row);
-            }
-          });
-
-          return { ...next, items: mergedItems };
-        });
-
-        if (nextPage <= 1) {
-          setSelectedClaims({});
-          setClaimTasks({});
-          setExpandedClaim('');
-        }
+        setClaims(next);
+        setSelectedClaims({});
+        setClaimTasks({});
+        setExpandedClaim('');
       });
     } else if (view === 'tasks') {
       call = denialWorkflowService.getTasks(query).then(t => setTasks(t || emptyPagedResult));
@@ -303,6 +283,16 @@ export default function App() {
 
   const labName = labs.find(l => Number(l.labId ?? l.LabId) === Number(labId))?.labName || 'Select Lab';
   const pageTitle = { dashboard: 'Denial Workflow Dashboard', summary: 'Denial Summary', claims: 'Claim Level Assignment', myworklist: 'My Worklist', tasks: 'Task Board', verification: 'Verification Queue' }[view] || 'Denial Workflow';
+
+  function handleClaimTaskViewChange(nextView) {
+    if (nextView === claimTaskView) return;
+    setClaimTaskView(nextView);
+    setFilter(f => (Number(f.page || 1) === 1 ? f : { ...f, page: 1 }));
+    setClaims(emptyPagedResult);
+    setSelectedClaims({});
+    setClaimTasks({});
+    setExpandedClaim('');
+  }
 
   function setFilterValue(k, v) { setFilter(f => ({ ...f, [k]: v, page: 1 })); }
   function clearFilter() { setFilter(emptyFilter); }
@@ -346,20 +336,10 @@ export default function App() {
     setExpandedClaim(claimId);
     if (claimTasks[claimId]) return;
     try {
-      const rows = await denialWorkflowService.getClaimTasks(labId, claimId);
+      const rows = await denialWorkflowService.getClaimTasks(labId, claimId, claimTaskView);
       setClaimTasks(prev => ({ ...prev, [claimId]: rows || [] }));
     } catch (err) { setMessage({ type: 'danger', text: err.message }); }
   }
-
-  const loadMoreClaims = useCallback(() => {
-    if (view !== 'claims' || loading) return;
-    const loaded = claims.items?.length || 0;
-    const total = claims.totalCount || 0;
-    if (!total || loaded >= total) return;
-
-    const currentPage = Number(claims.pageNumber || debouncedFilter.page || 1);
-    setFilter(f => ({ ...f, page: currentPage + 1 }));
-  }, [view, loading, claims, debouncedFilter.page]);
 
   async function assignClaims(claimIds, reviewer, overwriteExisting = false) {
     if (!canAssign) return setMessage({ type: 'warning', text: 'Only Admin and AR Manager users can assign claims.' });
@@ -379,7 +359,7 @@ export default function App() {
       setSelectedClaims({});
       setClaimTasks({});
       setExpandedClaim('');
-      setClaims(await denialWorkflowService.getClaims(query));
+      setClaims(await denialWorkflowService.getClaims({ ...query, taskView: claimTaskView }));
     } catch (err) { setMessage({ type: 'danger', text: err.message }); }
     finally { setLoading(false); }
   }
@@ -441,7 +421,7 @@ export default function App() {
         {loading && <div className="loading-line" />}
         {view === 'dashboard' && <DashboardPage data={dashboard} />}
         {view === 'summary' && <DenialSummaryPage data={dashboard} canAssign={canAssign} onClassificationClick={openClaimsByClassification} onActionCategoryClick={openClaimsByActionCategory} onAssign={() => { setView('claims'); setMessage({ type: 'info', text: 'Select the required claim rows, choose reviewer, then assign.' }); }} />}
-        {view === 'claims' && <ClaimAssignmentPage data={claims} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} loadMoreClaims={loadMoreClaims} isLoadingClaims={loading} labId={labId} currentUser={user.userName || 'ReactWorkflow'} canAssign={canAssign} />}
+        {view === 'claims' && <ClaimAssignmentPage data={claims} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} canAssign={canAssign} taskView={claimTaskView} setTaskView={handleClaimTaskViewChange} />}
         {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setMessage} onSaved={refreshReviewerNotification} />}
         {view === 'tasks' && <TasksPage data={tasks} saveTask={saveTask} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} />}
         {view === 'verification' && <VerificationPage data={verification} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} />}

@@ -86,7 +86,8 @@ public sealed class DenialWorkflowController : ControllerBase
 	public async Task<ActionResult<IReadOnlyList<WorkflowTaskRow>>> ClaimTasksQuery(
 	   [FromQuery] int labId,
 	   [FromQuery] string? claimId,
-	   CancellationToken ct)
+	   CancellationToken ct,
+	   [FromQuery] string taskView = "")
 	{
 		if (labId <= 0) return BadRequest("LabId is required.");
 		if (string.IsNullOrWhiteSpace(claimId)) return BadRequest("ClaimId is required.");
@@ -99,7 +100,8 @@ public sealed class DenialWorkflowController : ControllerBase
 	public async Task<ActionResult<IReadOnlyList<WorkflowTaskRow>>> ClaimTasksRoute(
 		[FromQuery] int labId,
 		[FromRoute] string? claimId,
-		CancellationToken ct)
+		CancellationToken ct,
+		[FromQuery] string taskView = "")
 	{
 		if (labId <= 0) return BadRequest("LabId is required.");
 		if (string.IsNullOrWhiteSpace(claimId)) return BadRequest("ClaimId is required.");

@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import Pager from '../components/Pager';
 import { money, date } from '../utils/formatters';
 import { denialWorkflowService } from '../services/denialWorkflowService';
 
-export default function ClaimAssignmentPage({ data, reviewers, selected, setSelected, bulkReviewer, setBulkReviewer, loadClaimTasks, claimTasks, expandedClaim, assignClaims, changePage, loadMoreClaims, isLoadingClaims = false, labId, currentUser, canAssign = false }) {
+export default function ClaimAssignmentPage({ data, reviewers, selected, setSelected, bulkReviewer, setBulkReviewer, loadClaimTasks, claimTasks, expandedClaim, assignClaims, changePage, labId, currentUser, canAssign = false, taskView = 'unassigned', setTaskView = () => {} }) {
   const [notePopup, setNotePopup] = useState(null);
   const [docPopup, setDocPopup] = useState(null);
   const [historyPopup, setHistoryPopup] = useState(null);
@@ -17,31 +17,14 @@ export default function ClaimAssignmentPage({ data, reviewers, selected, setSele
   const getClaimId = (r) => String(r?.claimId ?? r?.claimID ?? r?.ClaimId ?? r?.ClaimID ?? '').trim();
   const all = canAssign && items.length > 0 && items.every((_, i) => selected[i]);
   const selectedClaimIds = canAssign ? items.filter((_, i) => selected[i]).map(getClaimId).filter(Boolean) : [];
-  const lazySentinelRef = useRef(null);
   const loadedCount = items.length;
   const totalCount = data.totalCount || loadedCount;
-  const hasMoreClaims = loadedCount < totalCount;
-  const claimTableStatus = useMemo(() => {
-    if (!hasMoreClaims) return loadedCount ? 'All matching claims loaded.' : '';
-    return `Scroll down to load more claims (${loadedCount} of ${totalCount} loaded).`;
-  }, [hasMoreClaims, loadedCount, totalCount]);
-
-  useEffect(() => {
-    if (!lazySentinelRef.current || !hasMoreClaims || !loadMoreClaims) return;
-
-    const observer = new IntersectionObserver(entries => {
-      if (entries[0]?.isIntersecting && !isLoadingClaims) loadMoreClaims();
-    }, { root: null, rootMargin: '450px 0px', threshold: 0.01 });
-
-    observer.observe(lazySentinelRef.current);
-    return () => observer.disconnect();
-  }, [hasMoreClaims, isLoadingClaims, loadMoreClaims, loadedCount]);
-
-  function handleClaimScroll(e) {
-    if (!hasMoreClaims || isLoadingClaims || !loadMoreClaims) return;
-    const el = e.currentTarget;
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 260) loadMoreClaims();
-  }
+  const claimTabs = useMemo(() => [
+    { key: 'unassigned', label: 'New / Unassigned', hint: 'Not assigned and not closed' },
+    { key: 'assigned', label: 'Assigned', hint: 'Assigned and still active' },
+    { key: 'closed', label: 'Closed', hint: 'Completed / closed by reviewer' },
+    { key: 'escalations', label: 'Escalations', hint: 'Escalated or SLA risk items' }
+  ], []);
 
   async function loadNotes(info) {
     const rows = await denialWorkflowService.getNotes({ labId, claimId: info.claimId, taskId: info.taskId, cptCode: info.cptCode, noteLevel: info.type });
@@ -99,9 +82,24 @@ export default function ClaimAssignmentPage({ data, reviewers, selected, setSele
     } catch { }
   }
 
-  const tableColSpan = canAssign ? 12 : 10;
+  const tableColSpan = canAssign ? 13 : 11;
 
   return <>
+    <div className="workflow-tabs claim-tabs">
+      {claimTabs.map(tab => (
+        <button
+          key={tab.key}
+          type="button"
+          className={`workflow-tab ${taskView === tab.key ? 'active' : ''}`}
+          title={tab.hint}
+          onClick={() => setTaskView(tab.key)}
+        >
+          <span>{tab.label}</span>
+          <small>{tab.hint}</small>
+        </button>
+      ))}
+    </div>
+
     {canAssign && (
       <div className="lrn-card assignment-toolbar claim-assign-toolbar">
         <div className="assign-left"><strong>Selected claims:</strong> <span>{selectedClaimIds.length}</span><small>Assigning a claim assigns all matching DenialTaskBoard task rows for that claim.</small></div>
@@ -110,13 +108,10 @@ export default function ClaimAssignmentPage({ data, reviewers, selected, setSele
     )}
 
     <div className="lrn-card claim-card">
-      <div className="lrn-card-header claim-card-hd"><div><div className="lrn-card-title">{canAssign ? 'Claim Level Assignment' : 'Claim Level View'}</div><small className="claim-subtitle">VisitNumber grouped claim rows. Click a claim to expand task details under the row.</small></div><span className="table-count">Showing {loadedCount} of {totalCount} claim(s)</span></div>
-      <div className="dt-wrap claim-assign-scroll" onScroll={handleClaimScroll}>
-        <table className={`lrn-table workflow-table claim-assign-table thin-bordered ${canAssign ? '' : 'claim-view-only-table'}`}><thead><tr>{canAssign && <th className="sticky-col select-col"><input type="checkbox" checked={all} onChange={e => { const next = {}; if (e.target.checked) items.forEach((_, i) => next[i] = true); setSelected(next); }} /></th>}<th>Claim ID</th><th>Payer Name</th><th>Panel Name</th><th>Patient Name</th><th>Patient DOB</th><th>Date Of Service</th><th>Clinic Name</th><th>Referring Provider</th><th className="text-right">Insurance Balance</th>{canAssign && <th>Assign</th>}<th>Actions</th></tr></thead>
-          <tbody>{items.length ? items.map((r, i) => { const claimId = getClaimId(r); const isOpen = expandedClaim === claimId; const tasks = claimTasks?.[claimId] || []; return <React.Fragment key={`${claimId || 'claim'}-${i}`}><tr className={`claim-row-ui ${isOpen ? 'open' : ''}`}>{canAssign && <td className="sticky-col select-col"><input type="checkbox" checked={!!selected[i]} onChange={e => setSelected({ ...selected, [i]: e.target.checked })} /></td>}<td><button className="claim-id-link" type="button" disabled={!claimId} onClick={() => loadClaimTasks(claimId)}>{isOpen ? '▼ ' : '▶ '}{claimId || '-'}</button></td><td>{r.payerName || '-'}</td><td>{r.panelName || '-'}</td><td>{r.patientName || '-'}</td><td>{date(r.patientDOB)}</td><td>{date(r.dateOfService)}</td><td>{r.clinicName || '-'}</td><td>{r.referringProvider || '-'}</td><td className="text-right claim-money">{money(r.insuranceBalance)}</td>{canAssign && <td><button className="wl-btn teal xs" type="button" onClick={() => assignClaims([claimId], bulkReviewer)} disabled={!claimId}>Assign</button></td>}<td><div className="claim-row-actions"><button className="wl-icon" title="Claim notes" type="button" onClick={() => openClaimNotes(r)}>📝</button><button className="wl-icon" title="Upload documents" type="button" disabled={!claimId} onClick={() => openClaimDocuments(claimId)}><i className="bi bi-paperclip" /></button></div></td></tr>{isOpen && <tr className="claim-task-expanded-row"><td colSpan={tableColSpan}><InlineClaimTaskDrill claimId={claimId} tasks={tasks} openClaimNotes={() => openClaimNotes(r)} openLineNotes={openLineNotes} openClaimDocuments={openClaimDocuments} openAssignmentHistory={openAssignmentHistory} /></td></tr>}</React.Fragment>; }) : <tr><td colSpan={tableColSpan} className="empty-cell">No claim records found.</td></tr>}</tbody></table>
-        <div ref={lazySentinelRef} style={{ padding: '10px 12px', textAlign: 'center', fontSize: 11, color: '#64748b' }}>
-          {isLoadingClaims && hasMoreClaims ? <span><i className="bi bi-arrow-repeat" /> Loading more claims...</span> : claimTableStatus ? <span>{claimTableStatus}</span> : null}
-        </div>
+      <div className="lrn-card-header claim-card-hd"><div><div className="lrn-card-title">{canAssign ? 'Claim Level Assignment' : 'Claim Level View'}</div><small className="claim-subtitle">VisitNumber grouped claim rows filtered by selected tab. Click a claim to expand task details under the row.</small></div><span className="table-count">Showing {loadedCount} of {totalCount} claim(s)</span></div>
+      <div className="dt-wrap claim-assign-scroll">
+        <table className={`lrn-table workflow-table claim-assign-table thin-bordered ${canAssign ? '' : 'claim-view-only-table'}`}><thead><tr>{canAssign && <th className="sticky-col select-col"><input type="checkbox" checked={all} onChange={e => { const next = {}; if (e.target.checked) items.forEach((_, i) => next[i] = true); setSelected(next); }} /></th>}<th>Claim ID</th><th>Payer Name</th><th>Panel Name</th><th>Patient Name</th><th>Patient DOB</th><th>Date Of Service</th><th>Clinic Name</th><th>Referring Provider</th><th>Assigned To</th><th className="text-right">Insurance Balance</th>{canAssign && <th>Assign</th>}<th>Actions</th></tr></thead>
+          <tbody>{items.length ? items.map((r, i) => { const claimId = getClaimId(r); const isOpen = expandedClaim === claimId; const tasks = claimTasks?.[claimId] || []; return <React.Fragment key={`${claimId || 'claim'}-${i}`}><tr className={`claim-row-ui ${isOpen ? 'open' : ''}`}>{canAssign && <td className="sticky-col select-col"><input type="checkbox" checked={!!selected[i]} onChange={e => setSelected({ ...selected, [i]: e.target.checked })} /></td>}<td><button className="claim-id-link" type="button" disabled={!claimId} onClick={() => loadClaimTasks(claimId)}>{isOpen ? '▼ ' : '▶ '}{claimId || '-'}</button></td><td>{r.payerName || '-'}</td><td>{r.panelName || '-'}</td><td>{r.patientName || '-'}</td><td>{date(r.patientDOB)}</td><td>{date(r.dateOfService)}</td><td>{r.clinicName || '-'}</td><td>{r.referringProvider || '-'}</td><td>{r.assignedTo || '-'}</td><td className="text-right claim-money">{money(r.insuranceBalance)}</td>{canAssign && <td><button className="wl-btn teal xs" type="button" onClick={() => assignClaims([claimId], bulkReviewer)} disabled={!claimId}>Assign</button></td>}<td><div className="claim-row-actions"><button className="wl-icon" title="Claim notes" type="button" onClick={() => openClaimNotes(r)}>📝</button><button className="wl-icon" title="Upload documents" type="button" disabled={!claimId} onClick={() => openClaimDocuments(claimId)}><i className="bi bi-paperclip" /></button></div></td></tr>{isOpen && <tr className="claim-task-expanded-row"><td colSpan={tableColSpan}><InlineClaimTaskDrill claimId={claimId} tasks={tasks} openClaimNotes={() => openClaimNotes(r)} openLineNotes={openLineNotes} openClaimDocuments={openClaimDocuments} openAssignmentHistory={openAssignmentHistory} /></td></tr>}</React.Fragment>; }) : <tr><td colSpan={tableColSpan} className="empty-cell">No claim records found.</td></tr>}</tbody></table>
       </div>
     </div>
     <Pager data={data} changePage={changePage} />

@@ -523,3 +523,41 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 @media(max-width:1100px){
   .summary-style-grid{grid-template-columns:1fr!important;}
 }
+
+
+/* Denial Workflow task bucket tabs */
+.workflow-tabs {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+}
+.workflow-tab {
+  border: 1px solid #d7e3ef;
+  background: #fff;
+  color: #334155;
+  border-radius: 14px;
+  padding: 10px 14px;
+  min-width: 150px;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+}
+.workflow-tab span {
+  display: block;
+  font-weight: 800;
+  font-size: 13px;
+}
+.workflow-tab small {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: #64748b;
+}
+.workflow-tab.active {
+  border-color: #0f766e;
+  background: linear-gradient(180deg, #ecfdf5, #ffffff);
+  color: #0f766e;
+}
+.workflow-tab.active small { color: #0f766e; }
+.mywork-tabs { margin-top: 2px; }
