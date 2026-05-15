@@ -1,4 +1,12 @@
-using LabMetricsDashboard.Models;
+using LRN.ProductionReports.Models;
+using LRN.ProductionReports.Models;
+using SharedCodingResult = LRN.ProductionReports.Services.CodingResult;
+using SharedCptBreakdownResult = LRN.ProductionReports.Services.CptBreakdownResult;
+using SharedPayerBreakdownResult = LRN.ProductionReports.Services.PayerBreakdownResult;
+using SharedPayerPanelResult = LRN.ProductionReports.Services.PayerPanelResult;
+using SharedProductionReportResult = LRN.ProductionReports.Services.ProductionReportResult;
+using SharedUnbilledAgingResult = LRN.ProductionReports.Services.UnbilledAgingResult;
+using SharedWeeklyClaimVolumeResult = LRN.ProductionReports.Services.WeeklyClaimVolumeResult;
 using System.Data;
 using Microsoft.Data.SqlClient;
 
@@ -63,7 +71,7 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
 
     // ?? Monthly Claim Volume ????????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<ProductionReportResult> GetMonthlyAsync(
+    public async Task<SharedProductionReportResult> GetMonthlyAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -183,7 +191,7 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
                 });
             }
 
-            return new ProductionReportResult(
+            return new SharedProductionReportResult(
                 [],
                 panelRows.Select(p => p.PanelName).ToList(),
                 months,
@@ -196,13 +204,13 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
         catch (Exception ex)
         {
             _logger.LogError(ex, "Aug GetMonthlyAsync failed.");
-            return new ProductionReportResult([], [], [], [], [], new Dictionary<string, ProductionMonthCell>(), 0, 0m);
+            return new SharedProductionReportResult([], [], [], [], [], new Dictionary<string, ProductionMonthCell>(), 0, 0m);
         }
     }
 
     // ?? Weekly Claim Volume ?????????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<WeeklyClaimVolumeResult> GetWeeklyAsync(
+    public async Task<SharedWeeklyClaimVolumeResult> GetWeeklyAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -320,7 +328,7 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
                 });
             }
 
-            return new WeeklyClaimVolumeResult(
+            return new SharedWeeklyClaimVolumeResult(
                 columns,
                 panelRows,
                 grandByWeek,
@@ -330,13 +338,13 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
         catch (Exception ex)
         {
             _logger.LogError(ex, "Aug GetWeeklyAsync failed.");
-            return new WeeklyClaimVolumeResult([], [], new Dictionary<string, ProductionMonthCell>(), 0, 0m);
+            return new SharedWeeklyClaimVolumeResult([], [], new Dictionary<string, ProductionMonthCell>(), 0, 0m);
         }
     }
 
     // ?? Coding ??????????????????????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<CodingResult> GetCodingAsync(
+    public async Task<SharedCodingResult> GetCodingAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -401,18 +409,18 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
                 })
                 .ToList();
 
-            return new CodingResult(panelRows, panelRows.Sum(r => r.ClaimCount), panelRows.Sum(r => r.TotalCharges));
+            return new SharedCodingResult(panelRows, panelRows.Sum(r => r.ClaimCount), panelRows.Sum(r => r.TotalCharges));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Aug GetCodingAsync failed.");
-            return new CodingResult([], 0, 0m);
+            return new SharedCodingResult([], 0, 0m);
         }
     }
 
     // ?? Payer Breakdown ?????????????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<PayerBreakdownResult> GetPayerBreakdownAsync(
+    public async Task<SharedPayerBreakdownResult> GetPayerBreakdownAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -475,18 +483,18 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
                 });
             }
 
-            return new PayerBreakdownResult(months, years, payerRows, grandByMonth, grandByMonth.Values.Sum());
+        return new SharedPayerBreakdownResult(months, years, payerRows, grandByMonth, grandByMonth.Values.Sum());
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Aug GetPayerBreakdownAsync failed.");
-            return new PayerBreakdownResult([], [], [], new Dictionary<string, int>(), 0);
+        return new SharedPayerBreakdownResult([], [], [], new Dictionary<string, int>(), 0);
         }
     }
 
     // ?? Payer × Panel ???????????????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<PayerPanelResult> GetPayerByPanelAsync(
+    public async Task<SharedPayerPanelResult> GetPayerByPanelAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -552,7 +560,7 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
                 });
             }
 
-            return new PayerPanelResult(
+        return new SharedPayerPanelResult(
                 panelCols,
                 payerRows,
                 grandPanel,
@@ -562,13 +570,13 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
         catch (Exception ex)
         {
             _logger.LogError(ex, "Aug GetPayerByPanelAsync failed.");
-            return new PayerPanelResult([], [], new Dictionary<string, ProductionMonthCell>(StringComparer.OrdinalIgnoreCase), 0, 0m);
+        return new SharedPayerPanelResult([], [], new Dictionary<string, ProductionMonthCell>(StringComparer.OrdinalIgnoreCase), 0, 0m);
         }
     }
 
     // ?? Unbilled × Aging ????????????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<UnbilledAgingResult> GetUnbilledAgingAsync(
+    public async Task<SharedUnbilledAgingResult> GetUnbilledAgingAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -634,7 +642,7 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
                 });
             }
 
-            return new UnbilledAgingResult(
+        return new SharedUnbilledAgingResult(
                 panelRows,
                 grandByBucket,
                 grandByBucket.Values.Sum(c => c.ClaimCount),
@@ -643,13 +651,13 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
         catch (Exception ex)
         {
             _logger.LogError(ex, "Aug GetUnbilledAgingAsync failed.");
-            return new UnbilledAgingResult([], new Dictionary<string, ProductionMonthCell>(StringComparer.OrdinalIgnoreCase), 0, 0m);
+        return new SharedUnbilledAgingResult([], new Dictionary<string, ProductionMonthCell>(StringComparer.OrdinalIgnoreCase), 0, 0m);
         }
     }
 
     // ?? CPT Breakdown ???????????????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<CptBreakdownResult> GetCptBreakdownAsync(
+    public async Task<SharedCptBreakdownResult> GetCptBreakdownAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -718,7 +726,7 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
                 });
             }
 
-            return new CptBreakdownResult(
+        return new SharedCptBreakdownResult(
                 months,
                 years,
                 cptRows,
@@ -729,7 +737,7 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
         catch (Exception ex)
         {
             _logger.LogError(ex, "Aug GetCptBreakdownAsync failed.");
-            return new CptBreakdownResult([], [], [], new Dictionary<string, CptBreakdownCell>(), 0m, 0m);
+        return new SharedCptBreakdownResult([], [], [], new Dictionary<string, CptBreakdownCell>(), 0m, 0m);
         }
     }
 

@@ -5,8 +5,9 @@
     ViewData["PageLabel"]   = "Forecasting Summary";
 
     var weeks       = Model.MedianSummary.Weeks;
-    var rangeLabel  = weeks.Count >= 2
-        ? $"{weeks[0].Start:MM/dd/yyyy} – {weeks[^1].End:MM/dd/yyyy}"
+    var displayWeeks = weeks.Where(w => !w.IncludeBeforeStart).ToList();
+    var rangeLabel  = displayWeeks.Count >= 2
+        ? $"{displayWeeks[0].Start:MM/dd/yyyy} – {displayWeeks[^1].End:MM/dd/yyyy}"
         : "—";
 
     bool isMedian   = Model.ActiveTab == "median";

@@ -168,8 +168,8 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         PctPaidLineItemCount                 = Str(r, "PctPaidLineItemCount"),
         PayerType                            = Str(r, "PayerType"),
         PayerFoundInPolicy                   = Str(r, "PayerFoundInPolicy"),
-        DateOfService                        = Str(r, "DateOfService"),
-        FirstBilledDate                      = Str(r, "FirstBilledDate"),
+        DateOfService                        = DateStr(r, "DateOfService"),
+        FirstBilledDate                      = DateStr(r, "FirstBilledDate"),
         PanelName                            = Str(r, "PanelName"),
         LISIcd10Codes                        = Str(r, "LISIcd10Codes"),
         CCWIcd10Code                         = Str(r, "CCWIcd10Code"),
@@ -231,7 +231,7 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         DenialRate                           = Str(r, "DenialRate"),
         AdjustmentRate                       = Str(r, "AdjustmentRate"),
         PaymentDays                          = Str(r, "PaymentDays"),
-        ExpectedPaymentDate                  = Str(r, "ExpectedPaymentDate"),
+        ExpectedPaymentDate                  = DateStr(r, "ExpectedPaymentDate"),
         ExpectedPaymentMonth                 = Str(r, "ExpectedPaymentMonth"),
     };
 
@@ -239,6 +239,41 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
 
     private static string  Str(SqlDataReader r, string col)
         => r.IsDBNull(r.GetOrdinal(col)) ? string.Empty : r.GetString(r.GetOrdinal(col));
+
+    private static string DateStr(SqlDataReader r, string col) => OADateOrRaw(Str(r, col));
+
+    /// <summary>
+    /// Normalizes DB date strings that may be stored as Excel OA serial numbers
+    /// (for example, "46477") or as normal date text. This mirrors the Excel parser
+    /// so DB-sourced records pass the same date filters as file-sourced records.
+    /// </summary>
+    private static string OADateOrRaw(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+
+        if (double.TryParse(raw, System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var serial)
+            && serial > 1 && serial < 2958466)
+        {
+            try
+            {
+                return DateTime.FromOADate(serial)
+                    .ToString("MM/dd/yyyy", System.Globalization.CultureInfo.InvariantCulture);
+            }
+            catch
+            {
+                // fall through to normal date parsing
+            }
+        }
+
+        if (DateTime.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var dt))
+        {
+            return dt.ToString("MM/dd/yyyy", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        return raw;
+    }
 
     private static int     Int(SqlDataReader r, string col)
     {

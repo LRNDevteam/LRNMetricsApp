@@ -275,10 +275,10 @@ public sealed class WeeklyForecastSummary
     public WeeklyPayerRow Totals { get; init; } = new("Total");
 }
 
-/// <summary>A Mon–Sun week range.</summary>
-public sealed record WeekRange(DateOnly Start, DateOnly End)
+/// <summary>A forecasting week range. Can also represent a synthetic prior-period bucket.</summary>
+public sealed record WeekRange(DateOnly Start, DateOnly End, string? LabelOverride = null, bool IncludeBeforeStart = false)
 {
-    public string Label => $"{Start:MM/dd/yyyy} - {End:MM/dd/yyyy}";
+    public string Label => LabelOverride ?? $"{Start:MM/dd/yyyy} - {End:MM/dd/yyyy}";
 }
 
 /// <summary>One payer row in the weekly forecast table.</summary>

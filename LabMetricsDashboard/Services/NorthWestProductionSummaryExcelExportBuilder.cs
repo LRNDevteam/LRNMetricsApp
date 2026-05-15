@@ -1,5 +1,6 @@
 using ClosedXML.Excel;
-using LabMetricsDashboard.Models;
+using LRN.ProductionReports.Models;
+using LRN.ProductionReports.Services;
 using Microsoft.Extensions.Logging;
 
 namespace LabMetricsDashboard.Services;
@@ -39,25 +40,25 @@ public static class NorthWestProductionSummaryExcelExportBuilder
     /// Sheet names: <c>YYYY_BaseName</c> or <c>YYYY_MM_BaseName</c>, truncated to 31 chars.
     /// </summary>
     public static List<RawDataSegment> PreSplitRawData(
-        string baseSheetName, List<Dictionary<string, object?>> rows)
+        string baseSheetName, string[] columns, List<object?[]> rows)
     {
         var segments = new List<RawDataSegment>();
 
         if (rows.Count == 0)
         {
-            segments.Add(new RawDataSegment(baseSheetName, rows));
+            segments.Add(new RawDataSegment(baseSheetName, columns, rows));
             return segments;
         }
 
         if (rows.Count <= SplitThreshold)
         {
-            segments.Add(new RawDataSegment(baseSheetName, rows));
+            segments.Add(new RawDataSegment(baseSheetName, columns, rows));
             return segments;
         }
 
-        // Group by ChargeEnteredDate year (NW primary date), fallback to FirstBillDate, then 0 (Unknown).
+        // Group by ChargeEnteredDate year (NW primary date), fallback to FirstBilledDate, then 0 (Unknown).
         var byYear = rows
-            .GroupBy(GetChargeEnteredYear)
+            .GroupBy(r => GetChargeEnteredYear(columns, r))
             .OrderBy(g => g.Key)
             .ToList();
 
@@ -70,18 +71,19 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             if (yearRows.Count <= SplitThreshold)
             {
                 segments.Add(new RawDataSegment(
-                    Truncate($"{label}_{baseSheetName}"), yearRows));
+                    Truncate($"{label}_{baseSheetName}"), columns, yearRows));
             }
             else
             {
                 // Split further by month
                 foreach (var monthGroup in yearRows
-                    .GroupBy(GetChargeEnteredMonth)
+                    .GroupBy(r => GetChargeEnteredMonth(columns, r))
                     .OrderBy(g => g.Key))
                 {
                     if (monthGroup.Any())
                         segments.Add(new RawDataSegment(
                             Truncate($"{label}_{monthGroup.Key:D2}_{baseSheetName}"),
+                            columns,
                             monthGroup.ToList()));
                 }
             }
@@ -135,7 +137,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         int idx = 0;
         foreach (var seg in claimSegments)
         {
-            BuildRawDataSheet(wb, seg.SheetName, seg.Rows, labName, ExcelTheme.TabGreen);
+            BuildRawDataSheet(wb, seg.SheetName, seg.Columns, seg.Rows, labName, ExcelTheme.TabGreen);
             logger?.LogInformation(
                 "[NWExcelExport][Sheet] ClaimLevel {Idx}/{Total} '{Name}' ({Rows:N0} rows)",
                 ++idx, claimSegments.Count, seg.SheetName, seg.Rows.Count);
@@ -144,7 +146,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         idx = 0;
         foreach (var seg in lineSegments)
         {
-            BuildRawDataSheet(wb, seg.SheetName, seg.Rows, labName, ExcelTheme.TabGold);
+            BuildRawDataSheet(wb, seg.SheetName, seg.Columns, seg.Rows, labName, ExcelTheme.TabGold);
             logger?.LogInformation(
                 "[NWExcelExport][Sheet] LineLevel {Idx}/{Total} '{Name}' ({Rows:N0} rows)",
                 ++idx, lineSegments.Count, seg.SheetName, seg.Rows.Count);
@@ -1032,7 +1034,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
 
     private static void BuildRawDataSheet(
         XLWorkbook wb, string sheetName,
-        List<Dictionary<string, object?>> rows, string labName, XLColor tabColor)
+        string[] columns, List<object?[]> rows, string labName, XLColor tabColor)
     {
         var ws = wb.AddWorksheet(sheetName);
         ws.TabColor = tabColor;
@@ -1045,7 +1047,6 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             return;
         }
 
-        var columns      = rows[0].Keys.ToArray();
         int colCount     = columns.Length;
         bool truncated   = rows.Count > MaxRawDataRows;
         int rowsToWrite  = Math.Min(rows.Count, MaxRawDataRows);
@@ -1066,9 +1067,9 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         for (int r = 0; r < rowsToWrite; r++)
         {
             var dataRow = rows[r];
-            for (int c = 0; c < columns.Length; c++)
+            for (int c = 0; c < colCount; c++)
             {
-                var val = dataRow[columns[c]];
+                var val = dataRow[c];
                 if (val is not null)
                     SetRawCellValue(ws.Cell(row, c + 1), val);
             }
@@ -1138,31 +1139,38 @@ public static class NorthWestProductionSummaryExcelExportBuilder
 
     // ?? Split helpers (use ChargeEnteredDate — NW primary date column) ????????
 
-    private static int GetChargeEnteredYear(Dictionary<string, object?> row)
+    private static int GetChargeEnteredYear(string[] columns, object?[] row)
     {
-        if (row.TryGetValue("ChargeEnteredDate", out var val))
+        var idx = Array.IndexOf(columns, "ChargeEnteredDate");
+        if (idx >= 0 && idx < row.Length)
         {
+            var val = row[idx];
             if (val is DateTime dt) return dt.Year;
             if (val is string s && DateTime.TryParse(s, out var p)) return p.Year;
         }
-        // Fallback to FirstBilledDate
-        if (row.TryGetValue("FirstBilledDate", out var fb))
+        var fbIdx = Array.IndexOf(columns, "FirstBilledDate");
+        if (fbIdx >= 0 && fbIdx < row.Length)
         {
+            var fb = row[fbIdx];
             if (fb is DateTime dt2) return dt2.Year;
             if (fb is string s2 && DateTime.TryParse(s2, out var p2)) return p2.Year;
         }
         return 0;
     }
 
-    private static int GetChargeEnteredMonth(Dictionary<string, object?> row)
+    private static int GetChargeEnteredMonth(string[] columns, object?[] row)
     {
-        if (row.TryGetValue("ChargeEnteredDate", out var val))
+        var idx = Array.IndexOf(columns, "ChargeEnteredDate");
+        if (idx >= 0 && idx < row.Length)
         {
+            var val = row[idx];
             if (val is DateTime dt) return dt.Month;
             if (val is string s && DateTime.TryParse(s, out var p)) return p.Month;
         }
-        if (row.TryGetValue("FirstBilledDate", out var fb))
+        var fbIdx = Array.IndexOf(columns, "FirstBilledDate");
+        if (fbIdx >= 0 && fbIdx < row.Length)
         {
+            var fb = row[fbIdx];
             if (fb is DateTime dt2) return dt2.Month;
             if (fb is string s2 && DateTime.TryParse(s2, out var p2)) return p2.Month;
         }
