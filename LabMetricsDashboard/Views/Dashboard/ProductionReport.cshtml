@@ -1,4 +1,5 @@
-﻿@model LabMetricsDashboard.Models.ProductionReportViewModel
+﻿@using LRN.ProductionReports.Models
+@model LRN.ProductionReports.Models.ProductionReportViewModel
 @{
     ViewData["Title"]       = $"Production Report – {Model.SelectedLab}";
     ViewData["SelectedLab"] = Model.SelectedLab;
@@ -33,13 +34,13 @@
         return new DateTime(int.Parse(parts[0]), int.Parse(parts[1]), 1).ToString("MMM");
     }
 
-    int CellClaims(Dictionary<string, LabMetricsDashboard.Models.ProductionMonthCell>? d, string mk)
+    int CellClaims(Dictionary<string, ProductionMonthCell>? d, string mk)
         => d is not null && d.TryGetValue(mk, out var c) ? c.ClaimCount : 0;
-    decimal CellCharges(Dictionary<string, LabMetricsDashboard.Models.ProductionMonthCell>? d, string mk)
+    decimal CellCharges(Dictionary<string, ProductionMonthCell>? d, string mk)
         => d is not null && d.TryGetValue(mk, out var c) ? c.BilledCharges : 0m;
-    int YearClaims(Dictionary<int, LabMetricsDashboard.Models.ProductionYearTotal>? d, int y)
+    int YearClaims(Dictionary<int, ProductionYearTotal>? d, int y)
         => d is not null && d.TryGetValue(y, out var t) ? t.ClaimCount : 0;
-    decimal YearCharges(Dictionary<int, LabMetricsDashboard.Models.ProductionYearTotal>? d, int y)
+    decimal YearCharges(Dictionary<int, ProductionYearTotal>? d, int y)
         => d is not null && d.TryGetValue(y, out var t) ? t.BilledCharges : 0m;
 
     int GrandYearClaims(int year) =>
@@ -72,16 +73,16 @@
 
     // Payer X Panel helpers
     var pxpPanels = Model.PayerPanelColumns;
-    int PxpClaims(Dictionary<string, LabMetricsDashboard.Models.ProductionMonthCell>? d, string pk)
+    int PxpClaims(Dictionary<string, ProductionMonthCell>? d, string pk)
         => d is not null && d.TryGetValue(pk, out var c) ? c.ClaimCount : 0;
-    decimal PxpCharges(Dictionary<string, LabMetricsDashboard.Models.ProductionMonthCell>? d, string pk)
+    decimal PxpCharges(Dictionary<string, ProductionMonthCell>? d, string pk)
         => d is not null && d.TryGetValue(pk, out var c) ? c.BilledCharges : 0m;
 
     // Unbilled X Aging helpers
-    var agingBuckets = LabMetricsDashboard.Models.AgingBuckets.All;
-    int UaClaims(Dictionary<string, LabMetricsDashboard.Models.ProductionMonthCell>? d, string bk)
+    var agingBuckets = AgingBuckets.All;
+    int UaClaims(Dictionary<string, ProductionMonthCell>? d, string bk)
         => d is not null && d.TryGetValue(bk, out var c) ? c.ClaimCount : 0;
-    decimal UaCharges(Dictionary<string, LabMetricsDashboard.Models.ProductionMonthCell>? d, string bk)
+    decimal UaCharges(Dictionary<string, ProductionMonthCell>? d, string bk)
         => d is not null && d.TryGetValue(bk, out var c) ? c.BilledCharges : 0m;
 
     // CPT Breakdown helpers
@@ -92,17 +93,17 @@
         .OrderBy(g => g.Key)
         .ToDictionary(g => g.Key, g => g.OrderBy(m => m).ToList());
 
-    decimal CptUnits(Dictionary<string, LabMetricsDashboard.Models.CptBreakdownCell>? d, string mk)
+    decimal CptUnits(Dictionary<string, CptBreakdownCell>? d, string mk)
         => d is not null && d.TryGetValue(mk, out var c) ? c.Units : 0m;
-    decimal CptCharges(Dictionary<string, LabMetricsDashboard.Models.CptBreakdownCell>? d, string mk)
+    decimal CptCharges(Dictionary<string, CptBreakdownCell>? d, string mk)
         => d is not null && d.TryGetValue(mk, out var c) ? c.BilledCharges : 0m;
-    int CptClaims(Dictionary<string, LabMetricsDashboard.Models.CptBreakdownCell>? d, string mk)
+    int CptClaims(Dictionary<string, CptBreakdownCell>? d, string mk)
         => d is not null && d.TryGetValue(mk, out var c) ? c.ClaimCount : 0;
-    decimal CptYearUnits(Dictionary<int, LabMetricsDashboard.Models.CptBreakdownCell>? d, int y)
+    decimal CptYearUnits(Dictionary<int, CptBreakdownCell>? d, int y)
         => d is not null && d.TryGetValue(y, out var t) ? t.Units : 0m;
-    decimal CptYearCharges(Dictionary<int, LabMetricsDashboard.Models.CptBreakdownCell>? d, int y)
+    decimal CptYearCharges(Dictionary<int, CptBreakdownCell>? d, int y)
         => d is not null && d.TryGetValue(y, out var t) ? t.BilledCharges : 0m;
-    int CptYearClaims(Dictionary<int, LabMetricsDashboard.Models.CptBreakdownCell>? d, int y)
+    int CptYearClaims(Dictionary<int, CptBreakdownCell>? d, int y)
         => d is not null && d.TryGetValue(y, out var t) ? t.ClaimCount : 0;
     decimal CptGrandYearUnits(int year) =>
         Model.CptBreakdownGrandByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value.Units);
@@ -1430,13 +1431,13 @@ th.pr-month-data, td.pr-month-data {
                                         var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
                                         foreach (var mk in mons)
                                         {
-                                            <th class="pr-month-data">No. of Claims</th>
+                                            <th class="pr-month-data">@Model.CptUnitsLabel</th>
                                             <th class="pr-month-data">Billed Amount</th>
                                         }
-                                        <th class="pr-year-total">No. of Claims</th>
+                                        <th class="pr-year-total">@Model.CptUnitsLabel</th>
                                         <th class="pr-year-total">Billed Amount</th>
                                     }
-                                    <th class="pr-grand-total">No. of Claims</th>
+                                    <th class="pr-grand-total">@Model.CptUnitsLabel</th>
                                     <th class="pr-grand-total">Billed Amount</th>
                                 </tr>
                             </thead>

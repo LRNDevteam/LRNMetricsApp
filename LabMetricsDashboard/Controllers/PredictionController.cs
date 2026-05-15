@@ -106,6 +106,31 @@ public class PredictionController : Controller
                 _logger.LogInformation("[{Lab}] After global filter (ForecastPayability + ExpPmtDate < {WeekStart}): {Count} records.",
                     selectedLab, weekStart, baseDataset.Count);
 
+                if (baseDataset.Count == 0 && rawRecords.Count > 0)
+                {
+                    var forecastOnly = rawRecords
+                        .Where(r => PredictionReportParserService.IsForecastPayable(r.ForecastingPayability))
+                        .ToList();
+
+                    var parseableDates = forecastOnly.Count == 0
+                        ? 0
+                        : forecastOnly.Count(r => PredictionReportParserService.TryParseDate(r.ExpectedPaymentDate, out _));
+
+                    _logger.LogWarning(
+                        "[{Lab}] DB returned {RawCount} rows but strict Prediction filter returned 0. " +
+                        "Forecast-only rows={ForecastCount}; parseable ExpectedPaymentDate rows={ParseableDates}. " +
+                        "Falling back to forecast-only rows so the UI can display available prediction data. " +
+                        "Sample ForecastingPayability=[{ForecastSamples}], ExpectedPaymentDate=[{DateSamples}]",
+                        selectedLab,
+                        rawRecords.Count,
+                        forecastOnly.Count,
+                        parseableDates,
+                        string.Join(" | ", rawRecords.Select(r => r.ForecastingPayability).Where(v => !string.IsNullOrWhiteSpace(v)).Distinct().Take(8)),
+                        string.Join(" | ", rawRecords.Select(r => r.ExpectedPaymentDate).Where(v => !string.IsNullOrWhiteSpace(v)).Distinct().Take(8)));
+
+                    baseDataset = forecastOnly.Count > 0 ? forecastOnly : rawRecords;
+                }
+
                 // If the SP returned 0 rows, run a diagnostic probe so the page can
                 // explain *why* the dataset is empty (table missing, SP missing,
                 // never populated for this lab, etc.) instead of rendering blanks.
@@ -383,11 +408,14 @@ public class PredictionController : Controller
             weeks.Add(new WeekRange(wkStart, wkStart.AddDays(6)));
         }
 
+        var summaryWeeks = BuildForecastWeeksWithPrior(weeks);
+
         var rangeStart = weeks[0].Start;
         var rangeEnd   = weeks[^1].End;
 
         // Load records and filter to the 4-week window with ForecastingPayability check
         List<PredictionRecord> inRangeRecords;
+        List<PredictionRecord> summaryRecords;
         bool usingDb = labConfig?.DBEnabled == true;
 
         if (usingDb)
@@ -402,8 +430,26 @@ public class PredictionController : Controller
             inRangeRecords = PredictionReportParserService.ApplyForecastDateRangeFilter(
                 rawRecords, rangeStart, rangeEnd.AddDays(1));
 
+            summaryRecords = PredictionReportParserService.ApplyForecastDateRangeFilter(
+                rawRecords, DateOnly.MinValue, rangeEnd.AddDays(1));
+
         _logger.LogInformation("[{Lab}] ForecastingSummary in-range rows ({Start}–{End}): {Count}",
                 selectedLab, rangeStart, rangeEnd, inRangeRecords.Count);
+
+            if (inRangeRecords.Count == 0 && rawRecords.Count > 0)
+            {
+                var forecastOnly = rawRecords
+                    .Where(r => PredictionReportParserService.IsForecastPayable(r.ForecastingPayability))
+                    .ToList();
+
+                _logger.LogWarning(
+                    "[{Lab}] ForecastingSummary DB returned {RawCount} rows but 4-week window returned 0. " +
+                    "Falling back to forecast-only rows ({ForecastCount}) so the page can display available data.",
+                    selectedLab, rawRecords.Count, forecastOnly.Count);
+
+                inRangeRecords = forecastOnly.Count > 0 ? forecastOnly : rawRecords;
+                summaryRecords = inRangeRecords;
+            }
         }
         else
         {
@@ -414,10 +460,12 @@ public class PredictionController : Controller
             var allParsed = filePath is not null ? _parser.Parse(filePath) : new List<PredictionRecord>();
             inRangeRecords = PredictionReportParserService.ApplyForecastDateRangeFilter(
                 allParsed, rangeStart, rangeEnd.AddDays(1));
+            summaryRecords = PredictionReportParserService.ApplyForecastDateRangeFilter(
+                allParsed, DateOnly.MinValue, rangeEnd.AddDays(1));
         }
 
         // Detect when there is no data in the 4-week window
-        bool noDataForRange = inRangeRecords.Count == 0;
+        bool noDataForRange = inRangeRecords.Count == 0 && summaryRecords.Count == 0;
         DateOnly? latestDataDate = null;
 
         if (noDataForRange)
@@ -449,9 +497,9 @@ public class PredictionController : Controller
         }
 
         // All-data summaries
-        var medianSummary = BuildWeeklySummary(inRangeRecords, weeks,
+        var medianSummary = BuildWeeklySummary(summaryRecords, summaryWeeks,
             r => r.MedianAllowedAmountSameLab, r => r.MedianInsurancePaidSameLab);
-        var modeSummary = BuildWeeklySummary(inRangeRecords, weeks,
+        var modeSummary = BuildWeeklySummary(summaryRecords, summaryWeeks,
             r => r.ModeAllowedAmountSameLab, r => r.ModeInsurancePaidSameLab);
 
         // Filter option lists (from in-range records)
@@ -950,10 +998,13 @@ public class PredictionController : Controller
             weeks.Add(new WeekRange(wkStart, wkStart.AddDays(6)));
         }
 
+        var summaryWeeks = BuildForecastWeeksWithPrior(weeks);
+
         var rangeStart = weeks[0].Start;
         var rangeEnd   = weeks[^1].End;
 
         List<PredictionRecord> inRangeRecords;
+        List<PredictionRecord> summaryRecords;
         bool usingDb = labConfig?.DBEnabled == true;
 
         if (usingDb)
@@ -963,6 +1014,8 @@ public class PredictionController : Controller
                 cancellationToken: HttpContext.RequestAborted);
             inRangeRecords = PredictionReportParserService.ApplyForecastDateRangeFilter(
                 rawRecords, rangeStart, rangeEnd.AddDays(1));
+            summaryRecords = PredictionReportParserService.ApplyForecastDateRangeFilter(
+                rawRecords, DateOnly.MinValue, rangeEnd.AddDays(1));
         }
         else
         {
@@ -972,6 +1025,8 @@ public class PredictionController : Controller
             var allParsed = filePath is not null ? _parser.Parse(filePath) : new List<PredictionRecord>();
             inRangeRecords = PredictionReportParserService.ApplyForecastDateRangeFilter(
                 allParsed, rangeStart, rangeEnd.AddDays(1));
+            summaryRecords = PredictionReportParserService.ApplyForecastDateRangeFilter(
+                allParsed, DateOnly.MinValue, rangeEnd.AddDays(1));
         }
 
         return new ForecastingSummaryViewModel
@@ -980,9 +1035,9 @@ public class PredictionController : Controller
             PredictionAvailable  = true,
             CurrentWeekStartDate = weekStart,
             TotalRecordsInRange  = inRangeRecords.Count,
-            MedianSummary = BuildWeeklySummary(inRangeRecords, weeks,
+            MedianSummary = BuildWeeklySummary(summaryRecords, summaryWeeks,
                 r => r.MedianAllowedAmountSameLab, r => r.MedianInsurancePaidSameLab),
-            ModeSummary = BuildWeeklySummary(inRangeRecords, weeks,
+            ModeSummary = BuildWeeklySummary(summaryRecords, summaryWeeks,
                 r => r.ModeAllowedAmountSameLab, r => r.ModeInsurancePaidSameLab),
         };
     }
@@ -1071,20 +1126,48 @@ public class PredictionController : Controller
     /// Builds a weekly forecast summary (Median or Mode) by assigning each record
     /// to a week bin based on its ExpectedPaymentDate and grouping by payer.
     /// </summary>
+    private static IReadOnlyList<WeekRange> BuildForecastWeeksWithPrior(IReadOnlyList<WeekRange> weeks)
+    {
+        if (weeks.Count == 0) return weeks;
+
+        var firstWeek = weeks[0];
+        var result = new List<WeekRange>(weeks.Count + 1)
+        {
+            new(
+                DateOnly.MinValue,
+                firstWeek.Start.AddDays(-1),
+                $"Prior to {firstWeek.Label}",
+                IncludeBeforeStart: true)
+        };
+        result.AddRange(weeks);
+        return result;
+    }
+
     private static WeeklyForecastSummary BuildWeeklySummary(
         IReadOnlyList<PredictionRecord> records,
         IReadOnlyList<WeekRange> weeks,
         Func<PredictionRecord, decimal> allowedSelector,
         Func<PredictionRecord, decimal> paidSelector)
     {
-        // Assign each record to its week bin (Mon–Sun)
+        // Assign each record to its week bin. A synthetic prior bucket, when present,
+        // captures all records before the first real week.
         var recordsWithWeek = new List<(PredictionRecord Rec, DateOnly WeekStart)>();
+        var priorBucket = weeks.FirstOrDefault(w => w.IncludeBeforeStart);
+        var normalWeeks = weeks.Where(w => !w.IncludeBeforeStart).ToList();
+        var firstNormalWeekStart = normalWeeks.Count > 0 ? normalWeeks[0].Start : (DateOnly?)null;
+
         foreach (var r in records)
         {
             if (!PredictionReportParserService.TryParseDate(r.ExpectedPaymentDate, out var pmtDate))
                 continue;
 
-            foreach (var wk in weeks)
+            if (priorBucket is not null && firstNormalWeekStart.HasValue && pmtDate < firstNormalWeekStart.Value)
+            {
+                recordsWithWeek.Add((r, priorBucket.Start));
+                continue;
+            }
+
+            foreach (var wk in normalWeeks)
             {
                 if (pmtDate >= wk.Start && pmtDate <= wk.End)
                 {

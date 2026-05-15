@@ -31,7 +31,7 @@
             @* Summary row (label A) *@
             <tr class="summary-row">
                 <td class="fw-bold text-center">A</td>
-                <td class="desc"></td>
+                <td class="desc">@label</td>
                 @foreach (var wk in Model.Weeks)
                 {
                     var amt = Model.Totals.WeekAmounts.GetValueOrDefault(wk.Start);
