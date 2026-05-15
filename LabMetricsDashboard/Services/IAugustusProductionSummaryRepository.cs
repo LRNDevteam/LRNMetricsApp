@@ -1,3 +1,11 @@
+using SharedCodingResult = LRN.ProductionReports.Services.CodingResult;
+using SharedCptBreakdownResult = LRN.ProductionReports.Services.CptBreakdownResult;
+using SharedPayerBreakdownResult = LRN.ProductionReports.Services.PayerBreakdownResult;
+using SharedPayerPanelResult = LRN.ProductionReports.Services.PayerPanelResult;
+using SharedProductionReportResult = LRN.ProductionReports.Services.ProductionReportResult;
+using SharedUnbilledAgingResult = LRN.ProductionReports.Services.UnbilledAgingResult;
+using SharedWeeklyClaimVolumeResult = LRN.ProductionReports.Services.WeeklyClaimVolumeResult;
+
 namespace LabMetricsDashboard.Services;
 
 /// <summary>
@@ -24,7 +32,7 @@ public interface IAugustusProductionSummaryRepository
         /// snapshot table (fast path). When any filter is supplied the SP aggregates live from
         /// <c>dbo.ClaimLevelData</c> using the same Augustus filter semantics.
         /// </remarks>
-        Task<ProductionReportResult> GetMonthlyAsync(
+        Task<SharedProductionReportResult> GetMonthlyAsync(
             string connectionString,
             List<string>? filterPayerNames = null,
             List<string>? filterPanelNames = null,
@@ -38,7 +46,7 @@ public interface IAugustusProductionSummaryRepository
 
         /// <summary>Reads Aug_WeeklyBilledProductionSummary ? last-4-week panel + top-3 payer pivot.</summary>
         /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
-        Task<WeeklyClaimVolumeResult> GetWeeklyAsync(
+        Task<SharedWeeklyClaimVolumeResult> GetWeeklyAsync(
             string connectionString,
             List<string>? filterPayerNames = null,
             List<string>? filterPanelNames = null,
@@ -52,7 +60,7 @@ public interface IAugustusProductionSummaryRepository
 
         /// <summary>Reads Aug_CodingPanelSummary + Aug_CodingCPTDetail ? coding panel + CPT drill-down.</summary>
         /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
-        Task<CodingResult> GetCodingAsync(
+        Task<SharedCodingResult> GetCodingAsync(
             string connectionString,
             List<string>? filterPayerNames = null,
             List<string>? filterPanelNames = null,
@@ -66,7 +74,7 @@ public interface IAugustusProductionSummaryRepository
 
         /// <summary>Reads Aug_PayerBreakdown ? payer × month pivot.</summary>
         /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
-        Task<PayerBreakdownResult> GetPayerBreakdownAsync(
+        Task<SharedPayerBreakdownResult> GetPayerBreakdownAsync(
             string connectionString,
             List<string>? filterPayerNames = null,
             List<string>? filterPanelNames = null,
@@ -80,7 +88,7 @@ public interface IAugustusProductionSummaryRepository
 
         /// <summary>Reads Aug_PayerByPanel ? payer × panel pivot.</summary>
         /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
-        Task<PayerPanelResult> GetPayerByPanelAsync(
+        Task<SharedPayerPanelResult> GetPayerByPanelAsync(
             string connectionString,
             List<string>? filterPayerNames = null,
             List<string>? filterPanelNames = null,
@@ -94,7 +102,7 @@ public interface IAugustusProductionSummaryRepository
 
         /// <summary>Reads Aug_UnbilledAging ? panel × aging bucket pivot.</summary>
         /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
-        Task<UnbilledAgingResult> GetUnbilledAgingAsync(
+        Task<SharedUnbilledAgingResult> GetUnbilledAgingAsync(
             string connectionString,
             List<string>? filterPayerNames = null,
             List<string>? filterPanelNames = null,
@@ -108,7 +116,7 @@ public interface IAugustusProductionSummaryRepository
 
         /// <summary>Reads Aug_CPTBreakdown ? CPT code × month pivot.</summary>
         /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
-        Task<CptBreakdownResult> GetCptBreakdownAsync(
+        Task<SharedCptBreakdownResult> GetCptBreakdownAsync(
             string connectionString,
             List<string>? filterPayerNames = null,
             List<string>? filterPanelNames = null,

@@ -1,4 +1,11 @@
-using LabMetricsDashboard.Models;
+using LRN.ProductionReports.Models;
+using SharedCodingResult = LRN.ProductionReports.Services.CodingResult;
+using SharedCptBreakdownResult = LRN.ProductionReports.Services.CptBreakdownResult;
+using SharedPayerBreakdownResult = LRN.ProductionReports.Services.PayerBreakdownResult;
+using SharedPayerPanelResult = LRN.ProductionReports.Services.PayerPanelResult;
+using SharedProductionReportResult = LRN.ProductionReports.Services.ProductionReportResult;
+using SharedUnbilledAgingResult = LRN.ProductionReports.Services.UnbilledAgingResult;
+using SharedWeeklyClaimVolumeResult = LRN.ProductionReports.Services.WeeklyClaimVolumeResult;
 
 namespace LabMetricsDashboard.Services;
 
@@ -21,26 +28,26 @@ public interface ILabProductionSummaryRepository
     /// Uses <c>TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL</c> so the lists match
     /// what the aggregate SPs include.
     /// </summary>
+    /// <summary>
+    /// <c>true</c> when this repository is backed by the Certus lab tables (<c>Cert_</c> prefix).
+    /// The CPT Breakdown units column for Certus represents <c>BilledUnits</c>, not a claim count.
+    /// </summary>
+    bool IsCertus { get; }
+
+    bool SupportsFilteredMonthlyWeeklySp { get; }
+
     Task<(List<string> PayerNames, List<string> PanelNames)> GetFilterOptionsAsync(
         string connectionString, CancellationToken ct = default);
 
     /// <summary>
     /// <c>true</c> when this lab's <c>usp_Get{Prefix}MonthlyBilledProductionSummary</c>
-    /// and <c>usp_Get{Prefix}WeeklyBilledProductionSummary</c> stored procedures
-    /// accept filter parameters and aggregate live from <c>dbo.ClaimLevelData</c>
-    /// when filters are supplied. When <c>false</c>, callers must fall back to
-    /// <see cref="IProductionReportRepository"/> for the filtered query.
-    /// </summary>
-    bool SupportsFilteredMonthlyWeeklySp { get; }
-
-    /// <summary>Reads <c>{prefix}MonthlyBilledProductionSummary</c> ? monthly panel + top-3 payer pivot.</summary>
     /// <remarks>
     /// When <see cref="SupportsFilteredMonthlyWeeklySp"/> is <c>true</c>, the optional filter
     /// parameters are passed to the read SP which switches to a live aggregation against
     /// <c>dbo.ClaimLevelData</c>. When all filter parameters are <c>null</c> the SP returns
     /// rows from the pre-aggregated snapshot table (fast path).
     /// </remarks>
-    Task<ProductionReportResult> GetMonthlyAsync(
+    Task<SharedProductionReportResult> GetMonthlyAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -54,7 +61,7 @@ public interface ILabProductionSummaryRepository
 
     /// <summary>Reads <c>{prefix}WeeklyBilledProductionSummary</c> ? last-4-week panel + top-3 payer pivot.</summary>
     /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
-    Task<WeeklyClaimVolumeResult> GetWeeklyAsync(
+    Task<SharedWeeklyClaimVolumeResult> GetWeeklyAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -72,7 +79,7 @@ public interface ILabProductionSummaryRepository
     /// (<see cref="LabSummaryTableConfig.HasCodingTables"/> is <c>false</c>).
     /// </summary>
     /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
-    Task<CodingResult> GetCodingAsync(
+    Task<SharedCodingResult> GetCodingAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -86,7 +93,7 @@ public interface ILabProductionSummaryRepository
 
     /// <summary>Reads <c>{prefix}PayerBreakdown</c> ? payer × month pivot.</summary>
     /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
-    Task<PayerBreakdownResult> GetPayerBreakdownAsync(
+    Task<SharedPayerBreakdownResult> GetPayerBreakdownAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -100,7 +107,7 @@ public interface ILabProductionSummaryRepository
 
     /// <summary>Reads <c>{prefix}PayerByPanel</c> ? payer × panel pivot.</summary>
     /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
-    Task<PayerPanelResult> GetPayerByPanelAsync(
+    Task<SharedPayerPanelResult> GetPayerByPanelAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -117,7 +124,7 @@ public interface ILabProductionSummaryRepository
     /// The row key column and bucket column vary per lab (see <see cref="LabSummaryTableConfig"/>).
     /// </summary>
     /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
-    Task<UnbilledAgingResult> GetUnbilledAgingAsync(
+    Task<SharedUnbilledAgingResult> GetUnbilledAgingAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -131,7 +138,7 @@ public interface ILabProductionSummaryRepository
 
     /// <summary>Reads <c>{prefix}CPTBreakdown</c> ? CPT × month pivot.</summary>
     /// <remarks>See <see cref="GetMonthlyAsync"/> for filter-parameter behaviour.</remarks>
-    Task<CptBreakdownResult> GetCptBreakdownAsync(
+    Task<SharedCptBreakdownResult> GetCptBreakdownAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,

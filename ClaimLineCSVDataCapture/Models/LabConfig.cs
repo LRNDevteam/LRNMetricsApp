@@ -32,6 +32,12 @@ public sealed class LabConfig
     public bool ClaimLineRefresh { get; set; }
 
     /// <summary>
+    /// Optional per-lab Production Summary settings used when generating the
+    /// Production Report Excel from the capture app.
+    /// </summary>
+    public ProductionSummaryConfig? ProductionSummary { get; set; }
+
+    /// <summary>
     /// Combined path: <c>ServerMastersBasePath</c> \ <c>ServerMasterFolderName</c>.
     /// This is where Claim Level and Line Level CSV files are located.
     /// </summary>
@@ -70,4 +76,11 @@ public sealed class LabOutput
     public string Avgs { get; set; } = string.Empty;
     public string Archive { get; set; } = string.Empty;
     public string ConslidatedAvgs { get; set; } = string.Empty;
+}
+
+public sealed class ProductionSummaryConfig
+{
+    public string? Rule { get; set; }
+    public string? WeekRule { get; set; }
+    public string? WeekRange { get; set; }
 }

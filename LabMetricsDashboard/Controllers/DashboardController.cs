@@ -1,6 +1,8 @@
 using LabMetricsDashboard.Models;
 using System.Diagnostics;
 using LabMetricsDashboard.Services;
+using LRN.ProductionReports.Models;
+using LRN.ProductionReports.Services;
 using Microsoft.AspNetCore.Mvc;
 
 
@@ -2062,6 +2064,15 @@ public class DashboardController : Controller
         DateOnly.TryParse(filterFirstBilledFrom, out var fbldFrom);
         DateOnly.TryParse(filterFirstBilledTo, out var fbldTo);
 
+        var hasFilters = filterPayerNames.Count > 0
+            || filterPanelNames.Count > 0
+            || dosFrom != default
+            || dosTo != default
+            || fbFrom != default
+            || fbTo != default
+            || fbldFrom != default
+            || fbldTo != default;
+
         // Resolve the per-lab Production Summary rule (e.g. "Rule1" => use ChargeEnteredDate columns).
         var productionRule = config.ProductionSummary?.Rule;
         // Per-lab Weekly Claim Volume rule. Falls back to the monthly Rule when not configured.
@@ -2614,6 +2625,7 @@ public class DashboardController : Controller
                 CptBreakdownGrandByMonth       = cptResult.GrandTotalByMonth,
                 CptBreakdownGrandTotalUnits    = cptResult.GrandTotalUnits,
                 CptBreakdownGrandTotalCharges  = cptResult.GrandTotalCharges,
+                CptUnitsLabel                  = genericSummaryRepo?.IsCertus == true ? "Billed Units" : "No. of Claims",
                 ReportWeekFolder               = runWeekFolder,
                 ReportRunId                    = runId,
             });
@@ -2670,17 +2682,58 @@ public class DashboardController : Controller
         DateOnly.TryParse(filterFirstBilledFrom, out var fbldFrom);
         DateOnly.TryParse(filterFirstBilledTo, out var fbldTo);
 
+        var hasFilters = filterPayerNames.Count > 0
+            || filterPanelNames.Count > 0
+            || dosFrom != default
+            || dosTo != default
+            || fbFrom != default
+            || fbTo != default
+            || fbldFrom != default
+            || fbldTo != default;
+
         // Resolve the per-lab Production Summary rule (e.g. "Rule1" => use ChargeEnteredDate columns).
         var productionRule = config.ProductionSummary?.Rule;
         // Per-lab Weekly Claim Volume rule. Falls back to the monthly Rule when not configured.
         var weekRule = !string.IsNullOrWhiteSpace(config.ProductionSummary?.WeekRule)
             ? config.ProductionSummary!.WeekRule
+
             : productionRule;
         // Per-lab week boundary (e.g. "Mon to Sun", "Thu to Wed"). Null/empty => Monday-to-Sunday.
         var weekRange = config.ProductionSummary?.WeekRange;
 
         try
         {
+            if (!hasFilters)
+            {
+                var recentReport = TryResolveLatestProductionReportExcel(config.Reports);
+                if (recentReport is null)
+                {
+                    TempData["ExportError"] = $"No pre-generated Production Report Excel was found for {selectedLab}. Please wait for ClaimLineCSVDataCapture to generate it or apply filters to build a live export.";
+                    return RedirectToAction(nameof(ProductionReport), new { lab });
+                }
+
+                Response.Cookies.Append("prExportDone", "1", new CookieOptions
+
+
+                {
+                    Path     = "/",
+                    HttpOnly = false,
+                    SameSite = SameSiteMode.Lax,
+                    MaxAge   = TimeSpan.FromSeconds(30),
+                });
+
+                _logger.LogInformation(
+                    "[ProdExcelExport] No filters for lab '{LabName}' — serving pre-generated workbook: {FilePath}",
+                    selectedLab,
+                    recentReport.FullName);
+
+                return PhysicalFile(
+                    recentReport.FullName,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    recentReport.Name,
+                    enableRangeProcessing: true);
+            }
+
             // ── Master stopwatch + correlation scope ───────────────────────
             var exportSw  = Stopwatch.StartNew();
             var exportJobId = $"{selectedLab}_{DateTime.UtcNow:yyyyMMdd_HHmmss}";
@@ -3012,6 +3065,15 @@ public class DashboardController : Controller
         DateOnly.TryParse(filterFirstBilledFrom, out var fbldFrom);
         DateOnly.TryParse(filterFirstBilledTo,   out var fbldTo);
 
+        var hasFilters = filterPayerNames.Count > 0
+            || filterPanelNames.Count > 0
+            || dosFrom != default
+            || dosTo != default
+            || fbFrom != default
+            || fbTo != default
+            || fbldFrom != default
+            || fbldTo != default;
+
         var payerArg  = filterPayerNames.Count > 0 ? filterPayerNames : null;
         var panelArg  = filterPanelNames.Count > 0 ? filterPanelNames : null;
         var dosFromArg  = dosFrom  != default ? dosFrom  : (DateOnly?)null;
@@ -3023,6 +3085,35 @@ public class DashboardController : Controller
 
         try
         {
+            if (!hasFilters)
+            {
+                var recentReport = TryResolveLatestProductionReportExcel(config.Reports);
+                if (recentReport is null)
+                {
+                    TempData["ExportError"] = $"No pre-generated Production Report Excel was found for {selectedLab}. Please wait for ClaimLineCSVDataCapture to generate it or apply filters to build a live export.";
+                    return RedirectToAction(nameof(ProductionSummaryReport), new { lab });
+                }
+
+                Response.Cookies.Append("prExportDone", "1", new CookieOptions
+                {
+                    Path     = "/",
+                    HttpOnly = false,
+                    SameSite = SameSiteMode.Lax,
+                    MaxAge   = TimeSpan.FromSeconds(30),
+                });
+
+                _logger.LogInformation(
+                    "[NWExcelExport] No filters for lab '{LabName}' — serving pre-generated workbook: {FilePath}",
+                    selectedLab,
+                    recentReport.FullName);
+
+                return PhysicalFile(
+                    recentReport.FullName,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    recentReport.Name,
+                    enableRangeProcessing: true);
+            }
+
             var sw = System.Diagnostics.Stopwatch.StartNew();
             _logger.LogInformation(
                 "[NWExcelExport] START Lab={Lab} Payers={Payers} Panels={Panels}",
@@ -3218,6 +3309,20 @@ public class DashboardController : Controller
             dosTo != default ? dosTo : null,
             fbFrom != default ? fbFrom : null,
             fbTo != default ? fbTo : null);
+    }
+
+    /// <summary>
+    /// Returns the most recent pre-generated workbook from the configured reports folder.
+    /// </summary>
+    private static FileInfo? TryResolveLatestProductionReportExcel(string? reportsRoot)
+    {
+        if (string.IsNullOrWhiteSpace(reportsRoot) || !Directory.Exists(reportsRoot))
+            return null;
+
+        return Directory
+            .EnumerateFiles(reportsRoot, "*.xlsx", SearchOption.AllDirectories)
+            .Select(path => new FileInfo(path))
+            .MaxBy(file => file.LastWriteTimeUtc);
     }
 
 }

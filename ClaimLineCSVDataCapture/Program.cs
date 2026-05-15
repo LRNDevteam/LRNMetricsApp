@@ -1,7 +1,10 @@
 ﻿using System.Text.Json;
 using ClaimLineCSVDataCapture.Models;
 using ClaimLineCSVDataCapture.Services;
+using LRN.ProductionReports.Models;
+using LRN.ProductionReports.Services;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 var cfg = new ConfigurationBuilder()
@@ -54,9 +57,14 @@ log.Blank();
 
 // ── Load lab configs ──────────────────────────────────────────────────────────
 var labConfigs = LabConfigLoader.LoadAll(labConfigFolder, labNames, log);
+var productionReportRepo = new SqlProductionReportRepository(NullLogger<SqlProductionReportRepository>.Instance);
 
 int labsProcessed = 0, labsSkipped = 0, labsFailed = 0;
 var processedLabNames = new List<string>();
+
+// Production Report tasks are started per-lab and awaited after the main loop
+// so that large-data labs don't block CSV ingestion for other labs.
+var reportTasks = new List<(string LabName, Task Task)>();
 
 foreach (var lab in labConfigs)
 {
@@ -595,6 +603,27 @@ foreach (var lab in labConfigs)
             }
         }
 
+        // ── Production Report Excel generation — started in background ─────────
+        // Queued here so the main loop continues to the next lab immediately.
+        // All tasks are awaited after the loop before the process exits.
+        var capturedLab1 = lab; // capture for closure
+        reportTasks.Add((lab.LabName, Task.Run(async () =>
+        {
+            try
+            {
+                var reportPath = await GenerateProductionReportExcelAsync(
+                    capturedLab1,
+                    workingFolder,
+                    productionReportRepo,
+                    log);
+                log.Info($"  [Prod Excel] [{capturedLab1.LabName}] Saved to: {reportPath}");
+            }
+            catch (Exception ex)
+            {
+                log.Error($"  [Prod Excel] [{capturedLab1.LabName}] Generation failed: {ex.Message}");
+            }
+        })));
+
         processedLabNames.Add(lab.LabName);
         labsProcessed++;
 
@@ -609,7 +638,42 @@ foreach (var lab in labConfigs)
         labsSkipped++;
     }
 
+    // ── Production Report Excel generation (runs regardless of insert outcome) ──
+    // Always check whether this week's report exists; generate it if missing.
+    // Only queued when no task was already started for this lab above
+    // (i.e. when claimInserted && lineInserted was false).
+    if (lab.ClaimLineInsert && !string.IsNullOrWhiteSpace(lab.DbConnectionString)
+        && !reportTasks.Any(t => t.LabName.Equals(lab.LabName, StringComparison.OrdinalIgnoreCase)))
+    {
+        var capturedLab2 = lab; // capture for closure
+        reportTasks.Add((lab.LabName, Task.Run(async () =>
+        {
+            try
+            {
+                var reportPath = await GenerateProductionReportExcelAsync(
+                    capturedLab2,
+                    workingFolder,
+                    productionReportRepo,
+                    log);
+                log.Info($"  [Prod Excel] [{capturedLab2.LabName}] Saved to: {reportPath}");
+            }
+            catch (Exception ex)
+            {
+                log.Error($"  [Prod Excel] [{capturedLab2.LabName}] Generation failed: {ex.Message}");
+            }
+        })));
+    }
+
     log.Blank();
+}
+
+// ── Await all background Production Report tasks ─────────────────────────────
+if (reportTasks.Count > 0)
+{
+    log.Header("Waiting for Production Reports");
+    log.Info($"  {reportTasks.Count} report task(s) running in background — waiting for completion…");
+    await Task.WhenAll(reportTasks.Select(t => t.Task));
+    log.Info("  All Production Report tasks completed.");
 }
 
 // ── Final report ──────────────────────────────────────────────────────────────
@@ -655,6 +719,275 @@ static void RunCollectionSummary(
     {
         log.Error($"  [{tag}] Unexpected error running Collection Summary SPs: {ex.Message}");
     }
+}
+
+static async Task<string> GenerateProductionReportExcelAsync(
+    ClaimLineCSVDataCapture.Models.LabConfig lab,
+    string workingFolder,
+    LRN.ProductionReports.Services.IProductionReportRepository productionReportRepo,
+    ClaimLineCSVDataCapture.Services.AppLogger log,
+    CancellationToken ct = default)
+{
+    ArgumentNullException.ThrowIfNull(lab);
+    ArgumentNullException.ThrowIfNull(productionReportRepo);
+    ArgumentNullException.ThrowIfNull(log);
+    ArgumentException.ThrowIfNullOrWhiteSpace(workingFolder);
+    ArgumentException.ThrowIfNullOrWhiteSpace(lab.DbConnectionString);
+
+    var (productionRule, weekRule, weekRange) = ResolveProductionSummarySettings(lab);
+
+    log.Info(
+        $"  [Prod Excel] Building workbook — Rule={productionRule ?? "Default"}, WeekRule={weekRule ?? "Default"}, WeekRange={weekRange ?? "Mon to Sun"}.");
+
+    // ── Resolve output path before any DB work so we can skip if already generated ──
+    var outputFolder = ResolveProductionReportOutputFolder(lab, workingFolder);
+    Directory.CreateDirectory(outputFolder);
+
+    var processingFolder = Path.Combine(outputFolder, "Processing");
+    Directory.CreateDirectory(processingFolder);
+
+    var safeLabName = SanitizeFileName(lab.LabName);
+    var (weekStart, weekEnd) = ResolveCurrentWeekBounds(weekRange);
+    var fileName   = $"{safeLabName}_ProductionReport_{weekStart:yyyyMMdd}-{weekEnd:yyyyMMdd}.xlsx";
+    var outputPath = Path.Combine(outputFolder, fileName);
+    var processingPath = Path.Combine(processingFolder, fileName);
+
+    if (File.Exists(outputPath))
+    {
+        log.Info($"  [Prod Excel] Report already exists for this week — skipping generation. ({outputPath})");
+        return outputPath;
+    }
+
+    if (File.Exists(processingPath))
+    {
+        log.Info($"  [Prod Excel] Removing stale processing file: {processingPath}");
+        File.Delete(processingPath);
+    }
+
+    var connStr = lab.DbConnectionString;
+
+    // ── Summary tabs (lightweight aggregates) — fetch in parallel ───────────────
+    var monthlyTask        = productionReportRepo.GetMonthlyClaimVolumeAsync(connStr, rule: productionRule, ct: ct);
+    var weeklyTask         = productionReportRepo.GetWeeklyClaimVolumeAsync(connStr, rule: weekRule, weekRange: weekRange, ct: ct);
+    var codingTask         = productionReportRepo.GetCodingAsync(connStr, ct: ct);
+    var payerBreakdownTask = productionReportRepo.GetPayerBreakdownAsync(connStr, rule: productionRule, ct: ct);
+    var payerPanelTask     = productionReportRepo.GetPayerPanelAsync(connStr, rule: productionRule, ct: ct);
+    var unbilledAgingTask  = productionReportRepo.GetUnbilledAgingAsync(connStr, rule: productionRule, ct: ct);
+    var cptBreakdownTask   = productionReportRepo.GetCptBreakdownAsync(connStr, ct: ct, rule: productionRule);
+    var runInfoTask        = productionReportRepo.GetRunInfoAsync(connStr, ct);
+
+    await Task.WhenAll(
+        monthlyTask, weeklyTask, codingTask,
+        payerBreakdownTask, payerPanelTask,
+        unbilledAgingTask, cptBreakdownTask,
+        runInfoTask);
+
+    var monthlyResult       = monthlyTask.Result;
+    var weeklyResult        = weeklyTask.Result;
+    var codingResult        = codingTask.Result;
+    var payerBreakdownResult= payerBreakdownTask.Result;
+    var payerPanelResult    = payerPanelTask.Result;
+    var unbilledAgingResult = unbilledAgingTask.Result;
+    var cptBreakdownResult  = cptBreakdownTask.Result;
+    var (reportWeekFolder, reportRunId) = runInfoTask.Result;
+
+    var vm = new ProductionReportViewModel
+    {
+        SelectedLab = lab.LabName,
+        ProductionSummaryRule = productionRule,
+        ProductionSummaryWeekRule = weekRule,
+        ProductionSummaryWeekRange = weekRange,
+        PayerNames = monthlyResult.PayerNames,
+        PanelNames = monthlyResult.PanelNames,
+        Months = monthlyResult.Months,
+        Years = monthlyResult.Years,
+        PanelRows = monthlyResult.PanelRows,
+        GrandTotalByMonth = monthlyResult.GrandTotalByMonth,
+        GrandTotalClaims = monthlyResult.GrandTotalClaims,
+        GrandTotalCharges = monthlyResult.GrandTotalCharges,
+        WeekColumns = weeklyResult.WeekColumns,
+        WeeklyPanelRows = weeklyResult.PanelRows,
+        WeeklyGrandTotalByWeek = weeklyResult.GrandTotalByWeek,
+        WeeklyGrandTotalClaims = weeklyResult.GrandTotalClaims,
+        WeeklyGrandTotalCharges = weeklyResult.GrandTotalCharges,
+        CodingPanelRows = codingResult.PanelRows,
+        CodingGrandTotalClaims = codingResult.GrandTotalClaims,
+        CodingGrandTotalCharges = codingResult.GrandTotalCharges,
+        PayerBreakdownMonths = payerBreakdownResult.Months,
+        PayerBreakdownYears = payerBreakdownResult.Years,
+        PayerBreakdownRows = payerBreakdownResult.PayerRows,
+        PayerBreakdownGrandByMonth = payerBreakdownResult.GrandTotalByMonth,
+        PayerBreakdownGrandTotal = payerBreakdownResult.GrandTotal,
+        PayerPanelColumns = payerPanelResult.PanelColumns,
+        PayerPanelRows = payerPanelResult.PayerRows,
+        PayerPanelGrandByPanel = payerPanelResult.GrandTotalByPanel,
+        PayerPanelGrandTotalClaims = payerPanelResult.GrandTotalClaims,
+        PayerPanelGrandTotalCharges = payerPanelResult.GrandTotalCharges,
+        UnbilledAgingRows = unbilledAgingResult.PanelRows,
+        UnbilledAgingGrandByBucket = unbilledAgingResult.GrandTotalByBucket,
+        UnbilledAgingGrandTotalClaims = unbilledAgingResult.GrandTotalClaims,
+        UnbilledAgingGrandTotalCharges = unbilledAgingResult.GrandTotalCharges,
+        CptBreakdownMonths = cptBreakdownResult.Months,
+        CptBreakdownYears = cptBreakdownResult.Years,
+        CptBreakdownRows = cptBreakdownResult.CptRows,
+        CptBreakdownGrandByMonth = cptBreakdownResult.GrandTotalByMonth,
+        CptBreakdownGrandTotalUnits = cptBreakdownResult.GrandTotalUnits,
+        CptBreakdownGrandTotalCharges = cptBreakdownResult.GrandTotalCharges,
+        ReportWeekFolder = reportWeekFolder,
+        ReportRunId = reportRunId,
+    };
+
+    // ── Build workbook with summary tabs only and SAVE it to disk first ────────
+    // The file on disk becomes the buffer for the raw export sheets — we never
+    // hold the full workbook + ClaimLevel + LineLevel in memory at the same time.
+    log.Info($"  [Prod Excel] Saving summary-only workbook to processing folder…");
+    {
+        using var workbook = ProductionReportExcelExportBuilder.CreateWorkbookSummaryOnly(
+            vm, lab.LabName, reportWeekFolder, reportRunId);
+        workbook.SaveAs(processingPath);
+    } // workbook disposed here
+
+    // Force GC so the summary workbook's in-memory state is released before
+    // we start loading the file again to append raw data sheets.
+    GC.Collect();
+    GC.WaitForPendingFinalizers();
+    GC.Collect();
+
+    // ── Append raw export sheets ONE BUCKET AT A TIME ──────────────────────────
+    // For each bucket: load workbook from disk → add ONE worksheet streamed from
+    // SQL → save back to disk → dispose → GC. ClosedXML never holds more than
+    // one bucket's worth of cells in memory at a time.
+    if (productionReportRepo is LRN.ProductionReports.Services.SqlProductionReportRepository sqlRepo)
+    {
+        log.Info($"  [Prod Excel] ClaimLevel: appending sheets to processing file {Path.GetFileName(processingPath)}…");
+        var claimRows = await sqlRepo.AppendSpExportSheetsToFileAsync(
+            processingPath,
+            connStr,
+            bucketSpName: "dbo.usp_GetClaimLevelExportBuckets",
+            dataSpName:   "dbo.usp_GetClaimLevelExportDataByDateRange",
+            baseSheetName: "ClaimLevel",
+            tabColor: ClosedXML.Excel.XLColor.FromHtml("#2E5984"),
+            ct: ct);
+        log.Info($"  [Prod Excel] ClaimLevel complete — {claimRows:N0} total rows written to processing file.");
+
+        log.Info($"  [Prod Excel] LineLevel: appending sheets to processing file {Path.GetFileName(processingPath)}…");
+        var lineRows = await sqlRepo.AppendSpExportSheetsToFileAsync(
+            processingPath,
+            connStr,
+            bucketSpName: "dbo.usp_GetLineLevelExportBuckets",
+            dataSpName:   "dbo.usp_GetLineLevelExportDataByDateRange",
+            baseSheetName: "LineLevel",
+            tabColor: ClosedXML.Excel.XLColor.FromHtml("#C99B1F"),
+            ct: ct);
+        log.Info($"  [Prod Excel] LineLevel complete — {lineRows:N0} total rows written to processing file.");
+
+        log.Info($"  [Prod Excel] Moving processing file to final report folder…");
+        if (File.Exists(outputPath))
+            File.Delete(outputPath);
+        File.Move(processingPath, outputPath);
+        log.Info($"  [Prod Excel] Final report ready: {outputPath}");
+    }
+    else
+    {
+        log.Warn($"  [Prod Excel] Repository is not SqlProductionReportRepository — raw data sheets skipped.");
+    }
+
+    return outputPath;
+}
+
+static (string? Rule, string? WeekRule, string? WeekRange) ResolveProductionSummarySettings(
+    ClaimLineCSVDataCapture.Models.LabConfig lab)
+{
+    ArgumentNullException.ThrowIfNull(lab);
+
+    var configRule = lab.ProductionSummary?.Rule;
+    var configWeekRule = !string.IsNullOrWhiteSpace(lab.ProductionSummary?.WeekRule)
+        ? lab.ProductionSummary!.WeekRule
+        : configRule;
+    var configWeekRange = lab.ProductionSummary?.WeekRange;
+
+    if (!string.IsNullOrWhiteSpace(configRule)
+        || !string.IsNullOrWhiteSpace(configWeekRule)
+        || !string.IsNullOrWhiteSpace(configWeekRange))
+    {
+        return (configRule, configWeekRule, configWeekRange);
+    }
+
+    return lab.LabName switch
+    {
+        var name when name.Equals("Augustus", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("Augustus_Labs", StringComparison.OrdinalIgnoreCase)
+                => ("Rule3", "Rule3", null),
+
+        var name when name.Equals("NorthWest", StringComparison.OrdinalIgnoreCase)
+                => ("Rule4", "Rule4", "Thu to Wed"),
+
+        var name when name.Equals("Certus", StringComparison.OrdinalIgnoreCase)
+                => ("Rule2", "Rule2", null),
+
+        var name when name.Equals("Cove", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("COVE", StringComparison.OrdinalIgnoreCase)
+                => ("Rule5", "Rule5", null),
+
+        var name when name.Equals("Elixir", StringComparison.OrdinalIgnoreCase)
+                => ("Rule5", "Rule5", "Wed to Tue"),
+
+        var name when name.Equals("PCRLabsofAmerica", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("PCRLAPSOfAmerica", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("Beech_Tree", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("BeechTree", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("RisingTides", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("Rising_Tides", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("PhiLife", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("Inhealth_DTR", StringComparison.OrdinalIgnoreCase)
+                => ("Rule1", "Rule1", "Thu to Wed"),
+
+        _ => (null, null, null),
+    };
+}
+
+static string ResolveProductionReportOutputFolder(
+    ClaimLineCSVDataCapture.Models.LabConfig lab,
+    string workingFolder)
+{
+    ArgumentNullException.ThrowIfNull(lab);
+    ArgumentException.ThrowIfNullOrWhiteSpace(workingFolder);
+
+    var baseFolder = !string.IsNullOrWhiteSpace(lab.Output.Reports)
+        ? lab.Output.Reports
+        : Path.Combine(workingFolder, "ProductionReports", SanitizeFileName(lab.LabName));
+
+    return Path.Combine(baseFolder, "Production Report");
+}
+
+static string SanitizeFileName(string name)
+{
+    ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+    return string.Join("_", name.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)).Trim('_');
+}
+
+/// <summary>
+/// Returns the start and end of the current week based on the lab's week-range setting.
+/// E.g. weekRange="Thu to Wed" and today=Monday-2026-05-11 → (2026-05-07, 2026-05-13).
+/// </summary>
+static (DateOnly WeekStart, DateOnly WeekEnd) ResolveCurrentWeekBounds(string? weekRange)
+{
+    // Mirrors WeekRangeHelper.ResolveWeekStart — kept here to avoid exposing the internal class.
+    var weekStartDay = weekRange?.Trim().ToLowerInvariant() switch
+    {
+        "mon to sun" => DayOfWeek.Monday,
+        "tue to mon" => DayOfWeek.Tuesday,
+        "wed to tue" => DayOfWeek.Wednesday,
+        "thu to wed" => DayOfWeek.Thursday,
+        "fri to thu" => DayOfWeek.Friday,
+        _            => DayOfWeek.Monday,
+    };
+
+    var today     = DateOnly.FromDateTime(DateTime.Today);
+    var offset    = ((int)today.DayOfWeek - (int)weekStartDay + 7) % 7;
+    var weekStart = today.AddDays(-offset);
+    return (weekStart, weekStart.AddDays(6));
 }
 
 
