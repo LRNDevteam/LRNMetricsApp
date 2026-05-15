@@ -1,9 +1,6 @@
-using LabMetricsDashboard.Filters;
+﻿using LabMetricsDashboard.Filters;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
-using LabMetricsDashboard.Services.DenialWorkflow;
-using LabMetricsDashboard.Models.DenialWorkflow;
-using LabMetricsDashboard.Services.Security;
 using LRN.ProductionReports.Services;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -15,13 +12,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc.Authorization;
 
 var builder = WebApplication.CreateBuilder(args);
-
-const string DenialWorkflowLocalDevCorsPolicy = "DenialWorkflowLocalDevCors";
-
-// Local React/Vite runs on http://localhost:5173 and calls MVC on https://localhost:44350.
-// For fetch(..., credentials: "include") the auth cookie must be SameSite=None and Secure.
-var useWorkflowCrossOriginCookie = builder.Environment.IsDevelopment()
-	|| builder.Configuration.GetValue<bool>("DenialWorkflowAuth:UseCrossOriginCookies");
 
 // ── File logging ─────────────────────────────────────────────────
 // Writes Warning+ logs (DB errors, crashes) to rolling daily text files.
@@ -303,28 +293,26 @@ builder.Services
 // making the login form return 400 or loop back to the login page.
 builder.Services.AddAntiforgery(options =>
 {
-	//<<<<<<< HEAD
-	//    options.Cookie.Name         = "LRN.Antiforgery";
-	//    options.Cookie.SameSite     = SameSiteMode.Lax;
-	//    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
-	//    options.Cookie.HttpOnly     = true;
-	//=======
-	//	options.Cookie.Name = "LRN.Antiforgery";
-	//	options.Cookie.SameSite = builder.Environment.IsDevelopment() ? SameSiteMode.Lax : SameSiteMode.None;
-		options.Cookie.Path = "/";
-	//	options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
-	//		? CookieSecurePolicy.SameAsRequest
-	//		: CookieSecurePolicy.Always;
-	//	options.Cookie.HttpOnly = true;
-	//>>>>>>> 23cf9fdcfbffecee7d6826a98b7baa4821a4bc13
+    //<<<<<<< HEAD
+    //    options.Cookie.Name         = "LRN.Antiforgery";
+    //    options.Cookie.SameSite     = SameSiteMode.Lax;
+    //    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+    //    options.Cookie.HttpOnly     = true;
+    //=======
+    //	options.Cookie.Name = "LRN.Antiforgery";
+    //	options.Cookie.SameSite = SameSiteMode.Lax;
+    //	options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+    //		? CookieSecurePolicy.SameAsRequest
+    //		: CookieSecurePolicy.Always;
+    //	options.Cookie.HttpOnly = true;
+    //>>>>>>> 23cf9fdcfbffecee7d6826a98b7baa4821a4bc13
 
-	options.Cookie.Name = "LRN.Antiforgery";
-	options.Cookie.SameSite = builder.Environment.IsDevelopment() ? SameSiteMode.Lax : SameSiteMode.None;
-		options.Cookie.Path = "/";
-	options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
-		? CookieSecurePolicy.SameAsRequest
-		: CookieSecurePolicy.Always;
-	options.Cookie.HttpOnly = true;
+    options.Cookie.Name = "LRN.Antiforgery";
+    options.Cookie.SameSite = SameSiteMode.Lax;
+    options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+        ? CookieSecurePolicy.SameAsRequest
+        : CookieSecurePolicy.Always;
+    options.Cookie.HttpOnly = true;
 });
 
 // ── Forwarded Headers (IIS reverse-proxy / SSL termination) ────────────────────
@@ -366,7 +354,7 @@ builder.Services.AddScoped<IProductionReportRepository, SqlProductionReportRepos
 builder.Services.AddScoped<INorthWestProductionSummaryRepository, SqlNorthWestProductionSummaryRepository>();
 builder.Services.AddScoped<IAugustusProductionSummaryRepository, SqlAugustusProductionSummaryRepository>();
 
-// ── Per-lab generic production summary repositories (Certus, Cove, Elixir, PCRLabsofAmerica, Beech_Tree, Rising_Tides, Phi_Life, Inhealth_DTR) ──
+// ── Per-lab generic production summary repositories (Certus, Cove, Elixir, PCRLabsofAmerica, Beech_Tree, Rising_Tides) ──
 // One SqlLabProductionSummaryRepository per lab, keyed by the lab name used in the LabSettings config.
 builder.Services.AddSingleton<IReadOnlyDictionary<string, ILabProductionSummaryRepository>>(sp =>
 {
@@ -379,64 +367,24 @@ builder.Services.AddSingleton<IReadOnlyDictionary<string, ILabProductionSummaryR
 		["PCRLabsofAmerica"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.PCRLabsofAmerica),
 		["Beech_Tree"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.BeechTree),
 		["Rising_Tides"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.RisingTides),
-		["Phi_Life"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.PhiLife),
-		["Inhealth_DTR"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.InHealthDTR),
 	};
 });
 builder.Services.AddScoped<IClaimLineRepository, SqlClaimLineRepository>();
-builder.Services.AddScoped<ICptSearchRepository, SqlCptSearchRepository>();
 builder.Services.AddScoped<ICollectionSummaryRepository, SqlCollectionSummaryRepository>();
-builder.Services.AddScoped<AllLabsCollectionExcelBuilder>();
 builder.Services.AddScoped<ILisSummaryRepository, SqlLisSummaryRepository>();
-builder.Services.AddScoped<SqlPhiExecutiveSummaryRepository>();
-builder.Services.AddScoped<ExecutiveSummaryExcelBuilder>();
 
 // User management repository (uses DefaultConnection from appsettings.json)
 builder.Services.AddScoped<IUserManagementRepository, SqlUserManagementRepository>();
-builder.Services.AddScoped<WorkflowJwtIssuer>();
 // Password hasher
 builder.Services.AddSingleton<IPasswordHasher, PasswordHasher>();
 
 // Add services to the container.
 builder.Services.AddMemoryCache();
-builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IAppUsageAuditService, SqlAppUsageAuditService>();
 builder.Services.AddScoped<AppUsageAuditFilter>();
 
 // In-app Help Bot (singleton - loads topic file once at startup)
 builder.Services.AddSingleton<HelpBotService>();
-
-builder.Services.Configure<DenialWorkflowOptions>(builder.Configuration.GetSection("DenialWorkflowApi"));
-builder.Services.AddHttpClient<IDenialWorkflowApiClient, DenialWorkflowApiClient>();
-
-// Allow local Vite React dev server to call MVC AuthToken endpoint with cookies.
-// Production stays same-origin, but these origins are useful while debugging React locally.
-var denialWorkflowCorsOrigins = builder.Configuration
-	.GetSection("DenialWorkflowCors:AllowedOrigins")
-	.Get<string[]>()
-	?.Where(x => !string.IsNullOrWhiteSpace(x))
-	.Select(x => x.Trim().TrimEnd('/'))
-	.Distinct(StringComparer.OrdinalIgnoreCase)
-	.ToArray()
-	?? new[]
-	{
-		"http://localhost:5173",
-		"https://localhost:5173",
-		"http://127.0.0.1:5173",
-		"https://127.0.0.1:5173"
-	};
-
-builder.Services.AddCors(options =>
-{
-	options.AddPolicy(DenialWorkflowLocalDevCorsPolicy, policy =>
-	{
-		policy
-			.WithOrigins(denialWorkflowCorsOrigins)
-			.AllowAnyHeader()
-			.AllowAnyMethod()
-			.AllowCredentials();
-	});
-});
 
 builder.Services.AddControllersWithViews(options =>
 {
@@ -451,23 +399,23 @@ builder.Services.AddControllersWithViews(options =>
 
 // ── Cookie authentication ─────────────────────────────────────────
 builder.Services
-	//<<<<<<< HEAD
-	//    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-	//    .AddCookie(options =>
-	//    {
-	//        options.LoginPath        = "/Account/Login";
-	//        options.LogoutPath       = "/Account/Logout";
-	//        options.AccessDeniedPath = "/Account/AccessDenied";
-	//        options.ExpireTimeSpan   = TimeSpan.FromHours(8);
-	//        options.SlidingExpiration = true;
-	//        options.Cookie.Name     = "LRN.Auth";
-	//        options.Cookie.HttpOnly  = true;
-	//        options.Cookie.SameSite  = SameSiteMode.Lax;
-	//        // SameAsRequest: Secure flag is added only when the connection is already HTTPS.
-	//        // Using Always on an HTTP-only IIS server caused Chrome to silently drop the
-	//        // auth cookie after login, so every request was redirected back to the login page.
-	//        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
-	//=======
+//<<<<<<< HEAD
+//    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+//    .AddCookie(options =>
+//    {
+//        options.LoginPath        = "/Account/Login";
+//        options.LogoutPath       = "/Account/Logout";
+//        options.AccessDeniedPath = "/Account/AccessDenied";
+//        options.ExpireTimeSpan   = TimeSpan.FromHours(8);
+//        options.SlidingExpiration = true;
+//        options.Cookie.Name     = "LRN.Auth";
+//        options.Cookie.HttpOnly  = true;
+//        options.Cookie.SameSite  = SameSiteMode.Lax;
+//        // SameAsRequest: Secure flag is added only when the connection is already HTTPS.
+//        // Using Always on an HTTP-only IIS server caused Chrome to silently drop the
+//        // auth cookie after login, so every request was redirected back to the login page.
+//        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+//=======
 	.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
 	.AddCookie(options =>
 	{
@@ -478,14 +426,14 @@ builder.Services
 		options.SlidingExpiration = true;
 		options.Cookie.Name = "LRN.Auth";
 		options.Cookie.HttpOnly = true;
-		options.Cookie.SameSite = useWorkflowCrossOriginCookie ? SameSiteMode.None : SameSiteMode.None;
-		options.Cookie.Path = "/";
-		// Required for local React/Vite cross-origin AuthToken fetch.
-		// If this is SameAsRequest/Lax in Development, Chrome will not send LRN.Auth
-		// from http://localhost:5173 to https://localhost:44350, causing login loops.
-		options.Cookie.SecurePolicy = useWorkflowCrossOriginCookie
-			? CookieSecurePolicy.Always
+		options.Cookie.SameSite = SameSiteMode.Lax;
+		// Always mark the auth cookie as Secure in production so Chrome accepts it after
+		// the HTTPS redirect that follows a successful login.
+		// SameAsRequest is kept for local development (HTTP) so the dev experience is unaffected.
+		options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+			? CookieSecurePolicy.SameAsRequest
 			: CookieSecurePolicy.Always;
+//>>>>>>> 23cf9fdcfbffecee7d6826a98b7baa4821a4bc13
 
 		// ── ReturnUrl loop guard ──────────────────────────────────────────────
 		// Prevent the error and login pages from being embedded as a ReturnUrl.
@@ -633,33 +581,33 @@ app.Use(async (context, next) =>
 // fresh antiforgery token from the current key ring.
 app.Use(async (context, next) =>
 {
-	await next();
+    await next();
 
-	if (context.Response.StatusCode != StatusCodes.Status400BadRequest) return;
-	if (context.Response.HasStarted) return;
-	if (!HttpMethods.IsPost(context.Request.Method)) return;
+    if (context.Response.StatusCode != StatusCodes.Status400BadRequest) return;
+    if (context.Response.HasStarted) return;
+    if (!HttpMethods.IsPost(context.Request.Method)) return;
 
-	var path = context.Request.Path.Value ?? string.Empty;
-	if (!path.StartsWith("/Account/", StringComparison.OrdinalIgnoreCase)) return;
+    var path = context.Request.Path.Value ?? string.Empty;
+    if (!path.StartsWith("/Account/", StringComparison.OrdinalIgnoreCase)) return;
 
-	var staleCookieNames = context.Request.Cookies.Keys
-		.Where(k => k.StartsWith("LRN.", StringComparison.OrdinalIgnoreCase)
-				 || k.StartsWith(".AspNetCore.", StringComparison.OrdinalIgnoreCase))
-		.ToList();
+    var staleCookieNames = context.Request.Cookies.Keys
+        .Where(k => k.StartsWith("LRN.", StringComparison.OrdinalIgnoreCase)
+                 || k.StartsWith(".AspNetCore.", StringComparison.OrdinalIgnoreCase))
+        .ToList();
 
-	foreach (var cookieName in staleCookieNames)
-		context.Response.Cookies.Delete(cookieName);
+    foreach (var cookieName in staleCookieNames)
+        context.Response.Cookies.Delete(cookieName);
 
-	context.RequestServices.GetRequiredService<ILoggerFactory>()
-		.CreateLogger("LoginCookieRecovery")
-		.LogWarning(
-			"POST {Path} returned 400 (likely stale antiforgery/auth cookie after publish). " +
-			"Cleared {Count} cookie(s) [{Names}] and redirecting to login.",
-			path, staleCookieNames.Count, string.Join(",", staleCookieNames));
+    context.RequestServices.GetRequiredService<ILoggerFactory>()
+        .CreateLogger("LoginCookieRecovery")
+        .LogWarning(
+            "POST {Path} returned 400 (likely stale antiforgery/auth cookie after publish). " +
+            "Cleared {Count} cookie(s) [{Names}] and redirecting to login.",
+            path, staleCookieNames.Count, string.Join(",", staleCookieNames));
 
-	var pathBase = context.Request.PathBase.HasValue ? context.Request.PathBase.Value : string.Empty;
-	context.Response.Clear();
-	context.Response.Redirect($"{pathBase}/Account/Login");
+    var pathBase = context.Request.PathBase.HasValue ? context.Request.PathBase.Value : string.Empty;
+    context.Response.Clear();
+    context.Response.Redirect($"{pathBase}/Account/Login");
 });
 
 // HTTPS redirection: only useful when running standalone (Visual Studio / Kestrel).
@@ -672,10 +620,6 @@ if (app.Environment.IsDevelopment())
 }
 app.UseStaticFiles();
 app.UseRouting();
-
-// Must be after UseRouting and before UseAuthentication so preflight/AuthToken
-// responses include Access-Control-Allow-Origin for local React dev.
-app.UseCors(DenialWorkflowLocalDevCorsPolicy);
 
 app.UseAuthentication();
 app.UseAuthorization();

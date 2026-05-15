@@ -27,7 +27,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
     private const string PcrPrefix = "PCR_";
     private const string BeechTreePrefix = "BT_";
     private const string RisingTidesPrefix = "RT_";
-    private const string InHealthDTRPrefix = "InH_";
+
     /// <summary>
     /// Rule1 / legacy drill-down limit: keep only the Top N <c>PayerName</c> rows per
     /// <c>PanelName</c>, ranked by <c>COUNT(DISTINCT ClaimID)</c> descending.
@@ -4070,7 +4070,6 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             "Certus_LRN" => CertusPrefix,
             "Augustus_LRN" => AugustusPrefix,
             "NWL" => NorthWestPrefix,
-            "InHealthDTR_LRN" => InHealthDTRPrefix,
             _ => string.Empty,
         };
 
@@ -4086,8 +4085,6 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             prefix = NorthWestPrefix;
         if (string.IsNullOrEmpty(prefix) && string.Equals(initialCatalog, "RisingTides", StringComparison.OrdinalIgnoreCase))
             prefix = RisingTidesPrefix;
-        if (string.IsNullOrEmpty(prefix) && string.Equals(initialCatalog, "InHealthDTR", StringComparison.OrdinalIgnoreCase))
-            prefix = InHealthDTRPrefix;
 
         if (string.IsNullOrEmpty(prefix) && !isRule5)
         {

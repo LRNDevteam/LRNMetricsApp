@@ -32,17 +32,6 @@ public sealed class LabConfig
     public bool ClaimLineRefresh { get; set; }
 
     /// <summary>
-    /// Lab name passed to the <c>sp_GetRecentSuccessRunByLab</c> stored procedure
-    /// (run against the LRNMaster database via the appsettings <c>DefaultConnection</c>)
-    /// to fetch the latest successfully completed RunId for this lab.
-    /// Used to gate ingestion: the latest input file is only processed when its RunId
-    /// prefix (the text before the first underscore in the file name, e.g.
-    /// <c>20260522R0118</c>) matches the latest completed RunId.
-    /// Example: <c>"PCR Labs of America"</c>.
-    /// </summary>
-    public string? FetchLatestCompletedRunIDParameter { get; set; }
-
-    /// <summary>
     /// Optional per-lab Production Summary settings used when generating the
     /// Production Report Excel from the capture app.
     /// </summary>
@@ -77,19 +66,6 @@ public sealed class LabPaths
     /// When set and the file exists, it overrides the global FieldMappingsPath from appsettings.json.
     /// </summary>
     public string? LabFieldMappingsPath { get; set; }
-
-    /// <summary>
-    /// Keyword used to identify TransactionDetail Adjustment XLSX files by filename.
-    /// Example: "TransactionDetail Adjustment"
-    /// Required when the lab receives this supplemental file.
-    /// </summary>
-    public string? TransactionDetailAdjustmentKeyword { get; set; }
-
-    /// <summary>
-    /// Folder path where TransactionDetail Adjustment XLSX files are searched.
-    /// When null or empty, falls back to the lab's <c>ServerMastersPath</c>.
-    /// </summary>
-    public string? TransactionDetailAdjustmentPath { get; set; }
 }
 
 public sealed class LabOutput
