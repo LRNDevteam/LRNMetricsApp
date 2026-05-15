@@ -561,3 +561,50 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 }
 .workflow-tab.active small { color: #0f766e; }
 .mywork-tabs { margin-top: 2px; }
+
+
+/* 2026-05-15: Claim view readability fixes
+   - Show complete payer name in claim grid
+   - Show complete denial description in expanded task grid
+*/
+.claim-assign-table td.payer-full-cell{
+  white-space:normal !important;
+  overflow:visible !important;
+  text-overflow:clip !important;
+  min-width:210px;
+  max-width:320px;
+  line-height:1.25;
+  word-break:normal;
+  overflow-wrap:anywhere;
+}
+
+.claim-assign-table th:nth-child(3),
+.claim-assign-table td.payer-full-cell{
+  width:240px;
+}
+
+.claim-task-expanded-row .line-task-grid{
+  min-width:3800px;
+}
+
+.line-task-grid th.denial-desc-col,
+.line-task-grid td.denial-desc-cell{
+  min-width:360px;
+  max-width:520px;
+}
+
+.line-task-grid td.denial-desc-cell,
+.line-task-grid td.wrap-wide{
+  white-space:normal !important;
+  overflow:visible !important;
+  text-overflow:clip !important;
+  line-height:1.35;
+  vertical-align:top;
+  word-break:normal;
+  overflow-wrap:anywhere;
+}
+
+.line-task-grid td.denial-desc-cell{
+  font-weight:500;
+  color:#17324d;
+}

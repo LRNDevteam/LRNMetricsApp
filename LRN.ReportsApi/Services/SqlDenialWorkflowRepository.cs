@@ -1816,24 +1816,100 @@ VALUES(@LabId,@ClaimId,@TaskId,@CptCode,@EscalationLevel,@EscalationReason,@Comm
 		}
 
 		const string updateTaskSql = @"
-UPDATE dbo.DenialTaskBoard
+DECLARE @Changed TABLE
+(
+    TaskID nvarchar(100) NULL,
+    UniqueTrackId nvarchar(100) NULL,
+    LabId int NULL,
+    RunId nvarchar(100) NULL,
+    OldStatus nvarchar(100) NULL,
+    NewStatus nvarchar(100) NULL,
+    OldAssignedTo nvarchar(256) NULL,
+    NewAssignedTo nvarchar(256) NULL
+);
+
+UPDATE t
 SET Status = 'Escalated',
     ReviewerUpdatedBy = @CreatedBy,
     ReviewerUpdatedOn = SYSDATETIME()
-WHERE (LTRIM(RTRIM(ISNULL(ClaimIDNormalized,''))) = @ClaimId OR LTRIM(RTRIM(ISNULL(ClaimID,''))) = @ClaimId OR LTRIM(RTRIM(ISNULL(ClaimID,''))) LIKE '%' + @ClaimId)
-  AND (@TaskId = '' OR ISNULL(TaskID,'') = @TaskId)
-  AND (@CptCode = '' OR ISNULL(CPTCode,'') = @CptCode);";
+OUTPUT
+    INSERTED.TaskID,
+    INSERTED.UniqueTrackId,
+    ISNULL(INSERTED.LabId, @LabId),
+    INSERTED.RunId,
+    DELETED.Status,
+    INSERTED.Status,
+    DELETED.AssignedTo,
+    INSERTED.AssignedTo
+INTO @Changed(TaskID, UniqueTrackId, LabId, RunId, OldStatus, NewStatus, OldAssignedTo, NewAssignedTo)
+FROM dbo.DenialTaskBoard t
+WHERE (LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))) = @ClaimId
+       OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) = @ClaimId
+       OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) LIKE '%' + @ClaimId)
+  AND (@TaskId = '' OR ISNULL(t.TaskID,'') = @TaskId)
+  AND (@CptCode = '' OR ISNULL(t.CPTCode,'') = @CptCode);
+
+IF OBJECT_ID('dbo.DenialTaskHistory','U') IS NOT NULL
+BEGIN
+    INSERT INTO dbo.DenialTaskHistory
+    (
+        TaskID,
+        UniqueTrackId,
+        LabId,
+        RunId,
+        ActionType,
+        OldStatus,
+        NewStatus,
+        OldAssignedTo,
+        NewAssignedTo,
+        Comments,
+        ActionBy,
+        ActionDate,
+        SnapshotJson
+    )
+    SELECT
+        ISNULL(TaskID,''),
+        ISNULL(UniqueTrackId,''),
+        ISNULL(LabId, @LabId),
+        ISNULL(RunId,''),
+        'Escalation',
+        ISNULL(OldStatus,''),
+        ISNULL(NewStatus,'Escalated'),
+        ISNULL(OldAssignedTo,''),
+        ISNULL(NewAssignedTo,''),
+        @HistoryComments,
+        @CreatedBy,
+        SYSDATETIME(),
+        ''
+    FROM @Changed;
+END;";
 
 		await using var updateCmd = new SqlCommand(updateTaskSql, con) { CommandTimeout = 120 };
+		updateCmd.Parameters.AddWithValue("@LabId", request.LabId);
 		updateCmd.Parameters.AddWithValue("@ClaimId", request.ClaimId.Trim());
 		updateCmd.Parameters.AddWithValue("@TaskId", request.TaskId?.Trim() ?? string.Empty);
 		updateCmd.Parameters.AddWithValue("@CptCode", request.CptCode?.Trim() ?? string.Empty);
 		updateCmd.Parameters.AddWithValue("@CreatedBy", string.IsNullOrWhiteSpace(request.CreatedBy) ? "ReactWorkflow" : request.CreatedBy.Trim());
+		updateCmd.Parameters.AddWithValue("@HistoryComments", BuildEscalationHistoryComment(request));
 		await updateCmd.ExecuteNonQueryAsync(ct);
 
 		return saved;
 	}
 
+
+
+	private static string BuildEscalationHistoryComment(SaveDenialEscalationRequest request)
+	{
+		var reason = request.EscalationReason?.Trim() ?? string.Empty;
+		var comments = request.Comments?.Trim() ?? string.Empty;
+		if (string.IsNullOrWhiteSpace(comments))
+			return string.IsNullOrWhiteSpace(reason) ? "Task escalated." : $"Escalated: {reason}";
+
+		if (string.IsNullOrWhiteSpace(reason))
+			return comments;
+
+		return $"Escalated: {reason} | {comments}";
+	}
 
 
 	private static void AddFilterParams(SqlCommand cmd, DenialWorkflowFilter f) => cmd.Parameters.AddWithValue("@LabId", f.LabId);
