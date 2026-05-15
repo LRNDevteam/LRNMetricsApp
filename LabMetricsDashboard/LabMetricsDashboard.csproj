@@ -50,4 +50,21 @@
 
   <ProjectExtensions><VisualStudio><UserProperties /></VisualStudio></ProjectExtensions>
 
+  <ItemGroup>
+    <ProjectReference Include="..\LRN.ProductionReports\LRN.ProductionReports.csproj"
+                      SetTargetFramework="TargetFramework=net9.0">
+      <Private>True</Private>
+      <CopyLocalSatelliteAssemblies>true</CopyLocalSatelliteAssemblies>
+      <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
+    </ProjectReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Models\ProductionReportViewModel.cs" />
+    <Compile Remove="Services\IProductionReportRepository.cs" />
+    <Compile Remove="Services\ProductionReportExcelExportBuilder.cs" />
+    <Compile Remove="Services\SqlProductionReportRepository.cs" />
+    <Compile Remove="Services\WeekRangeHelper.cs" />
+  </ItemGroup>
+
 </Project>
