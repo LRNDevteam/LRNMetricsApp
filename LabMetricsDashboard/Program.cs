@@ -5,6 +5,7 @@ using LabMetricsDashboard.Services.DenialWorkflow;
 using LabMetricsDashboard.Models.DenialWorkflow;
 using LabMetricsDashboard.Services.Security;
 using LRN.ProductionReports.Services;
+using LRN.ProductionReports.Services;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
