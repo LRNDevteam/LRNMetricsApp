@@ -1,4 +1,12 @@
-using LabMetricsDashboard.Models;
+using LRN.ProductionReports.Models;
+using SharedCodingResult = LRN.ProductionReports.Services.CodingResult;
+using SharedCptBreakdownResult = LRN.ProductionReports.Services.CptBreakdownResult;
+using SharedPayerBreakdownResult = LRN.ProductionReports.Services.PayerBreakdownResult;
+using SharedPayerPanelResult = LRN.ProductionReports.Services.PayerPanelResult;
+using SharedProductionReportResult = LRN.ProductionReports.Services.ProductionReportResult;
+using SharedRawDataSegment = LRN.ProductionReports.Services.RawDataSegment;
+using SharedUnbilledAgingResult = LRN.ProductionReports.Services.UnbilledAgingResult;
+using SharedWeeklyClaimVolumeResult = LRN.ProductionReports.Services.WeeklyClaimVolumeResult;
 
 
 namespace LabMetricsDashboard.Services;
@@ -22,7 +30,7 @@ public interface INorthWestProductionSummaryRepository
         string connectionString, CancellationToken ct = default);
 
     /// <summary>Calls usp_GetNW_MonthlyBilledProductionSummary — monthly panel + top-3 payer pivot.</summary>
-    Task<ProductionReportResult> GetMonthlyAsync(
+    Task<SharedProductionReportResult> GetMonthlyAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -38,7 +46,7 @@ public interface INorthWestProductionSummaryRepository
     /// Returns <c>dbo.ClaimLevelData</c> Excel rows already split into worksheet segments using
     /// NorthWest filter semantics.
     /// </summary>
-    Task<List<RawDataSegment>> GetClaimLevelDataExportSegmentsAsync(
+    Task<List<SharedRawDataSegment>> GetClaimLevelDataExportSegmentsAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -51,7 +59,7 @@ public interface INorthWestProductionSummaryRepository
         CancellationToken ct = default);
 
     /// <summary>Calls usp_GetNW_WeeklyBilledProductionSummary — last-4-week panel + top-3 payer pivot (Thu–Wed).</summary>
-    Task<WeeklyClaimVolumeResult> GetWeeklyAsync(
+    Task<SharedWeeklyClaimVolumeResult> GetWeeklyAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -64,7 +72,7 @@ public interface INorthWestProductionSummaryRepository
         CancellationToken ct = default);
 
     /// <summary>Calls usp_GetNW_CodingBreakdown — coding panel + CPT drill-down (2 result sets).</summary>
-    Task<CodingResult> GetCodingAsync(
+    Task<SharedCodingResult> GetCodingAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -77,7 +85,7 @@ public interface INorthWestProductionSummaryRepository
         CancellationToken ct = default);
 
     /// <summary>Calls usp_GetNW_PayerBreakdown — payer × month pivot.</summary>
-    Task<PayerBreakdownResult> GetPayerBreakdownAsync(
+    Task<SharedPayerBreakdownResult> GetPayerBreakdownAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -90,7 +98,7 @@ public interface INorthWestProductionSummaryRepository
         CancellationToken ct = default);
 
     /// <summary>Calls usp_GetNW_PayerByPanel — payer × panel pivot.</summary>
-    Task<PayerPanelResult> GetPayerByPanelAsync(
+    Task<SharedPayerPanelResult> GetPayerByPanelAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -103,7 +111,7 @@ public interface INorthWestProductionSummaryRepository
         CancellationToken ct = default);
 
     /// <summary>Calls usp_GetNW_UnbilledAging — payer × aging bucket pivot.</summary>
-    Task<UnbilledAgingResult> GetUnbilledAgingAsync(
+    Task<SharedUnbilledAgingResult> GetUnbilledAgingAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -116,7 +124,7 @@ public interface INorthWestProductionSummaryRepository
         CancellationToken ct = default);
 
     /// <summary>Calls usp_GetNW_CPTBreakdown — payer × month line-count + charge pivot.</summary>
-    Task<CptBreakdownResult> GetCptBreakdownAsync(
+    Task<SharedCptBreakdownResult> GetCptBreakdownAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -164,7 +172,7 @@ public interface INorthWestProductionSummaryRepository
     /// Returns <c>dbo.LineLevelData</c> Excel rows already split into worksheet segments using
     /// NorthWest filter semantics.
     /// </summary>
-    Task<List<RawDataSegment>> GetLineLevelDataExportSegmentsAsync(
+    Task<List<SharedRawDataSegment>> GetLineLevelDataExportSegmentsAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,

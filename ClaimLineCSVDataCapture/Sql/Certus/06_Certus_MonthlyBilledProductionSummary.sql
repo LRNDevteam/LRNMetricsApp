@@ -32,6 +32,7 @@ GO
 -- ============================================================
 -- Step 2: Stored procedure
 -- ============================================================
+
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshCert_MonthlyBilledProductionSummary
 AS
 BEGIN
@@ -42,12 +43,12 @@ BEGIN
     SELECT
         LTRIM(RTRIM(ISNULL(Panelname,      'Unknown')))                  AS Panelname,
         LTRIM(RTRIM(ISNULL(PayerName_Raw,  'Unknown')))                  AS PayerName_Raw,
-        FORMAT(TRY_CAST(FirstBilledDate AS DATE), 'yyyy-MM')             AS BilledYearMonth,
+        FORMAT(TRY_CAST(ChargeEnteredDate AS DATE), 'yyyy-MM')             AS BilledYearMonth,
         COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))                AS ClaimCount,
         ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0)          AS TotalCharges
     INTO #BilledRaw
     FROM dbo.ClaimLevelData
-    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL AND LTRIM(RTRIM(FirstBilledDate)) <> ''
+    WHERE TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL AND LTRIM(RTRIM(ChargeEnteredDate)) <> ''
       AND UPPER(LTRIM(RTRIM(ISNULL(PayerName_Raw, '')))) NOT LIKE '%NONE%'
       AND UPPER(LTRIM(RTRIM(ISNULL(PayerName_Raw, '')))) NOT LIKE '%ACCU%'
       AND UPPER(LTRIM(RTRIM(ISNULL(PayerName_Raw, '')))) NOT LIKE '%CLIENT%'
@@ -57,7 +58,7 @@ BEGIN
     GROUP BY
         LTRIM(RTRIM(ISNULL(Panelname,      'Unknown'))),
         LTRIM(RTRIM(ISNULL(PayerName_Raw,  'Unknown'))),
-        FORMAT(TRY_CAST(FirstBilledDate AS DATE), 'yyyy-MM');
+        FORMAT(TRY_CAST(ChargeEnteredDate AS DATE), 'yyyy-MM');
 
     -- Rank payers within each Panelname by total claim count (Top 3).
     SELECT
@@ -98,6 +99,74 @@ BEGIN
     PRINT 'usp_RefreshCert_MonthlyBilledProductionSummary completed — ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
 END
 GO
+
+
+--CREATE OR ALTER PROCEDURE dbo.usp_RefreshCert_MonthlyBilledProductionSummary
+--AS
+--BEGIN
+--    SET NOCOUNT ON;
+
+--    -- Aggregate by Panelname x PayerName_Raw x FirstBilledDate month.
+--    -- Payer exclusions: rows where PayerName_Raw contains None, Accu, Client, or Patient are excluded.
+--    SELECT
+--        LTRIM(RTRIM(ISNULL(Panelname,      'Unknown')))                  AS Panelname,
+--        LTRIM(RTRIM(ISNULL(PayerName_Raw,  'Unknown')))                  AS PayerName_Raw,
+--        FORMAT(TRY_CAST(FirstBilledDate AS DATE), 'yyyy-MM')             AS BilledYearMonth,
+--        COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))                AS ClaimCount,
+--        ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0)          AS TotalCharges
+--    INTO #BilledRaw
+--    FROM dbo.ClaimLevelData
+--    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL AND LTRIM(RTRIM(FirstBilledDate)) <> ''
+--      AND UPPER(LTRIM(RTRIM(ISNULL(PayerName_Raw, '')))) NOT LIKE '%NONE%'
+--      AND UPPER(LTRIM(RTRIM(ISNULL(PayerName_Raw, '')))) NOT LIKE '%ACCU%'
+--      AND UPPER(LTRIM(RTRIM(ISNULL(PayerName_Raw, '')))) NOT LIKE '%CLIENT%'
+--      AND UPPER(LTRIM(RTRIM(ISNULL(PayerName_Raw, '')))) NOT LIKE '%PATIENT%'
+--	 -- AND PayerName_Raw NOT IN (SELECT Payername from ExcludedPayers)
+	 
+--    GROUP BY
+--        LTRIM(RTRIM(ISNULL(Panelname,      'Unknown'))),
+--        LTRIM(RTRIM(ISNULL(PayerName_Raw,  'Unknown'))),
+--        FORMAT(TRY_CAST(FirstBilledDate AS DATE), 'yyyy-MM');
+
+--    -- Rank payers within each Panelname by total claim count (Top 3).
+--    SELECT
+--        Panelname,
+--        PayerName_Raw,
+--        DENSE_RANK() OVER (
+--            PARTITION BY Panelname
+--            ORDER BY SUM(ClaimCount) DESC
+--        ) AS PayerRank
+--    INTO #PayerRanks
+--    FROM #BilledRaw
+--    GROUP BY Panelname, PayerName_Raw;
+
+--    SELECT
+--        b.Panelname,
+--        b.PayerName_Raw,
+--        CAST(r.PayerRank AS TINYINT) AS PayerRank,
+--        b.BilledYearMonth,
+--        b.ClaimCount,
+--        b.TotalCharges
+--    INTO #Top3
+--    FROM #BilledRaw b
+--    JOIN #PayerRanks r ON r.Panelname = b.Panelname AND r.PayerName_Raw = b.PayerName_Raw
+--   -- WHERE r.PayerRank <= 3;
+
+--    TRUNCATE TABLE dbo.Cert_MonthlyBilledProductionSummary;
+
+--    INSERT INTO dbo.Cert_MonthlyBilledProductionSummary
+--        (PanelType, PayerName, PayerRank, BilledYearMonth, ClaimCount, TotalCharges, RefreshedAt)
+--    SELECT Panelname, PayerName_Raw, PayerRank, BilledYearMonth, ClaimCount, TotalCharges, GETDATE()
+--    FROM #Top3
+--    ORDER BY Panelname, PayerRank, BilledYearMonth;
+
+--    DROP TABLE IF EXISTS #BilledRaw;
+--    DROP TABLE IF EXISTS #PayerRanks;
+--    DROP TABLE IF EXISTS #Top3;
+
+--    PRINT 'usp_RefreshCert_MonthlyBilledProductionSummary completed — ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
+--END
+--GO
 
 /*
 SELECT PanelType, PayerName, PayerRank, BilledYearMonth, ClaimCount, TotalCharges

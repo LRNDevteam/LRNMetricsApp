@@ -1,4 +1,12 @@
-using LabMetricsDashboard.Models;
+using LRN.ProductionReports.Models;
+using LRN.ProductionReports.Models;
+using SharedCodingResult = LRN.ProductionReports.Services.CodingResult;
+using SharedCptBreakdownResult = LRN.ProductionReports.Services.CptBreakdownResult;
+using SharedPayerBreakdownResult = LRN.ProductionReports.Services.PayerBreakdownResult;
+using SharedPayerPanelResult = LRN.ProductionReports.Services.PayerPanelResult;
+using SharedProductionReportResult = LRN.ProductionReports.Services.ProductionReportResult;
+using SharedUnbilledAgingResult = LRN.ProductionReports.Services.UnbilledAgingResult;
+using SharedWeeklyClaimVolumeResult = LRN.ProductionReports.Services.WeeklyClaimVolumeResult;
 using System.Data;
 using Microsoft.Data.SqlClient;
 
@@ -25,6 +33,9 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
 
     /// <inheritdoc/>
     public bool SupportsFilteredMonthlyWeeklySp => _cfg.SupportsFilteredMonthlyWeeklySp;
+
+    /// <inheritdoc/>
+    public bool IsCertus => string.Equals(_cfg.Prefix, "Cert_", StringComparison.OrdinalIgnoreCase);
 
     // ?? Filter Options ????????????????????????????????????????????????????
     /// <inheritdoc/>
@@ -68,7 +79,7 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
 
     // ?? Monthly Claim Volume ??????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<ProductionReportResult> GetMonthlyAsync(
+    public async Task<SharedProductionReportResult> GetMonthlyAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -192,7 +203,7 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                 });
             }
 
-            return new ProductionReportResult(
+        return new SharedProductionReportResult(
                 [],
                 panelRows.Select(p => p.PanelName).ToList(),
                 months,
@@ -205,13 +216,13 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
         catch (Exception ex)
         {
             _logger.LogError(ex, "[{Prefix}] GetMonthlyAsync failed.", _cfg.Prefix);
-            return new ProductionReportResult([], [], [], [], [], new Dictionary<string, ProductionMonthCell>(), 0, 0m);
+        return new SharedProductionReportResult([], [], [], [], [], new Dictionary<string, ProductionMonthCell>(), 0, 0m);
         }
     }
 
     // ?? Weekly Claim Volume ???????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<WeeklyClaimVolumeResult> GetWeeklyAsync(
+    public async Task<SharedWeeklyClaimVolumeResult> GetWeeklyAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -332,7 +343,7 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                 });
             }
 
-            return new WeeklyClaimVolumeResult(
+        return new SharedWeeklyClaimVolumeResult(
                 columns,
                 panelRows,
                 grandByWeek,
@@ -342,13 +353,13 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
         catch (Exception ex)
         {
             _logger.LogError(ex, "[{Prefix}] GetWeeklyAsync failed.", _cfg.Prefix);
-            return new WeeklyClaimVolumeResult([], [], new Dictionary<string, ProductionMonthCell>(), 0, 0m);
+        return new SharedWeeklyClaimVolumeResult([], [], new Dictionary<string, ProductionMonthCell>(), 0, 0m);
         }
     }
 
     // ?? Coding ????????????????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<CodingResult> GetCodingAsync(
+    public async Task<SharedCodingResult> GetCodingAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -362,7 +373,7 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
     {
         // Certus has no coding tables — return empty so the tab shows the "no data" state.
         if (!_cfg.HasCodingTables)
-            return new CodingResult([], 0, 0m);
+        return new SharedCodingResult([], 0, 0m);
 
         // When the lab's read SPs are parameterised (SupportsFilteredMonthlyWeeklySp == true)
         // we call usp_Get{Prefix}CodingBreakdown which returns two result sets and serves
@@ -437,18 +448,18 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                 })
                 .ToList();
 
-            return new CodingResult(panelRows, panelRows.Sum(r => r.ClaimCount), panelRows.Sum(r => r.TotalCharges));
+        return new SharedCodingResult(panelRows, panelRows.Sum(r => r.ClaimCount), panelRows.Sum(r => r.TotalCharges));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[{Prefix}] GetCodingAsync failed.", _cfg.Prefix);
-            return new CodingResult([], 0, 0m);
+        return new SharedCodingResult([], 0, 0m);
         }
     }
 
     // ?? Payer Breakdown ???????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<PayerBreakdownResult> GetPayerBreakdownAsync(
+    public async Task<SharedPayerBreakdownResult> GetPayerBreakdownAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -528,18 +539,18 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                 });
             }
 
-            return new PayerBreakdownResult(months, years, payerRows, grandByMonth, grandByMonth.Values.Sum());
+        return new SharedPayerBreakdownResult(months, years, payerRows, grandByMonth, grandByMonth.Values.Sum());
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[{Prefix}] GetPayerBreakdownAsync failed.", _cfg.Prefix);
-            return new PayerBreakdownResult([], [], [], new Dictionary<string, int>(), 0);
+        return new SharedPayerBreakdownResult([], [], [], new Dictionary<string, int>(), 0);
         }
     }
 
     // ?? Payer × Panel ?????????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<PayerPanelResult> GetPayerByPanelAsync(
+    public async Task<SharedPayerPanelResult> GetPayerByPanelAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -621,7 +632,7 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                 });
             }
 
-            return new PayerPanelResult(
+        return new SharedPayerPanelResult(
                 panelCols,
                 payerRows,
                 grandPanel,
@@ -631,13 +642,13 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
         catch (Exception ex)
         {
             _logger.LogError(ex, "[{Prefix}] GetPayerByPanelAsync failed.", _cfg.Prefix);
-            return new PayerPanelResult([], [], new Dictionary<string, ProductionMonthCell>(StringComparer.OrdinalIgnoreCase), 0, 0m);
+        return new SharedPayerPanelResult([], [], new Dictionary<string, ProductionMonthCell>(StringComparer.OrdinalIgnoreCase), 0, 0m);
         }
     }
 
     // ?? Unbilled Aging ????????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<UnbilledAgingResult> GetUnbilledAgingAsync(
+    public async Task<SharedUnbilledAgingResult> GetUnbilledAgingAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -723,7 +734,7 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                 });
             }
 
-            return new UnbilledAgingResult(
+        return new SharedUnbilledAgingResult(
                 panelRows,
                 grandByBucket,
                 grandByBucket.Values.Sum(c => c.ClaimCount),
@@ -732,13 +743,13 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
         catch (Exception ex)
         {
             _logger.LogError(ex, "[{Prefix}] GetUnbilledAgingAsync failed.", _cfg.Prefix);
-            return new UnbilledAgingResult([], new Dictionary<string, ProductionMonthCell>(StringComparer.OrdinalIgnoreCase), 0, 0m);
+        return new SharedUnbilledAgingResult([], new Dictionary<string, ProductionMonthCell>(StringComparer.OrdinalIgnoreCase), 0, 0m);
         }
     }
 
     // ?? CPT Breakdown ?????????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<CptBreakdownResult> GetCptBreakdownAsync(
+    public async Task<SharedCptBreakdownResult> GetCptBreakdownAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -821,7 +832,7 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                 });
             }
 
-            return new CptBreakdownResult(
+        return new SharedCptBreakdownResult(
                 months,
                 years,
                 cptRows,
@@ -832,7 +843,7 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
         catch (Exception ex)
         {
             _logger.LogError(ex, "[{Prefix}] GetCptBreakdownAsync failed.", _cfg.Prefix);
-            return new CptBreakdownResult([], [], [], new Dictionary<string, CptBreakdownCell>(), 0m, 0m);
+        return new SharedCptBreakdownResult([], [], [], new Dictionary<string, CptBreakdownCell>(), 0m, 0m);
         }
     }
 

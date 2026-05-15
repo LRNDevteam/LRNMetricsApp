@@ -67,7 +67,7 @@ public sealed class PredictionReportParserService
         var result = new List<PredictionRecord>();
         foreach (var r in records)
         {
-            if (!ForecastPayableValues.Contains(r.ForecastingPayability))
+            if (!IsForecastPayable(r.ForecastingPayability))
                 continue;
 
             if (!TryParseDate(r.ExpectedPaymentDate, out var pmtDate))
@@ -93,7 +93,7 @@ public sealed class PredictionReportParserService
         var result = new List<PredictionRecord>();
         foreach (var r in records)
         {
-            if (!ForecastPayableValues.Contains(r.ForecastingPayability))
+            if (!IsForecastPayable(r.ForecastingPayability))
                 continue;
 
             if (!TryParseDate(r.ExpectedPaymentDate, out var pmtDate))
@@ -468,14 +468,32 @@ public sealed class PredictionReportParserService
     internal static string Normalise(string s)
     {
         if (string.IsNullOrEmpty(s)) return s;
-        var collapsed = WhitespaceRun.Replace(s.Trim(), " ");
+        var collapsed = WhitespaceRun.Replace(s.Trim().Replace('–', '-').Replace('—', '-'), " ");
         return DashSpacing.Replace(collapsed, " - ");
     }
+
+    internal static bool IsForecastPayable(string value) =>
+        ForecastPayableValues.Contains(Normalise(value));
 
     internal static bool TryParseDate(string value, out DateOnly date)
     {
         date = default;
         if (string.IsNullOrWhiteSpace(value)) return false;
+
+        if (double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var serial)
+            && serial > 1 && serial < 2958466)
+        {
+            try
+            {
+                date = DateOnly.FromDateTime(DateTime.FromOADate(serial));
+                return true;
+            }
+            catch
+            {
+                // fall through to normal date parsing
+            }
+        }
+
         if (DateOnly.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out date))
             return true;
         if (DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt))

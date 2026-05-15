@@ -88,35 +88,80 @@ GO
 -- ============================================================
 -- Step 2b: Stored procedure — Payer × Panelname
 -- ============================================================
+
+
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshCove_PayerByPanel
 AS
 BEGIN
     SET NOCOUNT ON;
 
     SELECT
-        LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown')))                                              AS PayerName_Raw,
-        LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(Panelname)), ''), '(No Panelname)')))                 AS Panelname,
-        COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))                                           AS ClaimCount,
-        ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0)                                     AS TotalCharges
+        LTRIM(RTRIM(PayerName_Raw)) AS PayerName_Raw,
+        LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(Panelname)), ''), '(No Panelname)'))) AS Panelname,
+        COUNT(*) AS ClaimCount,
+        ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0) AS TotalCharges
     INTO #RawPP
     FROM dbo.ClaimLevelData
-    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL and FirstBilledDate<>''
+    WHERE NULLIF(LTRIM(RTRIM(PayerName_Raw)), '') IS NOT NULL
     GROUP BY
-        LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))),
+        LTRIM(RTRIM(PayerName_Raw)),
         LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(Panelname)), ''), '(No Panelname)')));
 
     TRUNCATE TABLE dbo.Cove_PayerByPanel;
 
-    INSERT INTO dbo.Cove_PayerByPanel (PayerName, PanelType, ClaimCount, TotalCharges, RefreshedAt)
-    SELECT PayerName_Raw, Panelname, ClaimCount, TotalCharges, GETDATE()
+    INSERT INTO dbo.Cove_PayerByPanel
+    (
+        PayerName,
+        PanelType,
+        ClaimCount,
+        TotalCharges,
+        RefreshedAt
+    )
+    SELECT
+        PayerName_Raw,
+        Panelname,
+        ClaimCount,
+        TotalCharges,
+        GETDATE()
     FROM #RawPP
     ORDER BY PayerName_Raw, Panelname;
 
     DROP TABLE IF EXISTS #RawPP;
 
-    PRINT 'usp_RefreshCove_PayerByPanel completed — ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
+    PRINT 'usp_RefreshCove_PayerByPanel completed.';
 END
 GO
+
+
+--CREATE OR ALTER PROCEDURE dbo.usp_RefreshCove_PayerByPanel
+--AS
+--BEGIN
+--    SET NOCOUNT ON;
+
+--    SELECT
+--        LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown')))                                              AS PayerName_Raw,
+--        LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(Panelname)), ''), '(No Panelname)')))                 AS Panelname,
+--        COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))                                           AS ClaimCount,
+--        ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0)                                     AS TotalCharges
+--    INTO #RawPP
+--    FROM dbo.ClaimLevelData
+--    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL and FirstBilledDate<>''
+--    GROUP BY
+--        LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))),
+--        LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(Panelname)), ''), '(No Panelname)')));
+
+--    TRUNCATE TABLE dbo.Cove_PayerByPanel;
+
+--    INSERT INTO dbo.Cove_PayerByPanel (PayerName, PanelType, ClaimCount, TotalCharges, RefreshedAt)
+--    SELECT PayerName_Raw, Panelname, ClaimCount, TotalCharges, GETDATE()
+--    FROM #RawPP
+--    ORDER BY PayerName_Raw, Panelname;
+
+--    DROP TABLE IF EXISTS #RawPP;
+
+--    PRINT 'usp_RefreshCove_PayerByPanel completed — ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
+--END
+--GO
 
 /*
 -- Payer × Month

@@ -638,4 +638,699 @@ BEGIN
 END  
 GO
 
+/* =========================================================
+   Raw Export SPs  (ClaimLevel + LineLevel)
+   Bucketing column : FirstBilledDate
+   Split logic      : total <= @Threshold  -> one ALL sheet
+                      year > @Threshold    -> split by month
+   ========================================================= */
+
+/* ---- 1) ClaimLevel Buckets -------------------------------- */
+CREATE OR ALTER PROCEDURE dbo.usp_GetClaimLevelExportBuckets
+    @Threshold        INT           = 50000,
+    @PayerNames       NVARCHAR(MAX) = NULL,
+    @PanelNames       NVARCHAR(MAX) = NULL,
+    @DosFrom          DATE          = NULL,
+    @DosTo            DATE          = NULL,
+    @CEDFrom          DATE          = NULL,
+    @CEDTo            DATE          = NULL,
+    @FirstBilledFrom  DATE          = NULL,
+    @FirstBilledTo    DATE          = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @PayerList TABLE (Value NVARCHAR(200) NOT NULL);
+    DECLARE @PanelList TABLE (Value NVARCHAR(200) NOT NULL);
+
+    IF NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL
+        INSERT INTO @PayerList(Value)
+        SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 200)
+        FROM STRING_SPLIT(@PayerNames, '|')
+        WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    IF NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL
+        INSERT INTO @PanelList(Value)
+        SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 200)
+        FROM STRING_SPLIT(@PanelNames, '|')
+        WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
+    DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+    CREATE TABLE #Base
+    (
+        FirstBilledDate DATE          NOT NULL,
+        ClaimId         NVARCHAR(100) NULL
+    );
+
+    INSERT INTO #Base (FirstBilledDate, ClaimId)
+    SELECT
+        TRY_CAST(FirstBilledDate AS DATE),
+        CAST(ClaimId AS NVARCHAR(100))
+    FROM dbo.ClaimLevelData
+    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+      AND (@HasPayerFilter = 0 OR LEFT(LTRIM(RTRIM(ISNULL(PayerName_Raw,'Unknown'))),200) IN (SELECT Value FROM @PayerList))
+      AND (@HasPanelFilter = 0 OR LEFT(LTRIM(RTRIM(ISNULL(PanelType,'Unknown'))),200) IN (SELECT Value FROM @PanelList))
+      AND (@DosFrom         IS NULL OR TRY_CAST(DateOfService     AS DATE) >= @DosFrom)
+      AND (@DosTo           IS NULL OR TRY_CAST(DateOfService     AS DATE) <= @DosTo)
+      AND (@CEDFrom         IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) >= @CEDFrom)
+      AND (@CEDTo           IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) <= @CEDTo)
+      AND (@FirstBilledFrom IS NULL OR TRY_CAST(FirstBilledDate   AS DATE) >= @FirstBilledFrom)
+      AND (@FirstBilledTo   IS NULL OR TRY_CAST(FirstBilledDate   AS DATE) <= @FirstBilledTo);
+
+    DECLARE @cntClaim INT = 0;
+    SELECT @cntClaim = COUNT(*) FROM #Base;
+
+    CREATE TABLE #Buckets
+    (
+        BucketType   VARCHAR(20),
+        YearNo       INT           NULL,
+        MonthNo      INT           NULL,
+        FromDate     DATE          NULL,
+        ToDate       DATE          NULL,
+        RecordCount  INT,
+        SheetName    NVARCHAR(50)
+    );
+
+    IF (@cntClaim <= @Threshold)
+    BEGIN
+        INSERT INTO #Buckets (BucketType, YearNo, MonthNo, FromDate, ToDate, RecordCount, SheetName)
+        VALUES ('ALL', NULL, NULL, NULL, NULL, @cntClaim, 'All_Claim');
+    END
+    ELSE
+    BEGIN
+        ;WITH YearCounts AS
+        (
+            SELECT YEAR(FirstBilledDate) AS YearNo, COUNT(*) AS RecordCount
+            FROM #Base
+            GROUP BY YEAR(FirstBilledDate)
+        )
+        INSERT INTO #Buckets (BucketType, YearNo, MonthNo, FromDate, ToDate, RecordCount, SheetName)
+        SELECT 'YEAR', yc.YearNo, NULL,
+               DATEFROMPARTS(yc.YearNo, 1, 1),
+               DATEFROMPARTS(yc.YearNo, 12, 31),
+               yc.RecordCount,
+               CAST(yc.YearNo AS VARCHAR(4)) + '_Claim'
+        FROM YearCounts yc
+        WHERE yc.RecordCount <= @Threshold;
+
+        ;WITH LargeYears AS
+        (
+            SELECT YEAR(FirstBilledDate) AS YearNo
+            FROM #Base
+            GROUP BY YEAR(FirstBilledDate)
+            HAVING COUNT(*) > @Threshold
+        ),
+        MonthCounts AS
+        (
+            SELECT YEAR(b.FirstBilledDate) AS YearNo,
+                   MONTH(b.FirstBilledDate) AS MonthNo,
+                   COUNT(*) AS RecordCount
+            FROM #Base b
+            INNER JOIN LargeYears y ON YEAR(b.FirstBilledDate) = y.YearNo
+            GROUP BY YEAR(b.FirstBilledDate), MONTH(b.FirstBilledDate)
+        )
+        INSERT INTO #Buckets (BucketType, YearNo, MonthNo, FromDate, ToDate, RecordCount, SheetName)
+        SELECT 'MONTH', mc.YearNo, mc.MonthNo,
+               DATEFROMPARTS(mc.YearNo, mc.MonthNo, 1),
+               EOMONTH(DATEFROMPARTS(mc.YearNo, mc.MonthNo, 1)),
+               mc.RecordCount,
+               LEFT(DATENAME(MONTH, DATEFROMPARTS(mc.YearNo, mc.MonthNo, 1)), 3)
+                   + CAST(mc.YearNo AS VARCHAR(4)) + '_Claim'
+        FROM MonthCounts mc;
+    END
+
+    SELECT BucketType, YearNo, MonthNo, FromDate, ToDate, RecordCount, SheetName
+    FROM #Buckets
+    ORDER BY CASE WHEN YearNo IS NULL THEN 1 ELSE 0 END, YearNo DESC, MonthNo ASC;
+END
+GO
+
+/* ---- 2) ClaimLevel Data By Date Range -------------------- */
+CREATE OR ALTER PROCEDURE dbo.usp_GetClaimLevelExportDataByDateRange
+    @FromDate         DATE,
+    @ToDate           DATE,
+    @PayerNames       NVARCHAR(MAX) = NULL,
+    @PanelNames       NVARCHAR(MAX) = NULL,
+    @DosFrom          DATE          = NULL,
+    @DosTo            DATE          = NULL,
+    @CEDFrom          DATE          = NULL,
+    @CEDTo            DATE          = NULL,
+    @FirstBilledFrom  DATE          = NULL,
+    @FirstBilledTo    DATE          = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @FromDate IS NULL OR @ToDate IS NULL
+    BEGIN
+        RAISERROR('FromDate and ToDate are required.', 16, 1);
+        RETURN;
+    END;
+
+    IF @FromDate > @ToDate
+    BEGIN
+        RAISERROR('FromDate cannot be greater than ToDate.', 16, 1);
+        RETURN;
+    END;
+
+    DECLARE @PayerList TABLE (Value NVARCHAR(200) NOT NULL);
+    DECLARE @PanelList TABLE (Value NVARCHAR(200) NOT NULL);
+
+    IF NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL
+        INSERT INTO @PayerList(Value)
+        SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 200)
+        FROM STRING_SPLIT(@PayerNames, '|')
+        WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    IF NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL
+        INSERT INTO @PanelList(Value)
+        SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 200)
+        FROM STRING_SPLIT(@PanelNames, '|')
+        WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
+    DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+    SELECT *
+    FROM dbo.ClaimLevelData
+    WHERE TRY_CAST(FirstBilledDate AS DATE) >= @FromDate
+      AND TRY_CAST(FirstBilledDate AS DATE) < DATEADD(DAY, 1, @ToDate)
+      AND (@HasPayerFilter = 0 OR LEFT(LTRIM(RTRIM(ISNULL(PayerName_Raw,'Unknown'))),200) IN (SELECT Value FROM @PayerList))
+      AND (@HasPanelFilter = 0 OR LEFT(LTRIM(RTRIM(ISNULL(PanelType,'Unknown'))),200) IN (SELECT Value FROM @PanelList))
+      AND (@DosFrom         IS NULL OR TRY_CAST(DateOfService     AS DATE) >= @DosFrom)
+      AND (@DosTo           IS NULL OR TRY_CAST(DateOfService     AS DATE) <= @DosTo)
+      AND (@CEDFrom         IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) >= @CEDFrom)
+      AND (@CEDTo           IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) <= @CEDTo)
+      AND (@FirstBilledFrom IS NULL OR TRY_CAST(FirstBilledDate   AS DATE) >= @FirstBilledFrom)
+      AND (@FirstBilledTo   IS NULL OR TRY_CAST(FirstBilledDate   AS DATE) <= @FirstBilledTo)
+    ORDER BY TRY_CAST(FirstBilledDate AS DATE), ClaimId;
+END
+GO
+
+/* ---- 3) LineLevel Buckets --------------------------------- */
+CREATE OR ALTER PROCEDURE dbo.usp_GetLineLevelExportBuckets
+    @Threshold        INT           = 50000,
+    @PayerNames       NVARCHAR(MAX) = NULL,
+    @PanelNames       NVARCHAR(MAX) = NULL,
+    @DosFrom          DATE          = NULL,
+    @DosTo            DATE          = NULL,
+    @CEDFrom          DATE          = NULL,
+    @CEDTo            DATE          = NULL,
+    @FirstBilledFrom  DATE          = NULL,
+    @FirstBilledTo    DATE          = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @PayerList TABLE (Value NVARCHAR(200) NOT NULL);
+    DECLARE @PanelList TABLE (Value NVARCHAR(200) NOT NULL);
+
+    IF NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL
+        INSERT INTO @PayerList(Value)
+        SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 200)
+        FROM STRING_SPLIT(@PayerNames, '|')
+        WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    IF NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL
+        INSERT INTO @PanelList(Value)
+        SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 200)
+        FROM STRING_SPLIT(@PanelNames, '|')
+        WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
+    DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+    CREATE TABLE #Base
+    (
+        FirstBilledDate DATE          NOT NULL,
+        ClaimId         NVARCHAR(100) NULL
+    );
+
+    INSERT INTO #Base (FirstBilledDate, ClaimId)
+    SELECT
+        TRY_CAST(FirstBilledDate AS DATE),
+        CAST(ClaimId AS NVARCHAR(100))
+    FROM dbo.LineLevelData
+    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+      AND (@HasPayerFilter = 0 OR LEFT(LTRIM(RTRIM(ISNULL(PayerName_Raw,'Unknown'))),200) IN (SELECT Value FROM @PayerList))
+      AND (@HasPanelFilter = 0 OR LEFT(LTRIM(RTRIM(ISNULL(Panelname,'Unknown'))),200) IN (SELECT Value FROM @PanelList))
+      AND (@DosFrom         IS NULL OR TRY_CAST(DateOfService     AS DATE) >= @DosFrom)
+      AND (@DosTo           IS NULL OR TRY_CAST(DateOfService     AS DATE) <= @DosTo)
+      AND (@CEDFrom         IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) >= @CEDFrom)
+      AND (@CEDTo           IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) <= @CEDTo)
+      AND (@FirstBilledFrom IS NULL OR TRY_CAST(FirstBilledDate   AS DATE) >= @FirstBilledFrom)
+      AND (@FirstBilledTo   IS NULL OR TRY_CAST(FirstBilledDate   AS DATE) <= @FirstBilledTo);
+
+    DECLARE @cntLine INT = 0;
+    SELECT @cntLine = COUNT(*) FROM #Base;
+
+    CREATE TABLE #Buckets
+    (
+        BucketType   VARCHAR(20),
+        YearNo       INT           NULL,
+        MonthNo      INT           NULL,
+        FromDate     DATE          NULL,
+        ToDate       DATE          NULL,
+        RecordCount  INT,
+        SheetName    NVARCHAR(50)
+    );
+
+    IF (@cntLine <= @Threshold)
+    BEGIN
+        INSERT INTO #Buckets (BucketType, YearNo, MonthNo, FromDate, ToDate, RecordCount, SheetName)
+        VALUES ('ALL', NULL, NULL, NULL, NULL, @cntLine, 'All_Line');
+    END
+    ELSE
+    BEGIN
+        ;WITH YearCounts AS
+        (
+            SELECT YEAR(FirstBilledDate) AS YearNo, COUNT(*) AS RecordCount
+            FROM #Base
+            GROUP BY YEAR(FirstBilledDate)
+        )
+        INSERT INTO #Buckets (BucketType, YearNo, MonthNo, FromDate, ToDate, RecordCount, SheetName)
+        SELECT 'YEAR', yc.YearNo, NULL,
+               DATEFROMPARTS(yc.YearNo, 1, 1),
+               DATEFROMPARTS(yc.YearNo, 12, 31),
+               yc.RecordCount,
+               CAST(yc.YearNo AS VARCHAR(4)) + '_Line'
+        FROM YearCounts yc
+        WHERE yc.RecordCount <= @Threshold;
+
+        ;WITH LargeYears AS
+        (
+            SELECT YEAR(FirstBilledDate) AS YearNo
+            FROM #Base
+            GROUP BY YEAR(FirstBilledDate)
+            HAVING COUNT(*) > @Threshold
+        ),
+        MonthCounts AS
+        (
+            SELECT YEAR(b.FirstBilledDate) AS YearNo,
+                   MONTH(b.FirstBilledDate) AS MonthNo,
+                   COUNT(*) AS RecordCount
+            FROM #Base b
+            INNER JOIN LargeYears y ON YEAR(b.FirstBilledDate) = y.YearNo
+            GROUP BY YEAR(b.FirstBilledDate), MONTH(b.FirstBilledDate)
+        )
+        INSERT INTO #Buckets (BucketType, YearNo, MonthNo, FromDate, ToDate, RecordCount, SheetName)
+        SELECT 'MONTH', mc.YearNo, mc.MonthNo,
+               DATEFROMPARTS(mc.YearNo, mc.MonthNo, 1),
+               EOMONTH(DATEFROMPARTS(mc.YearNo, mc.MonthNo, 1)),
+               mc.RecordCount,
+               LEFT(DATENAME(MONTH, DATEFROMPARTS(mc.YearNo, mc.MonthNo, 1)), 3)
+                   + CAST(mc.YearNo AS VARCHAR(4)) + '_Line'
+        FROM MonthCounts mc;
+    END
+
+    SELECT BucketType, YearNo, MonthNo, FromDate, ToDate, RecordCount, SheetName
+    FROM #Buckets
+    ORDER BY CASE WHEN YearNo IS NULL THEN 1 ELSE 0 END, YearNo DESC, MonthNo ASC;
+END
+GO
+
+/* ---- 4) LineLevel Data By Date Range --------------------- */
+CREATE OR ALTER PROCEDURE dbo.usp_GetLineLevelExportDataByDateRange
+    @FromDate         DATE,
+    @ToDate           DATE,
+    @PayerNames       NVARCHAR(MAX) = NULL,
+    @PanelNames       NVARCHAR(MAX) = NULL,
+    @DosFrom          DATE          = NULL,
+    @DosTo            DATE          = NULL,
+    @CEDFrom          DATE          = NULL,
+    @CEDTo            DATE          = NULL,
+    @FirstBilledFrom  DATE          = NULL,
+    @FirstBilledTo    DATE          = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @FromDate IS NULL OR @ToDate IS NULL
+    BEGIN
+        RAISERROR('FromDate and ToDate are required.', 16, 1);
+        RETURN;
+    END;
+
+    IF @FromDate > @ToDate
+    BEGIN
+        RAISERROR('FromDate cannot be greater than ToDate.', 16, 1);
+        RETURN;
+    END;
+
+    DECLARE @PayerList TABLE (Value NVARCHAR(200) NOT NULL);
+    DECLARE @PanelList TABLE (Value NVARCHAR(200) NOT NULL);
+
+    IF NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL
+        INSERT INTO @PayerList(Value)
+        SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 200)
+        FROM STRING_SPLIT(@PayerNames, '|')
+        WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    IF NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL
+        INSERT INTO @PanelList(Value)
+        SELECT DISTINCT LEFT(LTRIM(RTRIM(value)), 200)
+        FROM STRING_SPLIT(@PanelNames, '|')
+        WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+    DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
+    DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+    SELECT *
+    FROM dbo.LineLevelData
+    WHERE TRY_CAST(FirstBilledDate AS DATE) >= @FromDate
+      AND TRY_CAST(FirstBilledDate AS DATE) < DATEADD(DAY, 1, @ToDate)
+      AND (@HasPayerFilter = 0 OR LEFT(LTRIM(RTRIM(ISNULL(PayerName_Raw,'Unknown'))),200) IN (SELECT Value FROM @PayerList))
+      AND (@HasPanelFilter = 0 OR LEFT(LTRIM(RTRIM(ISNULL(Panelname,'Unknown'))),200) IN (SELECT Value FROM @PanelList))
+      AND (@DosFrom         IS NULL OR TRY_CAST(DateOfService     AS DATE) >= @DosFrom)
+      AND (@DosTo           IS NULL OR TRY_CAST(DateOfService     AS DATE) <= @DosTo)
+      AND (@CEDFrom         IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) >= @CEDFrom)
+      AND (@CEDTo           IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) <= @CEDTo)
+      AND (@FirstBilledFrom IS NULL OR TRY_CAST(FirstBilledDate   AS DATE) >= @FirstBilledFrom)
+      AND (@FirstBilledTo   IS NULL OR TRY_CAST(FirstBilledDate   AS DATE) <= @FirstBilledTo)
+    ORDER BY TRY_CAST(FirstBilledDate AS DATE), ClaimId;
+END
+GO
+
+PRINT '14_NorthWest_ReadSPs.sql completed.';
+-- usp_GetNW_ClaimLevelExportBuckets  : returns date-range slices for ClaimLevelData
+-- usp_GetNW_LineLevelExportBuckets   : returns date-range slices for LineLevelData
+-- usp_GetNW_ClaimLevelExportByRange  : returns ClaimLevelData rows for one slice
+-- usp_GetNW_LineLevelExportByRange   : returns LineLevelData rows for one slice
+--
+-- Bucketing column : ChargeEnteredDate (NW Rule4 convention)
+-- Split logic      : total <= @Threshold  -> one "ALL" sheet
+--                    else group by year;  year > @Threshold -> split by month
+-- ============================================================
+
+CREATE OR ALTER PROCEDURE dbo.usp_GetNW_ClaimLevelExportBuckets
+    @Threshold       INT           = 300000,
+    @PayerNames      NVARCHAR(MAX) = NULL,
+    @PanelNames      NVARCHAR(MAX) = NULL,
+    @DosFrom         DATE          = NULL,
+    @DosTo           DATE          = NULL,
+    @CEDFrom         DATE          = NULL,
+    @CEDTo           DATE          = NULL,
+    @FirstBilledFrom DATE          = NULL,
+    @FirstBilledTo   DATE          = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @PayerList TABLE (Value NVARCHAR(500) NOT NULL PRIMARY KEY);
+    DECLARE @PanelList TABLE (Value NVARCHAR(500) NOT NULL PRIMARY KEY);
+
+    IF NULLIF(LTRIM(RTRIM(@PayerNames)),'') IS NOT NULL
+        INSERT INTO @PayerList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PayerNames,'|') WHERE NULLIF(LTRIM(RTRIM(value)),'') IS NOT NULL;
+
+    IF NULLIF(LTRIM(RTRIM(@PanelNames)),'') IS NOT NULL
+        INSERT INTO @PanelList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PanelNames,'|') WHERE NULLIF(LTRIM(RTRIM(value)),'') IS NOT NULL;
+
+    DECLARE @HasPayer BIT = CASE WHEN EXISTS(SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
+    DECLARE @HasPanel BIT = CASE WHEN EXISTS(SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+    -- Resolve effective panel expression (PanelType with PanelName fallback)
+    SELECT
+        TRY_CAST(ChargeEnteredDate AS DATE)                                        AS CED,
+        YEAR(TRY_CAST(ChargeEnteredDate AS DATE))                                  AS YearNo,
+        MONTH(TRY_CAST(ChargeEnteredDate AS DATE))                                 AS MonthNo
+    INTO #Base
+    FROM dbo.ClaimLevelData
+    WHERE LTRIM(RTRIM(ClaimStatus)) NOT IN (
+              'Unbilled in Daq','Unbilled in Daq - PR',
+              'Unbilled in Webpm','Unbilled in Webpm - PR','Billed amount 0')
+      AND TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL
+      AND NULLIF(LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(PanelType)),''), ISNULL(PanelName,'')))), '') IS NOT NULL
+      AND (@HasPayer = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw,'Unknown'))) IN (SELECT Value FROM @PayerList))
+      AND (@HasPanel = 0 OR LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(PanelType)),''), ISNULL(PanelName,'Unknown')))) IN (SELECT Value FROM @PanelList))
+      AND (@DosFrom        IS NULL OR TRY_CAST(DateOfService     AS DATE) >= @DosFrom)
+      AND (@DosTo          IS NULL OR TRY_CAST(DateOfService     AS DATE) <= @DosTo)
+      AND (@CEDFrom        IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) >= @CEDFrom)
+      AND (@CEDTo          IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) <= @CEDTo)
+      AND (@FirstBilledFrom IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) >= @FirstBilledFrom)
+      AND (@FirstBilledTo   IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) <= @FirstBilledTo);
+
+    DECLARE @Total BIGINT = (SELECT COUNT(*) FROM #Base);
+
+    IF @Total = 0 OR @Total <= @Threshold
+    BEGIN
+        SELECT 'ALL'               AS BucketType,
+               NULL                AS YearNo,
+               NULL                AS MonthNo,
+               CAST(MIN(CED) AS DATETIME) AS FromDate,
+               CAST(MAX(CED) AS DATETIME) AS ToDate,
+               CAST(@Total AS INT) AS RecordCount,
+               'ClaimLevel'        AS SheetName
+        FROM #Base;
+        DROP TABLE #Base;
+        RETURN;
+    END
+
+    SELECT YearNo, COUNT(*) AS Cnt, MIN(CED) AS YMin, MAX(CED) AS YMax
+    INTO #Yr FROM #Base GROUP BY YearNo;
+
+    SELECT b.YearNo, b.MonthNo, COUNT(*) AS Cnt, MIN(b.CED) AS MMin, MAX(b.CED) AS MMax
+    INTO #Mo FROM #Base b
+    JOIN #Yr y ON y.YearNo = b.YearNo AND y.Cnt > @Threshold
+    GROUP BY b.YearNo, b.MonthNo;
+
+    SELECT
+        CASE WHEN y.Cnt > @Threshold THEN 'MONTH' ELSE 'YEAR' END AS BucketType,
+        y.YearNo,
+        NULL AS MonthNo,
+        CAST(y.YMin AS DATETIME) AS FromDate,
+        CAST(y.YMax AS DATETIME) AS ToDate,
+        CAST(y.Cnt AS INT)       AS RecordCount,
+        CAST(y.YearNo AS NVARCHAR(4)) + '_ClaimLevel' AS SheetName
+    FROM #Yr y WHERE y.Cnt <= @Threshold
+    UNION ALL
+    SELECT
+        'MONTH' AS BucketType,
+        m.YearNo,
+        m.MonthNo,
+        CAST(m.MMin AS DATETIME) AS FromDate,
+        CAST(m.MMax AS DATETIME) AS ToDate,
+        CAST(m.Cnt AS INT)       AS RecordCount,
+        CAST(m.YearNo AS NVARCHAR(4)) + '_' + RIGHT('0' + CAST(m.MonthNo AS NVARCHAR(2)), 2) + '_ClaimLevel' AS SheetName
+    FROM #Mo m
+    ORDER BY YearNo, MonthNo;
+
+    DROP TABLE IF EXISTS #Base;
+    DROP TABLE IF EXISTS #Yr;
+    DROP TABLE IF EXISTS #Mo;
+END
+GO
+
+-- ============================================================
+CREATE OR ALTER PROCEDURE dbo.usp_GetNW_LineLevelExportBuckets
+    @Threshold       INT           = 300000,
+    @PayerNames      NVARCHAR(MAX) = NULL,
+    @PanelNames      NVARCHAR(MAX) = NULL,
+    @DosFrom         DATE          = NULL,
+    @DosTo           DATE          = NULL,
+    @CEDFrom         DATE          = NULL,
+    @CEDTo           DATE          = NULL,
+    @FirstBilledFrom DATE          = NULL,
+    @FirstBilledTo   DATE          = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @PayerList TABLE (Value NVARCHAR(500) NOT NULL PRIMARY KEY);
+    DECLARE @PanelList TABLE (Value NVARCHAR(500) NOT NULL PRIMARY KEY);
+
+    IF NULLIF(LTRIM(RTRIM(@PayerNames)),'') IS NOT NULL
+        INSERT INTO @PayerList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PayerNames,'|') WHERE NULLIF(LTRIM(RTRIM(value)),'') IS NOT NULL;
+
+    IF NULLIF(LTRIM(RTRIM(@PanelNames)),'') IS NOT NULL
+        INSERT INTO @PanelList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PanelNames,'|') WHERE NULLIF(LTRIM(RTRIM(value)),'') IS NOT NULL;
+
+    DECLARE @HasPayer BIT = CASE WHEN EXISTS(SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
+    DECLARE @HasPanel BIT = CASE WHEN EXISTS(SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+    SELECT
+        TRY_CAST(ChargeEnteredDate AS DATE)       AS CED,
+        YEAR(TRY_CAST(ChargeEnteredDate AS DATE))  AS YearNo,
+        MONTH(TRY_CAST(ChargeEnteredDate AS DATE)) AS MonthNo
+    INTO #Base
+    FROM dbo.LineLevelData
+    WHERE TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL
+      AND (@HasPayer = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw,'Unknown'))) IN (SELECT Value FROM @PayerList))
+      AND (@HasPanel = 0 OR LTRIM(RTRIM(ISNULL(Panelname,'Unknown'))) IN (SELECT Value FROM @PanelList))
+      AND (@DosFrom        IS NULL OR TRY_CAST(DateOfService     AS DATE) >= @DosFrom)
+      AND (@DosTo          IS NULL OR TRY_CAST(DateOfService     AS DATE) <= @DosTo)
+      AND (@CEDFrom        IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) >= @CEDFrom)
+      AND (@CEDTo          IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) <= @CEDTo)
+      AND (@FirstBilledFrom IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) >= @FirstBilledFrom)
+      AND (@FirstBilledTo   IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) <= @FirstBilledTo);
+
+    DECLARE @Total BIGINT = (SELECT COUNT(*) FROM #Base);
+
+    IF @Total = 0 OR @Total <= @Threshold
+    BEGIN
+        SELECT 'ALL'               AS BucketType,
+               NULL                AS YearNo,
+               NULL                AS MonthNo,
+               CAST(MIN(CED) AS DATETIME) AS FromDate,
+               CAST(MAX(CED) AS DATETIME) AS ToDate,
+               CAST(@Total AS INT) AS RecordCount,
+               'LineLevel'         AS SheetName
+        FROM #Base;
+        DROP TABLE #Base;
+        RETURN;
+    END
+
+    SELECT YearNo, COUNT(*) AS Cnt, MIN(CED) AS YMin, MAX(CED) AS YMax
+    INTO #Yr FROM #Base GROUP BY YearNo;
+
+    SELECT b.YearNo, b.MonthNo, COUNT(*) AS Cnt, MIN(b.CED) AS MMin, MAX(b.CED) AS MMax
+    INTO #Mo FROM #Base b
+    JOIN #Yr y ON y.YearNo = b.YearNo AND y.Cnt > @Threshold
+    GROUP BY b.YearNo, b.MonthNo;
+
+    SELECT
+        CASE WHEN y.Cnt > @Threshold THEN 'MONTH' ELSE 'YEAR' END AS BucketType,
+        y.YearNo,
+        NULL AS MonthNo,
+        CAST(y.YMin AS DATETIME) AS FromDate,
+        CAST(y.YMax AS DATETIME) AS ToDate,
+        CAST(y.Cnt AS INT)       AS RecordCount,
+        CAST(y.YearNo AS NVARCHAR(4)) + '_LineLevel' AS SheetName
+    FROM #Yr y WHERE y.Cnt <= @Threshold
+    UNION ALL
+    SELECT
+        'MONTH' AS BucketType,
+        m.YearNo,
+        m.MonthNo,
+        CAST(m.MMin AS DATETIME) AS FromDate,
+        CAST(m.MMax AS DATETIME) AS ToDate,
+        CAST(m.Cnt AS INT)       AS RecordCount,
+        CAST(m.YearNo AS NVARCHAR(4)) + '_' + RIGHT('0' + CAST(m.MonthNo AS NVARCHAR(2)), 2) + '_LineLevel' AS SheetName
+    FROM #Mo m
+    ORDER BY YearNo, MonthNo;
+
+    DROP TABLE IF EXISTS #Base;
+    DROP TABLE IF EXISTS #Yr;
+    DROP TABLE IF EXISTS #Mo;
+END
+GO
+
+-- ============================================================
+CREATE OR ALTER PROCEDURE dbo.usp_GetNW_ClaimLevelExportByRange
+    @FromDate        DATE          = NULL,
+    @ToDate          DATE          = NULL,
+    @PayerNames      NVARCHAR(MAX) = NULL,
+    @PanelNames      NVARCHAR(MAX) = NULL,
+    @DosFrom         DATE          = NULL,
+    @DosTo           DATE          = NULL,
+    @CEDFrom         DATE          = NULL,
+    @CEDTo           DATE          = NULL,
+    @FirstBilledFrom DATE          = NULL,
+    @FirstBilledTo   DATE          = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @PayerList TABLE (Value NVARCHAR(500) NOT NULL PRIMARY KEY);
+    DECLARE @PanelList TABLE (Value NVARCHAR(500) NOT NULL PRIMARY KEY);
+
+    IF NULLIF(LTRIM(RTRIM(@PayerNames)),'') IS NOT NULL
+        INSERT INTO @PayerList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PayerNames,'|') WHERE NULLIF(LTRIM(RTRIM(value)),'') IS NOT NULL;
+
+    IF NULLIF(LTRIM(RTRIM(@PanelNames)),'') IS NOT NULL
+        INSERT INTO @PanelList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PanelNames,'|') WHERE NULLIF(LTRIM(RTRIM(value)),'') IS NOT NULL;
+
+    DECLARE @HasPayer BIT = CASE WHEN EXISTS(SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
+    DECLARE @HasPanel BIT = CASE WHEN EXISTS(SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+    SELECT
+        [ClaimID],[AccessionNumber],[PayerName],[PayerType],[BillingProvider],[ReferringProvider],
+        [ClinicName],[SalesRepname],[PatientID],[PatientDOB],[DateofService],[ChargeEnteredDate],
+        [FirstBilledDate],[Panelname],[CPTCodeXUnitsXModifier],[POS],[TOS],[ChargeAmount],[AllowedAmount],
+        [InsurancePayment],[PatientPayment],[TotalPayments],[InsuranceAdjustments],[PatientAdjustments],
+        [TotalAdjustments],[InsuranceBalance],[PatientBalance],[TotalBalance],[CheckDate],[ClaimStatus],
+        [DenialCode],[ICDCode],[DaystoDOS],[RollingDays],[DaystoBill],[DaystoPost],[ICDPointer],[InsertedDateTime]
+    FROM dbo.ClaimLevelData
+    WHERE LTRIM(RTRIM(ClaimStatus)) NOT IN (
+              'Unbilled in Daq','Unbilled in Daq - PR',
+              'Unbilled in Webpm','Unbilled in Webpm - PR','Billed amount 0')
+      AND TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL
+      AND NULLIF(LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(PanelType)),''), ISNULL(PanelName,'')))), '') IS NOT NULL
+      AND (@FromDate IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) >= @FromDate)
+      AND (@ToDate   IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) <= @ToDate)
+      AND (@HasPayer = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw,'Unknown'))) IN (SELECT Value FROM @PayerList))
+      AND (@HasPanel = 0 OR LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(PanelType)),''), ISNULL(PanelName,'Unknown')))) IN (SELECT Value FROM @PanelList))
+      AND (@DosFrom        IS NULL OR TRY_CAST(DateOfService     AS DATE) >= @DosFrom)
+      AND (@DosTo          IS NULL OR TRY_CAST(DateOfService     AS DATE) <= @DosTo)
+      AND (@CEDFrom        IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) >= @CEDFrom)
+      AND (@CEDTo          IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) <= @CEDTo)
+      AND (@FirstBilledFrom IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) >= @FirstBilledFrom)
+      AND (@FirstBilledTo   IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) <= @FirstBilledTo)
+    ORDER BY TRY_CAST(ChargeEnteredDate AS DATE), ClaimID, AccessionNumber;
+END
+GO
+
+-- ============================================================
+CREATE OR ALTER PROCEDURE dbo.usp_GetNW_LineLevelExportByRange
+    @FromDate        DATE          = NULL,
+    @ToDate          DATE          = NULL,
+    @PayerNames      NVARCHAR(MAX) = NULL,
+    @PanelNames      NVARCHAR(MAX) = NULL,
+    @DosFrom         DATE          = NULL,
+    @DosTo           DATE          = NULL,
+    @CEDFrom         DATE          = NULL,
+    @CEDTo           DATE          = NULL,
+    @FirstBilledFrom DATE          = NULL,
+    @FirstBilledTo   DATE          = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @PayerList TABLE (Value NVARCHAR(500) NOT NULL PRIMARY KEY);
+    DECLARE @PanelList TABLE (Value NVARCHAR(500) NOT NULL PRIMARY KEY);
+
+    IF NULLIF(LTRIM(RTRIM(@PayerNames)),'') IS NOT NULL
+        INSERT INTO @PayerList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PayerNames,'|') WHERE NULLIF(LTRIM(RTRIM(value)),'') IS NOT NULL;
+
+    IF NULLIF(LTRIM(RTRIM(@PanelNames)),'') IS NOT NULL
+        INSERT INTO @PanelList SELECT DISTINCT LTRIM(RTRIM(value))
+        FROM STRING_SPLIT(@PanelNames,'|') WHERE NULLIF(LTRIM(RTRIM(value)),'') IS NOT NULL;
+
+    DECLARE @HasPayer BIT = CASE WHEN EXISTS(SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
+    DECLARE @HasPanel BIT = CASE WHEN EXISTS(SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+    SELECT
+        [ClaimID],[AccessionNumber],[PayerName],[PayerType],[BillingProvider],[ReferringProvider],
+        [ClinicName],[SalesRepname],[PatientID],[PatientDOB],[DateofService],[ChargeEnteredDate],
+        [FirstBilledDate],[Panelname],[CPTCode],[Units],[Modifier],[POS],[TOS],
+        [ChargeAmount],[ChargeAmountPerUnit],[AllowedAmount],[AllowedAmountPerUnit],
+        [InsurancePayment],[InsurancePaymentPerUnit],[PatientPayment],[PatientPaymentPerUnit],
+        [TotalPayments],[InsuranceAdjustments],[PatientAdjustments],[TotalAdjustments],
+        [InsuranceBalance],[PatientBalance],[PatientBalancePerUnit],[TotalBalance],
+        [CheckDate],[PostingDate],[ClaimStatus],[PayStatus],[DenialCode],[DenialDate],
+        [ICDCode],[DaystoDOS],[RollingDays],[DaystoBill],[DaystoPost],[ICDPointer]
+    FROM dbo.LineLevelData
+    WHERE TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL
+      AND (@FromDate IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) >= @FromDate)
+      AND (@ToDate   IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) <= @ToDate)
+      AND (@HasPayer = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw,'Unknown'))) IN (SELECT Value FROM @PayerList))
+      AND (@HasPanel = 0 OR LTRIM(RTRIM(ISNULL(Panelname,'Unknown'))) IN (SELECT Value FROM @PanelList))
+      AND (@DosFrom        IS NULL OR TRY_CAST(DateOfService     AS DATE) >= @DosFrom)
+      AND (@DosTo          IS NULL OR TRY_CAST(DateOfService     AS DATE) <= @DosTo)
+      AND (@CEDFrom        IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) >= @CEDFrom)
+      AND (@CEDTo          IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) <= @CEDTo)
+      AND (@FirstBilledFrom IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) >= @FirstBilledFrom)
+      AND (@FirstBilledTo   IS NULL OR TRY_CAST(FirstBilledDate  AS DATE) <= @FirstBilledTo)
+    ORDER BY TRY_CAST(ChargeEnteredDate AS DATE), ClaimID, AccessionNumber;
+END
+GO
+
 PRINT '14_NorthWest_ReadSPs.sql completed.';

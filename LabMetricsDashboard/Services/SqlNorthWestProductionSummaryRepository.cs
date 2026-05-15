@@ -1,4 +1,13 @@
-using LabMetricsDashboard.Models;
+using LRN.ProductionReports.Models;
+using LRN.ProductionReports.Models;
+using SharedCodingResult = LRN.ProductionReports.Services.CodingResult;
+using SharedCptBreakdownResult = LRN.ProductionReports.Services.CptBreakdownResult;
+using SharedPayerBreakdownResult = LRN.ProductionReports.Services.PayerBreakdownResult;
+using SharedPayerPanelResult = LRN.ProductionReports.Services.PayerPanelResult;
+using SharedProductionReportResult = LRN.ProductionReports.Services.ProductionReportResult;
+using SharedRawDataSegment = LRN.ProductionReports.Services.RawDataSegment;
+using SharedUnbilledAgingResult = LRN.ProductionReports.Services.UnbilledAgingResult;
+using SharedWeeklyClaimVolumeResult = LRN.ProductionReports.Services.WeeklyClaimVolumeResult;
 using System.Data;
 using Microsoft.Data.SqlClient;
 
@@ -65,7 +74,7 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
 
     // ?? Monthly Claim Volume ??????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<ProductionReportResult> GetMonthlyAsync(
+    public async Task<SharedProductionReportResult> GetMonthlyAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -177,7 +186,7 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
                 });
             }
 
-            return new ProductionReportResult(
+        return new SharedProductionReportResult(
                 [],
                 panelRows.Select(p => p.PanelName).ToList(),
                 months, years, panelRows,
@@ -188,13 +197,13 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
         catch (Exception ex)
         {
             _logger.LogError(ex, "NW GetMonthlyAsync failed.");
-            return new ProductionReportResult([], [], [], [], [], new Dictionary<string, ProductionMonthCell>(), 0, 0m);
+        return new SharedProductionReportResult([], [], [], [], [], new Dictionary<string, ProductionMonthCell>(), 0, 0m);
         }
     }
 
     // ?? Weekly Claim Volume ???????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<WeeklyClaimVolumeResult> GetWeeklyAsync(
+    public async Task<SharedWeeklyClaimVolumeResult> GetWeeklyAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -305,7 +314,7 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
                 });
             }
 
-            return new WeeklyClaimVolumeResult(
+        return new SharedWeeklyClaimVolumeResult(
                 columns, panelRows, grandByWeek,
                 grandByWeek.Values.Sum(c => c.ClaimCount),
                 grandByWeek.Values.Sum(c => c.BilledCharges));
@@ -313,13 +322,13 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
         catch (Exception ex)
         {
             _logger.LogError(ex, "NW GetWeeklyAsync failed.");
-            return new WeeklyClaimVolumeResult([], [], new Dictionary<string, ProductionMonthCell>(), 0, 0m);
+        return new SharedWeeklyClaimVolumeResult([], [], new Dictionary<string, ProductionMonthCell>(), 0, 0m);
         }
     }
 
     // ?? Coding ???????????????????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<CodingResult> GetCodingAsync(
+    public async Task<SharedCodingResult> GetCodingAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -380,18 +389,18 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
                 })
                 .ToList();
 
-            return new CodingResult(panelRows, panelRows.Sum(r => r.ClaimCount), panelRows.Sum(r => r.TotalCharges));
+        return new SharedCodingResult(panelRows, panelRows.Sum(r => r.ClaimCount), panelRows.Sum(r => r.TotalCharges));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "NW GetCodingAsync failed.");
-            return new CodingResult([], 0, 0m);
+        return new SharedCodingResult([], 0, 0m);
         }
     }
 
     // ?? Payer Breakdown ???????????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<PayerBreakdownResult> GetPayerBreakdownAsync(
+    public async Task<SharedPayerBreakdownResult> GetPayerBreakdownAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -454,18 +463,18 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
                 });
             }
 
-            return new PayerBreakdownResult(months, years, payerRows, grandByMonth, grandByMonth.Values.Sum());
+        return new SharedPayerBreakdownResult(months, years, payerRows, grandByMonth, grandByMonth.Values.Sum());
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "NW GetPayerBreakdownAsync failed.");
-            return new PayerBreakdownResult([], [], [], new Dictionary<string, int>(), 0);
+        return new SharedPayerBreakdownResult([], [], [], new Dictionary<string, int>(), 0);
         }
     }
 
     // ?? Payer × Panel ?????????????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<PayerPanelResult> GetPayerByPanelAsync(
+    public async Task<SharedPayerPanelResult> GetPayerByPanelAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -527,7 +536,7 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
                 });
             }
 
-            return new PayerPanelResult(
+        return new SharedPayerPanelResult(
                 panelCols, payerRows, grandPanel,
                 grandPanel.Values.Sum(c => c.ClaimCount),
                 grandPanel.Values.Sum(c => c.BilledCharges));
@@ -535,13 +544,13 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
         catch (Exception ex)
         {
             _logger.LogError(ex, "NW GetPayerByPanelAsync failed.");
-            return new PayerPanelResult([], [], new Dictionary<string, ProductionMonthCell>(StringComparer.OrdinalIgnoreCase), 0, 0m);
+        return new SharedPayerPanelResult([], [], new Dictionary<string, ProductionMonthCell>(StringComparer.OrdinalIgnoreCase), 0, 0m);
         }
     }
 
     // ?? Unbilled × Aging ?????????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<UnbilledAgingResult> GetUnbilledAgingAsync(
+    public async Task<SharedUnbilledAgingResult> GetUnbilledAgingAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -604,7 +613,7 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
                 });
             }
 
-            return new UnbilledAgingResult(
+        return new SharedUnbilledAgingResult(
                 panelRows, grandByBucket,
                 grandByBucket.Values.Sum(c => c.ClaimCount),
                 grandByBucket.Values.Sum(c => c.BilledCharges));
@@ -612,13 +621,13 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
         catch (Exception ex)
         {
             _logger.LogError(ex, "NW GetUnbilledAgingAsync failed.");
-            return new UnbilledAgingResult([], new Dictionary<string, ProductionMonthCell>(StringComparer.OrdinalIgnoreCase), 0, 0m);
+        return new SharedUnbilledAgingResult([], new Dictionary<string, ProductionMonthCell>(StringComparer.OrdinalIgnoreCase), 0, 0m);
         }
     }
 
     // ?? CPT Breakdown ?????????????????????????????????????????????????????????
     /// <inheritdoc/>
-    public async Task<CptBreakdownResult> GetCptBreakdownAsync(
+    public async Task<SharedCptBreakdownResult> GetCptBreakdownAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -699,7 +708,7 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
                 });
             }
 
-            return new CptBreakdownResult(
+        return new SharedCptBreakdownResult(
                 months, years, cptRows, grandByMonth,
                 grandByMonth.Values.Sum(c => c.Units),
                 grandByMonth.Values.Sum(c => c.BilledCharges));
@@ -707,7 +716,7 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
         catch (Exception ex)
         {
             _logger.LogError(ex, "NW GetCptBreakdownAsync failed.");
-            return new CptBreakdownResult([], [], [], new Dictionary<string, CptBreakdownCell>(), 0m, 0m);
+        return new SharedCptBreakdownResult([], [], [], new Dictionary<string, CptBreakdownCell>(), 0m, 0m);
         }
     }
 
@@ -745,7 +754,7 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
     }
 
     /// <inheritdoc/>
-    public Task<List<RawDataSegment>> GetClaimLevelDataExportSegmentsAsync(
+    public Task<List<SharedRawDataSegment>> GetClaimLevelDataExportSegmentsAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -769,7 +778,7 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
     }
 
     /// <inheritdoc/>
-    public Task<List<RawDataSegment>> GetLineLevelDataExportSegmentsAsync(
+    public Task<List<SharedRawDataSegment>> GetLineLevelDataExportSegmentsAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -969,7 +978,7 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
             "TRY_CAST(l.ChargeEnteredDate AS DATE), c.PanelType, l.ClaimID, l.CPTCode");
     }
 
-    private async Task<List<RawDataSegment>> GetNwRawDataExportSegmentsAsync(
+    private async Task<List<SharedRawDataSegment>> GetNwRawDataExportSegmentsAsync(
         string connectionString,
         string baseSheetName,
         NwExportSqlParts parts,
@@ -990,23 +999,23 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
             _logger.LogInformation(
                 "[ProdExcelExportSplit] NW SQL split DONE Sheet={Sheet} Segments=1 Empty=true ElapsedMs={Ms}",
                 baseSheetName, sw.ElapsedMilliseconds);
-            return [new RawDataSegment(baseSheetName, [])];
+        return [new SharedRawDataSegment(baseSheetName, [], [])];
         }
 
         if (totalRows <= ExportSplitThreshold)
         {
-            var rows = await ExecuteNwSegmentQueryAsync(connectionString, parts, null, null, null, null, null, ct);
+            var (cols, rows) = await ExecuteNwSegmentQueryAsync(connectionString, parts, null, null, null, null, null, ct);
             _logger.LogInformation(
                 "[ProdExcelExportSplit] NW SQL split DONE Sheet={Sheet} Segments=1 Rows={Rows:N0} ElapsedMs={Ms}",
                 baseSheetName, rows.Count, sw.ElapsedMilliseconds);
-            return [new RawDataSegment(baseSheetName, rows)];
+        return [new SharedRawDataSegment(baseSheetName, cols, rows)];
         }
 
         _logger.LogInformation(
             "[ProdExcelExportSplit] NW SQL period count START Sheet={Sheet} — grouping by year/month in one pass",
             baseSheetName);
 
-        var segments = new List<RawDataSegment>();
+        var segments = new List<SharedRawDataSegment>();
         var usedSheetNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var periodCounts = await ExecuteNwPeriodCountsAsync(connectionString, parts, ct);
 
@@ -1063,7 +1072,7 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
         string yearLabel,
         int? month,
         long rowCount,
-        List<RawDataSegment> segments,
+        List<SharedRawDataSegment> segments,
         HashSet<string> usedSheetNames,
         CancellationToken ct)
     {
@@ -1081,14 +1090,14 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
                 "[ProdExcelExportSplit] NW SQL segment query START Sheet={SheetName} Offset={Offset:N0} Take={Take:N0}",
                 sheetName, offset, ExportSplitThreshold);
 
-            var rows = await ExecuteNwSegmentQueryAsync(
+            var (cols, rows) = await ExecuteNwSegmentQueryAsync(
                 connectionString, parts, splitFilter, splitYear, splitMonth, offset, ExportSplitThreshold, ct);
 
             _logger.LogInformation(
                 "[ProdExcelExportSplit] NW SQL segment query DONE Sheet={SheetName} Rows={Rows:N0}",
                 sheetName, rows.Count);
 
-            segments.Add(new RawDataSegment(sheetName, rows));
+        segments.Add(new SharedRawDataSegment(sheetName, cols, rows));
         }
     }
 
@@ -1151,7 +1160,7 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
         return rows;
     }
 
-    private async Task<List<Dictionary<string, object?>>> ExecuteNwSegmentQueryAsync(
+    private async Task<(string[] Columns, List<object?[]> Rows)> ExecuteNwSegmentQueryAsync(
         string connectionString,
         NwExportSqlParts parts,
         string? splitFilter,
@@ -1176,7 +1185,7 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
         await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 300 };
         AddClonedNwParameters(cmd, parts.Parameters);
         AddNwSplitParameters(cmd, splitFilter, splitYear, splitMonth, offset, take);
-        return await ExecuteNwReaderToDictionaryListAsync(cmd, ct);
+        return await ExecuteNwReaderToArraysAsync(cmd, ct);
     }
 
     private static string BuildNwMonthFilter(string dateExpression) =>
@@ -1262,6 +1271,21 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
             rows.Add(row);
         }
         return rows;
+    }
+
+    private static async Task<(string[] Columns, List<object?[]> Rows)> ExecuteNwReaderToArraysAsync(SqlCommand cmd, CancellationToken ct)
+    {
+        await using var rdr = await cmd.ExecuteReaderAsync(ct);
+        var cols = Enumerable.Range(0, rdr.FieldCount).Select(i => rdr.GetName(i)).ToArray();
+        var rows = new List<object?[]>();
+        while (await rdr.ReadAsync(ct))
+        {
+            var row = new object?[cols.Length];
+            for (int i = 0; i < cols.Length; i++)
+                row[i] = rdr.IsDBNull(i) ? null : rdr.GetValue(i);
+            rows.Add(row);
+        }
+        return (cols, rows);
     }
 
     private static void AddNwInClause(
