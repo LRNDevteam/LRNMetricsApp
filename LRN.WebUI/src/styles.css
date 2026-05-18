@@ -25,6 +25,24 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .lrn-content::-webkit-scrollbar-thumb{background:transparent}
 .lrn-content::-webkit-scrollbar-track{background:transparent}
 .filter-card{padding:11px 14px}.filter-row{display:flex;gap:8px;flex-wrap:wrap;align-items:end}.filter-row>div{display:flex;flex-direction:column;gap:3px}.filter-row label{font-size:10px;font-weight:700;color:var(--c-muted);text-transform:uppercase;letter-spacing:.08em}.filter-row input,.filter-row select,.assignment-toolbar select,.lrn-table select,.edit-pop select,.edit-pop textarea{font-size:11px;padding:5px 8px;border:1px solid var(--c-border);border-radius:5px;background:#fff;color:var(--c-text)}.filter-row input{min-width:160px}.filter-actions{flex-direction:row!important;gap:8px;margin-left:auto}.lrn-alert{padding:8px 12px;border-radius:5px;font-size:12px;margin-bottom:12px;border:1px solid}.lrn-alert.success{background:#e8f8f3;border-color:#a7e8d2;color:#0f766e}.lrn-alert.warning{background:#fff8e6;border-color:#ffe2a1;color:#92400e}.lrn-alert.danger{background:#fff0f0;border-color:#f8b4b4;color:#991b1b}.lrn-alert.info{background:#eef6ff;border-color:#bfdbfe;color:#1e40af}.loading-line{height:4px;background:linear-gradient(90deg,var(--lrn-teal),#dff8f2,var(--lrn-teal));background-size:200% 100%;animation:loading 1s linear infinite;border-radius:5px;margin-bottom:12px}@keyframes loading{to{background-position:-200% 0}}
+@media(min-width:1100px){
+  .filter-row{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:10px;align-items:end}
+  .filter-row>div{min-width:0}
+  .filter-row select,.filter-row input{width:100%}
+  .filter-row input{min-width:0}
+  .filter-row>div:nth-child(1){grid-column:span 2}
+  .filter-row>div:nth-child(2){grid-column:span 2}
+  .filter-row>div:nth-child(3){grid-column:span 4}
+  .filter-row>div:nth-child(4){grid-column:span 4}
+  .filter-row>div:nth-child(5){grid-column:span 4}
+  .filter-row>div:nth-child(6){grid-column:span 2}
+  .filter-row>div:nth-child(7){grid-column:span 2}
+  .filter-row>div:nth-child(8){grid-column:span 4}
+  .filter-row>div:nth-child(9){grid-column:span 3}
+  .filter-row>div:nth-child(10){grid-column:span 3}
+  .filter-row>div:nth-child(11){grid-column:span 4}
+  .filter-actions{grid-column:11/span 2;margin-left:0;justify-content:flex-end}
+}
 .kpi-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:18px}.kpi-card{background:#fff;border:1px solid var(--c-border);border-radius:7px;padding:14px 16px;border-top:3px solid var(--kpi-color,var(--lrn-teal))}.kpi-label{font-size:10px;font-weight:600;color:var(--c-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}.kpi-value{font-size:22px;font-weight:700;color:var(--lrn-navy);line-height:1}.kpi-sub{font-size:10px;color:var(--c-muted);margin-top:4px}.kpi-up{color:#1abc9c}.kpi-dn{color:#e74c3c}.kpi-warn{color:#f39c12}.row-2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;margin-bottom:14px}.status-row{margin-bottom:12px}.status-row>div:first-child{display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px}.progress-bar{height:6px;background:#e9ecef;border-radius:3px;overflow:hidden}.pb-fill{height:100%;border-radius:3px;background:var(--lrn-teal)}
 .dt-wrap{overflow:auto}.workflow-scroll{max-height:64vh}table.lrn-table{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}.lrn-table th{position:sticky;top:0;z-index:4;background:#f4f6f9;padding:8px 10px;text-align:left;font-weight:600;font-size:10px;color:var(--c-muted);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--c-border);white-space:nowrap}.lrn-table td{padding:7px 10px;border-bottom:1px solid #f1f3f5;vertical-align:middle;background:#fff}.lrn-table tr:hover td{background:#f8fffe}.lrn-table td.claim-link{font-weight:600;color:var(--lrn-teal);cursor:pointer}.workflow-table tbody tr:nth-child(even) td{background:#fbfdff}.workflow-table tbody tr:hover td{background:#eefdfa}.wrap-cell{min-width:260px;max-width:380px;white-space:normal!important}.sticky-col{position:sticky!important;z-index:5!important;background:#fff!important;box-shadow:1px 0 0 #dee2e6}.lrn-table thead .sticky-col{z-index:8!important;background:#f4f6f9!important}.select-col{left:0;min-width:54px;width:54px;text-align:center}.reviewer-col{left:54px;min-width:300px;width:300px}.assign-col{left:354px;min-width:104px;width:104px;text-align:center}.edit-col{left:0;min-width:92px;width:92px;text-align:center;overflow:visible}.reviewer-col select{min-width:275px}.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;letter-spacing:.03em}.badge-open{background:#dbeafe;color:#1e40af}.badge-ip{background:#fef3c7;color:#92400e}.badge-closed{background:#dcfce7;color:#166534}.badge-escalated{background:#fee2e2;color:#991b1b}.badge-high{background:#fee2e2;color:#991b1b}.badge-med{background:#fef3c7;color:#92400e}.badge-low{background:#f3f4f6;color:#374151}.avatar-sm{width:26px;height:26px;border-radius:50%;background:#e0f2f1;color:#0f766e;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;vertical-align:middle;margin-right:5px}.assignment-toolbar{padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px}.assign-left{display:flex;gap:8px;align-items:center;font-size:12px}.assign-left span{background:var(--lrn-teal);color:#fff;border-radius:10px;padding:1px 8px;font-size:10px}.assign-left small{color:var(--c-muted)}.assign-right{display:flex;gap:8px;align-items:center}.assign-right select{min-width:260px}.edit-pop{position:absolute;left:8px;top:40px;z-index:30;width:330px;background:#fff;border:1px solid #ced4da;border-radius:8px;padding:.75rem;box-shadow:0 10px 30px rgba(0,0,0,.2);text-align:left}.edit-pop label{display:block;font-size:10px;font-weight:700;color:var(--c-muted);text-transform:uppercase;margin:0 0 4px}.edit-pop select,.edit-pop textarea{width:100%;margin-bottom:8px}.edit-pop textarea{resize:vertical}.pager{display:flex;gap:10px;align-items:center;justify-content:flex-end;margin:10px 0}.pager span{font-size:11px;color:var(--c-muted)}.report-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.report-card p{font-size:11px;color:var(--c-muted);margin-bottom:12px}
 @media(max-width:1100px){.kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.row-2,.report-grid{grid-template-columns:1fr}.lrn-sidebar{width:205px}.topbar-actions{display:flex}.current-lab{display:none}.top-lab-select{max-width:140px}}
@@ -666,4 +684,147 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .line-task-grid td.denial-desc-cell{
   font-weight:500;
   color:#17324d;
+}
+
+/* 2026-05-18: Claim/My Worklist menu counts and full-content table visibility */
+.lrn-nav-subitem{
+  display:flex!important;
+  align-items:center!important;
+  justify-content:space-between!important;
+  gap:8px!important;
+  width:100%!important;
+}
+.nav-sub-label{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.nav-sub-count{
+  flex:0 0 auto;
+  min-width:30px;
+  max-width:58px;
+  padding:1px 6px;
+  border-radius:999px;
+  background:#16d7b7;
+  color:#063b34;
+  font-size:10px;
+  font-weight:900;
+  text-align:center;
+  line-height:16px;
+}
+.lrn-nav-subitem.active .nav-sub-count{
+  background:#ffffff;
+  color:#0f766e;
+}
+
+/* Claim Assignment claim-level table: show complete values and include Assigned To */
+.claim-assign-table{
+  min-width:1720px!important;
+}
+.claim-assign-table th,
+.claim-assign-table td{
+  white-space:normal!important;
+  overflow:visible!important;
+  text-overflow:clip!important;
+  vertical-align:top!important;
+  line-height:1.25!important;
+  overflow-wrap:anywhere!important;
+  word-break:normal!important;
+}
+.claim-assign-table .assigned-to-cell{
+  min-width:135px;
+  font-weight:700;
+  color:#334155;
+}
+.claim-assign-table .claim-money,
+.claim-assign-table .text-right{
+  white-space:nowrap!important;
+  vertical-align:middle!important;
+}
+.claim-row-actions{
+  display:flex;
+  gap:6px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+
+/* My Worklist claim-level and line-level grids: avoid clipped values */
+.wl-main-table{
+  min-width:1580px!important;
+}
+.wl-main-table th,
+.wl-main-table td,
+.wl-line-table th,
+.wl-line-table td{
+  white-space:normal!important;
+  overflow:visible!important;
+  text-overflow:clip!important;
+  vertical-align:top!important;
+  line-height:1.28!important;
+  overflow-wrap:anywhere!important;
+}
+.wl-main-table .money,
+.wl-line-table .money{
+  white-space:nowrap!important;
+}
+.wl-line-table{
+  min-width:2050px!important;
+}
+.wl-line-scroll{
+  max-width:100%!important;
+}
+
+/* Denial Summary: keep both tables inside the page without cutting the right edge */
+.summary-style-grid{
+  width:100%!important;
+  max-width:100%!important;
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;
+}
+.summary-style-card{
+  min-width:0!important;
+  max-width:100%!important;
+  overflow:hidden!important;
+}
+.summary-style-table-wrap{
+  width:100%!important;
+  max-width:100%!important;
+  overflow-x:hidden!important;
+  overflow-y:auto!important;
+}
+.summary-style-table{
+  width:100%!important;
+  min-width:0!important;
+  table-layout:fixed!important;
+}
+.summary-style-table th,
+.summary-style-table td{
+  white-space:normal!important;
+  overflow:visible!important;
+  text-overflow:clip!important;
+  overflow-wrap:anywhere!important;
+  word-break:normal!important;
+  line-height:1.25!important;
+  padding:9px 8px!important;
+}
+.summary-style-table th:first-child,
+.summary-style-table td:first-child{
+  width:44%!important;
+  min-width:0!important;
+  max-width:none!important;
+}
+.summary-style-table .num{
+  white-space:normal!important;
+  text-align:right!important;
+  font-size:11px!important;
+}
+.summary-style-table .ins-cell span{
+  display:block;
+  max-width:100%;
+}
+.summary-mini-progress{
+  min-width:0!important;
+  width:100%!important;
+}
+@media(max-width:1280px){
+  .summary-style-grid{grid-template-columns:1fr!important;}
 }

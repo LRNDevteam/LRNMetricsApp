@@ -69,6 +69,13 @@ public sealed class DenialWorkflowController : ControllerBase
     public async Task<ActionResult<DenialWorkflowSummary>> Summary([FromQuery] int labId, [FromQuery] string role = "", [FromQuery] string userName = "", CancellationToken ct = default)
         => Ok(await _service.GetSummaryAsync(labId, role, userName, ct));
 
+    [HttpGet("claim-menu-counts")]
+    [HttpGet("claim-counts")]
+    [HttpGet("claims/status-counts")]
+    [HttpGet("my-worklist/counts")]
+    public async Task<ActionResult<ClaimSubMenuCounts>> ClaimMenuCounts([FromQuery] DenialWorkflowFilter filter, CancellationToken ct)
+        => Ok(await _service.GetClaimSubMenuCountsAsync(Normalize(filter), ct));
+
     [HttpGet("reviewer-summary")]
     public async Task<ActionResult<IReadOnlyList<ReviewerWorkflowSummaryRow>>> ReviewerSummary([FromQuery] DenialWorkflowFilter filter, CancellationToken ct)
         => Ok(await _service.GetReviewerSummaryAsync(Normalize(filter), ct));

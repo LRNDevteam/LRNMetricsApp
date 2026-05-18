@@ -508,7 +508,75 @@ SELECT VerificationPending = COUNT(1) FROM dbo.DenialVerificationTask WHERE LabI
 		await using var rd = await cmd.ExecuteReaderAsync(ct);
 		if (await rd.ReadAsync(ct)) { s.Assigned = GetInt(rd, "Assigned"); s.Completed = GetInt(rd, "Completed"); s.Pending = GetInt(rd, "Pending"); s.Unassigned = GetInt(rd, "Unassigned"); }
 		if (await rd.NextResultAsync(ct) && await rd.ReadAsync(ct)) s.VerificationPending = GetInt(rd, "VerificationPending");
+
+		var counts = await GetClaimSubMenuCountsAsync(new DenialWorkflowFilter { LabId = labId, Role = role, UserName = userName }, ct);
+		s.New = counts.New;
+		s.Assigned = counts.Assigned;
+		s.Closed = counts.Closed;
+		s.Escalated = counts.Escalated;
+		s.TotalClaims = counts.TotalClaims;
 		return s;
+	}
+
+	public async Task<ClaimSubMenuCounts> GetClaimSubMenuCountsAsync(DenialWorkflowFilter filter, CancellationToken ct)
+	{
+		await using var con = OpenLab(filter.LabId);
+		await con.OpenAsync(ct);
+		await EnsureDenialTaskBoardNormalizedClaimIdAsync(con, ct);
+
+		var where = BuildClaimWhere(filter, "l");
+		var sql = $@"
+IF OBJECT_ID('tempdb..#TaskClaimAgg') IS NOT NULL DROP TABLE #TaskClaimAgg;
+IF OBJECT_ID('tempdb..#ClaimBase') IS NOT NULL DROP TABLE #ClaimBase;
+
+SELECT
+    ClaimId = LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))),
+    [Status] = CASE
+        WHEN SUM(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) LIKE '%escal%' THEN 1 ELSE 0 END) > 0 THEN 'Escalated'
+        WHEN SUM(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) IN ('closed','completed') THEN 0 ELSE 1 END) = 0 THEN 'Closed'
+        WHEN SUM(CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))),'') IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 'Assigned'
+        ELSE 'New'
+    END
+INTO #TaskClaimAgg
+FROM dbo.DenialTaskBoard t WITH (NOLOCK)
+WHERE NULLIF(LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))),'') IS NOT NULL
+GROUP BY LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,'')));
+
+SELECT ClaimId = LTRIM(RTRIM(ISNULL(l.VisitNumber,'')))
+INTO #ClaimBase
+FROM dbo.DenialLineItem l WITH (NOLOCK)
+WHERE NULLIF(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))),'') IS NOT NULL
+  {where.WhereClause}
+GROUP BY LTRIM(RTRIM(ISNULL(l.VisitNumber,'')));
+
+SELECT
+    TotalClaims = COUNT(1),
+    [New] = SUM(CASE WHEN ISNULL(tca.[Status], 'New') = 'New' THEN 1 ELSE 0 END),
+    Assigned = SUM(CASE WHEN ISNULL(tca.[Status], '') = 'Assigned' THEN 1 ELSE 0 END),
+    Closed = SUM(CASE WHEN ISNULL(tca.[Status], '') = 'Closed' THEN 1 ELSE 0 END),
+    Escalated = SUM(CASE WHEN ISNULL(tca.[Status], '') = 'Escalated' THEN 1 ELSE 0 END)
+FROM #ClaimBase c
+LEFT JOIN #TaskClaimAgg tca ON tca.ClaimId = c.ClaimId;
+
+DROP TABLE #ClaimBase;
+DROP TABLE #TaskClaimAgg;";
+
+		await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 180 };
+		AddFilterParams(cmd, filter);
+		AddExtraParams(cmd, where.Parameters);
+		await using var rd = await cmd.ExecuteReaderAsync(ct);
+
+		var result = new ClaimSubMenuCounts();
+		if (await rd.ReadAsync(ct))
+		{
+			result.TotalClaims = GetInt(rd, "TotalClaims");
+			result.New = GetInt(rd, "New");
+			result.Assigned = GetInt(rd, "Assigned");
+			result.Closed = GetInt(rd, "Closed");
+			result.Escalated = GetInt(rd, "Escalated");
+		}
+
+		return result;
 	}
 
 	public async Task<IReadOnlyList<ReviewerWorkflowSummaryRow>> GetReviewerSummaryAsync(DenialWorkflowFilter filter, CancellationToken ct)
@@ -579,7 +647,12 @@ IF OBJECT_ID('tempdb..#ClaimBase') IS NOT NULL DROP TABLE #ClaimBase;
 
 SELECT
     ClaimId = LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))),
-    AssignedTo = MAX(NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))),'')),
+    AssignedReviewerCount = COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))),'')),
+    AssignedTo = CASE
+        WHEN COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))),'')) = 0 THEN ''
+        WHEN COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))),'')) = 1 THEN MAX(NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))),''))
+        ELSE CONCAT('Multiple (', COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))),'')), ')')
+    END,
     [Status] = CASE
         WHEN SUM(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) LIKE '%escal%' THEN 1 ELSE 0 END) > 0 THEN 'Escalated'
         WHEN SUM(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) IN ('closed','completed') THEN 0 ELSE 1 END) = 0 THEN 'Closed'
@@ -1538,38 +1611,39 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
 	}
 
 	private static string BuildTaskViewSql(string? taskView, string a)
-	{
-		var view = NormalizeTaskView(taskView);
-		return view switch
 		{
-			// Claim Level: New / Unassigned
-			"unassigned" => $"LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) IN ('open','review','pending review') AND NULLIF(LTRIM(RTRIM(ISNULL({a}.AssignedTo,''))),'') IS NULL",
+			var view = NormalizeTaskView(taskView);
+			return view switch
+			{
+				// Claim Assignment: New means no reviewer assigned and not closed/escalated.
+				// Imported rows may have blank/New/Open/Review/Pending Review statuses, so do not require one exact status.
+				"unassigned" => $"NULLIF(LTRIM(RTRIM(ISNULL({a}.AssignedTo,''))),'') IS NULL AND LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) NOT IN ('closed','completed') AND LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) NOT LIKE '%escal%'",
 
-			// Claim Level: Assigned
-			"assigned" => $"NULLIF(LTRIM(RTRIM(ISNULL({a}.AssignedTo,''))),'') IS NOT NULL AND LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) NOT IN ('closed','completed','escalated')",
+				// Claim Assignment / My Worklist: assigned active rows.
+				"assigned" => $"NULLIF(LTRIM(RTRIM(ISNULL({a}.AssignedTo,''))),'') IS NOT NULL AND LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) NOT IN ('closed','completed') AND LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) NOT LIKE '%escal%'",
 
-			// Claim Level / My Worklist: Closed
-			"closed" => $"LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) IN ('closed','completed')",
+				// Claim Assignment / My Worklist: closed rows.
+				"closed" => $"LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) IN ('closed','completed')",
 
-			// My Worklist: Open / New
-			"open" => $"LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) IN ('open','review','pending review')",
+				// My Worklist: New means assigned active work after reviewer/user filter is applied.
+				"open" => $"LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) IN ('','new','open','review','pending review','in progress','pending payer','pending documentation')",
 
-			// Claim Level: Escalations
-			"escalations" => $"(LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) LIKE '%escal%' OR LOWER(LTRIM(RTRIM(ISNULL({a}.SLAStatus,'')))) IN ('breached','overdue','at risk','atrisk'))",
+				// Claim Assignment / My Worklist: escalated rows.
+				"escalations" => $"(LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) LIKE '%escal%' OR LOWER(LTRIM(RTRIM(ISNULL({a}.SLAStatus,'')))) IN ('breached','overdue','at risk','atrisk'))",
 
-			// My Worklist: Rework - closed once and reassigned again
-			"rework" => $@"EXISTS (
-				SELECT 1
-				FROM dbo.DenialTaskHistory h WITH (NOLOCK)
-				WHERE (ISNULL(h.TaskID,'') = ISNULL({a}.TaskID,'') OR ISNULL(h.UniqueTrackId,'') = ISNULL({a}.UniqueTrackId,''))
-				  AND LOWER(LTRIM(RTRIM(ISNULL(h.OldStatus,'')))) IN ('closed','completed')
-				  AND NULLIF(LTRIM(RTRIM(ISNULL(h.NewAssignedTo,''))),'') IS NOT NULL
-			)",
-			_ => string.Empty
-		};
-	}
+				// My Worklist: Rework - closed once and reassigned again
+				"rework" => $@"EXISTS (
+					SELECT 1
+					FROM dbo.DenialTaskHistory h WITH (NOLOCK)
+					WHERE (ISNULL(h.TaskID,'') = ISNULL({a}.TaskID,'') OR ISNULL(h.UniqueTrackId,'') = ISNULL({a}.UniqueTrackId,''))
+					  AND LOWER(LTRIM(RTRIM(ISNULL(h.OldStatus,'')))) IN ('closed','completed')
+					  AND NULLIF(LTRIM(RTRIM(ISNULL(h.NewAssignedTo,''))),'') IS NOT NULL
+				)",
+				_ => string.Empty
+			};
+		}
 
-	private static string BuildClaimTaskViewExistsSql(string? taskView, string a)
+		private static string BuildClaimTaskViewExistsSql(string? taskView, string a)
 	{
 		var taskPredicate = BuildTaskViewSql(taskView, "tbx");
 		if (string.IsNullOrWhiteSpace(taskPredicate)) return string.Empty;
@@ -1590,8 +1664,8 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
 			"new" or "newunassigned" or "unassigned" => "unassigned",
 			"assigned" or "active" => "assigned",
 			"closed" or "completed" => "closed",
-			"escalation" or "escalations" or "escalated" => "escalations",
-			"open" or "opennew" or "myopen" => "open",
+			"escalation" or "escalations" or "escalated" or "escalate" => "escalations",
+			"open" or "opennew" or "myopen" or "pending" => "open",
 			"rework" or "reassigned" => "rework",
 			_ => string.Empty
 		};

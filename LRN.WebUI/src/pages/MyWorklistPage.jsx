@@ -85,9 +85,10 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
   const claims = useMemo(() => groupByClaim(rows), [rows]);
   const kpi = useMemo(() => ({ claims: claims.length, tasks: rows.length, balance: rows.reduce((a, b) => a + Number(b.insuranceBalance || 0), 0), escalated: rows.filter(x => String(x.status || '').toLowerCase().includes('escal')).length }), [claims, rows]);
   const myTabs = useMemo(() => [
-    { key: 'open', label: 'Open / New', hint: 'Assigned active work' },
-    { key: 'closed', label: 'Closed', hint: 'Completed by reviewer' },
-    { key: 'rework', label: 'Rework', hint: 'Closed item reassigned back' }
+    { key: 'open', label: 'New', hint: 'Assigned active work' },
+    { key: 'assigned', label: 'Assigned', hint: 'All assigned active items' },
+    { key: 'escalations', label: 'Escalate', hint: 'Escalated work items' },
+    { key: 'closed', label: 'Closed', hint: 'Completed by reviewer' }
   ], []);
 
   async function openNote(level, claim, task) {

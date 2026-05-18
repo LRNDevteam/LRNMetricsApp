@@ -52,6 +52,8 @@ export default function App() {
   const [authChecking, setAuthChecking] = useState(true);
   const [authError, setAuthError] = useState('');
   const [reviewerNotification, setReviewerNotification] = useState({ assignedTasks: 0, pendingTasks: 0, loading: false });
+  const [claimMenuCounts, setClaimMenuCounts] = useState({ unassigned: null, assigned: null, escalations: null, closed: null });
+  const [myWorklistMenuCounts, setMyWorklistMenuCounts] = useState({ open: null, assigned: null, escalations: null, closed: null });
   const claimRequestSeq = useRef(0);
   const reviewerOnly = roleIsReviewerOnly(user.role);
   const canAssign = canAssignRole(user.role);
@@ -283,18 +285,93 @@ export default function App() {
     call.catch(err => setMessage({ type: 'danger', text: err.message })).finally(() => setLoading(false));
   }, [authReady, labId, view, query, reviewerOnly]);
 
+
+  function menuCountText(value) {
+    if (value === null || value === undefined) return '...';
+    const n = Number(value || 0);
+    return n > 99999 ? `${Math.round(n / 1000)}k` : n.toLocaleString();
+  }
+
+  async function refreshMenuCounts() {
+    if (!authReady || !labId) return;
+
+    const commonFilters = {
+      labId,
+      role: user.role,
+      userName: user.userName,
+      reviewer: reviewerOnly ? (user.userName || '') : debouncedFilter.reviewer,
+      assignedTo: reviewerOnly ? (user.userName || '') : debouncedFilter.reviewer,
+      actionCategory: debouncedFilter.actionCategory,
+      priority: debouncedFilter.priority,
+      denialCode: debouncedFilter.denialCode,
+      payerName: debouncedFilter.payerName,
+      clinic: debouncedFilter.clinic,
+      salesRepname: debouncedFilter.salesRepname,
+      referringProvider: debouncedFilter.referringProvider,
+      denialClassification: debouncedFilter.denialClassification,
+      searchText: debouncedFilter.searchText,
+      page: 1,
+      pageSize: 1
+    };
+
+    try {
+      const [newClaims, assignedClaims, escalatedClaims, closedClaims] = await Promise.all([
+        denialWorkflowService.getClaims({ ...commonFilters, taskView: 'unassigned' }),
+        denialWorkflowService.getClaims({ ...commonFilters, taskView: 'assigned' }),
+        denialWorkflowService.getClaims({ ...commonFilters, taskView: 'escalations' }),
+        denialWorkflowService.getClaims({ ...commonFilters, taskView: 'closed' })
+      ]);
+      setClaimMenuCounts({
+        unassigned: Number(newClaims?.totalCount || 0),
+        assigned: Number(assignedClaims?.totalCount || 0),
+        escalations: Number(escalatedClaims?.totalCount || 0),
+        closed: Number(closedClaims?.totalCount || 0)
+      });
+    } catch {
+      setClaimMenuCounts({ unassigned: null, assigned: null, escalations: null, closed: null });
+    }
+
+    try {
+      const myFilters = {
+        ...commonFilters,
+        reviewer: reviewerOnly ? (user.userName || '') : (debouncedFilter.reviewer || user.userName || ''),
+        assignedTo: reviewerOnly ? (user.userName || '') : (debouncedFilter.reviewer || user.userName || '')
+      };
+      const [newTasks, assignedTasks, escalatedTasks, closedTasks] = await Promise.all([
+        denialWorkflowService.getTasks({ ...myFilters, taskView: 'open' }),
+        denialWorkflowService.getTasks({ ...myFilters, taskView: 'assigned' }),
+        denialWorkflowService.getTasks({ ...myFilters, taskView: 'escalations' }),
+        denialWorkflowService.getTasks({ ...myFilters, taskView: 'closed' })
+      ]);
+      setMyWorklistMenuCounts({
+        open: Number(newTasks?.totalCount || 0),
+        assigned: Number(assignedTasks?.totalCount || 0),
+        escalations: Number(escalatedTasks?.totalCount || 0),
+        closed: Number(closedTasks?.totalCount || 0)
+      });
+    } catch {
+      setMyWorklistMenuCounts({ open: null, assigned: null, escalations: null, closed: null });
+    }
+  }
+
+  useEffect(() => {
+    if (!authReady || !labId) return;
+    refreshMenuCounts();
+  }, [authReady, labId, user.role, user.userName, reviewerOnly, debouncedFilter]);
+
   const labName = labs.find(l => Number(l.labId ?? l.LabId) === Number(labId))?.labName || 'Select Lab';
   const pageTitle = { dashboard: 'Denial Workflow Dashboard', summary: 'Denial Summary', claims: 'Claim Level Assignment', myworklist: 'My Worklist', tasks: 'Task Board', verification: 'Verification Queue' }[view] || 'Denial Workflow';
   const claimNavTabs = useMemo(() => ([
-    { key: 'unassigned', label: 'New / Unassigned' },
+    { key: 'unassigned', label: 'New' },
     { key: 'assigned', label: 'Assigned' },
-    { key: 'closed', label: 'Closed' },
-    { key: 'escalations', label: 'Escalations' }
+    { key: 'escalations', label: 'Escalate' },
+    { key: 'closed', label: 'Closed' }
   ]), []);
   const myWorklistNavTabs = useMemo(() => ([
-    { key: 'open', label: 'Open / New' },
-    { key: 'closed', label: 'Closed' },
-    { key: 'rework', label: 'Rework' }
+    { key: 'open', label: 'New' },
+    { key: 'assigned', label: 'Assigned' },
+    { key: 'escalations', label: 'Escalate' },
+    { key: 'closed', label: 'Closed' }
   ]), []);
 
   function handleClaimTaskViewChange(nextView) {
@@ -441,7 +518,7 @@ export default function App() {
               <div className="lrn-nav-submenu">
                 {claimNavTabs.map(t => (
                   <button key={t.key} type="button" className={`lrn-nav-subitem ${claimTaskView === t.key ? 'active' : ''}`} onClick={() => { setView('claims'); handleClaimTaskViewChange(t.key); }}>
-                    {t.label}
+                    <span className="nav-sub-label">{t.label}</span><span className="nav-sub-count">{menuCountText(claimMenuCounts[t.key])}</span>
                   </button>
                 ))}
               </div>
@@ -454,7 +531,7 @@ export default function App() {
           <div className="lrn-nav-submenu">
             {myWorklistNavTabs.map(t => (
               <button key={t.key} type="button" className={`lrn-nav-subitem ${myWorklistView === t.key ? 'active' : ''}`} onClick={() => { setView('myworklist'); handleMyWorklistViewChange(t.key); }}>
-                {t.label}
+                <span className="nav-sub-label">{t.label}</span><span className="nav-sub-count">{menuCountText(myWorklistMenuCounts[t.key])}</span>
               </button>
             ))}
           </div>

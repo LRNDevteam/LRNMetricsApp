@@ -110,6 +110,9 @@ public sealed class ActionCategorySummaryRow
     public int Count { get; set; }
     public decimal Outstanding { get; set; }
     public decimal PercentageOfTotal { get; set; }
+    public int Open { get; set; }
+    public int InProgress { get; set; }
+    public int Closed { get; set; }
 }
 
 public sealed class SlaSummaryRow
@@ -186,6 +189,23 @@ public class DenialWorkflowSummary
     public int Pending { get; set; }
     public int VerificationPending { get; set; }
     public int Unassigned { get; set; }
+
+    // Claim-level menu counters used by Claim Assignment and My Worklist sub menus.
+    public int New { get; set; }
+    public int Closed { get; set; }
+    public int Escalated { get; set; }
+    public int Escalate { get => Escalated; set => Escalated = value; }
+    public int TotalClaims { get; set; }
+}
+
+public sealed class ClaimSubMenuCounts
+{
+    public int TotalClaims { get; set; }
+    public int New { get; set; }
+    public int Assigned { get; set; }
+    public int Closed { get; set; }
+    public int Escalated { get; set; }
+    public int Escalate { get => Escalated; set => Escalated = value; }
 }
 
 public sealed class ReviewerWorkflowSummaryRow
