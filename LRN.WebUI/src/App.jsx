@@ -43,6 +43,7 @@ export default function App() {
   const [claimTasks, setClaimTasks] = useState({});
   const [expandedClaim, setExpandedClaim] = useState('');
   const [claimTaskView, setClaimTaskView] = useState('unassigned');
+  const [myWorklistView, setMyWorklistView] = useState('open');
   const [bulkReviewer, setBulkReviewer] = useState('');
   const [rowReviewers, setRowReviewers] = useState({});
   const [message, setMessage] = useState(null);
@@ -56,7 +57,8 @@ export default function App() {
   const canAssign = canAssignRole(user.role);
 
   function setView(nextView) {
-    const safeView = workflowViews.includes(nextView) ? nextView : 'dashboard';
+    let safeView = workflowViews.includes(nextView) ? nextView : 'dashboard';
+    if (reviewerOnly && safeView === 'claims') safeView = 'myworklist';
     setViewState(safeView);
     if (window.location.hash !== `#${safeView}`) {
       window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${safeView}`);
@@ -283,6 +285,17 @@ export default function App() {
 
   const labName = labs.find(l => Number(l.labId ?? l.LabId) === Number(labId))?.labName || 'Select Lab';
   const pageTitle = { dashboard: 'Denial Workflow Dashboard', summary: 'Denial Summary', claims: 'Claim Level Assignment', myworklist: 'My Worklist', tasks: 'Task Board', verification: 'Verification Queue' }[view] || 'Denial Workflow';
+  const claimNavTabs = useMemo(() => ([
+    { key: 'unassigned', label: 'New / Unassigned' },
+    { key: 'assigned', label: 'Assigned' },
+    { key: 'closed', label: 'Closed' },
+    { key: 'escalations', label: 'Escalations' }
+  ]), []);
+  const myWorklistNavTabs = useMemo(() => ([
+    { key: 'open', label: 'Open / New' },
+    { key: 'closed', label: 'Closed' },
+    { key: 'rework', label: 'Rework' }
+  ]), []);
 
   function handleClaimTaskViewChange(nextView) {
     if (nextView === claimTaskView) return;
@@ -292,6 +305,11 @@ export default function App() {
     setSelectedClaims({});
     setClaimTasks({});
     setExpandedClaim('');
+  }
+
+  function handleMyWorklistViewChange(nextView) {
+    if (nextView === myWorklistView) return;
+    setMyWorklistView(nextView);
   }
 
   function setFilterValue(k, v) { setFilter(f => ({ ...f, [k]: v, page: 1 })); }
@@ -305,6 +323,12 @@ export default function App() {
       denialClassification: classification || '',
       page: 1
     }));
+    if (reviewerOnly) {
+      setMyWorklistView('open');
+      setView('myworklist');
+      return;
+    }
+    setClaimTaskView('unassigned');
     setView('claims');
     setMessage({
       type: 'info',
@@ -320,6 +344,12 @@ export default function App() {
       actionCategory: actionCategory || '',
       page: 1
     }));
+    if (reviewerOnly) {
+      setMyWorklistView('open');
+      setView('myworklist');
+      return;
+    }
+    setClaimTaskView('unassigned');
     setView('claims');
     setMessage({
       type: 'info',
@@ -404,9 +434,31 @@ export default function App() {
         <button className={`lrn-nav-item ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}><i className="bi bi-grid-1x2-fill" />Dashboard</button>
         <div className="lrn-nav-section">Denial Workflow</div>
         <button className={`lrn-nav-item ${view === 'summary' ? 'active' : ''}`} onClick={() => setView('summary')}><i className="bi bi-table" />Denial Summary</button>
-        <button className={`lrn-nav-item ${view === 'claims' ? 'active' : ''}`} onClick={() => setView('claims')}><i className="bi bi-folder-check" />{canAssign ? 'Claim Assignment' : 'Claim View'}</button>
+        {!reviewerOnly && (
+          <>
+            <button className={`lrn-nav-item ${view === 'claims' ? 'active' : ''}`} onClick={() => setView('claims')}><i className="bi bi-folder-check" />{canAssign ? 'Claim Assignment' : 'Claim View'}</button>
+            {view === 'claims' && (
+              <div className="lrn-nav-submenu">
+                {claimNavTabs.map(t => (
+                  <button key={t.key} type="button" className={`lrn-nav-subitem ${claimTaskView === t.key ? 'active' : ''}`} onClick={() => { setView('claims'); handleClaimTaskViewChange(t.key); }}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        )}
         <div className="lrn-nav-section">My Tasks</div>
         <button className={`lrn-nav-item ${view === 'myworklist' ? 'active' : ''}`} onClick={() => setView('myworklist')}><i className="bi bi-person-check" />My Worklist</button>
+        {view === 'myworklist' && (
+          <div className="lrn-nav-submenu">
+            {myWorklistNavTabs.map(t => (
+              <button key={t.key} type="button" className={`lrn-nav-subitem ${myWorklistView === t.key ? 'active' : ''}`} onClick={() => { setView('myworklist'); handleMyWorklistViewChange(t.key); }}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
         <button className={`lrn-nav-item ${view === 'tasks' ? 'active' : ''}`} onClick={() => setView('tasks')}><i className="bi bi-list-check" />Task Board<span className="lrn-nav-badge">{dashboard.openInProgressCount || 0}</span></button>
         <button className={`lrn-nav-item ${view === 'verification' ? 'active' : ''}`} onClick={() => setView('verification')}><i className="bi bi-shield-check" />Verification</button>
       </nav>
@@ -420,9 +472,9 @@ export default function App() {
         {message && <div className={`lrn-alert ${message.type}`}>{message.text}</div>}
         {loading && <div className="loading-line" />}
         {view === 'dashboard' && <DashboardPage data={dashboard} />}
-        {view === 'summary' && <DenialSummaryPage data={dashboard} canAssign={canAssign} onClassificationClick={openClaimsByClassification} onActionCategoryClick={openClaimsByActionCategory} onAssign={() => { setView('claims'); setMessage({ type: 'info', text: 'Select the required claim rows, choose reviewer, then assign.' }); }} />}
+        {view === 'summary' && <DenialSummaryPage data={dashboard} canAssign={canAssign} onClassificationClick={openClaimsByClassification} onActionCategoryClick={openClaimsByActionCategory} onAssign={() => { setClaimTaskView('unassigned'); setView(reviewerOnly ? 'myworklist' : 'claims'); setMessage({ type: 'info', text: 'Select the required claim rows, choose reviewer, then assign.' }); }} />}
         {view === 'claims' && <ClaimAssignmentPage data={claims} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} canAssign={canAssign} taskView={claimTaskView} setTaskView={handleClaimTaskViewChange} />}
-        {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setMessage} onSaved={refreshReviewerNotification} />}
+        {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setMessage} onSaved={refreshReviewerNotification} taskView={myWorklistView} setTaskView={handleMyWorklistViewChange} />}
         {view === 'tasks' && <TasksPage data={tasks} saveTask={saveTask} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} />}
         {view === 'verification' && <VerificationPage data={verification} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} />}
       </main>

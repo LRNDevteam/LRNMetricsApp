@@ -31,11 +31,10 @@ function Modal({ title, children, onClose }) {
   return <div className="wl-modal-bg"><div className="wl-modal"><div className="wl-modal-hd"><strong>{title}</strong><button className="wl-btn xs" onClick={onClose}>✕</button></div>{children}</div></div>;
 }
 
-export default function MyWorklistPage({ labId, user, options, filter, setMessage, onRefreshToken, onSaved }) {
+export default function MyWorklistPage({ labId, user, options, filter, setMessage, onRefreshToken, onSaved, taskView = 'open', setTaskView = () => {} }) {
   const [data, setData] = useState({ items: [], page: 1, pageSize: 100, totalCount: 0, totalPages: 0 });
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState('');
-  const [taskView, setTaskView] = useState('open');
   const [page, setPage] = useState(1);
   const [local, setLocal] = useState({ payerName: '', denialClassification: '', actionCategory: '', status: '', searchText: '' });
   const [noteCtx, setNoteCtx] = useState(null);
@@ -80,7 +79,6 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
 
   const rows = data.items || [];
   function changePage(nextPage) { setExpanded(''); setPage(nextPage); }
-  function resetToFirstPage() { setExpanded(''); setPage(1); }
 
   useEffect(() => { setPage(1); setExpanded(''); }, [local, taskView]);
 
@@ -140,20 +138,6 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
   }
 
   return <div className="wl-page">
-    <div className="workflow-tabs mywork-tabs">
-      {myTabs.map(tab => (
-        <button
-          key={tab.key}
-          type="button"
-          className={`workflow-tab ${taskView === tab.key ? 'active' : ''}`}
-          title={tab.hint}
-          onClick={() => { setTaskView(tab.key); resetToFirstPage(); }}
-        >
-          <span>{tab.label}</span>
-          <small>{tab.hint}</small>
-        </button>
-      ))}
-    </div>
     <div className="wl-kpis"><div><b>{kpi.claims}</b><span>Assigned claims</span></div><div><b>{kpi.tasks}</b><span>Open tasks</span></div><div><b>{money(kpi.balance)}</b><span>Ins. balance</span></div><div><b>{kpi.escalated}</b><span>Escalated</span></div></div>
     <div className="wl-card wl-filters"><div className="wl-card-hd"><b>My Worklist Filters</b><button className="wl-btn xs" onClick={() => setLocal({ payerName: '', denialClassification: '', actionCategory: '', status: '', searchText: '' })}>Clear all</button></div><div className="wl-filter-grid">
       <label>Payer<select value={local.payerName} onChange={e => setLocal(x => ({ ...x, payerName: e.target.value }))}><option value="">All payers</option>{(options?.payerNames || []).map(x => <option key={x}>{x}</option>)}</select></label>
