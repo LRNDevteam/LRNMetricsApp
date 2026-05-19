@@ -1223,6 +1223,15 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
 		new() { Id = 23, Name = "NorthWest", ConnectionKey = "NWLConnection" }
 	];
 
+
+	private const string MultiSelectDelimiter = "¬";
+
+	private static string TextInSql(string expression, string parameterName) =>
+		$"EXISTS (SELECT 1 FROM STRING_SPLIT({parameterName}, N'{MultiSelectDelimiter}') mv WHERE LOWER(LTRIM(RTRIM({expression}))) = LOWER(LTRIM(RTRIM(mv.value))))";
+
+	private static string TextLikeAnySql(string expression, string parameterName) =>
+		$"EXISTS (SELECT 1 FROM STRING_SPLIT({parameterName}, N'{MultiSelectDelimiter}') mv WHERE {expression} LIKE '%' + LTRIM(RTRIM(mv.value)) + '%')";
+
 	private static (string WhereClause, Dictionary<string, object> Parameters) BuildVerificationWhere(
 		DenialWorkflowFilter f,
 		string a,
@@ -1242,39 +1251,39 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
 		{
 			if (Has("Status"))
 			{
-				w.Add($"ISNULL({a}.Status,'')=@Status");
+				w.Add(TextInSql($"ISNULL({a}.Status,'')", "@Status"));
 				p["@Status"] = f.Status.Trim();
 			}
 			else if (Has("VerificationStatus"))
 			{
-				w.Add($"ISNULL({a}.VerificationStatus,'')=@Status");
+				w.Add(TextInSql($"ISNULL({a}.VerificationStatus,'')", "@Status"));
 				p["@Status"] = f.Status.Trim();
 			}
 		}
 
 		if (!string.IsNullOrWhiteSpace(f.AssignedTo) && Has("AssignedTo"))
 		{
-			w.Add($"ISNULL({a}.AssignedTo,'')=@AssignedTo");
+			w.Add(TextInSql($"ISNULL({a}.AssignedTo,'')", "@AssignedTo"));
 			p["@AssignedTo"] = f.AssignedTo.Trim();
 		}
 
 		if (!string.IsNullOrWhiteSpace(f.Reviewer) && Has("AssignedTo"))
 		{
-			w.Add($"ISNULL({a}.AssignedTo,'')=@Reviewer");
+			w.Add(TextInSql($"ISNULL({a}.AssignedTo,'')", "@Reviewer"));
 			p["@Reviewer"] = f.Reviewer.Trim();
 		}
 
 		if (!string.IsNullOrWhiteSpace(f.DenialCode) && Has("DenialCode"))
 		{
-			w.Add($"ISNULL({a}.DenialCode,'')=@DenialCode");
+			w.Add(TextInSql($"ISNULL({a}.DenialCode,'')", "@DenialCode"));
 			p["@DenialCode"] = f.DenialCode.Trim();
 		}
 
 		if (!string.IsNullOrWhiteSpace(f.PayerName))
 		{
 			var payerParts = new List<string>();
-			if (Has("PayerNameNormalized")) payerParts.Add($"ISNULL({a}.PayerNameNormalized,'')=@PayerName");
-			if (Has("PayerName")) payerParts.Add($"ISNULL({a}.PayerName,'')=@PayerName");
+			if (Has("PayerNameNormalized")) payerParts.Add(TextInSql($"ISNULL({a}.PayerNameNormalized,'')", "@PayerName"));
+			if (Has("PayerName")) payerParts.Add(TextInSql($"ISNULL({a}.PayerName,'')", "@PayerName"));
 			if (payerParts.Count > 0)
 			{
 				w.Add("(" + string.Join(" OR ", payerParts) + ")");
@@ -1284,37 +1293,37 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
 
 		if (!string.IsNullOrWhiteSpace(f.ActionCategory) && Has("ActionCategory"))
 		{
-			w.Add($"LOWER(LTRIM(RTRIM(ISNULL({a}.ActionCategory,''))))=LOWER(LTRIM(RTRIM(@ActionCategory)))");
+			w.Add(TextInSql($"ISNULL({a}.ActionCategory,'')", "@ActionCategory"));
 			p["@ActionCategory"] = f.ActionCategory.Trim();
 		}
 
 		if (!string.IsNullOrWhiteSpace(f.Priority) && Has("Priority"))
 		{
-			w.Add($"ISNULL({a}.Priority,'')=@Priority");
+			w.Add(TextInSql($"ISNULL({a}.Priority,'')", "@Priority"));
 			p["@Priority"] = f.Priority.Trim();
 		}
 
 		if (!string.IsNullOrWhiteSpace(f.Clinic) && Has("ClinicName"))
 		{
-			w.Add($"ISNULL({a}.ClinicName,'') LIKE @Clinic");
-			p["@Clinic"] = "%" + f.Clinic.Trim() + "%";
+			w.Add(TextLikeAnySql($"ISNULL({a}.ClinicName,'')", "@Clinic"));
+			p["@Clinic"] = f.Clinic.Trim();
 		}
 
 		if (!string.IsNullOrWhiteSpace(f.SalesRepname) && Has("SalesRepname"))
 		{
-			w.Add($"ISNULL({a}.SalesRepname,'') LIKE @SalesRepname");
-			p["@SalesRepname"] = "%" + f.SalesRepname.Trim() + "%";
+			w.Add(TextLikeAnySql($"ISNULL({a}.SalesRepname,'')", "@SalesRepname"));
+			p["@SalesRepname"] = f.SalesRepname.Trim();
 		}
 
 		if (!string.IsNullOrWhiteSpace(f.ReferringProvider) && Has("ReferringProvider"))
 		{
-			w.Add($"ISNULL({a}.ReferringProvider,'') LIKE @ReferringProvider");
-			p["@ReferringProvider"] = "%" + f.ReferringProvider.Trim() + "%";
+			w.Add(TextLikeAnySql($"ISNULL({a}.ReferringProvider,'')", "@ReferringProvider"));
+			p["@ReferringProvider"] = f.ReferringProvider.Trim();
 		}
 
 		if (!string.IsNullOrWhiteSpace(f.DenialClassification) && Has("DenialClassification"))
 		{
-			w.Add($"LOWER(LTRIM(RTRIM(ISNULL({a}.DenialClassification,''))))=LOWER(LTRIM(RTRIM(@DenialClassification)))");
+			w.Add(TextInSql($"ISNULL({a}.DenialClassification,'')", "@DenialClassification"));
 			p["@DenialClassification"] = f.DenialClassification.Trim();
 		}
 
@@ -1377,25 +1386,25 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
 
 		if (includeStatus && !string.IsNullOrWhiteSpace(f.Status))
 		{
-			w.Add($"ISNULL({a}.Status,'')=@Status");
+			w.Add(TextInSql($"ISNULL({a}.Status,'')", "@Status"));
 			p["@Status"] = f.Status.Trim();
 		}
 
 		if (includeAssigned && !string.IsNullOrWhiteSpace(f.AssignedTo))
 		{
-			w.Add($"ISNULL({a}.AssignedTo,'')=@AssignedTo");
+			w.Add(TextInSql($"ISNULL({a}.AssignedTo,'')", "@AssignedTo"));
 			p["@AssignedTo"] = f.AssignedTo.Trim();
 		}
 
 		if (includeAssigned && !string.IsNullOrWhiteSpace(f.Reviewer))
 		{
-			w.Add($"ISNULL({a}.AssignedTo,'')=@Reviewer");
+			w.Add(TextInSql($"ISNULL({a}.AssignedTo,'')", "@Reviewer"));
 			p["@Reviewer"] = f.Reviewer.Trim();
 		}
 
 		if (!string.IsNullOrWhiteSpace(f.DenialCode))
 		{
-			w.Add($"ISNULL({a}.{denialColumn},'')=@DenialCode");
+			w.Add(TextInSql($"ISNULL({a}.{denialColumn},'')", "@DenialCode"));
 			p["@DenialCode"] = f.DenialCode.Trim();
 		}
 
@@ -1403,43 +1412,43 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
 		if (!string.IsNullOrWhiteSpace(f.PayerName))
 		{
 			if (isInsight)
-				w.Add($"ISNULL({a}.HighImpactInsurance,'')=@PayerName");
+				w.Add(TextInSql($"ISNULL({a}.HighImpactInsurance,'')", "@PayerName"));
 			else
-				w.Add($"ISNULL({a}.PayerName,'')=@PayerName");
+				w.Add(TextInSql($"ISNULL({a}.PayerName,'')", "@PayerName"));
 
 			p["@PayerName"] = f.PayerName.Trim();
 		}
 
 		if (!string.IsNullOrWhiteSpace(f.ActionCategory))
 		{
-			w.Add($"LOWER(LTRIM(RTRIM(ISNULL({a}.ActionCategory,''))))=LOWER(LTRIM(RTRIM(@ActionCategory)))");
+			w.Add(TextInSql($"ISNULL({a}.ActionCategory,'')", "@ActionCategory"));
 			p["@ActionCategory"] = f.ActionCategory.Trim();
 		}
 
 		// Priority does not exist in DenialInsight
 		if (!isInsight && !string.IsNullOrWhiteSpace(f.Priority))
 		{
-			w.Add($"ISNULL({a}.Priority,'')=@Priority");
+			w.Add(TextInSql($"ISNULL({a}.Priority,'')", "@Priority"));
 			p["@Priority"] = f.Priority.Trim();
 		}
 
 
 		if (!isInsight && !string.IsNullOrWhiteSpace(f.Clinic))
 		{
-			w.Add($"ISNULL({a}.ClinicName,'') LIKE @Clinic");
-			p["@Clinic"] = "%" + f.Clinic.Trim() + "%";
+			w.Add(TextLikeAnySql($"ISNULL({a}.ClinicName,'')", "@Clinic"));
+			p["@Clinic"] = f.Clinic.Trim();
 		}
 
 		if (!isInsight && !string.IsNullOrWhiteSpace(f.SalesRepname))
 		{
-			w.Add($"ISNULL({a}.SalesRepname,'') LIKE @SalesRepname");
-			p["@SalesRepname"] = "%" + f.SalesRepname.Trim() + "%";
+			w.Add(TextLikeAnySql($"ISNULL({a}.SalesRepname,'')", "@SalesRepname"));
+			p["@SalesRepname"] = f.SalesRepname.Trim();
 		}
 
 		if (!isInsight && !string.IsNullOrWhiteSpace(f.ReferringProvider))
 		{
-			w.Add($"ISNULL({a}.ReferringProvider,'') LIKE @ReferringProvider");
-			p["@ReferringProvider"] = "%" + f.ReferringProvider.Trim() + "%";
+			w.Add(TextLikeAnySql($"ISNULL({a}.ReferringProvider,'')", "@ReferringProvider"));
+			p["@ReferringProvider"] = f.ReferringProvider.Trim();
 		}
 
 		if (!string.IsNullOrWhiteSpace(f.DenialClassification))
@@ -1450,7 +1459,7 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
                 SELECT 1
                 FROM dbo.DenialTaskBoard tbx WITH (NOLOCK)
                 WHERE (tbx.LabId = @LabId OR ISNULL(i.LabId, @LabId) = @LabId)
-                  AND LOWER(LTRIM(RTRIM(ISNULL(tbx.DenialClassification,'')))) = LOWER(LTRIM(RTRIM(@DenialClassification)))
+                  AND EXISTS (SELECT 1 FROM STRING_SPLIT(@DenialClassification, N'¬') mv WHERE LOWER(LTRIM(RTRIM(ISNULL(tbx.DenialClassification,'')))) = LOWER(LTRIM(RTRIM(mv.value))))
                   AND (
                         ISNULL(tbx.DenialCode,'') = ISNULL(i.DenialCodes,'')
                         OR ISNULL(tbx.PayerName,'') = ISNULL(i.HighImpactInsurance,'')
@@ -1459,7 +1468,7 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
 			}
 			else
 			{
-				w.Add($"LOWER(LTRIM(RTRIM(ISNULL({a}.DenialClassification,''))))=LOWER(LTRIM(RTRIM(@DenialClassification)))");
+				w.Add(TextInSql($"ISNULL({a}.DenialClassification,'')", "@DenialClassification"));
 			}
 			p["@DenialClassification"] = f.DenialClassification.Trim();
 		}
@@ -1536,44 +1545,44 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
 
 		if (!string.IsNullOrWhiteSpace(f.DenialCode))
 		{
-			w.Add($"ISNULL({a}.DenialCodeNormalized,'')=@DenialCode");
+			w.Add(TextInSql($"ISNULL({a}.DenialCodeNormalized,'')", "@DenialCode"));
 			p["@DenialCode"] = f.DenialCode.Trim();
 		}
 
 		if (!string.IsNullOrWhiteSpace(f.PayerName))
 		{
-			w.Add($"ISNULL({a}.PayerName,'')=@PayerName");
+			w.Add(TextInSql($"ISNULL({a}.PayerName,'')", "@PayerName"));
 			p["@PayerName"] = f.PayerName.Trim();
 		}
 
 		if (!string.IsNullOrWhiteSpace(f.Clinic))
 		{
-			w.Add($"ISNULL({a}.ClinicName,'') LIKE @Clinic");
-			p["@Clinic"] = "%" + f.Clinic.Trim() + "%";
+			w.Add(TextLikeAnySql($"ISNULL({a}.ClinicName,'')", "@Clinic"));
+			p["@Clinic"] = f.Clinic.Trim();
 		}
 
 		if (!string.IsNullOrWhiteSpace(f.SalesRepname))
 		{
-			w.Add($"ISNULL({a}.SalesRepname,'') LIKE @SalesRepname");
-			p["@SalesRepname"] = "%" + f.SalesRepname.Trim() + "%";
+			w.Add(TextLikeAnySql($"ISNULL({a}.SalesRepname,'')", "@SalesRepname"));
+			p["@SalesRepname"] = f.SalesRepname.Trim();
 		}
 
 		if (!string.IsNullOrWhiteSpace(f.ReferringProvider))
 		{
-			w.Add($"ISNULL({a}.ReferringProvider,'') LIKE @ReferringProvider");
-			p["@ReferringProvider"] = "%" + f.ReferringProvider.Trim() + "%";
+			w.Add(TextLikeAnySql($"ISNULL({a}.ReferringProvider,'')", "@ReferringProvider"));
+			p["@ReferringProvider"] = f.ReferringProvider.Trim();
 		}
 
 		if (!string.IsNullOrWhiteSpace(f.ActionCategory))
 		{
-			w.Add($"LOWER(LTRIM(RTRIM(ISNULL({a}.ActionCategory,'')))) LIKE LOWER(LTRIM(RTRIM(@ActionCategory)))");
-			p["@ActionCategory"] = "%" + f.ActionCategory.Trim() + "%";
+			w.Add(TextLikeAnySql($"ISNULL({a}.ActionCategory,'')", "@ActionCategory"));
+			p["@ActionCategory"] = f.ActionCategory.Trim();
 		}
 
 		if (!string.IsNullOrWhiteSpace(f.DenialClassification))
 		{
-			w.Add($"LOWER(LTRIM(RTRIM(ISNULL({a}.DenialClassification,'')))) LIKE LOWER(LTRIM(RTRIM(@DenialClassification)))");
-			p["@DenialClassification"] = "%" + f.DenialClassification.Trim() + "%";
+			w.Add(TextLikeAnySql($"ISNULL({a}.DenialClassification,'')", "@DenialClassification"));
+			p["@DenialClassification"] = f.DenialClassification.Trim();
 		}
 
 		if (f.FromDate.HasValue)

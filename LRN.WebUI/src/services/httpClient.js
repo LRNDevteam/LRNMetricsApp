@@ -80,6 +80,11 @@ export { API_BASE_URL };
 export function qs(obj = {}) {
   const params = new URLSearchParams();
   Object.entries(obj || {}).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      const joined = value.filter(v => v !== undefined && v !== null && v !== '').join('¬');
+      if (joined) params.append(key, joined);
+      return;
+    }
     if (value !== undefined && value !== null && value !== '') params.append(key, value);
   });
   return params.toString();
