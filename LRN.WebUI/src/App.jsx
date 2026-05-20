@@ -3,7 +3,7 @@ import { API_BASE, LOGOUT_URL } from './config/apiConfig';
 import { emptyDashboard, emptyFilter, emptyFilterOptions, emptyPagedResult } from './dto/denialWorkflowDtos';
 import { denialWorkflowService, qs } from './services/denialWorkflowService';
 import { claimRole, claimUser, clearWorkflowJwt, ensureWorkflowJwt, getJwt, parseJwt } from './utils/auth';
-import { canAssignRole, initials } from './utils/formatters';
+import { canAssignRole, initials, isArReviewerRole, isClientManagerRole, isAccountManagerRole, isReadOnlyWorkflowRole } from './utils/formatters';
 import DashboardFilter from './components/DashboardFilter';
 import DashboardPage from './pages/DashboardPage';
 import DenialSummaryPage from './pages/DenialSummaryPage';
@@ -12,12 +12,7 @@ import TasksPage from './pages/TasksPage';
 import VerificationPage from './pages/VerificationPage';
 import MyWorklistPage from './pages/MyWorklistPage';
 
-function roleIsReviewerOnly(role) {
-  const r = String(role || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
-  return (r.includes('arreviewer') || r.includes('aranalyser') || r.includes('aranalyzer') || r.includes('reviewer'))
-    && !r.includes('manager')
-    && !r.includes('admin');
-}
+function roleIsReviewerOnly(role) { return isArReviewerRole(role); }
 
 export default function App() {
   const jwtClaims = useMemo(() => parseJwt(getJwt()), []);
@@ -57,6 +52,8 @@ export default function App() {
   const claimRequestSeq = useRef(0);
   const reviewerOnly = roleIsReviewerOnly(user.role);
   const canAssign = canAssignRole(user.role);
+  const clientManager = isClientManagerRole(user.role);
+  const readOnlyWorkflow = isReadOnlyWorkflowRole(user.role);
 
   function setView(nextView) {
     let safeView = workflowViews.includes(nextView) ? nextView : 'dashboard';
@@ -70,7 +67,8 @@ export default function App() {
   function resolveLandingView(role) {
     const stored = getStoredView();
     if (stored) return stored;
-    return roleIsReviewerOnly(role) ? 'myworklist' : 'dashboard';
+    // Every Denial Workflow role lands on the workflow dashboard after login.
+    return 'dashboard';
   }
 
   async function refreshLoginUserFromMetrics({ forceRefresh = true, resetData = false, applyLanding = false } = {}) {
@@ -389,6 +387,10 @@ export default function App() {
     setMyWorklistView(nextView);
   }
 
+  useEffect(() => {
+    if (clientManager && myWorklistView !== 'escalations') setMyWorklistView('escalations');
+  }, [clientManager, myWorklistView]);
+
   function setFilterValue(k, v) { setFilter(f => ({ ...f, [k]: v, page: 1 })); }
   function clearFilter() { setFilter(emptyFilter); }
   function changePage(page) { setFilter(f => ({ ...f, page })); }
@@ -549,10 +551,10 @@ export default function App() {
         {message && <div className={`lrn-alert ${message.type}`}>{message.text}</div>}
         {loading && <div className="loading-line" />}
         {view === 'dashboard' && <DashboardPage data={dashboard} />}
-        {view === 'summary' && <DenialSummaryPage data={dashboard} canAssign={canAssign} onClassificationClick={openClaimsByClassification} onActionCategoryClick={openClaimsByActionCategory} onAssign={() => { setClaimTaskView('unassigned'); setView(reviewerOnly ? 'myworklist' : 'claims'); setMessage({ type: 'info', text: 'Select the required claim rows, choose reviewer, then assign.' }); }} />}
-        {view === 'claims' && <ClaimAssignmentPage data={claims} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} canAssign={canAssign} taskView={claimTaskView} setTaskView={handleClaimTaskViewChange} />}
+        {view === 'summary' && <DenialSummaryPage data={dashboard} canAssign={canAssign} onClassificationClick={openClaimsByClassification} onActionCategoryClick={openClaimsByActionCategory} onAssign={() => { setClaimTaskView('unassigned'); setView((reviewerOnly || readOnlyWorkflow) ? 'myworklist' : 'claims'); setMessage({ type: 'info', text: canAssign ? 'Select the required claim rows, choose reviewer, then assign.' : 'This role has read-only workflow access.' }); }} />}
+        {view === 'claims' && <ClaimAssignmentPage data={claims} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} canAssign={canAssign} readOnlyWorkflow={readOnlyWorkflow} taskView={claimTaskView} setTaskView={handleClaimTaskViewChange} />}
         {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setMessage} onSaved={refreshReviewerNotification} taskView={myWorklistView} setTaskView={handleMyWorklistViewChange} />}
-        {view === 'tasks' && <TasksPage data={tasks} saveTask={saveTask} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} />}
+        {view === 'tasks' && <TasksPage data={tasks} saveTask={saveTask} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} userRole={user.role || ''} readOnlyWorkflow={readOnlyWorkflow} />}
         {view === 'verification' && <VerificationPage data={verification} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} />}
       </main>
     </div>

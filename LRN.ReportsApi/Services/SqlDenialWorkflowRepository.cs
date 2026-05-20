@@ -1383,7 +1383,6 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
 			w.Add($"ISNULL({a}.AssignedTo,'')=@RoleUserName");
 			p["@RoleUserName"] = f.UserName ?? string.Empty;
 		}
-
 		if (includeStatus && !string.IsNullOrWhiteSpace(f.Status))
 		{
 			w.Add(TextInSql($"ISNULL({a}.Status,'')", "@Status"));
@@ -1542,7 +1541,6 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
             )");
 			p["@RoleUserName"] = f.UserName ?? string.Empty;
 		}
-
 		if (!string.IsNullOrWhiteSpace(f.DenialCode))
 		{
 			w.Add(TextInSql($"ISNULL({a}.DenialCodeNormalized,'')", "@DenialCode"));
@@ -1878,6 +1876,10 @@ VALUES(@LabId,@ClaimId,@TaskId,@CptCode,@EscalationLevel,@EscalationReason,@Comm
 		await con.OpenAsync(ct);
 		await EnsureDenialTaskBoardNormalizedClaimIdAsync(con, ct);
 
+		var clientManagerAssignee = IsClientInfoPendingEscalation(request.EscalationReason)
+			? await ResolveClientManagerAssigneeAsync(request.LabId, ct)
+			: string.Empty;
+
 		await using var cmd = new SqlCommand(insertSql, con) { CommandTimeout = 120 };
 		cmd.Parameters.AddWithValue("@LabId", request.LabId);
 		cmd.Parameters.AddWithValue("@ClaimId", request.ClaimId.Trim());
@@ -1913,6 +1915,7 @@ DECLARE @Changed TABLE
 
 UPDATE t
 SET Status = 'Escalated',
+    AssignedTo = CASE WHEN @ClientManagerAssignee <> '' THEN @ClientManagerAssignee ELSE t.AssignedTo END,
     ReviewerUpdatedBy = @CreatedBy,
     ReviewerUpdatedOn = SYSDATETIME()
 OUTPUT
@@ -1973,12 +1976,86 @@ END;";
 		updateCmd.Parameters.AddWithValue("@TaskId", request.TaskId?.Trim() ?? string.Empty);
 		updateCmd.Parameters.AddWithValue("@CptCode", request.CptCode?.Trim() ?? string.Empty);
 		updateCmd.Parameters.AddWithValue("@CreatedBy", string.IsNullOrWhiteSpace(request.CreatedBy) ? "ReactWorkflow" : request.CreatedBy.Trim());
+		updateCmd.Parameters.AddWithValue("@ClientManagerAssignee", clientManagerAssignee);
 		updateCmd.Parameters.AddWithValue("@HistoryComments", BuildEscalationHistoryComment(request));
 		await updateCmd.ExecuteNonQueryAsync(ct);
 
 		return saved;
 	}
 
+
+
+	private static bool IsClientInfoPendingEscalation(string? reason)
+	{
+		var value = (reason ?? string.Empty).Trim().ToLowerInvariant();
+		return value.Contains("client info pending") || value.Contains("client information pending");
+	}
+
+	private async Task<string> ResolveClientManagerAssigneeAsync(int labId, CancellationToken ct)
+	{
+		try
+		{
+			await using var con = OpenMaster();
+			await con.OpenAsync(ct);
+
+			var userRoleColumns = await GetColumnSetAsync(con, "dbo.UserRoles", ct);
+			var labUsersColumns = await GetColumnSetAsync(con, "dbo.LabUsers", ct);
+			if (userRoleColumns.Count == 0 || labUsersColumns.Count == 0) return "Client Manager";
+
+			var roleTable = await TableExistsAsync(con, "dbo.Roles", ct) ? "dbo.Roles" : await TableExistsAsync(con, "dbo.Role", ct) ? "dbo.Role" : string.Empty;
+			var roleColumns = string.IsNullOrWhiteSpace(roleTable) ? new HashSet<string>(StringComparer.OrdinalIgnoreCase) : await GetColumnSetAsync(con, roleTable, ct);
+			var roleNameColumn = new[] { "RoleName", "Name", "Role" }.FirstOrDefault(roleColumns.Contains);
+			var roleIdColumn = new[] { "RoleID", "RoleId", "Id" }.FirstOrDefault(roleColumns.Contains);
+			var userRoleIdColumn = new[] { "RoleID", "RoleId" }.FirstOrDefault(userRoleColumns.Contains);
+			var userRoleUserIdColumn = new[] { "LabUserID", "LabUserId", "UserID", "UserId" }.FirstOrDefault(userRoleColumns.Contains) ?? "LabUserID";
+			var labUserIdColumn = new[] { "LabUserID", "LabUserId", "UserID", "UserId" }.FirstOrDefault(labUsersColumns.Contains) ?? "LabUserID";
+			var displayExpr = labUsersColumns.Contains("FirstName") || labUsersColumns.Contains("LastName")
+				? "NULLIF(LTRIM(RTRIM(CONCAT(ISNULL(lu.FirstName,''),' ',ISNULL(lu.LastName,'')))), '')"
+				: "NULL";
+
+			var labJoin = await TableExistsAsync(con, "dbo.UserLabs", ct)
+				? $"LEFT JOIN dbo.UserLabs ul ON lu.{labUserIdColumn}=ul.{labUserIdColumn}"
+				: string.Empty;
+			var labFilter = string.IsNullOrWhiteSpace(labJoin) ? string.Empty : "AND (@LabId <= 0 OR ul.LabId = @LabId)";
+
+			var roleJoin = string.Empty;
+			var roleFilter = string.Empty;
+			if (!string.IsNullOrWhiteSpace(roleTable) && !string.IsNullOrWhiteSpace(roleNameColumn) && !string.IsNullOrWhiteSpace(roleIdColumn) && !string.IsNullOrWhiteSpace(userRoleIdColumn))
+			{
+				roleJoin = $"INNER JOIN {roleTable} r ON ur.{userRoleIdColumn}=r.{roleIdColumn}";
+				roleFilter = $"AND UPPER(REPLACE(REPLACE(ISNULL(r.{roleNameColumn},''),' ',''),'-','')) = 'CLIENTMANAGER'";
+			}
+			else if (userRoleColumns.Contains("RoleName"))
+			{
+				roleFilter = "AND UPPER(REPLACE(REPLACE(ISNULL(ur.RoleName,''),' ',''),'-','')) = 'CLIENTMANAGER'";
+			}
+			else
+			{
+				return "Client Manager";
+			}
+
+			var sql = $@"
+SELECT TOP (1)
+	UserName = COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(lu.UserName,''))), ''), {displayExpr}, 'Client Manager')
+FROM dbo.LabUsers lu
+INNER JOIN dbo.UserRoles ur ON lu.{labUserIdColumn}=ur.{userRoleUserIdColumn}
+{roleJoin}
+{labJoin}
+WHERE 1=1
+  {labFilter}
+  {roleFilter}
+ORDER BY UserName;";
+
+			await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 60 };
+			cmd.Parameters.AddWithValue("@LabId", labId);
+			var value = Convert.ToString(await cmd.ExecuteScalarAsync(ct));
+			return string.IsNullOrWhiteSpace(value) ? "Client Manager" : value.Trim();
+		}
+		catch
+		{
+			return "Client Manager";
+		}
+	}
 
 
 	private static string BuildEscalationHistoryComment(SaveDenialEscalationRequest request)
@@ -2022,11 +2099,13 @@ END;";
 
 	private static bool IsReviewerOnly(string? role)
 	{
-		var r = new string((role ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+		var r = NormalizeRoleToken(role);
 		return (r.Contains("ARREVIEWER") || r.Contains("ARANALYSER") || r.Contains("ARANALYZER") || r.Contains("REVIEWER"))
 			&& !r.Contains("MANAGER")
 			&& !r.Contains("ADMIN");
 	}
+	private static bool IsClientManagerRole(string? role) => NormalizeRoleToken(role).Contains("CLIENTMANAGER");
+	private static string NormalizeRoleToken(string? role) => new string((role ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
 	private static string GetString(IDataRecord r, string n) => HasColumn(r, n) && r[n] != DBNull.Value ? Convert.ToString(r[n]) ?? string.Empty : string.Empty;
 	private static int GetInt(IDataRecord r, string n) => HasColumn(r, n) && r[n] != DBNull.Value ? Convert.ToInt32(r[n]) : 0;
 	private static int? GetNullableInt(IDataRecord r, string n) => HasColumn(r, n) && r[n] != DBNull.Value ? Convert.ToInt32(r[n]) : null;

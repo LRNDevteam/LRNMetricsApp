@@ -5,6 +5,9 @@ const LEGACY_TOKEN_KEYS = ['lrn.jwt', 'lrnMetrics.jwt', 'access_token', 'jwtToke
 
 let authTokenPromise = null;
 let redirectStarted = false;
+let lastAuthTokenError = null;
+let lastAuthTokenErrorAt = 0;
+const AUTH_ERROR_COOLDOWN_MS = 8000;
 
 function isLocalReactHost() {
   return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
@@ -142,6 +145,10 @@ export async function ensureWorkflowJwt(options = {}) {
 
   if (!forceRefresh && isJwtValid(current)) return current;
 
+  if (!forceRefresh && lastAuthTokenError && Date.now() - lastAuthTokenErrorAt < AUTH_ERROR_COOLDOWN_MS) {
+    throw lastAuthTokenError;
+  }
+
   if (!authTokenPromise) {
     authTokenPromise = fetch(AUTH_TOKEN_URL, {
       method: 'GET',
@@ -150,6 +157,13 @@ export async function ensureWorkflowJwt(options = {}) {
       headers: { Accept: 'application/json' }
     })
       .then(async (response) => {
+        if (response.status === 502 || response.status === 503 || response.status === 504) {
+          const err = new Error(`Auth service unavailable (${response.status}). Auth URL: ${AUTH_TOKEN_URL}`);
+          lastAuthTokenError = err;
+          lastAuthTokenErrorAt = Date.now();
+          throw err;
+        }
+
         if (response.status === 401 || response.status === 403) {
           if (isLocalReactHost()) {
             throw new Error(
@@ -180,9 +194,13 @@ export async function ensureWorkflowJwt(options = {}) {
         if (!token) throw new Error('AuthToken response did not contain token/accessToken.');
 
         setWorkflowJwt(token);
+        lastAuthTokenError = null;
+        lastAuthTokenErrorAt = 0;
         return cleanToken(token);
       })
       .catch((error) => {
+        lastAuthTokenError = error instanceof Error ? error : new Error(String(error || 'Auth token error'));
+        lastAuthTokenErrorAt = Date.now();
         if (isLocalReactHost() && (error instanceof TypeError || String(error?.message || '').includes('Failed to fetch'))) {
           throw new Error(
             `Cannot call AuthToken from React localhost. Check CORS and local HTTPS. Auth URL: ${AUTH_TOKEN_URL}. ` +

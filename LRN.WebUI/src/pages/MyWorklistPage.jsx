@@ -2,16 +2,26 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { denialWorkflowService } from '../services/denialWorkflowService';
 import Pager from '../components/Pager';
 import SearchableMultiSelect from '../components/SearchableMultiSelect';
+import { canUpdateWorkflowRole, isAccountManagerRole, isClientManagerRole } from '../utils/formatters';
 
 const fmtDate = v => v ? new Date(v).toLocaleDateString() : '-';
 const money = v => Number(v || 0).toLocaleString(undefined, { style: 'currency', currency: 'USD' });
 const statusOptions = ['Open', 'In Progress', 'Pending Payer', 'Pending Documentation', 'Escalated', 'Closed'];
-const claimEscReasons = ['Payer policy conflict across claim — need manager guidance', 'Multiple CPT lines impacted by same denial', 'Timely filing risk at claim level', 'High value claim requires approval', 'Other'];
-const lineEscReasons = ['Payer policy unclear — need guidance', 'Appeal requires manager approval', 'Coding / modifier review required', 'ICD coverage rule requires review', 'Other'];
+const claimEscReasons = ['Client Info Pending', 'Payer policy conflict across claim — need manager guidance', 'Multiple CPT lines impacted by same denial', 'Timely filing risk at claim level', 'High value claim requires approval', 'Other'];
+const lineEscReasons = ['Client Info Pending', 'Payer policy unclear — need guidance', 'Appeal requires manager approval', 'Coding / modifier review required', 'ICD coverage rule requires review', 'Other'];
 
 function roleIsReviewerOnly(role) {
   const r = String(role || '').toLowerCase();
   return r.includes('reviewer') && !r.includes('manager') && !r.includes('admin');
+}
+
+function isClientInfoPending(item) {
+  const text = `${item?.status || ''} ${item?.reviewerComments || ''} ${item?.task || ''} ${item?.recommendedAction || ''} ${item?.assignedTo || ''}`.toLowerCase();
+  return text.includes('client info pending') || text.includes('client information pending') || String(item?.assignedTo || '').toLowerCase().trim() === 'client manager';
+}
+
+function claimHasClientInfoPending(claim) {
+  return (claim?.lines || []).some(isClientInfoPending);
 }
 
 function groupByClaim(rows) {
@@ -51,6 +61,16 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
   const [escComment, setEscComment] = useState('');
   const [escalations, setEscalations] = useState([]);
 
+  const role = user?.role || '';
+  const clientManager = isClientManagerRole(role);
+  const accountManager = isAccountManagerRole(role);
+  const canUpdateTasks = canUpdateWorkflowRole(role);
+  const canCreateEscalation = canUpdateTasks;
+  const canUploadDocuments = canUpdateTasks || clientManager;
+  const canSaveComments = canUpdateTasks || clientManager;
+  const canEditClaim = (claim) => canUpdateTasks || (clientManager && claimHasClientInfoPending(claim));
+  const canEditLine = (line) => canUpdateTasks || (clientManager && isClientInfoPending(line));
+
   const query = useMemo(() => ({
     labId,
     role: user?.role || '',
@@ -61,11 +81,11 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
     denialClassification: local.denialClassification || filter?.denialClassification || '',
     actionCategory: local.actionCategory || filter?.actionCategory || '',
     status: local.status || filter?.status || '',
-    taskView,
+    taskView: clientManager ? 'escalations' : taskView,
     searchText: local.searchText || filter?.searchText || '',
     page,
     pageSize: 100
-  }), [labId, user, filter, local, taskView, page]);
+  }), [labId, user, filter, local, taskView, page, clientManager]);
 
   async function load() {
     if (!labId) return;
@@ -85,12 +105,15 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
 
   const claims = useMemo(() => groupByClaim(rows), [rows]);
   const kpi = useMemo(() => ({ claims: claims.length, tasks: rows.length, balance: rows.reduce((a, b) => a + Number(b.insuranceBalance || 0), 0), escalated: rows.filter(x => String(x.status || '').toLowerCase().includes('escal')).length }), [claims, rows]);
-  const myTabs = useMemo(() => [
-    { key: 'open', label: 'New', hint: 'Assigned active work' },
-    { key: 'assigned', label: 'Assigned', hint: 'All assigned active items' },
-    { key: 'escalations', label: 'Escalate', hint: 'Escalated work items' },
-    { key: 'closed', label: 'Closed', hint: 'Completed by reviewer' }
-  ], []);
+  const myTabs = useMemo(() => {
+    const tabs = [
+      { key: 'open', label: 'New', hint: 'Assigned active work' },
+      { key: 'assigned', label: 'Assigned', hint: 'All assigned active items' },
+      { key: 'escalations', label: 'Escalate', hint: 'Escalated work items' },
+      { key: 'closed', label: 'Closed', hint: 'Completed by reviewer' }
+    ];
+    return clientManager ? tabs.filter(x => x.key === 'escalations') : tabs;
+  }, [clientManager]);
 
   async function openNote(level, claim, task) {
     const ctx = { level, claim, task };
@@ -101,12 +124,16 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
   async function saveNote() {
     if (!noteText.trim()) return setMessage?.({ type: 'warning', text: 'Please enter comments.' });
     const claim = noteCtx.claim, task = noteCtx.task;
+    if (!canSaveComments) return setMessage?.({ type: 'warning', text: 'This role has read-only access.' });
+    if (clientManager && !(task ? isClientInfoPending(task) : claimHasClientInfoPending(claim))) {
+      return setMessage?.({ type: 'warning', text: 'Client Manager can update comments only for Client Info Pending escalations.' });
+    }
     await denialWorkflowService.saveNote({ labId, claimId: claim.claimId, taskId: task?.taskId || '', cptCode: task?.cptCode || '', noteLevel: noteCtx.level, noteText, createdBy: user?.userName || 'ReactWorkflow' });
-    if (task?.taskId && noteStatus) await denialWorkflowService.updateTask({ labId, taskId: task.taskId, status: noteStatus, comments: noteText, actionBy: user?.userName || 'ReactWorkflow' });
-    if (!task?.taskId && noteStatus) {
+    if (canUpdateTasks && task?.taskId && noteStatus) await denialWorkflowService.updateTask({ labId, taskId: task.taskId, status: noteStatus, comments: noteText, actionBy: user?.userName || 'ReactWorkflow' });
+    if (canUpdateTasks && !task?.taskId && noteStatus) {
       for (const l of claim.lines) await denialWorkflowService.updateTask({ labId, taskId: l.taskId, status: noteStatus, comments: noteText, actionBy: user?.userName || 'ReactWorkflow' });
     }
-    setMessage?.({ type: 'success', text: 'Comment and status saved.' });
+    setMessage?.({ type: 'success', text: canUpdateTasks ? 'Comment and status saved.' : 'Comment saved.' });
     onSaved?.();
     setNoteCtx(null); await load();
   }
@@ -116,6 +143,8 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
     setDocs(await denialWorkflowService.getClaimDocuments(labId, claim.claimId));
   }
   async function uploadDocs() {
+    if (!canUploadDocuments) return setMessage?.({ type: 'warning', text: 'This role cannot upload documents.' });
+    if (clientManager && !claimHasClientInfoPending(docCtx)) return setMessage?.({ type: 'warning', text: 'Client Manager can upload documents only for Client Info Pending escalations.' });
     if (!docFiles?.length) return setMessage?.({ type: 'warning', text: 'Select at least one document.' });
     await denialWorkflowService.uploadClaimDocuments(labId, docCtx.claimId, docComment, user?.userName || 'ReactWorkflow', docFiles);
     setMessage?.({ type: 'success', text: 'Document uploaded.' });
@@ -130,6 +159,7 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
     setEscalations(data || []);
   }
   async function saveEscalation() {
+    if (!canCreateEscalation) return setMessage?.({ type: 'warning', text: 'This role cannot submit escalations.' });
     const { level, claim, task } = escCtx;
     await denialWorkflowService.saveEscalation({ labId, claimId: claim.claimId, taskId: task?.taskId || '', cptCode: task?.cptCode || '', escalationLevel: level, escalationReason: escReason, comments: escComment, status: 'Open', createdBy: user?.userName || 'ReactWorkflow' });
     const affected = task ? [task] : claim.lines;
@@ -138,6 +168,8 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
     onSaved?.();
     setEscCtx(null); await load();
   }
+
+  useEffect(() => { if (clientManager && taskView !== 'escalations') setTaskView('escalations'); }, [clientManager, taskView, setTaskView]);
 
   return <div className="wl-page">
     <div className="wl-kpis"><div><b>{kpi.claims}</b><span>Assigned claims</span></div><div><b>{kpi.tasks}</b><span>Open tasks</span></div><div><b>{money(kpi.balance)}</b><span>Ins. balance</span></div><div><b>{kpi.escalated}</b><span>Escalated</span></div></div>
@@ -148,11 +180,11 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
       <SearchableMultiSelect label="Status" value={local.status} onChange={v => setLocal(x => ({ ...x, status: v }))} options={statusOptions} placeholder="All statuses" />
       <label className="span2">Search<input value={local.searchText} onChange={e => setLocal(x => ({ ...x, searchText: e.target.value }))} placeholder="Claim, payer, CPT, task..." /></label>
     </div></div>
-    <div className="wl-card"><div className="wl-card-hd"><b>AR Reviewer · My Worklist · {myTabs.find(x => x.key === taskView)?.label}</b><span>{loading ? 'Loading...' : `${data.totalCount || rows.length} task(s)`}</span></div><div className="wl-table-scroll"><table className="wl-main-table"><thead><tr><th></th><th>Claim ID</th><th>Payer</th><th>Panel</th><th>Patient ID</th><th>DOS</th><th>Clinic</th><th>Provider</th><th>Assigned To</th><th>Balance</th><th>Claim Notes</th><th>Docs</th><th>Escalate</th><th>Status</th></tr></thead><tbody>{claims.map(c => <React.Fragment key={c.claimId}><tr className={expanded === c.claimId ? 'open' : ''} onClick={() => setExpanded(expanded === c.claimId ? '' : c.claimId)}><td>{expanded === c.claimId ? '▼' : '▶'}</td><td className="linkish">{c.claimId}</td><td>{c.payerName}</td><td>{c.panelName}</td><td>{c.patientId}</td><td>{fmtDate(c.dateOfService)}</td><td>{c.clinicName}</td><td>{c.referringProvider}</td><td>{c.assignedTo || '-'}</td><td className="money">{money(c.balance)}</td><td><button className="wl-icon" onClick={e => { e.stopPropagation(); openNote('Claim', c); }}>📝</button></td><td><button className="wl-icon" onClick={e => { e.stopPropagation(); openDocs(c); }}>📎</button></td><td><button className="wl-btn red xs" onClick={e => { e.stopPropagation(); openEsc('Claim', c); }}>Escalate</button></td><td><span className={`wl-badge ${String(c.status).toLowerCase().replaceAll(' ', '-')}`}>{c.status}</span></td></tr>{expanded === c.claimId && <tr><td colSpan="14" className="wl-detail-cell"><div className="wl-detail-title">CPT / line-level task details</div><div className="wl-line-scroll"><table className="wl-line-table"><thead><tr><th>Task ID</th><th>CPT</th><th>Units</th><th>Modifier</th><th>Denial</th><th>Coverage</th><th>ICD Status</th><th>Classification</th><th>Validity</th><th>Balance</th><th>Action / Task</th><th>SLA</th><th>Assigned To</th><th>Status</th><th>Notes</th><th>Escalate</th></tr></thead><tbody>{c.lines.map(l => <tr key={l.taskId}><td><b>{l.taskId}</b></td><td>{l.cptCode}</td><td>{l.units ?? '-'}</td><td>{l.modifier || '-'}</td><td>{l.denialCode}</td><td>{l.coverageStatus || '-'}</td><td>{l.icdComplianceStatus || '-'}</td><td>{l.denialClassification}</td><td>{l.denialValidity || '-'}</td><td className="money">{money(l.insuranceBalance)}</td><td>{l.task || l.recommendedAction}</td><td>{l.daysRemaining ?? '-'}</td><td>{l.assignedTo || '-'}</td><td><span className={`wl-badge ${String(l.status).toLowerCase().replaceAll(' ', '-')}`}>{l.status || 'Open'}</span></td><td><button className="wl-icon" onClick={() => openNote('Line', c, l)}>📝</button></td><td><button className="wl-btn red xs" onClick={() => openEsc('Line', c, l)}>Escalate</button></td></tr>)}</tbody></table></div></td></tr>}</React.Fragment>)}</tbody></table></div></div>
+    <div className="wl-card"><div className="wl-card-hd"><b>{clientManager ? 'Client Manager' : accountManager ? 'Account Manager' : 'AR Reviewer'} · My Worklist · {myTabs.find(x => x.key === (clientManager ? 'escalations' : taskView))?.label}</b><span>{loading ? 'Loading...' : `${data.totalCount || rows.length} task(s)`}</span></div><div className="wl-table-scroll"><table className="wl-main-table"><thead><tr><th></th><th>Claim ID</th><th>Payer</th><th>Panel</th><th>Patient ID</th><th>DOS</th><th>Clinic</th><th>Provider</th><th>Assigned To</th><th>Balance</th><th>Claim Notes</th><th>Docs</th><th>Escalate</th><th>Status</th></tr></thead><tbody>{claims.map(c => <React.Fragment key={c.claimId}><tr className={expanded === c.claimId ? 'open' : ''} onClick={() => setExpanded(expanded === c.claimId ? '' : c.claimId)}><td>{expanded === c.claimId ? '▼' : '▶'}</td><td className="linkish">{c.claimId}</td><td>{c.payerName}</td><td>{c.panelName}</td><td>{c.patientId}</td><td>{fmtDate(c.dateOfService)}</td><td>{c.clinicName}</td><td>{c.referringProvider}</td><td>{c.assignedTo || '-'}</td><td className="money">{money(c.balance)}</td><td><button className="wl-icon" disabled={!canEditClaim(c)} onClick={e => { e.stopPropagation(); openNote('Claim', c); }}>📝</button></td><td><button className="wl-icon" disabled={!canEditClaim(c)} onClick={e => { e.stopPropagation(); openDocs(c); }}>📎</button></td><td>{canCreateEscalation ? <button className="wl-btn red xs" onClick={e => { e.stopPropagation(); openEsc('Claim', c); }}>Escalate</button> : <span className="muted-text">View only</span>}</td><td><span className={`wl-badge ${String(c.status).toLowerCase().replaceAll(' ', '-')}`}>{c.status}</span></td></tr>{expanded === c.claimId && <tr><td colSpan="14" className="wl-detail-cell"><div className="wl-detail-title">CPT / line-level task details</div><div className="wl-line-scroll"><table className="wl-line-table"><thead><tr><th>Task ID</th><th>CPT</th><th>Units</th><th>Modifier</th><th>Denial</th><th>Coverage</th><th>ICD Status</th><th>Classification</th><th>Validity</th><th>Balance</th><th>Action / Task</th><th>SLA</th><th>Assigned To</th><th>Status</th><th>Notes</th><th>Escalate</th></tr></thead><tbody>{c.lines.map(l => <tr key={l.taskId}><td><b>{l.taskId}</b></td><td>{l.cptCode}</td><td>{l.units ?? '-'}</td><td>{l.modifier || '-'}</td><td>{l.denialCode}</td><td>{l.coverageStatus || '-'}</td><td>{l.icdComplianceStatus || '-'}</td><td>{l.denialClassification}</td><td>{l.denialValidity || '-'}</td><td className="money">{money(l.insuranceBalance)}</td><td>{l.task || l.recommendedAction}</td><td>{l.daysRemaining ?? '-'}</td><td>{l.assignedTo || '-'}</td><td><span className={`wl-badge ${String(l.status).toLowerCase().replaceAll(' ', '-')}`}>{l.status || 'Open'}</span></td><td><button className="wl-icon" disabled={!canEditLine(l)} onClick={() => openNote('Line', c, l)}>📝</button></td><td>{canCreateEscalation ? <button className="wl-btn red xs" onClick={() => openEsc('Line', c, l)}>Escalate</button> : <span className="muted-text">View only</span>}</td></tr>)}</tbody></table></div></td></tr>}</React.Fragment>)}</tbody></table></div></div>
     <Pager data={data} changePage={changePage} />
 
-    {noteCtx && <Modal title={`${noteCtx.level} Comments · ${noteCtx.claim.claimId}${noteCtx.task ? ' / ' + noteCtx.task.cptCode : ''}`} onClose={() => setNoteCtx(null)}><div className="wl-modal-body"><label>Status<select className="wl-full" value={noteStatus} onChange={e => setNoteStatus(e.target.value)}>{statusOptions.map(x => <option key={x}>{x}</option>)}</select></label><label>Comments<textarea className="wl-textarea" value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Enter comments..." /></label><button className="wl-btn teal" onClick={saveNote}>Save comments</button><h4>History</h4>{notes.map(n => <div className="wl-history" key={n.noteId}><div>{n.noteText}</div><small>{n.createdBy} · {fmtDate(n.createdOn)}</small></div>)}</div></Modal>}
-    {docCtx && <Modal title={`Claim Documents · ${docCtx.claimId}`} onClose={() => setDocCtx(null)}><div className="wl-modal-body"><input type="file" multiple onChange={e => setDocFiles(e.target.files)} /><textarea className="wl-textarea" value={docComment} onChange={e => setDocComment(e.target.value)} placeholder="Document comment..." /><button className="wl-btn teal" onClick={uploadDocs}>Upload documents</button><h4>Uploaded documents</h4>{docs.map(d => <div className="wl-history" key={d.documentId}><b>{d.originalFileName}</b><div>{d.comment}</div><small>{d.uploadedBy} · {fmtDate(d.uploadedOn)} · {Math.round(Number(d.fileSizeBytes || 0) / 1024)} KB</small></div>)}</div></Modal>}
+    {noteCtx && <Modal title={`${noteCtx.level} Comments · ${noteCtx.claim.claimId}${noteCtx.task ? ' / ' + noteCtx.task.cptCode : ''}`} onClose={() => setNoteCtx(null)}><div className="wl-modal-body">{canUpdateTasks && <label>Status<select className="wl-full" value={noteStatus} onChange={e => setNoteStatus(e.target.value)}>{statusOptions.map(x => <option key={x}>{x}</option>)}</select></label>}<label>Comments<textarea className="wl-textarea" value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Enter comments..." /></label><button className="wl-btn teal" disabled={!canSaveComments || (clientManager && !(noteCtx.task ? isClientInfoPending(noteCtx.task) : claimHasClientInfoPending(noteCtx.claim)))} onClick={saveNote}>Save comments</button><h4>History</h4>{notes.map(n => <div className="wl-history" key={n.noteId}><div>{n.noteText}</div><small>{n.createdBy} · {fmtDate(n.createdOn)}</small></div>)}</div></Modal>}
+    {docCtx && <Modal title={`Claim Documents · ${docCtx.claimId}`} onClose={() => setDocCtx(null)}><div className="wl-modal-body"><input type="file" multiple onChange={e => setDocFiles(e.target.files)} /><textarea className="wl-textarea" value={docComment} onChange={e => setDocComment(e.target.value)} placeholder="Document comment..." /><button className="wl-btn teal" disabled={!canUploadDocuments || (clientManager && !claimHasClientInfoPending(docCtx))} onClick={uploadDocs}>Upload documents</button><h4>Uploaded documents</h4>{docs.map(d => <div className="wl-history" key={d.documentId}><b>{d.originalFileName}</b><div>{d.comment}</div><small>{d.uploadedBy} · {fmtDate(d.uploadedOn)} · {Math.round(Number(d.fileSizeBytes || 0) / 1024)} KB</small></div>)}</div></Modal>}
     {escCtx && <Modal title={`${escCtx.level} Escalation · ${escCtx.claim.claimId}${escCtx.task ? ' / ' + escCtx.task.cptCode : ''}`} onClose={() => setEscCtx(null)}><div className="wl-modal-body"><label>Escalation reason<select className="wl-full" value={escReason} onChange={e => setEscReason(e.target.value)}>{(escCtx.level === 'Claim' ? claimEscReasons : lineEscReasons).map(x => <option key={x}>{x}</option>)}</select></label><label>Escalation comments<textarea className="wl-textarea" value={escComment} onChange={e => setEscComment(e.target.value)} placeholder="Explain what manager has to review..." /></label><button className="wl-btn red" onClick={saveEscalation}>Submit escalation</button><h4>Escalation history</h4>{escalations.map(x => <div className="wl-history" key={x.escalationId}><b>{x.escalationReason}</b><div>{x.comments}</div><small>{x.status} · {x.createdBy} · {fmtDate(x.createdOn)}</small></div>)}</div></Modal>}
   </div>;
 }
