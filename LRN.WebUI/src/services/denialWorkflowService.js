@@ -26,7 +26,10 @@ export const denialWorkflowService = {
   getNotes: (query) => api(`/notes?${qs(query)}`),
   saveNote: (payload) => api('/notes', { method: 'POST', body: JSON.stringify(payload) }),
   getClaimDocuments: (labId, claimId) => api(`/claim-documents?labId=${encodeURIComponent(labId)}&claimId=${encodeURIComponent(claimId)}`),
+  getClaimHistory: (query) => api(`/claim-history?${qs(query)}`),
   getEscalations: (query) => api(`/escalations?${qs(query)}`),
+  getEscalationQueue: async (query, escalationLevel = 'Claim') => normalizePagedResult(await api(`/escalation-queue?${qs({ ...(query || {}), escalationLevel })}`)),
+  resolveEscalation: (payload) => api('/resolve-escalation', { method: 'POST', body: JSON.stringify(payload) }),
   saveEscalation: (payload) => api('/escalations', { method: 'POST', body: JSON.stringify(payload) }),
   uploadClaimDocuments: async (labId, claimId, comment, uploadedBy, files) => {
     const form = new FormData();

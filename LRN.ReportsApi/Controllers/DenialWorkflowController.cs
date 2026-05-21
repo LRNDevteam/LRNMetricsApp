@@ -230,6 +230,36 @@ public sealed class DenialWorkflowController : ControllerBase
     }
 
 
+
+    [HttpGet("claim-history")]
+    [HttpGet("claims/{claimId}/history")]
+    public async Task<ActionResult<IReadOnlyList<DenialClaimHistoryRow>>> ClaimHistory([FromQuery] int labId, [FromRoute] string? claimId = null, [FromQuery(Name = "claimId")] string? claimIdQuery = null, [FromQuery] string? taskId = null, [FromQuery] string? cptCode = null, [FromQuery] string historyLevel = "Claim", CancellationToken ct = default)
+    {
+        var id = !string.IsNullOrWhiteSpace(claimId) ? claimId : claimIdQuery;
+        if (labId <= 0) return BadRequest("LabId is required.");
+        if (string.IsNullOrWhiteSpace(id)) return BadRequest("ClaimId is required.");
+        return Ok(await _service.GetClaimHistoryAsync(labId, id.Trim(), taskId, cptCode, historyLevel, ct));
+    }
+
+    [HttpGet("escalation-queue")]
+    public async Task<ActionResult<PagedResult<DenialEscalationQueueRow>>> EscalationQueue([FromQuery] DenialWorkflowFilter filter, [FromQuery] string escalationLevel = "Claim", CancellationToken ct = default)
+    {
+        if (filter.LabId <= 0) return BadRequest("LabId is required.");
+        return Ok(await _service.GetEscalationQueueAsync(Normalize(filter), escalationLevel, ct));
+    }
+
+    [HttpPost("resolve-escalation")]
+    public async Task<ActionResult<DenialWorkflowResult>> ResolveEscalation(ResolveDenialEscalationRequest request, CancellationToken ct)
+    {
+        if (!CanAssignFromToken()) return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only Admin and AR Manager users can resolve manager escalations." });
+        if (request.LabId <= 0) return BadRequest("LabId is required.");
+        if (request.EscalationId <= 0) return BadRequest("EscalationId is required.");
+        if (string.IsNullOrWhiteSpace(request.ResponseNote)) return BadRequest("Manager response note is required.");
+        request.ActionBy = string.IsNullOrWhiteSpace(request.ActionBy) ? (FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "ReactWorkflow") : request.ActionBy;
+        var rows = await _service.ResolveEscalationAsync(request, ct);
+        return Ok(new DenialWorkflowResult { Success = rows > 0, RowsAffected = rows, Message = rows > 0 ? "Escalation response saved." : "Escalation response was not saved." });
+    }
+
     [HttpGet("escalations")]
     public async Task<ActionResult<IReadOnlyList<DenialEscalationRow>>> Escalations([FromQuery] int labId, [FromQuery] string claimId, [FromQuery] string? taskId, [FromQuery] string? cptCode, [FromQuery] string escalationLevel = "Claim", CancellationToken ct = default)
     {

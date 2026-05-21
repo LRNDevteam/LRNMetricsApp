@@ -84,6 +84,11 @@ public sealed class DenialWorkflowUserContext
 public sealed class DenialWorkflowDashboardSummary
 {
     public int TotalDenials { get; set; }
+    public int TotalClaims { get; set; }
+    public int TotalTasks { get; set; }
+    public int AssignedClaims { get; set; }
+    public int PendingClaims { get; set; }
+    public int ClosedClaims { get; set; }
     public decimal OutstandingAmount { get; set; }
     public int OpenInProgressCount { get; set; }
     public int ClosedCount { get; set; }
@@ -212,8 +217,12 @@ public sealed class ReviewerWorkflowSummaryRow
 {
     public string ReviewerName { get; set; } = string.Empty;
     public int TotalAssigned { get; set; }
+    public int TotalTasks { get; set; }
+    public int TotalClaims { get; set; }
     public int Closed { get; set; }
+    public int ClosedTasks { get; set; }
     public int Pending { get; set; }
+    public int PendingTasks { get; set; }
 }
 
 public sealed class DenialWorkflowInsightRow
@@ -318,6 +327,7 @@ public sealed class ClaimLevelRow
     public string PayerName { get; set; } = string.Empty;
     public string PanelName { get; set; } = string.Empty;
     public DateTime? DateOfService { get; set; }
+    public DateTime? CreatedOn { get; set; }
     public string AssignedTo { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public int TaskCount { get; set; }
@@ -444,4 +454,66 @@ public sealed class SaveDenialEscalationRequest
     public string Comments { get; set; } = string.Empty;
     public string Status { get; set; } = "Open";
     public string CreatedBy { get; set; } = string.Empty;
+}
+
+
+public sealed class DenialEscalationQueueRow
+{
+    public long EscalationId { get; set; }
+    public int LabId { get; set; }
+    public string ClaimId { get; set; } = string.Empty;
+    public string TaskId { get; set; } = string.Empty;
+    public string CptCode { get; set; } = string.Empty;
+    public string EscalationLevel { get; set; } = string.Empty;
+    public string EscalationReason { get; set; } = string.Empty;
+    public string Comments { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string CreatedBy { get; set; } = string.Empty;
+    public DateTime CreatedOn { get; set; }
+    public string Analyst { get; set; } = string.Empty;
+    public string LabName { get; set; } = string.Empty;
+    public string PayerName { get; set; } = string.Empty;
+    public string ActionCategory { get; set; } = string.Empty;
+    public string DenialClassification { get; set; } = string.Empty;
+    public string DenialCode { get; set; } = string.Empty;
+    public string DenialDescription { get; set; } = string.Empty;
+    public decimal InsuranceBalance { get; set; }
+    public string SlaStatus { get; set; } = string.Empty;
+    public int? DaysRemaining { get; set; }
+    public DateTime? DueDate { get; set; }
+    public string AssignedTo { get; set; } = string.Empty;
+}
+
+public sealed class ResolveDenialEscalationRequest
+{
+    public int LabId { get; set; }
+    public long EscalationId { get; set; }
+    public string ClaimId { get; set; } = string.Empty;
+    public string TaskId { get; set; } = string.Empty;
+    public string CptCode { get; set; } = string.Empty;
+    public string EscalationLevel { get; set; } = "Claim";
+    public string ResolutionAction { get; set; } = string.Empty;
+    public string ResponseNote { get; set; } = string.Empty;
+    public string ReassignTo { get; set; } = string.Empty;
+    public string ActionBy { get; set; } = string.Empty;
+}
+
+public sealed class DenialClaimHistoryRow
+{
+    public long HistoryId { get; set; }
+    public string HistoryType { get; set; } = string.Empty;
+    public string ClaimId { get; set; } = string.Empty;
+    public string TaskId { get; set; } = string.Empty;
+    public string CptCode { get; set; } = string.Empty;
+    public string ActionType { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string OldStatus { get; set; } = string.Empty;
+    public string NewStatus { get; set; } = string.Empty;
+    public string OldAssignedTo { get; set; } = string.Empty;
+    public string NewAssignedTo { get; set; } = string.Empty;
+    public string ActionBy { get; set; } = string.Empty;
+    public DateTime? ActionDate { get; set; }
+    public string CreatedBy { get; set; } = string.Empty;
+    public DateTime? CreatedOn { get; set; }
 }
