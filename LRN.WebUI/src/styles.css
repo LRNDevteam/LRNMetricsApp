@@ -856,6 +856,10 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .history-badge.document{background:#dcfce7;color:#166534}
 .history-badge.closed{background:#ccfbf1;color:#0f766e}
 .esc-action-buttons{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.esc-action-buttons>*{flex:0 0 auto}
+.esc-action-buttons .wl-icon{display:inline-flex;align-items:center;justify-content:center;line-height:1}
+.esc-action-buttons .wl-btn{display:inline-flex;align-items:center;justify-content:center}
+.esc-table td:first-child{vertical-align:middle}
 .wl-icon .bi{pointer-events:none}
 
 /* 2026-05-21 compact escalation response + dashboard table fit fixes */
@@ -1014,3 +1018,90 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .esc-line-task-table td.comment-text-cell{min-width:260px;max-width:360px}
 .esc-line-task-table td.task-text-cell{min-width:180px;max-width:260px}
 .esc-line-task-table td.action-text-cell{min-width:170px;max-width:260px}
+
+/* 2026-05-21 final fix: force visible horizontal scroll in escalation queue and popup */
+.esc-page,
+.esc-page .lrn-card,
+.esc-modal,
+.esc-modal-body,
+.esc-modal-task-section{
+  min-width:0!important;
+}
+.esc-page .lrn-card{
+  overflow:hidden!important;
+}
+.esc-page .escalation-table-wrap,
+.esc-page .dt-wrap.workflow-scroll.escalation-table-wrap{
+  display:block!important;
+  width:100%!important;
+  max-width:100%!important;
+  min-width:0!important;
+  overflow-x:scroll!important;
+  overflow-y:auto!important;
+  padding-bottom:12px!important;
+  scrollbar-gutter:stable both-edges;
+  border-bottom:1px solid #e5e7eb;
+}
+.esc-page .escalation-table-wrap table.esc-table,
+.esc-page .dt-wrap.workflow-scroll.escalation-table-wrap table.esc-table{
+  min-width:1450px!important;
+  width:1450px!important;
+  max-width:none!important;
+  table-layout:fixed!important;
+}
+.esc-page .esc-table th,
+.esc-page .esc-table td{
+  white-space:nowrap!important;
+}
+.esc-page .esc-table td.wrap-cell,
+.esc-page .esc-table th:nth-child(5){
+  white-space:normal!important;
+}
+.esc-modal-task-section .escalation-line-scroll,
+.esc-modal .escalation-line-scroll{
+  display:block!important;
+  width:100%!important;
+  max-width:100%!important;
+  min-width:0!important;
+  overflow-x:scroll!important;
+  overflow-y:auto!important;
+  padding-bottom:12px!important;
+  scrollbar-gutter:stable both-edges;
+}
+.esc-modal-task-section .esc-line-task-table,
+.esc-modal .esc-line-task-table{
+  min-width:1500px!important;
+  width:1500px!important;
+  max-width:none!important;
+  table-layout:fixed!important;
+}
+.esc-modal-task-section .esc-line-task-table th,
+.esc-modal-task-section .esc-line-task-table td{
+  white-space:nowrap!important;
+  vertical-align:top!important;
+  padding:7px 9px!important;
+}
+.esc-modal-task-section .esc-line-task-table .wrap-cell,
+.esc-modal-task-section .esc-line-task-table .task-text-cell,
+.esc-modal-task-section .esc-line-task-table .action-text-cell,
+.esc-modal-task-section .esc-line-task-table .comment-text-cell{
+  white-space:normal!important;
+  line-height:1.35!important;
+}
+.esc-modal-task-section .esc-line-task-table th:nth-child(1),.esc-modal-task-section .esc-line-task-table td:nth-child(1){width:115px!important;}
+.esc-modal-task-section .esc-line-task-table th:nth-child(2),.esc-modal-task-section .esc-line-task-table td:nth-child(2){width:125px!important;}
+.esc-modal-task-section .esc-line-task-table th:nth-child(3),.esc-modal-task-section .esc-line-task-table td:nth-child(3){width:80px!important;}
+.esc-modal-task-section .esc-line-task-table th:nth-child(4),.esc-modal-task-section .esc-line-task-table td:nth-child(4){width:110px!important;}
+.esc-modal-task-section .esc-line-task-table th:nth-child(5),.esc-modal-task-section .esc-line-task-table td:nth-child(5){width:180px!important;}
+.esc-modal-task-section .esc-line-task-table th:nth-child(6),.esc-modal-task-section .esc-line-task-table td:nth-child(6){width:190px!important;}
+.esc-modal-task-section .esc-line-task-table th:nth-child(7),.esc-modal-task-section .esc-line-task-table td:nth-child(7){width:190px!important;}
+.esc-modal-task-section .esc-line-task-table th:nth-child(8),.esc-modal-task-section .esc-line-task-table td:nth-child(8){width:280px!important;}
+.esc-modal-task-section .esc-line-task-table th:nth-child(9),.esc-modal-task-section .esc-line-task-table td:nth-child(9){width:130px!important;}
+.esc-modal-task-section .esc-line-task-table th:nth-child(10),.esc-modal-task-section .esc-line-task-table td:nth-child(10){width:110px!important;}
+.esc-modal-task-section .esc-line-task-table th:nth-child(11),.esc-modal-task-section .esc-line-task-table td:nth-child(11){width:130px!important;}
+.esc-page .escalation-table-wrap::-webkit-scrollbar,
+.esc-modal-task-section .escalation-line-scroll::-webkit-scrollbar{height:14px;width:14px;}
+.esc-page .escalation-table-wrap::-webkit-scrollbar-thumb,
+.esc-modal-task-section .escalation-line-scroll::-webkit-scrollbar-thumb{background:#64748b;border-radius:999px;border:3px solid #f8fafc;background-clip:content-box;}
+.esc-page .escalation-table-wrap::-webkit-scrollbar-track,
+.esc-modal-task-section .escalation-line-scroll::-webkit-scrollbar-track{background:#eef2f7;border-radius:999px;}

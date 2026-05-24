@@ -177,7 +177,7 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
       <div className="lrn-card-header"><div className="lrn-card-title">Escalation queue · {level} level</div><span className="table-count">Showing {rows.length} of {data.totalCount || 0}</span></div>
       <div className="dt-wrap workflow-scroll escalation-table-wrap">
         <table className="lrn-table workflow-table thin-bordered esc-table">
-          <thead><tr><th style={{ width: 86 }}>Action</th><th style={{ minWidth: 130 }}>Claim</th>{level === 'Line' && <th style={{ minWidth: 90 }}>CPT</th>}<th style={{ minWidth: 150 }}>Analyst</th><th style={{ minWidth: 280 }}>Reason</th><th style={{ minWidth: 130 }}>Created On</th><th style={{ minWidth: 115 }}>SLA</th><th style={{ minWidth: 105 }}>Balance</th><th style={{ minWidth: 130 }}>Status</th></tr></thead>
+          <thead><tr><th style={{ minWidth: 128 }}>Action</th><th style={{ minWidth: 130 }}>Claim</th>{level === 'Line' && <th style={{ minWidth: 90 }}>CPT</th>}<th style={{ minWidth: 150 }}>Analyst</th><th style={{ minWidth: 280 }}>Reason</th><th style={{ minWidth: 130 }}>Created On</th><th style={{ minWidth: 115 }}>SLA</th><th style={{ minWidth: 105 }}>Balance</th><th style={{ minWidth: 130 }}>Status</th></tr></thead>
           <tbody>{rows.length ? rows.map(row => <EscalationRow key={row.escalationId} row={row} level={level} onOpen={() => openModal(row)} onHistory={() => openHistory(row)} />) : <tr><td colSpan={level === 'Line' ? 9 : 8} className="empty-cell">No escalations found.</td></tr>}</tbody>
         </table>
       </div>

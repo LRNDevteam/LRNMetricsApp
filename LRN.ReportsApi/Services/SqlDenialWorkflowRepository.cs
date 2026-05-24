@@ -1981,15 +1981,15 @@ BEGIN
             TaskId = CAST('' AS nvarchar(100)),
             CptCode = CAST('' AS nvarchar(100)),
             ActionType = CAST('Assignment' AS nvarchar(100)),
-            Title = CAST(CONCAT('Assigned ', COUNT(1), ' task(s) to ', ISNULL(NULLIF(NewAssignedTo,''),'Unassigned')) AS nvarchar(250)),
+            Title = CAST(CONCAT('Assigned ', COUNT(1), ' task(s) to ', ISNULL(NULLIF(MAX(ISNULL(NewAssignedTo,'')),''),'Unassigned')) AS nvarchar(250)),
             Description = CAST(CONCAT('Bulk assignment/audit grouped from ', COUNT(1), ' line task update(s).') AS nvarchar(max)),
             OldStatus = CAST('' AS nvarchar(100)),
             NewStatus = MAX(ISNULL(NewStatus,'')),
             OldAssignedTo = CAST('' AS nvarchar(256)),
-            NewAssignedTo = ISNULL(NewAssignedTo,''),
-            ActionBy = ISNULL(ActionBy,''),
+            NewAssignedTo = MAX(ISNULL(NewAssignedTo,'')),
+            ActionBy = MAX(ISNULL(ActionBy,'')),
             ActionDate = MAX(ActionDate),
-            CreatedBy = ISNULL(ActionBy,''),
+            CreatedBy = MAX(ISNULL(ActionBy,'')),
             CreatedOn = MAX(ActionDate)
         FROM HistBase
         WHERE (ISNULL(ActionType,'') LIKE '%Assign%' OR ISNULL(OldAssignedTo,'')<>ISNULL(NewAssignedTo,''))
