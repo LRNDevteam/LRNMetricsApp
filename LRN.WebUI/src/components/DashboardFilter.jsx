@@ -21,7 +21,7 @@ export default function DashboardFilter({ filter, setFilterValue, clearFilter, r
     <SearchableMultiSelect label="Clinic" value={filter.clinic} onChange={v => setFilterValue('clinic', v)} options={options?.clinics || []} placeholder="All clinics" />
     <SearchableMultiSelect label="Sales Rep" value={filter.salesRepname} onChange={v => setFilterValue('salesRepname', v)} options={options?.salesReps || []} placeholder="All sales reps" />
     <SearchableMultiSelect label="Referring Provider" value={filter.referringProvider} onChange={v => setFilterValue('referringProvider', v)} options={options?.referringProviders || []} placeholder="All providers" />
-    <div><label>Search</label><input value={filter.searchText || ''} onChange={e => setFilterValue('searchText', e.target.value)} placeholder="Claim / patient / payer" /></div>
+    <div className="filter-search"><label>Search</label><input value={filter.searchText || ''} onChange={e => setFilterValue('searchText', e.target.value)} placeholder="Claim / patient / payer" /></div>
     <div className="filter-actions"><button className="topbar-btn" type="button" onClick={clearFilter}>Clear</button></div>
   </div></div>;
 }

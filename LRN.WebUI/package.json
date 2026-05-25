@@ -17,5 +17,7 @@
     "bootstrap": "^5.3.3",
     "bootstrap-icons": "^1.11.3"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@vitejs/plugin-basic-ssl": "^2.1.0"
+  }
 }

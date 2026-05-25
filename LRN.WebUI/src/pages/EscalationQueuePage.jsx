@@ -164,15 +164,6 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
   return <div className="esc-page">
     <div className="wl-kpis esc-kpis"><div><b>{Number(kpi.total || 0).toLocaleString()}</b><span>{level} escalations</span></div><div><b>{Number(kpi.pending || 0).toLocaleString()}</b><span>Pending manager</span></div><div><b>{Number(kpi.breached || 0).toLocaleString()}</b><span>SLA breached</span></div><div><b>{money(kpi.amount)}</b><span>Visible balance</span></div></div>
 
-    <div className="wl-card wl-filters">
-      <div className="wl-card-hd"><b>Escalation queue filters</b><span>{busy ? 'Loading...' : `${data.totalCount || rows.length} item(s)`}</span></div>
-      <div className="wl-filter-grid escalation-filter-grid">
-        <label>Level<select value={taskView} onChange={e => setTaskView(e.target.value)}><option value="claim">Claim level</option><option value="line">Line level</option></select></label>
-        <label>Status<select value={status} onChange={e => setStatus(e.target.value)}><option value="">All statuses</option><option>Open</option><option>Escalated</option><option>In review</option><option>Resolved</option><option>Returned for rework</option><option>Reassigned</option></select></label>
-        <label className="span2">Search<input value={searchText} onChange={e => setSearchText(e.target.value)} placeholder="Claim, task, CPT, analyst, reason..." /></label>
-      </div>
-    </div>
-
     <div className="lrn-card">
       <div className="lrn-card-header"><div className="lrn-card-title">Escalation queue · {level} level</div><span className="table-count">Showing {rows.length} of {data.totalCount || 0}</span></div>
       <div className="dt-wrap workflow-scroll escalation-table-wrap">

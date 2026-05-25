@@ -51,19 +51,75 @@ export default function App() {
   const [reviewerNotification, setReviewerNotification] = useState({ assignedTasks: 0, pendingTasks: 0, loading: false });
   const [claimMenuCounts, setClaimMenuCounts] = useState({ unassigned: null, assigned: null, escalations: null, closed: null });
   const [myWorklistMenuCounts, setMyWorklistMenuCounts] = useState({ open: null, assigned: null, escalations: null, closed: null });
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const claimRequestSeq = useRef(0);
   const reviewerOnly = roleIsReviewerOnly(user.role);
   const canAssign = canAssignRole(user.role);
   const clientManager = isClientManagerRole(user.role);
   const readOnlyWorkflow = isReadOnlyWorkflowRole(user.role);
 
-  function setView(nextView) {
+  function setView(nextView, { closeSidebar = true } = {}) {
     let safeView = workflowViews.includes(nextView) ? nextView : 'dashboard';
     if (reviewerOnly && safeView === 'claims') safeView = 'myworklist';
     setViewState(safeView);
+    if (closeSidebar) setSidebarOpen(false);
     if (window.location.hash !== `#${safeView}`) {
       window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${safeView}`);
     }
+  }
+
+  function normalizeFilterOptions(raw = {}) {
+    const source = raw?.data ?? raw?.Data ?? raw?.result ?? raw?.Result ?? raw;
+    const toStrings = (value, keys = []) => {
+      if (value === undefined || value === null) return [];
+      const list = Array.isArray(value) ? value : [value];
+      const seen = new Set();
+      const normalizeKey = (s) => String(s || '').toLowerCase().replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim();
+
+      return list
+        .map(item => {
+          if (item === undefined || item === null) return '';
+          if (typeof item === 'string') return item.trim();
+          if (typeof item === 'number') return String(item).trim();
+          if (typeof item === 'object') {
+            for (const k of keys) {
+              const v = item?.[k];
+              if (v !== undefined && v !== null) return String(v).trim();
+            }
+            const fallback = item?.value ?? item?.Value ?? item?.label ?? item?.Label ?? item?.userName ?? item?.UserName ?? item?.displayName ?? item?.DisplayName;
+            if (fallback !== undefined && fallback !== null) return String(fallback).trim();
+          }
+          return '';
+        })
+        .filter(Boolean)
+        .filter(s => {
+          const k = normalizeKey(s);
+          if (!k || seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        });
+    };
+    const fromMaybeDelimitedString = (value) => {
+      if (Array.isArray(value)) return value;
+      if (typeof value !== 'string') return value;
+      const s = value.trim();
+      if (!s) return [];
+      const splitBy = s.includes('¬') ? '¬' : (s.includes(',') ? ',' : null);
+      if (!splitBy) return [s];
+      return s.split(splitBy).map(x => x.trim()).filter(Boolean);
+    };
+
+    return {
+      statuses: toStrings(fromMaybeDelimitedString(source.statuses ?? source.Statuses), ['status', 'Status', 'name', 'Name']),
+      actionCategories: toStrings(fromMaybeDelimitedString(source.actionCategories ?? source.ActionCategories), ['actionCategory', 'ActionCategory', 'category', 'Category', 'name', 'Name']),
+      priorities: toStrings(fromMaybeDelimitedString(source.priorities ?? source.Priorities), ['priority', 'Priority', 'name', 'Name']),
+      denialCodes: toStrings(fromMaybeDelimitedString(source.denialCodes ?? source.DenialCodes), ['denialCode', 'DenialCode', 'code', 'Code', 'name', 'Name']),
+      payerNames: toStrings(fromMaybeDelimitedString(source.payerNames ?? source.PayerNames), ['payerName', 'PayerName', 'name', 'Name']),
+      denialClassifications: toStrings(fromMaybeDelimitedString(source.denialClassifications ?? source.DenialClassifications), ['denialClassification', 'DenialClassification', 'classification', 'Classification', 'name', 'Name']),
+      clinics: toStrings(fromMaybeDelimitedString(source.clinics ?? source.Clinics), ['clinic', 'Clinic', 'clinicName', 'ClinicName', 'name', 'Name']),
+      salesReps: toStrings(fromMaybeDelimitedString(source.salesReps ?? source.SalesReps), ['salesRepname', 'SalesRepname', 'salesRep', 'SalesRep', 'name', 'Name']),
+      referringProviders: toStrings(fromMaybeDelimitedString(source.referringProviders ?? source.ReferringProviders), ['referringProvider', 'ReferringProvider', 'providerName', 'ProviderName', 'name', 'Name'])
+    };
   }
 
   function resolveLandingView(role) {
@@ -177,21 +233,22 @@ export default function App() {
 
   useEffect(() => {
     if (!authReady || !labId) return;
-    const cacheKey = `denial.filterOptions.${labId}`;
+    const cacheKey = `denial.filterOptions.v2.${labId}`;
     try {
       const cached = sessionStorage.getItem(cacheKey);
-      if (cached) setFilterOptions({ ...emptyFilterOptions, ...(JSON.parse(cached) || {}) });
+      if (cached) setFilterOptions({ ...emptyFilterOptions, ...normalizeFilterOptions(JSON.parse(cached) || {}) });
     } catch { /* ignore bad browser cache */ }
 
     // Load dropdown/autocomplete values in the background. This should not block the page.
     denialWorkflowService.getFilterOptions(labId)
       .then(x => {
-        const options = { ...emptyFilterOptions, ...(x || {}) };
+        const options = { ...emptyFilterOptions, ...normalizeFilterOptions(x || {}) };
         setFilterOptions(options);
         try { sessionStorage.setItem(cacheKey, JSON.stringify(options)); } catch { /* ignore storage quota */ }
       })
-      .catch(() => {
+      .catch(err => {
         if (!sessionStorage.getItem(cacheKey)) setFilterOptions(emptyFilterOptions);
+        setMessage({ type: 'danger', text: `Filter values load failed: ${err.message}` });
       });
   }, [authReady, labId]);
 
@@ -511,7 +568,8 @@ export default function App() {
   }
 
   return <div className="lrn-wrap">
-    <aside className="lrn-sidebar">
+    <div className={`sidebar-backdrop ${sidebarOpen ? 'open' : ''}`} onClick={() => setSidebarOpen(false)} />
+    <aside className={`lrn-sidebar ${sidebarOpen ? 'open' : ''}`}>
       <div className="lrn-brand"><div className="lrn-brand-icon">LRN</div><div><div className="lrn-brand-text">Lab Revenue</div><div className="lrn-brand-sub">Intelligence Navigator</div></div></div>
       <div className="user-card"><span className="avatar-sm">{initials(user.displayName || user.userName)}</span><div><strong>{user.displayName || user.userName || 'LRN User'}</strong><small>{user.role || 'Workflow User'}</small></div></div>
       <nav className="lrn-nav">
@@ -521,7 +579,7 @@ export default function App() {
         <button className={`lrn-nav-item ${view === 'summary' ? 'active' : ''}`} onClick={() => setView('summary')}><i className="bi bi-table" />Denial Summary</button>
         {!reviewerOnly && (
           <>
-            <button className={`lrn-nav-item ${view === 'claims' ? 'active' : ''}`} onClick={() => setView('claims')}><i className="bi bi-folder-check" />{canAssign ? 'Claim Assignment' : 'Claim View'}</button>
+            <button className={`lrn-nav-item ${view === 'claims' ? 'active' : ''}`} onClick={() => setView('claims', { closeSidebar: false })}><i className="bi bi-folder-check" />{canAssign ? 'Claim Assignment' : 'Claim View'}</button>
             {view === 'claims' && (
               <div className="lrn-nav-submenu">
                 {claimNavTabs.map(t => (
@@ -534,7 +592,7 @@ export default function App() {
           </>
         )}
         <div className="lrn-nav-section">My Tasks</div>
-        <button className={`lrn-nav-item ${view === 'myworklist' ? 'active' : ''}`} onClick={() => setView('myworklist')}><i className="bi bi-person-check" />My Worklist</button>
+        <button className={`lrn-nav-item ${view === 'myworklist' ? 'active' : ''}`} onClick={() => setView('myworklist', { closeSidebar: false })}><i className="bi bi-person-check" />My Worklist</button>
         {view === 'myworklist' && (
           <div className="lrn-nav-submenu">
             {myWorklistNavTabs.map(t => (
@@ -546,7 +604,7 @@ export default function App() {
         )}
         {(canAssign || clientManager || readOnlyWorkflow) && (
           <>
-            <button className={`lrn-nav-item ${view === 'escalations' ? 'active' : ''}`} onClick={() => setView('escalations')}><i className="bi bi-exclamation-triangle" />Escalation Queue<span className="lrn-nav-badge">{menuCountText(claimMenuCounts.escalations)}</span></button>
+            <button className={`lrn-nav-item ${view === 'escalations' ? 'active' : ''}`} onClick={() => setView('escalations', { closeSidebar: false })}><i className="bi bi-exclamation-triangle" />Escalation Queue<span className="lrn-nav-badge">{menuCountText(claimMenuCounts.escalations)}</span></button>
             {view === 'escalations' && (
               <div className="lrn-nav-submenu">
                 {escalationNavTabs.map(t => (
@@ -565,12 +623,18 @@ export default function App() {
       <div className="sidebar-logout"><button type="button" className="sidebar-logout-btn" onClick={logoutWorkflow}><i className="bi bi-box-arrow-right" />Logout</button></div>
     </aside>
     <div className="lrn-main">
-      <header className="lrn-topbar"><div><div className="lrn-page-title">{pageTitle}</div><div className="lrn-breadcrumb">LRN Analytics / <span>{pageTitle}</span></div></div><div className="topbar-actions">{reviewerOnly && <button type="button" className="notification-btn" title="Pending assigned tasks" onClick={() => setView('myworklist')}><i className="bi bi-bell-fill" /><span className="notification-count">{reviewerNotification.pendingTasks}</span><span className="notification-text"><b>{reviewerNotification.pendingTasks}</b> pending / {reviewerNotification.assignedTasks} assigned</span></button>}<select className="top-lab-select" value={labId || ''} onChange={e => setLabId(Number(e.target.value))}>{labs.map(l => <option key={l.labId ?? l.LabId} value={l.labId ?? l.LabId}>{l.labName ?? l.LabName}</option>)}</select><span className="current-lab">{labName}</span><button className="topbar-btn teal" onClick={() => setMessage({ type: 'info', text: 'Use backend export endpoint for Excel download.' })}><i className="bi bi-download" />Export</button><button type="button" className="topbar-btn" onClick={logoutWorkflow}><i className="bi bi-box-arrow-right" />Logout</button></div></header>
+      <header className="lrn-topbar">
+        <div className="topbar-left">
+          <button type="button" className="menu-toggle" onClick={() => setSidebarOpen(v => !v)} aria-label="Toggle menu"><i className="bi bi-list" /></button>
+          <div><div className="lrn-page-title">{pageTitle}</div><div className="lrn-breadcrumb">LRN Analytics / <span>{pageTitle}</span></div></div>
+        </div>
+        <div className="topbar-actions">{reviewerOnly && <button type="button" className="notification-btn" title="Pending assigned tasks" onClick={() => setView('myworklist')}><i className="bi bi-bell-fill" /><span className="notification-count">{reviewerNotification.pendingTasks}</span><span className="notification-text"><b>{reviewerNotification.pendingTasks}</b> pending / {reviewerNotification.assignedTasks} assigned</span></button>}<select className="top-lab-select" value={labId || ''} onChange={e => setLabId(Number(e.target.value))}>{labs.map(l => <option key={l.labId ?? l.LabId} value={l.labId ?? l.LabId}>{l.labName ?? l.LabName}</option>)}</select><span className="current-lab">{labName}</span><button className="topbar-btn teal" onClick={() => setMessage({ type: 'info', text: 'Use backend export endpoint for Excel download.' })}><i className="bi bi-download" />Export</button><button type="button" className="topbar-btn" onClick={logoutWorkflow}><i className="bi bi-box-arrow-right" />Logout</button></div>
+      </header>
       <main className="lrn-content">
         {view !== 'myworklist' && <DashboardFilter filter={filter} setFilterValue={setFilterValue} clearFilter={clearFilter} reviewers={reviewers} options={filterOptions} />}
         {message && <div className={`lrn-alert ${message.type}`}>{message.text}</div>}
         {loading && <div className="loading-line" />}
-        {view === 'dashboard' && <DashboardPage data={dashboard} />}
+        {view === 'dashboard' && <DashboardPage data={dashboard} user={user} labName={labName} />}
         {view === 'summary' && <DenialSummaryPage data={dashboard} canAssign={canAssign} onClassificationClick={openClaimsByClassification} onActionCategoryClick={openClaimsByActionCategory} onAssign={() => { setClaimTaskView('unassigned'); setView((reviewerOnly || readOnlyWorkflow) ? 'myworklist' : 'claims'); setMessage({ type: 'info', text: canAssign ? 'Select the required claim rows, choose reviewer, then assign.' : 'This role has read-only workflow access.' }); }} />}
         {view === 'claims' && <ClaimAssignmentPage data={claims} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} canAssign={canAssign} readOnlyWorkflow={readOnlyWorkflow} taskView={claimTaskView} setTaskView={handleClaimTaskViewChange} />}
         {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setMessage} onSaved={refreshReviewerNotification} taskView={myWorklistView} setTaskView={handleMyWorklistViewChange} />}
