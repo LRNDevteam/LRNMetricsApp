@@ -14,6 +14,7 @@ public sealed class ReviewerOption
     public string DisplayName { get; set; } = string.Empty;
     public string FullName { get => DisplayName; set => DisplayName = value ?? string.Empty; }
     public string Email { get; set; } = string.Empty;
+    public string Role { get; set; } = string.Empty;
 }
 
 public sealed class DenialWorkflowOptions
@@ -397,6 +398,8 @@ public sealed class DenialNoteRow
     public string? CptCode { get; set; }
     public string NoteLevel { get; set; } = string.Empty;
     public string NoteText { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public DateTime? NextFollowUpDate { get; set; }
     public string CreatedBy { get; set; } = string.Empty;
     public DateTime CreatedOn { get; set; }
 }
@@ -409,6 +412,8 @@ public sealed class SaveDenialNoteRequest
     public string? CptCode { get; set; }
     public string NoteLevel { get; set; } = "Claim";
     public string NoteText { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public DateTime? NextFollowUpDate { get; set; }
     public string CreatedBy { get; set; } = string.Empty;
 }
 
@@ -439,6 +444,9 @@ public sealed class DenialEscalationRow
     public string EscalationReason { get; set; } = string.Empty;
     public string Comments { get; set; } = string.Empty;
     public string Status { get; set; } = "Open";
+    public string EscalatedTo { get; set; } = string.Empty;
+    public string EscalatedToRole { get; set; } = string.Empty;
+    public DateTime? NextFollowUpDate { get; set; }
     public string CreatedBy { get; set; } = string.Empty;
     public DateTime CreatedOn { get; set; }
 }
@@ -453,6 +461,9 @@ public sealed class SaveDenialEscalationRequest
     public string EscalationReason { get; set; } = string.Empty;
     public string Comments { get; set; } = string.Empty;
     public string Status { get; set; } = "Open";
+    public string EscalatedTo { get; set; } = string.Empty;
+    public string EscalatedToRole { get; set; } = string.Empty;
+    public DateTime? NextFollowUpDate { get; set; }
     public string CreatedBy { get; set; } = string.Empty;
 }
 
@@ -468,6 +479,9 @@ public sealed class DenialEscalationQueueRow
     public string EscalationReason { get; set; } = string.Empty;
     public string Comments { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
+    public string EscalatedTo { get; set; } = string.Empty;
+    public string EscalatedToRole { get; set; } = string.Empty;
+    public DateTime? NextFollowUpDate { get; set; }
     public string CreatedBy { get; set; } = string.Empty;
     public DateTime CreatedOn { get; set; }
     public string Analyst { get; set; } = string.Empty;

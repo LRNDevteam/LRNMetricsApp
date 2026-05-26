@@ -111,7 +111,6 @@ function SingleAccountDashboard({ data, user, labName, mode }) {
       </div>
       <div>
         <RoleCard title="Recommended Single-Account Metrics"><div className="role-metrics-list"><Metric name="Payer response exposure" value={money(data.outstandingAmount || 0)} /><Metric name="Client pending requests" value={n(data.escalatedCount || 0)} /><Metric name="Documentation queue" value={n(data.openInProgressCount || 0)} /><Metric name="Closed this cycle" value={n(data.closedCount || 0)} /></div></RoleCard>
-        <RoleCard title="Client Communication Summary"><div className="role-insight">Use this panel for the client/account follow-up narrative. Items escalated as Client Info Pending should be handled from the Escalation Queue and My Worklist pages without assignment/edit access.</div><div className="role-insight warn">Download or export request lists from the relevant claim/task view after filters are applied.</div></RoleCard>
         <AgingMix />
       </div>
     </div>
@@ -121,7 +120,6 @@ function SingleAccountDashboard({ data, user, labName, mode }) {
 function DashboardSidePanels({ data }) {
   return <div>
     <RoleCard title="Recommended Metrics"><div className="role-metrics-list"><Metric name="SLA Compliance" value={pct(data.slaCompliance || 86)} /><Metric name="Recovery Rate" value={pct(data.recoveryRate || 24)} /><Metric name="Aging Exposure" value={money(data.agingExposure || data.outstandingAmount || 0)} /><Metric name="Work Queue Velocity" value={pct(data.velocity || 72)} /></div></RoleCard>
-    <RoleCard title="Operational Insights"><div className="role-insight danger">Prioritize high-dollar claims with appeal deadlines inside 3 days.</div><div className="role-insight warn">Claims with no activity over 5 business days should surface in manager review.</div><div className="role-insight">Rebill validation should wait for next PMS sync before auto-closing.</div></RoleCard>
     <AgingMix />
   </div>;
 }

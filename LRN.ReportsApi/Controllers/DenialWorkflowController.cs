@@ -167,7 +167,6 @@ public sealed class DenialWorkflowController : ControllerBase
     public async Task<ActionResult<DenialNoteRow>> SaveNote(SaveDenialNoteRequest request, CancellationToken ct)
     {
         var role = FirstClaim(ClaimTypes.Role, "role", "roles");
-        if (IsAccountManagerRole(role)) return StatusCode(StatusCodes.Status403Forbidden, new { message = "Account Manager has view-only access." });
         if (request.LabId <= 0) return BadRequest("LabId is required.");
         if (string.IsNullOrWhiteSpace(request.ClaimId)) return BadRequest("ClaimId is required.");
         if (string.IsNullOrWhiteSpace(request.NoteText)) return BadRequest("Note text is required.");
@@ -190,11 +189,10 @@ public sealed class DenialWorkflowController : ControllerBase
     public async Task<ActionResult<IReadOnlyList<ClaimDocumentRow>>> UploadClaimDocuments([FromForm] int labId, [FromForm] string claimId, [FromForm] string? comment, [FromForm] string? uploadedBy, [FromForm] List<IFormFile> files, CancellationToken ct)
     {
         var role = FirstClaim(ClaimTypes.Role, "role", "roles");
-        if (IsAccountManagerRole(role)) return StatusCode(StatusCodes.Status403Forbidden, new { message = "Account Manager has view-only access." });
         if (labId <= 0) return BadRequest("LabId is required.");
         if (string.IsNullOrWhiteSpace(claimId)) return BadRequest("ClaimId is required.");
-        if (IsClientManagerRole(role) && !await HasClientInfoPendingEscalationAsync(labId, claimId, null, null, ct))
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Client Manager can upload documents only for Client Info Pending escalations." });
+        if ((IsClientManagerRole(role) || IsAccountManagerRole(role)) && !await HasClientInfoPendingEscalationAsync(labId, claimId, null, null, ct))
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Client/Account Manager can upload documents only for Client Info Pending escalations." });
         if (files == null || files.Count == 0) return BadRequest("Select at least one file.");
 
         uploadedBy = string.IsNullOrWhiteSpace(uploadedBy) ? (FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "ReactWorkflow") : uploadedBy;
@@ -251,7 +249,7 @@ public sealed class DenialWorkflowController : ControllerBase
     [HttpPost("resolve-escalation")]
     public async Task<ActionResult<DenialWorkflowResult>> ResolveEscalation(ResolveDenialEscalationRequest request, CancellationToken ct)
     {
-        if (!CanAssignFromToken()) return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only Admin and AR Manager users can resolve manager escalations." });
+        if (!CanRespondToEscalationFromToken()) return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only Admin, AR Manager, Client Manager and Account Manager users can submit escalation responses." });
         if (request.LabId <= 0) return BadRequest("LabId is required.");
         if (request.EscalationId <= 0) return BadRequest("EscalationId is required.");
         if (string.IsNullOrWhiteSpace(request.ResponseNote)) return BadRequest("Manager response note is required.");
@@ -377,6 +375,13 @@ public sealed class DenialWorkflowController : ControllerBase
         var role = FirstClaim(ClaimTypes.Role, "role", "roles");
         var r = NormalizeRoleToken(role);
         return r.Contains("ADMIN") || r.Contains("ARMANAGER");
+    }
+
+    private bool CanRespondToEscalationFromToken()
+    {
+        var role = FirstClaim(ClaimTypes.Role, "role", "roles");
+        var r = NormalizeRoleToken(role);
+        return r.Contains("ADMIN") || r.Contains("ARMANAGER") || r.Contains("CLIENTMANAGER") || r.Contains("ACCOUNTMANAGER");
     }
 
     private static bool IsReadOnlyWorkflowRole(string? role) => IsClientManagerRole(role) || IsAccountManagerRole(role);

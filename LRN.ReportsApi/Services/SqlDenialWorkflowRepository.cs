@@ -54,6 +54,11 @@ public sealed class SqlDenialWorkflowRepository : IDenialWorkflowRepository
 
 	private static async Task EnsureDenialTaskBoardNormalizedClaimIdAsync(SqlConnection con, CancellationToken ct)
 	{
+		// Keep this runtime schema helper idempotent. Some SQL Server databases can have
+		// auto/user statistics with the same name as the index we want to create. Checking
+		// only sys.indexes causes error 1913: "index or statistics with name already exists".
+		// This script checks both sys.indexes and sys.stats, and ignores duplicate-object
+		// races so dashboard/claim pages do not fail while opening.
 		const string sql = @"
 IF OBJECT_ID('dbo.DenialTaskBoard','U') IS NOT NULL
 BEGIN
@@ -63,43 +68,88 @@ BEGIN
         ADD ClaimIDNormalized AS CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL([ClaimID],''))), 'CLM-', '')) PERSISTED;
     END;
 
-    IF NOT EXISTS
-    (
-        SELECT 1
-        FROM sys.indexes
-        WHERE name = 'IX_DenialTaskBoard_ClaimIDNormalized'
-          AND object_id = OBJECT_ID('dbo.DenialTaskBoard')
-    )
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_DenialTaskBoard_ClaimIDNormalized' AND object_id = OBJECT_ID('dbo.DenialTaskBoard'))
     BEGIN
-        CREATE NONCLUSTERED INDEX IX_DenialTaskBoard_ClaimIDNormalized
-        ON dbo.DenialTaskBoard (ClaimIDNormalized);
+        BEGIN TRY
+            IF NOT EXISTS (SELECT 1 FROM sys.stats WHERE name = 'IX_DenialTaskBoard_ClaimIDNormalized' AND object_id = OBJECT_ID('dbo.DenialTaskBoard'))
+                CREATE NONCLUSTERED INDEX IX_DenialTaskBoard_ClaimIDNormalized ON dbo.DenialTaskBoard (ClaimIDNormalized);
+            ELSE IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_DenialTaskBoard_ClaimIDNormalized_Auto' AND object_id = OBJECT_ID('dbo.DenialTaskBoard'))
+                CREATE NONCLUSTERED INDEX IX_DenialTaskBoard_ClaimIDNormalized_Auto ON dbo.DenialTaskBoard (ClaimIDNormalized);
+        END TRY
+        BEGIN CATCH
+            IF ERROR_NUMBER() NOT IN (1911, 1913, 2714) THROW;
+        END CATCH
     END;
 
-    IF NOT EXISTS
-    (
-        SELECT 1
-        FROM sys.indexes
-        WHERE name = 'IX_DenialTaskBoard_TaskView_ClaimIDNormalized'
-          AND object_id = OBJECT_ID('dbo.DenialTaskBoard')
-    )
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_DenialTaskBoard_TaskView_ClaimIDNormalized' AND object_id = OBJECT_ID('dbo.DenialTaskBoard'))
     BEGIN
-        CREATE NONCLUSTERED INDEX IX_DenialTaskBoard_TaskView_ClaimIDNormalized
-        ON dbo.DenialTaskBoard (Status, AssignedTo, ClaimIDNormalized)
-        INCLUDE (TaskID, UniqueTrackId, CPTCode, SLAStatus, DueDate, InsuranceBalance, DenialCode, DenialClassification, ActionCategory);
+        BEGIN TRY
+            IF NOT EXISTS (SELECT 1 FROM sys.stats WHERE name = 'IX_DenialTaskBoard_TaskView_ClaimIDNormalized' AND object_id = OBJECT_ID('dbo.DenialTaskBoard'))
+                CREATE NONCLUSTERED INDEX IX_DenialTaskBoard_TaskView_ClaimIDNormalized
+                ON dbo.DenialTaskBoard (Status, AssignedTo, ClaimIDNormalized)
+                INCLUDE (TaskID, UniqueTrackId, CPTCode, SLAStatus, DueDate, InsuranceBalance, DenialCode, DenialClassification, ActionCategory);
+            ELSE IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_DenialTaskBoard_TaskView_ClaimIDNormalized_Auto' AND object_id = OBJECT_ID('dbo.DenialTaskBoard'))
+                CREATE NONCLUSTERED INDEX IX_DenialTaskBoard_TaskView_ClaimIDNormalized_Auto
+                ON dbo.DenialTaskBoard (Status, AssignedTo, ClaimIDNormalized)
+                INCLUDE (TaskID, UniqueTrackId, CPTCode, SLAStatus, DueDate, InsuranceBalance, DenialCode, DenialClassification, ActionCategory);
+        END TRY
+        BEGIN CATCH
+            IF ERROR_NUMBER() NOT IN (1911, 1913, 2714) THROW;
+        END CATCH
     END;
 
-    IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL
-       AND NOT EXISTS
-       (
-           SELECT 1
-           FROM sys.indexes
-           WHERE name = 'IX_DenialLineItem_VisitNumber_ClaimView'
-             AND object_id = OBJECT_ID('dbo.DenialLineItem')
-       )
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_DenialTaskBoard_ClaimAssignment_Status' AND object_id = OBJECT_ID('dbo.DenialTaskBoard'))
     BEGIN
-        CREATE NONCLUSTERED INDEX IX_DenialLineItem_VisitNumber_ClaimView
-        ON dbo.DenialLineItem (VisitNumber, DateOfService)
-        INCLUDE (PayerName, PanelName, PatientDOB, ClinicName, ReferringProvider, PatientID, SalesRepname, InsuranceBalance);
+        BEGIN TRY
+            IF NOT EXISTS (SELECT 1 FROM sys.stats WHERE name = 'IX_DenialTaskBoard_ClaimAssignment_Status' AND object_id = OBJECT_ID('dbo.DenialTaskBoard'))
+                CREATE NONCLUSTERED INDEX IX_DenialTaskBoard_ClaimAssignment_Status
+                ON dbo.DenialTaskBoard (ClaimIDNormalized)
+                INCLUDE (TaskID, Status, AssignedTo, CreatedOn, SLAStatus, UniqueTrackId, RunId);
+            ELSE IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_DenialTaskBoard_ClaimAssignment_Status_Auto' AND object_id = OBJECT_ID('dbo.DenialTaskBoard'))
+                CREATE NONCLUSTERED INDEX IX_DenialTaskBoard_ClaimAssignment_Status_Auto
+                ON dbo.DenialTaskBoard (ClaimIDNormalized)
+                INCLUDE (TaskID, Status, AssignedTo, CreatedOn, SLAStatus, UniqueTrackId, RunId);
+        END TRY
+        BEGIN CATCH
+            IF ERROR_NUMBER() NOT IN (1911, 1913, 2714) THROW;
+        END CATCH
+    END;
+END;
+
+IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_DenialLineItem_VisitNumber_ClaimView' AND object_id = OBJECT_ID('dbo.DenialLineItem'))
+    BEGIN
+        BEGIN TRY
+            IF NOT EXISTS (SELECT 1 FROM sys.stats WHERE name = 'IX_DenialLineItem_VisitNumber_ClaimView' AND object_id = OBJECT_ID('dbo.DenialLineItem'))
+                CREATE NONCLUSTERED INDEX IX_DenialLineItem_VisitNumber_ClaimView
+                ON dbo.DenialLineItem (VisitNumber, DateOfService)
+                INCLUDE (PayerName, PanelName, PatientDOB, ClinicName, ReferringProvider, PatientID, SalesRepname, InsuranceBalance);
+            ELSE IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_DenialLineItem_VisitNumber_ClaimView_Auto' AND object_id = OBJECT_ID('dbo.DenialLineItem'))
+                CREATE NONCLUSTERED INDEX IX_DenialLineItem_VisitNumber_ClaimView_Auto
+                ON dbo.DenialLineItem (VisitNumber, DateOfService)
+                INCLUDE (PayerName, PanelName, PatientDOB, ClinicName, ReferringProvider, PatientID, SalesRepname, InsuranceBalance);
+        END TRY
+        BEGIN CATCH
+            IF ERROR_NUMBER() NOT IN (1911, 1913, 2714) THROW;
+        END CATCH
+    END;
+
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_DenialLineItem_ClaimAssignment_Page' AND object_id = OBJECT_ID('dbo.DenialLineItem'))
+    BEGIN
+        BEGIN TRY
+            IF NOT EXISTS (SELECT 1 FROM sys.stats WHERE name = 'IX_DenialLineItem_ClaimAssignment_Page' AND object_id = OBJECT_ID('dbo.DenialLineItem'))
+                CREATE NONCLUSTERED INDEX IX_DenialLineItem_ClaimAssignment_Page
+                ON dbo.DenialLineItem (DateOfService DESC, VisitNumber)
+                INCLUDE (PayerName, PanelName, PatientDOB, ClinicName, ReferringProvider, PatientID, SalesRepname, InsuranceBalance, DenialCodeNormalized, ActionCategory, DenialClassification);
+            ELSE IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_DenialLineItem_ClaimAssignment_Page_Auto' AND object_id = OBJECT_ID('dbo.DenialLineItem'))
+                CREATE NONCLUSTERED INDEX IX_DenialLineItem_ClaimAssignment_Page_Auto
+                ON dbo.DenialLineItem (DateOfService DESC, VisitNumber)
+                INCLUDE (PayerName, PanelName, PatientDOB, ClinicName, ReferringProvider, PatientID, SalesRepname, InsuranceBalance, DenialCodeNormalized, ActionCategory, DenialClassification);
+        END TRY
+        BEGIN CATCH
+            IF ERROR_NUMBER() NOT IN (1911, 1913, 2714) THROW;
+        END CATCH
     END;
 END;";
 		await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 180 };
@@ -172,9 +222,47 @@ SELECT
     DenialClassification = COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.DenialClassification, ''))), ''), 'Unclassified'),
     AssignedTo = COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo, ''))), ''), 'Unassigned'),
     ActionCategory = LTRIM(RTRIM(ISNULL(t.ActionCategory, ''))),
-    DueDate = t.DueDate
+    DueDate = t.DueDate,
+    NormalizedSlaDays = COALESCE(lineSla.NormalizedSlaDays, taskSla.NormalizedSlaDays, CASE WHEN t.DateOpened IS NOT NULL AND t.DueDate IS NOT NULL THEN DATEDIFF(day, CAST(t.DateOpened AS date), CAST(t.DueDate AS date)) END)
 INTO #TaskBoardBase
 FROM dbo.DenialTaskBoard t WITH (NOLOCK)
+OUTER APPLY
+(
+    SELECT RawSlaDays = CONVERT(nvarchar(200), t.SLADays)
+) taskRaw
+OUTER APPLY
+(
+    SELECT DigitsOnly = CASE
+        WHEN NULLIF(LTRIM(RTRIM(taskRaw.RawSlaDays)), '') IS NULL THEN NULL
+        WHEN CHARINDEX(':', taskRaw.RawSlaDays) > 0 THEN LTRIM(SUBSTRING(taskRaw.RawSlaDays, CHARINDEX(':', taskRaw.RawSlaDays) + 1, 32))
+        ELSE LTRIM(RTRIM(taskRaw.RawSlaDays))
+    END
+) taskClean
+OUTER APPLY
+(
+    SELECT NormalizedSlaDays = TRY_CONVERT(int, LEFT(taskClean.DigitsOnly, NULLIF(PATINDEX('%[^0-9]%', ISNULL(taskClean.DigitsOnly,'') + 'X') - 1, -1)))
+) taskSla
+OUTER APPLY
+(
+    SELECT TOP (1) RawSlaDays = CONVERT(nvarchar(200), d.SLADays)
+    FROM dbo.DenialLineItem d WITH (NOLOCK)
+    WHERE d.LabId = @LabId
+      AND LTRIM(RTRIM(ISNULL(d.VisitNumber,''))) = LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,t.ClaimID)))
+      AND (ISNULL(t.CPTCode,'') = '' OR ISNULL(d.CPTCode,'') = '' OR LTRIM(RTRIM(ISNULL(d.CPTCode,''))) = LTRIM(RTRIM(ISNULL(t.CPTCode,''))))
+      AND NULLIF(CONVERT(nvarchar(200), d.SLADays), '') IS NOT NULL
+) lineRaw
+OUTER APPLY
+(
+    SELECT DigitsOnly = CASE
+        WHEN NULLIF(LTRIM(RTRIM(lineRaw.RawSlaDays)), '') IS NULL THEN NULL
+        WHEN CHARINDEX(':', lineRaw.RawSlaDays) > 0 THEN LTRIM(SUBSTRING(lineRaw.RawSlaDays, CHARINDEX(':', lineRaw.RawSlaDays) + 1, 32))
+        ELSE LTRIM(RTRIM(lineRaw.RawSlaDays))
+    END
+) lineClean
+OUTER APPLY
+(
+    SELECT NormalizedSlaDays = TRY_CONVERT(int, LEFT(lineClean.DigitsOnly, NULLIF(PATINDEX('%[^0-9]%', ISNULL(lineClean.DigitsOnly,'') + 'X') - 1, -1)))
+) lineSla
 WHERE (@HasTaskLab = 0 OR t.LabId = @LabId) {where.WhereClause};
 
 ;WITH ClaimAgg AS
@@ -262,40 +350,16 @@ ORDER BY CASE WHEN AssignedTo = 'Unassigned' THEN 0 ELSE 1 END, TotalTasks DESC;
 
 ;WITH Sla AS
 (
-    SELECT
-        SortOrder = 1,
-        Label = 'Appeal SLA',
-        [Count] = SUM(CASE WHEN ActionCategory LIKE '%Appeal%' THEN 1 ELSE 0 END),
-        [Status] = CASE WHEN SUM(CASE WHEN ActionCategory LIKE '%Appeal%' AND DueDate IS NOT NULL AND CAST(DueDate AS date) < CAST(GETDATE() AS date) AND LOWER(StatusValue) NOT IN ('closed', 'completed') THEN 1 ELSE 0 END) > 0
-                        THEN CONCAT(SUM(CASE WHEN ActionCategory LIKE '%Appeal%' AND DueDate IS NOT NULL AND CAST(DueDate AS date) < CAST(GETDATE() AS date) AND LOWER(StatusValue) NOT IN ('closed', 'completed') THEN 1 ELSE 0 END), ' overdue')
-                        ELSE 'On Track' END
+    SELECT SortOrder = 1, Label = '0-30 days', [Count] = SUM(CASE WHEN ISNULL(NormalizedSlaDays, 0) BETWEEN 0 AND 30 THEN 1 ELSE 0 END), [Status] = 'Normalized SLA'
     FROM #TaskBoardBase
     UNION ALL
-    SELECT
-        2,
-        'Rebill SLA',
-        SUM(CASE WHEN ActionCategory LIKE '%Rebill%' THEN 1 ELSE 0 END),
-        CASE WHEN SUM(CASE WHEN ActionCategory LIKE '%Rebill%' AND DueDate IS NOT NULL AND CAST(DueDate AS date) < CAST(GETDATE() AS date) AND LOWER(StatusValue) NOT IN ('closed', 'completed') THEN 1 ELSE 0 END) > 0
-             THEN CONCAT(SUM(CASE WHEN ActionCategory LIKE '%Rebill%' AND DueDate IS NOT NULL AND CAST(DueDate AS date) < CAST(GETDATE() AS date) AND LOWER(StatusValue) NOT IN ('closed', 'completed') THEN 1 ELSE 0 END), ' overdue')
-             ELSE 'On Track' END
+    SELECT 2, '31-60 days', SUM(CASE WHEN ISNULL(NormalizedSlaDays, 0) BETWEEN 31 AND 60 THEN 1 ELSE 0 END), 'Normalized SLA'
     FROM #TaskBoardBase
     UNION ALL
-    SELECT
-        3,
-        'Write-off SLA',
-        SUM(CASE WHEN ActionCategory LIKE '%Write%' OR ActionCategory LIKE '%Write-off%' OR ActionCategory LIKE '%Write Off%' THEN 1 ELSE 0 END),
-        CASE WHEN SUM(CASE WHEN (ActionCategory LIKE '%Write%' OR ActionCategory LIKE '%Write-off%' OR ActionCategory LIKE '%Write Off%') AND DueDate IS NOT NULL AND CAST(DueDate AS date) < CAST(GETDATE() AS date) AND LOWER(StatusValue) NOT IN ('closed', 'completed') THEN 1 ELSE 0 END) > 0
-             THEN CONCAT(SUM(CASE WHEN (ActionCategory LIKE '%Write%' OR ActionCategory LIKE '%Write-off%' OR ActionCategory LIKE '%Write Off%') AND DueDate IS NOT NULL AND CAST(DueDate AS date) < CAST(GETDATE() AS date) AND LOWER(StatusValue) NOT IN ('closed', 'completed') THEN 1 ELSE 0 END), ' overdue')
-             ELSE 'On Track' END
+    SELECT 3, '61-90 days', SUM(CASE WHEN ISNULL(NormalizedSlaDays, 0) BETWEEN 61 AND 90 THEN 1 ELSE 0 END), 'Normalized SLA'
     FROM #TaskBoardBase
     UNION ALL
-    SELECT
-        4,
-        'Appeal Success Rate',
-        CAST(CASE WHEN SUM(CASE WHEN ActionCategory LIKE '%Appeal%' THEN 1 ELSE 0 END) = 0 THEN 0
-                  ELSE SUM(CASE WHEN ActionCategory LIKE '%Appeal%' AND LOWER(StatusValue) IN ('closed', 'completed') THEN 1 ELSE 0 END) * 100.0 / SUM(CASE WHEN ActionCategory LIKE '%Appeal%' THEN 1 ELSE 0 END)
-             END AS int),
-        'closed claims'
+    SELECT 4, '90+ days', SUM(CASE WHEN ISNULL(NormalizedSlaDays, 0) > 90 THEN 1 ELSE 0 END), 'Normalized SLA'
     FROM #TaskBoardBase
 )
 SELECT Label, ISNULL([Count], 0) [Count], [Status]
@@ -457,20 +521,64 @@ ORDER BY Value;";
 
 	public async Task<IReadOnlyList<ReviewerOption>> GetReviewerOptionsAsync(int labId, CancellationToken ct)
 	{
-		const string sql = @"
-SELECT DISTINCT
-    lu.LabUserID,
-    ISNULL(lu.UserName, '') AS UserName,
-    LTRIM(RTRIM(CONCAT(ISNULL(lu.FirstName, ''), ' ', ISNULL(lu.LastName, '')))) AS DisplayName
-FROM dbo.LabUsers lu
-LEFT JOIN dbo.UserRoles ur ON lu.LabUserID = ur.LabUserID
-LEFT JOIN dbo.UserLabs ul ON lu.LabUserID = ul.LabUserID
-WHERE (@LabId <= 0 OR ul.LabId = @LabId)
-  AND ur.RoleID = 5
-ORDER BY DisplayName, UserName;";
 		var rows = new List<ReviewerOption>();
 		await using var con = OpenMaster();
 		await con.OpenAsync(ct);
+
+		var userRoleColumns = await GetColumnSetAsync(con, "dbo.UserRoles", ct);
+		var labUsersColumns = await GetColumnSetAsync(con, "dbo.LabUsers", ct);
+		var hasUserLabs = await TableExistsAsync(con, "dbo.UserLabs", ct);
+		var userLabsColumns = hasUserLabs ? await GetColumnSetAsync(con, "dbo.UserLabs", ct) : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var roleTable = await TableExistsAsync(con, "dbo.Roles", ct) ? "dbo.Roles" : await TableExistsAsync(con, "dbo.Role", ct) ? "dbo.Role" : string.Empty;
+		var roleColumns = string.IsNullOrWhiteSpace(roleTable) ? new HashSet<string>(StringComparer.OrdinalIgnoreCase) : await GetColumnSetAsync(con, roleTable, ct);
+
+		var labUserIdColumn = new[] { "LabUserID", "LabUserId", "UserID", "UserId", "Id" }.FirstOrDefault(labUsersColumns.Contains) ?? "LabUserID";
+		var userRoleUserIdColumn = new[] { "LabUserID", "LabUserId", "UserID", "UserId" }.FirstOrDefault(userRoleColumns.Contains) ?? labUserIdColumn;
+		var userLabUserIdColumn = new[] { "LabUserID", "LabUserId", "UserID", "UserId" }.FirstOrDefault(userLabsColumns.Contains) ?? labUserIdColumn;
+		var roleIdColumn = new[] { "RoleID", "RoleId", "Id" }.FirstOrDefault(roleColumns.Contains);
+		var userRoleIdColumn = new[] { "RoleID", "RoleId" }.FirstOrDefault(userRoleColumns.Contains);
+		var roleNameColumn = new[] { "RoleName", "Name", "Role", "RoleDescription" }.FirstOrDefault(roleColumns.Contains);
+		var userRoleNameColumn = new[] { "RoleName", "Role", "Name" }.FirstOrDefault(userRoleColumns.Contains);
+		var emailColumn = new[] { "Email", "EmailAddress", "UserEmail" }.FirstOrDefault(labUsersColumns.Contains);
+		var displayExpr = labUsersColumns.Contains("FirstName") || labUsersColumns.Contains("LastName")
+			? "NULLIF(LTRIM(RTRIM(CONCAT(ISNULL(lu.FirstName,''),' ',ISNULL(lu.LastName,'')))), '')"
+			: "NULL";
+		var emailExpr = string.IsNullOrWhiteSpace(emailColumn) ? "''" : $"ISNULL(lu.{emailColumn},'')";
+		var roleExpr = "CASE WHEN ur.RoleID = 5 THEN 'AR Reviewer' ELSE '' END";
+		var roleJoin = string.Empty;
+		var roleFilter = "AND ur.RoleID = 5";
+
+		if (!string.IsNullOrWhiteSpace(roleTable) && !string.IsNullOrWhiteSpace(roleNameColumn) && !string.IsNullOrWhiteSpace(roleIdColumn) && !string.IsNullOrWhiteSpace(userRoleIdColumn))
+		{
+			roleJoin = $"LEFT JOIN {roleTable} r ON ur.{userRoleIdColumn}=r.{roleIdColumn}";
+			roleExpr = $"ISNULL(r.{roleNameColumn}, CASE WHEN ur.{userRoleIdColumn}=5 THEN 'AR Reviewer' ELSE '' END)";
+			roleFilter = $"AND (UPPER(REPLACE(REPLACE(ISNULL(r.{roleNameColumn},''),' ',''),'-','')) IN ('ARREVIEWER','ARANALYST','ARANALYSER','CLIENTMANAGER','ACCOUNTMANAGER') OR ur.{userRoleIdColumn}=5)";
+		}
+		else if (!string.IsNullOrWhiteSpace(userRoleNameColumn))
+		{
+			roleExpr = $"ISNULL(ur.{userRoleNameColumn}, CASE WHEN ur.RoleID=5 THEN 'AR Reviewer' ELSE '' END)";
+			roleFilter = $"AND (UPPER(REPLACE(REPLACE(ISNULL(ur.{userRoleNameColumn},''),' ',''),'-','')) IN ('ARREVIEWER','ARANALYST','ARANALYSER','CLIENTMANAGER','ACCOUNTMANAGER') OR ur.RoleID=5)";
+		}
+
+		var labJoin = hasUserLabs ? $"LEFT JOIN dbo.UserLabs ul ON lu.{labUserIdColumn}=ul.{userLabUserIdColumn}" : string.Empty;
+		var labFilter = hasUserLabs ? "AND (@LabId <= 0 OR ul.LabId = @LabId)" : string.Empty;
+
+		var sql = $@"
+SELECT DISTINCT
+    LabUserID = lu.{labUserIdColumn},
+    UserName = ISNULL(lu.UserName, ''),
+    DisplayName = COALESCE({displayExpr}, NULLIF(LTRIM(RTRIM(ISNULL(lu.UserName,''))), ''), {emailExpr}),
+    Email = {emailExpr},
+    [Role] = {roleExpr}
+FROM dbo.LabUsers lu
+INNER JOIN dbo.UserRoles ur ON lu.{labUserIdColumn}=ur.{userRoleUserIdColumn}
+{roleJoin}
+{labJoin}
+WHERE 1=1
+  {labFilter}
+  {roleFilter}
+ORDER BY DisplayName, UserName;";
+
 		await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 120 };
 		cmd.Parameters.AddWithValue("@LabId", labId);
 		await using var rd = await cmd.ExecuteReaderAsync(ct);
@@ -478,12 +586,14 @@ ORDER BY DisplayName, UserName;";
 		{
 			var displayName = GetString(rd, "DisplayName");
 			var userName = GetString(rd, "UserName");
+			var role = NormalizeWorkflowRoleName(GetString(rd, "Role"));
 			rows.Add(new ReviewerOption
 			{
 				LabUserId = GetInt(rd, "LabUserID"),
 				UserName = userName,
 				DisplayName = string.IsNullOrWhiteSpace(displayName) ? userName : displayName,
-				Email = string.Empty
+				Email = GetString(rd, "Email"),
+				Role = role
 			});
 		}
 		return rows;
@@ -556,24 +666,29 @@ IF OBJECT_ID('tempdb..#TaskClaimAgg') IS NOT NULL DROP TABLE #TaskClaimAgg;
 IF OBJECT_ID('tempdb..#ClaimBase') IS NOT NULL DROP TABLE #ClaimBase;
 
 SELECT
-    ClaimId = LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))),
-    [Status] = CASE
-        WHEN SUM(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) LIKE '%escal%' THEN 1 ELSE 0 END) > 0 THEN 'Escalated'
-        WHEN SUM(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) IN ('closed','completed') THEN 0 ELSE 1 END) = 0 THEN 'Closed'
-        WHEN SUM(CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))),'') IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 'Assigned'
-        ELSE 'New'
-    END
-INTO #TaskClaimAgg
-FROM dbo.DenialTaskBoard t WITH (NOLOCK)
-WHERE NULLIF(LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))),'') IS NOT NULL
-GROUP BY LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,'')));
-
-SELECT ClaimId = LTRIM(RTRIM(ISNULL(l.VisitNumber,'')))
+    ClaimId = LTRIM(RTRIM(ISNULL(l.VisitNumber,''))),
+    ClaimKey = CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))), 'CLM-', ''))
 INTO #ClaimBase
 FROM dbo.DenialLineItem l WITH (NOLOCK)
 WHERE NULLIF(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))),'') IS NOT NULL
   {where.WhereClause}
 GROUP BY LTRIM(RTRIM(ISNULL(l.VisitNumber,'')));
+
+CREATE NONCLUSTERED INDEX IX_ClaimBase_ClaimKey ON #ClaimBase(ClaimKey);
+
+SELECT
+    ClaimId = c.ClaimId,
+    [Status] = CASE
+        WHEN SUM(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) LIKE '%escal%' THEN 1 ELSE 0 END) > 0 THEN 'Escalated'
+        WHEN COUNT(t.TaskID) > 0 AND SUM(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) IN ('closed','completed') THEN 0 ELSE 1 END) = 0 THEN 'Closed'
+        WHEN SUM(CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))),'') IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 'Assigned'
+        ELSE 'New'
+    END
+INTO #TaskClaimAgg
+FROM #ClaimBase c
+LEFT JOIN dbo.DenialTaskBoard t WITH (NOLOCK)
+  ON t.ClaimIDNormalized = c.ClaimKey
+GROUP BY c.ClaimId;
 
 SELECT
     TotalClaims = COUNT(1),
@@ -587,7 +702,7 @@ LEFT JOIN #TaskClaimAgg tca ON tca.ClaimId = c.ClaimId;
 DROP TABLE #ClaimBase;
 DROP TABLE #TaskClaimAgg;";
 
-		await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 180 };
+		await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 300 };
 		AddFilterParams(cmd, filter);
 		AddExtraParams(cmd, where.Parameters);
 		await using var rd = await cmd.ExecuteReaderAsync(ct);
@@ -665,18 +780,45 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
 		var patientNameSelect = hasPatientName
 			? "LTRIM(RTRIM(ISNULL(l.PatientName,'')))"
 			: "CAST('' AS nvarchar(255))";
-		var patientNameGroupBy = hasPatientName
-			? ",\n    LTRIM(RTRIM(ISNULL(l.PatientName,'')))"
-			: string.Empty;
-
 		var where = BuildClaimWhere(filter, "l");
 
 		var sql = $@"
 IF OBJECT_ID('tempdb..#TaskClaimAgg') IS NOT NULL DROP TABLE #TaskClaimAgg;
+IF OBJECT_ID('tempdb..#ClaimPage') IS NOT NULL DROP TABLE #ClaimPage;
 IF OBJECT_ID('tempdb..#ClaimBase') IS NOT NULL DROP TABLE #ClaimBase;
 
 SELECT
-    ClaimId = LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))),
+    ClaimId = LTRIM(RTRIM(ISNULL(l.VisitNumber,''))),
+    PayerName = MAX(LTRIM(RTRIM(ISNULL(l.PayerName,'')))),
+    PanelName = MAX(LTRIM(RTRIM(ISNULL(l.PanelName,'')))),
+    PatientName = MAX({patientNameSelect}),
+    PatientDOB = MAX(l.PatientDOB),
+    DateOfService = MAX(l.DateOfService),
+    ClinicName = MAX(LTRIM(RTRIM(ISNULL(l.ClinicName,'')))),
+    ReferringProvider = MAX(LTRIM(RTRIM(ISNULL(l.ReferringProvider,'')))),
+    PatientId = MAX(LTRIM(RTRIM(ISNULL(l.PatientID,'')))),
+    SalesRepname = MAX(LTRIM(RTRIM(ISNULL(l.SalesRepname,'')))),
+    InsuranceBalance = SUM(ISNULL(l.InsuranceBalance, 0))
+INTO #ClaimBase
+FROM dbo.DenialLineItem l WITH (NOLOCK)
+WHERE NULLIF(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))),'') IS NOT NULL
+  {where.WhereClause}
+GROUP BY LTRIM(RTRIM(ISNULL(l.VisitNumber,'')));
+
+CREATE CLUSTERED INDEX IX_ClaimBase_Page ON #ClaimBase(DateOfService DESC, ClaimId);
+
+SELECT COUNT(1) FROM #ClaimBase;
+
+SELECT *, ClaimKey = CONVERT(varchar(150), REPLACE(ClaimId, 'CLM-', ''))
+INTO #ClaimPage
+FROM #ClaimBase
+ORDER BY DateOfService DESC, ClaimId
+OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
+
+CREATE NONCLUSTERED INDEX IX_ClaimPage_ClaimKey ON #ClaimPage(ClaimKey);
+
+SELECT
+    ClaimId = cp.ClaimId,
     AssignedReviewerCount = COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))),'')),
     AssignedTo = CASE
         WHEN COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))),'')) = 0 THEN ''
@@ -685,43 +827,17 @@ SELECT
     END,
     [Status] = CASE
         WHEN SUM(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) LIKE '%escal%' THEN 1 ELSE 0 END) > 0 THEN 'Escalated'
-        WHEN SUM(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) IN ('closed','completed') THEN 0 ELSE 1 END) = 0 THEN 'Closed'
+        WHEN COUNT(t.TaskID) > 0 AND SUM(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) IN ('closed','completed') THEN 0 ELSE 1 END) = 0 THEN 'Closed'
         WHEN SUM(CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))),'') IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 'Assigned'
         ELSE 'New'
     END,
-    TaskCount = COUNT_BIG(1),
+    TaskCount = COUNT_BIG(t.TaskID),
     CreatedOn = MAX(t.CreatedOn)
 INTO #TaskClaimAgg
-FROM dbo.DenialTaskBoard t WITH (NOLOCK)
-WHERE NULLIF(LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))),'') IS NOT NULL
-GROUP BY LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,'')));
-
-SELECT
-    ClaimId = LTRIM(RTRIM(ISNULL(l.VisitNumber,''))),
-    PayerName = LTRIM(RTRIM(ISNULL(l.PayerName,''))),
-    PanelName = LTRIM(RTRIM(ISNULL(l.PanelName,''))),
-    PatientName = {patientNameSelect},
-    PatientDOB = l.PatientDOB,
-    DateOfService = l.DateOfService,
-    ClinicName = LTRIM(RTRIM(ISNULL(l.ClinicName,''))),
-    ReferringProvider = LTRIM(RTRIM(ISNULL(l.ReferringProvider,''))),
-    PatientId = MAX(LTRIM(RTRIM(ISNULL(l.PatientID,'')))),
-    SalesRepname = MAX(LTRIM(RTRIM(ISNULL(l.SalesRepname,'')))),
-    InsuranceBalance = SUM(ISNULL(l.InsuranceBalance, 0))
-INTO #ClaimBase
-FROM dbo.DenialLineItem l WITH (NOLOCK)
-WHERE NULLIF(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))),'') IS NOT NULL
-  {where.WhereClause}
-GROUP BY
-    LTRIM(RTRIM(ISNULL(l.VisitNumber,''))),
-    LTRIM(RTRIM(ISNULL(l.PayerName,''))),
-    LTRIM(RTRIM(ISNULL(l.PanelName,''))){patientNameGroupBy},
-    l.PatientDOB,
-    l.DateOfService,
-    LTRIM(RTRIM(ISNULL(l.ClinicName,''))),
-    LTRIM(RTRIM(ISNULL(l.ReferringProvider,'')));
-
-SELECT COUNT(1) FROM #ClaimBase;
+FROM #ClaimPage cp
+LEFT JOIN dbo.DenialTaskBoard t WITH (NOLOCK, INDEX(IX_DenialTaskBoard_ClaimAssignment_Status))
+  ON t.ClaimIDNormalized = cp.ClaimKey
+GROUP BY cp.ClaimId;
 
 SELECT
     c.ClaimId,
@@ -739,11 +855,11 @@ SELECT
     TaskCount = ISNULL(CONVERT(int, tca.TaskCount), 0),
     CreatedOn = tca.CreatedOn,
     InsuranceBalance = CAST(c.InsuranceBalance AS decimal(18,2))
-FROM #ClaimBase c
+FROM #ClaimPage c
 LEFT JOIN #TaskClaimAgg tca ON tca.ClaimId = c.ClaimId
-ORDER BY c.DateOfService DESC, c.ClaimId
-OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
+ORDER BY c.DateOfService DESC, c.ClaimId;
 
+DROP TABLE #ClaimPage;
 DROP TABLE #ClaimBase;
 DROP TABLE #TaskClaimAgg;";
 
@@ -755,7 +871,7 @@ DROP TABLE #TaskClaimAgg;";
 
 		await using var cmd = new SqlCommand(sql, con)
 		{
-			CommandTimeout = 180
+			CommandTimeout = 300
 		};
 
 		AddFilterParams(cmd, filter);
@@ -1569,7 +1685,7 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
                 SELECT 1
                 FROM dbo.DenialTaskBoard tbx WITH (NOLOCK)
                 WHERE ISNULL(tbx.AssignedTo,'') = @RoleUserName
-                  AND LTRIM(RTRIM(ISNULL(tbx.ClaimIDNormalized,''))) = LTRIM(RTRIM(ISNULL({a}.VisitNumber,'')))
+                  AND tbx.ClaimIDNormalized = CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL({a}.VisitNumber,''))), 'CLM-', ''))
             )");
 			p["@RoleUserName"] = f.UserName ?? string.Empty;
 		}
@@ -1690,7 +1806,7 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
 		return $@"EXISTS (
 			SELECT 1
 			FROM dbo.DenialTaskBoard tbx WITH (NOLOCK)
-			WHERE LTRIM(RTRIM(ISNULL(tbx.ClaimIDNormalized,''))) = LTRIM(RTRIM(ISNULL({a}.VisitNumber,'')))
+			WHERE tbx.ClaimIDNormalized = CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL({a}.VisitNumber,''))), 'CLM-', ''))
 			  AND {taskPredicate}
 		)";
 	}
@@ -1724,6 +1840,8 @@ BEGIN
         CptCode nvarchar(50) NULL,
         NoteLevel nvarchar(20) NOT NULL,
         NoteText nvarchar(max) NOT NULL,
+        Status nvarchar(50) NULL,
+        NextFollowUpDate date NULL,
         CreatedBy nvarchar(256) NOT NULL,
         CreatedOn datetime2(0) NOT NULL CONSTRAINT DF_DenialClaimNotes_CreatedOn DEFAULT SYSUTCDATETIME(),
         IsDeleted bit NOT NULL CONSTRAINT DF_DenialClaimNotes_IsDeleted DEFAULT 0
@@ -1765,13 +1883,24 @@ BEGIN
         EscalationReason nvarchar(300) NOT NULL,
         Comments nvarchar(max) NULL,
         Status nvarchar(50) NOT NULL CONSTRAINT DF_DenialClaimEscalations_Status DEFAULT 'Open',
+        EscalatedTo nvarchar(256) NULL,
+        EscalatedToRole nvarchar(100) NULL,
+        NextFollowUpDate date NULL,
         CreatedBy nvarchar(256) NOT NULL,
         CreatedOn datetime2(0) NOT NULL CONSTRAINT DF_DenialClaimEscalations_CreatedOn DEFAULT SYSUTCDATETIME(),
         IsDeleted bit NOT NULL CONSTRAINT DF_DenialClaimEscalations_IsDeleted DEFAULT 0
     );
     CREATE INDEX IX_DenialClaimEscalations_Claim ON dbo.DenialClaimEscalations(LabId, ClaimId, EscalationLevel, CreatedOn DESC);
     CREATE INDEX IX_DenialClaimEscalations_Line ON dbo.DenialClaimEscalations(LabId, ClaimId, TaskId, CptCode, CreatedOn DESC);
-END;";
+
+END;
+
+IF COL_LENGTH('dbo.DenialClaimNotes','Status') IS NULL ALTER TABLE dbo.DenialClaimNotes ADD Status nvarchar(50) NULL;
+IF COL_LENGTH('dbo.DenialClaimNotes','NextFollowUpDate') IS NULL ALTER TABLE dbo.DenialClaimNotes ADD NextFollowUpDate date NULL;
+IF COL_LENGTH('dbo.DenialClaimEscalations','EscalatedTo') IS NULL ALTER TABLE dbo.DenialClaimEscalations ADD EscalatedTo nvarchar(256) NULL;
+IF COL_LENGTH('dbo.DenialClaimEscalations','EscalatedToRole') IS NULL ALTER TABLE dbo.DenialClaimEscalations ADD EscalatedToRole nvarchar(100) NULL;
+IF COL_LENGTH('dbo.DenialClaimEscalations','NextFollowUpDate') IS NULL ALTER TABLE dbo.DenialClaimEscalations ADD NextFollowUpDate date NULL;
+";
 		await using var con = OpenLab(labId);
 		await con.OpenAsync(ct);
 		await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 120 };
@@ -1784,13 +1913,13 @@ END;";
 		var rows = new List<DenialNoteRow>();
 		var isLine = string.Equals(noteLevel, "Line", StringComparison.OrdinalIgnoreCase);
 		var sql = isLine ? @"
-SELECT TOP (200) NoteId,LabId,ClaimId,TaskId,CptCode,NoteLevel,NoteText,CreatedBy,CreatedOn
+SELECT TOP (200) NoteId,LabId,ClaimId,TaskId,CptCode,NoteLevel,NoteText,Status,NextFollowUpDate,CreatedBy,CreatedOn
 FROM dbo.DenialClaimNotes WITH (NOLOCK)
 WHERE IsDeleted=0 AND LabId=@LabId AND ClaimId=@ClaimId AND NoteLevel='Line'
   AND (@TaskId='' OR ISNULL(TaskId,'')=@TaskId)
   AND (@CptCode='' OR ISNULL(CptCode,'')=@CptCode)
 ORDER BY CreatedOn DESC, NoteId DESC;" : @"
-SELECT TOP (200) NoteId,LabId,ClaimId,TaskId,CptCode,NoteLevel,NoteText,CreatedBy,CreatedOn
+SELECT TOP (200) NoteId,LabId,ClaimId,TaskId,CptCode,NoteLevel,NoteText,Status,NextFollowUpDate,CreatedBy,CreatedOn
 FROM dbo.DenialClaimNotes WITH (NOLOCK)
 WHERE IsDeleted=0 AND LabId=@LabId AND ClaimId=@ClaimId AND NoteLevel='Claim'
 ORDER BY CreatedOn DESC, NoteId DESC;";
@@ -1808,10 +1937,11 @@ ORDER BY CreatedOn DESC, NoteId DESC;";
 
 	public async Task<DenialNoteRow> SaveNoteAsync(SaveDenialNoteRequest request, CancellationToken ct)
 	{
+		await EnsureClaimSupportTablesAsync(request.LabId, ct);
 		const string sql = @"
-INSERT INTO dbo.DenialClaimNotes(LabId,ClaimId,TaskId,CptCode,NoteLevel,NoteText,CreatedBy)
-OUTPUT INSERTED.NoteId,INSERTED.LabId,INSERTED.ClaimId,INSERTED.TaskId,INSERTED.CptCode,INSERTED.NoteLevel,INSERTED.NoteText,INSERTED.CreatedBy,INSERTED.CreatedOn
-VALUES(@LabId,@ClaimId,@TaskId,@CptCode,@NoteLevel,@NoteText,@CreatedBy);";
+INSERT INTO dbo.DenialClaimNotes(LabId,ClaimId,TaskId,CptCode,NoteLevel,NoteText,Status,NextFollowUpDate,CreatedBy)
+OUTPUT INSERTED.NoteId,INSERTED.LabId,INSERTED.ClaimId,INSERTED.TaskId,INSERTED.CptCode,INSERTED.NoteLevel,INSERTED.NoteText,INSERTED.Status,INSERTED.NextFollowUpDate,INSERTED.CreatedBy,INSERTED.CreatedOn
+VALUES(@LabId,@ClaimId,@TaskId,@CptCode,@NoteLevel,@NoteText,@Status,@NextFollowUpDate,@CreatedBy);";
 		await using var con = OpenLab(request.LabId);
 		await con.OpenAsync(ct);
 		await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 120 };
@@ -1821,6 +1951,8 @@ VALUES(@LabId,@ClaimId,@TaskId,@CptCode,@NoteLevel,@NoteText,@CreatedBy);";
 		cmd.Parameters.AddWithValue("@CptCode", (object?)request.CptCode?.Trim() ?? DBNull.Value);
 		cmd.Parameters.AddWithValue("@NoteLevel", string.Equals(request.NoteLevel, "Line", StringComparison.OrdinalIgnoreCase) ? "Line" : "Claim");
 		cmd.Parameters.AddWithValue("@NoteText", request.NoteText.Trim());
+		cmd.Parameters.AddWithValue("@Status", string.IsNullOrWhiteSpace(request.Status) ? (object)DBNull.Value : request.Status.Trim());
+		cmd.Parameters.AddWithValue("@NextFollowUpDate", request.NextFollowUpDate.HasValue ? request.NextFollowUpDate.Value.Date : (object)DBNull.Value);
 		cmd.Parameters.AddWithValue("@CreatedBy", string.IsNullOrWhiteSpace(request.CreatedBy) ? "ReactWorkflow" : request.CreatedBy.Trim());
 		await using var rd = await cmd.ExecuteReaderAsync(ct);
 		if (await rd.ReadAsync(ct)) return ReadNote(rd);
@@ -1888,31 +2020,6 @@ WHERE (LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))) = @ClaimId
        OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) LIKE '%' + @ClaimId)
   AND (@Level='Claim' OR @TaskId='' OR ISNULL(t.TaskID,'')=@TaskId)
   AND (@Level='Claim' OR @CptCode='' OR ISNULL(t.CPTCode,'')=@CptCode);
-
-SELECT TOP (500)
-    HistoryId = CAST(0 AS bigint),
-    HistoryType = CAST('Current Assignment' AS nvarchar(50)),
-    ClaimId = @ClaimId,
-    TaskId = ISNULL(t.TaskID,''),
-    CptCode = ISNULL(t.CPTCode,''),
-    ActionType = CAST('Current Task State' AS nvarchar(100)),
-    Title = CAST(CONCAT('Current status: ', ISNULL(NULLIF(t.Status,''),'New')) AS nvarchar(250)),
-    Description = CAST(CONCAT('Assigned to: ', ISNULL(NULLIF(t.AssignedTo,''),'Unassigned'), CASE WHEN NULLIF(t.ReviewerComments,'') IS NULL THEN '' ELSE CONCAT(' | Comment: ', t.ReviewerComments) END) AS nvarchar(max)),
-    OldStatus = CAST('' AS nvarchar(100)),
-    NewStatus = ISNULL(t.Status,''),
-    OldAssignedTo = CAST('' AS nvarchar(256)),
-    NewAssignedTo = ISNULL(t.AssignedTo,''),
-    ActionBy = ISNULL(t.ReviewerUpdatedBy,''),
-    ActionDate = COALESCE(t.ReviewerUpdatedOn, t.CreatedOn, t.DateOpened),
-    CreatedBy = ISNULL(t.ReviewerUpdatedBy,''),
-    CreatedOn = COALESCE(t.ReviewerUpdatedOn, t.CreatedOn, t.DateOpened)
-FROM dbo.DenialTaskBoard t WITH (NOLOCK)
-WHERE (LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))) = @ClaimId
-       OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) = @ClaimId
-       OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) LIKE '%' + @ClaimId)
-  AND (@Level='Claim' OR @TaskId='' OR ISNULL(t.TaskID,'')=@TaskId)
-  AND (@Level='Claim' OR @CptCode='' OR ISNULL(t.CPTCode,'')=@CptCode)
-ORDER BY COALESCE(t.ReviewerUpdatedOn, t.CreatedOn, t.DateOpened) DESC, t.TaskID DESC;
 
 -- Current assignment/status snapshot. Grouped so a claim with many lines shows one concise audit row per reviewer/status.
 ;WITH CurrentAssignment AS
@@ -2130,13 +2237,13 @@ DROP TABLE #ClaimTasks;";
 		var rows = new List<DenialEscalationRow>();
 		var isLine = string.Equals(escalationLevel, "Line", StringComparison.OrdinalIgnoreCase);
 		var sql = isLine ? @"
-SELECT TOP (200) EscalationId,LabId,ClaimId,TaskId,CptCode,EscalationLevel,EscalationReason,Comments,Status,CreatedBy,CreatedOn
+SELECT TOP (200) EscalationId,LabId,ClaimId,TaskId,CptCode,EscalationLevel,EscalationReason,Comments,Status,EscalatedTo,EscalatedToRole,NextFollowUpDate,CreatedBy,CreatedOn
 FROM dbo.DenialClaimEscalations WITH (NOLOCK)
 WHERE IsDeleted=0 AND LabId=@LabId AND ClaimId=@ClaimId AND EscalationLevel='Line'
   AND (@TaskId='' OR ISNULL(TaskId,'')=@TaskId)
   AND (@CptCode='' OR ISNULL(CptCode,'')=@CptCode)
 ORDER BY CreatedOn DESC, EscalationId DESC;" : @"
-SELECT TOP (200) EscalationId,LabId,ClaimId,TaskId,CptCode,EscalationLevel,EscalationReason,Comments,Status,CreatedBy,CreatedOn
+SELECT TOP (200) EscalationId,LabId,ClaimId,TaskId,CptCode,EscalationLevel,EscalationReason,Comments,Status,EscalatedTo,EscalatedToRole,NextFollowUpDate,CreatedBy,CreatedOn
 FROM dbo.DenialClaimEscalations WITH (NOLOCK)
 WHERE IsDeleted=0 AND LabId=@LabId AND ClaimId=@ClaimId AND EscalationLevel='Claim'
 ORDER BY CreatedOn DESC, EscalationId DESC;";
@@ -2165,13 +2272,16 @@ ORDER BY CreatedOn DESC, EscalationId DESC;";
 
 		var statusWhere = string.IsNullOrWhiteSpace(filter.Status) ? string.Empty : " AND EXISTS (SELECT 1 FROM STRING_SPLIT(@Status, N'¬') mv WHERE LOWER(LTRIM(RTRIM(ISNULL(e.Status,'')))) = LOWER(LTRIM(RTRIM(mv.value))))";
 		var searchWhere = string.IsNullOrWhiteSpace(filter.SearchText) ? string.Empty : " AND (e.ClaimId LIKE @Search OR ISNULL(e.TaskId,'') LIKE @Search OR ISNULL(e.CptCode,'') LIKE @Search OR ISNULL(e.EscalationReason,'') LIKE @Search OR ISNULL(e.Comments,'') LIKE @Search OR ISNULL(e.CreatedBy,'') LIKE @Search)";
+		var responseWhere = string.Equals(filter.TaskView, "response", StringComparison.OrdinalIgnoreCase)
+			? " AND (LOWER(LTRIM(RTRIM(ISNULL(e.Status,'')))) IN ('in review','responded','response submitted','manager response') OR ISNULL(e.Comments,'') LIKE '%Manager Response:%' OR ISNULL(e.Comments,'') LIKE '%Client Response:%' OR ISNULL(e.Comments,'') LIKE '%Account Manager Response:%')"
+			: string.Empty;
 		var sql = $@"
 SELECT COUNT_BIG(1)
 FROM dbo.DenialClaimEscalations e WITH (NOLOCK)
-WHERE e.IsDeleted=0 AND e.LabId=@LabId AND e.EscalationLevel=@Level {statusWhere} {searchWhere};
+WHERE e.IsDeleted=0 AND e.LabId=@LabId AND e.EscalationLevel=@Level {statusWhere} {searchWhere} {responseWhere};
 
 SELECT
-    e.EscalationId,e.LabId,e.ClaimId,TaskId=ISNULL(e.TaskId,''),CptCode=ISNULL(e.CptCode,''),e.EscalationLevel,e.EscalationReason,e.Comments,e.Status,e.CreatedBy,e.CreatedOn,
+    e.EscalationId,e.LabId,e.ClaimId,TaskId=ISNULL(e.TaskId,''),CptCode=ISNULL(e.CptCode,''),e.EscalationLevel,e.EscalationReason,e.Comments,e.Status,EscalatedTo=ISNULL(e.EscalatedTo,''),EscalatedToRole=ISNULL(e.EscalatedToRole,''),e.NextFollowUpDate,e.CreatedBy,e.CreatedOn,
     Analyst = e.CreatedBy,
     LabName = ISNULL(tb.LabName,''),
     PayerName = ISNULL(tb.PayerName,''),
@@ -2196,7 +2306,7 @@ OUTER APPLY
       AND (@Level='Claim' OR ISNULL(e.CptCode,'')='' OR ISNULL(t.CPTCode,'')=ISNULL(e.CptCode,''))
     ORDER BY CASE WHEN ISNULL(e.TaskId,'')<>'' AND ISNULL(t.TaskID,'')=ISNULL(e.TaskId,'') THEN 0 ELSE 1 END, t.TaskID
 ) tb
-WHERE e.IsDeleted=0 AND e.LabId=@LabId AND e.EscalationLevel=@Level {statusWhere} {searchWhere}
+WHERE e.IsDeleted=0 AND e.LabId=@LabId AND e.EscalationLevel=@Level {statusWhere} {searchWhere} {responseWhere}
 ORDER BY CASE WHEN LOWER(ISNULL(e.Status,'')) IN ('resolved','closed','approved','returned for rework') THEN 1 ELSE 0 END, e.CreatedOn DESC, e.EscalationId DESC
 OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
 
@@ -2215,6 +2325,7 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
 
 	public async Task<int> ResolveEscalationAsync(ResolveDenialEscalationRequest request, CancellationToken ct)
 	{
+		await EnsureClaimSupportTablesAsync(request.LabId, ct);
 		await using var con = OpenLab(request.LabId);
 		await con.OpenAsync(ct);
 		await EnsureDenialTaskBoardNormalizedClaimIdAsync(con, ct);
@@ -2224,7 +2335,7 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
 			"approve" => "Resolved",
 			"writeoff" => "Resolved",
 			"rework" => "Returned for rework",
-			"reassign" => "Reassigned",
+			"others" => "In review",
 			_ => "In review"
 		};
 		var nextTaskStatus = action switch
@@ -2232,7 +2343,7 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
 			"approve" => "Closed",
 			"writeoff" => "Closed",
 			"rework" => "Pending Review",
-			"reassign" => "Pending Review",
+			"others" => "In Progress",
 			_ => "In Progress"
 		};
 		var level = string.Equals(request.EscalationLevel, "Line", StringComparison.OrdinalIgnoreCase) ? "Line" : "Claim";
@@ -2254,7 +2365,7 @@ DECLARE @Changed TABLE(TaskID nvarchar(100), UniqueTrackId nvarchar(100), LabId 
 
 UPDATE t
 SET Status=@TaskStatus,
-    AssignedTo = CASE WHEN @ResolutionAction='reassign' AND @ReassignTo<>'' THEN @ReassignTo ELSE t.AssignedTo END,
+    AssignedTo = CASE WHEN @ResolutionAction='rework' THEN '' WHEN @ReassignTo<>'' THEN @ReassignTo ELSE t.AssignedTo END,
     ReviewerComments = CONCAT(ISNULL(NULLIF(t.ReviewerComments,''),''), CASE WHEN NULLIF(t.ReviewerComments,'') IS NULL THEN '' ELSE CHAR(13)+CHAR(10) END, 'Manager Response: ', @ResponseNote),
     ReviewerUpdatedBy=@ActionBy,
     ReviewerUpdatedOn=SYSDATETIME(),
@@ -2293,18 +2404,21 @@ SELECT @@ROWCOUNT;";
 
 	public async Task<DenialEscalationRow> SaveEscalationAsync(SaveDenialEscalationRequest request, CancellationToken ct)
 	{
+		await EnsureClaimSupportTablesAsync(request.LabId, ct);
 		const string insertSql = @"
-INSERT INTO dbo.DenialClaimEscalations(LabId,ClaimId,TaskId,CptCode,EscalationLevel,EscalationReason,Comments,Status,CreatedBy)
-OUTPUT INSERTED.EscalationId,INSERTED.LabId,INSERTED.ClaimId,INSERTED.TaskId,INSERTED.CptCode,INSERTED.EscalationLevel,INSERTED.EscalationReason,INSERTED.Comments,INSERTED.Status,INSERTED.CreatedBy,INSERTED.CreatedOn
-VALUES(@LabId,@ClaimId,@TaskId,@CptCode,@EscalationLevel,@EscalationReason,@Comments,@Status,@CreatedBy);";
+INSERT INTO dbo.DenialClaimEscalations(LabId,ClaimId,TaskId,CptCode,EscalationLevel,EscalationReason,Comments,Status,EscalatedTo,EscalatedToRole,NextFollowUpDate,CreatedBy)
+OUTPUT INSERTED.EscalationId,INSERTED.LabId,INSERTED.ClaimId,INSERTED.TaskId,INSERTED.CptCode,INSERTED.EscalationLevel,INSERTED.EscalationReason,INSERTED.Comments,INSERTED.Status,INSERTED.EscalatedTo,INSERTED.EscalatedToRole,INSERTED.NextFollowUpDate,INSERTED.CreatedBy,INSERTED.CreatedOn
+VALUES(@LabId,@ClaimId,@TaskId,@CptCode,@EscalationLevel,@EscalationReason,@Comments,@Status,@EscalatedTo,@EscalatedToRole,@NextFollowUpDate,@CreatedBy);";
 
 		await using var con = OpenLab(request.LabId);
 		await con.OpenAsync(ct);
 		await EnsureDenialTaskBoardNormalizedClaimIdAsync(con, ct);
-
-		var clientManagerAssignee = IsClientInfoPendingEscalation(request.EscalationReason)
-			? await ResolveClientManagerAssigneeAsync(request.LabId, ct)
-			: string.Empty;
+			var explicitEscalationAssignee = request.EscalatedTo?.Trim() ?? string.Empty;
+			var escalationAssignee = !string.IsNullOrWhiteSpace(explicitEscalationAssignee)
+				? explicitEscalationAssignee
+				: IsClientInfoPendingEscalation(request.EscalationReason)
+					? await ResolveClientManagerAssigneeAsync(request.LabId, ct)
+					: string.Empty;
 
 		await using var cmd = new SqlCommand(insertSql, con) { CommandTimeout = 120 };
 		cmd.Parameters.AddWithValue("@LabId", request.LabId);
@@ -2315,6 +2429,9 @@ VALUES(@LabId,@ClaimId,@TaskId,@CptCode,@EscalationLevel,@EscalationReason,@Comm
 		cmd.Parameters.AddWithValue("@EscalationReason", request.EscalationReason.Trim());
 		cmd.Parameters.AddWithValue("@Comments", request.Comments?.Trim() ?? string.Empty);
 		cmd.Parameters.AddWithValue("@Status", string.IsNullOrWhiteSpace(request.Status) ? "Open" : request.Status.Trim());
+		cmd.Parameters.AddWithValue("@EscalatedTo", request.EscalatedTo?.Trim() ?? string.Empty);
+		cmd.Parameters.AddWithValue("@EscalatedToRole", request.EscalatedToRole?.Trim() ?? string.Empty);
+		cmd.Parameters.AddWithValue("@NextFollowUpDate", request.NextFollowUpDate.HasValue ? request.NextFollowUpDate.Value.Date : (object)DBNull.Value);
 		cmd.Parameters.AddWithValue("@CreatedBy", string.IsNullOrWhiteSpace(request.CreatedBy) ? "ReactWorkflow" : request.CreatedBy.Trim());
 
 		DenialEscalationRow saved;
@@ -2341,7 +2458,7 @@ DECLARE @Changed TABLE
 
 UPDATE t
 SET Status = 'Escalated',
-    AssignedTo = CASE WHEN @ClientManagerAssignee <> '' THEN @ClientManagerAssignee ELSE t.AssignedTo END,
+    AssignedTo = CASE WHEN @EscalationAssignee <> '' THEN @EscalationAssignee ELSE t.AssignedTo END,
     ReviewerUpdatedBy = @CreatedBy,
     ReviewerUpdatedOn = SYSDATETIME()
 OUTPUT
@@ -2402,7 +2519,7 @@ END;";
 		updateCmd.Parameters.AddWithValue("@TaskId", request.TaskId?.Trim() ?? string.Empty);
 		updateCmd.Parameters.AddWithValue("@CptCode", request.CptCode?.Trim() ?? string.Empty);
 		updateCmd.Parameters.AddWithValue("@CreatedBy", string.IsNullOrWhiteSpace(request.CreatedBy) ? "ReactWorkflow" : request.CreatedBy.Trim());
-		updateCmd.Parameters.AddWithValue("@ClientManagerAssignee", clientManagerAssignee);
+		updateCmd.Parameters.AddWithValue("@EscalationAssignee", escalationAssignee);
 		updateCmd.Parameters.AddWithValue("@HistoryComments", BuildEscalationHistoryComment(request));
 		await updateCmd.ExecuteNonQueryAsync(ct);
 
@@ -2504,9 +2621,9 @@ ORDER BY UserName;";
 
 	private static ClaimLevelRow ReadClaim(SqlDataReader rd) => new() { ClaimId = GetString(rd, "ClaimId"), PayerName = GetString(rd, "PayerName"), PanelName = GetString(rd, "PanelName"), PatientName = GetString(rd, "PatientName"), PatientDOB = GetDate(rd, "PatientDOB"), PatientId = GetString(rd, "PatientId"), ClinicName = GetString(rd, "ClinicName"), SalesRepname = GetString(rd, "SalesRepname"), ReferringProvider = GetString(rd, "ReferringProvider"), DateOfService = GetDate(rd, "DateOfService"), AssignedTo = GetString(rd, "AssignedTo"), Status = GetString(rd, "Status"), TaskCount = GetInt(rd, "TaskCount"), CreatedOn = GetDate(rd, "CreatedOn"), InsuranceBalance = GetDecimal(rd, "InsuranceBalance") };
 
-	private static DenialNoteRow ReadNote(SqlDataReader rd) => new() { NoteId = GetLong(rd, "NoteId"), LabId = GetInt(rd, "LabId"), ClaimId = GetString(rd, "ClaimId"), TaskId = GetString(rd, "TaskId"), CptCode = GetString(rd, "CptCode"), NoteLevel = GetString(rd, "NoteLevel"), NoteText = GetString(rd, "NoteText"), CreatedBy = GetString(rd, "CreatedBy"), CreatedOn = GetDate(rd, "CreatedOn") ?? DateTime.MinValue };
+	private static DenialNoteRow ReadNote(SqlDataReader rd) => new() { NoteId = GetLong(rd, "NoteId"), LabId = GetInt(rd, "LabId"), ClaimId = GetString(rd, "ClaimId"), TaskId = GetString(rd, "TaskId"), CptCode = GetString(rd, "CptCode"), NoteLevel = GetString(rd, "NoteLevel"), NoteText = GetString(rd, "NoteText"), Status = GetString(rd, "Status"), NextFollowUpDate = GetDate(rd, "NextFollowUpDate"), CreatedBy = GetString(rd, "CreatedBy"), CreatedOn = GetDate(rd, "CreatedOn") ?? DateTime.MinValue };
 	private static ClaimDocumentRow ReadDocument(SqlDataReader rd) => new() { DocumentId = GetLong(rd, "DocumentId"), LabId = GetInt(rd, "LabId"), ClaimId = GetString(rd, "ClaimId"), OriginalFileName = GetString(rd, "OriginalFileName"), StoredFileName = GetString(rd, "StoredFileName"), ContentType = GetString(rd, "ContentType"), FileSizeBytes = GetLong(rd, "FileSizeBytes"), FilePath = GetString(rd, "FilePath"), Comment = GetString(rd, "Comment"), UploadedBy = GetString(rd, "UploadedBy"), UploadedOn = GetDate(rd, "UploadedOn") ?? DateTime.MinValue };
-	private static DenialEscalationRow ReadEscalation(SqlDataReader rd) => new() { EscalationId = GetLong(rd, "EscalationId"), LabId = GetInt(rd, "LabId"), ClaimId = GetString(rd, "ClaimId"), TaskId = GetString(rd, "TaskId"), CptCode = GetString(rd, "CptCode"), EscalationLevel = GetString(rd, "EscalationLevel"), EscalationReason = GetString(rd, "EscalationReason"), Comments = GetString(rd, "Comments"), Status = GetString(rd, "Status"), CreatedBy = GetString(rd, "CreatedBy"), CreatedOn = GetDate(rd, "CreatedOn") ?? DateTime.MinValue };
+	private static DenialEscalationRow ReadEscalation(SqlDataReader rd) => new() { EscalationId = GetLong(rd, "EscalationId"), LabId = GetInt(rd, "LabId"), ClaimId = GetString(rd, "ClaimId"), TaskId = GetString(rd, "TaskId"), CptCode = GetString(rd, "CptCode"), EscalationLevel = GetString(rd, "EscalationLevel"), EscalationReason = GetString(rd, "EscalationReason"), Comments = GetString(rd, "Comments"), Status = GetString(rd, "Status"), EscalatedTo = GetString(rd, "EscalatedTo"), EscalatedToRole = GetString(rd, "EscalatedToRole"), NextFollowUpDate = GetDate(rd, "NextFollowUpDate"), CreatedBy = GetString(rd, "CreatedBy"), CreatedOn = GetDate(rd, "CreatedOn") ?? DateTime.MinValue };
 
 	private static DenialClaimHistoryRow ReadClaimHistory(SqlDataReader rd) => new()
 	{
@@ -2539,6 +2656,9 @@ ORDER BY UserName;";
 		EscalationReason = GetString(rd, "EscalationReason"),
 		Comments = GetString(rd, "Comments"),
 		Status = GetString(rd, "Status"),
+		EscalatedTo = GetString(rd, "EscalatedTo"),
+		EscalatedToRole = GetString(rd, "EscalatedToRole"),
+		NextFollowUpDate = GetDate(rd, "NextFollowUpDate"),
 		CreatedBy = GetString(rd, "CreatedBy"),
 		CreatedOn = GetDate(rd, "CreatedOn") ?? DateTime.MinValue,
 		Analyst = GetString(rd, "Analyst"),
@@ -2568,6 +2688,22 @@ ORDER BY UserName;";
 			if (!string.IsNullOrWhiteSpace(value)) rows.Add(value);
 		}
 		return rows;
+	}
+
+	private static string NormalizeWorkflowRoleName(string? role)
+	{
+		var value = (role ?? string.Empty).Trim();
+		var token = NormalizeRoleToken(value);
+		return token switch
+		{
+			"CLIENTMANAGER" => "Client Manager",
+			"ACCOUNTMANAGER" => "Account Manager",
+			"ARANALYST" or "ARANALYSER" or "ARREVIEWER" => "AR Reviewer",
+			_ when token.Contains("CLIENTMANAGER") => "Client Manager",
+			_ when token.Contains("ACCOUNTMANAGER") => "Account Manager",
+			_ when token.Contains("REVIEWER") || token.Contains("ANALYST") || token.Contains("ANALYSER") => "AR Reviewer",
+			_ => string.IsNullOrWhiteSpace(value) ? "AR Reviewer" : value
+		};
 	}
 
 	private static bool IsReviewerOnly(string? role)

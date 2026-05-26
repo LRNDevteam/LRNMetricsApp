@@ -8,9 +8,43 @@ const resolutionActions = [
   { value: '', label: '— Select resolution action —' },
   { value: 'approve', label: 'Approve & close escalation' },
   { value: 'rework', label: 'Return for rework' },
-  { value: 'reassign', label: 'Reassign to different analyst' },
-  { value: 'writeoff', label: 'Approve write-off' }
+  { value: 'writeoff', label: 'Approve write-off' },
+  { value: 'others', label: 'Others' }
 ];
+
+function normalizeRole(value) {
+  return String(value || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+}
+
+function isArReviewerOption(r) {
+  const role = normalizeRole(r?.role || r?.Role);
+  return !role || role.includes('arreviewer') || role.includes('analyst') || role.includes('analyser') || (role.includes('reviewer') && !role.includes('manager'));
+}
+
+function isManagerOption(r) {
+  const role = normalizeRole(r?.role || r?.Role);
+  return role.includes('clientmanager') || role.includes('accountmanager');
+}
+
+
+function distinctHistoryRows(rows = []) {
+  const seen = new Set();
+  return (rows || []).filter((x) => {
+    const type = String(x.historyType || x.HistoryType || '').trim().toLowerCase();
+    const action = String(x.actionType || x.ActionType || '').trim().toLowerCase();
+    const title = String(x.title || x.Title || '').trim().toLowerCase();
+    const desc = String(x.description || x.Description || '').trim().toLowerCase();
+    const status = String(x.newStatus || x.NewStatus || '').trim().toLowerCase();
+    const assigned = String(x.newAssignedTo || x.NewAssignedTo || '').trim().toLowerCase();
+    const by = String(x.actionBy || x.ActionBy || x.createdBy || x.CreatedBy || '').trim().toLowerCase();
+    const rawDate = x.actionDate || x.ActionDate || x.createdOn || x.CreatedOn || '';
+    const dateKey = rawDate ? new Date(rawDate).toISOString().slice(0, 19) : '';
+    const key = [type, action, title, desc, status, assigned, by, dateKey].join('|');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
 function ageText(value) {
   if (!value) return '-';
@@ -31,7 +65,7 @@ function slaBadge(row) {
   return <span className={`badge ${over ? 'badge-escalated' : warn ? 'badge-med' : 'badge-closed'}`}>{label}</span>;
 }
 
-export default function EscalationQueuePage({ labId, user, reviewers = [], taskView = 'claim', setTaskView = () => {}, setMessage = () => {} }) {
+export default function EscalationQueuePage({ labId, user, reviewers = [], taskView = 'claim', responseOnly = false, setTaskView = () => {}, setMessage = () => {} }) {
   const [data, setData] = useState({ items: [], page: 1, pageSize: 100, totalCount: 0, totalPages: 0 });
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState('');
@@ -45,6 +79,7 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
   const [historyLoading, setHistoryLoading] = useState(false);
   const [drafts, setDrafts] = useState({});
   const [busy, setBusy] = useState(false);
+  const [responseFiles, setResponseFiles] = useState([]);
   const level = taskView === 'line' ? 'Line' : 'Claim';
 
   const query = useMemo(() => ({
@@ -53,9 +88,10 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
     userName: user?.userName || '',
     status,
     searchText,
+    taskView: responseOnly ? 'response' : '',
     page,
     pageSize: 100
-  }), [labId, user, status, searchText, page]);
+  }), [labId, user, status, searchText, responseOnly, page]);
 
   async function load() {
     if (!labId) return;
@@ -82,13 +118,14 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
   }), [rows, data.totalCount]);
 
   function setDraft(id, patch) {
-    setDrafts(prev => ({ ...prev, [id]: { responseNote: '', resolutionAction: '', reassignTo: '', ...(prev[id] || {}), ...patch } }));
+    setDrafts(prev => ({ ...prev, [id]: { responseNote: '', resolutionAction: '', reassignTo: '', otherReason: '', ...(prev[id] || {}), ...patch } }));
   }
 
   function closeModal() {
     setActiveRow(null);
     setModalError('');
     setLineTasks([]);
+    setResponseFiles([]);
     setLineTasksBusy(false);
   }
 
@@ -120,7 +157,7 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
     setHistoryLoading(true);
     try {
       const rows = await denialWorkflowService.getClaimHistory({ labId, claimId, taskId, cptCode, historyLevel: lineMode ? 'Line' : 'Claim' });
-      setHistoryRows(rows || []);
+      setHistoryRows(distinctHistoryRows(rows || []));
     } catch (e) {
       setMessage({ type: 'warning', text: e.message || 'Unable to load claim history.' });
     } finally {
@@ -130,15 +167,20 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
 
   async function resolve(row, forcedAction = '', setInlineError = null) {
     const draft = drafts[row.escalationId] || {};
-    const action = forcedAction || draft.resolutionAction;
+    const action = forcedAction || draft.resolutionAction || '';
     const fail = (text) => { if (setInlineError) setInlineError(text); else setModalError(text); return false; };
-    if (!String(draft.responseNote || '').trim()) return fail('Please add manager response note.');
     if (!action) return fail('Please select resolution action.');
-    if (action === 'reassign' && !draft.reassignTo) return fail('Please select analyst to reassign.');
+    if (action === 'others' && !String(draft.otherReason || '').trim()) return fail('Please enter other response reason.');
+    if (!String(draft.responseNote || '').trim()) return fail('Please add manager response note.');
+
     if (setInlineError) setInlineError('');
     setModalError('');
     setBusy(true);
     try {
+      if (responseFiles?.length) {
+        await denialWorkflowService.uploadClaimDocuments(labId, row.claimId, `Escalation response upload: ${draft.responseNote || ''}`, user?.userName || 'ReactWorkflow', responseFiles);
+      }
+      const finalResponseNote = action === 'others' ? `Other Reason: ${String(draft.otherReason || '').trim()}\n${draft.responseNote}` : draft.responseNote;
       const result = await denialWorkflowService.resolveEscalation({
         labId,
         escalationId: row.escalationId,
@@ -147,8 +189,8 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
         cptCode: row.cptCode || '',
         escalationLevel: row.escalationLevel || level,
         resolutionAction: action,
-        responseNote: draft.responseNote,
-        reassignTo: draft.reassignTo || '',
+        responseNote: finalResponseNote,
+        reassignTo: action === 'rework' ? '' : (draft.reassignTo || ''),
         actionBy: user?.userName || 'ReactWorkflow'
       });
       setMessage({ type: result?.success ? 'success' : 'warning', text: result?.message || 'Escalation response saved.' });
@@ -168,8 +210,8 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
       <div className="lrn-card-header"><div className="lrn-card-title">Escalation queue · {level} level</div><span className="table-count">Showing {rows.length} of {data.totalCount || 0}</span></div>
       <div className="dt-wrap workflow-scroll escalation-table-wrap">
         <table className="lrn-table workflow-table thin-bordered esc-table">
-          <thead><tr><th style={{ minWidth: 128 }}>Action</th><th style={{ minWidth: 130 }}>Claim</th>{level === 'Line' && <th style={{ minWidth: 90 }}>CPT</th>}<th style={{ minWidth: 150 }}>Analyst</th><th style={{ minWidth: 280 }}>Reason</th><th style={{ minWidth: 130 }}>Created On</th><th style={{ minWidth: 115 }}>SLA</th><th style={{ minWidth: 105 }}>Balance</th><th style={{ minWidth: 130 }}>Status</th></tr></thead>
-          <tbody>{rows.length ? rows.map(row => <EscalationRow key={row.escalationId} row={row} level={level} onOpen={() => openModal(row)} onHistory={() => openHistory(row)} />) : <tr><td colSpan={level === 'Line' ? 9 : 8} className="empty-cell">No escalations found.</td></tr>}</tbody>
+          <thead><tr><th style={{ minWidth: 128 }}>Action</th><th style={{ minWidth: 130 }}>Claim</th>{level === 'Line' && <th style={{ minWidth: 90 }}>CPT</th>}<th style={{ minWidth: 150 }}>Analyst</th><th style={{ minWidth: 280 }}>Reason</th><th style={{ minWidth: 130 }}>Follow-up Date</th><th style={{ minWidth: 130 }}>Created On</th><th style={{ minWidth: 115 }}>SLA</th><th style={{ minWidth: 105 }}>Balance</th><th style={{ minWidth: 130 }}>Status</th></tr></thead>
+          <tbody>{rows.length ? rows.map(row => <EscalationRow key={row.escalationId} row={row} level={level} onOpen={() => openModal(row)} onHistory={() => openHistory(row)} />) : <tr><td colSpan={level === 'Line' ? 10 : 9} className="empty-cell">No escalations found.</td></tr>}</tbody>
         </table>
       </div>
     </div>
@@ -179,17 +221,18 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
 
     {historyCtx && <ClaimHistoryModal open={!!historyCtx} title={historyCtx.title} subtitle={historyCtx.subtitle} rows={historyRows} loading={historyLoading} onClose={() => setHistoryCtx(null)} />}
 
-    {activeRow && <EscalationModal row={activeRow} level={level} draft={drafts[activeRow.escalationId] || {}} setDraft={patch => setDraft(activeRow.escalationId, patch)} reviewers={reviewers} resolve={resolve} busy={busy} close={closeModal} tasks={lineTasks} tasksBusy={lineTasksBusy} onHistory={openHistory} modalError={modalError} setModalError={setModalError} />}
+    {activeRow && <EscalationModal row={activeRow} level={level} draft={drafts[activeRow.escalationId] || {}} setDraft={patch => setDraft(activeRow.escalationId, patch)} reviewers={reviewers} resolve={resolve} responseFiles={responseFiles} setResponseFiles={setResponseFiles} busy={busy} close={closeModal} tasks={lineTasks} tasksBusy={lineTasksBusy} onHistory={openHistory} modalError={modalError} setModalError={setModalError} />}
   </div>;
 }
 
 function EscalationRow({ row, level, onOpen, onHistory }) {
   return <tr className="esc-row">
-    <td><div className="esc-action-buttons"><button type="button" className="wl-btn xs teal" onClick={onOpen}>Review</button><button type="button" className="wl-icon" title="View history" onClick={onHistory}><i className="bi bi-clock-history" /></button></div></td>
+    <td><div className="esc-action-buttons"><button type="button" className="wl-btn xs teal" onClick={onOpen}>Review</button><button type="button" className="wl-icon icon-history" title="View history" onClick={onHistory}><i className="bi bi-clock-history" /></button></div></td>
     <td className="claim-link">{row.claimId}</td>
     {level === 'Line' && <td><code>{row.cptCode || '-'}</code></td>}
     <td><span className="avatar-sm">{initials(row.analyst || row.createdBy)}</span> {row.analyst || row.createdBy || '-'}</td>
     <td className="wrap-cell"><b>{row.escalationReason}</b></td>
+    <td>{date(row.nextFollowUpDate)}</td>
     <td>{date(row.createdOn)}</td>
     <td>{slaBadge(row)}</td>
     <td className="money">{money(row.insuranceBalance)}</td>
@@ -197,7 +240,7 @@ function EscalationRow({ row, level, onOpen, onHistory }) {
   </tr>;
 }
 
-function EscalationModal({ row, level, draft, setDraft, reviewers, resolve, busy, close, tasks, tasksBusy, onHistory, modalError, setModalError }) {
+function EscalationModal({ row, level, draft, setDraft, reviewers, resolve, busy, close, tasks, tasksBusy, onHistory, modalError, setModalError, responseFiles, setResponseFiles }) {
   return <div className="esc-modal-backdrop" onMouseDown={close}>
     <div className="esc-modal" role="dialog" aria-modal="true" onMouseDown={e => e.stopPropagation()}>
       <div className="esc-modal-hd">
@@ -205,14 +248,17 @@ function EscalationModal({ row, level, draft, setDraft, reviewers, resolve, busy
         <button type="button" className="esc-modal-close" onClick={close}>×</button>
       </div>
       <div className="esc-modal-body">
-        <EscalationDetail row={row} level={level} draft={draft} setDraft={setDraft} reviewers={reviewers} resolve={resolve} busy={busy} modalError={modalError} setModalError={setModalError} />
+        <EscalationDetail row={row} level={level} draft={draft} setDraft={setDraft} reviewers={reviewers} resolve={resolve} busy={busy} modalError={modalError} setModalError={setModalError} responseFiles={responseFiles} setResponseFiles={setResponseFiles} />
         <LineTasksTable title={level === 'Line' ? 'Task list for this claim' : 'Related task list'} row={row} tasks={tasks} busy={tasksBusy} compact hideHistory onHistory={onHistory} />
       </div>
     </div>
   </div>;
 }
 
-function EscalationDetail({ row, draft, setDraft, reviewers, resolve, busy, modalError, setModalError }) {
+function EscalationDetail({ row, draft, setDraft, reviewers, resolve, busy, modalError, setModalError, responseFiles, setResponseFiles }) {
+  const arReviewers = (reviewers || []).filter(isArReviewerOption);
+  const managerOptions = (reviewers || []).filter(isManagerOption);
+  const action = draft.resolutionAction || 'response';
   return <div className="esc-detail-wrap popup-mode">
     <div className="esc-detail-grid">
       <div>
@@ -222,6 +268,7 @@ function EscalationDetail({ row, draft, setDraft, reviewers, resolve, busy, moda
           <Info label="Balance" value={money(row.insuranceBalance)} />
           <Info label="SLA status" value={row.slaStatus || '-'} />
           <Info label="Escalation status" value={row.status || 'Open'} />
+          <Info label="Next follow-up" value={date(row.nextFollowUpDate)} />
         </div>
         <div className="esc-note-card">
           <div className="esc-note-label">Escalation note from {row.analyst || row.createdBy || 'analyst'}</div>
@@ -233,17 +280,15 @@ function EscalationDetail({ row, draft, setDraft, reviewers, resolve, busy, moda
       <div>
         <div className="esc-section-title">Manager response</div>
         {modalError ? <div className="esc-inline-error"><i className="bi bi-exclamation-circle" /> {modalError}</div> : null}
+        <label className="esc-label">Response action<select className="wl-full" value={action} onChange={e => setDraft({ resolutionAction: e.target.value, reassignTo: '', otherReason: '' })}>{resolutionActions.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}</select></label>
+        {action === 'rework' && <div className="esc-help">This will move the claim back to the unassigned queue.</div>}
+        {action === 'others' && <label className="esc-label">Other reason <span>*</span><input className="wl-full" value={draft.otherReason || ''} onChange={e => setDraft({ otherReason: e.target.value })} placeholder="Enter other response reason..." /></label>}
         <label className="esc-label">Add / update response note to {row.analyst || row.createdBy || 'analyst'} <span>*</span><textarea className="wl-textarea esc-response" value={draft.responseNote || ''} onChange={e => setDraft({ responseNote: e.target.value })} placeholder="Add clarification, decision, or instructions for the analyst — this will be visible in their work list..." /></label>
-        <label className="esc-label">Resolution action <span>*</span><select className="wl-full" value={draft.resolutionAction || ''} onChange={e => setDraft({ resolutionAction: e.target.value })}>{resolutionActions.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}</select></label>
-        {draft.resolutionAction === 'reassign' && <label className="esc-label">Reassign to analyst<select className="wl-full" value={draft.reassignTo || ''} onChange={e => setDraft({ reassignTo: e.target.value })}><option value="">— Select analyst —</option>{reviewers.map(r => <option key={r.userName || r.displayName} value={r.userName || r.displayName}>{r.displayName || r.userName}</option>)}</select></label>}
-        <div className="esc-help">The analyst will be notified of your response and resolution action immediately.</div>
+        <label className="esc-label">Optional document upload<input type="file" multiple onChange={e => setResponseFiles(Array.from(e.target.files || []))} /></label>{responseFiles?.length ? <div className="esc-help">{responseFiles.length} file(s) selected.</div> : null}<div className="esc-help">Submit will send the response back to the unassigned queue for AR Manager review and assignment.</div>
       </div>
     </div>
     <div className="esc-action-bar">
-      <button className="wl-btn teal" disabled={busy} onClick={() => resolve(row, 'approve', setModalError)}>Approve & close</button>
-      <button className="wl-btn amber" disabled={busy} onClick={() => resolve(row, 'rework', setModalError)}>Return for rework</button>
-      <button className="wl-btn" disabled={busy} onClick={() => resolve(row, 'reassign', setModalError)}>Reassign</button>
-      <button className="wl-btn red" disabled={busy} onClick={() => resolve(row, 'writeoff', setModalError)}>Approve write-off</button>
+      <button className="wl-btn teal" disabled={busy || !action || (action === 'others' && !String(draft.otherReason || '').trim())} onClick={() => resolve(row, action, setModalError)}>Submit</button>
     </div>
   </div>;
 }
@@ -254,7 +299,7 @@ function LineTasksPanel({ row, tasks, busy, onHistory }) {
 
 function LineTasksTable({ title, row, tasks, busy, compact, hideHistory = false, onHistory }) {
   const colSpan = hideHistory ? 11 : 12;
-  return <div className={compact ? 'esc-modal-task-section' : ''}>{title && <div className="esc-section-title">{title}</div>}<div className="dt-wrap escalation-line-scroll"><table className="lrn-table workflow-table thin-bordered esc-line-task-table"><thead><tr><th>Task ID</th><th>Claim</th><th>CPT</th><th>Denial Code</th><th>Denial Classification</th><th>Task</th><th>Action</th><th>Comment</th><th>Assigned To</th><th>Status</th><th>Created On</th>{!hideHistory && <th>History</th>}</tr></thead><tbody>{busy ? <tr><td colSpan={colSpan} className="empty-cell">Loading task list...</td></tr> : tasks?.length ? tasks.map((t, i) => <tr key={`${t.taskId}-${i}`}><td>{t.taskId || '-'}</td><td>{t.claimId || '-'}</td><td><code>{t.cptCode || '-'}</code></td><td>{t.denialCode || '-'}</td><td className="wrap-cell compact-wrap">{t.denialClassification || '-'}</td><td className="wrap-cell task-text-cell">{t.task || '-'}</td><td className="wrap-cell action-text-cell">{t.recommendedAction || t.actionCategory || t.actionCode || '-'}</td><td className="wrap-cell comment-text-cell">{t.reviewerComments || t.denialDescription || '-'}</td><td>{t.assignedTo || '-'}</td><td><span className={`badge ${statusClass(t.status)}`}>{t.status || '-'}</span></td><td>{date(t.createdOn)}</td>{!hideHistory && <td><button type="button" className="wl-icon" title="View line history" onClick={() => onHistory?.(row, t)}><i className="bi bi-clock-history" /></button></td>}</tr>) : <tr><td colSpan={colSpan} className="empty-cell">No task lines found for this claim.</td></tr>}</tbody></table></div></div>;
+  return <div className={compact ? 'esc-modal-task-section' : ''}>{title && <div className="esc-section-title">{title}</div>}<div className="dt-wrap escalation-line-scroll"><table className="lrn-table workflow-table thin-bordered esc-line-task-table"><thead><tr><th>Task ID</th><th>Claim</th><th>CPT</th><th>Denial Code</th><th>Denial Classification</th><th>Task</th><th>Action</th><th>Comment</th><th>Assigned To</th><th>Status</th><th>Created On</th>{!hideHistory && <th>History</th>}</tr></thead><tbody>{busy ? <tr><td colSpan={colSpan} className="empty-cell">Loading task list...</td></tr> : tasks?.length ? tasks.map((t, i) => <tr key={`${t.taskId}-${i}`}><td>{t.taskId || '-'}</td><td>{t.claimId || '-'}</td><td><code>{t.cptCode || '-'}</code></td><td>{t.denialCode || '-'}</td><td className="wrap-cell compact-wrap">{t.denialClassification || '-'}</td><td className="wrap-cell task-text-cell">{t.task || '-'}</td><td className="wrap-cell action-text-cell">{t.recommendedAction || t.actionCategory || t.actionCode || '-'}</td><td className="wrap-cell comment-text-cell">{t.reviewerComments || t.denialDescription || '-'}</td><td>{t.assignedTo || '-'}</td><td><span className={`badge ${statusClass(t.status)}`}>{t.status || '-'}</span></td><td>{date(t.createdOn)}</td>{!hideHistory && <td><button type="button" className="wl-icon icon-history" title="View line history" onClick={() => onHistory?.(row, t)}><i className="bi bi-clock-history" /></button></td>}</tr>) : <tr><td colSpan={colSpan} className="empty-cell">No task lines found for this claim.</td></tr>}</tbody></table></div></div>;
 }
 
 function Info({ label, value }) {
