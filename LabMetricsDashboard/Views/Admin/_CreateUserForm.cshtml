@@ -22,6 +22,47 @@
     padding: .5rem 1rem;
     background-color: #f6f9ff;
   }
+  .access-panel {
+    border: 1px solid #d8e1ef;
+    border-radius: 12px;
+    background: #f8fbff;
+    padding: 14px;
+  }
+  .lab-chip-picker .selected-labs {
+    min-height: 42px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    padding: 8px;
+    border: 1px solid #d8e1ef;
+    border-radius: 10px;
+    background: #fff;
+    margin-bottom: 10px;
+  }
+  .lab-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 999px;
+    background: #0f2942;
+    color: #fff;
+    font-weight: 700;
+    padding: .35rem .5rem .35rem .7rem;
+  }
+  .lab-chip button {
+    border: 0;
+    background: rgba(255,255,255,.18);
+    color: #fff;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    line-height: 1;
+  }
+  .lab-chip-empty {
+    color: #64748b;
+    font-size: .9rem;
+  }
   .action-row .btn { min-width: 120px; }
 </style>
 
@@ -115,11 +156,17 @@
           <div class="invalid-feedback" id="createUserRoleFeedback"></div>
         </div>
         <div class="col-md-6">
-          <label class="form-label">Lab <span class="text-danger">*</span></label>
-          <select id="createUserLab" class="form-select select-smooth" name="NewUserLabId" required>
-            <option value="">-- select lab --</option>
-            @foreach(var l in Model.Labs) { <option value="@l.LabId">@l.LabName</option> }
-          </select>
+          <label class="form-label">Labs <span class="text-danger">*</span></label>
+          <div class="access-panel lab-chip-picker" data-input-name="NewUserLabIds">
+            <div class="selected-labs" data-selected-labs>
+              <span class="lab-chip-empty">No labs selected</span>
+            </div>
+            <div data-hidden-labs></div>
+            <select id="createUserLab" class="form-select select-smooth">
+              <option value="">Select lab to add</option>
+              @foreach(var l in Model.Labs.Where(l => l.IsActive)) { <option value="@l.LabId">@l.LabName</option> }
+            </select>
+          </div>
           <div class="invalid-feedback" id="createUserLabFeedback"></div>
         </div>
       </div>
