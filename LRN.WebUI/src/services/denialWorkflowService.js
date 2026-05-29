@@ -1,4 +1,4 @@
-import { api, qs } from './httpClient';
+import { api, apiUrl, qs } from './httpClient';
 
 function normalizePagedResult(result) {
   const raw = result || {};
@@ -15,6 +15,7 @@ export const denialWorkflowService = {
   getReviewers: (labId) => api(`/reviewers?labId=${encodeURIComponent(labId)}`),
   getFilterOptions: (labId) => api(`/filter-options?labId=${encodeURIComponent(labId)}`),
   getDashboard: (query) => api(`/dashboard?${qs(query)}`),
+  getAgingDashboard: (query) => api(`/aging-dashboard?${qs(query)}`),
   getInsights: (query) => api(`/insights?${qs(query)}`),
   getClaims: async (query, options = {}) => normalizePagedResult(await api(`/claims?${qs(query)}`, options)),
   getTasks: async (query, options = {}) => normalizePagedResult(await api(`/tasks?${qs(query)}`, options)),
@@ -27,11 +28,13 @@ export const denialWorkflowService = {
   getNotes: (query) => api(`/notes?${qs(query)}`),
   saveNote: (payload) => api('/notes', { method: 'POST', body: JSON.stringify(payload) }),
   getClaimDocuments: (labId, claimId) => api(`/claim-documents?labId=${encodeURIComponent(labId)}&claimId=${encodeURIComponent(claimId)}`),
+  getClaimDocumentDownloadUrl: (labId, documentId) => apiUrl(`/claim-documents/${encodeURIComponent(documentId)}/download?labId=${encodeURIComponent(labId)}`),
   getClaimHistory: (query) => api(`/claim-history?${qs(query)}`),
   getEscalations: (query) => api(`/escalations?${qs(query)}`),
   getEscalationQueue: async (query, escalationLevel = 'Claim') => normalizePagedResult(await api(`/escalation-queue?${qs({ ...(query || {}), escalationLevel })}`)),
   resolveEscalation: (payload) => api('/resolve-escalation', { method: 'POST', body: JSON.stringify(payload) }),
   saveEscalation: (payload) => api('/escalations', { method: 'POST', body: JSON.stringify(payload) }),
+  updateEscalation: (payload) => api('/update-escalation', { method: 'POST', body: JSON.stringify(payload) }),
   uploadClaimDocuments: async (labId, claimId, comment, uploadedBy, files) => {
     const form = new FormData();
     form.append('labId', labId);
@@ -40,7 +43,6 @@ export const denialWorkflowService = {
     form.append('uploadedBy', uploadedBy || 'ReactWorkflow');
     Array.from(files || []).forEach(f => form.append('files', f));
 
-    const { api } = await import('./httpClient');
     return api('/claim-documents', { method: 'POST', body: form });
   }
 };

@@ -44,6 +44,7 @@ public sealed class DenialWorkflowFilter
     public string AssignedTo { get; set; } = string.Empty;
     public string DenialCode { get; set; } = string.Empty;
     public string PayerName { get; set; } = string.Empty;
+    public string PanelName { get; set; } = string.Empty;
     public string Clinic { get; set; } = string.Empty;
     public string SalesRepname { get; set; } = string.Empty;
     public string ReferringProvider { get; set; } = string.Empty;
@@ -67,6 +68,7 @@ public sealed class DenialWorkflowFilterOptions
     public IReadOnlyList<string> Priorities { get; set; } = Array.Empty<string>();
     public IReadOnlyList<string> DenialCodes { get; set; } = Array.Empty<string>();
     public IReadOnlyList<string> PayerNames { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> PanelNames { get; set; } = Array.Empty<string>();
     public IReadOnlyList<string> DenialClassifications { get; set; } = Array.Empty<string>();
     public IReadOnlyList<string> Clinics { get; set; } = Array.Empty<string>();
     public IReadOnlyList<string> SalesReps { get; set; } = Array.Empty<string>();
@@ -99,10 +101,57 @@ public sealed class DenialWorkflowDashboardSummary
     public IReadOnlyList<SlaSummaryRow> SlaTiles { get; set; } = Array.Empty<SlaSummaryRow>();
 }
 
+public sealed class AgingDashboardSummary
+{
+    public decimal TotalAmount { get; set; }
+    public int TotalClaims { get; set; }
+    public int TotalPayers { get; set; }
+    public int TotalSlaBreaches { get; set; }
+    public IReadOnlyList<AgingBucketSummary> Buckets { get; set; } = Array.Empty<AgingBucketSummary>();
+    public IReadOnlyList<AgingMatrixRow> ByPayer { get; set; } = Array.Empty<AgingMatrixRow>();
+    public IReadOnlyList<AgingMatrixRow> ByClassification { get; set; } = Array.Empty<AgingMatrixRow>();
+    public IReadOnlyList<AgingMatrixRow> ByAction { get; set; } = Array.Empty<AgingMatrixRow>();
+    public IReadOnlyList<AgingListItem> SlaRisks { get; set; } = Array.Empty<AgingListItem>();
+    public IReadOnlyList<AgingListItem> AnalystWorkload { get; set; } = Array.Empty<AgingListItem>();
+}
+
+public sealed class AgingBucketSummary
+{
+    public string Key { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public int ClaimCount { get; set; }
+    public int SlaBreaches { get; set; }
+}
+
+public sealed class AgingMatrixRow
+{
+    public string Name { get; set; } = string.Empty;
+    public string SubTitle { get; set; } = string.Empty;
+    public string Priority { get; set; } = string.Empty;
+    public int PriorityScore { get; set; }
+    public decimal TotalAmount { get; set; }
+    public int TotalClaims { get; set; }
+    public int SlaBreaches { get; set; }
+    public IReadOnlyList<AgingBucketSummary> Buckets { get; set; } = Array.Empty<AgingBucketSummary>();
+}
+
+public sealed class AgingListItem
+{
+    public string Name { get; set; } = string.Empty;
+    public string SubTitle { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public int ClaimCount { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public int DaysRemaining { get; set; }
+}
+
 public sealed class DenialClassificationSummaryRow
 {
     public string Classification { get; set; } = string.Empty;
     public int Count { get; set; }
+    public decimal BilledAmount { get; set; }
+    public decimal InsuranceBalance { get; set; }
     public decimal Outstanding { get; set; }
     public decimal PercentageOfTotal { get; set; }
     public int Open { get; set; }
@@ -114,6 +163,8 @@ public sealed class ActionCategorySummaryRow
 {
     public string ActionCategory { get; set; } = string.Empty;
     public int Count { get; set; }
+    public decimal BilledAmount { get; set; }
+    public decimal InsuranceBalance { get; set; }
     public decimal Outstanding { get; set; }
     public decimal PercentageOfTotal { get; set; }
     public int Open { get; set; }
@@ -208,10 +259,15 @@ public sealed class ClaimSubMenuCounts
 {
     public int TotalClaims { get; set; }
     public int New { get; set; }
+    public int Unassigned { get; set; }
     public int Assigned { get; set; }
     public int Closed { get; set; }
     public int Escalated { get; set; }
     public int Escalate { get => Escalated; set => Escalated = value; }
+    public int InternalEscalation { get; set; }
+    public int ExternalEscalation { get; set; }
+    public int EscalationResponse { get; set; }
+    public int Verification { get; set; }
 }
 
 public sealed class ReviewerWorkflowSummaryRow
@@ -322,6 +378,7 @@ public sealed class ClaimLevelRow
     public string PatientName { get; set; } = string.Empty;
     public DateTime? PatientDOB { get; set; }
     public string PatientId { get; set; } = string.Empty;
+    public string SubscriberId { get; set; } = string.Empty;
     public string ClinicName { get; set; } = string.Empty;
     public string SalesRepname { get; set; } = string.Empty;
     public string ReferringProvider { get; set; } = string.Empty;
@@ -331,6 +388,8 @@ public sealed class ClaimLevelRow
     public DateTime? CreatedOn { get; set; }
     public string AssignedTo { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
+    public string ClaimStatus { get; set; } = string.Empty;
+    public string WorkflowStatus { get; set; } = string.Empty;
     public int TaskCount { get; set; }
     public decimal InsuranceBalance { get; set; }
 }
@@ -465,6 +524,23 @@ public sealed class SaveDenialEscalationRequest
     public string EscalatedToRole { get; set; } = string.Empty;
     public DateTime? NextFollowUpDate { get; set; }
     public string CreatedBy { get; set; } = string.Empty;
+}
+
+public sealed class UpdateDenialEscalationRequest
+{
+    public int LabId { get; set; }
+    public long EscalationId { get; set; }
+    public string ClaimId { get; set; } = string.Empty;
+    public string? TaskId { get; set; }
+    public string? CptCode { get; set; }
+    public string EscalationLevel { get; set; } = "Claim";
+    public string EscalationReason { get; set; } = string.Empty;
+    public string Comments { get; set; } = string.Empty;
+    public string Status { get; set; } = "Open";
+    public string EscalatedTo { get; set; } = string.Empty;
+    public string EscalatedToRole { get; set; } = string.Empty;
+    public DateTime? NextFollowUpDate { get; set; }
+    public string ActionBy { get; set; } = string.Empty;
 }
 
 

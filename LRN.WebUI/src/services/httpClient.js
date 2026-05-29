@@ -73,6 +73,11 @@ export async function api(path, options = {}) {
   return response.text();
 }
 
+export async function apiUrl(path) {
+  const token = await ensureWorkflowJwt();
+  return appendWorkflowToken(joinUrl(API_BASE_URL, path), token);
+}
+
 // Backward-compatible export names used by existing files.
 export const apiFetch = api;
 export { API_BASE_URL };

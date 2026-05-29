@@ -26,6 +26,11 @@ function isManagerOption(r) {
   return role.includes('clientmanager') || role.includes('accountmanager');
 }
 
+function canAssignFromRole(role) {
+  const normalized = normalizeRole(role);
+  return normalized.includes('admin') || normalized.includes('armanager');
+}
+
 
 function distinctHistoryRows(rows = []) {
   const seen = new Set();
@@ -65,12 +70,13 @@ function slaBadge(row) {
   return <span className={`badge ${over ? 'badge-escalated' : warn ? 'badge-med' : 'badge-closed'}`}>{label}</span>;
 }
 
-export default function EscalationQueuePage({ labId, user, reviewers = [], taskView = 'claim', responseOnly = false, setTaskView = () => {}, setMessage = () => {} }) {
+export default function EscalationQueuePage({ labId, user, reviewers = [], taskView = 'claim', responseOnly = false, setTaskView = () => {}, tabCounts = {}, onClaimTabChange = () => {}, canAssign = false, assignClaims = () => {}, setMessage = () => {} }) {
   const [data, setData] = useState({ items: [], page: 1, pageSize: 100, totalCount: 0, totalPages: 0 });
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState('');
   const [searchText, setSearchText] = useState('');
   const [activeRow, setActiveRow] = useState(null);
+  const [drawerRow, setDrawerRow] = useState(null);
   const [modalError, setModalError] = useState('');
   const [lineTasks, setLineTasks] = useState([]);
   const [lineTasksBusy, setLineTasksBusy] = useState(false);
@@ -80,7 +86,25 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
   const [drafts, setDrafts] = useState({});
   const [busy, setBusy] = useState(false);
   const [responseFiles, setResponseFiles] = useState([]);
+  const [responseDocs, setResponseDocs] = useState([]);
+  const [selectedClaims, setSelectedClaims] = useState({});
+  const [bulkReviewer, setBulkReviewer] = useState('');
   const level = taskView === 'line' ? 'Line' : 'Claim';
+  const claimTabs = [
+    { key: 'new', label: 'New' },
+    { key: 'unassigned', label: 'Unassigned' },
+    { key: 'assigned', label: 'Assigned' },
+    { key: 'internalEscalation', label: 'Internal Escalation' },
+    { key: 'externalEscalation', label: 'External Escalation' },
+    { key: 'response', label: 'Escalated Response', countKey: 'escalationResponse' },
+    { key: 'verification', label: 'Verification Claim' },
+    { key: 'closed', label: 'Closed' }
+  ];
+  const tabCountText = value => {
+    if (value === null || value === undefined) return '...';
+    const n = Number(value || 0);
+    return n > 99999 ? `${Math.round(n / 1000)}k` : n.toLocaleString();
+  };
 
   const query = useMemo(() => ({
     labId,
@@ -110,6 +134,9 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
   useEffect(() => { setPage(1); closeModal(); }, [level, status, searchText]);
 
   const rows = data.items || [];
+  const arReviewers = useMemo(() => (reviewers || []).filter(isArReviewerOption), [reviewers]);
+  const selectedClaimIds = useMemo(() => rows.filter((_, i) => selectedClaims[i]).map(r => String(r.claimId || '').trim()).filter(Boolean), [rows, selectedClaims]);
+  const allSelected = canAssign && rows.length > 0 && rows.every((_, i) => selectedClaims[i]);
   const kpi = useMemo(() => ({
     total: data.totalCount || rows.length,
     pending: rows.filter(x => !['resolved', 'closed', 'returned for rework'].includes(String(x.status || '').toLowerCase())).length,
@@ -124,26 +151,45 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
   function closeModal() {
     setActiveRow(null);
     setModalError('');
+    setResponseDocs([]);
+    setResponseFiles([]);
+  }
+
+  function clearRowContext() {
     setLineTasks([]);
     setResponseFiles([]);
     setLineTasksBusy(false);
   }
 
-  async function openModal(row) {
-    setActiveRow(row);
+  async function loadRowContext(row) {
     setModalError('');
     setLineTasks([]);
+    setResponseDocs([]);
     if (!row?.claimId) return;
     setLineTasksBusy(true);
     try {
-      const taskRows = await denialWorkflowService.getClaimTasks(labId, row.claimId, level === 'Line' ? 'assigned' : '');
+      const [taskRows, docs] = await Promise.all([
+        denialWorkflowService.getClaimTasks(labId, row.claimId, level === 'Line' ? 'assigned' : ''),
+        denialWorkflowService.getClaimDocuments(labId, row.claimId)
+      ]);
       setLineTasks(taskRows || []);
+      setResponseDocs(docs || []);
     } catch (e) {
       setLineTasks([]);
       setMessage({ type: 'warning', text: e.message || 'Unable to load claim line tasks.' });
     } finally {
       setLineTasksBusy(false);
     }
+  }
+
+  async function openDrawer(row) {
+    setDrawerRow(row);
+    await loadRowContext(row);
+  }
+
+  async function openModal(row) {
+    setActiveRow(row);
+    await loadRowContext(row);
   }
 
   async function openHistory(row, task) {
@@ -168,6 +214,8 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
   async function resolve(row, forcedAction = '', setInlineError = null) {
     const draft = drafts[row.escalationId] || {};
     const action = forcedAction || draft.resolutionAction || '';
+    const canReassign = canAssignFromRole(user?.role);
+    const shouldReassign = canReassign && !['approve', 'writeoff'].includes(action);
     const fail = (text) => { if (setInlineError) setInlineError(text); else setModalError(text); return false; };
     if (!action) return fail('Please select resolution action.');
     if (action === 'others' && !String(draft.otherReason || '').trim()) return fail('Please enter other response reason.');
@@ -190,7 +238,7 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
         escalationLevel: row.escalationLevel || level,
         resolutionAction: action,
         responseNote: finalResponseNote,
-        reassignTo: action === 'rework' ? '' : (draft.reassignTo || ''),
+        reassignTo: shouldReassign ? (draft.reassignTo || '') : '',
         actionBy: user?.userName || 'ReactWorkflow'
       });
       setMessage({ type: result?.success ? 'success' : 'warning', text: result?.message || 'Escalation response saved.' });
@@ -201,6 +249,61 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
     } finally {
       setBusy(false);
     }
+  }
+
+  async function openDocument(documentId) {
+    const url = await denialWorkflowService.getClaimDocumentDownloadUrl(labId, documentId);
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
+  if (responseOnly) {
+    return <div className="esc-page">
+      <div className={`claim-split-shell ${drawerRow ? 'drawer-open' : ''}`}>
+        <section className={`claim-list-pane ${drawerRow ? 'narrow' : 'full'}`}>
+          <div className="claim-view-top">
+            <div>
+              <div className="claim-view-title">Escalated Response</div>
+              <div className="claim-view-subtitle">Manager response claims - {rows.length} of {data.totalCount || 0}</div>
+            </div>
+            <span className="table-count">{busy ? 'Loading...' : 'Response'}</span>
+          </div>
+          <div className="claim-list-toolbar">
+            <div className="claim-tab-row">{claimTabs.map(t => <button key={t.key} type="button" className={`claim-tab ${t.key === 'response' ? 'active' : ''}`} onClick={() => onClaimTabChange(t.key)}><span>{t.label}</span><b>{tabCountText(tabCounts?.[t.countKey || t.key])}</b></button>)}</div>
+          </div>
+          {canAssign && <div className="claim-assign-bar2"><label><input type="checkbox" checked={allSelected} onChange={e => { const next = {}; if (e.target.checked) rows.forEach((_, i) => next[i] = true); setSelectedClaims(next); }} /> Select page</label><strong>{selectedClaimIds.length} selected</strong><select value={bulkReviewer} onChange={e => setBulkReviewer(e.target.value)}><option value="">Select AR Reviewer</option>{arReviewers.map(r => <option key={r.userName || r.UserName} value={r.userName || r.UserName}>{r.displayName || r.DisplayName || r.userName || r.UserName}</option>)}</select><button className="wl-btn teal xs" type="button" disabled={!selectedClaimIds.length} onClick={() => assignClaims(selectedClaimIds, bulkReviewer)}>Assign</button></div>}
+          <div className="claim-list-head"><span>Claim</span><span>Payer</span><span>Balance</span><span>Status</span></div>
+          <div className="claim-rows-scroll">{rows.length ? rows.map((row, index) => {
+            const isOpen = drawerRow?.escalationId === row.escalationId;
+            return <button type="button" key={row.escalationId} className={`claim-list-row ${isOpen ? 'active' : ''}`} onClick={() => openDrawer(row)}>
+              {canAssign && <span className="claim-row-check" onClick={e => e.stopPropagation()}><input type="checkbox" checked={!!selectedClaims[index]} onChange={e => setSelectedClaims({ ...selectedClaims, [index]: e.target.checked })} /></span>}
+              <span className="claim-expand-dot"><i className={`bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'}`} /></span>
+              <span className="claim-list-id"><strong>{row.claimId || '-'}</strong><small>{row.analyst || row.createdBy || '-'} - {date(row.createdOn)}</small></span>
+              <span className="claim-list-payer" title={row.payerName || ''}>{row.payerName || '-'}</span>
+              <span className="claim-list-amt">{money(row.insuranceBalance)}</span>
+              <span className={`badge ${statusClass(row.status)}`}>{row.status || 'Open'}</span>
+            </button>;
+          }) : <div className="claim-empty-panel">No escalated responses found.</div>}</div>
+        </section>
+        {drawerRow && <section className="claim-drawer open">
+          <div className="claim-drawer-header"><div><div className="claim-drawer-kicker">Claims / Escalated Response / Review</div><h3>{drawerRow.claimId || '-'}</h3><p>{drawerRow.payerName || '-'} - {money(drawerRow.insuranceBalance)}</p></div><button className="wl-icon" title="Close claim drawer" type="button" onClick={() => { setDrawerRow(null); clearRowContext(); }}><i className="bi bi-x-lg" /></button></div>
+          <div className="claim-drawer-meta"><span><b>Reason</b>{drawerRow.escalationReason || '-'}</span><span><b>Analyst</b>{drawerRow.analyst || drawerRow.createdBy || '-'}</span><span><b>Created</b>{date(drawerRow.createdOn)}</span><span><b>Follow-up</b>{date(drawerRow.nextFollowUpDate)}</span><span><b>SLA</b>{drawerRow.slaStatus || '-'}</span><span><b>Status</b>{drawerRow.status || 'Open'}</span></div>
+          <div className="claim-drawer-actions"><button className="wl-btn teal xs" type="button" onClick={() => openModal(drawerRow)}>Review Response</button><button type="button" className="wl-icon icon-history" title="View history" onClick={() => openHistory(drawerRow)}><i className="bi bi-clock-history" /></button></div>
+          <div className="claim-drawer-tabs"><button className="active" type="button">Line Tasks</button></div>
+          <div className="claim-drawer-body">
+            <LineTasksTable row={drawerRow} tasks={lineTasks} busy={lineTasksBusy} compact onHistory={openHistory} />
+            <div className="claim-history-panel">
+              <div className="history-section-title">Escalation note</div>
+              <div className="modal-row"><div className="modal-row-title">{drawerRow.escalationReason || '-'}</div><div className="modal-row-meta">{drawerRow.comments || 'No escalation comment entered.'}</div></div>
+              <div className="history-section-title">Documents</div>
+              {responseDocs.length ? responseDocs.map(d => <div className="modal-row document-row" key={d.documentId}><div><div className="modal-row-title">{d.originalFileName}</div><div className="modal-row-meta">{d.uploadedBy || '-'} - {date(d.uploadedOn)}</div></div><button className="wl-btn xs" type="button" onClick={() => openDocument(d.documentId)}>Download</button></div>) : <div className="modal-row"><div className="modal-row-title">No documents uploaded</div></div>}
+            </div>
+          </div>
+        </section>}
+      </div>
+      <Pager data={data} changePage={next => { closeModal(); setDrawerRow(null); clearRowContext(); setPage(next); }} />
+      {historyCtx && <ClaimHistoryModal open={!!historyCtx} title={historyCtx.title} subtitle={historyCtx.subtitle} rows={historyRows} loading={historyLoading} onClose={() => setHistoryCtx(null)} />}
+      {activeRow && <EscalationModal row={activeRow} level={level} draft={drafts[activeRow.escalationId] || {}} setDraft={patch => setDraft(activeRow.escalationId, patch)} reviewers={reviewers} canReassign={canAssignFromRole(user?.role)} resolve={resolve} responseFiles={responseFiles} setResponseFiles={setResponseFiles} responseDocs={responseDocs} openDocument={openDocument} busy={busy} close={closeModal} tasks={lineTasks} tasksBusy={lineTasksBusy} onHistory={openHistory} modalError={modalError} setModalError={setModalError} />}
+    </div>;
   }
 
   return <div className="esc-page">
@@ -215,13 +318,13 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
         </table>
       </div>
     </div>
-    <Pager data={data} changePage={next => { closeModal(); setPage(next); }} />
+    <Pager data={data} changePage={next => { closeModal(); clearRowContext(); setPage(next); }} />
 
     {level === 'Line' && activeRow && <LineTasksPanel row={activeRow} tasks={lineTasks} busy={lineTasksBusy} onHistory={openHistory} modalError={modalError} setModalError={setModalError} />}
 
     {historyCtx && <ClaimHistoryModal open={!!historyCtx} title={historyCtx.title} subtitle={historyCtx.subtitle} rows={historyRows} loading={historyLoading} onClose={() => setHistoryCtx(null)} />}
 
-    {activeRow && <EscalationModal row={activeRow} level={level} draft={drafts[activeRow.escalationId] || {}} setDraft={patch => setDraft(activeRow.escalationId, patch)} reviewers={reviewers} resolve={resolve} responseFiles={responseFiles} setResponseFiles={setResponseFiles} busy={busy} close={closeModal} tasks={lineTasks} tasksBusy={lineTasksBusy} onHistory={openHistory} modalError={modalError} setModalError={setModalError} />}
+    {activeRow && <EscalationModal row={activeRow} level={level} draft={drafts[activeRow.escalationId] || {}} setDraft={patch => setDraft(activeRow.escalationId, patch)} reviewers={reviewers} canReassign={canAssignFromRole(user?.role)} resolve={resolve} responseFiles={responseFiles} setResponseFiles={setResponseFiles} responseDocs={responseDocs} openDocument={openDocument} busy={busy} close={closeModal} tasks={lineTasks} tasksBusy={lineTasksBusy} onHistory={openHistory} modalError={modalError} setModalError={setModalError} />}
   </div>;
 }
 
@@ -240,7 +343,7 @@ function EscalationRow({ row, level, onOpen, onHistory }) {
   </tr>;
 }
 
-function EscalationModal({ row, level, draft, setDraft, reviewers, resolve, busy, close, tasks, tasksBusy, onHistory, modalError, setModalError, responseFiles, setResponseFiles }) {
+function EscalationModal({ row, level, draft, setDraft, reviewers, canReassign, resolve, busy, close, tasks, tasksBusy, onHistory, modalError, setModalError, responseFiles, setResponseFiles, responseDocs, openDocument }) {
   return <div className="esc-modal-backdrop" onMouseDown={close}>
     <div className="esc-modal" role="dialog" aria-modal="true" onMouseDown={e => e.stopPropagation()}>
       <div className="esc-modal-hd">
@@ -248,17 +351,18 @@ function EscalationModal({ row, level, draft, setDraft, reviewers, resolve, busy
         <button type="button" className="esc-modal-close" onClick={close}>×</button>
       </div>
       <div className="esc-modal-body">
-        <EscalationDetail row={row} level={level} draft={draft} setDraft={setDraft} reviewers={reviewers} resolve={resolve} busy={busy} modalError={modalError} setModalError={setModalError} responseFiles={responseFiles} setResponseFiles={setResponseFiles} />
+        <EscalationDetail row={row} level={level} draft={draft} setDraft={setDraft} reviewers={reviewers} canReassign={canReassign} resolve={resolve} busy={busy} modalError={modalError} setModalError={setModalError} responseFiles={responseFiles} setResponseFiles={setResponseFiles} responseDocs={responseDocs} openDocument={openDocument} />
         <LineTasksTable title={level === 'Line' ? 'Task list for this claim' : 'Related task list'} row={row} tasks={tasks} busy={tasksBusy} compact hideHistory onHistory={onHistory} />
       </div>
     </div>
   </div>;
 }
 
-function EscalationDetail({ row, draft, setDraft, reviewers, resolve, busy, modalError, setModalError, responseFiles, setResponseFiles }) {
+function EscalationDetail({ row, draft, setDraft, reviewers, canReassign, resolve, busy, modalError, setModalError, responseFiles, setResponseFiles, responseDocs = [], openDocument }) {
   const arReviewers = (reviewers || []).filter(isArReviewerOption);
   const managerOptions = (reviewers || []).filter(isManagerOption);
-  const action = draft.resolutionAction || 'response';
+  const action = draft.resolutionAction || '';
+  const showReassign = canReassign && !!action && !['approve', 'writeoff'].includes(action);
   return <div className="esc-detail-wrap popup-mode">
     <div className="esc-detail-grid">
       <div>
@@ -281,10 +385,13 @@ function EscalationDetail({ row, draft, setDraft, reviewers, resolve, busy, moda
         <div className="esc-section-title">Manager response</div>
         {modalError ? <div className="esc-inline-error"><i className="bi bi-exclamation-circle" /> {modalError}</div> : null}
         <label className="esc-label">Response action<select className="wl-full" value={action} onChange={e => setDraft({ resolutionAction: e.target.value, reassignTo: '', otherReason: '' })}>{resolutionActions.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}</select></label>
-        {action === 'rework' && <div className="esc-help">This will move the claim back to the unassigned queue.</div>}
+        {action === 'rework' && <div className="esc-help">Choose an AR Reviewer to reassign the claim, or leave it blank to move it back to the unassigned queue.</div>}
         {action === 'others' && <label className="esc-label">Other reason <span>*</span><input className="wl-full" value={draft.otherReason || ''} onChange={e => setDraft({ otherReason: e.target.value })} placeholder="Enter other response reason..." /></label>}
         <label className="esc-label">Add / update response note to {row.analyst || row.createdBy || 'analyst'} <span>*</span><textarea className="wl-textarea esc-response" value={draft.responseNote || ''} onChange={e => setDraft({ responseNote: e.target.value })} placeholder="Add clarification, decision, or instructions for the analyst — this will be visible in their work list..." /></label>
-        <label className="esc-label">Optional document upload<input type="file" multiple onChange={e => setResponseFiles(Array.from(e.target.files || []))} /></label>{responseFiles?.length ? <div className="esc-help">{responseFiles.length} file(s) selected.</div> : null}<div className="esc-help">Submit will send the response back to the unassigned queue for AR Manager review and assignment.</div>
+        {showReassign && <label className="esc-label">Reassign claim to AR Reviewer<select className="wl-full" value={draft.reassignTo || ''} onChange={e => setDraft({ reassignTo: e.target.value })}><option value="">{action === 'rework' ? 'Move to unassigned' : 'Keep current reviewer'}</option>{arReviewers.map(r => <option key={r.userName || r.UserName} value={r.userName || r.UserName}>{r.displayName || r.DisplayName || r.userName || r.UserName}</option>)}</select></label>}
+        <label className="esc-label">Optional document upload<input type="file" multiple onChange={e => setResponseFiles(Array.from(e.target.files || []))} /></label>{responseFiles?.length ? <div className="esc-help">{responseFiles.length} file(s) selected.</div> : null}
+        {responseDocs?.length ? <div className="esc-doc-list">{responseDocs.map(d => <div className="esc-doc-row" key={d.documentId}><span>{d.originalFileName}</span><button className="wl-btn xs" type="button" onClick={() => openDocument?.(d.documentId)}>View / Download</button></div>)}</div> : null}
+        <div className="esc-help">Submit will send the response back for AR Manager verification.</div>
       </div>
     </div>
     <div className="esc-action-bar">

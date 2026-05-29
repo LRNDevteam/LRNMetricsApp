@@ -6,10 +6,12 @@ import { claimRole, claimUser, clearWorkflowJwt, ensureWorkflowJwt, getJwt, pars
 import { canAssignRole, initials, isArReviewerRole, isClientManagerRole, isAccountManagerRole, isReadOnlyWorkflowRole } from './utils/formatters';
 import DashboardFilter from './components/DashboardFilter';
 import DashboardPage from './pages/DashboardPage';
+import AgingDashboardPage from './pages/AgingDashboardPage';
 import DenialSummaryPage from './pages/DenialSummaryPage';
 import ClaimAssignmentPage from './pages/ClaimAssignmentPage';
 import MyWorklistPage from './pages/MyWorklistPage';
 import EscalationQueuePage from './pages/EscalationQueuePage';
+import VerificationPage from './pages/VerificationPage';
 
 function roleIsReviewerOnly(role) { return isArReviewerRole(role); }
 
@@ -20,15 +22,17 @@ export default function App() {
   const [reviewers, setReviewers] = useState([]);
   const [filterOptions, setFilterOptions] = useState(emptyFilterOptions);
   const [labId, setLabId] = useState(Number(localStorage.getItem('denial.labId') || 0));
-  const workflowViews = ['dashboard', 'summary', 'claims', 'myworklist', 'escalations'];
+  const workflowViews = ['dashboard', 'aging', 'summary', 'claims', 'myworklist', 'escalations', 'verification'];
   const getStoredView = () => {
     const hashView = String(window.location.hash || '').replace('#', '').trim().toLowerCase();
+    if (hashView === 'dashboard' || hashView === 'summary') return 'aging';
     return workflowViews.includes(hashView) ? hashView : '';
   };
-  const [view, setViewState] = useState(getStoredView() || 'dashboard');
+  const [view, setViewState] = useState(getStoredView() || 'aging');
   const [filter, setFilter] = useState(emptyFilter);
   const [debouncedFilter, setDebouncedFilter] = useState(emptyFilter);
   const [dashboard, setDashboard] = useState(emptyDashboard);
+  const [agingDashboard, setAgingDashboard] = useState({});
   const [claims, setClaims] = useState(emptyPagedResult);
   const [tasks, setTasks] = useState(emptyPagedResult);
   const [verification, setVerification] = useState(emptyPagedResult);
@@ -36,7 +40,7 @@ export default function App() {
   const [selectedClaims, setSelectedClaims] = useState({});
   const [claimTasks, setClaimTasks] = useState({});
   const [expandedClaim, setExpandedClaim] = useState('');
-  const [claimTaskView, setClaimTaskView] = useState('unassigned');
+  const [claimTaskView, setClaimTaskView] = useState('new');
   const [myWorklistView, setMyWorklistView] = useState('open');
   const [escalationView, setEscalationView] = useState('claim');
   const [bulkReviewer, setBulkReviewer] = useState('');
@@ -51,9 +55,10 @@ export default function App() {
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [notificationPopupOpen, setNotificationPopupOpen] = useState(false);
   const initialNotificationKeyRef = useRef('');
-  const [claimMenuCounts, setClaimMenuCounts] = useState({ unassigned: null, assigned: null, escalations: null, closed: null });
+  const [claimMenuCounts, setClaimMenuCounts] = useState({ new: null, unassigned: null, assigned: null, escalations: null, internalEscalation: null, externalEscalation: null, escalationResponse: null, verification: null, closed: null });
   const [myWorklistMenuCounts, setMyWorklistMenuCounts] = useState({ open: null, assigned: null, escalations: null, closed: null });
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [claimFiltersOpen, setClaimFiltersOpen] = useState(false);
   const claimRequestSeq = useRef(0);
   const claimAbortRef = useRef(null);
   const lastClaimQueryKeyRef = useRef('');
@@ -122,6 +127,7 @@ export default function App() {
       priorities: toStrings(fromMaybeDelimitedString(source.priorities ?? source.Priorities), ['priority', 'Priority', 'name', 'Name']),
       denialCodes: toStrings(fromMaybeDelimitedString(source.denialCodes ?? source.DenialCodes), ['denialCode', 'DenialCode', 'code', 'Code', 'name', 'Name']),
       payerNames: toStrings(fromMaybeDelimitedString(source.payerNames ?? source.PayerNames), ['payerName', 'PayerName', 'name', 'Name']),
+      panelNames: toStrings(fromMaybeDelimitedString(source.panelNames ?? source.PanelNames), ['panelName', 'PanelName', 'name', 'Name']),
       denialClassifications: toStrings(fromMaybeDelimitedString(source.denialClassifications ?? source.DenialClassifications), ['denialClassification', 'DenialClassification', 'classification', 'Classification', 'name', 'Name']),
       clinics: toStrings(fromMaybeDelimitedString(source.clinics ?? source.Clinics), ['clinic', 'Clinic', 'clinicName', 'ClinicName', 'name', 'Name']),
       salesReps: toStrings(fromMaybeDelimitedString(source.salesReps ?? source.SalesReps), ['salesRepname', 'SalesRepname', 'salesRep', 'SalesRep', 'name', 'Name']),
@@ -270,11 +276,14 @@ export default function App() {
     priority: debouncedFilter.priority,
     denialCode: debouncedFilter.denialCode,
     payerName: debouncedFilter.payerName,
+    panelName: debouncedFilter.panelName,
     clinic: debouncedFilter.clinic,
     salesRepname: debouncedFilter.salesRepname,
     referringProvider: debouncedFilter.referringProvider,
     denialClassification: debouncedFilter.denialClassification,
     searchText: debouncedFilter.searchText,
+    fromDate: debouncedFilter.fromDate || '',
+    toDate: debouncedFilter.toDate || '',
     taskView: view === 'claims' ? claimTaskView : '',
     page: debouncedFilter.page || 1,
     pageSize: 100
@@ -290,6 +299,7 @@ export default function App() {
     priority: debouncedFilter.priority,
     denialCode: debouncedFilter.denialCode,
     payerName: debouncedFilter.payerName,
+    panelName: debouncedFilter.panelName,
     clinic: debouncedFilter.clinic,
     salesRepname: debouncedFilter.salesRepname,
     referringProvider: debouncedFilter.referringProvider,
@@ -495,15 +505,20 @@ export default function App() {
     let call;
     if (view === 'dashboard' || view === 'summary') {
       call = denialWorkflowService.getDashboard(query).then(setDashboard);
+    } else if (view === 'aging') {
+      call = denialWorkflowService.getAgingDashboard(query).then(setAgingDashboard);
     } else if (view === 'claims') {
       call = denialWorkflowService.getClaims(query, { signal: abortController.signal }).then(c => {
         if (requestId !== claimRequestSeq.current || abortController.signal.aborted) return;
         const next = c || emptyPagedResult;
         setClaims(next);
+        setClaimMenuCounts(prev => ({ ...prev, [claimTaskView]: Number(next.totalCount || 0) }));
         setSelectedClaims({});
         setClaimTasks({});
         setExpandedClaim('');
       });
+    } else if (view === 'verification') {
+      call = denialWorkflowService.getVerification(query, { signal: abortController.signal }).then(setVerification);
     } else {
       call = Promise.resolve();
     }
@@ -538,13 +553,18 @@ export default function App() {
     try {
       const counts = await denialWorkflowService.getClaimMenuCounts(menuCountQuery);
       setClaimMenuCounts({
-        unassigned: Number(counts?.new ?? counts?.New ?? counts?.unassigned ?? counts?.Unassigned ?? 0),
+        new: Number(counts?.new ?? counts?.New ?? 0),
+        unassigned: Number(counts?.unassigned ?? counts?.Unassigned ?? 0),
         assigned: Number(counts?.assigned ?? counts?.Assigned ?? 0),
-        escalations: Number(counts?.escalated ?? counts?.Escalated ?? counts?.escalations ?? counts?.Escalations ?? 0),
+        escalations: Number(counts?.escalated ?? counts?.Escalated ?? 0),
+        internalEscalation: Number(counts?.internalEscalation ?? counts?.InternalEscalation ?? 0),
+        externalEscalation: Number(counts?.externalEscalation ?? counts?.ExternalEscalation ?? 0),
+        escalationResponse: Number(counts?.escalationResponse ?? counts?.EscalationResponse ?? 0),
+        verification: Number(counts?.verification ?? counts?.Verification ?? 0),
         closed: Number(counts?.closed ?? counts?.Closed ?? 0)
       });
     } catch {
-      setClaimMenuCounts({ unassigned: null, assigned: null, escalations: null, closed: null });
+      setClaimMenuCounts({ new: 0, unassigned: 0, assigned: 0, escalations: 0, internalEscalation: 0, externalEscalation: 0, escalationResponse: 0, verification: 0, closed: 0 });
     }
 
     try {
@@ -576,13 +596,15 @@ export default function App() {
   }, [authReady, labId, menuCountQuery, reviewerOnly]);
 
   const labName = labs.find(l => Number(l.labId ?? l.LabId) === Number(labId))?.labName || 'Select Lab';
-  const pageTitle = { dashboard: 'Denial Workflow Dashboard', summary: 'Denial Summary', claims: canAssign ? 'Claim Level Assignment' : 'Claim View', myworklist: 'My Worklist', escalations: escalationView === 'response' ? 'Escalation Response' : 'Escalation Queue' }[view] || 'Denial Workflow';
+  const pageTitle = { dashboard: 'Denial Workflow Dashboard', aging: 'Aging Dashboard', summary: 'Denial Summary', claims: canAssign ? 'Claim Level Assignment' : 'Claim View', myworklist: 'My Worklist', escalations: escalationView === 'response' ? 'Escalation Response' : 'Escalation Queue', verification: 'Verification' }[view] || 'Denial Workflow';
   const claimNavTabs = useMemo(() => ([
-    { key: 'unassigned', label: 'New' },
+    { key: 'new', label: 'New' },
+    { key: 'unassigned', label: 'Unassigned' },
     { key: 'assigned', label: 'Assigned' },
-    { key: 'escalations', label: 'Escalated Claims' },
+    { key: 'internalEscalation', label: 'Internal Escalation' },
+    { key: 'externalEscalation', label: 'External Escalation' },
     { key: 'closed', label: 'Closed' },
-    ...(canAssign ? [{ key: 'response', label: 'Escalation Response' }] : [])
+    ...(canAssign ? [{ key: 'response', label: 'Escalation Response', countKey: 'escalationResponse' }, { key: 'verification', label: 'Verification' }] : [])
   ]), [canAssign]);
   const myWorklistNavTabs = useMemo(() => ([
     { key: 'open', label: 'New' },
@@ -603,6 +625,20 @@ export default function App() {
     setSelectedClaims({});
     setClaimTasks({});
     setExpandedClaim('');
+  }
+
+  function handleClaimTabRoute(nextView) {
+    if (nextView === 'response') {
+      setEscalationView('response');
+      setView('escalations');
+      return;
+    }
+    if (nextView === 'verification') {
+      setView('verification');
+      return;
+    }
+    setView('claims');
+    handleClaimTaskViewChange(nextView);
   }
 
   function handleMyWorklistViewChange(nextView) {
@@ -630,7 +666,7 @@ export default function App() {
       setView('myworklist');
       return;
     }
-    setClaimTaskView('unassigned');
+    setClaimTaskView('new');
     setView('claims');
     setMessage({
       type: 'info',
@@ -651,7 +687,7 @@ export default function App() {
       setView('myworklist');
       return;
     }
-    setClaimTaskView('unassigned');
+    setClaimTaskView('new');
     setView('claims');
     setMessage({
       type: 'info',
@@ -804,22 +840,23 @@ export default function App() {
       <div className="user-card"><span className="avatar-sm">{initials(user.displayName || user.userName)}</span><div><strong>{user.displayName || user.userName || 'LRN User'}</strong><small>{user.role || 'Workflow User'}</small></div></div>
       <nav className="lrn-nav">
         <div className="lrn-nav-section">Overview</div>
-        <button className={`lrn-nav-item ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}><i className="bi bi-grid-1x2-fill" />Denial Dashboard</button>
+        <button className={`lrn-nav-item ${view === 'aging' ? 'active' : ''}`} onClick={() => setView('aging')}><i className="bi bi-hourglass-split" />Aging Dashboard</button>
         <div className="lrn-nav-section">Denial Workflow</div>
-        <button className={`lrn-nav-item ${view === 'summary' ? 'active' : ''}`} onClick={() => setView('summary')}><i className="bi bi-table" />Denial Summary</button>
         {(canAssign || externalManager || adminRole) && (
           <>
-            <button className={`lrn-nav-item ${(view === 'claims' || (view === 'escalations' && escalationView === 'response')) ? 'active' : ''}`} onClick={() => setView('claims', { closeSidebar: false })}><i className="bi bi-folder-check" />{canAssign ? 'Claim Assignment' : 'Claim View'}</button>
-            {(view === 'claims' || (view === 'escalations' && escalationView === 'response')) && (
+            <button className={`lrn-nav-item ${(view === 'claims' || view === 'verification' || (view === 'escalations' && escalationView === 'response')) ? 'active' : ''}`} onClick={() => setView('claims', { closeSidebar: false })}><i className="bi bi-folder-check" />{canAssign ? 'Claim Assignment' : 'Claim View'}</button>
+            {(view === 'claims' || view === 'verification' || (view === 'escalations' && escalationView === 'response')) && (
               <div className="lrn-nav-submenu">
                 {claimNavTabs.map(t => {
                   const isResponse = t.key === 'response';
-                  const isActive = isResponse ? (view === 'escalations' && escalationView === 'response') : (view === 'claims' && claimTaskView === t.key);
+                  const isVerification = t.key === 'verification';
+                  const isActive = isResponse ? (view === 'escalations' && escalationView === 'response') : isVerification ? view === 'verification' : (view === 'claims' && claimTaskView === t.key);
                   return <button key={t.key} type="button" className={`lrn-nav-subitem ${isActive ? 'active' : ''}`} onClick={() => {
                     if (isResponse) { setEscalationView('response'); setView('escalations'); }
+                    else if (isVerification) { setView('verification'); }
                     else { setView('claims'); handleClaimTaskViewChange(t.key); }
                   }}>
-                    <span className="nav-sub-label">{t.label}</span>{!isResponse && <span className="nav-sub-count">{menuCountText(claimMenuCounts[t.key])}</span>}
+                    <span className="nav-sub-label">{t.label}</span><span className="nav-sub-count">{menuCountText(claimMenuCounts[t.countKey || t.key])}</span>
                   </button>;
                 })}
               </div>
@@ -856,7 +893,6 @@ export default function App() {
           </>
         )}
       </nav>
-      <div className="lrn-sync"><div>API endpoint</div><span>{API_BASE}</span></div>
       <div className="sidebar-logout"><button type="button" className="sidebar-logout-btn" onClick={logoutWorkflow}><i className="bi bi-box-arrow-right" />Logout</button></div>
     </aside>
     <div className="lrn-main">
@@ -868,14 +904,30 @@ export default function App() {
         <div className="topbar-actions">{workflowNotifications.total > 0 && <div className="notification-wrap"><button type="button" className="notification-btn" title="Claims needing attention" onClick={() => setNotificationOpen(v => !v)}><i className="bi bi-bell-fill" /><span className="notification-count">{workflowNotifications.total}</span><span className="notification-text"><b>{workflowNotifications.total}</b> {reviewerOnly ? 'claims need attention' : 'escalation claim(s)'}</span></button>{notificationOpen && <NotificationDetails />}</div>}<select className="top-lab-select" value={labId || ''} onChange={e => setLabId(Number(e.target.value))}>{labs.map(l => <option key={l.labId ?? l.LabId} value={l.labId ?? l.LabId}>{l.labName ?? l.LabName}</option>)}</select><span className="current-lab">{labName}</span><button className="topbar-btn teal" onClick={() => setMessage({ type: 'info', text: 'Use backend export endpoint for Excel download.' })}><i className="bi bi-download" />Export</button><button type="button" className="topbar-btn" onClick={logoutWorkflow}><i className="bi bi-box-arrow-right" />Logout</button></div>
       </header>
       <main className="lrn-content">
-        {view !== 'myworklist' && <DashboardFilter filter={filter} setFilterValue={setFilterValue} clearFilter={clearFilter} reviewers={reviewers} options={filterOptions} />}
+        {view === 'claims' && <div className="claim-filter-toggle-row"><button type="button" className="wl-btn xs" onClick={() => setClaimFiltersOpen(v => !v)}><i className={`bi ${claimFiltersOpen ? 'bi-eye-slash' : 'bi-funnel'}`} />{claimFiltersOpen ? 'Hide Filters' : 'View Filters'}</button></div>}
+        {view !== 'myworklist' && view !== 'aging' && (
+          <div className={(view === 'verification' || view === 'escalations' || (view === 'claims' && !claimFiltersOpen)) ? 'global-filter-hidden' : ''}>
+            <DashboardFilter filter={filter} setFilterValue={setFilterValue} clearFilter={clearFilter} reviewers={reviewers} options={filterOptions} />
+          </div>
+        )}
         {message && <div className={`lrn-alert ${message.type}`}>{message.text}</div>}
         {loading && <div className="loading-line" />}
         {view === 'dashboard' && <DashboardPage data={dashboard} user={user} labName={labName} />}
-        {view === 'summary' && <DenialSummaryPage data={dashboard} canAssign={canAssign} onClassificationClick={openClaimsByClassification} onActionCategoryClick={openClaimsByActionCategory} onAssign={() => { setClaimTaskView('unassigned'); setView((reviewerOnly || readOnlyWorkflow) ? 'myworklist' : 'claims'); setMessage({ type: 'info', text: canAssign ? 'Select the required claim rows, choose reviewer, then assign.' : 'This role has read-only workflow access.' }); }} />}
-        {view === 'claims' && <ClaimAssignmentPage data={claims} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} canAssign={canAssign} readOnlyWorkflow={readOnlyWorkflow} taskView={claimTaskView} setTaskView={handleClaimTaskViewChange} setMessage={setMessage} />}
+        {view === 'aging' && <AgingDashboardPage data={agingDashboard} filter={filter} setFilterValue={setFilterValue} clearFilter={clearFilter} reviewers={reviewers} options={filterOptions} onCellClick={({ pivot, row, bucket }) => {
+          const next = { page: 1 };
+          if (pivot === 'payer') next.payerName = row?.name || '';
+          if (pivot === 'classification') next.denialClassification = row?.name || '';
+          if (pivot === 'action') next.actionCategory = row?.name || '';
+          setFilter(f => ({ ...f, ...next }));
+          setClaimTaskView('new');
+          setView((reviewerOnly || readOnlyWorkflow) ? 'myworklist' : 'claims');
+          setMessage({ type: 'info', text: `Showing claims for ${row?.name || 'selected group'} / ${bucket?.label || 'aging bucket'}.` });
+        }} />}
+        {view === 'summary' && <DenialSummaryPage data={dashboard} canAssign={canAssign} onClassificationClick={openClaimsByClassification} onActionCategoryClick={openClaimsByActionCategory} onAssign={() => { setClaimTaskView('new'); setView((reviewerOnly || readOnlyWorkflow) ? 'myworklist' : 'claims'); setMessage({ type: 'info', text: canAssign ? 'Select the required claim rows, choose reviewer, then assign.' : 'This role has read-only workflow access.' }); }} />}
+        {view === 'claims' && <ClaimAssignmentPage data={claims} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} canAssign={canAssign} readOnlyWorkflow={readOnlyWorkflow} taskView={claimTaskView} setTaskView={handleClaimTaskViewChange} tabCounts={claimMenuCounts} openEscalationResponse={() => handleClaimTabRoute('response')} openVerification={() => handleClaimTabRoute('verification')} setMessage={setMessage} />}
+        {view === 'verification' && <VerificationPage data={verification} changePage={changePage} tabCounts={claimMenuCounts} onTabChange={handleClaimTabRoute} reviewers={reviewers} canAssign={canAssign} assignClaims={assignClaims} />}
         {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setMessage} onSaved={() => { refreshReviewerNotification(); refreshWorkflowNotifications(); }} taskView={myWorklistView} setTaskView={handleMyWorklistViewChange} />}
-        {view === 'escalations' && <EscalationQueuePage labId={labId} user={user} reviewers={reviewers} taskView={escalationView === 'response' ? 'claim' : escalationView} responseOnly={escalationView === 'response'} setTaskView={setEscalationView} setMessage={setMessage} />}
+        {view === 'escalations' && <EscalationQueuePage labId={labId} user={user} reviewers={reviewers} taskView={escalationView === 'response' ? 'claim' : escalationView} responseOnly={escalationView === 'response'} setTaskView={setEscalationView} tabCounts={claimMenuCounts} onClaimTabChange={handleClaimTabRoute} canAssign={canAssign} assignClaims={assignClaims} setMessage={setMessage} />}
       </main>
     </div>
   </div>;

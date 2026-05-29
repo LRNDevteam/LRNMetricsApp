@@ -55,6 +55,11 @@ public sealed class DenialWorkflowController : ControllerBase
     public async Task<ActionResult<DenialWorkflowDashboardSummary>> Dashboard([FromQuery] DenialWorkflowFilter filter, CancellationToken ct)
         => Ok(await _service.GetDashboardSummaryAsync(Normalize(filter), ct));
 
+    [HttpGet("aging-dashboard")]
+    [HttpGet("aging")]
+    public async Task<ActionResult<AgingDashboardSummary>> AgingDashboard([FromQuery] DenialWorkflowFilter filter, CancellationToken ct)
+        => Ok(await _service.GetAgingDashboardAsync(Normalize(filter), ct));
+
     [HttpGet("filter-options")]
     public async Task<ActionResult<DenialWorkflowFilterOptions>> FilterOptions([FromQuery] int labId, CancellationToken ct)
     {
@@ -120,11 +125,21 @@ public sealed class DenialWorkflowController : ControllerBase
 
 	[HttpGet("tasks")]
     public async Task<ActionResult<PagedResult<WorkflowTaskRow>>> Tasks([FromQuery] DenialWorkflowFilter filter, CancellationToken ct)
-        => Ok(await _service.GetTasksAsync(Normalize(filter), ct));
+    {
+        if (string.Equals(filter.TaskView, "verification", StringComparison.OrdinalIgnoreCase) && !CanAssignFromToken())
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only Admin and AR Manager users can view Verification." });
+
+        return Ok(await _service.GetTasksAsync(Normalize(filter), ct));
+    }
 
     [HttpGet("verification")]
     public async Task<ActionResult<PagedResult<VerificationTaskRow>>> Verification([FromQuery] DenialWorkflowFilter filter, CancellationToken ct)
-        => Ok(await _service.GetVerificationAsync(Normalize(filter), ct));
+    {
+        if (!CanAssignFromToken())
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only Admin and AR Manager users can view Verification." });
+
+        return Ok(await _service.GetVerificationAsync(Normalize(filter), ct));
+    }
 
     [HttpPost("assign-insight")]
     [HttpPost("assign-by-insight")]
@@ -182,6 +197,18 @@ public sealed class DenialWorkflowController : ControllerBase
         if (labId <= 0) return BadRequest("LabId is required.");
         if (string.IsNullOrWhiteSpace(claimId)) return BadRequest("ClaimId is required.");
         return Ok(await _service.GetClaimDocumentsAsync(labId, claimId.Trim(), ct));
+    }
+
+    [HttpGet("claim-documents/{documentId:long}/download")]
+    public async Task<IActionResult> DownloadClaimDocument([FromRoute] long documentId, [FromQuery] int labId, CancellationToken ct)
+    {
+        if (labId <= 0) return BadRequest("LabId is required.");
+        var doc = await _service.GetClaimDocumentAsync(labId, documentId, ct);
+        if (doc is null || string.IsNullOrWhiteSpace(doc.FilePath) || !System.IO.File.Exists(doc.FilePath))
+            return NotFound("Document was not found.");
+
+        var stream = System.IO.File.OpenRead(doc.FilePath);
+        return File(stream, string.IsNullOrWhiteSpace(doc.ContentType) ? "application/octet-stream" : doc.ContentType, doc.OriginalFileName);
     }
 
     [HttpPost("claim-documents")]
@@ -275,6 +302,19 @@ public sealed class DenialWorkflowController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.EscalationReason)) return BadRequest("Escalation reason is required.");
         request.CreatedBy = string.IsNullOrWhiteSpace(request.CreatedBy) ? (FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "ReactWorkflow") : request.CreatedBy;
         return Ok(await _service.SaveEscalationAsync(request, ct));
+    }
+
+    [HttpPost("update-escalation")]
+    public async Task<ActionResult<DenialWorkflowResult>> UpdateEscalation(UpdateDenialEscalationRequest request, CancellationToken ct)
+    {
+        if (IsReadOnlyWorkflowRole(FirstClaim(ClaimTypes.Role, "role", "roles"))) return StatusCode(StatusCodes.Status403Forbidden, new { message = "This role cannot update escalations." });
+        if (request.LabId <= 0) return BadRequest("LabId is required.");
+        if (request.EscalationId <= 0) return BadRequest("EscalationId is required.");
+        if (string.IsNullOrWhiteSpace(request.ClaimId)) return BadRequest("ClaimId is required.");
+        if (string.IsNullOrWhiteSpace(request.EscalationReason)) return BadRequest("Escalation reason is required.");
+        request.ActionBy = string.IsNullOrWhiteSpace(request.ActionBy) ? (FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "ReactWorkflow") : request.ActionBy;
+        var rows = await _service.UpdateEscalationAsync(request, ct);
+        return Ok(new DenialWorkflowResult { Success = rows > 0, RowsAffected = rows, Message = rows > 0 ? "Escalation updated." : "Escalation update failed." });
     }
 
     [HttpPost("decide-verification")]
