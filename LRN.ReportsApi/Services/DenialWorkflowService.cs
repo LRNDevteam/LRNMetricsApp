@@ -54,6 +54,7 @@ public sealed class DenialWorkflowService : IDenialWorkflowService
     public async Task<DenialWorkflowImportResult> ImportAsync(DenialTaskImportRequest request, CancellationToken ct)
     {
         var result = new DenialWorkflowImportResult { Imported = request.Tasks.Count };
+        await _repo.EnsureClaimSupportTablesAsync(request.LabId, ct);
         var incoming = request.Tasks
             .Where(x => !string.IsNullOrWhiteSpace(x.UniqueTrackId))
             .GroupBy(x => x.UniqueTrackId.Trim(), StringComparer.OrdinalIgnoreCase)

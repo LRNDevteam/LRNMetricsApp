@@ -62,6 +62,9 @@ public sealed class SqlDenialWorkflowRepository : IDenialWorkflowRepository
 		const string sql = @"
 IF OBJECT_ID('dbo.DenialTaskBoard','U') IS NOT NULL
 BEGIN
+    IF COL_LENGTH('dbo.DenialTaskBoard','WorkFlowStatus') IS NULL
+        ALTER TABLE dbo.DenialTaskBoard ADD WorkFlowStatus nvarchar(100) NULL;
+
     IF COL_LENGTH('dbo.DenialTaskBoard','ClaimIDNormalized') IS NULL
     BEGIN
         ALTER TABLE dbo.DenialTaskBoard
@@ -118,6 +121,12 @@ END;
 
 IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL
 BEGIN
+    IF COL_LENGTH('dbo.DenialLineItem','AssignedTo') IS NULL
+        ALTER TABLE dbo.DenialLineItem ADD AssignedTo nvarchar(255) NULL;
+
+    IF COL_LENGTH('dbo.DenialLineItem','WorkFlowStatus') IS NULL
+        ALTER TABLE dbo.DenialLineItem ADD WorkFlowStatus nvarchar(100) NULL;
+
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_DenialLineItem_VisitNumber_ClaimView' AND object_id = OBJECT_ID('dbo.DenialLineItem'))
     BEGIN
         BEGIN TRY
@@ -1018,7 +1027,7 @@ SELECT
     [New] = SUM(CASE WHEN ISNULL(tca.[Status], 'New') = 'New' THEN 1 ELSE 0 END),
     Unassigned = SUM(CASE WHEN ISNULL(tca.[Status], '') = 'Unassigned' THEN 1 ELSE 0 END),
     Assigned = SUM(CASE WHEN ISNULL(tca.[Status], '') = 'Assigned' THEN 1 ELSE 0 END),
-    Closed = SUM(CASE WHEN ISNULL(tca.[Status], '') = 'Closed' THEN 1 ELSE 0 END),
+    Closed = (SELECT COUNT(1) FROM dbo.DenialClosedClaims dc WITH (NOLOCK) WHERE dc.LabId=@LabId),
     Escalated = SUM(CASE WHEN ISNULL(tca.[Status], '') IN ('Internal Escalation','External Escalation','Escalation Response') THEN 1 ELSE 0 END),
     InternalEscalation = SUM(CASE WHEN ISNULL(tca.[Status], '') = 'Internal Escalation' THEN 1 ELSE 0 END),
     ExternalEscalation = SUM(CASE WHEN ISNULL(tca.[Status], '') = 'External Escalation' THEN 1 ELSE 0 END),
@@ -1110,6 +1119,9 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
 		await EnsureDenialTaskBoardNormalizedClaimIdAsync(con, ct);
 		await EnsureClaimSupportTablesAsync(filter.LabId, ct);
 
+		if (string.Equals(NormalizeTaskView(filter.TaskView), "closed", StringComparison.OrdinalIgnoreCase))
+			return await GetClosedClaimsAsync(con, filter, ct);
+
 		var hasPatientName = await HasColumnAsync(con, "dbo.DenialLineItem", "PatientName", ct);
 		var patientNameSelect = hasPatientName
 			? "LTRIM(RTRIM(ISNULL(l.PatientName,'')))"
@@ -1187,6 +1199,30 @@ SELECT
         WHEN DATEDIFF(HOUR, ISNULL(MIN(t.CreatedOn), SYSDATETIME()), SYSDATETIME()) > 48 THEN 'Unassigned'
         ELSE 'New'
     END,
+    WorkFlowStatus = CASE
+        WHEN MAX(CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(t.WorkFlowStatus,''))),'') IS NOT NULL THEN 1 ELSE 0 END) = 1
+            THEN MAX(NULLIF(LTRIM(RTRIM(ISNULL(t.WorkFlowStatus,''))),''))
+        WHEN EXISTS (
+            SELECT 1 FROM dbo.DenialClaimEscalations e WITH (NOLOCK)
+            WHERE e.IsDeleted=0 AND e.LabId=@LabId AND e.ClaimId=cp.ClaimId
+              AND (LOWER(LTRIM(RTRIM(ISNULL(e.Status,'')))) IN ('in review','responded','response submitted','manager response')
+                   OR ISNULL(e.Comments,'') LIKE '%Manager Response:%'
+                   OR ISNULL(e.Comments,'') LIKE '%Client Response:%'
+                   OR ISNULL(e.Comments,'') LIKE '%Account Manager Response:%')
+        ) THEN 'Response Escalation'
+        WHEN EXISTS (
+            SELECT 1 FROM dbo.DenialClaimEscalations e WITH (NOLOCK)
+            WHERE e.IsDeleted=0 AND e.LabId=@LabId AND e.ClaimId=cp.ClaimId
+              AND (LOWER(LTRIM(RTRIM(ISNULL(e.EscalatedToRole,'')))) LIKE '%clientmanager%'
+                   OR LOWER(LTRIM(RTRIM(ISNULL(e.EscalatedToRole,'')))) LIKE '%accountmanager%'
+                   OR LOWER(LTRIM(RTRIM(ISNULL(e.EscalatedTo,'')))) LIKE '%client manager%'
+                   OR LOWER(LTRIM(RTRIM(ISNULL(e.EscalatedTo,'')))) LIKE '%account manager%')
+        ) OR SUM(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) = 'external escalation' THEN 1 ELSE 0 END) > 0 THEN 'External Escalation'
+        WHEN SUM(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) LIKE '%escal%' THEN 1 ELSE 0 END) > 0 THEN 'Internal Escalation'
+        WHEN COUNT(t.TaskID) > 0 AND SUM(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) IN ('closed','completed') THEN 0 ELSE 1 END) = 0 THEN 'Closed Claim'
+        WHEN SUM(CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))),'') IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 'Assigned To AR Reviewer'
+        ELSE 'New'
+    END,
     ClaimStatus = CASE
         WHEN SUM(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) LIKE '%escal%' THEN 1 ELSE 0 END) > 0 THEN 'Escalated'
         WHEN COUNT(t.TaskID) > 0 AND SUM(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) IN ('closed','completed') THEN 0 ELSE 1 END) = 0 THEN 'Closed'
@@ -1217,7 +1253,7 @@ SELECT
     AssignedTo = ISNULL(tca.AssignedTo, ''),
     [Status] = ISNULL(tca.[Status], ''),
     ClaimStatus = ISNULL(NULLIF(tca.ClaimStatus, ''), ISNULL(tca.[Status], '')),
-    WorkflowStatus = ISNULL(tca.[Status], ''),
+    WorkflowStatus = ISNULL(NULLIF(tca.WorkFlowStatus, ''), ISNULL(tca.[Status], '')),
     TaskCount = ISNULL(CONVERT(int, tca.TaskCount), 0),
     CreatedOn = tca.CreatedOn,
     InsuranceBalance = CAST(c.InsuranceBalance AS decimal(18,2))
@@ -1255,6 +1291,119 @@ DROP TABLE #TaskClaimAgg;";
 				result.Items.Add(ReadClaim(rd));
 		}
 
+		return result;
+	}
+
+	private async Task<PagedResult<ClaimLevelRow>> GetClosedClaimsAsync(SqlConnection con, DenialWorkflowFilter filter, CancellationToken ct)
+	{
+		var whereParts = new List<string> { "c.LabId=@LabId" };
+		var parameters = new Dictionary<string, object>();
+
+		if (!string.IsNullOrWhiteSpace(filter.AssignedTo))
+		{
+			whereParts.Add(TextInSql("ISNULL(c.AssignedTo,'')", "@AssignedTo"));
+			parameters["@AssignedTo"] = filter.AssignedTo.Trim();
+		}
+
+		if (!string.IsNullOrWhiteSpace(filter.Reviewer))
+		{
+			whereParts.Add(TextInSql("ISNULL(c.AssignedTo,'')", "@Reviewer"));
+			parameters["@Reviewer"] = filter.Reviewer.Trim();
+		}
+
+		if (!string.IsNullOrWhiteSpace(filter.PayerName))
+		{
+			whereParts.Add(TextInSql("ISNULL(c.PayerName,'')", "@PayerName"));
+			parameters["@PayerName"] = filter.PayerName.Trim();
+		}
+
+		if (!string.IsNullOrWhiteSpace(filter.PanelName))
+		{
+			whereParts.Add(TextInSql("ISNULL(c.PanelName,'')", "@PanelName"));
+			parameters["@PanelName"] = filter.PanelName.Trim();
+		}
+
+		if (!string.IsNullOrWhiteSpace(filter.Clinic))
+		{
+			whereParts.Add(TextLikeAnySql("ISNULL(c.ClinicName,'')", "@Clinic"));
+			parameters["@Clinic"] = filter.Clinic.Trim();
+		}
+
+		if (!string.IsNullOrWhiteSpace(filter.SalesRepname))
+		{
+			whereParts.Add(TextLikeAnySql("ISNULL(c.SalesRepname,'')", "@SalesRepname"));
+			parameters["@SalesRepname"] = filter.SalesRepname.Trim();
+		}
+
+		if (!string.IsNullOrWhiteSpace(filter.ReferringProvider))
+		{
+			whereParts.Add(TextLikeAnySql("ISNULL(c.ReferringProvider,'')", "@ReferringProvider"));
+			parameters["@ReferringProvider"] = filter.ReferringProvider.Trim();
+		}
+
+		if (filter.FromDate.HasValue)
+		{
+			whereParts.Add("CAST(c.DateOfService AS date)>=@FromDate");
+			parameters["@FromDate"] = filter.FromDate.Value.Date;
+		}
+
+		if (filter.ToDate.HasValue)
+		{
+			whereParts.Add("CAST(c.DateOfService AS date)<=@ToDate");
+			parameters["@ToDate"] = filter.ToDate.Value.Date;
+		}
+
+		if (!string.IsNullOrWhiteSpace(filter.SearchText))
+		{
+			whereParts.Add(@"(
+                ISNULL(c.ClaimId,'') LIKE @Search OR
+                ISNULL(c.PatientId,'') LIKE @Search OR
+                ISNULL(c.ClinicName,'') LIKE @Search OR
+                ISNULL(c.PayerName,'') LIKE @Search OR
+                ISNULL(c.ReferringProvider,'') LIKE @Search
+            )");
+			parameters["@Search"] = "%" + filter.SearchText.Trim() + "%";
+		}
+
+		var sql = $@"
+SELECT COUNT_BIG(1)
+FROM dbo.DenialClosedClaims c WITH (NOLOCK)
+WHERE {string.Join(" AND ", whereParts)};
+
+SELECT
+    ClaimId = ISNULL(c.ClaimId,''),
+    PayerName = ISNULL(c.PayerName,''),
+    PanelName = ISNULL(c.PanelName,''),
+    PatientName = ISNULL(c.PatientName,''),
+    PatientDOB = c.PatientDOB,
+    DateOfService = c.DateOfService,
+    ClinicName = ISNULL(c.ClinicName,''),
+    ReferringProvider = ISNULL(c.ReferringProvider,''),
+    PatientId = ISNULL(c.PatientId,''),
+    SubscriberId = ISNULL(c.SubscriberId,''),
+    SalesRepname = ISNULL(c.SalesRepname,''),
+    AssignedTo = ISNULL(c.AssignedTo,''),
+    [Status] = ISNULL(c.Status,'Closed'),
+    ClaimStatus = ISNULL(c.Status,'Closed'),
+    WorkflowStatus = ISNULL(c.WorkFlowStatus,'Closed Claim'),
+    TaskCount = c.TaskCount,
+    CreatedOn = c.ClosedOn,
+    InsuranceBalance = c.InsuranceBalance
+FROM dbo.DenialClosedClaims c WITH (NOLOCK)
+WHERE {string.Join(" AND ", whereParts)}
+ORDER BY c.ClosedOn DESC, c.ClaimId
+OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
+
+		var result = new PagedResult<ClaimLevelRow> { Page = filter.Page, PageSize = filter.PageSize };
+		await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 180 };
+		AddFilterParams(cmd, filter);
+		AddExtraParams(cmd, parameters);
+		AddPagingParams(cmd, filter);
+		await using var rd = await cmd.ExecuteReaderAsync(ct);
+		if (await rd.ReadAsync(ct))
+			result.TotalCount = rd[0] == DBNull.Value ? 0 : Convert.ToInt32(rd[0]);
+		if (await rd.NextResultAsync(ct))
+			while (await rd.ReadAsync(ct)) result.Items.Add(ReadClaim(rd));
 		return result;
 	}
 
@@ -1391,11 +1540,24 @@ ORDER BY c.ClaimId, t.TaskID;";
 UPDATE t
 SET AssignedTo=@ReviewerUserName,
     Status=CASE WHEN ISNULL(t.Status,'') IN ('','New','Open') THEN 'Pending Review' ELSE t.Status END,
+    WorkFlowStatus='Assigned To AR Reviewer',
     ReviewerUpdatedBy=@ActionBy,
     ReviewerUpdatedOn=SYSDATETIME()
 FROM dbo.DenialTaskBoard t
 JOIN #ClaimIds c ON (t.ClaimIDNormalized=c.ClaimId OR t.ClaimID=c.ClaimId OR t.ClaimID LIKE '%' + c.ClaimId)
-WHERE 1=1;";
+WHERE 1=1;
+
+IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL
+BEGIN
+    UPDATE l
+    SET AssignedTo=@ReviewerUserName,
+        WorkFlowStatus='Assigned To AR Reviewer'
+    FROM dbo.DenialLineItem l
+    JOIN #ClaimIds c ON (
+        LTRIM(RTRIM(ISNULL(l.VisitNumber,'')))=c.ClaimId
+        OR CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))), 'CLM-', ''))=c.ClaimId
+    );
+END;";
 			int rows;
 			await using (var cmd = new SqlCommand(updateSql, con, (SqlTransaction)tx) { CommandTimeout = 180 })
 			{
@@ -1572,8 +1734,15 @@ FETCH NEXT @PageSize ROWS ONLY;";
 		const string sql = @"IF EXISTS (SELECT 1 FROM dbo.DenialTaskBoard WHERE LabId=@LabId AND UniqueTrackId=@UniqueTrackId)
 UPDATE dbo.DenialTaskBoard SET RunId=@RunId, LabName=@LabName, ClaimID=@ClaimID, PatientId=@PatientId, CPTCode=@CPTCode, Units=@Units, Modifier=@Modifier, DenialCode=@DenialCode, DenialDescription=@DenialDescription, DenialClassification=@DenialClassification, ActionCode=@ActionCode, RecommendedAction=@RecommendedAction, ActionCategory=@ActionCategory, Task=@Task, Priority=@Priority, InsuranceBalance=@InsuranceBalance, SLADays=@SLADays, DueDate=@DueDate, SalesRepname=@SalesRepname, ClinicName=@ClinicName, ReferringProvider=@ReferringProvider, PayerName=@PayerName, PayerNameNormalized=@PayerNameNormalized, PayerCode=@PayerCode, PayerType=@PayerType, FirstBilledDate=@FirstBilledDate, ChargeEnteredDate=@ChargeEnteredDate, BillingProvider=@BillingProvider, PanelName=@PanelName, DateOfService=@DateOfService WHERE LabId=@LabId AND UniqueTrackId=@UniqueTrackId
 ELSE
-INSERT INTO dbo.DenialTaskBoard(TaskID,UniqueTrackId,ClaimID,PatientId,CPTCode,Units,Modifier,DenialCode,DenialDescription,DenialClassification,ActionCode,RecommendedAction,ActionCategory,Task,Priority,InsuranceBalance,IsCurrentDenial,SLADays,Status,DateOpened,DueDate,AssignedTo,LabId,LabName,RunId,CreatedOn,SalesRepname,ClinicName,ReferringProvider,PayerName,PayerNameNormalized,PayerCode,PayerType,FirstBilledDate,ChargeEnteredDate,BillingProvider,PanelName,DateOfService)
-VALUES(@TaskID,@UniqueTrackId,@ClaimID,@PatientId,@CPTCode,@Units,@Modifier,@DenialCode,@DenialDescription,@DenialClassification,@ActionCode,@RecommendedAction,@ActionCategory,@Task,@Priority,@InsuranceBalance,1,@SLADays,'New',@DateOpened,@DueDate,'',@LabId,@LabName,@RunId,SYSDATETIME(),@SalesRepname,@ClinicName,@ReferringProvider,@PayerName,@PayerNameNormalized,@PayerCode,@PayerType,@FirstBilledDate,@ChargeEnteredDate,@BillingProvider,@PanelName,@DateOfService);";
+INSERT INTO dbo.DenialTaskBoard(TaskID,UniqueTrackId,ClaimID,PatientId,CPTCode,Units,Modifier,DenialCode,DenialDescription,DenialClassification,ActionCode,RecommendedAction,ActionCategory,Task,Priority,InsuranceBalance,IsCurrentDenial,SLADays,Status,WorkFlowStatus,DateOpened,DueDate,AssignedTo,LabId,LabName,RunId,CreatedOn,SalesRepname,ClinicName,ReferringProvider,PayerName,PayerNameNormalized,PayerCode,PayerType,FirstBilledDate,ChargeEnteredDate,BillingProvider,PanelName,DateOfService)
+VALUES(@TaskID,@UniqueTrackId,@ClaimID,@PatientId,@CPTCode,@Units,@Modifier,@DenialCode,@DenialDescription,@DenialClassification,@ActionCode,@RecommendedAction,@ActionCategory,@Task,@Priority,@InsuranceBalance,1,@SLADays,'New','New',@DateOpened,@DueDate,'',@LabId,@LabName,@RunId,SYSDATETIME(),@SalesRepname,@ClinicName,@ReferringProvider,@PayerName,@PayerNameNormalized,@PayerCode,@PayerType,@FirstBilledDate,@ChargeEnteredDate,@BillingProvider,@PanelName,@DateOfService);
+
+IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL
+BEGIN
+    UPDATE dbo.DenialLineItem
+    SET WorkFlowStatus = ISNULL(NULLIF(WorkFlowStatus,''), 'New')
+    WHERE CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(VisitNumber,''))), 'CLM-', '')) = CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(@ClaimID,''))), 'CLM-', ''));
+END;";
 
 		await using var con = OpenLab(labId);
 		await con.OpenAsync(ct);
@@ -1606,12 +1775,32 @@ DELETE FROM dbo.DenialTaskBoard WHERE TaskID=@TaskID;";
 
 	public async Task<int> AssignByInsightAsync(AssignInsightRequest request, CancellationToken ct)
 	{
-		const string sql = @"UPDATE dbo.DenialTaskBoard SET AssignedTo=@ReviewerUserName, Status=CASE WHEN ISNULL(Status,'') IN ('','New') THEN 'Pending Review' ELSE Status END, ReviewerUpdatedBy=@ActionBy, ReviewerUpdatedOn=SYSDATETIME() WHERE DenialCode=@DenialCode AND ISNULL(PayerName,'')=@PayerName AND (@RunId='' OR RunId=@RunId);";
+		const string sql = @"
+DECLARE @ChangedClaims TABLE(ClaimId nvarchar(150) NOT NULL);
+
+UPDATE dbo.DenialTaskBoard
+SET AssignedTo=@ReviewerUserName,
+    Status=CASE WHEN ISNULL(Status,'') IN ('','New') THEN 'Pending Review' ELSE Status END,
+    WorkFlowStatus='Assigned To AR Reviewer',
+    ReviewerUpdatedBy=@ActionBy,
+    ReviewerUpdatedOn=SYSDATETIME()
+OUTPUT CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(INSERTED.ClaimID,''))), 'CLM-', '')) INTO @ChangedClaims(ClaimId)
+WHERE DenialCode=@DenialCode AND ISNULL(PayerName,'')=@PayerName AND (@RunId='' OR RunId=@RunId);
+
+IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL
+BEGIN
+    UPDATE l
+    SET AssignedTo=@ReviewerUserName,
+        WorkFlowStatus='Assigned To AR Reviewer'
+    FROM dbo.DenialLineItem l
+    JOIN @ChangedClaims c ON CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))), 'CLM-', ''))=c.ClaimId;
+END;";
 		await using var con = OpenLab(request.LabId); await con.OpenAsync(ct); await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 180 }; cmd.Parameters.AddWithValue("@LabId", request.LabId); cmd.Parameters.AddWithValue("@ReviewerUserName", request.ReviewerUserName); cmd.Parameters.AddWithValue("@ActionBy", request.ActionBy); cmd.Parameters.AddWithValue("@DenialCode", request.DenialCode); cmd.Parameters.AddWithValue("@PayerName", request.PayerName); cmd.Parameters.AddWithValue("@RunId", request.RunId ?? string.Empty); return await cmd.ExecuteNonQueryAsync(ct);
 	}
 
 	public async Task<int> UpdateTaskAsync(UpdateTaskRequest request, bool isClosed, bool isDuplicate, CancellationToken ct)
 	{
+		await EnsureClaimSupportTablesAsync(request.LabId, ct);
 		if (isDuplicate)
 		{
 			var task = (await GetTasksAsync(new DenialWorkflowFilter { LabId = request.LabId, SearchText = request.TaskId, Page = 1, PageSize = 1 }, ct)).Items.FirstOrDefault();
@@ -1619,15 +1808,87 @@ DELETE FROM dbo.DenialTaskBoard WHERE TaskID=@TaskID;";
 			await MoveActiveToVerificationAsync(task, request.TaskId, request.Comments, ct);
 			return 1;
 		}
-		const string sql = @"UPDATE dbo.DenialTaskBoard SET Status=@Status, ReviewerComments=@Comments, ReviewerUpdatedBy=@ActionBy, ReviewerUpdatedOn=SYSDATETIME(), DateCompleted=CASE WHEN @Status IN ('Closed','Completed') THEN CONVERT(date,GETDATE()) ELSE DateCompleted END WHERE TaskID=@TaskID;";
-		await using var con = OpenLab(request.LabId); await con.OpenAsync(ct); await using var cmd = new SqlCommand(sql, con); cmd.Parameters.AddWithValue("@LabId", request.LabId); cmd.Parameters.AddWithValue("@TaskID", request.TaskId); cmd.Parameters.AddWithValue("@Status", request.Status); cmd.Parameters.AddWithValue("@Comments", request.Comments ?? string.Empty); cmd.Parameters.AddWithValue("@ActionBy", request.ActionBy ?? string.Empty); return await cmd.ExecuteNonQueryAsync(ct);
+		const string sql = @"
+DECLARE @Changed TABLE(TaskID nvarchar(100), ClaimId nvarchar(150), OldWorkFlowStatus nvarchar(100), NewWorkFlowStatus nvarchar(100), OldAssignedTo nvarchar(255), NewAssignedTo nvarchar(255));
+
+UPDATE dbo.DenialTaskBoard
+SET Status=@Status,
+    WorkFlowStatus=CASE WHEN @IsClosed=1 THEN 'Closed Claim' ELSE ISNULL(NULLIF(WorkFlowStatus,''), 'Assigned To AR Reviewer') END,
+    ReviewerComments=@Comments,
+    ReviewerUpdatedBy=@ActionBy,
+    ReviewerUpdatedOn=SYSDATETIME(),
+    DateCompleted=CASE WHEN @IsClosed=1 THEN CONVERT(date,GETDATE()) ELSE DateCompleted END
+OUTPUT INSERTED.TaskID, CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(INSERTED.ClaimID,''))), 'CLM-', '')), DELETED.WorkFlowStatus, INSERTED.WorkFlowStatus, DELETED.AssignedTo, INSERTED.AssignedTo
+INTO @Changed(TaskID, ClaimId, OldWorkFlowStatus, NewWorkFlowStatus, OldAssignedTo, NewAssignedTo)
+WHERE TaskID=@TaskID;
+
+IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL
+BEGIN
+    UPDATE l
+    SET WorkFlowStatus = CASE WHEN @IsClosed=1 THEN 'Closed Claim' ELSE ISNULL(NULLIF(l.WorkFlowStatus,''), 'Assigned To AR Reviewer') END
+    FROM dbo.DenialLineItem l
+    JOIN @Changed c ON CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))), 'CLM-', ''))=c.ClaimId;
+END;
+
+IF @IsClosed=1
+BEGIN
+    ;WITH ClosedClaim AS
+    (
+        SELECT
+            LabId = @LabId,
+            ClaimId = c.ClaimId,
+            PayerName = MAX(LTRIM(RTRIM(ISNULL(l.PayerName,'')))),
+            PanelName = MAX(LTRIM(RTRIM(ISNULL(l.PanelName,'')))),
+            PatientName = CAST('' AS nvarchar(255)),
+            PatientDOB = MAX(l.PatientDOB),
+            PatientId = MAX(LTRIM(RTRIM(ISNULL(l.PatientID,'')))),
+            SubscriberId = CAST('' AS nvarchar(100)),
+            ClinicName = MAX(LTRIM(RTRIM(ISNULL(l.ClinicName,'')))),
+            SalesRepname = MAX(LTRIM(RTRIM(ISNULL(l.SalesRepname,'')))),
+            ReferringProvider = MAX(LTRIM(RTRIM(ISNULL(l.ReferringProvider,'')))),
+            DateOfService = MAX(l.DateOfService),
+            AssignedTo = MAX(NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))),'')),
+            TaskCount = COUNT(DISTINCT t.TaskID),
+            InsuranceBalance = SUM(ISNULL(l.InsuranceBalance,0))
+        FROM @Changed c
+        LEFT JOIN dbo.DenialLineItem l ON CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))), 'CLM-', ''))=c.ClaimId
+        LEFT JOIN dbo.DenialTaskBoard t ON CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(t.ClaimID,''))), 'CLM-', ''))=c.ClaimId
+        WHERE NOT EXISTS (
+            SELECT 1 FROM dbo.DenialTaskBoard openTask
+            WHERE CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(openTask.ClaimID,''))), 'CLM-', ''))=c.ClaimId
+              AND LOWER(LTRIM(RTRIM(ISNULL(openTask.Status,'')))) NOT IN ('closed','completed')
+        )
+        GROUP BY c.ClaimId
+    )
+    MERGE dbo.DenialClosedClaims AS target
+    USING ClosedClaim AS source
+       ON target.LabId=source.LabId AND target.ClaimId=source.ClaimId
+    WHEN MATCHED THEN UPDATE SET
+        PayerName=source.PayerName, PanelName=source.PanelName, PatientName=source.PatientName, PatientDOB=source.PatientDOB,
+        PatientId=source.PatientId, SubscriberId=source.SubscriberId, ClinicName=source.ClinicName, SalesRepname=source.SalesRepname,
+        ReferringProvider=source.ReferringProvider, DateOfService=source.DateOfService, AssignedTo=source.AssignedTo,
+        Status='Closed', WorkFlowStatus='Closed Claim', TaskCount=source.TaskCount, InsuranceBalance=source.InsuranceBalance,
+        ClosedBy=@ActionBy, LastUpdatedOn=SYSUTCDATETIME()
+    WHEN NOT MATCHED THEN
+        INSERT(LabId,ClaimId,PayerName,PanelName,PatientName,PatientDOB,PatientId,SubscriberId,ClinicName,SalesRepname,ReferringProvider,DateOfService,AssignedTo,Status,WorkFlowStatus,TaskCount,InsuranceBalance,ClosedBy)
+        VALUES(source.LabId,source.ClaimId,source.PayerName,source.PanelName,source.PatientName,source.PatientDOB,source.PatientId,source.SubscriberId,source.ClinicName,source.SalesRepname,source.ReferringProvider,source.DateOfService,source.AssignedTo,'Closed','Closed Claim',source.TaskCount,source.InsuranceBalance,@ActionBy);
+
+    INSERT INTO dbo.DenialClosedClaimsHistory(ClosedClaimId,LabId,ClaimId,ActionType,OldWorkFlowStatus,NewWorkFlowStatus,OldAssignedTo,NewAssignedTo,Comments,ActionBy)
+    SELECT dc.ClosedClaimId,@LabId,c.ClaimId,'Closed',c.OldWorkFlowStatus,c.NewWorkFlowStatus,c.OldAssignedTo,c.NewAssignedTo,@Comments,@ActionBy
+    FROM @Changed c
+    JOIN dbo.DenialClosedClaims dc ON dc.LabId=@LabId AND dc.ClaimId=c.ClaimId;
+END;
+
+SELECT COUNT(1) FROM @Changed;";
+		await using var con = OpenLab(request.LabId); await con.OpenAsync(ct); await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 180 }; cmd.Parameters.AddWithValue("@LabId", request.LabId); cmd.Parameters.AddWithValue("@TaskID", request.TaskId); cmd.Parameters.AddWithValue("@Status", request.Status); cmd.Parameters.AddWithValue("@Comments", request.Comments ?? string.Empty); cmd.Parameters.AddWithValue("@ActionBy", request.ActionBy ?? string.Empty); cmd.Parameters.AddWithValue("@IsClosed", isClosed); var scalar = await cmd.ExecuteScalarAsync(ct); return scalar == DBNull.Value || scalar is null ? 0 : Convert.ToInt32(scalar);
 	}
 
 	public async Task<int> DecideVerificationAsync(VerificationDecisionRequest request, bool isClosed, CancellationToken ct)
 	{
+		await EnsureClaimSupportTablesAsync(request.LabId, ct);
 		var sql = request.IsValidDenial
-			? @"INSERT INTO dbo.DenialTaskBoard(TaskID,UniqueTrackId,ClaimID,PatientId,CPTCode,DenialCode,DenialDescription,DenialClassification,ActionCode,RecommendedAction,ActionCategory,Task,Priority,InsuranceBalance,IsCurrentDenial,SLADays,Status,DateOpened,DueDate,DateCompleted,DaysRemaining,SLAStatus,AssignedTo,LabId,LabName,RunId,CreatedOn,SalesRepname,ClinicName,ReferringProvider,PayerName,PayerNameNormalized,PayerCode,PayerType,FirstBilledDate,ChargeEnteredDate,BillingProvider,PanelName,DateOfService,ReviewerComments,ReviewerUpdatedOn,ReviewerUpdatedBy)
-SELECT TaskID,UniqueTrackId,ClaimID,PatientId,CPTCode,DenialCode,DenialDescription,DenialClassification,ActionCode,RecommendedAction,ActionCategory,Task,Priority,InsuranceBalance,1,SLADays,CASE WHEN @Status='' THEN 'Pending Review' ELSE @Status END,DateOpened,DueDate,NULL,NULL,SLAStatus,AssignedTo,LabId,LabName,RunId,SYSDATETIME(),SalesRepname,ClinicName,ReferringProvider,PayerName,PayerNameNormalized,PayerCode,PayerType,FirstBilledDate,ChargeEnteredDate,BillingProvider,PanelName,DateOfService,@Comments,SYSDATETIME(),@ActionBy FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;
+			? @"INSERT INTO dbo.DenialTaskBoard(TaskID,UniqueTrackId,ClaimID,PatientId,CPTCode,DenialCode,DenialDescription,DenialClassification,ActionCode,RecommendedAction,ActionCategory,Task,Priority,InsuranceBalance,IsCurrentDenial,SLADays,Status,WorkFlowStatus,DateOpened,DueDate,DateCompleted,DaysRemaining,SLAStatus,AssignedTo,LabId,LabName,RunId,CreatedOn,SalesRepname,ClinicName,ReferringProvider,PayerName,PayerNameNormalized,PayerCode,PayerType,FirstBilledDate,ChargeEnteredDate,BillingProvider,PanelName,DateOfService,ReviewerComments,ReviewerUpdatedOn,ReviewerUpdatedBy)
+SELECT TaskID,UniqueTrackId,ClaimID,PatientId,CPTCode,DenialCode,DenialDescription,DenialClassification,ActionCode,RecommendedAction,ActionCategory,Task,Priority,InsuranceBalance,1,SLADays,CASE WHEN @Status='' THEN 'Pending Review' ELSE @Status END,CASE WHEN NULLIF(AssignedTo,'') IS NULL THEN 'New' ELSE 'Assigned To AR Reviewer' END,DateOpened,DueDate,NULL,NULL,SLAStatus,AssignedTo,LabId,LabName,RunId,SYSDATETIME(),SalesRepname,ClinicName,ReferringProvider,PayerName,PayerNameNormalized,PayerCode,PayerType,FirstBilledDate,ChargeEnteredDate,BillingProvider,PanelName,DateOfService,@Comments,SYSDATETIME(),@ActionBy FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;
 DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
 			: @"UPDATE dbo.DenialVerificationTask SET VerificationStatus='Closed', VerificationComments=@Comments, VerifiedOn=SYSDATETIME(), VerifiedBy=@ActionBy WHERE VerificationId=@VerificationId; DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;";
 		await using var con = OpenLab(request.LabId); await con.OpenAsync(ct); await using var cmd = new SqlCommand(sql, con); cmd.Parameters.AddWithValue("@LabId", request.LabId); cmd.Parameters.AddWithValue("@VerificationId", request.VerificationId); cmd.Parameters.AddWithValue("@Status", request.Status ?? string.Empty); cmd.Parameters.AddWithValue("@Comments", request.Comments ?? string.Empty); cmd.Parameters.AddWithValue("@ActionBy", request.ActionBy ?? string.Empty); return await cmd.ExecuteNonQueryAsync(ct);
@@ -2279,11 +2540,64 @@ BEGIN
 
 END;
 
+IF OBJECT_ID('dbo.DenialClosedClaims','U') IS NULL
+BEGIN
+    CREATE TABLE dbo.DenialClosedClaims
+    (
+        ClosedClaimId bigint IDENTITY(1,1) NOT NULL CONSTRAINT PK_DenialClosedClaims PRIMARY KEY,
+        LabId int NOT NULL,
+        ClaimId nvarchar(150) NOT NULL,
+        PayerName nvarchar(256) NULL,
+        PanelName nvarchar(256) NULL,
+        PatientName nvarchar(255) NULL,
+        PatientDOB date NULL,
+        PatientId nvarchar(100) NULL,
+        SubscriberId nvarchar(100) NULL,
+        ClinicName nvarchar(256) NULL,
+        SalesRepname nvarchar(256) NULL,
+        ReferringProvider nvarchar(256) NULL,
+        DateOfService date NULL,
+        AssignedTo nvarchar(255) NULL,
+        Status nvarchar(100) NOT NULL CONSTRAINT DF_DenialClosedClaims_Status DEFAULT 'Closed',
+        WorkFlowStatus nvarchar(100) NOT NULL CONSTRAINT DF_DenialClosedClaims_WorkFlowStatus DEFAULT 'Closed Claim',
+        TaskCount int NOT NULL CONSTRAINT DF_DenialClosedClaims_TaskCount DEFAULT 0,
+        InsuranceBalance decimal(18,2) NOT NULL CONSTRAINT DF_DenialClosedClaims_InsuranceBalance DEFAULT 0,
+        ClosedOn datetime2(0) NOT NULL CONSTRAINT DF_DenialClosedClaims_ClosedOn DEFAULT SYSUTCDATETIME(),
+        ClosedBy nvarchar(256) NULL,
+        LastUpdatedOn datetime2(0) NOT NULL CONSTRAINT DF_DenialClosedClaims_LastUpdatedOn DEFAULT SYSUTCDATETIME()
+    );
+    CREATE UNIQUE INDEX UX_DenialClosedClaims_Lab_Claim ON dbo.DenialClosedClaims(LabId, ClaimId);
+    CREATE INDEX IX_DenialClosedClaims_Lab_ClosedOn ON dbo.DenialClosedClaims(LabId, ClosedOn DESC) INCLUDE(ClaimId, AssignedTo, WorkFlowStatus, InsuranceBalance);
+END;
+
+IF OBJECT_ID('dbo.DenialClosedClaimsHistory','U') IS NULL
+BEGIN
+    CREATE TABLE dbo.DenialClosedClaimsHistory
+    (
+        HistoryId bigint IDENTITY(1,1) NOT NULL CONSTRAINT PK_DenialClosedClaimsHistory PRIMARY KEY,
+        ClosedClaimId bigint NULL,
+        LabId int NOT NULL,
+        ClaimId nvarchar(150) NOT NULL,
+        ActionType nvarchar(100) NOT NULL,
+        OldWorkFlowStatus nvarchar(100) NULL,
+        NewWorkFlowStatus nvarchar(100) NULL,
+        OldAssignedTo nvarchar(255) NULL,
+        NewAssignedTo nvarchar(255) NULL,
+        Comments nvarchar(max) NULL,
+        ActionBy nvarchar(256) NULL,
+        ActionDate datetime2(0) NOT NULL CONSTRAINT DF_DenialClosedClaimsHistory_ActionDate DEFAULT SYSUTCDATETIME()
+    );
+    CREATE INDEX IX_DenialClosedClaimsHistory_Lab_Claim ON dbo.DenialClosedClaimsHistory(LabId, ClaimId, ActionDate DESC);
+END;
+
 IF COL_LENGTH('dbo.DenialClaimNotes','Status') IS NULL ALTER TABLE dbo.DenialClaimNotes ADD Status nvarchar(50) NULL;
 IF COL_LENGTH('dbo.DenialClaimNotes','NextFollowUpDate') IS NULL ALTER TABLE dbo.DenialClaimNotes ADD NextFollowUpDate date NULL;
 IF COL_LENGTH('dbo.DenialClaimEscalations','EscalatedTo') IS NULL ALTER TABLE dbo.DenialClaimEscalations ADD EscalatedTo nvarchar(256) NULL;
 IF COL_LENGTH('dbo.DenialClaimEscalations','EscalatedToRole') IS NULL ALTER TABLE dbo.DenialClaimEscalations ADD EscalatedToRole nvarchar(100) NULL;
 IF COL_LENGTH('dbo.DenialClaimEscalations','NextFollowUpDate') IS NULL ALTER TABLE dbo.DenialClaimEscalations ADD NextFollowUpDate date NULL;
+IF OBJECT_ID('dbo.DenialTaskBoard','U') IS NOT NULL AND COL_LENGTH('dbo.DenialTaskBoard','WorkFlowStatus') IS NULL ALTER TABLE dbo.DenialTaskBoard ADD WorkFlowStatus nvarchar(100) NULL;
+IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL AND COL_LENGTH('dbo.DenialLineItem','AssignedTo') IS NULL ALTER TABLE dbo.DenialLineItem ADD AssignedTo nvarchar(255) NULL;
+IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL AND COL_LENGTH('dbo.DenialLineItem','WorkFlowStatus') IS NULL ALTER TABLE dbo.DenialLineItem ADD WorkFlowStatus nvarchar(100) NULL;
 ";
 		await using var con = OpenLab(labId);
 		await con.OpenAsync(ct);
@@ -2761,23 +3075,85 @@ UPDATE dbo.DenialClaimEscalations
 SET Status=@EscalationStatus, Comments = CONCAT(ISNULL(Comments,''), CHAR(13)+CHAR(10), 'Manager Response: ', @ResponseNote)
 WHERE IsDeleted=0 AND LabId=@LabId AND EscalationId=@EscalationId;
 
-DECLARE @Changed TABLE(TaskID nvarchar(100), UniqueTrackId nvarchar(100), LabId int, RunId nvarchar(100), OldStatus nvarchar(100), NewStatus nvarchar(100), OldAssignedTo nvarchar(256), NewAssignedTo nvarchar(256));
+DECLARE @Changed TABLE(TaskID nvarchar(100), UniqueTrackId nvarchar(100), ClaimId nvarchar(150), LabId int, RunId nvarchar(100), OldStatus nvarchar(100), NewStatus nvarchar(100), OldAssignedTo nvarchar(256), NewAssignedTo nvarchar(256));
 
 UPDATE t
 SET Status=@TaskStatus,
     AssignedTo = CASE WHEN @ReassignTo<>'' THEN @ReassignTo WHEN @ResolutionAction='rework' THEN '' ELSE t.AssignedTo END,
+    WorkFlowStatus = CASE WHEN @TaskStatus IN ('Closed','Completed') THEN 'Closed Claim' ELSE 'Response Escalation' END,
     ReviewerComments = CONCAT(ISNULL(NULLIF(t.ReviewerComments,''),''), CASE WHEN NULLIF(t.ReviewerComments,'') IS NULL THEN '' ELSE CHAR(13)+CHAR(10) END, 'Manager Response: ', @ResponseNote),
     ReviewerUpdatedBy=@ActionBy,
     ReviewerUpdatedOn=SYSDATETIME(),
     DateCompleted = CASE WHEN @TaskStatus IN ('Closed','Completed') THEN CONVERT(date, GETDATE()) ELSE DateCompleted END
-OUTPUT INSERTED.TaskID, INSERTED.UniqueTrackId, ISNULL(INSERTED.LabId,@LabId), INSERTED.RunId, DELETED.Status, INSERTED.Status, DELETED.AssignedTo, INSERTED.AssignedTo
-INTO @Changed(TaskID,UniqueTrackId,LabId,RunId,OldStatus,NewStatus,OldAssignedTo,NewAssignedTo)
+OUTPUT INSERTED.TaskID, INSERTED.UniqueTrackId, CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(INSERTED.ClaimID,''))), 'CLM-', '')), ISNULL(INSERTED.LabId,@LabId), INSERTED.RunId, DELETED.Status, INSERTED.Status, DELETED.AssignedTo, INSERTED.AssignedTo
+INTO @Changed(TaskID,UniqueTrackId,ClaimId,LabId,RunId,OldStatus,NewStatus,OldAssignedTo,NewAssignedTo)
 FROM dbo.DenialTaskBoard t
 WHERE (LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))) = LTRIM(RTRIM(ISNULL(@TargetClaimId,'')))
        OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) = LTRIM(RTRIM(ISNULL(@TargetClaimId,'')))
        OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) LIKE '%' + LTRIM(RTRIM(ISNULL(@TargetClaimId,''))))
   AND (@Level='Claim' OR @TargetTaskId='' OR ISNULL(t.TaskID,'')=@TargetTaskId)
   AND (@Level='Claim' OR @TargetCptCode='' OR ISNULL(t.CPTCode,'')=@TargetCptCode);
+
+DECLARE @TaskRows int = @@ROWCOUNT;
+
+IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL
+BEGIN
+    UPDATE l
+    SET AssignedTo = CASE WHEN @ReassignTo<>'' THEN @ReassignTo WHEN @ResolutionAction='rework' THEN '' ELSE l.AssignedTo END,
+        WorkFlowStatus = CASE WHEN @TaskStatus IN ('Closed','Completed') THEN 'Closed Claim' ELSE 'Response Escalation' END
+    FROM dbo.DenialLineItem l
+    JOIN (SELECT DISTINCT ClaimId FROM @Changed) c
+      ON CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))), 'CLM-', ''))=c.ClaimId;
+END;
+
+IF @TaskStatus IN ('Closed','Completed')
+BEGIN
+    ;WITH ClosedClaim AS
+    (
+        SELECT
+            LabId = @LabId,
+            ClaimId = c.ClaimId,
+            PayerName = MAX(LTRIM(RTRIM(ISNULL(l.PayerName,'')))),
+            PanelName = MAX(LTRIM(RTRIM(ISNULL(l.PanelName,'')))),
+            PatientName = CAST('' AS nvarchar(255)),
+            PatientDOB = MAX(l.PatientDOB),
+            PatientId = MAX(LTRIM(RTRIM(ISNULL(l.PatientID,'')))),
+            SubscriberId = CAST('' AS nvarchar(100)),
+            ClinicName = MAX(LTRIM(RTRIM(ISNULL(l.ClinicName,'')))),
+            SalesRepname = MAX(LTRIM(RTRIM(ISNULL(l.SalesRepname,'')))),
+            ReferringProvider = MAX(LTRIM(RTRIM(ISNULL(l.ReferringProvider,'')))),
+            DateOfService = MAX(l.DateOfService),
+            AssignedTo = MAX(NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))),'')),
+            TaskCount = COUNT(DISTINCT t.TaskID),
+            InsuranceBalance = SUM(ISNULL(l.InsuranceBalance,0))
+        FROM (SELECT DISTINCT ClaimId FROM @Changed) c
+        LEFT JOIN dbo.DenialLineItem l ON CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))), 'CLM-', ''))=c.ClaimId
+        LEFT JOIN dbo.DenialTaskBoard t ON CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(t.ClaimID,''))), 'CLM-', ''))=c.ClaimId
+        WHERE NOT EXISTS (
+            SELECT 1 FROM dbo.DenialTaskBoard openTask
+            WHERE CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(openTask.ClaimID,''))), 'CLM-', ''))=c.ClaimId
+              AND LOWER(LTRIM(RTRIM(ISNULL(openTask.Status,'')))) NOT IN ('closed','completed')
+        )
+        GROUP BY c.ClaimId
+    )
+    MERGE dbo.DenialClosedClaims AS target
+    USING ClosedClaim AS source
+       ON target.LabId=source.LabId AND target.ClaimId=source.ClaimId
+    WHEN MATCHED THEN UPDATE SET
+        PayerName=source.PayerName, PanelName=source.PanelName, PatientName=source.PatientName, PatientDOB=source.PatientDOB,
+        PatientId=source.PatientId, SubscriberId=source.SubscriberId, ClinicName=source.ClinicName, SalesRepname=source.SalesRepname,
+        ReferringProvider=source.ReferringProvider, DateOfService=source.DateOfService, AssignedTo=source.AssignedTo,
+        Status='Closed', WorkFlowStatus='Closed Claim', TaskCount=source.TaskCount, InsuranceBalance=source.InsuranceBalance,
+        ClosedBy=@ActionBy, LastUpdatedOn=SYSUTCDATETIME()
+    WHEN NOT MATCHED THEN
+        INSERT(LabId,ClaimId,PayerName,PanelName,PatientName,PatientDOB,PatientId,SubscriberId,ClinicName,SalesRepname,ReferringProvider,DateOfService,AssignedTo,Status,WorkFlowStatus,TaskCount,InsuranceBalance,ClosedBy)
+        VALUES(source.LabId,source.ClaimId,source.PayerName,source.PanelName,source.PatientName,source.PatientDOB,source.PatientId,source.SubscriberId,source.ClinicName,source.SalesRepname,source.ReferringProvider,source.DateOfService,source.AssignedTo,'Closed','Closed Claim',source.TaskCount,source.InsuranceBalance,@ActionBy);
+
+    INSERT INTO dbo.DenialClosedClaimsHistory(ClosedClaimId,LabId,ClaimId,ActionType,OldWorkFlowStatus,NewWorkFlowStatus,OldAssignedTo,NewAssignedTo,Comments,ActionBy)
+    SELECT dc.ClosedClaimId,@LabId,c.ClaimId,'ClosedByEscalationResponse','Response Escalation','Closed Claim',c.OldAssignedTo,c.NewAssignedTo,@ResponseNote,@ActionBy
+    FROM @Changed c
+    JOIN dbo.DenialClosedClaims dc ON dc.LabId=@LabId AND dc.ClaimId=c.ClaimId;
+END;
 
 IF OBJECT_ID('dbo.DenialTaskHistory','U') IS NOT NULL
 BEGIN
@@ -2786,7 +3162,7 @@ BEGIN
     FROM @Changed;
 END
 
-SELECT @@ROWCOUNT;";
+SELECT @TaskRows;";
 		await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 180 };
 		cmd.Parameters.AddWithValue("@LabId", request.LabId);
 		cmd.Parameters.AddWithValue("@EscalationId", request.EscalationId);
@@ -2858,6 +3234,7 @@ DECLARE @Changed TABLE
 UPDATE t
 SET Status = @TaskStatus,
     AssignedTo = CASE WHEN @EscalationAssignee <> '' THEN @EscalationAssignee ELSE t.AssignedTo END,
+    WorkFlowStatus = CASE WHEN @TaskStatus='External Escalation' THEN 'External Escalation' ELSE 'Internal Escalation' END,
     ReviewerComments = CONCAT(ISNULL(NULLIF(t.ReviewerComments,''),''), CASE WHEN NULLIF(t.ReviewerComments,'') IS NULL THEN '' ELSE CHAR(13)+CHAR(10) END, @UpdateComment),
     ReviewerUpdatedBy = @ActionBy,
     ReviewerUpdatedOn = SYSDATETIME()
@@ -2878,6 +3255,15 @@ WHERE @Rows > 0
        OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) LIKE '%' + LTRIM(RTRIM(ISNULL(@TargetClaimId,''))))
   AND (@Level='Claim' OR @TargetTaskId='' OR ISNULL(t.TaskID,'')=@TargetTaskId)
   AND (@Level='Claim' OR @TargetCptCode='' OR ISNULL(t.CPTCode,'')=@TargetCptCode);
+
+IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL
+BEGIN
+    UPDATE l
+    SET AssignedTo = CASE WHEN @EscalationAssignee <> '' THEN @EscalationAssignee ELSE l.AssignedTo END,
+        WorkFlowStatus = CASE WHEN @TaskStatus='External Escalation' THEN 'External Escalation' ELSE 'Internal Escalation' END
+    FROM dbo.DenialLineItem l
+    WHERE CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))), 'CLM-', '')) = CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(@TargetClaimId,''))), 'CLM-', ''));
+END;
 
 IF OBJECT_ID('dbo.DenialTaskHistory','U') IS NOT NULL
 BEGIN
@@ -2966,6 +3352,7 @@ DECLARE @Changed TABLE
 UPDATE t
 SET Status = @TaskStatus,
     AssignedTo = CASE WHEN @EscalationAssignee <> '' THEN @EscalationAssignee ELSE t.AssignedTo END,
+    WorkFlowStatus = CASE WHEN @TaskStatus='External Escalation' THEN 'External Escalation' ELSE 'Internal Escalation' END,
     ReviewerUpdatedBy = @CreatedBy,
     ReviewerUpdatedOn = SYSDATETIME()
 OUTPUT
@@ -2984,6 +3371,15 @@ WHERE (LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))) = @ClaimId
        OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) LIKE '%' + @ClaimId)
   AND (@TaskId = '' OR ISNULL(t.TaskID,'') = @TaskId)
   AND (@CptCode = '' OR ISNULL(t.CPTCode,'') = @CptCode);
+
+IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL
+BEGIN
+    UPDATE l
+    SET AssignedTo = CASE WHEN @EscalationAssignee <> '' THEN @EscalationAssignee ELSE l.AssignedTo END,
+        WorkFlowStatus = CASE WHEN @TaskStatus='External Escalation' THEN 'External Escalation' ELSE 'Internal Escalation' END
+    FROM dbo.DenialLineItem l
+    WHERE CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))), 'CLM-', '')) = CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(@ClaimId,''))), 'CLM-', ''));
+END;
 
 IF OBJECT_ID('dbo.DenialTaskHistory','U') IS NOT NULL
 BEGIN
