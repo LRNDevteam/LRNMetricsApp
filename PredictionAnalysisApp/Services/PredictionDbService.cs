@@ -12,6 +12,10 @@ namespace PredictionAnalysis.Services;
 public class PredictionDbService
 {
     private readonly string _connectionString;
+    private readonly int    _chunkSize;
+
+    /// <summary>Fallback chunk size when caller passes 0 / negative.</summary>
+    public const int DefaultChunkSize = 25_000;
 
     // Maps each source Excel header (exact text) to its TVP column name.
     // Keys are case-insensitive; unknown headers are silently ignored.
@@ -114,9 +118,10 @@ public class PredictionDbService
             ["DaystoPost"]                                      = "DaysToPost",
         };
 
-    public PredictionDbService(string connectionString)
+    public PredictionDbService(string connectionString, int chunkSize = DefaultChunkSize)
     {
         _connectionString = connectionString;
+        _chunkSize        = chunkSize > 0 ? chunkSize : DefaultChunkSize;
     }
 
     // ?? Public entry point ????????????????????????????????????????????????????
@@ -134,16 +139,16 @@ public class PredictionDbService
             using var conn = new SqlConnection(_connectionString);
             conn.Open();
 
-            using var cmd = new SqlCommand(
-                "SELECT COUNT(1) FROM dbo.PayerValidationFileLog WHERE SourceFullPath = @SourceFullPath",
-                conn)
+            using var cmd = new SqlCommand("dbo.usp_PV_IsFileLogged", conn)
             {
+                CommandType    = CommandType.StoredProcedure,
                 CommandTimeout = 30
             };
             cmd.Parameters.AddWithValue("@SourceFullPath", sourceFilePath);
 
-            var count = (int)cmd.ExecuteScalar()!;
-            if (count > 0)
+            var result   = cmd.ExecuteScalar();
+            var isLogged = result is bool b && b;
+            if (isLogged)
             {
                 AppLogger.LogDb($"[{labName}] File already in PayerValidationFileLog — skipping DB insert: {Path.GetFileName(sourceFilePath)}");
                 return true;
@@ -154,6 +159,49 @@ public class PredictionDbService
         {
             AppLogger.LogDbWarn($"[{labName}] FileAlreadyLogged check failed — will proceed with insert. {ex.Message}");
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Removes the <c>dbo.PayerValidationFileLog</c> entry and all associated
+    /// <c>dbo.PayerValidationReport</c> rows for the given file path so the
+    /// file can be re-inserted from scratch on the same run.
+    /// Called by <c>Program.cs</c> when <c>DataRefresh = true</c> in the lab JSON.
+    /// Any exception is caught and logged; the caller then proceeds with the insert.
+    /// </summary>
+    public void DeleteFileLogEntry(string sourceFilePath, string labName)
+    {
+        try
+        {
+            AppLogger.LogDb($"[{labName}] DataRefresh=true — deleting existing FileLog + Report rows for: {Path.GetFileName(sourceFilePath)}");
+
+            using var conn = new SqlConnection(_connectionString);
+            conn.Open();
+
+            // Delete report rows first (FK child), then the file-log row (parent).
+            using (var cmd = new SqlCommand(
+                "DELETE r FROM dbo.PayerValidationReport r " +
+                "INNER JOIN dbo.PayerValidationFileLog f ON r.FileLogId = f.FileLogId " +
+                "WHERE f.SourceFullPath = @SourceFullPath", conn)
+            { CommandTimeout = 300 })
+            {
+                cmd.Parameters.AddWithValue("@SourceFullPath", sourceFilePath);
+                var deleted = cmd.ExecuteNonQuery();
+                AppLogger.LogDb($"[{labName}]   Deleted {deleted:N0} rows from PayerValidationReport.");
+            }
+
+            using (var cmd = new SqlCommand(
+                "DELETE FROM dbo.PayerValidationFileLog WHERE SourceFullPath = @SourceFullPath", conn)
+            { CommandTimeout = 30 })
+            {
+                cmd.Parameters.AddWithValue("@SourceFullPath", sourceFilePath);
+                var deleted = cmd.ExecuteNonQuery();
+                AppLogger.LogDb($"[{labName}]   Deleted {deleted:N0} row(s) from PayerValidationFileLog.");
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLogger.LogDbError($"[{labName}] DeleteFileLogEntry failed — will still attempt re-insert", ex);
         }
     }
 
@@ -244,22 +292,104 @@ public class PredictionDbService
         string            labName,
         string            sourceFullPath)
     {
-        var tvp = BuildTvp(records, fileLogId, runId, weekFolder, labName, sourceFullPath);
+        if (records.Count == 0)
+        {
+            AppLogger.LogDb($"[{labName}] BulkInsertRows: 0 records ? nothing to insert.");
+            return;
+        }
 
+        // One-time header diagnostics (use first record so we don't log per chunk).
+        LogHeaderDiagnostics(records[0], labName);
+
+        var totalChunks = (records.Count + _chunkSize - 1) / _chunkSize;
+        AppLogger.LogDb(
+            $"[{labName}] Inserting {records.Count:N0} rows in {totalChunks} chunk(s) of up to {_chunkSize:N0}...");
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        int chunkNo = 0;
+        long rowsSent = 0;
+
+        // Reuse one open connection across chunks; one SP call per chunk.
         using var conn = new SqlConnection(_connectionString);
         conn.Open();
 
-        using var cmd = new SqlCommand("dbo.usp_BulkInsertPayerValidationReport", conn)
+        for (int offset = 0; offset < records.Count; offset += _chunkSize)
         {
-            CommandType    = CommandType.StoredProcedure,
-            CommandTimeout = 300
-        };
+            chunkNo++;
+            var size  = Math.Min(_chunkSize, records.Count - offset);
+            var slice = records.GetRange(offset, size);
 
-        var tvpParam = cmd.Parameters.AddWithValue("@Rows", tvp);
-        tvpParam.SqlDbType = SqlDbType.Structured;
-        tvpParam.TypeName  = "dbo.TVP_PayerValidationReport";
+            var chunkSw = System.Diagnostics.Stopwatch.StartNew();
+            var tvp = BuildTvp(slice, fileLogId, runId, weekFolder, labName, sourceFullPath);
 
-        cmd.ExecuteNonQuery();
+            using var cmd = new SqlCommand("dbo.usp_BulkInsertPayerValidationReport", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 300
+            };
+
+            var tvpParam = cmd.Parameters.AddWithValue("@Rows", tvp);
+            tvpParam.SqlDbType = SqlDbType.Structured;
+            tvpParam.TypeName  = "dbo.TVP_PayerValidationReport";
+
+            cmd.ExecuteNonQuery();
+
+            rowsSent += size;
+            chunkSw.Stop();
+            AppLogger.LogDb(
+                $"[{labName}]   chunk {chunkNo}/{totalChunks}: {size:N0} rows in {chunkSw.Elapsed.TotalSeconds:F1}s " +
+                $"(running total {rowsSent:N0}/{records.Count:N0})");
+        }
+
+        sw.Stop();
+        AppLogger.LogDb(
+            $"[{labName}] BulkInsertRows complete: {records.Count:N0} rows in {sw.Elapsed.TotalSeconds:F1}s " +
+            $"({totalChunks} chunk(s), {_chunkSize:N0} rows/chunk).");
+    }
+
+    /// <summary>
+    /// Runs <c>dbo.usp_RefreshAllPredictionAggregates</c> to populate the PV_* snapshot
+    /// tables that the LabMetricsDashboard reads from. Safe to call even when the
+    /// snapshot tables / SP are not yet deployed ? failures are caught and logged
+    /// so the prediction pipeline is never blocked.
+    /// </summary>
+    public void RefreshAggregatesForRun(string labName, string? runId, DateTime? weekStartDate = null)
+    {
+        if (string.IsNullOrWhiteSpace(runId))
+        {
+            AppLogger.LogDbWarn($"[{labName}] Aggregate refresh skipped ? RunId is blank.");
+            return;
+        }
+
+        try
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            AppLogger.LogDb($"[{labName}] Refreshing PV_* aggregate snapshots for RunId={runId}...");
+
+            using var conn = new SqlConnection(_connectionString);
+            conn.Open();
+
+            using var cmd = new SqlCommand("dbo.usp_RefreshAllPredictionAggregates", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 600
+            };
+            cmd.Parameters.AddWithValue("@RunId", runId);
+            cmd.Parameters.AddWithValue("@WeekStartDate",
+                (object?)weekStartDate?.Date ?? DBNull.Value);
+
+            cmd.ExecuteNonQuery();
+            sw.Stop();
+
+            AppLogger.LogDb(
+                $"[{labName}] Aggregate snapshot refresh complete in {sw.Elapsed.TotalSeconds:F1}s.");
+        }
+        catch (Exception ex)
+        {
+            // Never block the prediction pipeline because aggregate refresh failed.
+            AppLogger.LogDbError(
+                $"[{labName}] Aggregate snapshot refresh failed (dashboard will fall back to live SPs)", ex);
+        }
     }
 
     private static DataTable BuildTvp(
@@ -274,35 +404,6 @@ public class PredictionDbService
 
         if (records.Count == 0)
             return dt;
-
-        // ?? One-time header diagnostics ???????????????????????????????????????
-        var firstRaw = records[0].RawColumns;
-
-        var unmappedSourceHeaders = firstRaw.Keys
-            .Where(h => !HeaderToColumn.ContainsKey(h))
-            .OrderBy(h => h)
-            .ToList();
-
-        if (unmappedSourceHeaders.Count > 0)
-        {
-            AppLogger.LogDbWarn($"[{labName}] {unmappedSourceHeaders.Count} source column(s) have no DB mapping — skipped:");
-            foreach (var h in unmappedSourceHeaders)
-                AppLogger.LogDbWarn($"[{labName}]   (no mapping) \"{h}\"");
-        }
-
-        var missingMappedHeaders = HeaderToColumn.Keys
-            .Where(h => !firstRaw.ContainsKey(h))
-            .OrderBy(h => h)
-            .ToList();
-
-        if (missingMappedHeaders.Count > 0)
-        {
-            AppLogger.LogDbWarn($"[{labName}] {missingMappedHeaders.Count} expected column(s) not found in source file — will insert NULL:");
-            foreach (var h in missingMappedHeaders)
-                AppLogger.LogDbWarn($"[{labName}]   (not in file) \"{h}\" ? {HeaderToColumn[h]}");
-        }
-
-        AppLogger.LogDb($"[{labName}] Building {records.Count} TVP rows...");
 
         foreach (var rec in records)
         {
@@ -328,6 +429,39 @@ public class PredictionDbService
         }
 
         return dt;
+    }
+
+    /// <summary>
+    /// One-time per-file diagnostic logging of unmapped / missing source headers.
+    /// Called once before the chunk loop so we do not spam the log per chunk.
+    /// </summary>
+    private static void LogHeaderDiagnostics(ClaimRecord first, string labName)
+    {
+        var firstRaw = first.RawColumns;
+
+        var unmappedSourceHeaders = firstRaw.Keys
+            .Where(h => !HeaderToColumn.ContainsKey(h))
+            .OrderBy(h => h)
+            .ToList();
+
+        if (unmappedSourceHeaders.Count > 0)
+        {
+            AppLogger.LogDbWarn($"[{labName}] {unmappedSourceHeaders.Count} source column(s) have no DB mapping — skipped:");
+            foreach (var h in unmappedSourceHeaders)
+                AppLogger.LogDbWarn($"[{labName}]   (no mapping) \"{h}\"");
+        }
+
+        var missingMappedHeaders = HeaderToColumn.Keys
+            .Where(h => !firstRaw.ContainsKey(h))
+            .OrderBy(h => h)
+            .ToList();
+
+        if (missingMappedHeaders.Count > 0)
+        {
+            AppLogger.LogDbWarn($"[{labName}] {missingMappedHeaders.Count} expected column(s) not found in source file — will insert NULL:");
+            foreach (var h in missingMappedHeaders)
+                AppLogger.LogDbWarn($"[{labName}]   (not in file) ? {HeaderToColumn[h]}: \"{h}\"");
+        }
     }
 
     private static DataTable CreateTvpSchema()

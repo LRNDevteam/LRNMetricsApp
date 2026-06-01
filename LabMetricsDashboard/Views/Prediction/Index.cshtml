@@ -338,17 +338,136 @@
 {
     @if (!Model.PredictionAvailable)
     {
-        <div class="d-flex flex-column align-items-center justify-content-center py-5 my-3"
-             style="background:#fff;border-radius:16px;box-shadow:0 2px 14px rgba(0,0,0,.08);min-height:320px">
-            <div style="font-size:3.5rem;line-height:1">&#128683;</div>
-            <h4 class="fw-bold mt-3 mb-1" style="color:#1565c0">Prediction Not Available</h4>
-            <p class="text-muted mb-3" style="font-size:.92rem;max-width:420px;text-align:center">
-                Prediction Analysis is currently not available for <strong>@Model.SelectedLab</strong>.<br/>
-                Please contact your administrator for more details.
-            </p>
-            <a asp-controller="Home" asp-action="Index" class="btn btn-outline-primary btn-sm">
-                &#8592; Back to Home
-            </a>
+        var errMsg    = Model.ErrorMessage ?? string.Empty;
+        bool isMissing  = errMsg.Contains("does not exist", StringComparison.OrdinalIgnoreCase)
+                       || errMsg.Contains("missing",        StringComparison.OrdinalIgnoreCase)
+                       || errMsg.Contains("could not find", StringComparison.OrdinalIgnoreCase)
+                       || errMsg.Contains("empty",          StringComparison.OrdinalIgnoreCase);
+        bool isConnErr  = errMsg.Contains("A network-related", StringComparison.OrdinalIgnoreCase)
+                       || errMsg.Contains("Login failed",       StringComparison.OrdinalIgnoreCase)
+                       || errMsg.Contains("connection",         StringComparison.OrdinalIgnoreCase);
+        bool isNoData   = errMsg.Contains("is empty",         StringComparison.OrdinalIgnoreCase)
+                       || errMsg.Contains("not yet available", StringComparison.OrdinalIgnoreCase);
+
+        string icon  = isConnErr ? "??" : isNoData ? "??" : isMissing ? "???" : "??";
+        string title = isConnErr ? "Database Connection Error"
+                     : isNoData  ? "No Data Yet"
+                     : isMissing ? "Database Setup Required"
+                     :             "Prediction Not Available";
+
+        var steps = new List<(string Step, string Body)>();
+        if (isMissing)
+        {
+            steps.Add(("1", "Connect to this lab's SQL Server database."));
+            steps.Add(("2", "Run <code>01_CreateTables.sql</code> to create the base tables."));
+            steps.Add(("3", "Run <code>02_CreateStoredProcedures.sql</code> to create the core SPs."));
+            steps.Add(("4", "Run <code>03_PredictionAggregatedSPs.sql</code> to create the analysis SPs."));
+            steps.Add(("5", "Run <code>04_PredictionAggregateTables.sql</code> &amp; <code>05_PredictionAggregateRefreshSPs.sql</code> for snapshot tables."));
+            steps.Add(("6", "Run <code>06_PredictionReadSPs.sql</code> to create the read SPs."));
+            steps.Add(("7", "Run PredictionAnalysisApp to load source data into the database."));
+        }
+        else if (isNoData)
+        {
+            steps.Add(("1", "Ensure PredictionAnalysisApp is configured for <strong>@Model.SelectedLab</strong>."));
+            steps.Add(("2", "Set <code>\"EnableDatabaseInsert\": true</code> in the lab JSON config."));
+            steps.Add(("3", "Place the latest source Excel file in the lab's Input folder."));
+            steps.Add(("4", "Run PredictionAnalysisApp to load data, then reload this page."));
+        }
+        else if (isConnErr)
+        {
+            steps.Add(("1", "Verify the <code>DbConnectionString</code> in the lab's dashboard config."));
+            steps.Add(("2", "Check that the SQL Server instance is reachable from the web server."));
+            steps.Add(("3", "Confirm firewall rules and SQL Server login credentials."));
+        }
+
+        <div class="card border-0 shadow-sm my-4" style="border-radius:16px;overflow:hidden">
+            <!-- Header bar -->
+            <div class="card-header text-white py-3 px-4"
+                 style="background:linear-gradient(135deg,#0d1b2a,#1565c0)">
+                <div class="d-flex align-items-center gap-3">
+                    <span style="font-size:2rem;line-height:1">@Html.Raw(icon)</span>
+                    <div>
+                        <div class="fw-bold" style="font-size:1.05rem">@title</div>
+                        <div style="font-size:.75rem;opacity:.8">
+                            Prediction Analysis &mdash; @Model.SelectedLab
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card-body px-4 py-4">
+
+                @* Error detail message *@
+                @if (!string.IsNullOrWhiteSpace(errMsg))
+                {
+                    <div class="alert alert-warning d-flex gap-2 align-items-start mb-4"
+                         style="font-size:.85rem;border-left:4px solid #f59e0b;border-radius:8px">
+                        <span style="font-size:1.1rem;margin-top:.05rem">&#9888;&#65039;</span>
+                        <div>
+                            <div class="fw-semibold mb-1">Details</div>
+                            <div>@errMsg</div>
+                        </div>
+                    </div>
+                }
+
+                @* Resolution steps *@
+                @if (steps.Count > 0)
+                {
+                    <div class="fw-semibold mb-3" style="font-size:.85rem;color:#0d1b2a;letter-spacing:.04em">
+                        &#9989; RESOLUTION STEPS
+                    </div>
+                    <ol class="mb-4 ps-3" style="font-size:.87rem;color:#374151;line-height:1.9">
+                        @foreach (var (_, body) in steps)
+                        {
+                            <li>@Html.Raw(body)</li>
+                        }
+                    </ol>
+                }
+
+                @* Script file reference strip *@
+                @if (isMissing)
+                {
+                    <div class="rounded p-3 mb-4"
+                         style="background:#f0f9ff;border:1px solid #bae6fd;font-size:.78rem">
+                        <div class="fw-semibold mb-2" style="color:#0369a1">
+                            &#128196; SQL Scripts (PredictionAnalysisApp\Database\)
+                        </div>
+                        <div class="d-flex flex-wrap gap-2">
+                            @foreach (var script in new[]
+                            {
+                                "01_CreateTables.sql",
+                                "02_CreateStoredProcedures.sql",
+                                "03_PredictionAggregatedSPs.sql",
+                                "04_PredictionAggregateTables.sql",
+                                "05_PredictionAggregateRefreshSPs.sql",
+                                "06_PredictionReadSPs.sql"
+                            })
+                            {
+                                <span class="badge"
+                                      style="background:#e0f2fe;color:#0369a1;
+                                             font-weight:600;font-size:.74rem;
+                                             border:1px solid #bae6fd;padding:.3em .65em">
+                                    @script
+                                </span>
+                            }
+                        </div>
+                    </div>
+                }
+
+                @* Action buttons *@
+                <div class="d-flex gap-2 flex-wrap">
+                    <a asp-controller="Prediction" asp-action="Index"
+                       asp-route-lab="@Model.SelectedLab"
+                       class="btn btn-primary btn-sm">
+                        &#8635; Retry
+                    </a>
+                    <a asp-controller="Home" asp-action="Index"
+                       class="btn btn-outline-secondary btn-sm">
+                        &#8592; Back to Home
+                    </a>
+                </div>
+
+            </div>
         </div>
         return;
     }

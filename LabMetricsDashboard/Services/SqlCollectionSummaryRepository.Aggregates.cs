@@ -130,6 +130,25 @@ public sealed partial class SqlCollectionSummaryRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
 
+        // Labs with a dedicated read SP route through it with all-null filters
+        // (@HasFilter = 0 inside the SP â†’ snapshot path).
+        if (string.Equals(prefix, "NW",  StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase))
+        {
+            return await GetCollectionMonthlyVolumeViaSpAsync(
+                connectionString,
+                prefix,
+                filterPayerNames: null,
+                filterPanelNames: null,
+                filterFirstBillFrom: null,
+                filterFirstBillTo: null,
+                filterDosFrom: null,
+                filterDosTo: null,
+                filterCheckDateFrom: null,
+                filterCheckDateTo: null,
+                ct).ConfigureAwait(false);
+        }
+
         var sql = $"""
             SELECT PanelName, PayerName, PayerRank, BillYear, BillMonth, NoOfClaims, InsurancePayment
             FROM   dbo.{prefix}_CS_MonthlyClaimVolume
@@ -168,6 +187,26 @@ public sealed partial class SqlCollectionSummaryRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
 
+        // Labs that have a dedicated read SP route through it with all-null filters
+        // (@HasFilter = 0 inside the SP â†’ snapshot path). This guarantees that the
+        // week labels and anchor date are always driven by SP logic, not duplicated here.
+        if (string.Equals(prefix, "NW",  StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase))
+        {
+            return await GetCollectionWeeklyVolumeViaSpAsync(
+                connectionString,
+                prefix,
+                filterPayerNames: null,
+                filterPanelNames: null,
+                filterFirstBillFrom: null,
+                filterFirstBillTo: null,
+                filterDosFrom: null,
+                filterDosTo: null,
+                filterCheckDateFrom: null,
+                filterCheckDateTo: null,
+                ct).ConfigureAwait(false);
+        }
+
         var sql = $"""
             SELECT PanelName, PayerName, PayerRank, WeekKey, WeekStart, WeekEnd, NoOfClaims, InsurancePayment
             FROM   dbo.{prefix}_CS_WeeklyClaimVolume
@@ -202,18 +241,38 @@ public sealed partial class SqlCollectionSummaryRepository
 
     // ?? Panel Averages (flat per panel + payer) ???????????????????????????????
     // Schema for {prefix}_CS_PanelAverages:
-    //   NoOfClaims, TotalCharges, CarrierPayment,
+    //   ClaimCount, TotalCharges, CarrierPayment,
     //   FullyPaidCount, FullyPaidAmount, Days30Count/Amount, Days60Count/Amount
     //   (Adjudicated columns present only on labs that opted in, e.g. NW)
     public async Task<PanelAveragesResult> GetPanelAveragesFromAggregatesAsync(
         string connectionString, string prefix, CancellationToken ct = default)
-        => await ReadPanelAveragesAsync(
-            connectionString, $"{prefix}_CS_PanelAverages", prefix, "PanelAverages",
-            claimCountCol: "NoOfClaims",
-            carrierPayCol: "CarrierPayment",
-            days30CountCol: "Days30Count",  days30AmtCol: "Days30Amount",
-            days60CountCol: "Days60Count",  days60AmtCol: "Days60Amount",
-            ct);
+    {
+        // Try the SP first; fall back to direct snapshot table read if SP is not yet deployed.
+        try
+        {
+            return await GetPanelAveragesViaSpAsync(
+                connectionString,
+                $"dbo.usp_Get{prefix}_CS_PanelAverages",
+                filterPayerNames: null, filterPanelNames: null,
+                filterFirstBillFrom: null, filterFirstBillTo: null,
+                filterDosFrom: null, filterDosTo: null,
+                filterCheckDateFrom: null, filterCheckDateTo: null,
+                ct).ConfigureAwait(false);
+        }
+        catch (SqlException ex) when (ex.Number == 2812) // SP not yet deployed
+        {
+            _logger.LogWarning(
+                "CollectionSummary PanelAverages({Prefix}): SP not found ({Sp}), falling back to direct table read.",
+                prefix, $"usp_Get{prefix}_CS_PanelAverages");
+            return await ReadPanelAveragesAsync(
+                connectionString, $"{prefix}_CS_PanelAverages", prefix, "PanelAverages",
+                claimCountCol: "NoOfClaims",
+                carrierPayCol: "CarrierPayment",
+                days30CountCol: "Days30Count", days30AmtCol: "Days30Amount",
+                days60CountCol: "Days60Count", days60AmtCol: "Days60Amount",
+                ct);
+        }
+    }
 
     // Schema for {prefix}_CS_AvgPayments (different column names!):
     //   ClaimCount, TotalCharges, InsurancePayment (carrier),
@@ -221,13 +280,33 @@ public sealed partial class SqlCollectionSummaryRepository
     //   Over30Count/Amount, Over60Count/Amount
     public async Task<PanelAveragesResult> GetAvgPaymentsFromAggregatesAsync(
         string connectionString, string prefix, CancellationToken ct = default)
-        => await ReadPanelAveragesAsync(
-            connectionString, $"{prefix}_CS_AvgPayments", prefix, "AvgPayments",
-            claimCountCol: "ClaimCount",
-            carrierPayCol: "InsurancePayment",
-            days30CountCol: "Over30Count", days30AmtCol: "Over30Amount",
-            days60CountCol: "Over60Count", days60AmtCol: "Over60Amount",
-            ct);
+    {
+        // Try the SP first; fall back to direct snapshot table read if SP is not yet deployed.
+        try
+        {
+            return await GetAvgPaymentsViaSpAsync(
+                connectionString,
+                $"dbo.usp_Get{prefix}_CS_AvgPayments",
+                filterPayerNames: null, filterPanelNames: null,
+                filterFirstBillFrom: null, filterFirstBillTo: null,
+                filterDosFrom: null, filterDosTo: null,
+                filterCheckDateFrom: null, filterCheckDateTo: null,
+                ct).ConfigureAwait(false);
+        }
+        catch (SqlException ex) when (ex.Number == 2812) // SP not yet deployed
+        {
+            _logger.LogWarning(
+                "CollectionSummary AvgPayments({Prefix}): SP not found ({Sp}), falling back to direct table read.",
+                prefix, $"usp_Get{prefix}_CS_AvgPayments");
+            return await ReadPanelAveragesAsync(
+                connectionString, $"{prefix}_CS_AvgPayments", prefix, "AvgPayments",
+                claimCountCol: "ClaimCount",
+                carrierPayCol: "InsurancePayment",
+                days30CountCol: "Over30Count", days30AmtCol: "Over30Amount",
+                days60CountCol: "Over60Count", days60AmtCol: "Over60Amount",
+                ct);
+        }
+    }
 
     /// <summary>
     /// Reads a panel-averages style snapshot table and rolls up per-panel totals.
@@ -353,58 +432,53 @@ public sealed partial class SqlCollectionSummaryRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
 
-        // VisitCount or ClaimCount column name varies across labs (NW uses VisitCount, others ClaimCount).
+        // Prefer the read SP. Fall back to the snapshot table when the SP has not been
+        // deployed yet; this keeps localhost and partially-updated lab DBs usable.
+        try
+        {
+            return await GetInsuranceAgingViaSpAsync(
+                connectionString,
+                $"dbo.usp_Get{prefix}_CS_InsuranceVsAging",
+                filterPayerNames: null, filterPanelNames: null,
+                filterFirstBillFrom: null, filterFirstBillTo: null,
+                filterDosFrom: null, filterDosTo: null,
+                filterCheckDateFrom: null, filterCheckDateTo: null,
+                ct).ConfigureAwait(false);
+        }
+        catch (SqlException ex) when (ex.Number == 2812) // stored procedure not found
+        {
+            _logger.LogWarning(
+                "CollectionSummary InsuranceVsAging({Prefix}): read SP not found, falling back to {Table} snapshot table.",
+                prefix, $"{prefix}_CS_InsuranceVsAging");
+            return await GetInsuranceAgingFromSnapshotTableAsync(connectionString, prefix, ct).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<InsuranceAgingResult> GetInsuranceAgingFromSnapshotTableAsync(
+        string connectionString, string prefix, CancellationToken ct)
+    {
         var sql = $"""
-            SELECT PayerName, AgingBucket,
-                   ISNULL(TRY_CAST(NULLIF(CAST(NULL AS INT), 0) AS INT),
-                          ISNULL(SUM(0), 0)) AS _unused,
-                   COALESCE(NULLIF(0, 1), 0) AS _unused2
-            FROM   dbo.{prefix}_CS_InsuranceVsAging
-            WHERE  1 = 0;
-            """;
-        // Try VisitCount first; fall back to ClaimCount if missing.
-        var sqlVisit = $"""
-            SELECT PayerName, AgingBucket, VisitCount AS Cnt, InsuranceBalance
+            SELECT PayerName, AgingBucket, VisitCount, InsuranceBalance
             FROM   dbo.{prefix}_CS_InsuranceVsAging
             ORDER  BY PayerName, AgingBucket;
             """;
-        var sqlClaim = $"""
-            SELECT PayerName, AgingBucket, ClaimCount AS Cnt, InsuranceBalance
-            FROM   dbo.{prefix}_CS_InsuranceVsAging
-            ORDER  BY PayerName, AgingBucket;
-            """;
-        _ = sql; // silence unused
 
         var perPayer = new Dictionary<string, Dictionary<string, (int Cnt, decimal Bal)>>(StringComparer.OrdinalIgnoreCase);
-
         var sw = Stopwatch.StartNew();
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 60 };
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+        {
+            var payer = r.GetString(r.GetOrdinal("PayerName"));
+            var bucket = NormalizeAgingBucketForSnapshot(r.GetString(r.GetOrdinal("AgingBucket")));
+            var cnt = Convert.ToInt32(r.GetValue(r.GetOrdinal("VisitCount")));
+            var bal = r.GetDecimal(r.GetOrdinal("InsuranceBalance"));
 
-        async Task ReadAsync(string s)
-        {
-            await using var cmd = new SqlCommand(s, conn) { CommandTimeout = 60 };
-            await using var r = await cmd.ExecuteReaderAsync(ct);
-            while (await r.ReadAsync(ct))
-            {
-                var payer  = r.GetString(r.GetOrdinal("PayerName"));
-                var bucket = r.GetString(r.GetOrdinal("AgingBucket"));
-                var cnt    = r.GetInt32 (r.GetOrdinal("Cnt"));
-                var bal    = r.GetDecimal(r.GetOrdinal("InsuranceBalance"));
-                if (!perPayer.TryGetValue(payer, out var dict))
-                    perPayer[payer] = dict = new Dictionary<string, (int, decimal)>(StringComparer.OrdinalIgnoreCase);
-                dict[bucket] = (cnt, bal);
-            }
-        }
-
-        try
-        {
-            await ReadAsync(sqlVisit);
-        }
-        catch (SqlException ex) when (ex.Number == 207)
-        {
-            perPayer.Clear();
-            await ReadAsync(sqlClaim);
+            if (!perPayer.TryGetValue(payer, out var dict))
+                perPayer[payer] = dict = new Dictionary<string, (int, decimal)>(StringComparer.OrdinalIgnoreCase);
+            dict[bucket] = (cnt, bal);
         }
 
         static (int c, decimal b) Get(Dictionary<string, (int, decimal)> d, string key)
@@ -413,12 +487,10 @@ public sealed partial class SqlCollectionSummaryRepository
         var rows = perPayer.Select(kv =>
         {
             var (cur, bCur) = Get(kv.Value, "Current");
-            var (b30, x30)  = Get(kv.Value, "30 Days");
-            var (b60, x60)  = Get(kv.Value, "60 Days");
-            var (b90, x90)  = Get(kv.Value, "90 Days");
-            var (b120, x120)= Get(kv.Value, "120+ Days");
-            var totalC = cur + b30 + b60 + b90 + b120;
-            var totalB = bCur + x30 + x60 + x90 + x120;
+            var (b30, x30) = Get(kv.Value, "30 Days");
+            var (b60, x60) = Get(kv.Value, "60 Days");
+            var (b90, x90) = Get(kv.Value, "90 Days");
+            var (b120, x120) = Get(kv.Value, "120+ Days");
             return new InsuranceAgingRow(
                 PayerName: kv.Key,
                 ClaimsCurrent: cur, BalanceCurrent: bCur,
@@ -426,15 +498,25 @@ public sealed partial class SqlCollectionSummaryRepository
                 Claims60: b60, Balance60: x60,
                 Claims90: b90, Balance90: x90,
                 Claims120: b120, Balance120: x120,
-                ClaimsTotal: totalC, BalanceTotal: totalB);
-        })
-        .OrderByDescending(r => r.BalanceTotal)
-        .ToList();
+                ClaimsTotal: cur + b30 + b60 + b90 + b120,
+                BalanceTotal: bCur + x30 + x60 + x90 + x120);
+        }).OrderByDescending(row => row.BalanceTotal).ToList();
 
-        _logger.LogInformation("CollectionSummary[Aggregate] InsuranceVsAging({Prefix}): rows={N}, {Ms}ms",
+        _logger.LogInformation("CollectionSummary[Aggregate] InsuranceVsAging({Prefix}) snapshot fallback: rows={N}, {Ms}ms",
             prefix, rows.Count, sw.ElapsedMilliseconds);
+
         return new InsuranceAgingResult(rows);
     }
+
+    private static string NormalizeAgingBucketForSnapshot(string bucket) => bucket.Trim() switch
+    {
+        "30+" or "30" or "30 Days" => "30 Days",
+        "60+" or "60" or "60 Days" => "60 Days",
+        "90+" or "90" or "90 Days" => "90 Days",
+        "120+" or "120" or "120+ Days" => "120+ Days",
+        "Current" => "Current",
+        var value => value
+    };
 
     // ?? Panel vs Payment ??????????????????????????????????????????????????????
     public async Task<PanelPaymentResult> GetPanelPaymentFromAggregatesAsync(
@@ -443,16 +525,40 @@ public sealed partial class SqlCollectionSummaryRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
 
-        // The snapshot table may include monthly grain (PayerName/BillYear/BillMonth) for some labs;
-        // we sum across all of those to produce the same flat panel-level row the live SP returns.
-        var sql = $"""
-            SELECT PanelName,
-                   SUM(NoOfClaims)       AS NoOfClaims,
-                   SUM(InsurancePayment) AS InsurancePayments
-            FROM   dbo.{prefix}_CS_PanelVsPayment
-            GROUP  BY PanelName
-            ORDER  BY SUM(InsurancePayment) DESC;
-            """;
+        if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase))
+            return await GetPanelPaymentViaSpAsync(
+                connectionString,
+                "dbo.usp_GetNW_CS_PanelVsPayment",
+                filterPayerNames: null, filterPanelNames: null,
+                filterFirstBillFrom: null, filterFirstBillTo: null,
+                filterDosFrom: null, filterDosTo: null,
+                filterCheckDateFrom: null, filterCheckDateTo: null,
+                ct).ConfigureAwait(false);
+
+        // Elixir/Cove/BT/Cert snapshots store per-month rows (PanelName, BilledYear, BilledMonth) so the UI
+        // can pivot Year/Month. Other labs keep a flat panel-level row.
+        bool hasMonthlyGrain = string.Equals(prefix, "Elix", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(prefix, "Cove", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(prefix, "BT",   StringComparison.OrdinalIgnoreCase)
+            || string.Equals(prefix, "Cert", StringComparison.OrdinalIgnoreCase);
+        string sql = hasMonthlyGrain
+            ? $"""
+                SELECT PanelName,
+                       BilledYear,
+                       BilledMonth,
+                       NoOfClaims,
+                       InsurancePayment AS InsurancePayments
+                FROM   dbo.{prefix}_CS_PanelVsPayment
+                ORDER  BY PanelName, BilledYear, BilledMonth;
+                """
+            : $"""
+                SELECT PanelName,
+                       SUM(NoOfClaims)       AS NoOfClaims,
+                       SUM(InsurancePayment) AS InsurancePayments
+                FROM   dbo.{prefix}_CS_PanelVsPayment
+                GROUP  BY PanelName
+                ORDER  BY SUM(InsurancePayment) DESC;
+                """;
 
         var rows = new List<PanelPaymentRow>();
         var sw = Stopwatch.StartNew();
@@ -465,7 +571,9 @@ public sealed partial class SqlCollectionSummaryRepository
             rows.Add(new PanelPaymentRow(
                 PanelName:         r.GetString(r.GetOrdinal("PanelName")),
                 NoOfClaims:        r.GetInt32 (r.GetOrdinal("NoOfClaims")),
-                InsurancePayments: r.GetDecimal(r.GetOrdinal("InsurancePayments"))));
+                InsurancePayments: r.GetDecimal(r.GetOrdinal("InsurancePayments")),
+                BillYear:          hasMonthlyGrain ? r.GetInt32(r.GetOrdinal("BilledYear")) : 0,
+                BillMonth:         hasMonthlyGrain ? Convert.ToInt32(r.GetValue(r.GetOrdinal("BilledMonth"))) : 0));
         }
 
         _logger.LogInformation("CollectionSummary[Aggregate] PanelVsPayment({Prefix}): rows={N}, {Ms}ms",
@@ -473,12 +581,22 @@ public sealed partial class SqlCollectionSummaryRepository
         return new PanelPaymentResult(rows);
     }
 
-    // ?? Rep vs Payment (one row per rep × year × month) ??????????????????????
+    // ?? Rep vs Payment (one row per rep ï¿½ year ï¿½ month) ??????????????????????
     public async Task<RepPaymentResult> GetRepPaymentFromAggregatesAsync(
         string connectionString, string prefix, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
+
+        if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase))
+            return await GetRepPaymentViaSpAsync(
+                connectionString,
+                "dbo.usp_GetNW_CS_RepVsPayment",
+                filterPayerNames: null, filterPanelNames: null,
+                filterFirstBillFrom: null, filterFirstBillTo: null,
+                filterDosFrom: null, filterDosTo: null,
+                filterCheckDateFrom: null, filterCheckDateTo: null,
+                ct).ConfigureAwait(false);
 
         var sql = $"""
             SELECT SalesRepName, CheckYear, CheckMonth, NoOfClaims, InsurancePayment
@@ -514,8 +632,24 @@ public sealed partial class SqlCollectionSummaryRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
 
-        // NW uses NoOfPaidClaims; other labs may use PanelGroupCount. COALESCE handles both
-        // by trying NoOfPaidClaims first and falling back when the column is missing.
+        if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase))
+            return await GetInsurancePaymentPctViaSpAsync(
+                connectionString,
+                "dbo.usp_GetNW_CS_InsuranceVsPaymentPct",
+                filterPayerNames: null, filterPanelNames: null,
+                filterFirstBillFrom: null, filterFirstBillTo: null,
+                filterDosFrom: null, filterDosTo: null,
+                filterCheckDateFrom: null, filterCheckDateTo: null,
+                ct).ConfigureAwait(false);
+
+        // Newer Northwest snapshots include month grain and additional count fields.
+        // Older lab snapshots use either NoOfPaidClaims or PanelGroupCount as the count column.
+        var sqlNew = $"""
+            SELECT SummaryId, PayerName, PanelGroupCount, NoOfPaidClaims, InsurancePayment,
+                   PaymentPct, RefreshedAt, BillYear, BillMonth
+            FROM   dbo.{prefix}_CS_InsuranceVsPaymentPct
+            ORDER  BY BillYear DESC, BillMonth DESC, InsurancePayment DESC;
+            """;
         var sqlA = $"""
             SELECT PayerName, NoOfPaidClaims AS NoOfClaims, InsurancePayment, PaymentPct
             FROM   dbo.{prefix}_CS_InsuranceVsPaymentPct
@@ -538,37 +672,226 @@ public sealed partial class SqlCollectionSummaryRepository
             await using var r = await cmd.ExecuteReaderAsync(ct);
             while (await r.ReadAsync(ct))
             {
-                var payer    = r.GetString (r.GetOrdinal("PayerName"));
-                var claims   = r.GetInt32  (r.GetOrdinal("NoOfClaims"));
-                var insPay   = r.GetDecimal(r.GetOrdinal("InsurancePayment"));
-                var pct      = r.GetDecimal(r.GetOrdinal("PaymentPct"));
+                static int? GetNullableInt(SqlDataReader reader, string columnName)
+                {
+                    var ordinal = reader.GetOrdinal(columnName);
+                    return reader.IsDBNull(ordinal) ? null : Convert.ToInt32(reader.GetValue(ordinal));
+                }
+
+                static DateTime? GetNullableDateTime(SqlDataReader reader, string columnName)
+                {
+                    var ordinal = reader.GetOrdinal(columnName);
+                    return reader.IsDBNull(ordinal) ? null : reader.GetDateTime(ordinal);
+                }
+
+                var payer  = r.GetString(r.GetOrdinal("PayerName"));
+                var insPay = r.GetDecimal(r.GetOrdinal("InsurancePayment"));
+                var pct    = r.GetDecimal(r.GetOrdinal("PaymentPct"));
+
+                int? summaryId = null;
+                int? panelGroupCount = null;
+                int? noOfPaidClaims = null;
+                DateTime? refreshedAt = null;
+                int? billYear = null;
+                int? billMonth = null;
+                int claims;
+
+                if (ColumnExists(r, "NoOfClaims"))
+                {
+                    claims = r.GetInt32(r.GetOrdinal("NoOfClaims"));
+                }
+                else
+                {
+                    summaryId = GetNullableInt(r, "SummaryId");
+                    panelGroupCount = GetNullableInt(r, "PanelGroupCount");
+                    noOfPaidClaims = GetNullableInt(r, "NoOfPaidClaims");
+                    refreshedAt = GetNullableDateTime(r, "RefreshedAt");
+                    billYear = GetNullableInt(r, "BillYear");
+                    billMonth = GetNullableInt(r, "BillMonth");
+                    claims = noOfPaidClaims ?? panelGroupCount ?? 0;
+                }
 
                 // Snapshot stores PaymentPct directly. Back-compute Paid Charge so the
                 // record's derived PaymentPct property equals the snapshot value.
                 decimal paidChg = pct > 0 ? Math.Round(insPay * 100m / pct, 2) : 0m;
 
                 rows.Add(new InsurancePaymentPctRow(
+                    SummaryId:            summaryId,
                     PayerName:            payer,
                     TotalClaims:          claims,
                     InsurancePayments:    insPay,
                     PaidInsurancePayment: insPay,
-                    PaidChargeAmount:     paidChg));
+                    PaidChargeAmount:     paidChg,
+                    PanelGroupCount:      panelGroupCount,
+                    NoOfPaidClaims:       noOfPaidClaims,
+                    RefreshedAt:          refreshedAt,
+                    BillYear:             billYear,
+                    BillMonth:            billMonth,
+                    SnapshotPaymentPct:   pct));
             }
+        }
+
+        static bool ColumnExists(SqlDataReader reader, string columnName)
+        {
+            for (var i = 0; i < reader.FieldCount; i++)
+            {
+                if (string.Equals(reader.GetName(i), columnName, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            return false;
         }
 
         try
         {
-            await ReadAsync(sqlA);
+            await ReadAsync(sqlNew);
         }
         catch (SqlException ex) when (ex.Number == 207)
         {
             rows.Clear();
-            await ReadAsync(sqlB);
+            try
+            {
+                await ReadAsync(sqlA);
+            }
+            catch (SqlException ex2) when (ex2.Number == 207)
+            {
+                rows.Clear();
+                await ReadAsync(sqlB);
+            }
         }
 
         _logger.LogInformation("CollectionSummary[Aggregate] InsuranceVsPaymentPct({Prefix}): rows={N}, {Ms}ms",
             prefix, rows.Count, sw.ElapsedMilliseconds);
         return new InsurancePaymentPctResult(rows);
+    }
+
+    // ?? Insurance Vs Payment (live SP fallback) ??????????????????????????????????
+    /// <summary>
+    /// Reads Insurance vs Payment data via <c>usp_Get{prefix}_CS_InsuranceVsPayment</c>.
+    /// Used as a fallback when the snapshot table does not exist.
+    /// </summary>
+    private async Task<List<InsuranceVsPaymentRow>> GetInsuranceVsPaymentViaSpAsync(
+        string connectionString, string prefix,
+        List<string>? filterPayerNames, List<string>? filterPanelNames,
+        DateOnly? filterFirstBillFrom, DateOnly? filterFirstBillTo,
+        DateOnly? filterDosFrom, DateOnly? filterDosTo,
+        DateOnly? filterCheckDateFrom, DateOnly? filterCheckDateTo,
+        CancellationToken ct)
+    {
+        var spName = $"dbo.usp_Get{prefix}_CS_InsuranceVsPayment";
+        var rows = new List<InsuranceVsPaymentRow>();
+        var sw = Stopwatch.StartNew();
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(spName, conn)
+        {
+            CommandType = System.Data.CommandType.StoredProcedure,
+            CommandTimeout = 120
+        };
+        cmd.Parameters.AddRange(BuildCollectionReadSpParameters(
+            filterPayerNames, filterPanelNames,
+            filterFirstBillFrom, filterFirstBillTo,
+            filterDosFrom, filterDosTo,
+            filterCheckDateFrom, filterCheckDateTo));
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+        {
+            rows.Add(new InsuranceVsPaymentRow(
+                PayerName:        r.GetString (r.GetOrdinal("PayerName")),
+                BillYear:         Convert.ToInt32(r.GetValue(r.GetOrdinal("BillYear"))),
+                BillMonth:        Convert.ToInt32(r.GetValue(r.GetOrdinal("BillMonth"))),
+                NoOfPaidClaims:   Convert.ToInt32(r.GetValue(r.GetOrdinal("NoOfPaidClaims"))),
+                InsurancePayment: r.GetDecimal(r.GetOrdinal("InsurancePayment")),
+                PaymentPct:       r.GetDecimal(r.GetOrdinal("PaymentPct"))));
+        }
+        _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rows.Count, sw.ElapsedMilliseconds);
+        return rows;
+    }
+
+    // ?? Insurance Vs Payment (Payer ï¿½ Year/Month snapshot pivot) ?????????????
+    // Reads from dbo.{prefix}_CS_InsuranceVsPayment. The table is optional: a missing
+    // table (SQL error 208 "invalid object name") falls back to the live SP, and an
+    // empty result set shows "data not available" in the view.
+    public async Task<List<InsuranceVsPaymentRow>> GetInsuranceVsPaymentFromAggregatesAsync(
+        string connectionString, string prefix, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+        ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
+
+        // NorthWest routes through its dedicated read SP (usp_GetNW_CS_InsuranceVsPayment),
+        // matching every other NorthWest Collection Summary tab. The SP returns the
+        // NW_CS_InsuranceVsPayment snapshot on the no-filter path and aggregates live
+        // from ClaimLevelData when filters are supplied.
+        if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase))
+            return await GetInsuranceVsPaymentViaSpAsync(
+                connectionString, prefix,
+                filterPayerNames: null, filterPanelNames: null,
+                filterFirstBillFrom: null, filterFirstBillTo: null,
+                filterDosFrom: null, filterDosTo: null,
+                filterCheckDateFrom: null, filterCheckDateTo: null,
+                ct).ConfigureAwait(false);
+
+        var rows = new List<InsuranceVsPaymentRow>();
+        var sql = $"""
+            SELECT PayerName, BillYear, BillMonth, NoOfPaidClaims, InsurancePayment, PaymentPct
+            FROM   dbo.{prefix}_CS_InsuranceVsPayment
+            ORDER  BY BillYear, BillMonth, InsurancePayment DESC;
+            """;
+
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+            await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 60 };
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                rows.Add(new InsuranceVsPaymentRow(
+                    PayerName:        r.GetString(r.GetOrdinal("PayerName")),
+                    BillYear:         Convert.ToInt32(r.GetValue(r.GetOrdinal("BillYear"))),
+                    BillMonth:        Convert.ToInt32(r.GetValue(r.GetOrdinal("BillMonth"))),
+                    NoOfPaidClaims:   Convert.ToInt32(r.GetValue(r.GetOrdinal("NoOfPaidClaims"))),
+                    InsurancePayment: r.GetDecimal(r.GetOrdinal("InsurancePayment")),
+                    PaymentPct:       r.GetDecimal(r.GetOrdinal("PaymentPct"))));
+            }
+        }
+        catch (SqlException ex) when (ex.Number == 208)
+        {
+            // Snapshot table does not exist for this lab ï¿½ fall back to the live SP.
+            // usp_Get{prefix}_CS_InsuranceVsPayment aggregates live from ClaimLevelData.
+            _logger.LogInformation(
+                "CollectionSummary[Aggregate] InsuranceVsPayment({Prefix}): snapshot table not found, falling back to live SP.",
+                prefix);
+            try
+            {
+                return await GetInsuranceVsPaymentViaSpAsync(
+                    connectionString, prefix,
+                    filterPayerNames: null, filterPanelNames: null,
+                    filterFirstBillFrom: null, filterFirstBillTo: null,
+                    filterDosFrom: null, filterDosTo: null,
+                    filterCheckDateFrom: null, filterCheckDateTo: null,
+                    ct).ConfigureAwait(false);
+            }
+            catch (Exception spEx)
+            {
+                _logger.LogWarning(spEx,
+                    "CollectionSummary[Aggregate] InsuranceVsPayment({Prefix}) SP fallback failed; returning empty.",
+                    prefix);
+                return [];
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "CollectionSummary[Aggregate] InsuranceVsPayment({Prefix}) failed; returning empty.",
+                prefix);
+            return [];
+        }
+
+        _logger.LogInformation("CollectionSummary[Aggregate] InsuranceVsPayment({Prefix}): rows={N}, {Ms}ms",
+            prefix, rows.Count, sw.ElapsedMilliseconds);
+        return rows;
     }
 
     // ?? CPT vs Payment % ??????????????????????????????????????????????????????
@@ -578,8 +901,18 @@ public sealed partial class SqlCollectionSummaryRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
 
+        if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase))
+            return await GetCptPaymentPctViaSpAsync(
+                connectionString,
+                "dbo.usp_GetNW_CS_CptVsPaymentPct",
+                filterPayerNames: null, filterPanelNames: null,
+                filterFirstBillFrom: null, filterFirstBillTo: null,
+                filterDosFrom: null, filterDosTo: null,
+                filterCheckDateFrom: null, filterCheckDateTo: null,
+                ct).ConfigureAwait(false);
+
         var sql = $"""
-            SELECT CPTCode, SumUnits, PaidInsurancePayment, PaidChargeAmount
+            SELECT CPTCode, SumUnits, PaidInsurancePayment, PaidChargeAmount, PaymentPct
             FROM   dbo.{prefix}_CS_CptVsPaymentPct
             ORDER  BY SumUnits DESC;
             """;
@@ -592,11 +925,19 @@ public sealed partial class SqlCollectionSummaryRepository
         await using var r = await cmd.ExecuteReaderAsync(ct);
         while (await r.ReadAsync(ct))
         {
+            // Use the pre-computed PaymentPct from the aggregate table directly.
+            // PaidInsurancePayment / PaidChargeAmount can both be 0 in the snapshot
+            // while PaymentPct still holds the correct value.
+            var snapshotPct = r.IsDBNull(r.GetOrdinal("PaymentPct"))
+                ? (decimal?)null
+                : r.GetDecimal(r.GetOrdinal("PaymentPct"));
+
             rows.Add(new CptPaymentPctRow(
                 CptCode:              r.GetString (r.GetOrdinal("CPTCode")),
                 SumServiceUnits:      r.GetDecimal(r.GetOrdinal("SumUnits")),
                 PaidInsurancePayment: r.GetDecimal(r.GetOrdinal("PaidInsurancePayment")),
-                PaidChargeAmount:     r.GetDecimal(r.GetOrdinal("PaidChargeAmount"))));
+                PaidChargeAmount:     r.GetDecimal(r.GetOrdinal("PaidChargeAmount")),
+                SnapshotPaymentPct:   snapshotPct));
         }
 
         _logger.LogInformation("CollectionSummary[Aggregate] CptVsPaymentPct({Prefix}): rows={N}, {Ms}ms",
@@ -610,6 +951,16 @@ public sealed partial class SqlCollectionSummaryRepository
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
+
+        if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase))
+            return await GetStatusSummaryViaSpAsync(
+                connectionString,
+                "dbo.usp_GetNW_CS_StatusSummary",
+                filterPayerNames: null, filterPanelNames: null,
+                filterFirstBillFrom: null, filterFirstBillTo: null,
+                filterDosFrom: null, filterDosTo: null,
+                filterCheckDateFrom: null, filterCheckDateTo: null,
+                ct).ConfigureAwait(false);
 
         var sql = $"""
             SELECT ClaimStatus, PanelName, CptCode, PayerName,
@@ -651,6 +1002,16 @@ public sealed partial class SqlCollectionSummaryRepository
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
+
+        if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase))
+            return await GetProviderSummaryViaSpAsync(
+                connectionString,
+                "dbo.usp_GetNW_CS_ProviderSummary",
+                filterPayerNames: null, filterPanelNames: null,
+                filterFirstBillFrom: null, filterFirstBillTo: null,
+                filterDosFrom: null, filterDosTo: null,
+                filterCheckDateFrom: null, filterCheckDateTo: null,
+                ct).ConfigureAwait(false);
 
         // NW uses ProcTotalPayment, all other labs use InsurancePayment.
         var sqlA = $"""
@@ -718,7 +1079,7 @@ public sealed partial class SqlCollectionSummaryRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
 
-        // Probe a single representative table — Top5ReimbursementPct is always present.
+        // Probe a single representative table ï¿½ Top5ReimbursementPct is always present.
         var sql = $"SELECT MAX(RefreshedAt) FROM dbo.{prefix}_CS_Top5ReimbursementPct;";
         try
         {
@@ -811,7 +1172,7 @@ public sealed partial class SqlCollectionSummaryRepository
 
             // Totals (panelByMonth, panelByYear, panelEnc/panelPaid) already include ALL payers.
             // TopPayers drill-down: show only the top-3 ranked payers (PayerRank 1-3 from DB).
-            // When PayerRank == 0 the data came from a live query — fall back to top-3 by count.
+            // When PayerRank == 0 the data came from a live query ï¿½ fall back to top-3 by count.
             bool hasDbRank = payerAgg.Keys.Any(k =>
                 rawRows.Any(r => r.PanelName == pg.Key && r.PayerName == k && r.PayerRank > 0));
 

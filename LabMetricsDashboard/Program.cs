@@ -371,6 +371,7 @@ builder.Services.AddSingleton<IReadOnlyDictionary<string, ILabProductionSummaryR
 });
 builder.Services.AddScoped<IClaimLineRepository, SqlClaimLineRepository>();
 builder.Services.AddScoped<ICollectionSummaryRepository, SqlCollectionSummaryRepository>();
+builder.Services.AddScoped<AllLabsCollectionExcelBuilder>();
 builder.Services.AddScoped<ILisSummaryRepository, SqlLisSummaryRepository>();
 
 // User management repository (uses DefaultConnection from appsettings.json)
@@ -427,12 +428,11 @@ builder.Services
 		options.Cookie.Name = "LRN.Auth";
 		options.Cookie.HttpOnly = true;
 		options.Cookie.SameSite = SameSiteMode.Lax;
-		// Always mark the auth cookie as Secure in production so Chrome accepts it after
-		// the HTTPS redirect that follows a successful login.
-		// SameAsRequest is kept for local development (HTTP) so the dev experience is unaffected.
-		options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
-			? CookieSecurePolicy.SameAsRequest
-			: CookieSecurePolicy.Always;
+		// Use SameAsRequest so local/IIS deployments over HTTP keep the auth cookie.
+		// When the request is HTTPS, ASP.NET Core still emits the cookie as Secure.
+		// CookieSecurePolicy.Always caused localhost HTTP deployments to drop LRN.Auth
+		// after login, which made the app redirect back to the login screen.
+		options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
 //>>>>>>> 23cf9fdcfbffecee7d6826a98b7baa4821a4bc13
 
 		// ── ReturnUrl loop guard ──────────────────────────────────────────────

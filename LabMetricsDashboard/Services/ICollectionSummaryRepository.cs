@@ -13,7 +13,7 @@ public interface ICollectionSummaryRepository
     /// </summary>
     /// <summary>
     /// Fetches distinct payer and panel names from <c>dbo.ClaimLevelData</c> for filter dropdowns.
-    /// <paramref name="panelColumn"/> must be the exact column name to read panel values from —
+    /// <paramref name="panelColumn"/> must be the exact column name to read panel values from ï¿½
     /// pass the result of <c>LabCollectionPrefix.GetPanelColumn(labName)</c>:
     /// <c>PanelType</c> for NorthWest, <c>PanelNew</c> for Augustus, <c>PanelName</c> for all others.
     /// </summary>
@@ -94,6 +94,7 @@ public interface ICollectionSummaryRepository
         DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
         DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -109,6 +110,7 @@ public interface ICollectionSummaryRepository
         DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
         DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -125,6 +127,7 @@ public interface ICollectionSummaryRepository
         DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
         DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -140,10 +143,11 @@ public interface ICollectionSummaryRepository
         DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
         DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
         CancellationToken ct = default);
 
     /// <summary>
-    /// Returns the Rep vs Payments flat rows (SalesRepName × Year × Month).
+    /// Returns the Rep vs Payments flat rows (SalesRepName ï¿½ Year ï¿½ Month).
     /// Source: ClaimLevelData where InsurancePayment &gt; 0 and CheckDate is a valid date.
     /// Each row: SalesRepName, Year, Month, COUNT(DISTINCT ClaimID), SUM(InsurancePayment).
     /// </summary>
@@ -154,6 +158,7 @@ public interface ICollectionSummaryRepository
         DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
         DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -170,6 +175,7 @@ public interface ICollectionSummaryRepository
         DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
         DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -186,6 +192,7 @@ public interface ICollectionSummaryRepository
         DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
         DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -202,6 +209,7 @@ public interface ICollectionSummaryRepository
         DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
         DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -213,6 +221,35 @@ public interface ICollectionSummaryRepository
     /// Ranked by COUNT(DISTINCT ClaimID) descending.
     /// </summary>
     Task<PanelAveragesResult> GetAvgPaymentsAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
+        DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
+        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns the row count of <c>dbo.ClaimLevelData</c> respecting the active filters.
+    /// Used to decide whether to include raw-data sheets in the Excel export
+    /// (skip when count exceeds 200,000 rows).
+    /// </summary>
+    Task<int> GetClaimLevelDataCountAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
+        DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
+        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns the row count of <c>dbo.LineLevelData</c> respecting the active filters.
+    /// Used to decide whether to include raw-data sheets in the Excel export
+    /// (skip when count exceeds 200,000 rows).
+    /// </summary>
+    Task<int> GetLineLevelDataCountAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
         List<string>? filterPanelNames = null,
@@ -262,11 +299,12 @@ public interface ICollectionSummaryRepository
         DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
         DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
         CancellationToken ct = default);
 
     /// <summary>
     /// Provider Summary tab.
-    /// Source: ClaimLevelData [All rows – no InsurancePayment filter].
+    /// Source: ClaimLevelData [All rows ï¿½ no InsurancePayment filter].
     /// Rows: ReferringProvider.
     /// Columns: COUNT(DISTINCT ClaimID), SUM(InsurancePayment), SUM(InsuranceBalance), SUM(PatientBalance).
     /// Sorted by COUNT(DISTINCT ClaimID) DESC (Grand Total rank).
@@ -278,6 +316,7 @@ public interface ICollectionSummaryRepository
         DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
         DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
+        string? labName = null,
         CancellationToken ct = default);
 
     // ?? Aggregate-table fast path ??????????????????????????????????????????????
@@ -298,6 +337,15 @@ public interface ICollectionSummaryRepository
     Task<PanelPaymentResult>           GetPanelPaymentFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
     Task<RepPaymentResult>             GetRepPaymentFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
     Task<InsurancePaymentPctResult>    GetInsurancePaymentPctFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns the "Insurance Vs Payment" snapshot rows (Payer ï¿½ Year/Month pivot) from
+    /// <c>dbo.{prefix}_CS_InsuranceVsPayment</c>. Returns an empty list when the table
+    /// does not exist or contains no rows for the lab (so callers can render a
+    /// "data not available" empty state instead of failing).
+    /// </summary>
+    Task<List<InsuranceVsPaymentRow>>  GetInsuranceVsPaymentFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
+
     Task<CptPaymentPctResult>          GetCptPaymentPctFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
     Task<StatusSummaryResult>          GetStatusSummaryFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
     Task<ProviderSummaryResult>        GetProviderSummaryFromAggregatesAsync(string connectionString, string prefix, CancellationToken ct = default);
@@ -333,7 +381,7 @@ public sealed record CollectionWeekBucket(
 {
     /// <summary>Display key for dictionary lookups.</summary>
     public string Key => $"W{WeekNumber}";
-    /// <summary>Formatted header label: "Week N (MM/dd – MM/dd)".</summary>
+    /// <summary>Formatted header label: "Week N (MM/dd ï¿½ MM/dd)".</summary>
     public string Label => $"Week {WeekNumber} ({WeekStart:MM/dd} - {WeekEnd:MM/dd})";
 }
 
@@ -352,6 +400,7 @@ public sealed class CollectionWeeklyPanelRow
     public Dictionary<string, CollectionMonthlyCell> ByWeek { get; init; } = [];
     public int TotalEncounters { get; init; }
     public decimal TotalInsurancePaid { get; init; }
+    public decimal TotalAveragePaidAmount => TotalEncounters == 0 ? 0m : TotalInsurancePaid / TotalEncounters;
     public List<CollectionWeeklyPayerDrillDown> TopPayers { get; init; } = [];
 }
 
@@ -364,6 +413,7 @@ public sealed class CollectionWeeklyPayerDrillDown
     public Dictionary<string, CollectionMonthlyCell> ByWeek { get; init; } = [];
     public int TotalEncounters { get; init; }
     public decimal TotalInsurancePaid { get; init; }
+    public decimal TotalAveragePaidAmount => TotalEncounters == 0 ? 0m : TotalInsurancePaid / TotalEncounters;
 }
 
 /// <summary>Result container for the Top 5 Insurance Reimbursement % tab.</summary>

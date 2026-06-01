@@ -770,7 +770,7 @@
                                     <i class="bi bi-graph-up-arrow"></i> Analytics
                                 </a>
                                 <ul class="dropdown-menu">
-                                    @if (labConfig?.EnablePrediction ?? true)
+                                    @if (labConfig?.EnablePrediction == true)
                                     {
                                         <li>
                                             <a class="dropdown-item" asp-controller="Prediction" asp-action="Index">
@@ -787,7 +787,7 @@
                                         </li>
                                     }
 
-                                    @if (labConfig?.EnableForcast ?? true)
+                                    @if (labConfig?.EnableForcast == true)
                                     {
                                         <li>
                                             <a class="dropdown-item" asp-controller="Prediction" asp-action="ForecastingSummary">

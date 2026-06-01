@@ -7,22 +7,125 @@
                 var grandPaidChg = Model.InsurancePaymentPct.Sum(r => r.PaidChargeAmount);
                 var grandPaymentPct = grandPaidChg == 0 ? 0m : Math.Round(grandPaidIns / grandPaidChg * 100m, 2);
                 var maxPct = Model.InsurancePaymentPct.Max(r => r.PaymentPct);
+                var showNorthWestSnapshotPivot = Model.InsurancePaymentPct.Any(r => r.BillYear.HasValue && r.BillMonth.HasValue);
+                var nwPeriods = Model.InsurancePaymentPct
+                    .Where(r => r.BillYear.HasValue && r.BillMonth.HasValue)
+                    .Select(r => (Year: r.BillYear!.Value, Month: r.BillMonth!.Value))
+                    .Distinct()
+                    .OrderBy(p => p.Year)
+                    .ThenBy(p => p.Month)
+                    .ToList();
+                var nwYears = nwPeriods
+                    .Select(p => p.Year)
+                    .Distinct()
+                    .OrderBy(y => y)
+                    .ToList();
+                var nwRows = Model.InsurancePaymentPct
+                    .Where(r => r.BillYear.HasValue && r.BillMonth.HasValue)
+                    .GroupBy(r => r.PayerName, StringComparer.OrdinalIgnoreCase)
+                    .Select(g => new
+                    {
+                        PayerName = g.Key,
+                        Cells = g.GroupBy(r => (Year: r.BillYear!.Value, Month: r.BillMonth!.Value))
+                            .ToDictionary(
+                                cg => cg.Key,
+                                cg => new
+                                {
+                                    Count = cg.Sum(x => x.NoOfPaidClaims ?? x.TotalClaims),
+                                    Payment = cg.Sum(x => x.InsurancePayments)
+                                }),
+                        TotalCount = g.Sum(x => x.NoOfPaidClaims ?? x.TotalClaims),
+                        TotalPayment = g.Sum(x => x.InsurancePayments)
+                    })
+                    .OrderByDescending(r => r.TotalPayment)
+                    .ToList();
                 <div class="cs-rpt-wrap">
                     <div class="cs-rpt-scroll">
                         <table class="cs-rpt-table">
                             <thead>
+                                @if (showNorthWestSnapshotPivot)
+                                {
+                                    <tr>
+                                        <th rowspan="3" style="text-align:left;min-width:280px">Row Labels</th>
+                                        @foreach (var year in nwYears)
+                                        {
+                                            var yearMonthCount = nwPeriods.Count(p => p.Year == year);
+                                            <th colspan="@(yearMonthCount * 2 + 2)">@year</th>
+                                        }
+                                        <th colspan="2">Grand Total</th>
+                                    </tr>
+                                    <tr>
+                                        @foreach (var year in nwYears)
+                                        {
+                                            foreach (var p in nwPeriods.Where(p => p.Year == year))
+                                            {
+                                                var monthLabel = new DateTime(p.Year, p.Month, 1).ToString("MMM");
+                                                <th colspan="2">@monthLabel</th>
+                                            }
+                                            <th colspan="2">@year Total</th>
+                                        }
+                                        <th colspan="2">Total</th>
+                                    </tr>
+                                    <tr>
+                                        @foreach (var year in nwYears)
+                                        {
+                                            foreach (var _ in nwPeriods.Where(p => p.Year == year))
+                                            {
+                                                <th style="min-width:105px">Count of Paid Claims</th>
+                                                <th style="min-width:150px">Sum of Insurance Payment</th>
+                                            }
+                                            <th style="min-width:105px">Count of Paid Claims</th>
+                                            <th style="min-width:150px">Sum of Insurance Payment</th>
+                                        }
+                                        <th style="min-width:105px">Count of Paid Claims</th>
+                                        <th style="min-width:150px">Sum of Insurance Payment</th>
+                                    </tr>
+                                }
+                                else
+                                {
                                 <tr>
                                     <th style="text-align:left;min-width:280px">Payer</th>
                                     <th style="min-width:140px">Total No. of Claims</th>
                                     <th style="min-width:180px">Insurance Payments</th>
                                     <th style="min-width:260px">Payment %</th>
                                 </tr>
+                                }
                             </thead>
                             <tbody>
-                                @foreach (var row in Model.InsurancePaymentPct)
+                                @if (showNorthWestSnapshotPivot)
                                 {
-                                    var pct = row.PaymentPct;
-                                    var barWidth = maxPct == 0 ? 0m : Math.Round(pct / maxPct * 100m, 1);
+                                    @foreach (var row in nwRows)
+                                    {
+                                        <tr>
+                                            <td style="text-align:left;font-weight:600">@row.PayerName</td>
+                                            @foreach (var year in nwYears)
+                                            {
+                                                var yearCount = 0;
+                                                var yearPayment = 0m;
+                                                foreach (var p in nwPeriods.Where(p => p.Year == year))
+                                                {
+                                                    row.Cells.TryGetValue((p.Year, p.Month), out var cell);
+                                                    var count = cell?.Count ?? 0;
+                                                    var payment = cell?.Payment ?? 0m;
+                                                    yearCount += count;
+                                                    yearPayment += payment;
+                                                    <td style="text-align:right">@count.ToString("N0")</td>
+                                                    <td style="text-align:right">@payment.ToString("C2")</td>
+                                                }
+                                                <td style="text-align:right;font-weight:700">@yearCount.ToString("N0")</td>
+                                                <td style="text-align:right;font-weight:700">@yearPayment.ToString("C2")</td>
+                                            }
+                                            <td style="text-align:right;font-weight:700">@row.TotalCount.ToString("N0")</td>
+                                            <td style="text-align:right;font-weight:700">@row.TotalPayment.ToString("C2")</td>
+                                        </tr>
+                                    }
+                                }
+                                else
+                                {
+                                    @foreach (var row in Model.InsurancePaymentPct)
+                                    {
+                                        var pct = row.PaymentPct;
+                                        var barWidth = maxPct == 0 ? 0m : Math.Round(pct / maxPct * 100m, 1);
                                     <tr>
                                         <td style="text-align:left;font-weight:600">@row.PayerName</td>
                                         <td style="text-align:right">@row.TotalClaims.ToString("N0")</td>
@@ -34,15 +137,44 @@
                                             </div>
                                         </td>
                                     </tr>
+                                    }
                                 }
                             </tbody>
                             <tfoot>
+                                @if (showNorthWestSnapshotPivot)
+                                {
+                                    <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
+                                        <td style="text-align:left;color:#fff">Grand Total</td>
+                                        @foreach (var year in nwYears)
+                                        {
+                                            var yearCount = 0;
+                                            var yearPayment = 0m;
+                                            foreach (var p in nwPeriods.Where(p => p.Year == year))
+                                            {
+                                                var monthRows = Model.InsurancePaymentPct.Where(r => r.BillYear == p.Year && r.BillMonth == p.Month);
+                                                var count = monthRows.Sum(r => r.NoOfPaidClaims ?? r.TotalClaims);
+                                                var payment = monthRows.Sum(r => r.InsurancePayments);
+                                                yearCount += count;
+                                                yearPayment += payment;
+                                                <td style="text-align:right;color:#fff">@count.ToString("N0")</td>
+                                                <td style="text-align:right;color:#fff">@payment.ToString("C2")</td>
+                                            }
+                                            <td style="text-align:right;color:#fff">@yearCount.ToString("N0")</td>
+                                            <td style="text-align:right;color:#fff">@yearPayment.ToString("C2")</td>
+                                        }
+                                        <td style="text-align:right;color:#fff">@nwRows.Sum(r => r.TotalCount).ToString("N0")</td>
+                                        <td style="text-align:right;color:#fff">@nwRows.Sum(r => r.TotalPayment).ToString("C2")</td>
+                                    </tr>
+                                }
+                                else
+                                {
                                 <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
                                     <td style="text-align:left;color:#fff">Grand Total</td>
                                     <td style="text-align:right;color:#fff">@grandTotalClaims.ToString("N0")</td>
                                     <td style="text-align:right;color:#fff">@grandInsPayments.ToString("C2")</td>
                                     <td style="text-align:right;color:#fff">@grandPaymentPct.ToString("F2") %</td>
                                 </tr>
+                                }
                             </tfoot>
                         </table>
                     </div>

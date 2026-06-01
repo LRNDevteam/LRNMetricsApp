@@ -53,7 +53,7 @@ public class HomeController : Controller
                     HasLineFile           = linePath         is not null,
                     HasPredictionFile     = predictionPath   is not null,
                     HasCodingMasterFile   = codingMasterPath is not null,
-                    PredictionEnabled     = true,
+                    PredictionEnabled     = labConfig?.EnablePrediction == true,
                     DBEnabled             = dbEnabled,
                     CodingEnabled         = dbEnabled && !string.IsNullOrWhiteSpace(labConfig?.Reports),
                     LineClaimEnabled      = lineClaimEnabled,

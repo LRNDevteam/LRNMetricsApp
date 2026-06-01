@@ -1,0 +1,243 @@
+@model LabMetricsDashboard.Models.AllLabsCollectionViewModel
+@{
+    ViewData["Title"]     = "All Labs — Collection Summary";
+    ViewData["PageLabel"] = "All Labs Collection Summary";
+}
+
+<style>
+/* Export loading overlay — reuses same CSS variables as single-lab export */
+.cs-export-overlay {
+    position: fixed; inset: 0; z-index: 9999;
+    background: rgba(15, 23, 42, .55);
+    backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center;
+}
+.cs-export-dialog {
+    background: #fff; border-radius: 16px;
+    box-shadow: 0 8px 40px rgba(0,0,0,.18);
+    padding: 2rem 2.5rem; width: 400px; text-align: center;
+}
+.cs-export-icon { font-size: 2.4rem; color: #0d8553; margin-bottom: .6rem;
+    animation: cs-export-pulse 1.4s ease-in-out infinite; }
+@@keyframes cs-export-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: .6; transform: scale(.92); }
+}
+.cs-export-title { font-size: 1.05rem; font-weight: 700; color: #1e293b; margin-bottom: .25rem; }
+.cs-export-sub   { font-size: .78rem; color: #64748b; margin-bottom: 1rem; }
+.cs-export-bar-bg   { width: 100%; height: 10px; background: #e2e8f0; border-radius: 6px; overflow: hidden; }
+.cs-export-bar-fill { height: 100%; border-radius: 6px;
+    background: linear-gradient(90deg, #047857, #0d8553, #10b981);
+    transition: width .4s ease; }
+.cs-export-pct { font-size: .82rem; font-weight: 700; color: #0d8553; margin-top: .5rem; }
+</style>
+
+<div class="container-fluid px-4 py-3">
+
+    <div class="d-flex align-items-center gap-2 mb-3">
+        <i class="bi bi-buildings fs-4 text-success"></i>
+        <h4 class="mb-0 fw-semibold">All Labs — Collection Summary</h4>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+    {
+        <div class="alert alert-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>@Model.ErrorMessage</div>
+    }
+
+    @if (TempData["ExportError"] is string exportErr)
+    {
+        <div class="alert alert-warning"><i class="bi bi-exclamation-circle-fill me-1"></i>@exportErr</div>
+    }
+
+    <!-- Info card -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            <p class="mb-1 text-muted small">
+                <i class="bi bi-info-circle me-1"></i>
+                Downloads a combined Excel workbook with Collection Summary data for all
+                <strong>@Model.EligibleLabs.Count</strong> eligible lab(s).
+            </p>
+            <ul class="mb-0 small text-muted">
+                <li><strong>No filters applied</strong> — uses pre-generated Excel files when available (fastest).</li>
+                <li><strong>Filters applied</strong> — queries each lab's database using the Collection Read SPs.</li>
+                <li>ClaimLevelData / LineLevelData raw sheets are omitted for any lab with &gt;200,000 rows.</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Eligible labs list -->
+    @if (Model.EligibleLabs.Count > 0)
+    {
+        <div class="card shadow-sm mb-4">
+            <div class="card-header py-2 fw-semibold small">
+                <i class="bi bi-list-check me-1"></i>Labs included in export
+            </div>
+            <div class="card-body py-2">
+                <div class="d-flex flex-wrap gap-2">
+                    @foreach (var lab in Model.EligibleLabs)
+                    {
+                        <span class="badge bg-light text-dark border">@lab</span>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="alert alert-info">No labs are currently configured for Collection Summary export.</div>
+    }
+
+    <!-- Filter form -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-header py-2 fw-semibold small">
+            <i class="bi bi-funnel me-1"></i>Filters
+            @if (Model.HasActiveFilters)
+            {
+                <span class="badge bg-warning text-dark ms-2">Active</span>
+            }
+        </div>
+        <div class="card-body">
+            <form method="get" asp-action="Index" id="allLabsFilterForm">
+
+                <div class="row g-3 mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label small fw-semibold">Payer Names</label>
+                        <input type="text" name="filterPayerNames" class="form-control form-control-sm"
+                               placeholder="Comma-separated payer names"
+                               value="@string.Join(", ", Model.FilterPayerNames)" />
+                        <div class="form-text">Separate multiple values with commas.</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small fw-semibold">Panel Names</label>
+                        <input type="text" name="filterPanelNames" class="form-control form-control-sm"
+                               placeholder="Comma-separated panel names"
+                               value="@string.Join(", ", Model.FilterPanelNames)" />
+                    </div>
+                </div>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-md-3">
+                        <label class="form-label small fw-semibold">First Bill From</label>
+                        <input type="date" name="filterFirstBillFrom" class="form-control form-control-sm"
+                               value="@Model.FilterFirstBillFrom" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small fw-semibold">First Bill To</label>
+                        <input type="date" name="filterFirstBillTo" class="form-control form-control-sm"
+                               value="@Model.FilterFirstBillTo" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small fw-semibold">Date of Service From</label>
+                        <input type="date" name="filterDosFrom" class="form-control form-control-sm"
+                               value="@Model.FilterDosFrom" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small fw-semibold">Date of Service To</label>
+                        <input type="date" name="filterDosTo" class="form-control form-control-sm"
+                               value="@Model.FilterDosTo" />
+                    </div>
+                </div>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-md-3">
+                        <label class="form-label small fw-semibold">Check Date From</label>
+                        <input type="date" name="filterCheckDateFrom" class="form-control form-control-sm"
+                               value="@Model.FilterCheckDateFrom" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small fw-semibold">Check Date To</label>
+                        <input type="date" name="filterCheckDateTo" class="form-control form-control-sm"
+                               value="@Model.FilterCheckDateTo" />
+                    </div>
+                </div>
+
+                <div class="d-flex gap-2">
+                    <button type="submit" class="btn btn-sm btn-primary">
+                        <i class="bi bi-funnel-fill me-1"></i>Apply
+                    </button>
+                    <a asp-action="Index" class="btn btn-sm btn-outline-secondary">Clear</a>
+                    @if (Model.EligibleLabs.Count > 0)
+                    {
+                        <button type="button" id="allLabsExportBtn" class="btn btn-sm btn-outline-success ms-auto">
+                            <i class="bi bi-file-earmark-excel me-1"></i>Download All Labs Excel
+                        </button>
+                    }
+                </div>
+            </form>
+        </div>
+    </div>
+
+</div>
+
+<!-- Export progress overlay -->
+<div id="csExportOverlay" class="cs-export-overlay" style="display:none">
+    <div class="cs-export-dialog">
+        <div class="cs-export-icon"><i class="bi bi-file-earmark-excel"></i></div>
+        <div class="cs-export-title">Generating All Labs Excel</div>
+        <div class="cs-export-sub" id="csExportStatus">Fetching data across all labs…</div>
+        <div class="cs-export-bar-bg">
+            <div class="cs-export-bar-fill" id="csExportBar" style="width:0%"></div>
+        </div>
+        <div class="cs-export-pct" id="csExportPct">0%</div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+(function () {
+    var btn     = document.getElementById('allLabsExportBtn');
+    var overlay = document.getElementById('csExportOverlay');
+    var bar     = document.getElementById('csExportBar');
+    var pct     = document.getElementById('csExportPct');
+    var status  = document.getElementById('csExportStatus');
+
+    if (!btn) return;
+
+    btn.addEventListener('click', function () {
+        // Build query string from the current filter form values
+        var form = document.getElementById('allLabsFilterForm');
+
+        // Parse comma-separated payer/panel inputs into individual values
+        var params = new URLSearchParams();
+        var payerInput = form.querySelector('[name="filterPayerNames"]').value;
+        var panelInput = form.querySelector('[name="filterPanelNames"]').value;
+
+        payerInput.split(',').map(s => s.trim()).filter(Boolean)
+            .forEach(v => params.append('filterPayerNames', v));
+        panelInput.split(',').map(s => s.trim()).filter(Boolean)
+            .forEach(v => params.append('filterPanelNames', v));
+
+        ['filterFirstBillFrom','filterFirstBillTo','filterDosFrom','filterDosTo',
+         'filterCheckDateFrom','filterCheckDateTo'].forEach(function (n) {
+            var el = form.querySelector('[name="' + n + '"]');
+            if (el && el.value) params.append(n, el.value);
+        });
+
+        // Show overlay and animate progress bar
+        overlay.style.display = 'flex';
+        var progress = 0;
+        var timer = setInterval(function () {
+            if (progress < 85) { progress += 2; }
+            bar.style.width = progress + '%';
+            pct.textContent = progress + '%';
+        }, 800);
+
+        // Poll for the csExportDone cookie that the controller sets on completion
+        var pollTimer = setInterval(function () {
+            if (document.cookie.indexOf('csExportDone') !== -1) {
+                clearInterval(timer);
+                clearInterval(pollTimer);
+                bar.style.width = '100%';
+                pct.textContent = '100%';
+                status.textContent = 'Download ready!';
+                document.cookie = 'csExportDone=; path=/; max-age=0';
+                setTimeout(function () { overlay.style.display = 'none'; }, 1200);
+            }
+        }, 1000);
+
+        var url = '@Url.Action("ExportExcel", "AllLabsCollection")' + '?' + params.toString();
+        window.location.href = url;
+    });
+})();
+</script>
+}
