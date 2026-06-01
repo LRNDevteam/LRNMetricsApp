@@ -178,7 +178,7 @@ BEGIN
             COUNT(DISTINCT NULLIF(LTRIM(RTRIM(cl.ClaimID)), ''))      AS ClaimCount,
             ISNULL(SUM(TRY_CAST(cl.ChargeAmount AS DECIMAL(18,2))),0) AS TotalCharges
         FROM   dbo.ClaimLevelData cl
-        JOIN   @Weeks w ON TRY_CAST(cl.FirstBilledDate AS DATE) BETWEEN w.WeekStart AND w.WeekEnd
+        JOIN   @Weeks w ON TRY_CAST(cl.ChargeEnteredDate AS DATE) BETWEEN w.WeekStart AND w.WeekEnd
         WHERE  TRY_CAST(cl.FirstBilledDate AS DATE) IS NOT NULL
           AND  LTRIM(RTRIM(cl.FirstBilledDate)) <> ''
           AND  cl.PayerName_Raw IS NOT NULL AND LTRIM(RTRIM(cl.PayerName_Raw)) <> ''
@@ -511,7 +511,7 @@ BEGIN
         COUNT(*)                                                 AS CPTCount,
         ISNULL(SUM(TRY_CAST(Units        AS DECIMAL(18,2))), 0) AS BilledUnits,
         ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0) AS TotalCharges
-    FROM   dbo.LineLevelData
+    FROM   dbo.ClaimLevelData
     WHERE  TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
       AND  LTRIM(RTRIM(FirstBilledDate)) <> ''
       AND  NULLIF(LTRIM(RTRIM(CPTCode)), '') IS NOT NULL

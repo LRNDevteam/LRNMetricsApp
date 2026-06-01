@@ -32,13 +32,13 @@ BEGIN
     SELECT
         LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(Panelname)), ''), '(No Panelname)')))     AS Panelname,
         ISNULL(LTRIM(RTRIM(AgingBucket)), 'Unknown')                                     AS AgingBucket,
-        COUNT(COALESCE(
+        COUNT(DISTINCT COALESCE(
             NULLIF(LTRIM(RTRIM(AccessionNumber)), ''),
             NULLIF(LTRIM(RTRIM(ClaimID)), '')
         ))                                                                                AS ClaimCount,
         ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0)                          AS TotalCharges
     INTO #Raw
-    FROM dbo.ClaimLevelData
+    FROM dbo.LineLevelData
     WHERE (FirstBilledDate IS NULL OR LTRIM(RTRIM(FirstBilledDate)) = '')
     GROUP BY
         LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(Panelname)), ''), '(No Panelname)'))),
@@ -58,4 +58,3 @@ END
 GO
 
 PRINT '10_PhiLife_UnbilledAging.sql completed.';
-
