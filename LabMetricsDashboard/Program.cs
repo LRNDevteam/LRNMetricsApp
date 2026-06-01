@@ -383,6 +383,7 @@ builder.Services.AddSingleton<IReadOnlyDictionary<string, ILabProductionSummaryR
 });
 builder.Services.AddScoped<IClaimLineRepository, SqlClaimLineRepository>();
 builder.Services.AddScoped<ICollectionSummaryRepository, SqlCollectionSummaryRepository>();
+builder.Services.AddScoped<AllLabsCollectionExcelBuilder>();
 builder.Services.AddScoped<ILisSummaryRepository, SqlLisSummaryRepository>();
 
 // User management repository (uses DefaultConnection from appsettings.json)

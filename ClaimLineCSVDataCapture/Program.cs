@@ -58,17 +58,19 @@ log.Blank();
 // ── Load lab configs ──────────────────────────────────────────────────────────
 var labConfigs = LabConfigLoader.LoadAll(labConfigFolder, labNames, log);
 var productionReportRepo = new SqlProductionReportRepository(NullLogger<SqlProductionReportRepository>.Instance);
+var collectionSummaryRepo = new SqlCollectionSummaryReportRepository(NullLogger<SqlCollectionSummaryReportRepository>.Instance);
 
 int labsProcessed = 0, labsSkipped = 0, labsFailed = 0;
 var processedLabNames = new List<string>();
 
-// Production Report tasks are started per-lab and awaited after the main loop
+// Report tasks are started per-lab and awaited after the main loop
 // so that large-data labs don't block CSV ingestion for other labs.
-var reportTasks = new List<(string LabName, Task Task)>();
+var reportTasks = new List<(string LabName, string ReportType, Task Task)>();
 
 foreach (var lab in labConfigs)
 {
-    log.Info($"[Lab] {lab.LabName} — ClaimLineInsert={lab.ClaimLineInsert}, ClaimLineRefresh={lab.ClaimLineRefresh}, DBEnabled={lab.DBEnabled}");
+    log.Header($"Lab: {lab.LabName}");
+    log.Info($"  ClaimLineInsert={lab.ClaimLineInsert}  ClaimLineRefresh={lab.ClaimLineRefresh}  DBEnabled={lab.DBEnabled}");
 
     // ── Gate: only proceed when ClaimLineInsert is enabled ─────────────────
     if (!lab.ClaimLineInsert)
@@ -364,6 +366,25 @@ foreach (var lab in labConfigs)
         if (lab.LabName.Equals("Augustus_Labs", StringComparison.OrdinalIgnoreCase) ||
             lab.LabName.Equals("Augustus",      StringComparison.OrdinalIgnoreCase))
         {
+            // ── Augustus: build CollectionClaimLevelData staging table ───────────
+            // Must run after both ClaimLevel and LineLevel inserts and BEFORE the
+            // Production Report and Collection Summary aggregate SPs execute.
+            // This table is the source for the Augustus Collection Summary Report.
+            // SP: dbo.usp_Create_CollectionClaimLevelData — no parameters.
+            log.Info($"  [Aug CollectionClaim] Creating CollectionClaimLevelData staging table…");
+            try
+            {
+                var (ccldElapsed, ccldError) = db.CreateCollectionClaimLevelData();
+                if (ccldError is null)
+                    log.Info($"  [Aug CollectionClaim] dbo.usp_Create_CollectionClaimLevelData — OK ({ccldElapsed} ms).");
+                else
+                    log.Error($"  [Aug CollectionClaim] dbo.usp_Create_CollectionClaimLevelData — FAILED ({ccldElapsed} ms): {ccldError}");
+            }
+            catch (Exception ex)
+            {
+                log.Error($"  [Aug CollectionClaim] Unexpected error creating CollectionClaimLevelData: {ex.Message}");
+            }
+
             log.Info($"  [Aug Reports] Running Augustus production report SPs…");
             try
             {
@@ -603,11 +624,42 @@ foreach (var lab in labConfigs)
             }
         }
 
+        // ── PhiLife production report aggregates ─────────────────────────────
+        // Matches "PhiLife" lab name.
+        // Rule1 variant: ChargeEnteredDate columns, Thu–Wed week, coding = billed.
+        if (lab.LabName.Equals("PhiLife", StringComparison.OrdinalIgnoreCase))
+        {
+            log.Info($"  [Phi Reports] Running PhiLife production report SPs…");
+            try
+            {
+                var phiResults = db.RefreshPhiLifeProductionReports();
+                foreach (var (spName, elapsedMs, error) in phiResults)
+                {
+                    if (error is null)
+                        log.Info($"  [Phi Reports] {spName} — OK ({elapsedMs} ms).");
+                    else
+                        log.Error($"  [Phi Reports] {spName} — FAILED ({elapsedMs} ms): {error}");
+                }
+
+                var failed = phiResults.Count(r => r.Error is not null);
+                var passed = phiResults.Count(r => r.Error is null);
+                log.Info($"  [Phi Reports] {passed}/{phiResults.Count} SP(s) succeeded.");
+                if (failed > 0)
+                    log.Warn($"  [Phi Reports] {failed} SP(s) failed — see errors above.");
+            }
+            catch (Exception ex)
+            {
+                log.Error($"  [Phi Reports] Unexpected error running PhiLife production report SPs: {ex.Message}");
+            }
+
+            RunCollectionSummary(log, db, "Phi CS", db.RefreshPhiLifeCollectionReports);
+        }
+
         // ── Production Report Excel generation — started in background ─────────
         // Queued here so the main loop continues to the next lab immediately.
         // All tasks are awaited after the loop before the process exits.
         var capturedLab1 = lab; // capture for closure
-        reportTasks.Add((lab.LabName, Task.Run(async () =>
+        reportTasks.Add((lab.LabName, "Production", Task.Run(async () =>
         {
             try
             {
@@ -623,6 +675,30 @@ foreach (var lab in labConfigs)
                 log.Error($"  [Prod Excel] [{capturedLab1.LabName}] Generation failed: {ex.Message}");
             }
         })));
+
+        if (GetCollectionSummarySpPrefix(lab) is not null)
+        {
+            var capturedLabCollection = lab;
+            var forceCollectionRegenerate = claimInserted || lineInserted;
+            reportTasks.Add((lab.LabName, "Collection", Task.Run(async () =>
+            {
+                try
+                {
+                    var reportPath = await GenerateCollectionSummaryReportExcelAsync(
+                        capturedLabCollection,
+                        workingFolder,
+                        collectionSummaryRepo,
+                        log,
+                        forceRegenerate: forceCollectionRegenerate);
+                    if (!string.IsNullOrEmpty(reportPath))
+                        log.Info($"  [Collection Excel] [{capturedLabCollection.LabName}] Saved to: {reportPath}");
+                }
+                catch (Exception ex)
+                {
+                    log.Error($"  [Collection Excel] [{capturedLabCollection.LabName}] Generation failed: {ex.Message}");
+                }
+            })));
+        }
 
         processedLabNames.Add(lab.LabName);
         labsProcessed++;
@@ -643,10 +719,11 @@ foreach (var lab in labConfigs)
     // Only queued when no task was already started for this lab above
     // (i.e. when claimInserted && lineInserted was false).
     if (lab.ClaimLineInsert && !string.IsNullOrWhiteSpace(lab.DbConnectionString)
-        && !reportTasks.Any(t => t.LabName.Equals(lab.LabName, StringComparison.OrdinalIgnoreCase)))
+        && !reportTasks.Any(t => t.LabName.Equals(lab.LabName, StringComparison.OrdinalIgnoreCase)
+            && t.ReportType.Equals("Production", StringComparison.OrdinalIgnoreCase)))
     {
         var capturedLab2 = lab; // capture for closure
-        reportTasks.Add((lab.LabName, Task.Run(async () =>
+        reportTasks.Add((lab.LabName, "Production", Task.Run(async () =>
         {
             try
             {
@@ -660,6 +737,33 @@ foreach (var lab in labConfigs)
             catch (Exception ex)
             {
                 log.Error($"  [Prod Excel] [{capturedLab2.LabName}] Generation failed: {ex.Message}");
+            }
+        })));
+    }
+
+    if (lab.ClaimLineInsert && !string.IsNullOrWhiteSpace(lab.DbConnectionString)
+        && GetCollectionSummarySpPrefix(lab) is not null
+        && !reportTasks.Any(t => t.LabName.Equals(lab.LabName, StringComparison.OrdinalIgnoreCase)
+            && t.ReportType.Equals("Collection", StringComparison.OrdinalIgnoreCase)))
+    {
+        var capturedLabCollection2 = lab;
+        var forceCollectionRegenerate = claimInserted || lineInserted;
+        reportTasks.Add((lab.LabName, "Collection", Task.Run(async () =>
+        {
+            try
+            {
+                var reportPath = await GenerateCollectionSummaryReportExcelAsync(
+                    capturedLabCollection2,
+                    workingFolder,
+                    collectionSummaryRepo,
+                    log,
+                    forceRegenerate: forceCollectionRegenerate);
+                if (!string.IsNullOrEmpty(reportPath))
+                    log.Info($"  [Collection Excel] [{capturedLabCollection2.LabName}] Saved to: {reportPath}");
+            }
+            catch (Exception ex)
+            {
+                log.Error($"  [Collection Excel] [{capturedLabCollection2.LabName}] Generation failed: {ex.Message}");
             }
         })));
     }
@@ -895,6 +999,84 @@ static async Task<string> GenerateProductionReportExcelAsync(
     return outputPath;
 }
 
+static async Task<string> GenerateCollectionSummaryReportExcelAsync(
+    ClaimLineCSVDataCapture.Models.LabConfig lab,
+    string workingFolder,
+    LRN.ProductionReports.Services.ICollectionSummaryReportRepository collectionSummaryRepo,
+    ClaimLineCSVDataCapture.Services.AppLogger log,
+    bool forceRegenerate,
+    CancellationToken ct = default)
+{
+    ArgumentNullException.ThrowIfNull(lab);
+    ArgumentNullException.ThrowIfNull(collectionSummaryRepo);
+    ArgumentNullException.ThrowIfNull(log);
+    ArgumentException.ThrowIfNullOrWhiteSpace(workingFolder);
+    ArgumentException.ThrowIfNullOrWhiteSpace(lab.DbConnectionString);
+
+    // Resolve the SP prefix for this lab (e.g. "NW", "Elix", "Cove").
+    // Returns null if the lab has no Collection Summary aggregate SPs deployed.
+    var spPrefix = GetCollectionSummarySpPrefix(lab);
+    if (spPrefix is null)
+    {
+        log.Warn($"  [Collection Excel] No Collection Summary SP prefix configured for lab '{lab.LabName}' — skipping.");
+        return string.Empty;
+    }
+
+    var outputFolder = ResolveCollectionSummaryReportOutputFolder(lab, workingFolder);
+    Directory.CreateDirectory(outputFolder);
+
+    var processingFolder = Path.Combine(outputFolder, "Processing");
+    Directory.CreateDirectory(processingFolder);
+
+    var safeLabName = SanitizeFileName(lab.LabName);
+    var (_, _, weekRange) = ResolveProductionSummarySettings(lab);
+    var (weekStart, weekEnd) = ResolveCurrentWeekBounds(weekRange);
+
+    var fileName = $"{safeLabName}_CollectionSummaryReport_{weekStart:yyyyMMdd}-{weekEnd:yyyyMMdd}.xlsx";
+    var outputPath = Path.Combine(outputFolder, fileName);
+    var processingPath = Path.Combine(processingFolder, fileName);
+
+    if (File.Exists(outputPath) && !forceRegenerate)
+    {
+        log.Info($"  [Collection Excel] Report already exists for this week — skipping generation. ({outputPath})");
+        return outputPath;
+    }
+
+    if (File.Exists(processingPath))
+    {
+        log.Info($"  [Collection Excel] Removing stale processing file: {processingPath}");
+        File.Delete(processingPath);
+    }
+
+    log.Info(forceRegenerate
+        ? $"  [Collection Excel] [{lab.LabName}] New Claim/Line data detected — regenerating workbook."
+        : $"  [Collection Excel] [{lab.LabName}] Report missing — generating workbook.");
+
+    var connStr = lab.DbConnectionString;
+    var monthlySpName = $"dbo.usp_Get{spPrefix}_CS_MonthlyClaimVolume";
+    var weeklySpName  = $"dbo.usp_Get{spPrefix}_CS_WeeklyClaimVolume";
+
+    var monthlyTask = collectionSummaryRepo.GetMonthlyClaimVolumeAsync(connStr, monthlySpName, filters: null, ct);
+    var weeklyTask  = collectionSummaryRepo.GetWeeklyClaimVolumeAsync(connStr, weeklySpName, filters: null, ct);
+
+    await Task.WhenAll(monthlyTask, weeklyTask).ConfigureAwait(false);
+
+    using (var workbook = LRN.ProductionReports.Services.CollectionSummaryExcelExportBuilder.CreateWorkbook(
+        await monthlyTask.ConfigureAwait(false),
+        await weeklyTask.ConfigureAwait(false),
+        lab.LabName))
+    {
+        workbook.SaveAs(processingPath);
+    }
+
+    if (File.Exists(outputPath))
+        File.Delete(outputPath);
+    File.Move(processingPath, outputPath);
+
+    log.Info($"  [Collection Excel] Final report ready: {outputPath}");
+    return outputPath;
+}
+
 static (string? Rule, string? WeekRule, string? WeekRange) ResolveProductionSummarySettings(
     ClaimLineCSVDataCapture.Models.LabConfig lab)
 {
@@ -958,6 +1140,58 @@ static string ResolveProductionReportOutputFolder(
         : Path.Combine(workingFolder, "ProductionReports", SanitizeFileName(lab.LabName));
 
     return Path.Combine(baseFolder, "Production Report");
+}
+
+static string ResolveCollectionSummaryReportOutputFolder(
+    ClaimLineCSVDataCapture.Models.LabConfig lab,
+    string workingFolder)
+{
+    ArgumentNullException.ThrowIfNull(lab);
+    ArgumentException.ThrowIfNullOrWhiteSpace(workingFolder);
+
+    var baseFolder = !string.IsNullOrWhiteSpace(lab.Output.Reports)
+        ? lab.Output.Reports
+        : Path.Combine(workingFolder, "CollectionSummaryReports", SanitizeFileName(lab.LabName));
+
+    return Path.Combine(baseFolder, "Collection Summary Report");
+}
+
+static bool IsNorthWestLab(ClaimLineCSVDataCapture.Models.LabConfig lab)
+{
+    ArgumentNullException.ThrowIfNull(lab);
+    return lab.LabName.Equals("NorthWest", StringComparison.OrdinalIgnoreCase)
+        || lab.LabName.Equals("Northwest", StringComparison.OrdinalIgnoreCase)
+        || lab.LabName.Equals("NorthWest_Labs", StringComparison.OrdinalIgnoreCase)
+        || lab.LabName.Equals("Northwest_Labs", StringComparison.OrdinalIgnoreCase);
+}
+
+/// <summary>
+/// Maps a lab name to the SP prefix used by its Collection Summary stored procedures
+/// (e.g. "NW", "Elix", "Cove"). Returns <c>null</c> for labs without Collection Summary SPs.
+/// Keep in sync with <c>ClaimLineDbService.BuildCollectionSummarySpList</c> and
+/// <c>LabMetricsDashboard.Services.LabCollectionPrefix</c>.
+/// </summary>
+static string? GetCollectionSummarySpPrefix(ClaimLineCSVDataCapture.Models.LabConfig lab)
+{
+    ArgumentNullException.ThrowIfNull(lab);
+    var name = lab.LabName;
+    if (name.Equals("NorthWest",        StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("Northwest",         StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("NorthWest_Labs",    StringComparison.OrdinalIgnoreCase)) return "NW";
+    if (name.Equals("Augustus",         StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("Augustus_Labs",     StringComparison.OrdinalIgnoreCase)) return "Aug";
+    if (name.Equals("BeechTree",        StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("Beech_Tree",        StringComparison.OrdinalIgnoreCase)) return "BT";
+    if (name.Equals("Certus",           StringComparison.OrdinalIgnoreCase)) return "Cert";
+    if (name.Equals("Cove",             StringComparison.OrdinalIgnoreCase)) return "Cove";
+    if (name.Equals("Elixir",           StringComparison.OrdinalIgnoreCase)) return "Elix";
+    if (name.Equals("PCRLabsofAmerica", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("PCR_Labs_of_America", StringComparison.OrdinalIgnoreCase)) return "PCR";
+    if (name.Equals("PhiLife",          StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("Phi_Life",          StringComparison.OrdinalIgnoreCase)) return "Phi";
+    if (name.Equals("RisingTides",      StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("Rising_Tides",      StringComparison.OrdinalIgnoreCase)) return "RT";
+    return null;
 }
 
 static string SanitizeFileName(string name)

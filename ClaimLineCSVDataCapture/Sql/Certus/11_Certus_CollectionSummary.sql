@@ -24,19 +24,10 @@ CREATE TABLE dbo.Cert_CS_Top5ReimbursementPct
     PayerRank           TINYINT         NOT NULL,
     PayerName           NVARCHAR(500)   NOT NULL,
     SumInsurancePayment DECIMAL(18,2)   NOT NULL DEFAULT 0,
-    SumChargeAmount     DECIMAL(18,2)   NOT NULL DEFAULT 0,  -- retained for schema compat; always 0 (not in spec)
-    AvgPaymentPct       DECIMAL(9,4)    NOT NULL DEFAULT 0,
+    SumChargeAmount     DECIMAL(18,2)   NOT NULL DEFAULT 0,
     UniqueVisitCount    INT             NOT NULL DEFAULT 0,
     RefreshedAt         DATETIME        NOT NULL DEFAULT GETDATE()
 );
-GO
--- Add AvgPaymentPct to existing deployments where column does not yet exist
-IF NOT EXISTS (
-    SELECT 1 FROM sys.columns
-    WHERE object_id = OBJECT_ID('dbo.Cert_CS_Top5ReimbursementPct') AND name = 'AvgPaymentPct'
-)
-    ALTER TABLE dbo.Cert_CS_Top5ReimbursementPct
-        ADD AvgPaymentPct DECIMAL(9,4) NOT NULL DEFAULT 0;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Cert_CS_Top5ReimbursementPay')
@@ -252,9 +243,6 @@ GO
 -- =====================================================================
 
 -- 1. Top 5 Insurances | Reimbursement % (vs Billed Charge)
--- Spec: Filter InsurancePayment <> 0 (negatives included)
---       Row: Payer_Raw  |  Column: Payment %  |  Value: AVG(Payment%)
---       ChargeAmount is NOT in spec and is NOT used here.
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshCert_CS_Top5ReimbursementPct
 AS
 BEGIN
@@ -262,40 +250,29 @@ BEGIN
 
     ;WITH agg AS (
         SELECT
-            LTRIM(RTRIM(PayerName_Raw))                                                     AS PayerName,
-            ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)                     AS SumIns,
-            ISNULL(SUM(TRY_CAST(ChargeAmount     AS DECIMAL(18,2))), 0)                     AS SumChg,
-            COUNT(NULLIF(LTRIM(RTRIM(ClaimID)), ''))                                        AS Visits,
-            ROUND(
-                ISNULL(AVG(TRY_CAST(PaymentPercent AS DECIMAL(18,4))), 0) * 100,
-                0
-            )                                                                               AS AvgPaymentPct
+            LTRIM(RTRIM(PayerName_Raw))                                AS PayerName,
+            ISNULL(SUM(TRY_CAST(PaymentPercent AS DECIMAL(18,2))),0) AS SumIns,
+            ISNULL(SUM(TRY_CAST(ChargeAmount     AS DECIMAL(18,2))),0) AS SumChg,
+            COUNT(DISTINCT NULLIF(LTRIM(RTRIM(AccessionNumber)), '')) AS Visits
         FROM dbo.ClaimLevelData
-        WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+        WHERE PayerName_Raw IS NOT NULL
+          AND LTRIM(RTRIM(PayerName_Raw)) <> ''
+          AND ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) <> 0
+          AND LTRIM(RTRIM(ClaimStatus)) <> 'No Response'
         GROUP BY LTRIM(RTRIM(PayerName_Raw))
     ),
-    grand AS (
-        SELECT NULLIF(SUM(SumIns), 0) AS GrandTotal
-        FROM agg
-    ),
     ranked AS (
-        SELECT TOP 5
-               ROW_NUMBER() OVER (ORDER BY a.SumIns DESC) AS Rnk,
-               a.PayerName,
-               a.SumIns,
-               a.SumChg,
-               a.Visits,
-               a.AvgPaymentPct
-        FROM agg a
-        CROSS JOIN grand g
-        ORDER BY a.SumIns DESC
+        SELECT TOP 5 PayerName, SumIns, SumChg, Visits,
+               ROW_NUMBER() OVER (ORDER BY SumIns DESC) AS Rnk
+        FROM agg
+        ORDER BY SumIns DESC
     )
     SELECT * INTO #out FROM ranked;
 
     TRUNCATE TABLE dbo.Cert_CS_Top5ReimbursementPct;
     INSERT INTO dbo.Cert_CS_Top5ReimbursementPct
-        (PayerRank, PayerName, SumInsurancePayment, SumChargeAmount, AvgPaymentPct, UniqueVisitCount, RefreshedAt)
-    SELECT CAST(Rnk AS TINYINT), PayerName, SumIns, SumChg, AvgPaymentPct, Visits, GETDATE()
+        (PayerRank, PayerName, SumInsurancePayment, SumChargeAmount, UniqueVisitCount, RefreshedAt)
+    SELECT CAST(Rnk AS TINYINT), PayerName, SumIns, SumChg, Visits, GETDATE()
     FROM #out
     ORDER BY Rnk;
 
@@ -313,11 +290,13 @@ BEGIN
 
     ;WITH agg AS (
         SELECT
-            LTRIM(RTRIM(PayerName_Raw))                                         AS PayerName,
-            ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)         AS TotalPay,
-            COUNT(NULLIF(LTRIM(RTRIM(ClaimID)), ''))                            AS Visits
+            LTRIM(RTRIM(PayerName_Raw))                                AS PayerName,
+            ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))),0) AS TotalPay,
+            COUNT(DISTINCT NULLIF(LTRIM(RTRIM(AccessionNumber)), '')) AS Visits
         FROM dbo.ClaimLevelData
-        WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+        WHERE 
+           ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) <> 0
+        
         GROUP BY LTRIM(RTRIM(PayerName_Raw))
     ),
     ranked AS (

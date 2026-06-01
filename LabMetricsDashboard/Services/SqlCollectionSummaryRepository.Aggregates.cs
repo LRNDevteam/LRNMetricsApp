@@ -63,44 +63,11 @@ public sealed partial class SqlCollectionSummaryRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
 
-        // NorthWest, Augustus, Phi_Life, and PCR route through dedicated read SPs 
-        // (usp_GetNW_CS_Top5ReimbursementPct, usp_GetAug_CS_Top5ReimbursementPct, usp_GetPhi_CS_Top5ReimbursementPct, usp_GetPCR_CS_Top5ReimbursementPct),
-        // matching every other Collection Summary tab for these labs. The SP returns the
-        // snapshot on the no-filter path and aggregates live from ClaimLevelData when filters are supplied.
-        // These SPs also return the PaymentPct column calculated from the data.
-        if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase))
-        {
-            _logger.LogInformation("CollectionSummary[Aggregate] Top5ReimbursementPct({Prefix}): routing to SP usp_Get{Prefix}_CS_Top5ReimbursementPct", prefix, prefix);
-            return await GetTop5ReimbursementViaSpAsync(
-                connectionString, prefix,
-                filterPayerNames: null, filterPanelNames: null,
-                filterFirstBillFrom: null, filterFirstBillTo: null,
-                filterDosFrom: null, filterDosTo: null,
-                filterCheckDateFrom: null, filterCheckDateTo: null,
-                ct).ConfigureAwait(false);
-        }
-
-        _logger.LogInformation("CollectionSummary[Aggregate] Top5ReimbursementPct({Prefix}): reading snapshot table {Prefix}_CS_Top5ReimbursementPct", prefix, prefix);
-
-        // Only NorthWest and Augustus snapshot tables have PaymentPct column.
-        // (Phi_Life routes through SP above, so it doesn't need table PaymentPct)
-        var hasPaymentPctColumn = string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
-                                   string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase);
-        var sql = hasPaymentPctColumn
-            ? $"""
-              SELECT PayerRank, PayerName, SumInsurancePayment, SumChargeAmount, UniqueVisitCount, PaymentPct
-              FROM   dbo.{prefix}_CS_Top5ReimbursementPct
-              ORDER  BY PayerRank;
-              """
-            : $"""
-              SELECT PayerRank, PayerName, SumInsurancePayment, SumChargeAmount, UniqueVisitCount
-              FROM   dbo.{prefix}_CS_Top5ReimbursementPct
-              ORDER  BY PayerRank;
-              """;
+        var sql = $"""
+            SELECT PayerRank, PayerName, SumInsurancePayment, SumChargeAmount, UniqueVisitCount
+            FROM   dbo.{prefix}_CS_Top5ReimbursementPct
+            ORDER  BY PayerRank;
+            """;
 
         var rows = new List<InsuranceReimbursementRow>();
         var sw = Stopwatch.StartNew();
@@ -115,10 +82,7 @@ public sealed partial class SqlCollectionSummaryRepository
                 PayerName:           r.GetString(r.GetOrdinal("PayerName")),
                 SumInsurancePayment: r.GetDecimal(r.GetOrdinal("SumInsurancePayment")),
                 SumChargeAmount:     r.GetDecimal(r.GetOrdinal("SumChargeAmount")),
-                UniqueVisitCount:    r.GetInt32(r.GetOrdinal("UniqueVisitCount")),
-                PaymentPctFromSp:    hasPaymentPctColumn && !r.IsDBNull(r.GetOrdinal("PaymentPct"))
-                                        ? r.GetDecimal(r.GetOrdinal("PaymentPct"))
-                                        : null));
+                UniqueVisitCount:    r.GetInt32(r.GetOrdinal("UniqueVisitCount"))));
         }
 
         _logger.LogInformation("CollectionSummary[Aggregate] Top5ReimbursementPct({Prefix}): rows={N}, {Ms}ms",
@@ -132,21 +96,6 @@ public sealed partial class SqlCollectionSummaryRepository
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
-
-        // NorthWest, Phi_Life, and PCR route through dedicated read SPs (usp_Get{prefix}_CS_Top5ReimbursementPay),
-        // matching every other NorthWest/Phi/PCR Collection Summary tab. The SP returns the
-        // snapshot on the no-filter path and aggregates live from ClaimLevelData when filters are supplied.
-        if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase))
-            return await GetTop5TotalPaymentsViaSpAsync(
-                connectionString, prefix,
-                filterPayerNames: null, filterPanelNames: null,
-                filterFirstBillFrom: null, filterFirstBillTo: null,
-                filterDosFrom: null, filterDosTo: null,
-                filterCheckDateFrom: null, filterCheckDateTo: null,
-                ct).ConfigureAwait(false);
 
         var sql = $"""
             SELECT PayerRank, PayerName, TotalPayments, UniqueVisitCount
@@ -181,17 +130,11 @@ public sealed partial class SqlCollectionSummaryRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
 
-        _logger.LogInformation("CollectionSummary[Aggregate] MonthlyClaimVolume({Prefix}): entry point", prefix);
-
         // Labs with a dedicated read SP route through it with all-null filters
         // (@HasFilter = 0 inside the SP → snapshot path).
         if (string.Equals(prefix, "NW",  StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase))
+            string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase))
         {
-            _logger.LogInformation("CollectionSummary[Aggregate] MonthlyClaimVolume({Prefix}): routing to SP usp_Get{Prefix}_CS_MonthlyClaimVolume", prefix, prefix);
             return await GetCollectionMonthlyVolumeViaSpAsync(
                 connectionString,
                 prefix,
@@ -205,8 +148,6 @@ public sealed partial class SqlCollectionSummaryRepository
                 filterCheckDateTo: null,
                 ct).ConfigureAwait(false);
         }
-
-        _logger.LogInformation("CollectionSummary[Aggregate] MonthlyClaimVolume({Prefix}): reading snapshot table {Prefix}_CS_MonthlyClaimVolume", prefix, prefix);
 
         var sql = $"""
             SELECT PanelName, PayerName, PayerRank, BillYear, BillMonth, NoOfClaims, InsurancePayment
@@ -249,25 +190,23 @@ public sealed partial class SqlCollectionSummaryRepository
         // Labs that have a dedicated read SP route through it with all-null filters
         // (@HasFilter = 0 inside the SP → snapshot path). This guarantees that the
         // week labels and anchor date are always driven by SP logic, not duplicated here.
-        // ALL labs now have Collection Summary read SPs, so always route through the SP.
-        _logger.LogInformation("CollectionSummary[Aggregate] WeeklyClaimVolume({Prefix}): routing to SP usp_Get{Prefix}_CS_WeeklyClaimVolume", prefix, prefix);
-        return await GetCollectionWeeklyVolumeViaSpAsync(
-            connectionString,
-            prefix,
-            filterPayerNames: null,
-            filterPanelNames: null,
-            filterFirstBillFrom: null,
-            filterFirstBillTo: null,
-            filterDosFrom: null,
-            filterDosTo: null,
-            filterCheckDateFrom: null,
-            filterCheckDateTo: null,
-            ct).ConfigureAwait(false);
+        if (string.Equals(prefix, "NW",  StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase))
+        {
+            return await GetCollectionWeeklyVolumeViaSpAsync(
+                connectionString,
+                prefix,
+                filterPayerNames: null,
+                filterPanelNames: null,
+                filterFirstBillFrom: null,
+                filterFirstBillTo: null,
+                filterDosFrom: null,
+                filterDosTo: null,
+                filterCheckDateFrom: null,
+                filterCheckDateTo: null,
+                ct).ConfigureAwait(false);
+        }
 
-        // Old direct table read path - kept for reference but unreachable
-        // If a lab needs to fall back to direct table reads, add an explicit condition above
-        #pragma warning disable CS0162 // Unreachable code detected
-        _logger.LogInformation("CollectionSummary[Aggregate] WeeklyClaimVolume({Prefix}): reading snapshot table {Prefix}_CS_WeeklyClaimVolume", prefix, prefix);
         var sql = $"""
             SELECT PanelName, PayerName, PayerRank, WeekKey, WeekStart, WeekEnd, NoOfClaims, InsurancePayment
             FROM   dbo.{prefix}_CS_WeeklyClaimVolume
@@ -586,13 +525,10 @@ public sealed partial class SqlCollectionSummaryRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
 
-        if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase))
             return await GetPanelPaymentViaSpAsync(
                 connectionString,
-                $"dbo.usp_Get{prefix}_CS_PanelVsPayment",
+                "dbo.usp_GetNW_CS_PanelVsPayment",
                 filterPayerNames: null, filterPanelNames: null,
                 filterFirstBillFrom: null, filterFirstBillTo: null,
                 filterDosFrom: null, filterDosTo: null,
@@ -652,13 +588,10 @@ public sealed partial class SqlCollectionSummaryRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
 
-        if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase))
             return await GetRepPaymentViaSpAsync(
                 connectionString,
-                $"dbo.usp_Get{prefix}_CS_RepVsPayment",
+                "dbo.usp_GetNW_CS_RepVsPayment",
                 filterPayerNames: null, filterPanelNames: null,
                 filterFirstBillFrom: null, filterFirstBillTo: null,
                 filterDosFrom: null, filterDosTo: null,
@@ -699,13 +632,10 @@ public sealed partial class SqlCollectionSummaryRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
 
-        if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase))
             return await GetInsurancePaymentPctViaSpAsync(
                 connectionString,
-                $"dbo.usp_Get{prefix}_CS_InsuranceVsPaymentPct",
+                "dbo.usp_GetNW_CS_InsuranceVsPaymentPct",
                 filterPayerNames: null, filterPanelNames: null,
                 filterFirstBillFrom: null, filterFirstBillTo: null,
                 filterDosFrom: null, filterDosTo: null,
@@ -888,13 +818,11 @@ public sealed partial class SqlCollectionSummaryRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
 
-        // NorthWest, Phi_Life, and PCR route through dedicated read SPs (usp_Get{prefix}_CS_InsuranceVsPayment),
-        // matching every other NorthWest/Phi/PCR Collection Summary tab. The SP returns the
-        // snapshot on the no-filter path and aggregates live from ClaimLevelData when filters are supplied.
-        if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase))
+        // NorthWest routes through its dedicated read SP (usp_GetNW_CS_InsuranceVsPayment),
+        // matching every other NorthWest Collection Summary tab. The SP returns the
+        // NW_CS_InsuranceVsPayment snapshot on the no-filter path and aggregates live
+        // from ClaimLevelData when filters are supplied.
+        if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase))
             return await GetInsuranceVsPaymentViaSpAsync(
                 connectionString, prefix,
                 filterPayerNames: null, filterPanelNames: null,
@@ -973,13 +901,10 @@ public sealed partial class SqlCollectionSummaryRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
 
-        if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase))
             return await GetCptPaymentPctViaSpAsync(
                 connectionString,
-                $"dbo.usp_Get{prefix}_CS_CptVsPaymentPct",
+                "dbo.usp_GetNW_CS_CptVsPaymentPct",
                 filterPayerNames: null, filterPanelNames: null,
                 filterFirstBillFrom: null, filterFirstBillTo: null,
                 filterDosFrom: null, filterDosTo: null,
@@ -1027,13 +952,10 @@ public sealed partial class SqlCollectionSummaryRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
 
-        if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase))
             return await GetStatusSummaryViaSpAsync(
                 connectionString,
-                $"dbo.usp_Get{prefix}_CS_StatusSummary",
+                "dbo.usp_GetNW_CS_StatusSummary",
                 filterPayerNames: null, filterPanelNames: null,
                 filterFirstBillFrom: null, filterFirstBillTo: null,
                 filterDosFrom: null, filterDosTo: null,
@@ -1081,13 +1003,10 @@ public sealed partial class SqlCollectionSummaryRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
 
-        if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase))
             return await GetProviderSummaryViaSpAsync(
                 connectionString,
-                $"dbo.usp_Get{prefix}_CS_ProviderSummary",
+                "dbo.usp_GetNW_CS_ProviderSummary",
                 filterPayerNames: null, filterPanelNames: null,
                 filterFirstBillFrom: null, filterFirstBillTo: null,
                 filterDosFrom: null, filterDosTo: null,

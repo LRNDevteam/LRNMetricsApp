@@ -550,12 +550,12 @@ BEGIN
     IF @HasFilter = 0
     BEGIN
         SELECT  PanelName, PayerName, PayerRank,
-                NoOfClaims, TotalCharges, AvgCharges,
-                CarrierPayment, AvgCarrierPayment,
+                ClaimCount, TotalCharges, AvgCharges,
+                InsurancePayment, AvgInsurancePayment,
                 FullyPaidCount, FullyPaidAmount, AvgFullyPaid,
                 AdjudicatedCount, AdjudicatedAmount, AvgAdjudicated,
-                Days30Count, Days30Amount, AvgDays30,
-                Days60Count, Days60Amount, AvgDays60
+                Over30Count, Over30Amount, AvgOver30,
+                Over60Count, Over60Amount, AvgOver60
         FROM    dbo.Phi_CS_AvgPayments
         ORDER   BY PanelName, PayerRank;
         RETURN;
@@ -599,9 +599,9 @@ BEGIN
     ),
     agg AS (
         SELECT PanelName, PayerName,
-               COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)),''))                                     AS NoOfClaims,
+               COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)),''))                                     AS ClaimCount,
                ISNULL(SUM(Chg),    0)                                                               AS TotalCharges,
-               ISNULL(SUM(InsPay), 0)                                                               AS CarrierPayment,
+               ISNULL(SUM(InsPay), 0)                                                               AS InsurancePayment,
                COUNT(DISTINCT CASE WHEN Status = 'Fully Paid' THEN ClaimID END)                    AS FullyPaidCount,
                ISNULL(SUM(CASE WHEN Status = 'Fully Paid' THEN InsPay ELSE 0 END), 0)              AS FullyPaidAmount,
                COUNT(DISTINCT CASE WHEN Status IN ('Fully Paid','Partially Paid','Complete W/O',
@@ -610,31 +610,31 @@ BEGIN
                ISNULL(SUM(CASE WHEN Status IN ('Fully Paid','Partially Paid','Complete W/O',
                    'Fully Adjusted','Fully Denied','Denied','Partially Denied',
                    'Partially Adjusted','Patient Responsibility') THEN InsPay ELSE 0 END), 0)       AS AdjudicatedAmount,
-               COUNT(DISTINCT CASE WHEN Days <= 30 THEN ClaimID END)                               AS Days30Count,
-               ISNULL(SUM(CASE WHEN Days <= 30 THEN InsPay ELSE 0 END), 0)                         AS Days30Amount,
-               COUNT(DISTINCT CASE WHEN Days <= 60 THEN ClaimID END)                               AS Days60Count,
-               ISNULL(SUM(CASE WHEN Days <= 60 THEN InsPay ELSE 0 END), 0)                         AS Days60Amount
+               COUNT(DISTINCT CASE WHEN Days <= 30 THEN ClaimID END)                               AS Over30Count,
+               ISNULL(SUM(CASE WHEN Days <= 30 THEN InsPay ELSE 0 END), 0)                         AS Over30Amount,
+               COUNT(DISTINCT CASE WHEN Days <= 60 THEN ClaimID END)                               AS Over60Count,
+               ISNULL(SUM(CASE WHEN Days <= 60 THEN InsPay ELSE 0 END), 0)                         AS Over60Amount
         FROM base GROUP BY PanelName, PayerName
     ),
     ranks AS (
         SELECT PanelName, PayerName,
-               CAST(DENSE_RANK() OVER (PARTITION BY PanelName ORDER BY NoOfClaims DESC) AS TINYINT) AS PayerRank
+               CAST(DENSE_RANK() OVER (PARTITION BY PanelName ORDER BY ClaimCount DESC) AS TINYINT) AS PayerRank
         FROM agg
     )
     SELECT
         a.PanelName, a.PayerName, r.PayerRank,
-        a.NoOfClaims, a.TotalCharges,
-        CAST(CASE WHEN a.NoOfClaims       > 0 THEN a.TotalCharges      / a.NoOfClaims       ELSE 0 END AS DECIMAL(18,2)) AS AvgCharges,
-        a.CarrierPayment,
-        CAST(CASE WHEN a.NoOfClaims       > 0 THEN a.CarrierPayment    / a.NoOfClaims       ELSE 0 END AS DECIMAL(18,2)) AS AvgCarrierPayment,
+        a.ClaimCount, a.TotalCharges,
+        CAST(CASE WHEN a.ClaimCount       > 0 THEN a.TotalCharges      / a.ClaimCount       ELSE 0 END AS DECIMAL(18,2)) AS AvgCharges,
+        a.InsurancePayment,
+        CAST(CASE WHEN a.ClaimCount       > 0 THEN a.InsurancePayment  / a.ClaimCount       ELSE 0 END AS DECIMAL(18,2)) AS AvgInsurancePayment,
         a.FullyPaidCount, a.FullyPaidAmount,
         CAST(CASE WHEN a.FullyPaidCount   > 0 THEN a.FullyPaidAmount   / a.FullyPaidCount   ELSE 0 END AS DECIMAL(18,2)) AS AvgFullyPaid,
         a.AdjudicatedCount, a.AdjudicatedAmount,
         CAST(CASE WHEN a.AdjudicatedCount > 0 THEN a.AdjudicatedAmount / a.AdjudicatedCount ELSE 0 END AS DECIMAL(18,2)) AS AvgAdjudicated,
-        a.Days30Count, a.Days30Amount,
-        CAST(CASE WHEN a.Days30Count      > 0 THEN a.Days30Amount      / a.Days30Count      ELSE 0 END AS DECIMAL(18,2)) AS AvgDays30,
-        a.Days60Count, a.Days60Amount,
-        CAST(CASE WHEN a.Days60Count      > 0 THEN a.Days60Amount      / a.Days60Count      ELSE 0 END AS DECIMAL(18,2)) AS AvgDays60
+        a.Over30Count, a.Over30Amount,
+        CAST(CASE WHEN a.Over30Count      > 0 THEN a.Over30Amount      / a.Over30Count      ELSE 0 END AS DECIMAL(18,2)) AS AvgOver30,
+        a.Over60Count, a.Over60Amount,
+        CAST(CASE WHEN a.Over60Count      > 0 THEN a.Over60Amount      / a.Over60Count      ELSE 0 END AS DECIMAL(18,2)) AS AvgOver60
     FROM agg a
     JOIN ranks r ON r.PanelName = a.PanelName AND r.PayerName = a.PayerName
     WHERE r.PayerRank <= 3
@@ -1071,11 +1071,7 @@ BEGIN
     SELECT
         ISNULL(LTRIM(RTRIM(ClaimStatus)),            '(blank)') AS ClaimStatus,
         ISNULL(LTRIM(RTRIM(Panelname)),              '(blank)') AS PanelName,
-        ISNULL(NULLIF(LTRIM(RTRIM(
-            ISNULL(LTRIM(RTRIM(CPTCode)), '') +
-            CASE WHEN NULLIF(LTRIM(RTRIM(Units)),    '') IS NOT NULL THEN ' x ' + LTRIM(RTRIM(Units))    ELSE '' END +
-            CASE WHEN NULLIF(LTRIM(RTRIM(Modifier)), '') IS NOT NULL THEN ' x ' + LTRIM(RTRIM(Modifier)) ELSE '' END
-        )), ''), '(blank)')                                       AS CptCode,
+        ISNULL(LTRIM(RTRIM(CPTCodeXUnitsXModifier)), '(blank)') AS CptCode,
         ISNULL(LTRIM(RTRIM(PayerName_Raw)),          '(blank)') AS PayerName,
         COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)),''))            AS NoOfClaims,
         ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0) AS InsurancePayment,
@@ -1093,9 +1089,7 @@ BEGIN
     GROUP BY
         LTRIM(RTRIM(ClaimStatus)),
         LTRIM(RTRIM(Panelname)),
-        LTRIM(RTRIM(ISNULL(CPTCode, '') +
-            CASE WHEN NULLIF(LTRIM(RTRIM(Units)),    '') IS NOT NULL THEN ' x ' + LTRIM(RTRIM(Units))    ELSE '' END +
-            CASE WHEN NULLIF(LTRIM(RTRIM(Modifier)), '') IS NOT NULL THEN ' x ' + LTRIM(RTRIM(Modifier)) ELSE '' END)),
+        LTRIM(RTRIM(CPTCodeXUnitsXModifier)),
         LTRIM(RTRIM(PayerName_Raw))
     ORDER BY ClaimStatus, PanelName, PayerName;
 END
@@ -1133,7 +1127,7 @@ BEGIN
     IF @HasFilter = 0
     BEGIN
         SELECT ProviderRank, ReferringProvider,
-               NoOfClaims, InsurancePayments, InsuranceBalance, PatientBalance
+               NoOfClaims, InsurancePayment, InsuranceBalance, PatientBalance
         FROM   dbo.Phi_CS_ProviderSummary
         ORDER  BY ProviderRank;
         RETURN;
@@ -1172,7 +1166,7 @@ BEGIN
     )
     SELECT
         CAST(ROW_NUMBER() OVER (ORDER BY NoOfClaims DESC) AS INT) AS ProviderRank,
-        ReferringProvider, NoOfClaims, InsurancePayment AS InsurancePayments, InsuranceBalance, PatientBalance
+        ReferringProvider, NoOfClaims, InsurancePayment, InsuranceBalance, PatientBalance
     FROM agg
     ORDER BY ProviderRank;
 END

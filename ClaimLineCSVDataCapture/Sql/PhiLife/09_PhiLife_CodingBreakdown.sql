@@ -54,7 +54,7 @@ BEGIN
         )                                                                                AS VisitKey,
         TRY_CAST(ChargeAmount AS DECIMAL(18,2))                                          AS Charge
     INTO #Raw
-    FROM dbo.ClaimLevelData
+    FROM dbo.LineLevelData
     WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL AND LTRIM(RTRIM(FirstBilledDate)) <> '';
 
     SELECT Panelname, COUNT(VisitKey) AS ClaimCount, ISNULL(SUM(Charge), 0) AS TotalCharges

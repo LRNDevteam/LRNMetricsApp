@@ -1,4 +1,4 @@
-﻿using LabMetricsDashboard.Models;
+using LabMetricsDashboard.Models;
 using System.Diagnostics;
 using LabMetricsDashboard.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -314,10 +314,57 @@ public class CollectionSummaryController : Controller
         }
     }
 
-            /// <summary>
-            /// Wraps the repository result into the view-ready pivot structure.
-            /// </summary>
-            private static CollectionMonthlyVolumePivot BuildCollectionMonthlyPivot(CollectionMonthlyVolumeResult result)
+    /// <summary>
+    /// Transforms flat Rep�Year�Month rows into the pivot structure for the view.</summary>
+    private static RepPaymentPivot BuildRepPaymentPivot(List<RepPaymentFlatRow> flatRows)
+    {
+        if (flatRows.Count == 0)
+            return RepPaymentPivot.Empty;
+
+        // Discover distinct periods in chronological order
+        var periods = flatRows
+            .Select(r => new RepPaymentPeriod(r.Year, r.Month))
+            .Distinct()
+            .OrderBy(p => p.Year).ThenBy(p => p.Month)
+            .ToList();
+
+        // Group by SalesRepName
+        var grouped = flatRows
+            .GroupBy(r => r.SalesRepName, StringComparer.OrdinalIgnoreCase);
+
+        var pivotRows = new List<RepPaymentPivotRow>();
+        foreach (var g in grouped)
+        {
+            var cells = new Dictionary<RepPaymentPeriod, RepPaymentCell>();
+            foreach (var r in g)
+            {
+                var period = new RepPaymentPeriod(r.Year, r.Month);
+                cells[period] = new RepPaymentCell(r.NoOfClaims, r.InsurancePayments);
+            }
+
+            pivotRows.Add(new RepPaymentPivotRow
+            {
+                SalesRepName = g.Key,
+                Cells = cells,
+                GrandClaims = g.Sum(r => r.NoOfClaims),
+                GrandPayments = g.Sum(r => r.InsurancePayments),
+            });
+        }
+
+        // Sort rows by grand-total payments descending
+        pivotRows.Sort((a, b) => b.GrandPayments.CompareTo(a.GrandPayments));
+
+        return new RepPaymentPivot
+        {
+            Periods = periods,
+            Rows = pivotRows,
+        };
+    }
+
+    /// <summary>
+    /// Wraps the repository result into the view-ready pivot structure.
+    /// </summary>
+    private static CollectionMonthlyVolumePivot BuildCollectionMonthlyPivot(CollectionMonthlyVolumeResult result)
     {
         if (result.PanelRows.Count == 0)
             return CollectionMonthlyVolumePivot.Empty;
@@ -400,9 +447,6 @@ public class CollectionSummaryController : Controller
             : null;
         bool useAggregates = aggregatePrefix is not null && !hasActiveFilters;
 
-        _logger.LogInformation("CollectionSummary[GetTabPartial] Lab={Lab}, AggregatePrefix={Prefix}, UseAggregates={UseAgg}, HasFilters={HasFilters}, Tab={Tab}",
-            selectedLab, aggregatePrefix ?? "null", useAggregates, hasActiveFilters, tab);
-
         var payerFilter = filterPayerNames.Count > 0 ? filterPayerNames : null;
         var panelFilter = filterPanelNames.Count > 0 ? filterPanelNames : null;
 
@@ -479,6 +523,14 @@ public class CollectionSummaryController : Controller
                             fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
                     vm.PanelPayments = pp.Rows;
                     return PartialView("_CsTabPanelPay", vm);
+
+                case "reppay":
+                    var rp = useAggregates
+                        ? await _repo.GetRepPaymentFromAggregatesAsync(connStr, aggregatePrefix!, ct)
+                        : await _repo.GetRepPaymentAsync(connStr, payerFilter, panelFilter,
+                            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+                    vm.RepPayments = BuildRepPaymentPivot(rp.Rows);
+                    return PartialView("_CsTabRepPay", vm);
 
                 case "inspctpay":
                     var ip = useAggregates
@@ -654,6 +706,9 @@ public class CollectionSummaryController : Controller
             var panelPaymentTask = _repo.GetPanelPaymentAsync(
                 connStr, payerFilter, panelFilter,
                 fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+            var repPaymentTask = _repo.GetRepPaymentAsync(
+                connStr, payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
             var insurancePaymentPctTask = _repo.GetInsurancePaymentPctAsync(
                 connStr, payerFilter, panelFilter,
                 fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
@@ -685,7 +740,7 @@ public class CollectionSummaryController : Controller
 
             await Task.WhenAll(
                 monthlyVolumeTask, weeklyVolumeTask, reimbursementTask, totalPaymentsTask,
-                insuranceAgingTask, panelPaymentTask, insurancePaymentPctTask,
+                insuranceAgingTask, panelPaymentTask, repPaymentTask, insurancePaymentPctTask,
                 cptPaymentPctTask, panelAveragesTask, avgPaymentsTask,
                 statusSummaryTask, providerSummaryTask,
                 claimCountTask, lineCountTask);
@@ -720,6 +775,7 @@ public class CollectionSummaryController : Controller
                 ShowTop5TotalPayments = showTotalPayments,
                 InsuranceAging = (await insuranceAgingTask).Rows,
                 PanelPayments = (await panelPaymentTask).Rows,
+                RepPayments = BuildRepPaymentPivot((await repPaymentTask).Rows),
                 InsurancePaymentPct = (await insurancePaymentPctTask).Rows,
                 CptPaymentPct = (await cptPaymentPctTask).Rows,
                 PanelAverages = (await panelAveragesTask).PanelRows,
