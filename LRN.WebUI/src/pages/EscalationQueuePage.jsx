@@ -256,6 +256,22 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
     window.open(url, '_blank', 'noopener,noreferrer');
   }
 
+  async function deleteDocument(documentId, row = activeRow || drawerRow) {
+    if (!documentId || !row?.claimId) return;
+    if (!window.confirm('Delete this uploaded document?')) return;
+    setBusy(true);
+    try {
+      await denialWorkflowService.deleteClaimDocument(labId, documentId);
+      const docs = await denialWorkflowService.getClaimDocuments(labId, row.claimId);
+      setResponseDocs(docs || []);
+      setMessage({ type: 'success', text: 'Document deleted.' });
+    } catch (e) {
+      setMessage({ type: 'danger', text: e.message || 'Unable to delete document.' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (responseOnly) {
     return <div className="esc-page">
       <div className={`claim-split-shell ${drawerRow ? 'drawer-open' : ''}`}>
@@ -295,14 +311,14 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
               <div className="history-section-title">Escalation note</div>
               <div className="modal-row"><div className="modal-row-title">{drawerRow.escalationReason || '-'}</div><div className="modal-row-meta">{drawerRow.comments || 'No escalation comment entered.'}</div></div>
               <div className="history-section-title">Documents</div>
-              {responseDocs.length ? responseDocs.map(d => <div className="modal-row document-row" key={d.documentId}><div><div className="modal-row-title">{d.originalFileName}</div><div className="modal-row-meta">{d.uploadedBy || '-'} - {date(d.uploadedOn)}</div></div><button className="wl-btn xs" type="button" onClick={() => openDocument(d.documentId)}>Download</button></div>) : <div className="modal-row"><div className="modal-row-title">No documents uploaded</div></div>}
+              {responseDocs.length ? responseDocs.map(d => <div className="modal-row document-row" key={d.documentId}><div><div className="modal-row-title">{d.originalFileName}</div><div className="modal-row-meta">{d.uploadedBy || '-'} - {date(d.uploadedOn)}</div></div><div className="doc-row-actions"><button className="wl-btn xs" type="button" onClick={() => openDocument(d.documentId)}>Download</button><button className="wl-btn red xs" type="button" disabled={busy} onClick={() => deleteDocument(d.documentId, drawerRow)}>Delete</button></div></div>) : <div className="modal-row"><div className="modal-row-title">No documents uploaded</div></div>}
             </div>
           </div>
         </section>}
       </div>
       <Pager data={data} changePage={next => { closeModal(); setDrawerRow(null); clearRowContext(); setPage(next); }} />
       {historyCtx && <ClaimHistoryModal open={!!historyCtx} title={historyCtx.title} subtitle={historyCtx.subtitle} rows={historyRows} loading={historyLoading} onClose={() => setHistoryCtx(null)} />}
-      {activeRow && <EscalationModal row={activeRow} level={level} draft={drafts[activeRow.escalationId] || {}} setDraft={patch => setDraft(activeRow.escalationId, patch)} reviewers={reviewers} canReassign={canAssignFromRole(user?.role)} resolve={resolve} responseFiles={responseFiles} setResponseFiles={setResponseFiles} responseDocs={responseDocs} openDocument={openDocument} busy={busy} close={closeModal} tasks={lineTasks} tasksBusy={lineTasksBusy} onHistory={openHistory} modalError={modalError} setModalError={setModalError} />}
+      {activeRow && <EscalationModal row={activeRow} level={level} draft={drafts[activeRow.escalationId] || {}} setDraft={patch => setDraft(activeRow.escalationId, patch)} reviewers={reviewers} canReassign={canAssignFromRole(user?.role)} resolve={resolve} responseFiles={responseFiles} setResponseFiles={setResponseFiles} responseDocs={responseDocs} openDocument={openDocument} deleteDocument={deleteDocument} busy={busy} close={closeModal} tasks={lineTasks} tasksBusy={lineTasksBusy} onHistory={openHistory} modalError={modalError} setModalError={setModalError} />}
     </div>;
   }
 
@@ -324,7 +340,7 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
 
     {historyCtx && <ClaimHistoryModal open={!!historyCtx} title={historyCtx.title} subtitle={historyCtx.subtitle} rows={historyRows} loading={historyLoading} onClose={() => setHistoryCtx(null)} />}
 
-    {activeRow && <EscalationModal row={activeRow} level={level} draft={drafts[activeRow.escalationId] || {}} setDraft={patch => setDraft(activeRow.escalationId, patch)} reviewers={reviewers} canReassign={canAssignFromRole(user?.role)} resolve={resolve} responseFiles={responseFiles} setResponseFiles={setResponseFiles} responseDocs={responseDocs} openDocument={openDocument} busy={busy} close={closeModal} tasks={lineTasks} tasksBusy={lineTasksBusy} onHistory={openHistory} modalError={modalError} setModalError={setModalError} />}
+    {activeRow && <EscalationModal row={activeRow} level={level} draft={drafts[activeRow.escalationId] || {}} setDraft={patch => setDraft(activeRow.escalationId, patch)} reviewers={reviewers} canReassign={canAssignFromRole(user?.role)} resolve={resolve} responseFiles={responseFiles} setResponseFiles={setResponseFiles} responseDocs={responseDocs} openDocument={openDocument} deleteDocument={deleteDocument} busy={busy} close={closeModal} tasks={lineTasks} tasksBusy={lineTasksBusy} onHistory={openHistory} modalError={modalError} setModalError={setModalError} />}
   </div>;
 }
 
@@ -343,7 +359,7 @@ function EscalationRow({ row, level, onOpen, onHistory }) {
   </tr>;
 }
 
-function EscalationModal({ row, level, draft, setDraft, reviewers, canReassign, resolve, busy, close, tasks, tasksBusy, onHistory, modalError, setModalError, responseFiles, setResponseFiles, responseDocs, openDocument }) {
+function EscalationModal({ row, level, draft, setDraft, reviewers, canReassign, resolve, busy, close, tasks, tasksBusy, onHistory, modalError, setModalError, responseFiles, setResponseFiles, responseDocs, openDocument, deleteDocument }) {
   return <div className="esc-modal-backdrop" onMouseDown={close}>
     <div className="esc-modal" role="dialog" aria-modal="true" onMouseDown={e => e.stopPropagation()}>
       <div className="esc-modal-hd">
@@ -351,14 +367,14 @@ function EscalationModal({ row, level, draft, setDraft, reviewers, canReassign, 
         <button type="button" className="esc-modal-close" onClick={close}>×</button>
       </div>
       <div className="esc-modal-body">
-        <EscalationDetail row={row} level={level} draft={draft} setDraft={setDraft} reviewers={reviewers} canReassign={canReassign} resolve={resolve} busy={busy} modalError={modalError} setModalError={setModalError} responseFiles={responseFiles} setResponseFiles={setResponseFiles} responseDocs={responseDocs} openDocument={openDocument} />
+        <EscalationDetail row={row} level={level} draft={draft} setDraft={setDraft} reviewers={reviewers} canReassign={canReassign} resolve={resolve} busy={busy} modalError={modalError} setModalError={setModalError} responseFiles={responseFiles} setResponseFiles={setResponseFiles} responseDocs={responseDocs} openDocument={openDocument} deleteDocument={deleteDocument} />
         <LineTasksTable title={level === 'Line' ? 'Task list for this claim' : 'Related task list'} row={row} tasks={tasks} busy={tasksBusy} compact hideHistory onHistory={onHistory} />
       </div>
     </div>
   </div>;
 }
 
-function EscalationDetail({ row, draft, setDraft, reviewers, canReassign, resolve, busy, modalError, setModalError, responseFiles, setResponseFiles, responseDocs = [], openDocument }) {
+function EscalationDetail({ row, draft, setDraft, reviewers, canReassign, resolve, busy, modalError, setModalError, responseFiles, setResponseFiles, responseDocs = [], openDocument, deleteDocument }) {
   const arReviewers = (reviewers || []).filter(isArReviewerOption);
   const managerOptions = (reviewers || []).filter(isManagerOption);
   const action = draft.resolutionAction || '';
@@ -390,7 +406,7 @@ function EscalationDetail({ row, draft, setDraft, reviewers, canReassign, resolv
         <label className="esc-label">Add / update response note to {row.analyst || row.createdBy || 'analyst'} <span>*</span><textarea className="wl-textarea esc-response" value={draft.responseNote || ''} onChange={e => setDraft({ responseNote: e.target.value })} placeholder="Add clarification, decision, or instructions for the analyst — this will be visible in their work list..." /></label>
         {showReassign && <label className="esc-label">Reassign claim to AR Reviewer<select className="wl-full" value={draft.reassignTo || ''} onChange={e => setDraft({ reassignTo: e.target.value })}><option value="">{action === 'rework' ? 'Move to unassigned' : 'Keep current reviewer'}</option>{arReviewers.map(r => <option key={r.userName || r.UserName} value={r.userName || r.UserName}>{r.displayName || r.DisplayName || r.userName || r.UserName}</option>)}</select></label>}
         <label className="esc-label">Optional document upload<input type="file" multiple onChange={e => setResponseFiles(Array.from(e.target.files || []))} /></label>{responseFiles?.length ? <div className="esc-help">{responseFiles.length} file(s) selected.</div> : null}
-        {responseDocs?.length ? <div className="esc-doc-list">{responseDocs.map(d => <div className="esc-doc-row" key={d.documentId}><span>{d.originalFileName}</span><button className="wl-btn xs" type="button" onClick={() => openDocument?.(d.documentId)}>View / Download</button></div>)}</div> : null}
+        {responseDocs?.length ? <div className="esc-doc-list">{responseDocs.map(d => <div className="esc-doc-row" key={d.documentId}><span>{d.originalFileName}</span><div className="doc-row-actions"><button className="wl-btn xs" type="button" onClick={() => openDocument?.(d.documentId)}>View / Download</button><button className="wl-btn red xs" type="button" disabled={busy} onClick={() => deleteDocument?.(d.documentId, row)}>Delete</button></div></div>)}</div> : null}
         <div className="esc-help">Submit will send the response back for AR Manager verification.</div>
       </div>
     </div>

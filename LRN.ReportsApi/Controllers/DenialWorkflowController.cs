@@ -12,7 +12,12 @@ namespace LRN.ReportsApi.Controllers;
 public sealed class DenialWorkflowController : ControllerBase
 {
     private readonly IDenialWorkflowService _service;
-    public DenialWorkflowController(IDenialWorkflowService service) => _service = service;
+    private readonly IDenialWorkflowExportJobService _exportJobs;
+    public DenialWorkflowController(IDenialWorkflowService service, IDenialWorkflowExportJobService exportJobs)
+    {
+        _service = service;
+        _exportJobs = exportJobs;
+    }
 
     [HttpGet("health")]
     public IActionResult Health() => Ok("LRN.ReportsApi DenialWorkflow running");
@@ -94,6 +99,33 @@ public sealed class DenialWorkflowController : ControllerBase
     [HttpGet("claim-level")]
     public async Task<ActionResult<PagedResult<ClaimLevelRow>>> Claims([FromQuery] DenialWorkflowFilter filter, CancellationToken ct)
         => Ok(await _service.GetClaimsAsync(Normalize(filter), ct));
+
+    [HttpPost("claims/export")]
+    [HttpPost("claim-level/export")]
+    public ActionResult<ClaimExportStartResponse> StartClaimsExport([FromBody] DenialWorkflowFilter? filter)
+    {
+        if (filter is null || filter.LabId <= 0) return BadRequest("LabId is required.");
+        var normalized = Normalize(filter);
+        var requestedBy = normalized.UserName;
+        return Accepted(_exportJobs.StartClaimsExport(normalized, requestedBy));
+    }
+
+    [HttpGet("claims/export/{jobId}")]
+    public ActionResult<ClaimExportStatusResponse> ClaimsExportStatus([FromRoute] string jobId)
+    {
+        var requestedBy = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? string.Empty;
+        var status = _exportJobs.GetStatus(jobId, requestedBy);
+        return status is null ? NotFound(new { message = "Export job was not found." }) : Ok(status);
+    }
+
+    [HttpGet("claims/export/{jobId}/download")]
+    public IActionResult DownloadClaimsExport([FromRoute] string jobId)
+    {
+        var requestedBy = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? string.Empty;
+        var file = _exportJobs.GetCompletedFile(jobId, requestedBy);
+        if (file is null) return NotFound(new { message = "Export file is not ready yet." });
+        return PhysicalFile(file.FilePath, file.ContentType, file.FileName);
+    }
 
 	[HttpGet("claim-tasks")]
 	public async Task<ActionResult<IReadOnlyList<WorkflowTaskRow>>> ClaimTasksQuery(
@@ -246,6 +278,22 @@ public sealed class DenialWorkflowController : ControllerBase
             }, ct));
         }
         return Ok(saved);
+    }
+
+    [HttpDelete("claim-documents/{documentId:long}")]
+    public async Task<IActionResult> DeleteClaimDocument([FromRoute] long documentId, [FromQuery] int labId, CancellationToken ct)
+    {
+        var role = FirstClaim(ClaimTypes.Role, "role", "roles");
+        if (labId <= 0) return BadRequest("LabId is required.");
+
+        var doc = await _service.GetClaimDocumentAsync(labId, documentId, ct);
+        if (doc is null) return NotFound("Document was not found.");
+
+        if ((IsClientManagerRole(role) || IsAccountManagerRole(role)) && !await HasClientInfoPendingEscalationAsync(labId, doc.ClaimId, null, null, ct))
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Client/Account Manager can delete documents only for Client Info Pending escalations." });
+
+        var deleted = await _service.DeleteClaimDocumentAsync(labId, documentId, ct);
+        return deleted > 0 ? NoContent() : NotFound("Document was not found.");
     }
 
     private static string SafePath(string value)

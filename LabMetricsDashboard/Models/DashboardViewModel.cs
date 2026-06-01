@@ -9,6 +9,8 @@ public sealed class DashboardViewModel
     public string? FilterPayerName      { get; init; }
     public string? FilterPayerType      { get; init; }
     public string? FilterPanelName      { get; init; }
+    public List<string> FilterPayerNames { get; init; } = [];
+    public List<string> FilterPanelNames { get; init; } = [];
     public string? FilterClinicName     { get; init; }
     public string? FilterReferringProvider { get; init; }
     public string? FilterDosFrom        { get; init; }

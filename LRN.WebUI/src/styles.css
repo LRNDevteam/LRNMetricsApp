@@ -1232,10 +1232,10 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .claim-assign-bar2 label{display:flex;align-items:center;gap:6px;margin:0}
 .claim-assign-bar2 select{height:28px;border:.5px solid #cbd5e1;border-radius:6px;padding:0 8px;font-size:11px;background:#fff}
 .claim-list-head{display:grid;grid-template-columns:minmax(150px,1.3fr) minmax(120px,1fr) 94px 92px;gap:10px;padding:8px 14px;background:#f8fafc;border-bottom:.5px solid #e5e7eb;color:#64748b;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.06em}
-.claim-list-head-wide{grid-template-columns:minmax(150px,1.2fr) minmax(150px,1.1fr) minmax(140px,1fr) minmax(100px,.75fr) minmax(120px,.8fr) minmax(92px,.65fr) 94px 96px;min-width:1180px}
+.claim-list-head-wide{grid-template-columns:minmax(150px,1.2fr) minmax(90px,.7fr) minmax(150px,1.1fr) minmax(140px,1fr) minmax(100px,.75fr) minmax(120px,.8fr) minmax(92px,.65fr) 94px 96px;min-width:1340px}
 .claim-rows-scroll{max-height:62vh;overflow:auto}
 .claim-list-row{width:100%;display:grid;grid-template-columns:auto auto minmax(150px,1.3fr) minmax(120px,1fr) 94px 92px;gap:10px;align-items:center;border:0;border-bottom:.5px solid #eef2f7;background:#fff;padding:10px 14px;text-align:left;cursor:default;color:#0f172a}
-.claim-list-row-wide{grid-template-columns:auto auto minmax(150px,1.2fr) minmax(150px,1.1fr) minmax(140px,1fr) minmax(100px,.75fr) minmax(120px,.8fr) minmax(92px,.65fr) 94px 96px;min-width:1180px}
+.claim-list-row-wide{grid-template-columns:auto auto minmax(150px,1.2fr) minmax(90px,.7fr) minmax(150px,1.1fr) minmax(140px,1fr) minmax(100px,.75fr) minmax(120px,.8fr) minmax(92px,.65fr) 94px 96px;min-width:1340px}
 .claim-sort-btn{border:0;background:transparent;color:inherit;font:inherit;font-weight:800;text-transform:uppercase;letter-spacing:.06em;padding:0;display:inline-flex;align-items:center;gap:4px;cursor:pointer}
 .claim-sort-btn i{font-size:10px;color:#1abc9c}
 .claim-filter-toggle-row{display:flex;justify-content:flex-end;margin:0 0 8px}
@@ -1256,7 +1256,7 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .claim-drawer p{margin:0;font-size:11px;color:#475569}
 .claim-drawer-meta{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;padding:10px 16px;border-bottom:.5px solid #e5e7eb}
 .claim-drawer-meta span{min-width:0;font-size:11px;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.claim-drawer-meta b{display:block;font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:#64748b;margin-bottom:2px}
+.claim-drawer-meta b{display:block;font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:#246acd;margin-bottom:2px}
 .claim-drawer-actions{display:flex;align-items:center;gap:7px;padding:9px 16px;border-bottom:.5px solid #e5e7eb;background:#fff}
 .drawer-reviewer-select{height:28px;min-width:210px;border:.5px solid #cbd5e1;border-radius:6px;padding:0 8px;font-size:11px;background:#fff;color:#1f2937}
 .claim-drawer-tabs{display:flex;align-items:center;gap:4px;padding:9px 16px;border-bottom:.5px solid #e5e7eb;background:#f8fafc}
@@ -1273,6 +1273,7 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .history-section-title{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#64748b;margin:10px 0 2px}
 .document-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .document-row>div{min-width:0}
+.doc-row-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 @media(max-width:1100px){.claim-split-shell.drawer-open{grid-template-columns:1fr}.claim-drawer-meta{grid-template-columns:repeat(2,minmax(0,1fr))}.claim-list-head{display:none}.claim-list-row{grid-template-columns:auto auto minmax(0,1fr);align-items:start}.claim-list-payer,.claim-list-amt,.claim-list-row>.badge{grid-column:3}.claim-list-amt{text-align:left}}
 .aging-kpi-strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
 .aging-kpi{background:#fff;border:1px solid #e2e5ea;border-radius:10px;padding:14px 16px;box-shadow:0 1px 3px rgba(0,0,0,.07);position:relative;overflow:hidden}
@@ -1283,13 +1284,13 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .aging-kpi small{display:block;font-size:11px;color:#8b95a5;margin-top:2px}
 .aging-kpi em,.aging-list-row em{display:inline-block;margin-top:6px;font-style:normal;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px}
 .aging-kpi em.warn,.aging-list-row em.warn{background:#fdf0ee;color:#c0503e}.aging-kpi em.ok,.aging-list-row em.ok{background:#eaf8f3;color:#1a7a55}
-.aging-toolbar{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.aging-toolbar{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:start;gap:12px}
 .aging-toggle{display:flex;background:#fff;border:1px solid #e2e5ea;border-radius:6px;padding:3px;gap:2px;box-shadow:0 1px 3px rgba(0,0,0,.07)}
 .aging-toggle button{border:0;background:transparent;border-radius:4px;padding:7px 14px;font-size:12px;color:#6b7280;cursor:pointer}
 .aging-toggle button.active{background:#2ec08a;color:#fff;font-weight:700}
-.aging-toolbar-filters{display:flex;align-items:center;gap:10px;flex:1 1 560px;min-width:0;flex-wrap:wrap}
-.aging-toolbar-filters label{height:34px;display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid #d9e0ea;border-radius:6px;padding:0 10px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
-.aging-toolbar-filters i{font-size:12px;color:#4a90d9}.aging-toolbar-filters select{border:0;background:transparent;outline:0;min-width:116px;font-size:12px;color:#374151}.aging-toolbar-filters input[type=date]{border:0;background:transparent;outline:0;font-size:12px;color:#374151;min-width:118px}.aging-date-label span{font-size:10px;font-weight:800;text-transform:uppercase;color:#8b95a5}
+.aging-toolbar-filters{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));align-items:center;gap:10px;min-width:0}
+.aging-toolbar-filters label{height:34px;display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #d9e0ea;border-radius:6px;padding:0 10px;box-shadow:0 1px 3px rgba(0,0,0,.06);min-width:0}
+.aging-toolbar-filters i{font-size:12px;color:#4a90d9;flex:0 0 auto}.aging-toolbar-filters select{border:0;background:transparent;outline:0;width:100%;min-width:0;font-size:12px;color:#374151}.aging-toolbar-filters input[type=date]{border:0;background:transparent;outline:0;font-size:12px;color:#374151;width:100%;min-width:0}.aging-date-label span{font-size:10px;font-weight:800;text-transform:uppercase;color:#8b95a5;flex:0 0 auto}
 .aging-actions{display:flex;gap:8px;flex:0 0 auto}.aging-btn{border-radius:6px;font-size:12px;padding:8px 14px;display:inline-flex;align-items:center;gap:6px;cursor:pointer}
 .aging-btn.ghost{background:#fff;border:1px solid #e2e5ea;color:#4b5563}.aging-btn.primary{border:0;background:#2ec08a;color:#fff}
 .aging-main-card,.aging-list-card{background:#fff;border:1px solid #e2e5ea;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.08);overflow:hidden}
@@ -1311,7 +1312,7 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .aging-bottom-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.aging-list-card{padding:14px 18px;box-shadow:0 1px 3px rgba(0,0,0,.07)}
 .aging-list-title{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:800;color:#111827;margin-bottom:10px}.aging-list-title i{width:8px;height:8px;border-radius:2px}.aging-list-title i.red{background:#dc2626}.aging-list-title i.blue{background:#4a90d9}
 .aging-list-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f1f3f6}.aging-list-row:last-child{border-bottom:0}.aging-list-row b{display:block;font-size:12px;color:#374151}.aging-list-row small{display:block;font-size:10px;color:#8b95a5}.aging-list-row strong{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}.aging-list-row span{font-size:10px;color:#8b95a5}.aging-list-empty{color:#8b95a5;font-size:12px;padding:10px 0}
-@media (max-width:1100px){.aging-kpi-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.aging-bottom-grid{grid-template-columns:1fr}.aging-toolbar-filters{order:3;width:100%;flex-wrap:wrap}}
+@media (max-width:1100px){.aging-kpi-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.aging-bottom-grid{grid-template-columns:1fr}.aging-toolbar{grid-template-columns:1fr}.aging-toolbar-filters{grid-template-columns:repeat(2,minmax(150px,1fr))}.aging-actions{justify-content:flex-end}}
 
 /* Keep horizontal table scrollbars visible across workflow tables */
 .dt-wrap,

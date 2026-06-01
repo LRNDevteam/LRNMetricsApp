@@ -10,6 +10,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<DenialWorkflowOptions>(builder.Configuration.GetSection("Workflow"));
 builder.Services.AddScoped<IDenialWorkflowRepository, SqlDenialWorkflowRepository>();
 builder.Services.AddScoped<IDenialWorkflowService, DenialWorkflowService>();
+builder.Services.AddSingleton<IDenialWorkflowExportJobService, DenialWorkflowExportJobService>();
 builder.Services.AddAuthorization();
 builder.Services.AddControllers();
 builder.Services.AddResponseCompression(options =>

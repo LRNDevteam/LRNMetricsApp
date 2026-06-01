@@ -47,6 +47,7 @@ export default function App() {
   const [rowReviewers, setRowReviewers] = useState({});
   const [message, setMessage] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [claimExportJob, setClaimExportJob] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
   const [authError, setAuthError] = useState('');
@@ -62,6 +63,7 @@ export default function App() {
   const claimRequestSeq = useRef(0);
   const claimAbortRef = useRef(null);
   const lastClaimQueryKeyRef = useRef('');
+  const claimExportInFlightRef = useRef(false);
   const reviewerOnly = roleIsReviewerOnly(user.role);
   const canAssign = canAssignRole(user.role);
   const clientManager = isClientManagerRole(user.role);
@@ -597,6 +599,7 @@ export default function App() {
 
   const labName = labs.find(l => Number(l.labId ?? l.LabId) === Number(labId))?.labName || 'Select Lab';
   const pageTitle = { dashboard: 'Denial Workflow Dashboard', aging: 'Aging Dashboard', summary: 'Denial Summary', claims: canAssign ? 'Claim Level Assignment' : 'Claim View', myworklist: 'My Worklist', escalations: escalationView === 'response' ? 'Escalation Response' : 'Escalation Queue', verification: 'Verification' }[view] || 'Denial Workflow';
+  const showOverallDownload = view === 'claims';
   const claimNavTabs = useMemo(() => ([
     { key: 'new', label: 'New' },
     { key: 'unassigned', label: 'Unassigned' },
@@ -765,6 +768,118 @@ export default function App() {
     </div>;
   }
 
+  function claimExportStorageKey() {
+    return `denial.claimExport.${labId || 0}.${user.userName || 'user'}`;
+  }
+
+  function rememberClaimExport(job) {
+    try {
+      if (!job?.jobId) return;
+      localStorage.setItem(claimExportStorageKey(), JSON.stringify(job));
+    } catch { /* ignore browser storage errors */ }
+  }
+
+  function forgetClaimExport() {
+    claimExportInFlightRef.current = false;
+    setClaimExportJob(null);
+    try { localStorage.removeItem(claimExportStorageKey()); } catch { /* ignore browser storage errors */ }
+  }
+
+  useEffect(() => {
+    if (!authReady || !labId || !user.userName) return;
+    try {
+      const cached = JSON.parse(localStorage.getItem(claimExportStorageKey()) || 'null');
+      if (!cached?.jobId) return;
+      if (!['Queued', 'Running'].includes(cached.status)) {
+        localStorage.removeItem(claimExportStorageKey());
+        return;
+      }
+      setClaimExportJob(cached);
+      claimExportInFlightRef.current = ['Queued', 'Running'].includes(cached.status);
+    } catch { /* ignore bad browser cache */ }
+  }, [authReady, labId, user.userName]);
+
+  useEffect(() => {
+    if (!claimExportJob?.jobId || claimExportJob.status === 'Completed' || claimExportJob.status === 'Failed') return;
+
+    let cancelled = false;
+    const checkStatus = async () => {
+      try {
+        const status = await denialWorkflowService.getClaimsExportStatus(claimExportJob.jobId);
+        if (cancelled) return;
+        setClaimExportJob(status);
+        rememberClaimExport(status);
+        if (status?.status === 'Completed') {
+          claimExportInFlightRef.current = false;
+          try { localStorage.removeItem(claimExportStorageKey()); } catch { }
+          setMessage({ type: 'success', text: 'Claim detail export is ready. Click Download File to save it.' });
+        } else if (status?.status === 'Failed') {
+          claimExportInFlightRef.current = false;
+          try { localStorage.removeItem(claimExportStorageKey()); } catch { }
+          setMessage({ type: 'danger', text: status.message || 'Claim detail export failed.' });
+        }
+      } catch (err) {
+        if (cancelled) return;
+        const message = err.message || 'Unable to check export status.';
+        if (message.toLowerCase().includes('export job was not found')) {
+          forgetClaimExport();
+          setMessage({ type: 'info', text: 'The previous export job expired. Please start Overall Download again.' });
+          return;
+        }
+        claimExportInFlightRef.current = false;
+        setMessage({ type: 'danger', text: message });
+      }
+    };
+
+    const timer = window.setInterval(checkStatus, 10000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [claimExportJob?.jobId, claimExportJob?.status]);
+
+  async function startClaimExport() {
+    if (!labId) return setMessage({ type: 'warning', text: 'Please select a lab before exporting.' });
+    if (claimExportInFlightRef.current || (claimExportJob && ['Queued', 'Running'].includes(claimExportJob.status))) {
+      return setMessage({ type: 'info', text: 'Claim detail export is already in progress. Please wait until it completes.' });
+    }
+
+    try {
+      claimExportInFlightRef.current = true;
+      const exportQuery = {
+        ...query,
+        taskView: '',
+        page: 1,
+        pageSize: 100,
+        fromDate: query.fromDate || null,
+        toDate: query.toDate || null
+      };
+      Object.keys(exportQuery).forEach(key => {
+        if (exportQuery[key] === '' || exportQuery[key] === undefined) delete exportQuery[key];
+      });
+      const job = await denialWorkflowService.startClaimsExport(exportQuery);
+      setClaimExportJob(job);
+      rememberClaimExport(job);
+      claimExportInFlightRef.current = ['Queued', 'Running'].includes(job?.status);
+      setMessage({ type: 'info', text: job.message || 'Download is in progress. File creation is happening in the background; please wait for completion.' });
+    } catch (err) {
+      claimExportInFlightRef.current = false;
+      setMessage({ type: 'danger', text: err.message || 'Unable to start claim detail export.' });
+    }
+  }
+
+  async function downloadClaimExport() {
+    if (!claimExportJob?.jobId) return;
+    const url = await denialWorkflowService.getClaimsExportDownloadUrl(claimExportJob.jobId);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
   async function loadClaimTasks(rawClaimId) {
     const claimId = String(rawClaimId || '').trim();
     if (!claimId) return setMessage({ type: 'warning', text: 'ClaimId is missing for this row.' });
@@ -901,7 +1016,7 @@ export default function App() {
           <button type="button" className="menu-toggle" onClick={() => setSidebarOpen(v => !v)} aria-label="Toggle menu"><i className="bi bi-list" /></button>
           <div><div className="lrn-page-title">{pageTitle}</div><div className="lrn-breadcrumb">LRN Analytics / <span>{pageTitle}</span></div></div>
         </div>
-        <div className="topbar-actions">{workflowNotifications.total > 0 && <div className="notification-wrap"><button type="button" className="notification-btn" title="Claims needing attention" onClick={() => setNotificationOpen(v => !v)}><i className="bi bi-bell-fill" /><span className="notification-count">{workflowNotifications.total}</span><span className="notification-text"><b>{workflowNotifications.total}</b> {reviewerOnly ? 'claims need attention' : 'escalation claim(s)'}</span></button>{notificationOpen && <NotificationDetails />}</div>}<select className="top-lab-select" value={labId || ''} onChange={e => setLabId(Number(e.target.value))}>{labs.map(l => <option key={l.labId ?? l.LabId} value={l.labId ?? l.LabId}>{l.labName ?? l.LabName}</option>)}</select><span className="current-lab">{labName}</span><button className="topbar-btn teal" onClick={() => setMessage({ type: 'info', text: 'Use backend export endpoint for Excel download.' })}><i className="bi bi-download" />Export</button><button type="button" className="topbar-btn" onClick={logoutWorkflow}><i className="bi bi-box-arrow-right" />Logout</button></div>
+        <div className="topbar-actions">{workflowNotifications.total > 0 && <div className="notification-wrap"><button type="button" className="notification-btn" title="Claims needing attention" onClick={() => setNotificationOpen(v => !v)}><i className="bi bi-bell-fill" /><span className="notification-count">{workflowNotifications.total}</span><span className="notification-text"><b>{workflowNotifications.total}</b> {reviewerOnly ? 'claims need attention' : 'escalation claim(s)'}</span></button>{notificationOpen && <NotificationDetails />}</div>}<select className="top-lab-select" value={labId || ''} onChange={e => setLabId(Number(e.target.value))}>{labs.map(l => <option key={l.labId ?? l.LabId} value={l.labId ?? l.LabId}>{l.labName ?? l.LabName}</option>)}</select><span className="current-lab">{labName}</span>{showOverallDownload && claimExportJob && <button type="button" className={`topbar-btn ${claimExportJob.status === 'Completed' ? 'teal' : ''}`} disabled={claimExportJob.status !== 'Completed'} onClick={downloadClaimExport} title={claimExportJob.message || claimExportJob.status}><i className={`bi ${claimExportJob.status === 'Completed' ? 'bi-file-earmark-excel' : 'bi-hourglass-split'}`} />{claimExportJob.status === 'Completed' ? 'Download File' : 'Export Running'}</button>}{showOverallDownload && <button className="topbar-btn teal" onClick={startClaimExport} disabled={claimExportInFlightRef.current || (claimExportJob && ['Queued', 'Running'].includes(claimExportJob.status))}><i className="bi bi-download" />Overall Download</button>}<button type="button" className="topbar-btn" onClick={logoutWorkflow}><i className="bi bi-box-arrow-right" />Logout</button></div>
       </header>
       <main className="lrn-content">
         {view === 'claims' && <div className="claim-filter-toggle-row"><button type="button" className="wl-btn xs" onClick={() => setClaimFiltersOpen(v => !v)}><i className={`bi ${claimFiltersOpen ? 'bi-eye-slash' : 'bi-funnel'}`} />{claimFiltersOpen ? 'Hide Filters' : 'View Filters'}</button></div>}
@@ -918,6 +1033,7 @@ export default function App() {
           if (pivot === 'payer') next.payerName = row?.name || '';
           if (pivot === 'classification') next.denialClassification = row?.name || '';
           if (pivot === 'action') next.actionCategory = row?.name || '';
+          if (pivot === 'panel') next.panelName = row?.name || '';
           setFilter(f => ({ ...f, ...next }));
           setClaimTaskView('new');
           setView((reviewerOnly || readOnlyWorkflow) ? 'myworklist' : 'claims');

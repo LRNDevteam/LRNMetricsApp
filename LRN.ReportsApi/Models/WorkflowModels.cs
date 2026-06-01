@@ -110,6 +110,7 @@ public sealed class AgingDashboardSummary
     public IReadOnlyList<AgingBucketSummary> Buckets { get; set; } = Array.Empty<AgingBucketSummary>();
     public IReadOnlyList<AgingMatrixRow> ByPayer { get; set; } = Array.Empty<AgingMatrixRow>();
     public IReadOnlyList<AgingMatrixRow> ByClassification { get; set; } = Array.Empty<AgingMatrixRow>();
+    public IReadOnlyList<AgingMatrixRow> ByPanel { get; set; } = Array.Empty<AgingMatrixRow>();
     public IReadOnlyList<AgingMatrixRow> ByAction { get; set; } = Array.Empty<AgingMatrixRow>();
     public IReadOnlyList<AgingListItem> SlaRisks { get; set; } = Array.Empty<AgingListItem>();
     public IReadOnlyList<AgingListItem> AnalystWorkload { get; set; } = Array.Empty<AgingListItem>();
@@ -239,6 +240,24 @@ public sealed class DenialWorkflowResult
     public int RowsAffected { get; set; }
 }
 
+public sealed class ClaimExportStartResponse
+{
+    public string JobId { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+}
+
+public sealed class ClaimExportStatusResponse
+{
+    public string JobId { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+    public int RowCount { get; set; }
+    public DateTime CreatedOnUtc { get; set; }
+    public DateTime? CompletedOnUtc { get; set; }
+    public string? DownloadUrl { get; set; }
+}
+
 public class DenialWorkflowSummary
 {
     public int Assigned { get; set; }
@@ -314,7 +333,10 @@ public class WorkflowTaskRow
     public string UniqueTrackId { get; set; } = string.Empty;
     public string ClaimUid { get; set; } = string.Empty;
     public string ClaimId { get; set; } = string.Empty;
+    public string Source { get; set; } = string.Empty;
+    public string PatientName { get; set; } = string.Empty;
     public string PatientId { get; set; } = string.Empty;
+    public string SubscriberId { get; set; } = string.Empty;
     public string CptCode { get; set; } = string.Empty;
     public int? Units { get; set; }
     public string Modifier { get; set; } = string.Empty;
@@ -379,6 +401,7 @@ public sealed class ClaimLevelRow
     public string ClaimId { get; set; } = string.Empty;
     public string VisitNumber { get; set; } = string.Empty;
     public string AccessionNumber { get; set; } = string.Empty;
+    public string Source { get; set; } = string.Empty;
     public string PatientName { get; set; } = string.Empty;
     public DateTime? PatientDOB { get; set; }
     public string PatientId { get; set; } = string.Empty;

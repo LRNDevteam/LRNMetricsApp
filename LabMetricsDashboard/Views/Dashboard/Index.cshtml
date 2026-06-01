@@ -120,6 +120,38 @@
     .filter-active-badge    { font-size:.7rem; vertical-align:middle; }
     .bar-month              { font-size:.7rem; color:#555; }
     .bar-cell               { vertical-align:middle; }
+    .cs-ms { position:relative; }
+    .cs-ms-btn {
+        display:flex; align-items:center; justify-content:space-between;
+        width:100%; padding:.3rem .6rem; font-size:.8rem;
+        border:1px solid #ced4da; border-radius:.375rem;
+        background:#fff; cursor:pointer; min-height:31px;
+        white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    .cs-ms-btn:hover { border-color:#7B8B8E; }
+    .cs-ms-btn .cs-ms-count {
+        background:#1565c0; color:#fff; font-size:.65rem;
+        border-radius:10px; padding:0 .45rem; margin-left:.4rem;
+        font-weight:700; flex-shrink:0;
+    }
+    .cs-ms-panel {
+        display:none; position:absolute; z-index:100; top:100%;
+        left:0; right:0; background:#fff; border:1px solid #ced4da;
+        border-radius:.375rem; box-shadow:0 4px 16px rgba(0,0,0,.12);
+        margin-top:2px; max-height:280px; overflow:hidden;
+    }
+    .cs-ms-panel.open { display:flex; flex-direction:column; }
+    .cs-ms-search {
+        border:none; border-bottom:1px solid #e9ecef;
+        padding:.4rem .6rem; font-size:.78rem; outline:none; width:100%;
+    }
+    .cs-ms-list { overflow-y:auto; max-height:220px; padding:.25rem 0; }
+    .cs-ms-list label {
+        display:flex; align-items:center; gap:.4rem;
+        padding:.25rem .6rem; font-size:.78rem; cursor:pointer; margin:0;
+    }
+    .cs-ms-list label:hover { background:#edf0f0; }
+    .cs-ms-list label.cs-ms-hidden { display:none; }
 </style>
 
 
@@ -174,13 +206,22 @@
 
                     <div class="col-sm-6 col-md-3">
                         <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PAYER NAME</label>
-                        <select name="filterPayerName" class="form-select form-select-sm">
-                            <option value="">All</option>
-                            @foreach (var v in Model.PayerNames)
-                            {
-                                <option value="@v" selected="@(v == Model.FilterPayerName ? "selected" : null)">@v</option>
-                            }
-                        </select>
+                        <div class="cs-ms" data-ms-name="filterPayerName">
+                            <div class="cs-ms-btn" tabindex="0">
+                                <span class="cs-ms-label">All</span>
+                                <span class="cs-ms-count" style="display:none">0</span>
+                            </div>
+                            <div class="cs-ms-panel">
+                                <input type="text" class="cs-ms-search" placeholder="Search payer names..." autocomplete="off" />
+                                <div class="cs-ms-list">
+                                    @foreach (var v in Model.PayerNames)
+                                    {
+                                        <label><input type="checkbox" name="filterPayerName" value="@v"
+                                            @(Model.FilterPayerNames.Contains(v) ? "checked" : "") /> @v</label>
+                                    }
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="col-sm-6 col-md-2">
@@ -196,13 +237,22 @@
 
                     <div class="col-sm-6 col-md-2">
                         <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PANEL</label>
-                        <select name="filterPanelName" class="form-select form-select-sm">
-                            <option value="">All</option>
-                            @foreach (var v in Model.PanelNames)
-                            {
-                                <option value="@v" selected="@(v == Model.FilterPanelName ? "selected" : null)">@v</option>
-                            }
-                        </select>
+                        <div class="cs-ms" data-ms-name="filterPanelName">
+                            <div class="cs-ms-btn" tabindex="0">
+                                <span class="cs-ms-label">All</span>
+                                <span class="cs-ms-count" style="display:none">0</span>
+                            </div>
+                            <div class="cs-ms-panel">
+                                <input type="text" class="cs-ms-search" placeholder="Search panels..." autocomplete="off" />
+                                <div class="cs-ms-list">
+                                    @foreach (var v in Model.PanelNames)
+                                    {
+                                        <label><input type="checkbox" name="filterPanelName" value="@v"
+                                            @(Model.FilterPanelNames.Contains(v) ? "checked" : "") /> @v</label>
+                                    }
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="col-sm-6 col-md-2">
@@ -278,6 +328,67 @@
         </div>
     </div>
 
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            document.querySelectorAll('.cs-ms').forEach(function (ms) {
+                var btn = ms.querySelector('.cs-ms-btn');
+                var panel = ms.querySelector('.cs-ms-panel');
+                var search = ms.querySelector('.cs-ms-search');
+                var labels = ms.querySelectorAll('.cs-ms-list label');
+                var labelEl = ms.querySelector('.cs-ms-label');
+                var countEl = ms.querySelector('.cs-ms-count');
+
+                function updateLabel() {
+                    var checked = ms.querySelectorAll('.cs-ms-list input:checked');
+                    if (checked.length === 0) {
+                        labelEl.textContent = 'All';
+                        countEl.style.display = 'none';
+                    } else if (checked.length === 1) {
+                        labelEl.textContent = checked[0].value;
+                        countEl.style.display = 'none';
+                    } else {
+                        labelEl.textContent = checked[0].value;
+                        countEl.textContent = '+' + (checked.length - 1);
+                        countEl.style.display = '';
+                    }
+                }
+
+                btn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    document.querySelectorAll('.cs-ms-panel.open').forEach(function (p) {
+                        if (p !== panel) p.classList.remove('open');
+                    });
+                    panel.classList.toggle('open');
+                    if (panel.classList.contains('open')) {
+                        search.value = '';
+                        search.focus();
+                        labels.forEach(function (l) { l.classList.remove('cs-ms-hidden'); });
+                    }
+                });
+
+                search.addEventListener('input', function () {
+                    var q = this.value.toLowerCase();
+                    labels.forEach(function (l) {
+                        var text = l.textContent.toLowerCase();
+                        l.classList.toggle('cs-ms-hidden', q.length > 0 && text.indexOf(q) === -1);
+                    });
+                });
+
+                ms.querySelectorAll('.cs-ms-list input').forEach(function (cb) {
+                    cb.addEventListener('change', updateLabel);
+                });
+
+                panel.addEventListener('click', function (e) { e.stopPropagation(); });
+                updateLabel();
+            });
+
+            document.addEventListener('click', function () {
+                document.querySelectorAll('.cs-ms-panel.open').forEach(function (p) {
+                    p.classList.remove('open');
+                });
+            });
+        });
+    </script>
     <script>
         (function () {
             var el = document.getElementById('filterBody');

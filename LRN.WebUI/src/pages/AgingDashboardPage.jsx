@@ -4,7 +4,8 @@ import { money } from '../utils/formatters';
 const pivotConfig = {
   payer: { label: 'By Payer', title: 'AR Outstanding by Payer', column: 'Payer', key: 'byPayer' },
   classification: { label: 'By Classification', title: 'AR Outstanding by Denial Classification', column: 'Denial Classification', key: 'byClassification' },
-  action: { label: 'By Action', title: 'AR Outstanding by Action / Task', column: 'Action / Task', key: 'byAction' }
+  action: { label: 'By Action', title: 'AR Outstanding by Action Category', column: 'Action Category', key: 'byAction' },
+  panel: { label: 'By Panel', title: 'AR Outstanding by Panel', column: 'Panel', key: 'byPanel' }
 };
 
 const bucketClasses = ['h0', 'h30', 'h60', 'h90', 'h120'];
@@ -57,7 +58,8 @@ function exportAgingWorkbook(data, buckets) {
   const sheets = [
     ['By Payer', 'AR Outstanding by Payer', 'Payer', data.byPayer || []],
     ['By Classification', 'AR Outstanding by Denial Classification', 'Denial Classification', data.byClassification || []],
-    ['By Action Task', 'AR Outstanding by Action / Task', 'Action / Task', data.byAction || []]
+    ['By Action', 'AR Outstanding by Action Category', 'Action Category', data.byAction || []],
+    ['By Panel', 'AR Outstanding by Panel', 'Panel', data.byPanel || data.byAction || []]
   ];
   const exportBuckets = (buckets || []).slice(0, 5);
   const moneyValue = v => Number(Number(v || 0).toFixed(2));
@@ -124,7 +126,7 @@ export default function AgingDashboardPage({ data = {}, filter = {}, setFilterVa
   const [pivot, setPivot] = useState('payer');
   const [period, setPeriodState] = useState('');
   const config = pivotConfig[pivot];
-  const exportRows = data[config.key] || [];
+  const exportRows = data[config.key] || (config.key === 'byPanel' ? data.byAction : []) || [];
   const rows = exportRows.slice(0, 10);
   const buckets = data.buckets || [];
 
@@ -166,6 +168,7 @@ export default function AgingDashboardPage({ data = {}, filter = {}, setFilterVa
   }
 
   const reviewerOptions = (reviewers || []).map(r => ({ value: r.userName || r.UserName || '', label: r.displayName || r.DisplayName || r.userName || r.UserName || '' })).filter(x => x.value);
+  const payerOptions = options?.payerNames || [];
   const panelOptions = options?.panelNames || [];
   const periodValue = period || (filter.fromDate || filter.toDate ? 'custom' : '');
 
@@ -186,6 +189,7 @@ export default function AgingDashboardPage({ data = {}, filter = {}, setFilterVa
           <label className="aging-date-label"><span>End</span><input type="date" value={filter.toDate || ''} onChange={e => setCustomDate('toDate', e.target.value)} /></label>
         </>}
         <label><i className="bi bi-person" /><select value={filter.reviewer || ''} onChange={e => setFilterValue?.('reviewer', e.target.value)}><option value="">All Analysts</option>{reviewerOptions.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}</select></label>
+        <label><i className="bi bi-credit-card" /><select value={filter.payerName || ''} onChange={e => setFilterValue?.('payerName', e.target.value)}><option value="">All Payers</option>{payerOptions.map(p => <option key={p} value={p}>{p}</option>)}</select></label>
         <label><i className="bi bi-grid" /><select value={filter.panelName || ''} onChange={e => setFilterValue?.('panelName', e.target.value)}><option value="">All Panels</option>{panelOptions.map(p => <option key={p} value={p}>{p}</option>)}</select></label>
       </div>
       <div className="aging-actions">
