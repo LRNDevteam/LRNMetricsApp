@@ -33,6 +33,25 @@ public class LabConfig
     /// </summary>
     public string? DbConnectionString    { get; set; }
 
+    /// <summary>
+    /// Number of rows sent per chunk to <c>dbo.usp_BulkInsertPayerValidationReport</c>.
+    /// Large input files (NorthWest can have 500K+ rows) are split into chunks so each
+    /// TVP call stays within reasonable memory/transaction limits.
+    /// Defaults to 25,000; values &lt;= 0 fall back to the default.
+    /// </summary>
+    public int     DbInsertChunkSize     { get; set; } = 25_000;
+
+    /// <summary>
+    /// When <c>true</c> the app treats the current file as new regardless of
+    /// <see cref="LastProcessedFile"/>: the existing FileLog entry is removed,
+    /// rows are re-inserted, and the PV_* aggregate snapshots are refreshed.
+    /// The flag is automatically reset to <c>false</c> and written back to the
+    /// lab JSON file after the re-insert so the next normal run is unaffected.
+    /// Set this to <c>true</c> in the per-lab JSON when a source file is
+    /// corrected and needs to be reloaded without renaming it.
+    /// </summary>
+    public bool    DataRefresh           { get; set; } = false;
+
     // ?? Runtime fields (written back after every successful run) ?????????????
 
     /// <summary>Full path of the last successfully processed INPUT source file.

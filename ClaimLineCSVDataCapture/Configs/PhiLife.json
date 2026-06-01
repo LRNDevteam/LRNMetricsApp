@@ -1,0 +1,74 @@
+{
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PhiLife lab configuration
+  //
+  // DEPLOY INSTRUCTIONS:
+  //   Copy this file to  C:\CodingMastConfigs\Labs\PhiLife.json
+  //   Copy PhiLifeFieldMappings.json to  C:\CodingMastConfigs\Labs\PhiLifeFieldMappings.json
+  //   (or update LabFieldMappingsPath below to point to wherever you place it)
+  //
+  // FIRST RUN:
+  //   Set ClaimLineRefresh = true for the first run so existing data is purged
+  //   and the file is re-processed cleanly.  The app auto-resets it to false
+  //   after a successful run.
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  "DBEnabled": true,
+
+  // ── Connection string for the PhiLife SQL Server database ─────────────────
+  // FILL IN: replace with the actual PhiLife DB connection string
+  "DbConnectionString": "Server=YOUR_SERVER;Database=YOUR_PHILIFE_DB;Integrated Security=True;TrustServerCertificate=True;",
+
+  // ── CSV ingestion flags ───────────────────────────────────────────────────
+  // ClaimLineInsert MUST be true to enable file processing.
+  "ClaimLineInsert": true,
+
+  // Set true on first run (or any time you want to force a full re-load).
+  // The app resets this to false automatically after a successful run.
+  "ClaimLineRefresh": true,
+
+  // ── Paths ─────────────────────────────────────────────────────────────────
+  "Paths": {
+    // FILL IN: base folder where PhiLife weekly CSV drops are stored
+    // Example: "\\\\fileserver\\ServerMasters\\PhiLife\\"
+    // Example: "E:\\LRN-Data\\ServerMasters\\PhiLife\\"
+    "ServerMastersBasePath": "FILL_IN_BASE_PATH",
+
+    // FILL IN: sub-folder inside ServerMastersBasePath that contains the CSVs
+    // The app searches this folder recursively for files whose name contains
+    // "Claim Level" / "ClaimLevel"  or  "Line Level" / "LineLevel".
+    "ServerMasterFolderName": "FILL_IN_SUBFOLDER",
+
+    // Optional: lab-specific FieldMappings override.
+    // Point to the deployed copy of PhiLifeFieldMappings.json.
+    "LabFieldMappingsPath": "C:\\CodingMastConfigs\\Mappings\\PhiLifeFieldMappings.Json",
+
+    // Leave blank unless you have dedicated processing/output folders for PhiLife.
+    "LabProcessingBasePath": "",
+    "RecentlyProcessedLineLevelStandardizedFile": "",
+    "RecentlyProcessedClaimLevelStandardizedFile": "",
+    "LineLevelStandardizedCsv": "",
+    "ClaimLevelStandardizedCsv": "",
+    "PayerMaster": "",
+    "CodingMaster": "",
+    "CptFeeSchedule": ""
+  },
+
+  // ── Production report output folder (optional) ────────────────────────────
+  "Output": {
+    "Reports": "",
+    "Avgs": "",
+    "Archive": "",
+    "ConslidatedAvgs": "",
+    "PayerCptAverageBase": "",
+    "CodingValidationBase": ""
+  },
+
+  // ── Production Summary rule settings ─────────────────────────────────────
+  // PhiLife uses Rule1 (Thu-to-Wed weeks, same as BeechTree / Augustus).
+  "ProductionSummary": {
+    "Rule": "Rule1",
+    "WeekRule": "Rule1",
+    "WeekRange": "Thu to Wed"
+  }
+}

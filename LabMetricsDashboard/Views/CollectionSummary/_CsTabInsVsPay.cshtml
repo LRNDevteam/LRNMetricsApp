@@ -1,0 +1,139 @@
+@model LabMetricsDashboard.Models.CollectionSummaryViewModel
+@{
+    var rowsData = Model.InsuranceVsPayment;
+    var periods = rowsData
+        .Select(r => (Year: r.BillYear, Month: r.BillMonth))
+        .Distinct()
+        .OrderBy(p => p.Year)
+        .ThenBy(p => p.Month)
+        .ToList();
+    var years = periods.Select(p => p.Year).Distinct().OrderBy(y => y).ToList();
+    var pivotRows = rowsData
+        .GroupBy(r => r.PayerName, StringComparer.OrdinalIgnoreCase)
+        .Select(g => new
+        {
+            PayerName = g.Key,
+            Cells = g.GroupBy(r => (Year: r.BillYear, Month: r.BillMonth))
+                .ToDictionary(
+                    cg => cg.Key,
+                    cg => new
+                    {
+                        Count   = cg.Sum(x => x.NoOfPaidClaims),
+                        Payment = cg.Sum(x => x.InsurancePayment)
+                    }),
+            TotalCount   = g.Sum(x => x.NoOfPaidClaims),
+            TotalPayment = g.Sum(x => x.InsurancePayment)
+        })
+        .OrderByDescending(r => r.TotalPayment)
+        .ToList();
+}
+
+@if (rowsData.Count > 0)
+{
+    <div class="cs-rpt-wrap">
+        <div class="cs-rpt-scroll">
+            <table class="cs-rpt-table">
+                <thead>
+                    <tr>
+                        <th rowspan="3" style="text-align:left;min-width:280px">Row Labels</th>
+                        @foreach (var year in years)
+                        {
+                            var yearMonthCount = periods.Count(p => p.Year == year);
+                            <th colspan="@(yearMonthCount * 2 + 2)">@year</th>
+                        }
+                        <th colspan="2">Grand Total</th>
+                    </tr>
+                    <tr>
+                        @foreach (var year in years)
+                        {
+                            foreach (var p in periods.Where(p => p.Year == year))
+                            {
+                                var monthLabel = new DateTime(p.Year, p.Month, 1).ToString("MMM");
+                                <th colspan="2">@monthLabel</th>
+                            }
+                            <th colspan="2">@year Total</th>
+                        }
+                        <th colspan="2">Total</th>
+                    </tr>
+                    <tr>
+                        @foreach (var year in years)
+                        {
+                            foreach (var _ in periods.Where(p => p.Year == year))
+                            {
+                                <th style="min-width:105px">Count of Paid Claims</th>
+                                <th style="min-width:150px">Sum of Insurance Payment</th>
+                            }
+                            <th style="min-width:105px">Count of Paid Claims</th>
+                            <th style="min-width:150px">Sum of Insurance Payment</th>
+                        }
+                        <th style="min-width:105px">Count of Paid Claims</th>
+                        <th style="min-width:150px">Sum of Insurance Payment</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in pivotRows)
+                    {
+                        <tr>
+                            <td style="text-align:left;font-weight:600">@row.PayerName</td>
+                            @foreach (var year in years)
+                            {
+                                var yearCount = 0;
+                                var yearPayment = 0m;
+                                foreach (var p in periods.Where(p => p.Year == year))
+                                {
+                                    row.Cells.TryGetValue((p.Year, p.Month), out var cell);
+                                    var count = cell?.Count ?? 0;
+                                    var payment = cell?.Payment ?? 0m;
+                                    yearCount += count;
+                                    yearPayment += payment;
+                                    <td style="text-align:right">@count.ToString("N0")</td>
+                                    <td style="text-align:right">@payment.ToString("C2")</td>
+                                }
+                                <td style="text-align:right;font-weight:700">@yearCount.ToString("N0")</td>
+                                <td style="text-align:right;font-weight:700">@yearPayment.ToString("C2")</td>
+                            }
+                            <td style="text-align:right;font-weight:700">@row.TotalCount.ToString("N0")</td>
+                            <td style="text-align:right;font-weight:700">@row.TotalPayment.ToString("C2")</td>
+                        </tr>
+                    }
+                </tbody>
+                <tfoot>
+                    <tr style="background:linear-gradient(135deg,#0a1628 0%,#0e3460 50%,#0d5c74 100%);color:#fff;font-weight:700">
+                        <td style="text-align:left;color:#fff">Grand Total</td>
+                        @foreach (var year in years)
+                        {
+                            var yearCount = 0;
+                            var yearPayment = 0m;
+                            foreach (var p in periods.Where(p => p.Year == year))
+                            {
+                                var monthRows = rowsData.Where(r => r.BillYear == p.Year && r.BillMonth == p.Month);
+                                var count = monthRows.Sum(r => r.NoOfPaidClaims);
+                                var payment = monthRows.Sum(r => r.InsurancePayment);
+                                yearCount += count;
+                                yearPayment += payment;
+                                <td style="text-align:right;color:#fff">@count.ToString("N0")</td>
+                                <td style="text-align:right;color:#fff">@payment.ToString("C2")</td>
+                            }
+                            <td style="text-align:right;color:#fff">@yearCount.ToString("N0")</td>
+                            <td style="text-align:right;color:#fff">@yearPayment.ToString("C2")</td>
+                        }
+                        <td style="text-align:right;color:#fff">@pivotRows.Sum(r => r.TotalCount).ToString("N0")</td>
+                        <td style="text-align:right;color:#fff">@pivotRows.Sum(r => r.TotalPayment).ToString("C2")</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+
+    <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
+        <strong>Source:</strong> Aggregate snapshot table <code>{prefix}_CS_InsuranceVsPayment</code>
+    </div>
+}
+else
+{
+    <div class="text-center py-5 text-muted">
+        <div style="font-size:2rem;opacity:.4">&#128202;</div>
+        <div class="fw-semibold mt-2">Data not available</div>
+        <div class="small mt-1">The <code>{prefix}_CS_InsuranceVsPayment</code> snapshot table is missing or has no rows for this lab.</div>
+    </div>
+}

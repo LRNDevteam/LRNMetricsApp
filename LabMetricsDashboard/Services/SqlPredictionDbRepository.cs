@@ -78,14 +78,13 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(cancellationToken);
 
-            const string probeSql = """
-                SELECT
-                    CAST(CASE WHEN OBJECT_ID('dbo.PayerValidationReport','U')        IS NOT NULL THEN 1 ELSE 0 END AS BIT) AS TableExists,
-                    CAST(CASE WHEN OBJECT_ID('dbo.usp_GetPayerValidationReport','P') IS NOT NULL THEN 1 ELSE 0 END AS BIT) AS ProcExists;
-                """;
-
+            // SP 4: usp_ProbePredictionDb — checks table + SP existence
             bool tableExists, procExists;
-            await using (var cmd = new SqlCommand(probeSql, conn) { CommandTimeout = 30 })
+            await using (var cmd = new SqlCommand("dbo.usp_ProbePredictionDb", conn)
+                         {
+                             CommandType    = CommandType.StoredProcedure,
+                             CommandTimeout = 30
+                         })
             await using (var r = await cmd.ExecuteReaderAsync(cancellationToken))
             {
                 if (!await r.ReadAsync(cancellationToken))
@@ -105,18 +104,12 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
                     "Stored procedure dbo.usp_GetPayerValidationReport is missing. " +
                     "Run PredictionAnalysisApp/Database/02_CreateStoredProcedures.sql against this lab's database.");
 
-            // Latest run + total row count in one round-trip
-            const string statsSql = """
-                SELECT TOP 1
-                    RunId,
-                    InsertedDateTime,
-                    (SELECT COUNT_BIG(*) FROM dbo.PayerValidationReport) AS TotalRows
-                FROM   dbo.PayerValidationReport
-                WHERE  RunId IS NOT NULL
-                ORDER  BY InsertedDateTime DESC;
-                """;
-
-            await using (var cmd = new SqlCommand(statsSql, conn) { CommandTimeout = 60 })
+            // SP 5: usp_GetPayerValidationRunStats — latest RunId + total row count
+            await using (var cmd = new SqlCommand("dbo.usp_GetPayerValidationRunStats", conn)
+                         {
+                             CommandType    = CommandType.StoredProcedure,
+                             CommandTimeout = 60
+                         })
             await using (var r = await cmd.ExecuteReaderAsync(cancellationToken))
             {
                 if (!await r.ReadAsync(cancellationToken))
@@ -292,5 +285,765 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
             System.Globalization.NumberStyles.Any,
             System.Globalization.CultureInfo.InvariantCulture,
             out var v) ? v : 0m;
+    }
+
+    // ?? Aggregated SP helpers ????????????????????????????????????????????????
+
+    /// <summary>Adds the common filter parameters shared by all 6 aggregated SPs.</summary>
+    private static void AddAggregateParams(
+        SqlCommand cmd,
+        DateOnly   weekStartDate,
+        string?    runId,
+        string?    filterPayerName,
+        string?    filterPayerType,
+        string?    filterPanelName,
+        string?    filterFinalCoverageStatus,
+        string?    filterPayability,
+        string?    filterCPTCode)
+    {
+        cmd.Parameters.AddWithValue("@WeekStartDate",             (object?)weekStartDate.ToDateTime(TimeOnly.MinValue).Date ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@RunId",                     (object?)runId                     ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterPayerName",           (object?)filterPayerName           ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterPayerType",           (object?)filterPayerType           ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterPanelName",           (object?)filterPanelName           ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterFinalCoverageStatus", (object?)filterFinalCoverageStatus ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterPayability",          (object?)filterPayability          ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterCPTCode",             (object?)filterCPTCode             ?? DBNull.Value);
+    }
+
+    private static SqlConnection OpenConnection(string connectionString)
+    {
+        var conn = new SqlConnection(connectionString);
+        return conn; // caller must open
+    }
+
+    /// <summary>
+    /// True when none of the dimension filters are active, so we are reading the
+    /// totals as the PredictionAnalysisApp pre-computed them into the PV_* snapshot
+    /// tables. When any filter is set we must fall through to the live SP path.
+    /// </summary>
+    private static bool NoDimensionFilters(
+        string? filterPayerName, string? filterPayerType, string? filterPanelName,
+        string? filterFinalCoverageStatus, string? filterPayability, string? filterCPTCode)
+        => string.IsNullOrWhiteSpace(filterPayerName)
+        && string.IsNullOrWhiteSpace(filterPayerType)
+        && string.IsNullOrWhiteSpace(filterPanelName)
+        && string.IsNullOrWhiteSpace(filterFinalCoverageStatus)
+        && string.IsNullOrWhiteSpace(filterPayability)
+        && string.IsNullOrWhiteSpace(filterCPTCode);
+
+    /// <summary>
+    /// Adds @WeekStartDate to a snapshot read command. The read SPs auto-resolve
+    /// the latest RunId from their source PV_* table by RefreshedAt; the dashboard
+    /// never supplies a RunId from the UI.
+    /// </summary>
+    private static void AddSnapshotParams(SqlCommand cmd, DateOnly weekStartDate)
+    {
+        cmd.Parameters.AddWithValue("@WeekStartDate", weekStartDate.ToDateTime(TimeOnly.MinValue).Date);
+    }
+
+    /// <summary>Adds the optional @FilterPayerName parameter for SPs that support it.</summary>
+    private static void AddPayerNameFilter(SqlCommand cmd, string? filterPayerName)
+    {
+        cmd.Parameters.AddWithValue("@FilterPayerName", (object?)filterPayerName ?? DBNull.Value);
+    }
+
+
+    // ?? SP 6 : usp_GetPredictionSummaryBuckets ???????????????????????????????
+
+    public async Task<List<PredictionBucketSpRow>> GetSummaryBucketsAsync(
+        string connectionString, DateOnly weekStartDate,
+        string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
+        string? filterPanelName = null, string? filterFinalCoverageStatus = null,
+        string? filterPayability = null, string? filterCPTCode = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString)) return [];
+
+        var rows = new List<PredictionBucketSpRow>();
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        // ?? Snapshot fast-path ? dbo.PV_SummaryBuckets is populated by
+        //    PredictionAnalysisApp after every ingestion. The snapshot stores
+        //    unfiltered totals so it is only safe when no dimension filter is active.
+        var unfiltered = NoDimensionFilters(filterPayerName, filterPayerType, filterPanelName,
+            filterFinalCoverageStatus, filterPayability, filterCPTCode);
+
+        if (unfiltered
+            && await TryReadSummaryBucketsSnapshotAsync(conn, weekStartDate, rows, cancellationToken))
+        {
+            _logger.LogInformation(
+                "PV_SummaryBuckets snapshot hit ({Count} rows).", rows.Count);
+            return rows;
+        }
+
+        await using var cmd = new SqlCommand("dbo.usp_GetPredictionSummaryBuckets", conn)
+            { CommandType = System.Data.CommandType.StoredProcedure, CommandTimeout = 120 };
+        AddAggregateParams(cmd, weekStartDate, runId, filterPayerName, filterPayerType,
+            filterPanelName, filterFinalCoverageStatus, filterPayability, filterCPTCode);
+
+        await using var r = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await r.ReadAsync(cancellationToken))
+        {
+            rows.Add(new PredictionBucketSpRow(
+                BucketName:           r.GetString  (r.GetOrdinal("BucketName")),
+                SortOrder:            r.GetInt32   (r.GetOrdinal("SortOrder")),
+                LineItemCount:        r.GetInt32   (r.GetOrdinal("LineItemCount")),
+                PredictedAllowed:     r.GetDecimal (r.GetOrdinal("PredictedAllowed")),
+                PredictedInsurance:   r.GetDecimal (r.GetOrdinal("PredictedInsurance")),
+                ActualAllowed:        r.IsDBNull   (r.GetOrdinal("ActualAllowed"))    ? null : r.GetDecimal(r.GetOrdinal("ActualAllowed")),
+                ActualInsurance:      r.IsDBNull   (r.GetOrdinal("ActualInsurance"))  ? null : r.GetDecimal(r.GetOrdinal("ActualInsurance"))));
+        }
+
+        _logger.LogInformation("usp_GetPredictionSummaryBuckets returned {Count} rows.", rows.Count);
+        return rows;
+    }
+
+    // ?? SP 7 : usp_GetPredictionValidationByPayer ????????????????????????????
+
+    public async Task<List<PredictionPayerSpRow>> GetValidationByPayerAsync(
+        string connectionString, DateOnly weekStartDate,
+        string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
+        string? filterPanelName = null, string? filterFinalCoverageStatus = null,
+        string? filterPayability = null, string? filterCPTCode = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString)) return [];
+
+        var rows = new List<PredictionPayerSpRow>();
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        // Snapshot fast-path: PV_ValidationByPayer supports @FilterPayerName,
+        // so we keep using it even when only the payer dropdown is active.
+        var onlyPayerFilter = string.IsNullOrWhiteSpace(filterPayerType)
+            && string.IsNullOrWhiteSpace(filterPanelName)
+            && string.IsNullOrWhiteSpace(filterFinalCoverageStatus)
+            && string.IsNullOrWhiteSpace(filterPayability)
+            && string.IsNullOrWhiteSpace(filterCPTCode);
+
+        if (onlyPayerFilter
+            && await TryReadValidationByPayerSnapshotAsync(
+                   conn, weekStartDate, filterPayerName, rows, cancellationToken))
+        {
+            _logger.LogInformation(
+                "PV_ValidationByPayer snapshot hit ({Count} rows, payer='{Payer}').",
+                rows.Count, filterPayerName ?? "(all)");
+            return rows;
+        }
+
+        await using var cmd = new SqlCommand("dbo.usp_GetPredictionValidationByPayer", conn)
+            { CommandType = System.Data.CommandType.StoredProcedure, CommandTimeout = 120 };
+        AddAggregateParams(cmd, weekStartDate, runId, filterPayerName, filterPayerType,
+            filterPanelName, filterFinalCoverageStatus, filterPayability, filterCPTCode);
+
+        await using var r = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await r.ReadAsync(cancellationToken))
+        {
+            rows.Add(new PredictionPayerSpRow(
+                PayerName:          r.GetString (r.GetOrdinal("PayerName")),
+                PayerType:          r.GetString (r.GetOrdinal("PayerType")),
+                TotalLineItems:     r.GetInt32  (r.GetOrdinal("TotalLineItems")),
+                PaidCount:          r.GetInt32  (r.GetOrdinal("PaidCount")),
+                DeniedCount:        r.GetInt32  (r.GetOrdinal("DeniedCount")),
+                NoResponseCount:    r.GetInt32  (r.GetOrdinal("NoResponseCount")),
+                AdjustedCount:      r.GetInt32  (r.GetOrdinal("AdjustedCount")),
+                UnpaidCount:        r.GetInt32  (r.GetOrdinal("UnpaidCount")),
+                PredictedAllowed:   r.GetDecimal(r.GetOrdinal("PredictedAllowed")),
+                PredictedInsurance: r.GetDecimal(r.GetOrdinal("PredictedInsurance")),
+                ActualAllowed:      r.GetDecimal(r.GetOrdinal("ActualAllowed")),
+                ActualInsurance:    r.GetDecimal(r.GetOrdinal("ActualInsurance"))));
+        }
+
+        _logger.LogInformation("usp_GetPredictionValidationByPayer returned {Count} rows.", rows.Count);
+        return rows;
+    }
+
+    // ?? SP 8 : usp_GetPredictionValidationByPanel ????????????????????????????
+
+    public async Task<List<PredictionPanelSpRow>> GetValidationByPanelAsync(
+        string connectionString, DateOnly weekStartDate,
+        string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
+        string? filterPanelName = null, string? filterFinalCoverageStatus = null,
+        string? filterPayability = null, string? filterCPTCode = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString)) return [];
+
+        var rows = new List<PredictionPanelSpRow>();
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        var unfiltered = NoDimensionFilters(filterPayerName, filterPayerType, filterPanelName,
+            filterFinalCoverageStatus, filterPayability, filterCPTCode);
+        if (unfiltered
+            && await TryReadValidationByPanelSnapshotAsync(conn, weekStartDate, rows, cancellationToken))
+        {
+            _logger.LogInformation(
+                "PV_ValidationByPanel snapshot hit ({Count} rows).", rows.Count);
+            return rows;
+        }
+
+        await using var cmd = new SqlCommand("dbo.usp_GetPredictionValidationByPanel", conn)
+            { CommandType = System.Data.CommandType.StoredProcedure, CommandTimeout = 120 };
+        AddAggregateParams(cmd, weekStartDate, runId, filterPayerName, filterPayerType,
+            filterPanelName, filterFinalCoverageStatus, filterPayability, filterCPTCode);
+
+        await using var r = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await r.ReadAsync(cancellationToken))
+        {
+            rows.Add(new PredictionPanelSpRow(
+                PanelName:          r.GetString (r.GetOrdinal("PanelName")),
+                TotalLineItems:     r.GetInt32  (r.GetOrdinal("TotalLineItems")),
+                PaidCount:          r.GetInt32  (r.GetOrdinal("PaidCount")),
+                DeniedCount:        r.GetInt32  (r.GetOrdinal("DeniedCount")),
+                NoResponseCount:    r.GetInt32  (r.GetOrdinal("NoResponseCount")),
+                AdjustedCount:      r.GetInt32  (r.GetOrdinal("AdjustedCount")),
+                UnpaidCount:        r.GetInt32  (r.GetOrdinal("UnpaidCount")),
+                PredictedAllowed:   r.GetDecimal(r.GetOrdinal("PredictedAllowed")),
+                PredictedInsurance: r.GetDecimal(r.GetOrdinal("PredictedInsurance")),
+                ActualAllowed:      r.GetDecimal(r.GetOrdinal("ActualAllowed")),
+                ActualInsurance:    r.GetDecimal(r.GetOrdinal("ActualInsurance"))));
+        }
+
+        _logger.LogInformation("usp_GetPredictionValidationByPanel returned {Count} rows.", rows.Count);
+        return rows;
+    }
+
+    // ?? SP 9 : usp_GetPredictionValidationByCPT ??????????????????????????????
+
+    public async Task<List<PredictionCptSpRow>> GetValidationByCptAsync(
+        string connectionString, DateOnly weekStartDate,
+        string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
+        string? filterPanelName = null, string? filterFinalCoverageStatus = null,
+        string? filterPayability = null, string? filterCPTCode = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString)) return [];
+
+        var rows = new List<PredictionCptSpRow>();
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        var unfiltered = NoDimensionFilters(filterPayerName, filterPayerType, filterPanelName,
+            filterFinalCoverageStatus, filterPayability, filterCPTCode);
+        if (unfiltered
+            && await TryReadValidationByCptSnapshotAsync(conn, weekStartDate, rows, cancellationToken))
+        {
+            _logger.LogInformation(
+                "PV_ValidationByCPT snapshot hit ({Count} rows).", rows.Count);
+            return rows;
+        }
+
+        await using var cmd = new SqlCommand("dbo.usp_GetPredictionValidationByCPT", conn)
+            { CommandType = System.Data.CommandType.StoredProcedure, CommandTimeout = 120 };
+        AddAggregateParams(cmd, weekStartDate, runId, filterPayerName, filterPayerType,
+            filterPanelName, filterFinalCoverageStatus, filterPayability, filterCPTCode);
+
+        await using var r = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await r.ReadAsync(cancellationToken))
+        {
+            rows.Add(new PredictionCptSpRow(
+                CPTCode:            r.GetString (r.GetOrdinal("CPTCode")),
+                LineItemCount:      r.GetInt32  (r.GetOrdinal("LineItemCount")),
+                BilledAmount:       r.GetDecimal(r.GetOrdinal("BilledAmount")),
+                PredictedAllowed:   r.GetDecimal(r.GetOrdinal("PredictedAllowed")),
+                PredictedInsurance: r.GetDecimal(r.GetOrdinal("PredictedInsurance"))));
+        }
+
+        _logger.LogInformation("usp_GetPredictionValidationByCPT returned {Count} rows.", rows.Count);
+        return rows;
+    }
+
+    // ?? SP 10 : usp_GetPredictionDenialBreakdown ?????????????????????????????
+
+    public async Task<List<DenialBreakdownSpRow>> GetDenialBreakdownAsync(
+        string connectionString, DateOnly weekStartDate,
+        string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
+        string? filterPanelName = null, string? filterFinalCoverageStatus = null,
+        string? filterPayability = null, string? filterCPTCode = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString)) return [];
+
+        var rows = new List<DenialBreakdownSpRow>();
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        // PV_DenialBreakdown supports @FilterPayerName.
+        var onlyPayerFilter = string.IsNullOrWhiteSpace(filterPayerType)
+            && string.IsNullOrWhiteSpace(filterPanelName)
+            && string.IsNullOrWhiteSpace(filterFinalCoverageStatus)
+            && string.IsNullOrWhiteSpace(filterPayability)
+            && string.IsNullOrWhiteSpace(filterCPTCode);
+
+        if (onlyPayerFilter
+            && await TryReadDenialBreakdownSnapshotAsync(
+                   conn, weekStartDate, filterPayerName, rows, cancellationToken))
+        {
+            _logger.LogInformation(
+                "PV_DenialBreakdown snapshot hit ({Count} rows, payer='{Payer}').",
+                rows.Count, filterPayerName ?? "(all)");
+            return rows;
+        }
+
+        await using var cmd = new SqlCommand("dbo.usp_GetPredictionDenialBreakdown", conn)
+            { CommandType = System.Data.CommandType.StoredProcedure, CommandTimeout = 120 };
+        AddAggregateParams(cmd, weekStartDate, runId, filterPayerName, filterPayerType,
+            filterPanelName, filterFinalCoverageStatus, filterPayability, filterCPTCode);
+
+        await using var r = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await r.ReadAsync(cancellationToken))
+        {
+            rows.Add(new DenialBreakdownSpRow(
+                PayerName:            r.GetString (r.GetOrdinal("PayerName")),
+                DenialCode:           r.GetString (r.GetOrdinal("DenialCode")),
+                DenialDescription:    r.GetString (r.GetOrdinal("DenialDescription")),
+                ExpectedPaymentMonth: r.GetString (r.GetOrdinal("ExpectedPaymentMonth")),
+                LineItemCount:        r.GetInt32  (r.GetOrdinal("LineItemCount")),
+                PredictedAllowed:     r.GetDecimal(r.GetOrdinal("PredictedAllowed")),
+                PredictedInsurance:   r.GetDecimal(r.GetOrdinal("PredictedInsurance"))));
+        }
+
+        _logger.LogInformation("usp_GetPredictionDenialBreakdown returned {Count} rows.", rows.Count);
+        return rows;
+    }
+
+    // ?? SP 11 : usp_GetPredictionNoResponseBreakdown ?????????????????????????
+
+    public async Task<List<NoResponseBreakdownSpRow>> GetNoResponseBreakdownAsync(
+        string connectionString, DateOnly weekStartDate,
+        string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
+        string? filterPanelName = null, string? filterFinalCoverageStatus = null,
+        string? filterPayability = null, string? filterCPTCode = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString)) return [];
+
+        var rows = new List<NoResponseBreakdownSpRow>();
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        // PV_NoResponseBreakdown supports @FilterPayerName.
+        var onlyPayerFilter = string.IsNullOrWhiteSpace(filterPayerType)
+            && string.IsNullOrWhiteSpace(filterPanelName)
+            && string.IsNullOrWhiteSpace(filterFinalCoverageStatus)
+            && string.IsNullOrWhiteSpace(filterPayability)
+            && string.IsNullOrWhiteSpace(filterCPTCode);
+
+        if (onlyPayerFilter
+            && await TryReadNoResponseBreakdownSnapshotAsync(
+                   conn, weekStartDate, filterPayerName, rows, cancellationToken))
+        {
+            _logger.LogInformation(
+                "PV_NoResponseBreakdown snapshot hit ({Count} rows, payer='{Payer}').",
+                rows.Count, filterPayerName ?? "(all)");
+            return rows;
+        }
+
+        await using var cmd = new SqlCommand("dbo.usp_GetPredictionNoResponseBreakdown", conn)
+            { CommandType = System.Data.CommandType.StoredProcedure, CommandTimeout = 120 };
+        AddAggregateParams(cmd, weekStartDate, runId, filterPayerName, filterPayerType,
+            filterPanelName, filterFinalCoverageStatus, filterPayability, filterCPTCode);
+
+        await using var r = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await r.ReadAsync(cancellationToken))
+        {
+            rows.Add(new NoResponseBreakdownSpRow(
+                PayerName:          r.GetString (r.GetOrdinal("PayerName")),
+                AgeBucket:          r.GetString (r.GetOrdinal("AgeBucket")),
+                LineItemCount:      r.GetInt32  (r.GetOrdinal("LineItemCount")),
+                PredictedAllowed:   r.GetDecimal(r.GetOrdinal("PredictedAllowed")),
+                PredictedInsurance: r.GetDecimal(r.GetOrdinal("PredictedInsurance"))));
+        }
+
+        _logger.LogInformation("usp_GetPredictionNoResponseBreakdown returned {Count} rows.", rows.Count);
+        return rows;
+    }
+
+    // ?? SP 12 : usp_GetPredictionSummaryMetrics ??????????????????????????????
+
+    public async Task<PredictionSummaryMetricsSpRow?> GetSummaryMetricsAsync(
+        string connectionString, DateOnly weekStartDate,
+        string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
+        string? filterPanelName = null, string? filterFinalCoverageStatus = null,
+        string? filterPayability = null, string? filterCPTCode = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString)) return null;
+
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        var unfiltered = NoDimensionFilters(filterPayerName, filterPayerType, filterPanelName,
+            filterFinalCoverageStatus, filterPayability, filterCPTCode);
+        if (unfiltered)
+        {
+            var snap = await TryReadSummaryMetricsSnapshotAsync(
+                conn, weekStartDate, cancellationToken);
+            if (snap is not null)
+            {
+                _logger.LogInformation("PV_SummaryMetrics snapshot hit.");
+                return snap;
+            }
+        }
+
+        await using var cmd = new SqlCommand("dbo.usp_GetPredictionSummaryMetrics", conn)
+            { CommandType = System.Data.CommandType.StoredProcedure, CommandTimeout = 120 };
+        AddAggregateParams(cmd, weekStartDate, runId, filterPayerName, filterPayerType,
+            filterPanelName, filterFinalCoverageStatus, filterPayability, filterCPTCode);
+
+        await using var r = await cmd.ExecuteReaderAsync(cancellationToken);
+        if (!await r.ReadAsync(cancellationToken))
+        {
+            _logger.LogWarning("usp_GetPredictionSummaryMetrics returned no rows.");
+            return null;
+        }
+
+        // Null-safe helpers — defend against any NULL the SP might still return
+        // (e.g. when a bucket has no matching rows and ISNULL was not applied in an
+        // older SP version already deployed to a lab database).
+        int     SafeInt(string col) { var o = r.GetOrdinal(col); return r.IsDBNull(o) ? 0    : r.GetInt32  (o); }
+        decimal SafeDec(string col) { var o = r.GetOrdinal(col); return r.IsDBNull(o) ? 0m   : r.GetDecimal(o); }
+        decimal? NullDec(string col) { var o = r.GetOrdinal(col); return r.IsDBNull(o) ? null : r.GetDecimal(o); }
+
+        var result = new PredictionSummaryMetricsSpRow(
+            // Section 1 – raw bucket values (never null after SP fix; SafeInt/SafeDec as belt-and-braces)
+            ToPay_LineItems:     SafeInt("ToPay_LineItems"),
+            ToPay_ModeAllowed:   SafeDec("ToPay_ModeAllowed"),
+            ToPay_ModeIns:       SafeDec("ToPay_ModeIns"),
+            Paid_LineItems:      SafeInt("Paid_LineItems"),
+            Paid_ModeAllowed:    SafeDec("Paid_ModeAllowed"),
+            Paid_ModeIns:        SafeDec("Paid_ModeIns"),
+            Paid_ActAllowed:     SafeDec("Paid_ActAllowed"),
+            Paid_ActIns:         SafeDec("Paid_ActIns"),
+            Unpaid_LineItems:    SafeInt("Unpaid_LineItems"),
+            Unpaid_ModeAllowed:  SafeDec("Unpaid_ModeAllowed"),
+            Unpaid_ModeIns:      SafeDec("Unpaid_ModeIns"),
+            Denied_LineItems:    SafeInt("Denied_LineItems"),
+            Denied_ModeAllowed:  SafeDec("Denied_ModeAllowed"),
+            Denied_ModeIns:      SafeDec("Denied_ModeIns"),
+            NoResp_LineItems:    SafeInt("NoResp_LineItems"),
+            NoResp_ModeAllowed:  SafeDec("NoResp_ModeAllowed"),
+            NoResp_ModeIns:      SafeDec("NoResp_ModeIns"),
+            Adj_LineItems:       SafeInt("Adj_LineItems"),
+            Adj_ModeAllowed:     SafeDec("Adj_ModeAllowed"),
+            Adj_ModeIns:         SafeDec("Adj_ModeIns"),
+
+            // Section 2 – Ratios (legitimately nullable when denominator = 0)
+            PaymentRatio_Claim:       NullDec("PaymentRatio_Claim"),
+            PaymentRatio_Allowed:     NullDec("PaymentRatio_Allowed"),
+            PaymentRatio_Insurance:   NullDec("PaymentRatio_Insurance"),
+            NonPaymentRate_Claim:     NullDec("NonPaymentRate_Claim"),
+            NonPaymentRate_Allowed:   NullDec("NonPaymentRate_Allowed"),
+            NonPaymentRate_Insurance: NullDec("NonPaymentRate_Insurance"),
+            DeniedPct_Claim:          NullDec("DeniedPct_Claim"),
+            DeniedPct_Allowed:        NullDec("DeniedPct_Allowed"),
+            DeniedPct_Insurance:      NullDec("DeniedPct_Insurance"),
+            NoResponsePct_Claim:      NullDec("NoResponsePct_Claim"),
+            NoResponsePct_Allowed:    NullDec("NoResponsePct_Allowed"),
+            NoResponsePct_Insurance:  NullDec("NoResponsePct_Insurance"),
+            AdjustedPct_Claim:        NullDec("AdjustedPct_Claim"),
+            AdjustedPct_Allowed:      NullDec("AdjustedPct_Allowed"),
+            AdjustedPct_Insurance:    NullDec("AdjustedPct_Insurance"),
+
+            // Section 3 – Prediction Accuracy (legitimately nullable when denominator = 0)
+            PredAccuracy_Claim:            NullDec("PredAccuracy_Claim"),
+            PredAccuracy_AllowedAmount:    NullDec("PredAccuracy_AllowedAmount"),
+            PredAccuracy_InsurancePayment: NullDec("PredAccuracy_InsurancePayment"));
+
+        _logger.LogInformation(
+            "usp_GetPredictionSummaryMetrics: ToPay={T}, Paid={P}, Unpaid={U} | " +
+            "PaymentRatio={PR}%, NonPayment={NPR}% | PredAccuracy Claim={AC}%",
+            result.ToPay_LineItems, result.Paid_LineItems, result.Unpaid_LineItems,
+            result.PaymentRatio_Claim, result.NonPaymentRate_Claim, result.PredAccuracy_Claim);
+
+        return result;
+    }
+
+    // ?? PV_* snapshot readers ???????????????????????????????????????????????
+    // Each helper attempts to read from the snapshot table populated by
+    // PredictionAnalysisApp (usp_RefreshAllPredictionAggregates). Returns true
+    // when at least one row was loaded; on any SqlException (table missing,
+    // permission, etc.) we swallow and return false so the caller falls
+    // through to the live SP path.
+
+    private async Task<bool> TryReadSummaryBucketsSnapshotAsync(
+        SqlConnection conn, DateOnly weekStartDate,
+        List<PredictionBucketSpRow> rows, CancellationToken ct)
+    {
+        try
+        {
+            await using var cmd = new SqlCommand("dbo.usp_PV_ReadSummaryBuckets", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 30
+            };
+            AddSnapshotParams(cmd, weekStartDate);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                rows.Add(new PredictionBucketSpRow(
+                    BucketName:         r.GetString(0),
+                    SortOrder:          r.GetInt32(1),
+                    LineItemCount:      r.GetInt32(2),
+                    PredictedAllowed:   r.GetDecimal(3),
+                    PredictedInsurance: r.GetDecimal(4),
+                    ActualAllowed:      r.IsDBNull(5) ? null : r.GetDecimal(5),
+                    ActualInsurance:    r.IsDBNull(6) ? null : r.GetDecimal(6)));
+            }
+            return rows.Count > 0;
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogDebug(ex, "PV_SummaryBuckets snapshot unavailable; falling through to live SP.");
+            return false;
+        }
+    }
+
+    private async Task<bool> TryReadValidationByPayerSnapshotAsync(
+        SqlConnection conn, DateOnly weekStartDate, string? filterPayerName,
+        List<PredictionPayerSpRow> rows, CancellationToken ct)
+    {
+        try
+        {
+            await using var cmd = new SqlCommand("dbo.usp_PV_ReadValidationByPayer", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 30
+            };
+            AddSnapshotParams(cmd, weekStartDate);
+            AddPayerNameFilter(cmd, filterPayerName);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                rows.Add(new PredictionPayerSpRow(
+                    PayerName:          r.GetString(0),
+                    PayerType:          r.GetString(1),
+                    TotalLineItems:     r.GetInt32(2),
+                    PaidCount:          r.GetInt32(3),
+                    DeniedCount:        r.GetInt32(4),
+                    NoResponseCount:    r.GetInt32(5),
+                    AdjustedCount:      r.GetInt32(6),
+                    UnpaidCount:        r.GetInt32(7),
+                    PredictedAllowed:   r.GetDecimal(8),
+                    PredictedInsurance: r.GetDecimal(9),
+                    ActualAllowed:      r.GetDecimal(10),
+                    ActualInsurance:    r.GetDecimal(11)));
+            }
+            return rows.Count > 0;
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogDebug(ex, "PV_ValidationByPayer snapshot unavailable; falling through to live SP.");
+            return false;
+        }
+    }
+
+    private async Task<bool> TryReadValidationByPanelSnapshotAsync(
+        SqlConnection conn, DateOnly weekStartDate,
+        List<PredictionPanelSpRow> rows, CancellationToken ct)
+    {
+        try
+        {
+            await using var cmd = new SqlCommand("dbo.usp_PV_ReadValidationByPanel", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 30
+            };
+            AddSnapshotParams(cmd, weekStartDate);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                rows.Add(new PredictionPanelSpRow(
+                    PanelName:          r.GetString(0),
+                    TotalLineItems:     r.GetInt32(1),
+                    PaidCount:          r.GetInt32(2),
+                    DeniedCount:        r.GetInt32(3),
+                    NoResponseCount:    r.GetInt32(4),
+                    AdjustedCount:      r.GetInt32(5),
+                    UnpaidCount:        r.GetInt32(6),
+                    PredictedAllowed:   r.GetDecimal(7),
+                    PredictedInsurance: r.GetDecimal(8),
+                    ActualAllowed:      r.GetDecimal(9),
+                    ActualInsurance:    r.GetDecimal(10)));
+            }
+            return rows.Count > 0;
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogDebug(ex, "PV_ValidationByPanel snapshot unavailable; falling through to live SP.");
+            return false;
+        }
+    }
+
+    private async Task<bool> TryReadValidationByCptSnapshotAsync(
+        SqlConnection conn, DateOnly weekStartDate,
+        List<PredictionCptSpRow> rows, CancellationToken ct)
+    {
+        try
+        {
+            await using var cmd = new SqlCommand("dbo.usp_PV_ReadValidationByCPT", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 30
+            };
+            AddSnapshotParams(cmd, weekStartDate);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                rows.Add(new PredictionCptSpRow(
+                    CPTCode:            r.GetString(0),
+                    LineItemCount:      r.GetInt32(1),
+                    BilledAmount:       r.GetDecimal(2),
+                    PredictedAllowed:   r.GetDecimal(3),
+                    PredictedInsurance: r.GetDecimal(4)));
+            }
+            return rows.Count > 0;
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogDebug(ex, "PV_ValidationByCPT snapshot unavailable; falling through to live SP.");
+            return false;
+        }
+    }
+
+    private async Task<bool> TryReadDenialBreakdownSnapshotAsync(
+        SqlConnection conn, DateOnly weekStartDate, string? filterPayerName,
+        List<DenialBreakdownSpRow> rows, CancellationToken ct)
+    {
+        try
+        {
+            await using var cmd = new SqlCommand("dbo.usp_PV_ReadDenialBreakdown", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 30
+            };
+            AddSnapshotParams(cmd, weekStartDate);
+            AddPayerNameFilter(cmd, filterPayerName);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                rows.Add(new DenialBreakdownSpRow(
+                    PayerName:            r.GetString(0),
+                    DenialCode:           r.GetString(1),
+                    DenialDescription:    r.GetString(2),
+                    ExpectedPaymentMonth: r.GetString(3),
+                    LineItemCount:        r.GetInt32(4),
+                    PredictedAllowed:     r.GetDecimal(5),
+                    PredictedInsurance:   r.GetDecimal(6)));
+            }
+            return rows.Count > 0;
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogDebug(ex, "PV_DenialBreakdown snapshot unavailable; falling through to live SP.");
+            return false;
+        }
+    }
+
+    private async Task<bool> TryReadNoResponseBreakdownSnapshotAsync(
+        SqlConnection conn, DateOnly weekStartDate, string? filterPayerName,
+        List<NoResponseBreakdownSpRow> rows, CancellationToken ct)
+    {
+        try
+        {
+            await using var cmd = new SqlCommand("dbo.usp_PV_ReadNoResponseBreakdown", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 30
+            };
+            AddSnapshotParams(cmd, weekStartDate);
+            AddPayerNameFilter(cmd, filterPayerName);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                rows.Add(new NoResponseBreakdownSpRow(
+                    PayerName:          r.GetString(0),
+                    AgeBucket:          r.GetString(1),
+                    LineItemCount:      r.GetInt32(2),
+                    PredictedAllowed:   r.GetDecimal(3),
+                    PredictedInsurance: r.GetDecimal(4)));
+            }
+            return rows.Count > 0;
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogDebug(ex, "PV_NoResponseBreakdown snapshot unavailable; falling through to live SP.");
+            return false;
+        }
+    }
+
+    private async Task<PredictionSummaryMetricsSpRow?> TryReadSummaryMetricsSnapshotAsync(
+        SqlConnection conn, DateOnly weekStartDate, CancellationToken ct)
+    {
+        try
+        {
+            await using var cmd = new SqlCommand("dbo.usp_PV_ReadSummaryMetrics", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 30
+            };
+            AddSnapshotParams(cmd, weekStartDate);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            if (!await r.ReadAsync(ct)) return null;
+
+            int     I(int o) => r.IsDBNull(o) ? 0  : r.GetInt32(o);
+            decimal D(int o) => r.IsDBNull(o) ? 0m : r.GetDecimal(o);
+            decimal? N(int o) => r.IsDBNull(o) ? (decimal?)null : r.GetDecimal(o);
+
+            return new PredictionSummaryMetricsSpRow(
+                ToPay_LineItems:               I(0),
+                ToPay_ModeAllowed:             D(1),
+                ToPay_ModeIns:                 D(2),
+                Paid_LineItems:                I(3),
+                Paid_ModeAllowed:              D(4),
+                Paid_ModeIns:                  D(5),
+                Paid_ActAllowed:               D(6),
+                Paid_ActIns:                   D(7),
+                Unpaid_LineItems:              I(8),
+                Unpaid_ModeAllowed:            D(9),
+                Unpaid_ModeIns:                D(10),
+                Denied_LineItems:              I(11),
+                Denied_ModeAllowed:            D(12),
+                Denied_ModeIns:                D(13),
+                NoResp_LineItems:              I(14),
+                NoResp_ModeAllowed:            D(15),
+                NoResp_ModeIns:                D(16),
+                Adj_LineItems:                 I(17),
+                Adj_ModeAllowed:               D(18),
+                Adj_ModeIns:                   D(19),
+                PaymentRatio_Claim:            N(20),
+                PaymentRatio_Allowed:          N(21),
+                PaymentRatio_Insurance:        N(22),
+                NonPaymentRate_Claim:          N(23),
+                NonPaymentRate_Allowed:        N(24),
+                NonPaymentRate_Insurance:      N(25),
+                DeniedPct_Claim:               N(26),
+                DeniedPct_Allowed:             N(27),
+                DeniedPct_Insurance:           N(28),
+                NoResponsePct_Claim:           N(29),
+                NoResponsePct_Allowed:         N(30),
+                NoResponsePct_Insurance:       N(31),
+                AdjustedPct_Claim:             N(32),
+                AdjustedPct_Allowed:           N(33),
+                AdjustedPct_Insurance:         N(34),
+                PredAccuracy_Claim:            N(35),
+                PredAccuracy_AllowedAmount:    N(36),
+                PredAccuracy_InsurancePayment: N(37));
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogDebug(ex, "PV_SummaryMetrics snapshot unavailable; falling through to live SP.");
+            return null;
+        }
     }
 }

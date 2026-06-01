@@ -75,6 +75,16 @@ public sealed class CollectionSummaryViewModel
     // ?? Insurance vs Payment % ??????????????????????????????????
     public List<InsurancePaymentPctRow> InsurancePaymentPct { get; set; } = [];
 
+    // ?? Insurance vs Payment (snapshot pivot from {prefix}_CS_InsuranceVsPayment) ?????????????
+    public List<InsuranceVsPaymentRow> InsuranceVsPayment { get; set; } = [];
+
+    /// <summary>
+    /// Whether the "Insurance Vs Payment" snapshot tab is available for the selected lab.
+    /// Northwest already shows month-pivoted data inside the "Insurance vs Payment %" tab,
+    /// so this secondary tab is hidden for that lab.
+    /// </summary>
+    public bool ShowInsuranceVsPayment { get; set; }
+
     // ?? CPT vs Payment % ???????????????????????????????????????
     public List<CptPaymentPctRow> CptPaymentPct { get; set; } = [];
 
@@ -231,9 +241,11 @@ public sealed record InsuranceAgingRow(
 /// Grouped by PanelName, sorted by SUM(InsurancePayment) descending.
 /// </summary>
 public sealed record PanelPaymentRow(
-    string PanelName,
-    int NoOfClaims,
-    decimal InsurancePayments);
+string PanelName,
+int NoOfClaims,
+decimal InsurancePayments,
+int BillYear = 0,
+int BillMonth = 0);
 
 /// <summary>
 /// One row in the "Insurance vs Payment %" table.
@@ -243,17 +255,37 @@ public sealed record PanelPaymentRow(
 /// Sorted by SUM(InsurancePayment) descending.
 /// </summary>
 public sealed record InsurancePaymentPctRow(
+    int? SummaryId,
     string PayerName,
     int TotalClaims,
     decimal InsurancePayments,
     decimal PaidInsurancePayment,
-    decimal PaidChargeAmount)
+    decimal PaidChargeAmount,
+    int? PanelGroupCount = null,
+    int? NoOfPaidClaims = null,
+    DateTime? RefreshedAt = null,
+    int? BillYear = null,
+    int? BillMonth = null,
+    decimal? SnapshotPaymentPct = null)
 {
     /// <summary>Payment % = SUM(InsurancePayment) / SUM(ChargeAmount) × 100 (Fully Paid + Partially Paid only).</summary>
-    public decimal PaymentPct => PaidChargeAmount == 0
+    public decimal PaymentPct => SnapshotPaymentPct ?? (PaidChargeAmount == 0
         ? 0m
-        : Math.Round(PaidInsurancePayment / PaidChargeAmount * 100m, 2);
+        : Math.Round(PaidInsurancePayment / PaidChargeAmount * 100m, 2));
 }
+
+/// <summary>
+/// One row in the "Insurance Vs Payment" snapshot pivot.
+/// Source: <c>{prefix}_CS_InsuranceVsPayment</c> aggregate table (e.g. <c>Cove_CS_InsuranceVsPayment</c>).
+/// One row per Payer + BillYear + BillMonth combination.
+/// </summary>
+public sealed record InsuranceVsPaymentRow(
+    string PayerName,
+    int BillYear,
+    int BillMonth,
+    int NoOfPaidClaims,
+    decimal InsurancePayment,
+    decimal PaymentPct);
 
 /// <summary>
 /// One row in the "CPT vs Payment %" table.
@@ -266,12 +298,19 @@ public sealed record CptPaymentPctRow(
     string CptCode,
     decimal SumServiceUnits,
     decimal PaidInsurancePayment,
-    decimal PaidChargeAmount)
+    decimal PaidChargeAmount,
+    decimal? SnapshotPaymentPct = null)
 {
-    /// <summary>Payment % = SUM(InsurancePayment) / SUM(ChargeAmount) × 100 (Fully Paid + Partially Paid only).</summary>
-    public decimal PaymentPct => PaidChargeAmount == 0
+    /// <summary>
+    /// Payment % = SUM(InsurancePayment) / SUM(ChargeAmount) × 100.
+    /// When the aggregate table supplies a pre-computed <see cref="SnapshotPaymentPct"/>
+    /// (e.g. Elix_CS_CptVsPaymentPct.PaymentPct) that value is used directly,
+    /// because the aggregate stores 0 for PaidInsurancePayment/PaidChargeAmount
+    /// while still carrying the correct percentage.
+    /// </summary>
+    public decimal PaymentPct => SnapshotPaymentPct ?? (PaidChargeAmount == 0
         ? 0m
-        : Math.Round(PaidInsurancePayment / PaidChargeAmount * 100m, 2);
+        : Math.Round(PaidInsurancePayment / PaidChargeAmount * 100m, 2));
 }
 
 // ?? Monthly Claim Volume pivot types ???????????????????????????
@@ -289,10 +328,16 @@ public sealed record CollectionMonthlyPeriod(int Year, int Month)
 /// A single cell: encounter count + insurance paid amount
 /// for one Panel (or Payer drill-down) in one Year/Month.
 /// </summary>
-public sealed record CollectionMonthlyCell(int EncounterCount, decimal InsurancePaidAmount);
+public sealed record CollectionMonthlyCell(int EncounterCount, decimal InsurancePaidAmount)
+{
+    public decimal AveragePaidAmount => EncounterCount == 0 ? 0m : InsurancePaidAmount / EncounterCount;
+}
 
 /// <summary>Year-level subtotal across all months in that year.</summary>
-public sealed record CollectionYearTotal(int EncounterCount, decimal InsurancePaidAmount);
+public sealed record CollectionYearTotal(int EncounterCount, decimal InsurancePaidAmount)
+{
+    public decimal AveragePaidAmount => EncounterCount == 0 ? 0m : InsurancePaidAmount / EncounterCount;
+}
 
 /// <summary>
 /// Top-payer drill-down sub-row under a panel row.
@@ -306,6 +351,7 @@ public sealed class CollectionPayerDrillDown
     public Dictionary<int, CollectionYearTotal> ByYear { get; set; } = [];
     public int TotalEncounters { get; set; }
     public decimal TotalInsurancePaid { get; set; }
+    public decimal TotalAveragePaidAmount => TotalEncounters == 0 ? 0m : TotalInsurancePaid / TotalEncounters;
 }
 
 /// <summary>
@@ -318,6 +364,7 @@ public sealed class CollectionPanelRow
     public Dictionary<int, CollectionYearTotal> ByYear { get; set; } = [];
     public int TotalEncounters { get; set; }
     public decimal TotalInsurancePaid { get; set; }
+    public decimal TotalAveragePaidAmount => TotalEncounters == 0 ? 0m : TotalInsurancePaid / TotalEncounters;
     public List<CollectionPayerDrillDown> TopPayers { get; set; } = [];
 }
 
@@ -334,6 +381,7 @@ public sealed class CollectionMonthlyVolumePivot
     public Dictionary<int, CollectionYearTotal> GrandTotalByYear { get; set; } = [];
     public int GrandTotalEncounters { get; set; }
     public decimal GrandTotalInsurancePaid { get; set; }
+    public decimal GrandTotalAveragePaidAmount => GrandTotalEncounters == 0 ? 0m : GrandTotalInsurancePaid / GrandTotalEncounters;
     public bool HasData => PanelRows.Count > 0;
 }
 
@@ -351,6 +399,7 @@ public sealed class CollectionWeeklyVolumePivot
     public Dictionary<string, CollectionMonthlyCell> GrandTotalByWeek { get; set; } = [];
     public int GrandTotalEncounters { get; set; }
     public decimal GrandTotalInsurancePaid { get; set; }
+    public decimal GrandTotalAveragePaidAmount => GrandTotalEncounters == 0 ? 0m : GrandTotalInsurancePaid / GrandTotalEncounters;
     public bool HasData => PanelRows.Count > 0;
 }
 

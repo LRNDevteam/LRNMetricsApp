@@ -1,0 +1,1380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MeetingIQ — Prototype</title>
+<style>
+  /* ── Reset & Base ── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #f5f6fa; color: #1a1d2e; min-height: 100vh; }
+  a { text-decoration: none; color: inherit; }
+
+  /* ── Brand Colors ── */
+  :root {
+    --primary: #4f46e5;
+    --primary-light: #eef2ff;
+    --accent: #06b6d4;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+    --purple: #8b5cf6;
+    --text: #1a1d2e;
+    --text-muted: #6b7280;
+    --border: #e5e7eb;
+    --card: #ffffff;
+    --sidebar-w: 230px;
+  }
+
+  /* ── Layout ── */
+  .app { display: flex; min-height: 100vh; }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: var(--sidebar-w); background: #fff; border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; position: fixed; top: 0; left: 0; height: 100vh;
+    z-index: 100;
+  }
+  .sidebar-logo {
+    padding: 22px 20px 18px; display: flex; align-items: center; gap: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .logo-icon {
+    width: 34px; height: 34px; border-radius: 9px; background: var(--primary);
+    display: flex; align-items: center; justify-content: center; color: #fff; font-size: 16px; font-weight: 700;
+  }
+  .logo-text { font-size: 17px; font-weight: 700; letter-spacing: -0.3px; }
+  .logo-text span { color: var(--primary); }
+
+  .sidebar-nav { flex: 1; padding: 14px 10px; display: flex; flex-direction: column; gap: 2px; }
+  .nav-section { font-size: 10px; font-weight: 600; color: var(--text-muted); letter-spacing: .8px;
+    text-transform: uppercase; padding: 10px 10px 4px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px;
+    font-size: 14px; font-weight: 500; color: var(--text-muted); cursor: pointer;
+    transition: all .15s;
+  }
+  .nav-item:hover { background: var(--primary-light); color: var(--primary); }
+  .nav-item.active { background: var(--primary-light); color: var(--primary); font-weight: 600; }
+  .nav-item .icon { font-size: 16px; width: 20px; text-align: center; }
+  .badge {
+    margin-left: auto; background: var(--primary); color: #fff; border-radius: 20px;
+    font-size: 10px; padding: 2px 7px; font-weight: 700;
+  }
+  .badge.warn { background: var(--warning); }
+  .badge.red { background: var(--danger); }
+
+  .sidebar-user {
+    padding: 14px 16px; border-top: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .avatar {
+    width: 34px; height: 34px; border-radius: 50%; background: var(--primary);
+    color: #fff; font-size: 13px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .avatar.sm { width: 28px; height: 28px; font-size: 11px; }
+  .avatar.green { background: var(--success); }
+  .avatar.purple { background: var(--purple); }
+  .avatar.cyan { background: var(--accent); }
+  .avatar.orange { background: var(--warning); }
+  .user-name { font-size: 13px; font-weight: 600; }
+  .user-role { font-size: 11px; color: var(--text-muted); }
+
+  /* ── Main Content ── */
+  .main { margin-left: var(--sidebar-w); flex: 1; display: flex; flex-direction: column; min-height: 100vh; }
+
+  /* ── Topbar ── */
+  .topbar {
+    background: #fff; border-bottom: 1px solid var(--border); padding: 0 28px;
+    height: 60px; display: flex; align-items: center; justify-content: space-between;
+    position: sticky; top: 0; z-index: 90;
+  }
+  .topbar-title { font-size: 17px; font-weight: 700; }
+  .topbar-sub { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
+  .topbar-right { display: flex; align-items: center; gap: 14px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px;
+    border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;
+    border: none; transition: all .15s;
+  }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-primary:hover { background: #4338ca; }
+  .btn-ghost { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
+  .btn-ghost:hover { background: var(--primary-light); color: var(--primary); border-color: var(--primary); }
+  .btn-sm { padding: 5px 12px; font-size: 12px; }
+  .icon-btn {
+    width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+    color: var(--text-muted); font-size: 16px; background: #fff;
+    position: relative;
+  }
+  .icon-btn:hover { background: var(--primary-light); color: var(--primary); }
+  .notif-dot {
+    position: absolute; top: 6px; right: 6px; width: 7px; height: 7px;
+    background: var(--danger); border-radius: 50%; border: 1px solid #fff;
+  }
+
+  /* ── Page sections ── */
+  .page { display: none; padding: 28px; }
+  .page.active { display: block; }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--card); border-radius: 14px; border: 1px solid var(--border);
+    padding: 22px; box-shadow: 0 1px 3px rgba(0,0,0,.05);
+  }
+  .card-title { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+  .card-sub { font-size: 12px; color: var(--text-muted); }
+
+  /* ── Stat Cards ── */
+  .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+  .stat-card {
+    background: var(--card); border-radius: 14px; border: 1px solid var(--border);
+    padding: 20px 22px; display: flex; align-items: flex-start; gap: 14px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.05);
+  }
+  .stat-icon {
+    width: 44px; height: 44px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0;
+  }
+  .stat-icon.blue { background: #eef2ff; }
+  .stat-icon.green { background: #d1fae5; }
+  .stat-icon.yellow { background: #fef3c7; }
+  .stat-icon.red { background: #fee2e2; }
+  .stat-icon.purple { background: #ede9fe; }
+  .stat-num { font-size: 26px; font-weight: 800; letter-spacing: -1px; line-height: 1; }
+  .stat-label { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+  .stat-delta { font-size: 11px; font-weight: 600; margin-top: 6px; }
+  .stat-delta.up { color: var(--success); }
+  .stat-delta.down { color: var(--danger); }
+
+  /* ── Two-col grid ── */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  .col-span-2 { grid-column: span 2; }
+
+  /* ── Meeting List ── */
+  .meeting-row {
+    display: flex; align-items: center; gap: 14px; padding: 14px 0;
+    border-bottom: 1px solid var(--border); cursor: pointer; transition: all .15s;
+  }
+  .meeting-row:last-child { border-bottom: none; }
+  .meeting-row:hover { background: var(--primary-light); margin: 0 -22px; padding: 14px 22px; border-radius: 8px; border-bottom-color: transparent; }
+  .meeting-date-box {
+    width: 46px; height: 46px; border-radius: 10px; background: var(--primary-light);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .meeting-date-box .day { font-size: 18px; font-weight: 800; color: var(--primary); line-height: 1; }
+  .meeting-date-box .mon { font-size: 9px; font-weight: 700; color: var(--primary); letter-spacing: .5px; text-transform: uppercase; }
+  .meeting-info { flex: 1; }
+  .meeting-title { font-size: 14px; font-weight: 600; }
+  .meeting-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .meeting-tags { display: flex; gap: 6px; margin-left: auto; }
+
+  /* ── Tags / Chips ── */
+  .chip {
+    font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 20px;
+    white-space: nowrap;
+  }
+  .chip.blue { background: #eef2ff; color: var(--primary); }
+  .chip.green { background: #d1fae5; color: #059669; }
+  .chip.yellow { background: #fef3c7; color: #b45309; }
+  .chip.red { background: #fee2e2; color: #dc2626; }
+  .chip.purple { background: #ede9fe; color: #7c3aed; }
+  .chip.gray { background: #f3f4f6; color: #6b7280; }
+  .chip.cyan { background: #cffafe; color: #0891b2; }
+
+  /* ── Action Items ── */
+  .action-item {
+    display: flex; align-items: flex-start; gap: 12px; padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .action-item:last-child { border-bottom: none; }
+  .check-circle {
+    width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--border);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px;
+    cursor: pointer; transition: all .15s;
+  }
+  .check-circle:hover { border-color: var(--success); }
+  .check-circle.done { background: var(--success); border-color: var(--success); color: #fff; font-size: 10px; }
+  .action-text { flex: 1; font-size: 13px; line-height: 1.4; }
+  .action-text .owner { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+  .due-tag { font-size: 11px; font-weight: 600; }
+  .due-tag.overdue { color: var(--danger); }
+  .due-tag.soon { color: var(--warning); }
+  .due-tag.ok { color: var(--success); }
+
+  /* ── Priority Dot ── */
+  .prio-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 6px; }
+  .prio-dot.high { background: var(--danger); }
+  .prio-dot.medium { background: var(--warning); }
+  .prio-dot.low { background: var(--success); }
+
+  /* ── Section Header ── */
+  .section-hdr {
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;
+  }
+  .section-hdr h3 { font-size: 15px; font-weight: 700; }
+  .view-all { font-size: 12px; color: var(--primary); font-weight: 600; cursor: pointer; }
+
+  /* ── Meeting Detail ── */
+  .detail-header {
+    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+    border-radius: 16px; padding: 28px; color: #fff; margin-bottom: 24px;
+  }
+  .detail-header h2 { font-size: 22px; font-weight: 800; margin-bottom: 8px; }
+  .detail-meta { display: flex; gap: 20px; flex-wrap: wrap; }
+  .detail-meta span { font-size: 13px; opacity: .85; display: flex; align-items: center; gap: 5px; }
+
+  .tabs { display: flex; gap: 0; border-bottom: 2px solid var(--border); margin-bottom: 24px; }
+  .tab {
+    padding: 10px 20px; font-size: 13px; font-weight: 600; color: var(--text-muted);
+    cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all .15s;
+  }
+  .tab:hover { color: var(--primary); }
+  .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+  .extract-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .extract-card {
+    background: var(--card); border-radius: 12px; border: 1px solid var(--border); padding: 18px;
+  }
+  .extract-card-hdr { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+  .extract-icon { font-size: 18px; }
+  .extract-card-title { font-size: 13px; font-weight: 700; }
+  .extract-count { margin-left: auto; font-size: 12px; font-weight: 700; color: var(--primary); }
+  .extract-item { font-size: 12px; line-height: 1.5; padding: 6px 0; border-bottom: 1px solid var(--border); color: #374151; }
+  .extract-item:last-child { border-bottom: none; }
+  .extract-item strong { color: var(--text); }
+
+  /* ── Kanban Board ── */
+  .kanban { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .kanban-col { background: #f9fafb; border-radius: 12px; padding: 14px; min-height: 400px; }
+  .kanban-col-hdr {
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;
+  }
+  .kanban-col-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
+  .kanban-col-count {
+    width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center;
+    justify-content: center; font-size: 11px; font-weight: 700; background: var(--border); color: var(--text-muted);
+  }
+  .task-card {
+    background: #fff; border-radius: 10px; border: 1px solid var(--border); padding: 14px;
+    margin-bottom: 10px; cursor: grab; box-shadow: 0 1px 3px rgba(0,0,0,.05);
+    transition: box-shadow .15s;
+  }
+  .task-card:hover { box-shadow: 0 4px 12px rgba(79,70,229,.12); }
+  .task-card-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; line-height: 1.3; }
+  .task-card-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .task-card-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
+  .assignee-stack { display: flex; }
+  .assignee-stack .avatar { margin-left: -6px; border: 2px solid #fff; }
+  .assignee-stack .avatar:first-child { margin-left: 0; }
+
+  /* ── AI Suggestion Banner ── */
+  .ai-banner {
+    background: linear-gradient(135deg, #eef2ff, #e0f2fe); border-radius: 12px;
+    border: 1px solid #c7d2fe; padding: 16px 20px; margin-bottom: 20px;
+    display: flex; align-items: center; gap: 14px;
+  }
+  .ai-icon { font-size: 28px; flex-shrink: 0; }
+  .ai-text { flex: 1; }
+  .ai-text h4 { font-size: 13px; font-weight: 700; color: var(--primary); }
+  .ai-text p { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+  /* ── Timeline ── */
+  .timeline { display: flex; flex-direction: column; gap: 0; }
+  .tl-item { display: flex; gap: 14px; padding-bottom: 18px; position: relative; }
+  .tl-item::before {
+    content: ''; position: absolute; left: 15px; top: 28px; bottom: 0;
+    width: 2px; background: var(--border);
+  }
+  .tl-item:last-child::before { display: none; }
+  .tl-dot {
+    width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--border);
+    background: #fff; display: flex; align-items: center; justify-content: center;
+    font-size: 13px; flex-shrink: 0; z-index: 1;
+  }
+  .tl-content { flex: 1; }
+  .tl-title { font-size: 13px; font-weight: 600; }
+  .tl-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+  .tl-body { font-size: 12px; color: #4b5563; margin-top: 6px; line-height: 1.5; }
+
+  /* ── Progress bar ── */
+  .progress-bar { height: 6px; background: var(--border); border-radius: 10px; overflow: hidden; margin-top: 8px; }
+  .progress-fill { height: 100%; border-radius: 10px; background: var(--primary); }
+
+  /* ── Attendee Row ── */
+  .attendee-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .attendee-row:last-child { border-bottom: none; }
+  .attendee-info { flex: 1; }
+  .attendee-name { font-size: 13px; font-weight: 600; }
+  .attendee-title { font-size: 11px; color: var(--text-muted); }
+  .attendee-badges { display: flex; gap: 6px; }
+
+  /* ── Search Bar ── */
+  .search-bar {
+    display: flex; align-items: center; gap: 8px; background: #f9fafb;
+    border: 1px solid var(--border); border-radius: 10px; padding: 8px 14px;
+    font-size: 13px; color: var(--text-muted); cursor: text;
+  }
+  .search-bar input { border: none; background: transparent; outline: none; font-size: 13px; flex: 1; }
+
+  /* ── Filter Bar ── */
+  .filter-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+  .filter-chip {
+    padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 600;
+    border: 1px solid var(--border); cursor: pointer; background: #fff; color: var(--text-muted);
+    transition: all .15s;
+  }
+  .filter-chip:hover, .filter-chip.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+  /* ── Transcript View ── */
+  .transcript-line { padding: 10px 0; border-bottom: 1px solid #f3f4f6; }
+  .transcript-line:last-child { border-bottom: none; }
+  .transcript-speaker { font-size: 12px; font-weight: 700; color: var(--primary); margin-bottom: 3px; }
+  .transcript-time { font-size: 11px; color: var(--text-muted); margin-left: 8px; font-weight: normal; }
+  .transcript-text { font-size: 13px; line-height: 1.5; color: #374151; }
+  .transcript-text .highlight { background: #fef3c7; border-radius: 3px; padding: 1px 3px; }
+
+  /* ── Divider ── */
+  .divider { height: 1px; background: var(--border); margin: 20px 0; }
+
+  /* ── Page navigation hint ── */
+  .page-nav {
+    position: fixed; bottom: 20px; right: 24px; background: #1a1d2e; color: #fff;
+    border-radius: 12px; padding: 10px 18px; font-size: 12px; font-weight: 600;
+    display: flex; align-items: center; gap: 8px; z-index: 200;
+    box-shadow: 0 4px 20px rgba(0,0,0,.2);
+  }
+  .page-nav select {
+    background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2);
+    color: #fff; border-radius: 6px; padding: 4px 8px; font-size: 12px; cursor: pointer;
+  }
+
+  /* ── Notification dot on topbar ── */
+  .topbar-search { flex: 1; max-width: 320px; margin: 0 20px; }
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════
+     SIDEBAR
+═══════════════════════════════════════════════════════ -->
+<div class="app">
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-icon">M</div>
+    <div class="logo-text">Meeting<span>IQ</span></div>
+  </div>
+
+  <nav class="sidebar-nav">
+    <div class="nav-section">Main</div>
+    <div class="nav-item active" onclick="showPage('dashboard')">
+      <span class="icon">🏠</span> Dashboard
+    </div>
+    <div class="nav-item" onclick="showPage('meetings')">
+      <span class="icon">📅</span> All Meetings
+      <span class="badge">12</span>
+    </div>
+    <div class="nav-item" onclick="showPage('detail')">
+      <span class="icon">🎙️</span> Meeting Detail
+    </div>
+
+    <div class="nav-section">Actions</div>
+    <div class="nav-item" onclick="showPage('actions')">
+      <span class="icon">✅</span> Action Board
+      <span class="badge warn">7</span>
+    </div>
+    <div class="nav-item" onclick="showPage('mytasks')">
+      <span class="icon">🙋</span> My Tasks
+      <span class="badge red">3</span>
+    </div>
+    <div class="nav-item" onclick="showPage('reminders')">
+      <span class="icon">🔔</span> Reminders
+    </div>
+
+    <div class="nav-section">Insights</div>
+    <div class="nav-item" onclick="showPage('team')">
+      <span class="icon">👥</span> Team View
+    </div>
+    <div class="nav-item" onclick="showPage('reports')">
+      <span class="icon">📊</span> Reports
+    </div>
+  </nav>
+
+  <div class="sidebar-user">
+    <div class="avatar">JM</div>
+    <div>
+      <div class="user-name">James M.</div>
+      <div class="user-role">CEO</div>
+    </div>
+  </div>
+</aside>
+
+<!-- ══════════════════════════════════════════════════════
+     MAIN
+═══════════════════════════════════════════════════════ -->
+<main class="main">
+
+<!-- Topbar -->
+<header class="topbar">
+  <div>
+    <div class="topbar-title" id="topbar-title">Dashboard</div>
+    <div class="topbar-sub" id="topbar-sub">Thursday, 29 May 2026 · Welcome back, James</div>
+  </div>
+  <div class="topbar-search">
+    <div class="search-bar">
+      <span>🔍</span>
+      <input type="text" placeholder="Search meetings, actions, decisions…">
+    </div>
+  </div>
+  <div class="topbar-right">
+    <div class="icon-btn">🔔<div class="notif-dot"></div></div>
+    <div class="icon-btn">⚙️</div>
+    <button class="btn btn-primary btn-sm">+ Import Transcript</button>
+  </div>
+</header>
+
+<!-- ══ PAGE: DASHBOARD ══ -->
+<div class="page active" id="page-dashboard">
+  <div style="padding:28px;">
+
+    <div class="ai-banner">
+      <div class="ai-icon">🤖</div>
+      <div class="ai-text">
+        <h4>AI Summary Ready — "Q2 Budget Review" (Today, 10:00 AM)</h4>
+        <p>3 new decisions, 8 action items assigned, and 2 escalation flags detected. Review now or dismiss.</p>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="showPage('detail')">Review →</button>
+      <button class="btn btn-ghost btn-sm">Dismiss</button>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon blue">📅</div>
+        <div>
+          <div class="stat-num">28</div>
+          <div class="stat-label">Meetings This Month</div>
+          <div class="stat-delta up">↑ 4 vs last month</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon yellow">⚡</div>
+        <div>
+          <div class="stat-num">47</div>
+          <div class="stat-label">Open Action Items</div>
+          <div class="stat-delta down">↑ 12 new this week</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon green">✅</div>
+        <div>
+          <div class="stat-num">83%</div>
+          <div class="stat-label">Action Completion Rate</div>
+          <div class="stat-delta up">↑ 6% improvement</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon red">🚨</div>
+        <div>
+          <div class="stat-num">5</div>
+          <div class="stat-label">Overdue Items</div>
+          <div class="stat-delta down">Needs attention</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-2" style="gap:20px;">
+      <!-- Recent Meetings -->
+      <div class="card">
+        <div class="section-hdr">
+          <h3>Recent Meetings</h3>
+          <span class="view-all" onclick="showPage('meetings')">View all →</span>
+        </div>
+        <div class="meeting-row" onclick="showPage('detail')">
+          <div class="meeting-date-box"><div class="day">29</div><div class="mon">May</div></div>
+          <div class="meeting-info">
+            <div class="meeting-title">Q2 Budget Review — Leadership</div>
+            <div class="meeting-meta">🕙 10:00 AM · 58 min · 8 attendees</div>
+          </div>
+          <div class="meeting-tags">
+            <span class="chip yellow">In Review</span>
+          </div>
+        </div>
+        <div class="meeting-row">
+          <div class="meeting-date-box"><div class="day">27</div><div class="mon">May</div></div>
+          <div class="meeting-info">
+            <div class="meeting-title">Product Roadmap Sync — Q3</div>
+            <div class="meeting-meta">🕑 2:00 PM · 45 min · 6 attendees</div>
+          </div>
+          <div class="meeting-tags"><span class="chip green">Done</span></div>
+        </div>
+        <div class="meeting-row">
+          <div class="meeting-date-box"><div class="day">26</div><div class="mon">May</div></div>
+          <div class="meeting-info">
+            <div class="meeting-title">Sales Pipeline — Weekly Standup</div>
+            <div class="meeting-meta">🕘 9:00 AM · 30 min · 12 attendees</div>
+          </div>
+          <div class="meeting-tags"><span class="chip green">Done</span></div>
+        </div>
+        <div class="meeting-row">
+          <div class="meeting-date-box"><div class="day">23</div><div class="mon">May</div></div>
+          <div class="meeting-info">
+            <div class="meeting-title">Hiring Plan — Engineering & Sales</div>
+            <div class="meeting-meta">🕛 12:00 PM · 40 min · 5 attendees</div>
+          </div>
+          <div class="meeting-tags"><span class="chip green">Done</span></div>
+        </div>
+      </div>
+
+      <!-- Priority Actions -->
+      <div class="card">
+        <div class="section-hdr">
+          <h3>Priority Actions</h3>
+          <span class="view-all" onclick="showPage('actions')">View board →</span>
+        </div>
+        <div class="action-item">
+          <div class="prio-dot high"></div>
+          <div class="check-circle" onclick="this.classList.toggle('done');this.textContent=this.classList.contains('done')?'✓':''"></div>
+          <div class="action-text">
+            Finalize Q2 budget forecast and send to board by EOD
+            <div class="owner">👤 CFO — Sarah Chen &nbsp;·&nbsp; From: Budget Review</div>
+          </div>
+          <div class="due-tag overdue">Overdue</div>
+        </div>
+        <div class="action-item">
+          <div class="prio-dot high"></div>
+          <div class="check-circle" onclick="this.classList.toggle('done');this.textContent=this.classList.contains('done')?'✓':''"></div>
+          <div class="action-text">
+            Present revised hiring plan to CEO before Friday
+            <div class="owner">👤 VP HR — Mike R. &nbsp;·&nbsp; From: Hiring Plan</div>
+          </div>
+          <div class="due-tag soon">Due: 31 May</div>
+        </div>
+        <div class="action-item">
+          <div class="prio-dot medium"></div>
+          <div class="check-circle" onclick="this.classList.toggle('done');this.textContent=this.classList.contains('done')?'✓':''"></div>
+          <div class="action-text">
+            Share Q3 product feature list with sales team for pricing
+            <div class="owner">👤 CPO — Raj P. &nbsp;·&nbsp; From: Roadmap Sync</div>
+          </div>
+          <div class="due-tag soon">Due: 2 Jun</div>
+        </div>
+        <div class="action-item">
+          <div class="prio-dot medium"></div>
+          <div class="check-circle" onclick="this.classList.toggle('done');this.textContent=this.classList.contains('done')?'✓':''"></div>
+          <div class="action-text">
+            Schedule follow-up with enterprise client re: contract renewal
+            <div class="owner">👤 VP Sales — Lisa T. &nbsp;·&nbsp; From: Pipeline</div>
+          </div>
+          <div class="due-tag ok">Due: 5 Jun</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- Key Decisions This Week -->
+    <div class="section-hdr" style="margin-top:0;">
+      <h3>Key Decisions This Week</h3>
+    </div>
+    <div class="grid-3" style="margin-bottom:0;">
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+          <span style="font-size:20px;">🔨</span>
+          <div class="card-title">Budget Approved</div>
+        </div>
+        <div class="card-sub">Q2 marketing budget increased by 15% to drive pipeline growth. CFO to execute.</div>
+        <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center;">
+          <span class="chip blue">Budget Review · 29 May</span>
+        </div>
+      </div>
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+          <span style="font-size:20px;">🚀</span>
+          <div class="card-title">Feature Launch Moved</div>
+        </div>
+        <div class="card-sub">Analytics module launch pushed to Q3 week 2 due to QA dependency. All teams notified.</div>
+        <div style="margin-top:10px;"><span class="chip purple">Roadmap · 27 May</span></div>
+      </div>
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+          <span style="font-size:20px;">👥</span>
+          <div class="card-title">3 New Hires Approved</div>
+        </div>
+        <div class="card-sub">2 engineers + 1 enterprise sales rep approved for Q3. Offers to go out by June 15.</div>
+        <div style="margin-top:10px;"><span class="chip green">Hiring · 23 May</span></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+
+<!-- ══ PAGE: ALL MEETINGS ══ -->
+<div class="page" id="page-meetings">
+  <div style="padding:28px;">
+    <div class="filter-bar">
+      <span class="filter-chip active">All</span>
+      <span class="filter-chip">This Week</span>
+      <span class="filter-chip">Leadership</span>
+      <span class="filter-chip">Product</span>
+      <span class="filter-chip">Sales</span>
+      <span class="filter-chip">Finance</span>
+      <div style="margin-left:auto;display:flex;gap:10px;">
+        <button class="btn btn-ghost btn-sm">🗓 Filter by Date</button>
+        <button class="btn btn-primary btn-sm">+ Import Transcript</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="meeting-row" onclick="showPage('detail')">
+        <div class="meeting-date-box"><div class="day">29</div><div class="mon">May</div></div>
+        <div class="meeting-info">
+          <div class="meeting-title">Q2 Budget Review — Leadership Team</div>
+          <div class="meeting-meta">🕙 10:00 AM · 58 min · James M., Sarah C., Mike R. +5 more</div>
+        </div>
+        <div class="meeting-tags">
+          <span class="chip red">2 Escalations</span>
+          <span class="chip yellow">8 Actions</span>
+          <span class="chip yellow">Processing</span>
+        </div>
+      </div>
+      <div class="meeting-row">
+        <div class="meeting-date-box"><div class="day">27</div><div class="mon">May</div></div>
+        <div class="meeting-info">
+          <div class="meeting-title">Product Roadmap Sync — Q3 Planning</div>
+          <div class="meeting-meta">🕑 2:00 PM · 45 min · Raj P., Lisa T., Dev Team</div>
+        </div>
+        <div class="meeting-tags">
+          <span class="chip green">3 Decisions</span>
+          <span class="chip blue">5 Actions</span>
+          <span class="chip green">Complete</span>
+        </div>
+      </div>
+      <div class="meeting-row">
+        <div class="meeting-date-box"><div class="day">26</div><div class="mon">May</div></div>
+        <div class="meeting-info">
+          <div class="meeting-title">Sales Pipeline — Weekly Standup</div>
+          <div class="meeting-meta">🕘 9:00 AM · 30 min · Lisa T., Sales Team (12)</div>
+        </div>
+        <div class="meeting-tags">
+          <span class="chip green">1 Decision</span>
+          <span class="chip blue">4 Actions</span>
+          <span class="chip green">Complete</span>
+        </div>
+      </div>
+      <div class="meeting-row">
+        <div class="meeting-date-box"><div class="day">23</div><div class="mon">May</div></div>
+        <div class="meeting-info">
+          <div class="meeting-title">Hiring Plan — Engineering &amp; Sales</div>
+          <div class="meeting-meta">🕛 12:00 PM · 40 min · James M., Mike R. +3</div>
+        </div>
+        <div class="meeting-tags">
+          <span class="chip green">2 Decisions</span>
+          <span class="chip blue">3 Actions</span>
+          <span class="chip green">Complete</span>
+        </div>
+      </div>
+      <div class="meeting-row">
+        <div class="meeting-date-box"><div class="day">20</div><div class="mon">May</div></div>
+        <div class="meeting-info">
+          <div class="meeting-title">Enterprise Client — Contract Renewal</div>
+          <div class="meeting-meta">🕓 3:00 PM · 60 min · James M., Lisa T., Client</div>
+        </div>
+        <div class="meeting-tags">
+          <span class="chip red">1 Risk</span>
+          <span class="chip blue">6 Actions</span>
+          <span class="chip green">Complete</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══ PAGE: MEETING DETAIL ══ -->
+<div class="page" id="page-detail">
+  <div style="padding:28px;">
+
+    <div class="detail-header">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+        <div>
+          <div style="font-size:12px;opacity:.7;margin-bottom:6px;">📅 Thursday, 29 May 2026 · Teams Meeting</div>
+          <h2>Q2 Budget Review — Leadership Team</h2>
+          <div class="detail-meta">
+            <span>🕙 10:00–10:58 AM</span>
+            <span>⏱ 58 minutes</span>
+            <span>👥 8 Attendees</span>
+            <span>🤖 AI Processed</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-ghost btn-sm" style="color:#fff;border-color:rgba(255,255,255,.3);">📥 Export</button>
+          <button class="btn btn-ghost btn-sm" style="color:#fff;border-color:rgba(255,255,255,.3);">📧 Share</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active">📋 Summary</div>
+      <div class="tab">📄 Transcript</div>
+      <div class="tab">✅ Actions (8)</div>
+      <div class="tab">👥 Attendees</div>
+    </div>
+
+    <!-- AI Summary Box -->
+    <div class="ai-banner" style="margin-bottom:24px;">
+      <div class="ai-icon">🤖</div>
+      <div class="ai-text">
+        <h4>AI Meeting Summary</h4>
+        <p>Leadership reviewed Q2 performance and approved a 15% marketing budget increase. Key risks around enterprise client renewal and hiring timeline were escalated. 8 action items assigned across 4 owners.</p>
+      </div>
+    </div>
+
+    <!-- Extracted items grid -->
+    <div class="extract-grid" style="margin-bottom:24px;">
+
+      <div class="extract-card">
+        <div class="extract-card-hdr">
+          <div class="extract-icon">🔨</div>
+          <div class="extract-card-title">Decisions</div>
+          <div class="extract-count">3</div>
+        </div>
+        <div class="extract-item">✅ Q2 marketing budget approved at +15% ($2.3M total)</div>
+        <div class="extract-item">✅ Analytics module launch moved to Q3 Week 2</div>
+        <div class="extract-item">✅ 3 new hires approved: 2 engineers + 1 enterprise sales</div>
+      </div>
+
+      <div class="extract-card">
+        <div class="extract-card-hdr">
+          <div class="extract-icon">⚡</div>
+          <div class="extract-card-title">Action Items</div>
+          <div class="extract-count">8</div>
+        </div>
+        <div class="extract-item"><strong>Sarah C.</strong> — Finalize budget forecast, send to board</div>
+        <div class="extract-item"><strong>Mike R.</strong> — Revised hiring plan to CEO by Fri</div>
+        <div class="extract-item"><strong>Raj P.</strong> — Share Q3 feature list with sales</div>
+        <div class="extract-item"><strong>Lisa T.</strong> — Schedule enterprise renewal follow-up</div>
+      </div>
+
+      <div class="extract-card">
+        <div class="extract-card-hdr">
+          <div class="extract-icon">🔔</div>
+          <div class="extract-card-title">Reminders</div>
+          <div class="extract-count">4</div>
+        </div>
+        <div class="extract-item">Board presentation — 5 Jun (1 week away)</div>
+        <div class="extract-item">Enterprise contract renewal deadline — 15 Jun</div>
+        <div class="extract-item">Q3 kickoff all-hands — 1 Jul</div>
+        <div class="extract-item">Hiring offer letters — due 15 Jun</div>
+      </div>
+
+      <div class="extract-card">
+        <div class="extract-card-hdr">
+          <div class="extract-icon">🚨</div>
+          <div class="extract-card-title">Risks &amp; Issues</div>
+          <div class="extract-count">2</div>
+        </div>
+        <div class="extract-item" style="color:#dc2626;"><strong>[HIGH]</strong> Enterprise client at risk — competitor pricing pressure</div>
+        <div class="extract-item" style="color:#d97706;"><strong>[MED]</strong> QA bottleneck may delay analytics launch further</div>
+      </div>
+
+      <div class="extract-card">
+        <div class="extract-card-hdr">
+          <div class="extract-icon">❓</div>
+          <div class="extract-card-title">Open Questions</div>
+          <div class="extract-count">3</div>
+        </div>
+        <div class="extract-item">Who owns the competitor pricing analysis? (Unresolved)</div>
+        <div class="extract-item">Will Q3 budget accommodate 2 new engineers? (Pending)</div>
+        <div class="extract-item">Is board meeting on 5 Jun confirmed? (Check with EA)</div>
+      </div>
+
+      <div class="extract-card">
+        <div class="extract-card-hdr">
+          <div class="extract-icon">📅</div>
+          <div class="extract-card-title">Next Meeting</div>
+          <div class="extract-count">1</div>
+        </div>
+        <div class="extract-item"><strong>Budget Debrief</strong> — 5 Jun, 10:00 AM</div>
+        <div class="extract-item">Suggested Agenda:</div>
+        <div class="extract-item">1. Board feedback on Q2 budget</div>
+        <div class="extract-item">2. Hiring progress update</div>
+        <div class="extract-item">3. Enterprise client update</div>
+      </div>
+
+    </div>
+
+    <!-- Key Numbers -->
+    <div class="card" style="margin-bottom:20px;">
+      <div class="section-hdr"><h3>💰 Key Numbers Discussed</h3></div>
+      <div class="grid-3">
+        <div style="text-align:center;padding:16px;background:#f9fafb;border-radius:10px;">
+          <div style="font-size:24px;font-weight:800;color:var(--primary);">$2.3M</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">Q2 Marketing Budget</div>
+        </div>
+        <div style="text-align:center;padding:16px;background:#f9fafb;border-radius:10px;">
+          <div style="font-size:24px;font-weight:800;color:var(--success);">+15%</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">Budget Increase Approved</div>
+        </div>
+        <div style="text-align:center;padding:16px;background:#f9fafb;border-radius:10px;">
+          <div style="font-size:24px;font-weight:800;color:var(--warning);">3</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">New Hires Approved</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+
+<!-- ══ PAGE: ACTION BOARD ══ -->
+<div class="page" id="page-actions">
+  <div style="padding:28px;">
+
+    <div class="filter-bar">
+      <span class="filter-chip active">All Teams</span>
+      <span class="filter-chip">My Actions</span>
+      <span class="filter-chip">Overdue</span>
+      <span class="filter-chip">High Priority</span>
+      <div style="margin-left:auto;">
+        <button class="btn btn-primary btn-sm">+ Add Action</button>
+      </div>
+    </div>
+
+    <div class="kanban">
+      <!-- To Do -->
+      <div class="kanban-col">
+        <div class="kanban-col-hdr">
+          <div class="kanban-col-title" style="color:#6b7280;">📋 To Do</div>
+          <div class="kanban-col-count">6</div>
+        </div>
+        <div class="task-card">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+            <div class="prio-dot high"></div>
+            <span class="chip red" style="font-size:10px;">High</span>
+          </div>
+          <div class="task-card-title">Finalize Q2 budget forecast and send to board</div>
+          <div class="task-card-meta">
+            <span class="chip yellow">Finance</span>
+          </div>
+          <div class="task-card-footer">
+            <div class="assignee-stack">
+              <div class="avatar sm green">SC</div>
+            </div>
+            <div class="due-tag overdue">⚠️ Overdue</div>
+          </div>
+        </div>
+        <div class="task-card">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+            <div class="prio-dot medium"></div>
+            <span class="chip yellow" style="font-size:10px;">Medium</span>
+          </div>
+          <div class="task-card-title">Competitor pricing analysis for enterprise client</div>
+          <div class="task-card-meta">
+            <span class="chip purple">Sales</span>
+          </div>
+          <div class="task-card-footer">
+            <div class="assignee-stack">
+              <div class="avatar sm cyan">LT</div>
+            </div>
+            <div class="due-tag soon">3 Jun</div>
+          </div>
+        </div>
+        <div class="task-card">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+            <div class="prio-dot low"></div>
+            <span class="chip green" style="font-size:10px;">Low</span>
+          </div>
+          <div class="task-card-title">Update board presentation slides with Q2 numbers</div>
+          <div class="task-card-meta">
+            <span class="chip blue">Leadership</span>
+          </div>
+          <div class="task-card-footer">
+            <div class="assignee-stack">
+              <div class="avatar sm">JM</div>
+            </div>
+            <div class="due-tag ok">4 Jun</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- In Progress -->
+      <div class="kanban-col">
+        <div class="kanban-col-hdr">
+          <div class="kanban-col-title" style="color:#f59e0b;">🔄 In Progress</div>
+          <div class="kanban-col-count">5</div>
+        </div>
+        <div class="task-card">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+            <div class="prio-dot high"></div>
+            <span class="chip red" style="font-size:10px;">High</span>
+          </div>
+          <div class="task-card-title">Present revised hiring plan to CEO before Friday</div>
+          <div class="task-card-meta"><span class="chip cyan">HR</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:60%"></div></div>
+          <div class="task-card-footer" style="margin-top:8px;">
+            <div class="assignee-stack"><div class="avatar sm orange">MR</div></div>
+            <div class="due-tag soon">31 May</div>
+          </div>
+        </div>
+        <div class="task-card">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+            <div class="prio-dot medium"></div>
+            <span class="chip yellow" style="font-size:10px;">Medium</span>
+          </div>
+          <div class="task-card-title">Share Q3 product feature list with sales team for pricing</div>
+          <div class="task-card-meta"><span class="chip purple">Product</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:40%"></div></div>
+          <div class="task-card-footer" style="margin-top:8px;">
+            <div class="assignee-stack"><div class="avatar sm purple">RP</div></div>
+            <div class="due-tag ok">2 Jun</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- In Review -->
+      <div class="kanban-col">
+        <div class="kanban-col-hdr">
+          <div class="kanban-col-title" style="color:#8b5cf6;">👁 In Review</div>
+          <div class="kanban-col-count">3</div>
+        </div>
+        <div class="task-card">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+            <div class="prio-dot medium"></div>
+            <span class="chip yellow" style="font-size:10px;">Medium</span>
+          </div>
+          <div class="task-card-title">Draft enterprise contract renewal terms</div>
+          <div class="task-card-meta"><span class="chip purple">Sales</span></div>
+          <div class="task-card-footer">
+            <div class="assignee-stack">
+              <div class="avatar sm cyan">LT</div>
+              <div class="avatar sm">JM</div>
+            </div>
+            <div class="due-tag ok">5 Jun</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Done -->
+      <div class="kanban-col">
+        <div class="kanban-col-hdr">
+          <div class="kanban-col-title" style="color:#10b981;">✅ Done</div>
+          <div class="kanban-col-count">18</div>
+        </div>
+        <div class="task-card" style="opacity:.7;">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+            <div class="prio-dot low"></div>
+          </div>
+          <div class="task-card-title" style="text-decoration:line-through;color:var(--text-muted);">Send Q3 roadmap doc to all hands</div>
+          <div class="task-card-footer">
+            <div class="assignee-stack"><div class="avatar sm purple">RP</div></div>
+            <span class="chip green">Done · 27 May</span>
+          </div>
+        </div>
+        <div class="task-card" style="opacity:.7;">
+          <div class="task-card-title" style="text-decoration:line-through;color:var(--text-muted);">Confirm board meeting date with EA</div>
+          <div class="task-card-footer">
+            <div class="assignee-stack"><div class="avatar sm">JM</div></div>
+            <span class="chip green">Done · 26 May</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══ PAGE: MY TASKS ══ -->
+<div class="page" id="page-mytasks">
+  <div style="padding:28px;">
+    <div class="grid-2">
+      <div>
+        <div class="card" style="margin-bottom:20px;">
+          <div class="section-hdr">
+            <h3>🔴 Overdue</h3>
+            <span class="chip red">1 item</span>
+          </div>
+          <div class="action-item">
+            <div class="prio-dot high"></div>
+            <div class="check-circle"></div>
+            <div class="action-text">
+              Update board presentation slides with latest Q2 numbers
+              <div class="owner">📅 From: Budget Review · 29 May</div>
+            </div>
+            <div class="due-tag overdue">Overdue</div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:20px;">
+          <div class="section-hdr">
+            <h3>🟡 Due This Week</h3>
+            <span class="chip yellow">2 items</span>
+          </div>
+          <div class="action-item">
+            <div class="prio-dot high"></div>
+            <div class="check-circle"></div>
+            <div class="action-text">
+              Review and approve revised hiring plan from Mike R.
+              <div class="owner">📅 Due: 31 May · From: Hiring Plan</div>
+            </div>
+            <div class="due-tag soon">Tomorrow</div>
+          </div>
+          <div class="action-item">
+            <div class="prio-dot medium"></div>
+            <div class="check-circle"></div>
+            <div class="action-text">
+              Sign off on Q3 roadmap with product team
+              <div class="owner">📅 Due: 2 Jun · From: Roadmap Sync</div>
+            </div>
+            <div class="due-tag ok">3 days</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="section-hdr">
+            <h3>🟢 Upcoming</h3>
+            <span class="chip green">3 items</span>
+          </div>
+          <div class="action-item">
+            <div class="prio-dot low"></div>
+            <div class="check-circle"></div>
+            <div class="action-text">
+              Prepare talking points for board meeting
+              <div class="owner">📅 Due: 4 Jun · From: Budget Review</div>
+            </div>
+            <div class="due-tag ok">6 days</div>
+          </div>
+          <div class="action-item">
+            <div class="prio-dot low"></div>
+            <div class="check-circle"></div>
+            <div class="action-text">
+              Review enterprise contract renewal draft (Lisa T.)
+              <div class="owner">📅 Due: 5 Jun · From: Client Meeting</div>
+            </div>
+            <div class="due-tag ok">7 days</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Timeline -->
+      <div class="card">
+        <div class="section-hdr"><h3>📅 My Meeting Timeline</h3></div>
+        <div class="timeline">
+          <div class="tl-item">
+            <div class="tl-dot" style="border-color:var(--danger);background:#fee2e2;">🚨</div>
+            <div class="tl-content">
+              <div class="tl-title">Budget Review Action Due — OVERDUE</div>
+              <div class="tl-meta">Was due 29 May · Board deck update</div>
+              <div class="tl-body">Update slide 4 with revised Q2 figures and CFO's forecast.</div>
+            </div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot" style="border-color:var(--warning);">📋</div>
+            <div class="tl-content">
+              <div class="tl-title">Approve Hiring Plan</div>
+              <div class="tl-meta">Due 31 May · From: Hiring Plan Meeting</div>
+            </div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot" style="border-color:var(--primary);">📅</div>
+            <div class="tl-content">
+              <div class="tl-title">Board Meeting — Attend</div>
+              <div class="tl-meta">5 Jun, 10:00 AM · London HQ</div>
+              <div class="tl-body">Q2 budget review presentation. Prepare deck before 4 Jun.</div>
+            </div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot" style="border-color:var(--success);">🤝</div>
+            <div class="tl-content">
+              <div class="tl-title">Enterprise Client Call</div>
+              <div class="tl-meta">10 Jun · Contract renewal discussion</div>
+            </div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-dot">🚀</div>
+            <div class="tl-content">
+              <div class="tl-title">Q3 Kickoff All-Hands</div>
+              <div class="tl-meta">1 Jul · Full company</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══ PAGE: REMINDERS ══ -->
+<div class="page" id="page-reminders">
+  <div style="padding:28px;">
+    <div class="grid-2">
+      <div class="card">
+        <div class="section-hdr"><h3>🔔 Active Reminders</h3></div>
+        <div class="action-item">
+          <span style="font-size:20px;">⚠️</span>
+          <div class="action-text">
+            <strong>Board Presentation Deadline</strong>
+            <div class="owner">Prepare budget slides · Triggered from Budget Review meeting</div>
+          </div>
+          <span class="chip red">4 Jun</span>
+        </div>
+        <div class="action-item">
+          <span style="font-size:20px;">📄</span>
+          <div class="action-text">
+            <strong>Enterprise Contract Renewal</strong>
+            <div class="owner">Client deadline approaching · From: Client Meeting 20 May</div>
+          </div>
+          <span class="chip yellow">15 Jun</span>
+        </div>
+        <div class="action-item">
+          <span style="font-size:20px;">🤝</span>
+          <div class="action-text">
+            <strong>Hiring Offer Letters</strong>
+            <div class="owner">3 candidates · From: Hiring Plan meeting 23 May</div>
+          </div>
+          <span class="chip yellow">15 Jun</span>
+        </div>
+        <div class="action-item">
+          <span style="font-size:20px;">🚀</span>
+          <div class="action-text">
+            <strong>Q3 Kickoff Preparation</strong>
+            <div class="owner">All-hands agenda due · From: Roadmap Sync 27 May</div>
+          </div>
+          <span class="chip green">25 Jun</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-hdr"><h3>📊 What MeetingIQ Captures</h3></div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div style="display:flex;align-items:center;gap:10px;padding:10px;background:#f9fafb;border-radius:8px;">
+            <span style="font-size:18px;">🔨</span>
+            <div><strong style="font-size:13px;">Key Decisions</strong><br><span style="font-size:12px;color:var(--text-muted);">Formal decisions with context, owner &amp; date</span></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;padding:10px;background:#f9fafb;border-radius:8px;">
+            <span style="font-size:18px;">⚡</span>
+            <div><strong style="font-size:13px;">Action Items</strong><br><span style="font-size:12px;color:var(--text-muted);">Auto-assigned to attendees with priority &amp; deadline</span></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;padding:10px;background:#f9fafb;border-radius:8px;">
+            <span style="font-size:18px;">🔔</span>
+            <div><strong style="font-size:13px;">Reminders</strong><br><span style="font-size:12px;color:var(--text-muted);">Time-sensitive dates, deadlines, follow-ups</span></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;padding:10px;background:#f9fafb;border-radius:8px;">
+            <span style="font-size:18px;">🚨</span>
+            <div><strong style="font-size:13px;">Risks &amp; Escalations</strong><br><span style="font-size:12px;color:var(--text-muted);">Issues flagged that need leadership attention</span></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;padding:10px;background:#f9fafb;border-radius:8px;">
+            <span style="font-size:18px;">❓</span>
+            <div><strong style="font-size:13px;">Open Questions</strong><br><span style="font-size:12px;color:var(--text-muted);">Unresolved questions with assigned owner</span></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;padding:10px;background:#f9fafb;border-radius:8px;">
+            <span style="font-size:18px;">💰</span>
+            <div><strong style="font-size:13px;">Financial Mentions</strong><br><span style="font-size:12px;color:var(--text-muted);">Budgets, targets, and key numbers discussed</span></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;padding:10px;background:#f9fafb;border-radius:8px;">
+            <span style="font-size:18px;">📅</span>
+            <div><strong style="font-size:13px;">Next Meeting Agenda</strong><br><span style="font-size:12px;color:var(--text-muted);">AI-suggested agenda based on open items</span></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;padding:10px;background:#f9fafb;border-radius:8px;">
+            <span style="font-size:18px;">📊</span>
+            <div><strong style="font-size:13px;">Project Status</strong><br><span style="font-size:12px;color:var(--text-muted);">Progress updates on any project mentioned</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══ PAGE: TEAM VIEW ══ -->
+<div class="page" id="page-team">
+  <div style="padding:28px;">
+    <div class="grid-2" style="margin-bottom:20px;">
+      <div class="card">
+        <div class="section-hdr"><h3>👥 Team Workload</h3></div>
+        <div class="attendee-row">
+          <div class="avatar green">SC</div>
+          <div class="attendee-info">
+            <div class="attendee-name">Sarah Chen — CFO</div>
+            <div class="attendee-title">4 open actions · 1 overdue</div>
+          </div>
+          <div class="attendee-badges">
+            <span class="chip red">1 Overdue</span>
+            <span class="chip yellow">3 Open</span>
+          </div>
+        </div>
+        <div class="attendee-row">
+          <div class="avatar orange">MR</div>
+          <div class="attendee-info">
+            <div class="attendee-name">Mike R. — VP HR</div>
+            <div class="attendee-title">2 open actions · On track</div>
+          </div>
+          <div class="attendee-badges">
+            <span class="chip yellow">2 Open</span>
+          </div>
+        </div>
+        <div class="attendee-row">
+          <div class="avatar purple">RP</div>
+          <div class="attendee-info">
+            <div class="attendee-name">Raj P. — CPO</div>
+            <div class="attendee-title">3 open actions · 1 in review</div>
+          </div>
+          <div class="attendee-badges">
+            <span class="chip blue">1 Review</span>
+            <span class="chip yellow">2 Open</span>
+          </div>
+        </div>
+        <div class="attendee-row">
+          <div class="avatar cyan">LT</div>
+          <div class="attendee-info">
+            <div class="attendee-name">Lisa T. — VP Sales</div>
+            <div class="attendee-title">4 open actions · On track</div>
+          </div>
+          <div class="attendee-badges">
+            <span class="chip green">On Track</span>
+            <span class="chip yellow">4 Open</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-hdr"><h3>📊 Accountability Score</h3></div>
+        <div style="display:flex;flex-direction:column;gap:14px;">
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+              <span><div class="avatar sm green" style="display:inline-flex;">SC</div> Sarah C.</span>
+              <strong style="color:var(--danger);">72% — 1 overdue</strong>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" style="width:72%;background:var(--warning);"></div></div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+              <span><div class="avatar sm orange" style="display:inline-flex;">MR</div> Mike R.</span>
+              <strong style="color:var(--success);">90%</strong>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" style="width:90%"></div></div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+              <span><div class="avatar sm purple" style="display:inline-flex;">RP</div> Raj P.</span>
+              <strong style="color:var(--success);">88%</strong>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" style="width:88%"></div></div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+              <span><div class="avatar sm cyan" style="display:inline-flex;">LT</div> Lisa T.</span>
+              <strong style="color:var(--success);">95%</strong>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" style="width:95%"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══ PAGE: REPORTS ══ -->
+<div class="page" id="page-reports">
+  <div style="padding:28px;">
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon blue">📅</div>
+        <div><div class="stat-num">28</div><div class="stat-label">Meetings (May)</div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon green">✅</div>
+        <div><div class="stat-num">83%</div><div class="stat-label">Completion Rate</div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon yellow">⏱</div>
+        <div><div class="stat-num">42 min</div><div class="stat-label">Avg Meeting Length</div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon purple">🤖</div>
+        <div><div class="stat-num">147</div><div class="stat-label">AI Actions Created</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="section-hdr"><h3>📈 Monthly Meeting Activity</h3></div>
+      <div style="display:flex;align-items:flex-end;gap:8px;height:120px;padding:10px 0;">
+        <div style="flex:1;background:var(--primary-light);border-radius:4px 4px 0 0;height:60%;display:flex;align-items:flex-end;justify-content:center;padding-bottom:4px;font-size:10px;color:var(--primary);font-weight:700;">18</div>
+        <div style="flex:1;background:var(--primary-light);border-radius:4px 4px 0 0;height:75%;display:flex;align-items:flex-end;justify-content:center;padding-bottom:4px;font-size:10px;color:var(--primary);font-weight:700;">22</div>
+        <div style="flex:1;background:var(--primary-light);border-radius:4px 4px 0 0;height:55%;display:flex;align-items:flex-end;justify-content:center;padding-bottom:4px;font-size:10px;color:var(--primary);font-weight:700;">16</div>
+        <div style="flex:1;background:var(--primary);border-radius:4px 4px 0 0;height:100%;display:flex;align-items:flex-end;justify-content:center;padding-bottom:4px;font-size:10px;color:#fff;font-weight:700;">28</div>
+      </div>
+      <div style="display:flex;gap:8px;padding-top:4px;">
+        <div style="flex:1;text-align:center;font-size:10px;color:var(--text-muted);">Feb</div>
+        <div style="flex:1;text-align:center;font-size:10px;color:var(--text-muted);">Mar</div>
+        <div style="flex:1;text-align:center;font-size:10px;color:var(--text-muted);">Apr</div>
+        <div style="flex:1;text-align:center;font-size:10px;color:var(--primary);font-weight:700;">May</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+</main>
+</div>
+
+<!-- Page navigator -->
+<div class="page-nav">
+  🖥 View Page:
+  <select onchange="showPage(this.value)">
+    <option value="dashboard">Dashboard</option>
+    <option value="meetings">All Meetings</option>
+    <option value="detail">Meeting Detail</option>
+    <option value="actions">Action Board (Kanban)</option>
+    <option value="mytasks">My Tasks</option>
+    <option value="reminders">Reminders + Capture List</option>
+    <option value="team">Team View</option>
+    <option value="reports">Reports</option>
+  </select>
+</div>
+
+<script>
+const pageMeta = {
+  dashboard: { title: 'Dashboard', sub: 'Thursday, 29 May 2026 · Welcome back, James' },
+  meetings:  { title: 'All Meetings', sub: '28 meetings this month · 12 pending review' },
+  detail:    { title: 'Q2 Budget Review', sub: 'Meeting Detail · 29 May 2026 · AI Processed' },
+  actions:   { title: 'Action Board', sub: '47 open items · 5 overdue · Kanban view' },
+  mytasks:   { title: 'My Tasks', sub: '6 items assigned to you · 1 overdue' },
+  reminders: { title: 'Reminders', sub: '4 active reminders · What MeetingIQ captures' },
+  team:      { title: 'Team View', sub: 'Workload and accountability across your leadership team' },
+  reports:   { title: 'Reports & Analytics', sub: 'Monthly overview · May 2026' },
+};
+
+function showPage(id) {
+  // Hide all pages
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+
+  const page = document.getElementById('page-' + id);
+  if (page) page.classList.add('active');
+
+  // Update topbar
+  if (pageMeta[id]) {
+    document.getElementById('topbar-title').textContent = pageMeta[id].title;
+    document.getElementById('topbar-sub').textContent = pageMeta[id].sub;
+  }
+
+  // Update nav
+  document.querySelectorAll('.nav-item').forEach(n => {
+    if (n.getAttribute('onclick') && n.getAttribute('onclick').includes(id)) {
+      n.classList.add('active');
+    }
+  });
+
+  // Sync dropdown
+  const sel = document.querySelector('.page-nav select');
+  if (sel) sel.value = id;
+}
+</script>
+</body>
+</html>
