@@ -1,6 +1,6 @@
 @model LabMetricsDashboard.Models.CollectionSummaryViewModel
 @{
-    ViewData["Title"]       = $"Collection Summary – {Model.SelectedLab}";
+    ViewData["Title"]       = $"Collection Summary ï¿½ {Model.SelectedLab}";
     ViewData["SelectedLab"] = Model.SelectedLab;
     ViewData["PageLabel"]   = "Collection Summary";
 }
@@ -594,7 +594,7 @@
                                 <span class="cs-rpt-ms-count" style="display:none">0</span>
                             </div>
                             <div class="cs-rpt-ms-panel">
-                                <input type="text" class="cs-rpt-ms-search" placeholder="Search payers…" autocomplete="off" />
+                                <input type="text" class="cs-rpt-ms-search" placeholder="Search payersï¿½" autocomplete="off" />
                                 <div class="cs-rpt-ms-list">
                                     @foreach (var pn in Model.PayerNames)
                                     {
@@ -615,7 +615,7 @@
                                 <span class="cs-rpt-ms-count" style="display:none">0</span>
                             </div>
                             <div class="cs-rpt-ms-panel">
-                                <input type="text" class="cs-rpt-ms-search" placeholder="Search panels…" autocomplete="off" />
+                                <input type="text" class="cs-rpt-ms-search" placeholder="Search panelsï¿½" autocomplete="off" />
                                 <div class="cs-rpt-ms-list">
                                     @foreach (var pl in Model.PanelNames)
                                     {
@@ -683,7 +683,7 @@
             <i class="bi bi-file-earmark-excel"></i>
         </div>
         <div class="cs-export-title">Generating Excel Report</div>
-        <div class="cs-export-sub" id="csExportStatus">Fetching data and building workbook…</div>
+        <div class="cs-export-sub" id="csExportStatus">Fetching data and building workbookï¿½</div>
         <div class="cs-export-bar-bg">
             <div class="cs-export-bar-fill" id="csExportBar" style="width:0%"></div>
         </div>
@@ -720,11 +720,12 @@
             @if (Model.Top5Reimbursement.Count > 0)
             {
                 var reimbTotal = Model.Top5Reimbursement;
-                var reimbTotalCharges = reimbTotal.Sum(r => r.SumChargeAmount);
                 var reimbTotalPaid = reimbTotal.Sum(r => r.SumInsurancePayment);
                 var reimbTotalVisits = reimbTotal.Sum(r => r.UniqueVisitCount);
-                var reimbAvgPct = reimbTotalCharges == 0m ? 0m
-                    : Math.Round(reimbTotalPaid / reimbTotalCharges * 100m, 2);
+                var reimbTotalCharge = reimbTotal.Sum(r => r.SumChargeAmount);
+                var reimbAvgPct = reimbTotalCharge == 0
+                    ? 0m
+                    : Math.Round(reimbTotalPaid / reimbTotalCharge * 100m, 2);
 
                 <div class="top5-card-hdr reimb-hdr">
                     <div>
@@ -780,8 +781,8 @@
                 </div>
 
                 <div class="top5-card-footer">
-                    Ranked by <span class="top5-hl-blue">unique visit count</span> &bull;
-                    Formula: SUM(InsurancePayment) / SUM(ChargeAmount) × 100
+                    Ranked by <span class="top5-hl-blue">InsurancePayment</span> &bull;
+                    Formula: SUM(InsurancePayment) / SUM(ChargeAmount) &times; 100
                 </div>
             }
             else
@@ -944,6 +945,16 @@
                 <i class="bi bi-pie-chart"></i> Insurance vs Payment %
             </button>
         </li>
+        @if (Model.ShowInsuranceVsPayment)
+        {
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="insvspay-tab" data-bs-toggle="pill"
+                        data-bs-target="#insvspay-pane" type="button" role="tab"
+                        aria-controls="insvspay-pane" aria-selected="false">
+                    <i class="bi bi-cash-stack"></i> Insurance Vs Payment
+                </button>
+            </li>
+        }
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="cptpctpay-tab" data-bs-toggle="pill"
                     data-bs-target="#cptpctpay-pane" type="button" role="tab"
@@ -970,7 +981,7 @@
     <div id="csTabLoading" class="cs-tab-loading" aria-hidden="true">
         <div class="cs-tab-loading-card">
             <div class="lmd-spinner"></div>
-            <div class="cs-tab-loading-text">Loading tab…</div>
+            <div class="cs-tab-loading-text">Loading tabï¿½</div>
         </div>
     </div>
 
@@ -992,10 +1003,14 @@
                     => d is not null && d.TryGetValue(mk, out var c) ? c.EncounterCount : 0;
                 decimal McvCellPaid(Dictionary<string, CollectionMonthlyCell>? d, string mk)
                     => d is not null && d.TryGetValue(mk, out var c) ? c.InsurancePaidAmount : 0m;
+                decimal McvCellAvg(Dictionary<string, CollectionMonthlyCell>? d, string mk)
+                    => d is not null && d.TryGetValue(mk, out var c) ? c.AveragePaidAmount : 0m;
                 int McvYearEnc(Dictionary<int, CollectionYearTotal>? d, int y)
                     => d is not null && d.TryGetValue(y, out var t) ? t.EncounterCount : 0;
                 decimal McvYearPaid(Dictionary<int, CollectionYearTotal>? d, int y)
                     => d is not null && d.TryGetValue(y, out var t) ? t.InsurancePaidAmount : 0m;
+                decimal McvYearAvg(Dictionary<int, CollectionYearTotal>? d, int y)
+                    => d is not null && d.TryGetValue(y, out var t) ? t.AveragePaidAmount : 0m;
 
                 <div class="d-flex align-items-center justify-content-between mb-2" style="font-size:.78rem;color:#475569">
                     <div>
@@ -1016,16 +1031,17 @@
                                     @foreach (var year in mcvYears)
                                     {
                                         var monthsInYear = mcvMonthsByYear.TryGetValue(year, out var my) ? my : [];
-                                        <th colspan="@(monthsInYear.Count * 2)">@year</th>
-                                        <th colspan="2">@year Total</th>
+                                        <th colspan="@(monthsInYear.Count * 3)">@year</th>
+                                        <th colspan="3">@year Total</th>
                                     }
-                                    <th colspan="2">Grand Total</th>
+                                    <th colspan="3">Grand Total</th>
                                 </tr>
                                 @* Row 2: month sub-headers *@
                                 @{
                                     var encLabel      = "No. of Encounters";
                                     var encTotalLabel = "No. of Encounters";
                                     var paidLabel     = "Insurance Paid Amount";
+                                    var avgLabel      = "Average Paid";
                                 }
                                 <tr>
                                     @foreach (var year in mcvYears)
@@ -1035,12 +1051,15 @@
                                         {
                                             <th>@p.MonthLabel @encLabel</th>
                                             <th>@p.MonthLabel @paidLabel</th>
+                                            <th>@p.MonthLabel @avgLabel</th>
                                         }
                                         <th>@encTotalLabel</th>
                                         <th>@paidLabel</th>
+                                        <th>@avgLabel</th>
                                     }
                                     <th>@encTotalLabel</th>
                                     <th>@paidLabel</th>
+                                    <th>@avgLabel</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1060,12 +1079,15 @@
                                             {
                                                 <td style="text-align:right;font-weight:600">@McvCellEnc(panel.ByMonth, p.Key).ToString("N0")</td>
                                                 <td style="text-align:right;font-weight:600">@McvCellPaid(panel.ByMonth, p.Key).ToString("C0")</td>
+                                                <td style="text-align:right;font-weight:600">@McvCellAvg(panel.ByMonth, p.Key).ToString("C0")</td>
                                             }
                                             <td style="text-align:right;font-weight:700">@McvYearEnc(panel.ByYear, year).ToString("N0")</td>
                                             <td style="text-align:right;font-weight:700">@McvYearPaid(panel.ByYear, year).ToString("C0")</td>
+                                            <td style="text-align:right;font-weight:700">@McvYearAvg(panel.ByYear, year).ToString("C0")</td>
                                         }
                                         <td style="text-align:right;font-weight:700">@panel.TotalEncounters.ToString("N0")</td>
                                         <td style="text-align:right;font-weight:700">@panel.TotalInsurancePaid.ToString("C0")</td>
+                                        <td style="text-align:right;font-weight:700">@panel.TotalAveragePaidAmount.ToString("C0")</td>
                                     </tr>
                                     @* Payer drill-down rows (all payers when table1 mode, top 3 otherwise) *@
                                     @foreach (var payer in panel.TopPayers)
@@ -1085,12 +1107,15 @@
                                                 {
                                                     <td style="text-align:right">@McvCellEnc(payer.ByMonth, p.Key).ToString("N0")</td>
                                                     <td style="text-align:right">@McvCellPaid(payer.ByMonth, p.Key).ToString("C0")</td>
+                                                    <td style="text-align:right">@McvCellAvg(payer.ByMonth, p.Key).ToString("C0")</td>
                                                 }
                                                 <td style="text-align:right;font-weight:600">@McvYearEnc(payer.ByYear, year).ToString("N0")</td>
                                                 <td style="text-align:right;font-weight:600">@McvYearPaid(payer.ByYear, year).ToString("C0")</td>
+                                                <td style="text-align:right;font-weight:600">@McvYearAvg(payer.ByYear, year).ToString("C0")</td>
                                             }
                                             <td style="text-align:right;font-weight:600">@payer.TotalEncounters.ToString("N0")</td>
                                             <td style="text-align:right;font-weight:600">@payer.TotalInsurancePaid.ToString("C0")</td>
+                                            <td style="text-align:right;font-weight:600">@payer.TotalAveragePaidAmount.ToString("C0")</td>
                                         </tr>
                                     }
                                 }
@@ -1106,12 +1131,15 @@
                                         {
                                             <td style="text-align:right;color:#fff">@McvCellEnc(mcvPivot.GrandTotalByMonth, p.Key).ToString("N0")</td>
                                             <td style="text-align:right;color:#fff">@McvCellPaid(mcvPivot.GrandTotalByMonth, p.Key).ToString("C0")</td>
+                                            <td style="text-align:right;color:#fff">@McvCellAvg(mcvPivot.GrandTotalByMonth, p.Key).ToString("C0")</td>
                                         }
                                         <td style="text-align:right;color:#fff">@McvYearEnc(mcvPivot.GrandTotalByYear, year).ToString("N0")</td>
                                         <td style="text-align:right;color:#fff">@McvYearPaid(mcvPivot.GrandTotalByYear, year).ToString("C0")</td>
+                                        <td style="text-align:right;color:#fff">@McvYearAvg(mcvPivot.GrandTotalByYear, year).ToString("C0")</td>
                                     }
                                     <td style="text-align:right;color:#fff">@mcvPivot.GrandTotalEncounters.ToString("N0")</td>
                                     <td style="text-align:right;color:#fff">@mcvPivot.GrandTotalInsurancePaid.ToString("C0")</td>
+                                    <td style="text-align:right;color:#fff">@mcvPivot.GrandTotalAveragePaidAmount.ToString("C0")</td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -1120,8 +1148,8 @@
 
                 <div class="mt-2" style="font-size:.68rem; color:#94a3b8">
                     <strong>Source:</strong> ClaimLevelData (all rows) &bull;
-                    <strong>Filter (base):</strong> InsurancePayment &gt; 0 &nbsp;·&nbsp; CheckDate not blank/invalid &bull;
-                    <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &nbsp;|&nbsp; FirstBilledDate: @(string.IsNullOrWhiteSpace(Model.FilterFirstBillFrom) ? "-" : Model.FilterFirstBillFrom) — @(string.IsNullOrWhiteSpace(Model.FilterFirstBillTo) ? "-" : Model.FilterFirstBillTo) &nbsp;|&nbsp; DOS: @(string.IsNullOrWhiteSpace(Model.FilterDosFrom) ? "-" : Model.FilterDosFrom) — @(string.IsNullOrWhiteSpace(Model.FilterDosTo) ? "-" : Model.FilterDosTo) &nbsp;|&nbsp; CheckDate: @(string.IsNullOrWhiteSpace(Model.FilterCheckDateFrom) ? "-" : Model.FilterCheckDateFrom) — @(string.IsNullOrWhiteSpace(Model.FilterCheckDateTo) ? "-" : Model.FilterCheckDateTo) &bull;
+                    <strong>Filter (base):</strong> InsurancePayment &gt; 0 &nbsp;ï¿½&nbsp; CheckDate not blank/invalid &bull;
+                    <strong>Filter (applied):</strong> Payers: @(Model.FilterPayerNames != null && Model.FilterPayerNames.Count > 0 ? string.Join(", ", Model.FilterPayerNames) : "All") &nbsp;|&nbsp; Panels: @(Model.FilterPanelNames != null && Model.FilterPanelNames.Count > 0 ? string.Join(", ", Model.FilterPanelNames) : "All") &nbsp;|&nbsp; FirstBilledDate: @(string.IsNullOrWhiteSpace(Model.FilterFirstBillFrom) ? "-" : Model.FilterFirstBillFrom) ï¿½ @(string.IsNullOrWhiteSpace(Model.FilterFirstBillTo) ? "-" : Model.FilterFirstBillTo) &nbsp;|&nbsp; DOS: @(string.IsNullOrWhiteSpace(Model.FilterDosFrom) ? "-" : Model.FilterDosFrom) ï¿½ @(string.IsNullOrWhiteSpace(Model.FilterDosTo) ? "-" : Model.FilterDosTo) &nbsp;|&nbsp; CheckDate: @(string.IsNullOrWhiteSpace(Model.FilterCheckDateFrom) ? "-" : Model.FilterCheckDateFrom) ï¿½ @(string.IsNullOrWhiteSpace(Model.FilterCheckDateTo) ? "-" : Model.FilterCheckDateTo) &bull;
                     <strong>Rows:</strong> PanelName &bull;
                     <strong>Drill-down:</strong> Top 3 PayerName_Raw by Unique ClaimID count &bull;
                     <strong>Columns:</strong> CheckDate (Year, Month) &bull;
@@ -1130,7 +1158,7 @@
             }
             else
             {
-                var mcvReason = "No rows match: InsurancePayment > 0 · CheckDate is a valid date";
+                var mcvReason = "No rows match: InsurancePayment > 0 ï¿½ CheckDate is a valid date";
                 <div class="text-center py-5 text-muted">
                     <div style="font-size:2rem;opacity:.4">&#128202;</div>
                     <div class="fw-semibold mt-2">No monthly claim volume data available</div>
@@ -1147,10 +1175,10 @@
                 <div class="mt-1"><span class="fw-semibold">Monthly Claim Volume Logic:</span></div>
                 <ul class="mb-0 ps-3" style="font-size:.78rem">
                     <li>Source: <code>ClaimLevelData</code> (all rows)</li>
-                    <li>Rows: <code>PanelName</code> &nbsp;·&nbsp; Drill-down: Top 3 <code>PayerName_Raw</code> by <code>COUNT(DISTINCT ClaimID)</code></li>
+                    <li>Rows: <code>PanelName</code> &nbsp;ï¿½&nbsp; Drill-down: Top 3 <code>PayerName_Raw</code> by <code>COUNT(DISTINCT ClaimID)</code></li>
                     <li>Columns: <code>YEAR(CheckDate)</code> / <code>MONTH(CheckDate)</code></li>
-                    <li>Filter (base): <code>InsurancePayment &gt; 0</code> &nbsp;·&nbsp; <code>CheckDate</code> not blank/invalid &nbsp;·&nbsp; <code>PayerName_Raw</code> not blank</li>
-                    <li>Rank by: <code>COUNT(DISTINCT ClaimID)</code> &nbsp;·&nbsp; Sort: Grand Total descending</li>
+                    <li>Filter (base): <code>InsurancePayment &gt; 0</code> &nbsp;ï¿½&nbsp; <code>CheckDate</code> not blank/invalid &nbsp;ï¿½&nbsp; <code>PayerName_Raw</code> not blank</li>
+                    <li>Rank by: <code>COUNT(DISTINCT ClaimID)</code> &nbsp;ï¿½&nbsp; Sort: Grand Total descending</li>
                 </ul>
             </div>
         </div>
@@ -1169,6 +1197,11 @@
         <div class="tab-pane fade" id="reppay-pane"        role="tabpanel" aria-labelledby="reppay-tab"        data-cs-tab="reppay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabRepPay",       Model) } else { <div class="cs-lazy-pane" data-lazy-tab="reppay"></div> }</div>
         <!-- Insurance vs Payment % tab -->
         <div class="tab-pane fade" id="inspctpay-pane"     role="tabpanel" aria-labelledby="inspctpay-tab"     data-cs-tab="inspctpay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabInsPctPay",    Model) } else { <div class="cs-lazy-pane" data-lazy-tab="inspctpay"></div> }</div>
+        @if (Model.ShowInsuranceVsPayment)
+        {
+            <!-- Insurance Vs Payment (snapshot pivot) tab -->
+            <div class="tab-pane fade" id="insvspay-pane"  role="tabpanel" aria-labelledby="insvspay-tab"     data-cs-tab="insvspay"><div class="cs-lazy-pane" data-lazy-tab="insvspay"></div></div>
+        }
         <!-- CPT vs Payment % tab -->
         <div class="tab-pane fade" id="cptpctpay-pane"     role="tabpanel" aria-labelledby="cptpctpay-tab"     data-cs-tab="cptpctpay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabCptPctPay",    Model) } else { <div class="cs-lazy-pane" data-lazy-tab="cptpctpay"></div> }</div>
         <!-- Status Summary tab -->
@@ -1352,7 +1385,7 @@
     /*
      * shown.bs.tab fires AFTER the new pane has fully faded in.
      * Bootstrap has removed .active from the old pane by now,
-     * so we can safely restore its inline styles — Bootstrap's own
+     * so we can safely restore its inline styles ï¿½ Bootstrap's own
      * display:none rule for inactive panes takes over.
      */
     tabList.addEventListener('shown.bs.tab', function (e) {
@@ -1381,7 +1414,22 @@
 })();
 </script>
 
-@if (Model.LazyLoadTabs)
+<script>
+(function () {
+    var form = document.getElementById('csRptFilterForm');
+    var overlay = document.getElementById('csTabLoading');
+    if (!form || !overlay) return;
+
+    form.addEventListener('submit', function () {
+        var text = overlay.querySelector('.cs-tab-loading-text');
+        if (text) text.textContent = 'Loading Collection Summary...';
+        overlay.classList.add('active');
+        overlay.setAttribute('aria-hidden', 'false');
+    });
+}());
+</script>
+
+@if (Model.LazyLoadTabs || Model.ShowInsuranceVsPayment)
 {
 <style>
 .cs-lazy-placeholder {
@@ -1398,11 +1446,30 @@
 <script>
 (function () {
     'use strict';
-    // Base URL for lazy tab AJAX calls — carries all current filter params.
+    // Base URL for lazy tab AJAX calls ï¿½ carries all current filter params.
     var baseParams = (function () {
         var qs = window.location.search;
         return qs ? qs.substring(1) : '';
     }());
+
+    /*
+     * innerHTML does NOT execute <script> tags. This helper sets the HTML and
+     * then clones every <script> element so the browser executes each one.
+     * Required for drilldown / toggle scripts inside lazy-loaded tab partials
+     * (e.g. Status Summary expand-collapse, Weekly Claim Volume toggles).
+     */
+    function setHtmlAndRunScripts(container, html) {
+        container.innerHTML = html;
+        container.querySelectorAll('script').forEach(function (oldScript) {
+            var s = document.createElement('script');
+            // Copy all attributes (type, src, etc.)
+            Array.prototype.forEach.call(oldScript.attributes, function (attr) {
+                s.setAttribute(attr.name, attr.value);
+            });
+            s.textContent = oldScript.textContent;
+            oldScript.parentNode.replaceChild(s, oldScript);
+        });
+    }
 
     function lazyLoadPane(pane) {
         var placeholder = pane.querySelector('.cs-lazy-pane');
@@ -1423,7 +1490,7 @@
 
         fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
             .then(function (r) { return r.text(); })
-            .then(function (html) { pane.innerHTML = html; })
+            .then(function (html) { setHtmlAndRunScripts(pane, html); })
             .catch(function () {
                 pane.innerHTML =
                     '<div class="alert alert-warning m-3">' +

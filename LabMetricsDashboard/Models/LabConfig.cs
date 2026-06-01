@@ -90,15 +90,15 @@ public sealed class LabCsvConfig
 
     /// <summary>
     /// Enables the Prediction Analysis page under Analytics menu.
-    /// Defaults to true for backward compatibility.
+    /// Only labs with this key set to true should show or access the page.
     /// </summary>
-    public bool EnablePrediction { get; init; } = true;
+    public bool EnablePrediction { get; init; } = false;
 
     /// <summary>
     /// Enables the Forecasting Summary page under Analytics menu.
-    /// Defaults to true for backward compatibility.
+    /// Only labs with this key set to true should show or access the page.
     /// </summary>
-    public bool EnableForcast { get; init; } = true;
+    public bool EnableForcast { get; init; } = false;
 
     /// <summary>
     /// Enables the Clinic Summary page under Analytics menu.
@@ -143,6 +143,15 @@ public sealed class LabCsvConfig
     /// Defaults to false.
     /// </summary>
     public bool EnableCollectionSummaryReport { get; init; } = false;
+
+    /// <summary>
+    /// Folder that contains the pre-generated Collection Summary Excel file for this lab.
+    /// When set and a <c>.xlsx</c> file exists in the folder, the "All Labs Collection Summary"
+    /// download uses that pre-built file instead of querying the database.
+    /// The most-recently modified <c>.xlsx</c> in the folder is selected automatically.
+    /// When null or empty the All Labs export falls back to a live query for this lab.
+    /// </summary>
+    public string? CollectionSummaryExcelPath { get; init; }
 
     /// <summary>
     /// Optional per-lab Production Summary settings (rule selection, etc.).
@@ -205,24 +214,24 @@ public sealed class CollectionSummaryConfig
 /// <remarks>
 /// Supported rules:
 /// <list type="bullet">
-///   <item><c>Rule1</c> – Columns grouped by Year/Month of <c>ChargeEnteredDate</c>;
+///   <item><c>Rule1</c> ï¿½ Columns grouped by Year/Month of <c>ChargeEnteredDate</c>;
 ///   filter retains <c>FirstBilledDate IS NOT NULL</c> and <c>PayerName &lt;&gt; ''</c>;
 ///   rows ranked by <c>COUNT(DISTINCT ClaimID)</c> with Top 3 payer drill-down.
 ///   Used by PCRLabsofAmerica, Beech Tree, Phi Life, Rising Tides, InHealth, PCR CO, PCR AL.</item>
-///   <item><c>Rule2</c> – Same as Rule1 (ChargeEnteredDate columns, Top 3 payer drill-down,
+///   <item><c>Rule2</c> ï¿½ Same as Rule1 (ChargeEnteredDate columns, Top 3 payer drill-down,
 ///   sort by Grand Total) but the row filter excludes any row whose <c>PayerName_Raw</c>
 ///   contains <c>None</c>, <c>Accu Labs</c>, <c>Client Bill</c>, <c>Client</c>, <c>Patient</c>,
 ///   or <c>Patient Pay</c>. <c>FirstBilledDate IS NOT NULL</c> is still required.
 ///   Used by Certus Laboratories.</item>
-///   <item><c>Rule3</c> – Same as Rule1 (ChargeEnteredDate columns, Top 3 payer drill-down,
+///   <item><c>Rule3</c> ï¿½ Same as Rule1 (ChargeEnteredDate columns, Top 3 payer drill-down,
 ///   sort by Grand Total) with explicit filters <c>PayerName &lt;&gt; ''</c>,
 ///   <c>ChargeEnteredDate IS NOT NULL</c> and <c>FirstBilledDate IS NOT NULL</c>.
 ///   Row source is <c>PanelName</c> today; will switch to <c>PanelNameNew</c> when that
 ///   column is added. Used by Augustus Laboratories.</item>
-///   <item><c>Rule4</c> – Currently identical to <c>Rule3</c> (same filters, ChargeEnteredDate
+///   <item><c>Rule4</c> ï¿½ Currently identical to <c>Rule3</c> (same filters, ChargeEnteredDate
 ///   columns, <c>PanelName</c> fallback). Used by NorthWest. Exists as a distinct rule so it
 ///   can diverge from Rule3 later.</item>
-///   <item><c>Rule5</c> – Identical to the legacy default: columns grouped by
+///   <item><c>Rule5</c> ï¿½ Identical to the legacy default: columns grouped by
 ///   <c>YEAR/MONTH(FirstBilledDate)</c>, filter <c>PayerName &lt;&gt; ''</c> and
 ///   <c>FirstBilledDate IS NOT NULL</c>, with Top 3 payer drill-down by
 ///   <c>COUNT(DISTINCT ClaimID)</c> sorted by Grand Total. Used by Cove and Elixir.</item>
