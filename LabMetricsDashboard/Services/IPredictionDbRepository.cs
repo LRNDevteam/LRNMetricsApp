@@ -1,5 +1,7 @@
 using LabMetricsDashboard.Models;
 
+using LabMetricsDashboard.Models;
+
 namespace LabMetricsDashboard.Services;
 
 /// <summary>
@@ -34,6 +36,69 @@ public interface IPredictionDbRepository
     /// </summary>
     Task<PredictionDbDiagnostic> ProbeAsync(
         string connectionString,
+        CancellationToken cancellationToken = default);
+
+    // ?? Aggregated SP methods (SP 6-11) ?????????????????????????????????????
+
+    /// <summary>Returns the 6 summary bucket rows (usp_GetPredictionSummaryBuckets).</summary>
+    Task<List<PredictionBucketSpRow>> GetSummaryBucketsAsync(
+        string connectionString, DateOnly weekStartDate,
+        string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
+        string? filterPanelName = null, string? filterFinalCoverageStatus = null,
+        string? filterPayability = null, string? filterCPTCode = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Returns payer-level validation rows (usp_GetPredictionValidationByPayer).</summary>
+    Task<List<PredictionPayerSpRow>> GetValidationByPayerAsync(
+        string connectionString, DateOnly weekStartDate,
+        string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
+        string? filterPanelName = null, string? filterFinalCoverageStatus = null,
+        string? filterPayability = null, string? filterCPTCode = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Returns panel-level validation rows (usp_GetPredictionValidationByPanel).</summary>
+    Task<List<PredictionPanelSpRow>> GetValidationByPanelAsync(
+        string connectionString, DateOnly weekStartDate,
+        string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
+        string? filterPanelName = null, string? filterFinalCoverageStatus = null,
+        string? filterPayability = null, string? filterCPTCode = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Returns CPT-level validation rows (usp_GetPredictionValidationByCPT).</summary>
+    Task<List<PredictionCptSpRow>> GetValidationByCptAsync(
+        string connectionString, DateOnly weekStartDate,
+        string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
+        string? filterPanelName = null, string? filterFinalCoverageStatus = null,
+        string? filterPayability = null, string? filterCPTCode = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Returns flat denial breakdown rows (usp_GetPredictionDenialBreakdown).</summary>
+    Task<List<DenialBreakdownSpRow>> GetDenialBreakdownAsync(
+        string connectionString, DateOnly weekStartDate,
+        string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
+        string? filterPanelName = null, string? filterFinalCoverageStatus = null,
+        string? filterPayability = null, string? filterCPTCode = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Returns flat no-response breakdown rows (usp_GetPredictionNoResponseBreakdown).</summary>
+    Task<List<NoResponseBreakdownSpRow>> GetNoResponseBreakdownAsync(
+        string connectionString, DateOnly weekStartDate,
+        string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
+        string? filterPanelName = null, string? filterFinalCoverageStatus = null,
+        string? filterPayability = null, string? filterCPTCode = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns the single summary-metrics row containing all bucket counts, all Ratio
+    /// percentages, and all Prediction Accuracy percentages
+    /// (usp_GetPredictionSummaryMetrics — SP 12).
+    /// Returns null when the SP returns no rows (empty dataset).
+    /// </summary>
+    Task<PredictionSummaryMetricsSpRow?> GetSummaryMetricsAsync(
+        string connectionString, DateOnly weekStartDate,
+        string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
+        string? filterPanelName = null, string? filterFinalCoverageStatus = null,
+        string? filterPayability = null, string? filterCPTCode = null,
         CancellationToken cancellationToken = default);
 }
 

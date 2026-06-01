@@ -1,10 +1,22 @@
 ﻿@model LabMetricsDashboard.Models.CollectionSummaryViewModel
             @if (Model.CptPaymentPct.Count > 0)
             {
-                var cptGrandUnits = Model.CptPaymentPct.Sum(r => r.SumServiceUnits);
+                var cptGrandUnits   = Model.CptPaymentPct.Sum(r => r.SumServiceUnits);
                 var cptGrandPaidIns = Model.CptPaymentPct.Sum(r => r.PaidInsurancePayment);
                 var cptGrandPaidChg = Model.CptPaymentPct.Sum(r => r.PaidChargeAmount);
-                var cptGrandPct = cptGrandPaidChg == 0 ? 0m : Math.Round(cptGrandPaidIns / cptGrandPaidChg * 100m, 2);
+
+                // When the aggregate snapshot stores 0/0 for PaidInsurancePayment/PaidChargeAmount
+                // fall back to a units-weighted average of each row's PaymentPct.
+                decimal cptGrandPct;
+                if (cptGrandPaidChg != 0)
+                {
+                    cptGrandPct = Math.Round(cptGrandPaidIns / cptGrandPaidChg * 100m, 2);
+                }
+                else
+                {
+                    var weightedSum = Model.CptPaymentPct.Sum(r => r.PaymentPct * r.SumServiceUnits);
+                    cptGrandPct = cptGrandUnits == 0 ? 0m : Math.Round(weightedSum / cptGrandUnits, 2);
+                }
                 var cptMaxPct = Model.CptPaymentPct.Max(r => r.PaymentPct);
                 <div class="cs-rpt-wrap">
                     <div class="cs-rpt-scroll">

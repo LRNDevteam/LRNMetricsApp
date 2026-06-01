@@ -431,3 +431,45 @@ BEGIN
     ORDER BY InsertedDateTime DESC;  
 END  
 GO
+
+-- ============================================================
+-- SP 4 : usp_ProbePredictionDb
+-- Returns a single row that the dashboard uses to decide whether
+-- the Prediction Analysis page is ready to display.
+--   TableExists  BIT  – 1 when dbo.PayerValidationReport exists
+--   ProcExists   BIT  – 1 when dbo.usp_GetPayerValidationReport exists
+-- No parameters required; safe to call on any database.
+-- ============================================================
+CREATE OR ALTER PROCEDURE dbo.usp_ProbePredictionDb
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        CAST(CASE WHEN OBJECT_ID('dbo.PayerValidationReport',        'U') IS NOT NULL
+                  THEN 1 ELSE 0 END AS BIT) AS TableExists,
+        CAST(CASE WHEN OBJECT_ID('dbo.usp_GetPayerValidationReport', 'P') IS NOT NULL
+                  THEN 1 ELSE 0 END AS BIT) AS ProcExists;
+END
+GO
+
+-- ============================================================
+-- SP 5 : usp_GetPayerValidationRunStats
+-- Returns the latest RunId, its InsertedDateTime, and the
+-- total row count in dbo.PayerValidationReport.
+-- Returns 0 rows when the table is empty (caller must handle).
+-- ============================================================
+CREATE OR ALTER PROCEDURE dbo.usp_GetPayerValidationRunStats
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT TOP 1
+        RunId,
+        InsertedDateTime,
+        (SELECT COUNT_BIG(*) FROM dbo.PayerValidationReport) AS TotalRows
+    FROM   dbo.PayerValidationReport
+    WHERE  RunId IS NOT NULL
+    ORDER  BY InsertedDateTime DESC;
+END
+GO

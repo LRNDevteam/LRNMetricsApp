@@ -8,16 +8,19 @@
                     => d is not null && d.TryGetValue(wk, out var c) ? c.EncounterCount : 0;
                 decimal WcvCellPaid(Dictionary<string, CollectionMonthlyCell>? d, string wk)
                     => d is not null && d.TryGetValue(wk, out var c) ? c.InsurancePaidAmount : 0m;
+                decimal WcvCellAvg(Dictionary<string, CollectionMonthlyCell>? d, string wk)
+                    => d is not null && d.TryGetValue(wk, out var c) ? c.AveragePaidAmount : 0m;
 
                 var wcvEncLabel = Model.UsesLineEncounters ? "No. of Enc." : "No. of Encounters";
-                var wcvPaidLabel = Model.UsesLineEncounters ? "Total Paid" : "Total Billed Charges";
+                var wcvPaidLabel = "Total Paid";
+                var wcvAvgLabel = "Average Paid";
 
                 <div class="cs-rpt-wrap">
                     <div class="cs-rpt-scroll">
                         <table class="cs-rpt-table">
                             <thead>
                                 <tr>
-                                    <th colspan="@(2 + wcvWeeks.Count * 2 + 2)" style="text-align:center;font-size:.7rem;letter-spacing:.03em">
+                                    <th colspan="@(2 + wcvWeeks.Count * 3 + 3)" style="text-align:center;font-size:.7rem;letter-spacing:.03em">
                                         Data based on Last 4 Week [Posting Date]
                                     </th>
                                 </tr>
@@ -26,18 +29,20 @@
                                     <th rowspan="2" style="text-align:left;min-width:260px">Panel &amp; Insurance</th>
                                     @foreach (var w in wcvWeeks)
                                     {
-                                        <th colspan="2">@w.Label</th>
+                                        <th colspan="3">@w.Label</th>
                                     }
-                                    <th colspan="2">Grand Total</th>
+                                    <th colspan="3">Grand Total</th>
                                 </tr>
                                 <tr>
                                     @foreach (var w in wcvWeeks)
                                     {
                                         <th>@wcvEncLabel</th>
                                         <th>@wcvPaidLabel</th>
+                                        <th>@wcvAvgLabel</th>
                                     }
                                     <th>@wcvEncLabel</th>
                                     <th>@wcvPaidLabel</th>
+                                    <th>@wcvAvgLabel</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -53,9 +58,11 @@
                                         {
                                             <td style="text-align:right;font-weight:600">@WcvCellEnc(panel.ByWeek, w.Key).ToString("N0")</td>
                                             <td style="text-align:right;font-weight:600">@WcvCellPaid(panel.ByWeek, w.Key).ToString("C0")</td>
+                                            <td style="text-align:right;font-weight:600">@WcvCellAvg(panel.ByWeek, w.Key).ToString("C0")</td>
                                         }
                                         <td style="text-align:right;font-weight:700">@panel.TotalEncounters.ToString("N0")</td>
                                         <td style="text-align:right;font-weight:700">@panel.TotalInsurancePaid.ToString("C0")</td>
+                                        <td style="text-align:right;font-weight:700">@panel.TotalAveragePaidAmount.ToString("C0")</td>
                                     </tr>
                                     @foreach (var payer in panel.TopPayers)
                                     {
@@ -71,9 +78,11 @@
                                             {
                                                 <td style="text-align:right">@WcvCellEnc(payer.ByWeek, w.Key).ToString("N0")</td>
                                                 <td style="text-align:right">@WcvCellPaid(payer.ByWeek, w.Key).ToString("C0")</td>
+                                                <td style="text-align:right">@WcvCellAvg(payer.ByWeek, w.Key).ToString("C0")</td>
                                             }
                                             <td style="text-align:right;font-weight:600">@payer.TotalEncounters.ToString("N0")</td>
                                             <td style="text-align:right;font-weight:600">@payer.TotalInsurancePaid.ToString("C0")</td>
+                                            <td style="text-align:right;font-weight:600">@payer.TotalAveragePaidAmount.ToString("C0")</td>
                                         </tr>
                                     }
                                 }
@@ -86,9 +95,11 @@
                                     {
                                         <td style="text-align:right;color:#fff">@WcvCellEnc(wcvPivot.GrandTotalByWeek, w.Key).ToString("N0")</td>
                                         <td style="text-align:right;color:#fff">@WcvCellPaid(wcvPivot.GrandTotalByWeek, w.Key).ToString("C0")</td>
+                                        <td style="text-align:right;color:#fff">@WcvCellAvg(wcvPivot.GrandTotalByWeek, w.Key).ToString("C0")</td>
                                     }
                                     <td style="text-align:right;color:#fff">@wcvPivot.GrandTotalEncounters.ToString("N0")</td>
                                     <td style="text-align:right;color:#fff">@wcvPivot.GrandTotalInsurancePaid.ToString("C0")</td>
+                                    <td style="text-align:right;color:#fff">@wcvPivot.GrandTotalAveragePaidAmount.ToString("C0")</td>
                                 </tr>
                             </tfoot>
                         </table>

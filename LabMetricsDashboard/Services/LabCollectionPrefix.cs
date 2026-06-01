@@ -17,6 +17,8 @@ internal static class LabCollectionPrefix
         // Both with-underscore and no-underscore variants are accepted to be tolerant
         // of legacy configs and the LabSelectionHelper.Resolve normalisation.
         ["NorthWest"]          = "NW",
+        ["NW"]                 = "NW",   // alias: lab config key may be "NW" not "NorthWest"
+        ["North_West"]         = "NW",
         ["Augustus"]           = "Aug",
         ["Augustus_Labs"]      = "Aug",
         ["AugustusLabs"]       = "Aug",
@@ -54,7 +56,7 @@ internal static class LabCollectionPrefix
     ///   <item>All other labs ? <c>PanelName</c> (confirmed by SSMS results and aggregate SP schemas)</item>
     /// </list>
     /// NOTE: Augustus was originally thought to use PanelNew, but its CollectionSummary SPs
-    /// and actual ClaimLevelData rows both use PanelName — confirmed by live SSMS query.
+    /// and actual ClaimLevelData rows both use PanelName ï¿½ confirmed by live SSMS query.
     /// </summary>
     public static string GetPanelColumn(string? labName)
     {
@@ -63,6 +65,7 @@ internal static class LabCollectionPrefix
         var normalized = labName.Replace("_", string.Empty).Replace(" ", string.Empty);
 
         return normalized.Equals("NorthWest", StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("NW", StringComparison.OrdinalIgnoreCase)
             ? "PanelType"
             : "PanelName";
     }

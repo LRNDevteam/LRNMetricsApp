@@ -149,8 +149,10 @@ try
 
             // ════════════════════════════════════════════════════════════════════
             // STEP 1C — Skip if same as LastProcessedFile in JSON
+            //           UNLESS DataRefresh = true (forced re-process).
             // ════════════════════════════════════════════════════════════════════
-            if (!string.IsNullOrWhiteSpace(lab.LastProcessedFile)
+            if (!lab.DataRefresh
+                && !string.IsNullOrWhiteSpace(lab.LastProcessedFile)
                 && string.Equals(lab.LastProcessedFile, latestInputFile.FullName,
                                  StringComparison.OrdinalIgnoreCase))
             {
@@ -162,7 +164,8 @@ try
                 continue;
             }
 
-            Console.WriteLine($"[Step 1] New file detected — proceeding with processing.");
+            if (lab.DataRefresh)
+                Console.WriteLine($"[Step 1] DataRefresh=true — bypassing LastProcessedFile check, file will be re-processed: {latestInputFile.Name}");
 
             // ── Relative sub-path — derived from ResolveLatestFolder result ───────
             // weekFolderPath = Input\2026\02. February\02.25.2026 - 03.03.2026
@@ -240,13 +243,19 @@ try
             // STEP 3B — Persist source rows to DB (exceptions do NOT stop analysis)
             //           DB is opt-in per lab via EnableDatabaseInsert in {LabName}.json
             //           Guard: skip if this exact file path already exists in
-            //                  PayerValidationFileLog (e.g. re-run after a crash).
+            //                  PayerValidationFileLog UNLESS DataRefresh = true.
             // ════════════════════════════════════════════════════════════════════
             if (lab.EnableDatabaseInsert)
             {
                 if (!string.IsNullOrWhiteSpace(lab.DbConnectionString))
                 {
-                    var labDbService = new PredictionDbService(lab.DbConnectionString);
+                    var labDbService = new PredictionDbService(lab.DbConnectionString, lab.DbInsertChunkSize);
+
+                    if (lab.DataRefresh)
+                    {
+                        // DataRefresh=true: purge existing rows so we insert a clean copy.
+                        labDbService.DeleteFileLogEntry(latestInputFile.FullName, lab.LabName);
+                    }
 
                     if (labDbService.FileAlreadyLogged(latestInputFile.FullName, lab.LabName))
                     {
@@ -256,6 +265,20 @@ try
                     {
                         labDbService.SavePayerValidationData(
                             allRecords, latestInputFile.FullName, runId, weekFolderName, lab.LabName);
+                    }
+
+                    // Always refresh PV_* aggregate snapshots after a successful path through
+                    // the insert step (whether rows were just inserted or the file was a re-run).
+                    // The dashboard reads these snapshots so the user does not pay the cost of
+                    // scanning PayerValidationReport on every page load.
+                    labDbService.RefreshAggregatesForRun(lab.LabName, runId);
+
+                    // Reset DataRefresh flag so the next scheduled run is not re-processed.
+                    if (lab.DataRefresh)
+                    {
+                        lab.DataRefresh = false;
+                        LabConfigLoader.SaveLastProcessed(configFilePath, lab);
+                        AppLogger.LogDb($"[{lab.LabName}] DataRefresh reset to false in {Path.GetFileName(configFilePath)}.");
                     }
                 }
                 else

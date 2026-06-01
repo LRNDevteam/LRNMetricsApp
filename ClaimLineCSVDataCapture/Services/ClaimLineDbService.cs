@@ -6,7 +6,7 @@ namespace ClaimLineCSVDataCapture.Services;
 
 /// <summary>
 /// Persists CSV data to SQL Server using TVP bulk insert.
-/// Fully driven by <see cref="FileTypeMapping"/> — no hardcoded column lists.
+/// Fully driven by <see cref="FileTypeMapping"/> ï¿½ no hardcoded column lists.
 /// Adding/removing fields only requires a FieldMappings.json change
 /// (plus matching SQL TVP/table/SP updates).
 /// </summary>
@@ -81,7 +81,7 @@ public sealed class ClaimLineDbService
 
         if (totalRows == 0) return 0;
 
-        // Single SP call with all rows — the SP handles internal chunked inserts
+        // Single SP call with all rows ï¿½ the SP handles internal chunked inserts
         using var conn = new SqlConnection(_connectionString);
         conn.Open();
 
@@ -493,11 +493,75 @@ public sealed class ClaimLineDbService
     // ??? Collection Summary aggregate refreshers (one set of 13 SPs per lab) ??
     // Each method runs the 13 RefreshXxx_CS_* SPs that pre-compute the data
     // behind the Collection Summary tabs in the LabMetricsDashboard web app.
-    // SPs run independently — one failure does not block the others.
+    // SPs run independently ï¿½ one failure does not block the others.
+
+    /// <summary>
+    /// Runs all PhiLife-specific production report stored procedures after ingestion.
+    /// Each SP is executed independently so a failure in one does not block the others.
+    /// Returns a list of (SpName, ElapsedMs, ErrorMessage?) for caller logging.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshPhiLifeProductionReports()
+    {
+        string[] procedures =
+        [
+            "dbo.usp_RefreshPhi_MonthlyBilledProductionSummary",
+            "dbo.usp_RefreshPhi_WeeklyBilledProductionSummary",
+            "dbo.usp_RefreshPhi_PayerBreakdown",
+            "dbo.usp_RefreshPhi_PayerByPanel",
+            "dbo.usp_RefreshPhi_CodingBreakdown_Billed",
+            "dbo.usp_RefreshPhi_UnbilledAging",
+            "dbo.usp_RefreshPhi_CPTBreakdown",
+        ];
+
+        return RunProductionReportSPs(procedures);
+    }
+
+    /// <summary>Refreshes the PhiLife Collection Summary aggregates.</summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshPhiLifeCollectionReports()
+        => RunProductionReportSPs(BuildCollectionSummarySpList("Phi"));
 
     /// <summary>Refreshes the Augustus Collection Summary aggregates.</summary>
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshAugustusCollectionReports()
         => RunProductionReportSPs(BuildCollectionSummarySpList("Aug"));
+
+    /// <summary>
+    /// Executes <c>dbo.usp_Create_CollectionClaimLevelData</c> to build (or rebuild)
+    /// the <c>CollectionClaimLevelData</c> staging table from <c>LineLevelData</c>.
+    /// <para>
+    /// Must be called for the <b>Augustus</b> lab only, after both ClaimLevel and
+    /// LineLevel ingestion are complete and <b>before</b> the Production Report and
+    /// Collection Summary aggregate SPs run â€” this table is the source for the
+    /// Augustus Collection Summary Report.
+    /// </para>
+    /// The SP takes no parameters and manages its own table lifecycle internally
+    /// (drops and recreates <c>CollectionClaimLevelData</c> on every run).
+    /// </summary>
+    /// <returns>
+    /// A tuple of (<c>ElapsedMs</c>, <c>Error</c>) where <c>Error</c> is <c>null</c>
+    /// on success or contains the exception message on failure.
+    /// </returns>
+    public (long ElapsedMs, string? Error) CreateCollectionClaimLevelData()
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            using var conn = new SqlConnection(_connectionString);
+            conn.Open();
+            using var cmd = new SqlCommand("dbo.usp_Create_CollectionClaimLevelData", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 1800
+            };
+            cmd.ExecuteNonQuery();
+            sw.Stop();
+            return (sw.ElapsedMilliseconds, null);
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            return (sw.ElapsedMilliseconds, ex.Message);
+        }
+    }
 
     /// <summary>Refreshes the BeechTree Collection Summary aggregates.</summary>
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshBeechTreeCollectionReports()
@@ -517,7 +581,10 @@ public sealed class ClaimLineDbService
 
     /// <summary>Refreshes the NorthWest Collection Summary aggregates.</summary>
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshNorthWestCollectionReports()
-        => RunProductionReportSPs(BuildCollectionSummarySpList("NW"));
+        => RunProductionReportSPs([
+            ..BuildCollectionSummarySpList("NW"),
+            "dbo.usp_RefreshNW_CS_InsuranceVsPayment",
+        ]);
 
     /// <summary>Refreshes the PCRLabsofAmerica Collection Summary aggregates.</summary>
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshPCRLabsCollectionReports()
@@ -547,7 +614,7 @@ public sealed class ClaimLineDbService
 
     /// <summary>
     /// Executes a list of stored procedures sequentially on an open connection.
-    /// Each SP runs independently — a failure in one does not stop the others.
+    /// Each SP runs independently ï¿½ a failure in one does not stop the others.
     /// </summary>
     private List<(string SpName, long ElapsedMs, string? Error)> RunProductionReportSPs(
         string[] procedures)
