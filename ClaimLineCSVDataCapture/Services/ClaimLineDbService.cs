@@ -520,85 +520,6 @@ public sealed class ClaimLineDbService
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshPhiLifeCollectionReports()
         => RunProductionReportSPs(BuildCollectionSummarySpList("Phi"));
 
-    /// <summary>
-    /// Maps a LabSettings "LabName" key to the SP-name prefix used by
-    /// <see cref="RefreshExecutiveSummaryByPrefix"/> to build
-    /// "dbo.usp_Refresh{prefix}_ExecutiveSummary[_LIS_Alt]". Keep aligned with
-    /// LabMetricsDashboard's ExecutiveSummaryController.LabPrefixMap /
-    /// PhiExecutiveSummaryController.LabPrefixMap.
-    /// </summary>
-    public static readonly Dictionary<string, string> LabPrefixMap =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["RisingTides"]      = "RT",
-            ["Rising_Tides"]     = "RT",
-            ["Phi_Life"]         = "Phi",
-            ["PhiLife"]          = "Phi",
-            ["Augustus"]         = "Aug",
-            ["Augustus_Labs"]    = "Aug",
-            ["Augustus_LRN"]     = "Aug",
-            ["Certus"]           = "Cert",
-            ["Certus_LRN"]       = "Cert",
-            ["Cove"]             = "Cove",
-            ["CoveLRN"]          = "Cove",
-            ["Elixir"]           = "Elix",
-            ["Elixir_LRN"]       = "Elix",
-            ["NorthWest"]        = "NW",
-            ["NWL"]              = "NW",
-            ["PCRLabsofAmerica"] = "PCR",
-            ["PCRLAPSOfAmerica"] = "PCR",
-            ["PCRLOA"]           = "PCR",
-            ["Beech_Tree"]       = "BT",
-            ["BeechTree"]        = "BT",
-            ["Inhealth_DTR"]     = "InH",
-            ["InHealthDTR"]      = "InH",
-            ["InHealthDTRLRN"]   = "InH",
-        };
-
-    /// <summary>
-    /// Generic Executive Summary aggregate refresh, driven entirely by the SP
-    /// naming convention "dbo.usp_Refresh{prefix}_ExecutiveSummary" and
-    /// "dbo.usp_Refresh{prefix}_ExecutiveSummary_LIS_Alt" (the latter
-    /// independently truncates/repopulates the LIS rows + B.&lt;PanelName&gt;
-    /// sub-rows from dbo.LIMSMaster — the two SPs share no tables, so their
-    /// relative order doesn't matter).
-    ///
-    /// Either SP is silently skipped (not run, not reported as an error) if it
-    /// hasn't been deployed yet for this lab's prefix — onboarding a new lab's
-    /// Executive Summary is then just: deploy the matching SQL scripts using
-    /// this prefix (see <see cref="LabPrefixMap"/>), no code changes required.
-    ///
-    /// Called by ClaimLineCSVDataCapture after ClaimLevel ingestion completes.
-    /// Returns a list of (SpName, ElapsedMs, ErrorMessage?) for caller logging —
-    /// empty if neither SP exists yet for this prefix.
-    /// </summary>
-    public List<(string SpName, long ElapsedMs, string? Error)> RefreshExecutiveSummaryByPrefix(string prefix)
-    {
-        string[] candidates =
-        [
-            $"dbo.usp_Refresh{prefix}_ExecutiveSummary",
-            $"dbo.usp_Refresh{prefix}_ExecutiveSummary_LIS_Alt",
-        ];
-
-        using var conn = new SqlConnection(_connectionString);
-        conn.Open();
-
-        var procedures = candidates.Where(sp => StoredProcedureExists(conn, sp)).ToArray();
-        if (procedures.Length == 0)
-            return [];
-
-        return RunProductionReportSPs(procedures);
-    }
-
-    /// <summary>Returns true if the given (optionally schema-qualified) stored procedure exists.</summary>
-    private static bool StoredProcedureExists(SqlConnection conn, string spName)
-    {
-        using var cmd = new SqlCommand("SELECT OBJECT_ID(@name, 'P')", conn);
-        cmd.Parameters.AddWithValue("@name", spName);
-        var result = cmd.ExecuteScalar();
-        return result is not null && result != DBNull.Value;
-    }
-
     /// <summary>Refreshes the Augustus Collection Summary aggregates.</summary>
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshAugustusCollectionReports()
         => RunProductionReportSPs(BuildCollectionSummarySpList("Aug"));
@@ -646,61 +567,6 @@ public sealed class ClaimLineDbService
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshBeechTreeCollectionReports()
         => RunProductionReportSPs(BuildCollectionSummarySpList("BT"));
 
-    /// <summary>
-    /// Returns true if the given filename has already been logged in
-    /// <c>dbo.BTTransactionDetailFileLogs</c>, meaning that file was
-    /// already fully imported and should be skipped this run.
-    /// </summary>
-    public bool IsBTTransactionDetailFileAlreadyLoaded(string fileName)
-    {
-        using var conn = new SqlConnection(_connectionString);
-        conn.Open();
-        using var cmd = new SqlCommand(
-            "SELECT TOP 1 1 FROM dbo.BTTransactionDetailFileLogs WHERE FileName = @FileName",
-            conn);
-        cmd.Parameters.AddWithValue("@FileName", fileName);
-        var result = cmd.ExecuteScalar();
-        return result is not null && result != DBNull.Value;
-    }
-
-    /// <summary>
-    /// Rebuilds <c>dbo.BTWOSummary</c> from the latest data in
-    /// <c>dbo.BTTransactionDetailData</c> and cross-matches with
-    /// <c>dbo.ClaimLevelData</c> to populate ClaimID, CdateofService,
-    /// UpdatedDateTime, and ClaimFileSourcename.
-    /// Called after every new TransactionDetail Adjustment XLSX is imported.
-    /// Returns (TotalRows, MatchedRows) from the SP's output row.
-    /// </summary>
-    public (int TotalRows, int MatchedRows, string? Error) RefreshBTWOSummary()
-    {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        try
-        {
-            using var conn = new SqlConnection(_connectionString);
-            conn.Open();
-            using var cmd = new SqlCommand("dbo.usp_RefreshBT_WOSummary", conn)
-            {
-                CommandType    = CommandType.StoredProcedure,
-                CommandTimeout = 1800
-            };
-            using var reader = cmd.ExecuteReader();
-            int totalRows   = 0;
-            int matchedRows = 0;
-            if (reader.Read())
-            {
-                totalRows   = reader.IsDBNull(0) ? 0 : reader.GetInt32(0);
-                matchedRows = reader.IsDBNull(1) ? 0 : reader.GetInt32(1);
-            }
-            sw.Stop();
-            return (totalRows, matchedRows, null);
-        }
-        catch (Exception ex)
-        {
-            sw.Stop();
-            return (0, 0, ex.Message);
-        }
-    }
-
     /// <summary>Refreshes the Certus Collection Summary aggregates.</summary>
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshCertusCollectionReports()
         => RunProductionReportSPs(BuildCollectionSummarySpList("Cert"));
@@ -723,31 +589,6 @@ public sealed class ClaimLineDbService
     /// <summary>Refreshes the PCRLabsofAmerica Collection Summary aggregates.</summary>
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshPCRLabsCollectionReports()
         => RunProductionReportSPs(BuildCollectionSummarySpList("PCR"));
-
-    /// <summary>
-    /// Runs all InHealthDTR-specific production report stored procedures after ingestion.
-    /// Each SP is executed independently so a failure in one does not block the others.
-    /// Returns a list of (SpName, ElapsedMs, ErrorMessage?) for caller logging.
-    /// </summary>
-    public List<(string SpName, long ElapsedMs, string? Error)> RefreshInHealthDTRProductionReports()
-    {
-        string[] procedures =
-        [
-            "dbo.usp_RefreshInH_MonthlyBilledProductionSummary",
-            "dbo.usp_RefreshInH_WeeklyBilledProductionSummary",
-            "dbo.usp_RefreshInH_PayerBreakdown",
-            "dbo.usp_RefreshInH_PayerByPanel",
-            "dbo.usp_RefreshInH_CodingBreakdown_Billed",
-            "dbo.usp_RefreshInH_UnbilledAging",
-            "dbo.usp_RefreshInH_CPTBreakdown",
-        ];
-
-        return RunProductionReportSPs(procedures);
-    }
-
-    /// <summary>Refreshes the InHealthDTR Collection Summary aggregates.</summary>
-    public List<(string SpName, long ElapsedMs, string? Error)> RefreshInHealthDTRCollectionReports()
-        => RunProductionReportSPs(BuildCollectionSummarySpList("IHD"));
 
     /// <summary>
     /// Builds the standard 13-element ordered list of Collection Summary SP names
@@ -822,39 +663,5 @@ public sealed class ClaimLineDbService
         return underscoreIndex > 0
             ? fileNameWithoutExt[..underscoreIndex]
             : fileNameWithoutExt;
-    }
-
-    /// <summary>
-    /// Fetches the latest successfully completed RunId for a lab by executing
-    /// <c>sp_GetRecentSuccessRunByLab</c> against the LRNMaster database.
-    /// </summary>
-    /// <param name="masterConnectionString">
-    /// The LRNMaster connection string (appsettings <c>ConnectionStrings:DefaultConnection</c>).
-    /// </param>
-    /// <param name="labName">
-    /// The lab name passed as the <c>@LabName</c> parameter — sourced from the lab config
-    /// key <c>FetchLatestCompletedRunIDParameter</c> (e.g. "PCR Labs of America").
-    /// </param>
-    /// <returns>
-    /// The latest completed RunId (e.g. "20260522R0118"), or <c>null</c> when the SP returns
-    /// no row / a NULL value.
-    /// </returns>
-    public static string? GetRecentSuccessRunByLab(string masterConnectionString, string labName)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(masterConnectionString);
-        ArgumentException.ThrowIfNullOrWhiteSpace(labName);
-
-        using var conn = new SqlConnection(masterConnectionString);
-        conn.Open();
-
-        using var cmd = new SqlCommand("dbo.sp_GetRecentSuccessRunByLab", conn)
-        {
-            CommandType    = CommandType.StoredProcedure,
-            CommandTimeout = 60
-        };
-        cmd.Parameters.AddWithValue("@LabName", labName);
-
-        var result = cmd.ExecuteScalar();
-        return result is DBNull or null ? null : result.ToString();
     }
 }

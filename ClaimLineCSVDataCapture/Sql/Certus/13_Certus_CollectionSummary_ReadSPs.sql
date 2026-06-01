@@ -306,9 +306,7 @@ BEGIN
 
     IF @HasFilter = 0
     BEGIN
-        -- Spec: Payment % = AVG(Payment%). Return stored AvgPaymentPct as PaymentPct.
-        SELECT PayerRank, PayerName, SumInsurancePayment, SumChargeAmount, UniqueVisitCount,
-               AvgPaymentPct AS PaymentPct
+        SELECT PayerRank, PayerName, SumInsurancePayment, SumChargeAmount, UniqueVisitCount
         FROM   dbo.Cert_CS_Top5ReimbursementPct
         ORDER  BY PayerRank;
         RETURN;
@@ -328,15 +326,14 @@ BEGIN
     DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
     DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
 
-    -- Spec: Filter InsurancePayment <> 0 (negatives included). ChargeAmount NOT in spec.
     ;WITH base AS (
         SELECT
-            LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown')))                       AS PayerName,
-            COALESCE(NULLIF(LTRIM(RTRIM(ClaimID)), ''), LTRIM(RTRIM(AccessionNumber))) AS VisitKey,
-            TRY_CAST(InsurancePayment AS DECIMAL(18,2))                          AS InsPay,
-            ISNULL(TRY_CAST(PaymentPercent AS DECIMAL(18,4)), 0)                 AS PayPct
+            LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) AS PayerName,
+            COALESCE(NULLIF(LTRIM(RTRIM(AccessionNumber)), ''), LTRIM(RTRIM(ClaimID))) AS VisitKey,
+            TRY_CAST(InsurancePayment AS DECIMAL(18,2)) AS InsPay,
+            TRY_CAST(ChargeAmount     AS DECIMAL(18,2)) AS Chg
         FROM dbo.ClaimLevelData
-        WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) <> 0
+        WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
           AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) IN (SELECT Value FROM @PayerList))
           AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) IN (SELECT Value FROM @PanelList))
           AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
@@ -348,16 +345,14 @@ BEGIN
     ),
     agg AS (
         SELECT PayerName,
-               ISNULL(SUM(InsPay), 0)                    AS SumInsurancePayment,
-               CAST(0 AS DECIMAL(18,2))                  AS SumChargeAmount,  -- not in spec
-               AVG(PayPct)                               AS AvgPaymentPct,
-               COUNT(DISTINCT NULLIF(VisitKey, ''))      AS UniqueVisitCount
+               ISNULL(SUM(InsPay), 0) AS SumInsurancePayment,
+               ISNULL(SUM(Chg),    0) AS SumChargeAmount,
+               COUNT(DISTINCT NULLIF(VisitKey, '')) AS UniqueVisitCount
         FROM base GROUP BY PayerName
     )
     SELECT TOP 5
-        CAST(ROW_NUMBER() OVER (ORDER BY AvgPaymentPct DESC) AS TINYINT) AS PayerRank,
-        PayerName, SumInsurancePayment, SumChargeAmount, UniqueVisitCount,
-        AvgPaymentPct AS PaymentPct
+        CAST(ROW_NUMBER() OVER (ORDER BY SumInsurancePayment DESC) AS TINYINT) AS PayerRank,
+        PayerName, SumInsurancePayment, SumChargeAmount, UniqueVisitCount
     FROM agg
     ORDER BY PayerRank;
 END
@@ -415,10 +410,10 @@ BEGIN
     ;WITH base AS (
         SELECT
             LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) AS PayerName,
-            COALESCE(NULLIF(LTRIM(RTRIM(ClaimID)), ''), LTRIM(RTRIM(AccessionNumber))) AS VisitKey,
+            COALESCE(NULLIF(LTRIM(RTRIM(AccessionNumber)), ''), LTRIM(RTRIM(ClaimID))) AS VisitKey,
             TRY_CAST(InsurancePayment AS DECIMAL(18,2)) AS InsPay
         FROM dbo.ClaimLevelData
-        WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) <> 0
+        WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
           AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) IN (SELECT Value FROM @PayerList))
           AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(Panelname,     'Unknown'))) IN (SELECT Value FROM @PanelList))
           AND (@DosFrom       IS NULL OR TRY_CAST(DateOfService   AS DATE) >= @DosFrom)
@@ -430,8 +425,8 @@ BEGIN
     ),
     agg AS (
         SELECT PayerName,
-               ISNULL(SUM(InsPay), 0)                       AS TotalPayments,
-               COUNT(DISTINCT NULLIF(VisitKey, ''))          AS UniqueVisitCount
+               ISNULL(SUM(InsPay), 0) AS TotalPayments,
+               COUNT(DISTINCT NULLIF(VisitKey, '')) AS UniqueVisitCount
         FROM base GROUP BY PayerName
     )
     SELECT TOP 5

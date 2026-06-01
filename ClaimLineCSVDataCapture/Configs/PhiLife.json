@@ -7,6 +7,8 @@
   //   Copy PhiLifeFieldMappings.json to  C:\CodingMastConfigs\Mappings\PhiLifeFieldMappings.Json
   //   IMPORTANT: LabFieldMappingsPath below MUST point to the deployed copy.
   //   Without it the app falls back to the global FieldMappings.json (wrong field set).
+  //   Copy PhiLifeFieldMappings.json to  C:\CodingMastConfigs\Labs\PhiLifeFieldMappings.json
+  //   (or update LabFieldMappingsPath below to point to wherever you place it)
   //
   // FIRST RUN:
   //   Set ClaimLineRefresh = true for the first run so existing data is purged

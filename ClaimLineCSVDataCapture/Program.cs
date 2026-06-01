@@ -43,9 +43,6 @@ var workingFolder = cfg["AppSettings:WorkingFolder"]
     ?? Path.Combine(Path.GetTempPath(), "ClaimLineCSVDataCapture");
 Directory.CreateDirectory(workingFolder);
 
-// ── LRNMaster connection (used by sp_GetRecentSuccessRunByLab RunId gate) ──────
-var masterConnectionString = cfg.GetConnectionString("DefaultConnection");
-
 // ── Logger ────────────────────────────────────────────────────────────────────
 using var log = new ClaimLineCSVDataCapture.Services.AppLogger(cfg);
 log.Header("ClaimLineCSVDataCapture — Claim/Line Level CSV Capture");
@@ -55,7 +52,6 @@ log.Info($"Field mappings    : {fieldMappingsPath}");
 log.Info($"Working folder    : {workingFolder}");
 log.Info($"  ClaimLevel fields : {fieldMappings.ClaimLevel.Fields.Count}");
 log.Info($"  LineLevel fields  : {fieldMappings.LineLevel.Fields.Count}");
-log.Info($"  ClientPaidList fields : {fieldMappings.ClientPaidList.Fields.Count}");
 log.Info($"Labs configured   : {labNames.Count}");
 log.Blank();
 
@@ -75,14 +71,6 @@ foreach (var lab in labConfigs)
 {
     log.Header($"Lab: {lab.LabName}");
     log.Info($"  ClaimLineInsert={lab.ClaimLineInsert}  ClaimLineRefresh={lab.ClaimLineRefresh}  DBEnabled={lab.DBEnabled}");
-
-    // ── Gate: skip lab if DBEnabled is false ──────────────────────────────
-    if (!lab.DBEnabled)
-    {
-        log.Warn($"  [SKIP] DBEnabled=false — skipping lab.");
-        labsSkipped++;
-        continue;
-    }
 
     // ── Gate: only proceed when ClaimLineInsert is enabled ─────────────────
     if (!lab.ClaimLineInsert)
@@ -136,17 +124,6 @@ foreach (var lab in labConfigs)
     var db = new ClaimLineDbService(lab.DbConnectionString);
     var claimInserted = false;
     var lineInserted = false;
-
-    // ── Gate: validate latest input file's RunId against latest completed RunId ──
-    // Before processing the latest files, fetch the latest successfully completed
-    // RunId (sp_GetRecentSuccessRunByLab on LRNMaster) and compare it with the RunId
-    // prefix of the latest input file. Processing (including ClaimLineRefresh=true)
-    // only continues when both RunIds match.
-    if (!RunIdGatePassed(lab, masterConnectionString, log))
-    {
-        labsSkipped++;
-        continue;
-    }
 
     // ── Refresh mode: purge existing lab data so the latest file re-inserts cleanly ──
     if (lab.ClaimLineRefresh)
@@ -313,238 +290,6 @@ foreach (var lab in labConfigs)
     {
         log.Error($"  [Line Level] {ex.Message}");
         labsFailed++;
-    }
-
-    // ── Process ClientPaidList .xlsx (RisingTides "Master" file — RisingTides only) ──
-    // ClientPaidList is synced the same way as Claim/Line Level (latest matching file
-    // in the current WeekFolder), but arrives as an .xlsx workbook rather than .csv,
-    // and the whole table is replaced on every run. The bulk-insert SP
-    // (usp_BulkInsertClientPaidListData) handles the RunId-based skip/replace logic
-    // itself, so there is no separate "already loaded" pre-check here.
-    if (lab.LabName.Equals("RisingTides", StringComparison.OrdinalIgnoreCase))
-    {
-        try
-        {
-            var cplResolved = CsvFileResolver.ResolveLatestClientPaidListWithDiag(
-                lab.ServerMastersPath,
-                out var cplFailReason, out var cplTotalXlsx, out var cplMatchedXlsx);
-
-            log.Info($"  [ClientPaidList] XLSX files found : {cplTotalXlsx} total, {cplMatchedXlsx} matching 'Client Paid List'/'ClientPaidList'.");
-
-            if (cplResolved is null)
-            {
-                var diagMsg = cplFailReason switch
-                {
-                    CsvFileResolver.ResolveFailureReason.PathMissing    => $"path does not exist: {lab.ServerMastersPath}",
-                    CsvFileResolver.ResolveFailureReason.NoCsvFiles     => $"0 XLSX files found under: {lab.ServerMastersPath}",
-                    CsvFileResolver.ResolveFailureReason.NoKeywordMatch => $"{cplTotalXlsx} XLSX file(s) found but none contain 'Client Paid List' or 'ClientPaidList' — under: {lab.ServerMastersPath}",
-                    _                                                    => $"unknown — {lab.ServerMastersPath}"
-                };
-                log.Warn($"  [ClientPaidList] No XLSX found — {diagMsg}");
-            }
-            else
-            {
-                var (cplFilePath, cplWeekFolder) = cplResolved.Value;
-                var cplFileName = Path.GetFileName(cplFilePath);
-                var cplLastWrite = File.Exists(cplFilePath) ? File.GetLastWriteTimeUtc(cplFilePath).ToString("u") : "n/a";
-                log.Info($"  [ClientPaidList] File        : {cplFileName}");
-                log.Info($"  [ClientPaidList] Full path    : {cplFilePath}");
-                log.Info($"  [ClientPaidList] Week folder : {cplWeekFolder}");
-                log.Info($"  [ClientPaidList] Last write (UTC) : {cplLastWrite}");
-
-                var runId = ClaimLineDbService.ExtractRunId(cplFilePath);
-                log.Info($"  [ClientPaidList] RunId (extracted) : {runId}");
-
-                var cplWorkingPath = Path.Combine(workingFolder, Path.GetFileName(cplFilePath));
-                try
-                {
-                    log.Info($"  [ClientPaidList] Copying to working folder…");
-                    File.Copy(cplFilePath, cplWorkingPath, overwrite: true);
-
-                    // ── Diagnostics: confirm the workbook opens and show header alignment ──
-                    try
-                    {
-                        var headers = XlsxFileReader.PeekHeaders(cplWorkingPath);
-                        var expected = labFieldMappings.ClientPaidList.Fields.Select(f => f.CsvHeader).ToList();
-                        var matchedHeaders = expected.Count(h => headers.Any(x => string.Equals(x, h, StringComparison.OrdinalIgnoreCase)));
-                        log.Info($"  [ClientPaidList] Worksheet headers found : {headers.Length} (first row).");
-                        log.Info($"  [ClientPaidList] Header values : {string.Join(" | ", headers)}");
-                        log.Info($"  [ClientPaidList] Field mapping match : {matchedHeaders}/{expected.Count} expected headers found in worksheet.");
-                        if (matchedHeaders == 0)
-                            log.Warn($"  [ClientPaidList] 0 of {expected.Count} expected headers matched — check the worksheet's first row / header names, or that the correct worksheet is the first tab.");
-                    }
-                    catch (Exception peekEx)
-                    {
-                        log.Error($"  [ClientPaidList] Failed to open/peek workbook headers: {peekEx.Message}");
-                    }
-
-                    log.Info($"  [ClientPaidList] Streaming XLSX in batches of {XlsxFileReader.DefaultBatchSize}…");
-                    var cplBatches = XlsxFileReader.ReadXlsxBatches(
-                        cplWorkingPath, lab.LabName, cplWeekFolder, runId,
-                        labFieldMappings.ClientPaidList, cplFilePath);
-
-                    var cplRowsRead = 0;
-                    var inserted = db.StreamingInsert(
-                        cplBatches, lab.LabName, cplWeekFolder,
-                        labFieldMappings.ClientPaidList, cplFilePath,
-                        onBatchLoaded: (batch, count) =>
-                        {
-                            cplRowsRead += count;
-                            log.Info($"  [ClientPaidList] Batch {batch} loaded — {count} rows.");
-                        });
-
-                    log.Info($"  [ClientPaidList] Total rows read from XLSX : {cplRowsRead}.");
-
-                    if (cplRowsRead == 0)
-                        log.Warn($"  [ClientPaidList] 0 data rows read — workbook may be empty, have only a header row, or the first worksheet may be the wrong tab.");
-                    else if (inserted > 0)
-                        log.Info($"  [ClientPaidList] Total inserted : {inserted} rows.");
-                    else
-                        log.Info($"  [ClientPaidList] {cplRowsRead} row(s) read, but 0 inserted — RunId '{runId}' unchanged since last run, SP skipped.");
-                }
-                finally
-                {
-                    if (File.Exists(cplWorkingPath))
-                    {
-                        File.Delete(cplWorkingPath);
-                        log.Info($"  [ClientPaidList] Working copy deleted.");
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            log.Error($"  [ClientPaidList] {ex.Message}");
-            labsFailed++;
-        }
-    }
-
-    // ── Process TransactionDetail Adjustment .xlsx (BeechTree only) ──────────
-    // Triggered when lab config Paths.TransactionDetailAdjustmentKeyword is set.
-    // The file name contains that keyword (e.g. "TransactionDetail Adjustment").
-    // No RunId dedup — SP always inserts; BTWOSummary is truncated and rebuilt
-    // from the raw table on every run.
-    if ((lab.LabName.Equals("Beech_Tree", StringComparison.OrdinalIgnoreCase) ||
-         lab.LabName.Equals("BeechTree",  StringComparison.OrdinalIgnoreCase))
-        && !string.IsNullOrWhiteSpace(lab.Paths.TransactionDetailAdjustmentKeyword))
-    {
-        try
-        {
-            var tdKeyword    = lab.Paths.TransactionDetailAdjustmentKeyword!;
-            var tdSearchPath = string.IsNullOrWhiteSpace(lab.Paths.TransactionDetailAdjustmentPath)
-                               ? lab.ServerMastersPath
-                               : lab.Paths.TransactionDetailAdjustmentPath;
-
-            var tdResolved = CsvFileResolver.ResolveLatestTransactionDetailAdjustmentWithDiag(
-                tdSearchPath, tdKeyword,
-                out var tdFailReason, out var tdTotalXlsx, out var tdMatchedXlsx);
-
-            log.Info($"  [TransactionDetail] XLSX files found : {tdTotalXlsx} total, {tdMatchedXlsx} matching '{tdKeyword}'.");
-
-            if (tdResolved is null)
-            {
-                var diagMsg = tdFailReason switch
-                {
-                    CsvFileResolver.ResolveFailureReason.PathMissing    => $"path does not exist: {tdSearchPath}",
-                    CsvFileResolver.ResolveFailureReason.NoCsvFiles     => $"0 XLSX files found under: {tdSearchPath}",
-                    CsvFileResolver.ResolveFailureReason.NoKeywordMatch => $"{tdTotalXlsx} XLSX file(s) found but none contain '{tdKeyword}' — under: {tdSearchPath}",
-                    _                                                    => $"unknown — {tdSearchPath}"
-                };
-                log.Warn($"  [TransactionDetail] No XLSX found — {diagMsg}");
-            }
-            else
-            {
-                var (tdFilePath, tdWeekFolder) = tdResolved.Value;
-                var tdFileName  = Path.GetFileName(tdFilePath);
-                var tdLastWrite = File.Exists(tdFilePath) ? File.GetLastWriteTimeUtc(tdFilePath).ToString("u") : "n/a";
-                log.Info($"  [TransactionDetail] File           : {tdFileName}");
-                log.Info($"  [TransactionDetail] Full path      : {tdFilePath}");
-                log.Info($"  [TransactionDetail] Week folder    : {tdWeekFolder}");
-                log.Info($"  [TransactionDetail] Last write (UTC) : {tdLastWrite}");
-
-                // Use the week-date portion of the filename as a logical identifier
-                var tdRunId = ClaimLineDbService.ExtractRunId(tdFilePath);
-                log.Info($"  [TransactionDetail] RunId (extracted) : {tdRunId}");
-
-                // ── Early exit: skip if this exact filename was already imported ──
-                if (db.IsBTTransactionDetailFileAlreadyLoaded(tdFileName))
-                {
-                    log.Info($"  [TransactionDetail] Already loaded — same file, skipping.");
-                    goto tdDone;
-                }
-
-                var tdWorkingPath = Path.Combine(workingFolder, Path.GetFileName(tdFilePath));
-                try
-                {
-                    log.Info($"  [TransactionDetail] Copying to working folder…");
-                    File.Copy(tdFilePath, tdWorkingPath, overwrite: true);
-
-                    // ── Diagnostics: header alignment check ──
-                    try
-                    {
-                        var headers  = XlsxFileReader.PeekHeaders(tdWorkingPath);
-                        var expected = labFieldMappings.TransactionDetailAdjustment.Fields.Select(f => f.CsvHeader).ToList();
-                        var matched  = expected.Count(h => headers.Any(x => string.Equals(x, h, StringComparison.OrdinalIgnoreCase)));
-                        log.Info($"  [TransactionDetail] Worksheet headers found : {headers.Length} (first row).");
-                        log.Info($"  [TransactionDetail] Header values : {string.Join(" | ", headers)}");
-                        log.Info($"  [TransactionDetail] Field mapping match : {matched}/{expected.Count} expected headers found.");
-                        if (matched == 0)
-                            log.Warn($"  [TransactionDetail] 0 of {expected.Count} expected headers matched — verify first worksheet tab and column names.");
-                    }
-                    catch (Exception peekEx)
-                    {
-                        log.Error($"  [TransactionDetail] Failed to open/peek workbook headers: {peekEx.Message}");
-                    }
-
-                    log.Info($"  [TransactionDetail] Streaming XLSX in batches of {XlsxFileReader.DefaultBatchSize}…");
-                    var tdBatches = XlsxFileReader.ReadXlsxBatches(
-                        tdWorkingPath, lab.LabName, tdWeekFolder, tdRunId,
-                        labFieldMappings.TransactionDetailAdjustment, tdFilePath);
-
-                    var tdRowsRead = 0;
-                    var tdInserted = db.StreamingInsert(
-                        tdBatches, lab.LabName, tdWeekFolder,
-                        labFieldMappings.TransactionDetailAdjustment, tdFilePath,
-                        onBatchLoaded: (batch, count) =>
-                        {
-                            tdRowsRead += count;
-                            log.Info($"  [TransactionDetail] Batch {batch} loaded — {count} rows.");
-                        });
-
-                    log.Info($"  [TransactionDetail] Total rows read from XLSX : {tdRowsRead}.");
-
-                    if (tdRowsRead == 0)
-                        log.Warn($"  [TransactionDetail] 0 data rows read — workbook may be empty or first worksheet is the wrong tab.");
-                    else
-                        log.Info($"  [TransactionDetail] Total inserted : {tdInserted} rows.");
-
-                    // ── Rebuild BTWOSummary ───────────────────────────────────
-                    if (tdInserted > 0)
-                    {
-                        log.Info($"  [TransactionDetail] Refreshing BTWOSummary…");
-                        var (totalRows, matchedRows, woError) = db.RefreshBTWOSummary();
-                        if (woError is null)
-                            log.Info($"  [TransactionDetail] BTWOSummary rebuilt — {totalRows} total row(s), {matchedRows} matched to ClaimLevelData.");
-                        else
-                            log.Error($"  [TransactionDetail] BTWOSummary refresh failed: {woError}");
-                    }
-                }
-                finally
-                {
-                    if (File.Exists(tdWorkingPath))
-                    {
-                        File.Delete(tdWorkingPath);
-                        log.Info($"  [TransactionDetail] Working copy deleted.");
-                    }
-                }
-            }
-            tdDone:;
-        }
-        catch (Exception ex)
-        {
-            log.Error($"  [TransactionDetail] {ex.Message}");
-            labsFailed++;
-        }
     }
 
     // ── Clean decimal suffixes from integer columns after both inserts ────────
@@ -877,7 +622,6 @@ foreach (var lab in labConfigs)
             {
                 log.Error($"  [RT CS Reports] Unexpected error running RisingTides Collection Summary SPs: {ex.Message}");
             }
-
         }
 
         // ── PhiLife production report aggregates ─────────────────────────────
@@ -909,81 +653,6 @@ foreach (var lab in labConfigs)
             }
 
             RunCollectionSummary(log, db, "Phi CS", db.RefreshPhiLifeCollectionReports);
-        }
-
-        // ── InHealthDTR production report aggregates ─────────────────────────
-        // Matches "InHealthDTR" lab name.
-        if (lab.LabName.Equals("Inhealth_DTR", StringComparison.OrdinalIgnoreCase)
-            || lab.LabName.Equals("InHealthDTR", StringComparison.OrdinalIgnoreCase)
-            || lab.LabName.Equals("InHealthDTRLRN", StringComparison.OrdinalIgnoreCase))
-        {
-            log.Info($"  [InH Reports] Running InHealthDTR production report SPs…");
-            try
-            {
-                var inhResults = db.RefreshInHealthDTRProductionReports();
-                foreach (var (spName, elapsedMs, error) in inhResults)
-                {
-                    if (error is null)
-                        log.Info($"  [InH Reports] {spName} — OK ({elapsedMs} ms).");
-                    else
-                        log.Error($"  [InH Reports] {spName} — FAILED ({elapsedMs} ms): {error}");
-                }
-
-                var failed = inhResults.Count(r => r.Error is not null);
-                var passed = inhResults.Count(r => r.Error is null);
-                log.Info($"  [InH Reports] {passed}/{inhResults.Count} SP(s) succeeded.");
-                if (failed > 0)
-                    log.Warn($"  [InH Reports] {failed} SP(s) failed — see errors above.");
-            }
-            catch (Exception ex)
-            {
-                log.Error($"  [InH Reports] Unexpected error running InHealthDTR production report SPs: {ex.Message}");
-            }
-
-            RunCollectionSummary(log, db, "IHD CS", db.RefreshInHealthDTRCollectionReports);
-        }
-
-        // ── Executive Summary aggregate refresh (generic, prefix-driven) ──────
-        // Looks up this lab's SP-name prefix in ClaimLineDbService.LabPrefixMap and,
-        // if found, runs dbo.usp_Refresh{prefix}_ExecutiveSummary and (if deployed)
-        // dbo.usp_Refresh{prefix}_ExecutiveSummary_LIS_Alt. Either/both SPs are
-        // silently skipped (no error) if not yet deployed for this lab — onboarding
-        // a new lab's Executive Summary requires only deploying the SQL scripts
-        // named per this convention; no further changes here are needed.
-        if (ClaimLineDbService.LabPrefixMap.TryGetValue(lab.LabName, out var esPrefix))
-        {
-            log.Header($"Executive Summary Refresh — {lab.LabName}");
-            log.Info($"  [ES] Refreshing Executive Summary aggregates for prefix '{esPrefix}'…");
-            try
-            {
-                var esResults = db.RefreshExecutiveSummaryByPrefix(esPrefix);
-                if (esResults.Count == 0)
-                {
-                    log.Info($"  [ES] No Executive Summary SPs deployed yet for prefix '{esPrefix}' — skipping.");
-                }
-                else
-                {
-                    foreach (var (spName, elapsedMs, error) in esResults)
-                    {
-                        if (error is null)
-                            log.Info($"  [ES] {spName} — OK ({elapsedMs} ms).");
-                        else
-                            log.Error($"  [ES] {spName} — FAILED ({elapsedMs} ms): {error}");
-                    }
-
-                    var failedEs = esResults.Count(r => r.Error is not null);
-                    var passedEs = esResults.Count(r => r.Error is null);
-                    log.Info($"  [ES] {passedEs}/{esResults.Count} SP(s) succeeded.");
-                    if (failedEs > 0)
-                        log.Warn($"  [ES] {failedEs} SP(s) failed — see errors above.");
-                }
-            }
-            catch (Exception ex)
-            {
-                log.Error($"  [ES] Unexpected error refreshing Executive Summary for prefix '{esPrefix}': {ex.Message}");
-            }
-
-            log.Blank();
         }
 
         // ── Production Report Excel generation — started in background ─────────
@@ -1120,101 +789,6 @@ log.Info($"  Skipped   : {labsSkipped}");
 log.Info($"  Failed    : {labsFailed}");
 
 return labsFailed > 0 ? 1 : 0;
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Local helper: RunId validation gate.
-// Before processing a lab's latest input files, fetch the latest successfully
-// completed RunId (sp_GetRecentSuccessRunByLab on LRNMaster) and compare it with
-// the RunId prefix of the latest input file. Returns true when processing should
-// continue, false when the lab must be skipped. Applies to both the normal flow
-// and the ClaimLineRefresh=true flow. Every step is logged with separators.
-// ─────────────────────────────────────────────────────────────────────────────
-static bool RunIdGatePassed(
-    ClaimLineCSVDataCapture.Models.LabConfig lab,
-    string? masterConnectionString,
-    ClaimLineCSVDataCapture.Services.AppLogger log)
-{
-    log.Header($"RunId Validation — {lab.LabName}");
-
-    // Resolve the latest input file (newest of Claim Level / Line Level) and its RunId.
-    var claimResolved = CsvFileResolver.ResolveLatestClaimLevel(lab.ServerMastersPath);
-    var lineResolved  = CsvFileResolver.ResolveLatestLineLevel(lab.ServerMastersPath);
-
-    string? latestFilePath;
-    if (claimResolved is not null && lineResolved is not null)
-    {
-        var claimWrite = File.GetLastWriteTimeUtc(claimResolved.Value.FilePath);
-        var lineWrite  = File.GetLastWriteTimeUtc(lineResolved.Value.FilePath);
-        latestFilePath = lineWrite >= claimWrite ? lineResolved.Value.FilePath : claimResolved.Value.FilePath;
-    }
-    else
-    {
-        latestFilePath = lineResolved?.FilePath ?? claimResolved?.FilePath;
-    }
-
-    if (string.IsNullOrWhiteSpace(latestFilePath))
-    {
-        log.Warn($"  [RunId Gate] No input file found under: {lab.ServerMastersPath} — proceeding (downstream will report no CSV).");
-        log.Header($"RunId Validation — {lab.LabName} — PROCEED (no file)");
-        return true;
-    }
-
-    var fileRunId = ClaimLineDbService.ExtractRunId(latestFilePath);
-    log.Info($"  [RunId Gate] Latest input file     : {Path.GetFileName(latestFilePath)}");
-    log.Info($"  [RunId Gate] File RunId            : {fileRunId}");
-
-    // The lab name passed to sp_GetRecentSuccessRunByLab comes from the config key.
-    var labParam = lab.FetchLatestCompletedRunIDParameter;
-    if (string.IsNullOrWhiteSpace(labParam))
-    {
-        log.Warn($"  [RunId Gate] FetchLatestCompletedRunIDParameter not configured — skipping RunId validation and proceeding.");
-        log.Header($"RunId Validation — {lab.LabName} — PROCEED (not configured)");
-        return true;
-    }
-
-    if (string.IsNullOrWhiteSpace(masterConnectionString))
-    {
-        log.Warn($"  [RunId Gate] ConnectionStrings:DefaultConnection (LRNMaster) not configured — skipping RunId validation and proceeding.");
-        log.Header($"RunId Validation — {lab.LabName} — PROCEED (no master connection)");
-        return true;
-    }
-
-    log.Info($"  [RunId Gate] SP                   : sp_GetRecentSuccessRunByLab (LRNMaster)");
-    log.Info($"  [RunId Gate] SP parameter @LabName : {labParam}");
-
-    string? completedRunId;
-    try
-    {
-        completedRunId = ClaimLineDbService.GetRecentSuccessRunByLab(masterConnectionString, labParam);
-    }
-    catch (Exception ex)
-    {
-        log.Error($"  [RunId Gate] sp_GetRecentSuccessRunByLab failed — {ex.Message}. Skipping lab to avoid processing an unvalidated run.");
-        log.Header($"RunId Validation — {lab.LabName} — SKIPPED (SP error)");
-        return false;
-    }
-
-    log.Info($"  [RunId Gate] Latest completed RunId : {completedRunId ?? "(none)"}");
-
-    if (string.IsNullOrWhiteSpace(completedRunId))
-    {
-        log.Warn($"  [RunId Gate] [SKIP] No successfully completed RunId returned for '{labParam}' — skipping lab.");
-        log.Header($"RunId Validation — {lab.LabName} — SKIPPED (no completed run)");
-        return false;
-    }
-
-    var matched = string.Equals(fileRunId, completedRunId, StringComparison.OrdinalIgnoreCase);
-    log.Info($"  [RunId Gate] Comparison           : File='{fileRunId}'  Completed='{completedRunId}'  =>  {(matched ? "MATCHED" : "NOT MATCHED")}");
-
-    if (matched)
-        log.Info($"  [RunId Gate] [PROCEED] RunIds match — starting processing for {lab.LabName}.");
-    else
-        log.Warn($"  [RunId Gate] [SKIP] RunIds do not match — skipping {lab.LabName} until the completed run aligns with the latest file.");
-
-    log.Header($"RunId Validation — {lab.LabName} — {(matched ? "PASSED" : "SKIPPED")}");
-    return matched;
-}
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1547,9 +1121,7 @@ static (string? Rule, string? WeekRule, string? WeekRange) ResolveProductionSumm
             || name.Equals("RisingTides", StringComparison.OrdinalIgnoreCase)
             || name.Equals("Rising_Tides", StringComparison.OrdinalIgnoreCase)
             || name.Equals("PhiLife", StringComparison.OrdinalIgnoreCase)
-            || name.Equals("Inhealth_DTR",   StringComparison.OrdinalIgnoreCase)
-            || name.Equals("InHealthDTR",    StringComparison.OrdinalIgnoreCase)
-            || name.Equals("InHealthDTRLRN", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("Inhealth_DTR", StringComparison.OrdinalIgnoreCase)
                 => ("Rule1", "Rule1", "Thu to Wed"),
 
         _ => (null, null, null),
@@ -1619,9 +1191,6 @@ static string? GetCollectionSummarySpPrefix(ClaimLineCSVDataCapture.Models.LabCo
         name.Equals("Phi_Life",          StringComparison.OrdinalIgnoreCase)) return "Phi";
     if (name.Equals("RisingTides",      StringComparison.OrdinalIgnoreCase) ||
         name.Equals("Rising_Tides",      StringComparison.OrdinalIgnoreCase)) return "RT";
-    if (name.Equals("Inhealth_DTR",     StringComparison.OrdinalIgnoreCase) ||
-        name.Equals("InHealthDTR",       StringComparison.OrdinalIgnoreCase) ||
-        name.Equals("InHealthDTRLRN",    StringComparison.OrdinalIgnoreCase)) return "IHD";
     return null;
 }
 

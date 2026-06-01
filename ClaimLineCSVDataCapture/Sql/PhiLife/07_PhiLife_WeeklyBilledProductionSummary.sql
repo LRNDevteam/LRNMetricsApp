@@ -33,136 +33,95 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @Today DATE = CAST(GETDATE() AS DATE);
-    DECLARE @DateFromData DATE;
-    DECLARE @ThisWeekMonStart DATE;
-    DECLARE @StartIndex INT;
+    DECLARE @Today            DATE = CAST(GETDATE() AS DATE);
+    DECLARE @ThisWeekThuStart DATE;
+    DECLARE @DateFromData     DATE;
 
-    -- Anchor from FirstBilledDate (client requirement)
+    -- Anchor to most recent Thursday using ChargeEnteredDate from data
     SELECT
-        @DateFromData = MAX(TRY_CAST(FirstBilledDate AS DATE))
+        @DateFromData     = MAX(TRY_CAST(ChargeEnteredDate AS DATE)),
+        @ThisWeekThuStart = DATEADD(day,
+            -(DATEDIFF(day, '1900-01-04', ISNULL(MAX(TRY_CAST(ChargeEnteredDate AS DATE)), @Today)) % 7),
+            ISNULL(MAX(TRY_CAST(ChargeEnteredDate AS DATE)), @Today))
     FROM dbo.ClaimLevelData
-    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
-      AND LTRIM(RTRIM(FirstBilledDate)) <> ''
-      AND TRY_CAST(FirstBilledDate AS DATE) <= @Today;
+    WHERE TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL
+      AND TRY_CAST(ChargeEnteredDate AS DATE) <= @Today;
 
-    IF @DateFromData IS NULL
-    BEGIN
-        RAISERROR('No valid FirstBilledDate <= today found.', 16, 1);
-        RETURN;
+    -- If max date >= Wednesday of current week → current week is complete → start from 0
+    -- Otherwise current week is incomplete → start from 1 (last complete week)
+    DECLARE @StartIndex INT = CASE
+        WHEN @DateFromData >= DATEADD(day, 6, @ThisWeekThuStart) THEN 0
+        ELSE 1
     END;
 
-    -- Monday of the week containing @DateFromData
-    SET @ThisWeekMonStart =
-        DATEADD(DAY, -(DATEDIFF(DAY, '19000101', @DateFromData) % 7), @DateFromData);
-
-    -- Include current week only if complete (data reached Sunday)
-    SET @StartIndex =
-        CASE
-            WHEN @DateFromData >= DATEADD(DAY, 6, @ThisWeekMonStart) THEN 0
-            ELSE 1
-        END;
-
+    DECLARE @i INT = @StartIndex;
     CREATE TABLE #Weeks
     (
         WeekIndex INT PRIMARY KEY,
-        WeekStart DATE NOT NULL,
-        WeekEnd   DATE NOT NULL,
-        WeekLabel NVARCHAR(32) NOT NULL
+        WeekStart DATE,
+        WeekEnd   DATE,
+        WeekLabel NVARCHAR(32)
     );
 
-    DECLARE @i INT = @StartIndex;
-    WHILE @i <= @StartIndex + 3
+    WHILE @i <= @StartIndex + 3   -- always 4 weeks
     BEGIN
-        DECLARE @ws DATE = DATEADD(WEEK, -@i, @ThisWeekMonStart);
-        DECLARE @we DATE = DATEADD(DAY, 6, @ws); -- Mon-Sun
-
+        DECLARE @ws DATE = DATEADD(week, -@i, @ThisWeekThuStart);
+        DECLARE @we DATE = DATEADD(day, 6, @ws);   -- Thu + 6 = Wed
         INSERT INTO #Weeks (WeekIndex, WeekStart, WeekEnd, WeekLabel)
         VALUES (@i, @ws, @we, FORMAT(@ws, 'yyyy-MM-dd') + ' - ' + FORMAT(@we, 'yyyy-MM-dd'));
+        SET @i = @i + 1;
+    END
 
-        SET @i += 1;
-    END;
-
-    ;WITH src AS
-    (
-        SELECT
-            Panelname     = LTRIM(RTRIM(ISNULL(cl.Panelname, 'Unknown'))),
-            PayerName_Raw = LTRIM(RTRIM(ISNULL(cl.PayerName_Raw, 'Unknown'))),
-            w.WeekStart,
-            w.WeekEnd,
-            w.WeekLabel,
-            ClaimID       = NULLIF(LTRIM(RTRIM(cl.ClaimID)), ''),
-            ChargeAmt     = TRY_CAST(cl.ChargeAmount AS DECIMAL(18,2))
-        FROM dbo.ClaimLevelData cl
-        JOIN #Weeks w
-          ON TRY_CAST(cl.FirstBilledDate AS DATE) BETWEEN w.WeekStart AND w.WeekEnd
-        WHERE TRY_CAST(cl.FirstBilledDate AS DATE) IS NOT NULL
-          AND LTRIM(RTRIM(cl.FirstBilledDate)) <> ''
-    ),
-    billed AS
-    (
-        SELECT
-            Panelname,
-            PayerName_Raw,
-            WeekStart,
-            WeekEnd,
-            WeekLabel,
-            COUNT(DISTINCT ClaimID) AS ClaimCount,
-            ISNULL(SUM(ChargeAmt), 0) AS TotalCharges
-        FROM src
-        GROUP BY Panelname, PayerName_Raw, WeekStart, WeekEnd, WeekLabel
-    ),
-    ranks AS
-    (
-        SELECT
-            Panelname,
-            PayerName_Raw,
-            DENSE_RANK() OVER (PARTITION BY Panelname ORDER BY SUM(ClaimCount) DESC) AS PayerRank
-        FROM billed
-        GROUP BY Panelname, PayerName_Raw
-    )
+    -- Drive join from #Weeks (LEFT JOIN) so every one of the 4 weeks always
+    -- produces at least one row, even when zero billed claims existed that week.
     SELECT
-        b.Panelname,
-        b.PayerName_Raw,
-        CAST(r.PayerRank AS TINYINT) AS PayerRank,
-        b.WeekStart,
-        b.WeekEnd,
-        b.WeekLabel,
-        b.ClaimCount,
-        b.TotalCharges
+        LTRIM(RTRIM(ISNULL(cl.Panelname,     'Unknown')))              AS Panelname,
+        LTRIM(RTRIM(ISNULL(cl.PayerName_Raw, 'Unknown')))              AS PayerName_Raw,
+        w.WeekStart, w.WeekEnd, w.WeekLabel,
+        COUNT(DISTINCT NULLIF(LTRIM(RTRIM(cl.ClaimID)), ''))           AS ClaimCount,
+        ISNULL(SUM(TRY_CAST(cl.ChargeAmount AS DECIMAL(18,2))), 0)     AS TotalCharges
+    INTO #BilledRaw
+    FROM #Weeks w
+    LEFT JOIN dbo.ClaimLevelData cl
+           ON TRY_CAST(cl.ChargeEnteredDate AS DATE) BETWEEN w.WeekStart AND w.WeekEnd
+          AND TRY_CAST(cl.FirstBilledDate   AS DATE) IS NOT NULL
+          AND LTRIM(RTRIM(cl.FirstBilledDate)) <> ''
+    GROUP BY
+        LTRIM(RTRIM(ISNULL(cl.Panelname,     'Unknown'))),
+        LTRIM(RTRIM(ISNULL(cl.PayerName_Raw, 'Unknown'))),
+        w.WeekStart, w.WeekEnd, w.WeekLabel;
+
+    SELECT
+        Panelname,
+        PayerName_Raw,
+        DENSE_RANK() OVER (PARTITION BY Panelname ORDER BY SUM(ClaimCount) DESC) AS PayerRank
+    INTO #PayerRanks
+    FROM #BilledRaw
+    GROUP BY Panelname, PayerName_Raw;
+
+    SELECT
+        b.Panelname, b.PayerName_Raw, CAST(r.PayerRank AS TINYINT) AS PayerRank,
+        b.WeekStart, b.WeekEnd, b.WeekLabel, b.ClaimCount, b.TotalCharges
     INTO #Final
-    FROM billed b
-    JOIN ranks r
-      ON r.Panelname = b.Panelname
-     AND r.PayerName_Raw = b.PayerName_Raw;
+    FROM #BilledRaw b
+    JOIN #PayerRanks r ON r.Panelname = b.Panelname AND r.PayerName_Raw = b.PayerName_Raw;
 
     TRUNCATE TABLE dbo.Phi_WeeklyBilledProductionSummary;
 
     INSERT INTO dbo.Phi_WeeklyBilledProductionSummary
-    (
-        PanelType, PayerName, PayerRank, WeekStart, WeekEnd, WeekLabel,
-        ClaimCount, TotalCharges, RefreshedAt
-    )
-    SELECT
-        Panelname, PayerName_Raw, PayerRank,
-        WeekStart, WeekEnd, WeekLabel,
-        ClaimCount, TotalCharges, GETDATE()
+        (PanelType, PayerName, PayerRank, WeekStart, WeekEnd, WeekLabel,
+         ClaimCount, TotalCharges, RefreshedAt)
+    SELECT Panelname, PayerName_Raw, PayerRank,
+           WeekStart, WeekEnd, WeekLabel, ClaimCount, TotalCharges, GETDATE()
     FROM #Final
     ORDER BY Panelname, PayerRank, WeekStart DESC;
 
-    -- Debug prints
-    PRINT 'Max FirstBilledDate = ' + CONVERT(VARCHAR(10), @DateFromData, 120);
-    PRINT 'Anchor Monday       = ' + CONVERT(VARCHAR(10), @ThisWeekMonStart, 120);
-    PRINT 'StartIndex          = ' + CAST(@StartIndex AS VARCHAR(10));
-
-    SELECT WeekIndex, WeekStart, WeekEnd, WeekLabel
-    FROM #Weeks
-    ORDER BY WeekIndex;
-
+    DROP TABLE IF EXISTS #BilledRaw;
+    DROP TABLE IF EXISTS #PayerRanks;
     DROP TABLE IF EXISTS #Final;
     DROP TABLE IF EXISTS #Weeks;
 
-    PRINT 'usp_RefreshPhi_WeeklyBilledProductionSummary completed.';
+    PRINT 'usp_RefreshPhi_WeeklyBilledProductionSummary completed — ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
 END
 GO
 

@@ -36,13 +36,8 @@ CREATE TABLE dbo.Phi_CS_Top5ReimbursementPct
     SumInsurancePayment DECIMAL(18,2)   NOT NULL DEFAULT 0,
     SumChargeAmount     DECIMAL(18,2)   NOT NULL DEFAULT 0,
     UniqueVisitCount    INT             NOT NULL DEFAULT 0,
-    PaymentPct          DECIMAL(9,2)    NOT NULL DEFAULT 0,
     RefreshedAt         DATETIME        NOT NULL DEFAULT GETDATE()
 );
--- Add PaymentPct if table already exists without it
-IF EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Phi_CS_Top5ReimbursementPct')
-   AND NOT EXISTS (SELECT 1 FROM sys.columns WHERE [object_id] = OBJECT_ID('dbo.Phi_CS_Top5ReimbursementPct') AND name = 'PaymentPct')
-    ALTER TABLE dbo.Phi_CS_Top5ReimbursementPct ADD PaymentPct DECIMAL(9,2) NOT NULL DEFAULT 0;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Phi_CS_Top5ReimbursementPay')
@@ -116,31 +111,29 @@ CREATE TABLE dbo.Phi_CS_PanelAverages
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Phi_CS_AvgPayments')
--- Column names intentionally match what SqlCollectionSummaryRepository.GetAvgPaymentsViaSpAsync reads:
---   NoOfClaims, CarrierPayment, Days30Count/Amount, Days60Count/Amount
 CREATE TABLE dbo.Phi_CS_AvgPayments
 (
     SummaryId             INT             NOT NULL IDENTITY(1,1) PRIMARY KEY,
     PanelName             NVARCHAR(500)   NOT NULL,
     PayerName             NVARCHAR(500)   NOT NULL,
     PayerRank             TINYINT         NOT NULL,
-    NoOfClaims            INT             NOT NULL DEFAULT 0,
+    ClaimCount            INT             NOT NULL DEFAULT 0,
     TotalCharges          DECIMAL(18,2)   NOT NULL DEFAULT 0,
     AvgCharges            DECIMAL(18,2)   NOT NULL DEFAULT 0,
-    CarrierPayment        DECIMAL(18,2)   NOT NULL DEFAULT 0,
-    AvgCarrierPayment     DECIMAL(18,2)   NOT NULL DEFAULT 0,
+    InsurancePayment      DECIMAL(18,2)   NOT NULL DEFAULT 0,
+    AvgInsurancePayment   DECIMAL(18,2)   NOT NULL DEFAULT 0,
     FullyPaidCount        INT             NOT NULL DEFAULT 0,
     FullyPaidAmount       DECIMAL(18,2)   NOT NULL DEFAULT 0,
     AvgFullyPaid          DECIMAL(18,2)   NOT NULL DEFAULT 0,
     AdjudicatedCount      INT             NOT NULL DEFAULT 0,
     AdjudicatedAmount     DECIMAL(18,2)   NOT NULL DEFAULT 0,
     AvgAdjudicated        DECIMAL(18,2)   NOT NULL DEFAULT 0,
-    Days30Count           INT             NOT NULL DEFAULT 0,
-    Days30Amount          DECIMAL(18,2)   NOT NULL DEFAULT 0,
-    AvgDays30             DECIMAL(18,2)   NOT NULL DEFAULT 0,
-    Days60Count           INT             NOT NULL DEFAULT 0,
-    Days60Amount          DECIMAL(18,2)   NOT NULL DEFAULT 0,
-    AvgDays60             DECIMAL(18,2)   NOT NULL DEFAULT 0,
+    Over30Count           INT             NOT NULL DEFAULT 0,
+    Over30Amount          DECIMAL(18,2)   NOT NULL DEFAULT 0,
+    AvgOver30             DECIMAL(18,2)   NOT NULL DEFAULT 0,
+    Over60Count           INT             NOT NULL DEFAULT 0,
+    Over60Amount          DECIMAL(18,2)   NOT NULL DEFAULT 0,
+    AvgOver60             DECIMAL(18,2)   NOT NULL DEFAULT 0,
     RefreshedAt           DATETIME        NOT NULL DEFAULT GETDATE()
 );
 GO
@@ -227,14 +220,13 @@ CREATE TABLE dbo.Phi_CS_StatusSummary
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Phi_CS_ProviderSummary')
--- InsurancePayments (plural) matches SqlCollectionSummaryRepository.GetProviderSummaryViaSpAsync
 CREATE TABLE dbo.Phi_CS_ProviderSummary
 (
     SummaryId         INT             NOT NULL IDENTITY(1,1) PRIMARY KEY,
     ProviderRank      INT             NOT NULL,
     ReferringProvider NVARCHAR(500)   NOT NULL,
     NoOfClaims        INT             NOT NULL DEFAULT 0,
-    InsurancePayments DECIMAL(18,2)   NOT NULL DEFAULT 0,
+    InsurancePayment  DECIMAL(18,2)   NOT NULL DEFAULT 0,
     InsuranceBalance  DECIMAL(18,2)   NOT NULL DEFAULT 0,
     PatientBalance    DECIMAL(18,2)   NOT NULL DEFAULT 0,
     RefreshedAt       DATETIME        NOT NULL DEFAULT GETDATE()
@@ -247,7 +239,7 @@ GO
 -- =====================================================================
 
 -- 1. Top 5 Insurances | Reimbursement % (vs Billed Charge)
---    Source: ClaimLevelData (PhiLife: BilledUnbilled and PaymentPercent are ClaimLevel fields)
+--    Source: LineLevelData (has PaymentPercent, BilledUnbilled, InsurancePayment)
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshPhi_CS_Top5ReimbursementPct
 AS
 BEGIN
@@ -255,23 +247,18 @@ BEGIN
 
     ;WITH agg AS (
         SELECT
-            LTRIM(RTRIM(PayerName_Raw))                                       AS PayerName,
-            ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)       AS SumIns,
-            ISNULL(SUM(TRY_CAST(ChargeAmount     AS DECIMAL(18,2))), 0)       AS SumChg,
-            COUNT(NULLIF(LTRIM(RTRIM(AccessionNumber)), ''))                  AS Visits,
-            ROUND(
-                ISNULL(AVG(TRY_CAST(PaymentPercent AS DECIMAL(18,4))), 0) * 100,
-                0
-            )                                                                 AS PaymentPct
-        FROM dbo.ClaimLevelData
-        WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
-          AND NOT (LTRIM(RTRIM(ClaimStatus)) = 'No Response' AND LTRIM(RTRIM(BilledUnbilled)) = 'Unbilled')
+            LTRIM(RTRIM(PayerName_Raw))                                  AS PayerName,
+            ISNULL(SUM(TRY_CAST(PaymentPercent    AS DECIMAL(18,2))), 0) AS SumIns,
+            ISNULL(SUM(TRY_CAST(ChargeAmount      AS DECIMAL(18,2))), 0) AS SumChg,
+            COUNT(DISTINCT NULLIF(LTRIM(RTRIM(AccessionNumber)), ''))    AS Visits
+        FROM dbo.LineLevelData
+        WHERE NOT (LTRIM(RTRIM(ClaimStatus)) = 'No Response' AND LTRIM(RTRIM(BilledUnbilled)) = 'Unbilled')
+          AND ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
         GROUP BY LTRIM(RTRIM(PayerName_Raw))
     ),
     ranked AS (
-        SELECT TOP 5
-               ROW_NUMBER() OVER (ORDER BY SumIns DESC) AS Rnk,
-               PayerName, SumIns, SumChg, Visits, PaymentPct
+        SELECT TOP 5 PayerName, SumIns, SumChg, Visits,
+               ROW_NUMBER() OVER (ORDER BY SumIns DESC) AS Rnk
         FROM agg
         ORDER BY SumIns DESC
     )
@@ -279,8 +266,8 @@ BEGIN
 
     TRUNCATE TABLE dbo.Phi_CS_Top5ReimbursementPct;
     INSERT INTO dbo.Phi_CS_Top5ReimbursementPct
-        (PayerRank, PayerName, SumInsurancePayment, SumChargeAmount, UniqueVisitCount, PaymentPct, RefreshedAt)
-    SELECT CAST(Rnk AS TINYINT), PayerName, SumIns, SumChg, Visits, PaymentPct, GETDATE()
+        (PayerRank, PayerName, SumInsurancePayment, SumChargeAmount, UniqueVisitCount, RefreshedAt)
+    SELECT CAST(Rnk AS TINYINT), PayerName, SumIns, SumChg, Visits, GETDATE()
     FROM #out ORDER BY Rnk;
 
     DROP TABLE IF EXISTS #out;
@@ -479,248 +466,90 @@ GO
 -- 5. Panel Averages
 --    Source: LineLevelData (has BilledUnbilled, AgingBucket, FullyPaidCount/Amount,
 --            AdjudicatedCount/Amount, Days30/60 Count/Amount, CheckDate)
-    
-    
-Create        PROCEDURE [dbo].[usp_RefreshPhi_CS_PanelAverages]        
-AS        
-BEGIN        
-    SET NOCOUNT ON;        
-        
-    DECLARE @MaxCheckDate DATE;        
-    DECLARE @StartCheckDate DATE;        
-    DECLARE @EndCheckDate DATE;        
-        
-    /*        
-        Get latest valid CheckDate from ClaimLevelData up to today        
-    */        
-    SELECT        
-        @MaxCheckDate = MAX(TRY_CAST(CheckDate AS DATE))        
-    FROM dbo.ClaimLevelData        
-    WHERE TRY_CAST(CheckDate AS DATE) IS NOT NULL        
-      AND TRY_CAST(CheckDate AS DATE) <= CAST(GETDATE() AS DATE);        
-        
-    IF @MaxCheckDate IS NULL        
-    BEGIN        
-        RAISERROR('No valid CheckDate <= today found in ClaimLevelData.', 16, 1);        
-        RETURN;        
-    END;        
-        
-    /*        
-        Rolling 180 days based on max CheckDate.        
-        Example:        
-        If @MaxCheckDate = 2026-05-31,        
-        then range = 2025-12-02 to 2026-05-31.        
-    */        
-    SET @StartCheckDate = DATEADD(DAY, -180, @MaxCheckDate);        
-    SET @EndCheckDate   = @MaxCheckDate;        
-        
-    ;WITH src AS        
-    (        
-        SELECT        
-            LTRIM(RTRIM(ISNULL(PanelType, 'Unknown'))) AS PanelName,        
-            LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) AS PayerName,        
-            LTRIM(RTRIM(ClaimID)) AS VisitKey,        
-            TRY_CAST(ChargeAmount AS DECIMAL(18,2)) AS Chg,        
-            TRY_CAST(InsurancePayment AS DECIMAL(18,2)) AS InsPay,        
-        
-            LTRIM(RTRIM(ISNULL(ClaimStatus, ''))) AS ClaimStatus,        
-    
-            FullyPaidCount,        
-            TRY_CAST(FullyPaidAmount AS DECIMAL(18,2)) AS FullyPaidAmount,        
-        
-             
-   [Adjudicated] AS AdjudicatedCount,  
-   TRY_CAST([AdjudicatedAmount] AS DECIMAL(18,2)) AS AdjudicatedAmount,  
-  
-   Days30Count AS Bucket30Count,  
-   TRY_CAST([Days30Amount] AS DECIMAL(18,2)) AS Bucket30Amount,  
-  
-   Days60Count AS Bucket60Count,  
-   TRY_CAST([Days60Amount] AS DECIMAL(18,2)) AS Bucket60Amount,  
-            TRY_CAST(CheckDate AS DATE) AS CheckDateValue        
-        
-        FROM dbo.ClaimLevelData     where Not (ClaimStatus='No Response' and BilledUnBilled='Unbilled')  
-    )        
-    SELECT        
-        PanelName,        
-        PayerName,        
-        
-        COUNT(VisitKey) AS ClaimCount,        
-        
-        ISNULL(SUM(Chg), 0) AS TotalCharges,        
-        
-        ISNULL(SUM(InsPay), 0) AS CarrierPayment,        
-        
-        COUNT(        
-            CASE        
-                WHEN FullyPaidCount IN ('Fully Paid', 'Fully Paid Count')        
-                THEN VisitKey        
-            END        
-        ) AS FullyPaidCount,        
-        
-        ISNULL(        
-            SUM(        
-                CASE        
-                    WHEN FullyPaidCount IN ('Fully Paid', 'Fully Paid Count')        
-                    THEN FullyPaidAmount        
-                    ELSE 0        
-                END        
-            ), 0        
-        ) AS FullyPaidAmount,        
-        
-        COUNT(        
-            CASE        
-                WHEN AdjudicatedCount IN ('Adjudicated', 'Adjudicated Count')        
-                THEN VisitKey        
-            END        
-        ) AS AdjudicatedCount,        
-        
-        ISNULL(        
-            SUM(        
-                CASE        
-                    WHEN AdjudicatedCount IN ('Adjudicated', 'Adjudicated Count')        
-                    THEN AdjudicatedAmount        
-                    ELSE 0        
-                END        
-            ), 0        
-        ) AS AdjudicatedAmount,        
-        
-        COUNT(        
-            CASE        
-                WHEN Bucket30Count IN ('30 Bucket', '30 Days Count')        
-                THEN VisitKey        
-            END        
-        ) AS Days30Count,        
-        
-        ISNULL(        
-            SUM(        
-                CASE        
-       WHEN Bucket30Count IN ('30 Bucket', '30 Days Count')        
-                    THEN Bucket30Amount        
-                    ELSE 0        
-                END        
-            ), 0        
-        ) AS Days30Amount,        
-        
-        COUNT(        
-            CASE        
-                WHEN Bucket60Count IN ('60 Bucket', '60 Days Count')        
-                THEN VisitKey        
-            END        
-        ) AS Days60Count,        
-        
-        ISNULL(        
-            SUM(        
-                CASE        
-                    WHEN Bucket60Count IN ('60 Bucket', '60 Days Count')        
-                    THEN Bucket60Amount        
-                    ELSE 0        
-                END        
-            ), 0        
-        ) AS Days60Amount        
-        
-    INTO #out        
-        
-    FROM src        
-        
-    WHERE CheckDateValue IS NOT NULL        
-      AND CheckDateValue BETWEEN @StartCheckDate AND @EndCheckDate        
-        
-            
-    GROUP BY PanelName, PayerName;        
-        
-    TRUNCATE TABLE dbo.Phi_CS_PanelAverages;        
-        
-    INSERT INTO dbo.Phi_CS_PanelAverages        
-    (        
-        PanelName,        
-        PayerName,        
-        
-        NoOfClaims,        
-        TotalCharges,        
-        CarrierPayment,        
-        AvgCarrierPayment,        
-        
-        FullyPaidCount,        
-        FullyPaidAmount,        
-        AvgFullyPaid,        
-        
-        AdjudicatedCount,        
-        AdjudicatedAmount,        
-        AvgAdjudicated,        
-        
-        Days30Count,        
-        Days30Amount,        
-        AvgDays30,        
-        
-        Days60Count,        
-        Days60Amount,        
-        AvgDays60,        
-        
-        RefreshedAt        
-    )        
-    SELECT        
-        PanelName,        
-        PayerName,        
-        
-        ClaimCount,        
-        TotalCharges,        
-        CarrierPayment,        
-        
-        CASE        
-            WHEN ClaimCount > 0        
-            THEN CarrierPayment / ClaimCount        
-            ELSE 0        
-        END AS AvgCarrierPayment,        
-        
-        FullyPaidCount,        
-        FullyPaidAmount,        
-        
-        CASE        
-            WHEN FullyPaidCount > 0        
-            THEN FullyPaidAmount / FullyPaidCount        
-            ELSE 0        
-        END AS AvgFullyPaid,        
-        
-        AdjudicatedCount,        
-        AdjudicatedAmount,        
-        
-        CASE        
-            WHEN AdjudicatedCount > 0        
-            THEN AdjudicatedAmount / AdjudicatedCount        
-            ELSE 0        
-        END AS AvgAdjudicated,        
-        
-        Days30Count,        
-        Days30Amount,        
-        
-        CASE        
-            WHEN Days30Count > 0        
-            THEN Days30Amount / Days30Count        
-            ELSE 0        
-        END AS AvgDays30,        
-        
-        Days60Count,        
-        Days60Amount,        
-        
-        CASE        
-            WHEN Days60Count > 0        
-            THEN Days60Amount / Days60Count        
-            ELSE 0        
-        END AS AvgDays60,        
-        
-        GETDATE()        
-        
-    FROM #out        
-    ORDER BY PanelName, PayerName;        
-        
-    DROP TABLE IF EXISTS #out;        
-        
-    PRINT 'usp_RefreshPhi_CS_PanelAverages completed.';        
-    PRINT 'CheckDate Start: ' + CONVERT(VARCHAR(10), @StartCheckDate, 120);        
-    PRINT 'CheckDate End: ' + CONVERT(VARCHAR(10), @EndCheckDate, 120);        
-END    
-  
+CREATE OR ALTER PROCEDURE dbo.usp_RefreshPhi_CS_PanelAverages
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    ;WITH src AS (
+        SELECT
+            LTRIM(RTRIM(ISNULL(Panelname,     'Unknown')))  AS PanelName,
+            LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown')))  AS PayerName,
+            COALESCE(
+                NULLIF(LTRIM(RTRIM(AccessionNumber)), ''),
+                LTRIM(RTRIM(ClaimID))
+            )                                               AS VisitKey,
+            TRY_CAST(ChargeAmount     AS DECIMAL(18,2))     AS Chg,
+            TRY_CAST(InsurancePayment AS DECIMAL(18,2))     AS InsPay,
+            LTRIM(RTRIM(ClaimStatus))                       AS ClaimStatus,
+            LTRIM(RTRIM(ISNULL(FullyPaidCount, '')))        AS FPC,
+            TRY_CAST(FullyPaidAmount  AS DECIMAL(18,2))     AS FullyPaidAmount,
+            LTRIM(RTRIM(ISNULL(AdjudicatedCount, '')))      AS AdjC,
+            TRY_CAST(AdjudicatedAmount AS DECIMAL(18,2))    AS AdjAmount,
+            LTRIM(RTRIM(ISNULL(AgingBucket, '')))           AS AgingBucket
+        FROM dbo.LineLevelData
+        WHERE NOT (
+            LTRIM(RTRIM(ClaimStatus)) = 'No Response'
+            AND LTRIM(RTRIM(BilledUnbilled)) = 'Unbilled'
+        )
+        AND Panelname <> '' AND LEN(Panelname) > 0
+        AND TRY_CAST(CheckDate AS DATE) IS NOT NULL
+        AND TRY_CAST(CheckDate AS DATE) <= CAST(GETDATE() AS DATE)
+        AND TRY_CAST(CheckDate AS DATE) >=
+            DATEADD(DAY, 1, EOMONTH((
+                SELECT MAX(TRY_CAST(CheckDate AS DATE))
+                FROM dbo.LineLevelData
+                WHERE TRY_CAST(CheckDate AS DATE) IS NOT NULL
+                  AND TRY_CAST(CheckDate AS DATE) <= CAST(GETDATE() AS DATE)
+            ), -6))
+    )
+    SELECT
+        PanelName, PayerName,
+        COUNT(VisitKey)                                          AS ClaimCount,
+        ISNULL(SUM(Chg),   0)                                   AS TotalCharges,
+        ISNULL(SUM(InsPay), 0)                                  AS CarrierPayment,
+        COUNT(DISTINCT CASE WHEN FPC = 'Fully Paid'     THEN VisitKey END) AS FullyPaidCount,
+        ISNULL(SUM(CASE WHEN FPC = 'Fully Paid'         THEN FullyPaidAmount ELSE 0 END), 0) AS FullyPaidAmount,
+        COUNT(DISTINCT CASE WHEN AdjC = 'Adjucticated'  THEN VisitKey END) AS AdjudicatedCount,
+        ISNULL(SUM(CASE WHEN AdjC = 'Adjucticated'      THEN AdjAmount ELSE 0 END), 0) AS AdjudicatedAmount,
+        COUNT(DISTINCT CASE WHEN AgingBucket = '30+'    THEN VisitKey END) AS Days30Count,
+        ISNULL(SUM(CASE WHEN AgingBucket = '30+'        THEN Chg ELSE 0 END), 0) AS Days30Amount,
+        COUNT(DISTINCT CASE WHEN AgingBucket = '60+'    THEN VisitKey END) AS Days60Count,
+        ISNULL(SUM(CASE WHEN AgingBucket = '60+'        THEN Chg ELSE 0 END), 0) AS Days60Amount
+    INTO #out
+    FROM src
+    GROUP BY PanelName, PayerName;
+
+    TRUNCATE TABLE dbo.Phi_CS_PanelAverages;
+    INSERT INTO dbo.Phi_CS_PanelAverages
+    (
+        PanelName, PayerName,
+        NoOfClaims, TotalCharges, CarrierPayment, AvgCarrierPayment,
+        FullyPaidCount, FullyPaidAmount, AvgFullyPaid,
+        AdjudicatedCount, AdjudicatedAmount, AvgAdjudicated,
+        Days30Count, Days30Amount, AvgDays30,
+        Days60Count, Days60Amount, AvgDays60,
+        RefreshedAt
+    )
+    SELECT
+        PanelName, PayerName,
+        ClaimCount, TotalCharges, CarrierPayment,
+        CASE WHEN ClaimCount    > 0 THEN CarrierPayment    / ClaimCount    ELSE 0 END,
+        FullyPaidCount, FullyPaidAmount,
+        CASE WHEN FullyPaidCount  > 0 THEN FullyPaidAmount  / FullyPaidCount  ELSE 0 END,
+        AdjudicatedCount, AdjudicatedAmount,
+        CASE WHEN AdjudicatedCount > 0 THEN AdjudicatedAmount / AdjudicatedCount ELSE 0 END,
+        Days30Count, Days30Amount,
+        CASE WHEN Days30Count   > 0 THEN Days30Amount   / Days30Count   ELSE 0 END,
+        Days60Count, Days60Amount,
+        CASE WHEN Days60Count   > 0 THEN Days60Amount   / Days60Count   ELSE 0 END,
+        GETDATE()
+    FROM #out
+    ORDER BY PanelName, PayerName;
+
+    DROP TABLE IF EXISTS #out;
+    PRINT 'usp_RefreshPhi_CS_PanelAverages completed.';
+END
 GO
 
 
@@ -750,9 +579,9 @@ BEGIN
     ),
     agg AS (
         SELECT PanelName, PayerName,
-               COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), '')) AS NoOfClaims,
+               COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), '')) AS ClaimCount,
                ISNULL(SUM(Chg),    0)  AS TotalCharges,
-               ISNULL(SUM(InsPay), 0)  AS CarrierPayment,
+               ISNULL(SUM(InsPay), 0)  AS InsurancePayment,
                COUNT(DISTINCT CASE WHEN Status = 'Fully Paid' THEN ClaimID END) AS FullyPaidCount,
                ISNULL(SUM(CASE WHEN Status = 'Fully Paid' THEN InsPay ELSE 0 END), 0) AS FullyPaidAmount,
                COUNT(DISTINCT CASE WHEN Status IN
@@ -765,15 +594,15 @@ BEGIN
                     'Fully Denied','Denied','Partially Denied','Partially Adjusted',
                     'Patient Responsibility')
                  THEN InsPay ELSE 0 END), 0) AS AdjudicatedAmount,
-               COUNT(DISTINCT CASE WHEN Days <= 30 THEN ClaimID END) AS Days30Count,
-               ISNULL(SUM(CASE WHEN Days <= 30 THEN InsPay ELSE 0 END), 0) AS Days30Amount,
-               COUNT(DISTINCT CASE WHEN Days <= 60 THEN ClaimID END) AS Days60Count,
-               ISNULL(SUM(CASE WHEN Days <= 60 THEN InsPay ELSE 0 END), 0) AS Days60Amount
+               COUNT(DISTINCT CASE WHEN Days <= 30 THEN ClaimID END) AS Over30Count,
+               ISNULL(SUM(CASE WHEN Days <= 30 THEN InsPay ELSE 0 END), 0) AS Over30Amount,
+               COUNT(DISTINCT CASE WHEN Days <= 60 THEN ClaimID END) AS Over60Count,
+               ISNULL(SUM(CASE WHEN Days <= 60 THEN InsPay ELSE 0 END), 0) AS Over60Amount
         FROM base GROUP BY PanelName, PayerName
     ),
     ranks AS (
         SELECT PanelName, PayerName,
-               DENSE_RANK() OVER (PARTITION BY PanelName ORDER BY NoOfClaims DESC) AS PayerRank
+               DENSE_RANK() OVER (PARTITION BY PanelName ORDER BY ClaimCount DESC) AS PayerRank
         FROM agg
     )
     SELECT a.*, CAST(r.PayerRank AS TINYINT) AS PayerRank
@@ -785,27 +614,27 @@ BEGIN
     TRUNCATE TABLE dbo.Phi_CS_AvgPayments;
     INSERT INTO dbo.Phi_CS_AvgPayments
         (PanelName, PayerName, PayerRank,
-         NoOfClaims, TotalCharges, AvgCharges,
-         CarrierPayment, AvgCarrierPayment,
+         ClaimCount, TotalCharges, AvgCharges,
+         InsurancePayment, AvgInsurancePayment,
          FullyPaidCount, FullyPaidAmount, AvgFullyPaid,
          AdjudicatedCount, AdjudicatedAmount, AvgAdjudicated,
-         Days30Count, Days30Amount, AvgDays30,
-         Days60Count, Days60Amount, AvgDays60,
+         Over30Count, Over30Amount, AvgOver30,
+         Over60Count, Over60Amount, AvgOver60,
          RefreshedAt)
     SELECT
         PanelName, PayerName, PayerRank,
-        NoOfClaims, TotalCharges,
-        CASE WHEN NoOfClaims > 0 THEN TotalCharges / NoOfClaims ELSE 0 END,
-        CarrierPayment,
-        CASE WHEN NoOfClaims > 0 THEN CarrierPayment / NoOfClaims ELSE 0 END,
+        ClaimCount, TotalCharges,
+        CASE WHEN ClaimCount > 0 THEN TotalCharges / ClaimCount ELSE 0 END,
+        InsurancePayment,
+        CASE WHEN ClaimCount > 0 THEN InsurancePayment / ClaimCount ELSE 0 END,
         FullyPaidCount, FullyPaidAmount,
         CASE WHEN FullyPaidCount > 0 THEN FullyPaidAmount / FullyPaidCount ELSE 0 END,
         AdjudicatedCount, AdjudicatedAmount,
         CASE WHEN AdjudicatedCount > 0 THEN AdjudicatedAmount / AdjudicatedCount ELSE 0 END,
-        Days30Count, Days30Amount,
-        CASE WHEN Days30Count > 0 THEN Days30Amount / Days30Count ELSE 0 END,
-        Days60Count, Days60Amount,
-        CASE WHEN Days60Count > 0 THEN Days60Amount / Days60Count ELSE 0 END,
+        Over30Count, Over30Amount,
+        CASE WHEN Over30Count > 0 THEN Over30Amount / Over30Count ELSE 0 END,
+        Over60Count, Over60Amount,
+        CASE WHEN Over60Count > 0 THEN Over60Amount / Over60Count ELSE 0 END,
         GETDATE()
     FROM #out ORDER BY PanelName, PayerRank;
 
@@ -860,9 +689,9 @@ BEGIN
         ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)    AS InsurancePayment,
         GETDATE()
     FROM dbo.ClaimLevelData
-    WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) <> 0
-        AND TRY_CAST(CheckDate AS DATE) IS NOT NULL
-	  	AND Not (ClaimStatus='No Response' and BilledUnBilled='Unbilled')
+    WHERE Panelname IS NOT NULL AND LTRIM(RTRIM(Panelname)) <> ''
+      AND ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+      AND TRY_CAST(CheckDate AS DATE) IS NOT NULL
     GROUP BY
         LTRIM(RTRIM(Panelname)),
         YEAR (TRY_CAST(CheckDate AS DATE)),
@@ -906,18 +735,7 @@ GO
 
 -- 10. Insurance vs Payment %
 --     Source: LineLevelData (has PaymentPercent, InsurancePayment)
-USE [Phi_Life]
-GO
-/****** Object:  StoredProcedure [dbo].[usp_RefreshPhi_CS_InsuranceVsPaymentPct]    Script Date: 6/3/2026 11:31:06 AM ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-
-
--- 10. Insurance vs Payment %
---     Source: LineLevelData (has PaymentPercent, InsurancePayment)
-CREATE OR ALTER   PROCEDURE [dbo].[usp_RefreshPhi_CS_InsuranceVsPaymentPct]
+CREATE OR ALTER PROCEDURE dbo.usp_RefreshPhi_CS_InsuranceVsPaymentPct
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -930,7 +748,6 @@ BEGIN
             TRY_CAST(PaymentPercent   AS DECIMAL(9,4))           AS PayPct
         FROM dbo.LineLevelData
         WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) <> 0
-		and Not (ClaimStatus='No Response' and BilledUnBilled='Unbilled')
     ),
     agg AS (
         SELECT PayerName,
@@ -951,7 +768,6 @@ BEGIN
     DROP TABLE IF EXISTS #out;
     PRINT 'usp_RefreshPhi_CS_InsuranceVsPaymentPct completed.';
 END
-
 GO
 
 
@@ -1008,11 +824,7 @@ BEGIN
     SELECT
         ISNULL(LTRIM(RTRIM(ClaimStatus)),             '(blank)') AS ClaimStatus,
         ISNULL(LTRIM(RTRIM(Panelname)),               '(blank)') AS PanelName,
-        ISNULL(NULLIF(LTRIM(RTRIM(
-            ISNULL(LTRIM(RTRIM(CPTCode)), '') +
-            CASE WHEN NULLIF(LTRIM(RTRIM(Units)),    '') IS NOT NULL THEN ' x ' + LTRIM(RTRIM(Units))    ELSE '' END +
-            CASE WHEN NULLIF(LTRIM(RTRIM(Modifier)), '') IS NOT NULL THEN ' x ' + LTRIM(RTRIM(Modifier)) ELSE '' END
-        )), ''), '(blank)')                                        AS CptCode,
+        ISNULL(LTRIM(RTRIM(CPTCodeXUnitsXModifier)),  '(blank)') AS CptCode,
         ISNULL(LTRIM(RTRIM(PayerName_Raw)),           '(blank)') AS PayerName,
         COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))        AS NoOfClaims,
         ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0) AS InsurancePayment,
@@ -1023,9 +835,7 @@ BEGIN
     GROUP BY
         LTRIM(RTRIM(ClaimStatus)),
         LTRIM(RTRIM(Panelname)),
-        LTRIM(RTRIM(ISNULL(CPTCode,    '') +
-            CASE WHEN NULLIF(LTRIM(RTRIM(Units)),    '') IS NOT NULL THEN ' x ' + LTRIM(RTRIM(Units))    ELSE '' END +
-            CASE WHEN NULLIF(LTRIM(RTRIM(Modifier)), '') IS NOT NULL THEN ' x ' + LTRIM(RTRIM(Modifier)) ELSE '' END)),
+        LTRIM(RTRIM(CPTCodeXUnitsXModifier)),
         LTRIM(RTRIM(PayerName_Raw));
 
     PRINT 'usp_RefreshPhi_CS_StatusSummary completed.';
@@ -1059,7 +869,7 @@ BEGIN
     TRUNCATE TABLE dbo.Phi_CS_ProviderSummary;
     INSERT INTO dbo.Phi_CS_ProviderSummary
         (ProviderRank, ReferringProvider, NoOfClaims,
-         InsurancePayments, InsuranceBalance, PatientBalance, RefreshedAt)
+         InsurancePayment, InsuranceBalance, PatientBalance, RefreshedAt)
     SELECT ProviderRank, ReferringProvider, NoOfClaims,
            InsurancePayment, InsuranceBalance, PatientBalance, GETDATE()
     FROM #out ORDER BY ProviderRank;

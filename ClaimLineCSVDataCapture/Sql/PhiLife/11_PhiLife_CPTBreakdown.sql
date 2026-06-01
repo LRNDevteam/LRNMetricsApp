@@ -39,7 +39,7 @@ BEGIN
         ISNULL(SUM(TRY_CAST(Units        AS DECIMAL(18,2))), 0)         AS BilledUnits,
         ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0)         AS TotalCharges
     INTO #Raw
-    FROM dbo.LineLevelData
+    FROM dbo.ClaimLevelData
     WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL AND LTRIM(RTRIM(FirstBilledDate)) <> ''
       AND NULLIF(LTRIM(RTRIM(CPTCode)), '') IS NOT NULL
     GROUP BY
