@@ -689,36 +689,15 @@
                                     <i class="bi bi-file-earmark-bar-graph"></i> Standard Reports
                                 </a>
                                 <ul class="dropdown-menu">
+                                    <li>
+                                        <a class="dropdown-item" asp-controller="LisSummary" asp-action="Index">
+                                            <i class="bi bi-clipboard2-pulse-fill"></i> LIS Summary
+                                        </a>
+                                    </li>
+
                                     @{
                                         var summaryEnabled = labConfig?.EnableProductionSummaryReport ?? false;
-                                        var hideStandardProductionReport = !isAdmin && summaryEnabled;
                                     }
-
-                                    @if (!hideStandardProductionReport)
-                                    {
-                                        <li>
-                                            <a class="dropdown-item" asp-controller="LisSummary" asp-action="Index">
-                                                <i class="bi bi-clipboard2-pulse-fill"></i> LIS Summary
-                                            </a>
-                                        </li>
-                                        @if (labConfig?.EnableProductionReport ?? true)
-                                        {
-                                            <li>
-                                                <a class="dropdown-item" asp-controller="Dashboard" asp-action="ProductionReport">
-                                                    <i class="bi bi-bar-chart-fill"></i> Production Report
-                                                </a>
-                                            </li>
-                                        }
-                                        else
-                                        {
-                                            <li>
-                                                <span class="dropdown-item disabled" title="This feature is not enabled for the selected lab">
-                                                    <i class="bi bi-bar-chart-fill"></i> Production Report
-                                                </span>
-                                            </li>
-                                        }
-                                    }
-
                                     @if (summaryEnabled)
                                     {
                                         <li>
