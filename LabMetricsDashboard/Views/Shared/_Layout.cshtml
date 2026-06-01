@@ -523,6 +523,7 @@
 <body>
 @{
     var denialReactUrl = Configuration["DenialWorkflowReactUrl"] ?? "http://localhost:5173";
+    var denialReactAgingUrl = denialReactUrl.Contains('#') ? denialReactUrl : $"{denialReactUrl}#aging";
 }
 
 
@@ -667,7 +668,7 @@
                         @if (isArRestricted)
                         {
                             <li class="nav-item">
-                                <a class="nav-link" href="@denialReactUrl" target="_blank" rel="noopener">
+                                <a class="nav-link" href="@denialReactAgingUrl" target="_blank" rel="noopener">
                                     <i class="bi bi-kanban-fill"></i> Denial Workflow <span class="badge text-bg-info ms-1">React</span>
                                 </a>
                             </li>
@@ -771,7 +772,7 @@
                             </li>
 
                             <li class="nav-item">
-                                <a class="nav-link" href="@denialReactUrl" target="_blank" rel="noopener">
+                                <a class="nav-link" href="@denialReactAgingUrl" target="_blank" rel="noopener">
                                     <i class="bi bi-kanban-fill"></i> Denial Workflow
                                 </a>
                             </li>

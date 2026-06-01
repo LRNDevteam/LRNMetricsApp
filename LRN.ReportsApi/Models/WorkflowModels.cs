@@ -312,6 +312,7 @@ public class WorkflowTaskRow
 {
     public string TaskId { get; set; } = string.Empty;
     public string UniqueTrackId { get; set; } = string.Empty;
+    public string ClaimUid { get; set; } = string.Empty;
     public string ClaimId { get; set; } = string.Empty;
     public string PatientId { get; set; } = string.Empty;
     public string CptCode { get; set; } = string.Empty;
@@ -374,7 +375,10 @@ public class VerificationTaskRow : WorkflowTaskRow
 
 public sealed class ClaimLevelRow
 {
+    public string ClaimUid { get; set; } = string.Empty;
     public string ClaimId { get; set; } = string.Empty;
+    public string VisitNumber { get; set; } = string.Empty;
+    public string AccessionNumber { get; set; } = string.Empty;
     public string PatientName { get; set; } = string.Empty;
     public DateTime? PatientDOB { get; set; }
     public string PatientId { get; set; } = string.Empty;

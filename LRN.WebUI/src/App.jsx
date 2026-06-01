@@ -138,8 +138,8 @@ export default function App() {
   function resolveLandingView(role) {
     const stored = getStoredView();
     if (stored) return stored;
-    // Every Denial Workflow role lands on the workflow dashboard after login.
-    return 'dashboard';
+    // Every Denial Workflow role lands on the aging dashboard after login.
+    return 'aging';
   }
 
   async function refreshLoginUserFromMetrics({ forceRefresh = true, resetData = false, applyLanding = false } = {}) {
