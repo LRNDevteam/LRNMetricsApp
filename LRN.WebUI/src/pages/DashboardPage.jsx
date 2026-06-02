@@ -19,7 +19,7 @@ export default function DashboardPage({ data, user = {}, labName = '' }) {
   return <ManagerDashboard data={data} user={user} labName={labName} />;
 }
 
-function ManagerDashboard({ data, user, labName }) {
+function ManagerDashboard({ data }) {
   const classifications = data.denialClassifications || [];
   const workload = data.analystWorkload || [];
   const assignedClaims = data.assignedClaims ?? data.assigned ?? 0;
@@ -28,26 +28,19 @@ function ManagerDashboard({ data, user, labName }) {
   const slaPercent = data.slaCompliancePercent ?? data.slaCompliance ?? 86;
 
   return <div className="role-dashboard manager-dashboard">
-    <div className="role-kpi-row">
-      <RoleKpi label="Open Claims" value={n(pendingClaims || data.totalClaims)} tone="blue" />
-      <RoleKpi label="Open Balance" value={money(data.outstandingAmount || 0)} tone="teal" />
-      <RoleKpi label="Escalated" value={n(escalated)} tone="red" />
-      <RoleKpi label="SLA Compliance" value={pct(slaPercent)} tone="green" />
-    </div>
-    <div className="role-grid two">
-      <div>
-        <RoleCard title="Denial Classification Summary">
-          <div className="role-table-wrap"><table className="role-table wide"><thead><tr><th>Classification</th><th>Claims</th><th>Balance</th><th>Assigned</th><th>In Progress</th><th>Closed</th><th>SLA Risk</th></tr></thead><tbody>
-            {classifications.length ? classifications.map((r, i) => <tr key={i}><td>{r.classification || '-'}</td><td>{n(r.count)}</td><td>{money(r.outstanding)}</td><td>{n(r.assigned || Math.round(Number(r.count || 0) * .75))}</td><td>{n(r.inProgress || Math.round(Number(r.count || 0) * .35))}</td><td>{n(r.closed || r.closedCount || 0)}</td><td><RiskPill value={r.slaRisk || r.risk || (Number(r.percentageOfTotal || 0) > 25 ? 'High' : 'Medium')} /></td></tr>) : <EmptyRow colSpan={7} />}
-          </tbody></table></div>
-        </RoleCard>
-        <RoleCard title="Analyst Performance">
-          <div className="role-table-wrap"><table className="role-table"><thead><tr><th>Analyst</th><th>Open</th><th>Closed</th><th>Recovery</th><th>SLA</th><th>Escalations</th></tr></thead><tbody>
-            {workload.length ? workload.map((r, i) => <tr key={i}><td><span className="avatar-sm">{initials(r.reviewerName)}</span> {r.reviewerName || '-'}</td><td>{n(r.pendingTasks ?? r.pending ?? 0)}</td><td>{n(r.closedTasks ?? r.closed ?? 0)}</td><td>{money(r.recoveryAmount || 0)}</td><td>{pct(r.slaPercent || 85)}</td><td>{n(r.escalations || 0)}</td></tr>) : <EmptyRow colSpan={6} />}
-          </tbody></table></div>
-        </RoleCard>
+    <ReviewerAgingTable rows={workload} />
+    <div className="dashboard-overview-grid">
+      <div className="role-kpi-row dashboard-kpi-stack">
+        <RoleKpi label="Open Claims" value={n(pendingClaims || data.totalClaims)} tone="blue" />
+        <RoleKpi label="Open Balance" value={money(data.outstandingAmount || 0)} tone="teal" />
+        <RoleKpi label="Escalated" value={n(escalated)} tone="red" />
+        <RoleKpi label="SLA Compliance" value={pct(slaPercent)} tone="green" />
       </div>
-      <DashboardSidePanels data={data} manager />
+      <RoleCard title="Denial Classification Summary">
+        <div className="role-table-wrap"><table className="role-table wide"><thead><tr><th>Classification</th><th>Claims</th><th>Balance</th><th>Assigned</th><th>In Progress</th><th>Closed</th><th>SLA Risk</th></tr></thead><tbody>
+          {classifications.length ? classifications.map((r, i) => <tr key={i}><td>{r.classification || '-'}</td><td>{n(r.count)}</td><td>{money(r.outstanding)}</td><td>{n(r.assigned || Math.round(Number(r.count || 0) * .75))}</td><td>{n(r.inProgress || Math.round(Number(r.count || 0) * .35))}</td><td>{n(r.closed || r.closedCount || 0)}</td><td><RiskPill value={r.slaRisk || r.risk || (Number(r.percentageOfTotal || 0) > 25 ? 'High' : 'Medium')} /></td></tr>) : <EmptyRow colSpan={7} />}
+        </tbody></table></div>
+      </RoleCard>
     </div>
   </div>;
 }
@@ -62,6 +55,7 @@ function AnalystDashboard({ data, user, labName }) {
 
   return <div className="role-dashboard analyst-dashboard">
     <RoleHeader title="AR Analyst Dashboard" subtitle="My work queue" tag="Analyst view" user={user} labName={labName} />
+    <ReviewerAgingTable rows={workload} title="My Aging View" />
     <div className="role-kpi-row">
       <RoleKpi label="Assigned Claims" value={n(assignedClaims)} tone="blue" />
       <RoleKpi label="Open Tasks" value={n(pendingTasks)} tone="amber" />
@@ -75,10 +69,6 @@ function AnalystDashboard({ data, user, labName }) {
           {!(data.denialClassifications || []).length && <EmptyRow colSpan={5} />}
         </tbody></table></div>
       </RoleCard>
-      <div>
-        <RoleCard title="My Productivity Today"><div className="role-metrics-list"><Metric name="Tasks worked" value={n(closedTasks)} /><Metric name="Remaining queue" value={n(pendingTasks)} /><Metric name="Escalations created" value={n(data.escalatedCount || 0)} /><Metric name="SLA focus" value={pct(data.slaCompliance || 82)} /></div></RoleCard>
-        <DashboardSidePanels data={data} />
-      </div>
     </div>
   </div>;
 }
@@ -90,6 +80,7 @@ function SingleAccountDashboard({ data, user, labName, mode }) {
   const actionCategories = data.actionCategories || [];
   return <div className="role-dashboard single-account-dashboard">
     <RoleHeader title={title} subtitle="Single account operational summary" tag={isClient ? 'Client-facing view' : 'Account view'} user={user} labName={labName} />
+    <ReviewerAgingTable rows={data.analystWorkload || []} />
     <div className="role-kpi-row">
       <RoleKpi label="Open Claims" value={n(data.totalClaims)} tone="blue" />
       <RoleKpi label="At-Risk AR" value={money(data.outstandingAmount || 0)} tone="red" />
@@ -109,25 +100,20 @@ function SingleAccountDashboard({ data, user, labName, mode }) {
           </tbody></table></div>
         </RoleCard>
       </div>
-      <div>
-        <RoleCard title="Recommended Single-Account Metrics"><div className="role-metrics-list"><Metric name="Payer response exposure" value={money(data.outstandingAmount || 0)} /><Metric name="Client pending requests" value={n(data.escalatedCount || 0)} /><Metric name="Documentation queue" value={n(data.openInProgressCount || 0)} /><Metric name="Closed this cycle" value={n(data.closedCount || 0)} /></div></RoleCard>
-        <AgingMix />
-      </div>
     </div>
   </div>;
 }
 
-function DashboardSidePanels({ data }) {
-  return <div>
-    <RoleCard title="Recommended Metrics"><div className="role-metrics-list"><Metric name="SLA Compliance" value={pct(data.slaCompliance || 86)} /><Metric name="Recovery Rate" value={pct(data.recoveryRate || 24)} /><Metric name="Aging Exposure" value={money(data.agingExposure || data.outstandingAmount || 0)} /><Metric name="Work Queue Velocity" value={pct(data.velocity || 72)} /></div></RoleCard>
-    <AgingMix />
-  </div>;
+function ReviewerAgingTable({ rows = [], title = 'Aging View by AR Reviewer' }) {
+  return <RoleCard title={title}>
+    <div className="role-table-wrap"><table className="role-table reviewer-aging-table"><thead><tr><th>AR Reviewer</th><th>0-30</th><th>31-60</th><th>61-90</th><th>91-120</th><th>120+</th><th>Assigned</th><th>In Progress</th><th>Pending</th><th>Closed</th></tr></thead><tbody>
+      {rows.length ? rows.map((r, i) => <tr key={`${r.reviewerName || 'reviewer'}-${i}`}><td><span className="avatar-sm">{initials(r.reviewerName)}</span> {r.reviewerName || '-'}</td><td>{n(r.aging0To30 ?? 0)}</td><td>{n(r.aging31To60 ?? 0)}</td><td>{n(r.aging61To90 ?? 0)}</td><td>{n(r.aging91To120 ?? 0)}</td><td>{n(r.agingOver120 ?? 0)}</td><td>{n(r.assigned ?? r.totalClaims ?? 0)}</td><td>{n(r.inProgress ?? 0)}</td><td>{n(r.pending ?? 0)}</td><td>{n(r.closed ?? 0)}</td></tr>) : <EmptyRow colSpan={10} />}
+    </tbody></table></div>
+  </RoleCard>;
 }
 
-function RoleHeader({ title, subtitle, tag, user, labName }) { return <div className="role-page-head"><div><h2>{title}</h2><p>DenialFlow / <b>{subtitle}</b>{labName ? ` · ${labName}` : ''}</p></div><div className="role-head-right"><span className="role-tag">{tag}</span><span className="role-user"><span className="avatar-sm">{initials(user?.displayName || user?.userName)}</span>{user?.displayName || user?.userName || 'Workflow User'}</span></div></div>; }
+function RoleHeader({ title, subtitle, tag, user, labName }) { return <div className="role-page-head"><div><h2>{title}</h2><p>DenialFlow / <b>{subtitle}</b>{labName ? ` - ${labName}` : ''}</p></div><div className="role-head-right"><span className="role-tag">{tag}</span><span className="role-user"><span className="avatar-sm">{initials(user?.displayName || user?.userName)}</span>{user?.displayName || user?.userName || 'Workflow User'}</span></div></div>; }
 function RoleKpi({ label, value, tone }) { return <div className={`role-kpi ${tone || ''}`}><div className="role-kpi-value">{value}</div><div className="role-kpi-label">{label}</div></div>; }
 function RoleCard({ title, children }) { return <div className="role-card"><div className="role-card-hd"><div className="role-card-title">{title}</div></div><div className="role-card-body">{children}</div></div>; }
 function RiskPill({ value }) { return <span className={`role-flag ${riskClass(value)}`}>{value || 'Medium'}</span>; }
-function Metric({ name, value }) { return <div className="role-metric"><div><b>{name}</b><span>Workflow metric</span></div><strong>{value}</strong></div>; }
 function EmptyRow({ colSpan }) { return <tr><td colSpan={colSpan} className="empty-cell">No dashboard data found.</td></tr>; }
-function AgingMix() { return <RoleCard title="Aging Mix"><div className="aging-row"><span>0–30 days</span><div><i style={{ width: '64%' }} /></div></div><div className="aging-row"><span>31–60 days</span><div><i style={{ width: '48%' }} /></div></div><div className="aging-row"><span>61–90 days</span><div><i style={{ width: '36%' }} /></div></div><div className="aging-row"><span>90+ days</span><div><i style={{ width: '28%' }} /></div></div></RoleCard>; }

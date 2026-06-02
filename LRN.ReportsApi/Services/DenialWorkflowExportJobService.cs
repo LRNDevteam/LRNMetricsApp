@@ -8,6 +8,7 @@ public interface IDenialWorkflowExportJobService
     ClaimExportStartResponse StartClaimsExport(DenialWorkflowFilter filter, string requestedBy);
     ClaimExportStatusResponse? GetStatus(string jobId, string requestedBy);
     ClaimExportFile? GetCompletedFile(string jobId, string requestedBy);
+    ClaimExportStatusResponse? Cancel(string jobId, string requestedBy);
 }
 
 public sealed record ClaimExportFile(string FilePath, string FileName, string ContentType);
@@ -15,6 +16,7 @@ public sealed record ClaimExportFile(string FilePath, string FileName, string Co
 public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobService
 {
     private static readonly ConcurrentDictionary<string, ExportJobState> Jobs = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly TimeSpan MaxExportDuration = TimeSpan.FromMinutes(30);
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<DenialWorkflowExportJobService> _logger;
     private readonly string _exportRoot;
@@ -46,8 +48,11 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
             LabId = filter.LabId,
             Status = "Queued",
             Message = "Export request received. File creation is running in the background.",
-            CreatedOnUtc = DateTime.UtcNow
+            CreatedOnUtc = DateTime.UtcNow,
+            Cancellation = new CancellationTokenSource()
         };
+
+        ExpireStaleJobs();
 
         var active = Jobs.Values
             .Where(x => string.Equals(x.RequestedBy, requestedBy, StringComparison.OrdinalIgnoreCase)
@@ -62,7 +67,8 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
             {
                 JobId = active.JobId,
                 Status = active.Status,
-                Message = "A claim detail export is already in progress. Please wait until it completes before starting another one."
+                Message = "A claim detail export is already in progress. Please wait until it completes before starting another one.",
+                CreatedOnUtc = active.CreatedOnUtc
             };
         }
 
@@ -73,12 +79,14 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
         {
             JobId = jobId,
             Status = state.Status,
-            Message = state.Message
+            Message = state.Message,
+            CreatedOnUtc = state.CreatedOnUtc
         };
     }
 
     public ClaimExportStatusResponse? GetStatus(string jobId, string requestedBy)
     {
+        ExpireStaleJobs();
         if (!Jobs.TryGetValue(jobId, out var state) || !CanAccess(state, requestedBy)) return null;
         return new ClaimExportStatusResponse
         {
@@ -102,6 +110,22 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
         return new ClaimExportFile(state.FilePath, state.FileName, "text/csv");
     }
 
+    public ClaimExportStatusResponse? Cancel(string jobId, string requestedBy)
+    {
+        if (!Jobs.TryGetValue(jobId, out var state) || !CanAccess(state, requestedBy)) return null;
+        if (string.Equals(state.Status, "Queued", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(state.Status, "Running", StringComparison.OrdinalIgnoreCase))
+        {
+            state.Cancellation?.Cancel();
+            state.Status = "Failed";
+            state.Message = "Export was cancelled by the user.";
+            state.CompletedOnUtc = DateTime.UtcNow;
+            TryDelete(state.FilePath);
+        }
+
+        return GetStatus(jobId, requestedBy);
+    }
+
     private async Task RunJobAsync(DenialWorkflowFilter filter, ExportJobState state)
     {
         try
@@ -112,7 +136,9 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
             await using var stream = File.Create(state.FilePath);
             using var scope = _scopeFactory.CreateScope();
             var service = scope.ServiceProvider.GetRequiredService<IDenialWorkflowService>();
-            state.RowCount = await service.WriteClaimsExportAsync(filter, stream, CancellationToken.None);
+            using var timeoutCts = new CancellationTokenSource(MaxExportDuration);
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, state.Cancellation?.Token ?? CancellationToken.None);
+            state.RowCount = await service.WriteClaimsExportAsync(filter, stream, linkedCts.Token);
             if (state.RowCount <= 0)
             {
                 state.Status = "Failed";
@@ -126,10 +152,20 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
             state.Message = $"Export completed with {state.RowCount:N0} row(s).";
             state.CompletedOnUtc = DateTime.UtcNow;
         }
+        catch (OperationCanceledException ex)
+        {
+            state.Status = "Failed";
+            state.Message = state.Cancellation?.IsCancellationRequested == true
+                ? "Export was cancelled by the user."
+                : "Export timed out after 30 minutes. Please narrow the filters or try a tab download.";
+            state.CompletedOnUtc = DateTime.UtcNow;
+            _logger.LogWarning(ex, "Claim export job {JobId} stopped before completion.", state.JobId);
+            TryDelete(state.FilePath);
+        }
         catch (Exception ex)
         {
             state.Status = "Failed";
-            state.Message = "Export failed. Please try again or contact support.";
+            state.Message = $"Export failed: {ShortError(ex)}";
             state.CompletedOnUtc = DateTime.UtcNow;
             _logger.LogError(ex, "Claim export job {JobId} failed.", state.JobId);
             TryDelete(state.FilePath);
@@ -143,11 +179,35 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
             || string.Equals(SafeFilePart(state.RequestedBy), SafeFilePart(requestedBy), StringComparison.OrdinalIgnoreCase);
     }
 
+    private static void ExpireStaleJobs()
+    {
+        var cutoff = DateTime.UtcNow - MaxExportDuration;
+        foreach (var state in Jobs.Values)
+        {
+            if (state.CreatedOnUtc >= cutoff) continue;
+            if (!string.Equals(state.Status, "Queued", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(state.Status, "Running", StringComparison.OrdinalIgnoreCase)) continue;
+
+            state.Status = "Failed";
+            state.Message = "Export timed out after 30 minutes. Please start a new export.";
+            state.CompletedOnUtc = DateTime.UtcNow;
+            state.Cancellation?.Cancel();
+            TryDelete(state.FilePath);
+        }
+    }
+
     private static string SafeFilePart(string value)
     {
         var chars = (value ?? "user").Select(ch => char.IsLetterOrDigit(ch) ? ch : '_').ToArray();
         var safe = new string(chars).Trim('_');
         return string.IsNullOrWhiteSpace(safe) ? "user" : safe[..Math.Min(safe.Length, 48)];
+    }
+
+    private static string ShortError(Exception ex)
+    {
+        var message = string.IsNullOrWhiteSpace(ex.Message) ? ex.GetType().Name : ex.Message.Trim();
+        message = message.Replace(Environment.NewLine, " ");
+        return message.Length <= 240 ? message : message[..240] + "...";
     }
 
     private static void TryDelete(string path)
@@ -167,5 +227,6 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
         public int RowCount { get; set; }
         public DateTime CreatedOnUtc { get; init; }
         public DateTime? CompletedOnUtc { get; set; }
+        public CancellationTokenSource? Cancellation { get; init; }
     }
 }

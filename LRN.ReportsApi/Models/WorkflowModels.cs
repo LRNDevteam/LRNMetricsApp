@@ -17,6 +17,13 @@ public sealed class ReviewerOption
     public string Role { get; set; } = string.Empty;
 }
 
+public sealed class DenialWorkflowRunReference
+{
+    public string RunId { get; set; } = string.Empty;
+    public string OutputFileName { get; set; } = string.Empty;
+    public string FileNameWithoutExtension { get; set; } = string.Empty;
+}
+
 public sealed class DenialWorkflowOptions
 {
     public string[] ClosedStatuses { get; set; } = ["Closed", "Completed"];
@@ -245,6 +252,7 @@ public sealed class ClaimExportStartResponse
     public string JobId { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public string Message { get; set; } = string.Empty;
+    public DateTime CreatedOnUtc { get; set; }
 }
 
 public sealed class ClaimExportStatusResponse
@@ -295,10 +303,17 @@ public sealed class ReviewerWorkflowSummaryRow
     public int TotalAssigned { get; set; }
     public int TotalTasks { get; set; }
     public int TotalClaims { get; set; }
+    public int Assigned { get; set; }
+    public int InProgress { get; set; }
     public int Closed { get; set; }
     public int ClosedTasks { get; set; }
     public int Pending { get; set; }
     public int PendingTasks { get; set; }
+    public int Aging0To30 { get; set; }
+    public int Aging31To60 { get; set; }
+    public int Aging61To90 { get; set; }
+    public int Aging91To120 { get; set; }
+    public int AgingOver120 { get; set; }
 }
 
 public sealed class DenialWorkflowInsightRow

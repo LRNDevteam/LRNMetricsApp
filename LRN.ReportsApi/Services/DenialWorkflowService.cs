@@ -9,6 +9,7 @@ public interface IDenialWorkflowService
     Task<DenialWorkflowImportResult> ImportAsync(DenialTaskImportRequest request, CancellationToken ct);
     Task<IReadOnlyList<DenialWorkflowLabOption>> GetLabsAsync(CancellationToken ct);
     Task<IReadOnlyList<DenialWorkflowLabOption>> GetLabsForUserAsync(string userName, CancellationToken ct);
+    Task<DenialWorkflowRunReference?> GetLastRunReferenceAsync(int labId, CancellationToken ct);
     Task<DenialWorkflowDashboardSummary> GetDashboardSummaryAsync(DenialWorkflowFilter filter, CancellationToken ct);
     Task<AgingDashboardSummary> GetAgingDashboardAsync(DenialWorkflowFilter filter, CancellationToken ct);
     Task<DenialWorkflowFilterOptions> GetFilterOptionsAsync(int labId, CancellationToken ct);
@@ -130,6 +131,7 @@ public sealed class DenialWorkflowService : IDenialWorkflowService
 
     public Task<IReadOnlyList<DenialWorkflowLabOption>> GetLabsAsync(CancellationToken ct) => _repo.GetLabsAsync(ct);
     public Task<IReadOnlyList<DenialWorkflowLabOption>> GetLabsForUserAsync(string userName, CancellationToken ct) => _repo.GetLabsForUserAsync(userName, ct);
+    public Task<DenialWorkflowRunReference?> GetLastRunReferenceAsync(int labId, CancellationToken ct) => _repo.GetLastRunReferenceAsync(labId, ct);
     public Task<DenialWorkflowDashboardSummary> GetDashboardSummaryAsync(DenialWorkflowFilter filter, CancellationToken ct) => _repo.GetDashboardSummaryAsync(filter, ct);
     public Task<AgingDashboardSummary> GetAgingDashboardAsync(DenialWorkflowFilter filter, CancellationToken ct) => _repo.GetAgingDashboardAsync(filter, ct);
     public Task<DenialWorkflowFilterOptions> GetFilterOptionsAsync(int labId, CancellationToken ct) => _repo.GetFilterOptionsAsync(labId, ct);

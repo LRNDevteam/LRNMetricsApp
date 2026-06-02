@@ -26,7 +26,7 @@ function dedupeEscalations(rows = []) {
   });
 }
 
-export default function ClaimAssignmentPage({ data, reviewers, selected, setSelected, bulkReviewer, setBulkReviewer, loadClaimTasks, claimTasks, expandedClaim, assignClaims, changePage, labId, currentUser, canAssign = false, readOnlyWorkflow = false, taskView = 'unassigned', setTaskView = () => {}, tabCounts = {}, openEscalationResponse = () => {}, openVerification = () => {}, setMessage = () => {} }) {
+export default function ClaimAssignmentPage({ data, reviewers, selected, setSelected, bulkReviewer, setBulkReviewer, loadClaimTasks, claimTasks, expandedClaim, assignClaims, changePage, labId, currentUser, canAssign = false, readOnlyWorkflow = false, taskView = 'unassigned', setTaskView = () => {}, tabCounts = {}, openEscalationResponse = () => {}, openVerification = () => {}, setMessage = () => {}, onDownloadTab = () => {}, exportBusy = false, exportStatusText = '' }) {
   const [notePopup, setNotePopup] = useState(null);
   const [docPopup, setDocPopup] = useState(null);
   const [historyPopup, setHistoryPopup] = useState(null);
@@ -417,7 +417,7 @@ export default function ClaimAssignmentPage({ data, reviewers, selected, setSele
           <div className="claim-tab-row">{claimTabs.map(t => {
             const count = tabCounts?.[t.countKey || t.key];
             return <button key={t.key} type="button" className={`claim-tab ${taskView === t.key ? 'active' : ''}`} title={t.hint} onClick={() => t.route ? t.route() : setTaskView(t.key)}><span>{t.label}</span><b>{tabCountText(count)}</b></button>;
-          })}</div>
+          })}<button type="button" className="claim-tab-download" onClick={onDownloadTab} disabled={exportBusy} title={exportStatusText || `Download ${activeTab.label} claims using current filters`}><i className="bi bi-download" />{exportBusy ? 'Export running' : `Download ${activeTab.label}`}</button></div>
         </div>
         {canAssign && <div className="claim-assign-bar2"><label><input type="checkbox" checked={all} onChange={e => { const next = {}; if (e.target.checked) items.forEach((_, i) => next[i] = true); setSelected(next); }} /> Select page</label><strong>{selectedClaimIds.length} selected</strong><select value={bulkReviewer} onChange={e => setBulkReviewer(e.target.value)}><option value="">Select AR Reviewer</option>{arReviewers.map(r => <option key={r.userName || r.UserName} value={r.userName || r.UserName}>{r.displayName || r.DisplayName || r.userName || r.UserName}</option>)}</select><button className="wl-btn teal xs" onClick={() => assignClaims(selectedClaimIds, bulkReviewer)} disabled={!selectedClaimIds.length}>Assign</button>{!isEscalatedView && <button className="wl-btn red xs" type="button" disabled={busy || !selectedClaimIds.length} onClick={escalateSelectedClaims}>Escalate</button>}</div>}
         <div className="claim-list-head claim-list-head-wide"><span><SortButton sortKey="claimId">Claim</SortButton></span><span><SortButton sortKey="source">Source</SortButton></span><span><SortButton sortKey="payerName">Payer Name</SortButton></span><span><SortButton sortKey="patientName">Patient Name</SortButton></span><span><SortButton sortKey="patientId">Patient ID</SortButton></span><span><SortButton sortKey="subscriberId">Subscriber ID</SortButton></span><span><SortButton sortKey="dateOfService">DOS</SortButton></span><span><SortButton sortKey="insuranceBalance">Balance</SortButton></span><span><SortButton sortKey="claimStatus">Status</SortButton></span></div>

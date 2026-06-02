@@ -72,6 +72,13 @@ public sealed class DenialWorkflowController : ControllerBase
         return Ok(await _service.GetFilterOptionsAsync(labId, ct));
     }
 
+    [HttpGet("last-run-reference")]
+    public async Task<ActionResult<DenialWorkflowRunReference?>> LastRunReference([FromQuery] int labId, CancellationToken ct)
+    {
+        if (labId <= 0) return BadRequest("LabId is required.");
+        return Ok(await _service.GetLastRunReferenceAsync(labId, ct));
+    }
+
     [HttpGet("reviewers")]
     public async Task<ActionResult<IReadOnlyList<ReviewerOption>>> Reviewers([FromQuery] int labId = 0, CancellationToken ct = default)
         => Ok(await _service.GetReviewerOptionsAsync(labId, ct));
@@ -125,6 +132,14 @@ public sealed class DenialWorkflowController : ControllerBase
         var file = _exportJobs.GetCompletedFile(jobId, requestedBy);
         if (file is null) return NotFound(new { message = "Export file is not ready yet." });
         return PhysicalFile(file.FilePath, file.ContentType, file.FileName);
+    }
+
+    [HttpDelete("claims/export/{jobId}")]
+    public ActionResult<ClaimExportStatusResponse> CancelClaimsExport([FromRoute] string jobId)
+    {
+        var requestedBy = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? string.Empty;
+        var status = _exportJobs.Cancel(jobId, requestedBy);
+        return status is null ? NotFound(new { message = "Export job was not found." }) : Ok(status);
     }
 
 	[HttpGet("claim-tasks")]

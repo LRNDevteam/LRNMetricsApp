@@ -2,9 +2,17 @@ function cleanBase(value) {
   return String(value || '').trim().replace(/\/+$/, '');
 }
 
+function normalizeLocalhostPorts(value) {
+  const v = cleanBase(value);
+  if (!v) return '';
+  return v
+    .replace(/^https?:\/\/localhost:57996(?=\/|$)/i, 'https://localhost:44350')
+    .replace(/^https?:\/\/127\.0\.0\.1:57996(?=\/|$)/i, 'https://localhost:44350');
+}
+
 function firstValue(...values) {
   for (const value of values) {
-    const cleaned = cleanBase(value);
+    const cleaned = normalizeLocalhostPorts(value);
     if (cleaned) return cleaned;
   }
   return '';

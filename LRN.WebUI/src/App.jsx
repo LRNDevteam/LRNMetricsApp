@@ -25,7 +25,6 @@ export default function App() {
   const workflowViews = ['dashboard', 'aging', 'summary', 'claims', 'myworklist', 'escalations', 'verification'];
   const getStoredView = () => {
     const hashView = String(window.location.hash || '').replace('#', '').trim().toLowerCase();
-    if (hashView === 'dashboard' || hashView === 'summary') return 'aging';
     return workflowViews.includes(hashView) ? hashView : '';
   };
   const [view, setViewState] = useState(getStoredView() || 'aging');
@@ -48,6 +47,9 @@ export default function App() {
   const [message, setMessage] = useState(null);
   const [loading, setLoading] = useState(false);
   const [claimExportJob, setClaimExportJob] = useState(null);
+  const [lastRunReference, setLastRunReference] = useState(null);
+  const [lastRunLoading, setLastRunLoading] = useState(false);
+  const [exportTick, setExportTick] = useState(Date.now());
   const [authReady, setAuthReady] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
   const [authError, setAuthError] = useState('');
@@ -59,6 +61,7 @@ export default function App() {
   const [claimMenuCounts, setClaimMenuCounts] = useState({ new: null, unassigned: null, assigned: null, escalations: null, internalEscalation: null, externalEscalation: null, escalationResponse: null, verification: null, closed: null });
   const [myWorklistMenuCounts, setMyWorklistMenuCounts] = useState({ open: null, assigned: null, escalations: null, closed: null });
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [dashboardFiltersOpen, setDashboardFiltersOpen] = useState(false);
   const [claimFiltersOpen, setClaimFiltersOpen] = useState(false);
   const claimRequestSeq = useRef(0);
   const claimAbortRef = useRef(null);
@@ -71,6 +74,7 @@ export default function App() {
   const externalManager = clientManager || accountManager;
   const adminRole = String(user.role || '').toLowerCase().includes('admin');
   const readOnlyWorkflow = isReadOnlyWorkflowRole(user.role);
+  const exportBusy = !!claimExportJob && ['Queued', 'Running'].includes(claimExportJob.status);
 
   function setView(nextView, { closeSidebar = true } = {}) {
     let safeView = workflowViews.includes(nextView) ? nextView : 'dashboard';
@@ -140,7 +144,6 @@ export default function App() {
   function resolveLandingView(role) {
     const stored = getStoredView();
     if (stored) return stored;
-    // Every Denial Workflow role lands on the aging dashboard after login.
     return 'aging';
   }
 
@@ -267,23 +270,52 @@ export default function App() {
       });
   }, [authReady, labId]);
 
+  useEffect(() => {
+    if (!authReady || !labId) {
+      setLastRunReference(null);
+      setLastRunLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLastRunLoading(true);
+    denialWorkflowService.getLastRunReference(labId)
+      .then(x => {
+        if (!cancelled) setLastRunReference(x || null);
+      })
+      .catch(() => {
+        if (!cancelled) setLastRunReference(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLastRunLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [authReady, labId]);
+
+  function filterValue(value) {
+    if (Array.isArray(value)) return value.map(x => String(x || '').trim()).filter(Boolean).join('Â¬');
+    if (value === undefined || value === null) return '';
+    return String(value).trim();
+  }
+
   const query = useMemo(() => ({
     labId,
     role: user.role,
     userName: user.userName,
-    status: debouncedFilter.status,
-    reviewer: reviewerOnly ? (user.userName || '') : debouncedFilter.reviewer,
-    assignedTo: reviewerOnly ? (user.userName || '') : debouncedFilter.reviewer,
-    actionCategory: debouncedFilter.actionCategory,
-    priority: debouncedFilter.priority,
-    denialCode: debouncedFilter.denialCode,
-    payerName: debouncedFilter.payerName,
-    panelName: debouncedFilter.panelName,
-    clinic: debouncedFilter.clinic,
-    salesRepname: debouncedFilter.salesRepname,
-    referringProvider: debouncedFilter.referringProvider,
-    denialClassification: debouncedFilter.denialClassification,
-    searchText: debouncedFilter.searchText,
+    status: filterValue(debouncedFilter.status),
+    reviewer: reviewerOnly ? (user.userName || '') : filterValue(debouncedFilter.reviewer),
+    assignedTo: reviewerOnly ? (user.userName || '') : filterValue(debouncedFilter.reviewer),
+    actionCategory: filterValue(debouncedFilter.actionCategory),
+    priority: filterValue(debouncedFilter.priority),
+    denialCode: filterValue(debouncedFilter.denialCode),
+    payerName: filterValue(debouncedFilter.payerName),
+    panelName: filterValue(debouncedFilter.panelName),
+    clinic: filterValue(debouncedFilter.clinic),
+    salesRepname: filterValue(debouncedFilter.salesRepname),
+    referringProvider: filterValue(debouncedFilter.referringProvider),
+    denialClassification: filterValue(debouncedFilter.denialClassification),
+    searchText: filterValue(debouncedFilter.searchText),
     fromDate: debouncedFilter.fromDate || '',
     toDate: debouncedFilter.toDate || '',
     taskView: view === 'claims' ? claimTaskView : '',
@@ -295,18 +327,18 @@ export default function App() {
     labId,
     role: user.role,
     userName: user.userName,
-    reviewer: reviewerOnly ? (user.userName || '') : debouncedFilter.reviewer,
-    assignedTo: reviewerOnly ? (user.userName || '') : debouncedFilter.reviewer,
-    actionCategory: debouncedFilter.actionCategory,
-    priority: debouncedFilter.priority,
-    denialCode: debouncedFilter.denialCode,
-    payerName: debouncedFilter.payerName,
-    panelName: debouncedFilter.panelName,
-    clinic: debouncedFilter.clinic,
-    salesRepname: debouncedFilter.salesRepname,
-    referringProvider: debouncedFilter.referringProvider,
-    denialClassification: debouncedFilter.denialClassification,
-    searchText: debouncedFilter.searchText,
+    reviewer: reviewerOnly ? (user.userName || '') : filterValue(debouncedFilter.reviewer),
+    assignedTo: reviewerOnly ? (user.userName || '') : filterValue(debouncedFilter.reviewer),
+    actionCategory: filterValue(debouncedFilter.actionCategory),
+    priority: filterValue(debouncedFilter.priority),
+    denialCode: filterValue(debouncedFilter.denialCode),
+    payerName: filterValue(debouncedFilter.payerName),
+    panelName: filterValue(debouncedFilter.panelName),
+    clinic: filterValue(debouncedFilter.clinic),
+    salesRepname: filterValue(debouncedFilter.salesRepname),
+    referringProvider: filterValue(debouncedFilter.referringProvider),
+    denialClassification: filterValue(debouncedFilter.denialClassification),
+    searchText: filterValue(debouncedFilter.searchText),
     page: 1,
     pageSize: 1
   }), [
@@ -785,6 +817,30 @@ export default function App() {
     try { localStorage.removeItem(claimExportStorageKey()); } catch { /* ignore browser storage errors */ }
   }
 
+  function exportElapsedText(job = claimExportJob) {
+    if (!job?.createdOnUtc) return '';
+    const started = new Date(job.createdOnUtc).getTime();
+    if (!Number.isFinite(started)) return '';
+    const end = job.completedOnUtc ? new Date(job.completedOnUtc).getTime() : exportTick;
+    const seconds = Math.max(0, Math.floor((end - started) / 1000));
+    const minutes = Math.floor(seconds / 60);
+    const rem = seconds % 60;
+    return minutes > 0 ? `${minutes}m ${String(rem).padStart(2, '0')}s` : `${rem}s`;
+  }
+
+  function exportStatusText(job = claimExportJob) {
+    if (!job) return '';
+    const scope = job.jobScope ? `${job.jobScope} - ` : '';
+    const elapsed = exportElapsedText(job);
+    return `${scope}${job.status || 'Export'}${elapsed ? ` for ${elapsed}` : ''}`;
+  }
+
+  useEffect(() => {
+    if (!exportBusy) return;
+    const timer = window.setInterval(() => setExportTick(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [exportBusy]);
+
   useEffect(() => {
     if (!authReady || !labId || !user.userName) return;
     try {
@@ -807,12 +863,14 @@ export default function App() {
       try {
         const status = await denialWorkflowService.getClaimsExportStatus(claimExportJob.jobId);
         if (cancelled) return;
-        setClaimExportJob(status);
-        rememberClaimExport(status);
+        const nextStatus = { ...status, jobScope: claimExportJob.jobScope };
+        setClaimExportJob(nextStatus);
+        rememberClaimExport(nextStatus);
         if (status?.status === 'Completed') {
           claimExportInFlightRef.current = false;
           try { localStorage.removeItem(claimExportStorageKey()); } catch { }
-          setMessage({ type: 'success', text: 'Claim detail export is ready. Click Download File to save it.' });
+          setMessage({ type: 'success', text: `${claimExportJob.jobScope || 'Claim detail'} export is ready. Your browser download should start now; use Download File if it does not.` });
+          downloadClaimExportById(status.jobId);
         } else if (status?.status === 'Failed') {
           claimExportInFlightRef.current = false;
           try { localStorage.removeItem(claimExportStorageKey()); } catch { }
@@ -831,7 +889,8 @@ export default function App() {
       }
     };
 
-    const timer = window.setInterval(checkStatus, 10000);
+    checkStatus();
+    const timer = window.setInterval(checkStatus, 5000);
 
     return () => {
       cancelled = true;
@@ -839,7 +898,41 @@ export default function App() {
     };
   }, [claimExportJob?.jobId, claimExportJob?.status]);
 
-  async function startClaimExport() {
+  async function refreshClaimExportStatus() {
+    if (!claimExportJob?.jobId) return;
+    try {
+      const status = await denialWorkflowService.getClaimsExportStatus(claimExportJob.jobId);
+      const nextStatus = { ...status, jobScope: claimExportJob.jobScope };
+      setClaimExportJob(nextStatus);
+      rememberClaimExport(nextStatus);
+      if (status?.status === 'Completed') {
+        claimExportInFlightRef.current = false;
+        try { localStorage.removeItem(claimExportStorageKey()); } catch { }
+        setMessage({ type: 'success', text: `${claimExportJob.jobScope || 'Claim detail'} export is ready. Click Download File to save it.` });
+      } else if (status?.status === 'Failed') {
+        claimExportInFlightRef.current = false;
+        try { localStorage.removeItem(claimExportStorageKey()); } catch { }
+        setMessage({ type: 'danger', text: status.message || 'Claim detail export failed.' });
+      } else {
+        setMessage({ type: 'info', text: `Export is still ${String(status?.status || 'running').toLowerCase()} (${exportStatusText(nextStatus)}).` });
+      }
+    } catch (err) {
+      setMessage({ type: 'danger', text: err.message || 'Unable to check export status.' });
+    }
+  }
+
+  async function cancelClaimExport() {
+    if (!claimExportJob?.jobId) return;
+    try {
+      await denialWorkflowService.cancelClaimsExport(claimExportJob.jobId);
+      forgetClaimExport();
+      setMessage({ type: 'info', text: 'Export cancelled. You can start a filtered tab download or overall download again.' });
+    } catch (err) {
+      setMessage({ type: 'danger', text: err.message || 'Unable to cancel export.' });
+    }
+  }
+
+  async function startClaimExport({ currentTab = false } = {}) {
     if (!labId) return setMessage({ type: 'warning', text: 'Please select a lab before exporting.' });
     if (claimExportInFlightRef.current || (claimExportJob && ['Queued', 'Running'].includes(claimExportJob.status))) {
       return setMessage({ type: 'info', text: 'Claim detail export is already in progress. Please wait until it completes.' });
@@ -847,9 +940,11 @@ export default function App() {
 
     try {
       claimExportInFlightRef.current = true;
+      const tabLabel = (claimNavTabs.find(t => t.key === claimTaskView)?.label || claimTaskView || 'Current Tab').trim();
+      const jobScope = currentTab ? `${tabLabel} tab` : 'Overall filtered';
       const exportQuery = {
         ...query,
-        taskView: '',
+        taskView: currentTab ? claimTaskView : '',
         page: 1,
         pageSize: 100,
         fromDate: query.fromDate || null,
@@ -859,25 +954,31 @@ export default function App() {
         if (exportQuery[key] === '' || exportQuery[key] === undefined) delete exportQuery[key];
       });
       const job = await denialWorkflowService.startClaimsExport(exportQuery);
-      setClaimExportJob(job);
-      rememberClaimExport(job);
+      const nextJob = { ...job, jobScope };
+      setClaimExportJob(nextJob);
+      rememberClaimExport(nextJob);
       claimExportInFlightRef.current = ['Queued', 'Running'].includes(job?.status);
-      setMessage({ type: 'info', text: job.message || 'Download is in progress. File creation is happening in the background; please wait for completion.' });
+      setMessage({ type: 'info', text: job.message || `${jobScope} download is in progress. File creation is happening in the background; please wait for completion.` });
     } catch (err) {
       claimExportInFlightRef.current = false;
       setMessage({ type: 'danger', text: err.message || 'Unable to start claim detail export.' });
     }
   }
 
-  async function downloadClaimExport() {
-    if (!claimExportJob?.jobId) return;
-    const url = await denialWorkflowService.getClaimsExportDownloadUrl(claimExportJob.jobId);
+  async function downloadClaimExportById(jobId) {
+    if (!jobId) return;
+    const url = await denialWorkflowService.getClaimsExportDownloadUrl(jobId);
     const a = document.createElement('a');
     a.href = url;
     a.download = '';
     document.body.appendChild(a);
     a.click();
     a.remove();
+  }
+
+  async function downloadClaimExport() {
+    if (!claimExportJob?.jobId) return;
+    await downloadClaimExportById(claimExportJob.jobId);
   }
 
   async function loadClaimTasks(rawClaimId) {
@@ -955,6 +1056,7 @@ export default function App() {
       <div className="user-card"><span className="avatar-sm">{initials(user.displayName || user.userName)}</span><div><strong>{user.displayName || user.userName || 'LRN User'}</strong><small>{user.role || 'Workflow User'}</small></div></div>
       <nav className="lrn-nav">
         <div className="lrn-nav-section">Overview</div>
+        <button className={`lrn-nav-item ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}><i className="bi bi-speedometer2" />Dashboard</button>
         <button className={`lrn-nav-item ${view === 'aging' ? 'active' : ''}`} onClick={() => setView('aging')}><i className="bi bi-hourglass-split" />Aging Dashboard</button>
         <div className="lrn-nav-section">Denial Workflow</div>
         {(canAssign || externalManager || adminRole) && (
@@ -1016,12 +1118,19 @@ export default function App() {
           <button type="button" className="menu-toggle" onClick={() => setSidebarOpen(v => !v)} aria-label="Toggle menu"><i className="bi bi-list" /></button>
           <div><div className="lrn-page-title">{pageTitle}</div><div className="lrn-breadcrumb">LRN Analytics / <span>{pageTitle}</span></div></div>
         </div>
-        <div className="topbar-actions">{workflowNotifications.total > 0 && <div className="notification-wrap"><button type="button" className="notification-btn" title="Claims needing attention" onClick={() => setNotificationOpen(v => !v)}><i className="bi bi-bell-fill" /><span className="notification-count">{workflowNotifications.total}</span><span className="notification-text"><b>{workflowNotifications.total}</b> {reviewerOnly ? 'claims need attention' : 'escalation claim(s)'}</span></button>{notificationOpen && <NotificationDetails />}</div>}<select className="top-lab-select" value={labId || ''} onChange={e => setLabId(Number(e.target.value))}>{labs.map(l => <option key={l.labId ?? l.LabId} value={l.labId ?? l.LabId}>{l.labName ?? l.LabName}</option>)}</select><span className="current-lab">{labName}</span>{showOverallDownload && claimExportJob && <button type="button" className={`topbar-btn ${claimExportJob.status === 'Completed' ? 'teal' : ''}`} disabled={claimExportJob.status !== 'Completed'} onClick={downloadClaimExport} title={claimExportJob.message || claimExportJob.status}><i className={`bi ${claimExportJob.status === 'Completed' ? 'bi-file-earmark-excel' : 'bi-hourglass-split'}`} />{claimExportJob.status === 'Completed' ? 'Download File' : 'Export Running'}</button>}{showOverallDownload && <button className="topbar-btn teal" onClick={startClaimExport} disabled={claimExportInFlightRef.current || (claimExportJob && ['Queued', 'Running'].includes(claimExportJob.status))}><i className="bi bi-download" />Overall Download</button>}<button type="button" className="topbar-btn" onClick={logoutWorkflow}><i className="bi bi-box-arrow-right" />Logout</button></div>
+        <div className="topbar-actions">{workflowNotifications.total > 0 && <div className="notification-wrap"><button type="button" className="notification-btn" title="Claims needing attention" onClick={() => setNotificationOpen(v => !v)}><i className="bi bi-bell-fill" /><span className="notification-count">{workflowNotifications.total}</span><span className="notification-text"><b>{workflowNotifications.total}</b> {reviewerOnly ? 'claims need attention' : 'escalation claim(s)'}</span></button>{notificationOpen && <NotificationDetails />}</div>}<select className="top-lab-select" value={labId || ''} onChange={e => setLabId(Number(e.target.value))}>{labs.map(l => <option key={l.labId ?? l.LabId} value={l.labId ?? l.LabId}>{l.labName ?? l.LabName}</option>)}</select><span className="current-lab">{labName}</span>{showOverallDownload && claimExportJob && <span className={`export-status-pill ${claimExportJob.status === 'Completed' ? 'done' : exportBusy ? 'running' : 'failed'}`} title={claimExportJob.message || claimExportJob.status}>{exportStatusText()}</span>}{showOverallDownload && claimExportJob && <button type="button" className={`topbar-btn ${claimExportJob.status === 'Completed' ? 'teal' : ''}`} disabled={claimExportJob.status !== 'Completed'} onClick={downloadClaimExport} title={claimExportJob.message || claimExportJob.status}><i className={`bi ${claimExportJob.status === 'Completed' ? 'bi-file-earmark-excel' : 'bi-hourglass-split'}`} />{claimExportJob.status === 'Completed' ? 'Download File' : 'Waiting'}</button>}{showOverallDownload && exportBusy && <button type="button" className="topbar-btn" onClick={refreshClaimExportStatus}><i className="bi bi-arrow-clockwise" />Refresh Export</button>}{showOverallDownload && exportBusy && <button type="button" className="topbar-btn danger" onClick={cancelClaimExport}><i className="bi bi-x-circle" />Cancel Export</button>}{showOverallDownload && <button className="topbar-btn teal" onClick={() => startClaimExport({ currentTab: false })} disabled={exportBusy}><i className="bi bi-download" />Overall Download</button>}<button type="button" className="topbar-btn" onClick={logoutWorkflow}><i className="bi bi-box-arrow-right" />Logout</button></div>
       </header>
       <main className="lrn-content">
-        {view === 'claims' && <div className="claim-filter-toggle-row"><button type="button" className="wl-btn xs" onClick={() => setClaimFiltersOpen(v => !v)}><i className={`bi ${claimFiltersOpen ? 'bi-eye-slash' : 'bi-funnel'}`} />{claimFiltersOpen ? 'Hide Filters' : 'View Filters'}</button></div>}
+        <div className="claim-filter-toggle-row">
+          <div className="last-run-reference" title={lastRunReference?.outputFileName || lastRunReference?.OutputFileName || lastRunReference?.runId || lastRunReference?.RunId || ''}>
+            <i className="bi bi-file-earmark-text" />
+            <span className="last-run-label">Source File</span>
+            <strong>{lastRunLoading ? 'Loading...' : (lastRunReference?.fileNameWithoutExtension || lastRunReference?.FileNameWithoutExtension || 'Not available')}</strong>
+          </div>
+          {(view === 'dashboard' || view === 'claims') && <button type="button" className="wl-btn xs" onClick={() => view === 'dashboard' ? setDashboardFiltersOpen(v => !v) : setClaimFiltersOpen(v => !v)}><i className={`bi ${view === 'dashboard' ? (dashboardFiltersOpen ? 'bi-eye-slash' : 'bi-funnel') : (claimFiltersOpen ? 'bi-eye-slash' : 'bi-funnel')}`} />{view === 'dashboard' ? (dashboardFiltersOpen ? 'Hide Filters' : 'View Filters') : (claimFiltersOpen ? 'Hide Filters' : 'View Filters')}</button>}
+        </div>
         {view !== 'myworklist' && view !== 'aging' && (
-          <div className={(view === 'verification' || view === 'escalations' || (view === 'claims' && !claimFiltersOpen)) ? 'global-filter-hidden' : ''}>
+          <div className={(view === 'verification' || view === 'escalations' || (view === 'claims' && !claimFiltersOpen) || (view === 'dashboard' && !dashboardFiltersOpen)) ? 'global-filter-hidden' : ''}>
             <DashboardFilter filter={filter} setFilterValue={setFilterValue} clearFilter={clearFilter} reviewers={reviewers} options={filterOptions} />
           </div>
         )}
@@ -1040,7 +1149,7 @@ export default function App() {
           setMessage({ type: 'info', text: `Showing claims for ${row?.name || 'selected group'} / ${bucket?.label || 'aging bucket'}.` });
         }} />}
         {view === 'summary' && <DenialSummaryPage data={dashboard} canAssign={canAssign} onClassificationClick={openClaimsByClassification} onActionCategoryClick={openClaimsByActionCategory} onAssign={() => { setClaimTaskView('new'); setView((reviewerOnly || readOnlyWorkflow) ? 'myworklist' : 'claims'); setMessage({ type: 'info', text: canAssign ? 'Select the required claim rows, choose reviewer, then assign.' : 'This role has read-only workflow access.' }); }} />}
-        {view === 'claims' && <ClaimAssignmentPage data={claims} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} canAssign={canAssign} readOnlyWorkflow={readOnlyWorkflow} taskView={claimTaskView} setTaskView={handleClaimTaskViewChange} tabCounts={claimMenuCounts} openEscalationResponse={() => handleClaimTabRoute('response')} openVerification={() => handleClaimTabRoute('verification')} setMessage={setMessage} />}
+        {view === 'claims' && <ClaimAssignmentPage data={claims} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} canAssign={canAssign} readOnlyWorkflow={readOnlyWorkflow} taskView={claimTaskView} setTaskView={handleClaimTaskViewChange} tabCounts={claimMenuCounts} openEscalationResponse={() => handleClaimTabRoute('response')} openVerification={() => handleClaimTabRoute('verification')} setMessage={setMessage} onDownloadTab={() => startClaimExport({ currentTab: true })} exportBusy={exportBusy} exportStatusText={exportStatusText()} />}
         {view === 'verification' && <VerificationPage data={verification} changePage={changePage} tabCounts={claimMenuCounts} onTabChange={handleClaimTabRoute} reviewers={reviewers} canAssign={canAssign} assignClaims={assignClaims} />}
         {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setMessage} onSaved={() => { refreshReviewerNotification(); refreshWorkflowNotifications(); }} taskView={myWorklistView} setTaskView={handleMyWorklistViewChange} />}
         {view === 'escalations' && <EscalationQueuePage labId={labId} user={user} reviewers={reviewers} taskView={escalationView === 'response' ? 'claim' : escalationView} responseOnly={escalationView === 'response'} setTaskView={setEscalationView} tabCounts={claimMenuCounts} onClaimTabChange={handleClaimTabRoute} canAssign={canAssign} assignClaims={assignClaims} setMessage={setMessage} />}
