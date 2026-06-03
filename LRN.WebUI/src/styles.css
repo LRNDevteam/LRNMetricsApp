@@ -282,11 +282,11 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 
 .thin-bordered{
   border-collapse:collapse!important;
-  border:1px solid #d8dee9;
+  border:.5px solid #d8dee9;
 }
 .thin-bordered th,
 .thin-bordered td{
-  border:1px solid #d8dee9;
+  border:.5px solid #d8dee9!important;
 }
 
 /* My Worklist */
@@ -499,18 +499,20 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .notification-btn{position:relative;display:inline-flex;align-items:center;gap:7px;height:31px;padding:5px 10px;border:1px solid #cdeee8;border-radius:999px;background:#ecfdf8;color:#0f766e;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;box-shadow:0 1px 2px rgba(15,118,110,.08)}
 .notification-btn:hover{background:#dffaf2;border-color:#1abc9c;color:#075e55}.notification-btn .bi{font-size:14px}.notification-count{position:absolute;top:-7px;left:20px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#ef4444;color:#fff;border:2px solid #fff;display:inline-flex;align-items:center;justify-content:center;font-size:10px;line-height:1;font-weight:800}.notification-text b{font-size:12px;color:#0f766e}@media(max-width:1100px){.notification-text{display:none}.notification-btn{width:34px;justify-content:center;padding:5px}}
 .notification-wrap{position:relative}
-.workflow-notification-panel{position:absolute;right:0;top:38px;width:min(420px,92vw);max-height:70vh;overflow:auto;background:#fff;border:1px solid #d8dee9;border-radius:10px;box-shadow:0 18px 45px rgba(15,23,42,.2);z-index:2100;padding:8px}
+.workflow-notification-panel{position:absolute;right:0;top:38px;width:min(430px,92vw);max-height:70vh;overflow:auto;background:#fff;border:1px solid #d8dee9;border-radius:10px;box-shadow:0 18px 45px rgba(15,23,42,.2);z-index:2100;padding:8px}
 .workflow-notification-panel.popup{position:static;width:100%;max-height:62vh;box-shadow:none;border:0;border-radius:0;padding:10px 14px 14px}
 .workflow-notification-section+.workflow-notification-section{border-top:1px solid #eef2f7;margin-top:8px;padding-top:8px}
-.notification-section-head{width:100%;border:0;background:#f8fafc;border-radius:8px;padding:8px 10px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;color:#0f172a;font-size:12px;font-weight:800}
+.notification-section-head{width:100%;border:0;background:#f8fafc;border-radius:8px;padding:8px 10px;display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;color:#0f172a;font-size:12px;font-weight:800}
 .notification-section-head b{background:#1abc9c;color:#fff;border-radius:999px;min-width:26px;padding:2px 8px;text-align:center}
 .notification-claim-list{display:flex;flex-direction:column;gap:6px;margin-top:7px}
-.notification-claim-row{border:1px solid #e5e7eb;background:#fff;border-radius:8px;padding:8px 9px;text-align:left;cursor:pointer;display:grid;grid-template-columns:105px minmax(0,1fr);gap:2px 8px;align-items:center}
+.notification-claim-row{border:1px solid #e5e7eb;background:#fff;border-radius:8px;padding:9px 10px;text-align:left;cursor:pointer;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 10px;align-items:start;min-width:0}
 .notification-claim-row:hover{border-color:#1abc9c;background:#f8fffe}
-.notification-claim-row strong{font-size:12px;color:#0f766e}
-.notification-claim-row span{font-size:11px;color:#334155;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.notification-claim-row strong{font-size:12px;color:#0f766e;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.notification-claim-row span{font-size:10px;color:#0f766e;font-weight:800;justify-self:end;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .notification-claim-row small{grid-column:1 / -1;font-size:10px;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .notification-empty{padding:8px 4px;font-size:11px;color:#64748b;text-align:center}
+.text-count{margin-top:4px;text-align:right;font-size:10px;font-weight:700;color:#64748b;font-variant-numeric:tabular-nums}
+.text-count.warn{color:#b45309}
 .workflow-popup-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.52);z-index:3000;display:flex;align-items:flex-start;justify-content:center;padding:58px 18px}
 .workflow-popup-modal{width:min(680px,96vw);background:#fff;border-radius:12px;border:1px solid #d8dee9;box-shadow:0 24px 80px rgba(15,23,42,.35);overflow:hidden}
 .workflow-popup-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:13px 16px;border-bottom:1px solid #e5e7eb;background:#f8fafc}
@@ -1218,6 +1220,33 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .claim-split-shell{display:grid;grid-template-columns:minmax(360px,1fr);gap:12px;align-items:start}
 .claim-split-shell.drawer-open{grid-template-columns:minmax(340px,430px) minmax(0,1fr)}
 .claim-list-pane,.claim-drawer{background:#fff;border:.5px solid #d8dee9;border-radius:8px;box-shadow:0 2px 8px rgba(15,23,42,.08);overflow:hidden}
+.thin-list-border{border:.5px solid #d8dee9!important}
+.thin-list-border .claim-list-toolbar,
+.thin-list-border .claim-list-head,
+.thin-list-border .claim-list-row,
+.thin-list-border .claim-view-top{border-color:#d8dee9!important}
+.thin-list-border .claim-list-head,
+.thin-list-border .claim-list-row{
+  gap:0;
+  padding-left:0;
+  padding-right:0;
+}
+.thin-list-border .claim-list-head>span,
+.thin-list-border .claim-list-row>span{
+  height:100%;
+  min-height:100%;
+  padding-left:10px;
+  padding-right:10px;
+  border-right:.5px solid #d8dee9;
+}
+.thin-list-border .claim-list-head>span:last-child,
+.thin-list-border .claim-list-row>span:last-child{
+  border-right:0;
+}
+.thin-list-border .claim-list-head>span{
+  display:flex;
+  align-items:center;
+}
 .claim-view-top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border-bottom:.5px solid #d8dee9;background:#f8fafc}
 .claim-view-title{font-size:14px;font-weight:800;color:#0f172a}
 .claim-view-subtitle{font-size:10px;color:#64748b;margin-top:2px}
@@ -1229,6 +1258,10 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .claim-tab b{min-width:22px;height:18px;padding:0 6px;border-radius:999px;background:#fff;color:#0f766e;display:inline-flex;align-items:center;justify-content:center;font-size:10px;line-height:18px;font-variant-numeric:tabular-nums}
 .claim-tab.active{background:#1abc9c;color:#fff;border-color:#1abc9c}
 .claim-tab.active b{background:rgba(255,255,255,.94);color:#0f766e}
+.claim-tab.has-alert:not(.active){border-color:#ef4444;color:#991b1b;background:#fff1f2}
+.claim-tab.has-alert b{background:#ef4444;color:#fff}
+.lrn-nav-subitem.has-alert:not(.active) .nav-sub-count{background:#ef4444;color:#fff}
+.lrn-nav-subitem.has-alert:not(.active) .nav-sub-label{color:#fecaca}
 .claim-tab-download{height:30px;border:.5px solid #1abc9c;background:#fff;color:#0f766e;border-radius:6px;padding:0 10px;font-size:11px;font-weight:800;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px}
 .claim-tab-download:hover{background:#e8f8f3}
 .claim-tab-download:disabled{opacity:.55;cursor:not-allowed}
@@ -1251,9 +1284,21 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .claim-list-row.active{background:#f0fdfa}
 .claim-list-row.active{box-shadow:inset 3px 0 0 #1abc9c}
 .claim-row-check{display:flex;align-items:center}
+.my-worklist-spacer{width:13px;height:13px}
 .claim-expand-dot{width:22px;height:22px;border-radius:999px;display:flex;align-items:center;justify-content:center;background:#eef2f7;color:#475569;font-size:10px}
 .claim-list-id{display:flex;flex-direction:column;gap:2px;min-width:0}
 .claim-list-id strong{font-size:12px;color:#0f172a}
+.my-worklist-row .claim-id-link.as-text{
+  border:0;
+  background:transparent;
+  padding:0;
+  font:inherit;
+  font-size:12px;
+  font-weight:800;
+  color:#00a98f;
+  text-align:left;
+  cursor:inherit;
+}
 .claim-list-id small,.claim-task-table small{font-size:9px;color:#64748b;display:block;margin-top:2px}
 .claim-list-payer{font-size:11px;color:#334155;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .claim-list-amt{font-size:12px;font-weight:800;color:#0f172a;text-align:right}
@@ -1273,6 +1318,7 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .claim-drawer-tabs button.active{background:#1abc9c;color:#fff}
 .claim-drawer-body{overflow:auto;max-height:55vh}
 .claim-task-table{width:100%;border-collapse:collapse;min-width:920px;font-size:11px}
+.claim-task-table.full-task-columns{min-width:2600px}
 .claim-task-table th{position:sticky;top:0;z-index:1;background:#f8fafc;color:#64748b;text-transform:uppercase;letter-spacing:.06em;font-size:9px;padding:8px 10px;border-bottom:.5px solid #d8dee9;text-align:left}
 .claim-task-table td{padding:9px 10px;border-bottom:.5px solid #eef2f7;vertical-align:top;color:#0f172a}
 .claim-task-table .r{text-align:right}

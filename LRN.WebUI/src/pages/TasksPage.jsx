@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import Pager from '../components/Pager';
 import { statusOptions } from '../utils/options';
 import { money, date, statusClass, priorityClass, isClientManagerRole, isAccountManagerRole } from '../utils/formatters';
 import { denialWorkflowService } from '../services/denialWorkflowService';
+import { canDeleteClaimDocument } from '../utils/documentPermissions';
+import { MAX_TEXT_LENGTH, limitText, textCountLabel } from '../utils/textLimits';
 
 const claimEscReasons = ['Client Info Pending', 'Payer policy conflict across claim — need manager guidance', 'Multiple CPT lines impacted by same denial', 'Timely filing risk at claim level', 'High value claim requires approval', 'Other'];
 const lineEscReasons = ['Client Info Pending', 'Payer policy unclear — need guidance', 'Appeal requires manager approval', 'Coding / modifier review required', 'ICD coverage rule requires review', 'Other'];
@@ -34,6 +36,7 @@ export default function TasksPage({ data, saveTask, changePage, labId, currentUs
   const [escComment, setEscComment] = useState('');
   const [escalations, setEscalations] = useState([]);
   const [busy, setBusy] = useState(false);
+  const escalationSubmittingRef = useRef(false);
 
   function canClientEditTask(task) {
     return clientManager && isClientInfoPending(task);
@@ -41,6 +44,10 @@ export default function TasksPage({ data, saveTask, changePage, labId, currentUs
 
   function canEditTask(task) {
     return !accountManager && (!readOnlyWorkflow || canClientEditTask(task));
+  }
+
+  function canDeleteDocumentForTask(task) {
+    return canDeleteClaimDocument(task, { busy, canEdit: canEditTask(task) });
   }
 
   function canEscalateTask(task) {
@@ -99,6 +106,7 @@ export default function TasksPage({ data, saveTask, changePage, labId, currentUs
 
   async function deleteDocument(documentId) {
     if (!documentId || !canEditTask(docCtx)) return;
+    if (!canDeleteDocumentForTask(docCtx)) return;
     if (!window.confirm('Delete this uploaded document?')) return;
     setBusy(true);
     try {
@@ -120,13 +128,18 @@ export default function TasksPage({ data, saveTask, changePage, labId, currentUs
   }
 
   async function saveEscalation() {
+    if (escalationSubmittingRef.current) return;
     if (!canEscalateTask(escCtx)) return;
+    escalationSubmittingRef.current = true;
     setBusy(true);
     try {
       await denialWorkflowService.saveEscalation({ labId, claimId: escCtx.claimId, taskId: escCtx.taskId || '', cptCode: escCtx.cptCode || '', escalationLevel: 'Line', escalationReason: escReason, comments: escComment, status: 'Open', createdBy: currentUser || 'ReactWorkflow' });
       await saveTask(escCtx, 'Escalated', `${escReason}${escComment ? ' - ' + escComment : ''}`);
       setEscCtx(null);
-    } finally { setBusy(false); }
+    } finally {
+      escalationSubmittingRef.current = false;
+      setBusy(false);
+    }
   }
 
   return <>
@@ -136,9 +149,9 @@ export default function TasksPage({ data, saveTask, changePage, labId, currentUs
     </div>
     <Pager data={data} changePage={changePage} />
 
-    {noteCtx && <Modal title={`Task Notes · ${noteCtx.taskId || ''}`} onClose={() => setNoteCtx(null)}><div className="wl-modal-body">{!clientManager && <label>Status<select className="wl-full" value={noteStatus} onChange={e => setNoteStatus(e.target.value)}>{statusOptions.filter(Boolean).map(x => <option key={x}>{x}</option>)}</select></label>}<label>Comments<textarea className="wl-textarea" value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Enter task note..." /></label><button className="wl-btn teal" disabled={busy || !canEditTask(noteCtx)} onClick={saveNote}>Save comment</button><h4>History</h4>{notes.map(n => <div className="wl-history" key={n.noteId}><div>{n.noteText}</div><small>{n.createdBy} · {date(n.createdOn)}</small></div>)}</div></Modal>}
-    {docCtx && <Modal title={`Upload Documents · ${docCtx.claimId || ''}`} onClose={() => setDocCtx(null)}><div className="wl-modal-body"><input type="file" multiple onChange={e => setDocFiles(e.target.files)} /><textarea className="wl-textarea" value={docComment} onChange={e => setDocComment(e.target.value)} placeholder="Document comment..." /><button className="wl-btn teal" disabled={busy || !canEditTask(docCtx)} onClick={uploadDocs}>Upload documents</button><h4>Uploaded documents</h4>{docs.map(d => <div className="wl-history" key={d.documentId}><b>{d.originalFileName}</b><div>{d.comment}</div><small>{d.uploadedBy} · {date(d.uploadedOn)} · {Math.round(Number(d.fileSizeBytes || 0) / 1024)} KB</small><div className="doc-row-actions"><button className="wl-btn xs" type="button" onClick={() => openDocument(d.documentId)}>Download</button><button className="wl-btn red xs" type="button" disabled={busy || !canEditTask(docCtx)} onClick={() => deleteDocument(d.documentId)}>Delete</button></div></div>)}</div></Modal>}
-    {escCtx && <Modal title={`Escalation · ${escCtx.taskId || ''}`} onClose={() => setEscCtx(null)}><div className="wl-modal-body"><label>Escalation reason<select className="wl-full" value={escReason} onChange={e => setEscReason(e.target.value)}>{lineEscReasons.map(x => <option key={x}>{x}</option>)}</select></label><label>Escalation comments<textarea className="wl-textarea" value={escComment} onChange={e => setEscComment(e.target.value)} placeholder="Explain what manager has to review..." /></label><button className="wl-btn red" disabled={busy || !canEscalateTask(escCtx)} onClick={saveEscalation}>Submit escalation</button><h4>Escalation history</h4>{escalations.map(x => <div className="wl-history" key={x.escalationId}><b>{x.escalationReason}</b><div>{x.comments}</div><small>{x.status} · {x.createdBy} · {date(x.createdOn)}</small></div>)}</div></Modal>}
+    {noteCtx && <Modal title={`Task Notes · ${noteCtx.taskId || ''}`} onClose={() => setNoteCtx(null)}><div className="wl-modal-body">{!clientManager && <label>Status<select className="wl-full" value={noteStatus} onChange={e => setNoteStatus(e.target.value)}>{statusOptions.filter(Boolean).map(x => <option key={x}>{x}</option>)}</select></label>}<label>Comments<textarea className="wl-textarea" maxLength={MAX_TEXT_LENGTH} value={noteText} onChange={e => setNoteText(limitText(e.target.value))} placeholder="Enter task note..." /><div className="text-count">{textCountLabel(noteText)}</div></label><button className="wl-btn teal" disabled={busy || !canEditTask(noteCtx)} onClick={saveNote}>Save comment</button><h4>History</h4>{notes.map(n => <div className="wl-history" key={n.noteId}><div>{n.noteText}</div><small>{n.createdBy} · {date(n.createdOn)}</small></div>)}</div></Modal>}
+    {docCtx && <Modal title={`Upload Documents · ${docCtx.claimId || ''}`} onClose={() => setDocCtx(null)}><div className="wl-modal-body"><input type="file" multiple onChange={e => setDocFiles(e.target.files)} /><div><textarea className="wl-textarea" maxLength={MAX_TEXT_LENGTH} value={docComment} onChange={e => setDocComment(limitText(e.target.value))} placeholder="Document comment..." /><div className="text-count">{textCountLabel(docComment)}</div></div><button className="wl-btn teal" disabled={busy || !canEditTask(docCtx)} onClick={uploadDocs}>Upload documents</button><h4>Uploaded documents</h4>{docs.map(d => <div className="wl-history" key={d.documentId}><b>{d.originalFileName}</b><div>{d.comment}</div><small>{d.uploadedBy} · {date(d.uploadedOn)} · {Math.round(Number(d.fileSizeBytes || 0) / 1024)} KB</small><div className="doc-row-actions"><button className="wl-btn xs" type="button" onClick={() => openDocument(d.documentId)}>Download</button>{canDeleteDocumentForTask(docCtx) && <button className="wl-btn red xs" type="button" onClick={() => deleteDocument(d.documentId)}>Delete</button>}</div></div>)}</div></Modal>}
+    {escCtx && <Modal title={`Escalation · ${escCtx.taskId || ''}`} onClose={() => setEscCtx(null)}><div className="wl-modal-body"><label>Escalation reason<select className="wl-full" value={escReason} disabled={busy} onChange={e => setEscReason(e.target.value)}>{lineEscReasons.map(x => <option key={x}>{x}</option>)}</select></label><label>Escalation comments<textarea className="wl-textarea" maxLength={MAX_TEXT_LENGTH} value={escComment} disabled={busy} onChange={e => setEscComment(limitText(e.target.value))} placeholder="Explain what manager has to review..." /><div className="text-count">{textCountLabel(escComment)}</div></label><button className="wl-btn red" disabled={busy || !canEscalateTask(escCtx)} onClick={saveEscalation}>{busy ? 'Submitting escalation...' : 'Submit escalation'}</button><h4>Escalation history</h4>{escalations.map(x => <div className="wl-history" key={x.escalationId}><b>{x.escalationReason}</b><div>{x.comments}</div><small>{x.status} · {x.createdBy} · {date(x.createdOn)}</small></div>)}</div></Modal>}
   </>;
 }
 
@@ -150,3 +163,4 @@ function TaskRow({ task, openNote, openDocs, openEsc, showActionsColumn = true, 
     <td>{task.taskId}</td><td className="claim-link">{task.claimId}</td><td>{task.patientId}</td><td>{task.cptCode}</td><td>{task.units ?? '-'}</td><td>{task.modifier || '-'}</td><td>{task.denialCode}</td><td className="wrap-cell">{task.denialDescription}</td><td>{task.denialClassification}</td><td>{task.actionCategory}</td><td><span className={`badge ${priorityClass(task.priority)}`}>{task.priority || 'Normal'}</span></td><td><span className={`badge ${statusClass(task.status)}`}>{task.status || 'New'}</span></td><td>{task.assignedTo}</td><td>{money(task.insuranceBalance)}</td><td>{date(task.dueDate)}</td><td>{date(task.createdOn)}</td><td>{task.slaStatus}</td><td>{task.payerName}</td><td className="wrap-cell">{task.reviewerComments}</td>
   </tr>;
 }
+

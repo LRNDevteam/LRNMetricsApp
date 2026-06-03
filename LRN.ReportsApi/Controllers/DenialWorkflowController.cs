@@ -307,6 +307,9 @@ public sealed class DenialWorkflowController : ControllerBase
         if ((IsClientManagerRole(role) || IsAccountManagerRole(role)) && !await HasClientInfoPendingEscalationAsync(labId, doc.ClaimId, null, null, ct))
             return StatusCode(StatusCodes.Status403Forbidden, new { message = "Client/Account Manager can delete documents only for Client Info Pending escalations." });
 
+        if (!await _service.CanDeleteClaimDocumentAsync(labId, doc.ClaimId, ct))
+            return StatusCode(StatusCodes.Status409Conflict, new { message = "Documents can be deleted only while the claim is still in the active editable stage." });
+
         var deleted = await _service.DeleteClaimDocumentAsync(labId, documentId, ct);
         return deleted > 0 ? NoContent() : NotFound("Document was not found.");
     }

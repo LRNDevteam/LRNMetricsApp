@@ -162,6 +162,7 @@ public sealed class DenialClassificationSummaryRow
     public decimal InsuranceBalance { get; set; }
     public decimal Outstanding { get; set; }
     public decimal PercentageOfTotal { get; set; }
+    public int Assigned { get; set; }
     public int Open { get; set; }
     public int InProgress { get; set; }
     public int Closed { get; set; }

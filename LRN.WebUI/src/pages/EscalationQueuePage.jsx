@@ -3,6 +3,8 @@ import { denialWorkflowService } from '../services/denialWorkflowService';
 import Pager from '../components/Pager';
 import ClaimHistoryModal from '../components/ClaimHistoryModal';
 import { money, date, initials, statusClass } from '../utils/formatters';
+import { canDeleteClaimDocument } from '../utils/documentPermissions';
+import { MAX_TEXT_LENGTH, limitText, textCountLabel } from '../utils/textLimits';
 
 const resolutionActions = [
   { value: '', label: '— Select resolution action —' },
@@ -227,6 +229,8 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
     try {
       if (responseFiles?.length) {
         await denialWorkflowService.uploadClaimDocuments(labId, row.claimId, `Escalation response upload: ${draft.responseNote || ''}`, user?.userName || 'ReactWorkflow', responseFiles);
+        setResponseDocs(await denialWorkflowService.getClaimDocuments(labId, row.claimId) || []);
+        setResponseFiles([]);
       }
       const finalResponseNote = action === 'others' ? `Other Reason: ${String(draft.otherReason || '').trim()}\n${draft.responseNote}` : draft.responseNote;
       const result = await denialWorkflowService.resolveEscalation({
@@ -258,6 +262,7 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
 
   async function deleteDocument(documentId, row = activeRow || drawerRow) {
     if (!documentId || !row?.claimId) return;
+    if (!canDeleteClaimDocument(row, { busy, taskView: responseOnly ? 'response' : taskView })) return setMessage({ type: 'warning', text: 'Documents can be deleted only while the claim is still in the active editable stage.' });
     if (!window.confirm('Delete this uploaded document?')) return;
     setBusy(true);
     try {
@@ -311,7 +316,7 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
               <div className="history-section-title">Escalation note</div>
               <div className="modal-row"><div className="modal-row-title">{drawerRow.escalationReason || '-'}</div><div className="modal-row-meta">{drawerRow.comments || 'No escalation comment entered.'}</div></div>
               <div className="history-section-title">Documents</div>
-              {responseDocs.length ? responseDocs.map(d => <div className="modal-row document-row" key={d.documentId}><div><div className="modal-row-title">{d.originalFileName}</div><div className="modal-row-meta">{d.uploadedBy || '-'} - {date(d.uploadedOn)}</div></div><div className="doc-row-actions"><button className="wl-btn xs" type="button" onClick={() => openDocument(d.documentId)}>Download</button><button className="wl-btn red xs" type="button" disabled={busy} onClick={() => deleteDocument(d.documentId, drawerRow)}>Delete</button></div></div>) : <div className="modal-row"><div className="modal-row-title">No documents uploaded</div></div>}
+              {responseDocs.length ? responseDocs.map(d => <div className="modal-row document-row" key={d.documentId}><div><div className="modal-row-title">{d.originalFileName}</div><div className="modal-row-meta">{d.uploadedBy || '-'} - {date(d.uploadedOn)}</div></div><div className="doc-row-actions"><button className="wl-btn xs" type="button" onClick={() => openDocument(d.documentId)}>Download</button>{canDeleteClaimDocument(drawerRow, { busy, taskView: responseOnly ? 'response' : taskView }) && <button className="wl-btn red xs" type="button" onClick={() => deleteDocument(d.documentId, drawerRow)}>Delete</button>}</div></div>) : <div className="modal-row"><div className="modal-row-title">No documents uploaded</div></div>}
             </div>
           </div>
         </section>}
@@ -360,11 +365,11 @@ function EscalationRow({ row, level, onOpen, onHistory }) {
 }
 
 function EscalationModal({ row, level, draft, setDraft, reviewers, canReassign, resolve, busy, close, tasks, tasksBusy, onHistory, modalError, setModalError, responseFiles, setResponseFiles, responseDocs, openDocument, deleteDocument }) {
-  return <div className="esc-modal-backdrop" onMouseDown={close}>
+  return <div className="esc-modal-backdrop" onMouseDown={busy ? undefined : close}>
     <div className="esc-modal" role="dialog" aria-modal="true" onMouseDown={e => e.stopPropagation()}>
       <div className="esc-modal-hd">
         <div><h3>Esclation Response</h3><p>{row.escalationReason || 'Manager response required'}</p></div>
-        <button type="button" className="esc-modal-close" onClick={close}>×</button>
+        <button type="button" className="esc-modal-close" disabled={busy} onClick={close}>×</button>
       </div>
       <div className="esc-modal-body">
         <EscalationDetail row={row} level={level} draft={draft} setDraft={setDraft} reviewers={reviewers} canReassign={canReassign} resolve={resolve} busy={busy} modalError={modalError} setModalError={setModalError} responseFiles={responseFiles} setResponseFiles={setResponseFiles} responseDocs={responseDocs} openDocument={openDocument} deleteDocument={deleteDocument} />
@@ -400,18 +405,18 @@ function EscalationDetail({ row, draft, setDraft, reviewers, canReassign, resolv
       <div>
         <div className="esc-section-title">Manager response</div>
         {modalError ? <div className="esc-inline-error"><i className="bi bi-exclamation-circle" /> {modalError}</div> : null}
-        <label className="esc-label">Response action<select className="wl-full" value={action} onChange={e => setDraft({ resolutionAction: e.target.value, reassignTo: '', otherReason: '' })}>{resolutionActions.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}</select></label>
+        <label className="esc-label">Response action<select className="wl-full" value={action} disabled={busy} onChange={e => setDraft({ resolutionAction: e.target.value, reassignTo: '', otherReason: '' })}>{resolutionActions.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}</select></label>
         {action === 'rework' && <div className="esc-help">Choose an AR Reviewer to reassign the claim, or leave it blank to move it back to the unassigned queue.</div>}
-        {action === 'others' && <label className="esc-label">Other reason <span>*</span><input className="wl-full" value={draft.otherReason || ''} onChange={e => setDraft({ otherReason: e.target.value })} placeholder="Enter other response reason..." /></label>}
-        <label className="esc-label">Add / update response note to {row.analyst || row.createdBy || 'analyst'} <span>*</span><textarea className="wl-textarea esc-response" value={draft.responseNote || ''} onChange={e => setDraft({ responseNote: e.target.value })} placeholder="Add clarification, decision, or instructions for the analyst — this will be visible in their work list..." /></label>
-        {showReassign && <label className="esc-label">Reassign claim to AR Reviewer<select className="wl-full" value={draft.reassignTo || ''} onChange={e => setDraft({ reassignTo: e.target.value })}><option value="">{action === 'rework' ? 'Move to unassigned' : 'Keep current reviewer'}</option>{arReviewers.map(r => <option key={r.userName || r.UserName} value={r.userName || r.UserName}>{r.displayName || r.DisplayName || r.userName || r.UserName}</option>)}</select></label>}
-        <label className="esc-label">Optional document upload<input type="file" multiple onChange={e => setResponseFiles(Array.from(e.target.files || []))} /></label>{responseFiles?.length ? <div className="esc-help">{responseFiles.length} file(s) selected.</div> : null}
-        {responseDocs?.length ? <div className="esc-doc-list">{responseDocs.map(d => <div className="esc-doc-row" key={d.documentId}><span>{d.originalFileName}</span><div className="doc-row-actions"><button className="wl-btn xs" type="button" onClick={() => openDocument?.(d.documentId)}>View / Download</button><button className="wl-btn red xs" type="button" disabled={busy} onClick={() => deleteDocument?.(d.documentId, row)}>Delete</button></div></div>)}</div> : null}
+        {action === 'others' && <label className="esc-label">Other reason <span>*</span><input className="wl-full" value={draft.otherReason || ''} disabled={busy} onChange={e => setDraft({ otherReason: e.target.value })} placeholder="Enter other response reason..." /></label>}
+        <label className="esc-label">Add / update response note to {row.analyst || row.createdBy || 'analyst'} <span>*</span><textarea className="wl-textarea esc-response" maxLength={MAX_TEXT_LENGTH} value={draft.responseNote || ''} disabled={busy} onChange={e => setDraft({ responseNote: limitText(e.target.value) })} placeholder="Add clarification, decision, or instructions for the analyst — this will be visible in their work list..." /><div className="text-count">{textCountLabel(draft.responseNote)}</div></label>
+        {showReassign && <label className="esc-label">Reassign claim to AR Reviewer<select className="wl-full" value={draft.reassignTo || ''} disabled={busy} onChange={e => setDraft({ reassignTo: e.target.value })}><option value="">{action === 'rework' ? 'Move to unassigned' : 'Keep current reviewer'}</option>{arReviewers.map(r => <option key={r.userName || r.UserName} value={r.userName || r.UserName}>{r.displayName || r.DisplayName || r.userName || r.UserName}</option>)}</select></label>}
+        <label className="esc-label">Optional document upload<input type="file" multiple disabled={busy} onChange={e => setResponseFiles(Array.from(e.target.files || []))} /></label>{responseFiles?.length ? <div className="esc-help">{responseFiles.length} file(s) selected.</div> : null}
+        {responseDocs?.length ? <div className="esc-doc-list">{responseDocs.map(d => <div className="esc-doc-row" key={d.documentId}><span>{d.originalFileName}</span><div className="doc-row-actions"><button className="wl-btn xs" type="button" onClick={() => openDocument?.(d.documentId)}>View / Download</button>{canDeleteClaimDocument(row, { busy }) && <button className="wl-btn red xs" type="button" onClick={() => deleteDocument?.(d.documentId, row)}>Delete</button>}</div></div>)}</div> : null}
         <div className="esc-help">Submit will send the response back for AR Manager verification.</div>
       </div>
     </div>
     <div className="esc-action-bar">
-      <button className="wl-btn teal" disabled={busy || !action || (action === 'others' && !String(draft.otherReason || '').trim())} onClick={() => resolve(row, action, setModalError)}>Submit</button>
+      <button className="wl-btn teal" disabled={busy || !action || (action === 'others' && !String(draft.otherReason || '').trim())} onClick={() => resolve(row, action, setModalError)}>{busy ? 'Submitting response...' : 'Submit'}</button>
     </div>
   </div>;
 }
@@ -428,3 +433,4 @@ function LineTasksTable({ title, row, tasks, busy, compact, hideHistory = false,
 function Info({ label, value }) {
   return <div className="esc-info"><label>{label}</label><div>{value}</div></div>;
 }
+

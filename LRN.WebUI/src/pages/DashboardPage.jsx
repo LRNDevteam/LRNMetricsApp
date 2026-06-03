@@ -38,7 +38,7 @@ function ManagerDashboard({ data }) {
       </div>
       <RoleCard title="Denial Classification Summary">
         <div className="role-table-wrap"><table className="role-table wide"><thead><tr><th>Classification</th><th>Claims</th><th>Balance</th><th>Assigned</th><th>In Progress</th><th>Closed</th><th>SLA Risk</th></tr></thead><tbody>
-          {classifications.length ? classifications.map((r, i) => <tr key={i}><td>{r.classification || '-'}</td><td>{n(r.count)}</td><td>{money(r.outstanding)}</td><td>{n(r.assigned || Math.round(Number(r.count || 0) * .75))}</td><td>{n(r.inProgress || Math.round(Number(r.count || 0) * .35))}</td><td>{n(r.closed || r.closedCount || 0)}</td><td><RiskPill value={r.slaRisk || r.risk || (Number(r.percentageOfTotal || 0) > 25 ? 'High' : 'Medium')} /></td></tr>) : <EmptyRow colSpan={7} />}
+          {classifications.length ? classifications.map((r, i) => <tr key={i}><td>{r.classification || '-'}</td><td>{n(r.count)}</td><td>{money(r.outstanding)}</td><td>{n(r.assigned ?? r.assignedCount ?? 0)}</td><td>{n(r.inProgress ?? r.inProgressCount ?? 0)}</td><td>{n(r.closed ?? r.closedCount ?? 0)}</td><td><RiskPill value={r.slaRisk || r.risk || (Number(r.percentageOfTotal || 0) > 25 ? 'High' : 'Medium')} /></td></tr>) : <EmptyRow colSpan={7} />}
         </tbody></table></div>
       </RoleCard>
     </div>

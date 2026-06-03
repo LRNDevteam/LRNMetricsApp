@@ -32,6 +32,7 @@ public interface IDenialWorkflowService
     Task<IReadOnlyList<ClaimDocumentRow>> GetClaimDocumentsAsync(int labId, string claimId, CancellationToken ct);
     Task<ClaimDocumentRow?> GetClaimDocumentAsync(int labId, long documentId, CancellationToken ct);
     Task<ClaimDocumentRow> SaveClaimDocumentAsync(ClaimDocumentRow row, CancellationToken ct);
+    Task<bool> CanDeleteClaimDocumentAsync(int labId, string claimId, CancellationToken ct);
     Task<int> DeleteClaimDocumentAsync(int labId, long documentId, CancellationToken ct);
     Task<IReadOnlyList<DenialClaimHistoryRow>> GetClaimHistoryAsync(int labId, string claimId, string? taskId, string? cptCode, string historyLevel, CancellationToken ct);
     Task<IReadOnlyList<DenialEscalationRow>> GetEscalationsAsync(int labId, string claimId, string? taskId, string? cptCode, string escalationLevel, CancellationToken ct);
@@ -155,6 +156,7 @@ public sealed class DenialWorkflowService : IDenialWorkflowService
     public Task<IReadOnlyList<ClaimDocumentRow>> GetClaimDocumentsAsync(int labId, string claimId, CancellationToken ct) => _repo.GetClaimDocumentsAsync(labId, claimId, ct);
     public Task<ClaimDocumentRow?> GetClaimDocumentAsync(int labId, long documentId, CancellationToken ct) => _repo.GetClaimDocumentAsync(labId, documentId, ct);
     public async Task<ClaimDocumentRow> SaveClaimDocumentAsync(ClaimDocumentRow row, CancellationToken ct) { await _repo.EnsureClaimSupportTablesAsync(row.LabId, ct); return await _repo.SaveClaimDocumentAsync(row, ct); }
+    public async Task<bool> CanDeleteClaimDocumentAsync(int labId, string claimId, CancellationToken ct) { await _repo.EnsureClaimSupportTablesAsync(labId, ct); return await _repo.CanDeleteClaimDocumentAsync(labId, claimId, ct); }
     public async Task<int> DeleteClaimDocumentAsync(int labId, long documentId, CancellationToken ct) { await _repo.EnsureClaimSupportTablesAsync(labId, ct); return await _repo.DeleteClaimDocumentAsync(labId, documentId, ct); }
     public Task<IReadOnlyList<DenialClaimHistoryRow>> GetClaimHistoryAsync(int labId, string claimId, string? taskId, string? cptCode, string historyLevel, CancellationToken ct) => _repo.GetClaimHistoryAsync(labId, claimId, taskId, cptCode, historyLevel, ct);
     public Task<IReadOnlyList<DenialEscalationRow>> GetEscalationsAsync(int labId, string claimId, string? taskId, string? cptCode, string escalationLevel, CancellationToken ct) => _repo.GetEscalationsAsync(labId, claimId, taskId, cptCode, escalationLevel, ct);
