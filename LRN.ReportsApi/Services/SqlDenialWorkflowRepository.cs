@@ -2426,7 +2426,7 @@ DECLARE @Changed TABLE(TaskID nvarchar(100), ClaimId nvarchar(150), OldWorkFlowS
 
 UPDATE dbo.DenialTaskBoard
 SET Status=@Status,
-    WorkFlowStatus=CASE WHEN @IsClosed=1 THEN 'Closed Claim' ELSE ISNULL(NULLIF(WorkFlowStatus,''), 'Assigned To AR Reviewer') END,
+    WorkFlowStatus=CASE WHEN @IsClosed=1 THEN 'Closed Claim' ELSE NULLIF(@Status,'') END,
     ReviewerComments=@Comments,
     ReviewerUpdatedBy=@ActionBy,
     ReviewerUpdatedOn=SYSDATETIME(),
@@ -2438,7 +2438,7 @@ WHERE TaskID=@TaskID;
 IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL
 BEGIN
     UPDATE l
-    SET WorkFlowStatus = CASE WHEN @IsClosed=1 THEN 'Closed Claim' ELSE ISNULL(NULLIF(l.WorkFlowStatus,''), 'Assigned To AR Reviewer') END
+    SET WorkFlowStatus = CASE WHEN @IsClosed=1 THEN 'Closed Claim' ELSE NULLIF(@Status,'') END
     FROM dbo.DenialLineItem l
     JOIN @Changed c ON CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))), 'CLM-', ''))=c.ClaimId;
 END;
@@ -3348,13 +3348,15 @@ IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL AND COL_LENGTH('dbo.DenialLin
 		var sql = isLine ? @"
 SELECT TOP (200) NoteId,LabId,ClaimId,TaskId,CptCode,NoteLevel,NoteText,Status,NextFollowUpDate,CreatedBy,CreatedOn
 FROM dbo.DenialClaimNotes WITH (NOLOCK)
-WHERE IsDeleted=0 AND LabId=@LabId AND ClaimId=@ClaimId AND NoteLevel='Line'
+WHERE IsDeleted=0 AND LabId=@LabId AND NoteLevel='Line'
+  AND (ClaimId=@ClaimId OR REPLACE(LTRIM(RTRIM(ISNULL(ClaimId,''))), 'CLM-', '') = REPLACE(LTRIM(RTRIM(ISNULL(@ClaimId,''))), 'CLM-', ''))
   AND (@TaskId='' OR ISNULL(TaskId,'')=@TaskId)
   AND (@CptCode='' OR ISNULL(CptCode,'')=@CptCode)
 ORDER BY CreatedOn DESC, NoteId DESC;" : @"
 SELECT TOP (200) NoteId,LabId,ClaimId,TaskId,CptCode,NoteLevel,NoteText,Status,NextFollowUpDate,CreatedBy,CreatedOn
 FROM dbo.DenialClaimNotes WITH (NOLOCK)
-WHERE IsDeleted=0 AND LabId=@LabId AND ClaimId=@ClaimId AND NoteLevel='Claim'
+WHERE IsDeleted=0 AND LabId=@LabId AND NoteLevel='Claim'
+  AND (ClaimId=@ClaimId OR REPLACE(LTRIM(RTRIM(ISNULL(ClaimId,''))), 'CLM-', '') = REPLACE(LTRIM(RTRIM(ISNULL(@ClaimId,''))), 'CLM-', ''))
 ORDER BY CreatedOn DESC, NoteId DESC;";
 		await using var con = OpenLab(labId);
 		await con.OpenAsync(ct);
@@ -3398,7 +3400,8 @@ VALUES(@LabId,@ClaimId,@TaskId,@CptCode,@NoteLevel,@NoteText,@Status,@NextFollow
 		const string sql = @"
 SELECT TOP (200) DocumentId,LabId,ClaimId,OriginalFileName,StoredFileName,ContentType,FileSizeBytes,FilePath,Comment,UploadedBy,UploadedOn
 FROM dbo.DenialClaimDocuments WITH (NOLOCK)
-WHERE IsDeleted=0 AND LabId=@LabId AND ClaimId=@ClaimId
+WHERE IsDeleted=0 AND LabId=@LabId
+  AND (ClaimId=@ClaimId OR REPLACE(LTRIM(RTRIM(ISNULL(ClaimId,''))), 'CLM-', '') = REPLACE(LTRIM(RTRIM(ISNULL(@ClaimId,''))), 'CLM-', ''))
 ORDER BY UploadedOn DESC, DocumentId DESC;";
 		var rows = new List<ClaimDocumentRow>();
 		await using var con = OpenLab(labId);
@@ -3619,7 +3622,8 @@ SELECT TOP (500)
     CreatedBy = ISNULL(n.CreatedBy,''),
     CreatedOn = n.CreatedOn
 FROM dbo.DenialClaimNotes n WITH (NOLOCK)
-WHERE n.IsDeleted=0 AND n.LabId=@LabId AND n.ClaimId=@ClaimId
+WHERE n.IsDeleted=0 AND n.LabId=@LabId
+  AND (n.ClaimId=@ClaimId OR REPLACE(LTRIM(RTRIM(ISNULL(n.ClaimId,''))), 'CLM-', '') = REPLACE(LTRIM(RTRIM(ISNULL(@ClaimId,''))), 'CLM-', ''))
   AND (@Level='Claim' OR n.NoteLevel='Line')
   AND (@Level='Claim' OR @TaskId='' OR ISNULL(n.TaskId,'')=@TaskId)
   AND (@Level='Claim' OR @CptCode='' OR ISNULL(n.CptCode,'')=@CptCode)
@@ -3643,7 +3647,8 @@ SELECT TOP (500)
     CreatedBy = ISNULL(e.CreatedBy,''),
     CreatedOn = e.CreatedOn
 FROM dbo.DenialClaimEscalations e WITH (NOLOCK)
-WHERE e.IsDeleted=0 AND e.LabId=@LabId AND e.ClaimId=@ClaimId
+WHERE e.IsDeleted=0 AND e.LabId=@LabId
+  AND (e.ClaimId=@ClaimId OR REPLACE(LTRIM(RTRIM(ISNULL(e.ClaimId,''))), 'CLM-', '') = REPLACE(LTRIM(RTRIM(ISNULL(@ClaimId,''))), 'CLM-', ''))
   AND (@Level='Claim' OR e.EscalationLevel='Line')
   AND (@Level='Claim' OR @TaskId='' OR ISNULL(e.TaskId,'')=@TaskId)
   AND (@Level='Claim' OR @CptCode='' OR ISNULL(e.CptCode,'')=@CptCode)
@@ -3667,7 +3672,9 @@ SELECT TOP (500)
     CreatedBy = ISNULL(d.UploadedBy,''),
     CreatedOn = d.UploadedOn
 FROM dbo.DenialClaimDocuments d WITH (NOLOCK)
-WHERE d.IsDeleted=0 AND d.LabId=@LabId AND d.ClaimId=@ClaimId AND @Level='Claim'
+WHERE d.IsDeleted=0 AND d.LabId=@LabId
+  AND (d.ClaimId=@ClaimId OR REPLACE(LTRIM(RTRIM(ISNULL(d.ClaimId,''))), 'CLM-', '') = REPLACE(LTRIM(RTRIM(ISNULL(@ClaimId,''))), 'CLM-', ''))
+  AND @Level='Claim'
 ORDER BY d.UploadedOn DESC, d.DocumentId DESC;
 
 DROP TABLE #ClaimTasks;";
@@ -3702,13 +3709,15 @@ DROP TABLE #ClaimTasks;";
 		var sql = isLine ? @"
 SELECT TOP (200) EscalationId,LabId,ClaimId,TaskId,CptCode,EscalationLevel,EscalationReason,Comments,Status,EscalatedTo,EscalatedToRole,NextFollowUpDate,CreatedBy,CreatedOn
 FROM dbo.DenialClaimEscalations WITH (NOLOCK)
-WHERE IsDeleted=0 AND LabId=@LabId AND ClaimId=@ClaimId AND EscalationLevel='Line'
+WHERE IsDeleted=0 AND LabId=@LabId AND EscalationLevel='Line'
+  AND (ClaimId=@ClaimId OR REPLACE(LTRIM(RTRIM(ISNULL(ClaimId,''))), 'CLM-', '') = REPLACE(LTRIM(RTRIM(ISNULL(@ClaimId,''))), 'CLM-', ''))
   AND (@TaskId='' OR ISNULL(TaskId,'')=@TaskId)
   AND (@CptCode='' OR ISNULL(CptCode,'')=@CptCode)
 ORDER BY CreatedOn DESC, EscalationId DESC;" : @"
 SELECT TOP (200) EscalationId,LabId,ClaimId,TaskId,CptCode,EscalationLevel,EscalationReason,Comments,Status,EscalatedTo,EscalatedToRole,NextFollowUpDate,CreatedBy,CreatedOn
 FROM dbo.DenialClaimEscalations WITH (NOLOCK)
-WHERE IsDeleted=0 AND LabId=@LabId AND ClaimId=@ClaimId AND EscalationLevel='Claim'
+WHERE IsDeleted=0 AND LabId=@LabId AND EscalationLevel='Claim'
+  AND (ClaimId=@ClaimId OR REPLACE(LTRIM(RTRIM(ISNULL(ClaimId,''))), 'CLM-', '') = REPLACE(LTRIM(RTRIM(ISNULL(@ClaimId,''))), 'CLM-', ''))
 ORDER BY CreatedOn DESC, EscalationId DESC;";
 		await using var con = OpenLab(labId);
 		await con.OpenAsync(ct);

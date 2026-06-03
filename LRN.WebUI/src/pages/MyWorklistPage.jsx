@@ -9,6 +9,7 @@ const money = v => Number(v || 0).toLocaleString(undefined, { style: 'currency',
 const statusOptions = ['Open', 'In Progress', 'Pending Payer', 'Pending Documentation', 'Escalated', 'Closed'];
 const claimEscReasons = ['EOB Pending', 'Client Info Pending', 'Document Required', 'Others'];
 const lineEscReasons = ['EOB Pending', 'Client Info Pending', 'Document Required', 'Others'];
+const statusRank = ['Escalated', 'Pending Documentation', 'Pending Payer', 'In Progress', 'Open', 'Closed'];
 
 function roleIsReviewerOnly(role) {
   const r = String(role || '').toLowerCase();
@@ -37,7 +38,11 @@ function groupByClaim(rows) {
     if ((!c.subscriberId || c.subscriberId === '-') && t.subscriberId) c.subscriberId = t.subscriberId;
     if (!c.createdOn || (t.createdOn && new Date(t.createdOn) > new Date(c.createdOn))) c.createdOn = t.createdOn;
     if (!c.assignedTo || c.assignedTo === '-') c.assignedTo = t.assignedTo || '-';
-    if (String(t.status || '').toLowerCase().includes('escal')) c.status = 'Escalated';
+    const rowStatus = t.status || 'Open';
+    const currentRank = statusRank.findIndex(x => x.toLowerCase() === String(c.status || '').toLowerCase());
+    const rowRank = statusRank.findIndex(x => x.toLowerCase() === String(rowStatus).toLowerCase());
+    if (rowRank >= 0 && (currentRank < 0 || rowRank < currentRank)) c.status = rowStatus;
+    if (String(rowStatus).toLowerCase().includes('escal')) c.status = 'Escalated';
   });
   return Array.from(map.values());
 }
@@ -168,9 +173,9 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
 
   async function openNote(level, claim, task) {
     const key = task ? lineOptions(claim).find(x => x.taskId === (task.taskId || '') && x.cptCode === (task.cptCode || ''))?.key || '' : '';
-    const ctx = { level: 'Claim', claim, task: null };
+    const ctx = { level: level === 'Line' || task ? 'Line' : 'Claim', claim, task: task || null };
     setNoteCtx(ctx); setNoteLineTarget(key); setNoteText(''); setNoteStatus(task?.status || claim?.status || 'In Progress'); setNoteFollowUpDate('');
-    const data = await denialWorkflowService.getNotes({ labId, claimId: claim.claimId, noteLevel: 'Claim' });
+    const data = await denialWorkflowService.getNotes({ labId, claimId: claim.claimId, taskId: task?.taskId || '', cptCode: task?.cptCode || '', noteLevel: ctx.level });
     setNotes(data || []);
   }
   async function saveNote() {
@@ -182,7 +187,8 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
     if (clientManager && !(actualTask ? isClientInfoPending(actualTask) : claimHasClientInfoPending(claim))) {
       return setMessage?.({ type: 'warning', text: 'Client Manager can update comments only for Client Info Pending escalations.' });
     }
-    await denialWorkflowService.saveNote({ labId, claimId: claim.claimId, taskId: task.taskId || '', cptCode: task.cptCode || '', noteLevel: 'Claim', noteText, status: noteStatus, nextFollowUpDate: noteFollowUpDate || null, createdBy: user?.userName || 'ReactWorkflow' });
+    const noteLevel = task.taskId || task.cptCode ? 'Line' : 'Claim';
+    await denialWorkflowService.saveNote({ labId, claimId: claim.claimId, taskId: task.taskId || '', cptCode: task.cptCode || '', noteLevel, noteText, status: noteStatus, nextFollowUpDate: noteFollowUpDate || null, createdBy: user?.userName || 'ReactWorkflow' });
     if (canUpdateTasks && actualTask?.taskId && noteStatus) await denialWorkflowService.updateTask({ labId, taskId: actualTask.taskId, status: noteStatus, comments: noteText, actionBy: user?.userName || 'ReactWorkflow' });
     if (canUpdateTasks && !actualTask?.taskId && noteStatus) {
       for (const l of claim.lines) await denialWorkflowService.updateTask({ labId, taskId: l.taskId, status: noteStatus, comments: noteText, actionBy: user?.userName || 'ReactWorkflow' });
