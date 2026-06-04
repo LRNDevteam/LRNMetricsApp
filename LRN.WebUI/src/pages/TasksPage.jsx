@@ -5,6 +5,7 @@ import { money, date, statusClass, priorityClass, isClientManagerRole, isAccount
 import { denialWorkflowService } from '../services/denialWorkflowService';
 import { canDeleteClaimDocument } from '../utils/documentPermissions';
 import { MAX_TEXT_LENGTH, limitText, textCountLabel } from '../utils/textLimits';
+import { dedupeEscalations } from '../utils/escalations';
 
 const claimEscReasons = ['Client Info Pending', 'Payer policy conflict across claim — need manager guidance', 'Multiple CPT lines impacted by same denial', 'Timely filing risk at claim level', 'High value claim requires approval', 'Other'];
 const lineEscReasons = ['Client Info Pending', 'Payer policy unclear — need guidance', 'Appeal requires manager approval', 'Coding / modifier review required', 'ICD coverage rule requires review', 'Other'];
@@ -123,7 +124,7 @@ export default function TasksPage({ data, saveTask, changePage, labId, currentUs
       setEscReason(task.taskId ? lineEscReasons[0] : claimEscReasons[0]);
       setEscComment('');
       const data = await denialWorkflowService.getEscalations({ labId, claimId: task.claimId, taskId: task.taskId || '', cptCode: task.cptCode || '', escalationLevel: 'Line' });
-      setEscalations(data || []);
+      setEscalations(dedupeEscalations(data || []));
     } finally { setBusy(false); }
   }
 

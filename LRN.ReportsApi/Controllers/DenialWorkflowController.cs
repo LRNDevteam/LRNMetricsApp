@@ -210,7 +210,13 @@ public sealed class DenialWorkflowController : ControllerBase
     [HttpPost("task/update")]
     public async Task<ActionResult<DenialWorkflowResult>> UpdateTask(UpdateTaskRequest request, CancellationToken ct)
     {
-        if (IsReadOnlyWorkflowRole(FirstClaim(ClaimTypes.Role, "role", "roles"))) return StatusCode(StatusCodes.Status403Forbidden, new { message = "This role cannot update task status." });
+        var role = FirstClaim(ClaimTypes.Role, "role", "roles");
+        if (IsReadOnlyWorkflowRole(role)) return StatusCode(StatusCodes.Status403Forbidden, new { message = "This role cannot update task status." });
+        request.Status = NormalizeWorkflowStatus(request.Status);
+        var validationError = ValidateTaskStatusUpdate(request, role);
+        if (!string.IsNullOrWhiteSpace(validationError)) return BadRequest(new { message = validationError });
+        if (string.IsNullOrWhiteSpace(request.ActionBy))
+            request.ActionBy = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "ReactWorkflow";
         var rows = await _service.UpdateTaskAsync(request, ct);
         return Ok(new DenialWorkflowResult { Success = rows > 0, RowsAffected = rows, Message = rows > 0 ? "Task updated." : "Task update failed." });
     }
@@ -500,6 +506,74 @@ public sealed class DenialWorkflowController : ControllerBase
         return (r.Contains("ARREVIEWER") || r.Contains("ARANALYSER") || r.Contains("ARANALYZER") || r.Contains("REVIEWER"))
             && !r.Contains("MANAGER")
             && !r.Contains("ADMIN");
+    }
+
+    private static readonly HashSet<string> CanonicalLineStatuses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "New",
+        "Unassigned",
+        "Assigned",
+        "Payer Follow-up Required",
+        "Pending Payer Response",
+        "Pending Documentation",
+        "Write-Off Pending Approval",
+        "Escalated to AR Manager",
+        "Rework",
+        "Closed"
+    };
+
+    private static readonly HashSet<string> AnalystSelectableStatuses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Assigned",
+        "Payer Follow-up Required",
+        "Pending Payer Response",
+        "Pending Documentation",
+        "Write-Off Pending Approval",
+        "Closed"
+    };
+
+    private static string NormalizeWorkflowStatus(string? status)
+    {
+        var value = (status ?? string.Empty).Trim();
+        return value.ToLowerInvariant() switch
+        {
+            "" or "open" or "in progress" or "in-progress" or "pending review" => "Assigned",
+            "pending payer" => "Pending Payer Response",
+            "escalated" or "internal escalation" or "external escalation" => "Escalated to AR Manager",
+            "completed" => "Closed",
+            "required review" or "returned for rework" => "Rework",
+            _ => value
+        };
+    }
+
+    private static string ValidateTaskStatusUpdate(UpdateTaskRequest request, string? role)
+    {
+        if (!CanonicalLineStatuses.Contains(request.Status))
+            return $"'{request.Status}' is not a valid denial workflow status.";
+
+        if (IsReviewerOnly(role) && !AnalystSelectableStatuses.Contains(request.Status))
+            return "AR Analyst users can only select active analyst workflow statuses.";
+
+        static bool Missing(string? value) => string.IsNullOrWhiteSpace(value);
+        var commentsMissing = Missing(request.Comments);
+
+        return request.Status switch
+        {
+            "Payer Follow-up Required" when Missing(request.FollowUpReason) => "Follow-up reason is required.",
+            "Payer Follow-up Required" when request.ExpectedResponseDate is null => "Expected response date is required.",
+            "Payer Follow-up Required" when commentsMissing => "Comments are required.",
+            "Pending Payer Response" when request.ActionCompleted is null => "Action completed must be confirmed.",
+            "Pending Payer Response" when request.ExpectedResponseDate is null => "Expected response date is required.",
+            "Pending Payer Response" when commentsMissing => "Comments are required.",
+            "Pending Documentation" when Missing(request.DocumentationType) => "Documentation type is required.",
+            "Pending Documentation" when request.ExpectedResponseDate is null => "Expected response date is required.",
+            "Pending Documentation" when commentsMissing => "Comments are required.",
+            "Closed" when Missing(request.ClosureReason) => "Closure reason is required.",
+            "Closed" when Missing(request.ActualOutcome) => "Actual outcome is required.",
+            "Closed" when commentsMissing => "Closure comments are required.",
+            "Write-Off Pending Approval" when Missing(request.ActualOutcome) => "Actual outcome is required for write-off approval.",
+            _ => string.Empty
+        };
     }
 
     private static string NormalizeRoleToken(string? value)

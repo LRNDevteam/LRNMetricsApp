@@ -3,9 +3,10 @@ import { money } from '../utils/formatters';
 
 const pivotConfig = {
   payer: { label: 'By Payer', title: 'AR Outstanding by Payer', column: 'Payer', key: 'byPayer' },
-  classification: { label: 'By Classification', title: 'AR Outstanding by Denial Classification', column: 'Denial Classification', key: 'byClassification' },
-  action: { label: 'By Action', title: 'AR Outstanding by Action Category', column: 'Action Category', key: 'byAction' },
-  panel: { label: 'By Panel', title: 'AR Outstanding by Panel', column: 'Panel', key: 'byPanel' }
+  classification: { label: 'By Denial Classification', title: 'AR Outstanding by Denial Classification', column: 'Denial Classification', key: 'byClassification' },
+  action: { label: 'By Action Category', title: 'AR Outstanding by Action Category', column: 'Action Category', key: 'byAction' },
+  panel: { label: 'By Panel', title: 'AR Outstanding by Panel', column: 'Panel', key: 'byPanel' },
+  reviewer: { label: 'By Reviewer', title: 'AR Outstanding by Reviewer', column: 'Reviewer', key: 'byReviewer' }
 };
 
 const bucketClasses = ['h0', 'h30', 'h60', 'h90', 'h120'];
@@ -59,7 +60,8 @@ function exportAgingWorkbook(data, buckets) {
     ['By Payer', 'AR Outstanding by Payer', 'Payer', data.byPayer || []],
     ['By Classification', 'AR Outstanding by Denial Classification', 'Denial Classification', data.byClassification || []],
     ['By Action', 'AR Outstanding by Action Category', 'Action Category', data.byAction || []],
-    ['By Panel', 'AR Outstanding by Panel', 'Panel', data.byPanel || data.byAction || []]
+    ['By Panel', 'AR Outstanding by Panel', 'Panel', data.byPanel || data.byAction || []],
+    ['By Reviewer', 'AR Outstanding by Reviewer', 'Reviewer', data.byReviewer || data.analystWorkload || []]
   ];
   const exportBuckets = (buckets || []).slice(0, 5);
   const moneyValue = v => Number(Number(v || 0).toFixed(2));
@@ -126,7 +128,23 @@ export default function AgingDashboardPage({ data = {}, filter = {}, setFilterVa
   const [pivot, setPivot] = useState('payer');
   const [period, setPeriodState] = useState('');
   const config = pivotConfig[pivot];
-  const exportRows = data[config.key] || (config.key === 'byPanel' ? data.byAction : []) || [];
+  const reviewerRows = (data.byReviewer || data.analystWorkload || []).map(r => r.name ? r : ({
+    name: r.reviewerName || r.displayName || r.userName || 'Unassigned',
+    subTitle: r.reviewerName || r.userName || '',
+    priority: Number(r.agingOver120 || 0) > 0 ? 'high' : 'low',
+    priorityScore: Math.min(100, Number(r.agingOver120 || 0) + Number(r.aging91To120 || 0)),
+    buckets: [
+      { key: 'd0', amount: r.amount0To30 || 0, claimCount: r.aging0To30 || 0 },
+      { key: 'd30', amount: r.amount31To60 || 0, claimCount: r.aging31To60 || 0 },
+      { key: 'd60', amount: r.amount61To90 || 0, claimCount: r.aging61To90 || 0 },
+      { key: 'd90', amount: r.amount91To120 || 0, claimCount: r.aging91To120 || 0, slaBreaches: r.aging91To120 || 0 },
+      { key: 'd120', amount: r.amountOver120 || 0, claimCount: r.agingOver120 || 0, slaBreaches: r.agingOver120 || 0 }
+    ],
+    totalAmount: r.totalAmount || r.balance || 0,
+    totalClaims: r.totalClaims || r.assigned || 0,
+    slaBreaches: Number(r.aging91To120 || 0) + Number(r.agingOver120 || 0)
+  }));
+  const exportRows = config.key === 'byReviewer' ? reviewerRows : data[config.key] || (config.key === 'byPanel' ? data.byAction : []) || [];
   const rows = exportRows.slice(0, 10);
   const buckets = data.buckets || [];
 
@@ -170,6 +188,8 @@ export default function AgingDashboardPage({ data = {}, filter = {}, setFilterVa
   const reviewerOptions = (reviewers || []).map(r => ({ value: r.userName || r.UserName || '', label: r.displayName || r.DisplayName || r.userName || r.UserName || '' })).filter(x => x.value);
   const payerOptions = options?.payerNames || [];
   const panelOptions = options?.panelNames || [];
+  const classificationOptions = options?.denialClassifications || [];
+  const actionOptions = options?.actionCategories || [];
   const periodValue = period || (filter.fromDate || filter.toDate ? 'custom' : '');
 
   return <div className="aging-dashboard">
@@ -191,6 +211,8 @@ export default function AgingDashboardPage({ data = {}, filter = {}, setFilterVa
         <label><i className="bi bi-person" /><select value={filter.reviewer || ''} onChange={e => setFilterValue?.('reviewer', e.target.value)}><option value="">All Analysts</option>{reviewerOptions.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}</select></label>
         <label><i className="bi bi-credit-card" /><select value={filter.payerName || ''} onChange={e => setFilterValue?.('payerName', e.target.value)}><option value="">All Payers</option>{payerOptions.map(p => <option key={p} value={p}>{p}</option>)}</select></label>
         <label><i className="bi bi-grid" /><select value={filter.panelName || ''} onChange={e => setFilterValue?.('panelName', e.target.value)}><option value="">All Panels</option>{panelOptions.map(p => <option key={p} value={p}>{p}</option>)}</select></label>
+        <label><i className="bi bi-tags" /><select value={filter.denialClassification || ''} onChange={e => setFilterValue?.('denialClassification', e.target.value)}><option value="">All Classifications</option>{classificationOptions.map(p => <option key={p} value={p}>{p}</option>)}</select></label>
+        <label><i className="bi bi-diagram-3" /><select value={filter.actionCategory || ''} onChange={e => setFilterValue?.('actionCategory', e.target.value)}><option value="">All Action Categories</option>{actionOptions.map(p => <option key={p} value={p}>{p}</option>)}</select></label>
       </div>
       <div className="aging-actions">
         <button type="button" className="aging-btn ghost" onClick={() => { setPeriodState(''); clearFilter?.(); }}><i className="bi bi-x-circle" />Clear</button>

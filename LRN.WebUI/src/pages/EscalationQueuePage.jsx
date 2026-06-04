@@ -14,6 +14,8 @@ const resolutionActions = [
   { value: 'others', label: 'Others' }
 ];
 
+const recommendedNextActions = ['Proceed with Appeal', 'Proceed with Rebill', 'Proceed with Write-Off Request', 'Perform Payer Follow-up', 'Request Documentation', 'Additional Information Needed', 'No Further Action Required', 'Close Claim / Line', 'Other'];
+
 function normalizeRole(value) {
   return String(value || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
 }
@@ -221,6 +223,7 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
     const fail = (text) => { if (setInlineError) setInlineError(text); else setModalError(text); return false; };
     if (!action) return fail('Please select resolution action.');
     if (action === 'others' && !String(draft.otherReason || '').trim()) return fail('Please enter other response reason.');
+    if (!String(draft.recommendedNextAction || '').trim()) return fail('Please select recommended next action.');
     if (!String(draft.responseNote || '').trim()) return fail('Please add manager response note.');
 
     if (setInlineError) setInlineError('');
@@ -241,6 +244,7 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
         cptCode: row.cptCode || '',
         escalationLevel: row.escalationLevel || level,
         resolutionAction: action,
+        recommendedNextAction: draft.recommendedNextAction || (action === 'approve' || action === 'writeoff' ? 'Close Claim / Line' : 'Additional Information Needed'),
         responseNote: finalResponseNote,
         reassignTo: shouldReassign ? (draft.reassignTo || '') : '',
         actionBy: user?.userName || 'ReactWorkflow'
@@ -406,6 +410,7 @@ function EscalationDetail({ row, draft, setDraft, reviewers, canReassign, resolv
         <div className="esc-section-title">Manager response</div>
         {modalError ? <div className="esc-inline-error"><i className="bi bi-exclamation-circle" /> {modalError}</div> : null}
         <label className="esc-label">Response action<select className="wl-full" value={action} disabled={busy} onChange={e => setDraft({ resolutionAction: e.target.value, reassignTo: '', otherReason: '' })}>{resolutionActions.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}</select></label>
+        <label className="esc-label">Recommended Next Action <span>*</span><select className="wl-full" value={draft.recommendedNextAction || ''} disabled={busy} onChange={e => setDraft({ recommendedNextAction: e.target.value })}><option value="">Select recommended next action</option>{recommendedNextActions.map(x => <option key={x}>{x}</option>)}</select></label>
         {action === 'rework' && <div className="esc-help">Choose an AR Reviewer to reassign the claim, or leave it blank to move it back to the unassigned queue.</div>}
         {action === 'others' && <label className="esc-label">Other reason <span>*</span><input className="wl-full" value={draft.otherReason || ''} disabled={busy} onChange={e => setDraft({ otherReason: e.target.value })} placeholder="Enter other response reason..." /></label>}
         <label className="esc-label">Add / update response note to {row.analyst || row.createdBy || 'analyst'} <span>*</span><textarea className="wl-textarea esc-response" maxLength={MAX_TEXT_LENGTH} value={draft.responseNote || ''} disabled={busy} onChange={e => setDraft({ responseNote: limitText(e.target.value) })} placeholder="Add clarification, decision, or instructions for the analyst — this will be visible in their work list..." /><div className="text-count">{textCountLabel(draft.responseNote)}</div></label>

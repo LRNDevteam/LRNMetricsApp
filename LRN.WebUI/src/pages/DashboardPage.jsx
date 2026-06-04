@@ -11,28 +11,42 @@ function riskClass(value) {
   return 'flag-blue';
 }
 
-export default function DashboardPage({ data, user = {}, labName = '' }) {
+export default function DashboardPage({ data, user = {}, labName = '', onKpiClick }) {
   const role = user?.role || '';
   if (isArReviewerRole(role)) return <AnalystDashboard data={data} user={user} labName={labName} />;
   if (isClientManagerRole(role)) return <SingleAccountDashboard data={data} user={user} labName={labName} mode="client" />;
   if (isAccountManagerRole(role)) return <SingleAccountDashboard data={data} user={user} labName={labName} mode="account" />;
-  return <ManagerDashboard data={data} user={user} labName={labName} />;
+  return <ManagerDashboard data={data} user={user} labName={labName} onKpiClick={onKpiClick} />;
 }
 
-function ManagerDashboard({ data }) {
+function ManagerDashboard({ data, onKpiClick }) {
   const classifications = data.denialClassifications || [];
   const workload = data.analystWorkload || [];
   const assignedClaims = data.assignedClaims ?? data.assigned ?? 0;
-  const pendingClaims = data.pendingClaims ?? Math.max(Number(data.totalClaims || 0) - Number(assignedClaims || 0) - Number(data.closedClaims || 0), 0);
-  const escalated = data.escalatedClaims ?? data.escalationCount ?? data.escalatedCount ?? data.openInProgressCount ?? 0;
+  const openClaims = data.openClaims ?? Math.max(Number(data.totalClaims || 0) - Number(data.closedClaims || 0), 0);
+  const unassignedClaims = data.pendingClaims ?? data.unassignedClaims ?? 0;
+  const escalated = data.escalatedClaims ?? data.escalationCount ?? data.escalatedCount ?? 0;
   const slaPercent = data.slaCompliancePercent ?? data.slaCompliance ?? 86;
+  const totalTasks = data.openInProgressCount ?? data.totalOpenTasks ?? data.totalTasks ?? data.totalDenials ?? 0;
+  const slaBreached = data.slaBreached ?? data.slaBreachedCount ?? (data.slaTiles || []).find(x => String(x.label || '').toLowerCase().includes('breach'))?.count ?? 0;
+  const verificationPending = data.verificationPending ?? data.verificationPendingCount ?? 0;
+  const balance = data.outstandingAmount || 0;
 
   return <div className="role-dashboard manager-dashboard">
-    <ReviewerAgingTable rows={workload} />
+    <div className="dashboard-hero-row">
+      <DashboardKpi label="Total Open Claims" value={n(openClaims)} icon="bi-folder2-open" tone="blue" onClick={() => onKpiClick?.({})} />
+      <DashboardKpi label="Total Open Tasks" value={n(totalTasks)} icon="bi-list-task" tone="indigo" onClick={() => onKpiClick?.({ status: '' })} />
+      <DashboardKpi label="Assigned Claims" value={n(assignedClaims)} icon="bi-person-check" tone="green" onClick={() => onKpiClick?.({ taskView: 'assigned' })} />
+      <DashboardKpi label="Unassigned Claims" value={n(unassignedClaims)} icon="bi-person-dash" tone="amber" onClick={() => onKpiClick?.({ taskView: 'unassigned' })} />
+      <DashboardKpi label="SLA Breached" value={n(slaBreached)} icon="bi-alarm" tone="red" onClick={() => onKpiClick?.({ status: 'Breached' })} />
+      <DashboardKpi label="Escalated Claims" value={n(escalated)} icon="bi-exclamation-triangle" tone="red" onClick={() => onKpiClick?.({ status: 'Escalated' })} />
+      <DashboardKpi label="Verification Pending" value={n(verificationPending)} icon="bi-shield-check" tone="violet" onClick={() => onKpiClick?.({ status: 'Verification Pending' })} />
+      <DashboardKpi label="Total Insurance Balance" value={money(balance)} icon="bi-cash-stack" tone="teal balance" onClick={() => onKpiClick?.({})} />
+    </div>
     <div className="dashboard-overview-grid">
       <div className="role-kpi-row dashboard-kpi-stack">
-        <RoleKpi label="Open Claims" value={n(pendingClaims || data.totalClaims)} tone="blue" />
-        <RoleKpi label="Open Balance" value={money(data.outstandingAmount || 0)} tone="teal" />
+        <RoleKpi label="Open Claims" value={n(openClaims)} tone="blue" />
+        <RoleKpi label="Open Balance" value={money(balance)} tone="teal" />
         <RoleKpi label="Escalated" value={n(escalated)} tone="red" />
         <RoleKpi label="SLA Compliance" value={pct(slaPercent)} tone="green" />
       </div>
@@ -42,6 +56,7 @@ function ManagerDashboard({ data }) {
         </tbody></table></div>
       </RoleCard>
     </div>
+    <ReviewerAgingTable rows={workload} title="Analyst Workload" />
   </div>;
 }
 
@@ -114,6 +129,7 @@ function ReviewerAgingTable({ rows = [], title = 'Aging View by AR Reviewer' }) 
 
 function RoleHeader({ title, subtitle, tag, user, labName }) { return <div className="role-page-head"><div><h2>{title}</h2><p>DenialFlow / <b>{subtitle}</b>{labName ? ` - ${labName}` : ''}</p></div><div className="role-head-right"><span className="role-tag">{tag}</span><span className="role-user"><span className="avatar-sm">{initials(user?.displayName || user?.userName)}</span>{user?.displayName || user?.userName || 'Workflow User'}</span></div></div>; }
 function RoleKpi({ label, value, tone }) { return <div className={`role-kpi ${tone || ''}`}><div className="role-kpi-value">{value}</div><div className="role-kpi-label">{label}</div></div>; }
+function DashboardKpi({ label, value, icon, tone, onClick }) { return <button type="button" className={`modern-kpi ${tone || ''}`} onClick={onClick}><span className="modern-kpi-icon"><i className={`bi ${icon}`} /></span><span><small>{label}</small><b>{value}</b><em>Click to view filtered claims</em></span></button>; }
 function RoleCard({ title, children }) { return <div className="role-card"><div className="role-card-hd"><div className="role-card-title">{title}</div></div><div className="role-card-body">{children}</div></div>; }
 function RiskPill({ value }) { return <span className={`role-flag ${riskClass(value)}`}>{value || 'Medium'}</span>; }
 function EmptyRow({ colSpan }) { return <tr><td colSpan={colSpan} className="empty-cell">No dashboard data found.</td></tr>; }

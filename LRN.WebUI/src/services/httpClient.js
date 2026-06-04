@@ -16,13 +16,25 @@ function appendWorkflowToken(url, token) {
 }
 
 async function readError(response) {
+  const requestId =
+    response.headers.get('x-correlation-id') ||
+    response.headers.get('x-request-id') ||
+    response.headers.get('traceparent') ||
+    '';
   const contentType = response.headers.get('content-type') || '';
+  let message = '';
   if (contentType.toLowerCase().includes('application/json')) {
     const data = await response.json().catch(() => null);
     const reason = data?.reason ? ` ${data.reason}` : '';
-    return data?.message ? `${data.message}${reason}` : data?.title || data?.error || JSON.stringify(data || {});
+    const correlationId = data?.correlationId || data?.CorrelationId || data?.traceId || data?.traceID || requestId;
+    message = data?.message ? `${data.message}${reason}` : data?.title || data?.error || JSON.stringify(data || {});
+    if (correlationId && !String(message).toLowerCase().includes('error id')) {
+      return `${message || 'Unable to load claims. Please retry.'} If the issue continues, contact support with Error ID: ${correlationId}`;
+    }
+    return message;
   }
-  return (await response.text().catch(() => '')) || `${response.status} ${response.statusText}`;
+  message = (await response.text().catch(() => '')) || `${response.status} ${response.statusText}`;
+  return requestId ? `${message} If the issue continues, contact support with Error ID: ${requestId}` : message;
 }
 
 async function executeRequest(path, options = {}, jwt = '') {

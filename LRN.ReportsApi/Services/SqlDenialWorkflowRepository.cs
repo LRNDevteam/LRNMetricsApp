@@ -324,6 +324,9 @@ ORDER BY CreatedOn DESC;";
 		var taskClaimKeyExpression = taskColumns.Contains("ClaimUID")
 			? "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.ClaimUID,''))), ''), LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized, t.ClaimID))))"
 			: "LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized, t.ClaimID)))";
+		var taskWorkflowStatusExpression = taskColumns.Contains("WorkFlowStatus")
+			? "LTRIM(RTRIM(ISNULL(t.WorkFlowStatus, '')))"
+			: "CAST('' AS nvarchar(100))";
 		var lineClaimKeyExpression = lineColumns.Contains("ClaimUID")
 			? "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(d.ClaimUID,''))), ''), CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(d.VisitNumber,''))), 'CLM-', '')))"
 			: "CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(d.VisitNumber,''))), 'CLM-', ''))";
@@ -341,6 +344,7 @@ SELECT
     ClaimId = {taskClaimKeyExpression},
     InsuranceBalance = ISNULL(t.InsuranceBalance, 0),
     StatusValue = LTRIM(RTRIM(ISNULL(t.Status, ''))),
+    WorkFlowStatusValue = {taskWorkflowStatusExpression},
     DenialClassification = COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.DenialClassification, ''))), ''), 'Unclassified'),
     AssignedTo = COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo, ''))), ''), 'Unassigned'),
     ActionCategory = LTRIM(RTRIM(ISNULL(t.ActionCategory, ''))),
@@ -404,10 +408,13 @@ CREATE UNIQUE CLUSTERED INDEX IX_ClaimAmount_Claim ON #ClaimAmount(ClaimId);
 SELECT
     TotalDenials = (SELECT COUNT(1) FROM #TaskBoardBase),
     TotalClaims = COUNT(1),
+    OpenClaims = SUM(CASE WHEN OpenTaskCount > 0 THEN 1 ELSE 0 END),
     TotalTasks = (SELECT COUNT(1) FROM #TaskBoardBase),
     AssignedClaims = SUM(CASE WHEN AssignedActiveTaskCount > 0 THEN 1 ELSE 0 END),
     PendingClaims = SUM(CASE WHEN OpenTaskCount > 0 AND AssignedActiveTaskCount = 0 THEN 1 ELSE 0 END),
     ClosedClaims = SUM(CASE WHEN OpenTaskCount = 0 THEN 1 ELSE 0 END),
+    EscalatedClaims = (SELECT COUNT(DISTINCT ClaimId) FROM #TaskBoardBase WHERE LOWER(StatusValue) LIKE '%escal%' OR LOWER(WorkFlowStatusValue) LIKE '%escal%'),
+    VerificationPending = (SELECT COUNT(DISTINCT ClaimId) FROM #TaskBoardBase WHERE LOWER(StatusValue) LIKE '%verification%' OR LOWER(WorkFlowStatusValue) LIKE '%verification%'),
     OutstandingAmount = (SELECT ISNULL(SUM(InsuranceBalance), 0) FROM #ClaimAmount),
     OpenInProgressCount = (SELECT SUM(CASE WHEN LOWER(StatusValue) NOT IN ('closed', 'completed') THEN 1 ELSE 0 END) FROM #TaskBoardBase),
     ClosedCount = (SELECT SUM(CASE WHEN LOWER(StatusValue) IN ('closed', 'completed') THEN 1 ELSE 0 END) FROM #TaskBoardBase)
@@ -547,10 +554,13 @@ DROP TABLE #TaskBoardBase;";
 		{
 			result.TotalDenials = GetInt(rd, "TotalDenials");
 			result.TotalClaims = GetInt(rd, "TotalClaims");
+			result.OpenClaims = GetInt(rd, "OpenClaims");
 			result.TotalTasks = GetInt(rd, "TotalTasks");
 			result.AssignedClaims = GetInt(rd, "AssignedClaims");
 			result.PendingClaims = GetInt(rd, "PendingClaims");
 			result.ClosedClaims = GetInt(rd, "ClosedClaims");
+			result.EscalatedClaims = GetInt(rd, "EscalatedClaims");
+			result.VerificationPending = GetInt(rd, "VerificationPending");
 			result.OutstandingAmount = GetDecimal(rd, "OutstandingAmount");
 			result.OpenInProgressCount = GetInt(rd, "OpenInProgressCount");
 			result.ClosedCount = GetInt(rd, "ClosedCount");
@@ -638,32 +648,50 @@ DROP TABLE #TaskBoardBase;";
 			"LTRIM(RTRIM(ISNULL(t.TaskID,'')))";
 		var taskClassExpression = TaskTextSql(taskCols, "DenialClassification", "Unclassified");
 		var taskActionExpression = TaskTextSql(taskCols, "ActionCategory", "Unclassified");
+		var lineClaimRootExpression = $"CASE WHEN CHARINDEX('_', {claimUidExpression}) > 0 THEN LEFT({claimUidExpression}, CHARINDEX('_', {claimUidExpression}) - 1) ELSE {claimUidExpression} END";
+		var taskClaimRootExpression = $"CASE WHEN CHARINDEX('_', {taskClaimUidExpression}) > 0 THEN LEFT({taskClaimUidExpression}, CHARINDEX('_', {taskClaimUidExpression}) - 1) ELSE {taskClaimUidExpression} END";
 		var lineLabScope = LabScopeSql("d.LabId");
 		var taskLabScope = LabScopeSql("t.LabId");
 
 		var sql = $@"
 IF OBJECT_ID('tempdb..#LineAging') IS NOT NULL DROP TABLE #LineAging;
 IF OBJECT_ID('tempdb..#TaskAgingDedup') IS NOT NULL DROP TABLE #TaskAgingDedup;
+IF OBJECT_ID('tempdb..#TaskAssignment') IS NOT NULL DROP TABLE #TaskAssignment;
 IF OBJECT_ID('tempdb..#VisibleAgingClaims') IS NOT NULL DROP TABLE #VisibleAgingClaims;
 
 DECLARE @HasLineLab bit = CASE WHEN EXISTS (SELECT 1 FROM dbo.DenialLineItem WITH (NOLOCK) WHERE {LabScopeSql("LabId")}) THEN 1 ELSE 0 END;
 DECLARE @HasTaskLab bit = CASE WHEN OBJECT_ID('dbo.DenialTaskBoard','U') IS NOT NULL AND EXISTS (SELECT 1 FROM dbo.DenialTaskBoard WITH (NOLOCK) WHERE {LabScopeSql("LabId")}) THEN 1 ELSE 0 END;
 
 SELECT
-    ClaimId = {taskClaimUidExpression}
+    ClaimRoot = {taskClaimRootExpression},
+    ClaimId = MIN({taskClaimUidExpression})
 INTO #VisibleAgingClaims
 FROM dbo.DenialTaskBoard t WITH (NOLOCK)
 WHERE (@HasTaskLab=0 OR {taskLabScope})
   AND NULLIF({taskClaimUidExpression}, '') IS NOT NULL
   {taskWhere.WhereClause}
-GROUP BY {taskClaimUidExpression};
+GROUP BY {taskClaimRootExpression};
 
-CREATE UNIQUE CLUSTERED INDEX IX_VisibleAgingClaims_Claim ON #VisibleAgingClaims(ClaimId);
+CREATE UNIQUE CLUSTERED INDEX IX_VisibleAgingClaims_Root ON #VisibleAgingClaims(ClaimRoot);
+
+SELECT
+    ClaimRoot = {taskClaimRootExpression},
+    AssignedTo = COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))), ''), 'Unassigned')
+INTO #TaskAssignment
+FROM dbo.DenialTaskBoard t WITH (NOLOCK)
+WHERE (@HasTaskLab=0 OR {taskLabScope})
+  AND NULLIF({taskClaimUidExpression}, '') IS NOT NULL
+  {taskWhere.WhereClause}
+GROUP BY {taskClaimRootExpression},
+         COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))), ''), 'Unassigned');
+
+CREATE NONCLUSTERED INDEX IX_TaskAssignment_Root ON #TaskAssignment(ClaimRoot) INCLUDE(AssignedTo);
 
 ;WITH LineSource AS
 (
     SELECT
         ClaimId = {claimUidExpression},
+        ClaimRoot = {lineClaimRootExpression},
         PayerName = COALESCE(NULLIF({payerExpression}, ''), 'Unknown Payer'),
         DenialClassification = COALESCE(NULLIF({classExpression}, ''), 'Unclassified'),
         PanelName = COALESCE(NULLIF({panelExpression}, ''), 'Unknown Panel'),
@@ -671,15 +699,14 @@ CREATE UNIQUE CLUSTERED INDEX IX_VisibleAgingClaims_Claim ON #VisibleAgingClaims
         Amount = {amountExpression}
     FROM dbo.DenialLineItem d WITH (NOLOCK)
     INNER JOIN #VisibleAgingClaims vac
-      ON vac.ClaimId = {claimUidExpression}
-      OR vac.ClaimId LIKE {claimUidExpression} + '\_%' ESCAPE '\'
-      OR {claimUidExpression} LIKE vac.ClaimId + '\_%' ESCAPE '\'
+      ON vac.ClaimRoot = {lineClaimRootExpression}
     WHERE (@HasLineLab=0 OR {lineLabScope})
       AND NULLIF({claimUidExpression}, '') IS NOT NULL
       {where.WhereClause}
 )
 SELECT
     ClaimId,
+    ClaimRoot,
     PayerName,
     DenialClassification,
     PanelName,
@@ -696,11 +723,13 @@ INTO #LineAging
 FROM LineSource;
 
 CREATE NONCLUSTERED INDEX IX_AgingLineAging_Bucket ON #LineAging(AgeBucket) INCLUDE(Amount, ClaimId, PayerName, DenialClassification, PanelName, AgeDays);
+CREATE NONCLUSTERED INDEX IX_AgingLineAging_Root ON #LineAging(ClaimRoot) INCLUDE(Amount, ClaimId, PayerName, AgeDays);
 
 ;WITH TaskSource AS
 (
     SELECT
         ClaimId = {taskClaimUidExpression},
+        ClaimRoot = {taskClaimRootExpression},
         CptCode = {taskCptExpression},
         DenialClassification = COALESCE(NULLIF({taskClassExpression}, ''), 'Unclassified'),
         ActionCategory = COALESCE(NULLIF({taskActionExpression}, ''), 'Unclassified'),
@@ -720,6 +749,7 @@ CREATE NONCLUSTERED INDEX IX_AgingLineAging_Bucket ON #LineAging(AgeBucket) INCL
 )
 SELECT
     ClaimId,
+    ClaimRoot,
     CptCode,
     DenialClassification,
     ActionCategory,
@@ -728,7 +758,7 @@ SELECT
     Amount = MAX(Amount)
 INTO #TaskAgingDedup
 FROM TaskSource
-GROUP BY ClaimId, CptCode, DenialClassification, ActionCategory, AgeBucket;
+GROUP BY ClaimId, ClaimRoot, CptCode, DenialClassification, ActionCategory, AgeBucket;
 
 CREATE NONCLUSTERED INDEX IX_AgingTaskAgingDedup_Bucket ON #TaskAgingDedup(AgeBucket) INCLUDE(Amount, ClaimId, DenialClassification, ActionCategory, AgeDays);
 
@@ -804,23 +834,21 @@ GROUP BY la.PayerName
 ORDER BY MAX(la.AgeDays) DESC, SUM(la.Amount) DESC;
 
 SELECT TOP (6)
-    Name = COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))), ''), 'Unassigned'),
+    Name = ISNULL(ta.AssignedTo, 'Unassigned'),
     SubTitle = 'Assigned workload',
     Amount = ISNULL(SUM(la.Amount), 0),
     ClaimCount = COUNT(DISTINCT la.ClaimId),
-    [Status] = CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))), '') IS NULL THEN 'Needs action' ELSE 'On track' END,
+    [Status] = CASE WHEN ISNULL(ta.AssignedTo, 'Unassigned') = 'Unassigned' THEN 'Needs action' ELSE 'On track' END,
     DaysRemaining = 0
 FROM #LineAging la
-LEFT JOIN dbo.DenialTaskBoard t WITH (NOLOCK)
-  ON (la.ClaimId = {taskClaimUidExpression}
-      OR {taskClaimUidExpression} LIKE la.ClaimId + '\_%' ESCAPE '\'
-      OR la.ClaimId LIKE {taskClaimUidExpression} + '\_%' ESCAPE '\')
- AND (@HasTaskLab=0 OR {taskLabScope})
-GROUP BY COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))), ''), 'Unassigned'),
-         CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))), '') IS NULL THEN 'Needs action' ELSE 'On track' END
-ORDER BY CASE WHEN COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))), ''), 'Unassigned')='Unassigned' THEN 0 ELSE 1 END, SUM(la.Amount) DESC;
+LEFT JOIN #TaskAssignment ta
+  ON ta.ClaimRoot = la.ClaimRoot
+GROUP BY ISNULL(ta.AssignedTo, 'Unassigned'),
+         CASE WHEN ISNULL(ta.AssignedTo, 'Unassigned') = 'Unassigned' THEN 'Needs action' ELSE 'On track' END
+ORDER BY CASE WHEN ISNULL(ta.AssignedTo, 'Unassigned')='Unassigned' THEN 0 ELSE 1 END, SUM(la.Amount) DESC;
 
 DROP TABLE #TaskAgingDedup;
+DROP TABLE #TaskAssignment;
 DROP TABLE #VisibleAgingClaims;
 DROP TABLE #LineAging;";
 
@@ -2056,13 +2084,22 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
 			? "ClaimUID = ISNULL(t.ClaimUID,'')"
 			: "ClaimUID = CAST('' AS nvarchar(150))";
 		var claimLookupWhere = hasTaskClaimUid
-			? "t.ClaimUID = @ClaimUid"
+			? @"(
+				   LTRIM(RTRIM(ISNULL(t.ClaimUID,''))) = @ClaimUid
+				   OR LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))) = @ClaimKey
+				   OR CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(t.ClaimID,''))), 'CLM-', '')) = @ClaimKey
+				   OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) = @ClaimId
+				   OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) LIKE '%' + @ClaimId
+			   )"
 			: @"LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))) = @ClaimKey
 				   OR CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(t.ClaimID,''))), 'CLM-', '')) = @ClaimKey
 				   OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) = @ClaimId
 				   OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) LIKE '%' + @ClaimId";
+		var taskLabScope = LabScopeSql("t.LabId");
 
 		var sql = $@"
+				DECLARE @HasTaskLab bit = CASE WHEN EXISTS (SELECT 1 FROM dbo.DenialTaskBoard WITH (NOLOCK) WHERE {LabScopeSql("LabId")}) THEN 1 ELSE 0 END;
+
 				SELECT
 					t.TaskID,
 					t.UniqueTrackId,
@@ -2117,7 +2154,8 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
 					t.ICDComplianceStatus,
 					t.DenialValidity
 				FROM dbo.DenialTaskBoard t WITH (NOLOCK)
-				WHERE {claimLookupWhere}
+				WHERE (@HasTaskLab=0 OR {taskLabScope})
+				  AND ({claimLookupWhere})
 				ORDER BY t.CPTCode, t.TaskID;";
 
 		var rows = new List<WorkflowTaskRow>();
@@ -2128,6 +2166,7 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
 		};
 
 		var trimmedClaimId = claimId.Trim();
+		AddLabScopeParams(cmd, labId);
 		cmd.Parameters.AddWithValue("@ClaimId", trimmedClaimId);
 		cmd.Parameters.AddWithValue("@ClaimUid", trimmedClaimId);
 		cmd.Parameters.AddWithValue("@ClaimKey", trimmedClaimId.Replace("CLM-", string.Empty, StringComparison.OrdinalIgnoreCase));
@@ -2483,6 +2522,7 @@ END;";
 	public async Task<int> UpdateTaskAsync(UpdateTaskRequest request, bool isClosed, bool isDuplicate, CancellationToken ct)
 	{
 		await EnsureClaimSupportTablesAsync(request.LabId, ct);
+		request.Status = NormalizeWorkflowStatus(request.Status);
 		if (isDuplicate)
 		{
 			var task = (await GetTasksAsync(new DenialWorkflowFilter { LabId = request.LabId, SearchText = request.TaskId, Page = 1, PageSize = 1 }, ct)).Items.FirstOrDefault();
@@ -2490,7 +2530,23 @@ END;";
 			await MoveActiveToVerificationAsync(task, request.TaskId, request.Comments, ct);
 			return 1;
 		}
-		const string sql = @"
+		await using var con = OpenLab(request.LabId);
+		await con.OpenAsync(ct);
+		var taskColumns = await GetColumnSetAsync(con, "dbo.DenialTaskBoard", ct);
+		var optionalSets = new List<string>();
+		if (taskColumns.Contains("ActionCompleted")) optionalSets.Add("ActionCompleted=@ActionCompleted");
+		if (taskColumns.Contains("ActualOutcome")) optionalSets.Add("ActualOutcome=@ActualOutcome");
+		if (taskColumns.Contains("DocumentationType")) optionalSets.Add("DocumentationType=@DocumentationType");
+		if (taskColumns.Contains("FollowUpReason")) optionalSets.Add("FollowUpReason=@FollowUpReason");
+		if (taskColumns.Contains("ClosureReason")) optionalSets.Add("ClosureReason=@ClosureReason");
+		if (taskColumns.Contains("SyncConfirmation")) optionalSets.Add("SyncConfirmation=@SyncConfirmation");
+		if (taskColumns.Contains("ValidationStatus")) optionalSets.Add("ValidationStatus=@ValidationStatus");
+		if (taskColumns.Contains("ExpectedResponseDate")) optionalSets.Add("ExpectedResponseDate=@ExpectedResponseDate");
+		if (taskColumns.Contains("LastWorkflowUpdatedBy")) optionalSets.Add("LastWorkflowUpdatedBy=@ActionBy");
+		if (taskColumns.Contains("LastWorkflowUpdatedOn")) optionalSets.Add("LastWorkflowUpdatedOn=SYSDATETIME()");
+		var optionalSetSql = optionalSets.Count > 0 ? "," + Environment.NewLine + "    " + string.Join("," + Environment.NewLine + "    ", optionalSets) : string.Empty;
+		var historySnapshot = BuildWorkflowStatusSnapshot(request);
+		var sql = $@"
 DECLARE @Changed TABLE(TaskID nvarchar(100), ClaimId nvarchar(150), OldWorkFlowStatus nvarchar(100), NewWorkFlowStatus nvarchar(100), OldAssignedTo nvarchar(255), NewAssignedTo nvarchar(255));
 
 UPDATE dbo.DenialTaskBoard
@@ -2499,7 +2555,7 @@ SET Status=@Status,
     ReviewerComments=@Comments,
     ReviewerUpdatedBy=@ActionBy,
     ReviewerUpdatedOn=SYSDATETIME(),
-    DateCompleted=CASE WHEN @IsClosed=1 THEN CONVERT(date,GETDATE()) ELSE DateCompleted END
+    DateCompleted=CASE WHEN @IsClosed=1 THEN CONVERT(date,GETDATE()) ELSE DateCompleted END{optionalSetSql}
 OUTPUT INSERTED.TaskID, CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(INSERTED.ClaimID,''))), 'CLM-', '')), DELETED.WorkFlowStatus, INSERTED.WorkFlowStatus, DELETED.AssignedTo, INSERTED.AssignedTo
 INTO @Changed(TaskID, ClaimId, OldWorkFlowStatus, NewWorkFlowStatus, OldAssignedTo, NewAssignedTo)
 WHERE TaskID=@TaskID;
@@ -2561,8 +2617,33 @@ BEGIN
     JOIN dbo.DenialClosedClaims dc ON dc.LabId=@LabId AND dc.ClaimId=c.ClaimId;
 END;
 
+IF OBJECT_ID('dbo.DenialTaskHistory','U') IS NOT NULL
+BEGIN
+    INSERT INTO dbo.DenialTaskHistory(TaskID,UniqueTrackId,LabId,RunId,ActionType,OldStatus,NewStatus,OldAssignedTo,NewAssignedTo,Comments,ActionBy,ActionDate,SnapshotJson)
+    SELECT ISNULL(t.TaskID,''),ISNULL(t.UniqueTrackId,''),ISNULL(t.LabId,@LabId),ISNULL(t.RunId,''),'StatusUpdate',ISNULL(c.OldWorkFlowStatus,''),ISNULL(c.NewWorkFlowStatus,''),ISNULL(c.OldAssignedTo,''),ISNULL(c.NewAssignedTo,''),@Comments,@ActionBy,SYSDATETIME(),@SnapshotJson
+    FROM @Changed c
+    LEFT JOIN dbo.DenialTaskBoard t ON t.TaskID=c.TaskID;
+END
+
 SELECT COUNT(1) FROM @Changed;";
-		await using var con = OpenLab(request.LabId); await con.OpenAsync(ct); await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 180 }; cmd.Parameters.AddWithValue("@LabId", request.LabId); cmd.Parameters.AddWithValue("@TaskID", request.TaskId); cmd.Parameters.AddWithValue("@Status", request.Status); cmd.Parameters.AddWithValue("@Comments", request.Comments ?? string.Empty); cmd.Parameters.AddWithValue("@ActionBy", request.ActionBy ?? string.Empty); cmd.Parameters.AddWithValue("@IsClosed", isClosed); var scalar = await cmd.ExecuteScalarAsync(ct); return scalar == DBNull.Value || scalar is null ? 0 : Convert.ToInt32(scalar);
+		await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 180 };
+		cmd.Parameters.AddWithValue("@LabId", request.LabId);
+		cmd.Parameters.AddWithValue("@TaskID", request.TaskId);
+		cmd.Parameters.AddWithValue("@Status", request.Status);
+		cmd.Parameters.AddWithValue("@Comments", request.Comments ?? string.Empty);
+		cmd.Parameters.AddWithValue("@ActionBy", request.ActionBy ?? string.Empty);
+		cmd.Parameters.AddWithValue("@IsClosed", isClosed);
+		cmd.Parameters.AddWithValue("@ActionCompleted", request.ActionCompleted.HasValue ? request.ActionCompleted.Value : (object)DBNull.Value);
+		cmd.Parameters.AddWithValue("@ActualOutcome", request.ActualOutcome ?? string.Empty);
+		cmd.Parameters.AddWithValue("@DocumentationType", request.DocumentationType ?? string.Empty);
+		cmd.Parameters.AddWithValue("@FollowUpReason", request.FollowUpReason ?? string.Empty);
+		cmd.Parameters.AddWithValue("@ClosureReason", request.ClosureReason ?? string.Empty);
+		cmd.Parameters.AddWithValue("@SyncConfirmation", request.SyncConfirmation ?? string.Empty);
+		cmd.Parameters.AddWithValue("@ValidationStatus", request.ValidationStatus ?? string.Empty);
+		cmd.Parameters.AddWithValue("@ExpectedResponseDate", request.ExpectedResponseDate.HasValue ? request.ExpectedResponseDate.Value.Date : (object)DBNull.Value);
+		cmd.Parameters.AddWithValue("@SnapshotJson", historySnapshot);
+		var scalar = await cmd.ExecuteScalarAsync(ct);
+		return scalar == DBNull.Value || scalar is null ? 0 : Convert.ToInt32(scalar);
 	}
 
 	public async Task<int> DecideVerificationAsync(VerificationDecisionRequest request, bool isClosed, CancellationToken ct)
@@ -3953,9 +4034,9 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
 		{
 			"approve" => "Closed",
 			"writeoff" => "Closed",
-			"rework" => "Required Review",
-			"others" => "Required Review",
-			_ => "Required Review"
+			"rework" => "Rework",
+			"others" => "Rework",
+			_ => "Rework"
 		};
 		var level = string.Equals(request.EscalationLevel, "Line", StringComparison.OrdinalIgnoreCase) ? "Line" : "Claim";
 		var note = request.ResponseNote.Trim();
@@ -4199,14 +4280,27 @@ SELECT @Rows;";
 	public async Task<DenialEscalationRow> SaveEscalationAsync(SaveDenialEscalationRequest request, CancellationToken ct)
 	{
 		await EnsureClaimSupportTablesAsync(request.LabId, ct);
-		const string insertSql = @"
-INSERT INTO dbo.DenialClaimEscalations(LabId,ClaimId,TaskId,CptCode,EscalationLevel,EscalationReason,Comments,Status,EscalatedTo,EscalatedToRole,NextFollowUpDate,CreatedBy)
-OUTPUT INSERTED.EscalationId,INSERTED.LabId,INSERTED.ClaimId,INSERTED.TaskId,INSERTED.CptCode,INSERTED.EscalationLevel,INSERTED.EscalationReason,INSERTED.Comments,INSERTED.Status,INSERTED.EscalatedTo,INSERTED.EscalatedToRole,INSERTED.NextFollowUpDate,INSERTED.CreatedBy,INSERTED.CreatedOn
-VALUES(@LabId,@ClaimId,@TaskId,@CptCode,@EscalationLevel,@EscalationReason,@Comments,@Status,@EscalatedTo,@EscalatedToRole,@NextFollowUpDate,@CreatedBy);";
-
 		await using var con = OpenLab(request.LabId);
 		await con.OpenAsync(ct);
 		await EnsureDenialTaskBoardNormalizedClaimIdAsync(con, ct);
+		var escalationColumns = await GetColumnSetAsync(con, "dbo.DenialClaimEscalations", ct);
+		var insertColumns = new List<string> { "LabId", "ClaimId", "TaskId", "CptCode", "EscalationLevel", "EscalationReason", "Comments", "Status", "EscalatedTo", "EscalatedToRole", "NextFollowUpDate", "CreatedBy" };
+		var insertValues = new List<string> { "@LabId", "@ClaimId", "@TaskId", "@CptCode", "@EscalationLevel", "@EscalationReason", "@Comments", "@Status", "@EscalatedTo", "@EscalatedToRole", "@NextFollowUpDate", "@CreatedBy" };
+		void AddOptionalEscalationColumn(string column, string parameter)
+		{
+			if (!escalationColumns.Contains(column)) return;
+			insertColumns.Add(column);
+			insertValues.Add(parameter);
+		}
+		AddOptionalEscalationColumn("EscalationScope", "@EscalationScope");
+		AddOptionalEscalationColumn("EscalationScopeValue", "@EscalationScopeValue");
+		AddOptionalEscalationColumn("EscalationScopeDisplay", "@EscalationScopeDisplay");
+		AddOptionalEscalationColumn("AffectedTaskIds", "@AffectedTaskIds");
+		AddOptionalEscalationColumn("RecommendedNextAction", "@RecommendedNextAction");
+		var insertSql = $@"
+INSERT INTO dbo.DenialClaimEscalations({string.Join(",", insertColumns)})
+OUTPUT INSERTED.EscalationId,INSERTED.LabId,INSERTED.ClaimId,INSERTED.TaskId,INSERTED.CptCode,INSERTED.EscalationLevel,INSERTED.EscalationReason,INSERTED.Comments,INSERTED.Status,INSERTED.EscalatedTo,INSERTED.EscalatedToRole,INSERTED.NextFollowUpDate,INSERTED.CreatedBy,INSERTED.CreatedOn
+VALUES({string.Join(",", insertValues)});";
 			var explicitEscalationAssignee = request.EscalatedTo?.Trim() ?? string.Empty;
 			var explicitEscalationRole = request.EscalatedToRole?.Trim() ?? string.Empty;
 			var isExternalEscalation =
@@ -4230,6 +4324,11 @@ VALUES(@LabId,@ClaimId,@TaskId,@CptCode,@EscalationLevel,@EscalationReason,@Comm
 		cmd.Parameters.AddWithValue("@EscalatedToRole", explicitEscalationRole);
 		cmd.Parameters.AddWithValue("@NextFollowUpDate", request.NextFollowUpDate.HasValue ? request.NextFollowUpDate.Value.Date : (object)DBNull.Value);
 		cmd.Parameters.AddWithValue("@CreatedBy", string.IsNullOrWhiteSpace(request.CreatedBy) ? "ReactWorkflow" : request.CreatedBy.Trim());
+		cmd.Parameters.AddWithValue("@EscalationScope", string.IsNullOrWhiteSpace(request.EscalationScope) ? request.EscalationLevel : request.EscalationScope.Trim());
+		cmd.Parameters.AddWithValue("@EscalationScopeValue", request.EscalationScopeValue?.Trim() ?? string.Empty);
+		cmd.Parameters.AddWithValue("@EscalationScopeDisplay", request.EscalationScopeDisplay?.Trim() ?? string.Empty);
+		cmd.Parameters.AddWithValue("@AffectedTaskIds", request.AffectedTaskIds?.Trim() ?? string.Empty);
+		cmd.Parameters.AddWithValue("@RecommendedNextAction", request.RecommendedNextAction?.Trim() ?? string.Empty);
 
 		DenialEscalationRow saved;
 		await using (var rd = await cmd.ExecuteReaderAsync(ct))
@@ -4436,6 +4535,42 @@ ORDER BY UserName;";
 
 		return $"Escalated: {reason} | {comments}";
 	}
+
+	private static string NormalizeWorkflowStatus(string? status)
+	{
+		var value = (status ?? string.Empty).Trim();
+		return value.ToLowerInvariant() switch
+		{
+			"" or "open" or "in progress" or "in-progress" or "pending review" => "Assigned",
+			"pending payer" => "Pending Payer Response",
+			"escalated" or "internal escalation" or "external escalation" => "Escalated to AR Manager",
+			"completed" => "Closed",
+			"required review" or "returned for rework" => "Rework",
+			_ => value
+		};
+	}
+
+	private static string BuildWorkflowStatusSnapshot(UpdateTaskRequest request)
+	{
+		var parts = new List<string>
+		{
+			$"\"status\":\"{EscapeJson(request.Status)}\"",
+			$"\"actionCompleted\":{(request.ActionCompleted.HasValue ? (request.ActionCompleted.Value ? "true" : "false") : "null")}",
+			$"\"actualOutcome\":\"{EscapeJson(request.ActualOutcome)}\"",
+			$"\"documentationType\":\"{EscapeJson(request.DocumentationType)}\"",
+			$"\"followUpReason\":\"{EscapeJson(request.FollowUpReason)}\"",
+			$"\"closureReason\":\"{EscapeJson(request.ClosureReason)}\"",
+			$"\"syncConfirmation\":\"{EscapeJson(request.SyncConfirmation)}\"",
+			$"\"validationStatus\":\"{EscapeJson(request.ValidationStatus)}\"",
+			$"\"expectedResponseDate\":\"{(request.ExpectedResponseDate.HasValue ? request.ExpectedResponseDate.Value.ToString("yyyy-MM-dd") : string.Empty)}\"",
+			$"\"updateScope\":\"{EscapeJson(request.UpdateScope)}\"",
+			$"\"updateScopeValue\":\"{EscapeJson(request.UpdateScopeValue)}\""
+		};
+		return "{" + string.Join(",", parts) + "}";
+	}
+
+	private static string EscapeJson(string? value)
+		=> (value ?? string.Empty).Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal).Replace("\r", "\\r", StringComparison.Ordinal).Replace("\n", "\\n", StringComparison.Ordinal);
 
 
 	private static string LabScopeSql(string labExpression)

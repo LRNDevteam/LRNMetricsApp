@@ -15,6 +15,16 @@ import VerificationPage from './pages/VerificationPage';
 
 function roleIsReviewerOnly(role) { return isArReviewerRole(role); }
 
+function WorkflowPlaceholder({ title, children }) {
+  return <div className="workflow-placeholder">
+    <div className="workflow-placeholder-icon"><i className="bi bi-tools" /></div>
+    <div>
+      <h2>{title}</h2>
+      <p>{children}</p>
+    </div>
+  </div>;
+}
+
 export default function App() {
   const jwtClaims = useMemo(() => parseJwt(getJwt()), []);
   const [user, setUser] = useState({ userName: claimUser(jwtClaims), role: claimRole(jwtClaims), labs: [] });
@@ -22,7 +32,7 @@ export default function App() {
   const [reviewers, setReviewers] = useState([]);
   const [filterOptions, setFilterOptions] = useState(emptyFilterOptions);
   const [labId, setLabId] = useState(Number(localStorage.getItem('denial.labId') || 0));
-  const workflowViews = ['dashboard', 'aging', 'summary', 'claims', 'myworklist', 'escalations', 'verification'];
+  const workflowViews = ['dashboard', 'aging', 'summary', 'claims', 'myworklist', 'escalations', 'verification', 'exports', 'admin'];
   const getStoredView = () => {
     const hashView = String(window.location.hash || '').replace('#', '').trim().toLowerCase();
     return workflowViews.includes(hashView) ? hashView : '';
@@ -144,7 +154,9 @@ export default function App() {
   function resolveLandingView(role) {
     const stored = getStoredView();
     if (stored) return stored;
-    return 'aging';
+    if (isArReviewerRole(role)) return 'myworklist';
+    if (isClientManagerRole(role) || isAccountManagerRole(role)) return 'escalations';
+    return 'dashboard';
   }
 
   async function refreshLoginUserFromMetrics({ forceRefresh = true, resetData = false, applyLanding = false } = {}) {
@@ -415,6 +427,10 @@ export default function App() {
     return new Set((items || []).map(item => item.claimId).filter(Boolean)).size;
   }
 
+  function distinctSectionClaimCount(sections) {
+    return distinctClaimCount((sections || []).flatMap(section => section.items || []));
+  }
+
   function normalizeEscalationNotificationItems(result) {
     const rows = result?.items || [];
     return rows.map(row => ({
@@ -491,7 +507,7 @@ export default function App() {
         ].filter(section => section.count > 0);
       }
 
-      const total = sections.reduce((sum, section) => sum + Number(section.count || 0), 0);
+      const total = distinctSectionClaimCount(sections);
       setWorkflowNotifications({ loading: false, sections, total });
       const key = `${user.userName || ''}|${user.role || ''}|${labId}`;
       if (total > 0 && initialNotificationKeyRef.current !== key) {
@@ -636,7 +652,7 @@ export default function App() {
   }, [authReady, labId, menuCountQuery, reviewerOnly]);
 
   const labName = labs.find(l => Number(l.labId ?? l.LabId) === Number(labId))?.labName || 'Select Lab';
-  const pageTitle = { dashboard: 'Denial Workflow Dashboard', aging: 'Aging Dashboard', summary: 'Denial Summary', claims: canAssign ? 'Claim Level Assignment' : 'Claim View', myworklist: 'My Worklist', escalations: escalationView === 'response' ? 'Escalation Response' : 'Escalation Queue', verification: 'Verification' }[view] || 'Denial Workflow';
+  const pageTitle = { dashboard: 'Denial Dashboard', aging: 'Aging Dashboard', summary: 'Denial Summary', claims: canAssign ? 'Claim Assignment' : 'Claim View', myworklist: 'My Worklist', escalations: escalationView === 'response' ? 'Escalation Response' : 'Escalation Queue', verification: 'Verification', exports: 'Exports', admin: 'Admin Setup' }[view] || 'Denial Workflow';
   const showOverallDownload = view === 'claims';
   const claimNavTabs = useMemo(() => ([
     { key: 'new', label: 'New' },
@@ -1059,16 +1075,16 @@ export default function App() {
     <WorkflowNotificationPopup />
     <div className={`sidebar-backdrop ${sidebarOpen ? 'open' : ''}`} onClick={() => setSidebarOpen(false)} />
     <aside className={`lrn-sidebar ${sidebarOpen ? 'open' : ''}`}>
-      <div className="lrn-brand"><div className="lrn-brand-icon">LRN</div><div><div className="lrn-brand-text">Lab Revenue</div><div className="lrn-brand-sub">Intelligence Navigator</div></div></div>
+      <div className="lrn-brand"><div className="lrn-brand-icon"><i className="bi bi-layers" /></div><div><div className="lrn-brand-text">Denial Workflow</div><div className="lrn-brand-sub">Revenue recovery</div></div></div>
       <div className="user-card"><span className="avatar-sm">{initials(user.displayName || user.userName)}</span><div><strong>{user.displayName || user.userName || 'LRN User'}</strong><small>{user.role || 'Workflow User'}</small></div></div>
       <nav className="lrn-nav">
         <div className="lrn-nav-section">Overview</div>
-        <button className={`lrn-nav-item ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}><i className="bi bi-speedometer2" />Dashboard</button>
+        <button className={`lrn-nav-item ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}><i className="bi bi-speedometer2" />Denial Dashboard</button>
         <button className={`lrn-nav-item ${view === 'aging' ? 'active' : ''}`} onClick={() => setView('aging')}><i className="bi bi-hourglass-split" />Aging Dashboard</button>
         <div className="lrn-nav-section">Denial Workflow</div>
         {(canAssign || externalManager || adminRole) && (
           <>
-            <button className={`lrn-nav-item ${(view === 'claims' || view === 'verification' || (view === 'escalations' && escalationView === 'response')) ? 'active' : ''}`} onClick={() => setView('claims', { closeSidebar: false })}><i className="bi bi-folder-check" />{canAssign ? 'Claim Assignment' : 'Claim View'}</button>
+            <button className={`lrn-nav-item ${view === 'claims' ? 'active' : ''}`} onClick={() => setView('claims', { closeSidebar: false })}><i className="bi bi-folder-check" />{canAssign ? 'Claim Assignment' : 'Claim View'}</button>
             {(view === 'claims' || view === 'verification' || (view === 'escalations' && escalationView === 'response')) && (
               <div className="lrn-nav-submenu">
                 {claimNavTabs.map(t => {
@@ -1089,7 +1105,6 @@ export default function App() {
         )}
         {(reviewerOnly || adminRole) && (
           <>
-            <div className="lrn-nav-section">My Tasks</div>
             <button className={`lrn-nav-item ${view === 'myworklist' ? 'active' : ''}`} onClick={() => setView('myworklist', { closeSidebar: false })}><i className="bi bi-person-check" />My Worklist</button>
             {view === 'myworklist' && (
               <div className="lrn-nav-submenu">
@@ -1102,9 +1117,9 @@ export default function App() {
             )}
           </>
         )}
-        {(!canAssign && (externalManager || readOnlyWorkflow)) && (
+        {(externalManager || readOnlyWorkflow) && (
           <>
-            <button className={`lrn-nav-item ${view === 'escalations' ? 'active' : ''}`} onClick={() => setView('escalations', { closeSidebar: false })}><i className="bi bi-exclamation-triangle" />{canAssign ? 'Escalation Response' : 'Escalation Queue'}<span className="lrn-nav-badge">{menuCountText(claimMenuCounts.escalations)}</span></button>
+            <button className={`lrn-nav-item ${view === 'escalations' ? 'active' : ''}`} onClick={() => setView('escalations', { closeSidebar: false })}><i className="bi bi-exclamation-triangle" />Escalation Queue<span className="lrn-nav-badge">{menuCountText(claimMenuCounts.escalations)}</span></button>
             {view === 'escalations' && (
               <div className="lrn-nav-submenu">
                 {escalationNavTabs.map(t => (
@@ -1116,6 +1131,9 @@ export default function App() {
             )}
           </>
         )}
+        {(canAssign || externalManager || adminRole) && <button className={`lrn-nav-item ${view === 'verification' ? 'active' : ''}`} onClick={() => setView('verification')}><i className="bi bi-shield-check" />Verification</button>}
+        <button className={`lrn-nav-item ${view === 'claims' && claimTaskView === 'closed' ? 'active' : ''}`} onClick={() => { setClaimTaskView('closed'); setView('claims'); }}><i className="bi bi-archive" />Closed Claims</button>
+        {adminRole && <button className={`lrn-nav-item ${view === 'admin' ? 'active' : ''}`} onClick={() => setView('admin')}><i className="bi bi-gear" />Admin Setup</button>}
       </nav>
       <div className="sidebar-logout"><button type="button" className="sidebar-logout-btn" onClick={logoutWorkflow}><i className="bi bi-box-arrow-right" />Logout</button></div>
     </aside>
@@ -1143,7 +1161,12 @@ export default function App() {
         )}
         {message && <div className={`lrn-alert ${message.type}`}>{message.text}</div>}
         {loading && <div className="loading-line" />}
-        {view === 'dashboard' && <DashboardPage data={dashboard} user={user} labName={labName} />}
+        {view === 'dashboard' && <DashboardPage data={dashboard} user={user} labName={labName} onKpiClick={(next = {}) => {
+          const { taskView: nextTaskView, ...nextFilter } = next;
+          if (nextTaskView) setClaimTaskView(nextTaskView);
+          setFilter(f => ({ ...f, ...nextFilter, page: 1 }));
+          setView(reviewerOnly ? 'myworklist' : 'claims');
+        }} />}
         {view === 'aging' && <AgingDashboardPage data={agingDashboard} filter={filter} setFilterValue={setFilterValue} clearFilter={clearFilter} reviewers={reviewers} options={filterOptions} onCellClick={({ pivot, row, bucket }) => {
           const next = { page: 1 };
           if (pivot === 'payer') next.payerName = row?.name || '';
@@ -1160,6 +1183,8 @@ export default function App() {
         {view === 'verification' && <VerificationPage data={verification} changePage={changePage} tabCounts={claimMenuCounts} onTabChange={handleClaimTabRoute} reviewers={reviewers} canAssign={canAssign} assignClaims={assignClaims} />}
         {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setMessage} onSaved={() => { refreshReviewerNotification(); refreshWorkflowNotifications(); }} taskView={myWorklistView} setTaskView={handleMyWorklistViewChange} tabCounts={myWorklistMenuCounts} />}
         {view === 'escalations' && <EscalationQueuePage labId={labId} user={user} reviewers={reviewers} taskView={escalationView === 'response' ? 'claim' : escalationView} responseOnly={escalationView === 'response'} setTaskView={setEscalationView} tabCounts={claimMenuCounts} onClaimTabChange={handleClaimTabRoute} canAssign={canAssign} assignClaims={assignClaims} setMessage={setMessage} />}
+        {view === 'exports' && <WorkflowPlaceholder title="Exports">Use Overall Download or per-tab Download from Claim Assignment for claim extracts. Aging Dashboard also includes a Download Excel action.</WorkflowPlaceholder>}
+        {view === 'admin' && <WorkflowPlaceholder title="Admin Setup">Admin setup is available from the LRN Metrics administration area. This workflow shell keeps the menu entry visible for administrators.</WorkflowPlaceholder>}
       </main>
     </div>
   </div>;

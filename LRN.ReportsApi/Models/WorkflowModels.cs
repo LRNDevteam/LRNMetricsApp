@@ -95,10 +95,13 @@ public sealed class DenialWorkflowDashboardSummary
 {
     public int TotalDenials { get; set; }
     public int TotalClaims { get; set; }
+    public int OpenClaims { get; set; }
     public int TotalTasks { get; set; }
     public int AssignedClaims { get; set; }
     public int PendingClaims { get; set; }
     public int ClosedClaims { get; set; }
+    public int EscalatedClaims { get; set; }
+    public int VerificationPending { get; set; }
     public decimal OutstandingAmount { get; set; }
     public int OpenInProgressCount { get; set; }
     public int ClosedCount { get; set; }
@@ -397,6 +400,16 @@ public class WorkflowTaskRow
     public string CoverageStatus { get; set; } = string.Empty;
     public string ICDComplianceStatus { get; set; } = string.Empty;
     public string DenialValidity { get; set; } = string.Empty;
+    public bool? ActionCompleted { get; set; }
+    public string ActualOutcome { get; set; } = string.Empty;
+    public string DocumentationType { get; set; } = string.Empty;
+    public string FollowUpReason { get; set; } = string.Empty;
+    public string ClosureReason { get; set; } = string.Empty;
+    public string SyncConfirmation { get; set; } = string.Empty;
+    public string ValidationStatus { get; set; } = string.Empty;
+    public DateTime? ExpectedResponseDate { get; set; }
+    public string LastWorkflowUpdatedBy { get; set; } = string.Empty;
+    public DateTime? LastWorkflowUpdatedOn { get; set; }
 }
 
 public class VerificationTaskRow : WorkflowTaskRow
@@ -479,6 +492,16 @@ public sealed class UpdateTaskRequest
     public string Status { get; set; } = string.Empty;
     public string Comments { get; set; } = string.Empty;
     public string ActionBy { get; set; } = string.Empty;
+    public bool? ActionCompleted { get; set; }
+    public string ActualOutcome { get; set; } = string.Empty;
+    public string DocumentationType { get; set; } = string.Empty;
+    public string FollowUpReason { get; set; } = string.Empty;
+    public string ClosureReason { get; set; } = string.Empty;
+    public string SyncConfirmation { get; set; } = string.Empty;
+    public string ValidationStatus { get; set; } = string.Empty;
+    public DateTime? ExpectedResponseDate { get; set; }
+    public string UpdateScope { get; set; } = "Line";
+    public string UpdateScopeValue { get; set; } = string.Empty;
 }
 
 public sealed class VerificationDecisionRequest
@@ -548,6 +571,11 @@ public sealed class DenialEscalationRow
     public string Status { get; set; } = "Open";
     public string EscalatedTo { get; set; } = string.Empty;
     public string EscalatedToRole { get; set; } = string.Empty;
+    public string EscalationScope { get; set; } = "Claim";
+    public string EscalationScopeValue { get; set; } = string.Empty;
+    public string EscalationScopeDisplay { get; set; } = string.Empty;
+    public string AffectedTaskIds { get; set; } = string.Empty;
+    public string RecommendedNextAction { get; set; } = string.Empty;
     public DateTime? NextFollowUpDate { get; set; }
     public string CreatedBy { get; set; } = string.Empty;
     public DateTime CreatedOn { get; set; }
@@ -565,6 +593,11 @@ public sealed class SaveDenialEscalationRequest
     public string Status { get; set; } = "Open";
     public string EscalatedTo { get; set; } = string.Empty;
     public string EscalatedToRole { get; set; } = string.Empty;
+    public string EscalationScope { get; set; } = "Claim";
+    public string EscalationScopeValue { get; set; } = string.Empty;
+    public string EscalationScopeDisplay { get; set; } = string.Empty;
+    public string AffectedTaskIds { get; set; } = string.Empty;
+    public string RecommendedNextAction { get; set; } = string.Empty;
     public DateTime? NextFollowUpDate { get; set; }
     public string CreatedBy { get; set; } = string.Empty;
 }
@@ -582,6 +615,11 @@ public sealed class UpdateDenialEscalationRequest
     public string Status { get; set; } = "Open";
     public string EscalatedTo { get; set; } = string.Empty;
     public string EscalatedToRole { get; set; } = string.Empty;
+    public string EscalationScope { get; set; } = "Claim";
+    public string EscalationScopeValue { get; set; } = string.Empty;
+    public string EscalationScopeDisplay { get; set; } = string.Empty;
+    public string AffectedTaskIds { get; set; } = string.Empty;
+    public string RecommendedNextAction { get; set; } = string.Empty;
     public DateTime? NextFollowUpDate { get; set; }
     public string ActionBy { get; set; } = string.Empty;
 }
@@ -600,6 +638,11 @@ public sealed class DenialEscalationQueueRow
     public string Status { get; set; } = string.Empty;
     public string EscalatedTo { get; set; } = string.Empty;
     public string EscalatedToRole { get; set; } = string.Empty;
+    public string EscalationScope { get; set; } = string.Empty;
+    public string EscalationScopeValue { get; set; } = string.Empty;
+    public string EscalationScopeDisplay { get; set; } = string.Empty;
+    public string AffectedTaskIds { get; set; } = string.Empty;
+    public string RecommendedNextAction { get; set; } = string.Empty;
     public DateTime? NextFollowUpDate { get; set; }
     public string CreatedBy { get; set; } = string.Empty;
     public DateTime CreatedOn { get; set; }
@@ -627,6 +670,7 @@ public sealed class ResolveDenialEscalationRequest
     public string EscalationLevel { get; set; } = "Claim";
     public string ResolutionAction { get; set; } = string.Empty;
     public string ResponseNote { get; set; } = string.Empty;
+    public string RecommendedNextAction { get; set; } = string.Empty;
     public string ReassignTo { get; set; } = string.Empty;
     public string ActionBy { get; set; } = string.Empty;
 }
