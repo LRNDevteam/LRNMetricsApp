@@ -27,6 +27,10 @@ export const canAssignRole = (role) => {
   const r = normalizeRole(role);
   return r.includes('admin') || r.includes('armanager');
 };
+export const canDownloadWorkflowRole = (role) => {
+  const r = normalizeRole(role);
+  return r.includes('admin') || r.includes('armanager') || isArReviewerRole(role) || isClientManagerRole(role) || isAccountManagerRole(role);
+};
 export const canUpdateWorkflowRole = (role) => {
   const r = normalizeRole(role);
   return r.includes('admin') || r.includes('armanager') || isArReviewerRole(role);

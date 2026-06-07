@@ -13,10 +13,14 @@ public sealed class DenialWorkflowController : ControllerBase
 {
     private readonly IDenialWorkflowService _service;
     private readonly IDenialWorkflowExportJobService _exportJobs;
-    public DenialWorkflowController(IDenialWorkflowService service, IDenialWorkflowExportJobService exportJobs)
+    private readonly IConfiguration _configuration;
+    private readonly ILogger<DenialWorkflowController> _logger;
+    public DenialWorkflowController(IDenialWorkflowService service, IDenialWorkflowExportJobService exportJobs, IConfiguration configuration, ILogger<DenialWorkflowController> logger)
     {
         _service = service;
         _exportJobs = exportJobs;
+        _configuration = configuration;
+        _logger = logger;
     }
 
     [HttpGet("health")]
@@ -112,6 +116,8 @@ public sealed class DenialWorkflowController : ControllerBase
     public ActionResult<ClaimExportStartResponse> StartClaimsExport([FromBody] DenialWorkflowFilter? filter)
     {
         if (filter is null || filter.LabId <= 0) return BadRequest("LabId is required.");
+        if (!CanDownloadWorkflowFromToken())
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "This role cannot export workflow claims." });
         var normalized = Normalize(filter);
         var requestedBy = normalized.UserName;
         return Accepted(_exportJobs.StartClaimsExport(normalized, requestedBy));
@@ -173,6 +179,8 @@ public sealed class DenialWorkflowController : ControllerBase
 	[HttpGet("tasks")]
     public async Task<ActionResult<PagedResult<WorkflowTaskRow>>> Tasks([FromQuery] DenialWorkflowFilter filter, CancellationToken ct)
     {
+        if (!CanAccessWorkflowTaskView(filter.TaskView))
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "This role cannot access the selected workflow tab." });
         if (string.Equals(filter.TaskView, "verification", StringComparison.OrdinalIgnoreCase) && !CanAssignFromToken())
             return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only Admin and AR Manager users can view Verification." });
 
@@ -271,20 +279,41 @@ public sealed class DenialWorkflowController : ControllerBase
         var role = FirstClaim(ClaimTypes.Role, "role", "roles");
         if (labId <= 0) return BadRequest("LabId is required.");
         if (string.IsNullOrWhiteSpace(claimId)) return BadRequest("ClaimId is required.");
-        if ((IsClientManagerRole(role) || IsAccountManagerRole(role)) && !await HasClientInfoPendingEscalationAsync(labId, claimId, null, null, ct))
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Client/Account Manager can upload documents only for Client Info Pending escalations." });
+        if ((IsClientManagerRole(role) || IsAccountManagerRole(role)) && !await HasExternalManagerDocumentAccessAsync(labId, claimId, null, null, role, ct))
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Client/Account Manager can upload documents only for claims escalated to their role." });
         if (files == null || files.Count == 0) return BadRequest("Select at least one file.");
 
         uploadedBy = string.IsNullOrWhiteSpace(uploadedBy) ? (FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "ReactWorkflow") : uploadedBy;
-        var root = Path.Combine(AppContext.BaseDirectory, "ClaimDocuments", labId.ToString(), SafePath(claimId));
-        Directory.CreateDirectory(root);
+        var configuredRoot = _configuration["DenialWorkflowFileStorage:UploadRootPath"];
+        if (string.IsNullOrWhiteSpace(configuredRoot))
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Document upload storage is not configured." });
+
+        var root = Path.Combine(configuredRoot, labId.ToString(), SafePath(claimId));
+        try
+        {
+            Directory.CreateDirectory(root);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unable to create denial workflow upload folder {UploadFolder}.", root);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Document upload storage is not accessible. Please contact support." });
+        }
         var saved = new List<ClaimDocumentRow>();
         foreach (var file in files.Where(f => f.Length > 0))
         {
             var ext = Path.GetExtension(file.FileName);
             var stored = $"{Guid.NewGuid():N}{ext}";
             var path = Path.Combine(root, stored);
-            await using (var fs = System.IO.File.Create(path)) await file.CopyToAsync(fs, ct);
+            try
+            {
+                await using var fs = System.IO.File.Create(path);
+                await file.CopyToAsync(fs, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unable to save denial workflow upload {FileName} to {UploadPath}.", file.FileName, path);
+                return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Document upload failed because storage is not accessible. Please contact support." });
+            }
             saved.Add(await _service.SaveClaimDocumentAsync(new ClaimDocumentRow
             {
                 LabId = labId,
@@ -310,8 +339,8 @@ public sealed class DenialWorkflowController : ControllerBase
         var doc = await _service.GetClaimDocumentAsync(labId, documentId, ct);
         if (doc is null) return NotFound("Document was not found.");
 
-        if ((IsClientManagerRole(role) || IsAccountManagerRole(role)) && !await HasClientInfoPendingEscalationAsync(labId, doc.ClaimId, null, null, ct))
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Client/Account Manager can delete documents only for Client Info Pending escalations." });
+        if ((IsClientManagerRole(role) || IsAccountManagerRole(role)) && !await HasExternalManagerDocumentAccessAsync(labId, doc.ClaimId, null, null, role, ct))
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Client/Account Manager can delete documents only for claims escalated to their role." });
 
         if (!await _service.CanDeleteClaimDocumentAsync(labId, doc.ClaimId, ct))
             return StatusCode(StatusCodes.Status409Conflict, new { message = "Documents can be deleted only while the claim is still in the active editable stage." });
@@ -342,6 +371,8 @@ public sealed class DenialWorkflowController : ControllerBase
     public async Task<ActionResult<PagedResult<DenialEscalationQueueRow>>> EscalationQueue([FromQuery] DenialWorkflowFilter filter, [FromQuery] string escalationLevel = "Claim", CancellationToken ct = default)
     {
         if (filter.LabId <= 0) return BadRequest("LabId is required.");
+        if (string.Equals(filter.TaskView, "response", StringComparison.OrdinalIgnoreCase) && IsReadOnlyWorkflowRole(FirstClaim(ClaimTypes.Role, "role", "roles")))
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "This role cannot access Escalation Response." });
         return Ok(await _service.GetEscalationQueueAsync(Normalize(filter), escalationLevel, ct));
     }
 
@@ -372,6 +403,16 @@ public sealed class DenialWorkflowController : ControllerBase
         if (request.LabId <= 0) return BadRequest("LabId is required.");
         if (string.IsNullOrWhiteSpace(request.ClaimId)) return BadRequest("ClaimId is required.");
         if (string.IsNullOrWhiteSpace(request.EscalationReason)) return BadRequest("Escalation reason is required.");
+        var role = FirstClaim(ClaimTypes.Role, "role", "roles");
+        if (IsReviewerOnly(role))
+        {
+            request.EscalationLevel = "Claim";
+            request.TaskId = string.Empty;
+            request.CptCode = string.Empty;
+            request.EscalationScope = "Overall Claim";
+            request.EscalationScopeValue = request.ClaimId;
+            request.EscalationScopeDisplay = "Overall Claim";
+        }
         request.CreatedBy = string.IsNullOrWhiteSpace(request.CreatedBy) ? (FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "ReactWorkflow") : request.CreatedBy;
         return Ok(await _service.SaveEscalationAsync(request, ct));
     }
@@ -457,8 +498,13 @@ public sealed class DenialWorkflowController : ControllerBase
             filter.AssignedTo = tokenUserName;
             filter.Reviewer = tokenUserName;
         }
-        // Client Manager and Account Manager can view all workflow claims/tasks for their selected lab.
-        // Their write access is enforced only on Client Info Pending escalations in the write endpoints.
+        else if (IsClientManagerRole(tokenRole) || IsAccountManagerRole(tokenRole))
+        {
+            // Client Manager and Account Manager downloads use the visible lab/tab/filter scope,
+            // but are never assigned-to restricted.
+            filter.AssignedTo = string.Empty;
+            filter.Reviewer = string.Empty;
+        }
 
         return filter;
     }
@@ -482,6 +528,30 @@ public sealed class DenialWorkflowController : ControllerBase
         return false;
     }
 
+    private async Task<bool> HasExternalManagerDocumentAccessAsync(int labId, string claimId, string? taskId, string? cptCode, string? role, CancellationToken ct)
+    {
+        static bool HasClientInfo(IEnumerable<DenialEscalationRow> rows)
+            => rows.Any(x =>
+                (x.EscalationReason ?? string.Empty).Contains("Client Info Pending", StringComparison.OrdinalIgnoreCase) ||
+                (x.EscalationReason ?? string.Empty).Contains("Client Information Pending", StringComparison.OrdinalIgnoreCase) ||
+                (x.Comments ?? string.Empty).Contains("Client Info Pending", StringComparison.OrdinalIgnoreCase) ||
+                (x.Comments ?? string.Empty).Contains("Client Information Pending", StringComparison.OrdinalIgnoreCase));
+
+        bool IsEscalatedToRole(DenialEscalationRow row)
+        {
+            var target = NormalizeRoleToken($"{row.EscalatedToRole} {row.EscalatedTo}");
+            return IsClientManagerRole(role)
+                ? target.Contains("CLIENTMANAGER")
+                : IsAccountManagerRole(role) && target.Contains("ACCOUNTMANAGER");
+        }
+
+        var claimRows = await _service.GetEscalationsAsync(labId, claimId.Trim(), null, null, "Claim", ct);
+        if (HasClientInfo(claimRows) || claimRows.Any(IsEscalatedToRole)) return true;
+
+        var lineRows = await _service.GetEscalationsAsync(labId, claimId.Trim(), taskId, cptCode, "Line", ct);
+        return HasClientInfo(lineRows) || lineRows.Any(IsEscalatedToRole);
+    }
+
     private bool CanAssignFromToken()
     {
         var role = FirstClaim(ClaimTypes.Role, "role", "roles");
@@ -494,6 +564,28 @@ public sealed class DenialWorkflowController : ControllerBase
         var role = FirstClaim(ClaimTypes.Role, "role", "roles");
         var r = NormalizeRoleToken(role);
         return r.Contains("ADMIN") || r.Contains("ARMANAGER") || r.Contains("CLIENTMANAGER") || r.Contains("ACCOUNTMANAGER");
+    }
+
+    private bool CanAccessWorkflowTaskView(string? taskView)
+    {
+        var view = NormalizeRoleToken(taskView);
+        var role = FirstClaim(ClaimTypes.Role, "role", "roles");
+        if (IsReviewerOnly(role) && view.Contains("INTERNALESCALATION")) return false;
+        if ((IsClientManagerRole(role) || IsAccountManagerRole(role))
+            && (view.Contains("INTERNALESCALATION") || view.Contains("ESCALATIONRESPONSE") || view == "RESPONSE"))
+            return false;
+        return true;
+    }
+
+    private bool CanDownloadWorkflowFromToken()
+    {
+        var role = FirstClaim(ClaimTypes.Role, "role", "roles");
+        var r = NormalizeRoleToken(role);
+        return r.Contains("ADMIN")
+            || r.Contains("ARMANAGER")
+            || IsReviewerOnly(role)
+            || r.Contains("CLIENTMANAGER")
+            || r.Contains("ACCOUNTMANAGER");
     }
 
     private static bool IsReadOnlyWorkflowRole(string? role) => IsClientManagerRole(role) || IsAccountManagerRole(role);
@@ -529,6 +621,7 @@ public sealed class DenialWorkflowController : ControllerBase
         "Pending Payer Response",
         "Pending Documentation",
         "Write-Off Pending Approval",
+        "Escalated to AR Manager",
         "Closed"
     };
 
@@ -568,7 +661,6 @@ public sealed class DenialWorkflowController : ControllerBase
             "Pending Documentation" when Missing(request.DocumentationType) => "Documentation type is required.",
             "Pending Documentation" when request.ExpectedResponseDate is null => "Expected response date is required.",
             "Pending Documentation" when commentsMissing => "Comments are required.",
-            "Closed" when Missing(request.ClosureReason) => "Closure reason is required.",
             "Closed" when Missing(request.ActualOutcome) => "Actual outcome is required.",
             "Closed" when commentsMissing => "Closure comments are required.",
             "Write-Off Pending Approval" when Missing(request.ActualOutcome) => "Actual outcome is required for write-off approval.",

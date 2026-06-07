@@ -8,7 +8,13 @@ export const emptyFilterOptions = {
   denialClassifications: [],
   clinics: [],
   salesReps: [],
-  referringProviders: []
+  referringProviders: [],
+  followUpReasons: [],
+  documentationTypes: [],
+  escalationReasons: [],
+  agingBuckets: ['0-30', '31-60', '61-90', '91-120', '120+'],
+  balanceBuckets: ['0-100', '100-500', '500-1000', '1000-5000', '5000+'],
+  followupDueBuckets: ['Today', 'Overdue', 'Next 7 Days', 'Next 14 Days', 'No Date']
 };
 
 export const emptyFilter = {
@@ -23,6 +29,14 @@ export const emptyFilter = {
   salesRepname: '',
   referringProvider: '',
   denialClassification: '',
+  followUpReason: '',
+  documentationType: '',
+  escalationReason: '',
+  expectedResponseBy: '',
+  nextFollowUpDate: '',
+  followupDue: '',
+  agingBucket: '',
+  balanceBucket: '',
   searchText: '',
   page: 1
 };

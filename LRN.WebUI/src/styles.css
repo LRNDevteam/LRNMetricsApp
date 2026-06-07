@@ -1221,6 +1221,7 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .status-scope-grid.single{grid-template-columns:minmax(240px,420px)}
 .status-scope-grid .doc-type-field{grid-column:3 / 5}
 .status-scope-grid label,.status-scope-comments{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:800;color:#334155}
+.field-label-row{display:inline-flex;align-items:center;gap:4px;line-height:1.2}
 .status-scope-grid input,.status-scope-grid select{min-height:36px;border:1px solid #cbd5e1;border-radius:8px;padding:7px 9px;background:#fff}
 .doctype-help{display:block;margin-top:2px;padding:8px 10px;border:1px solid #bfdbfe;background:#eff6ff;color:#1e3a8a;border-radius:8px;font-size:12px;font-weight:700;line-height:1.35}
 .status-scope-comments{margin-top:4px}
@@ -1337,6 +1338,7 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .claim-expand-dot{width:22px;height:22px;border-radius:999px;display:flex;align-items:center;justify-content:center;background:#eef2f7;color:#475569;font-size:10px}
 .claim-list-id{display:flex;flex-direction:column;gap:2px;min-width:0}
 .claim-list-id strong{font-size:12px;color:#0f172a}
+.claim-list-id .esc-review-inline{align-self:flex-start;margin-top:4px}
 .my-worklist-row .claim-id-link.as-text{
   border:0;
   background:transparent;
@@ -1443,14 +1445,15 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .aging-kpi small{display:block;font-size:11px;color:#8b95a5;margin-top:2px}
 .aging-kpi em,.aging-list-row em{display:inline-block;margin-top:6px;font-style:normal;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px}
 .aging-kpi em.warn,.aging-list-row em.warn{background:#fdf0ee;color:#c0503e}.aging-kpi em.ok,.aging-list-row em.ok{background:#eaf8f3;color:#1a7a55}
-.aging-toolbar{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:start;gap:12px}
-.aging-toggle{display:flex;background:#fff;border:1px solid #e2e5ea;border-radius:6px;padding:3px;gap:2px;box-shadow:0 1px 3px rgba(0,0,0,.07)}
+.aging-toolbar{display:flex;flex-wrap:wrap;align-items:flex-start;gap:12px}
+.aging-toggle{display:flex;flex-wrap:wrap;background:#fff;border:1px solid #e2e5ea;border-radius:6px;padding:3px;gap:2px;box-shadow:0 1px 3px rgba(0,0,0,.07);max-width:100%}
 .aging-toggle button{border:0;background:transparent;border-radius:4px;padding:7px 14px;font-size:12px;color:#6b7280;cursor:pointer}
 .aging-toggle button.active{background:#2ec08a;color:#fff;font-weight:700}
-.aging-toolbar-filters{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));align-items:center;gap:10px;min-width:0}
+.aging-toolbar-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));align-items:center;gap:10px;min-width:0;flex:1 1 560px}
 .aging-toolbar-filters label{height:34px;display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #d9e0ea;border-radius:6px;padding:0 10px;box-shadow:0 1px 3px rgba(0,0,0,.06);min-width:0}
 .aging-toolbar-filters i{font-size:12px;color:#4a90d9;flex:0 0 auto}.aging-toolbar-filters select{border:0;background:transparent;outline:0;width:100%;min-width:0;font-size:12px;color:#374151}.aging-toolbar-filters input[type=date]{border:0;background:transparent;outline:0;font-size:12px;color:#374151;width:100%;min-width:0}.aging-date-label span{font-size:10px;font-weight:800;text-transform:uppercase;color:#8b95a5;flex:0 0 auto}
-.aging-actions{display:flex;gap:8px;flex:0 0 auto}.aging-btn{border-radius:6px;font-size:12px;padding:8px 14px;display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+.aging-toolbar-filters .aging-ms-filter{min-width:0}.aging-toolbar-filters .aging-ms-filter .ms-control{height:34px;font-size:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.aging-actions{display:flex;gap:8px;flex:0 0 auto;margin-left:auto}.aging-btn{border-radius:6px;font-size:12px;padding:8px 14px;display:inline-flex;align-items:center;gap:6px;cursor:pointer}
 .aging-btn.ghost{background:#fff;border:1px solid #e2e5ea;color:#4b5563}.aging-btn.primary{border:0;background:#2ec08a;color:#fff}
 .aging-main-card,.aging-list-card{background:#fff;border:1px solid #e2e5ea;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.08);overflow:hidden}
 .aging-card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid #f1f3f6}
@@ -1471,7 +1474,7 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .aging-bottom-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.aging-list-card{padding:14px 18px;box-shadow:0 1px 3px rgba(0,0,0,.07)}
 .aging-list-title{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:800;color:#111827;margin-bottom:10px}.aging-list-title i{width:8px;height:8px;border-radius:2px}.aging-list-title i.red{background:#dc2626}.aging-list-title i.blue{background:#4a90d9}
 .aging-list-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f1f3f6}.aging-list-row:last-child{border-bottom:0}.aging-list-row b{display:block;font-size:12px;color:#374151}.aging-list-row small{display:block;font-size:10px;color:#8b95a5}.aging-list-row strong{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}.aging-list-row span{font-size:10px;color:#8b95a5}.aging-list-empty{color:#8b95a5;font-size:12px;padding:10px 0}
-@media (max-width:1100px){.aging-kpi-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.aging-bottom-grid{grid-template-columns:1fr}.aging-toolbar{grid-template-columns:1fr}.aging-toolbar-filters{grid-template-columns:repeat(2,minmax(150px,1fr))}.aging-actions{justify-content:flex-end}}
+@media (max-width:1100px){.aging-kpi-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.aging-bottom-grid{grid-template-columns:1fr}.aging-toolbar{flex-direction:column;align-items:stretch}.aging-toolbar-filters{grid-template-columns:repeat(2,minmax(150px,1fr));flex:1 1 auto}.aging-actions{justify-content:flex-end;margin-left:0}}
 
 /* Keep horizontal table scrollbars visible across workflow tables */
 .dt-wrap,
@@ -1561,7 +1564,7 @@ body{background:#f5f7fb;color:#101828}
 .lrn-content{padding:18px;max-width:100%;overflow-x:hidden}
 .lrn-card,.role-card,.claim-list-pane,.claim-drawer,.aging-main-card,.aging-list-card,.aging-kpi,.wl-card{border:1px solid #e1e7ef;border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.06)}
 .badge-good{background:#dcfce7;color:#166534}.badge-due-soon{background:#ffedd5;color:#9a3412}.badge-breached{background:#fee2e2;color:#991b1b}.badge-verification{background:#ede9fe;color:#6d28d9}
-.dashboard-hero-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-bottom:14px;align-items:stretch}
+.dashboard-hero-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(195px,1fr));gap:10px;margin-bottom:14px;align-items:stretch}
 .modern-kpi{border:1px solid #e1e7ef;border-radius:8px;background:#fff;min-height:92px;padding:12px;text-align:left;display:flex;gap:10px;align-items:flex-start;cursor:pointer;box-shadow:0 8px 20px rgba(15,23,42,.05)}
 .modern-kpi:hover{transform:translateY(-1px);box-shadow:0 12px 26px rgba(15,23,42,.09)}
 .modern-kpi-icon{width:32px;height:32px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;background:#eff6ff;color:#2563eb;flex:0 0 auto}
@@ -1579,7 +1582,7 @@ body{background:#f5f7fb;color:#101828}
 .claim-list-row-wide{grid-template-columns:auto auto minmax(140px,1.1fr) minmax(92px,.65fr) minmax(140px,1fr) minmax(130px,.9fr) minmax(95px,.7fr) minmax(112px,.75fr) minmax(92px,.65fr) 94px 96px}
 .claim-list-head-wide{grid-template-columns:minmax(140px,1.1fr) minmax(92px,.65fr) minmax(140px,1fr) minmax(130px,.9fr) minmax(95px,.7fr) minmax(112px,.75fr) minmax(92px,.65fr) 94px 96px}
 .claim-drawer-body{max-height:calc(100vh - 260px)}
-.aging-toolbar-filters{grid-template-columns:repeat(3,minmax(150px,1fr))}
+.aging-toolbar-filters{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
 @media(max-width:1500px){.modern-kpi.balance{grid-column:span 1}}
 @media(max-width:1100px){.dashboard-hero-row{grid-template-columns:repeat(2,minmax(0,1fr))}.aging-toolbar-filters{grid-template-columns:repeat(2,minmax(150px,1fr))}}
 @media(max-width:700px){.dashboard-hero-row,.aging-toolbar-filters{grid-template-columns:1fr}.workflow-placeholder{align-items:flex-start;justify-content:flex-start}}

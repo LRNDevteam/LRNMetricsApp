@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
+const multiValueDelimiterPattern = new RegExp('\\u00ac|\\u00c2\\u00ac|\\u00c3\\u0082\\u00c2\\u00ac');
+
 function toArray(value) {
   if (Array.isArray(value)) return value.filter(Boolean).map(String);
   if (value === undefined || value === null || value === '') return [];
-  return String(value).split('¬').map(x => x.trim()).filter(Boolean);
+  return String(value).split(multiValueDelimiterPattern).map(x => x.trim()).filter(Boolean);
 }
 
 function uniqueOptions(options) {
@@ -64,8 +66,8 @@ export default function SearchableMultiSelect({ label, value, options, onChange,
     <button type="button" className={`ms-control ${open ? 'open' : ''}`} onClick={() => setOpen(x => !x)} title={selected.map(x => labelMap.get(x) || x).join(', ')}>
       <span className={selected.length ? 'ms-selected-text' : 'ms-placeholder'}>{firstLabel}</span>
       {selected.length > 1 && <span className="ms-count">+{selected.length - 1}</span>}
-      {selected.length > 0 && <span className="ms-clear" onClick={clear}>×</span>}
-      <span className="ms-caret">▾</span>
+      {selected.length > 0 && <span className="ms-clear" onClick={clear}>x</span>}
+      <span className="ms-caret">v</span>
     </button>
     {open && <div className="ms-menu">
       <input className="ms-search" autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="Search..." />

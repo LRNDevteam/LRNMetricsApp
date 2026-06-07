@@ -59,6 +59,14 @@ public sealed class DenialWorkflowFilter
     public string ActionCategory { get; set; } = string.Empty;
     public string Priority { get; set; } = string.Empty;
     public string RunId { get; set; } = string.Empty;
+    public string FollowUpReason { get; set; } = string.Empty;
+    public string DocumentationType { get; set; } = string.Empty;
+    public string EscalationReason { get; set; } = string.Empty;
+    public DateTime? ExpectedResponseBy { get; set; }
+    public DateTime? NextFollowUpDate { get; set; }
+    public string FollowupDue { get; set; } = string.Empty;
+    public string AgingBucket { get; set; } = string.Empty;
+    public string BalanceBucket { get; set; } = string.Empty;
     public string SearchText { get; set; } = string.Empty;
     public DateTime? FromDate { get; set; }
     public DateTime? ToDate { get; set; }
@@ -122,6 +130,7 @@ public sealed class AgingDashboardSummary
     public IReadOnlyList<AgingMatrixRow> ByClassification { get; set; } = Array.Empty<AgingMatrixRow>();
     public IReadOnlyList<AgingMatrixRow> ByPanel { get; set; } = Array.Empty<AgingMatrixRow>();
     public IReadOnlyList<AgingMatrixRow> ByAction { get; set; } = Array.Empty<AgingMatrixRow>();
+    public IReadOnlyList<AgingMatrixRow> ByReviewer { get; set; } = Array.Empty<AgingMatrixRow>();
     public IReadOnlyList<AgingListItem> SlaRisks { get; set; } = Array.Empty<AgingListItem>();
     public IReadOnlyList<AgingListItem> AnalystWorkload { get; set; } = Array.Empty<AgingListItem>();
 }
@@ -299,6 +308,11 @@ public sealed class ClaimSubMenuCounts
     public int ExternalEscalation { get; set; }
     public int EscalationResponse { get; set; }
     public int Verification { get; set; }
+    public int PayerFollowup { get; set; }
+    public int PendingDocumentation { get; set; }
+    public int PendingPayerResponse { get; set; }
+    public int WriteOffApproval { get; set; }
+    public int AllClaims { get => TotalClaims; set => TotalClaims = value; }
 }
 
 public sealed class ReviewerWorkflowSummaryRow
@@ -446,6 +460,8 @@ public sealed class ClaimLevelRow
     public string Status { get; set; } = string.Empty;
     public string ClaimStatus { get; set; } = string.Empty;
     public string WorkflowStatus { get; set; } = string.Empty;
+    public string QueueName { get; set; } = string.Empty;
+    public string ClaimQueue { get; set; } = string.Empty;
     public int TaskCount { get; set; }
     public decimal InsuranceBalance { get; set; }
 }
@@ -648,7 +664,15 @@ public sealed class DenialEscalationQueueRow
     public DateTime CreatedOn { get; set; }
     public string Analyst { get; set; } = string.Empty;
     public string LabName { get; set; } = string.Empty;
+    public string Source { get; set; } = string.Empty;
     public string PayerName { get; set; } = string.Empty;
+    public string PanelName { get; set; } = string.Empty;
+    public string PatientName { get; set; } = string.Empty;
+    public string PatientId { get; set; } = string.Empty;
+    public string SubscriberId { get; set; } = string.Empty;
+    public string ClinicName { get; set; } = string.Empty;
+    public string ReferringProvider { get; set; } = string.Empty;
+    public DateTime? DateOfService { get; set; }
     public string ActionCategory { get; set; } = string.Empty;
     public string DenialClassification { get; set; } = string.Empty;
     public string DenialCode { get; set; } = string.Empty;

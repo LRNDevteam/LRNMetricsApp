@@ -5,6 +5,7 @@ import ClaimHistoryModal from '../components/ClaimHistoryModal';
 import { money, date, initials, statusClass } from '../utils/formatters';
 import { canDeleteClaimDocument } from '../utils/documentPermissions';
 import { MAX_TEXT_LENGTH, limitText, textCountLabel } from '../utils/textLimits';
+import { getQueuesForRole } from '../config/workflowRoleQueues';
 
 const resolutionActions = [
   { value: '', label: '— Select resolution action —' },
@@ -12,6 +13,11 @@ const resolutionActions = [
   { value: 'rework', label: 'Return for rework' },
   { value: 'writeoff', label: 'Approve write-off' },
   { value: 'others', label: 'Others' }
+];
+const writeOffDecisionActions = [
+  { value: '', label: 'Select write-off decision' },
+  { value: 'approveWriteOff', label: 'Approve Write Off' },
+  { value: 'rejectWriteOff', label: 'Reject Write Off' }
 ];
 
 const recommendedNextActions = ['Proceed with Appeal', 'Proceed with Rebill', 'Proceed with Write-Off Request', 'Perform Payer Follow-up', 'Request Documentation', 'Additional Information Needed', 'No Further Action Required', 'Close Claim / Line', 'Other'];
@@ -94,16 +100,7 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
   const [selectedClaims, setSelectedClaims] = useState({});
   const [bulkReviewer, setBulkReviewer] = useState('');
   const level = taskView === 'line' ? 'Line' : 'Claim';
-  const claimTabs = [
-    { key: 'new', label: 'New' },
-    { key: 'unassigned', label: 'Unassigned' },
-    { key: 'assigned', label: 'Assigned' },
-    { key: 'internalEscalation', label: 'Internal Escalation' },
-    { key: 'externalEscalation', label: 'External Escalation' },
-    { key: 'response', label: 'Escalated Response', countKey: 'escalationResponse' },
-    { key: 'verification', label: 'Verification Claim' },
-    { key: 'closed', label: 'Closed' }
-  ];
+  const claimTabs = [...getQueuesForRole(user?.role).map(t => t.key === 'escalationResponse' ? { ...t, countKey: 'escalationResponse' } : t), { key: 'verification', label: 'Verification Claim' }];
   const tabCountText = value => {
     if (value === null || value === undefined) return '...';
     const n = Number(value || 0);
@@ -219,11 +216,12 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
     const draft = drafts[row.escalationId] || {};
     const action = forcedAction || draft.resolutionAction || '';
     const canReassign = canAssignFromRole(user?.role);
-    const shouldReassign = canReassign && !['approve', 'writeoff'].includes(action);
+    const writeOffDecision = ['approveWriteOff', 'rejectWriteOff'].includes(action);
+    const shouldReassign = canReassign && !['approve', 'writeoff', 'approveWriteOff'].includes(action);
     const fail = (text) => { if (setInlineError) setInlineError(text); else setModalError(text); return false; };
     if (!action) return fail('Please select resolution action.');
     if (action === 'others' && !String(draft.otherReason || '').trim()) return fail('Please enter other response reason.');
-    if (!String(draft.recommendedNextAction || '').trim()) return fail('Please select recommended next action.');
+    if (!writeOffDecision && !String(draft.recommendedNextAction || '').trim()) return fail('Please select recommended next action.');
     if (!String(draft.responseNote || '').trim()) return fail('Please add manager response note.');
 
     if (setInlineError) setInlineError('');
@@ -244,7 +242,7 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
         cptCode: row.cptCode || '',
         escalationLevel: row.escalationLevel || level,
         resolutionAction: action,
-        recommendedNextAction: draft.recommendedNextAction || (action === 'approve' || action === 'writeoff' ? 'Close Claim / Line' : 'Additional Information Needed'),
+        recommendedNextAction: draft.recommendedNextAction || (action === 'approveWriteOff' ? 'Write-off approved' : action === 'rejectWriteOff' ? 'Write-off rejected' : action === 'approve' || action === 'writeoff' ? 'Close Claim / Line' : 'Additional Information Needed'),
         responseNote: finalResponseNote,
         reassignTo: shouldReassign ? (draft.reassignTo || '') : '',
         actionBy: user?.userName || 'ReactWorkflow'
@@ -253,7 +251,7 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
       closeModal();
       await load();
     } catch (e) {
-      setMessage({ type: 'danger', text: e.message || 'Escalation response failed.' });
+      fail(e.message || 'Escalation response failed.');
     } finally {
       setBusy(false);
     }
@@ -281,6 +279,47 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
     }
   }
 
+  function renderEscalationClaimSplit() {
+    return <>
+      <div className={`claim-split-shell ${drawerRow ? 'drawer-open' : ''}`}>
+        <section className={`claim-list-pane ${drawerRow ? 'narrow' : 'full'}`}>
+          <div className="claim-view-top">
+            <div>
+              <div className="claim-view-title">Escalation queue - {level} level</div>
+              <div className="claim-view-subtitle">Click a claim to view line-level tasks.</div>
+            </div>
+            <span className="table-count">{busy ? 'Loading...' : `Showing ${rows.length} of ${data.totalCount || 0}`}</span>
+          </div>
+          <div className="claim-list-head claim-list-head-wide"><span>Claim</span><span>Source</span><span>Payer Name</span><span>Patient Name</span><span>Patient ID</span><span>Subscriber ID</span><span>DOS</span><span>Balance</span><span>Status</span></div>
+          <div className="claim-rows-scroll">{rows.length ? rows.map(row => {
+            const isOpen = drawerRow?.escalationId === row.escalationId;
+            return <div key={row.escalationId} className={`claim-list-row claim-list-row-wide ${isOpen ? 'active' : ''}`}>
+              <span className="claim-row-check my-worklist-spacer" aria-hidden="true" />
+              <span className="claim-expand-dot"><i className={`bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'}`} /></span>
+              <span className="claim-list-id"><button className="claim-id-link" type="button" onClick={() => openDrawer(row)}>{row.claimId || '-'}</button><small>{row.analyst || row.createdBy || '-'} - {row.escalationReason || '-'}</small><button type="button" className="wl-btn xs teal esc-review-inline" onClick={() => openModal(row)}>Review</button></span>
+              <span className="claim-list-payer" title={row.source || ''}>{row.source || '-'}</span>
+              <span className="claim-list-payer" title={row.payerName || ''}>{row.payerName || '-'}</span>
+              <span className="claim-list-payer" title={row.patientName || ''}>{row.patientName || '-'}</span>
+              <span className="claim-list-payer" title={row.patientId || ''}>{row.patientId || '-'}</span>
+              <span className="claim-list-payer" title={row.subscriberId || ''}>{row.subscriberId || '-'}</span>
+              <span className="claim-list-payer">{date(row.dateOfService) || '-'}</span>
+              <span className="claim-list-amt">{money(row.insuranceBalance)}</span>
+              <span className="claim-list-status"><span className={`badge ${statusClass(row.status)}`}>{row.status || 'Open'}</span></span>
+            </div>;
+          }) : <div className="claim-empty-panel">No escalations found.</div>}</div>
+        </section>
+        {drawerRow && <section className="claim-drawer open">
+          <div className="claim-drawer-header"><div><div className="claim-drawer-kicker">Escalation Queue / Task View</div><h3>{drawerRow.claimId || '-'}</h3><p>{drawerRow.payerName || '-'} - {drawerRow.patientName || '-'} - {money(drawerRow.insuranceBalance)}</p></div><button className="wl-icon" title="Close claim drawer" type="button" onClick={() => { setDrawerRow(null); clearRowContext(); }}><i className="bi bi-x-lg" /></button></div>
+          <div className="claim-drawer-meta"><span><b>Source</b>{drawerRow.source || '-'}</span><span><b>Reason</b>{drawerRow.escalationReason || '-'}</span><span><b>Analyst</b>{drawerRow.analyst || drawerRow.createdBy || '-'}</span><span><b>DOS</b>{date(drawerRow.dateOfService)}</span><span><b>Follow-up</b>{date(drawerRow.nextFollowUpDate)}</span><span><b>Status</b>{drawerRow.status || 'Open'}</span></div>
+          <div className="claim-drawer-actions"><button className="wl-btn teal xs" type="button" onClick={() => openModal(drawerRow)}>Review</button></div>
+          <div className="claim-drawer-tabs"><button className="active" type="button">Tasks ({lineTasks.length})</button></div>
+          <div className="claim-drawer-body"><LineTasksTable row={drawerRow} tasks={lineTasks} busy={lineTasksBusy} compact hideHistory /></div>
+        </section>}
+      </div>
+      <Pager data={data} changePage={next => { closeModal(); setDrawerRow(null); clearRowContext(); setPage(next); }} />
+    </>;
+  }
+
   if (responseOnly) {
     return <div className="esc-page">
       <div className={`claim-split-shell ${drawerRow ? 'drawer-open' : ''}`}>
@@ -293,17 +332,22 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
             <span className="table-count">{busy ? 'Loading...' : 'Response'}</span>
           </div>
           <div className="claim-list-toolbar">
-            <div className="claim-tab-row">{claimTabs.map(t => <button key={t.key} type="button" className={`claim-tab ${t.key === 'response' ? 'active' : ''}`} onClick={() => onClaimTabChange(t.key)}><span>{t.label}</span><b>{tabCountText(tabCounts?.[t.countKey || t.key])}</b></button>)}</div>
+            <div className="claim-tab-row">{claimTabs.map(t => <button key={t.key} type="button" className={`claim-tab ${responseOnly && t.key === 'escalationResponse' ? 'active' : ''}`} onClick={() => onClaimTabChange(t.key)}><span>{t.label}</span><b>{tabCountText(tabCounts?.[t.countKey || t.key])}</b></button>)}</div>
           </div>
           {canAssign && <div className="claim-assign-bar2"><label><input type="checkbox" checked={allSelected} onChange={e => { const next = {}; if (e.target.checked) rows.forEach((_, i) => next[i] = true); setSelectedClaims(next); }} /> Select page</label><strong>{selectedClaimIds.length} selected</strong><select value={bulkReviewer} onChange={e => setBulkReviewer(e.target.value)}><option value="">Select AR Reviewer</option>{arReviewers.map(r => <option key={r.userName || r.UserName} value={r.userName || r.UserName}>{r.displayName || r.DisplayName || r.userName || r.UserName}</option>)}</select><button className="wl-btn teal xs" type="button" disabled={!selectedClaimIds.length} onClick={() => assignClaims(selectedClaimIds, bulkReviewer)}>Assign</button></div>}
-          <div className="claim-list-head"><span>Claim</span><span>Payer</span><span>Balance</span><span>Status</span></div>
+          <div className="claim-list-head claim-list-head-wide"><span>Claim</span><span>Source</span><span>Payer Name</span><span>Patient Name</span><span>Patient ID</span><span>Subscriber ID</span><span>DOS</span><span>Balance</span><span>Status</span></div>
           <div className="claim-rows-scroll">{rows.length ? rows.map((row, index) => {
             const isOpen = drawerRow?.escalationId === row.escalationId;
-            return <button type="button" key={row.escalationId} className={`claim-list-row ${isOpen ? 'active' : ''}`} onClick={() => openDrawer(row)}>
+            return <button type="button" key={row.escalationId} className={`claim-list-row claim-list-row-wide ${isOpen ? 'active' : ''}`} onClick={() => openDrawer(row)}>
               {canAssign && <span className="claim-row-check" onClick={e => e.stopPropagation()}><input type="checkbox" checked={!!selectedClaims[index]} onChange={e => setSelectedClaims({ ...selectedClaims, [index]: e.target.checked })} /></span>}
               <span className="claim-expand-dot"><i className={`bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'}`} /></span>
               <span className="claim-list-id"><strong>{row.claimId || '-'}</strong><small>{row.analyst || row.createdBy || '-'} - {date(row.createdOn)}</small></span>
+              <span className="claim-list-payer" title={row.source || ''}>{row.source || '-'}</span>
               <span className="claim-list-payer" title={row.payerName || ''}>{row.payerName || '-'}</span>
+              <span className="claim-list-payer" title={row.patientName || ''}>{row.patientName || '-'}</span>
+              <span className="claim-list-payer" title={row.patientId || ''}>{row.patientId || '-'}</span>
+              <span className="claim-list-payer" title={row.subscriberId || ''}>{row.subscriberId || '-'}</span>
+              <span className="claim-list-payer">{date(row.dateOfService) || '-'}</span>
               <span className="claim-list-amt">{money(row.insuranceBalance)}</span>
               <span className={`badge ${statusClass(row.status)}`}>{row.status || 'Open'}</span>
             </button>;
@@ -312,16 +356,10 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
         {drawerRow && <section className="claim-drawer open">
           <div className="claim-drawer-header"><div><div className="claim-drawer-kicker">Claims / Escalated Response / Review</div><h3>{drawerRow.claimId || '-'}</h3><p>{drawerRow.payerName || '-'} - {money(drawerRow.insuranceBalance)}</p></div><button className="wl-icon" title="Close claim drawer" type="button" onClick={() => { setDrawerRow(null); clearRowContext(); }}><i className="bi bi-x-lg" /></button></div>
           <div className="claim-drawer-meta"><span><b>Reason</b>{drawerRow.escalationReason || '-'}</span><span><b>Analyst</b>{drawerRow.analyst || drawerRow.createdBy || '-'}</span><span><b>Created</b>{date(drawerRow.createdOn)}</span><span><b>Follow-up</b>{date(drawerRow.nextFollowUpDate)}</span><span><b>SLA</b>{drawerRow.slaStatus || '-'}</span><span><b>Status</b>{drawerRow.status || 'Open'}</span></div>
-          <div className="claim-drawer-actions"><button className="wl-btn teal xs" type="button" onClick={() => openModal(drawerRow)}>Review Response</button><button type="button" className="wl-icon icon-history" title="View history" onClick={() => openHistory(drawerRow)}><i className="bi bi-clock-history" /></button></div>
+          <div className="claim-drawer-actions"><button className="wl-btn teal xs" type="button" onClick={() => openModal(drawerRow)}>Review Response</button></div>
           <div className="claim-drawer-tabs"><button className="active" type="button">Line Tasks</button></div>
           <div className="claim-drawer-body">
-            <LineTasksTable row={drawerRow} tasks={lineTasks} busy={lineTasksBusy} compact onHistory={openHistory} />
-            <div className="claim-history-panel">
-              <div className="history-section-title">Escalation note</div>
-              <div className="modal-row"><div className="modal-row-title">{drawerRow.escalationReason || '-'}</div><div className="modal-row-meta">{drawerRow.comments || 'No escalation comment entered.'}</div></div>
-              <div className="history-section-title">Documents</div>
-              {responseDocs.length ? responseDocs.map(d => <div className="modal-row document-row" key={d.documentId}><div><div className="modal-row-title">{d.originalFileName}</div><div className="modal-row-meta">{d.uploadedBy || '-'} - {date(d.uploadedOn)}</div></div><div className="doc-row-actions"><button className="wl-btn xs" type="button" onClick={() => openDocument(d.documentId)}>Download</button>{canDeleteClaimDocument(drawerRow, { busy, taskView: responseOnly ? 'response' : taskView }) && <button className="wl-btn red xs" type="button" onClick={() => deleteDocument(d.documentId, drawerRow)}>Delete</button>}</div></div>) : <div className="modal-row"><div className="modal-row-title">No documents uploaded</div></div>}
-            </div>
+            <LineTasksTable row={drawerRow} tasks={lineTasks} busy={lineTasksBusy} compact hideHistory onHistory={openHistory} />
           </div>
         </section>}
       </div>
@@ -334,18 +372,21 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
   return <div className="esc-page">
     <div className="wl-kpis esc-kpis"><div><b>{Number(kpi.total || 0).toLocaleString()}</b><span>{level} escalations</span></div><div><b>{Number(kpi.pending || 0).toLocaleString()}</b><span>Pending manager</span></div><div><b>{Number(kpi.breached || 0).toLocaleString()}</b><span>SLA breached</span></div><div><b>{money(kpi.amount)}</b><span>Visible balance</span></div></div>
 
+    {renderEscalationClaimSplit()}
+    {false && <>
     <div className="lrn-card">
       <div className="lrn-card-header"><div className="lrn-card-title">Escalation queue · {level} level</div><span className="table-count">Showing {rows.length} of {data.totalCount || 0}</span></div>
       <div className="dt-wrap workflow-scroll escalation-table-wrap">
         <table className="lrn-table workflow-table thin-bordered esc-table">
-          <thead><tr><th style={{ minWidth: 128 }}>Action</th><th style={{ minWidth: 130 }}>Claim</th>{level === 'Line' && <th style={{ minWidth: 90 }}>CPT</th>}<th style={{ minWidth: 150 }}>Analyst</th><th style={{ minWidth: 280 }}>Reason</th><th style={{ minWidth: 130 }}>Follow-up Date</th><th style={{ minWidth: 130 }}>Created On</th><th style={{ minWidth: 115 }}>SLA</th><th style={{ minWidth: 105 }}>Balance</th><th style={{ minWidth: 130 }}>Status</th></tr></thead>
-          <tbody>{rows.length ? rows.map(row => <EscalationRow key={row.escalationId} row={row} level={level} onOpen={() => openModal(row)} onHistory={() => openHistory(row)} />) : <tr><td colSpan={level === 'Line' ? 10 : 9} className="empty-cell">No escalations found.</td></tr>}</tbody>
+          <thead><tr><th style={{ minWidth: 128 }}>Action</th><th style={{ minWidth: 130 }}>Claim</th>{level === 'Line' && <th style={{ minWidth: 90 }}>CPT</th>}<th style={{ minWidth: 110 }}>Source</th><th style={{ minWidth: 180 }}>Payer Name</th><th style={{ minWidth: 160 }}>Patient Name</th><th style={{ minWidth: 120 }}>Patient ID</th><th style={{ minWidth: 130 }}>Subscriber ID</th><th style={{ minWidth: 115 }}>DOS</th><th style={{ minWidth: 150 }}>Analyst</th><th style={{ minWidth: 280 }}>Reason</th><th style={{ minWidth: 130 }}>Follow-up Date</th><th style={{ minWidth: 130 }}>Created On</th><th style={{ minWidth: 115 }}>SLA</th><th style={{ minWidth: 105 }}>Balance</th><th style={{ minWidth: 130 }}>Status</th></tr></thead>
+          <tbody>{rows.length ? rows.map(row => <EscalationRow key={row.escalationId} row={row} level={level} onOpen={() => openModal(row)} onSelect={() => openDrawer(row)} />) : <tr><td colSpan={level === 'Line' ? 16 : 15} className="empty-cell">No escalations found.</td></tr>}</tbody>
         </table>
       </div>
     </div>
     <Pager data={data} changePage={next => { closeModal(); clearRowContext(); setPage(next); }} />
 
-    {level === 'Line' && activeRow && <LineTasksPanel row={activeRow} tasks={lineTasks} busy={lineTasksBusy} onHistory={openHistory} modalError={modalError} setModalError={setModalError} />}
+    {drawerRow && <LineTasksPanel row={drawerRow} tasks={lineTasks} busy={lineTasksBusy} />}
+    </>}
 
     {historyCtx && <ClaimHistoryModal open={!!historyCtx} title={historyCtx.title} subtitle={historyCtx.subtitle} rows={historyRows} loading={historyLoading} onClose={() => setHistoryCtx(null)} />}
 
@@ -353,11 +394,17 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
   </div>;
 }
 
-function EscalationRow({ row, level, onOpen, onHistory }) {
+function EscalationRow({ row, level, onOpen, onSelect }) {
   return <tr className="esc-row">
-    <td><div className="esc-action-buttons"><button type="button" className="wl-btn xs teal" onClick={onOpen}>Review</button><button type="button" className="wl-icon icon-history" title="View history" onClick={onHistory}><i className="bi bi-clock-history" /></button></div></td>
-    <td className="claim-link">{row.claimId}</td>
+    <td><div className="esc-action-buttons"><button type="button" className="wl-btn xs teal" onClick={onOpen}>Review</button></div></td>
+    <td className="claim-link"><button type="button" className="claim-id-link" onClick={onSelect}>{row.claimId}</button></td>
     {level === 'Line' && <td><code>{row.cptCode || '-'}</code></td>}
+    <td>{row.source || '-'}</td>
+    <td className="wrap-cell">{row.payerName || '-'}</td>
+    <td>{row.patientName || '-'}</td>
+    <td>{row.patientId || '-'}</td>
+    <td>{row.subscriberId || '-'}</td>
+    <td>{date(row.dateOfService) || '-'}</td>
     <td><span className="avatar-sm">{initials(row.analyst || row.createdBy)}</span> {row.analyst || row.createdBy || '-'}</td>
     <td className="wrap-cell"><b>{row.escalationReason}</b></td>
     <td>{date(row.nextFollowUpDate)}</td>
@@ -385,13 +432,15 @@ function EscalationModal({ row, level, draft, setDraft, reviewers, canReassign, 
 
 function EscalationDetail({ row, draft, setDraft, reviewers, canReassign, resolve, busy, modalError, setModalError, responseFiles, setResponseFiles, responseDocs = [], openDocument, deleteDocument }) {
   const arReviewers = (reviewers || []).filter(isArReviewerOption);
-  const managerOptions = (reviewers || []).filter(isManagerOption);
   const action = draft.resolutionAction || '';
-  const showReassign = canReassign && !!action && !['approve', 'writeoff'].includes(action);
+  const writeOffDecision = String(row.escalationReason || '').toLowerCase().includes('write-off decision required') || String(row.escalationReason || '').toLowerCase().includes('writeoff decision required');
+  const actionOptions = writeOffDecision ? writeOffDecisionActions : resolutionActions;
+  const showReassign = canReassign && !!action && !['approve', 'writeoff', 'approveWriteOff'].includes(action);
+  const clearAndSetDraft = (patch) => { setModalError(''); setDraft(patch); };
   return <div className="esc-detail-wrap popup-mode">
     <div className="esc-detail-grid">
       <div>
-        <div className="esc-section-title esc-title-row"><span>Escalation details</span><span className="esc-title-meta">Claim {row.claimId || '-'} · {row.payerName || 'Payer not available'}</span></div>
+        <div className="esc-section-title esc-title-row"><span>Escalation details</span><span className="esc-title-meta">Claim {row.claimId || '-'} - {row.payerName || 'Payer not available'}</span></div>
         <div className="esc-info-grid">
           <Info label="Action required" value={row.actionCategory || row.escalationReason || '-'} />
           <Info label="Balance" value={money(row.insuranceBalance)} />
@@ -403,19 +452,20 @@ function EscalationDetail({ row, draft, setDraft, reviewers, canReassign, resolv
           <div className="esc-note-label">Escalation note from {row.analyst || row.createdBy || 'analyst'}</div>
           <span className="esc-reason-pill">{row.escalationReason}</span>
           <div className="esc-note-text">{row.comments || 'No escalation comment entered.'}</div>
-          <div className="esc-note-meta">{row.createdBy || row.analyst || '-'} · {date(row.createdOn)}</div>
+          <div className="esc-note-meta">{row.createdBy || row.analyst || '-'} - {date(row.createdOn)}</div>
         </div>
       </div>
       <div>
         <div className="esc-section-title">Manager response</div>
         {modalError ? <div className="esc-inline-error"><i className="bi bi-exclamation-circle" /> {modalError}</div> : null}
-        <label className="esc-label">Response action<select className="wl-full" value={action} disabled={busy} onChange={e => setDraft({ resolutionAction: e.target.value, reassignTo: '', otherReason: '' })}>{resolutionActions.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}</select></label>
-        <label className="esc-label">Recommended Next Action <span>*</span><select className="wl-full" value={draft.recommendedNextAction || ''} disabled={busy} onChange={e => setDraft({ recommendedNextAction: e.target.value })}><option value="">Select recommended next action</option>{recommendedNextActions.map(x => <option key={x}>{x}</option>)}</select></label>
+        {writeOffDecision ? <div className="esc-help">Write-off Decision Required: choose Approve Write Off or Reject Write Off and enter comments before submitting.</div> : null}
+        <label className="esc-label">Response action<select className="wl-full" value={action} disabled={busy} onChange={e => clearAndSetDraft({ resolutionAction: e.target.value, reassignTo: '', otherReason: '', recommendedNextAction: writeOffDecision ? (e.target.value === 'approveWriteOff' ? 'Write-off approved' : e.target.value === 'rejectWriteOff' ? 'Write-off rejected' : '') : (draft.recommendedNextAction || '') })}>{actionOptions.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}</select></label>
+        {!writeOffDecision && <label className="esc-label">Recommended Next Action <span>*</span><select className="wl-full" value={draft.recommendedNextAction || ''} disabled={busy} onChange={e => clearAndSetDraft({ recommendedNextAction: e.target.value })}><option value="">Select recommended next action</option>{recommendedNextActions.map(x => <option key={x}>{x}</option>)}</select></label>}
         {action === 'rework' && <div className="esc-help">Choose an AR Reviewer to reassign the claim, or leave it blank to move it back to the unassigned queue.</div>}
-        {action === 'others' && <label className="esc-label">Other reason <span>*</span><input className="wl-full" value={draft.otherReason || ''} disabled={busy} onChange={e => setDraft({ otherReason: e.target.value })} placeholder="Enter other response reason..." /></label>}
-        <label className="esc-label">Add / update response note to {row.analyst || row.createdBy || 'analyst'} <span>*</span><textarea className="wl-textarea esc-response" maxLength={MAX_TEXT_LENGTH} value={draft.responseNote || ''} disabled={busy} onChange={e => setDraft({ responseNote: limitText(e.target.value) })} placeholder="Add clarification, decision, or instructions for the analyst — this will be visible in their work list..." /><div className="text-count">{textCountLabel(draft.responseNote)}</div></label>
-        {showReassign && <label className="esc-label">Reassign claim to AR Reviewer<select className="wl-full" value={draft.reassignTo || ''} disabled={busy} onChange={e => setDraft({ reassignTo: e.target.value })}><option value="">{action === 'rework' ? 'Move to unassigned' : 'Keep current reviewer'}</option>{arReviewers.map(r => <option key={r.userName || r.UserName} value={r.userName || r.UserName}>{r.displayName || r.DisplayName || r.userName || r.UserName}</option>)}</select></label>}
-        <label className="esc-label">Optional document upload<input type="file" multiple disabled={busy} onChange={e => setResponseFiles(Array.from(e.target.files || []))} /></label>{responseFiles?.length ? <div className="esc-help">{responseFiles.length} file(s) selected.</div> : null}
+        {action === 'others' && <label className="esc-label">Other reason <span>*</span><input className="wl-full" value={draft.otherReason || ''} disabled={busy} onChange={e => clearAndSetDraft({ otherReason: e.target.value })} placeholder="Enter other response reason..." /></label>}
+        <label className="esc-label">Add / update response note to {row.analyst || row.createdBy || 'analyst'} <span>*</span><textarea className="wl-textarea esc-response" maxLength={MAX_TEXT_LENGTH} value={draft.responseNote || ''} disabled={busy} onChange={e => clearAndSetDraft({ responseNote: limitText(e.target.value) })} placeholder="Add clarification, decision, or instructions for the analyst - this will be visible in their work list..." /><div className="text-count">{textCountLabel(draft.responseNote)}</div></label>
+        {showReassign && <label className="esc-label">Reassign claim to AR Reviewer<select className="wl-full" value={draft.reassignTo || ''} disabled={busy} onChange={e => clearAndSetDraft({ reassignTo: e.target.value })}><option value="">{action === 'rework' ? 'Move to unassigned' : 'Keep current reviewer'}</option>{arReviewers.map(r => <option key={r.userName || r.UserName} value={r.userName || r.UserName}>{r.displayName || r.DisplayName || r.userName || r.UserName}</option>)}</select></label>}
+        <label className="esc-label">Optional document upload<input type="file" multiple disabled={busy} onChange={e => { setModalError(''); setResponseFiles(Array.from(e.target.files || [])); }} /></label>{responseFiles?.length ? <div className="esc-help">{responseFiles.length} file(s) selected.</div> : null}
         {responseDocs?.length ? <div className="esc-doc-list">{responseDocs.map(d => <div className="esc-doc-row" key={d.documentId}><span>{d.originalFileName}</span><div className="doc-row-actions"><button className="wl-btn xs" type="button" onClick={() => openDocument?.(d.documentId)}>View / Download</button>{canDeleteClaimDocument(row, { busy }) && <button className="wl-btn red xs" type="button" onClick={() => deleteDocument?.(d.documentId, row)}>Delete</button>}</div></div>)}</div> : null}
         <div className="esc-help">Submit will send the response back for AR Manager verification.</div>
       </div>
@@ -425,17 +475,24 @@ function EscalationDetail({ row, draft, setDraft, reviewers, canReassign, resolv
     </div>
   </div>;
 }
-
-function LineTasksPanel({ row, tasks, busy, onHistory }) {
-  return <div className="lrn-card esc-line-panel"><div className="lrn-card-header"><div className="lrn-card-title">Line level task list · Claim {row.claimId}</div><span className="table-count">{busy ? 'Loading...' : `${tasks.length} task(s)`}</span></div><LineTasksTable row={row} tasks={tasks} busy={busy} onHistory={onHistory} /></div>;
+function LineTasksPanel({ row, tasks, busy }) {
+  return <div className="lrn-card esc-line-panel"><div className="lrn-card-header"><div className="lrn-card-title">Task view - Claim {row.claimId}</div><span className="table-count">{busy ? 'Loading...' : `${tasks.length} task(s)`}</span></div><LineTasksTable row={row} tasks={tasks} busy={busy} hideHistory /></div>;
 }
 
-function LineTasksTable({ title, row, tasks, busy, compact, hideHistory = false, onHistory }) {
-  const colSpan = hideHistory ? 11 : 12;
-  return <div className={compact ? 'esc-modal-task-section' : ''}>{title && <div className="esc-section-title">{title}</div>}<div className="dt-wrap escalation-line-scroll"><table className="lrn-table workflow-table thin-bordered esc-line-task-table"><thead><tr><th>Task ID</th><th>Claim</th><th>CPT</th><th>Denial Code</th><th>Denial Classification</th><th>Task</th><th>Action</th><th>Comment</th><th>Assigned To</th><th>Status</th><th>Created On</th>{!hideHistory && <th>History</th>}</tr></thead><tbody>{busy ? <tr><td colSpan={colSpan} className="empty-cell">Loading task list...</td></tr> : tasks?.length ? tasks.map((t, i) => <tr key={`${t.taskId}-${i}`}><td>{t.taskId || '-'}</td><td>{t.claimId || '-'}</td><td><code>{t.cptCode || '-'}</code></td><td>{t.denialCode || '-'}</td><td className="wrap-cell compact-wrap">{t.denialClassification || '-'}</td><td className="wrap-cell task-text-cell">{t.task || '-'}</td><td className="wrap-cell action-text-cell">{t.recommendedAction || t.actionCategory || t.actionCode || '-'}</td><td className="wrap-cell comment-text-cell">{t.reviewerComments || t.denialDescription || '-'}</td><td>{t.assignedTo || '-'}</td><td><span className={`badge ${statusClass(t.status)}`}>{t.status || '-'}</span></td><td>{date(t.createdOn)}</td>{!hideHistory && <td><button type="button" className="wl-icon icon-history" title="View line history" onClick={() => onHistory?.(row, t)}><i className="bi bi-clock-history" /></button></td>}</tr>) : <tr><td colSpan={colSpan} className="empty-cell">No task lines found for this claim.</td></tr>}</tbody></table></div></div>;
+function LineTasksTable({ title, row, tasks, busy }) {
+  return <div className="esc-modal-task-section">
+    {title && <div className="esc-section-title">{title}</div>}
+    <div className="cpt-scroll">
+      <table className="claim-task-table full-task-columns thin-bordered">
+        <thead><tr><th>TaskID</th><th>CPTCode</th><th>Units</th><th>Modifier</th><th>DenialCode</th><th>DenialDescription</th><th>DenialClassification</th><th>ActionCode</th><th>ActionCategory</th><th>RecommendedAction</th><th>Priority</th><th className="r">InsuranceBalance</th><th>SLADays</th><th>Status</th><th>DateOpened</th><th>DueDate</th><th>SLAStatus</th><th>FirstBilledDate</th><th>ChargeEnteredDate</th><th>Assigned To</th></tr></thead>
+        <tbody>{busy ? <tr><td colSpan={20} className="empty-cell">Loading task list...</td></tr> : tasks?.length ? tasks.map((t, i) => <tr key={`${t.taskId || 'task'}-${i}`}><td><strong>{t.taskId || '-'}</strong></td><td><code className="code">{t.cptCode || '-'}</code></td><td>{t.units ?? '-'}</td><td>{t.modifier || '-'}</td><td><code className="code">{t.denialCode || '-'}</code></td><td className="wrap-wide">{t.denialDescription || '-'}</td><td>{t.denialClassification || '-'}</td><td>{t.actionCode || '-'}</td><td>{t.actionCategory || '-'}</td><td className="wrap-wide">{t.recommendedAction || '-'}</td><td>{t.priority || '-'}</td><td className="r">{money(t.insuranceBalance)}</td><td>{t.slaDays ?? '-'}</td><td><span className={`badge ${statusClass(t.status || '')}`}>{t.status || '-'}</span></td><td>{date(t.dateOpened)}</td><td>{date(t.dueDate)}</td><td><span className={`badge ${statusClass(t.slaStatus || '')}`}>{t.slaStatus || '-'}</span></td><td>{date(t.firstBilledDate)}</td><td>{date(t.chargeEnteredDate)}</td><td>{t.assignedTo || '-'}</td></tr>) : <tr><td colSpan={20} className="empty-cell">No task lines found for claim {row?.claimId || '-'}.</td></tr>}</tbody>
+      </table>
+    </div>
+  </div>;
 }
 
 function Info({ label, value }) {
   return <div className="esc-info"><label>{label}</label><div>{value}</div></div>;
 }
+
 

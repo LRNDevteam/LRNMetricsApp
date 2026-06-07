@@ -28,13 +28,19 @@ function parseStructuredNote(text = '') {
   }).filter(item => item.value);
 }
 
+function formatFieldValue(field) {
+  if (field.label !== 'Affected Lines') return field.value;
+  const cpts = [...new Set(Array.from(String(field.value || '').matchAll(/CPTs?\s*:?\s*([A-Za-z0-9.-]+)/gi)).map(match => match[1]).filter(Boolean))];
+  return cpts.length ? `CPTs: ${cpts.join(', ')}` : field.value;
+}
+
 export default function StructuredNoteText({ text }) {
   const fields = parseStructuredNote(text);
   if (!fields.length) return <span className="structured-note-plain">{text || '-'}</span>;
   return <div className="structured-note">
     {fields.map(field => <div className={`structured-note-field ${field.label === 'Note' || field.label === 'Affected Lines' || field.label === 'Documentation Description' ? 'wide' : ''}`} key={field.label}>
       <span>{field.label}</span>
-      <strong>{field.value}</strong>
+      <strong>{formatFieldValue(field)}</strong>
     </div>)}
   </div>;
 }

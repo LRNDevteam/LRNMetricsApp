@@ -8,6 +8,7 @@ import { denialWorkflowService } from '../services/denialWorkflowService';
 import { canDeleteClaimDocument } from '../utils/documentPermissions';
 import { MAX_TEXT_LENGTH, limitText, textCountLabel } from '../utils/textLimits';
 import { dedupeEscalations } from '../utils/escalations';
+import { getQueuesForRole } from '../config/workflowRoleQueues';
 
 const noteStatusOptions = ['Assigned', 'Payer Follow-up Required', 'Pending Payer Response', 'Pending Documentation', 'Write-Off Pending Approval', 'Closed'];
 const escalationReasons = ['Action clarification required', 'Denial-action mapping unclear', 'Payer policy conflict', 'Denial reason unclear', 'Payer follow-up guidance needed', 'Documentation required', 'Coding / CPT clarification', 'ICD / diagnosis clarification', 'Write-off decision required', 'Appeal eligibility unclear', 'Rebill eligibility unclear', 'Other'];
@@ -93,16 +94,8 @@ export default function ClaimAssignmentPage({ data, reviewers, selected, setSele
   const isEscalatedView = taskView === 'internalEscalation' || taskView === 'externalEscalation' || taskView === 'escalations';
   const isInternalEscalationView = taskView === 'internalEscalation';
   const claimTabs = useMemo(() => [
-    { key: 'new', label: 'New', hint: 'Not assigned and created within 48 hours' },
-    { key: 'unassigned', label: 'Unassigned', hint: 'Not assigned after 48 hours' },
-    { key: 'assigned', label: 'Assigned', hint: 'Assigned and still active' },
-    { key: 'internalEscalation', label: 'Internal Escalation', hint: 'Escalated by AR Reviewer' },
-    { key: 'externalEscalation', label: 'External Escalation', hint: 'Escalated to Client or Account Manager' },
-    ...(canAssign ? [
-      { key: 'response', label: 'Escalated Response', hint: 'Manager responses waiting for review', countKey: 'escalationResponse', route: openEscalationResponse },
-      { key: 'verification', label: 'Verification Claim', hint: 'Claims moved to verification', route: openVerification }
-    ] : []),
-    { key: 'closed', label: 'Closed', hint: 'Completed / closed by reviewer' }
+    ...getQueuesForRole(canAssign ? 'AR Manager' : 'AR Reviewer').map(t => t.key === 'escalationResponse' ? { ...t, route: openEscalationResponse } : t),
+    ...(canAssign ? [{ key: 'verification', label: 'Verification Claim', route: openVerification }] : [])
   ], [canAssign, openEscalationResponse, openVerification]);
   const tabCountText = value => {
     if (value === null || value === undefined) return '...';
@@ -441,10 +434,15 @@ export default function ClaimAssignmentPage({ data, reviewers, selected, setSele
 
   const statusLabel = useMemo(() => {
     if (taskView === 'assigned') return 'Assigned';
+    if (taskView === 'payerFollowup') return 'Payer Followup';
+    if (taskView === 'pendingDocumentation') return 'Pending Documentation';
+    if (taskView === 'pendingPayerResponse') return 'Pending Payer Response';
+    if (taskView === 'writeOffApproval') return 'Write-Off Approval';
     if (taskView === 'closed') return 'Closed';
     if (taskView === 'internalEscalation') return 'Internal Escalation';
     if (taskView === 'externalEscalation') return 'External Escalation';
     if (taskView === 'unassigned') return 'Unassigned';
+    if (taskView === 'all') return 'All Claims';
     return 'New';
   }, [taskView]);
 

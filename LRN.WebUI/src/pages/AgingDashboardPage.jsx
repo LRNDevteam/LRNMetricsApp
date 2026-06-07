@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { money } from '../utils/formatters';
+import SearchableMultiSelect from '../components/SearchableMultiSelect';
 
 const pivotConfig = {
   payer: { label: 'By Payer', title: 'AR Outstanding by Payer', column: 'Payer', key: 'byPayer' },
@@ -128,7 +129,7 @@ export default function AgingDashboardPage({ data = {}, filter = {}, setFilterVa
   const [pivot, setPivot] = useState('payer');
   const [period, setPeriodState] = useState('');
   const config = pivotConfig[pivot];
-  const reviewerRows = (data.byReviewer || data.analystWorkload || []).map(r => r.name ? r : ({
+  const reviewerRows = (data.byReviewer || data.analystWorkload || []).map(r => Array.isArray(r.buckets) ? r : ({
     name: r.reviewerName || r.displayName || r.userName || 'Unassigned',
     subTitle: r.reviewerName || r.userName || '',
     priority: Number(r.agingOver120 || 0) > 0 ? 'high' : 'low',
@@ -143,7 +144,7 @@ export default function AgingDashboardPage({ data = {}, filter = {}, setFilterVa
     totalAmount: r.totalAmount || r.balance || 0,
     totalClaims: r.totalClaims || r.assigned || 0,
     slaBreaches: Number(r.aging91To120 || 0) + Number(r.agingOver120 || 0)
-  }));
+  })).filter(r => String(r.name || '').trim().toLowerCase() !== 'unassigned');
   const exportRows = config.key === 'byReviewer' ? reviewerRows : data[config.key] || (config.key === 'byPanel' ? data.byAction : []) || [];
   const rows = exportRows.slice(0, 10);
   const buckets = data.buckets || [];
@@ -208,11 +209,11 @@ export default function AgingDashboardPage({ data = {}, filter = {}, setFilterVa
           <label className="aging-date-label"><span>Start</span><input type="date" value={filter.fromDate || ''} onChange={e => setCustomDate('fromDate', e.target.value)} /></label>
           <label className="aging-date-label"><span>End</span><input type="date" value={filter.toDate || ''} onChange={e => setCustomDate('toDate', e.target.value)} /></label>
         </>}
-        <label><i className="bi bi-person" /><select value={filter.reviewer || ''} onChange={e => setFilterValue?.('reviewer', e.target.value)}><option value="">All Analysts</option>{reviewerOptions.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}</select></label>
-        <label><i className="bi bi-credit-card" /><select value={filter.payerName || ''} onChange={e => setFilterValue?.('payerName', e.target.value)}><option value="">All Payers</option>{payerOptions.map(p => <option key={p} value={p}>{p}</option>)}</select></label>
-        <label><i className="bi bi-grid" /><select value={filter.panelName || ''} onChange={e => setFilterValue?.('panelName', e.target.value)}><option value="">All Panels</option>{panelOptions.map(p => <option key={p} value={p}>{p}</option>)}</select></label>
-        <label><i className="bi bi-tags" /><select value={filter.denialClassification || ''} onChange={e => setFilterValue?.('denialClassification', e.target.value)}><option value="">All Classifications</option>{classificationOptions.map(p => <option key={p} value={p}>{p}</option>)}</select></label>
-        <label><i className="bi bi-diagram-3" /><select value={filter.actionCategory || ''} onChange={e => setFilterValue?.('actionCategory', e.target.value)}><option value="">All Action Categories</option>{actionOptions.map(p => <option key={p} value={p}>{p}</option>)}</select></label>
+        <SearchableMultiSelect className="aging-ms-filter" value={filter.reviewer} onChange={v => setFilterValue?.('reviewer', v)} options={reviewerOptions} placeholder="All Analysts" />
+        <SearchableMultiSelect className="aging-ms-filter" value={filter.payerName} onChange={v => setFilterValue?.('payerName', v)} options={payerOptions} placeholder="All Payers" />
+        <SearchableMultiSelect className="aging-ms-filter" value={filter.panelName} onChange={v => setFilterValue?.('panelName', v)} options={panelOptions} placeholder="All Panels" />
+        <SearchableMultiSelect className="aging-ms-filter" value={filter.denialClassification} onChange={v => setFilterValue?.('denialClassification', v)} options={classificationOptions} placeholder="All Classifications" />
+        <SearchableMultiSelect className="aging-ms-filter" value={filter.actionCategory} onChange={v => setFilterValue?.('actionCategory', v)} options={actionOptions} placeholder="All Action Categories" />
       </div>
       <div className="aging-actions">
         <button type="button" className="aging-btn ghost" onClick={() => { setPeriodState(''); clearFilter?.(); }}><i className="bi bi-x-circle" />Clear</button>
@@ -271,7 +272,7 @@ function AgingRow({ row, buckets, onCellClick, pivot }) {
     <td>
       <div className="aging-row-name"><span className={`aging-priority ${priority.cls}`}>{priority.label}</span><div><b>{row.name || '-'}</b><small>{row.subTitle || row.name || '-'}</small></div></div>
     </td>
-    <td className="aging-priority-col"><strong>{Number(row.priorityScore || 0)}</strong><i><span style={{ width: `${Math.max(4, Number(row.priorityScore || 0))}%` }} /></i></td>
+    <td className="aging-priority-col"><strong>{Number(row.priorityScore || 0)}</strong><i><span style={{ width: `${Math.min(100, Math.max(4, Number(row.priorityScore || 0)))}%` }} /></i></td>
     {buckets.map((b, i) => {
       const cell = getBucket(row, b.key);
       return <td key={b.key || i}><button type="button" className={`aging-cell ${bucketClasses[i] || 'h0'}`} onClick={() => onCellClick?.({ pivot, row, bucket: b })}><strong>{compactMoney(cell.amount)}</strong><small>{compactCount(cell.claimCount)} claims</small>{Number(cell.slaBreaches || 0) > 0 && <em>{compactCount(cell.slaBreaches)} at risk</em>}</button></td>;

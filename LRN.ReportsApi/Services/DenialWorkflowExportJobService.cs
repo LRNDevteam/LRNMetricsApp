@@ -28,7 +28,8 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
     {
         _scopeFactory = scopeFactory;
         _logger = logger;
-        _exportRoot = configuration["DenialWorkflowExports:RootPath"]
+        _exportRoot = configuration["DenialWorkflowFileStorage:DownloadRootPath"]
+            ?? configuration["DenialWorkflowExports:RootPath"]
             ?? Path.Combine(AppContext.BaseDirectory, "ClaimExports");
         Directory.CreateDirectory(_exportRoot);
     }
