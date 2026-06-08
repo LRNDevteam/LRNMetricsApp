@@ -36,6 +36,7 @@ public class LisSummaryController : Controller
 
 		var availableLabs = GetAvailableLisLabs();
 		var selectedLabName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+		selectedLabName = ResolveConfiguredLabKey(selectedLabName, availableLabs);
 
 		if (availableLabs.Count == 0 || string.IsNullOrWhiteSpace(selectedLabName))
 		{
@@ -118,6 +119,7 @@ public class LisSummaryController : Controller
 
 		var availableLabs = GetAvailableLisLabs();
 		var selectedLabName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+		selectedLabName = ResolveConfiguredLabKey(selectedLabName, availableLabs);
 
 		if (availableLabs.Count == 0 || string.IsNullOrWhiteSpace(selectedLabName))
 		{
@@ -137,6 +139,7 @@ public class LisSummaryController : Controller
 			return RedirectToAction(nameof(Index), new
 			{
 				lab = selectedLabName,
+				LabId = filters.LabId,
 				CollectedFrom = filters.CollectedFrom?.ToString("yyyy-MM-dd"),
 				CollectedTo = filters.CollectedTo?.ToString("yyyy-MM-dd")
 			});
@@ -151,6 +154,18 @@ public class LisSummaryController : Controller
 				filters.CollectedFrom,
 				filters.CollectedTo,
 				cancellationToken);
+
+			if (result.Rows.Count == 0)
+			{
+				TempData["LisSummaryError"] = $"No LIS Summary data found for export for {selectedLabOption?.LabName ?? selectedLabName}.";
+				return RedirectToAction(nameof(Index), new
+				{
+					lab = selectedLabName,
+					LabId = filters.LabId,
+					CollectedFrom = filters.CollectedFrom?.ToString("yyyy-MM-dd"),
+					CollectedTo = filters.CollectedTo?.ToString("yyyy-MM-dd")
+				});
+			}
 
 			using var workbook = LisSummaryExcelExportBuilder.CreateWorkbook(
 				result,
@@ -173,6 +188,7 @@ public class LisSummaryController : Controller
 			return RedirectToAction(nameof(Index), new
 			{
 				lab = selectedLabName,
+				LabId = filters.LabId,
 				CollectedFrom = filters.CollectedFrom?.ToString("yyyy-MM-dd"),
 				CollectedTo = filters.CollectedTo?.ToString("yyyy-MM-dd")
 			});
@@ -226,6 +242,15 @@ public class LisSummaryController : Controller
 	private static bool SameLab(string left, string right)
 		=> left.Equals(right, StringComparison.OrdinalIgnoreCase)
 		   || NormalizeLabToken(left).Equals(NormalizeLabToken(right), StringComparison.OrdinalIgnoreCase);
+
+	private static string ResolveConfiguredLabKey(string selectedLabName, IReadOnlyList<string> availableLabs)
+	{
+		if (string.IsNullOrWhiteSpace(selectedLabName)) return string.Empty;
+
+		var selectedToken = NormalizeLabToken(selectedLabName);
+		return availableLabs.FirstOrDefault(x => NormalizeLabToken(x).Equals(selectedToken, StringComparison.OrdinalIgnoreCase))
+			?? selectedLabName;
+	}
 
 	private static string NormalizeLabToken(string value)
 		=> new string((value ?? string.Empty)

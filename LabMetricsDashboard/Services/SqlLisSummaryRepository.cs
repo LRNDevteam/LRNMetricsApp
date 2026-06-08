@@ -15,6 +15,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 	private sealed record DimensionProfile(
 		string LogicSheetName,
 		string DateColumn,
+		string? CountDistinctColumn,
+		string? IncorrectDosColumn,
 		Dictionary<string, string?> FieldColumns);
 
 	private sealed record TemplateRow(string Code, string Description, string Logic);
@@ -97,12 +99,12 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("1", "Billed", "Bill to = Insurance Bill AND Billing status = Billed"),
 				new TemplateRow("•", "Claim submitted in Daqbilling", "Bill to = Insurance Bill AND Billing status = Billed AND Final Status = Claim submitted in Daqbilling"),
 				new TemplateRow("2", "Not Billed", "Bill to = Insurance Bill AND Billing status = Not Billed"),
-				new TemplateRow("•", "Claim Entered in Daqbilling", "Bill to = Insurance Bill AND Billing status = Billed AND Final Status = Claim Entered in Daqbilling"),
-				new TemplateRow("•", "Resulted yet to be billed", "Bill to = Insurance Bill AND Billing status = Billed AND Final Status = Resulted yet to be billed"),
-				new TemplateRow("•", "D/L Isomer", "Bill to = Insurance Bill AND Billing status = Billed AND Final Status = D/L Isomer"),
+				new TemplateRow("•", "Claim Entered in Daqbilling", "Bill to = Insurance Bill AND Billing status = Not Billed AND Final Status = Claim Entered in Daqbilling"),
+				new TemplateRow("•", "Resulted yet to be billed", "Bill to = Insurance Bill AND Billing status = Not Billed AND Final Status = Resulted yet to be billed"),
+				new TemplateRow("•", "D/L Isomer", "Bill to = Insurance Bill AND Billing status = Not Billed AND Final Status = D/L Isomer"),
 				new TemplateRow("B", "Duplicate", "Bill to = Duplicate"),
-				new TemplateRow("1", "Billed", "Bill to = Duplicate Bill AND Billing status = Billed"),
-				new TemplateRow("•", "Claim submitted in Daqbilling", "Bill to = Duplicate Bill AND Billing status = Billed AND Final Status = Claim submitted in Daqbilling"),
+				new TemplateRow("1", "Billed", "Bill to = Duplicate AND Billing status = Billed"),
+				new TemplateRow("•", "Claim submitted in Daqbilling", "Bill to = Duplicate AND Billing status = Billed AND Final Status = Claim submitted in Daqbilling"),
 				new TemplateRow("C", "Client Bill", "Bill to = Client Bill"),
 				new TemplateRow("1", "Billed", "Bill to = Client Bill AND Billing status = Billed"),
 				new TemplateRow("•", "Claim submitted in Daqbilling", "Bill to = Client Bill AND Billing status = Billed AND Final Status = Claim submitted in Daqbilling"),
@@ -158,8 +160,9 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("•", "Billed", "Resulted / Not = [Not Resulted] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Self Pay]"),
 				new TemplateRow("5", "Test Entries", "Resulted / Not = [Not Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [Test Entries]"),
 				new TemplateRow("6", "Rejected Sample", "Resulted / Not = [Not Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [Rejected Sample]"),
-			},
+		},
 		["PCRLOA"] = new[] {
+				new TemplateRow("", "Total Samples", "Count [Unique Sample ID]"),
 				new TemplateRow("A", "Resulted", "Resulted / Not = [Resulted]"),
 				new TemplateRow("1", "Billed to Insurance", "Resulted / Not = [Resulted] AND Claim Status = [Billed]"),
 				new TemplateRow("◦", "Claims Billed to Payor via AMD", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Billed/Not = [Billed]"),
@@ -180,8 +183,9 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("2", "Client Bill", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client  Status = [Client Bill]"),
 				new TemplateRow("3", "Test Entries", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client  Status = [Test Entries]"),
 				new TemplateRow("4", "Self Pay", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client  Status = [Self Pay]"),
-			},
+		},
 		["PhiLife"] = new[] {
+				new TemplateRow("", "Total Samples", "Count [Unique Sample ID]"),
 				new TemplateRow("A", "Billable Samples - Resulted", "Resulted / Not = [Resulted]"),
 				new TemplateRow("1", "Billed to Insurance", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Blank AND Billing Review Required]"),
 				new TemplateRow("•", "Billed In AMD", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Blank AND Billing Review Required]"),
@@ -215,8 +219,9 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("3", "No Result date on LIS but Billed", "Resulted / Not = [Not Resulted] AND Claim Status = Billed AND Billed/Not = [Billed]"),
 				new TemplateRow("4", "Test Entries", "Resulted / Not = [Not Resulted] AND Payment Method = Insurance AND Claim Status = Not Entered in AMD AND Billed/Not = [UnBilled] AND Client Status = [Test Entries]"),
 				new TemplateRow("5", "Payment Method No Bill", "Resulted / Not = [Not Resulted] AND Payment Method = [No Bill]"),
-			},
+		},
 		["Rising Tides"] = new[] {
+				new TemplateRow("", "Total Samples", "Count [Unique Sample ID]"),
 				new TemplateRow("A", "Billable Samples - Resulted", "Resulted / Not = [Resulted]"),
 				new TemplateRow("1", "Billed to Insurance", "Resulted / Not = [Resulted] AND Payment Method = [Insurance] AND Claim Status = [Billed]"),
 				new TemplateRow("•", "Billed In AMD", "Resulted / Not = [Resulted] AND Payment Method = [Insurance] AND Claim Status = [Billed] AND Billed/Not = [Billed]"),
@@ -234,13 +239,13 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("6", "Test Entries", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Test Entries] AND Billing Status = [Billed]"),
 				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Test Entries] AND Billing Status = [Billed]"),
 				new TemplateRow("7", "Billing Status - No Bill", "Resulted / Not = [Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [ALL] AND Billing Status = [No Bill]"),
-				new TemplateRow("•", "Rejected", "Resulted / Not = [Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [ALL] AND Billing Status = [No Bill] Order Status = [Rejected]"),
-				new TemplateRow("•", "Completed", "Resulted / Not = [Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [ALL] AND Billing Status = [No Bill] Order Status = [Completed]"),
-				new TemplateRow("•", "Recollect Required", "Resulted / Not = [Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [ALL] AND Billing Status = [No Bill] Order Status = [Recollect Required]"),
+				new TemplateRow("•", "Rejected", "Resulted / Not = [Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [ALL] AND Billing Status = [No Bill] AND Order Status = [Rejected]"),
+				new TemplateRow("•", "Completed", "Resulted / Not = [Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [ALL] AND Billing Status = [No Bill] AND Order Status = [Completed]"),
+				new TemplateRow("•", "Recollect Required", "Resulted / Not = [Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [ALL] AND Billing Status = [No Bill] AND Order Status = [Recollect Required]"),
 				new TemplateRow("B", "Not Resulted", "Resulted / Not = [Not Resulted]"),
 				new TemplateRow("1", "Not Entered in AMD", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD]"),
-				new TemplateRow("•", "Collected", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] Sample Status = [Collected]"),
-				new TemplateRow("2", "Rejected Sample", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] Sample Status = [Rejected]"),
+				new TemplateRow("•", "Collected", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Sample Status = [Collected]"),
+				new TemplateRow("2", "Rejected Sample", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Sample Status = [Rejected]"),
 			},
 	};
 
@@ -355,7 +360,10 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			["Insurance category"] = FirstExisting(columns, InsuranceCategoryCandidatesFor(logicSheet))
 		};
 
-		return new DimensionProfile(logicSheet, dateColumn, fields);
+		var countDistinctColumn = FirstExisting(columns, CountDistinctCandidatesFor(logicSheet));
+		var incorrectDosColumn = FirstExisting(columns, IncorrectDosCandidatesFor(logicSheet));
+
+		return new DimensionProfile(logicSheet, dateColumn, countDistinctColumn, incorrectDosColumn, fields);
 	}
 
 	private static async Task<List<RawLisGroup>> LoadDynamicGroupsAsync(
@@ -385,6 +393,11 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			parameters.Add(new SqlParameter("@toDate", SqlDbType.Date) { Value = collectedTo.Value.ToDateTime(TimeOnly.MinValue) });
 		}
 
+		if (RequiresBlankIncorrectDos(profile.LogicSheetName) && !string.IsNullOrWhiteSpace(profile.IncorrectDosColumn))
+		{
+			where.Add($"{TextExpr(profile.IncorrectDosColumn)} = ''");
+		}
+
 		var fieldList = profile.FieldColumns.Keys.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
 		var selectDimensions = fieldList
 			.Select(f => TextExpr(profile.FieldColumns[f], FieldAlias(f)))
@@ -400,12 +413,16 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			.Concat(new[] { $"YEAR({dateExpr})", $"MONTH({dateExpr})" })
 			.ToList();
 
+		var countExpr = string.IsNullOrWhiteSpace(profile.CountDistinctColumn)
+			? "COUNT(*)"
+			: $"COUNT(DISTINCT NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(4000), {Q(profile.CountDistinctColumn)}))), ''))";
+
 		var sql = $"""
             SELECT
                 {string.Join("," + Environment.NewLine + "                ", selectDimensions)},
                 YEAR({dateExpr}) AS CollectedYear,
                 MONTH({dateExpr}) AS CollectedMonth,
-                COUNT(*) AS TotalClaims
+                {countExpr} AS TotalClaims
             FROM dbo.LIMSMaster WITH (NOLOCK)
             WHERE {string.Join(" AND ", where)}
             GROUP BY
@@ -497,8 +514,66 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			rows.Add(BuildRow(template.Code, template.Description, template.Logic, ResolveTemplateLevel(template.Code), matches.ToList()));
 		}
 
+		RecalculateParentRowsFromChildren(rows);
 		return rows;
 	}
+
+	private static void RecalculateParentRowsFromChildren(List<LisSummaryRow> rows)
+	{
+		for (var index = rows.Count - 1; index >= 0; index--)
+		{
+			var childRows = GetImmediateChildren(rows, index);
+			if (childRows.Count == 0) continue;
+
+			rows[index] = BuildChildAggregateRow(rows[index], childRows);
+		}
+	}
+
+	private static List<LisSummaryRow> GetImmediateChildren(List<LisSummaryRow> rows, int parentIndex)
+	{
+		var parentLevel = rows[parentIndex].Level;
+		var childLevel = parentLevel + 1;
+		var children = new List<LisSummaryRow>();
+
+		for (var index = parentIndex + 1; index < rows.Count && rows[index].Level > parentLevel; index++)
+		{
+			if (rows[index].Level == childLevel)
+			{
+				children.Add(rows[index]);
+			}
+		}
+
+		return children;
+	}
+
+	private static LisSummaryRow BuildChildAggregateRow(LisSummaryRow parent, List<LisSummaryRow> children)
+	{
+		var byMonth = SumChildMonths(children);
+		var byYear = SumChildYears(children);
+
+		return new LisSummaryRow
+		{
+			Code = parent.Code,
+			Description = parent.Description,
+			Logic = parent.Logic,
+			Level = parent.Level,
+			ByMonth = byMonth,
+			ByYear = byYear,
+			Total = children.Sum(x => x.Total)
+		};
+	}
+
+	private static Dictionary<string, int> SumChildMonths(List<LisSummaryRow> children)
+		=> children
+			.SelectMany(x => x.ByMonth)
+			.GroupBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+			.ToDictionary(g => g.Key, g => g.Sum(x => x.Value), StringComparer.OrdinalIgnoreCase);
+
+	private static Dictionary<int, int> SumChildYears(List<LisSummaryRow> children)
+		=> children
+			.SelectMany(x => x.ByYear)
+			.GroupBy(x => x.Key)
+			.ToDictionary(g => g.Key, g => g.Sum(x => x.Value));
 
 	private static bool MatchesTemplateLogic(RawLisGroup row, string logic)
 	{
@@ -582,12 +657,24 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		var actualKey = CompareKey(actual);
 		var expectedKey = CompareKey(expected);
 		if (actualKey == expectedKey) return true;
+		if (string.IsNullOrWhiteSpace(actualKey) || string.IsNullOrWhiteSpace(expectedKey)) return false;
+
+		var actualStatusKey = CompareKey(NormalizeBillStatus(actual));
+		var expectedStatusKey = CompareKey(NormalizeBillStatus(expected));
+		if (IsCanonicalBillStatusKey(actualStatusKey)
+			&& IsCanonicalBillStatusKey(expectedStatusKey)
+			&& actualStatusKey == expectedStatusKey)
+		{
+			return true;
+		}
 
 		// Allow small wording differences used by the lab templates, e.g. Insurance Bill(s), Selfpay/Self Pay.
 		return actualKey.TrimEnd('S') == expectedKey.TrimEnd('S')
-			   || actualKey.Contains(expectedKey, StringComparison.OrdinalIgnoreCase)
-			   || expectedKey.Contains(actualKey, StringComparison.OrdinalIgnoreCase);
+			   || actualKey.TrimEnd('D') == expectedKey.TrimEnd('D');
 	}
+
+	private static bool IsCanonicalBillStatusKey(string key)
+		=> key is "BILLED" or "UNBILLED" or "NONBILLABLE";
 
 	private static bool IsAllValue(string value)
 		=> CompareKey(value) == "ALL";
@@ -623,6 +710,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		AddNestedRows(rows, raw, "Bill To / Payment Type", x => GetField(x, "Bill To"), "Billed Status", x => GetField(x, "Billing Status"), "B");
 		AddNestedRows(rows, raw, "Final / Client Status", x => GetField(x, "Final Status"), "Sample / Category", x => GetField(x, "Sample Status"), "C");
 
+		RecalculateParentRowsFromChildren(rows);
 		return rows;
 	}
 
@@ -803,6 +891,18 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		_ => new[] { "RequestCollectDate", "ReqCollectDate", "DateOfCollection", "ReceivedDate", "CollectionDate", "Entry_DateCreated", "Collected" }
 	};
 
+	private static string[] CountDistinctCandidatesFor(string logicSheet) => logicSheet switch
+	{
+		"Beech Tree" => new[] { "Accession", "OrderID", "Order ID", "UniqueSampleID", "Unique Sample ID", "SampleID", "Sample ID", "AccessionNumber", "AccessionNo" },
+		_ => new[] { "Accession", "OrderID", "Order ID", "UniqueSampleID", "Unique Sample ID", "SampleID", "Sample ID", "AccessionNumber", "AccessionNo", "SpecimenID", "Specimen ID" }
+	};
+
+	private static string[] IncorrectDosCandidatesFor(string logicSheet)
+		=> new[] { "IncorrectDOS", "Incorrect DOS", "Incorrect_DOS", "IncorrectDos" };
+
+	private static bool RequiresBlankIncorrectDos(string logicSheet)
+		=> logicSheet is "Certus" or "NWL";
+
 	private static string[] ResultCandidatesFor(string logicSheet) => logicSheet switch
 	{
 		"PCRDx-AL" => new[] { "LRNResultStatus", "ResultStatus", "RessultedStatus", "ResultedStatus" },
@@ -870,3 +970,4 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 	private static string[] ChargesNotEnteredCandidatesFor(string logicSheet) => new[] { "ChargesNotEnteredStatus", "Charges not entered status", "ChargesNotEntered", "Charges_Not_Entered_Status" };
 	private static string[] InsuranceCategoryCandidatesFor(string logicSheet) => new[] { "InsuranceCategory", "Insurance category", "InsuranceType", "Category" };
 }
+

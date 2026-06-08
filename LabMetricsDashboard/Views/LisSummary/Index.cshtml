@@ -535,7 +535,7 @@
                 </button>
 
                 <a class="btn btn-outline-success rounded-pill px-4"
-                   href="@Url.Action("ExportToExcel", "LisSummary", new { lab = Model.CurrentLabName, CollectedFrom = Model.Filters.CollectedFrom?.ToString("yyyy-MM-dd"), CollectedTo = Model.Filters.CollectedTo?.ToString("yyyy-MM-dd") })">
+                   href="@Url.Action("ExportToExcel", "LisSummary", new { lab = Model.CurrentLabName, LabId = Model.Filters.LabId, CollectedFrom = Model.Filters.CollectedFrom?.ToString("yyyy-MM-dd"), CollectedTo = Model.Filters.CollectedTo?.ToString("yyyy-MM-dd") })">
                     <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
                 </a>
             </div>
