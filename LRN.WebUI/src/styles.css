@@ -1376,6 +1376,21 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .claim-task-table td{padding:9px 10px;border-bottom:.5px solid #eef2f7;vertical-align:top;color:#0f172a}
 .claim-task-table .r{text-align:right}
 .claim-task-table code{font-size:10px}
+.dcm-page{background:#fff;border:1px solid #e1e7ef;border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.06);overflow:hidden}
+.dcm-table-wrap{max-height:68vh}
+.dcm-table{min-width:980px}
+.dcm-row-actions{display:flex;gap:6px;align-items:center}
+.wl-btn.danger{background:#e74c3c;border-color:#e74c3c;color:#fff}.wl-btn.danger:hover{background:#c0392b;border-color:#c0392b}
+.dcm-upload{position:relative;overflow:hidden;cursor:pointer}
+.dcm-upload input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.dcm-modal{width:min(980px,96vw);max-height:92vh;background:#fff;border-radius:10px;box-shadow:0 24px 80px rgba(0,0,0,.35);display:flex;flex-direction:column;overflow:hidden;border:1px solid #dbe3ee}
+.dcm-form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:14px;overflow:auto}
+.dcm-field{display:flex;flex-direction:column;gap:4px;font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.06em}
+.dcm-field input,.dcm-field select,.dcm-field textarea{border:1px solid #cbd5e1;border-radius:6px;padding:7px 9px;font-size:12px;color:#0f172a;background:#fff;text-transform:none;letter-spacing:0;font-weight:500}
+.dcm-field textarea{resize:vertical;line-height:1.4}
+.dcm-field:has(textarea),.dcm-field:nth-last-child(1){grid-column:span 3}
+.dcm-other{margin-top:4px}
+.dcm-modal-actions{display:flex;justify-content:flex-end;gap:8px;padding:12px 14px;border-top:1px solid #e5e7eb;background:#f8fafc}
 .claim-history-panel{padding:12px 14px;display:flex;flex-direction:column;gap:8px}
 .claim-panel-actions{display:flex;justify-content:flex-end;margin-bottom:2px}
 .history-section-title{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#64748b;margin:10px 0 2px}

@@ -52,7 +52,19 @@ export const denialWorkflowService = {
     Array.from(files || []).forEach(f => form.append('files', f));
 
     return api('/claim-documents', { method: 'POST', body: form });
-  }
+  },
+  getDenialCodeMaster: async (query) => normalizePagedResult(await api(`/denial-code-master?${qs(query)}`)),
+  getDenialCodeMasterLookups: (labId) => api(`/denial-code-master/lookups?labId=${encodeURIComponent(labId)}`),
+  createDenialCodeMaster: (labId, payload) => api(`/denial-code-master?labId=${encodeURIComponent(labId)}`, { method: 'POST', body: JSON.stringify(payload) }),
+  updateDenialCodeMaster: (labId, originalKey, payload) => api(`/denial-code-master/${encodeURIComponent(originalKey.denialCode)}?${qs({ labId, coverageStatus: originalKey.coverageStatus, icdComplianceStatus: originalKey.icdComplianceStatus })}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  deleteDenialCodeMaster: (labId, originalKey) => api(`/denial-code-master/${encodeURIComponent(originalKey.denialCode)}?${qs({ labId, coverageStatus: originalKey.coverageStatus, icdComplianceStatus: originalKey.icdComplianceStatus })}`, { method: 'DELETE' }),
+  importDenialCodeMaster: (labId, file) => {
+    const form = new FormData();
+    form.append('file', file);
+    return api(`/denial-code-master/import?labId=${encodeURIComponent(labId)}`, { method: 'POST', body: form });
+  },
+  regenerateDenialCodeMasterExcel: (labId) => api(`/denial-code-master/regenerate-export?labId=${encodeURIComponent(labId)}`, { method: 'POST' }),
+  getDenialCodeMasterExportUrl: (labId) => apiUrl(`/denial-code-master/export?labId=${encodeURIComponent(labId)}`)
 };
 
 export { qs };

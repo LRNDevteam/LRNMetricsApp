@@ -9,8 +9,11 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.Configure<DenialWorkflowOptions>(builder.Configuration.GetSection("Workflow"));
 builder.Services.Configure<DenialWorkflowSupportOptions>(builder.Configuration.GetSection("DenialWorkflowSupport"));
+builder.Services.Configure<DenialCodeMasterExportOptions>(builder.Configuration.GetSection("DenialCodeMasterExport"));
 builder.Services.AddScoped<IDenialWorkflowRepository, SqlDenialWorkflowRepository>();
 builder.Services.AddScoped<IDenialWorkflowService, DenialWorkflowService>();
+builder.Services.AddScoped<IDenialCodeMasterRepository, SqlDenialCodeMasterRepository>();
+builder.Services.AddScoped<IDenialCodeMasterExcelService, DenialCodeMasterExcelService>();
 builder.Services.AddScoped<IDenialWorkflowIssueNotifier, DenialWorkflowIssueNotifier>();
 builder.Services.AddScoped<IDenialWorkflowSupportService, DenialWorkflowSupportService>();
 builder.Services.AddSingleton<IDenialWorkflowExportJobService, DenialWorkflowExportJobService>();

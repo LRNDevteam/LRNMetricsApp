@@ -17,6 +17,7 @@ export const normalizeRole = (role) => String(role || '').replace(/[^a-z0-9]/gi,
 export const isClientManagerRole = (role) => normalizeRole(role).includes('clientmanager');
 export const isAccountManagerRole = (role) => normalizeRole(role).includes('accountmanager');
 export const isReadOnlyWorkflowRole = (role) => isClientManagerRole(role) || isAccountManagerRole(role);
+export const isArManagerRole = (role) => normalizeRole(role).includes('armanager');
 export const isArReviewerRole = (role) => {
   const r = normalizeRole(role);
   return (r.includes('arreviewer') || r.includes('aranalyser') || r.includes('aranalyzer') || r.includes('reviewer'))
@@ -25,7 +26,7 @@ export const isArReviewerRole = (role) => {
 };
 export const canAssignRole = (role) => {
   const r = normalizeRole(role);
-  return r.includes('admin') || r.includes('armanager');
+  return r.includes('admin') || isArManagerRole(role);
 };
 export const canDownloadWorkflowRole = (role) => {
   const r = normalizeRole(role);

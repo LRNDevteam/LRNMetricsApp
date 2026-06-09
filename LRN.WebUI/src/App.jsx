@@ -4,7 +4,7 @@ import { emptyDashboard, emptyFilter, emptyFilterOptions, emptyPagedResult } fro
 import { denialWorkflowService, qs } from './services/denialWorkflowService';
 import { GENERIC_WORKFLOW_ERROR } from './services/httpClient';
 import { claimRole, claimUser, clearWorkflowJwt, ensureWorkflowJwt, getJwt, parseJwt } from './utils/auth';
-import { canAssignRole, canDownloadWorkflowRole, initials, isArReviewerRole, isClientManagerRole, isAccountManagerRole, isReadOnlyWorkflowRole } from './utils/formatters';
+import { canAssignRole, canDownloadWorkflowRole, initials, isArManagerRole, isArReviewerRole, isClientManagerRole, isAccountManagerRole, isReadOnlyWorkflowRole } from './utils/formatters';
 import DashboardFilter from './components/DashboardFilter';
 import { clearHiddenWorkflowFilters, getFiltersForRoleQueue, getQueuesForRole, normalizeQueueKey } from './config/workflowRoleQueues';
 import DashboardPage from './pages/DashboardPage';
@@ -15,6 +15,7 @@ import MyWorklistPage from './pages/MyWorklistPage';
 import EscalationQueuePage from './pages/EscalationQueuePage';
 import VerificationPage from './pages/VerificationPage';
 import ContactSupportPage from './pages/ContactSupportPage';
+import DenialCodeMasterPage from './pages/DenialCodeMasterPage';
 
 function roleIsReviewerOnly(role) { return isArReviewerRole(role); }
 
@@ -35,7 +36,7 @@ export default function App() {
   const [reviewers, setReviewers] = useState([]);
   const [filterOptions, setFilterOptions] = useState(emptyFilterOptions);
   const [labId, setLabId] = useState(Number(localStorage.getItem('denial.labId') || 0));
-  const workflowViews = ['dashboard', 'aging', 'summary', 'claims', 'myworklist', 'escalations', 'verification', 'exports', 'support', 'admin'];
+  const workflowViews = ['dashboard', 'aging', 'summary', 'claims', 'myworklist', 'escalations', 'verification', 'denialcodemaster', 'exports', 'support', 'admin'];
   const getStoredView = () => {
     const hashView = String(window.location.hash || '').replace('#', '').trim().toLowerCase();
     return workflowViews.includes(hashView) ? hashView : '';
@@ -84,6 +85,7 @@ export default function App() {
   const lastClaimQueryKeyRef = useRef('');
   const claimExportInFlightRef = useRef(false);
   const reviewerOnly = roleIsReviewerOnly(user.role);
+  const arManagerOnly = isArManagerRole(user.role);
   const canAssign = canAssignRole(user.role);
   const canDownloadWorkflow = canDownloadWorkflowRole(user.role);
   const clientManager = isClientManagerRole(user.role);
@@ -130,6 +132,7 @@ export default function App() {
     let safeView = workflowViews.includes(nextView) ? nextView : 'dashboard';
     if (reviewerOnly && safeView === 'claims') safeView = 'myworklist';
     if (externalManager && safeView === 'myworklist') safeView = 'claims';
+    if (safeView === 'denialcodemaster' && !isArManagerRole(user.role)) safeView = resolveLandingView(user.role);
     setViewState(safeView);
     if (closeSidebar) setSidebarOpen(false);
     if (window.location.hash !== `#${safeView}`) {
@@ -739,7 +742,7 @@ export default function App() {
   }, [authReady, labId, menuCountQuery, reviewerOnly]);
 
   const labName = labs.find(l => Number(l.labId ?? l.LabId) === Number(labId))?.labName || 'Select Lab';
-  const pageTitle = { dashboard: 'Denial Dashboard', aging: 'Aging Dashboard', summary: 'Denial Summary', claims: canAssign ? 'Claim Assignment' : 'Claim View', myworklist: 'My Worklist', escalations: escalationView === 'response' ? 'Escalation Response' : 'Escalation Queue', verification: 'Verification', exports: 'Exports', support: 'Contact Support', admin: 'Admin Setup' }[view] || 'Denial Workflow';
+  const pageTitle = { dashboard: 'Denial Dashboard', aging: 'Aging Dashboard', summary: 'Denial Summary', claims: canAssign ? 'Claim Assignment' : 'Claim View', myworklist: 'My Worklist', escalations: escalationView === 'response' ? 'Escalation Response' : 'Escalation Queue', verification: 'Verification', denialcodemaster: 'Denial Code Master', exports: 'Exports', support: 'Contact Support', admin: 'Admin Setup' }[view] || 'Denial Workflow';
   const showOverallDownload = canDownloadWorkflow && (view === 'claims' || view === 'myworklist');
   const claimNavTabs = useMemo(() => [
     ...getQueuesForRole(user.role),
@@ -1215,6 +1218,7 @@ export default function App() {
             )}
           </>
         )}
+        {arManagerOnly && <button className={`lrn-nav-item ${view === 'denialcodemaster' ? 'active' : ''}`} onClick={() => setView('denialcodemaster')}><i className="bi bi-list-check" />Denial Code Master</button>}
         <button className={`lrn-nav-item ${view === 'support' ? 'active' : ''}`} onClick={() => setView('support')}><i className="bi bi-life-preserver" />Contact Support</button>
         {adminRole && <button className={`lrn-nav-item ${view === 'admin' ? 'active' : ''}`} onClick={() => setView('admin')}><i className="bi bi-gear" />Admin Setup</button>}
       </nav>
@@ -1263,7 +1267,7 @@ export default function App() {
           </div>
           {(view === 'dashboard' || view === 'claims') && <button type="button" className="wl-btn xs" onClick={() => view === 'dashboard' ? setDashboardFiltersOpen(v => !v) : setClaimFiltersOpen(v => !v)}><i className={`bi ${view === 'dashboard' ? (dashboardFiltersOpen ? 'bi-eye-slash' : 'bi-funnel') : (claimFiltersOpen ? 'bi-eye-slash' : 'bi-funnel')}`} />{view === 'dashboard' ? (dashboardFiltersOpen ? 'Hide Filters' : 'View Filters') : (claimFiltersOpen ? 'Hide Filters' : 'View Filters')}</button>}
         </div>
-        {view !== 'myworklist' && view !== 'aging' && view !== 'support' && (
+        {view !== 'myworklist' && view !== 'aging' && view !== 'support' && view !== 'denialcodemaster' && (
           <div className={(view === 'verification' || view === 'escalations' || (view === 'claims' && !claimFiltersOpen) || (view === 'dashboard' && !dashboardFiltersOpen)) ? 'global-filter-hidden' : ''}>
             <DashboardFilter filter={filter} setFilterValue={setFilterValue} clearFilter={clearFilter} reviewers={reviewers} options={filterOptions} visibleFilters={visibleFilters} />
           </div>
@@ -1301,6 +1305,7 @@ export default function App() {
         {view === 'verification' && <VerificationPage data={verification} changePage={changePage} tabCounts={claimMenuCounts} onTabChange={handleClaimTabRoute} reviewers={reviewers} canAssign={canAssign} assignClaims={assignClaims} />}
         {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setWorkflowMessage} onSaved={() => { refreshReviewerNotification(); refreshWorkflowNotifications(); }} taskView={myWorklistView} setTaskView={handleMyWorklistViewChange} tabCounts={myWorklistMenuCounts} onExportQueryChange={setMyWorklistExportQuery} onDownloadTab={(exportQuery, tab) => startClaimExport({ currentTab: true, queryOverride: exportQuery, tabKey: tab?.key || myWorklistView, tabLabel: tab?.label || '' })} exportBusy={exportBusy} exportStatusText={exportStatusText()} canDownloadWorkflow={canDownloadWorkflow} />}
         {view === 'escalations' && <EscalationQueuePage labId={labId} user={user} reviewers={reviewers} taskView={escalationView === 'response' ? 'claim' : escalationView} responseOnly={escalationView === 'response'} setTaskView={setEscalationView} tabCounts={claimMenuCounts} onClaimTabChange={handleClaimTabRoute} canAssign={canAssign} assignClaims={assignClaims} setMessage={setWorkflowMessage} />}
+        {view === 'denialcodemaster' && arManagerOnly && <DenialCodeMasterPage labId={labId} setMessage={setWorkflowMessage} />}
         {view === 'exports' && <WorkflowPlaceholder title="Exports">Use Overall Download or per-tab Download from Claim Assignment for claim extracts. Aging Dashboard also includes a Download Excel action.</WorkflowPlaceholder>}
         {view === 'support' && <ContactSupportPage user={user} currentPage={pageTitle} setMessage={setWorkflowMessage} />}
         {view === 'admin' && <WorkflowPlaceholder title="Admin Setup">Admin setup is available from the LRN Metrics administration area. This workflow shell keeps the menu entry visible for administrators.</WorkflowPlaceholder>}
