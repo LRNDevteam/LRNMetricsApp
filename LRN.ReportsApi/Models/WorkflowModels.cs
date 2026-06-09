@@ -99,6 +99,26 @@ public sealed class DenialWorkflowUserContext
     public IReadOnlyList<DenialWorkflowLabOption> Labs { get; set; } = Array.Empty<DenialWorkflowLabOption>();
 }
 
+public sealed class DenialWorkflowSupportRequest
+{
+    public string IssueType { get; set; } = string.Empty;
+    public string Priority { get; set; } = string.Empty;
+    public string Subject { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+    public string ContactEmail { get; set; } = string.Empty;
+    public string Page { get; set; } = string.Empty;
+}
+
+public sealed class DenialWorkflowSupportRequestResult
+{
+    public bool Success { get; set; }
+    public bool EmailSent { get; set; }
+    public bool TeamsSent { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public string RequestId { get; set; } = string.Empty;
+    public IReadOnlyList<string> SupportEmails { get; set; } = Array.Empty<string>();
+}
+
 public sealed class DenialWorkflowDashboardSummary
 {
     public int TotalDenials { get; set; }

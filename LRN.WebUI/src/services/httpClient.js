@@ -2,6 +2,17 @@ import { REPORTS_API_BASE_URL } from '../config/apiConfig';
 import { clearWorkflowJwt, ensureWorkflowJwt } from '../utils/auth';
 
 const API_BASE_URL = REPORTS_API_BASE_URL;
+export const GENERIC_WORKFLOW_ERROR = 'Issue happened. Please contact admin support.';
+
+export class DenialWorkflowError extends Error {
+  constructor(message = GENERIC_WORKFLOW_ERROR, options = {}) {
+    super(message);
+    this.name = 'DenialWorkflowError';
+    this.correlationId = options.correlationId || '';
+    this.supportEmails = Array.isArray(options.supportEmails) ? options.supportEmails : [];
+    this.safeForUser = options.safeForUser !== false;
+  }
+}
 
 function joinUrl(base, path) {
   const b = String(base || '').replace(/\/+$/, '');
@@ -25,8 +36,12 @@ async function readError(response) {
   let message = '';
   if (contentType.toLowerCase().includes('application/json')) {
     const data = await response.json().catch(() => null);
+    const supportEmails = data?.supportEmails || data?.SupportEmails || [];
     const reason = data?.reason ? ` ${data.reason}` : '';
     const correlationId = data?.correlationId || data?.CorrelationId || data?.traceId || data?.traceID || requestId;
+    if (response.status >= 500 || supportEmails.length) {
+      return new DenialWorkflowError(GENERIC_WORKFLOW_ERROR, { correlationId, supportEmails });
+    }
     message = data?.message ? `${data.message}${reason}` : data?.title || data?.error || JSON.stringify(data || {});
     if (correlationId && !String(message).toLowerCase().includes('error id')) {
       return `${message || 'Unable to load claims. Please retry.'} If the issue continues, contact support with Error ID: ${correlationId}`;
@@ -34,6 +49,9 @@ async function readError(response) {
     return message;
   }
   message = (await response.text().catch(() => '')) || `${response.status} ${response.statusText}`;
+  if (response.status >= 500) {
+    return new DenialWorkflowError(GENERIC_WORKFLOW_ERROR, { correlationId: requestId });
+  }
   return requestId ? `${message} If the issue continues, contact support with Error ID: ${requestId}` : message;
 }
 
@@ -64,18 +82,26 @@ async function executeRequest(path, options = {}, jwt = '') {
 }
 
 export async function api(path, options = {}) {
-  let token = await ensureWorkflowJwt();
-  let response = await executeRequest(path, options, token);
-
-  // Token expired/changed signature: refresh once only.
-  if (response.status === 401 || response.status === 403) {
-    clearWorkflowJwt();
-    token = await ensureWorkflowJwt({ forceRefresh: true });
+  let token;
+  let response;
+  try {
+    token = await ensureWorkflowJwt();
     response = await executeRequest(path, options, token);
+
+    // Token expired/changed signature: refresh once only.
+    if (response.status === 401 || response.status === 403) {
+      clearWorkflowJwt();
+      token = await ensureWorkflowJwt({ forceRefresh: true });
+      response = await executeRequest(path, options, token);
+    }
+  } catch (err) {
+    if (err?.message && String(err.message).toLowerCase().includes('login')) throw err;
+    throw new DenialWorkflowError(GENERIC_WORKFLOW_ERROR);
   }
 
   if (!response.ok) {
-    throw new Error((await readError(response)) || `API error ${response.status}`);
+    const error = await readError(response);
+    throw error instanceof Error ? error : new Error(error || `API error ${response.status}`);
   }
 
   if (response.status === 204) return null;

@@ -11,6 +11,8 @@ function normalizePagedResult(result) {
 
 export const denialWorkflowService = {
   getMe: () => api('/me'),
+  getSupportContacts: () => api('/support-contacts'),
+  submitSupportRequest: (payload) => api('/support-request', { method: 'POST', body: JSON.stringify(payload) }),
   getLabs: () => api('/labs'),
   getReviewers: (labId) => api(`/reviewers?labId=${encodeURIComponent(labId)}`),
   getLastRunReference: (labId) => api(`/last-run-reference?labId=${encodeURIComponent(labId)}`),

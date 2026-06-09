@@ -8,9 +8,13 @@ using Microsoft.AspNetCore.ResponseCompression;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.Configure<DenialWorkflowOptions>(builder.Configuration.GetSection("Workflow"));
+builder.Services.Configure<DenialWorkflowSupportOptions>(builder.Configuration.GetSection("DenialWorkflowSupport"));
 builder.Services.AddScoped<IDenialWorkflowRepository, SqlDenialWorkflowRepository>();
 builder.Services.AddScoped<IDenialWorkflowService, DenialWorkflowService>();
+builder.Services.AddScoped<IDenialWorkflowIssueNotifier, DenialWorkflowIssueNotifier>();
+builder.Services.AddScoped<IDenialWorkflowSupportService, DenialWorkflowSupportService>();
 builder.Services.AddSingleton<IDenialWorkflowExportJobService, DenialWorkflowExportJobService>();
+builder.Services.AddHttpClient();
 builder.Services.AddAuthorization();
 builder.Services.AddControllers();
 builder.Services.AddResponseCompression(options =>
@@ -92,9 +96,9 @@ app.Use(async (context, next) =>
         }
     }
 
-    context.User = principal;
     try
     {
+        context.User = principal;
         await next();
     }
     catch (UnauthorizedAccessException ex)
@@ -106,6 +110,23 @@ app.Use(async (context, next) =>
     {
         context.Response.StatusCode = StatusCodes.Status400BadRequest;
         await context.Response.WriteAsJsonAsync(new { message = ex.Message });
+    }
+    catch (Exception ex)
+    {
+        var notifier = context.RequestServices.GetRequiredService<IDenialWorkflowIssueNotifier>();
+        var report = await notifier.ReportAsync(context, ex, $"{context.Request.Method} {context.Request.Path}", CancellationToken.None);
+        var support = context.RequestServices.GetRequiredService<IConfiguration>()
+            .GetSection("DenialWorkflowSupport:AdminEmails")
+            .Get<string[]>() ?? Array.Empty<string>();
+
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        context.Response.Headers["X-Correlation-ID"] = report.CorrelationId;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            message = "Issue happened. Please contact admin support.",
+            correlationId = report.CorrelationId,
+            supportEmails = support
+        });
     }
 });
 

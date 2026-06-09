@@ -13,18 +13,38 @@ public sealed class DenialWorkflowController : ControllerBase
 {
     private readonly IDenialWorkflowService _service;
     private readonly IDenialWorkflowExportJobService _exportJobs;
+    private readonly IDenialWorkflowSupportService _supportService;
     private readonly IConfiguration _configuration;
     private readonly ILogger<DenialWorkflowController> _logger;
-    public DenialWorkflowController(IDenialWorkflowService service, IDenialWorkflowExportJobService exportJobs, IConfiguration configuration, ILogger<DenialWorkflowController> logger)
+    public DenialWorkflowController(IDenialWorkflowService service, IDenialWorkflowExportJobService exportJobs, IDenialWorkflowSupportService supportService, IConfiguration configuration, ILogger<DenialWorkflowController> logger)
     {
         _service = service;
         _exportJobs = exportJobs;
+        _supportService = supportService;
         _configuration = configuration;
         _logger = logger;
     }
 
     [HttpGet("health")]
     public IActionResult Health() => Ok("LRN.ReportsApi DenialWorkflow running");
+
+    [HttpGet("support-contacts")]
+    public IActionResult SupportContacts()
+    {
+        var emails = _configuration.GetSection("DenialWorkflowSupport:AdminEmails").Get<string[]>() ?? Array.Empty<string>();
+        return Ok(new { supportEmails = emails.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray() });
+    }
+
+    [HttpPost("support-request")]
+    public async Task<ActionResult<DenialWorkflowSupportRequestResult>> SupportRequest(DenialWorkflowSupportRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.Subject)) return BadRequest(new { message = "Subject is required." });
+        if (string.IsNullOrWhiteSpace(request.Message)) return BadRequest(new { message = "Issue details are required." });
+        if (request.Subject.Length > 160) return BadRequest(new { message = "Subject must be 160 characters or fewer." });
+        if (request.Message.Length > 4000) return BadRequest(new { message = "Issue details must be 4000 characters or fewer." });
+
+        return Ok(await _supportService.SubmitAsync(HttpContext, request, ct));
+    }
 
     [HttpPost("import")]
     public async Task<ActionResult<DenialWorkflowImportResult>> Import(DenialTaskImportRequest request, CancellationToken ct)
