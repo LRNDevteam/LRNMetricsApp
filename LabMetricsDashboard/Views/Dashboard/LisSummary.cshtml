@@ -301,6 +301,7 @@
                 @if (result is not null)
                 {
                     <span class="chip">Logic: @result.LogicSheetName</span>
+                    <span class="chip">Top Source File name: @(string.IsNullOrWhiteSpace(result.SourceFileName) ? "-" : result.SourceFileName)</span>
                     <span class="chip">Total: @result.GrandTotal.ToString("N0")</span>
                 }
             </div>

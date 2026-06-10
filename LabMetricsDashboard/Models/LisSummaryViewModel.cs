@@ -33,6 +33,7 @@ public sealed class LisSummaryRow
 
 public sealed record LisSummaryResult(
     string LogicSheetName,
+    string SourceFileName,
     List<string> Months,
     List<int> Years,
     List<LisSummaryRow> Rows,

@@ -509,6 +509,7 @@
                 <span class="chip">Lab: @(string.IsNullOrWhiteSpace(Model.CurrentLabName) ? "-" : Model.CurrentLabName)</span>
                 @if (result is not null)
                 {
+                    <span class="chip">Source File Name: @(string.IsNullOrWhiteSpace(result.SourceFileName) ? "-" : result.SourceFileName)</span>
                     <span class="chip">Total: @result.GrandTotal.ToString("N0")</span>
                 }
             </div>

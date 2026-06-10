@@ -54,13 +54,15 @@ public static class LisSummaryExcelExportBuilder
         sheet.Cell(3, 2).Value = result.LogicSheetName;
         sheet.Cell(4, 1).Value = "Collected Date";
         sheet.Cell(4, 2).Value = BuildDateRangeLabel(collectedFrom, collectedTo);
+        sheet.Cell(5, 1).Value = "Top Source File name";
+        sheet.Cell(5, 2).Value = string.IsNullOrWhiteSpace(result.SourceFileName) ? "-" : result.SourceFileName;
 
-        sheet.Range(metaStartRow, 1, 4, 1).Style.Font.Bold = true;
-        sheet.Range(metaStartRow, 1, 4, 2).Style.Fill.BackgroundColor = SectionBlue;
-        sheet.Range(metaStartRow, 1, 4, 2).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-        sheet.Range(metaStartRow, 1, 4, 2).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
-        sheet.Range(metaStartRow, 1, 4, 2).Style.Border.OutsideBorderColor = BorderColor;
-        sheet.Range(metaStartRow, 1, 4, 2).Style.Border.InsideBorderColor = BorderColor;
+        sheet.Range(metaStartRow, 1, 5, 1).Style.Font.Bold = true;
+        sheet.Range(metaStartRow, 1, 5, 2).Style.Fill.BackgroundColor = SectionBlue;
+        sheet.Range(metaStartRow, 1, 5, 2).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        sheet.Range(metaStartRow, 1, 5, 2).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+        sheet.Range(metaStartRow, 1, 5, 2).Style.Border.OutsideBorderColor = BorderColor;
+        sheet.Range(metaStartRow, 1, 5, 2).Style.Border.InsideBorderColor = BorderColor;
 
         sheet.Cell(sampleNoteRow, 1).Value = "Sample Count = Count [Unique Accession / Order ID]";
         sheet.Range(sampleNoteRow, 1, sampleNoteRow, Math.Min(lastColumn, 6)).Merge();

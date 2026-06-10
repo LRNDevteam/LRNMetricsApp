@@ -269,6 +269,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		}
 
 		var profile = ResolveProfile(labName, labId, columns);
+		var sourceFileName = await GetLatestSourceFileNameAsync(conn, columns, ct);
 		var raw = await LoadDynamicGroupsAsync(conn, profile, collectedFrom, collectedTo, ct);
 
 		var months = raw
@@ -299,6 +300,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 		return new LisSummaryResult(
 			profile.LogicSheetName,
+			sourceFileName,
 			months,
 			years,
 			rows,
@@ -326,6 +328,29 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		}
 
 		return columns;
+	}
+
+	private static async Task<string> GetLatestSourceFileNameAsync(
+		SqlConnection conn,
+		HashSet<string> columns,
+		CancellationToken ct)
+	{
+		if (!columns.Contains("SourceFile") || !columns.Contains("CreatedOn"))
+		{
+			return string.Empty;
+		}
+
+		const string sql = """
+            SELECT TOP 1 SourceFile
+            FROM dbo.LIMSMaster WITH (NOLOCK)
+            ORDER BY CreatedOn DESC;
+            """;
+
+		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 60 };
+		var value = await cmd.ExecuteScalarAsync(ct);
+		return value == null || value == DBNull.Value
+			? string.Empty
+			: Convert.ToString(value)?.Trim() ?? string.Empty;
 	}
 
 	private static DimensionProfile ResolveProfile(string labName, int? labId, HashSet<string> columns)
