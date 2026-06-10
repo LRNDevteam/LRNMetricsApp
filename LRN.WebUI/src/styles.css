@@ -1383,6 +1383,8 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .wl-btn.danger{background:#e74c3c;border-color:#e74c3c;color:#fff}.wl-btn.danger:hover{background:#c0392b;border-color:#c0392b}
 .dcm-upload{position:relative;overflow:hidden;cursor:pointer}
 .dcm-upload input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.dcm-upload.disabled{opacity:.65;cursor:not-allowed;pointer-events:none}
+.dcm-import-status{display:inline-flex;align-items:center;gap:6px;color:#0f766e;background:#e8f8f3;border:1px solid #a7e8d2;border-radius:6px;padding:6px 9px;margin-bottom:10px;font-size:11px;font-weight:700}
 .dcm-modal{width:min(980px,96vw);max-height:92vh;background:#fff;border-radius:10px;box-shadow:0 24px 80px rgba(0,0,0,.35);display:flex;flex-direction:column;overflow:hidden;border:1px solid #dbe3ee}
 .dcm-form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:14px;overflow:auto}
 .dcm-field{display:flex;flex-direction:column;gap:4px;font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.06em}

@@ -70,8 +70,6 @@ function EditorModal({ initial, lookups, onClose, onSave }) {
   function submit(e) {
     e.preventDefault();
     if (!String(form.denialCode || '').trim()) return;
-    if (!String(form.coverageStatus || '').trim()) return;
-    if (!String(form.icdComplianceStatus || '').trim()) return;
     const payload = { ...form, slaDays: String(form.slaDays || '').trim() || null };
     onSave(payload, isEdit);
   }
@@ -87,7 +85,7 @@ function EditorModal({ initial, lookups, onClose, onSave }) {
         <TextField label="Priority" value={form.priority} onChange={v => setField('priority', v)} />
         <TextField label="SLA Days" value={form.slaDays} onChange={v => setField('slaDays', v)} />
         <TextField label="Denial Description" value={form.denialDescription} rows={2} onChange={v => setField('denialDescription', v)} />
-        {dropdownFields.map(([key, label, lookupKey]) => <ChoiceField key={key} label={`${label}${key === 'coverageStatus' || key === 'icdComplianceStatus' ? ' *' : ''}`} value={form[key]} options={lookups?.[lookupKey] || lookups?.[lookupKey[0].toUpperCase() + lookupKey.slice(1)] || []} disabled={isEdit && (key === 'coverageStatus' || key === 'icdComplianceStatus')} onChange={v => setField(key, v)} />)}
+        {dropdownFields.map(([key, label, lookupKey]) => <ChoiceField key={key} label={label} value={form[key]} options={lookups?.[lookupKey] || lookups?.[lookupKey[0].toUpperCase() + lookupKey.slice(1)] || []} disabled={isEdit && (key === 'coverageStatus' || key === 'icdComplianceStatus')} onChange={v => setField(key, v)} />)}
         <TextField label="Recommended Action" value={form.recommendedAction} rows={2} onChange={v => setField('recommendedAction', v)} />
         <TextField label="Short Category" value={form.shortCategory} onChange={v => setField('shortCategory', v)} />
         <TextField label="Notes / Comments" value={form.notesComments} rows={3} onChange={v => setField('notesComments', v)} />
@@ -107,6 +105,7 @@ export default function DenialCodeMasterPage({ labId, setMessage }) {
   const [query, setQuery] = useState({ search: '', page: 1, pageSize: 25 });
   const [lookups, setLookups] = useState({});
   const [loading, setLoading] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [editor, setEditor] = useState(null);
 
   const totalPages = useMemo(() => Number(pageInfo.totalPages || pageInfo.TotalPages || 0), [pageInfo]);
@@ -161,13 +160,17 @@ export default function DenialCodeMasterPage({ labId, setMessage }) {
   }
 
   async function importFile(file) {
-    if (!file) return;
+    if (!file || importing) return;
+    setImporting(true);
+    setMessage?.({ type: 'info', text: `Importing ${file.name}. This may take a few minutes...` });
     try {
       const result = await denialWorkflowService.importDenialCodeMaster(labId, file);
       setMessage({ type: result.failedCount ? 'warning' : 'success', text: `Import complete. Inserted: ${result.insertedCount || 0}, updated/replaced: ${result.updatedCount || 0}, skipped: ${result.skippedCount || 0}, failed: ${result.failedCount || 0}.` });
       load(query);
     } catch (err) {
       setMessage({ type: 'danger', text: err.message || 'Import failed.' });
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -199,11 +202,12 @@ export default function DenialCodeMasterPage({ labId, setMessage }) {
       <label className="claim-search-wrap"><i className="bi bi-search" /><input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') setQuery({ ...query, search, page: 1 }); }} placeholder="Search denial code, classification, action" /></label>
       <button className="wl-btn xs" onClick={() => setQuery({ ...query, search, page: 1 })}>Search</button>
       <button className="wl-btn teal xs" onClick={() => setEditor({})}><i className="bi bi-plus-circle" /> Add</button>
-      <label className="wl-btn xs dcm-upload"><i className="bi bi-upload" /> Import Excel<input type="file" accept=".xlsx,.xlsm,.xltx,.xltm" onChange={e => importFile(e.target.files?.[0])} /></label>
+      <label className={`wl-btn xs dcm-upload ${importing ? 'disabled' : ''}`} aria-disabled={importing}><i className={`bi ${importing ? 'bi-hourglass-split' : 'bi-upload'}`} /> {importing ? 'Importing Excel...' : 'Import Excel'}<input type="file" accept=".xlsx,.xlsm,.xltx,.xltm" disabled={importing} onChange={e => { importFile(e.target.files?.[0]); e.target.value = ''; }} /></label>
       <button className="wl-btn xs" onClick={regenerate}><i className="bi bi-arrow-repeat" /> Regenerate</button>
       <button className="wl-btn xs" onClick={downloadExport}><i className="bi bi-download" /> Export Excel</button>
     </div>
-    {loading && <div className="loading-line" />}
+    {(loading || importing) && <div className="loading-line" />}
+    {importing && <div className="dcm-import-status"><i className="bi bi-hourglass-split" /> Import is running. Please keep this page open while the file is uploaded and processed.</div>}
     <div className="claim-assign-scroll dcm-table-wrap">
       <table className="lrn-table workflow-table dcm-table">
         <thead><tr><th>Denial Code</th><th>Denial Classification</th><th>Coverage Status</th><th>ICD Compliance Status</th><th>Action Code</th><th>Action Category</th><th>Actions</th></tr></thead>

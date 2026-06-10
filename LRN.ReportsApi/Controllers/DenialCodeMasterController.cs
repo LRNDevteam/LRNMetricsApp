@@ -155,8 +155,6 @@ public sealed class DenialCodeMasterController : ControllerBase
     private static string Validate(DenialCodeMasterRequest request, bool requireCode)
     {
         if (requireCode && string.IsNullOrWhiteSpace(request.DenialCode)) return "Denial Code is required.";
-        if (string.IsNullOrWhiteSpace(request.CoverageStatus)) return "Coverage Status is required.";
-        if (string.IsNullOrWhiteSpace(request.ICDComplianceStatus)) return "ICD Compliance Status is required.";
         return string.Empty;
     }
 
@@ -176,11 +174,12 @@ public sealed class DenialCodeMasterController : ControllerBase
     private static DenialCodeMasterRequest Normalize(DenialCodeMasterRequest request)
     {
         static string? Trim(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        static string StatusOrDefault(string? value) => string.IsNullOrWhiteSpace(value) ? "N/A" : value.Trim();
         request.DenialCode = (request.DenialCode ?? string.Empty).Trim();
         request.DenialDescription = Trim(request.DenialDescription);
         request.DenialClassification = Trim(request.DenialClassification);
-        request.CoverageStatus = Trim(request.CoverageStatus);
-        request.ICDComplianceStatus = Trim(request.ICDComplianceStatus);
+        request.CoverageStatus = StatusOrDefault(request.CoverageStatus);
+        request.ICDComplianceStatus = StatusOrDefault(request.ICDComplianceStatus);
         request.DenialValidity = Trim(request.DenialValidity);
         request.ActionCode = Trim(request.ActionCode);
         request.RecommendedAction = Trim(request.RecommendedAction);

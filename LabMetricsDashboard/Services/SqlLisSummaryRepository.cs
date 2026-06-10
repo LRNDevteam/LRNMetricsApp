@@ -360,6 +360,17 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			["Insurance category"] = FirstExisting(columns, InsuranceCategoryCandidatesFor(logicSheet))
 		};
 
+		if (logicSheet.Equals("Augustus", StringComparison.OrdinalIgnoreCase))
+		{
+			fields = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+			{
+				["Billing Status"] = FirstExisting(columns, "BillingStatus", "Billing Status"),
+				["Bill To"] = FirstExisting(columns, "BillTo", "Bill To"),
+				["Result Status"] = FirstExisting(columns, "ResultStatus", "Result Status"),
+				["Final Status"] = FirstExisting(columns, "FinalStatus", "Final Status")
+			};
+		}
+
 		var countDistinctColumn = FirstExisting(columns, CountDistinctCandidatesFor(logicSheet));
 		var incorrectDosColumn = FirstExisting(columns, IncorrectDosCandidatesFor(logicSheet));
 
@@ -514,7 +525,11 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			rows.Add(BuildRow(template.Code, template.Description, template.Logic, ResolveTemplateLevel(template.Code), matches.ToList()));
 		}
 
-		RecalculateParentRowsFromChildren(rows);
+		if (!logicSheetName.Equals("Augustus", StringComparison.OrdinalIgnoreCase))
+		{
+			RecalculateParentRowsFromChildren(rows);
+		}
+
 		return rows;
 	}
 
@@ -587,7 +602,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			if (expectedValues.Count == 0 || expectedValues.Any(v => IsAllValue(v))) continue;
 
 			var actual = GetField(row, field);
-			if (!expectedValues.Any(v => ValueMatches(actual, v))) return false;
+			if (!expectedValues.Any(v => ValueMatches(field, actual, v))) return false;
 		}
 
 		return true;
@@ -649,7 +664,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 	private static string ValueOrBlank(RawLisGroup row, string field)
 		=> row.Fields.TryGetValue(field, out var value) ? value : string.Empty;
 
-	private static bool ValueMatches(string actual, string expected)
+	private static bool ValueMatches(string field, string actual, string expected)
 	{
 		if (IsBlankValue(expected)) return string.IsNullOrWhiteSpace(actual);
 		if (IsAllValue(expected)) return true;
@@ -659,18 +674,27 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		if (actualKey == expectedKey) return true;
 		if (string.IsNullOrWhiteSpace(actualKey) || string.IsNullOrWhiteSpace(expectedKey)) return false;
 
-		var actualStatusKey = CompareKey(NormalizeBillStatus(actual));
-		var expectedStatusKey = CompareKey(NormalizeBillStatus(expected));
-		if (IsCanonicalBillStatusKey(actualStatusKey)
-			&& IsCanonicalBillStatusKey(expectedStatusKey)
-			&& actualStatusKey == expectedStatusKey)
+		if (IsBillStatusField(field))
 		{
-			return true;
+			var actualStatusKey = CompareKey(NormalizeBillStatus(actual));
+			var expectedStatusKey = CompareKey(NormalizeBillStatus(expected));
+			if (IsCanonicalBillStatusKey(actualStatusKey)
+				&& IsCanonicalBillStatusKey(expectedStatusKey)
+				&& actualStatusKey == expectedStatusKey)
+			{
+				return true;
+			}
 		}
 
 		// Allow small wording differences used by the lab templates, e.g. Insurance Bill(s), Selfpay/Self Pay.
 		return actualKey.TrimEnd('S') == expectedKey.TrimEnd('S')
 			   || actualKey.TrimEnd('D') == expectedKey.TrimEnd('D');
+	}
+
+	private static bool IsBillStatusField(string field)
+	{
+		var canonical = CanonicalFieldName(field);
+		return canonical is "Billing Status" or "Bill Status" or "Billed/Not";
 	}
 
 	private static bool IsCanonicalBillStatusKey(string key)

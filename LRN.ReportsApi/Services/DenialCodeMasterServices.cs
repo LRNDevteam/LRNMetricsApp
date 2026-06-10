@@ -407,11 +407,12 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
     private static void TrimImportRecord(DenialCodeMasterRequest record)
     {
         static string? Trim(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        static string StatusOrDefault(string? value) => string.IsNullOrWhiteSpace(value) ? "N/A" : value.Trim();
         record.DenialCode = record.DenialCode.Trim();
         record.DenialDescription = Trim(record.DenialDescription);
         record.DenialClassification = Trim(record.DenialClassification);
-        record.CoverageStatus = record.CoverageStatus!.Trim();
-        record.ICDComplianceStatus = record.ICDComplianceStatus!.Trim();
+        record.CoverageStatus = StatusOrDefault(record.CoverageStatus);
+        record.ICDComplianceStatus = StatusOrDefault(record.ICDComplianceStatus);
         record.DenialValidity = Trim(record.DenialValidity);
         record.ActionCode = Trim(record.ActionCode);
         record.RecommendedAction = Trim(record.RecommendedAction);
@@ -658,21 +659,11 @@ public sealed class DenialCodeMasterExcelService : IDenialCodeMasterExcelService
         for (var row = 3; row <= lastRow; row++)
         {
             var code = Text(sheet.Cell(row, 1));
-            var coverageStatus = Text(sheet.Cell(row, 4));
-            var icdComplianceStatus = Text(sheet.Cell(row, 5));
+            var coverageStatus = StatusOrDefault(Text(sheet.Cell(row, 4)));
+            var icdComplianceStatus = StatusOrDefault(Text(sheet.Cell(row, 5)));
             if (string.IsNullOrWhiteSpace(code))
             {
                 skipped++;
-                continue;
-            }
-            if (string.IsNullOrWhiteSpace(coverageStatus))
-            {
-                errors.Add($"Row {row}: Coverage Status is required.");
-                continue;
-            }
-            if (string.IsNullOrWhiteSpace(icdComplianceStatus))
-            {
-                errors.Add($"Row {row}: ICD Compliance Status is required.");
                 continue;
             }
 
@@ -750,4 +741,6 @@ public sealed class DenialCodeMasterExcelService : IDenialCodeMasterExcelService
         var value = cell.GetFormattedString().Trim();
         return string.IsNullOrWhiteSpace(value) ? null : value;
     }
+
+    private static string StatusOrDefault(string? value) => string.IsNullOrWhiteSpace(value) ? "N/A" : value.Trim();
 }
