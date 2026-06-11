@@ -1,0 +1,252 @@
+@model LabMetricsDashboard.Models.PhiExecutiveSummaryViewModel
+@{
+    ViewData["Title"] = "Executive Summary";
+    Layout = "~/Views/Shared/_Layout.cshtml";
+
+    static string MonthName(int m) => m == 0 ? "Total" :
+        System.Globalization.CultureInfo.InvariantCulture.DateTimeFormat.GetAbbreviatedMonthName(m);
+
+    static string ColHeader((int Year, int Month) col) =>
+        col == (0, 0) ? "Total" : $"{col.Year}<br/><small>{MonthName(col.Month)}</small>";
+
+    string FmtCount(decimal v, string cat) =>
+        (cat == "Cash" || cat == "Avg")
+            ? (v == 0 ? "—" : v.ToString("C0"))
+            : (v == 0 ? "—" : ((long)v).ToString("N0"));
+
+    bool IsDollar(string cat) => cat is "Cash" or "Avg";
+
+    static string TabId(string cat) => cat switch
+    {
+        "LIS"  => "lis",
+        "PMS"  => "pms",
+        "Cash" => "cash",
+        "Avg"  => "avg",
+        _      => "other"
+    };
+
+    static string TabLabel(string cat) => cat switch
+    {
+        "LIS"  => "LIS Breakdown",
+        "PMS"  => "PMS Breakdown",
+        "Cash" => "Cash Breakdown",
+        "Avg"  => "Averages",
+        _      => cat
+    };
+
+    var tabs = new[] { "LIS", "PMS", "Cash", "Avg" };
+}
+
+<style>
+    .exec-page { padding: 16px; }
+    .exec-filter-bar { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end;
+        background:#f8f9fa; border:1px solid #dee2e6; border-radius:6px; padding:12px 16px;
+        margin-bottom:16px; }
+    .exec-filter-bar label { font-size:.78rem; font-weight:600; color:#1B3A4B; margin-bottom:2px; }
+    .exec-filter-bar select, .exec-filter-bar input { font-size:.82rem; padding:3px 8px; border-radius:4px;
+        border:1px solid #ced4da; min-width:100px; }
+    .btn-exec { background:#1B3A4B; color:#fff; border:none; border-radius:4px;
+        padding:5px 14px; font-size:.82rem; cursor:pointer; }
+    .btn-exec:hover { background:#2a5370; }
+    .btn-exec-reset { background:#6c757d; color:#fff; border:none; border-radius:4px;
+        padding:5px 14px; font-size:.82rem; cursor:pointer; }
+    /* Tabs */
+    .exec-tabs { border-bottom: 2px solid #1B3A4B; margin-bottom:0; }
+    .exec-tabs .nav-link { color:#1B3A4B; font-weight:600; font-size:.85rem; border-radius:6px 6px 0 0;
+        border: 1px solid transparent; padding: 7px 18px; }
+    .exec-tabs .nav-link:hover { background:#e8f0f5; border-color:#c0d4df; }
+    .exec-tabs .nav-link.active { background:#1B3A4B; color:#fff; border-color:#1B3A4B; }
+    .exec-tab-content { border:1px solid #dee2e6; border-top:none; border-radius:0 0 6px 6px;
+        background:#fff; overflow:hidden; }
+    /* Table */
+    .exec-table-wrap { overflow-x:auto; max-height:72vh; overflow-y:auto; }
+    .exec-table { width:100%; border-collapse:collapse; font-size:.8rem; }
+    .exec-table thead th { position:sticky; top:0; background:#1B3A4B; color:#fff;
+        padding:7px 10px; white-space:nowrap; text-align:center; z-index:2; border-right:1px solid #2a5370; }
+    .exec-table thead th.col-code { text-align:left; min-width:45px; }
+    .exec-table thead th.col-desc { text-align:left; min-width:260px; }
+    .exec-table thead th.col-total { background:#1e5c2e; }
+    .exec-table tbody tr:hover td { background:#eaf3fb !important; }
+    .exec-table td { padding:5px 10px; border-bottom:1px solid #e9ecef;
+        border-right:1px solid #f0f0f0; white-space:nowrap; }
+    .exec-table td.val { text-align:right; min-width:80px; }
+    .exec-table td.val-total { text-align:right; background:#f0faf3 !important; font-weight:700; }
+    /* Row types */
+    tr.cat-row td { background:#f5f7f8; font-weight:700; color:#1B3A4B; }
+    tr.sub-row td { background:#fff; padding-left:22px; font-size:.79rem; color:#444; }
+    tr.sub-row td.col-code { color:#888; }
+    /* dollar badge */
+    .dollar-badge { background:#1e7e34; color:#fff; font-size:.65rem; border-radius:3px;
+        padding:1px 4px; margin-right:4px; }
+    /* error / info */
+    .exec-info { padding:40px; text-align:center; color:#6c757d; }
+    .exec-info .bi { font-size:2.5rem; display:block; margin-bottom:12px; }
+</style>
+
+<div class="exec-page">
+    <h5 style="color:#1B3A4B; font-weight:700; margin-bottom:12px;">
+        <i class="bi bi-table"></i> Executive Summary
+        @if (!string.IsNullOrEmpty(Model.SelectedLab))
+        {
+            <span style="font-weight:400; font-size:.9rem; color:#666;"> — @Model.SelectedLab</span>
+        }
+    </h5>
+
+    <!-- Filter bar — lab comes from top-banner selector, not shown here -->
+    <form method="get" class="exec-filter-bar">
+        <input type="hidden" name="lab" value="@Model.SelectedLab" />
+        <div>
+            <label>Year From</label>
+            <select name="yearFrom">
+                <option value="">All</option>
+                @foreach (var y in Model.AvailableYears)
+                {
+                    if (y == Model.SelectedYearFrom)
+                    { <option value="@y" selected>@y</option> }
+                    else
+                    { <option value="@y">@y</option> }
+                }
+            </select>
+        </div>
+        <div>
+            <label>Year To</label>
+            <select name="yearTo">
+                <option value="">All</option>
+                @foreach (var y in Model.AvailableYears)
+                {
+                    if (y == Model.SelectedYearTo)
+                    { <option value="@y" selected>@y</option> }
+                    else
+                    { <option value="@y">@y</option> }
+                }
+            </select>
+        </div>
+        <div>
+            <label>Month From</label>
+            <select name="monthFrom">
+                <option value="">All</option>
+                @for (int m = 1; m <= 12; m++)
+                {
+                    if (m == Model.SelectedMonthFrom)
+                    { <option value="@m" selected>@MonthName(m)</option> }
+                    else
+                    { <option value="@m">@MonthName(m)</option> }
+                }
+            </select>
+        </div>
+        <div>
+            <label>Month To</label>
+            <select name="monthTo">
+                <option value="">All</option>
+                @for (int m = 1; m <= 12; m++)
+                {
+                    if (m == Model.SelectedMonthTo)
+                    { <option value="@m" selected>@MonthName(m)</option> }
+                    else
+                    { <option value="@m">@MonthName(m)</option> }
+                }
+            </select>
+        </div>
+        <div>
+            <button type="submit" class="btn-exec">Apply</button>&nbsp;
+            <a href="@Url.Action("Index", "PhiExecutiveSummary", new { lab = Model.SelectedLab })" class="btn-exec-reset">Reset</a>
+        </div>
+    </form>
+
+    @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+    {
+        <div class="exec-info">
+            <i class="bi bi-exclamation-circle-fill" style="color:#c0392b;"></i>
+            @Model.ErrorMessage
+        </div>
+    }
+    else if (!Model.HasData)
+    {
+        <div class="exec-info">
+            <i class="bi bi-inbox"></i>
+            No data found for the selected filters.
+        </div>
+    }
+    else
+    {
+        <!-- Tab nav -->
+        <ul class="nav exec-tabs" id="execTabs" role="tablist">
+            @foreach (var tab in tabs)
+            {
+                var rows = Model.Rows.Where(r => r.Category == tab).ToList();
+                if (rows.Count == 0) continue;
+                string tid = TabId(tab);
+                bool isFirst = tid == TabId(tabs.First(t => Model.Rows.Any(r => r.Category == t)));
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link @(isFirst ? "active" : "")"
+                            id="tab-@tid"
+                            data-bs-toggle="tab"
+                            data-bs-target="#pane-@tid"
+                            type="button" role="tab">
+                        @TabLabel(tab)
+                    </button>
+                </li>
+            }
+        </ul>
+
+        <div class="tab-content exec-tab-content" id="execTabContent">
+            @{ bool firstPane = true; }
+            @foreach (var tab in tabs)
+            {
+                var rows = Model.Rows.Where(r => r.Category == tab).ToList();
+                if (rows.Count == 0) continue;
+                string tid = TabId(tab);
+                <div class="tab-pane fade @(firstPane ? "show active" : "")"
+                     id="pane-@tid" role="tabpanel">
+                    <div class="exec-table-wrap">
+                        <table class="exec-table">
+                            <thead>
+                                <tr>
+                                    <th class="col-desc">Description</th>
+                                    @foreach (var col in Model.YearMonthColumns)
+                                    {
+                                        if (col == (0, 0))
+                                        { <th class="col-total">Total</th> }
+                                        else
+                                        { <th>@col.Year<br/><small style="font-weight:400;">@MonthName(col.Month)</small></th> }
+                                    }
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in rows)
+                                {
+                                    bool isSub   = row.IsSubRow;
+                                    string rClass = isSub ? "sub-row" : "cat-row";
+                                    bool isDollar = IsDollar(row.Category);
+
+                                    <tr class="@rClass">
+                                        <td class="col-desc">
+                                            @if (isDollar)
+                                            {
+                                                <span class="dollar-badge">$</span>
+                                            }
+                                            @row.Description.TrimStart()
+                                        </td>
+                                        @foreach (var col in Model.YearMonthColumns)
+                                        {
+                                            row.ValuesByYearMonth.TryGetValue(col, out var v);
+                                            if (col == (0, 0))
+                                            {
+                                                <td class="val val-total">@FmtCount(v, row.Category)</td>
+                                            }
+                                            else
+                                            {
+                                                <td class="val">@FmtCount(v, row.Category)</td>
+                                            }
+                                        }
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                firstPane = false;
+            }
+        </div>
+    }
+</div>

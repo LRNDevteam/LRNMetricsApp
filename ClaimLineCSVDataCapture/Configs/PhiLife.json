@@ -4,8 +4,9 @@
   //
   // DEPLOY INSTRUCTIONS:
   //   Copy this file to  C:\CodingMastConfigs\Labs\PhiLife.json
-  //   Copy PhiLifeFieldMappings.json to  C:\CodingMastConfigs\Labs\PhiLifeFieldMappings.json
-  //   (or update LabFieldMappingsPath below to point to wherever you place it)
+  //   Copy PhiLifeFieldMappings.json to  C:\CodingMastConfigs\Mappings\PhiLifeFieldMappings.Json
+  //   IMPORTANT: LabFieldMappingsPath below MUST point to the deployed copy.
+  //   Without it the app falls back to the global FieldMappings.json (wrong field set).
   //
   // FIRST RUN:
   //   Set ClaimLineRefresh = true for the first run so existing data is purged
@@ -26,6 +27,13 @@
   // Set true on first run (or any time you want to force a full re-load).
   // The app resets this to false automatically after a successful run.
   "ClaimLineRefresh": true,
+
+  // ── RunId validation gate ─────────────────────────────────────────────────
+  // Lab name passed to sp_GetRecentSuccessRunByLab (LRNMaster) to fetch the
+  // latest successfully completed RunId. The latest input file is only processed
+  // when its RunId prefix (text before the first underscore in the file name)
+  // matches that completed RunId. Applies to ClaimLineRefresh=true as well.
+  "FetchLatestCompletedRunIDParameter": "Phi Life",
 
   // ── Paths ─────────────────────────────────────────────────────────────────
   "Paths": {

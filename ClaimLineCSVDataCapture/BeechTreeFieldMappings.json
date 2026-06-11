@@ -55,6 +55,7 @@
       { "CsvHeader": "ICD Pointer", "SqlColumn": "ICDPointer", "IncludeInHash": true },
       { "CsvHeader": "PatientName", "SqlColumn": "PatientName", "IncludeInHash": false },
       { "CsvHeader": "Billed/Unbilled", "SqlColumn": "BilledUnbilled", "IncludeInHash": false },
+      { "CsvHeader": "Modifier", "SqlColumn": "Modifier", "IncludeInHash": true, "DataType": "integer" },
       { "CsvHeader": "Payment %", "SqlColumn": "PaymentPercent", "IncludeInHash": false },
       { "CsvHeader": "Aging", "SqlColumn": "Aging", "IncludeInHash": false },
       { "CsvHeader": "Aging Bucket", "SqlColumn": "AgingBucket", "IncludeInHash": false },
@@ -124,7 +125,6 @@
       { "CsvHeader": "PatientBalancePerUnit", "SqlColumn": "PatientBalancePerUnit", "IncludeInHash": true },
       { "CsvHeader": "Total Balance", "SqlColumn": "TotalBalance", "IncludeInHash": true },
       { "CsvHeader": "CheckDate", "SqlColumn": "CheckDate", "IncludeInHash": true },
-      { "CsvHeader": "Payment Posted Date", "SqlColumn": "PostingDate", "IncludeInHash": true },
       { "CsvHeader": "Payment Posted Date", "SqlColumn": "PaymentPostedDate", "IncludeInHash": true },
       { "CsvHeader": "ClaimStatus", "SqlColumn": "ClaimStatus", "IncludeInHash": true },
       { "CsvHeader": "Pay Status", "SqlColumn": "PayStatus", "IncludeInHash": true },
@@ -144,6 +144,7 @@
       { "CsvHeader": "EntryUser", "SqlColumn": "EntryUser", "IncludeInHash": false },
       { "CsvHeader": "CPTUnits", "SqlColumn": "CPTUnits", "IncludeInHash": false, "DataType": "integer" },
       { "CsvHeader": "CPTMOD", "SqlColumn": "CPTMOD", "IncludeInHash": false },
+      { "CsvHeader": "CPTs", "SqlColumn": "CPTs", "IncludeInHash": false },
       { "CsvHeader": "Posted Week", "SqlColumn": "PostedWeek", "IncludeInHash": false }
     ]
   }

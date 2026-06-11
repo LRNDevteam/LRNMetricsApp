@@ -69,9 +69,6 @@ public sealed class CollectionSummaryViewModel
     // ?? Panel vs Payment ????????????????????????????????????????
     public List<PanelPaymentRow> PanelPayments { get; set; } = [];
 
-    // ?? Rep vs Payments ??????????????????????????????????????????
-    public RepPaymentPivot RepPayments { get; set; } = RepPaymentPivot.Empty;
-
     // ?? Insurance vs Payment % ??????????????????????????????????
     public List<InsurancePaymentPctRow> InsurancePaymentPct { get; set; } = [];
 
@@ -196,12 +193,13 @@ public sealed record InsuranceReimbursementRow(
     string PayerName,
     decimal SumInsurancePayment,
     decimal SumChargeAmount,
-    int UniqueVisitCount)
+    int UniqueVisitCount,
+    decimal? PaymentPctFromSp = null)
 {
     /// <summary>Reimbursement % = SUM(InsurancePayment) / SUM(ChargeAmount) × 100.</summary>
-    public decimal ReimbursementPct => SumChargeAmount == 0
+    public decimal ReimbursementPct => PaymentPctFromSp ?? (SumChargeAmount == 0
         ? 0m
-        : Math.Round(SumInsurancePayment / SumChargeAmount * 100m, 2);
+        : Math.Round(SumInsurancePayment / SumChargeAmount * 100m, 2));
 }
 
 /// <summary>
@@ -405,41 +403,3 @@ public sealed class CollectionWeeklyVolumePivot
 
 // ?? Rep vs Payments pivot types ?????????????????????????????????
 
-/// <summary>
-/// Represents a Year + Month column group in the Rep vs Payments pivot.
-/// </summary>
-public sealed record RepPaymentPeriod(int Year, int Month)
-{
-    public string Label => $"{Year}-{Month:D2}";
-}
-
-/// <summary>
-/// A single cell in the Rep vs Payments pivot: claims count + payment sum
-/// for one SalesRep in one Year/Month.
-/// </summary>
-public sealed record RepPaymentCell(int NoOfClaims, decimal InsurancePayments);
-
-/// <summary>
-/// One row (SalesRepName) in the Rep vs Payments pivot table.
-/// <see cref="Cells"/> is keyed by <see cref="RepPaymentPeriod"/> matching
-/// the column order in <see cref="RepPaymentPivot.Periods"/>.
-/// </summary>
-public sealed class RepPaymentPivotRow
-{
-    public required string SalesRepName { get; set; }
-    public Dictionary<RepPaymentPeriod, RepPaymentCell> Cells { get; set; } = [];
-    public int GrandClaims { get; set; }
-    public decimal GrandPayments { get; set; }
-}
-
-/// <summary>
-/// Fully assembled pivot for the "Rep vs Payments" tab.
-/// Periods are sorted chronologically; rows are sorted by grand-total payments descending.
-/// </summary>
-public sealed class RepPaymentPivot
-{
-    public static readonly RepPaymentPivot Empty = new();
-    public List<RepPaymentPeriod> Periods { get; set; } = [];
-    public List<RepPaymentPivotRow> Rows { get; set; } = [];
-    public bool HasData => Rows.Count > 0;
-}
