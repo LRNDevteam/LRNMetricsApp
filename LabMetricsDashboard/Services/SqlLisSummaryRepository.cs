@@ -83,7 +83,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("•", "Claim Submitted in Daqbilling", "Bill to = Insurance Bills AND Bill status = Billed AND Final Status =  Claim Submitted in Daqbilling"),
 				new TemplateRow("2", "Unbilled", "Bill to = Insurance Bills AND Bill status = Unbilled"),
 				new TemplateRow("•", "Resulted yet to be billed", "Bill to = Insurance Bills AND Bill status = Unbilled AND Final Status =  Resulted yet to be billed"),
-				new TemplateRow("*", "Ready to bill", "Bill to = Insurance Bills AND Bill status = Unbilled AND Final Status =  Resulted yet to be billed AND Client Status 2 = Ready to bill"),
+				new TemplateRow("*", "Ready to bill", "Bill to = Insurance Bills AND Bill status = Unbilled AND Final Status =  Resulted yet to be billed"),
 				new TemplateRow("•", "Insurance name not listed", "Bill to = Insurance Bills AND Bill status = Unbilled AND Final Status =  Insurance Name Not Listed"),
 				new TemplateRow("B", "Yet to be Validated", "Bill to = Yet to be Validated"),
 				new TemplateRow("1", "Billed", "Bill to = Yet to be Validated AND Bill Status = Billed"),
@@ -392,7 +392,9 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				["Billing Status"] = FirstExisting(columns, "BillingStatus", "Billing Status"),
 				["Bill To"] = FirstExisting(columns, "BillTo", "Bill To"),
 				["Result Status"] = FirstExisting(columns, "ResultStatus", "Result Status"),
-				["Final Status"] = FirstExisting(columns, "FinalStatus", "Final Status")
+				["Final Status"] = FirstExisting(columns, "FinalStatus", "Final Status"),
+				["Client Status"] = FirstExisting(columns, "ClientStatus", "Client Status"),
+				["Client Status 2"] = FirstExisting(columns, "ClientStatus2", "Client Status 2", "ClientStatus", "Client Status")
 			};
 		}
 
@@ -449,9 +451,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			.Concat(new[] { $"YEAR({dateExpr})", $"MONTH({dateExpr})" })
 			.ToList();
 
-		var countExpr = string.IsNullOrWhiteSpace(profile.CountDistinctColumn)
-			? "COUNT(*)"
-			: $"COUNT(DISTINCT NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(4000), {Q(profile.CountDistinctColumn)}))), ''))";
+		var countExpr = "COUNT(*)";
 
 		var sql = $"""
             SELECT
@@ -543,11 +543,13 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 		foreach (var template in templateRows)
 		{
-			var matches = IsTotalLogic(template.Logic)
+			var matches = IsAugustusReadyToBillRow(logicSheetName, template)
+				? raw.Where(x => MatchesTemplateLogic(x, AugustusReadyToBillCountLogic)).ToList()
+				: IsTotalLogic(template.Logic)
 				? raw
 				: raw.Where(x => MatchesTemplateLogic(x, template.Logic)).ToList();
 
-			rows.Add(BuildRow(template.Code, template.Description, template.Logic, ResolveTemplateLevel(template.Code), matches.ToList()));
+			rows.Add(BuildRow(template.Code, template.Description, template.Logic, ResolveTemplateLevel(logicSheetName, template), matches.ToList()));
 		}
 
 		if (!logicSheetName.Equals("Augustus", StringComparison.OrdinalIgnoreCase))
@@ -557,6 +559,12 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 		return rows;
 	}
+
+	private const string AugustusReadyToBillCountLogic = "Bill to = Insurance Bills AND Bill status = Unbilled AND Final Status =  Resulted yet to be billed";
+
+	private static bool IsAugustusReadyToBillRow(string logicSheetName, TemplateRow template)
+		=> logicSheetName.Equals("Augustus", StringComparison.OrdinalIgnoreCase)
+		   && template.Description.Equals("Ready to bill", StringComparison.OrdinalIgnoreCase);
 
 	private static void RecalculateParentRowsFromChildren(List<LisSummaryRow> rows)
 	{
@@ -670,7 +678,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 	private static string GetField(RawLisGroup row, string field)
 	{
-		if (row.Fields.TryGetValue(field, out var value)) return value;
+		if (row.Fields.TryGetValue(field, out var value) && !string.IsNullOrWhiteSpace(value)) return value;
 
 		return field switch
 		{
@@ -679,6 +687,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			"Billed/Not" => FirstNonBlank(ValueOrBlank(row, "Billed/Not"), ValueOrBlank(row, "Billing Status"), ValueOrBlank(row, "Bill Status")),
 			"Bill To" => FirstNonBlank(ValueOrBlank(row, "Bill To"), ValueOrBlank(row, "Payment Method")),
 			"Payment Method" => FirstNonBlank(ValueOrBlank(row, "Payment Method"), ValueOrBlank(row, "Bill To")),
+			"Client Status" => FirstNonBlank(ValueOrBlank(row, "Client Status"), ValueOrBlank(row, "Client Status 2")),
 			"Client Status 2" => FirstNonBlank(ValueOrBlank(row, "Client Status 2"), ValueOrBlank(row, "Client Status")),
 			"Final Status 2" => FirstNonBlank(ValueOrBlank(row, "Final Status 2"), ValueOrBlank(row, "Final Status"), ValueOrBlank(row, "Claim Status")),
 			"Final Status" => FirstNonBlank(ValueOrBlank(row, "Final Status"), ValueOrBlank(row, "Claim Status")),
@@ -739,9 +748,11 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			   || key == "COUNTORDERID";
 	}
 
-	private static int ResolveTemplateLevel(string code)
+	private static int ResolveTemplateLevel(string logicSheetName, TemplateRow template)
 	{
-		var c = CleanValue(code);
+		if (IsAugustusReadyToBillRow(logicSheetName, template)) return 3;
+
+		var c = CleanValue(template.Code);
 		if (string.IsNullOrWhiteSpace(c)) return 0;
 		if (c is "•" or "◦" or "*") return 2;
 		if (int.TryParse(c, out _)) return 1;
