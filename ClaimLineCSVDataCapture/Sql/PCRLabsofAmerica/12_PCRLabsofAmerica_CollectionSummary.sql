@@ -302,7 +302,16 @@ GO
 
 
 -- 3. Monthly Claim Volume  (LineLevelData, PostingDate, Top-3 payer per panel)
-CREATE OR ALTER PROCEDURE dbo.usp_RefreshPCR_CS_MonthlyClaimVolume
+USE [PCRLOA]
+GO
+/****** Object:  StoredProcedure [dbo].[usp_RefreshPCR_CS_MonthlyClaimVolume]    Script Date: 6/4/2026 11:51:15 AM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+-- 3. Monthly Claim Volume  (LineLevelData, PostingDate, Top-3 payer per panel)
+ALTER   PROCEDURE [dbo].[usp_RefreshPCR_CS_MonthlyClaimVolume]
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -312,13 +321,13 @@ BEGIN
         LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown')))               AS PayerName,
         YEAR (TRY_CAST(PostingDate AS DATE))                         AS BillYear,
         MONTH(TRY_CAST(PostingDate AS DATE))                         AS BillMonth,
-        COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))            AS NoOfClaims,
+        COUNT( NULLIF(LTRIM(RTRIM(ClaimID)), ''))            AS NoOfClaims,
         ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)  AS InsurancePayment
     INTO #raw
     FROM dbo.LineLevelData
     WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
-      AND TRY_CAST(PostingDate AS DATE) IS NOT NULL
-      AND YEAR(TRY_CAST(PostingDate AS DATE)) > 1900
+      --AND TRY_CAST(PostingDate AS DATE) IS NOT NULL
+      --AND YEAR(TRY_CAST(PostingDate AS DATE)) > 1900
     GROUP BY
         LTRIM(RTRIM(ISNULL(Panelname,        'Unknown'))),
         LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))),
@@ -346,7 +355,7 @@ BEGIN
     DROP TABLE IF EXISTS #ranks;
     PRINT 'usp_RefreshPCR_CS_MonthlyClaimVolume completed.';
 END
-GO
+go
 
 
 -- 4. Weekly Claim Volume (LineLevelData, PostingDate, Fri-Thu, last 4 complete weeks)
@@ -693,7 +702,7 @@ BEGIN
     ),
     agg AS (
         SELECT PayerName,
-               COUNT(DISTINCT PanelName) AS PanelGroupCount,
+               COUNT(PanelName) AS PanelGroupCount,
                ISNULL(SUM(InsPay), 0)    AS InsurancePayment
         FROM base
         GROUP BY PayerName
@@ -720,44 +729,72 @@ GO
 
 
 -- 11. CPT vs Payment %
-CREATE OR ALTER PROCEDURE dbo.usp_RefreshPCR_CS_CptVsPaymentPct
+
+/****** Object:  StoredProcedure [dbo].[usp_RefreshPcr_CS_CptVsPaymentPct]    Script Date: 6/4/2026 2:57:16 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER   PROCEDURE [dbo].[usp_RefreshPcr_CS_CptVsPaymentPct]
 AS
 BEGIN
     SET NOCOUNT ON;
 
     ;WITH agg AS (
         SELECT
-            LTRIM(RTRIM(CPTCode))                                      AS CPTCode,
-            ISNULL(SUM(TRY_CAST(Units AS DECIMAL(18,2))), 0)           AS SumUnits,
-            ISNULL(SUM(CASE WHEN LTRIM(RTRIM(ClaimStatus)) IN ('Fully Paid','Partially Paid')
-                            THEN TRY_CAST(InsurancePayment AS DECIMAL(18,2)) ELSE 0 END), 0) AS PaidIns,
-            ISNULL(SUM(CASE WHEN LTRIM(RTRIM(ClaimStatus)) IN ('Fully Paid','Partially Paid')
-                            THEN TRY_CAST(ChargeAmount     AS DECIMAL(18,2)) ELSE 0 END), 0) AS PaidChg
+            LTRIM(RTRIM(CPTCode))                                        AS CPTCode,
+            ISNULL(SUM(TRY_CAST(Units AS DECIMAL(18,2))), 0)             AS SumUnits,
+            ISNULL(SUM(
+                CASE WHEN ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+                     THEN TRY_CAST(InsurancePayment AS DECIMAL(18,2)) ELSE 0 END
+            ), 0)                                                         AS PaidIns,
+            ISNULL(SUM(
+                CASE WHEN ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+                     THEN TRY_CAST(ChargeAmount AS DECIMAL(18,2)) ELSE 0 END
+            ), 0)                                                         AS PaidChg
         FROM dbo.LineLevelData
         WHERE CPTCode IS NOT NULL AND LTRIM(RTRIM(CPTCode)) <> ''
         GROUP BY LTRIM(RTRIM(CPTCode))
     )
     SELECT CPTCode, SumUnits, PaidIns, PaidChg,
-           CASE WHEN PaidChg > 0
-                THEN CAST(PaidIns * 100.0 / PaidChg AS DECIMAL(9,4))
-                ELSE 0 END AS PaymentPct
-    INTO #out
-    FROM agg;
+           CAST(CASE WHEN PaidChg > 0 THEN PaidIns * 100.0 / PaidChg ELSE 0 END AS DECIMAL(9,4)) AS PaymentPct
+    INTO #out FROM agg;
 
-    TRUNCATE TABLE dbo.PCR_CS_CptVsPaymentPct;
-    INSERT INTO dbo.PCR_CS_CptVsPaymentPct
+    TRUNCATE TABLE dbo.Pcr_CS_CptVsPaymentPct;
+    INSERT INTO dbo.Pcr_CS_CptVsPaymentPct
         (CPTCode, SumUnits, PaidInsurancePayment, PaidChargeAmount, PaymentPct, RefreshedAt)
     SELECT CPTCode, SumUnits, PaidIns, PaidChg, PaymentPct, GETDATE()
-    FROM #out
-    ORDER BY SumUnits DESC;
+    FROM #out ORDER BY SumUnits DESC;
 
     DROP TABLE IF EXISTS #out;
-    PRINT 'usp_RefreshPCR_CS_CptVsPaymentPct completed.';
+    PRINT 'usp_RefreshPcr_CS_CptVsPaymentPct completed.';
 END
+
+
+-- =====================================================================
+-- Provider Summary - Collection Summary
+-- Source: dbo.LineLevelData / dbo.PCR_CS_ProviderSummary
+-- =====================================================================
+DROP TABLE IF EXISTS dbo.PCR_CS_StatusSummary;
+GO
+CREATE TABLE dbo.PCR_CS_StatusSummary
+(
+    SummaryId        INT             NOT NULL IDENTITY(1,1) PRIMARY KEY,
+    ClaimStatus      NVARCHAR(200)   NOT NULL,
+    PanelName        NVARCHAR(500)   NOT NULL,
+    CptCode          NVARCHAR(MAX)   NOT NULL,
+    PayerName        NVARCHAR(500)   NOT NULL,
+    NoOfClaims       INT             NOT NULL DEFAULT 0,
+    InsurancePayment DECIMAL(18,2)   NOT NULL DEFAULT 0,
+    InsuranceBalance DECIMAL(18,2)   NOT NULL DEFAULT 0,
+    PatientBalance   DECIMAL(18,2)   NOT NULL DEFAULT 0,
+    RefreshedAt      DATETIME        NOT NULL DEFAULT GETDATE()
+);
 GO
 
-
 -- 12. Status Summary
+
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshPCR_CS_StatusSummary
 AS
 BEGIN
@@ -830,7 +867,114 @@ GO
 
 PRINT '12_PCRLabsofAmerica_CollectionSummary.sql completed.';
 GO
-
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Pcr_CS_InsuranceVsPayment')
+CREATE TABLE dbo.Pcr_CS_InsuranceVsPayment
+(
+    SummaryId        INT           NOT NULL IDENTITY(1,1) PRIMARY KEY,
+    PayerName        NVARCHAR(200) NOT NULL,
+    BillYear         SMALLINT      NOT NULL,
+    BillMonth        TINYINT       NOT NULL,
+    NoOfPaidClaims   INT           NOT NULL DEFAULT 0,
+    InsurancePayment DECIMAL(18,2) NOT NULL DEFAULT 0,
+    PaymentPct       DECIMAL(9,4)  NOT NULL DEFAULT 0,
+    RefreshedAt      DATETIME      NOT NULL DEFAULT GETDATE()
+);
+GO  
+  
+CREATE   PROCEDURE dbo.usp_RefreshPcr_CS_InsuranceVsPayment  
+AS  
+BEGIN  
+    SET NOCOUNT ON;  
+  
+    ;WITH agg AS  
+    (  
+        SELECT  
+            LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown')))              AS PayerName,  
+  
+            YEAR (TRY_CAST(CheckDate AS DATE))                          AS BillYear,  
+            MONTH(TRY_CAST(CheckDate AS DATE))                          AS BillMonth,  
+  
+            COUNT(NULLIF(LTRIM(RTRIM(ClaimID)), ''))           AS NoOfPaidClaims,  
+  
+            ISNULL(  
+                SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))),  
+                0  
+            )                                                           AS InsurancePayment  
+  
+        FROM dbo.ClaimLevelData                                          -- ✅ Pcr_ uses LineLevelData  
+        WHERE  
+            ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) <> 0  
+            --AND CheckDate <> ''  
+            --AND TRY_CAST(CheckDate AS DATE) IS NOT NULL  
+            --AND YEAR(TRY_CAST(CheckDate AS DATE)) > 1900  
+  
+        GROUP BY  
+            LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))),  
+            YEAR (TRY_CAST(CheckDate AS DATE)),  
+            MONTH(TRY_CAST(CheckDate AS DATE))  
+    ),  
+  
+    grand AS  
+    (  
+        SELECT  
+            BillYear,  
+            BillMonth,  
+            NULLIF(SUM(InsurancePayment), 0) AS TotalInsurancePayment  
+        FROM agg  
+        GROUP BY  
+            BillYear,  
+            BillMonth  
+    )  
+  
+    SELECT  
+        a.PayerName,  
+        CAST(a.BillYear  AS SMALLINT)  AS BillYear,  
+        CAST(a.BillMonth AS TINYINT)   AS BillMonth,  
+        a.NoOfPaidClaims,  
+        a.InsurancePayment,  
+        CAST  
+        (  
+            a.InsurancePayment * 100.0 /  
+            ISNULL(g.TotalInsurancePayment, 1)  
+            AS DECIMAL(9,4)  
+        )                              AS PaymentPct  
+  
+    INTO #out  
+    FROM agg a  
+    INNER JOIN grand g  
+        ON  a.BillYear  = g.BillYear  
+        AND a.BillMonth = g.BillMonth;  
+  
+    TRUNCATE TABLE dbo.Pcr_CS_InsuranceVsPayment;  
+  
+    INSERT INTO dbo.Pcr_CS_InsuranceVsPayment  
+    (  
+        PayerName,  
+        BillYear,  
+        BillMonth,  
+        NoOfPaidClaims,  
+        InsurancePayment,  
+        PaymentPct,  
+        RefreshedAt  
+    )  
+    SELECT  
+        PayerName,  
+        BillYear,  
+        BillMonth,  
+        NoOfPaidClaims,  
+        InsurancePayment,  
+        PaymentPct,  
+        GETDATE()  
+    FROM #out  
+    ORDER BY  
+        BillYear,  
+        BillMonth,  
+        InsurancePayment DESC;  
+  
+    DROP TABLE IF EXISTS #out;  
+  
+    PRINT 'usp_RefreshPcr_CS_InsuranceVsPayment completed.';  
+END  
 -- =====================================================================
 -- TEST / VERIFICATION  (safe to re-run; no DML, just EXEC + SELECT)
 -- Uncomment or run interactively after deploying the file to validate

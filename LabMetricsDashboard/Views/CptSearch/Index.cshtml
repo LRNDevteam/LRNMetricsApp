@@ -1,0 +1,733 @@
+@model LabMetricsDashboard.Models.CptSearchViewModel
+@{
+    ViewData["Title"] = Model.HasSearched
+        ? $"CPT Code Search — {Model.SearchedCptCode}"
+        : "CPT Code Search";
+
+    var trend      = Model.AggregatedTrend;
+    var trendLabels = System.Text.Json.JsonSerializer.Serialize(trend.Select(t => t.MonthYear).ToArray());
+    var trendClaimed = System.Text.Json.JsonSerializer.Serialize(trend.Select(t => (double)t.ClaimedUnits).ToArray());
+    var trendDenied  = System.Text.Json.JsonSerializer.Serialize(trend.Select(t => (double)t.DeniedUnits).ToArray());
+}
+
+@* ── Page Styles ─────────────────────────────────────────────────────────── *@
+<style>
+    /* ── Hero Search Bar ────────────────────────────────────────────────── */
+    .cpt-hero {
+        background: linear-gradient(135deg, #0d1b2a 0%, #1b3a5c 55%, #1a237e 100%);
+        padding: 2.8rem 2rem 2.2rem;
+        border-radius: 16px;
+        margin-bottom: 2rem;
+        box-shadow: 0 8px 32px rgba(0,0,0,.25);
+        position: relative;
+        overflow: hidden;
+    }
+    .cpt-hero::before {
+        content: '';
+        position: absolute; inset: 0;
+        background: radial-gradient(ellipse 80% 60% at 70% 50%, rgba(100,181,246,.08), transparent);
+        pointer-events: none;
+    }
+    .cpt-hero-title {
+        font-size: 1.6rem; font-weight: 800; color: #fff;
+        letter-spacing: -.01em; margin-bottom: .3rem;
+    }
+    .cpt-hero-sub  { color: rgba(255,255,255,.6); font-size: .9rem; margin-bottom: 1.6rem; }
+    .cpt-search-wrap {
+        display: flex; gap: .6rem; max-width: 540px;
+    }
+    .cpt-search-input {
+        flex: 1;
+        background: rgba(255,255,255,.10);
+        border: 1.5px solid rgba(255,255,255,.22);
+        border-radius: 10px;
+        color: #fff;
+        font-size: 1.1rem; font-weight: 600; letter-spacing: .05em;
+        padding: .65rem 1.1rem;
+        text-transform: uppercase;
+        transition: border-color .15s, background .15s;
+    }
+    .cpt-search-input::placeholder { color: rgba(255,255,255,.35); text-transform: none; font-weight: 400; }
+    .cpt-search-input:focus {
+        outline: none;
+        border-color: #64b5f6;
+        background: rgba(255,255,255,.16);
+    }
+    .cpt-search-btn {
+        background: linear-gradient(135deg, #1565c0, #0d47a1);
+        border: none; border-radius: 10px;
+        color: #fff; font-weight: 700;
+        padding: .65rem 1.6rem; font-size: .95rem;
+        cursor: pointer; transition: opacity .15s, transform .1s;
+        white-space: nowrap;
+        display: flex; align-items: center; gap: .45rem;
+    }
+    .cpt-search-btn:hover  { opacity: .88; }
+    .cpt-search-btn:active { transform: scale(.97); }
+
+    /* ── Stat Cards ─────────────────────────────────────────────────────── */
+    .cpt-stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px,1fr)); gap: 1rem; margin-bottom: 2rem; }
+    .cpt-stat-card {
+        background: #fff; border-radius: 12px;
+        box-shadow: 0 2px 12px rgba(0,0,0,.07);
+        padding: 1.25rem 1.3rem 1rem;
+        border-top: 3px solid var(--card-accent, #1565c0);
+        position: relative; overflow: hidden;
+    }
+    .cpt-stat-card::after {
+        content: '';
+        position: absolute; right: -14px; bottom: -14px;
+        width: 70px; height: 70px; border-radius: 50%;
+        background: rgba(var(--card-accent-rgb,21 101 192),.06);
+    }
+    .cpt-stat-label { font-size: .74rem; font-weight: 600; color: #78909c; text-transform: uppercase; letter-spacing: .05em; margin-bottom: .2rem; }
+    .cpt-stat-value { font-size: 2rem; font-weight: 800; color: #0d1b2a; line-height: 1.1; }
+    .cpt-stat-sub   { font-size: .78rem; color: #90a4ae; margin-top: .2rem; }
+
+    /* ── Section Heading ────────────────────────────────────────────────── */
+    .cpt-section-title {
+        font-size: 1.05rem; font-weight: 700; color: #1b3a5c;
+        display: flex; align-items: center; gap: .5rem;
+        margin-bottom: 1rem; padding-bottom: .5rem;
+        border-bottom: 2px solid #e3eaf3;
+    }
+
+    /* ── Lab Accordion ──────────────────────────────────────────────────── */
+    .cpt-lab-card {
+        background: #fff; border-radius: 12px;
+        box-shadow: 0 2px 10px rgba(0,0,0,.06);
+        margin-bottom: 1rem; overflow: hidden;
+        border: 1px solid #e8eef5;
+        transition: box-shadow .2s;
+    }
+    .cpt-lab-card:hover { box-shadow: 0 4px 18px rgba(0,0,0,.1); }
+
+    .cpt-lab-header {
+        padding: 1rem 1.4rem; cursor: pointer;
+        display: flex; align-items: center; gap: 1rem;
+        background: linear-gradient(90deg, #f5f8fc 0%, #fff 100%);
+        user-select: none;
+    }
+    .cpt-lab-header:hover { background: linear-gradient(90deg, #edf2fa 0%, #f7faff 100%); }
+
+    .cpt-lab-badge {
+        width: 42px; height: 42px; border-radius: 10px;
+        background: linear-gradient(135deg, #1565c0, #0d47a1);
+        display: flex; align-items: center; justify-content: center;
+        color: #fff; font-weight: 800; font-size: .9rem; flex-shrink: 0;
+    }
+    .cpt-lab-info { flex: 1; min-width: 0; }
+    .cpt-lab-name { font-weight: 700; color: #1b3a5c; font-size: 1rem; }
+    .cpt-lab-meta { font-size: .78rem; color: #78909c; margin-top: .1rem; }
+
+    .cpt-lab-kpis {
+        display: flex; gap: 1.4rem; align-items: center;
+        margin-left: auto; padding-right: .4rem; flex-shrink: 0;
+    }
+    .cpt-lab-kpi-item { text-align: center; }
+    .cpt-lab-kpi-val  { font-size: 1.1rem; font-weight: 800; color: #1b3a5c; }
+    .cpt-lab-kpi-lbl  { font-size: .68rem; color: #90a4ae; text-transform: uppercase; letter-spacing: .04em; }
+
+    .cpt-lab-chevron { color: #b0bec5; font-size: 1rem; transition: transform .2s; flex-shrink: 0; }
+    .cpt-lab-card.open .cpt-lab-chevron { transform: rotate(180deg); }
+
+    .cpt-lab-body { display: none; padding: 1.2rem 1.4rem 1.4rem; border-top: 1px solid #e8eef5; }
+    .cpt-lab-card.open .cpt-lab-body { display: block; }
+
+    /* denial % badge */
+    .denial-pct-badge {
+        display: inline-block; border-radius: 20px; padding: .15em .65em;
+        font-size: .78rem; font-weight: 700;
+    }
+    .denial-pct-badge.low    { background: #e8f5e9; color: #2e7d32; }
+    .denial-pct-badge.medium { background: #fff8e1; color: #f57f17; }
+    .denial-pct-badge.high   { background: #ffebee; color: #c62828; }
+
+    /* ── Inner tables ───────────────────────────────────────────────────── */
+    .cpt-inner-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+    .cpt-inner-table thead th {
+        background: #f0f4f8; color: #546e7a;
+        font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+        padding: .55rem .8rem; border-bottom: 2px solid #dce5ef; white-space: nowrap;
+    }
+    .cpt-inner-table tbody td { padding: .5rem .8rem; border-bottom: 1px solid #f0f4f8; color: #263238; }
+    .cpt-inner-table tbody tr:last-child td { border-bottom: none; }
+    .cpt-inner-table tbody tr:hover td { background: #f5f8fc; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+    /* ── Mini progress bar ──────────────────────────────────────────────── */
+    .mini-bar-wrap { height: 6px; background: #e9ecef; border-radius: 3px; width: 80px; display: inline-block; vertical-align: middle; }
+    .mini-bar-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg,#1565c0,#42a5f5); }
+    .mini-bar-fill.red { background: linear-gradient(90deg,#e53935,#ef9a9a); }
+
+    /* ── Chart card ─────────────────────────────────────────────────────── */
+    .chart-card {
+        background: #fff; border-radius: 12px; padding: 1.4rem;
+        box-shadow: 0 2px 10px rgba(0,0,0,.06); margin-bottom: 1.5rem;
+        border: 1px solid #e8eef5;
+    }
+
+    /* ── Tabs (within lab) ──────────────────────────────────────────────── */
+    .cpt-tab-nav { display: flex; gap: .3rem; margin-bottom: 1rem; flex-wrap: wrap; }
+    .cpt-tab-btn {
+        border: 1.5px solid #dce5ef; background: #f5f8fc; border-radius: 8px;
+        padding: .35rem .85rem; font-size: .8rem; font-weight: 600; color: #546e7a;
+        cursor: pointer; transition: all .15s;
+    }
+    .cpt-tab-btn.active { background: #1565c0; color: #fff; border-color: #1565c0; }
+    .cpt-tab-btn:hover:not(.active) { background: #edf2fa; border-color: #b0bec5; }
+    .cpt-tab-pane { display: none; }
+    .cpt-tab-pane.active { display: block; }
+
+    /* ── Empty/no-data state ────────────────────────────────────────────── */
+    .cpt-empty-state {
+        text-align: center; padding: 3rem 2rem;
+        background: #fff; border-radius: 12px;
+        box-shadow: 0 2px 10px rgba(0,0,0,.05);
+        border: 1px dashed #cfd8e3;
+    }
+    .cpt-empty-state i { font-size: 2.8rem; color: #90caf9; margin-bottom: .8rem; display: block; }
+    .cpt-empty-state h5 { color: #546e7a; font-weight: 700; }
+    .cpt-empty-state p  { color: #90a4ae; font-size: .9rem; }
+
+    /* ── Error badge ────────────────────────────────────────────────────── */
+    .cpt-lab-error {
+        background: #fff8f8; border: 1px solid #ffcdd2; border-radius: 10px;
+        padding: .8rem 1.1rem; font-size: .83rem; color: #c62828;
+        display: flex; align-items: center; gap: .5rem; margin-bottom: .6rem;
+    }
+
+    /* ── Responsive ─────────────────────────────────────────────────────── */
+    @@media (max-width: 600px) {
+        .cpt-lab-kpis { display: none; }
+        .cpt-stats-row { grid-template-columns: 1fr 1fr; }
+    }
+</style>
+
+@* ── Hero Search ──────────────────────────────────────────────────────────── *@
+<div class="cpt-hero">
+    <div class="cpt-hero-title"><i class="bi bi-upc-scan me-2"></i>CPT Code Search</div>
+    <div class="cpt-hero-sub">
+        Enter a CPT code to see how it is used across all labs — claimed units, denied units, reasons, and history.
+    </div>
+    <form method="get" action="@Url.Action("Search","CptSearch")">
+        <div class="cpt-search-wrap">
+            <input class="cpt-search-input"
+                   type="text"
+                   name="cptCode"
+                   id="cptCodeInput"
+                   placeholder="e.g. 80307, 87651, 99213…"
+                   value="@Model.SearchedCptCode"
+                   maxlength="20"
+                   autocomplete="off"
+                   spellcheck="false" />
+            <button type="submit" class="cpt-search-btn">
+                <i class="bi bi-search"></i> Search
+            </button>
+        </div>
+    </form>
+    @if (Model.HasSearched)
+    {
+        <div style="margin-top:.9rem;color:rgba(255,255,255,.55);font-size:.8rem;">
+            <i class="bi bi-database me-1"></i>
+            Searched @Model.TotalLabsSearched lab@(Model.TotalLabsSearched != 1 ? "s" : "") &nbsp;·&nbsp;
+            @Model.LabsWithData lab@(Model.LabsWithData != 1 ? "s" : "") returned data
+        </div>
+    }
+</div>
+
+@if (!Model.HasSearched)
+{
+    @* ── Landing State ─────────────────────────────────────────────────────── *@
+    <div class="cpt-empty-state">
+        <i class="bi bi-upc-scan"></i>
+        <h5>Enter a CPT Code Above</h5>
+        <p>Search across all connected labs to see where a CPT code is billed, the purpose it serves, how many units were claimed or denied, and what denial reasons apply.</p>
+    </div>
+}
+else
+{
+    @if (Model.LabsWithData == 0)
+    {
+        <div class="cpt-empty-state">
+            <i class="bi bi-search"></i>
+            <h5>No Results for "@Model.SearchedCptCode"</h5>
+            <p>This CPT code was not found in any lab's claim or line data. Check the code and try again.</p>
+        </div>
+    }
+    else
+    {
+        @* ── Summary Stat Cards ──────────────────────────────────────────────── *@
+        <div class="cpt-stats-row">
+            <div class="cpt-stat-card" style="--card-accent:#1565c0;--card-accent-rgb:21 101 192">
+                <div class="cpt-stat-label">Labs Using CPT</div>
+                <div class="cpt-stat-value">@Model.LabsWithData</div>
+                <div class="cpt-stat-sub">of @Model.TotalLabsSearched searched</div>
+            </div>
+            <div class="cpt-stat-card" style="--card-accent:#2e7d32;--card-accent-rgb:46 125 50">
+                <div class="cpt-stat-label">Total Units</div>
+                <div class="cpt-stat-value">@Model.GrandTotalUnits.ToString("N0")</div>
+                <div class="cpt-stat-sub">across all labs</div>
+            </div>
+            <div class="cpt-stat-card" style="--card-accent:#43a047;--card-accent-rgb:67 160 71">
+                <div class="cpt-stat-label">Claimed Units</div>
+                <div class="cpt-stat-value">@Model.GrandClaimedUnits.ToString("N0")</div>
+                <div class="cpt-stat-sub">
+                    @(Model.GrandTotalUnits > 0 ? $"{Math.Round(Model.GrandClaimedUnits / Model.GrandTotalUnits * 100, 1)}%" : "—")
+                </div>
+            </div>
+            <div class="cpt-stat-card" style="--card-accent:#c62828;--card-accent-rgb:198 40 40">
+                <div class="cpt-stat-label">Denied Units</div>
+                <div class="cpt-stat-value">@Model.GrandDeniedUnits.ToString("N0")</div>
+                <div class="cpt-stat-sub">
+                    @(Model.OverallDenialRate)% denial rate
+                </div>
+            </div>
+            <div class="cpt-stat-card" style="--card-accent:#00838f;--card-accent-rgb:0 131 143">
+                <div class="cpt-stat-label">Total Payments</div>
+                <div class="cpt-stat-value">$@(Model.GrandTotalPayments >= 1_000_000
+                    ? (Model.GrandTotalPayments / 1_000_000m).ToString("N1") + "M"
+                    : Model.GrandTotalPayments >= 1_000
+                        ? (Model.GrandTotalPayments / 1_000m).ToString("N1") + "K"
+                        : Model.GrandTotalPayments.ToString("N0"))</div>
+                <div class="cpt-stat-sub">collected</div>
+            </div>
+        </div>
+
+        @* ── Aggregated Trend Chart ──────────────────────────────────────────── *@
+        @if (trend.Count > 0)
+        {
+            <div class="chart-card">
+                <div class="cpt-section-title">
+                    <i class="bi bi-graph-up-arrow text-primary"></i>
+                    Claim &amp; Denial History — All Labs
+                </div>
+                <canvas id="cptTrendChart" height="90"></canvas>
+            </div>
+        }
+
+        @* ── Top Denial Codes (cross-lab) ────────────────────────────────────── *@
+        @if (Model.TopDenialCodes.Count > 0)
+        {
+            <div class="chart-card">
+                <div class="cpt-section-title">
+                    <i class="bi bi-x-octagon text-danger"></i>
+                    Top Denial Reasons — All Labs
+                </div>
+                <table class="cpt-inner-table">
+                    <thead>
+                        <tr>
+                            <th>Denial Code</th>
+                            <th class="num">Occurrences</th>
+                            <th class="num">Denied Units</th>
+                            <th style="width:120px">Share</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @{
+                            var maxDc = Model.TopDenialCodes.Max(d => d.LineCount);
+                        }
+                        @foreach (var dc in Model.TopDenialCodes)
+                        {
+                            var pct = maxDc > 0 ? (int)Math.Round((double)dc.LineCount / maxDc * 100) : 0;
+                            <tr>
+                                <td><span class="badge bg-danger bg-opacity-10 text-danger fw-bold px-2">@dc.DenialCode</span></td>
+                                <td class="num fw-bold">@dc.LineCount.ToString("N0")</td>
+                                <td class="num">@dc.DeniedUnits.ToString("N0")</td>
+                                <td>
+                                    <div class="mini-bar-wrap">
+                                        <div class="mini-bar-fill red" style="width:@pct%"></div>
+                                    </div>
+                                    <span style="font-size:.75rem;color:#90a4ae;margin-left:.35rem;">@pct%</span>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        @* ── Per-Lab Breakdown ───────────────────────────────────────────────── *@
+        <div class="cpt-section-title mt-3">
+            <i class="bi bi-buildings text-primary"></i>
+            Per-Lab Breakdown
+            <span class="badge bg-primary bg-opacity-10 text-primary ms-1" style="font-size:.75rem;">@Model.LabsWithData lab@(Model.LabsWithData!=1?"s":"")</span>
+        </div>
+
+        @for (int labIdx = 0; labIdx < Model.ActiveLabs.Count; labIdx++)
+        {
+            var lab = Model.ActiveLabs[labIdx];
+            var initials = string.Concat(lab.DisplayName.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(w => w[0])).ToUpper();
+            var denialClass = lab.DenialRate < 10 ? "low" : lab.DenialRate < 25 ? "medium" : "high";
+            var tabId = $"lab{labIdx}";
+            <div class="cpt-lab-card" id="@tabId">
+                <div class="cpt-lab-header" onclick="toggleLabCard('@tabId')">
+                    <div class="cpt-lab-badge">@initials</div>
+                    <div class="cpt-lab-info">
+                        <div class="cpt-lab-name">@lab.DisplayName</div>
+                        <div class="cpt-lab-meta">
+                            @lab.Panels.Count panel@(lab.Panels.Count!=1?"s":"") &nbsp;·&nbsp;
+                            DOS: @(lab.Panels.FirstOrDefault(p=>p.EarliestDOS!="")?.EarliestDOS ?? "—")
+                            → @(lab.Panels.FirstOrDefault(p=>p.LatestDOS!="")?.LatestDOS ?? "—")
+                        </div>
+                    </div>
+                    <div class="cpt-lab-kpis">
+                        <div class="cpt-lab-kpi-item">
+                            <div class="cpt-lab-kpi-val">@lab.TotalUnits.ToString("N0")</div>
+                            <div class="cpt-lab-kpi-lbl">Total Units</div>
+                        </div>
+                        <div class="cpt-lab-kpi-item">
+                            <div class="cpt-lab-kpi-val" style="color:#2e7d32;">@lab.ClaimedUnits.ToString("N0")</div>
+                            <div class="cpt-lab-kpi-lbl">Claimed</div>
+                        </div>
+                        <div class="cpt-lab-kpi-item">
+                            <div class="cpt-lab-kpi-val" style="color:#c62828;">@lab.DeniedUnits.ToString("N0")</div>
+                            <div class="cpt-lab-kpi-lbl">Denied</div>
+                        </div>
+                        <div class="cpt-lab-kpi-item">
+                            <span class="denial-pct-badge @denialClass">@lab.DenialRate%</span>
+                            <div class="cpt-lab-kpi-lbl">Denial Rate</div>
+                        </div>
+                        <div class="cpt-lab-kpi-item" style="min-width:70px;text-align:right;">
+                            <div class="cpt-lab-kpi-val" style="font-size:.85rem;">$@(lab.TotalPayments>=1000?(lab.TotalPayments/1000m).ToString("N1")+"K":lab.TotalPayments.ToString("N0"))</div>
+                            <div class="cpt-lab-kpi-lbl">Payments</div>
+                        </div>
+                    </div>
+                    <i class="bi bi-chevron-down cpt-lab-chevron ms-3"></i>
+                </div>
+
+                <div class="cpt-lab-body">
+                    @if (!string.IsNullOrEmpty(lab.ErrorMessage))
+                    {
+                        <div class="cpt-lab-error">
+                            <i class="bi bi-exclamation-triangle-fill"></i>
+                            @lab.ErrorMessage
+                        </div>
+                    }
+
+                    @* Tabs *@
+                    <div class="cpt-tab-nav">
+                        <button class="cpt-tab-btn active" onclick="showTab('@tabId','panels',this)">
+                            <i class="bi bi-grid-3x3-gap me-1"></i>Panel Usage
+                        </button>
+                        @if (lab.DenialCodes.Count > 0)
+                        {
+                            <button class="cpt-tab-btn" onclick="showTab('@tabId','denials',this)">
+                                <i class="bi bi-x-octagon me-1"></i>Denial Codes
+                                <span class="badge bg-danger ms-1" style="font-size:.65rem;">@lab.DenialCodes.Count</span>
+                            </button>
+                        }
+                        @if (lab.ClaimLevel.Count > 0)
+                        {
+                            <button class="cpt-tab-btn" onclick="showTab('@tabId','claimlevel',this)">
+                                <i class="bi bi-file-earmark-text me-1"></i>Claim Level
+                            </button>
+                        }
+                        @if (lab.Payers.Count > 0)
+                        {
+                            <button class="cpt-tab-btn" onclick="showTab('@tabId','payers',this)">
+                                <i class="bi bi-bank me-1"></i>Payers
+                            </button>
+                        }
+                        @if (lab.MonthlyTrend.Count > 0)
+                        {
+                            <button class="cpt-tab-btn" onclick="showTab('@tabId','trend',this)">
+                                <i class="bi bi-bar-chart me-1"></i>Trend
+                            </button>
+                        }
+                    </div>
+
+                    @* ── Tab: Panels / Line Usage ─────────────────────────────── *@
+                    <div class="cpt-tab-pane active" id="@(tabId)-panels">
+                        <table class="cpt-inner-table">
+                            <thead>
+                                <tr>
+                                    <th>Panel / Purpose</th>
+                                    <th>Claim Status</th>
+                                    <th>Denial Code</th>
+                                    <th class="num">Lines</th>
+                                    <th class="num">Claimed Units</th>
+                                    <th class="num">Denied Units</th>
+                                    <th class="num">Denial %</th>
+                                    <th class="num">Payments</th>
+                                    <th class="num">Charges</th>
+                                    <th>Date Range</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var p in lab.Panels)
+                                {
+                                    var pDenialPct = p.TotalUnits > 0 ? Math.Round(p.DeniedUnits / p.TotalUnits * 100, 1) : 0;
+                                    var pClass     = pDenialPct < 10 ? "low" : pDenialPct < 25 ? "medium" : "high";
+                                    var isDenied   = !string.IsNullOrEmpty(p.DenialCode)
+                                                  || p.ClaimStatus.IndexOf("denied",   StringComparison.OrdinalIgnoreCase) >= 0
+                                                  || p.ClaimStatus.IndexOf("rejected", StringComparison.OrdinalIgnoreCase) >= 0;
+                                    <tr>
+                                        <td><span class="fw-semibold">@(string.IsNullOrEmpty(p.PanelName) ? "(No Panel)" : p.PanelName)</span></td>
+                                        <td>
+                                            <span class="badge @(isDenied ? "bg-danger" : "bg-success") bg-opacity-10 @(isDenied ? "text-danger" : "text-success") px-2">
+                                                @(string.IsNullOrEmpty(p.ClaimStatus) ? "—" : p.ClaimStatus)
+                                            </span>
+                                        </td>
+                                        <td>
+                                            @if (!string.IsNullOrEmpty(p.DenialCode))
+                                            {
+                                                <span class="badge bg-danger bg-opacity-10 text-danger fw-bold px-2">@p.DenialCode</span>
+                                            }
+                                            else { <span class="text-muted small">—</span> }
+                                        </td>
+                                        <td class="num">@p.TotalLines.ToString("N0")</td>
+                                        <td class="num" style="color:#2e7d32;font-weight:600;">@p.ClaimedUnits.ToString("N0")</td>
+                                        <td class="num" style="color:#c62828;font-weight:600;">@p.DeniedUnits.ToString("N0")</td>
+                                        <td class="num"><span class="denial-pct-badge @pClass">@pDenialPct%</span></td>
+                                        <td class="num">$@p.TotalPayments.ToString("N2")</td>
+                                        <td class="num" style="color:#78909c;">$@p.TotalCharges.ToString("N2")</td>
+                                        <td style="font-size:.75rem;color:#90a4ae;white-space:nowrap;">
+                                            @(p.EarliestDOS != "" ? p.EarliestDOS : "—") → @(p.LatestDOS != "" ? p.LatestDOS : "—")
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                    @* ── Tab: Denials ─────────────────────────────────────────── *@
+                    @if (lab.DenialCodes.Count > 0)
+                    {
+                        var maxL = lab.DenialCodes.Max(d => d.LineCount);
+                        <div class="cpt-tab-pane" id="@(tabId)-denials">
+                            <table class="cpt-inner-table">
+                                <thead>
+                                    <tr>
+                                        <th>Denial Code</th>
+                                        <th class="num">Occurrences</th>
+                                        <th class="num">Denied Units</th>
+                                        <th class="num">Payments</th>
+                                        <th style="width:130px">Frequency</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var dc in lab.DenialCodes)
+                                    {
+                                        var barPct = maxL > 0 ? (int)Math.Round((double)dc.LineCount / maxL * 100) : 0;
+                                        <tr>
+                                            <td><span class="badge bg-danger bg-opacity-10 text-danger fw-bold px-2 py-1">@dc.DenialCode</span></td>
+                                            <td class="num fw-bold">@dc.LineCount.ToString("N0")</td>
+                                            <td class="num" style="color:#c62828;">@dc.DeniedUnits.ToString("N0")</td>
+                                            <td class="num">$@dc.Payments.ToString("N0")</td>
+                                            <td>
+                                                <div class="mini-bar-wrap" style="width:100px;">
+                                                    <div class="mini-bar-fill red" style="width:@barPct%"></div>
+                                                </div>
+                                                <span style="font-size:.75rem;color:#90a4ae;margin-left:.3rem;">@barPct%</span>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+
+                    @* ── Tab: Claim Level ─────────────────────────────────────── *@
+                    @if (lab.ClaimLevel.Count > 0)
+                    {
+                        <div class="cpt-tab-pane" id="@(tabId)-claimlevel">
+                            <table class="cpt-inner-table">
+                                <thead>
+                                    <tr>
+                                        <th>Panel</th>
+                                        <th>Claim Status</th>
+                                        <th>Denial Code</th>
+                                        <th class="num">Claims</th>
+                                        <th class="num">Charges</th>
+                                        <th class="num">Payments</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var cl in lab.ClaimLevel)
+                                    {
+                                        <tr>
+                                            <td>@(string.IsNullOrEmpty(cl.PanelName)?"(No Panel)":cl.PanelName)</td>
+                                            <td>
+                                                @{
+                                                    var isD = cl.ClaimStatus.IndexOf("denied", StringComparison.OrdinalIgnoreCase) >= 0
+                                                           || cl.ClaimStatus.IndexOf("reject", StringComparison.OrdinalIgnoreCase) >= 0;
+                                                }
+                                                <span class="badge @(isD ? "bg-danger" : "bg-success") bg-opacity-10 @(isD ? "text-danger" : "text-success") px-2">
+                                                    @(string.IsNullOrEmpty(cl.ClaimStatus)?"—":cl.ClaimStatus)
+                                                </span>
+                                            </td>
+                                            <td>@(string.IsNullOrEmpty(cl.DenialCode)?"—":cl.DenialCode)</td>
+                                            <td class="num fw-bold">@cl.ClaimCount.ToString("N0")</td>
+                                            <td class="num">$@cl.TotalCharges.ToString("N0")</td>
+                                            <td class="num">$@cl.TotalPayments.ToString("N0")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+
+                    @* ── Tab: Payers ──────────────────────────────────────────── *@
+                    @if (lab.Payers.Count > 0)
+                    {
+                        var maxPu = lab.Payers.Max(p => p.TotalUnits);
+                        <div class="cpt-tab-pane" id="@(tabId)-payers">
+                            <table class="cpt-inner-table">
+                                <thead>
+                                    <tr>
+                                        <th>Payer</th>
+                                        <th>Type</th>
+                                        <th class="num">Lines</th>
+                                        <th class="num">Total Units</th>
+                                        <th class="num">Denied Units</th>
+                                        <th class="num">Payments</th>
+                                        <th style="width:110px">Volume</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var pay in lab.Payers)
+                                    {
+                                        var bp = maxPu > 0 ? (int)Math.Round((double)pay.TotalUnits / (double)maxPu * 100) : 0;
+                                        <tr>
+                                            <td class="fw-semibold">@pay.PayerName</td>
+                                            <td><span class="badge bg-secondary bg-opacity-10 text-secondary">@(string.IsNullOrEmpty(pay.PayerType)?"—":pay.PayerType)</span></td>
+                                            <td class="num">@pay.LineCount.ToString("N0")</td>
+                                            <td class="num fw-bold">@pay.TotalUnits.ToString("N0")</td>
+                                            <td class="num" style="color:#c62828;">@pay.DeniedUnits.ToString("N0")</td>
+                                            <td class="num">$@pay.TotalPayments.ToString("N0")</td>
+                                            <td>
+                                                <div class="mini-bar-wrap" style="width:90px;">
+                                                    <div class="mini-bar-fill" style="width:@bp%"></div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+
+                    @* ── Tab: Trend ───────────────────────────────────────────── *@
+                    @if (lab.MonthlyTrend.Count > 0)
+                    {
+                        var labTrendLabels  = System.Text.Json.JsonSerializer.Serialize(lab.MonthlyTrend.Select(t => t.MonthYear).ToArray());
+                        var labTrendClaimed = System.Text.Json.JsonSerializer.Serialize(lab.MonthlyTrend.Select(t => (double)t.ClaimedUnits).ToArray());
+                        var labTrendDenied  = System.Text.Json.JsonSerializer.Serialize(lab.MonthlyTrend.Select(t => (double)t.DeniedUnits).ToArray());
+                        <div class="cpt-tab-pane" id="@(tabId)-trend">
+                            <canvas id="labTrend_@tabId" height="100"></canvas>
+                            <script>
+                            (function(){
+                                var ctx = document.getElementById('labTrend_@tabId');
+                                if(!ctx) return;
+                                new Chart(ctx.getContext('2d'),{
+                                    type:'bar',
+                                    data:{
+                                        labels: @Html.Raw(labTrendLabels),
+                                        datasets:[
+                                            { label:'Claimed', data:@Html.Raw(labTrendClaimed), backgroundColor:'rgba(46,125,50,.75)', borderRadius:4 },
+                                            { label:'Denied',  data:@Html.Raw(labTrendDenied),  backgroundColor:'rgba(198,40,40,.7)',  borderRadius:4 }
+                                        ]
+                                    },
+                                    options:{ responsive:true, plugins:{ legend:{ position:'top' } }, scales:{ x:{ stacked:false }, y:{ beginAtZero:true, title:{ display:true, text:'Units' } } } }
+                                });
+                            })();
+                            </script>
+                        </div>
+                    }
+
+                </div><!-- /.cpt-lab-body -->
+            </div><!-- /.cpt-lab-card -->
+        }
+
+        @* Labs with errors only (no data) *@
+        @foreach (var lab in Model.LabResults.Where(r => r.TotalUnits == 0 && r.ErrorMessage != null))
+        {
+            <div class="cpt-lab-error">
+                <i class="bi bi-exclamation-triangle-fill"></i>
+                <strong>@lab.DisplayName</strong>: @lab.ErrorMessage
+            </div>
+        }
+    }
+}
+
+@* ── Scripts ──────────────────────────────────────────────────────────────── *@
+@section Scripts {
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+// ── Aggregated trend chart ─────────────────────────────────────────────────
+(function () {
+    var canvas = document.getElementById('cptTrendChart');
+    if (!canvas) return;
+    new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: @Html.Raw(trendLabels),
+            datasets: [
+                {
+                    label: 'Claimed Units',
+                    data: @Html.Raw(trendClaimed),
+                    backgroundColor: 'rgba(46,125,50,.8)',
+                    borderRadius: 5,
+                    order: 2
+                },
+                {
+                    label: 'Denied Units',
+                    data: @Html.Raw(trendDenied),
+                    backgroundColor: 'rgba(198,40,40,.75)',
+                    borderRadius: 5,
+                    order: 1
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { position: 'top' },
+                tooltip: {
+                    callbacks: {
+                        footer: function(items) {
+                            var total = items.reduce(function(a, i) { return a + i.parsed.y; }, 0);
+                            return 'Total: ' + total.toLocaleString();
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: { grid: { display: false } },
+                y: { beginAtZero: true, title: { display: true, text: 'Units' } }
+            }
+        }
+    });
+})();
+
+// ── Accordion toggles ─────────────────────────────────────────────────────
+function toggleLabCard(id) {
+    var el = document.getElementById(id);
+    if (el) el.classList.toggle('open');
+}
+
+// ── Inner tab switching ───────────────────────────────────────────────────
+function showTab(labId, tabName, btn) {
+    var card = document.getElementById(labId);
+    if (!card) return;
+
+    // deactivate all tab panes within this card
+    card.querySelectorAll('.cpt-tab-pane').forEach(function(p) { p.classList.remove('active'); });
+    // deactivate all buttons
+    card.querySelectorAll('.cpt-tab-btn').forEach(function(b) { b.classList.remove('active'); });
+
+    // activate target
+    var target = document.getElementById(labId + '-' + tabName);
+    if (target) target.classList.add('active');
+    if (btn)    btn.classList.add('active');
+}
+
+// Auto-open first lab card
+(function() {
+    var first = document.querySelector('.cpt-lab-card');
+    if (first) first.classList.add('open');
+})();
+</script>
+}

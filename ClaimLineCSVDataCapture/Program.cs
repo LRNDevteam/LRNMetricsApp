@@ -43,6 +43,9 @@ var workingFolder = cfg["AppSettings:WorkingFolder"]
     ?? Path.Combine(Path.GetTempPath(), "ClaimLineCSVDataCapture");
 Directory.CreateDirectory(workingFolder);
 
+// ── LRNMaster connection (used by sp_GetRecentSuccessRunByLab RunId gate) ──────
+var masterConnectionString = cfg.GetConnectionString("DefaultConnection");
+
 // ── Logger ────────────────────────────────────────────────────────────────────
 using var log = new ClaimLineCSVDataCapture.Services.AppLogger(cfg);
 log.Header("ClaimLineCSVDataCapture — Claim/Line Level CSV Capture");
@@ -71,6 +74,14 @@ foreach (var lab in labConfigs)
 {
     log.Header($"Lab: {lab.LabName}");
     log.Info($"  ClaimLineInsert={lab.ClaimLineInsert}  ClaimLineRefresh={lab.ClaimLineRefresh}  DBEnabled={lab.DBEnabled}");
+
+    // ── Gate: skip lab if DBEnabled is false ──────────────────────────────
+    if (!lab.DBEnabled)
+    {
+        log.Warn($"  [SKIP] DBEnabled=false — skipping lab.");
+        labsSkipped++;
+        continue;
+    }
 
     // ── Gate: only proceed when ClaimLineInsert is enabled ─────────────────
     if (!lab.ClaimLineInsert)
@@ -124,6 +135,17 @@ foreach (var lab in labConfigs)
     var db = new ClaimLineDbService(lab.DbConnectionString);
     var claimInserted = false;
     var lineInserted = false;
+
+    // ── Gate: validate latest input file's RunId against latest completed RunId ──
+    // Before processing the latest files, fetch the latest successfully completed
+    // RunId (sp_GetRecentSuccessRunByLab on LRNMaster) and compare it with the RunId
+    // prefix of the latest input file. Processing (including ClaimLineRefresh=true)
+    // only continues when both RunIds match.
+    if (!RunIdGatePassed(lab, masterConnectionString, log))
+    {
+        labsSkipped++;
+        continue;
+    }
 
     // ── Refresh mode: purge existing lab data so the latest file re-inserts cleanly ──
     if (lab.ClaimLineRefresh)
@@ -653,6 +675,53 @@ foreach (var lab in labConfigs)
             }
 
             RunCollectionSummary(log, db, "Phi CS", db.RefreshPhiLifeCollectionReports);
+
+            // ── Executive Summary aggregate refresh ──────────────────────────
+            log.Info($"  [Phi ES] Refreshing Executive Summary aggregate (Phi_ES_Data)…");
+            try
+            {
+                var (esMs, esErr) = db.RefreshPhiLifeExecutiveSummary();
+                if (esErr is null)
+                    log.Info($"  [Phi ES] Phi_ES_Data refreshed in {esMs} ms.");
+                else
+                    log.Error($"  [Phi ES] Refresh failed ({esMs} ms): {esErr}");
+            }
+            catch (Exception ex)
+            {
+                log.Error($"  [Phi ES] Unexpected error refreshing Executive Summary: {ex.Message}");
+            }
+        }
+
+        // ── InHealthDTR production report aggregates ─────────────────────────
+        // Matches "InHealthDTR" lab name.
+        if (lab.LabName.Equals("Inhealth_DTR", StringComparison.OrdinalIgnoreCase)
+            || lab.LabName.Equals("InHealthDTR", StringComparison.OrdinalIgnoreCase)
+            || lab.LabName.Equals("InHealthDTRLRN", StringComparison.OrdinalIgnoreCase))
+        {
+            log.Info($"  [InH Reports] Running InHealthDTR production report SPs…");
+            try
+            {
+                var inhResults = db.RefreshInHealthDTRProductionReports();
+                foreach (var (spName, elapsedMs, error) in inhResults)
+                {
+                    if (error is null)
+                        log.Info($"  [InH Reports] {spName} — OK ({elapsedMs} ms).");
+                    else
+                        log.Error($"  [InH Reports] {spName} — FAILED ({elapsedMs} ms): {error}");
+                }
+
+                var failed = inhResults.Count(r => r.Error is not null);
+                var passed = inhResults.Count(r => r.Error is null);
+                log.Info($"  [InH Reports] {passed}/{inhResults.Count} SP(s) succeeded.");
+                if (failed > 0)
+                    log.Warn($"  [InH Reports] {failed} SP(s) failed — see errors above.");
+            }
+            catch (Exception ex)
+            {
+                log.Error($"  [InH Reports] Unexpected error running InHealthDTR production report SPs: {ex.Message}");
+            }
+
+            RunCollectionSummary(log, db, "IHD CS", db.RefreshInHealthDTRCollectionReports);
         }
 
         // ── Production Report Excel generation — started in background ─────────
@@ -789,6 +858,101 @@ log.Info($"  Skipped   : {labsSkipped}");
 log.Info($"  Failed    : {labsFailed}");
 
 return labsFailed > 0 ? 1 : 0;
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Local helper: RunId validation gate.
+// Before processing a lab's latest input files, fetch the latest successfully
+// completed RunId (sp_GetRecentSuccessRunByLab on LRNMaster) and compare it with
+// the RunId prefix of the latest input file. Returns true when processing should
+// continue, false when the lab must be skipped. Applies to both the normal flow
+// and the ClaimLineRefresh=true flow. Every step is logged with separators.
+// ─────────────────────────────────────────────────────────────────────────────
+static bool RunIdGatePassed(
+    ClaimLineCSVDataCapture.Models.LabConfig lab,
+    string? masterConnectionString,
+    ClaimLineCSVDataCapture.Services.AppLogger log)
+{
+    log.Header($"RunId Validation — {lab.LabName}");
+
+    // Resolve the latest input file (newest of Claim Level / Line Level) and its RunId.
+    var claimResolved = CsvFileResolver.ResolveLatestClaimLevel(lab.ServerMastersPath);
+    var lineResolved  = CsvFileResolver.ResolveLatestLineLevel(lab.ServerMastersPath);
+
+    string? latestFilePath;
+    if (claimResolved is not null && lineResolved is not null)
+    {
+        var claimWrite = File.GetLastWriteTimeUtc(claimResolved.Value.FilePath);
+        var lineWrite  = File.GetLastWriteTimeUtc(lineResolved.Value.FilePath);
+        latestFilePath = lineWrite >= claimWrite ? lineResolved.Value.FilePath : claimResolved.Value.FilePath;
+    }
+    else
+    {
+        latestFilePath = lineResolved?.FilePath ?? claimResolved?.FilePath;
+    }
+
+    if (string.IsNullOrWhiteSpace(latestFilePath))
+    {
+        log.Warn($"  [RunId Gate] No input file found under: {lab.ServerMastersPath} — proceeding (downstream will report no CSV).");
+        log.Header($"RunId Validation — {lab.LabName} — PROCEED (no file)");
+        return true;
+    }
+
+    var fileRunId = ClaimLineDbService.ExtractRunId(latestFilePath);
+    log.Info($"  [RunId Gate] Latest input file     : {Path.GetFileName(latestFilePath)}");
+    log.Info($"  [RunId Gate] File RunId            : {fileRunId}");
+
+    // The lab name passed to sp_GetRecentSuccessRunByLab comes from the config key.
+    var labParam = lab.FetchLatestCompletedRunIDParameter;
+    if (string.IsNullOrWhiteSpace(labParam))
+    {
+        log.Warn($"  [RunId Gate] FetchLatestCompletedRunIDParameter not configured — skipping RunId validation and proceeding.");
+        log.Header($"RunId Validation — {lab.LabName} — PROCEED (not configured)");
+        return true;
+    }
+
+    if (string.IsNullOrWhiteSpace(masterConnectionString))
+    {
+        log.Warn($"  [RunId Gate] ConnectionStrings:DefaultConnection (LRNMaster) not configured — skipping RunId validation and proceeding.");
+        log.Header($"RunId Validation — {lab.LabName} — PROCEED (no master connection)");
+        return true;
+    }
+
+    log.Info($"  [RunId Gate] SP                   : sp_GetRecentSuccessRunByLab (LRNMaster)");
+    log.Info($"  [RunId Gate] SP parameter @LabName : {labParam}");
+
+    string? completedRunId;
+    try
+    {
+        completedRunId = ClaimLineDbService.GetRecentSuccessRunByLab(masterConnectionString, labParam);
+    }
+    catch (Exception ex)
+    {
+        log.Error($"  [RunId Gate] sp_GetRecentSuccessRunByLab failed — {ex.Message}. Skipping lab to avoid processing an unvalidated run.");
+        log.Header($"RunId Validation — {lab.LabName} — SKIPPED (SP error)");
+        return false;
+    }
+
+    log.Info($"  [RunId Gate] Latest completed RunId : {completedRunId ?? "(none)"}");
+
+    if (string.IsNullOrWhiteSpace(completedRunId))
+    {
+        log.Warn($"  [RunId Gate] [SKIP] No successfully completed RunId returned for '{labParam}' — skipping lab.");
+        log.Header($"RunId Validation — {lab.LabName} — SKIPPED (no completed run)");
+        return false;
+    }
+
+    var matched = string.Equals(fileRunId, completedRunId, StringComparison.OrdinalIgnoreCase);
+    log.Info($"  [RunId Gate] Comparison           : File='{fileRunId}'  Completed='{completedRunId}'  =>  {(matched ? "MATCHED" : "NOT MATCHED")}");
+
+    if (matched)
+        log.Info($"  [RunId Gate] [PROCEED] RunIds match — starting processing for {lab.LabName}.");
+    else
+        log.Warn($"  [RunId Gate] [SKIP] RunIds do not match — skipping {lab.LabName} until the completed run aligns with the latest file.");
+
+    log.Header($"RunId Validation — {lab.LabName} — {(matched ? "PASSED" : "SKIPPED")}");
+    return matched;
+}
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1191,6 +1355,9 @@ static string? GetCollectionSummarySpPrefix(ClaimLineCSVDataCapture.Models.LabCo
         name.Equals("Phi_Life",          StringComparison.OrdinalIgnoreCase)) return "Phi";
     if (name.Equals("RisingTides",      StringComparison.OrdinalIgnoreCase) ||
         name.Equals("Rising_Tides",      StringComparison.OrdinalIgnoreCase)) return "RT";
+    if (name.Equals("Inhealth_DTR",     StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("InHealthDTR",       StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("InHealthDTRLRN",    StringComparison.OrdinalIgnoreCase)) return "IHD";
     return null;
 }
 

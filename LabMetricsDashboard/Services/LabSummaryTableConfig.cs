@@ -3,7 +3,7 @@ namespace LabMetricsDashboard.Services;
 /// <summary>
 /// Describes the pre-aggregated output table schema used by
 /// <see cref="SqlLabProductionSummaryRepository"/> for a specific lab.
-/// Each lab that has its own SP-generated aggregate tables (06–11 scripts)
+/// Each lab that has its own SP-generated aggregate tables (06ï¿½11 scripts)
 /// gets one of these records registered in DI.
 /// </summary>
 /// <param name="Prefix">
@@ -54,33 +54,43 @@ public record LabSummaryTableConfig(
 
     // ?? Static per-lab configs ????????????????????????????????????????????
 
-    /// <summary>Certus Labs — prefix <c>Cert_</c>. Row key = PayerName. No coding tables.</summary>
+    /// <summary>Certus Labs ï¿½ prefix <c>Cert_</c>. Row key = PayerName. Supports coding tables/read SPs.</summary>
     public static readonly LabSummaryTableConfig Certus =
-        new("Cert_", "PayerName",  "Aging",       UnbilledAgingHasCharges: true,  HasCodingTables: false)
+        new("Cert_", "PayerName",  "Aging",       UnbilledAgingHasCharges: true,  HasCodingTables: true)
         { SupportsFilteredMonthlyWeeklySp = true };
 
-    /// <summary>COVE Labs — prefix <c>Cove_</c>. Aging table has no TotalCharges column.</summary>
+    /// <summary>COVE Labs ï¿½ prefix <c>Cove_</c>. Aging table has no TotalCharges column.</summary>
     public static readonly LabSummaryTableConfig Cove =
         new("Cove_", "PanelName",  "AgingDOS",    UnbilledAgingHasCharges: false, HasCodingTables: true)
         { SupportsFilteredMonthlyWeeklySp = true };
 
-    /// <summary>Elixir Labs — prefix <c>Elix_</c>.</summary>
+    /// <summary>Elixir Labs ï¿½ prefix <c>Elix_</c>.</summary>
     public static readonly LabSummaryTableConfig Elixir =
         new("Elix_", "PanelName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: true)
         { SupportsFilteredMonthlyWeeklySp = true };
 
-    /// <summary>PCR Labs of America — prefix <c>PCR_</c>. Monthly/Weekly read SPs accept filter parameters.</summary>
+    /// <summary>PCR Labs of America ï¿½ prefix <c>PCR_</c>. Monthly/Weekly read SPs accept filter parameters.</summary>
     public static readonly LabSummaryTableConfig PCRLabsofAmerica =
         new("PCR_",  "PanelName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: true)
         { SupportsFilteredMonthlyWeeklySp = true };
 
-    /// <summary>Beech Tree — prefix <c>BT_</c>.</summary>
+    /// <summary>Beech Tree ï¿½ prefix <c>BT_</c>.</summary>
     public static readonly LabSummaryTableConfig BeechTree =
         new("BT_",   "PanelName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: true)
         { SupportsFilteredMonthlyWeeklySp = true };
 
-    /// <summary>Rising Tides — prefix <c>RT_</c>.</summary>
+    /// <summary>Rising Tides ï¿½ prefix <c>RT_</c>.</summary>
     public static readonly LabSummaryTableConfig RisingTides =
         new("RT_",   "PanelName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: true)
+        { SupportsFilteredMonthlyWeeklySp = true };
+
+    /// <summary>Phi Life â€“ prefix <c>Phi_</c>. Supports filtered monthly/weekly SPs.</summary>
+    public static readonly LabSummaryTableConfig PhiLife =
+        new("Phi_",  "PanelName",  "AgingBucket", UnbilledAgingHasCharges: true,  HasCodingTables: true)
+        { SupportsFilteredMonthlyWeeklySp = true };
+
+    /// <summary>InHealth DTR â€“ prefix <c>InH_</c>. Supports filtered monthly/weekly SPs.</summary>
+    public static readonly LabSummaryTableConfig InHealthDTR =
+        new("InH_",  "PanelName",  "Aging", UnbilledAgingHasCharges: true,  HasCodingTables: true)
         { SupportsFilteredMonthlyWeeklySp = true };
 }

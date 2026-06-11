@@ -1,0 +1,75 @@
+{
+  // ─────────────────────────────────────────────────────────────────────────────
+  // InHealthDTR lab configuration
+  //
+  // DEPLOY INSTRUCTIONS:
+  //   Copy this file to  C:\CodingMastConfigs\Labs\InHealthDTR.json
+  //   Copy InHealthDTRFieldMappings.json to  C:\CodingMastConfigs\Mappings\InHealthDTRFieldMappings.json
+  //   IMPORTANT: LabFieldMappingsPath below MUST point to the deployed copy.
+  //   Without it the app falls back to the global FieldMappings.json (wrong field set).
+  //
+  // FIRST RUN:
+  //   Set ClaimLineRefresh = true for the first run so existing data is purged
+  //   and the file is re-processed cleanly.  The app auto-resets it to false
+  //   after a successful run.
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  "DBEnabled": true,
+
+  // ── Connection string for the InHealthDTR SQL Server database ─────────────
+  // FILL IN: replace with the actual InHealthDTR DB connection string
+  "DbConnectionString": "Server=YOUR_SERVER;Database=YOUR_INHEALTHDTR_DB;Integrated Security=True;TrustServerCertificate=True;",
+
+  // ── CSV ingestion flags ───────────────────────────────────────────────────
+  "ClaimLineInsert": true,
+
+  // Set true on first run (or any time you want to force a full re-load).
+  "ClaimLineRefresh": true,
+
+  // ── RunId validation gate ─────────────────────────────────────────────────
+  // Lab name passed to sp_GetRecentSuccessRunByLab (LRNMaster) to fetch the
+  // latest successfully completed RunId. The latest input file is only processed
+  // when its RunId prefix (text before the first underscore in the file name)
+  // matches that completed RunId. Applies to ClaimLineRefresh=true as well.
+  "FetchLatestCompletedRunIDParameter": "InHealth DTR",
+
+  // ── Paths ─────────────────────────────────────────────────────────────────
+  "Paths": {
+    // FILL IN: base folder where InHealthDTR weekly CSV drops are stored
+    "ServerMastersBasePath": "FILL_IN_BASE_PATH",
+
+    // FILL IN: sub-folder inside ServerMastersBasePath that contains the CSVs
+    "ServerMasterFolderName": "FILL_IN_SUBFOLDER",
+
+    // Lab-specific FieldMappings override.
+    // Point to the deployed copy of InHealthDTRFieldMappings.json.
+    "LabFieldMappingsPath": "C:\\CodingMastConfigs\\Mappings\\InHealthDTRFieldMappings.json",
+
+    "LabProcessingBasePath": "",
+    "RecentlyProcessedLineLevelStandardizedFile": "",
+    "RecentlyProcessedClaimLevelStandardizedFile": "",
+    "LineLevelStandardizedCsv": "",
+    "ClaimLevelStandardizedCsv": "",
+    "PayerMaster": "",
+    "CodingMaster": "",
+    "CptFeeSchedule": ""
+  },
+
+  // ── Production report output folder (optional) ────────────────────────────
+  "Output": {
+    "Reports": "",
+    "Avgs": "",
+    "Archive": "",
+    "ConslidatedAvgs": "",
+    "PayerCptAverageBase": "",
+    "CodingValidationBase": ""
+  },
+
+  // ── Production Summary rule settings ─────────────────────────────────────
+  // InHealthDTR uses Rule1 (Thu-to-Wed weeks).
+  "ProductionSummary": {
+    "Rule": "Rule1",
+    "WeekRule": "Rule1",
+    "WeekRange": "Thu to Wed"
+  }
+}

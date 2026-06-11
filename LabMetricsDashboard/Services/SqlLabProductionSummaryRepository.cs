@@ -402,12 +402,16 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                     filterFirstBillFrom, filterFirstBillTo,
                     filterFirstBilledFrom, filterFirstBilledTo);
             }
-            else
+            else if (_cfg.HasCodingTables)
             {
                 var legacySql =
                     $"SELECT PanelName, ClaimCount, TotalCharges FROM dbo.{_cfg.Prefix}CodingPanelSummary ORDER BY TotalCharges DESC; " +
                     $"SELECT PanelName, CPTCodeXUnitsXModifier, ClaimCount, TotalCharges FROM dbo.{_cfg.Prefix}CodingCPTDetail ORDER BY PanelName, TotalCharges DESC";
                 cmd = new SqlCommand(legacySql, conn) { CommandTimeout = 120 };
+            }
+            else
+            {
+                return new SharedCodingResult([], 0, 0m);
             }
             await using var _cmd = cmd;
 
@@ -795,19 +799,22 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
             await using var _cmd = cmd;
             await using var rdr = await cmd.ExecuteReaderAsync(ct);
 
-            var cptMonth  = new Dictionary<string, Dictionary<string, (decimal u, decimal ch)>>(StringComparer.OrdinalIgnoreCase);
+            var cptMonth  = new Dictionary<string, Dictionary<string, (int c, decimal u, decimal ch)>>(StringComparer.OrdinalIgnoreCase);
             var allMonths = new SortedSet<string>();
 
             while (await rdr.ReadAsync(ct))
             {
                 var cpt     = rdr.GetString(0);
                 var month   = rdr.GetString(1);
-                var units   = (decimal)rdr.GetInt32(2);   // CPTCount column is INT
+                // Column 2 = LineCount (claim count); Column 3 = BilledUnits (sum of Units field)
+                var count   = rdr.GetInt32(2);     // LineCount (index 2) - this is the claim count
+                var units   = rdr.GetDecimal(3);   // BilledUnits (index 3)
                 var charges = rdr.GetDecimal(4);
 
                 allMonths.Add(month);
                 if (!cptMonth.TryGetValue(cpt, out var mm)) cptMonth[cpt] = mm = [];
-                mm[month] = (mm.GetValueOrDefault(month).u + units, mm.GetValueOrDefault(month).ch + charges);
+                var prev = mm.GetValueOrDefault(month);
+                mm[month] = (prev.c + count, prev.u + units, prev.ch + charges);
             }
 
             var months       = allMonths.ToList();
@@ -817,11 +824,14 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
 
             foreach (var (cpt, mm) in cptMonth.OrderBy(x => x.Key))
             {
-                var byMonth = mm.ToDictionary(kv => kv.Key, kv => new CptBreakdownCell(kv.Value.u, kv.Value.ch));
+                var byMonth = mm.ToDictionary(kv => kv.Key, kv => new CptBreakdownCell(kv.Value.u, kv.Value.ch, kv.Value.c));
                 foreach (var (mk, cell) in byMonth)
                 {
                     if (!grandByMonth.TryGetValue(mk, out var g)) grandByMonth[mk] = cell;
-                    else grandByMonth[mk] = new CptBreakdownCell(g.Units + cell.Units, g.BilledCharges + cell.BilledCharges);
+                    else grandByMonth[mk] = new CptBreakdownCell(
+                        g.Units + cell.Units, 
+                        g.BilledCharges + cell.BilledCharges,
+                        g.ClaimCount + cell.ClaimCount);
                 }
                 cptRows.Add(new CptBreakdownRow
                 {
@@ -829,6 +839,7 @@ public sealed class SqlLabProductionSummaryRepository : ILabProductionSummaryRep
                     ByMonth           = byMonth,
                     GrandTotalUnits   = byMonth.Values.Sum(c => c.Units),
                     GrandTotalCharges = byMonth.Values.Sum(c => c.BilledCharges),
+                    GrandTotalClaims  = byMonth.Values.Sum(c => c.ClaimCount),
                 });
             }
 

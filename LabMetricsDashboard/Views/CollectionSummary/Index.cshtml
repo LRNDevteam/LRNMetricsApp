@@ -371,18 +371,7 @@
     letter-spacing: .02em;
 }
 
-/* ?? Rep vs Payments sticky first column ???????????????????????? */
-#reppay-pane .cs-rpt-table thead th:first-child {
-    position: sticky; left: 0; z-index: 10;
-    background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
-}
-#reppay-pane .cs-rpt-table tbody td:first-child {
-    position: sticky; left: 0; z-index: 3;
-    border-right: 2px solid #d4dde9;
-}
-#reppay-pane .cs-rpt-table tbody tr:nth-child(odd) td:first-child { background: #f8fafc; }
-#reppay-pane .cs-rpt-table tbody tr:nth-child(even) td:first-child { background: #fff; }
-#reppay-pane .cs-rpt-table tbody tr:hover td:first-child { background: #eef4ff; }
+
 #reppay-pane .cs-rpt-table tfoot td:first-child {
     position: sticky; left: 0; z-index: 3;
     background: #0e3460;
@@ -932,13 +921,6 @@
             </button>
         </li>
         <li class="nav-item" role="presentation">
-            <button class="nav-link" id="reppay-tab" data-bs-toggle="pill"
-                    data-bs-target="#reppay-pane" type="button" role="tab"
-                    aria-controls="reppay-pane" aria-selected="false">
-                <i class="bi bi-person-badge"></i> Rep vs Payments
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
             <button class="nav-link" id="inspctpay-tab" data-bs-toggle="pill"
                     data-bs-target="#inspctpay-pane" type="button" role="tab"
                     aria-controls="inspctpay-pane" aria-selected="false">
@@ -1193,8 +1175,6 @@
         <div class="tab-pane fade" id="aging-pane"         role="tabpanel" aria-labelledby="aging-tab"         data-cs-tab="aging">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabAging",        Model) } else { <div class="cs-lazy-pane" data-lazy-tab="aging"></div> }</div>
         <!-- Panel vs Payment tab -->
         <div class="tab-pane fade" id="panelpay-pane"      role="tabpanel" aria-labelledby="panelpay-tab"      data-cs-tab="panelpay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabPanelPay",     Model) } else { <div class="cs-lazy-pane" data-lazy-tab="panelpay"></div> }</div>
-        <!-- Rep vs Payments tab -->
-        <div class="tab-pane fade" id="reppay-pane"        role="tabpanel" aria-labelledby="reppay-tab"        data-cs-tab="reppay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabRepPay",       Model) } else { <div class="cs-lazy-pane" data-lazy-tab="reppay"></div> }</div>
         <!-- Insurance vs Payment % tab -->
         <div class="tab-pane fade" id="inspctpay-pane"     role="tabpanel" aria-labelledby="inspctpay-tab"     data-cs-tab="inspctpay">@if (!Model.LazyLoadTabs) { @await Html.PartialAsync("_CsTabInsPctPay",    Model) } else { <div class="cs-lazy-pane" data-lazy-tab="inspctpay"></div> }</div>
         @if (Model.ShowInsuranceVsPayment)
