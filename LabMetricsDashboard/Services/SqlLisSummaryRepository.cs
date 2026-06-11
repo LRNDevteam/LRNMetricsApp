@@ -121,6 +121,63 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("1", "Billed", "Bill to = System Test AND Billing status = Billed"),
 				new TemplateRow("•", "Claim submitted in Daqbilling", "Bill to = System Test AND Billing status = Billed AND Final Status = Claim submitted in Daqbilling"),
 			},
+		["Cove"] = new[] {
+				new TemplateRow("A", "Billable", "Final Status = [Billable]"),
+				new TemplateRow("1", "Billed", "Final Status = [Billable] AND Billed/Not = [Billed]"),
+				new TemplateRow("•", "No Sub Status", "Final Status = [Billable] AND Billed/Not = [Billed] AND Sub Status = [-]"),
+				new TemplateRow("2", "Not Billed", "Final Status = [Billable] AND Billed/Not = [Not Billed]"),
+				new TemplateRow("•", "Ready To Bill", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Ready To Bill]"),
+				new TemplateRow("•", "Ignored - CP Exception", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Ignored - CP Exception]"),
+				new TemplateRow("•", "Ignored - Client Response Pure Selfpay", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Ignored - Client Response Pure Selfpay]"),
+				new TemplateRow("•", "Billed In Elixir Dx", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Billed In Elixir Dx]"),
+				new TemplateRow("•", "Client Bill Cases", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Client Bill Cases]"),
+				new TemplateRow("•", "Ignored - NGS & PGX in Cove", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Ignored - NGS & PGX in Cove]"),
+				new TemplateRow("•", "Ignored - Duplicate Accession", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Ignored - Duplicate Accession]"),
+				new TemplateRow("•", "Coding exception -In review", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Coding exception -In review]"),
+				new TemplateRow("•", "In process", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [In process]"),
+				new TemplateRow("•", "CP Exception", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [CP Exception]"),
+				new TemplateRow("•", "Coding exception", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Coding exception]"),
+				new TemplateRow("•", "Discovery File need to be sent to Medlytix", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Discovery File need to be sent to Medlytix]"),
+				new TemplateRow("•", "Ignored - Medicaid AR Prior to Sep 19'2025", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Ignored - Medicaid AR Prior to Sep 19'2025]"),
+				new TemplateRow("•", "Discovery File sent to Medlytix", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Discovery File sent to Medlytix]"),
+				new TemplateRow("•", "Ignored - Reported in Elixir Truemed", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Ignored - Reported in Elixir Truemed]"),
+				new TemplateRow("•", "Hold-Amerihealth Lousiana", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Hold-Amerihealth Lousiana]"),
+				new TemplateRow("•", "Medicaid Credentialling In Process", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Medicaid Credentialling In Process]"),
+				new TemplateRow("•", "Selfpay", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Selfpay]"),
+				new TemplateRow("•", "Referring provider Issues", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Referring provider Issues]"),
+				new TemplateRow("•", "Billed In Variantx Lab", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Billed In Variantx Lab]"),
+				new TemplateRow("•", "Billed Insurance In Covedx", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Billed Insurance In Covedx]"),
+				new TemplateRow("•", "Ignored - Client Response Non Billiable", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Ignored - Client Response Non Billiable]"),
+				new TemplateRow("B", "System Test", "Final Status = [System Test]"),
+				new TemplateRow("1", "Billed", "Final Status = [System Test] AND Billed/Not = [Billed]"),
+				new TemplateRow("•", "No Sub Status", "Final Status = [System Test] AND Billed/Not = [Billed] AND Sub Status = [-]"),
+				new TemplateRow("2", "Not Billed", "Final Status = [System Test] AND Billed/Not = [Not Billed]"),
+				new TemplateRow("•", "No Sub Status", "Final Status = [System Test] AND Billed/Not = [Not Billed] AND Sub Status = [-]"),
+				new TemplateRow("C", "Self Pay", "Final Status = [Self Pay]"),
+				new TemplateRow("1", "Billed", "Final Status = [Self Pay] AND Billed/Not = [Billed]"),
+				new TemplateRow("•", "No Sub Status", "Final Status = [Self Pay] AND Billed/Not = [Billed] AND Sub Status = [-]"),
+				new TemplateRow("2", "Not Billed", "Final Status = [Self Pay] AND Billed/Not = [Not Billed]"),
+				new TemplateRow("•", "No Sub Status", "Final Status = [Self Pay] AND Billed/Not = [Not Billed] AND Sub Status = [-]"),
+				new TemplateRow("D", "Deleted / Rejected", "Final Status = [Deleted / Rejected]"),
+				new TemplateRow("1", "Billed", "Final Status = [Deleted / Rejected] AND Billed/Not = [Billed]"),
+				new TemplateRow("•", "No Sub Status", "Final Status = [Deleted / Rejected] AND Billed/Not = [Billed] AND Sub Status = [-]"),
+				new TemplateRow("2", "Not Billed", "Final Status = [Deleted / Rejected] AND Billed/Not = [Not Billed]"),
+				new TemplateRow("•", "No Sub Status", "Final Status = [Deleted / Rejected] AND Billed/Not = [Not Billed] AND Sub Status = [-]"),
+				new TemplateRow("E", "Client Bill", "Final Status = [Client Bill]"),
+				new TemplateRow("1", "Billed", "Final Status = [Client Bill] AND Billed/Not = [Billed]"),
+				new TemplateRow("•", "No Sub Status", "Final Status = [Client Bill] AND Billed/Not = [Billed] AND Sub Status = [-]"),
+				new TemplateRow("2", "Not Billed", "Final Status = [Client Bill] AND Billed/Not = [Not Billed]"),
+				new TemplateRow("•", "No Sub Status", "Final Status = [Client Bill] AND Billed/Not = [Not Billed] AND Sub Status = [-]"),
+				new TemplateRow("F", "Yet To Be Validated", "Final Status = [Yet To Be Validated]"),
+				new TemplateRow("1", "Not Billed", "Final Status = [Yet To Be Validated] AND Billed/Not = [Not Billed]"),
+				new TemplateRow("•", "No Sub Status", "Final Status = [Yet To Be Validated] AND Billed/Not = [Not Billed] AND Sub Status = [-]"),
+				new TemplateRow("G", "Ref Lab - Bill Patient", "Final Status = [Ref Lab - Bill Patient]"),
+				new TemplateRow("1", "Not Billed", "Final Status = [Ref Lab - Bill Patient] AND Billed/Not = [Not Billed]"),
+				new TemplateRow("•", "No Sub Status", "Final Status = [Ref Lab - Bill Patient] AND Billed/Not = [Not Billed] AND Sub Status = [-]"),
+				new TemplateRow("H", "Missing Accession", "Final Status = [Missing Accession]"),
+				new TemplateRow("1", "Not Billed", "Final Status = [Missing Accession] AND Billed/Not = [Not Billed]"),
+				new TemplateRow("•", "No Sub Status", "Final Status = [Missing Accession] AND Billed/Not = [Not Billed] AND Sub Status = [-]"),
+			},
 		["Beech Tree"] = new[] {
 				new TemplateRow("", "Total Samples", "Count [Order ID]"),
 				new TemplateRow("A", "Billable Samples - Resulted", "Resulted / Not = [Resulted]"),
@@ -380,6 +437,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			["Final Status 2"] = FirstExisting(columns, FinalStatus2CandidatesFor(logicSheet)),
 			["Sample Status"] = FirstExisting(columns, SampleStatusCandidatesFor(logicSheet)),
 			["Order Status"] = FirstExisting(columns, OrderStatusCandidatesFor(logicSheet)),
+			["Panel Type"] = FirstExisting(columns, PanelTypeCandidatesFor(logicSheet)),
+			["Sub Status"] = FirstExisting(columns, SubStatusCandidatesFor(logicSheet)),
 			["Source"] = FirstExisting(columns, SourceCandidatesFor(logicSheet)),
 			["Charges not entered status"] = FirstExisting(columns, ChargesNotEnteredCandidatesFor(logicSheet)),
 			["Insurance category"] = FirstExisting(columns, InsuranceCategoryCandidatesFor(logicSheet))
@@ -451,7 +510,9 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			.Concat(new[] { $"YEAR({dateExpr})", $"MONTH({dateExpr})" })
 			.ToList();
 
-		var countExpr = ShouldCountNonBlankSampleId(profile.LogicSheetName) && !string.IsNullOrWhiteSpace(profile.CountDistinctColumn)
+		var countExpr = ShouldCountDistinctSampleId(profile.LogicSheetName) && !string.IsNullOrWhiteSpace(profile.CountDistinctColumn)
+			? $"COUNT(DISTINCT NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(4000), {Q(profile.CountDistinctColumn)}))), ''))"
+			: ShouldCountNonBlankSampleId(profile.LogicSheetName) && !string.IsNullOrWhiteSpace(profile.CountDistinctColumn)
 			? $"COUNT(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(4000), {Q(profile.CountDistinctColumn)}))), ''))"
 			: "COUNT(*)";
 
@@ -570,7 +631,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 	private static bool UsesDirectTemplateParentCounts(string logicSheetName)
 		=> logicSheetName.Equals("Augustus", StringComparison.OrdinalIgnoreCase)
-		   || logicSheetName.Equals("Beech Tree", StringComparison.OrdinalIgnoreCase);
+		   || logicSheetName.Equals("Beech Tree", StringComparison.OrdinalIgnoreCase)
+		   || logicSheetName.Equals("Cove", StringComparison.OrdinalIgnoreCase);
 
 	private static void RecalculateParentRowsFromChildren(List<LisSummaryRow> rows)
 	{
@@ -697,6 +759,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			"Client Status 2" => FirstNonBlank(ValueOrBlank(row, "Client Status 2"), ValueOrBlank(row, "Client Status")),
 			"Final Status 2" => FirstNonBlank(ValueOrBlank(row, "Final Status 2"), ValueOrBlank(row, "Final Status"), ValueOrBlank(row, "Claim Status")),
 			"Final Status" => FirstNonBlank(ValueOrBlank(row, "Final Status"), ValueOrBlank(row, "Claim Status")),
+			"Sub Status" => FirstNonBlank(ValueOrBlank(row, "Sub Status"), ValueOrBlank(row, "Client Status"), ValueOrBlank(row, "Sample Status")),
+			"Panel Type" => FirstNonBlank(ValueOrBlank(row, "Panel Type"), ValueOrBlank(row, "Sample Status")),
 			_ => string.Empty
 		};
 	}
@@ -708,6 +772,10 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 	{
 		if (IsBlankValue(expected)) return string.IsNullOrWhiteSpace(actual);
 		if (IsAllValue(expected)) return true;
+
+		var actualClean = CleanValue(actual);
+		var expectedClean = CleanValue(expected);
+		if (actualClean.Equals(expectedClean, StringComparison.OrdinalIgnoreCase)) return true;
 
 		var actualKey = CompareKey(actual);
 		var expectedKey = CompareKey(expected);
@@ -851,6 +919,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			"CLIENTSTATUS2" => "Client Status 2",
 			"FINALSTATUS" => "Final Status",
 			"FINALSTATUS2" => "Final Status 2",
+			"SUBSTATUS" or "SUBSTATUS2" => "Sub Status",
+			"PANELTYPE" => "Panel Type",
 			"SAMPLESTATUS" => "Sample Status",
 			"ORDERSTATUS" => "Order Status",
 			"SOURCE" => "Source",
@@ -966,6 +1036,9 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 	private static bool ShouldCountNonBlankSampleId(string logicSheet)
 		=> logicSheet.Equals("Beech Tree", StringComparison.OrdinalIgnoreCase);
 
+	private static bool ShouldCountDistinctSampleId(string logicSheet)
+		=> logicSheet.Equals("Cove", StringComparison.OrdinalIgnoreCase);
+
 	private static string[] IncorrectDosCandidatesFor(string logicSheet)
 		=> new[] { "IncorrectDOS", "Incorrect DOS", "Incorrect_DOS", "IncorrectDos" };
 
@@ -1035,6 +1108,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		_ => new[] { "SampleStatus", "Sample Status", "Category", "SubStatus", "LRNSampleStatus", "LRNSubStatus", "InsuranceType" }
 	};
 	private static string[] OrderStatusCandidatesFor(string logicSheet) => new[] { "OrderStatus", "Order Status", "SampleStatus", "LRNSampleStatus", "ClientStatus", "FinalStatus", "NewStatus" };
+	private static string[] PanelTypeCandidatesFor(string logicSheet) => new[] { "PanelType", "Panel Type" };
+	private static string[] SubStatusCandidatesFor(string logicSheet) => new[] { "SubStatus", "Sub Status", "ClientStatus", "Client Status" };
 	private static string[] SourceCandidatesFor(string logicSheet) => new[] { "Source", "BillingSource", "Billing Source", "SystemSource" };
 	private static string[] ChargesNotEnteredCandidatesFor(string logicSheet) => new[] { "ChargesNotEnteredStatus", "Charges not entered status", "ChargesNotEntered", "Charges_Not_Entered_Status" };
 	private static string[] InsuranceCategoryCandidatesFor(string logicSheet) => new[] { "InsuranceCategory", "Insurance category", "InsuranceType", "Category" };
