@@ -27,10 +27,16 @@ internal static class LabCollectionPrefix
         ["Certus"]             = "Cert",
         ["Cove"]               = "Cove",
         ["Elixir"]             = "Elix",
+        ["PhiLife"]            = "Phi",
+        ["Phi_Life"]           = "Phi",
         ["PCRLabsofAmerica"]   = "PCR",
         ["PCR_Labs_of_America"]= "PCR",
         ["RisingTides"]        = "RT",
         ["Rising_Tides"]       = "RT",
+        ["InHealthDTR"]        = "IHD",
+        ["Inhealth_DTR"]       = "IHD",
+        ["InHealthDTRLRN"]     = "IHD",
+        ["InHealth_DTR"]       = "IHD",
     };
 
     /// <summary>

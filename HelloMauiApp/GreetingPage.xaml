@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="HelloMauiApp.GreetingPage"
+             Title="Greeting">
+
+    <VerticalStackLayout Spacing="20" Padding="30"
+                         VerticalOptions="Center">
+
+        <Label x:Name="GreetingLabel"
+               Text="Hello!"
+               FontSize="32"
+               FontAttributes="Bold"
+               HorizontalOptions="Center" />
+
+        <Label Text="You navigated to a second page."
+               FontSize="16"
+               HorizontalOptions="Center"
+               TextColor="Gray" />
+
+        <Button Text="Go Back"
+                Clicked="OnGoBackClicked"
+                BackgroundColor="#512BD4"
+                TextColor="White"
+                CornerRadius="8" />
+
+    </VerticalStackLayout>
+
+</ContentPage>

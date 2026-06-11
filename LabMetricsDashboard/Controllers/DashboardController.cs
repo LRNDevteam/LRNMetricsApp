@@ -2343,16 +2343,19 @@ public class DashboardController : Controller
                 }
                 else if (genericSummaryRepo is not null)
                 {
-                    // Generic labs: Certus, Cove, Elixir, PCRLabsofAmerica, Beech_Tree, Rising_Tides.
-                    // CPT always uses the live query (aggregate table is advisory only).
+                    // Generic labs: Certus, Cove, Elixir, PCRLabsofAmerica, Beech_Tree, Rising_Tides, Phi_Life, InHealthDTR.
+                    // CPT breakdown uses genericSummaryRepo when the lab's SupportsFilteredMonthlyWeeklySp flag is true
+                    // (calls usp_Get{Prefix}CPTBreakdown), otherwise falls back to _productionReportRepo (inline SQL).
                     var t1 = genericSummaryRepo.GetMonthlyAsync(connStr, ct: ct);
                     var t2 = genericSummaryRepo.GetWeeklyAsync(connStr, ct: ct);
                     var t3 = genericSummaryRepo.GetCodingAsync(connStr, ct: ct);
                     var t4 = genericSummaryRepo.GetPayerBreakdownAsync(connStr, ct: ct);
                     var t5 = genericSummaryRepo.GetPayerByPanelAsync(connStr, ct: ct);
                     var t6 = genericSummaryRepo.GetUnbilledAgingAsync(connStr, ct: ct);
-                    var t7 = _productionReportRepo.GetCptBreakdownAsync(connStr,
-                        null, null, null, null, null, null, ct, rule: productionRule);
+                    var t7 = genericSummaryRepo.SupportsFilteredMonthlyWeeklySp
+                        ? genericSummaryRepo.GetCptBreakdownAsync(connStr, ct: ct)
+                        : _productionReportRepo.GetCptBreakdownAsync(connStr,
+                            null, null, null, null, null, null, ct, rule: productionRule);
 
                     await Task.WhenAll(t1, t2, t3, t4, t5, t6, t7);
 

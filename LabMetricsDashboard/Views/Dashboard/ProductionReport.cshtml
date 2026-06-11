@@ -86,6 +86,7 @@
         => d is not null && d.TryGetValue(bk, out var c) ? c.BilledCharges : 0m;
 
     // CPT Breakdown helpers
+    var cptShowUnits = Model.CptUnitsLabel != "No. of Claims";
     var cptYears  = Model.CptBreakdownYears.Where(y => y > 1900).ToList();
     var cptMonths = Model.CptBreakdownMonths.Where(m => int.Parse(m[..4]) > 1900).ToList();
     var cptMonthsByYear = cptMonths
@@ -1451,13 +1452,13 @@ th.pr-month-data, td.pr-month-data {
                                             var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
                                             foreach (var mk in mons)
                                             {
-                                                <td class="pr-month-data">@CptClaims(row.ByMonth, mk).ToString("N0")</td>
+                                                <td class="pr-month-data">@(cptShowUnits ? CptUnits(row.ByMonth, mk).ToString("N0") : CptClaims(row.ByMonth, mk).ToString("N0"))</td>
                                                 <td class="pr-month-data">@CptCharges(row.ByMonth, mk).ToString("C0")</td>
                                             }
-                                            <td class="pr-year-total">@CptYearClaims(row.ByYear, year).ToString("N0")</td>
+                                            <td class="pr-year-total">@(cptShowUnits ? CptYearUnits(row.ByYear, year).ToString("N0") : CptYearClaims(row.ByYear, year).ToString("N0"))</td>
                                             <td class="pr-year-total">@CptYearCharges(row.ByYear, year).ToString("C0")</td>
                                         }
-                                        <td class="pr-grand-total">@row.GrandTotalClaims.ToString("N0")</td>
+                                        <td class="pr-grand-total">@(cptShowUnits ? row.GrandTotalUnits.ToString("N0") : row.GrandTotalClaims.ToString("N0"))</td>
                                         <td class="pr-grand-total">@row.GrandTotalCharges.ToString("C0")</td>
                                     </tr>
                                 }
@@ -1470,13 +1471,13 @@ th.pr-month-data, td.pr-month-data {
                                         var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
                                         foreach (var mk in mons)
                                         {
-                                            <td class="pr-month-data">@CptClaims(Model.CptBreakdownGrandByMonth, mk).ToString("N0")</td>
+                                            <td class="pr-month-data">@(cptShowUnits ? CptUnits(Model.CptBreakdownGrandByMonth, mk).ToString("N0") : CptClaims(Model.CptBreakdownGrandByMonth, mk).ToString("N0"))</td>
                                             <td class="pr-month-data">@CptCharges(Model.CptBreakdownGrandByMonth, mk).ToString("C0")</td>
                                         }
-                                        <td class="pr-year-total">@CptGrandYearClaims(year).ToString("N0")</td>
+                                        <td class="pr-year-total">@(cptShowUnits ? CptGrandYearUnits(year).ToString("N0") : CptGrandYearClaims(year).ToString("N0"))</td>
                                         <td class="pr-year-total">@CptGrandYearCharges(year).ToString("C0")</td>
                                     }
-                                    <td class="pr-grand-total">@cptGrandClaims.ToString("N0")</td>
+                                    <td class="pr-grand-total">@(cptShowUnits ? cptGrandUnits.ToString("N0") : cptGrandClaims.ToString("N0"))</td>
                                     <td class="pr-grand-total">@cptGrandCharges.ToString("C0")</td>
                                 </tr>
                             </tfoot>

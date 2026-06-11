@@ -688,19 +688,21 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
                 filterFirstBilledFrom, filterFirstBilledTo);
             await using var rdr  = await cmd.ExecuteReaderAsync(ct);
 
-            var cptMonth  = new Dictionary<string, Dictionary<string, (decimal u, decimal ch)>>(StringComparer.OrdinalIgnoreCase);
+            var cptMonth  = new Dictionary<string, Dictionary<string, (decimal u, decimal ch, int cnt)>>(StringComparer.OrdinalIgnoreCase);
             var allMonths = new SortedSet<string>();
 
             while (await rdr.ReadAsync(ct))
             {
                 var cpt     = rdr.GetString(0);
                 var month   = rdr.GetString(1);
-                var units   = rdr.GetDecimal(2);   // CPTCount stored in CPTCount column
-                var charges = rdr.GetDecimal(4);
+                var cptCount = rdr.GetInt32(2);     // CPTCount (line count)
+                var units   = rdr.GetDecimal(3);    // BilledUnits
+                var charges = rdr.GetDecimal(4);    // TotalCharges
 
                 allMonths.Add(month);
                 if (!cptMonth.TryGetValue(cpt, out var mm)) cptMonth[cpt] = mm = [];
-                mm[month] = (mm.GetValueOrDefault(month).u + units, mm.GetValueOrDefault(month).ch + charges);
+                var prev = mm.GetValueOrDefault(month);
+                mm[month] = (prev.u + units, prev.ch + charges, prev.cnt + cptCount);
             }
 
             var months = allMonths.ToList();
@@ -710,19 +712,33 @@ public sealed class SqlAugustusProductionSummaryRepository : IAugustusProduction
 
             foreach (var (cpt, mm) in cptMonth.OrderBy(x => x.Key))
             {
-                var byMonth = mm.ToDictionary(kv => kv.Key, kv => new CptBreakdownCell(kv.Value.u, kv.Value.ch));
+                var byMonth = mm.ToDictionary(kv => kv.Key, kv => new CptBreakdownCell(kv.Value.u, kv.Value.ch, kv.Value.cnt));
+                var byYear  = years.ToDictionary(y => y, y =>
+                {
+                    var cells = mm.Where(kv => kv.Key.StartsWith($"{y:D4}")).Select(kv => kv.Value).ToList();
+                    return new CptBreakdownCell(
+                        cells.Sum(c => c.u),
+                        cells.Sum(c => c.ch),
+                        cells.Sum(c => c.cnt));
+                });
+
                 foreach (var (mk, cell) in byMonth)
                 {
                     if (!grandByMonth.TryGetValue(mk, out var g)) grandByMonth[mk] = cell;
-                    else grandByMonth[mk] = new CptBreakdownCell(g.Units + cell.Units, g.BilledCharges + cell.BilledCharges);
+                    else grandByMonth[mk] = new CptBreakdownCell(
+                        g.Units + cell.Units,
+                        g.BilledCharges + cell.BilledCharges,
+                        g.ClaimCount + cell.ClaimCount);
                 }
 
                 cptRows.Add(new CptBreakdownRow
                 {
                     CptCode           = cpt,
                     ByMonth           = byMonth,
+                    ByYear            = byYear,
                     GrandTotalUnits   = byMonth.Values.Sum(c => c.Units),
                     GrandTotalCharges = byMonth.Values.Sum(c => c.BilledCharges),
+                    GrandTotalClaims  = byMonth.Values.Sum(c => c.ClaimCount),
                 });
             }
 
