@@ -100,7 +100,7 @@ public class PhiExecutiveSummaryController : Controller
 
         var vm = await _repo.GetExecutiveSummaryAsync(
             connStr, spName, availableLabs, labName,
-            yearFrom, yearTo, monthFrom, monthTo, ct: ct);
+            yearFrom, yearTo, monthFrom, monthTo, ct);
 
         if (vm.AvailableYears.Count == 0)
             vm.AvailableYears = availableYears;

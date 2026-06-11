@@ -391,6 +391,7 @@ builder.Services.AddScoped<AllLabsCollectionExcelBuilder>();
 builder.Services.AddScoped<ILisSummaryRepository, SqlLisSummaryRepository>();
 builder.Services.AddScoped<SqlPhiExecutiveSummaryRepository>();
 builder.Services.AddScoped<ExecutiveSummaryExcelBuilder>();
+builder.Services.AddScoped<SqlPhiExecutiveSummaryRepository>();
 
 // User management repository (uses DefaultConnection from appsettings.json)
 builder.Services.AddScoped<IUserManagementRepository, SqlUserManagementRepository>();
