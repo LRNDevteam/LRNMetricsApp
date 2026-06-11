@@ -135,14 +135,14 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("3", "Unbilled", "Resulted / Not = [Resulted] AND Claim Status = [Entered] AND Billed/Not = UnBilled AND Client Status = [Blank]"),
 				new TemplateRow("4", "Client Bill", "Resulted / Not = [Resulted] AND Claim Status = [ALL] AND Billed/Not = [Billed AND Unbilled] AND Client Status = [Client Bill]"),
 				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [Unbilled] AND Client Status = [Client Bill]"),
-				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Billed/Not = [Unbilled] AND Client Status = [Client Bill]"),
+				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Client Bill]"),
 				new TemplateRow("5", "Self Pay", "Resulted / Not = [Resulted] AND Claim Status = [All] AND Billed/Not = [ALL] AND Client Status = [Self Pay]"),
 				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Self Pay]"),
 				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Self Pay]"),
 				new TemplateRow("•", "Entered", "Resulted / Not = [Resulted] AND Claim Status = [Entered] AND Billed/Not = [UnBilled] AND Client Status = [Self Pay]"),
-				new TemplateRow("6", "Test Entries", "Resulted / Not = [Resulted] AND Claim Status = [All] AND Billed/Not = [ALL] AND Client Status = [Test Entries]"),
-				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Test Entries]"),
-				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Test Entries]"),
+				new TemplateRow("6", "Test Entries", "Resulted / Not = [Resulted] AND Claim Status = [All] AND Billed/Not = [ALL] AND Client Status = [Test Entries] AND Billing Status = [Billed]"),
+				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Test Entries] AND Billing Status = [Billed]"),
+				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Test Entries] AND Billing Status = [Billed]"),
 				new TemplateRow("7", "Rejected Sample", "Resulted / Not = [Resulted] AND Claim Status = [All] AND Billed/Not = [ALL] AND Client Status = [Rejected Sample]"),
 				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Rejected Sample]"),
 				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Rejected Sample]"),
@@ -158,7 +158,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("4", "Self Pay", "Resulted / Not = [Not Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [Self Pay]"),
 				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Self Pay]"),
 				new TemplateRow("•", "Billed", "Resulted / Not = [Not Resulted] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Self Pay]"),
-				new TemplateRow("5", "Test Entries", "Resulted / Not = [Not Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [Test Entries]"),
+				new TemplateRow("5", "Test Entries", "Resulted / Not = [Not Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [Test Entries] AND Billing Status = [Billed]"),
 				new TemplateRow("6", "Rejected Sample", "Resulted / Not = [Not Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [Rejected Sample]"),
 		},
 		["PCRLOA"] = new[] {
@@ -451,7 +451,9 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			.Concat(new[] { $"YEAR({dateExpr})", $"MONTH({dateExpr})" })
 			.ToList();
 
-		var countExpr = "COUNT(*)";
+		var countExpr = ShouldCountNonBlankSampleId(profile.LogicSheetName) && !string.IsNullOrWhiteSpace(profile.CountDistinctColumn)
+			? $"COUNT(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(4000), {Q(profile.CountDistinctColumn)}))), ''))"
+			: "COUNT(*)";
 
 		var sql = $"""
             SELECT
@@ -552,7 +554,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			rows.Add(BuildRow(template.Code, template.Description, template.Logic, ResolveTemplateLevel(logicSheetName, template), matches.ToList()));
 		}
 
-		if (!logicSheetName.Equals("Augustus", StringComparison.OrdinalIgnoreCase))
+		if (!UsesDirectTemplateParentCounts(logicSheetName))
 		{
 			RecalculateParentRowsFromChildren(rows);
 		}
@@ -565,6 +567,10 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 	private static bool IsAugustusReadyToBillRow(string logicSheetName, TemplateRow template)
 		=> logicSheetName.Equals("Augustus", StringComparison.OrdinalIgnoreCase)
 		   && template.Description.Equals("Ready to bill", StringComparison.OrdinalIgnoreCase);
+
+	private static bool UsesDirectTemplateParentCounts(string logicSheetName)
+		=> logicSheetName.Equals("Augustus", StringComparison.OrdinalIgnoreCase)
+		   || logicSheetName.Equals("Beech Tree", StringComparison.OrdinalIgnoreCase);
 
 	private static void RecalculateParentRowsFromChildren(List<LisSummaryRow> rows)
 	{
@@ -956,6 +962,9 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		"Beech Tree" => new[] { "Accession", "OrderID", "Order ID", "UniqueSampleID", "Unique Sample ID", "SampleID", "Sample ID", "AccessionNumber", "AccessionNo" },
 		_ => new[] { "Accession", "OrderID", "Order ID", "UniqueSampleID", "Unique Sample ID", "SampleID", "Sample ID", "AccessionNumber", "AccessionNo", "SpecimenID", "Specimen ID" }
 	};
+
+	private static bool ShouldCountNonBlankSampleId(string logicSheet)
+		=> logicSheet.Equals("Beech Tree", StringComparison.OrdinalIgnoreCase);
 
 	private static string[] IncorrectDosCandidatesFor(string logicSheet)
 		=> new[] { "IncorrectDOS", "Incorrect DOS", "Incorrect_DOS", "IncorrectDos" };
