@@ -86,6 +86,9 @@
         ,{ "CsvHeader": "30 Bucket $",                 "SqlColumn": "Bucket30Amount",         "IncludeInHash": false }
         ,{ "CsvHeader": "60 Bucket",                   "SqlColumn": "Bucket60",               "IncludeInHash": false }
         ,{ "CsvHeader": "60 Bucket $",                 "SqlColumn": "Bucket60Amount",         "IncludeInHash": false }
+        ,{ "CsvHeader": "DOE_Year",                    "SqlColumn": "DOE_Year",               "IncludeInHash": false }
+        ,{ "CsvHeader": "DOE_Month",                   "SqlColumn": "DOE_Month",              "IncludeInHash": false }
+        ,{ "CsvHeader": "Aging Bucket",                "SqlColumn": "AgingBucket",            "IncludeInHash": false }
       ]
     },
     "LineLevel": {

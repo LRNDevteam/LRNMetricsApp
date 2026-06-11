@@ -520,6 +520,34 @@ public sealed class ClaimLineDbService
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshPhiLifeCollectionReports()
         => RunProductionReportSPs(BuildCollectionSummarySpList("Phi"));
 
+    /// <summary>
+    /// Refreshes the PhiLife Executive Summary aggregate table (dbo.Phi_ES_Data)
+    /// by calling dbo.usp_RefreshPhi_ExecutiveSummary.
+    /// Called by ClaimLineCSVDataCapture after ClaimLevel ingestion completes.
+    /// </summary>
+    public (long ElapsedMs, string? Error) RefreshPhiLifeExecutiveSummary()
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            using var conn = new SqlConnection(_connectionString);
+            conn.Open();
+            using var cmd = new SqlCommand("dbo.usp_RefreshPhi_ExecutiveSummary", conn)
+            {
+                CommandType    = System.Data.CommandType.StoredProcedure,
+                CommandTimeout = 1800,
+            };
+            cmd.ExecuteNonQuery();
+            sw.Stop();
+            return (sw.ElapsedMilliseconds, null);
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            return (sw.ElapsedMilliseconds, ex.Message);
+        }
+    }
+
     /// <summary>Refreshes the Augustus Collection Summary aggregates.</summary>
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshAugustusCollectionReports()
         => RunProductionReportSPs(BuildCollectionSummarySpList("Aug"));
@@ -589,6 +617,31 @@ public sealed class ClaimLineDbService
     /// <summary>Refreshes the PCRLabsofAmerica Collection Summary aggregates.</summary>
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshPCRLabsCollectionReports()
         => RunProductionReportSPs(BuildCollectionSummarySpList("PCR"));
+
+    /// <summary>
+    /// Runs all InHealthDTR-specific production report stored procedures after ingestion.
+    /// Each SP is executed independently so a failure in one does not block the others.
+    /// Returns a list of (SpName, ElapsedMs, ErrorMessage?) for caller logging.
+    /// </summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshInHealthDTRProductionReports()
+    {
+        string[] procedures =
+        [
+            "dbo.usp_RefreshInH_MonthlyBilledProductionSummary",
+            "dbo.usp_RefreshInH_WeeklyBilledProductionSummary",
+            "dbo.usp_RefreshInH_PayerBreakdown",
+            "dbo.usp_RefreshInH_PayerByPanel",
+            "dbo.usp_RefreshInH_CodingBreakdown_Billed",
+            "dbo.usp_RefreshInH_UnbilledAging",
+            "dbo.usp_RefreshInH_CPTBreakdown",
+        ];
+
+        return RunProductionReportSPs(procedures);
+    }
+
+    /// <summary>Refreshes the InHealthDTR Collection Summary aggregates.</summary>
+    public List<(string SpName, long ElapsedMs, string? Error)> RefreshInHealthDTRCollectionReports()
+        => RunProductionReportSPs(BuildCollectionSummarySpList("IHD"));
 
     /// <summary>
     /// Builds the standard 13-element ordered list of Collection Summary SP names
@@ -663,5 +716,39 @@ public sealed class ClaimLineDbService
         return underscoreIndex > 0
             ? fileNameWithoutExt[..underscoreIndex]
             : fileNameWithoutExt;
+    }
+
+    /// <summary>
+    /// Fetches the latest successfully completed RunId for a lab by executing
+    /// <c>sp_GetRecentSuccessRunByLab</c> against the LRNMaster database.
+    /// </summary>
+    /// <param name="masterConnectionString">
+    /// The LRNMaster connection string (appsettings <c>ConnectionStrings:DefaultConnection</c>).
+    /// </param>
+    /// <param name="labName">
+    /// The lab name passed as the <c>@LabName</c> parameter — sourced from the lab config
+    /// key <c>FetchLatestCompletedRunIDParameter</c> (e.g. "PCR Labs of America").
+    /// </param>
+    /// <returns>
+    /// The latest completed RunId (e.g. "20260522R0118"), or <c>null</c> when the SP returns
+    /// no row / a NULL value.
+    /// </returns>
+    public static string? GetRecentSuccessRunByLab(string masterConnectionString, string labName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(masterConnectionString);
+        ArgumentException.ThrowIfNullOrWhiteSpace(labName);
+
+        using var conn = new SqlConnection(masterConnectionString);
+        conn.Open();
+
+        using var cmd = new SqlCommand("dbo.sp_GetRecentSuccessRunByLab", conn)
+        {
+            CommandType    = CommandType.StoredProcedure,
+            CommandTimeout = 60
+        };
+        cmd.Parameters.AddWithValue("@LabName", labName);
+
+        var result = cmd.ExecuteScalar();
+        return result is DBNull or null ? null : result.ToString();
     }
 }

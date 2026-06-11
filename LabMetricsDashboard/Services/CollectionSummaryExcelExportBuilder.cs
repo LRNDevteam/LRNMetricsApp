@@ -47,7 +47,6 @@ public static class CollectionSummaryExcelExportBuilder
             BuildTop5TotalPaymentsSheet(wb, vm.Top5TotalPayments, labName);
         BuildInsuranceAgingSheet(wb, vm.InsuranceAging, labName);
         BuildPanelPaymentSheet(wb, vm.PanelPayments, labName);
-        BuildRepPaymentsSheet(wb, vm.RepPayments, labName);
         BuildInsurancePaymentPctSheet(wb, vm.InsurancePaymentPct, labName);
         BuildCptPaymentPctSheet(wb, vm.CptPaymentPct, labName);
         BuildPanelAveragesSheet(wb, vm.PanelAverages, labName);
@@ -521,72 +520,6 @@ public static class CollectionSummaryExcelExportBuilder
 
         AutoFitColumns(ws);
         ws.SheetView.FreezeRows(3);
-    }
-
-    // ?? Rep vs Payments ?????????????????????????????????????????????
-
-    private static void BuildRepPaymentsSheet(XLWorkbook wb, RepPaymentPivot pivot, string labName)
-    {
-        var ws = wb.AddWorksheet("Rep vs Payments");
-        ws.TabColor = ExcelTheme.TabBlue;
-        ExcelTheme.ApplyDefaults(ws);
-
-        if (!pivot.HasData)
-        {
-            ws.Cell(1, 1).Value = "No data available.";
-            ws.Cell(1, 1).Style.Font.Italic = true;
-            return;
-        }
-
-        int colCount = 1 + pivot.Periods.Count * 2 + 2; // Name + periods*2 + Grand*2
-        int row = 1;
-        ExcelTheme.WriteBlueTitleBar(ws, row, colCount, $"Rep vs Payments \u2014 {labName}");
-        row++;
-
-        // Header Row 1: period labels
-        int hRow1 = row;
-        WriteMergedHeader(ws, hRow1, hRow1 + 1, 1, 1, "Sales Rep", ExcelTheme.BlueHeaderBg);
-        int hCol = 2;
-        foreach (var p in pivot.Periods)
-        {
-            var label = new DateTime(p.Year, p.Month, 1, 0, 0, 0).ToString("MMM yyyy");
-            WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + 1, label, ExcelTheme.BlueSubHeaderBg);
-            hCol += 2;
-        }
-        WriteMergedHeader(ws, hRow1, hRow1, hCol, hCol + 1, "Grand Total", ExcelTheme.AmberDarkBg);
-
-        // Header Row 2: sub-columns
-        int hRow2 = hRow1 + 1;
-        hCol = 2;
-        foreach (var _ in pivot.Periods)
-        {
-            WriteHeaderCell(ws, hRow2, hCol++, "Claims", ExcelTheme.BlueSubHeaderBg);
-            WriteHeaderCell(ws, hRow2, hCol++, "Payments", ExcelTheme.BlueSubHeaderBg);
-        }
-        WriteHeaderCell(ws, hRow2, hCol++, "Claims", ExcelTheme.AmberDarkBg);
-        WriteHeaderCell(ws, hRow2, hCol, "Payments", ExcelTheme.AmberDarkBg);
-
-        row = hRow2 + 1;
-
-        for (int i = 0; i < pivot.Rows.Count; i++)
-        {
-            var r = pivot.Rows[i];
-            var bg = i % 2 == 0 ? XLColor.White : ExcelTheme.BlueBandedRowBg;
-            int col = 1;
-            WriteCell(ws, row, col++, r.SalesRepName, bg, isText: true);
-            foreach (var p in pivot.Periods)
-            {
-                var cell = r.Cells.GetValueOrDefault(p);
-                WriteCell(ws, row, col++, cell?.NoOfClaims ?? 0, bg);
-                WriteCell(ws, row, col++, cell?.InsurancePayments ?? 0m, bg, isCurrency: true);
-            }
-            WriteCell(ws, row, col++, r.GrandClaims, bg);
-            WriteCell(ws, row, col, r.GrandPayments, bg, isCurrency: true);
-            row++;
-        }
-
-        AutoFitColumns(ws);
-        ws.SheetView.FreezeRows(hRow2);
     }
 
     // ?? Insurance vs Payment % ??????????????????????????????????????

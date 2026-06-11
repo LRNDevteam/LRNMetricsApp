@@ -730,6 +730,12 @@
                                         </li>
                                     }
 
+                                    @* <li>
+                                        <a class="dropdown-item" asp-controller="PhiExecutiveSummary" asp-action="Index">
+                                            <i class="bi bi-table"></i> Executive Summary
+                                        </a>
+                                    </li> *@
+
                                     <li><hr class="dropdown-divider" /></li>
                                     <li>
                                         <a class="dropdown-item" asp-controller="Dashboard" asp-action="ClaimLevel">
@@ -850,6 +856,19 @@
                                 </ul>
                             </li>
 
+                            @* ── Tools ── *@
+                           <!-- <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                                    <i class="bi bi-tools"></i> Tools
+                                </a>
+                                <ul class="dropdown-menu">
+                                    <li>
+                                        <a class="dropdown-item" asp-controller="CptSearch" asp-action="Index">
+                                            <i class="bi bi-upc-scan"></i> CPT Code Search
+                                        </a>
+                                    </li>
+                                </ul>
+                            </li>-->
                             @if (isAdmin)
                             {
                                 <li class="nav-item dropdown">
