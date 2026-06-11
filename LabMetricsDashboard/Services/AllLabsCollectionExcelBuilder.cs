@@ -220,9 +220,6 @@ public sealed class AllLabsCollectionExcelBuilder
         var panelPayTask    = useAggregates
             ? _repo.GetPanelPaymentFromAggregatesAsync(connStr, aggregatePrefix!, ct)
             : _repo.GetPanelPaymentAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct);
-        var repPayTask      = useAggregates
-            ? _repo.GetRepPaymentFromAggregatesAsync(connStr, aggregatePrefix!, ct)
-            : _repo.GetRepPaymentAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct);
         var insPctTask      = useAggregates
             ? _repo.GetInsurancePaymentPctFromAggregatesAsync(connStr, aggregatePrefix!, ct)
             : _repo.GetInsurancePaymentPctAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct);
@@ -248,7 +245,7 @@ public sealed class AllLabsCollectionExcelBuilder
 
         await Task.WhenAll(
             monthlyTask, weeklyTask, reimbTask, totPayTask,
-            agingTask, panelPayTask, repPayTask, insPctTask,
+            agingTask, panelPayTask, insPctTask,
             cptPctTask, panelAvgTask, avgPayTask, statusTask, providerTask,
             claimCountTask, lineCountTask);
 
@@ -267,8 +264,6 @@ public sealed class AllLabsCollectionExcelBuilder
         // Build a standalone workbook for this lab, then copy its sheets into the combined workbook
         var monthlyResult = await monthlyTask;
         var weeklyResult  = await weeklyTask;
-        var repPayResult  = await repPayTask;
-
         var vm = new CollectionSummaryViewModel
         {
             SelectedLab           = labName,
@@ -280,7 +275,6 @@ public sealed class AllLabsCollectionExcelBuilder
             ShowTop5TotalPayments = showTotalPayments,
             InsuranceAging        = (await agingTask).Rows,
             PanelPayments         = (await panelPayTask).Rows,
-            RepPayments           = BuildRepPaymentPivot(repPayResult.Rows),
             InsurancePaymentPct   = (await insPctTask).Rows,
             CptPaymentPct         = (await cptPctTask).Rows,
             PanelAverages         = (await panelAvgTask).PanelRows,
@@ -343,35 +337,6 @@ public sealed class AllLabsCollectionExcelBuilder
             GrandTotalEncounters   = result.GrandTotalEncounters,
             GrandTotalInsurancePaid = result.GrandTotalInsurancePaid,
         };
-    }
-
-    private static RepPaymentPivot BuildRepPaymentPivot(List<RepPaymentFlatRow> flatRows)
-    {
-        if (flatRows.Count == 0) return RepPaymentPivot.Empty;
-
-        var periods = flatRows
-            .Select(r => new RepPaymentPeriod(r.Year, r.Month))
-            .Distinct().OrderBy(p => p.Year).ThenBy(p => p.Month).ToList();
-
-        var pivotRows = flatRows
-            .GroupBy(r => r.SalesRepName, StringComparer.OrdinalIgnoreCase)
-            .Select(g =>
-            {
-                var cells = g.ToDictionary(
-                    r => new RepPaymentPeriod(r.Year, r.Month),
-                    r => new RepPaymentCell(r.NoOfClaims, r.InsurancePayments));
-                return new RepPaymentPivotRow
-                {
-                    SalesRepName  = g.Key,
-                    Cells         = cells,
-                    GrandClaims   = g.Sum(r => r.NoOfClaims),
-                    GrandPayments = g.Sum(r => r.InsurancePayments),
-                };
-            })
-            .OrderByDescending(r => r.GrandPayments)
-            .ToList();
-
-        return new RepPaymentPivot { Periods = periods, Rows = pivotRows };
     }
 
     // ── Error notice ─────────────────────────────────────────────────────────

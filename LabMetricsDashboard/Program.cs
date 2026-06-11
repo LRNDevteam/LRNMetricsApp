@@ -366,7 +366,7 @@ builder.Services.AddScoped<IProductionReportRepository, SqlProductionReportRepos
 builder.Services.AddScoped<INorthWestProductionSummaryRepository, SqlNorthWestProductionSummaryRepository>();
 builder.Services.AddScoped<IAugustusProductionSummaryRepository, SqlAugustusProductionSummaryRepository>();
 
-// ── Per-lab generic production summary repositories (Certus, Cove, Elixir, PCRLabsofAmerica, Beech_Tree, Rising_Tides) ──
+// ── Per-lab generic production summary repositories (Certus, Cove, Elixir, PCRLabsofAmerica, Beech_Tree, Rising_Tides, Phi_Life, Inhealth_DTR) ──
 // One SqlLabProductionSummaryRepository per lab, keyed by the lab name used in the LabSettings config.
 builder.Services.AddSingleton<IReadOnlyDictionary<string, ILabProductionSummaryRepository>>(sp =>
 {
@@ -379,12 +379,16 @@ builder.Services.AddSingleton<IReadOnlyDictionary<string, ILabProductionSummaryR
 		["PCRLabsofAmerica"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.PCRLabsofAmerica),
 		["Beech_Tree"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.BeechTree),
 		["Rising_Tides"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.RisingTides),
+		["Phi_Life"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.PhiLife),
+		["Inhealth_DTR"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.InHealthDTR),
 	};
 });
 builder.Services.AddScoped<IClaimLineRepository, SqlClaimLineRepository>();
+builder.Services.AddScoped<ICptSearchRepository, SqlCptSearchRepository>();
 builder.Services.AddScoped<ICollectionSummaryRepository, SqlCollectionSummaryRepository>();
 builder.Services.AddScoped<AllLabsCollectionExcelBuilder>();
 builder.Services.AddScoped<ILisSummaryRepository, SqlLisSummaryRepository>();
+builder.Services.AddScoped<SqlPhiExecutiveSummaryRepository>();
 
 // User management repository (uses DefaultConnection from appsettings.json)
 builder.Services.AddScoped<IUserManagementRepository, SqlUserManagementRepository>();

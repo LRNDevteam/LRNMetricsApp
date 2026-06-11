@@ -554,33 +554,19 @@
             ? allLabKeys
             : allLabKeys.Where(l => userLabClaims.Contains(l)).ToList();
 
-            // For the navbar lab selector: priority order:
-            //   1. ViewData["SelectedLab"]  — set by most controllers after resolving the lab
-            //   2. ?lab= query parameter    — present immediately on lab switch (before the
-            //                                 response cookie can propagate to the next request)
-            //   3. lmd_selected_lab cookie  — remembered from a prior navigation
-            //   4. First available lab      — final fallback
+            // For the navbar lab selector: use ViewData first, then fall back to cookie
             var activeLab = selectedLab;
             if (string.IsNullOrEmpty(activeLab))
             {
-                var queryLab = Context.Request.Query["lab"].ToString();
-                if (!string.IsNullOrWhiteSpace(queryLab)
-                && availableLabs.Contains(queryLab, StringComparer.OrdinalIgnoreCase))
+                Context.Request.Cookies.TryGetValue("lmd_selected_lab", out var cookieLab);
+                if (!string.IsNullOrWhiteSpace(cookieLab)
+                && availableLabs.Contains(cookieLab, StringComparer.OrdinalIgnoreCase))
                 {
-                    activeLab = queryLab;
+                    activeLab = cookieLab;
                 }
                 else
                 {
-                    Context.Request.Cookies.TryGetValue("lmd_selected_lab", out var cookieLab);
-                    if (!string.IsNullOrWhiteSpace(cookieLab)
-                    && availableLabs.Contains(cookieLab, StringComparer.OrdinalIgnoreCase))
-                    {
-                        activeLab = cookieLab;
-                    }
-                    else
-                    {
-                        activeLab = availableLabs.FirstOrDefault();
-                    }
+                    activeLab = availableLabs.FirstOrDefault();
                 }
             }
 
@@ -749,18 +735,6 @@
                                             <i class="bi bi-table"></i> Executive Summary
                                         </a>
                                     </li> *@
-
-                                    @* <li>
-                                        <a class="dropdown-item" asp-controller="PhiExecutiveSummary" asp-action="Index">
-                                            <i class="bi bi-table"></i> Executive Summary
-                                        </a>
-                                    </li> *@
-
-                                    <li>
-                                        <a class="dropdown-item" asp-controller="ExecutiveSummary" asp-action="Index" data-lab-link="Executive Summary">
-                                            <i class="bi bi-table"></i> Executive Summary
-                                        </a>
-                                    </li>
 
                                     <li><hr class="dropdown-divider" /></li>
                                     <li>

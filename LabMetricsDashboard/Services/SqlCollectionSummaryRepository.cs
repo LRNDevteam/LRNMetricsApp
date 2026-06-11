@@ -190,6 +190,17 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
 
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms",
             spName, rows.Count, sw.ElapsedMilliseconds);
+
+        if (rows.Count > 0)
+        {
+            var firstRow = rows[0];
+            var lastRow = rows[^1];
+            _logger.LogInformation("CollectionSummary[SP] {Sp} first row: WeekKey={WeekKey}, WeekStart={WeekStart:yyyy-MM-dd}, WeekEnd={WeekEnd:yyyy-MM-dd}, Panel={Panel}, Payer={Payer}",
+                spName, firstRow.Week, firstRow.Start, firstRow.End, firstRow.Panel, firstRow.Payer);
+            _logger.LogInformation("CollectionSummary[SP] {Sp} last row: WeekKey={WeekKey}, WeekStart={WeekStart:yyyy-MM-dd}, WeekEnd={WeekEnd:yyyy-MM-dd}, Panel={Panel}, Payer={Payer}",
+                spName, lastRow.Week, lastRow.Start, lastRow.End, lastRow.Panel, lastRow.Payer);
+        }
+
         return BuildWeeklyVolumePivotFromAggregate(rows);
     }
 
@@ -201,6 +212,8 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
     /// Reads PanelAverages data via any SP that returns the standard panel-averages column set
     /// (NoOfClaims, TotalCharges, CarrierPayment, FullyPaidCount/Amount,
     ///  AdjudicatedCount/Amount, Days30/60 Count/Amount) using the standard SP parameter set.
+    /// PCR historically uses the misspelled column names <c>AdjucticatedCount</c> /
+    /// <c>AdjucticatedAmount</c>; both spellings are accepted transparently here.
     /// </summary>
     private async Task<PanelAveragesResult> GetPanelAveragesViaSpAsync(
         string connectionString,
@@ -226,25 +239,55 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             filterDosFrom, filterDosTo,
             filterCheckDateFrom, filterCheckDateTo));
         await using var r = await cmd.ExecuteReaderAsync(ct);
-        while (await r.ReadAsync(ct))
+
+        // Resolve column ordinals once; tolerate the legacy PCR misspelling
+        // (AdjucticatedCount / AdjucticatedAmount) so the reader works against
+        // either SP variant without requiring a redeploy.
+        int? adjCountOrd  = null;
+        int? adjAmountOrd = null;
+        if (await r.ReadAsync(ct))
         {
-            rawRows.Add(new PanelAveragesRawRow(
-                PanelName:         r.GetString(r.GetOrdinal("PanelName")),
-                PayerName:         r.GetString(r.GetOrdinal("PayerName")),
-                ClaimCount:        r.GetInt32  (r.GetOrdinal("NoOfClaims")),
-                TotalCharges:      r.GetDecimal(r.GetOrdinal("TotalCharges")),
-                CarrierPayment:    r.GetDecimal(r.GetOrdinal("CarrierPayment")),
-                FullyPaidCount:    r.GetInt32  (r.GetOrdinal("FullyPaidCount")),
-                FullyPaidAmount:   r.GetDecimal(r.GetOrdinal("FullyPaidAmount")),
-                AdjudicatedCount:  r.GetInt32  (r.GetOrdinal("AdjudicatedCount")),
-                AdjudicatedAmount: r.GetDecimal(r.GetOrdinal("AdjudicatedAmount")),
-                Days30Count:       r.GetInt32  (r.GetOrdinal("Days30Count")),
-                Days30Amount:      r.GetDecimal(r.GetOrdinal("Days30Amount")),
-                Days60Count:       r.GetInt32  (r.GetOrdinal("Days60Count")),
-                Days60Amount:      r.GetDecimal(r.GetOrdinal("Days60Amount"))));
+            adjCountOrd  = TryGetOrdinal(r, "AdjudicatedCount")
+                        ?? TryGetOrdinal(r, "AdjucticatedCount");
+            adjAmountOrd = TryGetOrdinal(r, "AdjudicatedAmount")
+                        ?? TryGetOrdinal(r, "AdjucticatedAmount");
+
+            do
+            {
+                rawRows.Add(new PanelAveragesRawRow(
+                    PanelName:         r.GetString(r.GetOrdinal("PanelName")),
+                    PayerName:         r.GetString(r.GetOrdinal("PayerName")),
+                    ClaimCount:        r.GetInt32  (r.GetOrdinal("NoOfClaims")),
+                    TotalCharges:      r.GetDecimal(r.GetOrdinal("TotalCharges")),
+                    CarrierPayment:    r.GetDecimal(r.GetOrdinal("CarrierPayment")),
+                    FullyPaidCount:    r.GetInt32  (r.GetOrdinal("FullyPaidCount")),
+                    FullyPaidAmount:   r.GetDecimal(r.GetOrdinal("FullyPaidAmount")),
+                    AdjudicatedCount:  adjCountOrd.HasValue  ? r.GetInt32  (adjCountOrd.Value)  : 0,
+                    AdjudicatedAmount: adjAmountOrd.HasValue ? r.GetDecimal(adjAmountOrd.Value) : 0m,
+                    Days30Count:       r.GetInt32  (r.GetOrdinal("Days30Count")),
+                    Days30Amount:      r.GetDecimal(r.GetOrdinal("Days30Amount")),
+                    Days60Count:       r.GetInt32  (r.GetOrdinal("Days60Count")),
+                    Days60Amount:      r.GetDecimal(r.GetOrdinal("Days60Amount"))));
+            }
+            while (await r.ReadAsync(ct));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rawRows.Count, sw.ElapsedMilliseconds);
         return BuildPanelAveragesResult(rawRows);
+    }
+
+    /// <summary>
+    /// Returns the column ordinal for <paramref name="columnName"/> if present,
+    /// otherwise <c>null</c>. Used to read columns whose name may vary between
+    /// SP variants (e.g. PCR's legacy misspelled Adjucticated* columns).
+    /// </summary>
+    private static int? TryGetOrdinal(System.Data.Common.DbDataReader r, string columnName)
+    {
+        for (var i = 0; i < r.FieldCount; i++)
+        {
+            if (string.Equals(r.GetName(i), columnName, StringComparison.OrdinalIgnoreCase))
+                return i;
+        }
+        return null;
     }
 
     /// <summary>
@@ -703,14 +746,27 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
-        // NorthWest and Augustus both route through their own read SPs
-        // (usp_GetNW_CS_MonthlyClaimVolume / usp_GetAug_CS_MonthlyClaimVolume).
+        // NorthWest, Augustus, and Phi_Life all route through their own read SPs
+        // (usp_GetNW_CS_MonthlyClaimVolume / usp_GetAug_CS_MonthlyClaimVolume / usp_GetPhi_CS_MonthlyClaimVolume).
         // The SP receives the 8 filter params + @HasFilter and decides internally
         // whether to return the snapshot or run the live query.
         var monthLabPrefix = LabCollectionPrefix.GetPrefix(rule);
         if (string.Equals(monthLabPrefix, "NW",  StringComparison.OrdinalIgnoreCase) ||
             string.Equals(monthLabPrefix, "Aug", StringComparison.OrdinalIgnoreCase))
+            //||
+            //string.Equals(monthLabPrefix, "Phi", StringComparison.OrdinalIgnoreCase))
         {
+            return await GetCollectionMonthlyVolumeViaSpAsync(
+                connectionString, monthLabPrefix,
+                filterPayerNames, filterPanelNames,
+                filterFirstBillFrom, filterFirstBillTo,
+                filterDosFrom, filterDosTo,
+                filterCheckDateFrom, filterCheckDateTo,
+                ct).ConfigureAwait(false);
+        }
+        else
+        {
+            
             return await GetCollectionMonthlyVolumeViaSpAsync(
                 connectionString, monthLabPrefix,
                 filterPayerNames, filterPanelNames,
@@ -1077,6 +1133,16 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                 filterCheckDateFrom, filterCheckDateTo,
                 ct).ConfigureAwait(false);
         }
+        else
+        {
+            return await GetCollectionWeeklyVolumeViaSpAsync(
+               connectionString, labPrefix,
+               filterPayerNames, filterPanelNames,
+               filterFirstBillFrom, filterFirstBillTo,
+               filterDosFrom, filterDosTo,
+               filterCheckDateFrom, filterCheckDateTo,
+               ct).ConfigureAwait(false);
+        }
 
         var payerSelectExpr = "LTRIM(RTRIM(PayerName))";
 
@@ -1381,14 +1447,35 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         await using var r = await cmd.ExecuteReaderAsync(ct);
         while (await r.ReadAsync(ct))
         {
+            // NorthWest, Augustus, and Phi_Life SPs return PaymentPct column
+            var hasPaymentPctColumn = spName.Contains("NW_CS", StringComparison.OrdinalIgnoreCase) ||
+                                       spName.Contains("Aug_CS", StringComparison.OrdinalIgnoreCase) ||
+                                       spName.Contains("Phi_CS", StringComparison.OrdinalIgnoreCase);
+            decimal? paymentPctFromSp = null;
+            if (hasPaymentPctColumn)
+            {
+                try
+                {
+                    var ordinal = r.GetOrdinal("PaymentPct");
+                    if (!r.IsDBNull(ordinal))
+                        paymentPctFromSp = r.GetDecimal(ordinal);
+                }
+                catch { /* Column doesn't exist - fallback to calculation */ }
+            }
+
             rows.Add(new InsuranceReimbursementRow(
                 Rank:                r.GetByte   (r.GetOrdinal("PayerRank")),
                 PayerName:           r.GetString  (r.GetOrdinal("PayerName")),
                 SumInsurancePayment: r.GetDecimal (r.GetOrdinal("SumInsurancePayment")),
                 SumChargeAmount:     r.GetDecimal (r.GetOrdinal("SumChargeAmount")),
-                UniqueVisitCount:    r.GetInt32   (r.GetOrdinal("UniqueVisitCount"))));
+                UniqueVisitCount:    r.GetInt32   (r.GetOrdinal("UniqueVisitCount")),
+                PaymentPctFromSp:    paymentPctFromSp));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rows.Count, sw.ElapsedMilliseconds);
+
+        // ⚠️ BREAKPOINT HERE - inspect 'rows' to see raw SP data ⚠️
+        var debugBreakpointHere = rows; // Set breakpoint on this line
+
         return new Top5ReimbursementResult(rows);
     }
 
@@ -1448,7 +1535,9 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         // Labs with a dedicated Top5 read SP route through it.
         // The SP handles @HasFilter internally (snapshot vs live).
         var top5Prefix = LabCollectionPrefix.GetPrefix(labName);
-        if (string.Equals(top5Prefix, "Aug", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(top5Prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(top5Prefix, "Aug", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(top5Prefix, "Phi", StringComparison.OrdinalIgnoreCase))
         {
             return await GetTop5ReimbursementViaSpAsync(
                 connectionString, top5Prefix,
@@ -1531,7 +1620,9 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
 
         // Labs with a dedicated Top5 read SP route through it.
         var top5PayPrefix = LabCollectionPrefix.GetPrefix(labName);
-        if (string.Equals(top5PayPrefix, "Aug", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(top5PayPrefix, "NW", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(top5PayPrefix, "Aug", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(top5PayPrefix, "Phi", StringComparison.OrdinalIgnoreCase))
         {
             return await GetTop5TotalPaymentsViaSpAsync(
                 connectionString, top5PayPrefix,
