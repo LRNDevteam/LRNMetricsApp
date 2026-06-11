@@ -241,7 +241,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("3", "Test Entries", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client  Status = [Test Entries]"),
 				new TemplateRow("4", "Self Pay", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client  Status = [Self Pay]"),
 		},
-		["PhiLife"] = new[] {
+		["PhiLifeLegacy"] = new[] {
 				new TemplateRow("", "Total Samples", "Count [Unique Sample ID]"),
 				new TemplateRow("A", "Billable Samples - Resulted", "Resulted / Not = [Resulted]"),
 				new TemplateRow("1", "Billed to Insurance", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Blank AND Billing Review Required]"),
@@ -275,6 +275,38 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("2", "Client Bill", "Resulted / Not = [Not Resulted] AND Claim Status = Not Entered in AMD AND Billed/Not = [UnBilled] AND Client Status = [Client Bill]"),
 				new TemplateRow("3", "No Result date on LIS but Billed", "Resulted / Not = [Not Resulted] AND Claim Status = Billed AND Billed/Not = [Billed]"),
 				new TemplateRow("4", "Test Entries", "Resulted / Not = [Not Resulted] AND Payment Method = Insurance AND Claim Status = Not Entered in AMD AND Billed/Not = [UnBilled] AND Client Status = [Test Entries]"),
+				new TemplateRow("5", "Payment Method No Bill", "Resulted / Not = [Not Resulted] AND Payment Method = [No Bill]"),
+		},
+		["PhiLife"] = new[] {
+				new TemplateRow("", "Total Samples", "Count [Unique Sample ID]"),
+				new TemplateRow("A", "Billable Samples - Resulted", "Resulted / Not = [Resulted]"),
+				new TemplateRow("1", "Billed to Insurance", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Client Status = [Blank]"),
+				new TemplateRow("•", "Billed In AMD", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Client Status = [Blank]"),
+				new TemplateRow("2", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required, Blank] AND Payment Method = [Insurance]"),
+				new TemplateRow("•", "Received", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required] AND Payment Method = [Insurance] AND Sample Status = [Received]"),
+				new TemplateRow("•", "Billing Review Required", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required] AND Payment Method = [Insurance]"),
+				new TemplateRow("•", "Collected", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Payment Method = [Insurance] AND Sample Status = [Collected]"),
+				new TemplateRow("3", "Unbilled", "Resulted / Not = [Resulted] AND Client Status = [Blank] AND Claim Status = [Entered]"),
+				new TemplateRow("4", "Client Bill", "Resulted / Not = [Resulted] AND Client Status = [Client Bill]"),
+				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Client Status = [Client Bill] AND Claim Status = [Not Entered in AMD]"),
+				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Client Status = [Client Bill] AND Claim Status = [Billed]"),
+				new TemplateRow("5", "Self Pay", "Resulted / Not = [Resulted] AND Client Status = [Self Pay]"),
+				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Client Status = [Self Pay] AND Claim Status = [Billed]"),
+				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Client Status = [Self Pay] AND Claim Status = [Not Entered in AMD]"),
+				new TemplateRow("6", "Test Entries", "Resulted / Not = [Resulted] AND Client Status = [Test Entries] AND Payment Method != [No Bill]"),
+				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Client Status = [Test Entries] AND Payment Method != [No Bill] AND Claim Status = [Not Entered in AMD]"),
+				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Client Status = [Test Entries] AND Payment Method != [No Bill] AND Claim Status = [Billed]"),
+				new TemplateRow("7", "Rejected Sample", "Resulted / Not = [Resulted] AND Client Status = [Rejected Sample]"),
+				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Client Status = [Rejected Sample] AND Claim Status = [Not Entered in AMD]"),
+				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Client Status = [Rejected Sample] AND Claim Status = [Billed]"),
+				new TemplateRow("8", "Payment Method No Bill", "Resulted / Not = [Resulted] AND Payment Method = [No Bill]"),
+				new TemplateRow("B", "Not Resulted", "Resulted / Not = [Not Resulted]"),
+				new TemplateRow("1", "Not Entered in AMD", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Payment Method = [Insurance]"),
+				new TemplateRow("•", "Received", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Payment Method = [Insurance] AND Sample Status = [Received]"),
+				new TemplateRow("•", "Collected", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Payment Method = [Insurance] AND Sample Status = [Collected]"),
+				new TemplateRow("2", "Client Bill", "Resulted / Not = [Not Resulted] AND Client Status = [Client Bill]"),
+				new TemplateRow("3", "Test Entries", "Resulted / Not = [Not Resulted] AND Client Status = [Test Entries] AND Payment Method = [Insurance]"),
+				new TemplateRow("4", "Rejected Sample", "Resulted / Not = [Not Resulted] AND Client Status = [Rejected Sample] AND Payment Method = [Insurance]"),
 				new TemplateRow("5", "Payment Method No Bill", "Resulted / Not = [Not Resulted] AND Payment Method = [No Bill]"),
 		},
 		["Rising Tides"] = new[] {
@@ -632,7 +664,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 	private static bool UsesDirectTemplateParentCounts(string logicSheetName)
 		=> logicSheetName.Equals("Augustus", StringComparison.OrdinalIgnoreCase)
 		   || logicSheetName.Equals("Beech Tree", StringComparison.OrdinalIgnoreCase)
-		   || logicSheetName.Equals("Cove", StringComparison.OrdinalIgnoreCase);
+		   || logicSheetName.Equals("Cove", StringComparison.OrdinalIgnoreCase)
+		   || logicSheetName.Equals("PhiLife", StringComparison.OrdinalIgnoreCase);
 
 	private static void RecalculateParentRowsFromChildren(List<LisSummaryRow> rows)
 	{
@@ -695,18 +728,47 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 	{
 		foreach (var condition in SplitConditions(logic))
 		{
-			var parts = condition.Split('=', 2, StringSplitOptions.TrimEntries);
-			if (parts.Length != 2) continue;
+			if (!TryParseCondition(condition, out var fieldName, out var expectedText, out var negate)) continue;
 
-			var field = CanonicalFieldName(parts[0]);
-			var expectedValues = ParseExpectedValues(parts[1]);
+			var field = CanonicalFieldName(fieldName);
+			var expectedValues = ParseExpectedValues(expectedText);
 			if (expectedValues.Count == 0 || expectedValues.Any(v => IsAllValue(v))) continue;
 
 			var actual = GetField(row, field);
-			if (!expectedValues.Any(v => ValueMatches(field, actual, v))) return false;
+			var matches = expectedValues.Any(v => ValueMatches(field, actual, v));
+			if (negate ? matches : !matches) return false;
 		}
 
 		return true;
+	}
+
+	private static bool TryParseCondition(string condition, out string field, out string expectedText, out bool negate)
+	{
+		foreach (var op in new[] { " NOT EQUAL TO ", "!=", "<>" })
+		{
+			var index = condition.IndexOf(op, StringComparison.OrdinalIgnoreCase);
+			if (index >= 0)
+			{
+				field = condition[..index].Trim();
+				expectedText = condition[(index + op.Length)..].Trim();
+				negate = true;
+				return true;
+			}
+		}
+
+		var equalsIndex = condition.IndexOf('=', StringComparison.Ordinal);
+		if (equalsIndex >= 0)
+		{
+			field = condition[..equalsIndex].Trim();
+			expectedText = condition[(equalsIndex + 1)..].Trim();
+			negate = false;
+			return true;
+		}
+
+		field = string.Empty;
+		expectedText = string.Empty;
+		negate = false;
+		return false;
 	}
 
 	private static List<string> SplitConditions(string logic)
@@ -730,8 +792,14 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		}
 
 		result.Add(logic[start..].Trim());
-		return result.Where(x => x.Contains('=')).ToList();
+		return result.Where(ContainsConditionOperator).ToList();
 	}
+
+	private static bool ContainsConditionOperator(string condition)
+		=> condition.Contains('=', StringComparison.Ordinal)
+		   || condition.Contains("!=", StringComparison.Ordinal)
+		   || condition.Contains("<>", StringComparison.Ordinal)
+		   || condition.Contains(" NOT EQUAL TO ", StringComparison.OrdinalIgnoreCase);
 
 	private static List<string> ParseExpectedValues(string valueText)
 	{
@@ -828,6 +896,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 		var c = CleanValue(template.Code);
 		if (string.IsNullOrWhiteSpace(c)) return 0;
+		if (c is "•" or "◦") return 2;
 		if (c is "•" or "◦" or "*") return 2;
 		if (int.TryParse(c, out _)) return 1;
 		return 0;
@@ -1037,7 +1106,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		=> logicSheet.Equals("Beech Tree", StringComparison.OrdinalIgnoreCase);
 
 	private static bool ShouldCountDistinctSampleId(string logicSheet)
-		=> logicSheet.Equals("Cove", StringComparison.OrdinalIgnoreCase);
+		=> logicSheet.Equals("Cove", StringComparison.OrdinalIgnoreCase)
+		   || logicSheet.Equals("PhiLife", StringComparison.OrdinalIgnoreCase);
 
 	private static string[] IncorrectDosCandidatesFor(string logicSheet)
 		=> new[] { "IncorrectDOS", "Incorrect DOS", "Incorrect_DOS", "IncorrectDos" };
