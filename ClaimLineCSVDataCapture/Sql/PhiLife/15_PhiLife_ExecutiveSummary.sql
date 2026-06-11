@@ -1,47 +1,41 @@
 -- ============================================================
--- PhiLife – Executive Summary Aggregate Table + Refresh SP
--- File : 16_PhiLife_ExecutiveSummary_Aggregate.sql
+-- PhiLife – Executive Summary Read SP
+-- File : 15_PhiLife_ExecutiveSummary.sql
 -- DB   : PhiLife_LRN
 --
--- Run order: after ingestion of ClaimLevelData.
--- Called by ClaimLineCSVDataCapture via usp_RefreshPhi_ExecutiveSummary.
+-- Pattern (mirrors Collection Summary):
+--   No filters  → reads Phi_ES_Data aggregate table (instant)
+--   Any filter  → live query on ClaimLevelData
 --
--- Pattern (same as Collection Summary):
---   usp_RefreshPhi_ExecutiveSummary  → populates Phi_ES_Data (full dataset, no filter)
---   usp_GetPhi_ExecutiveSummary      → no filter  → reads Phi_ES_Data (fast)
---                                       with filter → live query on ClaimLevelData
+-- Run 16_PhiLife_ExecutiveSummary_Aggregate.sql first to create
+-- the Phi_ES_Data table and usp_RefreshPhi_ExecutiveSummary.
 -- ============================================================
 SET NOCOUNT ON;
 GO
 
--- ── 1. Aggregate table ────────────────────────────────────────────────────────
-IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Phi_ES_Data')
-CREATE TABLE dbo.Phi_ES_Data
+CREATE OR ALTER PROCEDURE dbo.usp_GetPhi_ExecutiveSummary
 (
-    Id          INT             NOT NULL IDENTITY(1,1) PRIMARY KEY,
-    RowCode     NVARCHAR(10)    NOT NULL,
-    Category    NVARCHAR(100)   NOT NULL,
-    Description NVARCHAR(300)   NOT NULL,
-    BillYear    INT             NOT NULL,
-    BillMonth   INT             NOT NULL,
-    MetricValue DECIMAL(18,2)   NOT NULL DEFAULT 0,
-    RefreshedAt DATETIME        NOT NULL DEFAULT GETDATE()
-);
-GO
-
--- Index for fast no-filter reads
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_Phi_ES_Data_RowYear' AND object_id=OBJECT_ID('dbo.Phi_ES_Data'))
-    CREATE NONCLUSTERED INDEX IX_Phi_ES_Data_RowYear
-        ON dbo.Phi_ES_Data (BillYear, BillMonth, RowCode);
-GO
-
--- ── 2. Refresh SP ─────────────────────────────────────────────────────────────
-CREATE OR ALTER PROCEDURE dbo.usp_RefreshPhi_ExecutiveSummary
+    @YearFrom  INT = NULL,
+    @YearTo    INT = NULL,
+    @MonthFrom INT = NULL,
+    @MonthTo   INT = NULL
+)
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    -- ── Build full working set (no date filter) ──────────────────────────────
+    -- ── No-filter path: serve from pre-computed aggregate table (if populated) ─
+    IF @YearFrom IS NULL AND @YearTo IS NULL AND @MonthFrom IS NULL AND @MonthTo IS NULL
+       AND EXISTS (SELECT 1 FROM dbo.Phi_ES_Data)
+    BEGIN
+        SELECT RowCode, Category, Description, BillYear, BillMonth, MetricValue
+        FROM   dbo.Phi_ES_Data
+        ORDER  BY BillYear, BillMonth, RowCode;
+        RETURN;
+    END;
+    -- Phi_ES_Data is empty (refresh not yet run) → fall through to live query
+
+    -- ── Filtered path: live query on ClaimLevelData ──────────────────────────
     DROP TABLE IF EXISTS #Base;
 
     SELECT
@@ -66,20 +60,17 @@ BEGIN
         END AS IsResulted
     INTO #Base
     FROM dbo.ClaimLevelData
-    WHERE TRY_CAST(DateofService AS DATE) IS NOT NULL;
+    WHERE TRY_CAST(DateofService AS DATE) IS NOT NULL
+      AND (@YearFrom  IS NULL OR YEAR (TRY_CAST(DateofService AS DATE)) >= @YearFrom)
+      AND (@YearTo    IS NULL OR YEAR (TRY_CAST(DateofService AS DATE)) <= @YearTo)
+      AND (@MonthFrom IS NULL OR MONTH(TRY_CAST(DateofService AS DATE)) >= @MonthFrom)
+      AND (@MonthTo   IS NULL OR MONTH(TRY_CAST(DateofService AS DATE)) <= @MonthTo);
 
-    -- ── Periods = all distinct Year/Month + grand-total sentinel (0,0) ───────
     DROP TABLE IF EXISTS #Periods;
     SELECT DISTINCT BillYear, BillMonth INTO #Periods FROM #Base
     UNION ALL SELECT 0, 0;
 
-    -- ── Compute all metrics into staging ─────────────────────────────────────
-    DROP TABLE IF EXISTS #Out;
-
-    SELECT RowCode, Category, Description, BillYear, BillMonth,
-           CAST(MetricValue AS DECIMAL(18,2)) AS MetricValue
-    INTO #Out
-    FROM
+    ;WITH Metrics AS
     (
         SELECT p.BillYear,p.BillMonth,'A' AS RowCode,'LIS' AS Category,'Total Samples' AS Description,CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2)) AS MetricValue FROM #Periods p LEFT JOIN #Base b ON (p.BillYear=0 OR (b.BillYear=p.BillYear AND b.BillMonth=p.BillMonth)) GROUP BY p.BillYear,p.BillMonth
         UNION ALL SELECT p.BillYear,p.BillMonth,'B','LIS','Billable Samples - Resulted',CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2)) FROM #Periods p LEFT JOIN #Base b ON (p.BillYear=0 OR (b.BillYear=p.BillYear AND b.BillMonth=p.BillMonth)) AND b.IsResulted=1 GROUP BY p.BillYear,p.BillMonth
@@ -125,7 +116,6 @@ BEGIN
         UNION ALL SELECT p.BillYear,p.BillMonth,'N','LIS','Test Entries (Not Resulted)',CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2)) FROM #Periods p LEFT JOIN #Base b ON (p.BillYear=0 OR (b.BillYear=p.BillYear AND b.BillMonth=p.BillMonth)) AND b.IsResulted=0 AND b.PayerType='Insurance' AND b.ClaimStatus='Test Entries' GROUP BY p.BillYear,p.BillMonth
         UNION ALL SELECT p.BillYear,p.BillMonth,'O','LIS','Rejected Sample (Not Resulted)',CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2)) FROM #Periods p LEFT JOIN #Base b ON (p.BillYear=0 OR (b.BillYear=p.BillYear AND b.BillMonth=p.BillMonth)) AND b.IsResulted=0 AND b.PayerType='Insurance' AND b.ClaimStatus='Rejected' GROUP BY p.BillYear,p.BillMonth
         UNION ALL SELECT p.BillYear,p.BillMonth,'P','LIS','Payment Method No Bill (Not Resulted)',CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2)) FROM #Periods p LEFT JOIN #Base b ON (p.BillYear=0 OR (b.BillYear=p.BillYear AND b.BillMonth=p.BillMonth)) AND b.IsResulted=0 AND b.PayerType='No Bill' GROUP BY p.BillYear,p.BillMonth
-        -- PMS
         UNION ALL SELECT p.BillYear,p.BillMonth,'Q','PMS','Billed',CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2)) FROM #Periods p LEFT JOIN #Base b ON (p.BillYear=0 OR (b.BillYear=p.BillYear AND b.BillMonth=p.BillMonth)) AND b.BilledUnbilled='Billed' GROUP BY p.BillYear,p.BillMonth
         UNION ALL SELECT p.BillYear,p.BillMonth,'S','PMS','Unbilled',CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2)) FROM #Periods p LEFT JOIN #Base b ON (p.BillYear=0 OR (b.BillYear=p.BillYear AND b.BillMonth=p.BillMonth)) AND b.BilledUnbilled='Unbilled' GROUP BY p.BillYear,p.BillMonth
         UNION ALL SELECT p.BillYear,p.BillMonth,'T','PMS','Fully Paid',CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2)) FROM #Periods p LEFT JOIN #Base b ON (p.BillYear=0 OR (b.BillYear=p.BillYear AND b.BillMonth=p.BillMonth)) AND b.ClaimStatus='Fully Paid' GROUP BY p.BillYear,p.BillMonth
@@ -136,7 +126,6 @@ BEGIN
         UNION ALL SELECT p.BillYear,p.BillMonth,'Y1','PMS','Insurance Balance - No Response',CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2)) FROM #Periods p LEFT JOIN #Base b ON (p.BillYear=0 OR (b.BillYear=p.BillYear AND b.BillMonth=p.BillMonth)) AND b.ClaimStatus='No Response' GROUP BY p.BillYear,p.BillMonth
         UNION ALL SELECT p.BillYear,p.BillMonth,'Y2','PMS','Insurance Balance - Fully Denied',CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2)) FROM #Periods p LEFT JOIN #Base b ON (p.BillYear=0 OR (b.BillYear=p.BillYear AND b.BillMonth=p.BillMonth)) AND b.ClaimStatus='Fully Denied' GROUP BY p.BillYear,p.BillMonth
         UNION ALL SELECT p.BillYear,p.BillMonth,'Y3','PMS','Insurance Balance - Partially Denied',CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2)) FROM #Periods p LEFT JOIN #Base b ON (p.BillYear=0 OR (b.BillYear=p.BillYear AND b.BillMonth=p.BillMonth)) AND b.ClaimStatus='Partially Denied' GROUP BY p.BillYear,p.BillMonth
-        -- Cash
         UNION ALL SELECT p.BillYear,p.BillMonth,'Z','Cash','Total Billed ($)',ISNULL(SUM(b.ChargeAmount),0) FROM #Periods p LEFT JOIN #Base b ON (p.BillYear=0 OR (b.BillYear=p.BillYear AND b.BillMonth=p.BillMonth)) AND b.BilledUnbilled='Billed' GROUP BY p.BillYear,p.BillMonth
         UNION ALL SELECT p.BillYear,p.BillMonth,'AA','Cash','Unbilled ($)',ISNULL(SUM(b.ChargeAmount),0) FROM #Periods p LEFT JOIN #Base b ON (p.BillYear=0 OR (b.BillYear=p.BillYear AND b.BillMonth=p.BillMonth)) AND b.BilledUnbilled='Unbilled' GROUP BY p.BillYear,p.BillMonth
         UNION ALL SELECT p.BillYear,p.BillMonth,'AB','Cash','Insurance Payment - Fully Paid ($)',ISNULL(SUM(b.InsurancePayment),0) FROM #Periods p LEFT JOIN #Base b ON (p.BillYear=0 OR (b.BillYear=p.BillYear AND b.BillMonth=p.BillMonth)) AND b.ClaimStatus='Fully Paid' GROUP BY p.BillYear,p.BillMonth
@@ -146,33 +135,18 @@ BEGIN
         UNION ALL SELECT p.BillYear,p.BillMonth,'AG','Cash','Patient Balance ($)',ISNULL(SUM(b.PatientBalance),0) FROM #Periods p LEFT JOIN #Base b ON (p.BillYear=0 OR (b.BillYear=p.BillYear AND b.BillMonth=p.BillMonth)) AND b.PatientBalance>0 GROUP BY p.BillYear,p.BillMonth
         UNION ALL SELECT p.BillYear,p.BillMonth,'AH','Cash','Patient WO ($)',ISNULL(SUM(b.PatientAdjustments),0) FROM #Periods p LEFT JOIN #Base b ON (p.BillYear=0 OR (b.BillYear=p.BillYear AND b.BillMonth=p.BillMonth)) AND b.PatientAdjustments>0 GROUP BY p.BillYear,p.BillMonth
         UNION ALL SELECT p.BillYear,p.BillMonth,'AI1','Cash','Insurance Balance - Fully Denied ($)',ISNULL(SUM(b.InsuranceBalance),0) FROM #Periods p LEFT JOIN #Base b ON (p.BillYear=0 OR (b.BillYear=p.BillYear AND b.BillMonth=p.BillMonth)) AND b.ClaimStatus='Fully Denied' GROUP BY p.BillYear,p.BillMonth
-        -- Averages
-        UNION ALL SELECT p.BillYear,p.BillMonth,'AJ','Avg','Avg Payment ($) Total Pay / Billed Claims',
-            ISNULL(ROUND(SUM(CASE WHEN b.BilledUnbilled='Billed' THEN b.InsurancePayment ELSE 0 END)/NULLIF(COUNT(DISTINCT CASE WHEN b.BilledUnbilled='Billed' THEN b.AccessionNumber END),0),2),0)
-            FROM #Periods p LEFT JOIN #Base b ON (p.BillYear=0 OR (b.BillYear=p.BillYear AND b.BillMonth=p.BillMonth)) GROUP BY p.BillYear,p.BillMonth
-        UNION ALL SELECT p.BillYear,p.BillMonth,'AK','Avg','Avg Payment ($) Total Pay / Paid Claims',
-            ISNULL(ROUND(SUM(CASE WHEN b.ClaimStatus IN ('Fully Paid','Partially Paid') THEN b.InsurancePayment ELSE 0 END)/NULLIF(COUNT(DISTINCT CASE WHEN b.ClaimStatus IN ('Fully Paid','Partially Paid') THEN b.AccessionNumber END),0),2),0)
-            FROM #Periods p LEFT JOIN #Base b ON (p.BillYear=0 OR (b.BillYear=p.BillYear AND b.BillMonth=p.BillMonth)) GROUP BY p.BillYear,p.BillMonth
-        UNION ALL SELECT p.BillYear,p.BillMonth,'AL','Avg','Avg Payment ($) Total Pay / Adjudicated Claims',
-            ISNULL(ROUND(SUM(CASE WHEN b.ClaimStatus IN ('Fully Paid','Partially Paid','Complete W/O','Fully Adjusted','Fully Denied','Denied','Partially Denied','Patient Responsibility') THEN b.InsurancePayment ELSE 0 END)/NULLIF(COUNT(DISTINCT CASE WHEN b.ClaimStatus IN ('Fully Paid','Partially Paid','Complete W/O','Fully Adjusted','Fully Denied','Denied','Partially Denied','Patient Responsibility') THEN b.AccessionNumber END),0),2),0)
-            FROM #Periods p LEFT JOIN #Base b ON (p.BillYear=0 OR (b.BillYear=p.BillYear AND b.BillMonth=p.BillMonth)) GROUP BY p.BillYear,p.BillMonth
-    ) x;
-
-    -- ── Swap into aggregate table atomically ─────────────────────────────────
-    TRUNCATE TABLE dbo.Phi_ES_Data;
-
-    INSERT INTO dbo.Phi_ES_Data (RowCode, Category, Description, BillYear, BillMonth, MetricValue, RefreshedAt)
-    SELECT RowCode, Category, Description, BillYear, BillMonth, MetricValue, GETDATE()
-    FROM #Out
+        UNION ALL SELECT p.BillYear,p.BillMonth,'AJ','Avg','Avg Payment ($) Total Pay / Billed Claims',ISNULL(ROUND(SUM(CASE WHEN b.BilledUnbilled='Billed' THEN b.InsurancePayment ELSE 0 END)/NULLIF(COUNT(DISTINCT CASE WHEN b.BilledUnbilled='Billed' THEN b.AccessionNumber END),0),2),0) FROM #Periods p LEFT JOIN #Base b ON (p.BillYear=0 OR (b.BillYear=p.BillYear AND b.BillMonth=p.BillMonth)) GROUP BY p.BillYear,p.BillMonth
+        UNION ALL SELECT p.BillYear,p.BillMonth,'AK','Avg','Avg Payment ($) Total Pay / Paid Claims',ISNULL(ROUND(SUM(CASE WHEN b.ClaimStatus IN ('Fully Paid','Partially Paid') THEN b.InsurancePayment ELSE 0 END)/NULLIF(COUNT(DISTINCT CASE WHEN b.ClaimStatus IN ('Fully Paid','Partially Paid') THEN b.AccessionNumber END),0),2),0) FROM #Periods p LEFT JOIN #Base b ON (p.BillYear=0 OR (b.BillYear=p.BillYear AND b.BillMonth=p.BillMonth)) GROUP BY p.BillYear,p.BillMonth
+        UNION ALL SELECT p.BillYear,p.BillMonth,'AL','Avg','Avg Payment ($) Total Pay / Adjudicated Claims',ISNULL(ROUND(SUM(CASE WHEN b.ClaimStatus IN ('Fully Paid','Partially Paid','Complete W/O','Fully Adjusted','Fully Denied','Denied','Partially Denied','Patient Responsibility') THEN b.InsurancePayment ELSE 0 END)/NULLIF(COUNT(DISTINCT CASE WHEN b.ClaimStatus IN ('Fully Paid','Partially Paid','Complete W/O','Fully Adjusted','Fully Denied','Denied','Partially Denied','Patient Responsibility') THEN b.AccessionNumber END),0),2),0) FROM #Periods p LEFT JOIN #Base b ON (p.BillYear=0 OR (b.BillYear=p.BillYear AND b.BillMonth=p.BillMonth)) GROUP BY p.BillYear,p.BillMonth
+    )
+    SELECT RowCode, Category, Description, BillYear, BillMonth, MetricValue
+    FROM Metrics
     ORDER BY BillYear, BillMonth, RowCode;
 
     DROP TABLE IF EXISTS #Base;
     DROP TABLE IF EXISTS #Periods;
-    DROP TABLE IF EXISTS #Out;
-
-    PRINT 'usp_RefreshPhi_ExecutiveSummary completed — ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
 END;
 GO
 
-PRINT '16_PhiLife_ExecutiveSummary_Aggregate.sql completed.';
+PRINT '15_PhiLife_ExecutiveSummary.sql completed.';
 GO

@@ -1,6 +1,5 @@
 @using LabMetricsDashboard.Models
 @inject LabSettings LabSettingsInstance
-@inject IConfiguration Configuration
 <!DOCTYPE html>
 <html lang="en">
 
@@ -521,11 +520,6 @@
 </head>
 
 <body>
-@{
-    var denialReactUrl = Configuration["DenialWorkflowReactUrl"] ?? "http://localhost:5173";
-    var denialReactAgingUrl = denialReactUrl.Contains('#') ? denialReactUrl : $"{denialReactUrl}#aging";
-}
-
 
     <!-- Full-screen loader overlay -->
     <div id="lmd-loader" role="status" aria-live="polite" aria-label="Loading">
@@ -554,33 +548,19 @@
             ? allLabKeys
             : allLabKeys.Where(l => userLabClaims.Contains(l)).ToList();
 
-            // For the navbar lab selector: priority order:
-            //   1. ViewData["SelectedLab"]  — set by most controllers after resolving the lab
-            //   2. ?lab= query parameter    — present immediately on lab switch (before the
-            //                                 response cookie can propagate to the next request)
-            //   3. lmd_selected_lab cookie  — remembered from a prior navigation
-            //   4. First available lab      — final fallback
+            // For the navbar lab selector: use ViewData first, then fall back to cookie
             var activeLab = selectedLab;
             if (string.IsNullOrEmpty(activeLab))
             {
-                var queryLab = Context.Request.Query["lab"].ToString();
-                if (!string.IsNullOrWhiteSpace(queryLab)
-                && availableLabs.Contains(queryLab, StringComparer.OrdinalIgnoreCase))
+                Context.Request.Cookies.TryGetValue("lmd_selected_lab", out var cookieLab);
+                if (!string.IsNullOrWhiteSpace(cookieLab)
+                && availableLabs.Contains(cookieLab, StringComparer.OrdinalIgnoreCase))
                 {
-                    activeLab = queryLab;
+                    activeLab = cookieLab;
                 }
                 else
                 {
-                    Context.Request.Cookies.TryGetValue("lmd_selected_lab", out var cookieLab);
-                    if (!string.IsNullOrWhiteSpace(cookieLab)
-                    && availableLabs.Contains(cookieLab, StringComparer.OrdinalIgnoreCase))
-                    {
-                        activeLab = cookieLab;
-                    }
-                    else
-                    {
-                        activeLab = availableLabs.FirstOrDefault();
-                    }
+                    activeLab = availableLabs.FirstOrDefault();
                 }
             }
 
@@ -682,8 +662,8 @@
                         @if (isArRestricted)
                         {
                             <li class="nav-item">
-                                <a class="nav-link" href="@denialReactAgingUrl" target="_blank" rel="noopener">
-                                    <i class="bi bi-kanban-fill"></i> Denial Workflow <span class="badge text-bg-info ms-1">React</span>
+                                <a class="nav-link active" asp-controller="DenialDashboard" asp-action="Index">
+                                    <i class="bi bi-exclamation-triangle-fill"></i> Denial Dashboard
                                 </a>
                             </li>
                         }
@@ -750,12 +730,6 @@
                                         </a>
                                     </li> *@
 
-                                    <li>
-                                        <a class="dropdown-item" asp-controller="ExecutiveSummary" asp-action="Index" data-lab-link="Executive Summary">
-                                            <i class="bi bi-table"></i> Executive Summary
-                                        </a>
-                                    </li>
-
                                     <li><hr class="dropdown-divider" /></li>
                                     <li>
                                         <a class="dropdown-item" asp-controller="Dashboard" asp-action="ClaimLevel">
@@ -773,12 +747,6 @@
                             <li class="nav-item">
                                 <a class="nav-link" asp-controller="DenialDashboard" asp-action="Index">
                                     <i class="bi bi-exclamation-triangle-fill"></i> Denial Dashboard
-                                </a>
-                            </li>
-
-                            <li class="nav-item">
-                                <a class="nav-link" href="@denialReactAgingUrl" target="_blank" rel="noopener">
-                                    <i class="bi bi-kanban-fill"></i> Denial Workflow
                                 </a>
                             </li>
 
