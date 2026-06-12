@@ -329,7 +329,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("4", "Rejected Sample", "Resulted / Not = [Not Resulted] AND Client Status = [Rejected Sample] AND Payment Method = [Insurance]"),
 				new TemplateRow("5", "Payment Method No Bill", "Resulted / Not = [Not Resulted] AND Payment Method = [No Bill]"),
 		},
-		["Rising Tides"] = new[] {
+		["Rising TidesLegacy"] = new[] {
 				new TemplateRow("", "Total Samples", "Count [Unique Sample ID]"),
 				new TemplateRow("A", "Billable Samples - Resulted", "Resulted / Not = [Resulted]"),
 				new TemplateRow("1", "Billed to Insurance", "Resulted / Not = [Resulted] AND Payment Method = [Insurance] AND Claim Status = [Billed]"),
@@ -355,6 +355,35 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("1", "Not Entered in AMD", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD]"),
 				new TemplateRow("•", "Collected", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Sample Status = [Collected]"),
 				new TemplateRow("2", "Rejected Sample", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Sample Status = [Rejected]"),
+			},
+		["Rising Tides"] = new[] {
+				new TemplateRow("", "Total Samples", "Count [Unique Sample ID]"),
+				new TemplateRow("A", "Billable Samples - Resulted", "Resulted / Not = [Resulted]"),
+				new TemplateRow("1", "Billed to Insurance", "Resulted / Not = [Resulted] AND Payment Method = [Insurance] AND Claim Status = [Billed]"),
+				new TemplateRow("•", "Billed In AMD", "Resulted / Not = [Resulted] AND Payment Method = [Insurance] AND Claim Status = [Billed] AND Billed/Not = [Billed]"),
+				new TemplateRow("2", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required, Blank] AND Payment Method = [Insurance] AND Billing Status != [No Bill]"),
+				new TemplateRow("•", "Received", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required, Blank] AND Payment Method = [Insurance] AND Billing Status != [No Bill] AND Sample Status = [Received]"),
+				new TemplateRow("•", "Billing Review Required", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required, Blank] AND Payment Method = [Insurance] AND Billing Status != [No Bill]"),
+				new TemplateRow("3", "Unbilled", "Resulted / Not = [Resulted] AND Payment Method = [Insurance] AND Claim Status = [Entered] AND Billed/Not = [UnBilled]"),
+				new TemplateRow("4", "Client Bill", "Resulted / Not = [Resulted] AND Payment Method = [Client Bill] AND Claim Status = [Billed, Not Entered in AMD] AND Billed/Not = [Billed, UnBilled] AND Client Status = [Client Bill] AND Billing Status != [No Bill]"),
+				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Payment Method = [Client Bill] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Client Bill] AND Billing Status != [No Bill]"),
+				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Payment Method = [Client Bill] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Client Bill] AND Billing Status != [No Bill]"),
+				new TemplateRow("5", "Self Pay", "Resulted / Not = [Resulted] AND Payment Method = [Self Pay] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [Self Pay] AND Billing Status != [No Bill]"),
+				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Payment Method = [Self Pay] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Self Pay] AND Billing Status != [No Bill]"),
+				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Payment Method = [Self Pay] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Self Pay] AND Billing Status != [No Bill]"),
+				new TemplateRow("•", "Entered", "Resulted / Not = [Resulted] AND Payment Method = [Self Pay] AND Claim Status = [Entered] AND Billed/Not = [UnBilled] AND Client Status = [Self Pay] AND Billing Status != [No Bill]"),
+				new TemplateRow("6", "Test Entries", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Test Entries] AND Billing Status != [No Bill]"),
+				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Test Entries] AND Billing Status != [No Bill]"),
+				new TemplateRow("7", "Billing Status - No Bill", "Resulted / Not = [Resulted] AND Billing Status = [No Bill]"),
+				new TemplateRow("•", "Rejected", "Resulted / Not = [Resulted] AND Billing Status = [No Bill] AND Order Status = [Rejected]"),
+				new TemplateRow("•", "Completed", "Resulted / Not = [Resulted] AND Billing Status = [No Bill] AND Order Status = [Completed]"),
+				new TemplateRow("•", "Recollect Required", "Resulted / Not = [Resulted] AND Billing Status = [No Bill] AND Order Status = [Recollect Required]"),
+				new TemplateRow("B", "Not Resulted", "Resulted / Not = [Not Resulted]"),
+				new TemplateRow("1", "Not Entered in AMD", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank]"),
+				new TemplateRow("•", "Collected", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Sample Status = [Collected]"),
+				new TemplateRow("•", "Received", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Sample Status = [Collected]"),
+				new TemplateRow("2", "Rejected Sample", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Rejected Sample]"),
+				new TemplateRow("3", "Client Bill", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Client Bill]"),
 			},
 	};
 
@@ -684,7 +713,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		   || logicSheetName.Equals("Beech Tree", StringComparison.OrdinalIgnoreCase)
 		   || logicSheetName.Equals("Cove", StringComparison.OrdinalIgnoreCase)
 		   || logicSheetName.Equals("PhiLife", StringComparison.OrdinalIgnoreCase)
-		   || logicSheetName.Equals("Elixir", StringComparison.OrdinalIgnoreCase);
+		   || logicSheetName.Equals("Elixir", StringComparison.OrdinalIgnoreCase)
+		   || logicSheetName.Equals("Rising Tides", StringComparison.OrdinalIgnoreCase);
 
 	private static void RecalculateParentRowsFromChildren(List<LisSummaryRow> rows)
 	{
@@ -1046,8 +1076,11 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		var cleaned = CleanValue(value);
 		var key = CompareKey(cleaned);
 		if (string.IsNullOrWhiteSpace(key)) return string.Empty;
-		if (ContainsAny(key, "UNBILL", "NOTBILL", "NOBILL", "PENDINGBILL", "NOTREADYTOBILL")) return "Unbilled";
-		if (ContainsAny(key, "BILLED", "SUBMITTED", "CHARGECREATED", "CLAIMCREATED", "READYTOBILL")) return "Billed";
+		if (key == "NOBILL") return "No Bill";
+		if (key.Contains("NOTREADYTOBILL", StringComparison.OrdinalIgnoreCase)) return "Not Ready To Bill";
+		if (key.Contains("READYTOBILL", StringComparison.OrdinalIgnoreCase)) return "Ready To Bill";
+		if (ContainsAny(key, "UNBILL", "NOTBILL", "PENDINGBILL")) return "Unbilled";
+		if (ContainsAny(key, "BILLED", "SUBMITTED", "CHARGECREATED", "CLAIMCREATED")) return "Billed";
 		if (ContainsAny(key, "NONBILL", "DONOTBILL", "EXCLUDED")) return "Non Billable";
 		return cleaned;
 	}
