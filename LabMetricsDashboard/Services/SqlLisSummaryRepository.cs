@@ -123,8 +123,23 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			},
 		["Cove"] = new[] {
 				new TemplateRow("A", "Billable", "Final Status = [Billable]"),
+				new TemplateRow("•", "UTI", "Final Status = [Billable] AND Panel Type = [UTI]"),
+				new TemplateRow("•", "Wound", "Final Status = [Billable] AND Panel Type = [Wound]"),
+				new TemplateRow("•", "RPP", "Final Status = [Billable] AND Panel Type = [RPP]"),
+				new TemplateRow("•", "Womens Health", "Final Status = [Billable] AND Panel Type = [Womens Health]"),
+				new TemplateRow("•", "GI", "Final Status = [Billable] AND Panel Type = [GI]"),
+				new TemplateRow("•", "Urinalysis", "Final Status = [Billable] AND Panel Type = [Urinalysis]"),
+				new TemplateRow("•", "Fungus", "Final Status = [Billable] AND Panel Type = [Fungus]"),
+				new TemplateRow("•", "STI", "Final Status = [Billable] AND Panel Type = [STI]"),
+				new TemplateRow("•", "Tox", "Final Status = [Billable] AND Panel Type = [Tox]"),
+				new TemplateRow("•", "Fungus + Wound", "Final Status = [Billable] AND Panel Type = [Fungus + Wound]"),
+				new TemplateRow("•", "PGx", "Final Status = [Billable] AND Panel Type = [PGX]"),
+				new TemplateRow("•", "Neurocognitive", "Final Status = [Billable] AND Panel Type = [Neurocognitive]"),
+				new TemplateRow("•", "Immunodeficiency", "Final Status = [Billable] AND Panel Type = [Immunodeficiency]"),
+				new TemplateRow("•", "CGx", "Final Status = [Billable] AND Panel Type = [CGx]"),
+				new TemplateRow("•", "Unable To Locate", "Final Status = [Billable] AND Panel Type = [Unable To Locate]"),
+				new TemplateRow("•", "Thyroid", "Final Status = [Billable] AND Panel Type = [Thyroid]"),
 				new TemplateRow("1", "Billed", "Final Status = [Billable] AND Billed/Not = [Billed]"),
-				new TemplateRow("•", "No Sub Status", "Final Status = [Billable] AND Billed/Not = [Billed] AND Sub Status = [-]"),
 				new TemplateRow("2", "Not Billed", "Final Status = [Billable] AND Billed/Not = [Not Billed]"),
 				new TemplateRow("•", "Ready To Bill", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Ready To Bill]"),
 				new TemplateRow("•", "Ignored - CP Exception", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Ignored - CP Exception]"),
@@ -150,33 +165,19 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("•", "Ignored - Client Response Non Billiable", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Ignored - Client Response Non Billiable]"),
 				new TemplateRow("B", "System Test", "Final Status = [System Test]"),
 				new TemplateRow("1", "Billed", "Final Status = [System Test] AND Billed/Not = [Billed]"),
-				new TemplateRow("•", "No Sub Status", "Final Status = [System Test] AND Billed/Not = [Billed] AND Sub Status = [-]"),
-				new TemplateRow("2", "Not Billed", "Final Status = [System Test] AND Billed/Not = [Not Billed]"),
-				new TemplateRow("•", "No Sub Status", "Final Status = [System Test] AND Billed/Not = [Not Billed] AND Sub Status = [-]"),
+				new TemplateRow("2", "UnBilled", "Final Status = [System Test] AND Billed/Not = [Unbilled]"),
 				new TemplateRow("C", "Self Pay", "Final Status = [Self Pay]"),
 				new TemplateRow("1", "Billed", "Final Status = [Self Pay] AND Billed/Not = [Billed]"),
-				new TemplateRow("•", "No Sub Status", "Final Status = [Self Pay] AND Billed/Not = [Billed] AND Sub Status = [-]"),
-				new TemplateRow("2", "Not Billed", "Final Status = [Self Pay] AND Billed/Not = [Not Billed]"),
-				new TemplateRow("•", "No Sub Status", "Final Status = [Self Pay] AND Billed/Not = [Not Billed] AND Sub Status = [-]"),
-				new TemplateRow("D", "Deleted / Rejected", "Final Status = [Deleted / Rejected]"),
-				new TemplateRow("1", "Billed", "Final Status = [Deleted / Rejected] AND Billed/Not = [Billed]"),
-				new TemplateRow("•", "No Sub Status", "Final Status = [Deleted / Rejected] AND Billed/Not = [Billed] AND Sub Status = [-]"),
-				new TemplateRow("2", "Not Billed", "Final Status = [Deleted / Rejected] AND Billed/Not = [Not Billed]"),
-				new TemplateRow("•", "No Sub Status", "Final Status = [Deleted / Rejected] AND Billed/Not = [Not Billed] AND Sub Status = [-]"),
+				new TemplateRow("2", "UnBilled", "Final Status = [Self Pay] AND Billed/Not = [Unbilled]"),
+				new TemplateRow("D", "Deleted/Rejected", "Final Status = [Deleted/Rejected]"),
+				new TemplateRow("1", "Billed", "Final Status = [Deleted/Rejected] AND Billed/Not = [Billed]"),
+				new TemplateRow("2", "UnBilled", "Final Status = [Deleted/Rejected] AND Billed/Not = [Unbilled]"),
 				new TemplateRow("E", "Client Bill", "Final Status = [Client Bill]"),
 				new TemplateRow("1", "Billed", "Final Status = [Client Bill] AND Billed/Not = [Billed]"),
-				new TemplateRow("•", "No Sub Status", "Final Status = [Client Bill] AND Billed/Not = [Billed] AND Sub Status = [-]"),
-				new TemplateRow("2", "Not Billed", "Final Status = [Client Bill] AND Billed/Not = [Not Billed]"),
-				new TemplateRow("•", "No Sub Status", "Final Status = [Client Bill] AND Billed/Not = [Not Billed] AND Sub Status = [-]"),
+				new TemplateRow("2", "UnBilled", "Final Status = [Client Bill] AND Billed/Not = [Unbilled]"),
 				new TemplateRow("F", "Yet To Be Validated", "Final Status = [Yet To Be Validated]"),
-				new TemplateRow("1", "Not Billed", "Final Status = [Yet To Be Validated] AND Billed/Not = [Not Billed]"),
-				new TemplateRow("•", "No Sub Status", "Final Status = [Yet To Be Validated] AND Billed/Not = [Not Billed] AND Sub Status = [-]"),
 				new TemplateRow("G", "Ref Lab - Bill Patient", "Final Status = [Ref Lab - Bill Patient]"),
-				new TemplateRow("1", "Not Billed", "Final Status = [Ref Lab - Bill Patient] AND Billed/Not = [Not Billed]"),
-				new TemplateRow("•", "No Sub Status", "Final Status = [Ref Lab - Bill Patient] AND Billed/Not = [Not Billed] AND Sub Status = [-]"),
 				new TemplateRow("H", "Missing Accession", "Final Status = [Missing Accession]"),
-				new TemplateRow("1", "Not Billed", "Final Status = [Missing Accession] AND Billed/Not = [Not Billed]"),
-				new TemplateRow("•", "No Sub Status", "Final Status = [Missing Accession] AND Billed/Not = [Not Billed] AND Sub Status = [-]"),
 			},
 		["Elixir"] = new[] {
 				new TemplateRow("", "Total Samples", "Count [Order ID]"),
@@ -942,14 +943,21 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 	private static int ResolveTemplateLevel(string logicSheetName, TemplateRow template)
 	{
 		if (IsAugustusReadyToBillRow(logicSheetName, template)) return 3;
+		if (IsCoveBillablePanelTypeRow(logicSheetName, template)) return 1;
 
 		var c = CleanValue(template.Code);
 		if (string.IsNullOrWhiteSpace(c)) return 0;
+		if (c is "•" or "◦") return 2;
 		if (c is "•" or "◦") return 2;
 		if (c is "•" or "◦" or "*") return 2;
 		if (int.TryParse(c, out _)) return 1;
 		return 0;
 	}
+
+	private static bool IsCoveBillablePanelTypeRow(string logicSheetName, TemplateRow template)
+		=> logicSheetName.Equals("Cove", StringComparison.OrdinalIgnoreCase)
+		   && template.Logic.Contains("Final Status = [Billable]", StringComparison.OrdinalIgnoreCase)
+		   && template.Logic.Contains("Panel Type =", StringComparison.OrdinalIgnoreCase);
 
 	private static List<LisSummaryRow> BuildDynamicPivotRows(List<RawLisGroup> raw)
 	{
