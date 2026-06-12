@@ -178,6 +178,26 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("1", "Not Billed", "Final Status = [Missing Accession] AND Billed/Not = [Not Billed]"),
 				new TemplateRow("•", "No Sub Status", "Final Status = [Missing Accession] AND Billed/Not = [Not Billed] AND Sub Status = [-]"),
 			},
+		["Elixir"] = new[] {
+				new TemplateRow("", "Total Samples", "Count [Order ID]"),
+				new TemplateRow("A", "Insurance Bill", "Final Status = [Billable]"),
+				new TemplateRow("1", "Billed", "Final Status = [Billable] AND Billed/Not = [Billed]"),
+				new TemplateRow("2", "Not Billed", "Final Status = [Billable] AND Billed/Not = [Not Billed]"),
+				new TemplateRow("•", "Resulted yet to be billed", "Final Status = [Billable] AND Billed/Not = [Not Billed]"),
+				new TemplateRow("B", "Client Bill", "Final Status = [Client Bill]"),
+				new TemplateRow("C", "Self Pay", "Final Status = [Self Pay]"),
+				new TemplateRow("1", "Billed", "Final Status = [Self Pay] AND Billed/Not = [Billed]"),
+				new TemplateRow("D", "System Test", "Final Status = [System Test]"),
+				new TemplateRow("1", "Billed", "Final Status = [System Test] AND Billed/Not = [Billed]"),
+				new TemplateRow("E", "Deleted/Rejected", "Final Status = [Deleted/Rejected]"),
+				new TemplateRow("F", "Yet to be validated", "Final Status = [Yet to be validated]"),
+				new TemplateRow("G", "CIP/Pending", "Final Status = [CIP/Pending]"),
+				new TemplateRow("1", "Billed", "Final Status = [CIP/Pending] AND Billed/Not = [Billed]"),
+				new TemplateRow("•", "Pending Smart PGx", "Final Status = [CIP/Pending] AND Billed/Not = [Billed]"),
+				new TemplateRow("2", "Not Billed", "Final Status = [CIP/Pending] AND Billed/Not = [Not Billed]"),
+				new TemplateRow("•", "SaveForSignature", "Final Status = [CIP/Pending] AND Billed/Not = [Not Billed] AND Payment Method != [Blank]"),
+				new TemplateRow("•", "Missing info", "Final Status = [CIP/Pending] AND Billed/Not = [Not Billed] AND Payment Method = [Blank]"),
+			},
 		["Beech Tree"] = new[] {
 				new TemplateRow("", "Total Samples", "Count [Order ID]"),
 				new TemplateRow("A", "Billable Samples - Resulted", "Resulted / Not = [Resulted]"),
@@ -542,9 +562,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			.Concat(new[] { $"YEAR({dateExpr})", $"MONTH({dateExpr})" })
 			.ToList();
 
-		var countExpr = ShouldCountDistinctSampleId(profile.LogicSheetName) && !string.IsNullOrWhiteSpace(profile.CountDistinctColumn)
-			? $"COUNT(DISTINCT NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(4000), {Q(profile.CountDistinctColumn)}))), ''))"
-			: ShouldCountNonBlankSampleId(profile.LogicSheetName) && !string.IsNullOrWhiteSpace(profile.CountDistinctColumn)
+		var countExpr = !string.IsNullOrWhiteSpace(profile.CountDistinctColumn)
 			? $"COUNT(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(4000), {Q(profile.CountDistinctColumn)}))), ''))"
 			: "COUNT(*)";
 
@@ -665,7 +683,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		=> logicSheetName.Equals("Augustus", StringComparison.OrdinalIgnoreCase)
 		   || logicSheetName.Equals("Beech Tree", StringComparison.OrdinalIgnoreCase)
 		   || logicSheetName.Equals("Cove", StringComparison.OrdinalIgnoreCase)
-		   || logicSheetName.Equals("PhiLife", StringComparison.OrdinalIgnoreCase);
+		   || logicSheetName.Equals("PhiLife", StringComparison.OrdinalIgnoreCase)
+		   || logicSheetName.Equals("Elixir", StringComparison.OrdinalIgnoreCase);
 
 	private static void RecalculateParentRowsFromChildren(List<LisSummaryRow> rows)
 	{
@@ -1101,13 +1120,6 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		"Beech Tree" => new[] { "Accession", "OrderID", "Order ID", "UniqueSampleID", "Unique Sample ID", "SampleID", "Sample ID", "AccessionNumber", "AccessionNo" },
 		_ => new[] { "Accession", "OrderID", "Order ID", "UniqueSampleID", "Unique Sample ID", "SampleID", "Sample ID", "AccessionNumber", "AccessionNo", "SpecimenID", "Specimen ID" }
 	};
-
-	private static bool ShouldCountNonBlankSampleId(string logicSheet)
-		=> logicSheet.Equals("Beech Tree", StringComparison.OrdinalIgnoreCase);
-
-	private static bool ShouldCountDistinctSampleId(string logicSheet)
-		=> logicSheet.Equals("Cove", StringComparison.OrdinalIgnoreCase)
-		   || logicSheet.Equals("PhiLife", StringComparison.OrdinalIgnoreCase);
 
 	private static string[] IncorrectDosCandidatesFor(string logicSheet)
 		=> new[] { "IncorrectDOS", "Incorrect DOS", "Incorrect_DOS", "IncorrectDos" };
