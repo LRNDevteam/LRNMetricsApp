@@ -46,9 +46,9 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("B", "Yet to be validate", "Bill To = Yet to be validate"),
 				new TemplateRow("1", "Billed", "Bill To = Yet to be validate AND Bill Status = Billed"),
 				new TemplateRow("2", "Unbilled", "Bill To = Yet to be validate AND Bill Status = Unbilled"),
-				new TemplateRow("•", "Not Resulted", "Bill To = Insurance Bill AND Bill Status = Unbilled AND Final Status 2 = Not Resulted"),
-				new TemplateRow("•", "Non Billable", "Bill To = Insurance Bill AND Bill Status = Unbilled AND Final Status 2 = Non Billable"),
-				new TemplateRow("•", "Charges Created and Not Submitted", "Bill To = Insurance Bill AND Bill Status = Unbilled AND Final Status 2 = Charges Created and Not Submitted"),
+				new TemplateRow("•", "Not Resulted", "Bill To = Yet to be validate AND Bill Status = Unbilled AND Final Status 2 = Not Resulted"),
+				new TemplateRow("•", "Non Billable", "Bill To = Yet to be validate AND Bill Status = Unbilled AND Final Status 2 = Non Billable"),
+				new TemplateRow("•", "Charges Created and Not Submitted", "Bill To = Yet to be validate AND Bill Status = Unbilled AND Final Status 2 = Charges Created and Not Submitted"),
 				new TemplateRow("C", "Self pay", "Bill To = Self pay"),
 				new TemplateRow("1", "Billed", "Bill To = Self pay AND Bill Status = Billed"),
 				new TemplateRow("2", "Unbilled", "Bill To = Self pay AND Bill Status = Unbilled"),
@@ -242,25 +242,30 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		["PCRLOA"] = new[] {
 				new TemplateRow("", "Total Samples", "Count [Unique Sample ID]"),
 				new TemplateRow("A", "Resulted", "Resulted / Not = [Resulted]"),
-				new TemplateRow("1", "Billed to Insurance", "Resulted / Not = [Resulted] AND Claim Status = [Billed]"),
-				new TemplateRow("◦", "Claims Billed to Payor via AMD", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Billed/Not = [Billed]"),
-				new TemplateRow("2", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Insurance category = [Insurance AND Missing Insurance AND PAID]"),
-				new TemplateRow("•", "Completed", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Order Status = [Completed] AND Client Status = [Billing Review Required AND Blank]"),
-				new TemplateRow("•", "Billing Review Required", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Order Status = [Completed] AND Client Status = [Billing Review Required]"),
-				new TemplateRow("•", "Rejected", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Order Status = [Rejected] AND Client Status = [Rejected Sample]"),
-				new TemplateRow("•", "In Transit", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Order Status = [In Transit] AND Client Status = [Blank]"),
-				new TemplateRow("•", "Partially Resulted", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Order Status = [Partially Resulted] AND Client Status = [Blank]"),
-				new TemplateRow("3", "Client Bill", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client Status = [Client Bill]"),
-				new TemplateRow("4", "Unbilled", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Entered]"),
-				new TemplateRow("◦", "Charges Entered in AMD - Not Released to Payor (EDI Hold)", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Entered]"),
+				new TemplateRow("1", "Billed to Insurance", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Client Status = [Blank]"),
+				new TemplateRow("◦", "Claims Billed to Payor via AMD", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Client Status = [Blank]"),
+				new TemplateRow("2", "Client Bill", "Resulted / Not = [Resulted] AND Client Status = [Client Bill]"),
+				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Client Status = [Client Bill] AND Claim Status = [Billed]"),
+				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Client Status = [Client Bill] AND Claim Status = [Not Entered in AMD]"),
+				new TemplateRow("•", "Entered", "Resulted / Not = [Resulted] AND Client Status = [Client Bill] AND Claim Status = [Entered]"),
+				new TemplateRow("3", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required, Blank]"),
+				new TemplateRow("•", "Completed", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required]"),
+				new TemplateRow("•", "Billing Review Required", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required, Blank] AND Order Status = [Completed]"),
+				new TemplateRow("•", "In Transit", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required, Blank] AND Order Status = [In Transit]"),
+				new TemplateRow("4", "Unbilled", "Resulted / Not = [Resulted] AND Claim Status = [Entered] AND Client Status = [Blank]"),
+				new TemplateRow("◦", "Charges Entered in AMD - Not Released to Payor (EDI Hold)", "Resulted / Not = [Resulted] AND Claim Status = [Entered] AND Client Status = [Blank]"),
 				new TemplateRow("5", "Test Entries", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client Status = [Test Entries]"),
+				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client Status = [Test Entries]"),
+				new TemplateRow("6", "Rejected Sample", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client Status = [Rejected Sample]"),
+				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client Status = [Rejected Sample]"),
 				new TemplateRow("B", "Not Resulted", "Resulted / Not = [Not Resulted]"),
-				new TemplateRow("1", "Not Entered in AMD", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client  Status = [Rejected Sample AND Blank]"),
-				new TemplateRow("•", "In Transit", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client  Status = [Rejected Sample AND Blank] AND Order Status = [In Transit]"),
-				new TemplateRow("•", "Rejected", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client  Status = [Rejected Sample] AND Order Status = [Rejected]"),
+				new TemplateRow("1", "Not Entered in AMD", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank]"),
+				new TemplateRow("•", "In Transit", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Order Status = [In Transit]"),
+				new TemplateRow("•", "Received", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Order Status = [Received]"),
 				new TemplateRow("2", "Client Bill", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client  Status = [Client Bill]"),
 				new TemplateRow("3", "Test Entries", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client  Status = [Test Entries]"),
-				new TemplateRow("4", "Self Pay", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client  Status = [Self Pay]"),
+				new TemplateRow("4", "Rejected Sample", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client  Status = [Rejected Sample]"),
+				new TemplateRow("5", "Self Pay", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client  Status = [Self Pay]"),
 		},
 		["PhiLifeLegacy"] = new[] {
 				new TemplateRow("", "Total Samples", "Count [Unique Sample ID]"),
@@ -382,7 +387,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("B", "Not Resulted", "Resulted / Not = [Not Resulted]"),
 				new TemplateRow("1", "Not Entered in AMD", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank]"),
 				new TemplateRow("•", "Collected", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Sample Status = [Collected]"),
-				new TemplateRow("•", "Received", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Sample Status = [Collected]"),
+				new TemplateRow("•", "Received", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Sample Status = [Received]"),
 				new TemplateRow("2", "Rejected Sample", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Rejected Sample]"),
 				new TemplateRow("3", "Client Bill", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Client Bill]"),
 			},
@@ -593,7 +598,9 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			.ToList();
 
 		var countExpr = !string.IsNullOrWhiteSpace(profile.CountDistinctColumn)
-			? $"COUNT(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(4000), {Q(profile.CountDistinctColumn)}))), ''))"
+			? ShouldUseDistinctSampleCount(profile.LogicSheetName)
+				? $"COUNT(DISTINCT NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(4000), {Q(profile.CountDistinctColumn)}))), ''))"
+				: $"COUNT(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(4000), {Q(profile.CountDistinctColumn)}))), ''))"
 			: "COUNT(*)";
 
 		var sql = $"""
@@ -715,7 +722,11 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		   || logicSheetName.Equals("Cove", StringComparison.OrdinalIgnoreCase)
 		   || logicSheetName.Equals("PhiLife", StringComparison.OrdinalIgnoreCase)
 		   || logicSheetName.Equals("Elixir", StringComparison.OrdinalIgnoreCase)
-		   || logicSheetName.Equals("Rising Tides", StringComparison.OrdinalIgnoreCase);
+		   || logicSheetName.Equals("Rising Tides", StringComparison.OrdinalIgnoreCase)
+		   || logicSheetName.Equals("PCRLOA", StringComparison.OrdinalIgnoreCase);
+
+	private static bool ShouldUseDistinctSampleCount(string logicSheetName)
+		=> logicSheetName.Equals("PCRLOA", StringComparison.OrdinalIgnoreCase);
 
 	private static void RecalculateParentRowsFromChildren(List<LisSummaryRow> rows)
 	{
@@ -1233,7 +1244,11 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 	private static string[] OrderStatusCandidatesFor(string logicSheet) => new[] { "OrderStatus", "Order Status", "SampleStatus", "LRNSampleStatus", "ClientStatus", "FinalStatus", "NewStatus" };
 	private static string[] PanelTypeCandidatesFor(string logicSheet) => new[] { "PanelType", "Panel Type" };
 	private static string[] SubStatusCandidatesFor(string logicSheet) => new[] { "SubStatus", "Sub Status", "ClientStatus", "Client Status" };
-	private static string[] SourceCandidatesFor(string logicSheet) => new[] { "Source", "BillingSource", "Billing Source", "SystemSource" };
+	private static string[] SourceCandidatesFor(string logicSheet) => logicSheet switch
+	{
+		"NWL" => new[] { "SourceSystem", "SystemSource", "Source", "BillingSource", "Billing Source" },
+		_ => new[] { "Source", "BillingSource", "Billing Source", "SystemSource", "SourceSystem" }
+	};
 	private static string[] ChargesNotEnteredCandidatesFor(string logicSheet) => new[] { "ChargesNotEnteredStatus", "Charges not entered status", "ChargesNotEntered", "Charges_Not_Entered_Status" };
 	private static string[] InsuranceCategoryCandidatesFor(string logicSheet) => new[] { "InsuranceCategory", "Insurance category", "InsuranceType", "Category" };
 }
