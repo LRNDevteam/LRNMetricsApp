@@ -253,10 +253,15 @@ public class LisSummaryController : Controller
 	}
 
 	private static string NormalizeLabToken(string value)
-		=> new string((value ?? string.Empty)
+	{
+		var token = new string((value ?? string.Empty)
 			.Where(char.IsLetterOrDigit)
 			.Select(char.ToUpperInvariant)
 			.ToArray());
+		return token.EndsWith("DTR", StringComparison.OrdinalIgnoreCase)
+			? token[..^3]
+			: token;
+	}
 
 	private static string MakeSafeFileName(string value)
 	{

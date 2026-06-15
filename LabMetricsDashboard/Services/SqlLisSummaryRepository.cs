@@ -239,6 +239,32 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("5", "Test Entries", "Resulted / Not = [Not Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [Test Entries]"),
 				new TemplateRow("6", "Rejected Sample", "Resulted / Not = [Not Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [Rejected Sample]"),
 		},
+		["InHealth"] = new[] {
+				new TemplateRow("A", "Billable", "NA = Blank AND LRN Sample Status = Billable"),
+				new TemplateRow("1", "Billed", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Billed"),
+				new TemplateRow("•", "Billed Via AMD", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Billed AND LRN Sub Status = Billed Via AMD"),
+				new TemplateRow("2", "Not Billed", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed"),
+				new TemplateRow("•", "Nexum_Claim_scrubber_Queue_Eligibility", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed AND LRN Sub Status = Nexum_Claim_scrubber_Queue_Eligibility"),
+				new TemplateRow("•", "Entered in AMD but not billed", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed AND LRN Sub Status = Entered in AMD but not billed"),
+				new TemplateRow("•", "Requires Review", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed AND LRN Sub Status = Requires Review"),
+				new TemplateRow("•", "Nexum Pre Processing Queue", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed AND LRN Sub Status = Nexum Pre Processing Queue"),
+				new TemplateRow("•", "Nexum_Claim_scrubber_Queue_AMD Output", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed AND LRN Sub Status = Nexum_Claim_scrubber_Queue_AMD Output"),
+				new TemplateRow("•", "Nexum_Claim_scrubber_Queue_Diagnosis Validity", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed AND LRN Sub Status = Nexum_Claim_scrubber_Queue_Diagnosis Validity"),
+				new TemplateRow("B", "Self Pay", "NA = Blank AND LRN Sample Status = Self Pay"),
+				new TemplateRow("1", "Billed", "NA = Blank AND LRN Sample Status = Self Pay AND LRN Bill Category = Billed"),
+				new TemplateRow("2", "Not Billed", "NA = Blank AND LRN Sample Status = Self Pay AND LRN Bill Category = Not Billed"),
+				new TemplateRow("C", "Other Samples", "NA = Blank AND LRN Sample Status = Other Samples"),
+				new TemplateRow("1", "Billed", "NA = Blank AND LRN Sample Status = Other Samples AND LRN Bill Category = Billed"),
+				new TemplateRow("2", "Not Billed", "NA = Blank AND LRN Sample Status = Other Samples AND LRN Bill Category = Not Billed"),
+				new TemplateRow("•", "Ordered", "NA = Blank AND LRN Sample Status = Other Samples AND LRN Bill Category = Not Billed AND Entry_Status = Ordered"),
+				new TemplateRow("•", "Unpayable Policies", "NA = Blank AND LRN Sample Status = Other Samples AND LRN Bill Category = Not Billed AND Entry_Status = Unpayable Policies"),
+				new TemplateRow("•", "Failed Discovery", "NA = Blank AND LRN Sample Status = Other Samples AND LRN Bill Category = Not Billed AND Entry_Status = Failed Discovery"),
+				new TemplateRow("•", "Waiting for Information", "NA = Blank AND LRN Sample Status = Other Samples AND LRN Bill Category = Not Billed AND Entry_Status = Waiting for Information"),
+				new TemplateRow("•", "Results Posted", "NA = Blank AND LRN Sample Status = Other Samples AND LRN Bill Category = Not Billed AND Entry_Status = Results Posted"),
+				new TemplateRow("D", "System Test", "NA = Blank AND LRN Sample Status = System Test"),
+				new TemplateRow("E", "Deleted/Rejected", "NA = Blank AND LRN Sample Status = Deleted/Rejected"),
+				new TemplateRow("", "Total Samples", "NA = Blank"),
+		},
 		["PCRLOA"] = new[] {
 				new TemplateRow("", "Total Samples", "Count [Unique Sample ID]"),
 				new TemplateRow("A", "Resulted", "Resulted / Not = [Resulted]"),
@@ -524,8 +550,12 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			["Final Status 2"] = FirstExisting(columns, FinalStatus2CandidatesFor(logicSheet)),
 			["Sample Status"] = FirstExisting(columns, SampleStatusCandidatesFor(logicSheet)),
 			["Order Status"] = FirstExisting(columns, OrderStatusCandidatesFor(logicSheet)),
+			["Entry Status"] = FirstExisting(columns, EntryStatusCandidatesFor(logicSheet)),
 			["Panel Type"] = FirstExisting(columns, PanelTypeCandidatesFor(logicSheet)),
 			["Sub Status"] = FirstExisting(columns, SubStatusCandidatesFor(logicSheet)),
+			["LRN Sample Status"] = FirstExisting(columns, SampleStatusCandidatesFor(logicSheet)),
+			["LRN Bill Category"] = FirstExisting(columns, BillCategoryCandidatesFor(logicSheet)),
+			["LRN Sub Status"] = FirstExisting(columns, SubStatusCandidatesFor(logicSheet)),
 			["Source"] = FirstExisting(columns, SourceCandidatesFor(logicSheet)),
 			["Charges not entered status"] = FirstExisting(columns, ChargesNotEnteredCandidatesFor(logicSheet)),
 			["Insurance category"] = FirstExisting(columns, InsuranceCategoryCandidatesFor(logicSheet))
@@ -723,10 +753,12 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		   || logicSheetName.Equals("PhiLife", StringComparison.OrdinalIgnoreCase)
 		   || logicSheetName.Equals("Elixir", StringComparison.OrdinalIgnoreCase)
 		   || logicSheetName.Equals("Rising Tides", StringComparison.OrdinalIgnoreCase)
-		   || logicSheetName.Equals("PCRLOA", StringComparison.OrdinalIgnoreCase);
+		   || logicSheetName.Equals("PCRLOA", StringComparison.OrdinalIgnoreCase)
+		   || logicSheetName.Equals("InHealth", StringComparison.OrdinalIgnoreCase);
 
 	private static bool ShouldUseDistinctSampleCount(string logicSheetName)
-		=> logicSheetName.Equals("PCRLOA", StringComparison.OrdinalIgnoreCase);
+		=> logicSheetName.Equals("PCRLOA", StringComparison.OrdinalIgnoreCase)
+		   || logicSheetName.Equals("InHealth", StringComparison.OrdinalIgnoreCase);
 
 	private static void RecalculateParentRowsFromChildren(List<LisSummaryRow> rows)
 	{
@@ -1049,17 +1081,18 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			"CLAIMSTATUS" => "Claim Status",
 			"BILLSTATUS" => "Bill Status",
 			"BILLINGSTATUS" => "Billing Status",
-			"BILLEDNOT" or "BILLEDORNOT" => "Billed/Not",
+			"BILLEDNOT" or "BILLEDORNOT" or "LRNBILLCATEGORY" => "Billed/Not",
 			"BILLTO" => "Bill To",
 			"PAYMENTMETHOD" => "Payment Method",
 			"CLIENTSTATUS" => "Client Status",
 			"CLIENTSTATUS2" => "Client Status 2",
 			"FINALSTATUS" => "Final Status",
 			"FINALSTATUS2" => "Final Status 2",
-			"SUBSTATUS" or "SUBSTATUS2" => "Sub Status",
+			"SUBSTATUS" or "SUBSTATUS2" or "LRNSUBSTATUS" => "Sub Status",
 			"PANELTYPE" => "Panel Type",
-			"SAMPLESTATUS" => "Sample Status",
+			"SAMPLESTATUS" or "LRNSAMPLESTATUS" => "Sample Status",
 			"ORDERSTATUS" => "Order Status",
+			"ENTRYSTATUS" => "Entry Status",
 			"SOURCE" => "Source",
 			"CHARGESNOTENTEREDSTATUS" or "CHARGESNOTENTERED" => "Charges not entered status",
 			"INSURANCECATEGORY" => "Insurance category",
@@ -1242,6 +1275,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		_ => new[] { "SampleStatus", "Sample Status", "Category", "SubStatus", "LRNSampleStatus", "LRNSubStatus", "InsuranceType" }
 	};
 	private static string[] OrderStatusCandidatesFor(string logicSheet) => new[] { "OrderStatus", "Order Status", "SampleStatus", "LRNSampleStatus", "ClientStatus", "FinalStatus", "NewStatus" };
+	private static string[] EntryStatusCandidatesFor(string logicSheet) => new[] { "EntryStatus", "Entry_Status", "Entry Status", "OrderStatus", "Order Status" };
 	private static string[] PanelTypeCandidatesFor(string logicSheet) => new[] { "PanelType", "Panel Type" };
 	private static string[] SubStatusCandidatesFor(string logicSheet) => new[] { "SubStatus", "Sub Status", "ClientStatus", "Client Status" };
 	private static string[] SourceCandidatesFor(string logicSheet) => logicSheet switch
