@@ -14,6 +14,7 @@ builder.Services.AddScoped<IDenialWorkflowRepository, SqlDenialWorkflowRepositor
 builder.Services.AddScoped<IDenialWorkflowService, DenialWorkflowService>();
 builder.Services.AddScoped<IDenialCodeMasterRepository, SqlDenialCodeMasterRepository>();
 builder.Services.AddScoped<IDenialCodeMasterExcelService, DenialCodeMasterExcelService>();
+builder.Services.AddScoped<IDenialActionChangeVerificationRepository, SqlDenialActionChangeVerificationRepository>();
 builder.Services.AddScoped<IDenialWorkflowIssueNotifier, DenialWorkflowIssueNotifier>();
 builder.Services.AddScoped<IDenialWorkflowSupportService, DenialWorkflowSupportService>();
 builder.Services.AddSingleton<IDenialWorkflowExportJobService, DenialWorkflowExportJobService>();

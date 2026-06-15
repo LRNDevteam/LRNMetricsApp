@@ -95,7 +95,7 @@ public sealed class DenialCodeMasterController : ControllerBase
         var file = request.File;
         if (file is null || file.Length == 0) return BadRequest(new { message = "Select an Excel file." });
         await using var stream = file.OpenReadStream();
-        return Ok(await _excelService.ImportAsync(labId, stream, CurrentUserName(), ct));
+        return Ok(await _excelService.ImportAsync(labId, stream, file.FileName, CurrentUserName(), ct));
     }
 
     [HttpDelete("{denialCode}")]

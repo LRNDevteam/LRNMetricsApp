@@ -64,7 +64,15 @@ export const denialWorkflowService = {
     return api(`/denial-code-master/import?labId=${encodeURIComponent(labId)}`, { method: 'POST', body: form });
   },
   regenerateDenialCodeMasterExcel: (labId) => api(`/denial-code-master/regenerate-export?labId=${encodeURIComponent(labId)}`, { method: 'POST' }),
-  getDenialCodeMasterExportUrl: (labId) => apiUrl(`/denial-code-master/export?labId=${encodeURIComponent(labId)}`)
+  getDenialCodeMasterExportUrl: (labId) => apiUrl(`/denial-code-master/export?labId=${encodeURIComponent(labId)}`),
+  getDenialActionVerification: async (query) => normalizePagedResult(await api(`/denial-action-verification?${qs(query)}`)),
+  getDenialActionVerificationBatch: (labId, batchId) => api(`/denial-action-verification/batch/${encodeURIComponent(batchId)}?labId=${encodeURIComponent(labId)}`),
+  getDenialActionVerificationLookups: (labId) => api(`/denial-action-verification/lookups?labId=${encodeURIComponent(labId)}`),
+  confirmDenialActionVerification: (labId, verificationId) => api(`/denial-action-verification/${encodeURIComponent(verificationId)}/confirm?labId=${encodeURIComponent(labId)}`, { method: 'POST' }),
+  confirmSelectedDenialActionVerification: (labId, verificationIds) => api(`/denial-action-verification/confirm-selected?labId=${encodeURIComponent(labId)}`, { method: 'POST', body: JSON.stringify(verificationIds || []) }),
+  confirmAllDenialActionVerification: (labId, batchId) => api(`/denial-action-verification/batch/${encodeURIComponent(batchId)}/confirm-all?labId=${encodeURIComponent(labId)}`, { method: 'POST' }),
+  ignoreDenialActionVerification: (labId, verificationId) => api(`/denial-action-verification/${encodeURIComponent(verificationId)}/ignore?labId=${encodeURIComponent(labId)}`, { method: 'POST' }),
+  getDenialActionVerificationExportUrl: (query) => apiUrl(`/denial-action-verification/export?${qs(query)}`)
 };
 
 export { qs };

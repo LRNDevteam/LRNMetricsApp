@@ -98,7 +98,29 @@ function EditorModal({ initial, lookups, onClose, onSave }) {
   </div>;
 }
 
-export default function DenialCodeMasterPage({ labId, setMessage }) {
+function ActionWarningModal({ warning, onLater, onReview }) {
+  return <div className="modal-backdrop">
+    <div className="action-warning-modal">
+      <div className="claim-modal-header">
+        <div><div className="claim-modal-title">Assigned Open Claims Affected</div><small>Verification required before assigned task action details are changed.</small></div>
+        <button type="button" className="modal-close" onClick={onLater}><i className="bi bi-x-lg" /></button>
+      </div>
+      <div className="action-warning-body">
+        <p>The uploaded Denial Code Master contains action changes for assigned open claims/tasks. Please verify and confirm before applying the new action details.</p>
+        <div className="action-warning-counts">
+          <div><span>Affected Claims</span><strong>{warning.affectedClaims || warning.AffectedClaims || 0}</strong></div>
+          <div><span>Affected Tasks</span><strong>{warning.affectedTasks || warning.AffectedTasks || 0}</strong></div>
+        </div>
+      </div>
+      <div className="dcm-modal-actions">
+        <button type="button" className="wl-btn" onClick={onLater}>Later</button>
+        <button type="button" className="wl-btn teal" onClick={() => onReview(warning.batchId || warning.BatchId)}>Review Now</button>
+      </div>
+    </div>
+  </div>;
+}
+
+export default function DenialCodeMasterPage({ labId, setMessage, onReviewActionChanges }) {
   const [rows, setRows] = useState([]);
   const [pageInfo, setPageInfo] = useState({ page: 1, totalCount: 0, totalPages: 0 });
   const [search, setSearch] = useState('');
@@ -107,6 +129,7 @@ export default function DenialCodeMasterPage({ labId, setMessage }) {
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [editor, setEditor] = useState(null);
+  const [actionWarning, setActionWarning] = useState(null);
 
   const totalPages = useMemo(() => Number(pageInfo.totalPages || pageInfo.TotalPages || 0), [pageInfo]);
 
@@ -166,6 +189,7 @@ export default function DenialCodeMasterPage({ labId, setMessage }) {
     try {
       const result = await denialWorkflowService.importDenialCodeMaster(labId, file);
       setMessage({ type: result.failedCount ? 'warning' : 'success', text: `Import complete. Inserted: ${result.insertedCount || 0}, updated/replaced: ${result.updatedCount || 0}, skipped: ${result.skippedCount || 0}, failed: ${result.failedCount || 0}.` });
+      if (result.hasActionChangeWarnings || result.HasActionChangeWarnings) setActionWarning(result);
       load(query);
     } catch (err) {
       setMessage({ type: 'danger', text: err.message || 'Import failed.' });
@@ -233,5 +257,6 @@ export default function DenialCodeMasterPage({ labId, setMessage }) {
       <button className="wl-btn xs" disabled={(pageInfo.page || 1) >= Math.max(1, totalPages)} onClick={() => setQuery(q => ({ ...q, page: (q.page || 1) + 1 }))}>Next</button>
     </div>
     {editor && <EditorModal initial={editor.denialCode ? editor : null} lookups={lookups} onClose={() => setEditor(null)} onSave={save} />}
+    {actionWarning && <ActionWarningModal warning={actionWarning} onLater={() => setActionWarning(null)} onReview={(batchId) => { setActionWarning(null); onReviewActionChanges?.(batchId); }} />}
   </section>;
 }
