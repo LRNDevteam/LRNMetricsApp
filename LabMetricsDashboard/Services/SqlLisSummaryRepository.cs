@@ -538,6 +538,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			["Result Status"] = FirstExisting(columns, ResultCandidatesFor(logicSheet)),
 			["ResultedStatus"] = FirstExisting(columns, ResultCandidatesFor(logicSheet)),
 			["Claim Status"] = FirstExisting(columns, ClaimStatusCandidatesFor(logicSheet)),
+			["NA"] = FirstExisting(columns, "NA"),
 			["Bill Status"] = FirstExisting(columns, BillStatusCandidatesFor(logicSheet)),
 			["Billing Status"] = FirstExisting(columns, BillStatusCandidatesFor(logicSheet)),
 			["Billed/Not"] = FirstExisting(columns, BillCategoryCandidatesFor(logicSheet)),
@@ -757,8 +758,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		   || logicSheetName.Equals("InHealth", StringComparison.OrdinalIgnoreCase);
 
 	private static bool ShouldUseDistinctSampleCount(string logicSheetName)
-		=> logicSheetName.Equals("PCRLOA", StringComparison.OrdinalIgnoreCase)
-		   || logicSheetName.Equals("InHealth", StringComparison.OrdinalIgnoreCase);
+		=> logicSheetName.Equals("PCRLOA", StringComparison.OrdinalIgnoreCase);
 
 	private static void RecalculateParentRowsFromChildren(List<LisSummaryRow> rows)
 	{
