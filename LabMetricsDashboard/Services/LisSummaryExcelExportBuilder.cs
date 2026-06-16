@@ -11,13 +11,22 @@ public static class LisSummaryExcelExportBuilder
     private static readonly XLColor BorderColor = XLColor.FromHtml("#AFC4DF");
     private static readonly XLColor SectionBlue = XLColor.FromHtml("#EAF3FF");
 
-    public static XLWorkbook CreateWorkbook(LisSummaryResult result, string labName, DateOnly? collectedFrom, DateOnly? collectedTo)
+    public static XLWorkbook CreateWorkbook(
+        LisSummaryResult result,
+        string labName,
+        string dateType,
+        DateOnly? dateFrom,
+        DateOnly? dateTo,
+        string? panel,
+        string? clinic,
+        string? refPhy,
+        string? salesRep)
     {
         var workbook = new XLWorkbook();
         var worksheetName = CleanSheetName(string.IsNullOrWhiteSpace(result.LogicSheetName) ? "LIS Summary" : result.LogicSheetName);
         var sheet = workbook.Worksheets.Add(worksheetName);
 
-        BuildSummarySheet(sheet, result, labName, collectedFrom, collectedTo);
+        BuildSummarySheet(sheet, result, labName, dateType, dateFrom, dateTo, panel, clinic, refPhy, salesRep);
 
         workbook.Properties.Title = $"LIS Summary - {labName}";
         workbook.Properties.Subject = "LIS Summary";
@@ -25,7 +34,17 @@ public static class LisSummaryExcelExportBuilder
         return workbook;
     }
 
-    private static void BuildSummarySheet(IXLWorksheet sheet, LisSummaryResult result, string labName, DateOnly? collectedFrom, DateOnly? collectedTo)
+    private static void BuildSummarySheet(
+        IXLWorksheet sheet,
+        LisSummaryResult result,
+        string labName,
+        string dateType,
+        DateOnly? dateFrom,
+        DateOnly? dateTo,
+        string? panel,
+        string? clinic,
+        string? refPhy,
+        string? salesRep)
     {
         var monthColumns = BuildMonthColumns(result.Months, result.Years);
 
@@ -33,10 +52,11 @@ public static class LisSummaryExcelExportBuilder
         var firstDataColumn = 3;
         var titleRow = 1;
         var metaStartRow = 2;
-        var sampleNoteRow = 6;
-        var yearHeaderRow = 7;
-        var monthHeaderRow = 8;
-        var dataStartRow = 9;
+        var metaEndRow = 10;
+        var sampleNoteRow = 11;
+        var yearHeaderRow = 12;
+        var monthHeaderRow = 13;
+        var dataStartRow = 14;
 
         var lastColumn = firstDataColumn + monthColumns.Count;
 
@@ -50,17 +70,35 @@ public static class LisSummaryExcelExportBuilder
         sheet.Cell(2, 2).Value = labName;
         sheet.Cell(3, 1).Value = "Logic Sheet";
         sheet.Cell(3, 2).Value = result.LogicSheetName;
-        sheet.Cell(4, 1).Value = "Collected Date";
-        sheet.Cell(4, 2).Value = BuildDateRangeLabel(collectedFrom, collectedTo);
-        sheet.Cell(5, 1).Value = "Top Source File name";
-        sheet.Cell(5, 2).Value = string.IsNullOrWhiteSpace(result.SourceFileName) ? "-" : result.SourceFileName;
+        sheet.Cell(4, 1).Value = "Date Type";
+        sheet.Cell(4, 2).Value = string.IsNullOrWhiteSpace(dateType) ? "Collected" : dateType;
+        sheet.Cell(5, 1).Value = "Date From";
+        sheet.Cell(5, 2).Value = FormatDateFilter(dateFrom);
+        sheet.Cell(6, 1).Value = "Date To";
+        sheet.Cell(6, 2).Value = FormatDateFilter(dateTo);
+        sheet.Cell(7, 1).Value = "Panel";
+        sheet.Cell(7, 2).Value = FormatFilter(panel);
+        sheet.Cell(8, 1).Value = "Clinic";
+        sheet.Cell(8, 2).Value = FormatFilter(clinic);
+        sheet.Cell(9, 1).Value = "Ref Phy";
+        sheet.Cell(9, 2).Value = FormatFilter(refPhy);
+        sheet.Cell(10, 1).Value = "Sales Rep";
+        sheet.Cell(10, 2).Value = FormatFilter(salesRep);
+        sheet.Cell(11, 1).Value = "Top Source File name";
+        sheet.Cell(11, 2).Value = string.IsNullOrWhiteSpace(result.SourceFileName) ? "-" : result.SourceFileName;
 
-        sheet.Range(metaStartRow, 1, 5, 1).Style.Font.Bold = true;
-        sheet.Range(metaStartRow, 1, 5, 2).Style.Fill.BackgroundColor = SectionBlue;
-        sheet.Range(metaStartRow, 1, 5, 2).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-        sheet.Range(metaStartRow, 1, 5, 2).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
-        sheet.Range(metaStartRow, 1, 5, 2).Style.Border.OutsideBorderColor = BorderColor;
-        sheet.Range(metaStartRow, 1, 5, 2).Style.Border.InsideBorderColor = BorderColor;
+        metaEndRow = 11;
+        sampleNoteRow = 12;
+        yearHeaderRow = 13;
+        monthHeaderRow = 14;
+        dataStartRow = 15;
+
+        sheet.Range(metaStartRow, 1, metaEndRow, 1).Style.Font.Bold = true;
+        sheet.Range(metaStartRow, 1, metaEndRow, 2).Style.Fill.BackgroundColor = SectionBlue;
+        sheet.Range(metaStartRow, 1, metaEndRow, 2).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        sheet.Range(metaStartRow, 1, metaEndRow, 2).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+        sheet.Range(metaStartRow, 1, metaEndRow, 2).Style.Border.OutsideBorderColor = BorderColor;
+        sheet.Range(metaStartRow, 1, metaEndRow, 2).Style.Border.InsideBorderColor = BorderColor;
 
         sheet.Cell(sampleNoteRow, 1).Value = "Sample Count = Count [Rows]";
         sheet.Range(sampleNoteRow, 1, sampleNoteRow, Math.Min(lastColumn, 6)).Merge();
@@ -263,13 +301,9 @@ public static class LisSummaryExcelExportBuilder
         return result;
     }
 
-    private static string BuildDateRangeLabel(DateOnly? from, DateOnly? to)
-    {
-        if (from.HasValue && to.HasValue) return $"{from:MM/dd/yyyy} to {to:MM/dd/yyyy}";
-        if (from.HasValue) return $"From {from:MM/dd/yyyy}";
-        if (to.HasValue) return $"Until {to:MM/dd/yyyy}";
-        return "All collected dates";
-    }
+    private static string FormatDateFilter(DateOnly? value) => value?.ToString("MM/dd/yyyy") ?? "All";
+
+    private static string FormatFilter(string? value) => string.IsNullOrWhiteSpace(value) ? "All" : value.Trim();
 
     private static string CleanSheetName(string value)
     {

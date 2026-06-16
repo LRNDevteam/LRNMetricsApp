@@ -33,6 +33,7 @@ public class LisSummaryController : Controller
 		CancellationToken cancellationToken)
 	{
 		filters ??= new LisSummaryFilters();
+		filters.Normalize();
 
 		var availableLabs = GetAvailableLisLabs();
 		var selectedLabName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
@@ -77,12 +78,34 @@ public class LisSummaryController : Controller
 
 		try
 		{
+			var filterOptions = await _lisSummaryRepository.GetFilterOptionsAsync(
+				config.DbConnectionString,
+				cancellationToken);
+
 			var result = await _lisSummaryRepository.GetLisSummaryAsync(
 				config.DbConnectionString,
 				selectedLabOption?.LabName ?? selectedLabName,
 				selectedLabOption?.LabId ?? 0,
-				filters.CollectedFrom,
-				filters.CollectedTo,
+				filters.EffectiveDateType,
+				filters.EffectiveDateFrom,
+				filters.EffectiveDateTo,
+				filters.Panel,
+				filters.Clinic,
+				filters.RefPhy,
+				filters.SalesRep,
+				cancellationToken);
+
+			var lineData = await _lisSummaryRepository.GetLisLineDataAsync(
+				config.DbConnectionString,
+				filters.EffectiveDateType,
+				filters.EffectiveDateFrom,
+				filters.EffectiveDateTo,
+				filters.Panel,
+				filters.Clinic,
+				filters.RefPhy,
+				filters.SalesRep,
+				filters.PageNumber,
+				filters.PageSize,
 				cancellationToken);
 
 			ViewData["SelectedLab"] = selectedLabName;
@@ -93,7 +116,9 @@ public class LisSummaryController : Controller
 				Filters = filters,
 				LabOptions = labOptions,
 				CurrentLabName = selectedLabOption?.LabName ?? selectedLabName,
-				Result = result
+				Result = result,
+				LineData = lineData,
+				FilterOptions = filterOptions
 			});
 		}
 		catch (Exception ex)
@@ -116,6 +141,7 @@ public class LisSummaryController : Controller
 		CancellationToken cancellationToken)
 	{
 		filters ??= new LisSummaryFilters();
+		filters.Normalize();
 
 		var availableLabs = GetAvailableLisLabs();
 		var selectedLabName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
@@ -136,13 +162,7 @@ public class LisSummaryController : Controller
 			|| string.IsNullOrWhiteSpace(config.DbConnectionString))
 		{
 			TempData["LisSummaryError"] = "LIS Summary export is not available for the selected lab.";
-			return RedirectToAction(nameof(Index), new
-			{
-				lab = selectedLabName,
-				LabId = filters.LabId,
-				CollectedFrom = filters.CollectedFrom?.ToString("yyyy-MM-dd"),
-				CollectedTo = filters.CollectedTo?.ToString("yyyy-MM-dd")
-			});
+			return RedirectToAction(nameof(Index), ToRouteValues(selectedLabName, filters));
 		}
 
 		try
@@ -151,47 +171,45 @@ public class LisSummaryController : Controller
 				config.DbConnectionString,
 				selectedLabOption?.LabName ?? selectedLabName,
 				selectedLabOption?.LabId ?? 0,
-				filters.CollectedFrom,
-				filters.CollectedTo,
+				filters.EffectiveDateType,
+				filters.EffectiveDateFrom,
+				filters.EffectiveDateTo,
+				filters.Panel,
+				filters.Clinic,
+				filters.RefPhy,
+				filters.SalesRep,
 				cancellationToken);
 
 			if (result.Rows.Count == 0)
 			{
 				TempData["LisSummaryError"] = $"No LIS Summary data found for export for {selectedLabOption?.LabName ?? selectedLabName}.";
-				return RedirectToAction(nameof(Index), new
-				{
-					lab = selectedLabName,
-					LabId = filters.LabId,
-					CollectedFrom = filters.CollectedFrom?.ToString("yyyy-MM-dd"),
-					CollectedTo = filters.CollectedTo?.ToString("yyyy-MM-dd")
-				});
+				return RedirectToAction(nameof(Index), ToRouteValues(selectedLabName, filters));
 			}
 
 			using var workbook = LisSummaryExcelExportBuilder.CreateWorkbook(
 				result,
 				selectedLabOption?.LabName ?? selectedLabName,
-				filters.CollectedFrom,
-				filters.CollectedTo);
+				filters.EffectiveDateType,
+				filters.EffectiveDateFrom,
+				filters.EffectiveDateTo,
+				filters.Panel,
+				filters.Clinic,
+				filters.RefPhy,
+				filters.SalesRep);
 
 			await using var stream = new MemoryStream();
 			workbook.SaveAs(stream);
 			stream.Position = 0;
 
 			var safeLabName = MakeSafeFileName(selectedLabOption?.LabName ?? selectedLabName);
-			var fileName = $"{safeLabName}_LIS_Summary_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
+			var fileName = $"{safeLabName}_LIS_Summary_{filters.EffectiveDateType}_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
 			return File(stream.ToArray(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
 		}
 		catch (Exception ex)
 		{
 			_logger.LogError(ex, "LIS Summary Excel export failed for lab '{LabName}'.", selectedLabName);
 			TempData["LisSummaryError"] = $"Failed to export LIS Summary: {ex.Message}";
-			return RedirectToAction(nameof(Index), new
-			{
-				lab = selectedLabName,
-				LabId = filters.LabId,
-				CollectedFrom = filters.CollectedFrom?.ToString("yyyy-MM-dd"),
-				CollectedTo = filters.CollectedTo?.ToString("yyyy-MM-dd")
-			});
+			return RedirectToAction(nameof(Index), ToRouteValues(selectedLabName, filters));
 		}
 	}
 
@@ -269,4 +287,21 @@ public class LisSummaryController : Controller
 		var safe = new string(value.Select(ch => invalidChars.Contains(ch) ? '_' : ch).ToArray()).Trim('_');
 		return string.IsNullOrWhiteSpace(safe) ? "Lab" : safe;
 	}
+
+	private static object ToRouteValues(string selectedLabName, LisSummaryFilters filters)
+		=> new
+		{
+			lab = selectedLabName,
+			LabId = filters.LabId,
+			DateType = filters.EffectiveDateType,
+			DateFrom = filters.EffectiveDateFrom?.ToString("yyyy-MM-dd"),
+			DateTo = filters.EffectiveDateTo?.ToString("yyyy-MM-dd"),
+			Panel = filters.Panel,
+			Clinic = filters.Clinic,
+			RefPhy = filters.RefPhy,
+			SalesRep = filters.SalesRep,
+			ActiveTab = filters.EffectiveActiveTab,
+			PageNumber = filters.PageNumber,
+			PageSize = filters.PageSize
+		};
 }

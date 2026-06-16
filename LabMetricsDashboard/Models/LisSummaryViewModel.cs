@@ -47,10 +47,92 @@ public sealed record LisSummaryKpiCards(
     int BilledCount,
     int UnbilledCount,
     int SelfPayCount);
+
+public sealed record LisSummaryFilterOptions(
+    List<string> Panels,
+    List<string> Clinics,
+    List<string> RefPhysicians,
+    List<string> SalesReps);
+
+public sealed record LisLineDataRow(
+    string OrderId,
+    string SampleId,
+    string PaymentMethod,
+    string Barcode,
+    string Specimen,
+    string Collector,
+    string OrderStatus,
+    string BillingStatus,
+    string SampleStatus,
+    DateTime? RequestSubmittedDate,
+    DateTime? RequestCollectDate,
+    DateTime? ReqReceivedDate,
+    DateTime? ReqReportedDate,
+    string ResultedStatus,
+    string ClientStatus,
+    string TimetoResult,
+    string TurnaroundTime,
+    string PerformingLaboratory,
+    string Results,
+    string PatientFirstName,
+    string PatientLastName,
+    DateTime? PatientDateofBirth,
+    string VisitNumber,
+    string AMDDOE,
+    string AMDLBD,
+    string TimetoBill,
+    string ClaimStatus,
+    string BilledorNot,
+    string Provider,
+    string PrimaryInsurance,
+    string PrimaryInsuranceID,
+    string ICD10Codes,
+    string Tests,
+    string PanelCategory);
+
+public sealed record LisLineDataResult(
+    List<LisLineDataRow> Rows,
+    int TotalCount,
+    int PageNumber,
+    int PageSize);
     
 public sealed class LisSummaryFilters
 {
+    private static readonly HashSet<string> AllowedDateTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Collected",
+        "Received",
+        "Resulted"
+    };
+
     public int? LabId { get; set; }
     public DateOnly? CollectedFrom { get; set; }
     public DateOnly? CollectedTo { get; set; }
+    public string DateType { get; set; } = "Collected";
+    public DateOnly? DateFrom { get; set; }
+    public DateOnly? DateTo { get; set; }
+    public string? Panel { get; set; }
+    public string? Clinic { get; set; }
+    public string? RefPhy { get; set; }
+    public string? SalesRep { get; set; }
+    public string? ActiveTab { get; set; } = "summary";
+    public int PageNumber { get; set; } = 1;
+    public int PageSize { get; set; } = 100;
+
+    public string EffectiveDateType
+        => AllowedDateTypes.Contains(DateType ?? string.Empty) ? DateType! : "Collected";
+
+    public DateOnly? EffectiveDateFrom => DateFrom ?? CollectedFrom;
+    public DateOnly? EffectiveDateTo => DateTo ?? CollectedTo;
+    public string EffectiveActiveTab => ActiveTab?.Equals("line", StringComparison.OrdinalIgnoreCase) == true ? "line" : "summary";
+
+    public void Normalize()
+    {
+        DateType = EffectiveDateType;
+        DateFrom ??= CollectedFrom;
+        DateTo ??= CollectedTo;
+        ActiveTab = EffectiveActiveTab;
+        PageNumber = Math.Max(1, PageNumber);
+        PageSize = PageSize is < 10 or > 500 ? 100 : PageSize;
+    }
 }

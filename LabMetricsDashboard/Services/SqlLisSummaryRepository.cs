@@ -19,6 +19,12 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		string? IncorrectDosColumn,
 		Dictionary<string, string?> FieldColumns);
 
+	private sealed record FilterColumnProfile(
+		string? PanelColumn,
+		string? ClinicColumn,
+		string? RefPhyColumn,
+		string? SalesRepColumn);
+
 	private sealed record TemplateRow(string Code, string Description, string Logic);
 
 	private static readonly IReadOnlyDictionary<string, TemplateRow[]> SheetTemplates = new Dictionary<string, TemplateRow[]>(StringComparer.OrdinalIgnoreCase)
@@ -424,8 +430,13 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		string connectionString,
 		string labName,
 		int? labId = null,
-		DateOnly? collectedFrom = null,
-		DateOnly? collectedTo = null,
+		string dateType = "Collected",
+		DateOnly? dateFrom = null,
+		DateOnly? dateTo = null,
+		string? panel = null,
+		string? clinic = null,
+		string? refPhy = null,
+		string? salesRep = null,
 		CancellationToken ct = default)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
@@ -439,9 +450,10 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			throw new InvalidOperationException("dbo.LIMSMaster was not found, or no columns were found in dbo.LIMSMaster.");
 		}
 
-		var profile = ResolveProfile(labName, labId, columns);
+		var profile = ResolveProfile(labName, labId, columns, dateType);
+		var filterColumns = ResolveFilterColumns(columns);
 		var sourceFileName = await GetLatestSourceFileNameAsync(conn, columns, ct);
-		var raw = await LoadDynamicGroupsAsync(conn, profile, collectedFrom, collectedTo, ct);
+		var raw = await LoadDynamicGroupsAsync(conn, profile, filterColumns, dateFrom, dateTo, panel, clinic, refPhy, salesRep, ct);
 		var summaryRaw = UsesBlankIncorrectDosSummary(profile.LogicSheetName)
 			? raw.Where(HasBlankIncorrectDos).ToList()
 			: UsesBlankNaSummary(profile.LogicSheetName)
@@ -529,14 +541,152 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			: Convert.ToString(value)?.Trim() ?? string.Empty;
 	}
 
-	private static DimensionProfile ResolveProfile(string labName, int? labId, HashSet<string> columns)
+	public async Task<LisSummaryFilterOptions> GetFilterOptionsAsync(
+		string connectionString,
+		CancellationToken ct = default)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+		await using var conn = new SqlConnection(connectionString);
+		await conn.OpenAsync(ct);
+
+		var columns = await GetLimsMasterColumnsAsync(conn, ct);
+		var filterColumns = ResolveFilterColumns(columns);
+
+		return new LisSummaryFilterOptions(
+			await LoadFilterValuesAsync(conn, filterColumns.PanelColumn, ct),
+			await LoadFilterValuesAsync(conn, filterColumns.ClinicColumn, ct),
+			await LoadFilterValuesAsync(conn, filterColumns.RefPhyColumn, ct),
+			await LoadFilterValuesAsync(conn, filterColumns.SalesRepColumn, ct));
+	}
+
+	public async Task<LisLineDataResult> GetLisLineDataAsync(
+		string connectionString,
+		string dateType = "Collected",
+		DateOnly? dateFrom = null,
+		DateOnly? dateTo = null,
+		string? panel = null,
+		string? clinic = null,
+		string? refPhy = null,
+		string? salesRep = null,
+		int pageNumber = 1,
+		int pageSize = 100,
+		CancellationToken ct = default)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+		pageNumber = Math.Max(1, pageNumber);
+		pageSize = pageSize is < 10 or > 500 ? 100 : pageSize;
+
+		await using var conn = new SqlConnection(connectionString);
+		await conn.OpenAsync(ct);
+
+		var columns = await GetLimsMasterColumnsAsync(conn, ct);
+		if (columns.Count == 0)
+		{
+			throw new InvalidOperationException("dbo.LIMSMaster was not found, or no columns were found in dbo.LIMSMaster.");
+		}
+
+		var dateColumn = ResolveDateColumn(columns, "Dynamic", dateType);
+		var filterColumns = ResolveFilterColumns(columns);
+		var dateExpr = $"TRY_CONVERT(date, {Q(dateColumn)})";
+		var where = new List<string>
+		{
+			$"{dateExpr} IS NOT NULL",
+			$"YEAR({dateExpr}) > 1900"
+		};
+		var parameters = new List<SqlParameter>();
+
+		if (dateFrom.HasValue)
+		{
+			where.Add($"{dateExpr} >= @fromDate");
+			parameters.Add(new SqlParameter("@fromDate", SqlDbType.Date) { Value = dateFrom.Value.ToDateTime(TimeOnly.MinValue) });
+		}
+
+		if (dateTo.HasValue)
+		{
+			where.Add($"{dateExpr} <= @toDate");
+			parameters.Add(new SqlParameter("@toDate", SqlDbType.Date) { Value = dateTo.Value.ToDateTime(TimeOnly.MinValue) });
+		}
+
+		AddOptionalFilter(where, parameters, filterColumns.PanelColumn, "@panel", panel);
+		AddOptionalFilter(where, parameters, filterColumns.ClinicColumn, "@clinic", clinic);
+		AddOptionalFilter(where, parameters, filterColumns.RefPhyColumn, "@refPhy", refPhy);
+		AddOptionalFilter(where, parameters, filterColumns.SalesRepColumn, "@salesRep", salesRep);
+
+		var whereSql = string.Join(" AND ", where);
+		var selectColumns = LineDataSelectors(columns);
+		var sql = $"""
+			SELECT {string.Join("," + Environment.NewLine + "                   ", selectColumns)}
+			FROM dbo.LIMSMaster WITH (NOLOCK)
+			WHERE {whereSql}
+			ORDER BY {dateExpr} DESC, {OrderByText(columns)}
+			OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY;
+			""";
+
+		var countSql = $"""
+			SELECT COUNT(1)
+			FROM dbo.LIMSMaster WITH (NOLOCK)
+			WHERE {whereSql};
+			""";
+
+		await using var countCmd = new SqlCommand(countSql, conn) { CommandTimeout = 240 };
+		foreach (var p in parameters) countCmd.Parameters.Add(CloneParameter(p));
+		var totalCount = Convert.ToInt32(await countCmd.ExecuteScalarAsync(ct));
+
+		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 240 };
+		foreach (var p in parameters) cmd.Parameters.Add(CloneParameter(p));
+		cmd.Parameters.Add(new SqlParameter("@offset", SqlDbType.Int) { Value = (pageNumber - 1) * pageSize });
+		cmd.Parameters.Add(new SqlParameter("@pageSize", SqlDbType.Int) { Value = pageSize });
+
+		var rows = new List<LisLineDataRow>();
+		await using var rdr = await cmd.ExecuteReaderAsync(ct);
+		while (await rdr.ReadAsync(ct))
+		{
+			rows.Add(new LisLineDataRow(
+				ReadText(rdr, "OrderId"),
+				ReadText(rdr, "SampleId"),
+				ReadText(rdr, "PaymentMethod"),
+				ReadText(rdr, "Barcode"),
+				ReadText(rdr, "Specimen"),
+				ReadText(rdr, "Collector"),
+				ReadText(rdr, "OrderStatus"),
+				ReadText(rdr, "BillingStatus"),
+				ReadText(rdr, "SampleStatus"),
+				ReadDate(rdr, "RequestSubmittedDate"),
+				ReadDate(rdr, "RequestCollectDate"),
+				ReadDate(rdr, "ReqReceivedDate"),
+				ReadDate(rdr, "ReqReportedDate"),
+				ReadText(rdr, "ResultedStatus"),
+				ReadText(rdr, "ClientStatus"),
+				ReadText(rdr, "TimetoResult"),
+				ReadText(rdr, "TurnaroundTime"),
+				ReadText(rdr, "PerformingLaboratory"),
+				ReadText(rdr, "Results"),
+				ReadText(rdr, "PatientFirstName"),
+				ReadText(rdr, "PatientLastName"),
+				ReadDate(rdr, "PatientDateofBirth"),
+				ReadText(rdr, "VisitNumber"),
+				ReadText(rdr, "AMDDOE"),
+				ReadText(rdr, "AMDLBD"),
+				ReadText(rdr, "TimetoBill"),
+				ReadText(rdr, "ClaimStatus"),
+				ReadText(rdr, "BilledorNot"),
+				ReadText(rdr, "Provider"),
+				ReadText(rdr, "PrimaryInsurance"),
+				ReadText(rdr, "PrimaryInsuranceID"),
+				ReadText(rdr, "ICD10Codes"),
+				ReadText(rdr, "Tests"),
+				ReadText(rdr, "PanelCategory")));
+		}
+
+		return new LisLineDataResult(rows, totalCount, pageNumber, pageSize);
+	}
+
+	private static DimensionProfile ResolveProfile(string labName, int? labId, HashSet<string> columns, string dateType)
 	{
 		var logicSheet = ResolveLogicSheet(labName, labId);
-		var dateColumn = FirstExisting(columns, DateCandidatesFor(logicSheet))
-			?? FirstExisting(columns,
-				"RequestCollectDate", "ReqCollectDate", "DateOfCollection", "Entry_DateCreated",
-				"ReceivedDate", "CollectionDate", "CollectedDate", "Collection_Date", "DOS")
-			?? throw new InvalidOperationException("No usable collected-date column was found in dbo.LIMSMaster.");
+		var dateColumn = ResolveDateColumn(columns, logicSheet, dateType);
 
 		var incorrectDosColumn = FirstExisting(columns, IncorrectDosCandidatesFor(logicSheet));
 
@@ -592,8 +742,13 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 	private static async Task<List<RawLisGroup>> LoadDynamicGroupsAsync(
 		SqlConnection conn,
 		DimensionProfile profile,
-		DateOnly? collectedFrom,
-		DateOnly? collectedTo,
+		FilterColumnProfile filterColumns,
+		DateOnly? dateFrom,
+		DateOnly? dateTo,
+		string? panel,
+		string? clinic,
+		string? refPhy,
+		string? salesRep,
 		CancellationToken ct)
 	{
 		var dateExpr = $"TRY_CONVERT(date, {Q(profile.DateColumn)})";
@@ -604,17 +759,22 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		};
 
 		var parameters = new List<SqlParameter>();
-		if (collectedFrom.HasValue)
+		if (dateFrom.HasValue)
 		{
 			where.Add($"{dateExpr} >= @fromDate");
-			parameters.Add(new SqlParameter("@fromDate", SqlDbType.Date) { Value = collectedFrom.Value.ToDateTime(TimeOnly.MinValue) });
+			parameters.Add(new SqlParameter("@fromDate", SqlDbType.Date) { Value = dateFrom.Value.ToDateTime(TimeOnly.MinValue) });
 		}
 
-		if (collectedTo.HasValue)
+		if (dateTo.HasValue)
 		{
 			where.Add($"{dateExpr} <= @toDate");
-			parameters.Add(new SqlParameter("@toDate", SqlDbType.Date) { Value = collectedTo.Value.ToDateTime(TimeOnly.MinValue) });
+			parameters.Add(new SqlParameter("@toDate", SqlDbType.Date) { Value = dateTo.Value.ToDateTime(TimeOnly.MinValue) });
 		}
+
+		AddOptionalFilter(where, parameters, filterColumns.PanelColumn, "@panel", panel);
+		AddOptionalFilter(where, parameters, filterColumns.ClinicColumn, "@clinic", clinic);
+		AddOptionalFilter(where, parameters, filterColumns.RefPhyColumn, "@refPhy", refPhy);
+		AddOptionalFilter(where, parameters, filterColumns.SalesRepColumn, "@salesRep", salesRep);
 
 		if (RequiresBlankIncorrectDos(profile.LogicSheetName) && !string.IsNullOrWhiteSpace(profile.IncorrectDosColumn))
 		{
@@ -675,6 +835,187 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 		return raw;
 	}
+
+	private static string ResolveDateColumn(HashSet<string> columns, string logicSheet, string dateType)
+	{
+		var normalized = NormalizeDateType(dateType);
+		var candidates = new List<string>();
+
+		if (normalized.Equals("Received", StringComparison.OrdinalIgnoreCase))
+		{
+			candidates.AddRange(new[] { "ReqReceivedDate", "ReceivedDate", "RequestReceivedDate" });
+		}
+		else if (normalized.Equals("Resulted", StringComparison.OrdinalIgnoreCase))
+		{
+			candidates.AddRange(new[] { "ReqReportedDate", "ResultDate", "ReportedDate", "ReqResultedDate" });
+		}
+		else
+		{
+			candidates.AddRange(new[] { "RequestCollectDate", "ReqCollectDate", "CollectionDate", "DateOfCollection", "CollectedDate" });
+			candidates.AddRange(DateCandidatesFor(logicSheet));
+		}
+
+		var dateColumn = candidates.Distinct(StringComparer.OrdinalIgnoreCase).FirstOrDefault(columns.Contains);
+		if (!string.IsNullOrWhiteSpace(dateColumn))
+		{
+			return dateColumn;
+		}
+
+		throw new InvalidOperationException($"{DateTypeLabel(normalized)} date column was not found in dbo.LIMSMaster.");
+	}
+
+	private static FilterColumnProfile ResolveFilterColumns(HashSet<string> columns)
+		=> new(
+			FirstExisting(columns, "PanelCategory", "Panel Category", "Panel", "PanelName", "Panel Name", "Tests", "Test", "ActualPanel", "Actual Panel", "PanelType", "Panel Type"),
+			FirstExisting(columns, "Clinic", "ClinicName", "Clinic Name", "ReqLocationName", "REQ_LOCATION_NAME", "Location", "LocationName", "ClientName", "Client Name", "OrganizationName", "ORGANIZATION_NAME"),
+			FirstExisting(columns, "Provider", "RefPhy", "Ref Phy", "ReferringProvider", "Referring Provider", "ReferringPhysician", "Referring Physician", "DoctorFullName", "Doctor Full Name", "DOCTOR_FULL_NAME"),
+			FirstExisting(columns, "SalesRep", "Sales Rep", "SalesRepName", "Sales Rep Name", "SalesRepresentative", "Sales Representative", "SalesRepEmail", "Sales Rep Email"));
+
+	private static async Task<List<string>> LoadFilterValuesAsync(SqlConnection conn, string? column, CancellationToken ct)
+	{
+		if (string.IsNullOrWhiteSpace(column))
+		{
+			return [];
+		}
+
+		var valueExpr = TextExpr(column);
+		var sql = $"""
+			SELECT DISTINCT TOP (1000) {valueExpr} AS [Value]
+			FROM dbo.LIMSMaster WITH (NOLOCK)
+			WHERE {valueExpr} <> ''
+			ORDER BY [Value];
+			""";
+
+		var values = new List<string>();
+		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 120 };
+		await using var rdr = await cmd.ExecuteReaderAsync(ct);
+		while (await rdr.ReadAsync(ct))
+		{
+			values.Add(rdr.GetString(0));
+		}
+
+		return values;
+	}
+
+	private static void AddOptionalFilter(List<string> where, List<SqlParameter> parameters, string? column, string parameterName, string? value)
+	{
+		if (string.IsNullOrWhiteSpace(column) || string.IsNullOrWhiteSpace(value))
+		{
+			return;
+		}
+
+		where.Add($"{TextExpr(column)} = {parameterName}");
+		parameters.Add(new SqlParameter(parameterName, SqlDbType.NVarChar, 4000) { Value = CleanValue(value) });
+	}
+
+	private static SqlParameter CloneParameter(SqlParameter parameter)
+	{
+		var clone = new SqlParameter(parameter.ParameterName, parameter.SqlDbType)
+		{
+			Direction = parameter.Direction,
+			IsNullable = parameter.IsNullable,
+			Precision = parameter.Precision,
+			Scale = parameter.Scale,
+			Size = parameter.Size,
+			Value = parameter.Value
+		};
+		return clone;
+	}
+
+	private static List<string> LineDataSelectors(HashSet<string> columns)
+		=> new()
+		{
+			TextSelect(columns, "OrderId", "OrderId", "OrderID", "Order ID"),
+			TextSelect(columns, "SampleId", "Accession", "SampleId", "SampleID", "Sample ID", "UniqueSampleID", "Unique Sample ID", "OrderId", "OrderID", "Order ID"),
+			TextSelect(columns, "PaymentMethod", "PaymentMethod", "Payment Method", "BillTo", "Bill To", "BilledTo", "Billed To"),
+			TextSelect(columns, "Barcode", "Barcode", "BarCode"),
+			TextSelect(columns, "Specimen", "Specimen", "SpecimenType", "Specimen Type"),
+			TextSelect(columns, "Collector", "Collector", "CollectedBy", "Collected By"),
+			TextSelect(columns, "OrderStatus", "OrderStatus", "Order Status"),
+			TextSelect(columns, "BillingStatus", "BillingStatus", "Billing Status", "BillStatus", "Bill Status"),
+			TextSelect(columns, "SampleStatus", "SampleStatus", "Sample Status", "LRNSampleStatus", "LRN Sample Status"),
+			DateSelect(columns, "RequestSubmittedDate", "RequestSubmittedDate", "Request Submitted Date", "ReqSubmittedDate", "SubmittedDate"),
+			DateSelect(columns, "RequestCollectDate", "RequestCollectDate", "ReqCollectDate", "REQ_COLLECT_DATE", "CollectionDate", "DateOfCollection", "CollectedDate", "Entry_DateCreated"),
+			DateSelect(columns, "ReqReceivedDate", "ReqReceivedDate", "ReceivedDate", "RequestReceivedDate"),
+			DateSelect(columns, "ReqReportedDate", "ReqReportedDate", "ResultDate", "ReportedDate", "ReqResultedDate"),
+			TextSelect(columns, "ResultedStatus", "RessultedStatus", "ResultedStatus", "Result Status", "ResultStatus", "LRNResultStatus"),
+			TextSelect(columns, "ClientStatus", "ClientStatus", "Client Status", "SubStatus", "Sub Status"),
+			TextSelect(columns, "TimetoResult", "TimetoResult", "Time to Result", "TimeToResult"),
+			TextSelect(columns, "TurnaroundTime", "TurnaroundTime", "Turnaround Time", "TAT"),
+			TextSelect(columns, "PerformingLaboratory", "Performing Laboratory", "PerformingLaboratory", "PerformingLab"),
+			TextSelect(columns, "Results", "Results", "Result"),
+			TextSelect(columns, "PatientFirstName", "PatientFirstName", "Patient First Name", "FirstName", "First Name"),
+			TextSelect(columns, "PatientLastName", "PatientLastName", "Patient Last Name", "LastName", "Last Name"),
+			DateSelect(columns, "PatientDateofBirth", "PatientDateofBirth", "Patient Date of Birth", "DOB", "DateOfBirth", "Date of Birth"),
+			TextSelect(columns, "VisitNumber", "VisitNumber", "Visit Number"),
+			TextSelect(columns, "AMDDOE", "AMDDOE", "AMD DOE"),
+			TextSelect(columns, "AMDLBD", "AMDLBD", "AMD LBD"),
+			TextSelect(columns, "TimetoBill", "TimetoBill", "Time to Bill", "TimeToBill"),
+			TextSelect(columns, "ClaimStatus", "ClaimStatus", "Claim Status", "FinalStatus", "Final Status"),
+			TextSelect(columns, "BilledorNot", "BilledorNot", "Billed/Not", "Billed Or Not", "BillCategory", "Bill Category", "LRNBillCategory"),
+			TextSelect(columns, "Provider", "Provider", "RefPhy", "Ref Phy", "ReferringProvider", "Referring Physician", "DoctorFullName", "Doctor Full Name"),
+			TextSelect(columns, "PrimaryInsurance", "PrimaryInsurance", "Primary Insurance", "Insurance", "InsuranceName", "Insurance Name"),
+			TextSelect(columns, "PrimaryInsuranceID", "PrimaryInsuranceID", "Primary Insurance ID", "InsuranceID", "Insurance ID"),
+			TextSelect(columns, "ICD10Codes", "ICD10Codes", "ICD10 Codes", "ICD Codes", "DiagnosisCodes"),
+			TextSelect(columns, "Tests", "Tests", "Test", "Panel", "PanelName"),
+			TextSelect(columns, "PanelCategory", "PanelCategory", "Panel Category", "PanelType", "Panel Type")
+		};
+
+	private static string TextSelect(HashSet<string> columns, string alias, params string[] candidates)
+		=> TextExpr(FirstExisting(columns, candidates), alias);
+
+	private static string DateSelect(HashSet<string> columns, string alias, params string[] candidates)
+	{
+		var column = FirstExisting(columns, candidates);
+		var expr = string.IsNullOrWhiteSpace(column)
+			? "CAST(NULL AS datetime)"
+			: $"TRY_CONVERT(datetime, {Q(column)})";
+		return $"{expr} AS {Q(alias)}";
+	}
+
+	private static string OrderByText(HashSet<string> columns)
+	{
+		var column = FirstExisting(columns, "OrderId", "OrderID", "Order ID", "Accession", "SampleId", "SampleID", "Sample ID");
+		return string.IsNullOrWhiteSpace(column) ? "(SELECT 0)" : Q(column);
+	}
+
+	private static string ReadText(SqlDataReader rdr, string alias)
+	{
+		var ordinal = rdr.GetOrdinal(alias);
+		return rdr.IsDBNull(ordinal) ? string.Empty : Convert.ToString(rdr.GetValue(ordinal))?.Trim() ?? string.Empty;
+	}
+
+	private static DateTime? ReadDate(SqlDataReader rdr, string alias)
+	{
+		var ordinal = rdr.GetOrdinal(alias);
+		if (rdr.IsDBNull(ordinal))
+		{
+			return null;
+		}
+
+		var value = rdr.GetValue(ordinal);
+		if (value is DateTime date)
+		{
+			return date;
+		}
+
+		return DateTime.TryParse(Convert.ToString(value), out var parsed) ? parsed : null;
+	}
+
+	private static string NormalizeDateType(string? dateType)
+		=> dateType?.Trim().Equals("Received", StringComparison.OrdinalIgnoreCase) == true
+			? "Received"
+			: dateType?.Trim().Equals("Resulted", StringComparison.OrdinalIgnoreCase) == true
+				? "Resulted"
+				: "Collected";
+
+	private static string DateTypeLabel(string dateType)
+		=> NormalizeDateType(dateType) switch
+		{
+			"Received" => "Received",
+			"Resulted" => "Resulted",
+			_ => "Collected"
+		};
 
 	private static LisSummaryKpiCards BuildKpiCards(List<RawLisGroup> raw, int totalSamples)
 	{

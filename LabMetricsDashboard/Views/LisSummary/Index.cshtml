@@ -27,6 +27,40 @@
     var logicTemplateCss = string.Empty;
     string DateValue(DateOnly? value) => value?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty;
     string RowCss(int level) => level <= 0 ? "lis-summary-section-row" : level == 1 ? "lis-summary-level-one" : level == 2 ? "lis-summary-level-two" : "lis-summary-level-three";
+    var filters = Model.Filters;
+    var activeTab = filters.EffectiveActiveTab;
+    var lineData = Model.LineData;
+    var totalPages = lineData is null ? 1 : Math.Max(1, (int)Math.Ceiling(lineData.TotalCount / (double)lineData.PageSize));
+    bool IsSelected(string? current, string value) => string.Equals(current, value, StringComparison.OrdinalIgnoreCase);
+    string TabUrl(string tab, int? pageNumber = null) => Url.Action("Index", "LisSummary", new
+    {
+        lab = Model.CurrentLabName,
+        LabId = filters.LabId,
+        DateType = filters.EffectiveDateType,
+        DateFrom = DateValue(filters.EffectiveDateFrom),
+        DateTo = DateValue(filters.EffectiveDateTo),
+        Panel = filters.Panel,
+        Clinic = filters.Clinic,
+        RefPhy = filters.RefPhy,
+        SalesRep = filters.SalesRep,
+        ActiveTab = tab,
+        PageNumber = pageNumber ?? filters.PageNumber,
+        PageSize = filters.PageSize
+    }) ?? "#";
+    string ExportUrl() => Url.Action("ExportToExcel", "LisSummary", new
+    {
+        lab = Model.CurrentLabName,
+        LabId = filters.LabId,
+        DateType = filters.EffectiveDateType,
+        DateFrom = DateValue(filters.EffectiveDateFrom),
+        DateTo = DateValue(filters.EffectiveDateTo),
+        Panel = filters.Panel,
+        Clinic = filters.Clinic,
+        RefPhy = filters.RefPhy,
+        SalesRep = filters.SalesRep,
+        ActiveTab = filters.EffectiveActiveTab
+    }) ?? "#";
+    string FormatDateTime(DateTime? value) => value?.ToString("MM/dd/yyyy", CultureInfo.InvariantCulture) ?? string.Empty;
 }
 
 <style>
@@ -499,6 +533,10 @@
         width: 285px;
     }
 
+    .lis-filter-item-sm {
+        width: 190px;
+    }
+
     .lis-filter-actions {
         display: flex;
         align-items: center;
@@ -522,6 +560,50 @@
             width: 100%;
             flex-wrap: wrap;
         }
+    }
+
+    .lis-tabs {
+        display: inline-flex;
+        gap: .35rem;
+        padding: .3rem;
+        border: 1px solid #d8e2ee;
+        border-radius: .85rem;
+        background: #f6f9fc;
+    }
+
+    .lis-tab {
+        min-height: 36px;
+        padding: .45rem .9rem;
+        border-radius: .6rem;
+        color: #294766;
+        font-weight: 700;
+        text-decoration: none;
+    }
+
+    .lis-tab.active {
+        background: #123b63;
+        color: #fff;
+    }
+
+    .lis-line-table {
+        width: max-content;
+        min-width: 100%;
+        font-size: .78rem;
+        color: #00214d;
+    }
+
+    .lis-line-table th {
+        background: #123b63;
+        color: #fff;
+        white-space: nowrap;
+        position: sticky;
+        top: 0;
+        z-index: 4;
+    }
+
+    .lis-line-table td {
+        white-space: nowrap;
+        vertical-align: middle;
     }
 </style>
 
@@ -549,17 +631,74 @@
 
         <form method="get" asp-action="Index" asp-controller="LisSummary" class="lis-filter-row">
             <input type="hidden" name="lab" value="@Model.CurrentLabName" />
+            <input type="hidden" name="LabId" value="@filters.LabId" />
+            <input type="hidden" name="ActiveTab" value="@activeTab" />
+            <input type="hidden" name="PageNumber" value="1" />
+            <input type="hidden" name="PageSize" value="@filters.PageSize" />
 
-            <div class="lis-filter-item">
-                <label class="form-label">Collected From</label>
-                <input class="form-control filter-select" type="date" name="CollectedFrom"
-                       value="@DateValue(Model.Filters.CollectedFrom)" />
+            <div class="lis-filter-item-sm">
+                <label class="form-label">Date Type</label>
+                <select class="form-select filter-select" name="DateType">
+                    <option value="Collected" selected="@IsSelected(filters.EffectiveDateType, "Collected")">Collected</option>
+                    <option value="Received" selected="@IsSelected(filters.EffectiveDateType, "Received")">Received</option>
+                    <option value="Resulted" selected="@IsSelected(filters.EffectiveDateType, "Resulted")">Resulted</option>
+                </select>
+            </div>
+
+            <div class="lis-filter-item-sm">
+                <label class="form-label">Date From</label>
+                <input class="form-control filter-select" type="date" name="DateFrom"
+                       value="@DateValue(filters.EffectiveDateFrom)" />
+            </div>
+
+            <div class="lis-filter-item-sm">
+                <label class="form-label">Date To</label>
+                <input class="form-control filter-select" type="date" name="DateTo"
+                       value="@DateValue(filters.EffectiveDateTo)" />
             </div>
 
             <div class="lis-filter-item">
-                <label class="form-label">Collected To</label>
-                <input class="form-control filter-select" type="date" name="CollectedTo"
-                       value="@DateValue(Model.Filters.CollectedTo)" />
+                <label class="form-label">Panel</label>
+                <select class="form-select filter-select" name="Panel">
+                    <option value="">All</option>
+                    @foreach (var option in Model.FilterOptions.Panels)
+                    {
+                        <option value="@option" selected="@IsSelected(filters.Panel, option)">@option</option>
+                    }
+                </select>
+            </div>
+
+            <div class="lis-filter-item">
+                <label class="form-label">Clinic</label>
+                <select class="form-select filter-select" name="Clinic">
+                    <option value="">All</option>
+                    @foreach (var option in Model.FilterOptions.Clinics)
+                    {
+                        <option value="@option" selected="@IsSelected(filters.Clinic, option)">@option</option>
+                    }
+                </select>
+            </div>
+
+            <div class="lis-filter-item">
+                <label class="form-label">Ref Phy</label>
+                <select class="form-select filter-select" name="RefPhy">
+                    <option value="">All</option>
+                    @foreach (var option in Model.FilterOptions.RefPhysicians)
+                    {
+                        <option value="@option" selected="@IsSelected(filters.RefPhy, option)">@option</option>
+                    }
+                </select>
+            </div>
+
+            <div class="lis-filter-item">
+                <label class="form-label">Sales Rep</label>
+                <select class="form-select filter-select" name="SalesRep">
+                    <option value="">All</option>
+                    @foreach (var option in Model.FilterOptions.SalesReps)
+                    {
+                        <option value="@option" selected="@IsSelected(filters.SalesRep, option)">@option</option>
+                    }
+                </select>
             </div>
 
             <div class="lis-filter-actions">
@@ -568,11 +707,18 @@
                 </button>
 
                 <a class="btn btn-outline-success rounded-pill px-4"
-                   href="@Url.Action("ExportToExcel", "LisSummary", new { lab = Model.CurrentLabName, LabId = Model.Filters.LabId, CollectedFrom = Model.Filters.CollectedFrom?.ToString("yyyy-MM-dd"), CollectedTo = Model.Filters.CollectedTo?.ToString("yyyy-MM-dd") })">
+                   href="@ExportUrl()">
                     <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
                 </a>
             </div>
         </form>
+
+        <div class="mt-3">
+            <div class="lis-tabs" role="tablist" aria-label="LIS Summary tabs">
+                <a class="lis-tab @(activeTab == "summary" ? "active" : "")" href="@TabUrl("summary", 1)">LIMS Summary</a>
+                <a class="lis-tab @(activeTab == "line" ? "active" : "")" href="@TabUrl("line", 1)">LIMS Line Data</a>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -584,7 +730,7 @@ else if (result is null)
 {
     <div class="alert alert-info border-0 shadow-sm">No LIS Summary data found.</div>
 }
-else
+else if (activeTab == "summary")
 {
     <div class="lis-kpi-grid">
         <div class="lis-kpi-card">
@@ -697,6 +843,120 @@ else
                     </tbody>
                 </table>
             </div>
+        </div>
+    </div>
+}
+else
+{
+    <div class="card border-0 shadow-sm table-card">
+        <div class="card-body">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+                <div>
+                    <div class="section-title">LIMS Line Data</div>
+                    <div class="section-subtitle">@((lineData?.TotalCount ?? 0).ToString("N0")) rows</div>
+                </div>
+                @if (lineData is not null && totalPages > 1)
+                {
+                    <div class="d-flex align-items-center gap-2">
+                        <a class="btn btn-sm btn-outline-primary @(lineData.PageNumber <= 1 ? "disabled" : "")"
+                           href="@TabUrl("line", Math.Max(1, lineData.PageNumber - 1))">Previous</a>
+                        <span class="chip">Page @lineData.PageNumber of @totalPages</span>
+                        <a class="btn btn-sm btn-outline-primary @(lineData.PageNumber >= totalPages ? "disabled" : "")"
+                           href="@TabUrl("line", Math.Min(totalPages, lineData.PageNumber + 1))">Next</a>
+                    </div>
+                }
+            </div>
+
+            @if (lineData is null || lineData.Rows.Count == 0)
+            {
+                <div class="alert alert-info border-0 shadow-sm mb-0">No LIMS line data found for the selected filters.</div>
+            }
+            else
+            {
+                <div class="lis-freeze-scroll">
+                    <table class="table table-sm table-bordered lis-line-table align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Order Id</th>
+                                <th>Sample Id</th>
+                                <th>Payment Method</th>
+                                <th>Barcode</th>
+                                <th>Specimen</th>
+                                <th>Collector</th>
+                                <th>Order Status</th>
+                                <th>Billing Status</th>
+                                <th>Sample Status</th>
+                                <th>Request Submitted Date</th>
+                                <th>Request Collect Date</th>
+                                <th>Req Received Date</th>
+                                <th>Req Reported Date</th>
+                                <th>Resulted Status</th>
+                                <th>Client Status</th>
+                                <th>Time to Result</th>
+                                <th>Turnaround Time</th>
+                                <th>Performing Laboratory</th>
+                                <th>Results</th>
+                                <th>Patient First Name</th>
+                                <th>Patient Last Name</th>
+                                <th>Patient DOB</th>
+                                <th>Visit Number</th>
+                                <th>AMD DOE</th>
+                                <th>AMD LBD</th>
+                                <th>Time to Bill</th>
+                                <th>Claim Status</th>
+                                <th>Billed or Not</th>
+                                <th>Provider</th>
+                                <th>Primary Insurance</th>
+                                <th>Primary Insurance ID</th>
+                                <th>ICD10 Codes</th>
+                                <th>Tests</th>
+                                <th>Panel Category</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in lineData.Rows)
+                            {
+                                <tr>
+                                    <td>@row.OrderId</td>
+                                    <td>@row.SampleId</td>
+                                    <td>@row.PaymentMethod</td>
+                                    <td>@row.Barcode</td>
+                                    <td>@row.Specimen</td>
+                                    <td>@row.Collector</td>
+                                    <td>@row.OrderStatus</td>
+                                    <td>@row.BillingStatus</td>
+                                    <td>@row.SampleStatus</td>
+                                    <td>@FormatDateTime(row.RequestSubmittedDate)</td>
+                                    <td>@FormatDateTime(row.RequestCollectDate)</td>
+                                    <td>@FormatDateTime(row.ReqReceivedDate)</td>
+                                    <td>@FormatDateTime(row.ReqReportedDate)</td>
+                                    <td>@row.ResultedStatus</td>
+                                    <td>@row.ClientStatus</td>
+                                    <td>@row.TimetoResult</td>
+                                    <td>@row.TurnaroundTime</td>
+                                    <td>@row.PerformingLaboratory</td>
+                                    <td>@row.Results</td>
+                                    <td>@row.PatientFirstName</td>
+                                    <td>@row.PatientLastName</td>
+                                    <td>@FormatDateTime(row.PatientDateofBirth)</td>
+                                    <td>@row.VisitNumber</td>
+                                    <td>@row.AMDDOE</td>
+                                    <td>@row.AMDLBD</td>
+                                    <td>@row.TimetoBill</td>
+                                    <td>@row.ClaimStatus</td>
+                                    <td>@row.BilledorNot</td>
+                                    <td>@row.Provider</td>
+                                    <td>@row.PrimaryInsurance</td>
+                                    <td>@row.PrimaryInsuranceID</td>
+                                    <td>@row.ICD10Codes</td>
+                                    <td>@row.Tests</td>
+                                    <td>@row.PanelCategory</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
         </div>
     </div>
 }
