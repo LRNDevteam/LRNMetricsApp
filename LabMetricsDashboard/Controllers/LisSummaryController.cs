@@ -294,6 +294,7 @@ public class LisSummaryController : Controller
 			lab = selectedLabName,
 			LabId = filters.LabId,
 			DateType = filters.EffectiveDateType,
+			DateRange = filters.EffectiveDateRange,
 			DateFrom = filters.EffectiveDateFrom?.ToString("yyyy-MM-dd"),
 			DateTo = filters.EffectiveDateTo?.ToString("yyyy-MM-dd"),
 			Panel = filters.Panel,

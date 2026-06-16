@@ -32,11 +32,25 @@
     var lineData = Model.LineData;
     var totalPages = lineData is null ? 1 : Math.Max(1, (int)Math.Ceiling(lineData.TotalCount / (double)lineData.PageSize));
     bool IsSelected(string? current, string value) => string.Equals(current, value, StringComparison.OrdinalIgnoreCase);
+    List<string> SelectedValues(string? value) => (value ?? string.Empty)
+        .Split(['|'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
+    bool IsMultiSelected(string? current, string value) => SelectedValues(current).Contains(value, StringComparer.OrdinalIgnoreCase);
+    string ClearFiltersUrl() => Url.Action("Index", "LisSummary", new
+    {
+        lab = Model.CurrentLabName,
+        LabId = filters.LabId,
+        ActiveTab = activeTab,
+        PageNumber = 1,
+        PageSize = filters.PageSize
+    }) ?? "#";
     string TabUrl(string tab, int? pageNumber = null) => Url.Action("Index", "LisSummary", new
     {
         lab = Model.CurrentLabName,
         LabId = filters.LabId,
         DateType = filters.EffectiveDateType,
+        DateRange = filters.EffectiveDateRange,
         DateFrom = DateValue(filters.EffectiveDateFrom),
         DateTo = DateValue(filters.EffectiveDateTo),
         Panel = filters.Panel,
@@ -46,19 +60,6 @@
         ActiveTab = tab,
         PageNumber = pageNumber ?? filters.PageNumber,
         PageSize = filters.PageSize
-    }) ?? "#";
-    string ExportUrl() => Url.Action("ExportToExcel", "LisSummary", new
-    {
-        lab = Model.CurrentLabName,
-        LabId = filters.LabId,
-        DateType = filters.EffectiveDateType,
-        DateFrom = DateValue(filters.EffectiveDateFrom),
-        DateTo = DateValue(filters.EffectiveDateTo),
-        Panel = filters.Panel,
-        Clinic = filters.Clinic,
-        RefPhy = filters.RefPhy,
-        SalesRep = filters.SalesRep,
-        ActiveTab = filters.EffectiveActiveTab
     }) ?? "#";
     string FormatDateTime(DateTime? value) => value?.ToString("MM/dd/yyyy", CultureInfo.InvariantCulture) ?? string.Empty;
 }
@@ -522,43 +523,234 @@
         font-weight: 900;
     }
 
+    .lis-filter-shell .card-body {
+        padding: 1.05rem 1.25rem .95rem;
+    }
+
+    .lis-filter-header {
+        padding-bottom: .8rem;
+        border-bottom: 1px solid #e5edf6;
+    }
+
     .lis-filter-row {
-        display: flex;
+        display: grid;
+        grid-template-columns: repeat(12, minmax(0, 1fr));
+        gap: .72rem .9rem;
         align-items: end;
-        gap: 1rem;
-        flex-wrap: wrap;
+    }
+
+    .lis-filter-item,
+    .lis-filter-item-sm {
+        min-width: 0;
     }
 
     .lis-filter-item {
-        width: 285px;
+        grid-column: span 3;
     }
 
     .lis-filter-item-sm {
-        width: 190px;
+        grid-column: span 2;
+    }
+
+    .lis-filter-item-range {
+        grid-column: span 2;
+    }
+
+    .lis-custom-date {
+        grid-column: span 2;
+    }
+
+    .lis-custom-date.is-hidden {
+        display: none;
+    }
+
+    .lis-filter-row .form-label {
+        margin-bottom: .3rem;
+        color: #233f5d;
+        font-size: .8rem;
+        font-weight: 700;
+    }
+
+    .filter-select {
+        border-color: #cfdded;
+        border-radius: .6rem;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, .03);
+        color: #0f2947;
+        font-size: .86rem;
+        min-height: 38px;
+        padding-top: .42rem;
+        padding-bottom: .42rem;
+    }
+
+    .filter-select:focus {
+        border-color: #6aa5e8;
+        box-shadow: 0 0 0 .2rem rgba(13, 110, 253, .12);
     }
 
     .lis-filter-actions {
+        grid-column: span 6;
         display: flex;
         align-items: center;
-        gap: .75rem;
-        padding-bottom: 1px;
+        gap: .6rem;
+        padding-top: 0;
     }
 
-        .lis-filter-actions .btn {
-            height: 42px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
+    .lis-filter-actions .btn,
+    .lis-pager .btn {
+        min-height: 38px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: .25rem;
+        font-weight: 700;
+        font-size: .86rem;
+    }
+
+    .lis-filter-actions .btn {
+        min-width: 128px;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+    }
+
+    .lis-ms {
+        position: relative;
+        min-width: 0;
+    }
+
+    .lis-ms-btn {
+        width: 100%;
+        min-height: 38px;
+        border: 1px solid #cfdded;
+        border-radius: .6rem;
+        background: #fff;
+        color: #0f2947;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: .5rem;
+        padding: .42rem .7rem;
+        font-size: .86rem;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, .03);
+    }
+
+    .lis-ms-btn:focus {
+        border-color: #6aa5e8;
+        box-shadow: 0 0 0 .2rem rgba(13, 110, 253, .12);
+        outline: 0;
+    }
+
+    .lis-ms-label {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .lis-ms-caret {
+        color: #4d6682;
+        flex: 0 0 auto;
+        font-size: .75rem;
+    }
+
+    .lis-ms-panel {
+        display: none;
+        position: absolute;
+        z-index: 120;
+        top: calc(100% + .35rem);
+        left: 0;
+        right: 0;
+        min-width: 260px;
+        max-height: 310px;
+        padding: .55rem;
+        border: 1px solid #cfdceb;
+        border-radius: .7rem;
+        background: #fff;
+        box-shadow: 0 14px 34px rgba(15, 23, 42, .16);
+    }
+
+    .lis-ms-panel.open {
+        display: block;
+    }
+
+    .lis-ms-search {
+        min-height: 34px;
+        margin-bottom: .45rem;
+        border-radius: .55rem;
+        font-size: .84rem;
+    }
+
+    .lis-ms-list {
+        max-height: 220px;
+        overflow: auto;
+        padding-right: .1rem;
+    }
+
+    .lis-ms-option {
+        display: flex;
+        align-items: center;
+        gap: .45rem;
+        min-height: 30px;
+        margin: 0;
+        padding: .25rem .35rem;
+        border-radius: .45rem;
+        color: #173554;
+        font-size: .84rem;
+        cursor: pointer;
+    }
+
+    .lis-ms-option:hover {
+        background: #edf6ff;
+    }
+
+    .lis-ms-option input {
+        flex: 0 0 auto;
+    }
+
+    .lis-ms-hidden {
+        display: none;
+    }
+
+    @@media (max-width: 1200px) {
+        .lis-filter-item,
+        .lis-filter-item-sm,
+        .lis-filter-item-range,
+        .lis-custom-date {
+            grid-column: span 4;
         }
+    }
 
     @@media (max-width: 768px) {
-        .lis-filter-item {
-            width: 100%;
+        .lis-filter-shell .card-body {
+            padding: 1rem;
+        }
+
+        .lis-filter-item,
+        .lis-filter-item-sm,
+        .lis-filter-item-range,
+        .lis-custom-date {
+            grid-column: span 6;
         }
 
         .lis-filter-actions {
-            width: 100%;
+            grid-column: span 8;
             flex-wrap: wrap;
+        }
+    }
+
+    @@media (max-width: 576px) {
+        .lis-filter-item,
+        .lis-filter-item-sm,
+        .lis-filter-item-range,
+        .lis-custom-date {
+            grid-column: 1 / -1;
+        }
+
+        .lis-filter-actions {
+            grid-column: 1 / -1;
+        }
+
+        .lis-filter-actions .btn {
+            width: 100%;
         }
     }
 
@@ -585,25 +777,107 @@
         color: #fff;
     }
 
+    .lis-line-toolbar {
+        padding-bottom: .9rem;
+        border-bottom: 1px solid #e5edf6;
+    }
+
+    .lis-pager {
+        padding: .25rem;
+        border: 1px solid #d8e5f4;
+        border-radius: .75rem;
+        background: #f8fbff;
+    }
+
+    .lis-pager .btn {
+        min-width: 82px;
+        border-radius: .55rem;
+    }
+
+    .lis-page-chip {
+        display: inline-flex;
+        align-items: center;
+        min-height: 34px;
+        padding: .35rem .75rem;
+        border-radius: .55rem;
+        background: #fff;
+        border: 1px solid #d8e5f4;
+        color: #123b63;
+        font-size: .8rem;
+        font-weight: 800;
+        white-space: nowrap;
+    }
+
+    .lis-line-scroll {
+        max-height: min(72vh, calc(100vh - 250px));
+        border-color: #cfdceb;
+        border-radius: .8rem;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.8);
+    }
+
     .lis-line-table {
         width: max-content;
         min-width: 100%;
-        font-size: .78rem;
-        color: #00214d;
+        border-collapse: separate !important;
+        border-spacing: 0 !important;
+        font-size: .76rem;
+        color: #0a2749;
     }
 
     .lis-line-table th {
-        background: #123b63;
+        background: linear-gradient(180deg, #17466f 0%, #0f365c 100%) !important;
         color: #fff;
         white-space: nowrap;
         position: sticky;
         top: 0;
-        z-index: 4;
+        z-index: 10;
+        border: 0 !important;
+        border-right: 1px solid rgba(255,255,255,.18) !important;
+        box-shadow: inset 0 -1px 0 rgba(255,255,255,.18);
+        font-size: .68rem;
+        font-weight: 800;
+        letter-spacing: .015em;
+        line-height: 1.15;
+        padding: .55rem .55rem !important;
+        text-transform: uppercase;
     }
 
     .lis-line-table td {
         white-space: nowrap;
         vertical-align: middle;
+        border-color: #e1e8f1 !important;
+        border-left: 0 !important;
+        border-top: 0 !important;
+        padding: .45rem .55rem !important;
+        background: #fff;
+    }
+
+    .lis-line-table tbody tr:nth-child(even) td {
+        background: #f9fbfe;
+    }
+
+    .lis-line-table tbody tr:hover td {
+        background: #edf6ff;
+    }
+
+    .lis-line-table .lis-number-cell,
+    .lis-line-table .lis-date-cell {
+        font-variant-numeric: tabular-nums;
+    }
+
+    .lis-line-table .lis-number-cell {
+        text-align: right;
+    }
+
+    .lis-line-table .lis-status-cell {
+        color: #123b63;
+        font-weight: 700;
+    }
+
+    .lis-line-table .lis-wide-cell {
+        max-width: 260px;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 </style>
 
@@ -614,7 +888,7 @@
 
 <div class="lis-filter-shell card border-0 shadow-sm mb-4">
     <div class="card-body">
-        <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+        <div class="lis-filter-header d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
             <div>
                 <div class="section-title">LIS Summary</div>
                 @* <div class="section-subtitle">Grouped by collected date and calculated using the lab-specific Excel logic.</div> *@
@@ -645,60 +919,119 @@
                 </select>
             </div>
 
-            <div class="lis-filter-item-sm">
+            <div class="lis-filter-item-range">
+                <label class="form-label">Date Range</label>
+                <select class="form-select filter-select" name="DateRange" id="lisDateRange">
+                    <option value="this-week" selected="@IsSelected(filters.EffectiveDateRange, "this-week")">This week</option>
+                    <option value="last-week" selected="@IsSelected(filters.EffectiveDateRange, "last-week")">Last week</option>
+                    <option value="this-month" selected="@IsSelected(filters.EffectiveDateRange, "this-month")">This month</option>
+                    <option value="last-month" selected="@IsSelected(filters.EffectiveDateRange, "last-month")">Last month</option>
+                    <option value="custom" selected="@IsSelected(filters.EffectiveDateRange, "custom")">Custom range</option>
+                </select>
+            </div>
+
+            <div class="lis-custom-date @(filters.EffectiveDateRange == "custom" ? "" : "is-hidden")">
                 <label class="form-label">Date From</label>
-                <input class="form-control filter-select" type="date" name="DateFrom"
+                <input class="form-control filter-select" type="date" name="DateFrom" id="lisDateFrom"
                        value="@DateValue(filters.EffectiveDateFrom)" />
             </div>
 
-            <div class="lis-filter-item-sm">
+            <div class="lis-custom-date @(filters.EffectiveDateRange == "custom" ? "" : "is-hidden")">
                 <label class="form-label">Date To</label>
-                <input class="form-control filter-select" type="date" name="DateTo"
+                <input class="form-control filter-select" type="date" name="DateTo" id="lisDateTo"
                        value="@DateValue(filters.EffectiveDateTo)" />
             </div>
 
             <div class="lis-filter-item">
                 <label class="form-label">Panel</label>
-                <select class="form-select filter-select" name="Panel">
-                    <option value="">All</option>
+                <div class="lis-ms" data-lis-ms>
+                    <input type="hidden" name="Panel" value="@filters.Panel" />
+                    <button type="button" class="lis-ms-btn" aria-haspopup="listbox" aria-expanded="false">
+                        <span class="lis-ms-label">All</span>
+                        <span class="lis-ms-caret">v</span>
+                    </button>
+                    <div class="lis-ms-panel">
+                        <input type="search" class="form-control lis-ms-search" placeholder="Search panel" />
+                        <div class="lis-ms-list">
                     @foreach (var option in Model.FilterOptions.Panels)
                     {
-                        <option value="@option" selected="@IsSelected(filters.Panel, option)">@option</option>
+                                <label class="lis-ms-option">
+                                    <input type="checkbox" value="@option" checked="@IsMultiSelected(filters.Panel, option)" />
+                                    <span>@option</span>
+                                </label>
                     }
-                </select>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="lis-filter-item">
                 <label class="form-label">Clinic</label>
-                <select class="form-select filter-select" name="Clinic">
-                    <option value="">All</option>
+                <div class="lis-ms" data-lis-ms>
+                    <input type="hidden" name="Clinic" value="@filters.Clinic" />
+                    <button type="button" class="lis-ms-btn" aria-haspopup="listbox" aria-expanded="false">
+                        <span class="lis-ms-label">All</span>
+                        <span class="lis-ms-caret">v</span>
+                    </button>
+                    <div class="lis-ms-panel">
+                        <input type="search" class="form-control lis-ms-search" placeholder="Search clinic" />
+                        <div class="lis-ms-list">
                     @foreach (var option in Model.FilterOptions.Clinics)
                     {
-                        <option value="@option" selected="@IsSelected(filters.Clinic, option)">@option</option>
+                                <label class="lis-ms-option">
+                                    <input type="checkbox" value="@option" checked="@IsMultiSelected(filters.Clinic, option)" />
+                                    <span>@option</span>
+                                </label>
                     }
-                </select>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="lis-filter-item">
-                <label class="form-label">Ref Phy</label>
-                <select class="form-select filter-select" name="RefPhy">
-                    <option value="">All</option>
+                <label class="form-label">Referring Physician</label>
+                <div class="lis-ms" data-lis-ms>
+                    <input type="hidden" name="RefPhy" value="@filters.RefPhy" />
+                    <button type="button" class="lis-ms-btn" aria-haspopup="listbox" aria-expanded="false">
+                        <span class="lis-ms-label">All</span>
+                        <span class="lis-ms-caret">v</span>
+                    </button>
+                    <div class="lis-ms-panel">
+                        <input type="search" class="form-control lis-ms-search" placeholder="Search physician" />
+                        <div class="lis-ms-list">
                     @foreach (var option in Model.FilterOptions.RefPhysicians)
                     {
-                        <option value="@option" selected="@IsSelected(filters.RefPhy, option)">@option</option>
+                                <label class="lis-ms-option">
+                                    <input type="checkbox" value="@option" checked="@IsMultiSelected(filters.RefPhy, option)" />
+                                    <span>@option</span>
+                                </label>
                     }
-                </select>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="lis-filter-item">
                 <label class="form-label">Sales Rep</label>
-                <select class="form-select filter-select" name="SalesRep">
-                    <option value="">All</option>
+                <div class="lis-ms" data-lis-ms>
+                    <input type="hidden" name="SalesRep" value="@filters.SalesRep" />
+                    <button type="button" class="lis-ms-btn" aria-haspopup="listbox" aria-expanded="false">
+                        <span class="lis-ms-label">All</span>
+                        <span class="lis-ms-caret">v</span>
+                    </button>
+                    <div class="lis-ms-panel">
+                        <input type="search" class="form-control lis-ms-search" placeholder="Search sales rep" />
+                        <div class="lis-ms-list">
                     @foreach (var option in Model.FilterOptions.SalesReps)
                     {
-                        <option value="@option" selected="@IsSelected(filters.SalesRep, option)">@option</option>
+                                <label class="lis-ms-option">
+                                    <input type="checkbox" value="@option" checked="@IsMultiSelected(filters.SalesRep, option)" />
+                                    <span>@option</span>
+                                </label>
                     }
-                </select>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="lis-filter-actions">
@@ -706,9 +1039,14 @@
                     <i class="bi bi-funnel me-1"></i>Apply Filters
                 </button>
 
-                <a class="btn btn-outline-success rounded-pill px-4"
-                   href="@ExportUrl()">
+                <button type="submit" class="btn btn-outline-success rounded-pill px-4"
+                        formaction="@Url.Action("ExportToExcel", "LisSummary")">
                     <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
+                </button>
+
+                <a class="btn btn-outline-secondary rounded-pill px-4"
+                   href="@ClearFiltersUrl()">
+                    <i class="bi bi-x-circle me-1"></i>Clear Filters
                 </a>
             </div>
         </form>
@@ -850,17 +1188,17 @@ else
 {
     <div class="card border-0 shadow-sm table-card">
         <div class="card-body">
-            <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+            <div class="lis-line-toolbar d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
                 <div>
                     <div class="section-title">LIMS Line Data</div>
                     <div class="section-subtitle">@((lineData?.TotalCount ?? 0).ToString("N0")) rows</div>
                 </div>
                 @if (lineData is not null && totalPages > 1)
                 {
-                    <div class="d-flex align-items-center gap-2">
+                    <div class="lis-pager d-flex align-items-center gap-2">
                         <a class="btn btn-sm btn-outline-primary @(lineData.PageNumber <= 1 ? "disabled" : "")"
                            href="@TabUrl("line", Math.Max(1, lineData.PageNumber - 1))">Previous</a>
-                        <span class="chip">Page @lineData.PageNumber of @totalPages</span>
+                        <span class="lis-page-chip">Page @lineData.PageNumber of @totalPages</span>
                         <a class="btn btn-sm btn-outline-primary @(lineData.PageNumber >= totalPages ? "disabled" : "")"
                            href="@TabUrl("line", Math.Min(totalPages, lineData.PageNumber + 1))">Next</a>
                     </div>
@@ -873,7 +1211,7 @@ else
             }
             else
             {
-                <div class="lis-freeze-scroll">
+                <div class="lis-freeze-scroll lis-line-scroll">
                     <table class="table table-sm table-bordered lis-line-table align-middle mb-0">
                         <thead>
                             <tr>
@@ -917,40 +1255,40 @@ else
                             @foreach (var row in lineData.Rows)
                             {
                                 <tr>
-                                    <td>@row.OrderId</td>
-                                    <td>@row.SampleId</td>
+                                    <td class="lis-number-cell">@row.OrderId</td>
+                                    <td class="lis-number-cell">@row.SampleId</td>
                                     <td>@row.PaymentMethod</td>
                                     <td>@row.Barcode</td>
                                     <td>@row.Specimen</td>
-                                    <td>@row.Collector</td>
-                                    <td>@row.OrderStatus</td>
-                                    <td>@row.BillingStatus</td>
-                                    <td>@row.SampleStatus</td>
-                                    <td>@FormatDateTime(row.RequestSubmittedDate)</td>
-                                    <td>@FormatDateTime(row.RequestCollectDate)</td>
-                                    <td>@FormatDateTime(row.ReqReceivedDate)</td>
-                                    <td>@FormatDateTime(row.ReqReportedDate)</td>
-                                    <td>@row.ResultedStatus</td>
-                                    <td>@row.ClientStatus</td>
+                                    <td class="lis-wide-cell">@row.Collector</td>
+                                    <td class="lis-status-cell">@row.OrderStatus</td>
+                                    <td class="lis-status-cell">@row.BillingStatus</td>
+                                    <td class="lis-status-cell">@row.SampleStatus</td>
+                                    <td class="lis-date-cell">@FormatDateTime(row.RequestSubmittedDate)</td>
+                                    <td class="lis-date-cell">@FormatDateTime(row.RequestCollectDate)</td>
+                                    <td class="lis-date-cell">@FormatDateTime(row.ReqReceivedDate)</td>
+                                    <td class="lis-date-cell">@FormatDateTime(row.ReqReportedDate)</td>
+                                    <td class="lis-status-cell">@row.ResultedStatus</td>
+                                    <td class="lis-status-cell">@row.ClientStatus</td>
                                     <td>@row.TimetoResult</td>
                                     <td>@row.TurnaroundTime</td>
-                                    <td>@row.PerformingLaboratory</td>
-                                    <td>@row.Results</td>
+                                    <td class="lis-wide-cell">@row.PerformingLaboratory</td>
+                                    <td class="lis-wide-cell">@row.Results</td>
                                     <td>@row.PatientFirstName</td>
                                     <td>@row.PatientLastName</td>
-                                    <td>@FormatDateTime(row.PatientDateofBirth)</td>
-                                    <td>@row.VisitNumber</td>
-                                    <td>@row.AMDDOE</td>
-                                    <td>@row.AMDLBD</td>
+                                    <td class="lis-date-cell">@FormatDateTime(row.PatientDateofBirth)</td>
+                                    <td class="lis-number-cell">@row.VisitNumber</td>
+                                    <td class="lis-date-cell">@row.AMDDOE</td>
+                                    <td class="lis-date-cell">@row.AMDLBD</td>
                                     <td>@row.TimetoBill</td>
-                                    <td>@row.ClaimStatus</td>
-                                    <td>@row.BilledorNot</td>
-                                    <td>@row.Provider</td>
-                                    <td>@row.PrimaryInsurance</td>
+                                    <td class="lis-status-cell">@row.ClaimStatus</td>
+                                    <td class="lis-status-cell">@row.BilledorNot</td>
+                                    <td class="lis-wide-cell">@row.Provider</td>
+                                    <td class="lis-wide-cell">@row.PrimaryInsurance</td>
                                     <td>@row.PrimaryInsuranceID</td>
-                                    <td>@row.ICD10Codes</td>
-                                    <td>@row.Tests</td>
-                                    <td>@row.PanelCategory</td>
+                                    <td class="lis-wide-cell">@row.ICD10Codes</td>
+                                    <td class="lis-wide-cell">@row.Tests</td>
+                                    <td class="lis-wide-cell">@row.PanelCategory</td>
                                 </tr>
                             }
                         </tbody>
@@ -963,6 +1301,138 @@ else
 
 
 <script>
+    (function () {
+        const form = document.querySelector('.lis-filter-row');
+        if (!form) return;
+
+        const dateRange = document.getElementById('lisDateRange');
+        const fromInput = document.getElementById('lisDateFrom');
+        const toInput = document.getElementById('lisDateTo');
+        const customDateBlocks = Array.from(document.querySelectorAll('.lis-custom-date'));
+
+        function formatDate(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        function startOfWeek(date) {
+            const result = new Date(date);
+            const offset = (result.getDay() + 6) % 7;
+            result.setDate(result.getDate() - offset);
+            return result;
+        }
+
+        function applyDatePreset() {
+            if (!dateRange || !fromInput || !toInput) return;
+
+            const today = new Date();
+            const current = dateRange.value;
+            const isCustom = current === 'custom';
+
+            customDateBlocks.forEach(block => block.classList.toggle('is-hidden', !isCustom));
+
+            if (isCustom) {
+                if (fromInput.value && !toInput.value) {
+                    toInput.value = formatDate(today);
+                }
+                return;
+            }
+
+            let from = new Date(today);
+            let to = new Date(today);
+
+            if (current === 'this-week') {
+                from = startOfWeek(today);
+            } else if (current === 'last-week') {
+                to = startOfWeek(today);
+                to.setDate(to.getDate() - 1);
+                from = new Date(to);
+                from.setDate(from.getDate() - 6);
+            } else if (current === 'this-month') {
+                from = new Date(today.getFullYear(), today.getMonth(), 1);
+            } else if (current === 'last-month') {
+                from = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+                to = new Date(today.getFullYear(), today.getMonth(), 0);
+            }
+
+            fromInput.value = formatDate(from);
+            toInput.value = formatDate(to);
+        }
+
+        dateRange?.addEventListener('change', applyDatePreset);
+        form.addEventListener('submit', applyDatePreset);
+        applyDatePreset();
+
+        function selectedCheckboxes(widget) {
+            return Array.from(widget.querySelectorAll('.lis-ms-option input[type="checkbox"]:checked'));
+        }
+
+        function updateMultiSelect(widget) {
+            const hidden = widget.querySelector('input[type="hidden"]');
+            const label = widget.querySelector('.lis-ms-label');
+            const selected = selectedCheckboxes(widget);
+            const values = selected.map(input => input.value);
+
+            if (hidden) hidden.value = values.join('|');
+
+            if (!label) return;
+            if (values.length === 0) {
+                label.textContent = 'All';
+            } else if (values.length === 1) {
+                label.textContent = values[0];
+            } else {
+                label.textContent = `${values[0]} +${values.length - 1}`;
+            }
+        }
+
+        function closeMultiSelects(exceptPanel) {
+            document.querySelectorAll('.lis-ms-panel.open').forEach(panel => {
+                if (panel !== exceptPanel) {
+                    panel.classList.remove('open');
+                    panel.closest('[data-lis-ms]')?.querySelector('.lis-ms-btn')?.setAttribute('aria-expanded', 'false');
+                }
+            });
+        }
+
+        document.querySelectorAll('[data-lis-ms]').forEach(widget => {
+            const button = widget.querySelector('.lis-ms-btn');
+            const panel = widget.querySelector('.lis-ms-panel');
+            const search = widget.querySelector('.lis-ms-search');
+
+            updateMultiSelect(widget);
+
+            button?.addEventListener('click', event => {
+                event.stopPropagation();
+                const isOpen = panel?.classList.contains('open');
+                closeMultiSelects(panel);
+                if (panel && !isOpen) {
+                    panel.classList.add('open');
+                    button.setAttribute('aria-expanded', 'true');
+                    if (search) {
+                        search.value = '';
+                        search.dispatchEvent(new Event('input'));
+                        search.focus();
+                    }
+                }
+            });
+
+            panel?.addEventListener('click', event => event.stopPropagation());
+
+            widget.addEventListener('change', () => updateMultiSelect(widget));
+
+            search?.addEventListener('input', () => {
+                const term = search.value.trim().toLowerCase();
+                widget.querySelectorAll('.lis-ms-option').forEach(option => {
+                    option.classList.toggle('lis-ms-hidden', term !== '' && !option.textContent.toLowerCase().includes(term));
+                });
+            });
+        });
+
+        document.addEventListener('click', () => closeMultiSelects(null));
+    })();
+
     (function () {
         const root = document.getElementById('lisSummaryFreeze');
         if (!root) return;

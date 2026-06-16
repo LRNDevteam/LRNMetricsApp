@@ -105,10 +105,20 @@ public sealed class LisSummaryFilters
         "Resulted"
     };
 
+    private static readonly HashSet<string> AllowedDateRanges = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "custom",
+        "this-week",
+        "last-week",
+        "this-month",
+        "last-month"
+    };
+
     public int? LabId { get; set; }
     public DateOnly? CollectedFrom { get; set; }
     public DateOnly? CollectedTo { get; set; }
     public string DateType { get; set; } = "Collected";
+    public string DateRange { get; set; } = "custom";
     public DateOnly? DateFrom { get; set; }
     public DateOnly? DateTo { get; set; }
     public string? Panel { get; set; }
@@ -122,6 +132,9 @@ public sealed class LisSummaryFilters
     public string EffectiveDateType
         => AllowedDateTypes.Contains(DateType ?? string.Empty) ? DateType! : "Collected";
 
+    public string EffectiveDateRange
+        => AllowedDateRanges.Contains(DateRange ?? string.Empty) ? DateRange! : "custom";
+
     public DateOnly? EffectiveDateFrom => DateFrom ?? CollectedFrom;
     public DateOnly? EffectiveDateTo => DateTo ?? CollectedTo;
     public string EffectiveActiveTab => ActiveTab?.Equals("line", StringComparison.OrdinalIgnoreCase) == true ? "line" : "summary";
@@ -131,8 +144,44 @@ public sealed class LisSummaryFilters
         DateType = EffectiveDateType;
         DateFrom ??= CollectedFrom;
         DateTo ??= CollectedTo;
+        DateRange = EffectiveDateRange;
+        ApplyDateRangePreset();
         ActiveTab = EffectiveActiveTab;
         PageNumber = Math.Max(1, PageNumber);
         PageSize = PageSize is < 10 or > 500 ? 100 : PageSize;
+    }
+
+    private void ApplyDateRangePreset()
+    {
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var startOfThisWeek = today.AddDays(-(((int)today.DayOfWeek + 6) % 7));
+
+        switch (DateRange)
+        {
+            case "this-week":
+                DateFrom = startOfThisWeek;
+                DateTo = today;
+                break;
+            case "last-week":
+                DateFrom = startOfThisWeek.AddDays(-7);
+                DateTo = startOfThisWeek.AddDays(-1);
+                break;
+            case "this-month":
+                DateFrom = new DateOnly(today.Year, today.Month, 1);
+                DateTo = today;
+                break;
+            case "last-month":
+                var firstOfThisMonth = new DateOnly(today.Year, today.Month, 1);
+                var firstOfLastMonth = firstOfThisMonth.AddMonths(-1);
+                DateFrom = firstOfLastMonth;
+                DateTo = firstOfThisMonth.AddDays(-1);
+                break;
+            default:
+                if (DateFrom.HasValue && !DateTo.HasValue)
+                {
+                    DateTo = today;
+                }
+                break;
+        }
     }
 }

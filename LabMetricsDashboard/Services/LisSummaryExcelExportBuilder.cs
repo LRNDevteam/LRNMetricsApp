@@ -175,7 +175,7 @@ public static class LisSummaryExcelExportBuilder
         tableRange.Style.Border.OutsideBorderColor = BorderColor;
         tableRange.Style.Border.InsideBorderColor = BorderColor;
 
-        sheet.SheetView.FreezeRows(monthHeaderRow);
+        // Keep row labels visible horizontally without freezing the metadata/filter rows above the counts.
         sheet.SheetView.FreezeColumns(2);
 
         sheet.Columns(firstDataColumn, lastColumn).Style.NumberFormat.Format = "#,##0";
@@ -303,7 +303,10 @@ public static class LisSummaryExcelExportBuilder
 
     private static string FormatDateFilter(DateOnly? value) => value?.ToString("MM/dd/yyyy") ?? "All";
 
-    private static string FormatFilter(string? value) => string.IsNullOrWhiteSpace(value) ? "All" : value.Trim();
+    private static string FormatFilter(string? value)
+        => string.IsNullOrWhiteSpace(value)
+            ? "All"
+            : string.Join(", ", value.Split(['|'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
     private static string CleanSheetName(string value)
     {

@@ -904,9 +904,37 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			return;
 		}
 
-		where.Add($"{TextExpr(column)} = {parameterName}");
-		parameters.Add(new SqlParameter(parameterName, SqlDbType.NVarChar, 4000) { Value = CleanValue(value) });
+		var values = ParseSelectedFilterValues(value);
+		if (values.Count == 0)
+		{
+			return;
+		}
+
+		if (values.Count == 1)
+		{
+			where.Add($"{TextExpr(column)} = {parameterName}");
+			parameters.Add(new SqlParameter(parameterName, SqlDbType.NVarChar, 4000) { Value = values[0] });
+			return;
+		}
+
+		var parameterNames = new List<string>();
+		for (var i = 0; i < values.Count; i++)
+		{
+			var indexedName = $"{parameterName}{i}";
+			parameterNames.Add(indexedName);
+			parameters.Add(new SqlParameter(indexedName, SqlDbType.NVarChar, 4000) { Value = values[i] });
+		}
+
+		where.Add($"{TextExpr(column)} IN ({string.Join(", ", parameterNames)})");
 	}
+
+	private static List<string> ParseSelectedFilterValues(string? value)
+		=> (value ?? string.Empty)
+			.Split(['|'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+			.Select(CleanValue)
+			.Where(x => !string.IsNullOrWhiteSpace(x))
+			.Distinct(StringComparer.OrdinalIgnoreCase)
+			.ToList();
 
 	private static SqlParameter CloneParameter(SqlParameter parameter)
 	{
