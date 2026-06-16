@@ -738,6 +738,11 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			RecalculateParentRowsFromChildren(rows);
 		}
 
+		if (logicSheetName.Equals("NWL", StringComparison.OrdinalIgnoreCase))
+		{
+			ApplyNwlChargesCreatedRows(rows, raw);
+		}
+
 		return rows;
 	}
 
@@ -749,6 +754,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 	private static bool UsesDirectTemplateParentCounts(string logicSheetName)
 		=> logicSheetName.Equals("Augustus", StringComparison.OrdinalIgnoreCase)
+		   || logicSheetName.Equals("NWL", StringComparison.OrdinalIgnoreCase)
 		   || logicSheetName.Equals("Beech Tree", StringComparison.OrdinalIgnoreCase)
 		   || logicSheetName.Equals("Cove", StringComparison.OrdinalIgnoreCase)
 		   || logicSheetName.Equals("PhiLife", StringComparison.OrdinalIgnoreCase)
@@ -759,6 +765,53 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 	private static bool ShouldUseDistinctSampleCount(string logicSheetName)
 		=> logicSheetName.Equals("PCRLOA", StringComparison.OrdinalIgnoreCase);
+
+	private static void ApplyNwlChargesCreatedRows(List<LisSummaryRow> rows, List<RawLisGroup> raw)
+	{
+		for (var index = 0; index < rows.Count; index++)
+		{
+			var row = rows[index];
+			if (!IsNwlInsuranceChargesCreatedLogic(row.Logic)) continue;
+
+			string? source = null;
+			if (row.Logic.Contains("Source = Webpm", StringComparison.OrdinalIgnoreCase))
+			{
+				source = "Webpm";
+			}
+			else if (row.Logic.Contains("Source = Daqbilling", StringComparison.OrdinalIgnoreCase))
+			{
+				source = "Daqbilling";
+			}
+
+			var matches = raw.Where(x => MatchesNwlInsuranceChargesCreated(x, source)).ToList();
+			rows[index] = BuildRow(row.Code, row.Description, row.Logic, row.Level, matches);
+		}
+	}
+
+	private static bool IsNwlInsuranceChargesCreatedLogic(string logic)
+	{
+		return logic.Contains("Bill To = Insurance Bill", StringComparison.OrdinalIgnoreCase)
+			   && logic.Contains("Bill Status = Unbilled", StringComparison.OrdinalIgnoreCase)
+			   && logic.Contains("Final Status = Charges Created and Not Submitted", StringComparison.OrdinalIgnoreCase);
+	}
+
+	private static bool MatchesNwlInsuranceChargesCreated(RawLisGroup row, string? source)
+	{
+		if (!ValueMatches("Bill To", GetField(row, "Bill To"), "Insurance Bill")) return false;
+		if (!ValueMatches("Bill Status", GetField(row, "Bill Status"), "Unbilled")) return false;
+
+		var matchesFinalStatus =
+			ValueMatches("Final Status", GetField(row, "Final Status"), "Charges Created and Not Submitted")
+			|| ValueMatches("Final Status 2", GetField(row, "Final Status 2"), "Charges Created and Not Submitted")
+			|| ValueMatches("Final Status", ValueOrBlank(row, "FinalStatus"), "Charges Created and Not Submitted")
+			|| ValueMatches("Final Status", ValueOrBlank(row, "Final Status"), "Charges Created and Not Submitted");
+
+		if (!matchesFinalStatus) return false;
+
+		return string.IsNullOrWhiteSpace(source)
+			   || ValueMatches("Source", GetField(row, "Source"), source)
+			   || ValueMatches("Source", ValueOrBlank(row, "SourceSystem"), source);
+	}
 
 	private static void RecalculateParentRowsFromChildren(List<LisSummaryRow> rows)
 	{
@@ -922,6 +975,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			"Final Status" => FirstNonBlank(ValueOrBlank(row, "Final Status"), ValueOrBlank(row, "Claim Status")),
 			"Sub Status" => FirstNonBlank(ValueOrBlank(row, "Sub Status"), ValueOrBlank(row, "Client Status"), ValueOrBlank(row, "Sample Status")),
 			"Panel Type" => FirstNonBlank(ValueOrBlank(row, "Panel Type"), ValueOrBlank(row, "Sample Status")),
+			"Source" => FirstNonBlank(ValueOrBlank(row, "Source"), ValueOrBlank(row, "SourceSystem")),
+			"Charges not entered status" => FirstNonBlank(ValueOrBlank(row, "Charges not entered status"), ValueOrBlank(row, "ChargeNotEnteredStatus")),
 			_ => string.Empty
 		};
 	}
@@ -1093,8 +1148,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			"SAMPLESTATUS" or "LRNSAMPLESTATUS" => "Sample Status",
 			"ORDERSTATUS" => "Order Status",
 			"ENTRYSTATUS" => "Entry Status",
-			"SOURCE" => "Source",
-			"CHARGESNOTENTEREDSTATUS" or "CHARGESNOTENTERED" => "Charges not entered status",
+			"SOURCE" or "SOURCESYSTEM" => "Source",
+			"CHARGESNOTENTEREDSTATUS" or "CHARGENOTENTEREDSTATUS" or "CHARGESNOTENTERED" => "Charges not entered status",
 			"INSURANCECATEGORY" => "Insurance category",
 			_ => field.Trim()
 		};
@@ -1266,7 +1321,11 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		"PCRDx-AL" => new[] { "LRNSampleStatus", "FinalStatus", "ClientStatus" },
 		_ => new[] { "ClientStatus", "FinalStatus", "SubStatus", "NewStatus", "LRNSubStatus", "LRNSampleStatus" }
 	};
-	private static string[] FinalStatus2CandidatesFor(string logicSheet) => new[] { "FinalStatus2", "Final Status 2", "FinalStatus", "Category", "ClientStatus", "SubStatus" };
+	private static string[] FinalStatus2CandidatesFor(string logicSheet) => logicSheet switch
+	{
+		"NWL" => new[] { "Category", "FinalStatus2", "Final Status 2", "FinalStatus", "ClientStatus", "SubStatus" },
+		_ => new[] { "FinalStatus2", "Final Status 2", "FinalStatus", "Category", "ClientStatus", "SubStatus" }
+	};
 	private static string[] SampleStatusCandidatesFor(string logicSheet) => logicSheet switch
 	{
 		"NWL" => new[] { "Category", "SampleStatus", "SubStatus" },
