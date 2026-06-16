@@ -441,8 +441,11 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		var profile = ResolveProfile(labName, labId, columns);
 		var sourceFileName = await GetLatestSourceFileNameAsync(conn, columns, ct);
 		var raw = await LoadDynamicGroupsAsync(conn, profile, collectedFrom, collectedTo, ct);
+		var summaryRaw = UsesBlankIncorrectDosSummary(profile.LogicSheetName)
+			? raw.Where(HasBlankIncorrectDos).ToList()
+			: raw;
 
-		var months = raw
+		var months = summaryRaw
 			.Select(x => $"{x.CollectedYear:D4}-{x.CollectedMonth:D2}")
 			.Distinct()
 			.OrderBy(x => x)
@@ -455,18 +458,18 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			.ToList();
 
 		var rows = SheetTemplates.ContainsKey(profile.LogicSheetName)
-			? BuildTemplatePivotRows(profile.LogicSheetName, raw)
-			: BuildDynamicPivotRows(raw);
+			? BuildTemplatePivotRows(profile.LogicSheetName, summaryRaw)
+			: BuildDynamicPivotRows(summaryRaw);
 
-		var grandByMonth = raw
+		var grandByMonth = summaryRaw
 			.GroupBy(x => $"{x.CollectedYear:D4}-{x.CollectedMonth:D2}")
 			.ToDictionary(g => g.Key, g => g.Sum(x => x.TotalClaims));
 
-		var grandByYear = raw
+		var grandByYear = summaryRaw
 			.GroupBy(x => x.CollectedYear)
 			.ToDictionary(g => g.Key, g => g.Sum(x => x.TotalClaims));
 
-		var kpiCards = BuildKpiCards(raw, grandByMonth.Values.Sum());
+		var kpiCards = BuildKpiCards(summaryRaw, grandByMonth.Values.Sum());
 
 		return new LisSummaryResult(
 			profile.LogicSheetName,
@@ -532,6 +535,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				"ReceivedDate", "CollectionDate", "CollectedDate", "Collection_Date", "DOS")
 			?? throw new InvalidOperationException("No usable collected-date column was found in dbo.LIMSMaster.");
 
+		var incorrectDosColumn = FirstExisting(columns, IncorrectDosCandidatesFor(logicSheet));
+
 		var fields = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
 		{
 			["Resulted / Not"] = FirstExisting(columns, ResultCandidatesFor(logicSheet)),
@@ -559,7 +564,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			["LRN Sub Status"] = FirstExisting(columns, SubStatusCandidatesFor(logicSheet)),
 			["Source"] = FirstExisting(columns, SourceCandidatesFor(logicSheet)),
 			["Charges not entered status"] = FirstExisting(columns, ChargesNotEnteredCandidatesFor(logicSheet)),
-			["Insurance category"] = FirstExisting(columns, InsuranceCategoryCandidatesFor(logicSheet))
+			["Insurance category"] = FirstExisting(columns, InsuranceCategoryCandidatesFor(logicSheet)),
+			["Incorrect DOS"] = ShouldGroupByIncorrectDos(logicSheet) ? incorrectDosColumn : null
 		};
 
 		if (logicSheet.Equals("Augustus", StringComparison.OrdinalIgnoreCase))
@@ -576,7 +582,6 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		}
 
 		var countDistinctColumn = FirstExisting(columns, CountDistinctCandidatesFor(logicSheet));
-		var incorrectDosColumn = FirstExisting(columns, IncorrectDosCandidatesFor(logicSheet));
 
 		return new DimensionProfile(logicSheet, dateColumn, countDistinctColumn, incorrectDosColumn, fields);
 	}
@@ -629,9 +634,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			.ToList();
 
 		var countExpr = !string.IsNullOrWhiteSpace(profile.CountDistinctColumn)
-			? ShouldUseDistinctSampleCount(profile.LogicSheetName)
-				? $"COUNT(DISTINCT NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(4000), {Q(profile.CountDistinctColumn)}))), ''))"
-				: $"COUNT(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(4000), {Q(profile.CountDistinctColumn)}))), ''))"
+			? $"COUNT(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(4000), {Q(profile.CountDistinctColumn)}))), ''))"
 			: "COUNT(*)";
 
 		var sql = $"""
@@ -754,6 +757,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 	private static bool UsesDirectTemplateParentCounts(string logicSheetName)
 		=> logicSheetName.Equals("Augustus", StringComparison.OrdinalIgnoreCase)
+		   || logicSheetName.Equals("Certus", StringComparison.OrdinalIgnoreCase)
 		   || logicSheetName.Equals("NWL", StringComparison.OrdinalIgnoreCase)
 		   || logicSheetName.Equals("Beech Tree", StringComparison.OrdinalIgnoreCase)
 		   || logicSheetName.Equals("Cove", StringComparison.OrdinalIgnoreCase)
@@ -763,8 +767,18 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		   || logicSheetName.Equals("PCRLOA", StringComparison.OrdinalIgnoreCase)
 		   || logicSheetName.Equals("InHealth", StringComparison.OrdinalIgnoreCase);
 
-	private static bool ShouldUseDistinctSampleCount(string logicSheetName)
-		=> logicSheetName.Equals("PCRLOA", StringComparison.OrdinalIgnoreCase);
+	private static bool ShouldGroupByIncorrectDos(string logicSheetName)
+		=> logicSheetName.Equals("Certus", StringComparison.OrdinalIgnoreCase)
+		   || logicSheetName.Equals("NWL", StringComparison.OrdinalIgnoreCase);
+
+	private static bool UsesBlankIncorrectDosSummary(string logicSheetName)
+		=> logicSheetName.Equals("Certus", StringComparison.OrdinalIgnoreCase);
+
+	private static bool HasBlankIncorrectDos(RawLisGroup row)
+	{
+		var incorrectDos = GetField(row, "Incorrect DOS");
+		return string.IsNullOrWhiteSpace(incorrectDos) || IsBlankValue(incorrectDos);
+	}
 
 	private static void ApplyNwlChargesCreatedRows(List<LisSummaryRow> rows, List<RawLisGroup> raw)
 	{
@@ -986,7 +1000,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 	private static bool ValueMatches(string field, string actual, string expected)
 	{
-		if (IsBlankValue(expected)) return string.IsNullOrWhiteSpace(actual);
+		if (IsBlankValue(expected)) return string.IsNullOrWhiteSpace(actual) || IsBlankValue(actual);
 		if (IsAllValue(expected)) return true;
 
 		var actualClean = CleanValue(actual);
@@ -1247,7 +1261,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 	private static string[] DateCandidatesFor(string logicSheet) => logicSheet switch
 	{
-		"Augustus" or "Certus" => new[] { "ReqCollectDate", "RequestCollectDate", "CollectionDate" },
+		"Augustus" or "Certus" => new[] { "ReqCollectDate", "REQ_COLLECT_DATE", "RequestCollectDate", "CollectionDate" },
 		"Cove" or "Elixir" => new[] { "DateOfCollection", "RequestCollectDate", "CollectionDate" },
 		"InHealth" => new[] { "Entry_DateCreated", "RequestCollectDate", "DateOfCollection" },
 		"PCRDx-AL" => new[] { "ReceivedDate", "RequestCollectDate", "CollectionDate" },
@@ -1265,7 +1279,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		=> new[] { "IncorrectDOS", "Incorrect DOS", "Incorrect_DOS", "IncorrectDos" };
 
 	private static bool RequiresBlankIncorrectDos(string logicSheet)
-		=> logicSheet is "Certus" or "NWL";
+		=> logicSheet is "NWL";
 
 	private static string[] ResultCandidatesFor(string logicSheet) => logicSheet switch
 	{

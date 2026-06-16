@@ -1,7 +1,7 @@
-/* Certus - LabId 18 */
 SELECT
     YEAR(TRY_CONVERT(date, ReqCollectDate)) AS CollectedYear,
     MONTH(TRY_CONVERT(date, ReqCollectDate)) AS CollectedMonth,
+	IncorrectDOS,
     ISNULL(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(4000), BillTo))), ''), '') AS BillTo,
     ISNULL(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(4000), BillingStatus))), ''), '') AS BillingStatus,
     ISNULL(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(4000), ResultStatus))), ''), '') AS ResultStatus,
@@ -18,6 +18,7 @@ WHERE TRY_CONVERT(date, ReqCollectDate) IS NOT NULL
 GROUP BY
     YEAR(TRY_CONVERT(date, ReqCollectDate)),
     MONTH(TRY_CONVERT(date, ReqCollectDate)),
+	IncorrectDOS,
     ISNULL(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(4000), BillTo))), ''), ''),
     ISNULL(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(4000), BillingStatus))), ''), ''),
     ISNULL(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(4000), ResultStatus))), ''), ''),
