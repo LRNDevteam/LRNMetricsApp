@@ -97,12 +97,31 @@ public sealed class DenialActionChangeVerification
     public string ClaimID { get; set; } = string.Empty;
     public string? TaskID { get; set; }
     public string? PatientId { get; set; }
+    public string? CPTCode { get; set; }
+    public int? Units { get; set; }
+    public string? Modifier { get; set; }
     public string? PayerName { get; set; }
     public string? AssignedTo { get; set; }
     public string? ClaimStatus { get; set; }
     public string DenialCode { get; set; } = string.Empty;
+    public string? DenialDescription { get; set; }
+    public string? DenialClassification { get; set; }
     public string? ICDComplianceStatus { get; set; }
     public string? CoverageStatus { get; set; }
+    public string? ActionCode { get; set; }
+    public string? ActionCategory { get; set; }
+    public string? RecommendedAction { get; set; }
+    public string? Task { get; set; }
+    public string? Priority { get; set; }
+    public decimal? InsuranceBalance { get; set; }
+    public int? SLADays { get; set; }
+    public string? Status { get; set; }
+    public DateTime? DateOpened { get; set; }
+    public DateTime? DueDate { get; set; }
+    public string? SLAStatus { get; set; }
+    public DateTime? FirstBilledDate { get; set; }
+    public DateTime? ChargeEnteredDate { get; set; }
+    public string? DenialValidity { get; set; }
     public string? OldActionCode { get; set; }
     public string? NewActionCode { get; set; }
     public string? OldActionCategory { get; set; }

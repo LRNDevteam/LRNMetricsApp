@@ -14,6 +14,17 @@ function date(value) {
   return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString();
 }
 
+function shortDate(value) {
+  if (!value) return '-';
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleDateString();
+}
+
+function money(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toLocaleString(undefined, { style: 'currency', currency: 'USD' }) : '-';
+}
+
 function list(values) {
   return Array.from(values || []).filter(Boolean).join(', ') || '-';
 }
@@ -296,67 +307,65 @@ export default function DenialActionVerificationPage({ labId, setMessage, initia
   const activePending = activeClaim?.pendingRows?.length || 0;
 
   return <section className="dcm-page action-verification-page action-split-page">
-    <div className="claim-view-top">
-      <div><div className="claim-view-title">Denial Action Change Verification</div><div className="claim-view-subtitle">Review action updates by claim, then inspect task-level old and new values before approval.</div></div>
-      <div className="action-top-actions">
-        <button className="wl-btn xs" onClick={exportRows}><i className="bi bi-file-earmark-excel" /> Export</button>
-      </div>
-    </div>
-
     <div className="action-summary-grid">
       {[
-        ['Affected Claims', batch?.totalAffectedClaims ?? batch?.TotalAffectedClaims ?? claimRows.length],
-        ['Affected Tasks', batch?.totalAffectedTasks ?? batch?.TotalAffectedTasks ?? items.length],
-        ['Pending', batch?.pendingCount ?? batch?.PendingCount ?? pendingItems.length],
-        ['Approved', batch?.confirmedCount ?? batch?.ConfirmedCount ?? 0],
-        ['Ignored', batch?.ignoredCount ?? batch?.IgnoredCount ?? 0]
-      ].map(([label, value]) => <div className="action-summary-card" key={label}><span>{label}</span><strong>{value}</strong></div>)}
+        ['Affected Claims', batch?.totalAffectedClaims ?? batch?.TotalAffectedClaims ?? claimRows.length, 'Batch-wide Scope'],
+        ['Affected Tasks', batch?.totalAffectedTasks ?? batch?.TotalAffectedTasks ?? items.length, 'Assigned Open Items'],
+        ['Pending Review', batch?.pendingCount ?? batch?.PendingCount ?? pendingItems.length, 'Decisions Required'],
+        ['Approved', batch?.confirmedCount ?? batch?.ConfirmedCount ?? 0, 'Changes Applied'],
+        ['Ignored', batch?.ignoredCount ?? batch?.IgnoredCount ?? 0, 'Tasks Unchanged']
+      ].map(([label, value, subtitle]) => <div className={`action-summary-card ${label === 'Pending Review' ? 'pending' : ''}`} key={label}><span>{label}</span><strong>{value}</strong><small>{subtitle}</small></div>)}
     </div>
 
     <div className="action-filter-grid">
-      <label><span>Search</span><input value={draft.search} onChange={e => setDraft(x => ({ ...x, search: e.target.value }))} placeholder="ClaimID, TaskID, PatientId, PayerName, DenialCode" /></label>
-      <label><span>Batch</span><select value={draft.batchId} onChange={e => setDraft(x => ({ ...x, batchId: e.target.value }))}><option value="">All batches</option>{(lookups.batches || lookups.Batches || []).map(b => <option key={b.batchId ?? b.BatchId} value={b.batchId ?? b.BatchId}>{b.batchId ?? b.BatchId}</option>)}</select></label>
-      <label><span>DenialCode</span><select value={draft.denialCode} onChange={e => setDraft(x => ({ ...x, denialCode: e.target.value }))}><option value="">All</option>{(lookups.denialCodes || lookups.DenialCodes || []).map(x => <option key={x}>{x}</option>)}</select></label>
-      <label><span>ICDComplianceStatus</span><select value={draft.icdComplianceStatus} onChange={e => setDraft(x => ({ ...x, icdComplianceStatus: e.target.value }))}><option value="">All</option>{(lookups.icdComplianceStatuses || lookups.ICDComplianceStatuses || []).map(x => <option key={x}>{x}</option>)}</select></label>
-      <label><span>CoverageStatus</span><select value={draft.coverageStatus} onChange={e => setDraft(x => ({ ...x, coverageStatus: e.target.value }))}><option value="">All</option>{(lookups.coverageStatuses || lookups.CoverageStatuses || []).map(x => <option key={x}>{x}</option>)}</select></label>
-      <label><span>AssignedTo</span><select value={draft.assignedTo} onChange={e => setDraft(x => ({ ...x, assignedTo: e.target.value }))}><option value="">All</option>{(lookups.assignedUsers || lookups.AssignedUsers || []).map(x => <option key={x}>{x}</option>)}</select></label>
-      <label><span>Status</span><select value={draft.status} onChange={e => setDraft(x => ({ ...x, status: e.target.value }))}><option value="">All</option>{statuses.map(x => <option key={x}>{x}</option>)}</select></label>
+      <label><span>Search Parameters</span><input value={draft.search} onChange={e => setDraft(x => ({ ...x, search: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') applyFilters(); }} placeholder="Claim ID, Task ID, Patient Name, Denial" /></label>
+      <label><span>Batch Assignment</span><select value={draft.batchId} onChange={e => setDraft(x => ({ ...x, batchId: e.target.value }))}><option value="">All batches</option>{(lookups.batches || lookups.Batches || []).map(b => <option key={b.batchId ?? b.BatchId} value={b.batchId ?? b.BatchId}>ACV-{b.batchId ?? b.BatchId}</option>)}</select></label>
+      <label><span>Denial Code</span><select value={draft.denialCode} onChange={e => setDraft(x => ({ ...x, denialCode: e.target.value }))}><option value="">All Codes</option>{(lookups.denialCodes || lookups.DenialCodes || []).map(x => <option key={x}>{x}</option>)}</select></label>
+      <label><span>ICD Compliance Status</span><select value={draft.icdComplianceStatus} onChange={e => setDraft(x => ({ ...x, icdComplianceStatus: e.target.value }))}><option value="">All Statuses</option>{(lookups.icdComplianceStatuses || lookups.ICDComplianceStatuses || []).map(x => <option key={x}>{x}</option>)}</select></label>
+      <label><span>Coverage Status</span><select value={draft.coverageStatus} onChange={e => setDraft(x => ({ ...x, coverageStatus: e.target.value }))}><option value="">All Statuses</option>{(lookups.coverageStatuses || lookups.CoverageStatuses || []).map(x => <option key={x}>{x}</option>)}</select></label>
+      <label><span>Assigned To</span><select value={draft.assignedTo} onChange={e => setDraft(x => ({ ...x, assignedTo: e.target.value }))}><option value="">All Reviewers</option>{(lookups.assignedUsers || lookups.AssignedUsers || []).map(x => <option key={x}>{x}</option>)}</select></label>
+      <label><span>Verification Status</span><select value={draft.status} onChange={e => setDraft(x => ({ ...x, status: e.target.value }))}><option value="">All</option>{statuses.map(x => <option key={x}>{x}</option>)}</select></label>
       <button className="wl-btn xs teal" onClick={applyFilters}>Search</button>
+      <button className="wl-btn xs action-export-btn" onClick={exportRows}><i className="bi bi-file-earmark-arrow-down" /> Export Filtered</button>
       <button className="wl-btn xs" onClick={clearFilters}>Clear</button>
     </div>
 
     {loading && <div className="loading-line" />}
 
     <div className={`claim-split-shell drawer-open action-review-shell`}>
-      <aside className="claim-list-pane thin-list-border">
-        <div className="claim-view-top">
-          <div><div className="claim-view-title">Claim Level Review</div><div className="claim-view-subtitle">{claimRows.length} claim(s), {data.totalCount || items.length} task(s)</div></div>
+      <aside className="action-claim-pane">
+        <div className="action-pane-head">Grouped Affected Claims</div>
+        <div className="action-pane-search">
+          <input value={claimSearch} onChange={e => setClaimSearch(e.target.value)} placeholder="Filter local claim results..." />
         </div>
-        <div className="claim-list-toolbar action-level-toolbar">
-          <label className="claim-search-wrap">
-            <i className="bi bi-search" />
-            <input value={claimSearch} onChange={e => setClaimSearch(e.target.value)} placeholder="Search claim, payer, action" />
-          </label>
-          <span className="table-count">{visibleClaimRows.length} of {claimRows.length} claim(s)</span>
-        </div>
-        <div className="claim-list-head action-claim-list-head"><span>Claim</span><span>Payer</span><span>Tasks</span><span>Status</span></div>
-        <div className="claim-rows-scroll">
-          {visibleClaimRows.length ? visibleClaimRows.map(row => <div key={row.claimId} className={`claim-list-row action-claim-list-row ${activeClaim?.claimId === row.claimId ? 'active' : ''}`} onClick={() => { setActiveClaimId(row.claimId); setDrawerTab('tasks'); }}>
-            <span className="claim-expand-dot"><i className={`bi ${activeClaim?.claimId === row.claimId ? 'bi-chevron-down' : 'bi-chevron-right'}`} /></span>
-            <span className="claim-list-id"><button type="button" className="claim-id-link" onClick={e => { e.stopPropagation(); setActiveClaimId(row.claimId); setDrawerTab('tasks'); }}>{row.claimId}</button><small>Patient {row.patientId || '-'}</small></span>
-            <span className="claim-list-payer">{row.payerName || '-'}</span>
-            <span className="claim-list-amt">{row.rows.length}</span>
-            <span className="badge badge-verification">{row.pendingRows.length ? `${row.pendingRows.length} Pending` : row.statusText}</span>
-          </div>) : <div className="claim-empty-panel">No action change claims found.</div>}
+        <div className="action-claim-list">
+          {visibleClaimRows.length ? visibleClaimRows.map(row => <button type="button" key={row.claimId} className={`action-claim-card ${activeClaim?.claimId === row.claimId ? 'active' : ''}`} onClick={() => { setActiveClaimId(row.claimId); setDrawerTab('tasks'); }}>
+            <span className="action-claim-card-top">
+              <b>{row.claimId}</b>
+              <em>{row.pendingRows.length ? `${row.pendingRows.length} Pending` : row.statusText}</em>
+            </span>
+            <span className="action-claim-card-meta">
+              Patient {row.patientId || '-'} | {row.payerName || '-'}<br />
+              Assigned: {row.assignedTo || '-'} | Code: {row.denialCodesText}
+            </span>
+          </button>) : <div className="claim-empty-panel">No action change claims found.</div>}
         </div>
       </aside>
 
-      <section className="claim-drawer action-review-drawer">
+      <section className="action-detail-card">
         {activeClaim ? <>
-          <div className="claim-drawer-header">
+          <div className="action-detail-head">
             <div>
-              <div className="claim-drawer-kicker">Claims / Claim Level Review</div>
-              <h3>{activeClaim.claimId}</h3>
+              <h3>Claim Level Review: <button type="button" className="action-claim-title-link">{activeClaim.claimId}</button></h3>
+              <div className="action-info-badges">
+                <span className="blue">{activeClaim.payerName || '-'}</span>
+                <span>Patient: {activeClaim.patientId || '-'}</span>
+                <span className="amber">{activeClaim.rows.length} affected tasks</span>
+                <span>User: {activeClaim.assignedTo || '-'}</span>
+                <span>Status: {activeClaim.claimStatus || '-'}</span>
+                <span>ICD: {activeClaim.icdText}</span>
+                <span>Coverage: {activeClaim.coverageText}</span>
+              </div>
               <p>{activeClaim.payerName || '-'} · Patient {activeClaim.patientId || '-'} · {activeClaim.rows.length} affected task(s)</p>
             </div>
             <div className="action-review-buttons">
@@ -389,17 +398,43 @@ export default function DenialActionVerificationPage({ labId, setMessage, initia
             {drawerTab === 'tasks' ? <div className="action-task-split">
               <div className="action-section-title">Task Split</div>
               <div className="action-task-scroll">
-                <table className="claim-task-table action-task-table">
-                  <thead><tr><th>Task ID</th><th>Assigned To</th><th>Denial</th><th>ICD</th><th>Coverage</th><th>Old Action</th><th>New Action</th><th>Old Category</th><th>New Category</th><th>Old Task</th><th>New Task</th><th>Old Short</th><th>New Short</th><th>Status</th><th>Approve / Ignore</th></tr></thead>
+                <table className="claim-task-table action-task-table full-task-columns thin-bordered">
+                  <thead><tr>
+                    <th>TaskID</th><th>CPTCode</th><th>Units</th><th>Modifier</th><th>DenialCode</th><th>DenialDescription</th><th>DenialClassification</th>
+                    <th>ActionCode</th><th>ActionCategory</th><th>RecommendedAction</th><th>Priority</th><th className="r">InsuranceBalance</th><th>SLADays</th>
+                    <th>Status</th><th>DateOpened</th><th>DueDate</th><th>SLAStatus</th><th>FirstBilledDate</th><th>ChargeEnteredDate</th><th>ICDComplianceStatus</th><th>DenialValidity</th>
+                    <th>CoverageStatus</th><th>AssignedTo</th><th>ClaimStatus</th>
+                    <th>OldActionCode</th><th>NewActionCode</th><th>OldActionCategory</th><th>NewActionCategory</th><th>OldTask</th><th>NewTask</th><th>OldShortCategory</th><th>NewShortCategory</th>
+                    <th>VerificationStatus</th><th>Approve / Ignore</th>
+                  </tr></thead>
                   <tbody>{activeTasks.map(row => {
                     const rowKey = uniqueKey(row);
                     const pending = val(row, 'verificationStatus') === 'Pending';
                     return <tr key={rowKey} className={activeTask && uniqueKey(activeTask) === rowKey ? 'active-task-row' : ''} onClick={() => { setActiveTaskKey(rowKey); setDrawerTab('tasks'); }}>
                       <td><strong>{val(row, 'taskID') || '-'}</strong></td>
-                      <td>{val(row, 'assignedTo') || '-'}</td>
-                      <td><code>{val(row, 'denialCode') || '-'}</code></td>
+                      <td><code className="code">{val(row, 'cptCode') || val(row, 'CPTCode') || '-'}</code></td>
+                      <td>{val(row, 'units') ?? '-'}</td>
+                      <td>{val(row, 'modifier') || '-'}</td>
+                      <td><code className="code">{val(row, 'denialCode') || '-'}</code></td>
+                      <td className="wrap-wide">{val(row, 'denialDescription') || '-'}</td>
+                      <td>{val(row, 'denialClassification') || '-'}</td>
+                      <td>{val(row, 'actionCode') || val(row, 'oldActionCode') || '-'}</td>
+                      <td>{val(row, 'actionCategory') || val(row, 'oldActionCategory') || '-'}</td>
+                      <td className="wrap-wide">{val(row, 'recommendedAction') || '-'}</td>
+                      <td>{val(row, 'priority') || '-'}</td>
+                      <td className="r">{money(val(row, 'insuranceBalance'))}</td>
+                      <td>{val(row, 'slaDays') ?? val(row, 'SLADays') ?? '-'}</td>
+                      <td><span className="badge badge-verification">{val(row, 'status') || '-'}</span></td>
+                      <td>{shortDate(val(row, 'dateOpened'))}</td>
+                      <td>{shortDate(val(row, 'dueDate'))}</td>
+                      <td><span className="badge badge-verification">{val(row, 'slaStatus') || '-'}</span></td>
+                      <td>{shortDate(val(row, 'firstBilledDate'))}</td>
+                      <td>{shortDate(val(row, 'chargeEnteredDate'))}</td>
                       <td>{val(row, 'icdComplianceStatus') || '-'}</td>
+                      <td>{val(row, 'denialValidity') || '-'}</td>
                       <td>{val(row, 'coverageStatus') || '-'}</td>
+                      <td>{val(row, 'assignedTo') || '-'}</td>
+                      <td>{val(row, 'claimStatus') || '-'}</td>
                       <td className={changed(row, 'oldActionCode', 'newActionCode') ? 'old-change action-change-cell' : ''}>{val(row, 'oldActionCode') || '-'}</td>
                       <td className={changed(row, 'oldActionCode', 'newActionCode') ? 'new-change action-change-cell' : ''}>{val(row, 'newActionCode') || '-'}</td>
                       <td className={changed(row, 'oldActionCategory', 'newActionCategory') ? 'old-change action-change-cell' : ''}>{val(row, 'oldActionCategory') || '-'}</td>

@@ -386,7 +386,132 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
 
     private static async Task<DenialCodeActionChangeSummary?> CreateActionChangeBatchAsync(SqlConnection conn, SqlTransaction tx, string? sourceFileName, string? userName, CancellationToken ct)
     {
-        const string sql = """
+        var taskColumns = await GetColumnSetAsync(conn, tx, "dbo.DenialTaskBoard", ct);
+        var lineColumns = await GetColumnSetAsync(conn, tx, "dbo.DenialLineItem", ct);
+        var lineTableExists = lineColumns.Count > 0;
+
+        static string TextExpr(IReadOnlySet<string> columns, string alias, string column, int length)
+            => columns.Contains(column)
+                ? $"NULLIF(LTRIM(RTRIM(CONVERT(nvarchar({length}), {alias}.[{column}]))), '')"
+                : $"CAST(NULL AS nvarchar({length}))";
+        static string IntExpr(IReadOnlySet<string> columns, string alias, string column)
+            => columns.Contains(column) ? $"TRY_CONVERT(int, {alias}.[{column}])" : "CAST(NULL AS int)";
+        static string MoneyExpr(IReadOnlySet<string> columns, string alias, string column)
+            => columns.Contains(column) ? $"TRY_CONVERT(decimal(18,2), {alias}.[{column}])" : "CAST(NULL AS decimal(18,2))";
+        static string DateExpr(IReadOnlySet<string> columns, string alias, string column)
+            => columns.Contains(column) ? $"TRY_CONVERT(date, {alias}.[{column}])" : "CAST(NULL AS date)";
+        static string NormalizedTextExpr(IReadOnlySet<string> columns, string alias, string column)
+            => columns.Contains(column)
+                ? $"UPPER(LTRIM(RTRIM(CONVERT(nvarchar(255), ISNULL({alias}.[{column}], '')))))"
+                : "CAST('' AS nvarchar(255))";
+
+        var taskClaimKeyExpr = taskColumns.Contains("ClaimIDNormalized")
+            ? "LTRIM(RTRIM(CONVERT(nvarchar(150), ISNULL(t.[ClaimIDNormalized], ''))))"
+            : "CONVERT(nvarchar(150), REPLACE(LTRIM(RTRIM(CONVERT(nvarchar(150), ISNULL(t.[ClaimID], '')))), 'CLM-', ''))";
+        var taskClaimUidExpr = taskColumns.Contains("ClaimUID")
+            ? $"COALESCE(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(150), ISNULL(t.[ClaimUID], '')))), ''), {taskClaimKeyExpr})"
+            : taskClaimKeyExpr;
+        var taskClaimIdExpr = "CONVERT(nvarchar(150), REPLACE(LTRIM(RTRIM(CONVERT(nvarchar(150), ISNULL(t.[ClaimID], '')))), 'CLM-', ''))";
+        var siblingTaskClaimKeyExpr = taskColumns.Contains("ClaimIDNormalized")
+            ? "LTRIM(RTRIM(CONVERT(nvarchar(150), ISNULL(tb.[ClaimIDNormalized], ''))))"
+            : "CONVERT(nvarchar(150), REPLACE(LTRIM(RTRIM(CONVERT(nvarchar(150), ISNULL(tb.[ClaimID], '')))), 'CLM-', ''))";
+        var siblingTaskClaimUidExpr = taskColumns.Contains("ClaimUID")
+            ? $"COALESCE(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(150), ISNULL(tb.[ClaimUID], '')))), ''), {siblingTaskClaimKeyExpr})"
+            : siblingTaskClaimKeyExpr;
+        var siblingTaskClaimIdExpr = "CONVERT(nvarchar(150), REPLACE(LTRIM(RTRIM(CONVERT(nvarchar(150), ISNULL(tb.[ClaimID], '')))), 'CLM-', ''))";
+        var lineVisitExpr = lineColumns.Contains("VisitNumber")
+            ? "CONVERT(nvarchar(150), REPLACE(LTRIM(RTRIM(CONVERT(nvarchar(150), ISNULL(l.[VisitNumber], '')))), 'CLM-', ''))"
+            : "CAST('' AS nvarchar(150))";
+        var lineClaimUidExpr = lineColumns.Contains("ClaimUID")
+            ? $"COALESCE(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(150), ISNULL(l.[ClaimUID], '')))), ''), {lineVisitExpr})"
+            : lineVisitExpr;
+
+        var lineDenialNormalized = NormalizedTextExpr(lineColumns, "l", "DenialCodeNormalized");
+        var lineDenialOriginal = NormalizedTextExpr(lineColumns, "l", "DenialCodeOriginal");
+        var lineDenialCode = NormalizedTextExpr(lineColumns, "l", "DenialCode");
+        var lineDateOrder = lineColumns.Contains("DateOfService") ? "TRY_CONVERT(date, l.[DateOfService]) DESC" : "CASE WHEN 1 = 1 THEN 0 END";
+        var lineHasDetailsOrder = lineColumns.Contains("CPTCode")
+            ? "CASE WHEN NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(100), ISNULL(l.[CPTCode], '')))), '') IS NOT NULL THEN 0 ELSE 1 END,"
+            : string.Empty;
+        var siblingTaskContextApplySql = $"""
+            OUTER APPLY
+            (
+                SELECT TOP (1)
+                    {TextExpr(taskColumns, "tb", "CPTCode", 100)} AS CPTCode,
+                    {IntExpr(taskColumns, "tb", "Units")} AS Units,
+                    {TextExpr(taskColumns, "tb", "Modifier", 100)} AS Modifier,
+                    {TextExpr(taskColumns, "tb", "PayerName", 255)} AS PayerName,
+                    {TextExpr(taskColumns, "tb", "DenialDescription", 1000)} AS DenialDescription,
+                    {TextExpr(taskColumns, "tb", "DenialClassification", 255)} AS DenialClassification,
+                    {TextExpr(taskColumns, "tb", "ActionCode", 100)} AS ActionCode,
+                    {TextExpr(taskColumns, "tb", "ActionCategory", 500)} AS ActionCategory,
+                    {TextExpr(taskColumns, "tb", "RecommendedAction", 1000)} AS RecommendedAction,
+                    {TextExpr(taskColumns, "tb", "Task", 500)} AS Task,
+                    {TextExpr(taskColumns, "tb", "Priority", 100)} AS Priority,
+                    {MoneyExpr(taskColumns, "tb", "InsuranceBalance")} AS InsuranceBalance,
+                    {IntExpr(taskColumns, "tb", "SLADays")} AS SLADays,
+                    {TextExpr(taskColumns, "tb", "Status", 100)} AS Status,
+                    {TextExpr(taskColumns, "tb", "WorkFlowStatus", 100)} AS WorkFlowStatus,
+                    {DateExpr(taskColumns, "tb", "DateOpened")} AS DateOpened,
+                    {DateExpr(taskColumns, "tb", "DueDate")} AS DueDate,
+                    {TextExpr(taskColumns, "tb", "SLAStatus", 100)} AS SLAStatus,
+                    {DateExpr(taskColumns, "tb", "FirstBilledDate")} AS FirstBilledDate,
+                    {DateExpr(taskColumns, "tb", "ChargeEnteredDate")} AS ChargeEnteredDate,
+                    {TextExpr(taskColumns, "tb", "DenialValidity", 255)} AS DenialValidity
+                FROM dbo.DenialTaskBoard tb WITH (NOLOCK)
+                WHERE ({siblingTaskClaimUidExpr} = {taskClaimUidExpr}
+                       OR {siblingTaskClaimKeyExpr} = {taskClaimKeyExpr}
+                       OR {siblingTaskClaimIdExpr} = {taskClaimIdExpr})
+                ORDER BY
+                    CASE WHEN NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(100), ISNULL(tb.[CPTCode], '')))), '') IS NOT NULL THEN 0 ELSE 1 END,
+                    CASE WHEN tb.[TaskID] = t.[TaskID] THEN 0 ELSE 1 END
+            ) taskCtx
+            """;
+        var lineMatchSql = lineTableExists
+            ? $"""
+              FROM dbo.DenialLineItem l WITH (NOLOCK)
+              WHERE ({lineClaimUidExpr} = {taskClaimUidExpr}
+                     OR {lineVisitExpr} = {taskClaimKeyExpr}
+                     OR {lineVisitExpr} = {taskClaimIdExpr})
+              ORDER BY
+                  CASE WHEN {lineDenialNormalized} = UPPER(source.DenialCode)
+                         OR {lineDenialOriginal} = UPPER(source.DenialCode)
+                         OR {lineDenialCode} = UPPER(source.DenialCode) THEN 0 ELSE 1 END,
+                  {lineHasDetailsOrder}
+                  {lineDateOrder}
+              """
+            : "WHERE 1 = 0";
+
+        var lineApplySql = $"""
+            OUTER APPLY
+            (
+                SELECT TOP (1)
+                    {TextExpr(lineColumns, "l", "CPTCode", 100)} AS CPTCode,
+                    {IntExpr(lineColumns, "l", "Units")} AS Units,
+                    {TextExpr(lineColumns, "l", "Modifier", 100)} AS Modifier,
+                    {TextExpr(lineColumns, "l", "PayerName", 255)} AS PayerName,
+                    {TextExpr(lineColumns, "l", "DenialDescription", 1000)} AS DenialDescription,
+                    {TextExpr(lineColumns, "l", "DenialClassification", 255)} AS DenialClassification,
+                    {TextExpr(lineColumns, "l", "ActionCode", 100)} AS ActionCode,
+                    {TextExpr(lineColumns, "l", "ActionCategory", 500)} AS ActionCategory,
+                    {TextExpr(lineColumns, "l", "RecommendedAction", 1000)} AS RecommendedAction,
+                    {TextExpr(lineColumns, "l", "TaskGuidance", 500)} AS TaskGuidance,
+                    {TextExpr(lineColumns, "l", "Task", 500)} AS Task,
+                    {TextExpr(lineColumns, "l", "Priority", 100)} AS Priority,
+                    {MoneyExpr(lineColumns, "l", "InsuranceBalance")} AS InsuranceBalance,
+                    {IntExpr(lineColumns, "l", "SLADays")} AS SLADays,
+                    {TextExpr(lineColumns, "l", "TaskStatus", 100)} AS TaskStatus,
+                    {TextExpr(lineColumns, "l", "Status", 100)} AS Status,
+                    {TextExpr(lineColumns, "l", "WorkFlowStatus", 100)} AS WorkFlowStatus,
+                    {DateExpr(lineColumns, "l", "DateOfService")} AS DateOfService,
+                    {DateExpr(lineColumns, "l", "FirstBilledDate")} AS FirstBilledDate,
+                    {DateExpr(lineColumns, "l", "ChargeEnteredDate")} AS ChargeEnteredDate,
+                    {TextExpr(lineColumns, "l", "DenialValidity", 255)} AS DenialValidity
+                {lineMatchSql}
+            ) line
+            """;
+
+        var sql = $"""
             DECLARE @BatchId bigint;
 
             DECLARE @Affected table
@@ -394,12 +519,31 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
                 ClaimID nvarchar(100) NOT NULL,
                 TaskID nvarchar(100) NULL,
                 PatientId nvarchar(100) NULL,
+                CPTCode nvarchar(100) NULL,
+                Units int NULL,
+                Modifier nvarchar(100) NULL,
                 PayerName nvarchar(255) NULL,
                 AssignedTo nvarchar(100) NULL,
                 ClaimStatus nvarchar(100) NULL,
                 DenialCode nvarchar(100) NOT NULL,
+                DenialDescription nvarchar(1000) NULL,
+                DenialClassification nvarchar(255) NULL,
                 ICDComplianceStatus nvarchar(255) NULL,
                 CoverageStatus nvarchar(255) NULL,
+                ActionCode nvarchar(100) NULL,
+                ActionCategory nvarchar(500) NULL,
+                RecommendedAction nvarchar(1000) NULL,
+                Task nvarchar(500) NULL,
+                Priority nvarchar(100) NULL,
+                InsuranceBalance decimal(18,2) NULL,
+                SLADays int NULL,
+                Status nvarchar(100) NULL,
+                DateOpened date NULL,
+                DueDate date NULL,
+                SLAStatus nvarchar(100) NULL,
+                FirstBilledDate date NULL,
+                ChargeEnteredDate date NULL,
+                DenialValidity nvarchar(255) NULL,
                 OldActionCode nvarchar(100) NULL,
                 NewActionCode nvarchar(100) NULL,
                 OldActionCategory nvarchar(500) NULL,
@@ -412,9 +556,30 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
 
             INSERT INTO @Affected
             SELECT CONVERT(nvarchar(100), t.ClaimID), CONVERT(nvarchar(100), t.TaskID), CONVERT(nvarchar(100), t.PatientId),
-                   CONVERT(nvarchar(255), t.PayerName), CONVERT(nvarchar(100), t.AssignedTo),
+                   COALESCE(NULLIF(CONVERT(nvarchar(100), t.CPTCode), ''), taskCtx.CPTCode, line.CPTCode),
+                   COALESCE(TRY_CONVERT(int, t.Units), taskCtx.Units, line.Units),
+                   COALESCE(NULLIF(CONVERT(nvarchar(100), t.Modifier), ''), taskCtx.Modifier, line.Modifier),
+                   COALESCE(NULLIF(CONVERT(nvarchar(255), t.PayerName), ''), taskCtx.PayerName, line.PayerName),
+                   CONVERT(nvarchar(100), t.AssignedTo),
                    CONVERT(nvarchar(100), ISNULL(NULLIF(LTRIM(RTRIM(t.WorkFlowStatus)), ''), t.Status)),
-                   source.DenialCode, source.ICDComplianceStatus, source.CoverageStatus,
+                   source.DenialCode,
+                   COALESCE(NULLIF(t.DenialDescription, ''), taskCtx.DenialDescription, line.DenialDescription, NULLIF(source.DenialDescription, '')),
+                   COALESCE(NULLIF(t.DenialClassification, ''), taskCtx.DenialClassification, line.DenialClassification, NULLIF(source.DenialClassification, '')),
+                   source.ICDComplianceStatus, source.CoverageStatus,
+                   COALESCE(NULLIF(t.ActionCode, ''), taskCtx.ActionCode, line.ActionCode),
+                   COALESCE(NULLIF(t.ActionCategory, ''), taskCtx.ActionCategory, line.ActionCategory),
+                   COALESCE(NULLIF(t.RecommendedAction, ''), taskCtx.RecommendedAction, line.RecommendedAction),
+                   COALESCE(NULLIF(t.Task, ''), taskCtx.Task, line.TaskGuidance, line.Task),
+                   COALESCE(NULLIF(t.Priority, ''), taskCtx.Priority, line.Priority),
+                   COALESCE(TRY_CONVERT(decimal(18,2), t.InsuranceBalance), taskCtx.InsuranceBalance, line.InsuranceBalance),
+                   COALESCE(TRY_CONVERT(int, t.SLADays), taskCtx.SLADays, line.SLADays),
+                   COALESCE(NULLIF(t.Status, ''), taskCtx.Status, taskCtx.WorkFlowStatus, line.TaskStatus, line.Status, line.WorkFlowStatus),
+                   COALESCE(t.DateOpened, taskCtx.DateOpened, line.DateOfService),
+                   COALESCE(t.DueDate, taskCtx.DueDate),
+                   COALESCE(t.SLAStatus, taskCtx.SLAStatus),
+                   COALESCE(t.FirstBilledDate, taskCtx.FirstBilledDate, line.FirstBilledDate),
+                   COALESCE(t.ChargeEnteredDate, taskCtx.ChargeEnteredDate, line.ChargeEnteredDate),
+                   COALESCE(NULLIF(t.DenialValidity, ''), taskCtx.DenialValidity, line.DenialValidity, NULLIF(source.DenialValidity, '')),
                    t.ActionCode, source.ActionCode, t.ActionCategory, source.ActionCategory,
                    t.Task, source.Task, t.ShortCategory, source.ShortCategory
             FROM dbo.DenialTaskBoard t WITH (NOLOCK)
@@ -422,6 +587,8 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
                 ON UPPER(LTRIM(RTRIM(ISNULL(t.DenialCode, '')))) = UPPER(source.DenialCode)
                AND UPPER(LTRIM(RTRIM(ISNULL(t.CoverageStatus, 'N/A')))) = UPPER(source.CoverageStatus)
                AND UPPER(LTRIM(RTRIM(ISNULL(t.ICDComplianceStatus, 'N/A')))) = UPPER(source.ICDComplianceStatus)
+            {siblingTaskContextApplySql}
+            {lineApplySql}
             WHERE NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo, ''))), '') IS NOT NULL
               AND LOWER(LTRIM(RTRIM(ISNULL(t.Status, '')))) NOT IN ('close', 'closed')
               AND LOWER(LTRIM(RTRIM(ISNULL(t.WorkFlowStatus, '')))) NOT IN ('close', 'closed', 'closed claim')
@@ -442,12 +609,16 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
                 SET @BatchId = SCOPE_IDENTITY();
 
                 INSERT INTO dbo.DenialCodeActionChangeVerification
-                    (BatchId, ClaimID, TaskID, PatientId, PayerName, AssignedTo, ClaimStatus,
-                     DenialCode, ICDComplianceStatus, CoverageStatus,
+                    (BatchId, ClaimID, TaskID, PatientId, CPTCode, Units, Modifier, PayerName, AssignedTo, ClaimStatus,
+                     DenialCode, DenialDescription, DenialClassification, ICDComplianceStatus, CoverageStatus,
+                     ActionCode, ActionCategory, RecommendedAction, Task, Priority, InsuranceBalance, SLADays, Status,
+                     DateOpened, DueDate, SLAStatus, FirstBilledDate, ChargeEnteredDate, DenialValidity,
                      OldActionCode, NewActionCode, OldActionCategory, NewActionCategory,
                      OldTask, NewTask, OldShortCategory, NewShortCategory)
-                SELECT @BatchId, ClaimID, TaskID, PatientId, PayerName, AssignedTo, ClaimStatus,
-                       DenialCode, ICDComplianceStatus, CoverageStatus,
+                SELECT @BatchId, ClaimID, TaskID, PatientId, CPTCode, Units, Modifier, PayerName, AssignedTo, ClaimStatus,
+                       DenialCode, DenialDescription, DenialClassification, ICDComplianceStatus, CoverageStatus,
+                       ActionCode, ActionCategory, RecommendedAction, Task, Priority, InsuranceBalance, SLADays, Status,
+                       DateOpened, DueDate, SLAStatus, FirstBilledDate, ChargeEnteredDate, DenialValidity,
                        OldActionCode, NewActionCode, OldActionCategory, NewActionCategory,
                        OldTask, NewTask, OldShortCategory, NewShortCategory
                 FROM @Affected;
@@ -499,12 +670,31 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
                     ClaimID nvarchar(100) NOT NULL,
                     TaskID nvarchar(100) NULL,
                     PatientId nvarchar(100) NULL,
+                    CPTCode nvarchar(100) NULL,
+                    Units int NULL,
+                    Modifier nvarchar(100) NULL,
                     PayerName nvarchar(255) NULL,
                     AssignedTo nvarchar(100) NULL,
                     ClaimStatus nvarchar(100) NULL,
                     DenialCode nvarchar(100) NOT NULL,
+                    DenialDescription nvarchar(1000) NULL,
+                    DenialClassification nvarchar(255) NULL,
                     ICDComplianceStatus nvarchar(255) NULL,
                     CoverageStatus nvarchar(255) NULL,
+                    ActionCode nvarchar(100) NULL,
+                    ActionCategory nvarchar(500) NULL,
+                    RecommendedAction nvarchar(1000) NULL,
+                    Task nvarchar(500) NULL,
+                    Priority nvarchar(100) NULL,
+                    InsuranceBalance decimal(18,2) NULL,
+                    SLADays int NULL,
+                    Status nvarchar(100) NULL,
+                    DateOpened date NULL,
+                    DueDate date NULL,
+                    SLAStatus nvarchar(100) NULL,
+                    FirstBilledDate date NULL,
+                    ChargeEnteredDate date NULL,
+                    DenialValidity nvarchar(255) NULL,
                     OldActionCode nvarchar(100) NULL,
                     NewActionCode nvarchar(100) NULL,
                     OldActionCategory nvarchar(500) NULL,
@@ -523,6 +713,26 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
 
             IF COL_LENGTH('dbo.DenialTaskBoard','ShortCategory') IS NULL
                 ALTER TABLE dbo.DenialTaskBoard ADD ShortCategory nvarchar(255) NULL;
+
+            IF COL_LENGTH('dbo.DenialCodeActionChangeVerification','CPTCode') IS NULL ALTER TABLE dbo.DenialCodeActionChangeVerification ADD CPTCode nvarchar(100) NULL;
+            IF COL_LENGTH('dbo.DenialCodeActionChangeVerification','Units') IS NULL ALTER TABLE dbo.DenialCodeActionChangeVerification ADD Units int NULL;
+            IF COL_LENGTH('dbo.DenialCodeActionChangeVerification','Modifier') IS NULL ALTER TABLE dbo.DenialCodeActionChangeVerification ADD Modifier nvarchar(100) NULL;
+            IF COL_LENGTH('dbo.DenialCodeActionChangeVerification','DenialDescription') IS NULL ALTER TABLE dbo.DenialCodeActionChangeVerification ADD DenialDescription nvarchar(1000) NULL;
+            IF COL_LENGTH('dbo.DenialCodeActionChangeVerification','DenialClassification') IS NULL ALTER TABLE dbo.DenialCodeActionChangeVerification ADD DenialClassification nvarchar(255) NULL;
+            IF COL_LENGTH('dbo.DenialCodeActionChangeVerification','ActionCode') IS NULL ALTER TABLE dbo.DenialCodeActionChangeVerification ADD ActionCode nvarchar(100) NULL;
+            IF COL_LENGTH('dbo.DenialCodeActionChangeVerification','ActionCategory') IS NULL ALTER TABLE dbo.DenialCodeActionChangeVerification ADD ActionCategory nvarchar(500) NULL;
+            IF COL_LENGTH('dbo.DenialCodeActionChangeVerification','RecommendedAction') IS NULL ALTER TABLE dbo.DenialCodeActionChangeVerification ADD RecommendedAction nvarchar(1000) NULL;
+            IF COL_LENGTH('dbo.DenialCodeActionChangeVerification','Task') IS NULL ALTER TABLE dbo.DenialCodeActionChangeVerification ADD Task nvarchar(500) NULL;
+            IF COL_LENGTH('dbo.DenialCodeActionChangeVerification','Priority') IS NULL ALTER TABLE dbo.DenialCodeActionChangeVerification ADD Priority nvarchar(100) NULL;
+            IF COL_LENGTH('dbo.DenialCodeActionChangeVerification','InsuranceBalance') IS NULL ALTER TABLE dbo.DenialCodeActionChangeVerification ADD InsuranceBalance decimal(18,2) NULL;
+            IF COL_LENGTH('dbo.DenialCodeActionChangeVerification','SLADays') IS NULL ALTER TABLE dbo.DenialCodeActionChangeVerification ADD SLADays int NULL;
+            IF COL_LENGTH('dbo.DenialCodeActionChangeVerification','Status') IS NULL ALTER TABLE dbo.DenialCodeActionChangeVerification ADD Status nvarchar(100) NULL;
+            IF COL_LENGTH('dbo.DenialCodeActionChangeVerification','DateOpened') IS NULL ALTER TABLE dbo.DenialCodeActionChangeVerification ADD DateOpened date NULL;
+            IF COL_LENGTH('dbo.DenialCodeActionChangeVerification','DueDate') IS NULL ALTER TABLE dbo.DenialCodeActionChangeVerification ADD DueDate date NULL;
+            IF COL_LENGTH('dbo.DenialCodeActionChangeVerification','SLAStatus') IS NULL ALTER TABLE dbo.DenialCodeActionChangeVerification ADD SLAStatus nvarchar(100) NULL;
+            IF COL_LENGTH('dbo.DenialCodeActionChangeVerification','FirstBilledDate') IS NULL ALTER TABLE dbo.DenialCodeActionChangeVerification ADD FirstBilledDate date NULL;
+            IF COL_LENGTH('dbo.DenialCodeActionChangeVerification','ChargeEnteredDate') IS NULL ALTER TABLE dbo.DenialCodeActionChangeVerification ADD ChargeEnteredDate date NULL;
+            IF COL_LENGTH('dbo.DenialCodeActionChangeVerification','DenialValidity') IS NULL ALTER TABLE dbo.DenialCodeActionChangeVerification ADD DenialValidity nvarchar(255) NULL;
 
             IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_DCACV_Batch_Status' AND object_id=OBJECT_ID('dbo.DenialCodeActionChangeVerification'))
                 CREATE INDEX IX_DCACV_Batch_Status ON dbo.DenialCodeActionChangeVerification(BatchId, VerificationStatus);
@@ -562,6 +772,25 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
             END
             """, conn, tx) { CommandTimeout = 180 };
         await procCmd.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task<HashSet<string>> GetColumnSetAsync(SqlConnection conn, SqlTransaction? tx, string tableName, CancellationToken ct)
+    {
+        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using var cmd = new SqlCommand("""
+            SELECT c.name
+            FROM sys.columns c
+            WHERE c.object_id = OBJECT_ID(@TableName);
+            """, conn, tx);
+        cmd.Parameters.Add(new SqlParameter("@TableName", tableName));
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var name = Convert.ToString(reader[0]);
+            if (!string.IsNullOrWhiteSpace(name)) columns.Add(name);
+        }
+
+        return columns;
     }
 
     private static DataTable BuildImportTable(IReadOnlyList<DenialCodeMasterRequest> records, string? userName)
@@ -980,8 +1209,10 @@ public sealed class SqlDenialActionChangeVerificationRepository : IDenialActionC
         }
 
         var sql = $"""
-            SELECT VerificationId, BatchId, ClaimID, TaskID, PatientId, PayerName, AssignedTo, ClaimStatus,
-                   DenialCode, ICDComplianceStatus, CoverageStatus,
+            SELECT VerificationId, BatchId, ClaimID, TaskID, PatientId, CPTCode, Units, Modifier, PayerName, AssignedTo, ClaimStatus,
+                   DenialCode, DenialDescription, DenialClassification, ICDComplianceStatus, CoverageStatus,
+                   ActionCode, ActionCategory, RecommendedAction, Task, Priority, InsuranceBalance, SLADays, Status,
+                   DateOpened, DueDate, SLAStatus, FirstBilledDate, ChargeEnteredDate, DenialValidity,
                    OldActionCode, NewActionCode, OldActionCategory, NewActionCategory,
                    OldTask, NewTask, OldShortCategory, NewShortCategory,
                    VerificationStatus, VerifiedBy, VerifiedOn, CreatedOn
@@ -1070,37 +1301,38 @@ public sealed class SqlDenialActionChangeVerificationRepository : IDenialActionC
         var rows = await GetVerificationItemsAsync(query, ct);
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add("Action Verification");
-        string[] headers = ["VerificationId", "BatchId", "ClaimID", "TaskID", "PatientId", "PayerName", "AssignedTo", "ClaimStatus", "DenialCode", "ICDComplianceStatus", "CoverageStatus", "OldActionCode", "NewActionCode", "OldActionCategory", "NewActionCategory", "OldTask", "NewTask", "OldShortCategory", "NewShortCategory", "VerificationStatus", "VerifiedBy", "VerifiedOn", "CreatedOn"];
-        for (var i = 0; i < headers.Length; i++) sheet.Cell(1, i + 1).Value = headers[i];
+        (string Header, Func<DenialActionChangeVerification, object?> Value)[] columns =
+        [
+            ("VerificationId", x => x.VerificationId), ("BatchId", x => x.BatchId), ("ClaimID", x => x.ClaimID), ("TaskID", x => x.TaskID),
+            ("PatientId", x => x.PatientId), ("CPTCode", x => x.CPTCode), ("Units", x => x.Units), ("Modifier", x => x.Modifier),
+            ("DenialCode", x => x.DenialCode), ("DenialDescription", x => x.DenialDescription), ("DenialClassification", x => x.DenialClassification),
+            ("ActionCode", x => x.ActionCode), ("ActionCategory", x => x.ActionCategory), ("RecommendedAction", x => x.RecommendedAction),
+            ("Task", x => x.Task), ("Priority", x => x.Priority), ("InsuranceBalance", x => x.InsuranceBalance), ("SLADays", x => x.SLADays),
+            ("Status", x => x.Status), ("DateOpened", x => x.DateOpened), ("DueDate", x => x.DueDate), ("SLAStatus", x => x.SLAStatus),
+            ("FirstBilledDate", x => x.FirstBilledDate), ("ChargeEnteredDate", x => x.ChargeEnteredDate), ("ICDComplianceStatus", x => x.ICDComplianceStatus),
+            ("DenialValidity", x => x.DenialValidity), ("CoverageStatus", x => x.CoverageStatus), ("PayerName", x => x.PayerName),
+            ("AssignedTo", x => x.AssignedTo), ("ClaimStatus", x => x.ClaimStatus),
+            ("OldActionCode", x => x.OldActionCode), ("NewActionCode", x => x.NewActionCode), ("OldActionCategory", x => x.OldActionCategory),
+            ("NewActionCategory", x => x.NewActionCategory), ("OldTask", x => x.OldTask), ("NewTask", x => x.NewTask),
+            ("OldShortCategory", x => x.OldShortCategory), ("NewShortCategory", x => x.NewShortCategory),
+            ("VerificationStatus", x => x.VerificationStatus), ("VerifiedBy", x => x.VerifiedBy), ("VerifiedOn", x => x.VerifiedOn), ("CreatedOn", x => x.CreatedOn)
+        ];
+        for (var i = 0; i < columns.Length; i++) sheet.Cell(1, i + 1).Value = columns[i].Header;
         var r = 2;
         foreach (var x in rows.Items)
         {
-            sheet.Cell(r, 1).Value = x.VerificationId;
-            sheet.Cell(r, 2).Value = x.BatchId;
-            sheet.Cell(r, 3).Value = x.ClaimID;
-            sheet.Cell(r, 4).Value = x.TaskID;
-            sheet.Cell(r, 5).Value = x.PatientId;
-            sheet.Cell(r, 6).Value = x.PayerName;
-            sheet.Cell(r, 7).Value = x.AssignedTo;
-            sheet.Cell(r, 8).Value = x.ClaimStatus;
-            sheet.Cell(r, 9).Value = x.DenialCode;
-            sheet.Cell(r, 10).Value = x.ICDComplianceStatus;
-            sheet.Cell(r, 11).Value = x.CoverageStatus;
-            sheet.Cell(r, 12).Value = x.OldActionCode;
-            sheet.Cell(r, 13).Value = x.NewActionCode;
-            sheet.Cell(r, 14).Value = x.OldActionCategory;
-            sheet.Cell(r, 15).Value = x.NewActionCategory;
-            sheet.Cell(r, 16).Value = x.OldTask;
-            sheet.Cell(r, 17).Value = x.NewTask;
-            sheet.Cell(r, 18).Value = x.OldShortCategory;
-            sheet.Cell(r, 19).Value = x.NewShortCategory;
-            sheet.Cell(r, 20).Value = x.VerificationStatus;
-            sheet.Cell(r, 21).Value = x.VerifiedBy;
-            sheet.Cell(r, 22).Value = x.VerifiedOn;
-            sheet.Cell(r, 23).Value = x.CreatedOn;
+            for (var c = 0; c < columns.Length; c++)
+            {
+                var value = columns[c].Value(x);
+                if (value is DateTime dateValue) sheet.Cell(r, c + 1).Value = dateValue;
+                else if (value is int intValue) sheet.Cell(r, c + 1).Value = intValue;
+                else if (value is long longValue) sheet.Cell(r, c + 1).Value = longValue;
+                else if (value is decimal decimalValue) sheet.Cell(r, c + 1).Value = decimalValue;
+                else sheet.Cell(r, c + 1).Value = value?.ToString();
+            }
             r++;
         }
-        sheet.Range(1, 1, 1, headers.Length).Style.Font.SetBold();
+        sheet.Range(1, 1, 1, columns.Length).Style.Font.SetBold();
         sheet.Columns().AdjustToContents();
         using var ms = new MemoryStream();
         workbook.SaveAs(ms);
@@ -1217,6 +1449,8 @@ public sealed class SqlDenialActionChangeVerificationRepository : IDenialActionC
     private static object DbValue(string? value) => string.IsNullOrWhiteSpace(value) ? DBNull.Value : value.Trim();
     private static string? GetString(SqlDataReader r, string column) => r.IsDBNull(r.GetOrdinal(column)) ? null : r.GetString(r.GetOrdinal(column));
     private static DateTime? GetDate(SqlDataReader r, string column) => r.IsDBNull(r.GetOrdinal(column)) ? null : r.GetDateTime(r.GetOrdinal(column));
+    private static int? GetNullableInt(SqlDataReader r, string column) => r.IsDBNull(r.GetOrdinal(column)) ? null : r.GetInt32(r.GetOrdinal(column));
+    private static decimal? GetNullableDecimal(SqlDataReader r, string column) => r.IsDBNull(r.GetOrdinal(column)) ? null : r.GetDecimal(r.GetOrdinal(column));
 
     private static async Task<IReadOnlyList<string>> ReadStringsAsync(SqlDataReader reader, CancellationToken ct)
     {
@@ -1253,12 +1487,31 @@ public sealed class SqlDenialActionChangeVerificationRepository : IDenialActionC
         ClaimID = GetString(r, "ClaimID") ?? string.Empty,
         TaskID = GetString(r, "TaskID"),
         PatientId = GetString(r, "PatientId"),
+        CPTCode = GetString(r, "CPTCode"),
+        Units = GetNullableInt(r, "Units"),
+        Modifier = GetString(r, "Modifier"),
         PayerName = GetString(r, "PayerName"),
         AssignedTo = GetString(r, "AssignedTo"),
         ClaimStatus = GetString(r, "ClaimStatus"),
         DenialCode = GetString(r, "DenialCode") ?? string.Empty,
+        DenialDescription = GetString(r, "DenialDescription"),
+        DenialClassification = GetString(r, "DenialClassification"),
         ICDComplianceStatus = GetString(r, "ICDComplianceStatus"),
         CoverageStatus = GetString(r, "CoverageStatus"),
+        ActionCode = GetString(r, "ActionCode"),
+        ActionCategory = GetString(r, "ActionCategory"),
+        RecommendedAction = GetString(r, "RecommendedAction"),
+        Task = GetString(r, "Task"),
+        Priority = GetString(r, "Priority"),
+        InsuranceBalance = GetNullableDecimal(r, "InsuranceBalance"),
+        SLADays = GetNullableInt(r, "SLADays"),
+        Status = GetString(r, "Status"),
+        DateOpened = GetDate(r, "DateOpened"),
+        DueDate = GetDate(r, "DueDate"),
+        SLAStatus = GetString(r, "SLAStatus"),
+        FirstBilledDate = GetDate(r, "FirstBilledDate"),
+        ChargeEnteredDate = GetDate(r, "ChargeEnteredDate"),
+        DenialValidity = GetString(r, "DenialValidity"),
         OldActionCode = GetString(r, "OldActionCode"),
         NewActionCode = GetString(r, "NewActionCode"),
         OldActionCategory = GetString(r, "OldActionCategory"),

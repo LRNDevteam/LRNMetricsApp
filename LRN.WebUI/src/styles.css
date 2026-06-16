@@ -1429,6 +1429,70 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 @media(max-width:1400px){.action-filter-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.action-filter-grid button{justify-self:start}}
 @media(max-width:1200px){.action-summary-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.action-filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.action-review-shell{grid-template-columns:1fr}.action-change-summary{grid-template-columns:1fr}}
 @media(max-width:700px){.action-summary-grid,.action-filter-grid{grid-template-columns:1fr}.action-level-toolbar{align-items:flex-start}.action-history-row{grid-template-columns:1fr}.action-change-pair{grid-template-columns:1fr}}
+
+/* Denial action verification: grouped claim review view */
+.action-split-page{background:#f8fafc!important;border:0!important;box-shadow:none!important;overflow:visible!important}
+.action-split-page .action-summary-grid{grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;padding:0 0 18px;border:0;background:transparent}
+.action-split-page .action-summary-card{position:relative;min-height:96px;background:#fff;border:1px solid #dbe4ef;border-radius:8px;box-shadow:0 6px 16px rgba(15,23,42,.08);padding:16px 18px;overflow:hidden}
+.action-split-page .action-summary-card.pending::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:#f59e0b}
+.action-split-page .action-summary-card span{font-size:11px;color:#344b72;letter-spacing:.06em;font-weight:800}
+.action-split-page .action-summary-card strong{font-size:26px;line-height:1.1;color:#020617;margin-top:8px}
+.action-split-page .action-summary-card small{display:block;margin-top:4px;font-size:11px;color:#475569}
+.action-split-page .action-filter-grid{background:#fff;border:1px solid #dbe4ef;border-radius:8px;box-shadow:0 4px 14px rgba(15,23,42,.06);padding:18px;grid-template-columns:minmax(210px,1.55fr) repeat(6,minmax(130px,1fr)) auto auto auto;gap:12px;margin-bottom:18px}
+.action-split-page .action-filter-grid span{font-size:10px;letter-spacing:0;color:#1e293b;text-transform:none;font-weight:800}
+.action-split-page .action-filter-grid input,.action-split-page .action-filter-grid select{height:34px;border-color:#d6e0eb;border-radius:6px;font-size:12px;color:#020617}
+.action-split-page .action-export-btn{white-space:nowrap;color:#0f172a}
+.action-review-shell{display:grid;grid-template-columns:320px minmax(0,1fr);gap:20px;padding:0}
+.action-claim-pane,.action-detail-card{background:#fff;border:1px solid #dbe4ef;border-radius:8px;box-shadow:0 6px 16px rgba(15,23,42,.07);overflow:hidden}
+.action-pane-head{padding:15px 14px;border-bottom:1px solid #e5edf5;background:#fff;color:#020617;font-size:12px;font-weight:900}
+.action-pane-search{padding:10px 14px;border-bottom:1px solid #e5edf5;background:#fff}
+.action-pane-search input{width:100%;height:28px;border:1px solid #d6e0eb;border-radius:6px;padding:5px 10px;font-size:11px;color:#0f172a}
+.action-claim-list{max-height:560px;overflow:auto}
+.action-claim-card{display:block;width:100%;border:0;border-bottom:1px solid #e5edf5;background:#fff;text-align:left;padding:15px 14px;cursor:pointer}
+.action-claim-card:hover{background:#f8fafc}
+.action-claim-card.active{background:#eff6ff;border-left:4px solid #2563eb;padding-left:10px}
+.action-claim-card-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:7px}
+.action-claim-card-top b{font-size:13px;color:#2563eb}
+.action-claim-card-top em{font-style:normal;font-size:10px;color:#d97706;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:3px 7px;white-space:nowrap}
+.action-claim-card-meta{display:block;font-size:11px;line-height:1.45;color:#475569}
+.action-detail-card{display:flex;flex-direction:column;min-width:0}
+.action-detail-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;padding:20px;border-bottom:1px solid #e5edf5;background:#f8fafc;order:0}
+.action-detail-head h3{margin:0 0 8px;font-size:18px;color:#020617}
+.action-detail-head p,.action-detail-card .claim-drawer-meta{display:none}
+.action-claim-title-link{border:0;background:transparent;color:#2563eb;font:inherit;font-weight:900;padding:0;cursor:pointer}
+.action-info-badges{display:flex;flex-wrap:wrap;gap:6px}
+.action-info-badges span{display:inline-flex;align-items:center;border:1px solid #dbe4ef;background:#f1f5f9;color:#334155;border-radius:5px;padding:3px 7px;font-size:10px;font-weight:700}
+.action-info-badges span.blue{background:#eff6ff;color:#2563eb;border-color:#bfdbfe}
+.action-info-badges span.amber{background:#fffbeb;color:#d97706;border-color:#fde68a}
+.action-review-buttons .wl-btn{height:30px;padding:0 12px;border-radius:6px;font-size:10px}
+.action-detail-card .claim-drawer-tabs{order:1}
+.action-detail-card .action-change-summary{order:2}
+.action-detail-card .claim-drawer-body{order:3}
+.action-single-tabs,.action-detail-tabs{display:flex;gap:20px;background:#f1f5f9;border-bottom:1px solid #dbe4ef;padding:0 16px}
+.action-single-tabs button,.action-detail-tabs button{border:0;background:transparent;padding:12px 0;color:#475569;font-size:11px;font-weight:800;cursor:pointer;border-bottom:2px solid transparent}
+.action-single-tabs button.active,.action-detail-tabs button.active{color:#2563eb;border-color:#2563eb}
+.claim-drawer-tabs.action-single-tabs button.active{background:transparent;color:#2563eb;border-bottom-color:#2563eb}
+.action-split-page .action-change-summary{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:20px;background:#fff;border-bottom:0}
+.action-split-page .action-change-pair{display:block;border:1px solid #dbe4ef;border-radius:7px;background:#fff;padding:12px}
+.action-split-page .action-change-pair>span{display:block;margin-bottom:8px;font-size:11px;color:#334155}
+.action-split-page .action-change-pair div{display:flex;align-items:center;justify-content:space-between;border-radius:5px;padding:6px 8px;margin-top:4px}
+.action-split-page .action-change-pair div:first-of-type{background:#fef2f2;border:1px solid #fecaca;color:#dc2626}
+.action-split-page .action-change-pair div:last-of-type{background:#f0fdf4;border:1px solid #bbf7d0;color:#16a34a}
+.action-split-page .action-change-pair b{font-size:10px;color:inherit;margin:0}
+.action-split-page .action-change-pair strong{font-size:11px;color:inherit}
+.action-split-page .action-section-title{display:none}
+.action-task-scroll{max-height:420px;margin:0 20px 20px;border:1px solid #dbe4ef;border-radius:7px;overflow:auto}
+.action-task-table{min-width:3400px;font-size:11px}
+.action-task-table th{background:#f8fafc;color:#334155;font-size:10px;text-transform:none}
+.action-task-table td{padding:10px 12px}
+.action-task-table .wrap-wide{min-width:240px;max-width:360px;white-space:normal}
+.action-task-table .old-change,.action-task-table .new-change{border-left:0!important;border-radius:5px;font-weight:800}
+.action-task-table .old-change{background:#fef2f2!important;color:#dc2626}
+.action-task-table .new-change{background:#f0fdf4!important;color:#16a34a}
+.action-history-panel{padding:14px 20px 20px}
+@media(max-width:1400px){.action-split-page .action-filter-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.action-review-shell{grid-template-columns:300px minmax(0,1fr)}}
+@media(max-width:1100px){.action-split-page .action-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.action-review-shell{grid-template-columns:1fr}.action-split-page .action-change-summary{grid-template-columns:1fr}}
+@media(max-width:720px){.action-split-page .action-summary-grid,.action-split-page .action-filter-grid{grid-template-columns:1fr}.action-detail-head{flex-direction:column}.action-review-buttons{justify-content:flex-start}}
 .claim-history-panel{padding:12px 14px;display:flex;flex-direction:column;gap:8px}
 .claim-panel-actions{display:flex;justify-content:flex-end;margin-bottom:2px}
 .history-section-title{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#64748b;margin:10px 0 2px}

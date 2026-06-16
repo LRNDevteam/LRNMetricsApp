@@ -6,8 +6,8 @@ function normalizeLocalhostPorts(value) {
   const v = cleanBase(value);
   if (!v) return '';
   return v
-    .replace(/^https?:\/\/localhost:57996(?=\/|$)/i, 'https://localhost:44350')
-    .replace(/^https?:\/\/127\.0\.0\.1:57996(?=\/|$)/i, 'https://127.0.0.1:44350');
+    .replace(/^https?:\/\/localhost:44350(?=\/|$)/i, 'https://localhost:57996')
+    .replace(/^https?:\/\/127\.0\.0\.1:44350(?=\/|$)/i, 'https://127.0.0.1:57996');
 }
 
 function firstValue(...values) {
@@ -41,7 +41,7 @@ function resolveMetricsBase() {
 
   // Last local fallback only. Prefer .env.development.
   if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-    return 'https://localhost:44350';
+    return 'https://localhost:57996';
   }
 
   return `${window.location.origin}/lrnAnalytics`;
