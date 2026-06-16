@@ -244,12 +244,12 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("1", "Billed", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Billed"),
 				new TemplateRow("•", "Billed Via AMD", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Billed AND LRN Sub Status = Billed Via AMD"),
 				new TemplateRow("2", "Not Billed", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed"),
-				new TemplateRow("•", "Nexum_Claim_scrubber_Queue_Eligibility", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed AND LRN Sub Status = Nexum_Claim_scrubber_Queue_Eligibility"),
+				new TemplateRow("•", "Nexum_Claim_scrubber_Eligibility", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed AND LRN Sub Status = Nexum_Claim_scrubber_Eligibility"),
 				new TemplateRow("•", "Entered in AMD but not billed", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed AND LRN Sub Status = Entered in AMD but not billed"),
 				new TemplateRow("•", "Requires Review", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed AND LRN Sub Status = Requires Review"),
 				new TemplateRow("•", "Nexum Pre Processing Queue", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed AND LRN Sub Status = Nexum Pre Processing Queue"),
-				new TemplateRow("•", "Nexum_Claim_scrubber_Queue_AMD Output", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed AND LRN Sub Status = Nexum_Claim_scrubber_Queue_AMD Output"),
-				new TemplateRow("•", "Nexum_Claim_scrubber_Queue_Diagnosis Validity", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed AND LRN Sub Status = Nexum_Claim_scrubber_Queue_Diagnosis Validity"),
+				new TemplateRow("•", "Nexum_Claim_scrubber_AMD Output", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed AND LRN Sub Status = Nexum_Claim_scrubber_AMD Output"),
+				new TemplateRow("•", "Nexum_Claim_scrubber_Diagnosis Validity", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed AND LRN Sub Status = Nexum_Claim_scrubber_Diagnosis Validity"),
 				new TemplateRow("B", "Self Pay", "NA = Blank AND LRN Sample Status = Self Pay"),
 				new TemplateRow("1", "Billed", "NA = Blank AND LRN Sample Status = Self Pay AND LRN Bill Category = Billed"),
 				new TemplateRow("2", "Not Billed", "NA = Blank AND LRN Sample Status = Self Pay AND LRN Bill Category = Not Billed"),
@@ -262,7 +262,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("•", "Waiting for Information", "NA = Blank AND LRN Sample Status = Other Samples AND LRN Bill Category = Not Billed AND Entry_Status = Waiting for Information"),
 				new TemplateRow("•", "Results Posted", "NA = Blank AND LRN Sample Status = Other Samples AND LRN Bill Category = Not Billed AND Entry_Status = Results Posted"),
 				new TemplateRow("D", "System Test", "NA = Blank AND LRN Sample Status = System Test"),
-				new TemplateRow("E", "Deleted/Rejected", "NA = Blank AND LRN Sample Status = Deleted/Rejected"),
+				new TemplateRow("E", "Duplicate", "NA = Blank AND LRN Sample Status = Duplicate"),
+				new TemplateRow("F", "Deleted/Rejected", "NA = Blank AND LRN Sample Status = Deleted/Rejected"),
 				new TemplateRow("", "Total Samples", "NA = Blank"),
 		},
 		["PCRLOA"] = new[] {
@@ -443,6 +444,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		var raw = await LoadDynamicGroupsAsync(conn, profile, collectedFrom, collectedTo, ct);
 		var summaryRaw = UsesBlankIncorrectDosSummary(profile.LogicSheetName)
 			? raw.Where(HasBlankIncorrectDos).ToList()
+			: UsesBlankNaSummary(profile.LogicSheetName)
+			? raw.Where(HasBlankNa).ToList()
 			: raw;
 
 		var months = summaryRaw
@@ -778,6 +781,15 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 	{
 		var incorrectDos = GetField(row, "Incorrect DOS");
 		return string.IsNullOrWhiteSpace(incorrectDos) || IsBlankValue(incorrectDos);
+	}
+
+	private static bool UsesBlankNaSummary(string logicSheetName)
+		=> logicSheetName.Equals("InHealth", StringComparison.OrdinalIgnoreCase);
+
+	private static bool HasBlankNa(RawLisGroup row)
+	{
+		var na = GetField(row, "NA");
+		return string.IsNullOrWhiteSpace(na) || IsBlankValue(na);
 	}
 
 	private static void ApplyNwlChargesCreatedRows(List<LisSummaryRow> rows, List<RawLisGroup> raw)
