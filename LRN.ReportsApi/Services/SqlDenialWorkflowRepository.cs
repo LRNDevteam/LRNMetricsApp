@@ -9,7 +9,7 @@ namespace LRN.ReportsApi.Services;
 public sealed class SqlDenialWorkflowRepository : IDenialWorkflowRepository
 {
 	private static readonly ConcurrentDictionary<int, FilterOptionsCacheEntry> FilterOptionsCache = new();
-	private static readonly TimeSpan FilterOptionsCacheDuration = TimeSpan.FromMinutes(30);
+	private static readonly TimeSpan FilterOptionsCacheDuration = TimeSpan.FromSeconds(30);
 
 	// Dashboard cards and summary tables are expensive on large DenialTaskBoard tables.
 	// Cache them briefly per lab/filter so navigating between pages does not rescan 300k+ rows each time.
@@ -1001,7 +1001,7 @@ FROM (
 ) x
 ORDER BY Value;
 
--- Clinic/Sales Rep/Referring Provider are autocomplete values from DenialLineItem.
+-- Clinic/Sales Rep are autocomplete values from DenialLineItem.
 SELECT TOP (500) Value
 FROM (
     SELECT Value = LTRIM(RTRIM(ISNULL(ClinicName,'')))
@@ -1022,8 +1022,17 @@ FROM (
 ) x
 ORDER BY Value;
 
+-- Referring Provider source includes DenialTaskBoard.ReferringProvider for Augustus task-board imports.
 SELECT TOP (500) Value
 FROM (
+    SELECT Value = LTRIM(RTRIM(ISNULL(ReferringProvider,'')))
+    FROM dbo.DenialTaskBoard WITH (NOLOCK)
+    WHERE (@HasTaskLab=0 OR {LabScopeSql("LabId")})
+      AND NULLIF(LTRIM(RTRIM(ISNULL(ReferringProvider,''))),'') IS NOT NULL
+    GROUP BY LTRIM(RTRIM(ISNULL(ReferringProvider,'')))
+
+    UNION
+
     SELECT Value = LTRIM(RTRIM(ISNULL(ReferringProvider,'')))
     FROM dbo.DenialLineItem WITH (NOLOCK)
     WHERE (@HasLineLab=0 OR {LabScopeSql("LabId")})

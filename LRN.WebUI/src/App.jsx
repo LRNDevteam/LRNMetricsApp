@@ -328,7 +328,7 @@ export default function App() {
 
   useEffect(() => {
     if (!authReady || !labId) return;
-    const cacheKey = `denial.filterOptions.v2.${labId}`;
+    const cacheKey = `denial.filterOptions.v3.${labId}`;
     try {
       const cached = sessionStorage.getItem(cacheKey);
       if (cached) setFilterOptions({ ...emptyFilterOptions, ...normalizeFilterOptions(JSON.parse(cached) || {}) });

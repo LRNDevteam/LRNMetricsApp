@@ -6,6 +6,11 @@ namespace LabMetricsDashboard.Services;
 
 public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 {
+	private sealed record LineDataColumnSpec(
+		string Key,
+		string Header,
+		string Selector);
+
 	private sealed record RawLisGroup(
 		Dictionary<string, string> Fields,
 		int CollectedYear,
@@ -20,10 +25,10 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		Dictionary<string, string?> FieldColumns);
 
 	private sealed record FilterColumnProfile(
-		string? PanelColumn,
-		string? ClinicColumn,
-		string? RefPhyColumn,
-		string? SalesRepColumn);
+		string? PanelExpression,
+		string? ClinicExpression,
+		string? RefPhyExpression,
+		string? SalesRepExpression);
 
 	private sealed record TemplateRow(string Code, string Description, string Logic);
 
@@ -451,7 +456,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		}
 
 		var profile = ResolveProfile(labName, labId, columns, dateType);
-		var filterColumns = ResolveFilterColumns(columns);
+		var filterColumns = ResolveFilterColumns(columns, profile.LogicSheetName);
 		var sourceFileName = await GetLatestSourceFileNameAsync(conn, columns, ct);
 		var raw = await LoadDynamicGroupsAsync(conn, profile, filterColumns, dateFrom, dateTo, panel, clinic, refPhy, salesRep, ct);
 		var summaryRaw = UsesBlankIncorrectDosSummary(profile.LogicSheetName)
@@ -543,6 +548,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 	public async Task<LisSummaryFilterOptions> GetFilterOptionsAsync(
 		string connectionString,
+		string labName,
 		CancellationToken ct = default)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
@@ -551,17 +557,19 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		await conn.OpenAsync(ct);
 
 		var columns = await GetLimsMasterColumnsAsync(conn, ct);
-		var filterColumns = ResolveFilterColumns(columns);
+		var logicSheet = ResolveLogicSheet(labName, null);
+		var filterColumns = ResolveFilterColumns(columns, logicSheet);
 
 		return new LisSummaryFilterOptions(
-			await LoadFilterValuesAsync(conn, filterColumns.PanelColumn, ct),
-			await LoadFilterValuesAsync(conn, filterColumns.ClinicColumn, ct),
-			await LoadFilterValuesAsync(conn, filterColumns.RefPhyColumn, ct),
-			await LoadFilterValuesAsync(conn, filterColumns.SalesRepColumn, ct));
+			await LoadFilterValuesAsync(conn, filterColumns.PanelExpression, ct),
+			await LoadFilterValuesAsync(conn, filterColumns.ClinicExpression, ct),
+			await LoadFilterValuesAsync(conn, filterColumns.RefPhyExpression, ct),
+			await LoadFilterValuesAsync(conn, filterColumns.SalesRepExpression, ct));
 	}
 
 	public async Task<LisLineDataResult> GetLisLineDataAsync(
 		string connectionString,
+		string labName,
 		string dateType = "Collected",
 		DateOnly? dateFrom = null,
 		DateOnly? dateTo = null,
@@ -587,8 +595,9 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			throw new InvalidOperationException("dbo.LIMSMaster was not found, or no columns were found in dbo.LIMSMaster.");
 		}
 
-		var dateColumn = ResolveDateColumn(columns, "Dynamic", dateType);
-		var filterColumns = ResolveFilterColumns(columns);
+		var logicSheet = ResolveLogicSheet(labName, null);
+		var dateColumn = ResolveDateColumn(columns, logicSheet, dateType);
+		var filterColumns = ResolveFilterColumns(columns, logicSheet);
 		var dateExpr = $"TRY_CONVERT(date, {Q(dateColumn)})";
 		var where = new List<string>
 		{
@@ -609,15 +618,15 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			parameters.Add(new SqlParameter("@toDate", SqlDbType.Date) { Value = dateTo.Value.ToDateTime(TimeOnly.MinValue) });
 		}
 
-		AddOptionalFilter(where, parameters, filterColumns.PanelColumn, "@panel", panel);
-		AddOptionalFilter(where, parameters, filterColumns.ClinicColumn, "@clinic", clinic);
-		AddOptionalFilter(where, parameters, filterColumns.RefPhyColumn, "@refPhy", refPhy);
-		AddOptionalFilter(where, parameters, filterColumns.SalesRepColumn, "@salesRep", salesRep);
+		AddOptionalFilter(where, parameters, filterColumns.PanelExpression, "@panel", panel);
+		AddOptionalFilter(where, parameters, filterColumns.ClinicExpression, "@clinic", clinic);
+		AddOptionalFilter(where, parameters, filterColumns.RefPhyExpression, "@refPhy", refPhy);
+		AddOptionalFilter(where, parameters, filterColumns.SalesRepExpression, "@salesRep", salesRep);
 
 		var whereSql = string.Join(" AND ", where);
-		var selectColumns = LineDataSelectors(columns);
+		var lineColumns = LineDataColumns(columns, logicSheet);
 		var sql = $"""
-			SELECT {string.Join("," + Environment.NewLine + "                   ", selectColumns)}
+			SELECT {string.Join("," + Environment.NewLine + "                   ", lineColumns.Select(x => x.Selector))}
 			FROM dbo.LIMSMaster WITH (NOLOCK)
 			WHERE {whereSql}
 			ORDER BY {dateExpr} DESC, {OrderByText(columns)}
@@ -639,79 +648,24 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		cmd.Parameters.Add(new SqlParameter("@offset", SqlDbType.Int) { Value = (pageNumber - 1) * pageSize });
 		cmd.Parameters.Add(new SqlParameter("@pageSize", SqlDbType.Int) { Value = pageSize });
 
-		var rows = new List<LisLineDataRow>();
+		var rows = new List<Dictionary<string, string>>();
 		await using var rdr = await cmd.ExecuteReaderAsync(ct);
 		while (await rdr.ReadAsync(ct))
 		{
-			rows.Add(new LisLineDataRow(
-				ReadText(rdr, "OrderId"),
-				ReadText(rdr, "SampleId"),
-				ReadText(rdr, "PaymentMethod"),
-				ReadText(rdr, "Barcode"),
-				ReadText(rdr, "Specimen"),
-				ReadText(rdr, "Collector"),
-				ReadText(rdr, "OrderStatus"),
-				ReadText(rdr, "BillingStatus"),
-				ReadText(rdr, "SampleStatus"),
-				ReadDate(rdr, "RequestSubmittedDate"),
-				ReadDate(rdr, "RequestCollectDate"),
-				ReadDate(rdr, "ReqReceivedDate"),
-				ReadDate(rdr, "ReqReportedDate"),
-				ReadDate(rdr, "ValidatedDate"),
-				ReadText(rdr, "ResultedStatus"),
-				ReadText(rdr, "ClientStatus"),
-				ReadText(rdr, "SubStatus"),
-				ReadText(rdr, "TimetoResult"),
-				ReadText(rdr, "TurnaroundTime"),
-				ReadText(rdr, "PerformingLaboratory"),
-				ReadText(rdr, "Results"),
-				ReadText(rdr, "PatientName"),
-				ReadText(rdr, "PatientFirstName"),
-				ReadText(rdr, "PatientLastName"),
-				ReadDate(rdr, "PatientDateofBirth"),
-				ReadText(rdr, "VisitNumber"),
-				ReadText(rdr, "AMDDOE"),
-				ReadText(rdr, "AMDLBD"),
-				ReadDate(rdr, "BilledDate"),
-				ReadText(rdr, "TimetoBill"),
-				ReadText(rdr, "ClaimStatus"),
-				ReadText(rdr, "BilledorNot"),
-				ReadText(rdr, "ClinicName"),
-				ReadText(rdr, "Provider"),
-				ReadText(rdr, "SalesRepName"),
-				ReadText(rdr, "PrimaryInsurance"),
-				ReadText(rdr, "PrimaryInsuranceID"),
-				ReadText(rdr, "ICD10Codes"),
-				ReadText(rdr, "Tests"),
-				ReadText(rdr, "PanelCategory"),
-				ReadText(rdr, "InsuranceCategory"),
-				ReadText(rdr, "Client"),
-				ReadText(rdr, "RequisitionType"),
-				ReadDate(rdr, "DateOfService"),
-				ReadText(rdr, "Medications"),
-				ReadText(rdr, "FacilityState"),
-				ReadText(rdr, "RelationshipToInsured"),
-				ReadText(rdr, "FacilityCity"),
-				ReadText(rdr, "FacilityZipcode"),
-				ReadText(rdr, "FacilityAddress"),
-				ReadText(rdr, "PolicyId"),
-				ReadText(rdr, "GroupId"),
-				ReadText(rdr, "ReferenceId"),
-				ReadDate(rdr, "PolicyHolderDOB"),
-				ReadText(rdr, "Address"),
-				ReadText(rdr, "Email"),
-				ReadText(rdr, "City"),
-				ReadText(rdr, "Gender"),
-				ReadText(rdr, "State"),
-				ReadText(rdr, "TransferTo"),
-				ReadText(rdr, "PatientEthnicity"),
-				ReadText(rdr, "ZipCode"),
-				ReadText(rdr, "Race"),
-				ReadText(rdr, "LabCode"),
-				ReadText(rdr, "NoInsuranceInfo")));
+			var row = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+			foreach (var column in lineColumns)
+			{
+				row[column.Key] = ReadText(rdr, column.Key);
+			}
+
+			rows.Add(row);
 		}
 
-		return new LisLineDataResult(rows, totalCount, pageNumber, pageSize);
+		var resultColumns = lineColumns
+			.Select(x => new LisLineDataColumn(x.Key, x.Header))
+			.ToList();
+
+		return new LisLineDataResult(resultColumns, rows, totalCount, pageNumber, pageSize);
 	}
 
 	private static DimensionProfile ResolveProfile(string labName, int? labId, HashSet<string> columns, string dateType)
@@ -802,10 +756,10 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			parameters.Add(new SqlParameter("@toDate", SqlDbType.Date) { Value = dateTo.Value.ToDateTime(TimeOnly.MinValue) });
 		}
 
-		AddOptionalFilter(where, parameters, filterColumns.PanelColumn, "@panel", panel);
-		AddOptionalFilter(where, parameters, filterColumns.ClinicColumn, "@clinic", clinic);
-		AddOptionalFilter(where, parameters, filterColumns.RefPhyColumn, "@refPhy", refPhy);
-		AddOptionalFilter(where, parameters, filterColumns.SalesRepColumn, "@salesRep", salesRep);
+		AddOptionalFilter(where, parameters, filterColumns.PanelExpression, "@panel", panel);
+		AddOptionalFilter(where, parameters, filterColumns.ClinicExpression, "@clinic", clinic);
+		AddOptionalFilter(where, parameters, filterColumns.RefPhyExpression, "@refPhy", refPhy);
+		AddOptionalFilter(where, parameters, filterColumns.SalesRepExpression, "@salesRep", salesRep);
 
 		if (RequiresBlankIncorrectDos(profile.LogicSheetName) && !string.IsNullOrWhiteSpace(profile.IncorrectDosColumn))
 		{
@@ -895,12 +849,62 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		throw new InvalidOperationException($"{DateTypeLabel(normalized)} date column was not found in dbo.LIMSMaster.");
 	}
 
-	private static FilterColumnProfile ResolveFilterColumns(HashSet<string> columns)
-		=> new(
-			ResolvePanelFilterColumn(columns),
-			FirstExisting(columns, "Facility", "FacilityName", "Clinic", "ClinicName", "Clinic Name", "ReqLocationName", "REQ_LOCATION_NAME", "Location", "LocationName", "ClientName", "Client Name", "OrganizationName", "ORGANIZATION_NAME"),
-			FirstExisting(columns, "Provider", "ProviderName", "PhysicianName", "RefPhy", "Ref Phy", "ReferringProvider", "Referring Provider", "ReferringPhysician", "Referring Physician", "DoctorFullName", "Doctor Full Name", "DOCTOR_FULL_NAME"),
-			FirstExisting(columns, "Collector", "SaleRepName", "SalesRepName", "Sales Rep Name", "SalesRep", "Sales Rep", "SalesRepresentative", "Sales Representative", "SalesRepEmail", "Sales Rep Email"));
+	private static FilterColumnProfile ResolveFilterColumns(HashSet<string> columns, string logicSheetName)
+	{
+		if (logicSheetName.Equals("InHealth", StringComparison.OrdinalIgnoreCase))
+		{
+			return new FilterColumnProfile(
+				ExpressionForColumn(FirstExisting(columns, "LRNPanelName")),
+				ExpressionForColumn(FirstExisting(columns, "Account")),
+				BuildCombinedNameExpression(columns, "ProviderLastName", "ProviderFirstName"),
+				ExpressionForColumn(FirstExisting(columns, "SalesRepEmail", "SalesRepName", "Sales Rep Name", "SalesRep", "Sales Rep")));
+		}
+
+		if (logicSheetName.Equals("Augustus", StringComparison.OrdinalIgnoreCase))
+		{
+			return new FilterColumnProfile(
+				ExpressionForColumn(FirstExisting(columns, "PanelType", "Panel Type")),
+				ExpressionForColumn(FirstExisting(columns, "ClinicName", "Clinic Name")),
+				BuildCombinedNameExpression(columns, "DoctorLastName", "DoctorFirstName")
+					?? ExpressionForColumn(FirstExisting(columns, "DoctorFullName", "Doctor Full Name", "ReferringProvider", "Referring Provider", "ReferringPhysician", "Referring Physician")),
+				ExpressionForColumn(FirstExisting(columns, "SalesRepname", "SalesRepName", "Sales Rep Name", "SaleRepName", "SalesRep", "Sales Rep", "SalesRepresentative", "Sales Representative", "SalesRepEmail", "Sales Rep Email")));
+		}
+
+		return new FilterColumnProfile(
+			ExpressionForColumn(ResolvePanelFilterColumn(columns)),
+			ExpressionForColumn(FirstExisting(columns, "Facility", "FacilityName", "Clinic", "ClinicName", "Clinic Name", "ReqLocationName", "REQ_LOCATION_NAME", "Location", "LocationName", "ClientName", "Client Name", "OrganizationName", "ORGANIZATION_NAME")),
+			ExpressionForColumn(FirstExisting(columns, "Provider", "ProviderName", "PhysicianName", "RefPhy", "Ref Phy", "ReferringProvider", "Referring Provider", "ReferringPhysician", "Referring Physician", "DoctorFullName", "Doctor Full Name", "DOCTOR_FULL_NAME")),
+			ExpressionForColumn(FirstExisting(columns, "Collector", "SaleRepName", "SalesRepName", "Sales Rep Name", "SalesRep", "Sales Rep", "SalesRepresentative", "Sales Representative", "SalesRepEmail", "Sales Rep Email")));
+	}
+
+	private static string? ExpressionForColumn(string? column)
+		=> string.IsNullOrWhiteSpace(column) ? null : TextExpr(column);
+
+	private static string? BuildCombinedNameExpression(HashSet<string> columns, string lastNameColumn, string firstNameColumn)
+	{
+		var lastName = FirstExisting(columns, lastNameColumn);
+		var firstName = FirstExisting(columns, firstNameColumn);
+		if (string.IsNullOrWhiteSpace(lastName) && string.IsNullOrWhiteSpace(firstName))
+		{
+			return null;
+		}
+
+		if (string.IsNullOrWhiteSpace(lastName))
+		{
+			return TextExpr(firstName);
+		}
+
+		if (string.IsNullOrWhiteSpace(firstName))
+		{
+			return TextExpr(lastName);
+		}
+
+		var lastExpr = TextExpr(lastName);
+		var firstExpr = TextExpr(firstName);
+		return $"""
+			LTRIM(RTRIM(CONCAT({lastExpr}, CASE WHEN {lastExpr} <> '' AND {firstExpr} <> '' THEN ', ' ELSE '' END, {firstExpr})))
+			""";
+	}
 
 	private static string? ResolvePanelFilterColumn(HashSet<string> columns)
 		=> IsElixirColumnShape(columns)
@@ -921,14 +925,13 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		   && columns.Contains("BillCategory")
 		   && (columns.Contains("DateOfCollection") || columns.Contains("FacilityName"));
 
-	private static async Task<List<string>> LoadFilterValuesAsync(SqlConnection conn, string? column, CancellationToken ct)
+	private static async Task<List<string>> LoadFilterValuesAsync(SqlConnection conn, string? valueExpr, CancellationToken ct)
 	{
-		if (string.IsNullOrWhiteSpace(column))
+		if (string.IsNullOrWhiteSpace(valueExpr))
 		{
 			return [];
 		}
 
-		var valueExpr = TextExpr(column);
 		var sql = $"""
 			SELECT DISTINCT TOP (1000) {valueExpr} AS [Value]
 			FROM dbo.LIMSMaster WITH (NOLOCK)
@@ -947,9 +950,9 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		return values;
 	}
 
-	private static void AddOptionalFilter(List<string> where, List<SqlParameter> parameters, string? column, string parameterName, string? value)
+	private static void AddOptionalFilter(List<string> where, List<SqlParameter> parameters, string? valueExpr, string parameterName, string? value)
 	{
-		if (string.IsNullOrWhiteSpace(column) || string.IsNullOrWhiteSpace(value))
+		if (string.IsNullOrWhiteSpace(valueExpr) || string.IsNullOrWhiteSpace(value))
 		{
 			return;
 		}
@@ -962,7 +965,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 		if (values.Count == 1)
 		{
-			where.Add($"{TextExpr(column)} = {parameterName}");
+			where.Add($"{valueExpr} = {parameterName}");
 			parameters.Add(new SqlParameter(parameterName, SqlDbType.NVarChar, 4000) { Value = values[0] });
 			return;
 		}
@@ -975,7 +978,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			parameters.Add(new SqlParameter(indexedName, SqlDbType.NVarChar, 4000) { Value = values[i] });
 		}
 
-		where.Add($"{TextExpr(column)} IN ({string.Join(", ", parameterNames)})");
+		where.Add($"{valueExpr} IN ({string.Join(", ", parameterNames)})");
 	}
 
 	private static List<string> ParseSelectedFilterValues(string? value)
@@ -1000,75 +1003,559 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		return clone;
 	}
 
-	private static List<string> LineDataSelectors(HashSet<string> columns)
+	private static List<LineDataColumnSpec> LineDataColumns(HashSet<string> columns, string logicSheetName)
+	{
+		var specs = logicSheetName.Equals("InHealth", StringComparison.OrdinalIgnoreCase)
+			? InHealthLineDataColumns(columns)
+			: logicSheetName.Equals("NWL", StringComparison.OrdinalIgnoreCase)
+			? NorthWestLineDataColumns(columns)
+			: logicSheetName.Equals("Augustus", StringComparison.OrdinalIgnoreCase)
+			? AugustusLineDataColumns(columns)
+			: logicSheetName.Equals("Cove", StringComparison.OrdinalIgnoreCase)
+			? CoveLineDataColumns(columns)
+			: logicSheetName.Equals("Elixir", StringComparison.OrdinalIgnoreCase)
+			? ElixirLineDataColumns(columns)
+			: logicSheetName.Equals("PCRLOA", StringComparison.OrdinalIgnoreCase)
+			? PcrLoaLineDataColumns(columns)
+			: logicSheetName.Equals("Beech Tree", StringComparison.OrdinalIgnoreCase)
+			? BeechTreeLineDataColumns(columns)
+			: logicSheetName.Equals("PhiLife", StringComparison.OrdinalIgnoreCase) || logicSheetName.Equals("Rising Tides", StringComparison.OrdinalIgnoreCase)
+			? StandardOrderLineDataColumns(columns)
+			: GenericLineDataColumns(columns);
+
+		return AvailableLineDataColumns(specs);
+	}
+
+	private static List<LineDataColumnSpec> AvailableLineDataColumns(IEnumerable<LineDataColumnSpec> specs)
+		=> specs
+			.Where(spec => !spec.Selector.StartsWith("CAST('' AS nvarchar", StringComparison.OrdinalIgnoreCase)
+						   && !spec.Selector.StartsWith("CAST(NULL AS datetime)", StringComparison.OrdinalIgnoreCase))
+			.ToList();
+
+	private static List<LineDataColumnSpec> GenericLineDataColumns(HashSet<string> columns)
 		=> new()
 		{
-			TextSelect(columns, "OrderId", "OrderId", "OrderID", "Order ID", "RecordId", "Record ID"),
-			TextSelect(columns, "SampleId", "Accession", "SampleId", "SampleID", "Sample ID", "UniqueSampleID", "Unique Sample ID", "OrderId", "OrderID", "Order ID"),
-			TextSelect(columns, "PaymentMethod", "PaymentMethod", "Payment Method", "BillTo", "Bill To", "BilledTo", "Billed To"),
-			TextSelect(columns, "Barcode", "Barcode", "BarCode"),
-			TextSelect(columns, "Specimen", "Specimen", "SpecimenType", "Specimen Type"),
-			TextSelect(columns, "Collector", "Collector", "CollectedBy", "Collected By"),
-			TextSelect(columns, "OrderStatus", "OrderStatus", "Order Status", "Status"),
-			TextSelect(columns, "BillingStatus", "BillingStatus", "Billing Status", "BillStatus", "Bill Status"),
-			TextSelect(columns, "SampleStatus", "SampleStatus", "Sample Status", "LRNSampleStatus", "LRN Sample Status"),
-			DateSelect(columns, "RequestSubmittedDate", "RequestSubmittedDate", "Request Submitted Date", "ReqSubmittedDate", "SubmittedDate"),
-			DateSelect(columns, "RequestCollectDate", "RequestCollectDate", "ReqCollectDate", "REQ_COLLECT_DATE", "CollectionDate", "DateOfCollection", "CollectedDate", "Entry_DateCreated"),
-			DateSelect(columns, "ReqReceivedDate", "ReqReceivedDate", "ReceivedDate", "RequestReceivedDate"),
-			DateSelect(columns, "ReqReportedDate", "ReqReportedDate", "ResultDate", "ReportedDate", "ReqResultedDate", "SampleResultedDate"),
-			DateSelect(columns, "ValidatedDate", "ValidatedDate", "Validated Date"),
-			TextSelect(columns, "ResultedStatus", "RessultedStatus", "ResultedStatus", "Result Status", "ResultStatus", "LRNResultStatus"),
-			TextSelect(columns, "ClientStatus", "ClientStatus", "Client Status", "SubStatus", "Sub Status"),
-			TextSelect(columns, "SubStatus", "SubStatus", "Sub Status", "ClientStatus", "Client Status"),
-			TextSelect(columns, "TimetoResult", "TimetoResult", "Time to Result", "TimeToResult"),
-			TextSelect(columns, "TurnaroundTime", "TurnaroundTime", "Turnaround Time", "TAT"),
-			TextSelect(columns, "PerformingLaboratory", "Performing Laboratory", "PerformingLaboratory", "PerformingLab"),
-			TextSelect(columns, "Results", "Results", "Result"),
-			TextSelect(columns, "PatientName", "PatientName", "Patient Name", "PatientFullName", "Patient Full Name", "FullName", "Full Name"),
-			TextSelect(columns, "PatientFirstName", "PatientFirstName", "Patient First Name", "FirstName", "First Name"),
-			TextSelect(columns, "PatientLastName", "PatientLastName", "Patient Last Name", "LastName", "Last Name"),
-			DateSelect(columns, "PatientDateofBirth", "PatientDateofBirth", "Patient Date of Birth", "DOB", "DateOfBirth", "Date of Birth"),
-			TextSelect(columns, "VisitNumber", "VisitNumber", "Visit Number"),
-			TextSelect(columns, "AMDDOE", "AMDDOE", "AMD DOE"),
-			TextSelect(columns, "AMDLBD", "AMDLBD", "AMD LBD"),
-			DateSelect(columns, "BilledDate", "BilledDate", "Billed Date"),
-			TextSelect(columns, "TimetoBill", "TimetoBill", "Time to Bill", "TimeToBill"),
-			TextSelect(columns, "ClaimStatus", "ClaimStatus", "Claim Status", "NewStatus", "FinalStatus", "Final Status"),
-			TextSelect(columns, "BilledorNot", "BilledorNot", "Billed/Not", "Billed Or Not", "BillCategory", "Bill Category", "LRNBillCategory"),
-			TextSelect(columns, "ClinicName", "Facility", "FacilityName", "ClinicName", "Clinic Name", "Clinic", "ReqLocationName", "REQ_LOCATION_NAME", "Location", "LocationName", "ClientName", "Client Name"),
-			TextSelect(columns, "Provider", "Provider", "ProviderName", "PhysicianName", "RefPhy", "Ref Phy", "ReferringProvider", "Referring Physician", "DoctorFullName", "Doctor Full Name"),
-			TextSelect(columns, "SalesRepName", "SaleRepName", "SalesRepName", "Sales Rep Name", "SalesRep", "Sales Rep", "SalesRepresentative", "Sales Representative"),
-			TextSelect(columns, "PrimaryInsurance", "PrimaryInsurance", "Primary Insurance", "PrimaryInsuranceProvider", "Primary Insurance Provider", "Insurance", "InsuranceName", "Insurance Name"),
-			TextSelect(columns, "PrimaryInsuranceID", "PrimaryInsuranceID", "Primary Insurance ID", "InsuranceID", "Insurance ID"),
-			TextSelect(columns, "ICD10Codes", "ICD10Codes", "ICD10 Codes", "ICD Codes", "DiagnosisCodes"),
-			TextSelect(columns, "Tests", "Tests", "Test", "Panel", "PanelName", "Panel Name"),
-			TextSelect(columns, "PanelCategory", "PanelCategory", "Panel Category", "PanelName", "Panel Name", "PanelType", "Panel Type"),
-			TextSelect(columns, "InsuranceCategory", "InsuranceCategory", "Insurance Category", "InsuranceType", "Insurance Type"),
-			TextSelect(columns, "Client", "Client", "ClientName", "Client Name"),
-			TextSelect(columns, "RequisitionType", "RequistionType", "RequisitionType", "Requisition Type"),
-			DateSelect(columns, "DateOfService", "DateofService", "DateOfService", "Date of Service"),
-			TextSelect(columns, "Medications", "Medications", "Medication"),
-			TextSelect(columns, "FacilityState", "FacilityState", "Facility State"),
-			TextSelect(columns, "RelationshipToInsured", "RelationshipToInsured", "Relationship To Insured"),
-			TextSelect(columns, "FacilityCity", "FacilityCity", "Facility City"),
-			TextSelect(columns, "FacilityZipcode", "FacilityZipcode", "Facility Zipcode", "FacilityZipCode", "Facility Zip Code"),
-			TextSelect(columns, "FacilityAddress", "FacilityAddress", "Facility Address"),
-			TextSelect(columns, "PolicyId", "PolicyId", "Policy ID", "PolicyId"),
-			TextSelect(columns, "GroupId", "GroupId", "Group ID"),
-			TextSelect(columns, "ReferenceId", "ReferenceId", "Reference ID"),
-			DateSelect(columns, "PolicyHolderDOB", "Policy_Holder_DOB", "PolicyHolderDOB", "Policy Holder DOB"),
-			TextSelect(columns, "Address", "Address"),
-			TextSelect(columns, "Email", "Email"),
-			TextSelect(columns, "City", "City"),
-			TextSelect(columns, "Gender", "Gender"),
-			TextSelect(columns, "State", "State"),
-			TextSelect(columns, "TransferTo", "TransferTo", "Transfer To"),
-			TextSelect(columns, "PatientEthnicity", "PatientEthnicity", "Patient Ethnicity"),
-			TextSelect(columns, "ZipCode", "ZipCode", "Zip Code", "Zipcode"),
-			TextSelect(columns, "Race", "Race"),
-			TextSelect(columns, "LabCode", "LabCode", "Lab Code"),
-			TextSelect(columns, "NoInsuranceInfo", "NoInsuranceInfo", "No Insurance Info")
+			TextColumn(columns, "OrderId", "Order Id", "OrderId", "OrderID", "Order ID", "RecordId", "Record ID"),
+			TextColumn(columns, "SampleId", "Sample Id", "Accession", "SampleId", "SampleID", "Sample ID", "UniqueSampleID", "Unique Sample ID", "OrderId", "OrderID", "Order ID"),
+			TextColumn(columns, "PaymentMethod", "Payment Method", "PaymentMethod", "Payment Method", "BillTo", "Bill To", "BilledTo", "Billed To"),
+			TextColumn(columns, "Barcode", "Barcode", "Barcode", "BarCode"),
+			TextColumn(columns, "Specimen", "Specimen", "Specimen", "SpecimenType", "Specimen Type"),
+			TextColumn(columns, "Collector", "Collector", "Collector", "CollectedBy", "Collected By"),
+			TextColumn(columns, "OrderStatus", "Order Status", "OrderStatus", "Order Status", "Status"),
+			TextColumn(columns, "BillingStatus", "Billing Status", "BillingStatus", "Billing Status", "BillStatus", "Bill Status"),
+			TextColumn(columns, "SampleStatus", "Sample Status", "SampleStatus", "Sample Status", "LRNSampleStatus", "LRN Sample Status"),
+			DateColumn(columns, "RequestSubmittedDate", "Request Submitted Date", "RequestSubmittedDate", "Request Submitted Date", "ReqSubmittedDate", "SubmittedDate"),
+			DateColumn(columns, "RequestCollectDate", "Request Collect Date", "RequestCollectDate", "ReqCollectDate", "REQ_COLLECT_DATE", "CollectionDate", "DateOfCollection", "CollectedDate", "Entry_DateCreated"),
+			DateColumn(columns, "ReqReceivedDate", "Req Received Date", "ReqReceivedDate", "ReceivedDate", "RequestReceivedDate"),
+			DateColumn(columns, "ReqReportedDate", "Req Reported Date", "ReqReportedDate", "ResultDate", "ReportedDate", "ReqResultedDate", "SampleResultedDate"),
+			DateColumn(columns, "ValidatedDate", "Validated Date", "ValidatedDate", "Validated Date"),
+			TextColumn(columns, "ResultedStatus", "Resulted Status", "RessultedStatus", "ResultedStatus", "Result Status", "ResultStatus", "LRNResultStatus"),
+			TextColumn(columns, "ClientStatus", "Client Status", "ClientStatus", "Client Status", "SubStatus", "Sub Status"),
+			TextColumn(columns, "SubStatus", "Sub Status", "SubStatus", "Sub Status", "ClientStatus", "Client Status"),
+			TextColumn(columns, "TimetoResult", "Time to Result", "TimetoResult", "Time to Result", "TimeToResult"),
+			TextColumn(columns, "TurnaroundTime", "Turnaround Time", "TurnaroundTime", "Turnaround Time", "TAT"),
+			TextColumn(columns, "PerformingLaboratory", "Performing Laboratory", "Performing Laboratory", "PerformingLaboratory", "PerformingLab"),
+			TextColumn(columns, "Results", "Results", "Results", "Result"),
+			TextColumn(columns, "PatientName", "Patient Name", "PatientName", "Patient Name", "PatientFullName", "Patient Full Name", "FullName", "Full Name"),
+			TextColumn(columns, "PatientFirstName", "Patient First Name", "PatientFirstName", "Patient First Name", "FirstName", "First Name"),
+			TextColumn(columns, "PatientLastName", "Patient Last Name", "PatientLastName", "Patient Last Name", "LastName", "Last Name"),
+			DateColumn(columns, "PatientDateofBirth", "Patient DOB", "PatientDateofBirth", "Patient Date of Birth", "DOB", "DateOfBirth", "Date of Birth"),
+			TextColumn(columns, "VisitNumber", "Visit Number", "VisitNumber", "Visit Number"),
+			TextColumn(columns, "AMDDOE", "AMD DOE", "AMDDOE", "AMD DOE"),
+			TextColumn(columns, "AMDLBD", "AMD LBD", "AMDLBD", "AMD LBD"),
+			DateColumn(columns, "BilledDate", "Billed Date", "BilledDate", "Billed Date"),
+			TextColumn(columns, "TimetoBill", "Time to Bill", "TimetoBill", "Time to Bill", "TimeToBill"),
+			TextColumn(columns, "ClaimStatus", "Claim Status", "ClaimStatus", "Claim Status", "NewStatus", "FinalStatus", "Final Status"),
+			TextColumn(columns, "BilledorNot", "Billed or Not", "BilledorNot", "Billed/Not", "Billed Or Not", "BillCategory", "Bill Category", "LRNBillCategory"),
+			TextColumn(columns, "ClinicName", "Clinic Name", "Facility", "FacilityName", "ClinicName", "Clinic Name", "Clinic", "ReqLocationName", "REQ_LOCATION_NAME", "Location", "LocationName", "ClientName", "Client Name"),
+			TextColumn(columns, "Provider", "Provider", "Provider", "ProviderName", "PhysicianName", "RefPhy", "Ref Phy", "ReferringProvider", "Referring Physician", "DoctorFullName", "Doctor Full Name"),
+			TextColumn(columns, "SalesRepName", "Sales Rep", "SaleRepName", "SalesRepName", "Sales Rep Name", "SalesRep", "Sales Rep", "SalesRepresentative", "Sales Representative"),
+			TextColumn(columns, "PrimaryInsurance", "Primary Insurance", "PrimaryInsurance", "Primary Insurance", "PrimaryInsuranceProvider", "Primary Insurance Provider", "Insurance", "InsuranceName", "Insurance Name"),
+			TextColumn(columns, "PrimaryInsuranceID", "Primary Insurance ID", "PrimaryInsuranceID", "Primary Insurance ID", "InsuranceID", "Insurance ID"),
+			TextColumn(columns, "ICD10Codes", "ICD10 Codes", "ICD10Codes", "ICD10 Codes", "ICD Codes", "DiagnosisCodes"),
+			TextColumn(columns, "Tests", "Tests", "Tests", "Test", "Panel", "PanelName", "Panel Name"),
+			TextColumn(columns, "PanelCategory", "Panel Category", "PanelCategory", "Panel Category", "PanelName", "Panel Name", "PanelType", "Panel Type"),
+			TextColumn(columns, "InsuranceCategory", "Insurance Category", "InsuranceCategory", "Insurance Category", "InsuranceType", "Insurance Type"),
+			TextColumn(columns, "Client", "Client", "Client", "ClientName", "Client Name"),
+			TextColumn(columns, "RequisitionType", "Requisition Type", "RequistionType", "RequisitionType", "Requisition Type"),
+			DateColumn(columns, "DateOfService", "Date of Service", "DateofService", "DateOfService", "Date of Service"),
+			TextColumn(columns, "Medications", "Medications", "Medications", "Medication"),
+			TextColumn(columns, "FacilityState", "Facility State", "FacilityState", "Facility State"),
+			TextColumn(columns, "RelationshipToInsured", "Relationship To Insured", "RelationshipToInsured", "Relationship To Insured"),
+			TextColumn(columns, "FacilityCity", "Facility City", "FacilityCity", "Facility City"),
+			TextColumn(columns, "FacilityZipcode", "Facility Zipcode", "FacilityZipcode", "Facility Zipcode", "FacilityZipCode", "Facility Zip Code"),
+			TextColumn(columns, "FacilityAddress", "Facility Address", "FacilityAddress", "Facility Address"),
+			TextColumn(columns, "PolicyId", "Policy ID", "PolicyId", "Policy ID"),
+			TextColumn(columns, "GroupId", "Group ID", "GroupId", "Group ID"),
+			TextColumn(columns, "ReferenceId", "Reference ID", "ReferenceId", "Reference ID"),
+			DateColumn(columns, "PolicyHolderDOB", "Policy Holder DOB", "Policy_Holder_DOB", "PolicyHolderDOB", "Policy Holder DOB"),
+			TextColumn(columns, "Address", "Address", "Address"),
+			TextColumn(columns, "Email", "Email", "Email"),
+			TextColumn(columns, "City", "City", "City"),
+			TextColumn(columns, "Gender", "Gender", "Gender"),
+			TextColumn(columns, "State", "State", "State"),
+			TextColumn(columns, "TransferTo", "Transfer To", "TransferTo", "Transfer To"),
+			TextColumn(columns, "PatientEthnicity", "Patient Ethnicity", "PatientEthnicity", "Patient Ethnicity"),
+			TextColumn(columns, "ZipCode", "Zip Code", "ZipCode", "Zip Code", "Zipcode"),
+			TextColumn(columns, "Race", "Race", "Race"),
+			TextColumn(columns, "LabCode", "Lab Code", "LabCode", "Lab Code"),
+			TextColumn(columns, "UID", "UID", "UID"),
+			TextColumn(columns, "CollectionWeek", "Collection Week", "CollectionWeek", "Collection Week"),
+			TextColumn(columns, "NPI", "NPI", "NPI"),
+			TextColumn(columns, "NoInsuranceInfo", "No Insurance Info", "NoInsuranceInfo", "No Insurance Info")
 		};
+
+	private static List<LineDataColumnSpec> AugustusLineDataColumns(HashSet<string> columns)
+		=> new()
+		{
+			TextColumn(columns, "Source", "Source", "Source"),
+			TextColumn(columns, "Accession", "Accession", "Accession"),
+			TextColumn(columns, "PatientCode", "PatientCode", "PatientCode"),
+			TextColumn(columns, "PatientLastName", "PatientLastName", "PatientLastName"),
+			TextColumn(columns, "PatientFirstName", "PatientFirstName", "PatientFirstName"),
+			TextColumn(columns, "PatientMiddleName", "PatientMiddleName", "PatientMiddleName"),
+			TextColumn(columns, "PatientFullName", "PatientFullName", "PatientFullName"),
+			DateColumn(columns, "PatientDOB", "PatientDOB", "PatientDOB"),
+			TextColumn(columns, "PatientEthnicity", "PatientEthnicity", "PatientEthnicity"),
+			TextColumn(columns, "DoctorCode", "DoctorCode", "DoctorCode"),
+			TextColumn(columns, "DoctorLastName", "DoctorLastName", "DoctorLastName"),
+			TextColumn(columns, "DoctorFirstName", "DoctorFirstName", "DoctorFirstName"),
+			TextColumn(columns, "DoctorFullName", "DoctorFullName", "DoctorFullName"),
+			TextColumn(columns, "DoctorMiddleName", "DoctorMiddleName", "DoctorMiddleName"),
+			TextColumn(columns, "DoctorNPI", "DoctorNPI", "DoctorNPI"),
+			TextColumn(columns, "Valid", "Valid", "Valid"),
+			TextColumn(columns, "AccessionWithoutLetter", "AccessionWithoutLetter", "AccessionWithoutLetter"),
+			TextColumn(columns, "AccessionWithoutLetter2", "AccessionWithoutLetter2", "AccessionWithoutLetter2"),
+			TextColumn(columns, "AccessionWithoutLetter3", "AccessionWithoutLetter3", "AccessionWithoutLetter3"),
+			TextColumn(columns, "AccessionWithoutLetter4", "AccessionWithoutLetter4", "AccessionWithoutLetter4"),
+			TextColumn(columns, "AccessionWithoutLetter5", "AccessionWithoutLetter5", "AccessionWithoutLetter5"),
+			TextColumn(columns, "AccessionWithoutLetter6", "AccessionWithoutLetter6", "AccessionWithoutLetter6"),
+			TextColumn(columns, "ReqternalNo", "ReqternalNo", "ReqternalNo"),
+			DateColumn(columns, "RequestSubmittedDate", "RequestSubmittedDate", "RequestSubmittedDate"),
+			DateColumn(columns, "RequestCollectDate", "RequestCollectDate", "RequestCollectDate"),
+			DateColumn(columns, "ReqReceivedDate", "ReqReceivedDate", "ReqReceivedDate"),
+			DateColumn(columns, "ReqReportedDate", "ReqReportedDate", "ReqReportedDate"),
+			TextColumn(columns, "LocationCode", "LocationCode", "LocationCode"),
+			TextColumn(columns, "LocationName", "LocationName", "LocationName"),
+			TextColumn(columns, "BillType", "BillType", "BillType"),
+			TextColumn(columns, "InsuranceCode", "InsuranceCode", "InsuranceCode"),
+			TextColumn(columns, "InsuredPolicyNo", "InsuredPolicyNo", "InsuredPolicyNo"),
+			TextColumn(columns, "InsuredGroupNo", "InsuredGroupNo", "InsuredGroupNo"),
+			DateColumn(columns, "InsuredEffectiveDate", "InsuredEffectiveDate", "InsuredEffectiveDate"),
+			DateColumn(columns, "InsuredExpireDate", "InsuredExpireDate", "InsuredExpireDate"),
+			TextColumn(columns, "PanelLabName", "PanelLabName", "PanelLabName"),
+			TextColumn(columns, "PanelCode", "PanelCode", "PanelCode"),
+			DateColumn(columns, "PanelRunDate", "PanelRunDate", "PanelRunDate"),
+			TextColumn(columns, "PanelStat", "PanelStat", "PanelStat"),
+			TextColumn(columns, "CombinedCPTCode", "CombinedCPTCode", "CombinedCPTCode"),
+			TextColumn(columns, "CombinedPanel", "CombinedPanel", "CombinedPanel"),
+			TextColumn(columns, "PanelName", "PanelName", "PanelName"),
+			TextColumn(columns, "PanelType", "PanelType", "PanelType"),
+			TextColumn(columns, "InsuranceName", "InsuranceName", "InsuranceName"),
+			TextColumn(columns, "InsuranceNameNotListed", "InsuranceNameNotListed", "InsuranceNameNotListed"),
+			DateColumn(columns, "ResultDate", "ResultDate", "ResultDate"),
+			TextColumn(columns, "ResultStatus", "ResultStatus", "ResultStatus"),
+			TextColumn(columns, "BillTo", "BillTo", "BillTo"),
+			TextColumn(columns, "BillingStatus", "BillingStatus", "BillingStatus"),
+			DateColumn(columns, "EnteredDate", "EnteredDate", "EnteredDate"),
+			TextColumn(columns, "EnteredStatus", "EnteredStatus", "EnteredStatus"),
+			DateColumn(columns, "FirstBilledDate", "FirstBilledDate", "FirstBilledDate"),
+			TextColumn(columns, "BilledStatus", "BilledStatus", "BilledStatus"),
+			TextColumn(columns, "ClaimStatus", "ClaimStatus", "ClaimStatus"),
+			TextColumn(columns, "FinalStatus", "FinalStatus", "FinalStatus"),
+			TextColumn(columns, "TimetoBill", "TimetoBill", "TimetoBill"),
+			TextColumn(columns, "TimetoResult", "TimetoResult", "TimetoResult"),
+			TextColumn(columns, "OrganizationCode", "OrganizationCode", "OrganizationCode"),
+			TextColumn(columns, "ClinicName", "ClinicName", "ClinicName"),
+			TextColumn(columns, "ClientStatus1", "ClientStatus1", "ClientStatus1"),
+			TextColumn(columns, "ClientStatus", "ClientStatus", "ClientStatus"),
+			TextColumn(columns, "OrderICDCode", "OrderICDCode", "OrderICDCode"),
+			TextColumn(columns, "ServiceICDCode", "ServiceICDCode", "ServiceICDCode"),
+			DateColumn(columns, "CreatedOn", "CreatedOn", "CreatedOn"),
+			TextColumn(columns, "SourceFile", "SourceFile", "SourceFile"),
+			TextColumn(columns, "RunId", "RunId", "RunId")
+		};
+
+	private static List<LineDataColumnSpec> CoveLineDataColumns(HashSet<string> columns)
+		=> new()
+		{
+			TextColumn(columns, "Accession", "Accession", "Accession"),
+			TextColumn(columns, "RecordId", "RecordId", "OrderId", "OrderID", "RecordId"),
+			TextColumn(columns, "Status", "Status", "Status"),
+			DateColumn(columns, "DateOfCollection", "DateOfCollection", "DateOfCollection"),
+			DateColumn(columns, "ReceivedDate", "ReceivedDate", "ReceivedDate"),
+			DateColumn(columns, "ValidatedDate", "ValidatedDate", "ValidatedDate"),
+			TextColumn(columns, "ClientStatus", "ClientStatus", "ClientStatus"),
+			TextColumn(columns, "FirstName", "FirstName", "FirstName", "PatientFirstName"),
+			TextColumn(columns, "LastName", "LastName", "LastName", "PatientLastName"),
+			TextColumn(columns, "TimetoResult", "TimetoResult", "TimetoResult", "TimeToResult"),
+			DateColumn(columns, "BilledDate", "BilledDate", "BilledDate"),
+			TextColumn(columns, "TimetoBill", "TimetoBill", "TimetoBill", "TimeToBill"),
+			TextColumn(columns, "BillCategory", "BillCategory", "BillCategory"),
+			TextColumn(columns, "FacilityName", "FacilityName", "FacilityName"),
+			TextColumn(columns, "PhysicianName", "PhysicianName", "PhysicianName"),
+			TextColumn(columns, "ProviderName", "ProviderName", "ProviderName"),
+			TextColumn(columns, "SaleRepName", "SaleRepName", "SaleRepName", "SalesRepName"),
+			TextColumn(columns, "PrimaryInsuranceProvider", "PrimaryInsuranceProvider", "PrimaryInsuranceProvider"),
+			TextColumn(columns, "ICDCodes", "ICDCodes", "ICDCodes"),
+			TextColumn(columns, "RequistionType", "RequistionType", "RequistionType", "RequisitionType"),
+			TextColumn(columns, "PanelType", "PanelType", "PanelType"),
+			TextColumn(columns, "Panel", "Panel", "Panel"),
+			TextColumn(columns, "NewStatus", "NewStatus", "NewStatus"),
+			TextColumn(columns, "SubStatus", "SubStatus", "SubStatus"),
+			DateColumn(columns, "DateOfBirth", "DateOfBirth", "DateOfBirth", "DOB"),
+			DateColumn(columns, "DateofService", "DateofService", "DateofService", "DateOfService"),
+			TextColumn(columns, "Medications", "Medications", "Medications"),
+			TextColumn(columns, "InsuranceType", "InsuranceType", "InsuranceType"),
+			TextColumn(columns, "FacilityState", "FacilityState", "FacilityState"),
+			TextColumn(columns, "Relationship_To_Insured", "Relationship_To_Insured", "Relationship_To_Insured", "RelationshipToInsured"),
+			TextColumn(columns, "FacilityCity", "FacilityCity", "FacilityCity"),
+			TextColumn(columns, "FacilityZipcode", "FacilityZipcode", "FacilityZipcode", "FacilityZipCode"),
+			TextColumn(columns, "FacilityAddress", "FacilityAddress", "FacilityAddress"),
+			TextColumn(columns, "PolicyId", "PolicyId", "PolicyId"),
+			TextColumn(columns, "GroupId", "GroupId", "GroupId"),
+			TextColumn(columns, "ReferenceId", "ReferenceId", "ReferenceId"),
+			DateColumn(columns, "Policy_Holder_DOB", "Policy_Holder_DOB", "Policy_Holder_DOB"),
+			TextColumn(columns, "Address", "Address", "Address"),
+			TextColumn(columns, "Email", "Email", "Email"),
+			TextColumn(columns, "City", "City", "City"),
+			TextColumn(columns, "Gender", "Gender", "Gender"),
+			TextColumn(columns, "State", "State", "State"),
+			TextColumn(columns, "TransferTo", "TransferTo", "TransferTo"),
+			TextColumn(columns, "PatientEthnicity", "PatientEthnicity", "PatientEthnicity"),
+			TextColumn(columns, "ZipCode", "ZipCode", "ZipCode", "Zipcode"),
+			TextColumn(columns, "Race", "Race", "Race"),
+			TextColumn(columns, "LabCode", "LabCode", "LabCode"),
+			TextColumn(columns, "UID", "UID", "UID"),
+			TextColumn(columns, "CollectionWeek", "CollectionWeek", "CollectionWeek"),
+			TextColumn(columns, "NPI", "NPI", "NPI")
+		};
+
+	private static List<LineDataColumnSpec> ElixirLineDataColumns(HashSet<string> columns)
+		=> new()
+		{
+			TextColumn(columns, "Accession", "Accession", "Accession"),
+			TextColumn(columns, "RecordId", "RecordId", "RecordId", "OrderId", "OrderID"),
+			TextColumn(columns, "Status", "Status", "Status"),
+			DateColumn(columns, "DateOfCollection", "DateOfCollection", "DateOfCollection"),
+			DateColumn(columns, "ReceivedDate", "ReceivedDate", "ReceivedDate"),
+			TextColumn(columns, "ResultStatus", "ResultStatus", "ResultStatus"),
+			DateColumn(columns, "SampleResultedDate", "SampleResultedDate", "SampleResultedDate"),
+			TextColumn(columns, "TimetoResult", "TimetoResult", "TimetoResult", "TimeToResult"),
+			TextColumn(columns, "PatientFirstName", "PatientFirstName", "PatientFirstName", "FirstName"),
+			TextColumn(columns, "PatientLastName", "PatientLastName", "PatientLastName", "LastName"),
+			TextColumn(columns, "PatientFullName", "PatientFullName", "PatientFullName", "PatientName"),
+			DateColumn(columns, "BilledDate", "BilledDate", "BilledDate"),
+			TextColumn(columns, "TimetoBill", "TimetoBill", "TimetoBill", "TimeToBill"),
+			TextColumn(columns, "FacilityName", "FacilityName", "FacilityName"),
+			TextColumn(columns, "PhysicianName", "PhysicianName", "PhysicianName"),
+			TextColumn(columns, "ProviderName", "ProviderName", "ProviderName"),
+			TextColumn(columns, "SaleRepName", "SaleRepName", "SaleRepName", "SalesRepName"),
+			TextColumn(columns, "PrimaryInsuranceProvider", "PrimaryInsuranceProvider", "PrimaryInsuranceProvider"),
+			TextColumn(columns, "ICDCodes", "ICDCodes", "ICDCodes"),
+			TextColumn(columns, "RequistionType", "RequistionType", "RequistionType", "RequisitionType"),
+			TextColumn(columns, "PanelName", "PanelName", "PanelName"),
+			TextColumn(columns, "Panel", "Panel", "Panel"),
+			TextColumn(columns, "NewStatus", "NewStatus", "NewStatus"),
+			TextColumn(columns, "BillCategory", "BillCategory", "BillCategory"),
+			TextColumn(columns, "SubStatus", "SubStatus", "SubStatus"),
+			TextColumn(columns, "FacilityState", "FacilityState", "FacilityState"),
+			TextColumn(columns, "RelationshipToInsured", "RelationshipToInsured", "RelationshipToInsured"),
+			TextColumn(columns, "FacilityCity", "FacilityCity", "FacilityCity"),
+			TextColumn(columns, "FacilityZipcode", "FacilityZipcode", "FacilityZipcode", "FacilityZipCode"),
+			TextColumn(columns, "FacilityAddress", "FacilityAddress", "FacilityAddress"),
+			TextColumn(columns, "PolicyId", "PolicyId", "PolicyId"),
+			TextColumn(columns, "GroupId", "GroupId", "GroupId"),
+			TextColumn(columns, "ReferenceId", "ReferenceId", "ReferenceId"),
+			DateColumn(columns, "Policy_Holder_DOB", "Policy_Holder_DOB", "Policy_Holder_DOB"),
+			TextColumn(columns, "Address", "Address", "Address"),
+			TextColumn(columns, "Medications", "Medications", "Medications"),
+			TextColumn(columns, "Email", "Email", "Email"),
+			TextColumn(columns, "City", "City", "City"),
+			TextColumn(columns, "Gender", "Gender", "Gender"),
+			TextColumn(columns, "State", "State", "State"),
+			DateColumn(columns, "DOB", "DOB", "DOB", "DateOfBirth"),
+			DateColumn(columns, "DateofService", "DateofService", "DateofService", "DateOfService"),
+			TextColumn(columns, "TransferTo", "TransferTo", "TransferTo"),
+			TextColumn(columns, "PatientEthnicity", "PatientEthnicity", "PatientEthnicity"),
+			TextColumn(columns, "ZipCode", "ZipCode", "ZipCode", "Zipcode"),
+			TextColumn(columns, "Race", "Race", "Race"),
+			TextColumn(columns, "LabCode", "LabCode", "LabCode"),
+			TextColumn(columns, "NoInsuranceInfo", "NoInsuranceInfo", "NoInsuranceInfo"),
+			TextColumn(columns, "InsuranceType", "InsuranceType", "InsuranceType")
+		};
+
+	private static List<LineDataColumnSpec> PcrLoaLineDataColumns(HashSet<string> columns)
+		=> new()
+		{
+			TextColumn(columns, "SpecimenID", "Specimen ID", "Accession", "SpecimenID", "Specimen ID"),
+			TextColumn(columns, "OrderStatus", "Order Status", "OrderStatus", "Order Status"),
+			DateColumn(columns, "RequestCollectDate", "RequestCollectDate", "RequestCollectDate", "ReqCollectDate"),
+			DateColumn(columns, "ReqReceivedDate", "ReqReceivedDate", "ReqReceivedDate", "ReceivedDate"),
+			DateColumn(columns, "ReqResultedDate", "ReqResultedDate", "ReqResultedDate", "ResultDate"),
+			TextColumn(columns, "ResultedNot", "Resulted / Not", "RessultedStatus", "ResultedStatus", "ResultStatus"),
+			TextColumn(columns, "ClientStatus", "Client Status", "ClientStatus", "Client Status"),
+			TextColumn(columns, "TimetoResult", "Time to Result (Resulted - Received)", "TimetoResult", "TimeToResult"),
+			TextColumn(columns, "PatientName", "Patient Name", "PatientName", "Patient Name"),
+			TextColumn(columns, "VisitNumber", "VisitNumber", "VisitNumber"),
+			TextColumn(columns, "AMDDOE", "AMDDOE", "AMDDOE"),
+			TextColumn(columns, "AMDLBD", "AMDLBD", "AMDLBD"),
+			TextColumn(columns, "TimetoBill", "TimetoBill", "TimetoBill", "TimeToBill"),
+			TextColumn(columns, "ClaimStatus", "ClaimStatus", "ClaimStatus"),
+			TextColumn(columns, "BilledorNot", "Billed/Not", "BilledorNot", "BillCategory"),
+			TextColumn(columns, "PrimaryInsurance", "PrimaryInsurance", "PrimaryInsurance"),
+			TextColumn(columns, "PanelCategory", "PanelCategory", "PanelCategory"),
+			TextColumn(columns, "InsuranceCategory", "InsuranceCategory", "InsuranceCategory"),
+			TextColumn(columns, "Client", "Client", "Client")
+		};
+
+	private static List<LineDataColumnSpec> BeechTreeLineDataColumns(HashSet<string> columns)
+		=> new()
+		{
+			TextColumn(columns, "OrderId", "OrderId", "OrderId", "OrderID", "Order ID"),
+			TextColumn(columns, "SampleId", "SampleId", "Accession", "SampleId", "SampleID"),
+			TextColumn(columns, "PaymentMethod", "PaymentMethod", "PaymentMethod"),
+			TextColumn(columns, "Barcode", "Barcode", "Barcode"),
+			TextColumn(columns, "Specimen", "Specimen", "Specimen"),
+			TextColumn(columns, "Collector", "Collector", "Collector"),
+			TextColumn(columns, "OrderStatus", "OrderStatus", "OrderStatus"),
+			TextColumn(columns, "BillingStatus", "BillingStatus", "BillingStatus"),
+			TextColumn(columns, "SampleStatus", "SampleStatus", "SampleStatus"),
+			DateColumn(columns, "RequestSubmittedDate", "RequestSubmittedDate", "RequestSubmittedDate"),
+			DateColumn(columns, "RequestCollectDate", "RequestCollectDate", "RequestCollectDate", "ReqCollectDate"),
+			DateColumn(columns, "ReqReceivedDate", "ReqReceivedDate", "ReqReceivedDate"),
+			DateColumn(columns, "ReqReportedDate", "ReqReportedDate", "ReqReportedDate"),
+			TextColumn(columns, "ResultedStatus", "ResultedStatus", "RessultedStatus", "ResultedStatus"),
+			TextColumn(columns, "ClientStatus", "ClientStatus", "ClientStatus"),
+			TextColumn(columns, "TimetoResult", "TimetoResult", "TimetoResult", "TimeToResult"),
+			TextColumn(columns, "TurnaroundTime", "TurnaroundTime", "TurnaroundTime"),
+			TextColumn(columns, "PerformingLaboratory", "Performing Laboratory", "Performing Laboratory", "PerformingLaboratory"),
+			TextColumn(columns, "Results", "Results", "Results"),
+			TextColumn(columns, "PatientFirstName", "PatientFirstName", "PatientFirstName"),
+			TextColumn(columns, "PatientLastName", "PatientLastName", "PatientLastName"),
+			DateColumn(columns, "PatientDateofBirth", "PatientDateofBirth", "PatientDateofBirth", "PatientDateOfBirth"),
+			TextColumn(columns, "VisitNumber", "VisitNumber", "VisitNumber"),
+			TextColumn(columns, "AMDDOE", "AMDDOE", "AMDDOE"),
+			TextColumn(columns, "AMDLBD", "AMDLBD", "AMDLBD"),
+			TextColumn(columns, "TimetoBill", "TimetoBill", "TimetoBill", "TimeToBill"),
+			TextColumn(columns, "ClaimStatus", "ClaimStatus", "ClaimStatus"),
+			TextColumn(columns, "BilledorNot", "Billed/Not", "BilledorNot"),
+			TextColumn(columns, "ClinicName", "Clinic Name", "Facility", "ClinicName"),
+			TextColumn(columns, "Provider", "Provider", "Provider"),
+			TextColumn(columns, "PrimaryInsurance", "PrimaryInsurance", "PrimaryInsurance"),
+			TextColumn(columns, "PrimaryInsuranceID", "PrimaryInsuranceID", "PrimaryInsuranceID"),
+			TextColumn(columns, "ICD10Codes", "ICD10Codes", "ICD10Codes"),
+			TextColumn(columns, "Tests", "Tests", "Tests"),
+			TextColumn(columns, "PanelCategory", "PanelCategory", "PanelCategory")
+		};
+
+	private static List<LineDataColumnSpec> StandardOrderLineDataColumns(HashSet<string> columns)
+		=> new()
+		{
+			TextColumn(columns, "OrderID", "OrderID", "OrderID", "OrderId", "Order ID"),
+			TextColumn(columns, "SampleID", "Sample ID", "Accession", "SampleID", "Sample ID"),
+			TextColumn(columns, "PaymentMethod", "PaymentMethod", "PaymentMethod"),
+			TextColumn(columns, "Barcode", "Barcode", "Barcode"),
+			TextColumn(columns, "Specimen", "Specimen", "Specimen"),
+			TextColumn(columns, "Collector", "Collector", "Collector"),
+			TextColumn(columns, "OrderStatus", "OrderStatus", "OrderStatus"),
+			TextColumn(columns, "BillingStatus", "BillingStatus", "BillingStatus"),
+			TextColumn(columns, "SampleStatus", "SampleStatus", "SampleStatus"),
+			DateColumn(columns, "RequestSubmittedDate", "RequestSubmittedDate", "RequestSubmittedDate"),
+			DateColumn(columns, "RequestCollectDate", "RequestCollectDate", "RequestCollectDate", "ReqCollectDate"),
+			DateColumn(columns, "ReqReceivedDate", "ReqReceivedDate", "ReqReceivedDate"),
+			DateColumn(columns, "ReqReportedDate", "ReqReportedDate", "ReqReportedDate"),
+			TextColumn(columns, "ResultedNot", "Resulted / Not", "RessultedStatus", "ResultedStatus"),
+			TextColumn(columns, "ClientStatus", "ClientStatus", "ClientStatus"),
+			TextColumn(columns, "TimeToResult", "Time to Result (Resulted - Received)", "TimeToResult", "TimetoResult"),
+			TextColumn(columns, "PerformingLaboratory", "Performing Laboratory", "Performing Laboratory", "PerformingLaboratory"),
+			TextColumn(columns, "Results", "Results", "Results"),
+			TextColumn(columns, "PatientFirstName", "Patient First Name", "PatientFirstName"),
+			TextColumn(columns, "PatientLastName", "Patient Last Name", "PatientLastname", "PatientLastName"),
+			DateColumn(columns, "PatientDateOfBirth", "Patient Date of Birth", "PatientDateOfBirth", "PatientDateofBirth"),
+			TextColumn(columns, "VisitNumber", "VisitNumber", "VisitNumber"),
+			TextColumn(columns, "AMDDOE", "AMD DOE", "AMDDOE"),
+			TextColumn(columns, "AMDLBD", "AMD LBD", "AMDLBD"),
+			TextColumn(columns, "TimetoBill", "Time to Bill", "TimetoBill", "TimeToBill"),
+			TextColumn(columns, "ClaimStatus", "ClaimStatus", "ClaimStatus"),
+			TextColumn(columns, "BilledorNot", "Billed/Not", "BilledorNot"),
+			TextColumn(columns, "Facility", "Facility", "Facility"),
+			TextColumn(columns, "Provider", "Provider", "Provider"),
+			TextColumn(columns, "PrimaryInsurance", "Primary Insurance", "PrimaryInsurance"),
+			TextColumn(columns, "PrimaryInsuranceID", "Primary Insurance ID #", "PrimaryInsuranceID"),
+			TextColumn(columns, "ICD10Codes", "ICD-10 Codes", "ICD10Codes"),
+			TextColumn(columns, "Tests", "Tests", "Tests"),
+			TextColumn(columns, "PanelCategory", "PanelCategory", "PanelCategory")
+		};
+
+	private static List<LineDataColumnSpec> InHealthLineDataColumns(HashSet<string> columns)
+		=> new()
+		{
+			TextColumn(columns, "Accession", "Accession", "Accession"),
+			TextColumn(columns, "TestOrderHistory82_Id", "TestOrderHistory82_Id", "OrderId", "OrderID", "Order ID"),
+			TextColumn(columns, "EntryStatus", "EntryStatus", "EntryStatus"),
+			TextColumn(columns, "LastTest", "LastTest", "LastTest"),
+			TextColumn(columns, "ResultStatus", "ResultStatus", "ResultStatus"),
+			TextColumn(columns, "TimetoResult", "TimetoResult", "TimetoResult", "TimeToResult", "Time to Result"),
+			TextColumn(columns, "PatientID", "PatientID", "PatientID", "Patient ID"),
+			TextColumn(columns, "PatientFirstName", "PatientFirstName", "PatientFirstName", "FirstName", "First Name"),
+			TextColumn(columns, "PatientLastName", "PatientLastName", "PatientLastName", "LastName", "Last Name"),
+			DateColumn(columns, "BilledDate", "BilledDate", "BilledDate", "Billed Date"),
+			TextColumn(columns, "TimetoBill", "TimetoBill", "TimetoBill", "TimeToBill", "Time to Bill"),
+			TextColumn(columns, "Clinic", "Clinic", "Account"),
+			TextColumn(columns, "ProviderLastName", "ProviderLastName", "ProviderLastName"),
+			TextColumn(columns, "ProviderFirstName", "ProviderFirstName", "ProviderFirstName"),
+			TextColumn(columns, "PrimaryInsurance", "PrimaryInsurance", "PrimaryInsurance", "Primary Insurance"),
+			TextColumn(columns, "ICD10", "ICD10", "ICD10", "ICD10Codes", "ICD Codes"),
+			TextColumn(columns, "TestCategory", "TestCategory", "TestCategory"),
+			TextColumn(columns, "LRNPanelName", "LRNPanelName", "LRNPanelName"),
+			TextColumn(columns, "OrderInfo", "OrderInfo", "OrderInfo"),
+			TextColumn(columns, "LRNSampleStatus", "LRN Sample Status", "SampleStatus"),
+			TextColumn(columns, "LRNBillCategory", "LRN Bill Category", "BillCategory"),
+			TextColumn(columns, "LRNSubStatus", "LRN Sub Status", "SubStatus"),
+			TextColumn(columns, "NexumStatus", "Nexum Status", "NexumStatus"),
+			TextColumn(columns, "PrimaryPolicyInformation", "PrimaryPolicyInformation", "PrimaryPolicyInformation"),
+			TextColumn(columns, "StreetAddress", "StreetAddress", "StreetAddress"),
+			TextColumn(columns, "Medications", "Medications", "Medications"),
+			TextColumn(columns, "City", "City", "City"),
+			TextColumn(columns, "Gender", "Gender", "Gender"),
+			TextColumn(columns, "State", "State", "State"),
+			DateColumn(columns, "DateOfBirth", "DateOfBirth", "DateOfBirth", "DOB"),
+			TextColumn(columns, "Ethnicity", "Ethnicity", "Ethnicity"),
+			TextColumn(columns, "Zip", "Zip", "Zip", "ZipCode", "Zipcode"),
+			TextColumn(columns, "Race", "Race", "Race"),
+			TextColumn(columns, "PerformingLab", "PerformingLab", "PerformingLab"),
+			TextColumn(columns, "DocRequest", "DocRequest", "DocRequest"),
+			TextColumn(columns, "InAppeals", "InAppeals", "InAppeals"),
+			TextColumn(columns, "ClaimDenied", "ClaimDenied", "ClaimDenied"),
+			DateColumn(columns, "UpdateDate", "UpdateDate", "UpdateDate"),
+			TextColumn(columns, "ClaimNote", "ClaimNote", "ClaimNote"),
+			TextColumn(columns, "Verified", "Verified", "Verified"),
+			TextColumn(columns, "ReverifyBy", "ReverifyBy", "ReverifyBy"),
+			TextColumn(columns, "PayerCodeLookup", "PayerCodeLookup", "PayerCodeLookup"),
+			TextColumn(columns, "PayerCodeLookup_Label", "PayerCodeLookup_Label", "PayerCodeLookup_Label"),
+			TextColumn(columns, "Note", "Note", "Note"),
+			TextColumn(columns, "BenefitsVerified", "BenefitsVerified", "BenefitsVerified"),
+			TextColumn(columns, "PVerifyCode", "PVerifyCode", "PVerifyCode"),
+			TextColumn(columns, "EligibilityPortal", "EligibilityPortal", "EligibilityPortal"),
+			TextColumn(columns, "ClearinghouseName", "ClearinghouseName", "ClearinghouseName"),
+			TextColumn(columns, "PortalName", "PortalName", "PortalName"),
+			TextColumn(columns, "HCPCS", "HCPCS", "HCPCS"),
+			TextColumn(columns, "PracticeType", "PracticeType", "PracticeType"),
+			TextColumn(columns, "NonCoveredToxCodes", "NonCoveredToxCodes", "NonCoveredToxCodes"),
+			TextColumn(columns, "SendToBilling", "SendToBilling", "SendToBilling"),
+			TextColumn(columns, "CheckForClaim", "CheckForClaim", "CheckForClaim"),
+			TextColumn(columns, "ClaimRcvd", "ClaimRcvd", "ClaimRcvd"),
+			TextColumn(columns, "HCPCS2", "HCPCS2", "HCPCS2"),
+			TextColumn(columns, "RegistrationID", "RegistrationID", "RegistrationID"),
+			TextColumn(columns, "WTHold", "WTHold", "WTHold"),
+			TextColumn(columns, "Rejected", "Rejected", "Rejected"),
+			TextColumn(columns, "AnnualTestCount", "AnnualTestCount", "AnnualTestCount"),
+			DateColumn(columns, "RegisteredDate", "RegisteredDate", "RegisteredDate"),
+			TextColumn(columns, "PatientIDEntry", "PatientIDEntry", "PatientIDEntry"),
+			TextColumn(columns, "SecondaryInsurance", "SecondaryInsurance", "SecondaryInsurance"),
+			TextColumn(columns, "SecondaryPolicyInformation", "SecondaryPolicyInformation", "SecondaryPolicyInformation"),
+			DateColumn(columns, "VerifiedDate", "VerifiedDate", "VerifiedDate"),
+			TextColumn(columns, "NewPatient", "NewPatient", "NewPatient"),
+			TextColumn(columns, "EditPatient", "EditPatient", "EditPatient"),
+			TextColumn(columns, "Reflex", "Reflex", "Reflex"),
+			TextColumn(columns, "EntryNumber", "EntryNumber", "EntryNumber"),
+			TextColumn(columns, "CollectionMedia", "CollectionMedia", "CollectionMedia"),
+			TextColumn(columns, "CollectedBy", "CollectedBy", "CollectedBy"),
+			TextColumn(columns, "OrderReason", "OrderReason", "OrderReason"),
+			TextColumn(columns, "SpecimenType", "SpecimenType", "SpecimenType"),
+			TextColumn(columns, "Components", "Components", "Components"),
+			TextColumn(columns, "OrderFormEntryNumber", "OrderFormEntryNumber", "OrderFormEntryNumber"),
+			TextColumn(columns, "CollectedTime", "CollectedTime", "CollectedTime"),
+			TextColumn(columns, "ElectronicSignature", "ElectronicSignature", "ElectronicSignature"),
+			TextColumn(columns, "AccountID", "AccountID", "AccountID"),
+			TextColumn(columns, "ParentAccountID", "ParentAccountID", "ParentAccountID"),
+			TextColumn(columns, "AccountContactEmail", "AccountContactEmail", "AccountContactEmail"),
+			TextColumn(columns, "SalesRepEmail", "SalesRepEmail", "SalesRepEmail"),
+			TextColumn(columns, "OrderIPAddress", "OrderIPAddress", "OrderIPAddress"),
+			TextColumn(columns, "PerformingLabAddress", "PerformingLabAddress", "PerformingLabAddress"),
+			TextColumn(columns, "PerformingLabCLIA", "PerformingLabCLIA", "PerformingLabCLIA"),
+			TextColumn(columns, "BillingLabCLIA", "BillingLabCLIA", "BillingLabCLIA"),
+			TextColumn(columns, "ResultsPortal", "ResultsPortal", "ResultsPortal"),
+			TextColumn(columns, "BillingLabAddress", "BillingLabAddress", "BillingLabAddress"),
+			TextColumn(columns, "Division", "Division", "Division"),
+			TextColumn(columns, "IHBillingForDTR", "IHBillingForDTR", "IHBillingForDTR"),
+			TextColumn(columns, "EditLink", "EditLink", "EditLink"),
+			TextColumn(columns, "UploadToQbench", "UploadToQbench", "UploadToQbench"),
+			TextColumn(columns, "InsuranceCode", "InsuranceCode", "InsuranceCode"),
+			TextColumn(columns, "CPT", "CPT", "CPT"),
+			TextColumn(columns, "PatientRegisterLink", "PatientRegisterLink", "PatientRegisterLink"),
+			TextColumn(columns, "ReqLink", "ReqLink", "ReqLink"),
+			TextColumn(columns, "ResultLink", "ResultLink", "ResultLink"),
+			TextColumn(columns, "ToxRules1", "ToxRules1", "ToxRules1"),
+			TextColumn(columns, "ToxRules2", "ToxRules2", "ToxRules2"),
+			TextColumn(columns, "ToxRules3", "ToxRules3", "ToxRules3"),
+			TextColumn(columns, "ToxRules4", "ToxRules4", "ToxRules4"),
+			TextColumn(columns, "ToxRules5", "ToxRules5", "ToxRules5"),
+			TextColumn(columns, "ToxGate1", "ToxGate1", "ToxGate1"),
+			TextColumn(columns, "ToxGate2", "ToxGate2", "ToxGate2"),
+			TextColumn(columns, "ToxApproved", "ToxApproved", "ToxApproved"),
+			TextColumn(columns, "PolicyNumberCharacteristics", "PolicyNumberCharacteristics", "PolicyNumberCharacteristics"),
+			TextColumn(columns, "ResultMatched", "ResultMatched", "ResultMatched"),
+			DateColumn(columns, "Entry_DateCreated", "Entry_DateCreated", "Entry_DateCreated"),
+			DateColumn(columns, "Entry_DateSubmitted", "Entry_DateSubmitted", "Entry_DateSubmitted"),
+			DateColumn(columns, "Entry_DateUpdated", "Entry_DateUpdated", "Entry_DateUpdated"),
+			TextColumn(columns, "BillingLab", "BillingLab", "BillingLab"),
+			TextColumn(columns, "BillingLab2", "BillingLab2", "BillingLab2"),
+			TextColumn(columns, "InsuranceCode2", "InsuranceCode2", "InsuranceCode2"),
+			TextColumn(columns, "Insurance", "Insurance", "Insurance"),
+			TextColumn(columns, "LRNBillingLab", "LRN Billing Lab", "LRNBillingLab"),
+			TextColumn(columns, "Week", "Week", "Week")
+		};
+
+	private static List<LineDataColumnSpec> NorthWestLineDataColumns(HashSet<string> columns)
+		=> new()
+		{
+			TextColumn(columns, "Accession", "Accession", "Accession"),
+			TextColumn(columns, "PatientName", "PatientName", "PatientName", "Patient Name"),
+			DateColumn(columns, "RequestCollectDate", "RequestCollectDate", "RequestCollectDate", "Request Collect Date"),
+			TextColumn(columns, "IncorrectDOS", "IncorrectDOS", "IncorrectDOS", "IncorrectDos"),
+			DateColumn(columns, "RequestReceivedDate", "RequestReceivedDate", "RequestReceivedDate", "Request Received Date", "ReceivedDate"),
+			TextColumn(columns, "BillType", "BillType", "BillType"),
+			TextColumn(columns, "ResultStatus", "ResultStatus", "ResultStatus", "Result Status"),
+			TextColumn(columns, "BilledTo", "BilledTo", "BilledTo", "Billed To", "BillTo", "Bill To"),
+			TextColumn(columns, "BillStatus", "BillStatus", "BillStatus", "Bill Status"),
+			TextColumn(columns, "FinalStatus", "FinalStatus", "FinalStatus", "Final Status"),
+			TextColumn(columns, "Category", "Category", "Category"),
+			DateColumn(columns, "DateOfBirth", "DateOfBirth", "DateOfBirth", "DOB"),
+			TextColumn(columns, "ReferringProvider", "ReferringProvider", "ReferringProvider", "Referring Provider"),
+			TextColumn(columns, "ActualPanel", "ActualPanel", "ActualPanel", "Actual Panel"),
+			TextColumn(columns, "PanelType", "PanelType", "PanelType", "Panel Type"),
+			TextColumn(columns, "InsuranceName", "InsuranceName", "InsuranceName", "Insurance Name"),
+			DateColumn(columns, "ResultDate", "ResultDate", "ResultDate", "Result Date"),
+			TextColumn(columns, "PanelName", "PanelName", "PanelName", "Panel Name"),
+			TextColumn(columns, "ClinicName", "ClinicName", "ClinicName", "Clinic Name"),
+			TextColumn(columns, "ReqLocationName", "ReqLocationName", "ReqLocationName", "REQ_LOCATION_NAME"),
+			DateColumn(columns, "EnteredDate", "EnteredDate", "EnteredDate", "Entered Date"),
+			DateColumn(columns, "BilledDateDaq", "BilledDateDaq", "BilledDateDaq"),
+			DateColumn(columns, "BilledDateWeb", "BilledDateWeb", "BilledDateWeb"),
+			TextColumn(columns, "EnteredStatus", "EnteredStatus", "EnteredStatus"),
+			TextColumn(columns, "BilledStatus", "BilledStatus", "BilledStatus"),
+			TextColumn(columns, "ClaimTypeDaq", "ClaimTypeDaq", "ClaimTypeDaq"),
+			TextColumn(columns, "ClaimStatusDaq", "ClaimStatusDaq", "ClaimStatusDaq"),
+			TextColumn(columns, "ClaimTypeWebpm", "ClaimTypeWebpm", "ClaimTypeWebpm"),
+			TextColumn(columns, "ClaimStatusWebpm", "ClaimStatusWebpm", "ClaimStatusWebpm"),
+			TextColumn(columns, "SourceSystem", "SourceSystem", "SourceSystem"),
+			TextColumn(columns, "ChargesNotEnteredStatus", "ChargesNotEnteredStatus", "ChargesNotEnteredStatus"),
+			TextColumn(columns, "TimetoResult", "TimetoResult", "TimetoResult", "TimeToResult", "Time to Result"),
+			TextColumn(columns, "TimetoBill", "TimetoBill", "TimetoBill", "TimeToBill", "Time to Bill"),
+			TextColumn(columns, "PATIENT_CODE", "PATIENT_CODE", "PATIENT_CODE"),
+			TextColumn(columns, "PATIENT_F_NAME", "PATIENT_F_NAME", "PATIENT_F_NAME"),
+			TextColumn(columns, "PATIENT_L_NAME", "PATIENT_L_NAME", "PATIENT_L_NAME"),
+			TextColumn(columns, "PATIENT_M_NAME", "PATIENT_M_NAME", "PATIENT_M_NAME"),
+			TextColumn(columns, "PATIENT_GENDER", "PATIENT_GENDER", "PATIENT_GENDER")
+		};
+
+	private static LineDataColumnSpec TextColumn(HashSet<string> columns, string key, string header, params string[] candidates)
+		=> new(key, header, TextSelect(columns, key, candidates));
+
+	private static LineDataColumnSpec DateColumn(HashSet<string> columns, string key, string header, params string[] candidates)
+		=> new(key, header, DateSelect(columns, key, candidates));
 
 	private static string TextSelect(HashSet<string> columns, string alias, params string[] candidates)
 		=> TextExpr(FirstExisting(columns, candidates), alias);
@@ -1077,8 +1564,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 	{
 		var column = FirstExisting(columns, candidates);
 		var expr = string.IsNullOrWhiteSpace(column)
-			? "CAST(NULL AS datetime)"
-			: $"TRY_CONVERT(datetime, {Q(column)})";
+			? "CAST('' AS nvarchar(10))"
+			: $"ISNULL(CONVERT(nvarchar(10), TRY_CONVERT(date, {Q(column)}), 23), '')";
 		return $"{expr} AS {Q(alias)}";
 	}
 
@@ -1723,7 +2210,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 	private static string[] DateCandidatesFor(string logicSheet) => logicSheet switch
 	{
-		"Augustus" or "Certus" => new[] { "ReqCollectDate", "REQ_COLLECT_DATE", "RequestCollectDate", "CollectionDate" },
+		"Augustus" => new[] { "RequestCollectDate", "ReqCollectDate", "REQ_COLLECT_DATE", "CollectionDate" },
+		"Certus" => new[] { "ReqCollectDate", "REQ_COLLECT_DATE", "RequestCollectDate", "CollectionDate" },
 		"Cove" or "Elixir" => new[] { "DateOfCollection", "RequestCollectDate", "CollectionDate" },
 		"InHealth" => new[] { "Entry_DateCreated", "RequestCollectDate", "DateOfCollection" },
 		"PCRDx-AL" => new[] { "ReceivedDate", "RequestCollectDate", "CollectionDate" },

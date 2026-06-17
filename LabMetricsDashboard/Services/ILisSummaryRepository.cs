@@ -19,10 +19,12 @@ public interface ILisSummaryRepository
 
     Task<LisSummaryFilterOptions> GetFilterOptionsAsync(
         string connectionString,
+        string labName,
         CancellationToken ct = default);
 
     Task<LisLineDataResult> GetLisLineDataAsync(
         string connectionString,
+        string labName,
         string dateType = "Collected",
         DateOnly? dateFrom = null,
         DateOnly? dateTo = null,

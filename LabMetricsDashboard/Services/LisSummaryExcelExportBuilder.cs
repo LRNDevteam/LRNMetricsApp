@@ -13,6 +13,7 @@ public static class LisSummaryExcelExportBuilder
 
     public static XLWorkbook CreateWorkbook(
         LisSummaryResult result,
+        LisLineDataResult? lineData,
         string labName,
         string dateType,
         DateOnly? dateFrom,
@@ -23,10 +24,10 @@ public static class LisSummaryExcelExportBuilder
         string? salesRep)
     {
         var workbook = new XLWorkbook();
-        var worksheetName = CleanSheetName(string.IsNullOrWhiteSpace(result.LogicSheetName) ? "LIS Summary" : result.LogicSheetName);
-        var sheet = workbook.Worksheets.Add(worksheetName);
+        var sheet = workbook.Worksheets.Add("LIS Summary");
 
         BuildSummarySheet(sheet, result, labName, dateType, dateFrom, dateTo, panel, clinic, refPhy, salesRep);
+        BuildLineDataSheet(workbook.Worksheets.Add("LIMS Master"), lineData);
 
         workbook.Properties.Title = $"LIS Summary - {labName}";
         workbook.Properties.Subject = "LIS Summary";
@@ -200,6 +201,61 @@ public static class LisSummaryExcelExportBuilder
 
         sheet.PageSetup.PageOrientation = XLPageOrientation.Landscape;
         sheet.PageSetup.FitToPages(1, 0);
+    }
+
+    private static void BuildLineDataSheet(IXLWorksheet sheet, LisLineDataResult? lineData)
+    {
+        sheet.TabColor = XLColor.FromHtml("#0D5F93");
+
+        if (lineData is null || lineData.Columns.Count == 0)
+        {
+            sheet.Cell(1, 1).Value = "No LIMS Master data found for the selected filters.";
+            sheet.Cell(1, 1).Style.Font.Bold = true;
+            sheet.Cell(1, 1).Style.Font.FontColor = XLColor.FromHtml("#1B3A5C");
+            sheet.Column(1).Width = 52;
+            return;
+        }
+
+        for (var col = 0; col < lineData.Columns.Count; col++)
+        {
+            sheet.Cell(1, col + 1).Value = lineData.Columns[col].Header;
+        }
+
+        var rowNumber = 2;
+        foreach (var row in lineData.Rows)
+        {
+            for (var col = 0; col < lineData.Columns.Count; col++)
+            {
+                var column = lineData.Columns[col];
+                sheet.Cell(rowNumber, col + 1).Value = row.TryGetValue(column.Key, out var value) ? value : string.Empty;
+            }
+
+            rowNumber++;
+        }
+
+        var lastRow = Math.Max(1, rowNumber - 1);
+        var lastColumn = Math.Max(1, lineData.Columns.Count);
+        var header = sheet.Range(1, 1, 1, lastColumn);
+        header.Style.Font.Bold = true;
+        header.Style.Font.FontColor = XLColor.White;
+        header.Style.Fill.BackgroundColor = XLColor.FromHtml("#123B63");
+        header.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+        var usedRange = sheet.Range(1, 1, lastRow, lastColumn);
+        usedRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        usedRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+        usedRange.Style.Border.OutsideBorderColor = BorderColor;
+        usedRange.Style.Border.InsideBorderColor = XLColor.FromHtml("#DDE7F0");
+        usedRange.Style.Font.FontName = "Calibri";
+        usedRange.Style.Font.FontSize = 10;
+
+        sheet.SheetView.FreezeRows(1);
+        sheet.Columns(1, lastColumn).AdjustToContents(1, Math.Min(lastRow, 500));
+        foreach (var column in sheet.Columns(1, lastColumn))
+        {
+            if (column.Width < 12) column.Width = 12;
+            if (column.Width > 42) column.Width = 42;
+        }
     }
 
     private static void WriteDataRow(IXLWorksheet sheet, int rowNumber, LisSummaryRow row, IReadOnlyList<MonthColumn> monthColumns, IReadOnlyList<int> years, int firstDataColumn, bool includeLogicColumn)

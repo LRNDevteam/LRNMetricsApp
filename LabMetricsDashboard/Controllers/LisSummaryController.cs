@@ -8,6 +8,7 @@ namespace LabMetricsDashboard.Controllers;
 public class LisSummaryController : Controller
 {
 	private const string PreferredInitialLabName = "PCRLabsofAmerica";
+	private const int ExcelMaxDataRows = 1_048_575;
 
 	private readonly ILisSummaryRepository _lisSummaryRepository;
 	private readonly IDenialRecordRepository _labRepository;
@@ -80,6 +81,7 @@ public class LisSummaryController : Controller
 		{
 			var filterOptions = await _lisSummaryRepository.GetFilterOptionsAsync(
 				config.DbConnectionString,
+				selectedLabOption?.LabName ?? selectedLabName,
 				cancellationToken);
 
 			var result = await _lisSummaryRepository.GetLisSummaryAsync(
@@ -97,6 +99,7 @@ public class LisSummaryController : Controller
 
 			var lineData = await _lisSummaryRepository.GetLisLineDataAsync(
 				config.DbConnectionString,
+				selectedLabOption?.LabName ?? selectedLabName,
 				filters.EffectiveDateType,
 				filters.EffectiveDateFrom,
 				filters.EffectiveDateTo,
@@ -186,8 +189,23 @@ public class LisSummaryController : Controller
 				return RedirectToAction(nameof(Index), ToRouteValues(selectedLabName, filters));
 			}
 
+			var lineData = await _lisSummaryRepository.GetLisLineDataAsync(
+				config.DbConnectionString,
+				selectedLabOption?.LabName ?? selectedLabName,
+				filters.EffectiveDateType,
+				filters.EffectiveDateFrom,
+				filters.EffectiveDateTo,
+				filters.Panel,
+				filters.Clinic,
+				filters.RefPhy,
+				filters.SalesRep,
+				1,
+				ExcelMaxDataRows,
+				cancellationToken);
+
 			using var workbook = LisSummaryExcelExportBuilder.CreateWorkbook(
 				result,
+				lineData,
 				selectedLabOption?.LabName ?? selectedLabName,
 				filters.EffectiveDateType,
 				filters.EffectiveDateFrom,
