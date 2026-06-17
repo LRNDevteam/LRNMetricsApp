@@ -83,6 +83,7 @@ public sealed record LisLineDataRow(
     string TimetoBill,
     string ClaimStatus,
     string BilledorNot,
+    string ClinicName,
     string Provider,
     string PrimaryInsurance,
     string PrimaryInsuranceID,

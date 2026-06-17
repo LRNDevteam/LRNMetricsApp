@@ -672,6 +672,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				ReadText(rdr, "TimetoBill"),
 				ReadText(rdr, "ClaimStatus"),
 				ReadText(rdr, "BilledorNot"),
+				ReadText(rdr, "ClinicName"),
 				ReadText(rdr, "Provider"),
 				ReadText(rdr, "PrimaryInsurance"),
 				ReadText(rdr, "PrimaryInsuranceID"),
@@ -867,9 +868,9 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 	private static FilterColumnProfile ResolveFilterColumns(HashSet<string> columns)
 		=> new(
 			FirstExisting(columns, "PanelCategory", "Panel Category", "Panel", "PanelName", "Panel Name", "Tests", "Test", "ActualPanel", "Actual Panel", "PanelType", "Panel Type"),
-			FirstExisting(columns, "Clinic", "ClinicName", "Clinic Name", "ReqLocationName", "REQ_LOCATION_NAME", "Location", "LocationName", "ClientName", "Client Name", "OrganizationName", "ORGANIZATION_NAME"),
+			FirstExisting(columns, "Facility", "Clinic", "ClinicName", "Clinic Name", "ReqLocationName", "REQ_LOCATION_NAME", "Location", "LocationName", "ClientName", "Client Name", "OrganizationName", "ORGANIZATION_NAME"),
 			FirstExisting(columns, "Provider", "RefPhy", "Ref Phy", "ReferringProvider", "Referring Provider", "ReferringPhysician", "Referring Physician", "DoctorFullName", "Doctor Full Name", "DOCTOR_FULL_NAME"),
-			FirstExisting(columns, "SalesRep", "Sales Rep", "SalesRepName", "Sales Rep Name", "SalesRepresentative", "Sales Representative", "SalesRepEmail", "Sales Rep Email"));
+			FirstExisting(columns, "Collector", "SalesRep", "Sales Rep", "SalesRepName", "Sales Rep Name", "SalesRepresentative", "Sales Representative", "SalesRepEmail", "Sales Rep Email"));
 
 	private static async Task<List<string>> LoadFilterValuesAsync(SqlConnection conn, string? column, CancellationToken ct)
 	{
@@ -981,6 +982,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			TextSelect(columns, "TimetoBill", "TimetoBill", "Time to Bill", "TimeToBill"),
 			TextSelect(columns, "ClaimStatus", "ClaimStatus", "Claim Status", "FinalStatus", "Final Status"),
 			TextSelect(columns, "BilledorNot", "BilledorNot", "Billed/Not", "Billed Or Not", "BillCategory", "Bill Category", "LRNBillCategory"),
+			TextSelect(columns, "ClinicName", "Facility", "ClinicName", "Clinic Name", "Clinic", "ReqLocationName", "REQ_LOCATION_NAME", "Location", "LocationName", "ClientName", "Client Name"),
 			TextSelect(columns, "Provider", "Provider", "RefPhy", "Ref Phy", "ReferringProvider", "Referring Physician", "DoctorFullName", "Doctor Full Name"),
 			TextSelect(columns, "PrimaryInsurance", "PrimaryInsurance", "Primary Insurance", "Insurance", "InsuranceName", "Insurance Name"),
 			TextSelect(columns, "PrimaryInsuranceID", "PrimaryInsuranceID", "Primary Insurance ID", "InsuranceID", "Insurance ID"),
