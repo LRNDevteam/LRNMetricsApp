@@ -1228,28 +1228,58 @@ else
                                 <th>Request Collect Date</th>
                                 <th>Req Received Date</th>
                                 <th>Req Reported Date</th>
+                                <th>Validated Date</th>
                                 <th>Resulted Status</th>
                                 <th>Client Status</th>
+                                <th>Sub Status</th>
                                 <th>Time to Result</th>
                                 <th>Turnaround Time</th>
                                 <th>Performing Laboratory</th>
                                 <th>Results</th>
+                                <th>Patient Name</th>
                                 <th>Patient First Name</th>
                                 <th>Patient Last Name</th>
                                 <th>Patient DOB</th>
                                 <th>Visit Number</th>
                                 <th>AMD DOE</th>
                                 <th>AMD LBD</th>
+                                <th>Billed Date</th>
                                 <th>Time to Bill</th>
                                 <th>Claim Status</th>
                                 <th>Billed or Not</th>
                                 <th>Clinic Name</th>
                                 <th>Provider</th>
+                                <th>Sales Rep</th>
                                 <th>Primary Insurance</th>
                                 <th>Primary Insurance ID</th>
                                 <th>ICD10 Codes</th>
                                 <th>Tests</th>
                                 <th>Panel Category</th>
+                                <th>Insurance Category</th>
+                                <th>Client</th>
+                                <th>Requisition Type</th>
+                                <th>Date of Service</th>
+                                <th>Medications</th>
+                                <th>Facility State</th>
+                                <th>Relationship To Insured</th>
+                                <th>Facility City</th>
+                                <th>Facility Zipcode</th>
+                                <th>Facility Address</th>
+                                <th>Policy ID</th>
+                                <th>Group ID</th>
+                                <th>Reference ID</th>
+                                <th>Policy Holder DOB</th>
+                                <th>Address</th>
+                                <th>Email</th>
+                                <th>City</th>
+                                <th>Gender</th>
+                                <th>State</th>
+                                <th>Transfer To</th>
+                                <th>Patient Ethnicity</th>
+                                <th>Zip Code</th>
+                                <th>Race</th>
+                                <th>Lab Code</th>
+                                <th>No Insurance Info</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1269,28 +1299,58 @@ else
                                     <td class="lis-date-cell">@FormatDateTime(row.RequestCollectDate)</td>
                                     <td class="lis-date-cell">@FormatDateTime(row.ReqReceivedDate)</td>
                                     <td class="lis-date-cell">@FormatDateTime(row.ReqReportedDate)</td>
+                                    <td class="lis-date-cell">@FormatDateTime(row.ValidatedDate)</td>
                                     <td class="lis-status-cell">@row.ResultedStatus</td>
                                     <td class="lis-status-cell">@row.ClientStatus</td>
+                                    <td class="lis-status-cell">@row.SubStatus</td>
                                     <td>@row.TimetoResult</td>
                                     <td>@row.TurnaroundTime</td>
                                     <td class="lis-wide-cell">@row.PerformingLaboratory</td>
                                     <td class="lis-wide-cell">@row.Results</td>
+                                    <td class="lis-wide-cell">@row.PatientName</td>
                                     <td>@row.PatientFirstName</td>
                                     <td>@row.PatientLastName</td>
                                     <td class="lis-date-cell">@FormatDateTime(row.PatientDateofBirth)</td>
                                     <td class="lis-number-cell">@row.VisitNumber</td>
                                     <td class="lis-date-cell">@row.AMDDOE</td>
                                     <td class="lis-date-cell">@row.AMDLBD</td>
+                                    <td class="lis-date-cell">@FormatDateTime(row.BilledDate)</td>
                                     <td>@row.TimetoBill</td>
                                     <td class="lis-status-cell">@row.ClaimStatus</td>
                                     <td class="lis-status-cell">@row.BilledorNot</td>
                                     <td class="lis-wide-cell">@row.ClinicName</td>
                                     <td class="lis-wide-cell">@row.Provider</td>
+                                    <td class="lis-wide-cell">@row.SalesRepName</td>
                                     <td class="lis-wide-cell">@row.PrimaryInsurance</td>
                                     <td>@row.PrimaryInsuranceID</td>
                                     <td class="lis-wide-cell">@row.ICD10Codes</td>
                                     <td class="lis-wide-cell">@row.Tests</td>
                                     <td class="lis-wide-cell">@row.PanelCategory</td>
+                                    <td class="lis-wide-cell">@row.InsuranceCategory</td>
+                                    <td class="lis-wide-cell">@row.Client</td>
+                                    <td class="lis-wide-cell">@row.RequisitionType</td>
+                                    <td class="lis-date-cell">@FormatDateTime(row.DateOfService)</td>
+                                    <td class="lis-wide-cell">@row.Medications</td>
+                                    <td>@row.FacilityState</td>
+                                    <td class="lis-wide-cell">@row.RelationshipToInsured</td>
+                                    <td>@row.FacilityCity</td>
+                                    <td>@row.FacilityZipcode</td>
+                                    <td class="lis-wide-cell">@row.FacilityAddress</td>
+                                    <td>@row.PolicyId</td>
+                                    <td>@row.GroupId</td>
+                                    <td>@row.ReferenceId</td>
+                                    <td class="lis-date-cell">@FormatDateTime(row.PolicyHolderDOB)</td>
+                                    <td class="lis-wide-cell">@row.Address</td>
+                                    <td class="lis-wide-cell">@row.Email</td>
+                                    <td>@row.City</td>
+                                    <td>@row.Gender</td>
+                                    <td>@row.State</td>
+                                    <td class="lis-wide-cell">@row.TransferTo</td>
+                                    <td>@row.PatientEthnicity</td>
+                                    <td>@row.ZipCode</td>
+                                    <td>@row.Race</td>
+                                    <td>@row.LabCode</td>
+                                    <td class="lis-wide-cell">@row.NoInsuranceInfo</td>
                                 </tr>
                             }
                         </tbody>

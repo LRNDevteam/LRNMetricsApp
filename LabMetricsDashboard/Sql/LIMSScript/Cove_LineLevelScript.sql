@@ -1,0 +1,31 @@
+--Select * from LIMSMaster
+
+Select
+Accession,
+OrderId RecordId,
+Status,
+DateOfCollection,
+ReceivedDate,
+ValidatedDate,
+ClientStatus,
+FirstName,
+LastName,
+BilledDate,
+BillCategory,
+FacilityName,
+PhysicianName,
+ProviderName,
+SaleRepName,
+PrimaryInsuranceProvider,
+ICDCodes,
+RequistionType,
+PanelType,
+Panel,
+NewStatus,
+BillCategory,
+SubStatus,
+DateOfBirth,
+DateofService,
+Medications,
+InsuranceType
+FROM LIMSMaster

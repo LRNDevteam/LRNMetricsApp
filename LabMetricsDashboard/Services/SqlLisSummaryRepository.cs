@@ -657,28 +657,58 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				ReadDate(rdr, "RequestCollectDate"),
 				ReadDate(rdr, "ReqReceivedDate"),
 				ReadDate(rdr, "ReqReportedDate"),
+				ReadDate(rdr, "ValidatedDate"),
 				ReadText(rdr, "ResultedStatus"),
 				ReadText(rdr, "ClientStatus"),
+				ReadText(rdr, "SubStatus"),
 				ReadText(rdr, "TimetoResult"),
 				ReadText(rdr, "TurnaroundTime"),
 				ReadText(rdr, "PerformingLaboratory"),
 				ReadText(rdr, "Results"),
+				ReadText(rdr, "PatientName"),
 				ReadText(rdr, "PatientFirstName"),
 				ReadText(rdr, "PatientLastName"),
 				ReadDate(rdr, "PatientDateofBirth"),
 				ReadText(rdr, "VisitNumber"),
 				ReadText(rdr, "AMDDOE"),
 				ReadText(rdr, "AMDLBD"),
+				ReadDate(rdr, "BilledDate"),
 				ReadText(rdr, "TimetoBill"),
 				ReadText(rdr, "ClaimStatus"),
 				ReadText(rdr, "BilledorNot"),
 				ReadText(rdr, "ClinicName"),
 				ReadText(rdr, "Provider"),
+				ReadText(rdr, "SalesRepName"),
 				ReadText(rdr, "PrimaryInsurance"),
 				ReadText(rdr, "PrimaryInsuranceID"),
 				ReadText(rdr, "ICD10Codes"),
 				ReadText(rdr, "Tests"),
-				ReadText(rdr, "PanelCategory")));
+				ReadText(rdr, "PanelCategory"),
+				ReadText(rdr, "InsuranceCategory"),
+				ReadText(rdr, "Client"),
+				ReadText(rdr, "RequisitionType"),
+				ReadDate(rdr, "DateOfService"),
+				ReadText(rdr, "Medications"),
+				ReadText(rdr, "FacilityState"),
+				ReadText(rdr, "RelationshipToInsured"),
+				ReadText(rdr, "FacilityCity"),
+				ReadText(rdr, "FacilityZipcode"),
+				ReadText(rdr, "FacilityAddress"),
+				ReadText(rdr, "PolicyId"),
+				ReadText(rdr, "GroupId"),
+				ReadText(rdr, "ReferenceId"),
+				ReadDate(rdr, "PolicyHolderDOB"),
+				ReadText(rdr, "Address"),
+				ReadText(rdr, "Email"),
+				ReadText(rdr, "City"),
+				ReadText(rdr, "Gender"),
+				ReadText(rdr, "State"),
+				ReadText(rdr, "TransferTo"),
+				ReadText(rdr, "PatientEthnicity"),
+				ReadText(rdr, "ZipCode"),
+				ReadText(rdr, "Race"),
+				ReadText(rdr, "LabCode"),
+				ReadText(rdr, "NoInsuranceInfo")));
 		}
 
 		return new LisLineDataResult(rows, totalCount, pageNumber, pageSize);
@@ -867,10 +897,29 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 	private static FilterColumnProfile ResolveFilterColumns(HashSet<string> columns)
 		=> new(
-			FirstExisting(columns, "PanelCategory", "Panel Category", "Panel", "PanelName", "Panel Name", "Tests", "Test", "ActualPanel", "Actual Panel", "PanelType", "Panel Type"),
-			FirstExisting(columns, "Facility", "Clinic", "ClinicName", "Clinic Name", "ReqLocationName", "REQ_LOCATION_NAME", "Location", "LocationName", "ClientName", "Client Name", "OrganizationName", "ORGANIZATION_NAME"),
-			FirstExisting(columns, "Provider", "RefPhy", "Ref Phy", "ReferringProvider", "Referring Provider", "ReferringPhysician", "Referring Physician", "DoctorFullName", "Doctor Full Name", "DOCTOR_FULL_NAME"),
-			FirstExisting(columns, "Collector", "SalesRep", "Sales Rep", "SalesRepName", "Sales Rep Name", "SalesRepresentative", "Sales Representative", "SalesRepEmail", "Sales Rep Email"));
+			ResolvePanelFilterColumn(columns),
+			FirstExisting(columns, "Facility", "FacilityName", "Clinic", "ClinicName", "Clinic Name", "ReqLocationName", "REQ_LOCATION_NAME", "Location", "LocationName", "ClientName", "Client Name", "OrganizationName", "ORGANIZATION_NAME"),
+			FirstExisting(columns, "Provider", "ProviderName", "PhysicianName", "RefPhy", "Ref Phy", "ReferringProvider", "Referring Provider", "ReferringPhysician", "Referring Physician", "DoctorFullName", "Doctor Full Name", "DOCTOR_FULL_NAME"),
+			FirstExisting(columns, "Collector", "SaleRepName", "SalesRepName", "Sales Rep Name", "SalesRep", "Sales Rep", "SalesRepresentative", "Sales Representative", "SalesRepEmail", "Sales Rep Email"));
+
+	private static string? ResolvePanelFilterColumn(HashSet<string> columns)
+		=> IsElixirColumnShape(columns)
+			? FirstExisting(columns, "PanelName", "Panel Name", "Panel", "PanelCategory", "Panel Category", "PanelType", "Panel Type")
+			: IsCoveColumnShape(columns)
+			? FirstExisting(columns, "PanelType", "Panel Type", "PanelCategory", "Panel Category", "Panel", "PanelName", "Panel Name")
+			: FirstExisting(columns, "PanelCategory", "Panel Category", "Panel", "PanelName", "Panel Name", "Tests", "Test", "ActualPanel", "Actual Panel", "PanelType", "Panel Type");
+
+	private static bool IsElixirColumnShape(HashSet<string> columns)
+		=> columns.Contains("PanelName")
+		   && columns.Contains("SampleResultedDate")
+		   && columns.Contains("PolicyId")
+		   && columns.Contains("NoInsuranceInfo");
+
+	private static bool IsCoveColumnShape(HashSet<string> columns)
+		=> columns.Contains("PanelType")
+		   && columns.Contains("NewStatus")
+		   && columns.Contains("BillCategory")
+		   && (columns.Contains("DateOfCollection") || columns.Contains("FacilityName"));
 
 	private static async Task<List<string>> LoadFilterValuesAsync(SqlConnection conn, string? column, CancellationToken ct)
 	{
@@ -954,41 +1003,71 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 	private static List<string> LineDataSelectors(HashSet<string> columns)
 		=> new()
 		{
-			TextSelect(columns, "OrderId", "OrderId", "OrderID", "Order ID"),
+			TextSelect(columns, "OrderId", "OrderId", "OrderID", "Order ID", "RecordId", "Record ID"),
 			TextSelect(columns, "SampleId", "Accession", "SampleId", "SampleID", "Sample ID", "UniqueSampleID", "Unique Sample ID", "OrderId", "OrderID", "Order ID"),
 			TextSelect(columns, "PaymentMethod", "PaymentMethod", "Payment Method", "BillTo", "Bill To", "BilledTo", "Billed To"),
 			TextSelect(columns, "Barcode", "Barcode", "BarCode"),
 			TextSelect(columns, "Specimen", "Specimen", "SpecimenType", "Specimen Type"),
 			TextSelect(columns, "Collector", "Collector", "CollectedBy", "Collected By"),
-			TextSelect(columns, "OrderStatus", "OrderStatus", "Order Status"),
+			TextSelect(columns, "OrderStatus", "OrderStatus", "Order Status", "Status"),
 			TextSelect(columns, "BillingStatus", "BillingStatus", "Billing Status", "BillStatus", "Bill Status"),
 			TextSelect(columns, "SampleStatus", "SampleStatus", "Sample Status", "LRNSampleStatus", "LRN Sample Status"),
 			DateSelect(columns, "RequestSubmittedDate", "RequestSubmittedDate", "Request Submitted Date", "ReqSubmittedDate", "SubmittedDate"),
 			DateSelect(columns, "RequestCollectDate", "RequestCollectDate", "ReqCollectDate", "REQ_COLLECT_DATE", "CollectionDate", "DateOfCollection", "CollectedDate", "Entry_DateCreated"),
 			DateSelect(columns, "ReqReceivedDate", "ReqReceivedDate", "ReceivedDate", "RequestReceivedDate"),
-			DateSelect(columns, "ReqReportedDate", "ReqReportedDate", "ResultDate", "ReportedDate", "ReqResultedDate"),
+			DateSelect(columns, "ReqReportedDate", "ReqReportedDate", "ResultDate", "ReportedDate", "ReqResultedDate", "SampleResultedDate"),
+			DateSelect(columns, "ValidatedDate", "ValidatedDate", "Validated Date"),
 			TextSelect(columns, "ResultedStatus", "RessultedStatus", "ResultedStatus", "Result Status", "ResultStatus", "LRNResultStatus"),
 			TextSelect(columns, "ClientStatus", "ClientStatus", "Client Status", "SubStatus", "Sub Status"),
+			TextSelect(columns, "SubStatus", "SubStatus", "Sub Status", "ClientStatus", "Client Status"),
 			TextSelect(columns, "TimetoResult", "TimetoResult", "Time to Result", "TimeToResult"),
 			TextSelect(columns, "TurnaroundTime", "TurnaroundTime", "Turnaround Time", "TAT"),
 			TextSelect(columns, "PerformingLaboratory", "Performing Laboratory", "PerformingLaboratory", "PerformingLab"),
 			TextSelect(columns, "Results", "Results", "Result"),
+			TextSelect(columns, "PatientName", "PatientName", "Patient Name", "PatientFullName", "Patient Full Name", "FullName", "Full Name"),
 			TextSelect(columns, "PatientFirstName", "PatientFirstName", "Patient First Name", "FirstName", "First Name"),
 			TextSelect(columns, "PatientLastName", "PatientLastName", "Patient Last Name", "LastName", "Last Name"),
 			DateSelect(columns, "PatientDateofBirth", "PatientDateofBirth", "Patient Date of Birth", "DOB", "DateOfBirth", "Date of Birth"),
 			TextSelect(columns, "VisitNumber", "VisitNumber", "Visit Number"),
 			TextSelect(columns, "AMDDOE", "AMDDOE", "AMD DOE"),
 			TextSelect(columns, "AMDLBD", "AMDLBD", "AMD LBD"),
+			DateSelect(columns, "BilledDate", "BilledDate", "Billed Date"),
 			TextSelect(columns, "TimetoBill", "TimetoBill", "Time to Bill", "TimeToBill"),
-			TextSelect(columns, "ClaimStatus", "ClaimStatus", "Claim Status", "FinalStatus", "Final Status"),
+			TextSelect(columns, "ClaimStatus", "ClaimStatus", "Claim Status", "NewStatus", "FinalStatus", "Final Status"),
 			TextSelect(columns, "BilledorNot", "BilledorNot", "Billed/Not", "Billed Or Not", "BillCategory", "Bill Category", "LRNBillCategory"),
-			TextSelect(columns, "ClinicName", "Facility", "ClinicName", "Clinic Name", "Clinic", "ReqLocationName", "REQ_LOCATION_NAME", "Location", "LocationName", "ClientName", "Client Name"),
-			TextSelect(columns, "Provider", "Provider", "RefPhy", "Ref Phy", "ReferringProvider", "Referring Physician", "DoctorFullName", "Doctor Full Name"),
-			TextSelect(columns, "PrimaryInsurance", "PrimaryInsurance", "Primary Insurance", "Insurance", "InsuranceName", "Insurance Name"),
+			TextSelect(columns, "ClinicName", "Facility", "FacilityName", "ClinicName", "Clinic Name", "Clinic", "ReqLocationName", "REQ_LOCATION_NAME", "Location", "LocationName", "ClientName", "Client Name"),
+			TextSelect(columns, "Provider", "Provider", "ProviderName", "PhysicianName", "RefPhy", "Ref Phy", "ReferringProvider", "Referring Physician", "DoctorFullName", "Doctor Full Name"),
+			TextSelect(columns, "SalesRepName", "SaleRepName", "SalesRepName", "Sales Rep Name", "SalesRep", "Sales Rep", "SalesRepresentative", "Sales Representative"),
+			TextSelect(columns, "PrimaryInsurance", "PrimaryInsurance", "Primary Insurance", "PrimaryInsuranceProvider", "Primary Insurance Provider", "Insurance", "InsuranceName", "Insurance Name"),
 			TextSelect(columns, "PrimaryInsuranceID", "PrimaryInsuranceID", "Primary Insurance ID", "InsuranceID", "Insurance ID"),
 			TextSelect(columns, "ICD10Codes", "ICD10Codes", "ICD10 Codes", "ICD Codes", "DiagnosisCodes"),
-			TextSelect(columns, "Tests", "Tests", "Test", "Panel", "PanelName"),
-			TextSelect(columns, "PanelCategory", "PanelCategory", "Panel Category", "PanelType", "Panel Type")
+			TextSelect(columns, "Tests", "Tests", "Test", "Panel", "PanelName", "Panel Name"),
+			TextSelect(columns, "PanelCategory", "PanelCategory", "Panel Category", "PanelName", "Panel Name", "PanelType", "Panel Type"),
+			TextSelect(columns, "InsuranceCategory", "InsuranceCategory", "Insurance Category", "InsuranceType", "Insurance Type"),
+			TextSelect(columns, "Client", "Client", "ClientName", "Client Name"),
+			TextSelect(columns, "RequisitionType", "RequistionType", "RequisitionType", "Requisition Type"),
+			DateSelect(columns, "DateOfService", "DateofService", "DateOfService", "Date of Service"),
+			TextSelect(columns, "Medications", "Medications", "Medication"),
+			TextSelect(columns, "FacilityState", "FacilityState", "Facility State"),
+			TextSelect(columns, "RelationshipToInsured", "RelationshipToInsured", "Relationship To Insured"),
+			TextSelect(columns, "FacilityCity", "FacilityCity", "Facility City"),
+			TextSelect(columns, "FacilityZipcode", "FacilityZipcode", "Facility Zipcode", "FacilityZipCode", "Facility Zip Code"),
+			TextSelect(columns, "FacilityAddress", "FacilityAddress", "Facility Address"),
+			TextSelect(columns, "PolicyId", "PolicyId", "Policy ID", "PolicyId"),
+			TextSelect(columns, "GroupId", "GroupId", "Group ID"),
+			TextSelect(columns, "ReferenceId", "ReferenceId", "Reference ID"),
+			DateSelect(columns, "PolicyHolderDOB", "Policy_Holder_DOB", "PolicyHolderDOB", "Policy Holder DOB"),
+			TextSelect(columns, "Address", "Address"),
+			TextSelect(columns, "Email", "Email"),
+			TextSelect(columns, "City", "City"),
+			TextSelect(columns, "Gender", "Gender"),
+			TextSelect(columns, "State", "State"),
+			TextSelect(columns, "TransferTo", "TransferTo", "Transfer To"),
+			TextSelect(columns, "PatientEthnicity", "PatientEthnicity", "Patient Ethnicity"),
+			TextSelect(columns, "ZipCode", "ZipCode", "Zip Code", "Zipcode"),
+			TextSelect(columns, "Race", "Race"),
+			TextSelect(columns, "LabCode", "LabCode", "Lab Code"),
+			TextSelect(columns, "NoInsuranceInfo", "NoInsuranceInfo", "No Insurance Info")
 		};
 
 	private static string TextSelect(HashSet<string> columns, string alias, params string[] candidates)
