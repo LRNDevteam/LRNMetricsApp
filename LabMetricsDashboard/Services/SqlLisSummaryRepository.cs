@@ -28,7 +28,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		string? PanelExpression,
 		string? ClinicExpression,
 		string? RefPhyExpression,
-		string? SalesRepExpression);
+		string? SalesRepExpression,
+		string? CollectorExpression);
 
 	private sealed record TemplateRow(string Code, string Description, string Logic);
 
@@ -442,6 +443,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		string? clinic = null,
 		string? refPhy = null,
 		string? salesRep = null,
+		string? collector = null,
 		CancellationToken ct = default)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
@@ -458,7 +460,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		var profile = ResolveProfile(labName, labId, columns, dateType);
 		var filterColumns = ResolveFilterColumns(columns, profile.LogicSheetName);
 		var sourceFileName = await GetLatestSourceFileNameAsync(conn, columns, ct);
-		var raw = await LoadDynamicGroupsAsync(conn, profile, filterColumns, dateFrom, dateTo, panel, clinic, refPhy, salesRep, ct);
+		var raw = await LoadDynamicGroupsAsync(conn, profile, filterColumns, dateFrom, dateTo, panel, clinic, refPhy, salesRep, collector, ct);
 		var summaryRaw = UsesBlankIncorrectDosSummary(profile.LogicSheetName)
 			? raw.Where(HasBlankIncorrectDos).ToList()
 			: UsesBlankNaSummary(profile.LogicSheetName)
@@ -564,7 +566,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			await LoadFilterValuesAsync(conn, filterColumns.PanelExpression, ct),
 			await LoadFilterValuesAsync(conn, filterColumns.ClinicExpression, ct),
 			await LoadFilterValuesAsync(conn, filterColumns.RefPhyExpression, ct),
-			await LoadFilterValuesAsync(conn, filterColumns.SalesRepExpression, ct));
+			await LoadFilterValuesAsync(conn, filterColumns.SalesRepExpression, ct),
+			await LoadFilterValuesAsync(conn, filterColumns.CollectorExpression, ct));
 	}
 
 	public async Task<LisLineDataResult> GetLisLineDataAsync(
@@ -577,6 +580,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		string? clinic = null,
 		string? refPhy = null,
 		string? salesRep = null,
+		string? collector = null,
 		int pageNumber = 1,
 		int pageSize = 100,
 		CancellationToken ct = default)
@@ -622,6 +626,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		AddOptionalFilter(where, parameters, filterColumns.ClinicExpression, "@clinic", clinic);
 		AddOptionalFilter(where, parameters, filterColumns.RefPhyExpression, "@refPhy", refPhy);
 		AddOptionalFilter(where, parameters, filterColumns.SalesRepExpression, "@salesRep", salesRep);
+		AddOptionalFilter(where, parameters, filterColumns.CollectorExpression, "@collector", collector);
 
 		var whereSql = string.Join(" AND ", where);
 		var lineColumns = LineDataColumns(columns, logicSheet);
@@ -734,6 +739,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		string? clinic,
 		string? refPhy,
 		string? salesRep,
+		string? collector,
 		CancellationToken ct)
 	{
 		var dateExpr = $"TRY_CONVERT(date, {Q(profile.DateColumn)})";
@@ -760,6 +766,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		AddOptionalFilter(where, parameters, filterColumns.ClinicExpression, "@clinic", clinic);
 		AddOptionalFilter(where, parameters, filterColumns.RefPhyExpression, "@refPhy", refPhy);
 		AddOptionalFilter(where, parameters, filterColumns.SalesRepExpression, "@salesRep", salesRep);
+		AddOptionalFilter(where, parameters, filterColumns.CollectorExpression, "@collector", collector);
 
 		if (RequiresBlankIncorrectDos(profile.LogicSheetName) && !string.IsNullOrWhiteSpace(profile.IncorrectDosColumn))
 		{
@@ -824,6 +831,23 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 	private static string ResolveDateColumn(HashSet<string> columns, string logicSheet, string dateType)
 	{
 		var normalized = NormalizeDateType(dateType);
+		if (logicSheet.Equals("Cove", StringComparison.OrdinalIgnoreCase))
+		{
+			var coveDateColumn = normalized switch
+			{
+				"Received" => "ReceivedDate",
+				"Resulted" => "ValidatedDate",
+				_ => "DateOfCollection"
+			};
+
+			if (columns.Contains(coveDateColumn))
+			{
+				return coveDateColumn;
+			}
+
+			throw new InvalidOperationException($"{DateTypeLabel(normalized)} date column '{coveDateColumn}' was not found in dbo.LIMSMaster for Cove.");
+		}
+
 		var candidates = new List<string>();
 
 		if (normalized.Equals("Received", StringComparison.OrdinalIgnoreCase))
@@ -857,7 +881,8 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				ExpressionForColumn(FirstExisting(columns, "LRNPanelName")),
 				ExpressionForColumn(FirstExisting(columns, "Account")),
 				BuildCombinedNameExpression(columns, "ProviderLastName", "ProviderFirstName"),
-				ExpressionForColumn(FirstExisting(columns, "SalesRepEmail", "SalesRepName", "Sales Rep Name", "SalesRep", "Sales Rep")));
+				ExpressionForColumn(FirstExisting(columns, "SalesRepEmail", "SalesRepName", "Sales Rep Name", "SalesRep", "Sales Rep")),
+				ExpressionForColumn(FirstExisting(columns, "Collector")));
 		}
 
 		if (logicSheetName.Equals("Augustus", StringComparison.OrdinalIgnoreCase))
@@ -867,14 +892,16 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				ExpressionForColumn(FirstExisting(columns, "ClinicName", "Clinic Name")),
 				BuildCombinedNameExpression(columns, "DoctorLastName", "DoctorFirstName")
 					?? ExpressionForColumn(FirstExisting(columns, "DoctorFullName", "Doctor Full Name", "ReferringProvider", "Referring Provider", "ReferringPhysician", "Referring Physician")),
-				ExpressionForColumn(FirstExisting(columns, "SalesRepname", "SalesRepName", "Sales Rep Name", "SaleRepName", "SalesRep", "Sales Rep", "SalesRepresentative", "Sales Representative", "SalesRepEmail", "Sales Rep Email")));
+				ExpressionForColumn(FirstExisting(columns, "SalesRepname", "SalesRepName", "Sales Rep Name", "SaleRepName", "SalesRep", "Sales Rep", "SalesRepresentative", "Sales Representative", "SalesRepEmail", "Sales Rep Email")),
+				ExpressionForColumn(FirstExisting(columns, "Collector")));
 		}
 
 		return new FilterColumnProfile(
 			ExpressionForColumn(ResolvePanelFilterColumn(columns)),
 			ExpressionForColumn(FirstExisting(columns, "Facility", "FacilityName", "Clinic", "ClinicName", "Clinic Name", "ReqLocationName", "REQ_LOCATION_NAME", "Location", "LocationName", "ClientName", "Client Name", "OrganizationName", "ORGANIZATION_NAME")),
 			ExpressionForColumn(FirstExisting(columns, "Provider", "ProviderName", "PhysicianName", "RefPhy", "Ref Phy", "ReferringProvider", "Referring Provider", "ReferringPhysician", "Referring Physician", "DoctorFullName", "Doctor Full Name", "DOCTOR_FULL_NAME")),
-			ExpressionForColumn(FirstExisting(columns, "Collector", "SaleRepName", "SalesRepName", "Sales Rep Name", "SalesRep", "Sales Rep", "SalesRepresentative", "Sales Representative", "SalesRepEmail", "Sales Rep Email")));
+			ExpressionForColumn(FirstExisting(columns, "SaleRepName", "SalesRepname", "SalesRepName", "Sales Rep Name", "SalesRep", "Sales Rep", "SalesRepresentative", "Sales Representative", "SalesRepEmail", "Sales Rep Email")),
+			ExpressionForColumn(FirstExisting(columns, "Collector")));
 	}
 
 	private static string? ExpressionForColumn(string? column)

@@ -15,6 +15,7 @@ public interface ILisSummaryRepository
         string? clinic = null,
         string? refPhy = null,
         string? salesRep = null,
+        string? collector = null,
         CancellationToken ct = default);
 
     Task<LisSummaryFilterOptions> GetFilterOptionsAsync(
@@ -32,6 +33,7 @@ public interface ILisSummaryRepository
         string? clinic = null,
         string? refPhy = null,
         string? salesRep = null,
+        string? collector = null,
         int pageNumber = 1,
         int pageSize = 100,
         CancellationToken ct = default);

@@ -9,6 +9,6 @@ public sealed class LisSummaryPageViewModel
     public string CurrentLabName { get; set; } = string.Empty;
     public LisSummaryResult? Result { get; set; }
     public LisLineDataResult? LineData { get; set; }
-    public LisSummaryFilterOptions FilterOptions { get; set; } = new([], [], [], []);
+    public LisSummaryFilterOptions FilterOptions { get; set; } = new([], [], [], [], []);
     public string? ErrorMessage { get; set; }
 }

@@ -323,25 +323,26 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
   if (responseOnly) {
     return <div className="esc-page">
       <div className={`claim-split-shell ${drawerRow ? 'drawer-open' : ''}`}>
-        <section className={`claim-list-pane ${drawerRow ? 'narrow' : 'full'}`}>
+        <section className={`claim-list-pane thin-list-border ${drawerRow ? 'narrow' : 'full'}`}>
           <div className="claim-view-top">
             <div>
-              <div className="claim-view-title">Escalated Response</div>
-              <div className="claim-view-subtitle">Manager response claims - {rows.length} of {data.totalCount || 0}</div>
+              <div className="claim-view-title">Claim Level Assignment</div>
+              <div className="claim-view-subtitle">Escalation Response claims - {rows.length} of {data.totalCount || 0}</div>
             </div>
-            <span className="table-count">{busy ? 'Loading...' : 'Response'}</span>
+            <span className="table-count">{busy ? 'Loading...' : 'Escalation Response'}</span>
           </div>
           <div className="claim-list-toolbar">
+            <label className="claim-search-wrap"><i className="bi bi-search" /><input value={searchText} onChange={e => setSearchText(e.target.value)} placeholder="Search claim, payer, patient" /></label>
             <div className="claim-tab-row">{claimTabs.map(t => <button key={t.key} type="button" className={`claim-tab ${responseOnly && t.key === 'escalationResponse' ? 'active' : ''}`} onClick={() => onClaimTabChange(t.key)}><span>{t.label}</span><b>{tabCountText(tabCounts?.[t.countKey || t.key])}</b></button>)}</div>
           </div>
           {canAssign && <div className="claim-assign-bar2"><label><input type="checkbox" checked={allSelected} onChange={e => { const next = {}; if (e.target.checked) rows.forEach((_, i) => next[i] = true); setSelectedClaims(next); }} /> Select page</label><strong>{selectedClaimIds.length} selected</strong><select value={bulkReviewer} onChange={e => setBulkReviewer(e.target.value)}><option value="">Select AR Reviewer</option>{arReviewers.map(r => <option key={r.userName || r.UserName} value={r.userName || r.UserName}>{r.displayName || r.DisplayName || r.userName || r.UserName}</option>)}</select><button className="wl-btn teal xs" type="button" disabled={!selectedClaimIds.length} onClick={() => assignClaims(selectedClaimIds, bulkReviewer)}>Assign</button></div>}
           <div className="claim-list-head claim-list-head-wide"><span>Claim</span><span>Source</span><span>Payer Name</span><span>Patient Name</span><span>Patient ID</span><span>Subscriber ID</span><span>DOS</span><span>Balance</span><span>Status</span></div>
           <div className="claim-rows-scroll">{rows.length ? rows.map((row, index) => {
             const isOpen = drawerRow?.escalationId === row.escalationId;
-            return <button type="button" key={row.escalationId} className={`claim-list-row claim-list-row-wide ${isOpen ? 'active' : ''}`} onClick={() => openDrawer(row)}>
-              {canAssign && <span className="claim-row-check" onClick={e => e.stopPropagation()}><input type="checkbox" checked={!!selectedClaims[index]} onChange={e => setSelectedClaims({ ...selectedClaims, [index]: e.target.checked })} /></span>}
+            return <div key={row.escalationId} className={`claim-list-row claim-list-row-wide ${isOpen ? 'active' : ''}`}>
+              {canAssign && <span className="claim-row-check"><input type="checkbox" checked={!!selectedClaims[index]} onChange={e => setSelectedClaims({ ...selectedClaims, [index]: e.target.checked })} /></span>}
               <span className="claim-expand-dot"><i className={`bi ${isOpen ? 'bi-chevron-down' : 'bi-chevron-right'}`} /></span>
-              <span className="claim-list-id"><strong>{row.claimId || '-'}</strong><small>{row.analyst || row.createdBy || '-'} - {date(row.createdOn)}</small></span>
+              <span className="claim-list-id"><button className="claim-id-link" type="button" onClick={() => openDrawer(row)}>{row.claimId || '-'}</button><small>{row.escalationReason || 'Manager response required'}</small><button type="button" className="wl-btn xs teal esc-review-inline" onClick={() => openModal(row)}>Review Response</button></span>
               <span className="claim-list-payer" title={row.source || ''}>{row.source || '-'}</span>
               <span className="claim-list-payer" title={row.payerName || ''}>{row.payerName || '-'}</span>
               <span className="claim-list-payer" title={row.patientName || ''}>{row.patientName || '-'}</span>
@@ -349,8 +350,8 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
               <span className="claim-list-payer" title={row.subscriberId || ''}>{row.subscriberId || '-'}</span>
               <span className="claim-list-payer">{date(row.dateOfService) || '-'}</span>
               <span className="claim-list-amt">{money(row.insuranceBalance)}</span>
-              <span className={`badge ${statusClass(row.status)}`}>{row.status || 'Open'}</span>
-            </button>;
+              <span className="claim-list-status"><span className={`badge ${statusClass(row.status)}`}>{row.status || 'Open'}</span></span>
+            </div>;
           }) : <div className="claim-empty-panel">No escalated responses found.</div>}</div>
         </section>
         {drawerRow && <section className="claim-drawer open">

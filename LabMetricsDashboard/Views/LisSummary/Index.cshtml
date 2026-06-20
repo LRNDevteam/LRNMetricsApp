@@ -57,6 +57,7 @@
         Clinic = filters.Clinic,
         RefPhy = filters.RefPhy,
         SalesRep = filters.SalesRep,
+        Collector = filters.Collector,
         ActiveTab = tab,
         PageNumber = pageNumber ?? filters.PageNumber,
         PageSize = filters.PageSize
@@ -941,6 +942,8 @@
                        value="@DateValue(filters.EffectiveDateTo)" />
             </div>
 
+            @if (Model.FilterOptions.Panels.Count > 0)
+            {
             <div class="lis-filter-item">
                 <label class="form-label">Panel</label>
                 <div class="lis-ms" data-lis-ms>
@@ -963,7 +966,10 @@
                     </div>
                 </div>
             </div>
+            }
 
+            @if (Model.FilterOptions.Clinics.Count > 0)
+            {
             <div class="lis-filter-item">
                 <label class="form-label">Clinic</label>
                 <div class="lis-ms" data-lis-ms>
@@ -986,7 +992,10 @@
                     </div>
                 </div>
             </div>
+            }
 
+            @if (Model.FilterOptions.RefPhysicians.Count > 0)
+            {
             <div class="lis-filter-item">
                 <label class="form-label">Referring Physician</label>
                 <div class="lis-ms" data-lis-ms>
@@ -1009,7 +1018,10 @@
                     </div>
                 </div>
             </div>
+            }
 
+            @if (Model.FilterOptions.SalesReps.Count > 0)
+            {
             <div class="lis-filter-item">
                 <label class="form-label">Sales Rep</label>
                 <div class="lis-ms" data-lis-ms>
@@ -1032,6 +1044,33 @@
                     </div>
                 </div>
             </div>
+            }
+
+            @if (Model.FilterOptions.Collectors.Count > 0)
+            {
+            <div class="lis-filter-item">
+                <label class="form-label">Collector</label>
+                <div class="lis-ms" data-lis-ms>
+                    <input type="hidden" name="Collector" value="@filters.Collector" />
+                    <button type="button" class="lis-ms-btn" aria-haspopup="listbox" aria-expanded="false">
+                        <span class="lis-ms-label">All</span>
+                        <span class="lis-ms-caret">v</span>
+                    </button>
+                    <div class="lis-ms-panel">
+                        <input type="search" class="form-control lis-ms-search" placeholder="Search collector" />
+                        <div class="lis-ms-list">
+                    @foreach (var option in Model.FilterOptions.Collectors)
+                    {
+                                <label class="lis-ms-option">
+                                    <input type="checkbox" value="@option" checked="@IsMultiSelected(filters.Collector, option)" />
+                                    <span>@option</span>
+                                </label>
+                    }
+                        </div>
+                    </div>
+                </div>
+            </div>
+            }
 
             <div class="lis-filter-actions">
                 <button type="submit" class="btn btn-primary rounded-pill px-4">

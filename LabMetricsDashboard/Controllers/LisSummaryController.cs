@@ -95,6 +95,7 @@ public class LisSummaryController : Controller
 				filters.Clinic,
 				filters.RefPhy,
 				filters.SalesRep,
+				filters.Collector,
 				cancellationToken);
 
 			var lineData = await _lisSummaryRepository.GetLisLineDataAsync(
@@ -107,6 +108,7 @@ public class LisSummaryController : Controller
 				filters.Clinic,
 				filters.RefPhy,
 				filters.SalesRep,
+				filters.Collector,
 				filters.PageNumber,
 				filters.PageSize,
 				cancellationToken);
@@ -181,6 +183,7 @@ public class LisSummaryController : Controller
 				filters.Clinic,
 				filters.RefPhy,
 				filters.SalesRep,
+				filters.Collector,
 				cancellationToken);
 
 			if (result.Rows.Count == 0)
@@ -199,6 +202,7 @@ public class LisSummaryController : Controller
 				filters.Clinic,
 				filters.RefPhy,
 				filters.SalesRep,
+				filters.Collector,
 				1,
 				ExcelMaxDataRows,
 				cancellationToken);
@@ -213,7 +217,8 @@ public class LisSummaryController : Controller
 				filters.Panel,
 				filters.Clinic,
 				filters.RefPhy,
-				filters.SalesRep);
+				filters.SalesRep,
+				filters.Collector);
 
 			await using var stream = new MemoryStream();
 			workbook.SaveAs(stream);
@@ -319,6 +324,7 @@ public class LisSummaryController : Controller
 			Clinic = filters.Clinic,
 			RefPhy = filters.RefPhy,
 			SalesRep = filters.SalesRep,
+			Collector = filters.Collector,
 			ActiveTab = filters.EffectiveActiveTab,
 			PageNumber = filters.PageNumber,
 			PageSize = filters.PageSize

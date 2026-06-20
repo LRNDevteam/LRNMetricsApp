@@ -21,12 +21,13 @@ public static class LisSummaryExcelExportBuilder
         string? panel,
         string? clinic,
         string? refPhy,
-        string? salesRep)
+        string? salesRep,
+        string? collector)
     {
         var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add("LIS Summary");
 
-        BuildSummarySheet(sheet, result, labName, dateType, dateFrom, dateTo, panel, clinic, refPhy, salesRep);
+        BuildSummarySheet(sheet, result, labName, dateType, dateFrom, dateTo, panel, clinic, refPhy, salesRep, collector);
         BuildLineDataSheet(workbook.Worksheets.Add("LIMS Master"), lineData);
 
         workbook.Properties.Title = $"LIS Summary - {labName}";
@@ -45,7 +46,8 @@ public static class LisSummaryExcelExportBuilder
         string? panel,
         string? clinic,
         string? refPhy,
-        string? salesRep)
+        string? salesRep,
+        string? collector)
     {
         var monthColumns = BuildMonthColumns(result.Months, result.Years);
 
@@ -53,11 +55,11 @@ public static class LisSummaryExcelExportBuilder
         var firstDataColumn = 3;
         var titleRow = 1;
         var metaStartRow = 2;
-        var metaEndRow = 10;
-        var sampleNoteRow = 11;
-        var yearHeaderRow = 12;
-        var monthHeaderRow = 13;
-        var dataStartRow = 14;
+        var metaEndRow = 11;
+        var sampleNoteRow = 12;
+        var yearHeaderRow = 13;
+        var monthHeaderRow = 14;
+        var dataStartRow = 15;
 
         var lastColumn = firstDataColumn + monthColumns.Count;
 
@@ -85,14 +87,16 @@ public static class LisSummaryExcelExportBuilder
         sheet.Cell(9, 2).Value = FormatFilter(refPhy);
         sheet.Cell(10, 1).Value = "Sales Rep";
         sheet.Cell(10, 2).Value = FormatFilter(salesRep);
-        sheet.Cell(11, 1).Value = "Top Source File name";
-        sheet.Cell(11, 2).Value = string.IsNullOrWhiteSpace(result.SourceFileName) ? "-" : result.SourceFileName;
+        sheet.Cell(11, 1).Value = "Collector";
+        sheet.Cell(11, 2).Value = FormatFilter(collector);
+        sheet.Cell(12, 1).Value = "Top Source File name";
+        sheet.Cell(12, 2).Value = string.IsNullOrWhiteSpace(result.SourceFileName) ? "-" : result.SourceFileName;
 
-        metaEndRow = 11;
-        sampleNoteRow = 12;
-        yearHeaderRow = 13;
-        monthHeaderRow = 14;
-        dataStartRow = 15;
+        metaEndRow = 12;
+        sampleNoteRow = 13;
+        yearHeaderRow = 14;
+        monthHeaderRow = 15;
+        dataStartRow = 16;
 
         sheet.Range(metaStartRow, 1, metaEndRow, 1).Style.Font.Bold = true;
         sheet.Range(metaStartRow, 1, metaEndRow, 2).Style.Fill.BackgroundColor = SectionBlue;

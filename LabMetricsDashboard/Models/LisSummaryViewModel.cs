@@ -52,7 +52,8 @@ public sealed record LisSummaryFilterOptions(
     List<string> Panels,
     List<string> Clinics,
     List<string> RefPhysicians,
-    List<string> SalesReps);
+    List<string> SalesReps,
+    List<string> Collectors);
 
 public sealed record LisLineDataColumn(
     string Key,
@@ -94,6 +95,7 @@ public sealed class LisSummaryFilters
     public string? Clinic { get; set; }
     public string? RefPhy { get; set; }
     public string? SalesRep { get; set; }
+    public string? Collector { get; set; }
     public string? ActiveTab { get; set; } = "summary";
     public int PageNumber { get; set; } = 1;
     public int PageSize { get; set; } = 100;
