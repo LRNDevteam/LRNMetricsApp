@@ -73,6 +73,19 @@ export const denialWorkflowService = {
   confirmAllDenialActionVerification: (labId, batchId) => api(`/denial-action-verification/batch/${encodeURIComponent(batchId)}/confirm-all?labId=${encodeURIComponent(labId)}`, { method: 'POST' }),
   ignoreDenialActionVerification: (labId, verificationId) => api(`/denial-action-verification/${encodeURIComponent(verificationId)}/ignore?labId=${encodeURIComponent(labId)}`, { method: 'POST' }),
   getDenialActionVerificationExportUrl: (query) => apiUrl(`/denial-action-verification/export?${qs(query)}`)
+  ,getDenialMapperDashboard: (labId) => api(`/denial-mapper/dashboard?${qs({ labId })}`)
+  ,getDenialMapperSuper: async (query) => normalizePagedResult(await api(`/denial-mapper/super-master?${qs(query)}`))
+  ,createDenialMapperSuper: (payload) => api('/denial-mapper/super-master', { method: 'POST', body: JSON.stringify(payload) })
+  ,updateDenialMapperSuper: (id, payload) => api(`/denial-mapper/super-master/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
+  ,deleteDenialMapperSuper: (id) => api(`/denial-mapper/super-master/${id}`, { method: 'DELETE' })
+  ,getDenialMapperLabs: () => api('/denial-mapper/labs')
+  ,pushDenialMapper: (labIds) => api('/denial-mapper/push', { method: 'POST', body: JSON.stringify({ labIds }) })
+  ,getDenialMapperLab: async (labId, query) => normalizePagedResult(await api(`/denial-mapper/lab-master?${qs({ ...query, labId })}`))
+  ,saveDenialMapperOverride: (labId, id, payload) => api(`/denial-mapper/lab-master/${id}/override?labId=${labId}`, { method: 'PUT', body: JSON.stringify(payload) })
+  ,removeDenialMapperOverride: (labId, id) => api(`/denial-mapper/lab-master/${id}/override?labId=${labId}`, { method: 'DELETE' })
+  ,getDenialMapperAudit: (labId) => api(`/denial-mapper/audit?${qs({ labId, take: 200 })}`)
+  ,getDenialMapperClassifications: (labId) => api(`/denial-mapper/classifications?${qs({ labId })}`)
+  ,uploadDenialMapper: (file) => { const form = new FormData(); form.append('file', file); return api('/denial-mapper/upload', { method: 'POST', body: form }); }
 };
 
 export { qs };

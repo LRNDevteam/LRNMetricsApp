@@ -663,7 +663,7 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
 
             IF OBJECT_ID('dbo.DenialCodeActionChangeVerification','U') IS NULL
             BEGIN
-                CREATE TABLE dbo.DenialCodeActionChangeVerification
+                EXEC(N'CREATE TABLE dbo.DenialCodeActionChangeVerification
                 (
                     VerificationId bigint IDENTITY(1,1) NOT NULL CONSTRAINT PK_DenialCodeActionChangeVerification PRIMARY KEY,
                     BatchId bigint NOT NULL,
@@ -703,12 +703,12 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
                     NewTask nvarchar(500) NULL,
                     OldShortCategory nvarchar(255) NULL,
                     NewShortCategory nvarchar(255) NULL,
-                    VerificationStatus nvarchar(50) NOT NULL CONSTRAINT DF_DCACV_VerificationStatus DEFAULT 'Pending',
+                    VerificationStatus nvarchar(50) NOT NULL CONSTRAINT DF_DCACV_VerificationStatus DEFAULT ''Pending'',
                     VerifiedBy nvarchar(100) NULL,
                     VerifiedOn datetime2(0) NULL,
                     CreatedOn datetime2(0) NOT NULL CONSTRAINT DF_DCACV_CreatedOn DEFAULT SYSUTCDATETIME(),
                     CONSTRAINT FK_DCACV_Batch FOREIGN KEY (BatchId) REFERENCES dbo.DenialCodeActionChangeBatch(BatchId)
-                );
+                );');
             END;
 
             IF COL_LENGTH('dbo.DenialTaskBoard','ShortCategory') IS NULL

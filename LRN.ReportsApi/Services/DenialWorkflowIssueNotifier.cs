@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 
 namespace LRN.ReportsApi.Services;
@@ -51,7 +52,7 @@ public sealed class DenialWorkflowIssueNotifier : IDenialWorkflowIssueNotifier
         var correlationId = GetCorrelationId(context);
         var userName = FirstClaim(context, ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn", ClaimTypes.Email, "email");
         var role = FirstClaim(context, ClaimTypes.Role, "role", "roles");
-        var page = $"{context.Request.Method} {context.Request.Path}{context.Request.QueryString}";
+        var page = $"{context.Request.Method} {context.Request.Path}{SanitizeQueryString(context.Request.QueryString.Value)}";
         var errorFilePath = await SaveIssueTextFileAsync(correlationId, page, userName, role, action, exception, ct);
 
         _logger.LogError(exception,
@@ -64,6 +65,16 @@ public sealed class DenialWorkflowIssueNotifier : IDenialWorkflowIssueNotifier
 
         await SendTeamsAlertAsync(correlationId, page, userName, role, action, errorFilePath, exception, ct);
         return new DenialWorkflowIssueReport(correlationId, errorFilePath);
+    }
+
+    private static string SanitizeQueryString(string? query)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return string.Empty;
+        return Regex.Replace(
+            query,
+            @"(?i)(?<=[?&])([^=&]*(?:token|key|password|secret|authorization)[^=&]*)=[^&]*",
+            "$1=[REDACTED]",
+            RegexOptions.CultureInvariant);
     }
 
     private async Task<string?> SaveIssueTextFileAsync(string correlationId, string page, string userName, string role, string action, Exception exception, CancellationToken ct)

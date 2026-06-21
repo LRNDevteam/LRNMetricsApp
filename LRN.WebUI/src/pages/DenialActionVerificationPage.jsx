@@ -325,9 +325,11 @@ export default function DenialActionVerificationPage({ labId, setMessage, initia
       <label><span>Coverage Status</span><select value={draft.coverageStatus} onChange={e => setDraft(x => ({ ...x, coverageStatus: e.target.value }))}><option value="">All Statuses</option>{(lookups.coverageStatuses || lookups.CoverageStatuses || []).map(x => <option key={x}>{x}</option>)}</select></label>
       <label><span>Assigned To</span><select value={draft.assignedTo} onChange={e => setDraft(x => ({ ...x, assignedTo: e.target.value }))}><option value="">All Reviewers</option>{(lookups.assignedUsers || lookups.AssignedUsers || []).map(x => <option key={x}>{x}</option>)}</select></label>
       <label><span>Verification Status</span><select value={draft.status} onChange={e => setDraft(x => ({ ...x, status: e.target.value }))}><option value="">All</option>{statuses.map(x => <option key={x}>{x}</option>)}</select></label>
-      <button className="wl-btn xs teal" onClick={applyFilters}>Search</button>
-      <button className="wl-btn xs action-export-btn" onClick={exportRows}><i className="bi bi-file-earmark-arrow-down" /> Export Filtered</button>
-      <button className="wl-btn xs" onClick={clearFilters}>Clear</button>
+      <div className="action-filter-actions">
+        <button className="wl-btn xs teal" onClick={applyFilters}>Search</button>
+        <button className="wl-btn xs" onClick={clearFilters}>Clear</button>
+        <button className="wl-btn xs action-export-btn" onClick={exportRows}><i className="bi bi-file-earmark-arrow-down" /> Export Filtered</button>
+      </div>
     </div>
 
     {loading && <div className="loading-line" />}

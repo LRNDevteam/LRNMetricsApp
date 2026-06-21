@@ -12,11 +12,13 @@ public sealed class DenialCodeMasterController : ControllerBase
 {
     private readonly IDenialCodeMasterRepository _repo;
     private readonly IDenialCodeMasterExcelService _excelService;
+    private readonly IDenialWorkflowService _workflowService;
 
-    public DenialCodeMasterController(IDenialCodeMasterRepository repo, IDenialCodeMasterExcelService excelService)
+    public DenialCodeMasterController(IDenialCodeMasterRepository repo, IDenialCodeMasterExcelService excelService, IDenialWorkflowService workflowService)
     {
         _repo = repo;
         _excelService = excelService;
+        _workflowService = workflowService;
     }
 
     [HttpGet]
@@ -24,6 +26,7 @@ public sealed class DenialCodeMasterController : ControllerBase
     {
         if (!IsArManagerFromToken()) return AccessDenied();
         if (labId <= 0) return BadRequest(new { message = "LabId is required." });
+        if (!await CanAccessLabAsync(labId, ct)) return LabAccessDenied();
         return Ok(await _repo.GetPagedAsync(labId, search, page, pageSize, ct));
     }
 
@@ -32,6 +35,7 @@ public sealed class DenialCodeMasterController : ControllerBase
     {
         if (!IsArManagerFromToken()) return AccessDenied();
         if (labId <= 0) return BadRequest(new { message = "LabId is required." });
+        if (!await CanAccessLabAsync(labId, ct)) return LabAccessDenied();
         return Ok(await _repo.GetLookupsAsync(labId, ct));
     }
 
@@ -40,6 +44,7 @@ public sealed class DenialCodeMasterController : ControllerBase
     {
         if (!IsArManagerFromToken()) return AccessDenied();
         if (labId <= 0) return BadRequest(new { message = "LabId is required." });
+        if (!await CanAccessLabAsync(labId, ct)) return LabAccessDenied();
         var keyError = ValidateKey(denialCode, coverageStatus, icdComplianceStatus);
         if (!string.IsNullOrWhiteSpace(keyError)) return BadRequest(new { message = keyError });
         var row = await _repo.GetByKeyAsync(labId, denialCode, coverageStatus!, icdComplianceStatus!, ct);
@@ -51,6 +56,7 @@ public sealed class DenialCodeMasterController : ControllerBase
     {
         if (!IsArManagerFromToken()) return AccessDenied();
         if (labId <= 0) return BadRequest(new { message = "LabId is required." });
+        if (!await CanAccessLabAsync(labId, ct)) return LabAccessDenied();
         request = Normalize(request);
         var error = Validate(request, requireCode: true);
         if (!string.IsNullOrWhiteSpace(error)) return BadRequest(new { message = error });
@@ -67,6 +73,7 @@ public sealed class DenialCodeMasterController : ControllerBase
     {
         if (!IsArManagerFromToken()) return AccessDenied();
         if (labId <= 0) return BadRequest(new { message = "LabId is required." });
+        if (!await CanAccessLabAsync(labId, ct)) return LabAccessDenied();
         var keyError = ValidateKey(denialCode, coverageStatus, icdComplianceStatus);
         if (!string.IsNullOrWhiteSpace(keyError)) return BadRequest(new { message = keyError });
         request = Normalize(request);
@@ -92,6 +99,7 @@ public sealed class DenialCodeMasterController : ControllerBase
     {
         if (!IsArManagerFromToken()) return AccessDenied();
         if (labId <= 0) return BadRequest(new { message = "LabId is required." });
+        if (!await CanAccessLabAsync(labId, ct)) return LabAccessDenied();
         var file = request.File;
         if (file is null || file.Length == 0) return BadRequest(new { message = "Select an Excel file." });
         await using var stream = file.OpenReadStream();
@@ -103,6 +111,7 @@ public sealed class DenialCodeMasterController : ControllerBase
     {
         if (!IsArManagerFromToken()) return AccessDenied();
         if (labId <= 0) return BadRequest(new { message = "LabId is required." });
+        if (!await CanAccessLabAsync(labId, ct)) return LabAccessDenied();
         var keyError = ValidateKey(denialCode, coverageStatus, icdComplianceStatus);
         if (!string.IsNullOrWhiteSpace(keyError)) return BadRequest(new { message = keyError });
         if (!await _repo.ExistsAsync(labId, denialCode, coverageStatus!, icdComplianceStatus!, ct))
@@ -118,6 +127,7 @@ public sealed class DenialCodeMasterController : ControllerBase
     {
         if (!IsArManagerFromToken()) return AccessDenied();
         if (labId <= 0) return BadRequest(new { message = "LabId is required." });
+        if (!await CanAccessLabAsync(labId, ct)) return LabAccessDenied();
         var path = await _excelService.RegenerateExportAsync(labId, ct);
         return Ok(new { success = true, message = "Classifier Excel regenerated.", path });
     }
@@ -127,11 +137,26 @@ public sealed class DenialCodeMasterController : ControllerBase
     {
         if (!IsArManagerFromToken()) return AccessDenied();
         if (labId <= 0) return BadRequest(new { message = "LabId is required." });
+        if (!await CanAccessLabAsync(labId, ct)) return LabAccessDenied();
         var path = await _excelService.RegenerateExportAsync(labId, ct);
         return PhysicalFile(path, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", Path.GetFileName(path));
     }
 
     private ActionResult AccessDenied() => StatusCode(StatusCodes.Status403Forbidden, new { message = "Access denied. Denial Code Master is available only for AR Manager." });
+    private ActionResult LabAccessDenied() => StatusCode(StatusCodes.Status403Forbidden, new { message = "Access denied. You can manage denial codes only for your assigned lab." });
+
+    private async Task<bool> CanAccessLabAsync(int labId, CancellationToken ct)
+    {
+        var tokenLabIds = User.Claims
+            .Where(c => string.Equals(c.Type, "lab_id", StringComparison.OrdinalIgnoreCase))
+            .Select(c => int.TryParse(c.Value, out var id) ? id : 0)
+            .Where(id => id > 0)
+            .ToHashSet();
+        if (tokenLabIds.Count > 0) return tokenLabIds.Contains(labId);
+
+        var labs = await _workflowService.GetLabsForUserAsync(CurrentUserName(), ct);
+        return labs.Any(lab => lab.LabId == labId);
+    }
 
     private bool IsArManagerFromToken()
     {

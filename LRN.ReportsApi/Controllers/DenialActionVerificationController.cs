@@ -11,10 +11,12 @@ namespace LRN.ReportsApi.Controllers;
 public sealed class DenialActionVerificationController : ControllerBase
 {
     private readonly IDenialActionChangeVerificationRepository _repo;
+    private readonly IDenialWorkflowService _workflowService;
 
-    public DenialActionVerificationController(IDenialActionChangeVerificationRepository repo)
+    public DenialActionVerificationController(IDenialActionChangeVerificationRepository repo, IDenialWorkflowService workflowService)
     {
         _repo = repo;
+        _workflowService = workflowService;
     }
 
     [HttpGet]
@@ -22,6 +24,7 @@ public sealed class DenialActionVerificationController : ControllerBase
     {
         if (!IsArManagerFromToken()) return AccessDenied();
         if (query.LabId <= 0) return BadRequest(new { message = "LabId is required." });
+        if (!await CanAccessLabAsync(query.LabId, ct)) return LabAccessDenied();
         return Ok(await _repo.GetVerificationItemsAsync(query, ct));
     }
 
@@ -30,6 +33,7 @@ public sealed class DenialActionVerificationController : ControllerBase
     {
         if (!IsArManagerFromToken()) return AccessDenied();
         if (labId <= 0) return BadRequest(new { message = "LabId is required." });
+        if (!await CanAccessLabAsync(labId, ct)) return LabAccessDenied();
         var batch = await _repo.GetBatchAsync(labId, batchId, ct);
         return batch is null ? NotFound(new { message = "Verification batch was not found." }) : Ok(batch);
     }
@@ -39,6 +43,7 @@ public sealed class DenialActionVerificationController : ControllerBase
     {
         if (!IsArManagerFromToken()) return AccessDenied();
         if (labId <= 0) return BadRequest(new { message = "LabId is required." });
+        if (!await CanAccessLabAsync(labId, ct)) return LabAccessDenied();
         return Ok(await _repo.GetLookupsAsync(labId, ct));
     }
 
@@ -47,6 +52,7 @@ public sealed class DenialActionVerificationController : ControllerBase
     {
         if (!IsArManagerFromToken()) return AccessDenied();
         if (labId <= 0) return BadRequest(new { message = "LabId is required." });
+        if (!await CanAccessLabAsync(labId, ct)) return LabAccessDenied();
         return Ok(await _repo.ConfirmAsync(labId, verificationId, CurrentUserName(), ct));
     }
 
@@ -55,6 +61,7 @@ public sealed class DenialActionVerificationController : ControllerBase
     {
         if (!IsArManagerFromToken()) return AccessDenied();
         if (labId <= 0) return BadRequest(new { message = "LabId is required." });
+        if (!await CanAccessLabAsync(labId, ct)) return LabAccessDenied();
         if (verificationIds.Count == 0) return BadRequest(new { message = "Select at least one verification row." });
         return Ok(await _repo.ConfirmSelectedAsync(labId, verificationIds, CurrentUserName(), ct));
     }
@@ -64,6 +71,7 @@ public sealed class DenialActionVerificationController : ControllerBase
     {
         if (!IsArManagerFromToken()) return AccessDenied();
         if (labId <= 0) return BadRequest(new { message = "LabId is required." });
+        if (!await CanAccessLabAsync(labId, ct)) return LabAccessDenied();
         return Ok(await _repo.ConfirmAllAsync(labId, batchId, CurrentUserName(), ct));
     }
 
@@ -72,6 +80,7 @@ public sealed class DenialActionVerificationController : ControllerBase
     {
         if (!IsArManagerFromToken()) return AccessDenied();
         if (labId <= 0) return BadRequest(new { message = "LabId is required." });
+        if (!await CanAccessLabAsync(labId, ct)) return LabAccessDenied();
         return Ok(await _repo.IgnoreAsync(labId, verificationId, CurrentUserName(), ct));
     }
 
@@ -80,17 +89,40 @@ public sealed class DenialActionVerificationController : ControllerBase
     {
         if (!IsArManagerFromToken()) return AccessDenied();
         if (query.LabId <= 0) return BadRequest(new { message = "LabId is required." });
+        if (!await CanAccessLabAsync(query.LabId, ct)) return LabAccessDenied();
         var bytes = await _repo.ExportAsync(query, ct);
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"Denial_Action_Change_Verification_{DateTime.UtcNow:yyyyMMddHHmmss}.xlsx");
     }
 
     private ActionResult AccessDenied() => StatusCode(StatusCodes.Status403Forbidden, new { message = "Access denied. Action Change Verification is available only for AR Manager." });
+    private ActionResult LabAccessDenied() => StatusCode(StatusCodes.Status403Forbidden, new { message = "Access denied. You can verify denial actions only for your assigned lab." });
+
+    private async Task<bool> CanAccessLabAsync(int labId, CancellationToken ct)
+    {
+        if (IsAdminFromToken()) return true;
+        var tokenLabIds = User.Claims
+            .Where(c => string.Equals(c.Type, "lab_id", StringComparison.OrdinalIgnoreCase))
+            .Select(c => int.TryParse(c.Value, out var id) ? id : 0)
+            .Where(id => id > 0)
+            .ToHashSet();
+        if (tokenLabIds.Count > 0) return tokenLabIds.Contains(labId);
+
+        var labs = await _workflowService.GetLabsForUserAsync(CurrentUserName(), ct);
+        return labs.Any(lab => lab.LabId == labId);
+    }
+
+    private bool IsAdminFromToken()
+    {
+        var role = FirstClaim(ClaimTypes.Role, "role", "roles");
+        var token = new string((role ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+        return token.Contains("ADMIN");
+    }
 
     private bool IsArManagerFromToken()
     {
         var role = FirstClaim(ClaimTypes.Role, "role", "roles");
         var token = new string((role ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
-        return token.Contains("ARMANAGER");
+        return token.Contains("ARMANAGER") || token.Contains("ADMIN");
     }
 
     private string CurrentUserName() => FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "ReactWorkflow";

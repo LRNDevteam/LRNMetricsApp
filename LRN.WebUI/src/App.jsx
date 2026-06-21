@@ -17,6 +17,7 @@ import VerificationPage from './pages/VerificationPage';
 import ContactSupportPage from './pages/ContactSupportPage';
 import DenialCodeMasterPage from './pages/DenialCodeMasterPage';
 import DenialActionVerificationPage from './pages/DenialActionVerificationPage';
+import DenialMapperPage from './pages/DenialMapperPage';
 
 function roleIsReviewerOnly(role) { return isArReviewerRole(role); }
 
@@ -37,12 +38,14 @@ export default function App() {
   const [reviewers, setReviewers] = useState([]);
   const [filterOptions, setFilterOptions] = useState(emptyFilterOptions);
   const [labId, setLabId] = useState(Number(localStorage.getItem('denial.labId') || 0));
-  const workflowViews = ['dashboard', 'aging', 'summary', 'claims', 'myworklist', 'escalations', 'verification', 'denialcodemaster', 'denialactionverification', 'exports', 'support', 'admin'];
+  const workflowViews = ['dashboard', 'aging', 'summary', 'claims', 'myworklist', 'escalations', 'verification', 'denialcodemaster', 'denialmapper', 'denialactionverification', 'exports', 'support', 'admin'];
   const getStoredView = () => {
     const hashView = String(window.location.hash || '').replace('#', '').trim().toLowerCase();
     return workflowViews.includes(hashView) ? hashView : '';
   };
   const [view, setViewState] = useState(getStoredView() || 'aging');
+  const [denialMapperView, setDenialMapperView] = useState('dashboard');
+  const [denialMapperLabs, setDenialMapperLabs] = useState([]);
   const [filter, setFilter] = useState(emptyFilter);
   const [debouncedFilter, setDebouncedFilter] = useState(emptyFilter);
   const [dashboard, setDashboard] = useState(emptyDashboard);
@@ -95,6 +98,8 @@ export default function App() {
   const externalManager = clientManager || accountManager;
   const adminRole = String(user.role || '').toLowerCase().includes('admin');
   const readOnlyWorkflow = isReadOnlyWorkflowRole(user.role);
+  const denialMapperRole = adminRole || arManagerOnly || clientManager || accountManager || /lab\s*user|viewer|read\s*only/i.test(String(user.role || ''));
+  const denialMapperAdmin = adminRole;
   const exportBusy = !!claimExportJob && ['Queued', 'Running'].includes(claimExportJob.status);
   const activeQueueKey = view === 'myworklist' ? myWorklistView : view === 'claims' ? claimTaskView : '';
   const visibleFilters = useMemo(() => (view === 'dashboard'
@@ -134,7 +139,8 @@ export default function App() {
     let safeView = workflowViews.includes(nextView) ? nextView : 'dashboard';
     if (reviewerOnly && safeView === 'claims') safeView = 'myworklist';
     if (externalManager && safeView === 'myworklist') safeView = 'claims';
-    if ((safeView === 'denialcodemaster' || safeView === 'denialactionverification') && !isArManagerRole(user.role)) safeView = resolveLandingView(user.role);
+    if (arManagerOnly && safeView === 'denialmapper') safeView = 'denialcodemaster';
+    if ((safeView === 'denialcodemaster' || safeView === 'denialactionverification') && !isArManagerRole(user.role) && !String(user.role || '').toLowerCase().includes('admin')) safeView = resolveLandingView(user.role);
     setViewState(safeView);
     if (closeSidebar) setSidebarOpen(false);
     if (window.location.hash !== `#${safeView}`) {
@@ -145,6 +151,20 @@ export default function App() {
   useEffect(() => {
     if (externalManager && view === 'myworklist') setView('claims', { closeSidebar: false });
   }, [externalManager, view]);
+
+  useEffect(() => {
+    if (!denialMapperAdmin || (view !== 'denialmapper' && view !== 'denialactionverification')) return;
+    let cancelled = false;
+    denialWorkflowService.getDenialMapperLabs().then(activeLabs => {
+      if (cancelled) return;
+      const next = Array.isArray(activeLabs) ? activeLabs : [];
+      setDenialMapperLabs(next);
+      if (next.length && !next.some(x => Number(x.labId ?? x.LabId) === Number(labId))) {
+        setLabId(Number(next[0].labId ?? next[0].LabId));
+      }
+    }).catch(() => { /* page-level API handling will report mapper errors */ });
+    return () => { cancelled = true; };
+  }, [denialMapperAdmin, view]);
 
   function normalizeFilterOptions(raw = {}) {
     const source = raw?.data ?? raw?.Data ?? raw?.result ?? raw?.Result ?? raw;
@@ -743,8 +763,10 @@ export default function App() {
     refreshMenuCounts();
   }, [authReady, labId, menuCountQuery, reviewerOnly]);
 
-  const labName = labs.find(l => Number(l.labId ?? l.LabId) === Number(labId))?.labName || 'Select Lab';
-  const pageTitle = { dashboard: 'Denial Dashboard', aging: 'Aging Dashboard', summary: 'Denial Summary', claims: canAssign ? 'Claim Assignment' : 'Claim View', myworklist: 'My Worklist', escalations: escalationView === 'response' ? 'Escalation Response' : 'Escalation Queue', verification: 'Verification', denialcodemaster: 'Denial Code Master', denialactionverification: 'Action Change Verification', exports: 'Exports', support: 'Contact Support', admin: 'Admin Setup' }[view] || 'Denial Workflow';
+  const mapperHeaderActive = denialMapperAdmin && (view === 'denialmapper' || view === 'denialactionverification');
+  const headerLabs = mapperHeaderActive && denialMapperLabs.length ? denialMapperLabs : labs;
+  const labName = [...denialMapperLabs, ...labs].find(l => Number(l.labId ?? l.LabId) === Number(labId))?.labName || 'Select Lab';
+  const pageTitle = { dashboard: 'Denial Dashboard', aging: 'Aging Dashboard', summary: 'Denial Summary', claims: canAssign ? 'Claim Assignment' : 'Claim View', myworklist: 'My Worklist', escalations: escalationView === 'response' ? 'Escalation Response' : 'Escalation Queue', verification: 'Verification', denialcodemaster: 'Denial Code Master', denialmapper: 'Denial Mapper', denialactionverification: 'Action Change Verification', exports: 'Exports', support: 'Contact Support', admin: 'Admin Setup' }[view] || 'Denial Workflow';
   const showOverallDownload = canDownloadWorkflow && (view === 'claims' || view === 'myworklist');
   const claimNavTabs = useMemo(() => [
     ...getQueuesForRole(user.role),
@@ -1220,8 +1242,18 @@ export default function App() {
             )}
           </>
         )}
-        {arManagerOnly && <button className={`lrn-nav-item ${view === 'denialcodemaster' ? 'active' : ''}`} onClick={() => setView('denialcodemaster')}><i className="bi bi-list-check" />Denial Code Master</button>}
-        {arManagerOnly && <button className={`lrn-nav-item ${view === 'denialactionverification' ? 'active' : ''}`} onClick={() => setView('denialactionverification')}><i className="bi bi-shield-check" />Action Change Verification</button>}
+        {denialMapperRole && <>
+          <button className={`lrn-nav-item ${view === 'denialmapper' || view === 'denialcodemaster' || view === 'denialactionverification' ? 'active' : ''}`} onClick={() => { if (arManagerOnly) setView('denialcodemaster', { closeSidebar: false }); else { setDenialMapperView(adminRole ? 'dashboard' : 'lab'); setView('denialmapper', { closeSidebar: false }); } }}><i className="bi bi-diagram-3" />Denial Code Master</button>
+          {(view === 'denialmapper' || view === 'denialcodemaster' || view === 'denialactionverification') && <div className="lrn-nav-submenu dm-nav-submenu">
+            {arManagerOnly && <button className={`lrn-nav-subitem ${view === 'denialcodemaster' ? 'active' : ''}`} onClick={() => setView('denialcodemaster')}><span className="nav-sub-label">Denial Action Master</span></button>}
+            {(denialMapperAdmin || clientManager || accountManager) && <button className={`lrn-nav-subitem ${view === 'denialmapper' && denialMapperView === 'dashboard' ? 'active' : ''}`} onClick={() => { setDenialMapperView('dashboard'); setView('denialmapper'); }}><span className="nav-sub-label">Dashboard</span></button>}
+            {denialMapperAdmin && <button className={`lrn-nav-subitem ${view === 'denialmapper' && denialMapperView === 'super' ? 'active' : ''}`} onClick={() => { setDenialMapperView('super'); setView('denialmapper'); }}><span className="nav-sub-label">Super Master</span></button>}
+            <button className={`lrn-nav-subitem ${view === 'denialmapper' && (denialMapperView === 'labs' || denialMapperView === 'lab') ? 'active' : ''}`} onClick={() => { setDenialMapperView(denialMapperAdmin ? 'labs' : 'lab'); setView('denialmapper'); }}><span className="nav-sub-label">Lab Master</span></button>
+            {(denialMapperAdmin || clientManager || accountManager) && <button className={`lrn-nav-subitem ${view === 'denialmapper' && denialMapperView === 'audit' ? 'active' : ''}`} onClick={() => { setDenialMapperView('audit'); setView('denialmapper'); }}><span className="nav-sub-label">Audit Log</span></button>}
+            {denialMapperAdmin && <button className={`lrn-nav-subitem ${view === 'denialmapper' && denialMapperView === 'upload' ? 'active' : ''}`} onClick={() => { setDenialMapperView('upload'); setView('denialmapper'); }}><span className="nav-sub-label">Upload Mapper</span></button>}
+            {(denialMapperAdmin || arManagerOnly) && <button className={`lrn-nav-subitem ${view === 'denialactionverification' ? 'active' : ''}`} onClick={() => setView('denialactionverification')}><span className="nav-sub-label">Action Code Verification</span></button>}
+          </div>}
+        </>}
         <button className={`lrn-nav-item ${view === 'support' ? 'active' : ''}`} onClick={() => setView('support')}><i className="bi bi-life-preserver" />Contact Support</button>
         {adminRole && <button className={`lrn-nav-item ${view === 'admin' ? 'active' : ''}`} onClick={() => setView('admin')}><i className="bi bi-gear" />Admin Setup</button>}
       </nav>
@@ -1235,8 +1267,8 @@ export default function App() {
         </div>
         <div className="topbar-actions">
           {workflowNotifications.total > 0 && <div className="notification-wrap"><button type="button" className="notification-btn" title="Claims needing attention" onClick={() => setNotificationOpen(v => !v)}><i className="bi bi-bell-fill" /><span className="notification-count">{workflowNotifications.total}</span><span className="notification-text"><b>{workflowNotifications.total}</b> {reviewerOnly ? 'claims need attention' : 'escalation claim(s)'}</span></button>{notificationOpen && <NotificationDetails />}</div>}
-          <select className="top-lab-select" value={labId || ''} onChange={e => setLabId(Number(e.target.value))}>{labs.map(l => <option key={l.labId ?? l.LabId} value={l.labId ?? l.LabId}>{l.labName ?? l.LabName}</option>)}</select>
-          <span className="current-lab">{labName}</span>
+          {(view !== 'denialmapper' || denialMapperAdmin) && <select className="top-lab-select" value={labId || ''} onChange={e => setLabId(Number(e.target.value))}>{headerLabs.map(l => <option key={l.labId ?? l.LabId} value={l.labId ?? l.LabId}>{l.labName ?? l.LabName}</option>)}</select>}
+          {!mapperHeaderActive && <span className="current-lab">{labName}</span>}
           {showOverallDownload && claimExportJob && <span className={`export-status-pill ${claimExportJob.status === 'Completed' ? 'done' : exportBusy ? 'running' : 'failed'}`} title={claimExportJob.message || claimExportJob.status}>{exportStatusText()}</span>}
           {showOverallDownload && claimExportJob && <button type="button" className={`topbar-btn ${claimExportJob.status === 'Completed' ? 'teal' : ''}`} disabled={claimExportJob.status !== 'Completed'} onClick={downloadClaimExport} title={claimExportJob.message || claimExportJob.status}><i className={`bi ${claimExportJob.status === 'Completed' ? 'bi-file-earmark-excel' : 'bi-hourglass-split'}`} />{claimExportJob.status === 'Completed' ? 'Download File' : 'Waiting'}</button>}
           {showOverallDownload && exportBusy && <button type="button" className="topbar-btn" onClick={refreshClaimExportStatus}><i className="bi bi-arrow-clockwise" />Refresh Export</button>}
@@ -1262,15 +1294,15 @@ export default function App() {
         </div>
       </header>
       <main className="lrn-content">
-        <div className="claim-filter-toggle-row">
+        {view !== 'denialmapper' && <div className="claim-filter-toggle-row">
           <div className="last-run-reference" title={lastRunReference?.outputFileName || lastRunReference?.OutputFileName || lastRunReference?.runId || lastRunReference?.RunId || ''}>
             <i className="bi bi-file-earmark-text" />
             <span className="last-run-label">Source File</span>
             <strong>{lastRunLoading ? 'Loading...' : (lastRunReference?.fileNameWithoutExtension || lastRunReference?.FileNameWithoutExtension || 'Not available')}</strong>
           </div>
           {(view === 'dashboard' || view === 'claims') && <button type="button" className="wl-btn xs" onClick={() => view === 'dashboard' ? setDashboardFiltersOpen(v => !v) : setClaimFiltersOpen(v => !v)}><i className={`bi ${view === 'dashboard' ? (dashboardFiltersOpen ? 'bi-eye-slash' : 'bi-funnel') : (claimFiltersOpen ? 'bi-eye-slash' : 'bi-funnel')}`} />{view === 'dashboard' ? (dashboardFiltersOpen ? 'Hide Filters' : 'View Filters') : (claimFiltersOpen ? 'Hide Filters' : 'View Filters')}</button>}
-        </div>
-        {view !== 'myworklist' && view !== 'aging' && view !== 'support' && view !== 'denialcodemaster' && view !== 'denialactionverification' && (
+        </div>}
+        {view !== 'myworklist' && view !== 'aging' && view !== 'support' && view !== 'denialcodemaster' && view !== 'denialmapper' && view !== 'denialactionverification' && (
           <div className={(view === 'verification' || view === 'escalations' || (view === 'claims' && !claimFiltersOpen) || (view === 'dashboard' && !dashboardFiltersOpen)) ? 'global-filter-hidden' : ''}>
             <DashboardFilter filter={filter} setFilterValue={setFilterValue} clearFilter={clearFilter} reviewers={reviewers} options={filterOptions} visibleFilters={visibleFilters} />
           </div>
@@ -1309,7 +1341,8 @@ export default function App() {
         {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setWorkflowMessage} onSaved={() => { refreshReviewerNotification(); refreshWorkflowNotifications(); }} taskView={myWorklistView} setTaskView={handleMyWorklistViewChange} tabCounts={myWorklistMenuCounts} onExportQueryChange={setMyWorklistExportQuery} onDownloadTab={(exportQuery, tab) => startClaimExport({ currentTab: true, queryOverride: exportQuery, tabKey: tab?.key || myWorklistView, tabLabel: tab?.label || '' })} exportBusy={exportBusy} exportStatusText={exportStatusText()} canDownloadWorkflow={canDownloadWorkflow} />}
         {view === 'escalations' && <EscalationQueuePage labId={labId} user={user} reviewers={reviewers} taskView={escalationView === 'response' ? 'claim' : escalationView} responseOnly={escalationView === 'response'} setTaskView={setEscalationView} tabCounts={claimMenuCounts} onClaimTabChange={handleClaimTabRoute} canAssign={canAssign} assignClaims={assignClaims} setMessage={setWorkflowMessage} />}
         {view === 'denialcodemaster' && arManagerOnly && <DenialCodeMasterPage labId={labId} setMessage={setWorkflowMessage} onReviewActionChanges={(batchId) => { setActionVerificationBatchId(batchId || ''); setView('denialactionverification'); }} />}
-        {view === 'denialactionverification' && arManagerOnly && <DenialActionVerificationPage labId={labId} setMessage={setWorkflowMessage} initialBatchId={actionVerificationBatchId} />}
+        {view === 'denialmapper' && denialMapperRole && <DenialMapperPage user={user} labs={labs} labId={labId} setLabId={setLabId} setMessage={setWorkflowMessage} screen={denialMapperView} onScreenChange={setDenialMapperView} />}
+        {view === 'denialactionverification' && (denialMapperAdmin || arManagerOnly) && <DenialActionVerificationPage labId={labId} setMessage={setWorkflowMessage} initialBatchId={actionVerificationBatchId} />}
         {view === 'exports' && <WorkflowPlaceholder title="Exports">Use Overall Download or per-tab Download from Claim Assignment for claim extracts. Aging Dashboard also includes a Download Excel action.</WorkflowPlaceholder>}
         {view === 'support' && <ContactSupportPage user={user} currentPage={pageTitle} setMessage={setWorkflowMessage} />}
         {view === 'admin' && <WorkflowPlaceholder title="Admin Setup">Admin setup is available from the LRN Metrics administration area. This workflow shell keeps the menu entry visible for administrators.</WorkflowPlaceholder>}
