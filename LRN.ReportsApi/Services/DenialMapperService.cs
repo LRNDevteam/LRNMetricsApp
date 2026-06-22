@@ -13,6 +13,12 @@ public interface IDenialMapperRepository
     Task DeleteSuperMasterAsync(long id, string user, string role, CancellationToken ct);
     Task<IReadOnlyList<DenialMapperLabStatus>> LabsAsync(CancellationToken ct);
     Task<int> PushAsync(IReadOnlyList<int> labIds, string user, string role, CancellationToken ct);
+    Task<DenialMapperPushCompareResult> ComparePushAsync(IReadOnlyList<int> labIds, string user, CancellationToken ct);
+    Task<int> ConfirmPushAsync(IReadOnlyList<long> pushAuditIds, string user, string role, CancellationToken ct);
+    Task CancelPushAsync(IReadOnlyList<long> pushAuditIds, string user, CancellationToken ct);
+    Task<DenialMapperPushAuditView?> PushAuditAsync(long pushAuditId, CancellationToken ct);
+    Task<IReadOnlyList<DenialMapperNotification>> PendingNotificationsAsync(int labId, string user, CancellationToken ct);
+    Task AcknowledgeNotificationAsync(long pushAuditId, int labId, string user, CancellationToken ct);
     Task<PagedResult<DenialMapperRecord>> LabMasterAsync(int labId, string? search, string? classification, int page, int pageSize, CancellationToken ct);
     Task SaveOverrideAsync(int labId, long superMasterId, DenialMapperOverrideRequest request, string user, string role, CancellationToken ct);
     Task RemoveOverrideAsync(int labId, long superMasterId, string user, string role, CancellationToken ct);
@@ -91,6 +97,72 @@ public sealed class SqlDenialMapperRepository : IDenialMapperRepository
         }return selected.Count;
     }
 
+    public async Task<DenialMapperPushCompareResult> ComparePushAsync(IReadOnlyList<int> labIds,string user,CancellationToken ct)
+    {
+        var labs=(await ActiveLabsAsync(ct)).ToDictionary(x=>x.Id,x=>x.Name);
+        var selected=labIds.Distinct().Where(labs.ContainsKey).ToList();
+        if(selected.Count==0)throw new ArgumentException("Select at least one active target lab.");
+        var masterRows=new List<DenialMapperRecord>();
+        for(var page=1;;page++){var batch=await SuperMasterAsync(null,null,page,200,ct);masterRows.AddRange(batch.Items);if(batch.Items.Count<200)break;}
+        var allDetails=new List<DenialMapperPushDifference>();var auditIds=new List<long>();var totalCompared=0;var totalOpen=0;
+        await using var central=Open();await central.OpenAsync(ct);await EnsurePushAuditSchemaAsync(central,ct);
+        foreach(var labId in selected)
+        {
+            var target=new Dictionary<string,DenialMapperRecord>(StringComparer.OrdinalIgnoreCase);
+            await using(var lab=OpenLab(labId)){await lab.OpenAsync(ct);await EnsureLabTables(lab,ct);
+                const string sql="SELECT m.SuperMasterId,m.DenialCode,m.DenialDescription,m.DenialClassification,m.CoverageStatus,m.ICDComplianceStatus,m.DenialValidity,COALESCE(o.ActionCode,m.ActionCode),COALESCE(o.ActionCategory,m.ActionCategory),COALESCE(o.Task,m.Task),COALESCE(o.RecommendedAction,m.RecommendedAction),m.SLA,m.Priority,COALESCE(o.ModifiedOn,m.ModifiedOn),CASE WHEN o.Id IS NULL THEN CAST(0 AS bit) ELSE CAST(1 AS bit) END,m.ActionCode,m.ActionCategory,m.Task,m.RecommendedAction FROM dbo.DenialMapperLabMaster m LEFT JOIN dbo.DenialMapperLabOverride o ON o.SuperMasterId=m.SuperMasterId AND o.LabId=@LabId AND o.IsActive=1 WHERE m.IsActive=1";
+                await using var cmd=new SqlCommand(sql,lab);cmd.Parameters.AddWithValue("@LabId",labId);await using var reader=await cmd.ExecuteReaderAsync(ct);while(await reader.ReadAsync(ct)){var row=Map(reader,true,labId);target[MapperKey(row.DenialCode,row.ICDComplianceStatus,row.CoverageStatus)]=row;}}
+            var details=new List<DenialMapperPushDifference>();
+            foreach(var master in masterRows)
+            {
+                target.TryGetValue(MapperKey(master.DenialCode,master.ICDComplianceStatus,master.CoverageStatus),out var old);
+                var types=new List<string>();
+                if(old is null)types.Add("New Code");
+                else {if(Different(old.ActionCode,master.ActionCode))types.Add("Action Code Changed");if(Different(old.ActionCategory,master.ActionCategory))types.Add("Action Category Changed");if(Different(old.Task,master.Task))types.Add("Task Changed");if(Different(old.RecommendedAction,master.RecommendedAction))types.Add("Short Category Changed");if(Different(old.DenialClassification,master.DenialClassification))types.Add("Denial Classification Changed");}
+                if(types.Count==0)continue;
+                var d=new DenialMapperPushDifference{TargetLabId=labId,TargetLabName=labs[labId],DenialCode=master.DenialCode,ICDComplianceStatus=master.ICDComplianceStatus,CoverageStatus=master.CoverageStatus,ExistingActionCode=old?.ActionCode,NewActionCode=master.ActionCode,ExistingActionCategory=old?.ActionCategory,NewActionCategory=master.ActionCategory,ExistingTask=old?.Task,NewTask=master.Task,ExistingShortCategory=old?.RecommendedAction,NewShortCategory=master.RecommendedAction,ExistingDenialClassification=old?.DenialClassification,NewDenialClassification=master.DenialClassification,DifferenceType=string.Join(", ",types)};
+                d.OpenAssignedTaskCount=await CountOpenTasksAsync(labId,d,ct);d.IsAssignedToOpenTask=d.OpenAssignedTaskCount>0;details.Add(d);
+            }
+            totalCompared+=masterRows.Count;totalOpen+=details.Sum(x=>x.OpenAssignedTaskCount);
+            await using var tx=(SqlTransaction)await central.BeginTransactionAsync(ct);try
+            {
+                await using var head=new SqlCommand("INSERT dbo.DenialMapperPushAudit(SourceLabId,TargetLabId,PushedByUserId,PushStatus,TotalCompared,TotalDifferences,TotalAssignedOpenTasksAffected) OUTPUT inserted.PushAuditId VALUES(0,@Lab,@User,'PendingConfirmation',@Compared,@Differences,@Open)",central,tx);
+                head.Parameters.AddWithValue("@Lab",labId);head.Parameters.AddWithValue("@User",user);head.Parameters.AddWithValue("@Compared",masterRows.Count);head.Parameters.AddWithValue("@Differences",details.Count);head.Parameters.AddWithValue("@Open",details.Sum(x=>x.OpenAssignedTaskCount));var auditId=Convert.ToInt64(await head.ExecuteScalarAsync(ct));auditIds.Add(auditId);
+                foreach(var d in details){d.PushAuditId=auditId;await InsertPushDetailAsync(central,tx,d,ct);}await tx.CommitAsync(ct);
+            }catch{await tx.RollbackAsync(CancellationToken.None);throw;}
+            allDetails.AddRange(details);
+        }
+        return new(){PushAuditIds=auditIds,TotalLabs=selected.Count,TotalCompared=totalCompared,TotalDifferences=allDetails.Count,TotalAssignedOpenTasksAffected=totalOpen,Differences=allDetails,Message=allDetails.Count==0?"No action/task difference found. Ready to push.":"Action/Task differences found between Master Lab and selected lab(s). Please verify before pushing."};
+    }
+
+    public async Task<int> ConfirmPushAsync(IReadOnlyList<long> pushAuditIds,string user,string role,CancellationToken ct)
+    {
+        var done=0;
+        foreach(var id in pushAuditIds.Distinct())
+        {
+            var audit=await PushAuditAsync(id,ct);if(audit is null||audit.PushStatus!="PendingConfirmation")continue;
+            try{await PushAsync([audit.TargetLabId],user,role,ct);await AcceptMasterValuesAsync(audit,user,ct);await CreateOpenTaskVerificationAsync(audit,user,ct);await SetPushStatusAsync(id,"Pushed",user,null,ct);done++;}
+            catch(Exception ex){await SetPushStatusAsync(id,"Failed",user,ex.Message,ct);throw;}
+        }
+        return done;
+    }
+
+    public async Task CancelPushAsync(IReadOnlyList<long> ids,string user,CancellationToken ct)
+    {await using var c=Open();await c.OpenAsync(ct);await EnsurePushAuditSchemaAsync(c,ct);foreach(var id in ids.Distinct()){await using var cmd=new SqlCommand("UPDATE dbo.DenialMapperPushAudit SET PushStatus='Cancelled',CancelledOn=SYSUTCDATETIME(),CancelledByUserId=@User WHERE PushAuditId=@Id AND PushStatus='PendingConfirmation'",c);cmd.Parameters.AddWithValue("@Id",id);cmd.Parameters.AddWithValue("@User",user);await cmd.ExecuteNonQueryAsync(ct);}}
+
+    public async Task<DenialMapperPushAuditView?> PushAuditAsync(long id,CancellationToken ct)
+    {
+        await using var c=Open();await c.OpenAsync(ct);await EnsurePushAuditSchemaAsync(c,ct);DenialMapperPushAuditView? result=null;
+        await using(var cmd=new SqlCommand("SELECT a.PushAuditId,a.SourceLabId,a.TargetLabId,ISNULL(l.LabName,''),a.PushedByUserId,a.PushStatus,a.TotalCompared,a.TotalDifferences,a.TotalAssignedOpenTasksAffected,a.CreatedOn,a.ConfirmedOn FROM dbo.DenialMapperPushAudit a LEFT JOIN dbo.Labs l ON l.LabId=a.TargetLabId WHERE a.PushAuditId=@Id",c)){cmd.Parameters.AddWithValue("@Id",id);await using var r=await cmd.ExecuteReaderAsync(ct);if(await r.ReadAsync(ct))result=new(){PushAuditId=r.GetInt64(0),SourceLabId=r.GetInt32(1),TargetLabId=r.GetInt32(2),TargetLabName=r.GetString(3),PushedByUserId=r.GetString(4),PushStatus=r.GetString(5),TotalCompared=r.GetInt32(6),TotalDifferences=r.GetInt32(7),TotalAssignedOpenTasksAffected=r.GetInt32(8),CreatedOn=r.GetDateTime(9),ConfirmedOn=r.IsDBNull(10)?null:r.GetDateTime(10)};}
+        if(result is null)return null;result.Differences=await ReadPushDetailsAsync(c,id,result.TargetLabName,ct);return result;
+    }
+
+    public async Task<IReadOnlyList<DenialMapperNotification>> PendingNotificationsAsync(int labId,string user,CancellationToken ct)
+    {await using var c=Open();await c.OpenAsync(ct);await EnsurePushAuditSchemaAsync(c,ct);var list=new List<DenialMapperNotification>();await using var cmd=new SqlCommand("SELECT a.PushAuditId,a.SourceLabId,a.TargetLabId,ISNULL(l.LabName,''),a.PushStatus,a.TotalDifferences,a.CreatedOn FROM dbo.DenialMapperPushAudit a LEFT JOIN dbo.Labs l ON l.LabId=a.TargetLabId WHERE a.TargetLabId=@Lab AND a.PushStatus IN ('Pushed','Confirmed') AND a.AcknowledgedOn IS NULL ORDER BY a.CreatedOn DESC",c);cmd.Parameters.AddWithValue("@Lab",labId);await using var r=await cmd.ExecuteReaderAsync(ct);while(await r.ReadAsync(ct))list.Add(new(){PushAuditId=r.GetInt64(0),SourceLabId=r.GetInt32(1),TargetLabId=r.GetInt32(2),TargetLabName=r.GetString(3),PushStatus=r.GetString(4),TotalDifferences=r.GetInt32(5),CreatedOn=r.GetDateTime(6)});return list;}
+
+    public async Task AcknowledgeNotificationAsync(long id,int labId,string user,CancellationToken ct)
+    {await using var c=Open();await c.OpenAsync(ct);await EnsurePushAuditSchemaAsync(c,ct);await using var cmd=new SqlCommand("UPDATE dbo.DenialMapperPushAudit SET AcknowledgedOn=SYSUTCDATETIME(),AcknowledgedByUserId=@User,PushStatus=CASE WHEN PushStatus='Pushed' THEN 'Confirmed' ELSE PushStatus END WHERE PushAuditId=@Id AND TargetLabId=@Lab AND PushStatus IN ('Pushed','Confirmed')",c);cmd.Parameters.AddWithValue("@Id",id);cmd.Parameters.AddWithValue("@Lab",labId);cmd.Parameters.AddWithValue("@User",user);await cmd.ExecuteNonQueryAsync(ct);}
+
     public async Task<PagedResult<DenialMapperRecord>> LabMasterAsync(int labId,string? search,string? classification,int page,int pageSize,CancellationToken ct)
     {
         page=Math.Max(1,page);pageSize=Math.Clamp(pageSize,10,200);var result=new PagedResult<DenialMapperRecord>{Page=page,PageSize=pageSize};await using var c=OpenLab(labId);await c.OpenAsync(ct);await EnsureLabTables(c,ct);if(!await LabTablesExist(c,ct))return result;
@@ -138,6 +210,42 @@ public sealed class SqlDenialMapperRepository : IDenialMapperRepository
         return new(){InsertedCount=inserted,UpdatedCount=updated,FailedCount=errors.Count,Errors=errors,Message=$"Uploaded {records.Count} mapping rows to LRNMaster."};
     }
 
+    private static string MapperKey(string code,string? icd,string? coverage)=>$"{code.Trim()}\u001f{icd?.Trim()}\u001f{coverage?.Trim()}";
+    private static bool Different(string? left,string? right)=>!string.Equals(left?.Trim()??"",right?.Trim()??"",StringComparison.OrdinalIgnoreCase);
+    private async Task<int> CountOpenTasksAsync(int labId,DenialMapperPushDifference d,CancellationToken ct)
+    {await using var c=OpenLab(labId);await c.OpenAsync(ct);await using var cmd=new SqlCommand("IF OBJECT_ID('dbo.DenialTaskBoard','U') IS NULL SELECT 0 ELSE SELECT COUNT(*) FROM dbo.DenialTaskBoard WHERE UPPER(LTRIM(RTRIM(ISNULL(DenialCode,''))))=UPPER(LTRIM(RTRIM(@Code))) AND UPPER(LTRIM(RTRIM(ISNULL(ICDComplianceStatus,''))))=UPPER(LTRIM(RTRIM(ISNULL(@Icd,'')))) AND UPPER(LTRIM(RTRIM(ISNULL(CoverageStatus,''))))=UPPER(LTRIM(RTRIM(ISNULL(@Coverage,'')))) AND NULLIF(LTRIM(RTRIM(ISNULL(AssignedTo,''))),'') IS NOT NULL AND LOWER(LTRIM(RTRIM(ISNULL(Status,'')))) NOT IN ('close','closed') AND LOWER(LTRIM(RTRIM(ISNULL(WorkFlowStatus,'')))) NOT IN ('close','closed','closed claim')",c);cmd.Parameters.AddWithValue("@Code",d.DenialCode);cmd.Parameters.AddWithValue("@Icd",Db(d.ICDComplianceStatus));cmd.Parameters.AddWithValue("@Coverage",Db(d.CoverageStatus));return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));}
+    private static async Task EnsurePushAuditSchemaAsync(SqlConnection c,CancellationToken ct)
+    {const string sql="""
+IF OBJECT_ID('dbo.DenialMapperPushAudit','U') IS NULL
+CREATE TABLE dbo.DenialMapperPushAudit(PushAuditId bigint IDENTITY PRIMARY KEY,SourceLabId int NOT NULL,TargetLabId int NOT NULL,PushedByUserId nvarchar(100) NOT NULL,PushStatus nvarchar(50) NOT NULL,TotalCompared int NOT NULL DEFAULT 0,TotalDifferences int NOT NULL DEFAULT 0,TotalAssignedOpenTasksAffected int NOT NULL DEFAULT 0,CreatedOn datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),ConfirmedOn datetime2 NULL,ConfirmedByUserId nvarchar(100) NULL,CancelledOn datetime2 NULL,CancelledByUserId nvarchar(100) NULL,AcknowledgedOn datetime2 NULL,AcknowledgedByUserId nvarchar(100) NULL,FailureMessage nvarchar(2000) NULL);
+IF COL_LENGTH('dbo.DenialMapperPushAudit','AcknowledgedOn') IS NULL ALTER TABLE dbo.DenialMapperPushAudit ADD AcknowledgedOn datetime2 NULL,AcknowledgedByUserId nvarchar(100) NULL;
+IF COL_LENGTH('dbo.DenialMapperPushAudit','FailureMessage') IS NULL ALTER TABLE dbo.DenialMapperPushAudit ADD FailureMessage nvarchar(2000) NULL;
+IF OBJECT_ID('dbo.DenialMapperPushAuditDetail','U') IS NULL
+CREATE TABLE dbo.DenialMapperPushAuditDetail(PushAuditDetailId bigint IDENTITY PRIMARY KEY,PushAuditId bigint NOT NULL,TargetLabId int NOT NULL,DenialCode nvarchar(100) NOT NULL,ICDComplianceStatus nvarchar(255) NULL,CoverageStatus nvarchar(255) NULL,ExistingActionCode nvarchar(255) NULL,NewActionCode nvarchar(255) NULL,ExistingActionCategory nvarchar(500) NULL,NewActionCategory nvarchar(500) NULL,ExistingTask nvarchar(500) NULL,NewTask nvarchar(500) NULL,ExistingShortCategory nvarchar(1000) NULL,NewShortCategory nvarchar(1000) NULL,ExistingDenialClassification nvarchar(255) NULL,NewDenialClassification nvarchar(255) NULL,DifferenceType nvarchar(255) NOT NULL,IsAssignedToOpenTask bit NOT NULL DEFAULT 0,OpenAssignedTaskCount int NOT NULL DEFAULT 0,CreatedOn datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),CONSTRAINT FK_DMPAD_Audit FOREIGN KEY(PushAuditId) REFERENCES dbo.DenialMapperPushAudit(PushAuditId));
+""";await using var cmd=new SqlCommand(sql,c);await cmd.ExecuteNonQueryAsync(ct);}
+    private static async Task InsertPushDetailAsync(SqlConnection c,SqlTransaction tx,DenialMapperPushDifference d,CancellationToken ct)
+    {const string sql="INSERT dbo.DenialMapperPushAuditDetail(PushAuditId,TargetLabId,DenialCode,ICDComplianceStatus,CoverageStatus,ExistingActionCode,NewActionCode,ExistingActionCategory,NewActionCategory,ExistingTask,NewTask,ExistingShortCategory,NewShortCategory,ExistingDenialClassification,NewDenialClassification,DifferenceType,IsAssignedToOpenTask,OpenAssignedTaskCount) OUTPUT inserted.PushAuditDetailId VALUES(@Audit,@Lab,@Code,@Icd,@Coverage,@OldCode,@NewCode,@OldCategory,@NewCategory,@OldTask,@NewTask,@OldShort,@NewShort,@OldClass,@NewClass,@Type,@Assigned,@Count)";await using var cmd=new SqlCommand(sql,c,tx);cmd.Parameters.AddWithValue("@Audit",d.PushAuditId);cmd.Parameters.AddWithValue("@Lab",d.TargetLabId);cmd.Parameters.AddWithValue("@Code",d.DenialCode);cmd.Parameters.AddWithValue("@Icd",Db(d.ICDComplianceStatus));cmd.Parameters.AddWithValue("@Coverage",Db(d.CoverageStatus));cmd.Parameters.AddWithValue("@OldCode",Db(d.ExistingActionCode));cmd.Parameters.AddWithValue("@NewCode",Db(d.NewActionCode));cmd.Parameters.AddWithValue("@OldCategory",Db(d.ExistingActionCategory));cmd.Parameters.AddWithValue("@NewCategory",Db(d.NewActionCategory));cmd.Parameters.AddWithValue("@OldTask",Db(d.ExistingTask));cmd.Parameters.AddWithValue("@NewTask",Db(d.NewTask));cmd.Parameters.AddWithValue("@OldShort",Db(d.ExistingShortCategory));cmd.Parameters.AddWithValue("@NewShort",Db(d.NewShortCategory));cmd.Parameters.AddWithValue("@OldClass",Db(d.ExistingDenialClassification));cmd.Parameters.AddWithValue("@NewClass",Db(d.NewDenialClassification));cmd.Parameters.AddWithValue("@Type",d.DifferenceType);cmd.Parameters.AddWithValue("@Assigned",d.IsAssignedToOpenTask);cmd.Parameters.AddWithValue("@Count",d.OpenAssignedTaskCount);d.PushAuditDetailId=Convert.ToInt64(await cmd.ExecuteScalarAsync(ct));}
+    private static async Task<IReadOnlyList<DenialMapperPushDifference>> ReadPushDetailsAsync(SqlConnection c,long id,string labName,CancellationToken ct)
+    {var list=new List<DenialMapperPushDifference>();await using var cmd=new SqlCommand("SELECT PushAuditDetailId,PushAuditId,TargetLabId,DenialCode,ICDComplianceStatus,CoverageStatus,ExistingActionCode,NewActionCode,ExistingActionCategory,NewActionCategory,ExistingTask,NewTask,ExistingShortCategory,NewShortCategory,ExistingDenialClassification,NewDenialClassification,DifferenceType,IsAssignedToOpenTask,OpenAssignedTaskCount FROM dbo.DenialMapperPushAuditDetail WHERE PushAuditId=@Id ORDER BY DenialCode",c);cmd.Parameters.AddWithValue("@Id",id);await using var r=await cmd.ExecuteReaderAsync(ct);while(await r.ReadAsync(ct))list.Add(new(){PushAuditDetailId=r.GetInt64(0),PushAuditId=r.GetInt64(1),TargetLabId=r.GetInt32(2),TargetLabName=labName,DenialCode=r.GetString(3),ICDComplianceStatus=S(r,4),CoverageStatus=S(r,5),ExistingActionCode=S(r,6),NewActionCode=S(r,7),ExistingActionCategory=S(r,8),NewActionCategory=S(r,9),ExistingTask=S(r,10),NewTask=S(r,11),ExistingShortCategory=S(r,12),NewShortCategory=S(r,13),ExistingDenialClassification=S(r,14),NewDenialClassification=S(r,15),DifferenceType=r.GetString(16),IsAssignedToOpenTask=r.GetBoolean(17),OpenAssignedTaskCount=r.GetInt32(18)});return list;}
+    private async Task SetPushStatusAsync(long id,string status,string user,string? failure,CancellationToken ct)
+    {await using var c=Open();await c.OpenAsync(ct);await EnsurePushAuditSchemaAsync(c,ct);await using var cmd=new SqlCommand("UPDATE dbo.DenialMapperPushAudit SET PushStatus=@Status,ConfirmedOn=CASE WHEN @Status='Pushed' THEN SYSUTCDATETIME() ELSE ConfirmedOn END,ConfirmedByUserId=CASE WHEN @Status='Pushed' THEN @User ELSE ConfirmedByUserId END,FailureMessage=@Failure WHERE PushAuditId=@Id",c);cmd.Parameters.AddWithValue("@Id",id);cmd.Parameters.AddWithValue("@Status",status);cmd.Parameters.AddWithValue("@User",user);cmd.Parameters.AddWithValue("@Failure",Db(failure));await cmd.ExecuteNonQueryAsync(ct);}
+    private async Task CreateOpenTaskVerificationAsync(DenialMapperPushAuditView audit,string user,CancellationToken ct)
+    {
+        var changed=audit.Differences.Where(x=>x.OpenAssignedTaskCount>0).ToList();if(changed.Count==0)return;
+        await using var c=OpenLab(audit.TargetLabId);await c.OpenAsync(ct);await SqlDenialCodeMasterRepository.EnsureActionChangeSchemaAsync(c,null,ct);await using var tx=(SqlTransaction)await c.BeginTransactionAsync(ct);
+        try{await using var batch=new SqlCommand("INSERT dbo.DenialCodeActionChangeBatch(SourceFileName,UploadedBy,TotalAffectedClaims,TotalAffectedTasks,PendingCount,Status) OUTPUT inserted.BatchId VALUES(@Source,@User,0,@Tasks,@Tasks,'Pending')",c,tx);batch.Parameters.AddWithValue("@Source",$"DenialMapperLabPush:{audit.PushAuditId}");batch.Parameters.AddWithValue("@User",user);batch.Parameters.AddWithValue("@Tasks",changed.Sum(x=>x.OpenAssignedTaskCount));var batchId=Convert.ToInt64(await batch.ExecuteScalarAsync(ct));
+            foreach(var d in changed){const string sql="""
+INSERT dbo.DenialCodeActionChangeVerification(BatchId,ClaimID,TaskID,AssignedTo,ClaimStatus,DenialCode,ICDComplianceStatus,CoverageStatus,ActionCode,ActionCategory,RecommendedAction,Task,OldActionCode,NewActionCode,OldActionCategory,NewActionCategory,OldTask,NewTask,OldShortCategory,NewShortCategory)
+SELECT @Batch,CONVERT(nvarchar(100),ClaimID),CONVERT(nvarchar(100),TaskID),CONVERT(nvarchar(100),AssignedTo),CONVERT(nvarchar(100),ISNULL(NULLIF(WorkFlowStatus,''),Status)),@Code,@Icd,@Coverage,ActionCode,ActionCategory,RecommendedAction,Task,@OldCode,@NewCode,@OldCategory,@NewCategory,@OldTask,@NewTask,@OldShort,@NewShort
+FROM dbo.DenialTaskBoard WHERE UPPER(LTRIM(RTRIM(ISNULL(DenialCode,''))))=UPPER(LTRIM(RTRIM(@Code))) AND UPPER(LTRIM(RTRIM(ISNULL(ICDComplianceStatus,''))))=UPPER(LTRIM(RTRIM(ISNULL(@Icd,'')))) AND UPPER(LTRIM(RTRIM(ISNULL(CoverageStatus,''))))=UPPER(LTRIM(RTRIM(ISNULL(@Coverage,'')))) AND NULLIF(LTRIM(RTRIM(ISNULL(AssignedTo,''))),'') IS NOT NULL AND LOWER(LTRIM(RTRIM(ISNULL(Status,'')))) NOT IN ('close','closed') AND LOWER(LTRIM(RTRIM(ISNULL(WorkFlowStatus,'')))) NOT IN ('close','closed','closed claim');
+""";await using var cmd=new SqlCommand(sql,c,tx);cmd.Parameters.AddWithValue("@Batch",batchId);cmd.Parameters.AddWithValue("@Code",d.DenialCode);cmd.Parameters.AddWithValue("@Icd",Db(d.ICDComplianceStatus));cmd.Parameters.AddWithValue("@Coverage",Db(d.CoverageStatus));cmd.Parameters.AddWithValue("@OldCode",Db(d.ExistingActionCode));cmd.Parameters.AddWithValue("@NewCode",Db(d.NewActionCode));cmd.Parameters.AddWithValue("@OldCategory",Db(d.ExistingActionCategory));cmd.Parameters.AddWithValue("@NewCategory",Db(d.NewActionCategory));cmd.Parameters.AddWithValue("@OldTask",Db(d.ExistingTask));cmd.Parameters.AddWithValue("@NewTask",Db(d.NewTask));cmd.Parameters.AddWithValue("@OldShort",Db(d.ExistingShortCategory));cmd.Parameters.AddWithValue("@NewShort",Db(d.NewShortCategory));await cmd.ExecuteNonQueryAsync(ct);}await tx.CommitAsync(ct);
+        }catch{await tx.RollbackAsync(CancellationToken.None);throw;}
+    }
+    private async Task AcceptMasterValuesAsync(DenialMapperPushAuditView audit,string user,CancellationToken ct)
+    {
+        if(audit.Differences.Count==0)return;await using var c=OpenLab(audit.TargetLabId);await c.OpenAsync(ct);await using var tx=(SqlTransaction)await c.BeginTransactionAsync(ct);
+        try{foreach(var d in audit.Differences){await using var cmd=new SqlCommand("UPDATE o SET IsActive=0,ModifiedBy=@User,ModifiedOn=SYSUTCDATETIME() FROM dbo.DenialMapperLabOverride o INNER JOIN dbo.DenialMapperLabMaster m ON m.SuperMasterId=o.SuperMasterId WHERE o.IsActive=1 AND UPPER(LTRIM(RTRIM(m.DenialCode)))=UPPER(LTRIM(RTRIM(@Code))) AND UPPER(LTRIM(RTRIM(ISNULL(m.ICDComplianceStatus,''))))=UPPER(LTRIM(RTRIM(ISNULL(@Icd,'')))) AND UPPER(LTRIM(RTRIM(ISNULL(m.CoverageStatus,''))))=UPPER(LTRIM(RTRIM(ISNULL(@Coverage,''))))",c,tx);cmd.Parameters.AddWithValue("@User",user);cmd.Parameters.AddWithValue("@Code",d.DenialCode);cmd.Parameters.AddWithValue("@Icd",Db(d.ICDComplianceStatus));cmd.Parameters.AddWithValue("@Coverage",Db(d.CoverageStatus));await cmd.ExecuteNonQueryAsync(ct);}await tx.CommitAsync(ct);}catch{await tx.RollbackAsync(CancellationToken.None);throw;}
+    }
     private async Task<IReadOnlyList<(int Id,string Name)>> ActiveLabsAsync(CancellationToken ct){var rows=new List<(int,string)>();await using var c=Open();await c.OpenAsync(ct);await using var cmd=new SqlCommand("SELECT LabId,LabName FROM dbo.Labs WHERE IsActive=1 ORDER BY LabName",c);await using var r=await cmd.ExecuteReaderAsync(ct);while(await r.ReadAsync(ct))rows.Add((r.GetInt32(0),r.GetString(1)));return rows;}
     private static string Initials(string name)=>string.Concat(name.Split([' ','_'],StringSplitOptions.RemoveEmptyEntries).Take(3).Select(x=>char.ToUpperInvariant(x[0])));
     private static async Task<bool> LabTablesExist(SqlConnection c,CancellationToken ct){await using var cmd=new SqlCommand("SELECT CASE WHEN OBJECT_ID('dbo.DenialMapperLabMaster','U') IS NULL THEN 0 ELSE 1 END",c);return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct))==1;}

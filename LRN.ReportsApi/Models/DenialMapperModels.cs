@@ -51,6 +51,75 @@ public sealed class DenialMapperOverrideRequest
 
 public sealed class DenialMapperPushRequest { public IReadOnlyList<int> LabIds { get; set; } = Array.Empty<int>(); }
 
+public sealed class DenialMapperPushCompareResult
+{
+    public IReadOnlyList<long> PushAuditIds { get; set; } = Array.Empty<long>();
+    public int TotalLabs { get; set; }
+    public int TotalCompared { get; set; }
+    public int TotalDifferences { get; set; }
+    public int TotalAssignedOpenTasksAffected { get; set; }
+    public IReadOnlyList<DenialMapperPushDifference> Differences { get; set; } = Array.Empty<DenialMapperPushDifference>();
+    public string Message { get; set; } = string.Empty;
+}
+
+public sealed class DenialMapperPushDifference
+{
+    public long PushAuditDetailId { get; set; }
+    public long PushAuditId { get; set; }
+    public int TargetLabId { get; set; }
+    public string TargetLabName { get; set; } = string.Empty;
+    public string DenialCode { get; set; } = string.Empty;
+    public string? ICDComplianceStatus { get; set; }
+    public string? CoverageStatus { get; set; }
+    public string? ExistingActionCode { get; set; }
+    public string? NewActionCode { get; set; }
+    public string? ExistingActionCategory { get; set; }
+    public string? NewActionCategory { get; set; }
+    public string? ExistingTask { get; set; }
+    public string? NewTask { get; set; }
+    public string? ExistingShortCategory { get; set; }
+    public string? NewShortCategory { get; set; }
+    public string? ExistingDenialClassification { get; set; }
+    public string? NewDenialClassification { get; set; }
+    public string DifferenceType { get; set; } = string.Empty;
+    public bool IsAssignedToOpenTask { get; set; }
+    public int OpenAssignedTaskCount { get; set; }
+}
+
+public sealed class DenialMapperPushAuditView
+{
+    public long PushAuditId { get; set; }
+    public int SourceLabId { get; set; }
+    public string SourceLabName { get; set; } = "Master Lab";
+    public int TargetLabId { get; set; }
+    public string TargetLabName { get; set; } = string.Empty;
+    public string PushedByUserId { get; set; } = string.Empty;
+    public string PushStatus { get; set; } = string.Empty;
+    public int TotalCompared { get; set; }
+    public int TotalDifferences { get; set; }
+    public int TotalAssignedOpenTasksAffected { get; set; }
+    public DateTime CreatedOn { get; set; }
+    public DateTime? ConfirmedOn { get; set; }
+    public IReadOnlyList<DenialMapperPushDifference> Differences { get; set; } = Array.Empty<DenialMapperPushDifference>();
+}
+
+public sealed class DenialMapperPushDecisionRequest
+{
+    public IReadOnlyList<long> PushAuditIds { get; set; } = Array.Empty<long>();
+}
+
+public sealed class DenialMapperNotification
+{
+    public long PushAuditId { get; set; }
+    public int SourceLabId { get; set; }
+    public int TargetLabId { get; set; }
+    public string TargetLabName { get; set; } = string.Empty;
+    public string PushStatus { get; set; } = string.Empty;
+    public int TotalDifferences { get; set; }
+    public DateTime CreatedOn { get; set; }
+    public string Message { get; set; } = "Denial Mapper update is available for your lab. Please verify and confirm the Denial Code Master changes.";
+}
+
 public sealed class DenialMapperLabStatus
 {
     public int LabId { get; set; }

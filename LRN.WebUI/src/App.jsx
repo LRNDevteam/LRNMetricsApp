@@ -46,6 +46,8 @@ export default function App() {
   const [view, setViewState] = useState(getStoredView() || 'aging');
   const [denialMapperView, setDenialMapperView] = useState('dashboard');
   const [denialMapperLabs, setDenialMapperLabs] = useState([]);
+  const [mapperNotification, setMapperNotification] = useState(null);
+  const [mapperReviewAuditId, setMapperReviewAuditId] = useState(null);
   const [filter, setFilter] = useState(emptyFilter);
   const [debouncedFilter, setDebouncedFilter] = useState(emptyFilter);
   const [dashboard, setDashboard] = useState(emptyDashboard);
@@ -99,13 +101,18 @@ export default function App() {
   const adminRole = String(user.role || '').toLowerCase().includes('admin');
   const readOnlyWorkflow = isReadOnlyWorkflowRole(user.role);
   const denialMapperRole = adminRole || arManagerOnly || clientManager || accountManager || /lab\s*user|viewer|read\s*only/i.test(String(user.role || ''));
-  const denialMapperAdmin = adminRole;
+  const denialMapperAdmin = adminRole || arManagerOnly;
   const exportBusy = !!claimExportJob && ['Queued', 'Running'].includes(claimExportJob.status);
   const activeQueueKey = view === 'myworklist' ? myWorklistView : view === 'claims' ? claimTaskView : '';
   const visibleFilters = useMemo(() => (view === 'dashboard'
     ? ['status', 'reviewer', 'payerName', 'denialClassification', 'actionCategory', 'denialCode', 'priority', 'clinic', 'salesRepname', 'referringProvider']
     : getFiltersForRoleQueue(user.role, activeQueueKey)), [view, user.role, activeQueueKey]);
   const copyrightYear = new Date().getFullYear();
+
+  useEffect(() => {
+    if (!authReady || !arManagerOnly || !labId) return;
+    denialWorkflowService.getDenialMapperNotifications(labId).then(items => setMapperNotification(items?.[0] || null)).catch(() => {});
+  }, [authReady, arManagerOnly, labId]);
 
   const supportEmailList = useCallback((err = null) => {
     const fromError = Array.isArray(err?.supportEmails) ? err.supportEmails : [];
@@ -139,7 +146,6 @@ export default function App() {
     let safeView = workflowViews.includes(nextView) ? nextView : 'dashboard';
     if (reviewerOnly && safeView === 'claims') safeView = 'myworklist';
     if (externalManager && safeView === 'myworklist') safeView = 'claims';
-    if (arManagerOnly && safeView === 'denialmapper') safeView = 'denialcodemaster';
     if ((safeView === 'denialcodemaster' || safeView === 'denialactionverification') && !isArManagerRole(user.role) && !String(user.role || '').toLowerCase().includes('admin')) safeView = resolveLandingView(user.role);
     setViewState(safeView);
     if (closeSidebar) setSidebarOpen(false);
@@ -1247,7 +1253,7 @@ export default function App() {
           {(view === 'denialmapper' || view === 'denialcodemaster' || view === 'denialactionverification') && <div className="lrn-nav-submenu dm-nav-submenu">
             {arManagerOnly && <button className={`lrn-nav-subitem ${view === 'denialcodemaster' ? 'active' : ''}`} onClick={() => setView('denialcodemaster')}><span className="nav-sub-label">Denial Action Master</span></button>}
             {(denialMapperAdmin || clientManager || accountManager) && <button className={`lrn-nav-subitem ${view === 'denialmapper' && denialMapperView === 'dashboard' ? 'active' : ''}`} onClick={() => { setDenialMapperView('dashboard'); setView('denialmapper'); }}><span className="nav-sub-label">Dashboard</span></button>}
-            {denialMapperAdmin && <button className={`lrn-nav-subitem ${view === 'denialmapper' && denialMapperView === 'super' ? 'active' : ''}`} onClick={() => { setDenialMapperView('super'); setView('denialmapper'); }}><span className="nav-sub-label">Super Master</span></button>}
+            {denialMapperAdmin && <button className={`lrn-nav-subitem ${view === 'denialmapper' && denialMapperView === 'super' ? 'active' : ''}`} onClick={() => { setDenialMapperView('super'); setView('denialmapper'); }}><span className="nav-sub-label">Super Master / Push</span></button>}
             <button className={`lrn-nav-subitem ${view === 'denialmapper' && (denialMapperView === 'labs' || denialMapperView === 'lab') ? 'active' : ''}`} onClick={() => { setDenialMapperView(denialMapperAdmin ? 'labs' : 'lab'); setView('denialmapper'); }}><span className="nav-sub-label">Lab Master</span></button>
             {(denialMapperAdmin || clientManager || accountManager) && <button className={`lrn-nav-subitem ${view === 'denialmapper' && denialMapperView === 'audit' ? 'active' : ''}`} onClick={() => { setDenialMapperView('audit'); setView('denialmapper'); }}><span className="nav-sub-label">Audit Log</span></button>}
             {denialMapperAdmin && <button className={`lrn-nav-subitem ${view === 'denialmapper' && denialMapperView === 'upload' ? 'active' : ''}`} onClick={() => { setDenialMapperView('upload'); setView('denialmapper'); }}><span className="nav-sub-label">Upload Mapper</span></button>}
@@ -1294,6 +1300,7 @@ export default function App() {
         </div>
       </header>
       <main className="lrn-content">
+        {mapperNotification&&<div className="lrn-alert warning mapper-login-alert"><div><strong>Denial Mapper update is available for your lab.</strong><span>Please verify and confirm the Denial Code Master changes.</span></div><div><button className="wl-btn teal xs" onClick={()=>{setMapperReviewAuditId(mapperNotification.pushAuditId);setDenialMapperView('verification');setView('denialmapper');}}>Review Now</button><button className="wl-btn xs" onClick={()=>setMapperNotification(null)}>Later</button></div></div>}
         {view !== 'denialmapper' && <div className="claim-filter-toggle-row">
           <div className="last-run-reference" title={lastRunReference?.outputFileName || lastRunReference?.OutputFileName || lastRunReference?.runId || lastRunReference?.RunId || ''}>
             <i className="bi bi-file-earmark-text" />
@@ -1341,7 +1348,7 @@ export default function App() {
         {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setWorkflowMessage} onSaved={() => { refreshReviewerNotification(); refreshWorkflowNotifications(); }} taskView={myWorklistView} setTaskView={handleMyWorklistViewChange} tabCounts={myWorklistMenuCounts} onExportQueryChange={setMyWorklistExportQuery} onDownloadTab={(exportQuery, tab) => startClaimExport({ currentTab: true, queryOverride: exportQuery, tabKey: tab?.key || myWorklistView, tabLabel: tab?.label || '' })} exportBusy={exportBusy} exportStatusText={exportStatusText()} canDownloadWorkflow={canDownloadWorkflow} />}
         {view === 'escalations' && <EscalationQueuePage labId={labId} user={user} reviewers={reviewers} taskView={escalationView === 'response' ? 'claim' : escalationView} responseOnly={escalationView === 'response'} setTaskView={setEscalationView} tabCounts={claimMenuCounts} onClaimTabChange={handleClaimTabRoute} canAssign={canAssign} assignClaims={assignClaims} setMessage={setWorkflowMessage} />}
         {view === 'denialcodemaster' && arManagerOnly && <DenialCodeMasterPage labId={labId} setMessage={setWorkflowMessage} onReviewActionChanges={(batchId) => { setActionVerificationBatchId(batchId || ''); setView('denialactionverification'); }} />}
-        {view === 'denialmapper' && denialMapperRole && <DenialMapperPage user={user} labs={labs} labId={labId} setLabId={setLabId} setMessage={setWorkflowMessage} screen={denialMapperView} onScreenChange={setDenialMapperView} />}
+        {view === 'denialmapper' && denialMapperRole && <DenialMapperPage user={user} labs={labs} labId={labId} setLabId={setLabId} setMessage={setWorkflowMessage} screen={denialMapperView} onScreenChange={setDenialMapperView} pushAuditId={mapperReviewAuditId} onAuditAcknowledged={()=>{setMapperNotification(null);setMapperReviewAuditId(null);setDenialMapperView('lab');}} />}
         {view === 'denialactionverification' && (denialMapperAdmin || arManagerOnly) && <DenialActionVerificationPage labId={labId} setMessage={setWorkflowMessage} initialBatchId={actionVerificationBatchId} />}
         {view === 'exports' && <WorkflowPlaceholder title="Exports">Use Overall Download or per-tab Download from Claim Assignment for claim extracts. Aging Dashboard also includes a Download Excel action.</WorkflowPlaceholder>}
         {view === 'support' && <ContactSupportPage user={user} currentPage={pageTitle} setMessage={setWorkflowMessage} />}
