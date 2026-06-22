@@ -3,3 +3,5 @@ bin/
 obj/
 *.user
 *.suo
+/LRN.WebUI/node_modules
+/LRN.WebUI/dist
