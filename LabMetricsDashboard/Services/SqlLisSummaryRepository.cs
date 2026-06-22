@@ -831,21 +831,15 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 	private static string ResolveDateColumn(HashSet<string> columns, string logicSheet, string dateType)
 	{
 		var normalized = NormalizeDateType(dateType);
-		if (logicSheet.Equals("Cove", StringComparison.OrdinalIgnoreCase))
+		var configuredDateColumn = ResolveConfiguredDateColumn(logicSheet, normalized);
+		if (!string.IsNullOrWhiteSpace(configuredDateColumn))
 		{
-			var coveDateColumn = normalized switch
+			if (columns.Contains(configuredDateColumn))
 			{
-				"Received" => "ReceivedDate",
-				"Resulted" => "ValidatedDate",
-				_ => "DateOfCollection"
-			};
-
-			if (columns.Contains(coveDateColumn))
-			{
-				return coveDateColumn;
+				return configuredDateColumn;
 			}
 
-			throw new InvalidOperationException($"{DateTypeLabel(normalized)} date column '{coveDateColumn}' was not found in dbo.LIMSMaster for Cove.");
+			throw new InvalidOperationException($"{DateTypeLabel(normalized)} date column '{configuredDateColumn}' was not found in dbo.LIMSMaster for {logicSheet}.");
 		}
 
 		var candidates = new List<string>();
@@ -873,64 +867,102 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		throw new InvalidOperationException($"{DateTypeLabel(normalized)} date column was not found in dbo.LIMSMaster.");
 	}
 
+	private static string? ResolveConfiguredDateColumn(string logicSheet, string dateType)
+		=> (logicSheet, dateType) switch
+		{
+			("PhiLife", "Collected") or ("Beech Tree", "Collected") or ("Rising Tides", "Collected") or ("PCRLOA", "Collected") => "RequestCollectDate",
+			("PhiLife", "Received") or ("Beech Tree", "Received") or ("Rising Tides", "Received") or ("PCRLOA", "Received") => "ReqReceivedDate",
+			("PhiLife", "Resulted") or ("Beech Tree", "Resulted") or ("Rising Tides", "Resulted") => "ReqReportedDate",
+			("PCRLOA", "Resulted") => "ReqResultedDate",
+			("Cove", "Collected") or ("Elixir", "Collected") => "DateOfCollection",
+			("Cove", "Received") or ("Elixir", "Received") => "ReceivedDate",
+			("Cove", "Resulted") => "ValidatedDate",
+			("Elixir", "Resulted") => "SampleResultedDate",
+			("InHealth", "Collected") => "LastTest",
+			("Augustus", "Collected") or ("NWL", "Collected") => "RequestCollectDate",
+			("Augustus", "Received") => "ReqReceivedDate",
+			("NWL", "Received") => "RequestReceivedDate",
+			("Augustus", "Resulted") or ("NWL", "Resulted") or ("Certus", "Resulted") => "ResultDate",
+			("Certus", "Collected") => "ReqCollectDate",
+			("Certus", "Received") => "ReqReceivedDate",
+			_ => null
+		};
+
 	private static FilterColumnProfile ResolveFilterColumns(HashSet<string> columns, string logicSheetName)
 	{
-		if (logicSheetName.Equals("InHealth", StringComparison.OrdinalIgnoreCase))
+		return logicSheetName switch
 		{
-			return new FilterColumnProfile(
+			"PhiLife" or "Beech Tree" or "Rising Tides" => new FilterColumnProfile(
+				ExpressionForColumn(FirstExisting(columns, "PanelCategory")),
+				ExpressionForColumn(FirstExisting(columns, "Facility")),
+				ExpressionForColumn(FirstExisting(columns, "Provider")),
+				null,
+				ExpressionForColumn(FirstExisting(columns, "Collector"))),
+			"PCRLOA" => new FilterColumnProfile(
+				ExpressionForColumn(FirstExisting(columns, "PanelCategory")),
+				null, null, null, null),
+			"Cove" => new FilterColumnProfile(
+				ExpressionForColumn(FirstExisting(columns, "PanelType")),
+				ExpressionForColumn(FirstExisting(columns, "FacilityName")),
+				ExpressionForColumn(FirstExisting(columns, "ProviderName")),
+				ExpressionForColumn(FirstExisting(columns, "SaleRepName")),
+				null),
+			"Elixir" => new FilterColumnProfile(
+				ExpressionForColumn(FirstExisting(columns, "PanelName")),
+				ExpressionForColumn(FirstExisting(columns, "FacilityName")),
+				ExpressionForColumn(FirstExisting(columns, "ProviderName")),
+				ExpressionForColumn(FirstExisting(columns, "SaleRepName")),
+				null),
+			"InHealth" => new FilterColumnProfile(
 				ExpressionForColumn(FirstExisting(columns, "LRNPanelName")),
 				ExpressionForColumn(FirstExisting(columns, "Account")),
-				BuildCombinedNameExpression(columns, "ProviderLastName", "ProviderFirstName"),
-				ExpressionForColumn(FirstExisting(columns, "SalesRepEmail", "SalesRepName", "Sales Rep Name", "SalesRep", "Sales Rep")),
-				ExpressionForColumn(FirstExisting(columns, "Collector")));
-		}
-
-		if (logicSheetName.Equals("Augustus", StringComparison.OrdinalIgnoreCase))
-		{
-			return new FilterColumnProfile(
-				ExpressionForColumn(FirstExisting(columns, "PanelType", "Panel Type")),
-				ExpressionForColumn(FirstExisting(columns, "ClinicName", "Clinic Name")),
-				BuildCombinedNameExpression(columns, "DoctorLastName", "DoctorFirstName")
-					?? ExpressionForColumn(FirstExisting(columns, "DoctorFullName", "Doctor Full Name", "ReferringProvider", "Referring Provider", "ReferringPhysician", "Referring Physician")),
-				ExpressionForColumn(FirstExisting(columns, "SalesRepname", "SalesRepName", "Sales Rep Name", "SaleRepName", "SalesRep", "Sales Rep", "SalesRepresentative", "Sales Representative", "SalesRepEmail", "Sales Rep Email")),
-				ExpressionForColumn(FirstExisting(columns, "Collector")));
-		}
-
-		return new FilterColumnProfile(
-			ExpressionForColumn(ResolvePanelFilterColumn(columns)),
-			ExpressionForColumn(FirstExisting(columns, "Facility", "FacilityName", "Clinic", "ClinicName", "Clinic Name", "ReqLocationName", "REQ_LOCATION_NAME", "Location", "LocationName", "ClientName", "Client Name", "OrganizationName", "ORGANIZATION_NAME")),
-			ExpressionForColumn(FirstExisting(columns, "Provider", "ProviderName", "PhysicianName", "RefPhy", "Ref Phy", "ReferringProvider", "Referring Provider", "ReferringPhysician", "Referring Physician", "DoctorFullName", "Doctor Full Name", "DOCTOR_FULL_NAME")),
-			ExpressionForColumn(FirstExisting(columns, "SaleRepName", "SalesRepname", "SalesRepName", "Sales Rep Name", "SalesRep", "Sales Rep", "SalesRepresentative", "Sales Representative", "SalesRepEmail", "Sales Rep Email")),
-			ExpressionForColumn(FirstExisting(columns, "Collector")));
+				BuildConcatenatedNameExpression(columns, "ProviderFirstName", "ProviderLastName"),
+				ExpressionForColumn(FirstExisting(columns, "SalesRepEmail")),
+				null),
+			"Augustus" => new FilterColumnProfile(
+				ExpressionForColumn(FirstExisting(columns, "PanelName")),
+				ExpressionForColumn(FirstExisting(columns, "ClinicName")),
+				BuildAugustusProviderExpression(columns),
+				null, null),
+			"NWL" => new FilterColumnProfile(
+				ExpressionForColumn(FirstExisting(columns, "PanelType")),
+				ExpressionForColumn(FirstExisting(columns, "ClinicName")),
+				ExpressionForColumn(FirstExisting(columns, "ReferringProvider")),
+				null, null),
+			"Certus" => new FilterColumnProfile(
+				ExpressionForColumn(FirstExisting(columns, "PanelName")),
+				null,
+				ExpressionForColumn(FirstExisting(columns, "DoctorFullName")),
+				null, null),
+			_ => new FilterColumnProfile(
+				ExpressionForColumn(ResolvePanelFilterColumn(columns)),
+				ExpressionForColumn(FirstExisting(columns, "Facility", "FacilityName", "Clinic", "ClinicName")),
+				ExpressionForColumn(FirstExisting(columns, "Provider", "ProviderName", "ReferringProvider", "DoctorFullName")),
+				ExpressionForColumn(FirstExisting(columns, "SaleRepName", "SalesRepName", "SalesRep")),
+				ExpressionForColumn(FirstExisting(columns, "Collector")))
+		};
 	}
 
 	private static string? ExpressionForColumn(string? column)
 		=> string.IsNullOrWhiteSpace(column) ? null : TextExpr(column);
 
-	private static string? BuildCombinedNameExpression(HashSet<string> columns, string lastNameColumn, string firstNameColumn)
+	private static string? BuildConcatenatedNameExpression(HashSet<string> columns, string firstNameColumn, string lastNameColumn)
 	{
-		var lastName = FirstExisting(columns, lastNameColumn);
 		var firstName = FirstExisting(columns, firstNameColumn);
-		if (string.IsNullOrWhiteSpace(lastName) && string.IsNullOrWhiteSpace(firstName))
-		{
-			return null;
-		}
+		var lastName = FirstExisting(columns, lastNameColumn);
+		if (firstName is null || lastName is null) return null;
 
-		if (string.IsNullOrWhiteSpace(lastName))
-		{
-			return TextExpr(firstName);
-		}
+		return $"LTRIM(RTRIM(CONVERT(nvarchar(4000), {Q(firstName)}) + CONVERT(nvarchar(4000), {Q(lastName)})))";
+	}
 
-		if (string.IsNullOrWhiteSpace(firstName))
-		{
-			return TextExpr(lastName);
-		}
+	private static string? BuildAugustusProviderExpression(HashSet<string> columns)
+	{
+		var lastName = FirstExisting(columns, "DoctorLastName");
+		var firstName = FirstExisting(columns, "DoctorFirstName");
+		var middleName = FirstExisting(columns, "DoctorMiddleName");
+		if (lastName is null || firstName is null || middleName is null) return null;
 
-		var lastExpr = TextExpr(lastName);
-		var firstExpr = TextExpr(firstName);
-		return $"""
-			LTRIM(RTRIM(CONCAT({lastExpr}, CASE WHEN {lastExpr} <> '' AND {firstExpr} <> '' THEN ', ' ELSE '' END, {firstExpr})))
-			""";
+		return $"ISNULL(CONVERT(nvarchar(4000), {Q(lastName)}) + ',' + CONVERT(nvarchar(4000), {Q(firstName)}), CONVERT(nvarchar(4000), {Q(middleName)}))";
 	}
 
 	private static string? ResolvePanelFilterColumn(HashSet<string> columns)

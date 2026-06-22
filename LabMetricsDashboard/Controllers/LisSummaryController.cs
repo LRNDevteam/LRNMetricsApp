@@ -54,6 +54,7 @@ public class LisSummaryController : Controller
 		var labOptions = await GetLabOptionsAsync(availableLabs, cancellationToken);
 		var selectedLabOption = ResolveSelectedLabOption(labOptions, selectedLabName, filters.LabId);
 		filters.LabId = selectedLabOption?.LabId;
+		NormalizeLabDateType(filters, selectedLabOption?.LabName ?? selectedLabName);
 
 		if (!_labSettings.Labs.TryGetValue(selectedLabName, out var config))
 		{
@@ -161,6 +162,7 @@ public class LisSummaryController : Controller
 		var labOptions = await GetLabOptionsAsync(availableLabs, cancellationToken);
 		var selectedLabOption = ResolveSelectedLabOption(labOptions, selectedLabName, filters.LabId);
 		filters.LabId = selectedLabOption?.LabId;
+		NormalizeLabDateType(filters, selectedLabOption?.LabName ?? selectedLabName);
 
 		if (!_labSettings.Labs.TryGetValue(selectedLabName, out var config)
 			|| !config.LineClaimEnable
@@ -233,6 +235,14 @@ public class LisSummaryController : Controller
 			_logger.LogError(ex, "LIS Summary Excel export failed for lab '{LabName}'.", selectedLabName);
 			TempData["LisSummaryError"] = $"Failed to export LIS Summary: {ex.Message}";
 			return RedirectToAction(nameof(Index), ToRouteValues(selectedLabName, filters));
+		}
+	}
+
+	private static void NormalizeLabDateType(LisSummaryFilters filters, string labName)
+	{
+		if (labName.Contains("InHealth", StringComparison.OrdinalIgnoreCase))
+		{
+			filters.DateType = "Collected";
 		}
 	}
 

@@ -28,6 +28,7 @@
     string DateValue(DateOnly? value) => value?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty;
     string RowCss(int level) => level <= 0 ? "lis-summary-section-row" : level == 1 ? "lis-summary-level-one" : level == 2 ? "lis-summary-level-two" : "lis-summary-level-three";
     var filters = Model.Filters;
+    var isInHealth = Model.CurrentLabName.Contains("InHealth", StringComparison.OrdinalIgnoreCase);
     var activeTab = filters.EffectiveActiveTab;
     var lineData = Model.LineData;
     var totalPages = lineData is null ? 1 : Math.Max(1, (int)Math.Ceiling(lineData.TotalCount / (double)lineData.PageSize));
@@ -650,10 +651,38 @@
     }
 
     .lis-ms-label {
+        flex: 1 1 auto;
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        text-align: left;
+    }
+
+    .lis-ms-clear {
+        display: none;
+        width: 1.15rem;
+        height: 1.15rem;
+        flex: 0 0 1.15rem;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        color: #60758c;
+        font-size: 1rem;
+        font-weight: 500;
+        line-height: 1;
+        cursor: pointer;
+    }
+
+    .lis-ms-clear.is-visible {
+        display: inline-flex;
+    }
+
+    .lis-ms-clear:hover,
+    .lis-ms-clear:focus {
+        background: #e8f0f8;
+        color: #163a60;
+        outline: none;
     }
 
     .lis-ms-caret {
@@ -924,8 +953,11 @@
                 <label class="form-label">Date Type</label>
                 <select class="form-select filter-select" name="DateType">
                     <option value="Collected" selected="@IsSelected(filters.EffectiveDateType, "Collected")">Collected</option>
+                    @if (!isInHealth)
+                    {
                     <option value="Received" selected="@IsSelected(filters.EffectiveDateType, "Received")">Received</option>
                     <option value="Resulted" selected="@IsSelected(filters.EffectiveDateType, "Resulted")">Resulted</option>
+                    }
                 </select>
             </div>
 
@@ -960,6 +992,7 @@
                     <input type="hidden" name="Panel" value="@filters.Panel" />
                     <button type="button" class="lis-ms-btn" aria-haspopup="listbox" aria-expanded="false">
                         <span class="lis-ms-label">All</span>
+                        <span class="lis-ms-clear" role="button" tabindex="0" aria-label="Clear panel filter" title="Clear panel filter">&times;</span>
                         <span class="lis-ms-caret">v</span>
                     </button>
                     <div class="lis-ms-panel">
@@ -986,6 +1019,7 @@
                     <input type="hidden" name="Clinic" value="@filters.Clinic" />
                     <button type="button" class="lis-ms-btn" aria-haspopup="listbox" aria-expanded="false">
                         <span class="lis-ms-label">All</span>
+                        <span class="lis-ms-clear" role="button" tabindex="0" aria-label="Clear clinic filter" title="Clear clinic filter">&times;</span>
                         <span class="lis-ms-caret">v</span>
                     </button>
                     <div class="lis-ms-panel">
@@ -1012,6 +1046,7 @@
                     <input type="hidden" name="RefPhy" value="@filters.RefPhy" />
                     <button type="button" class="lis-ms-btn" aria-haspopup="listbox" aria-expanded="false">
                         <span class="lis-ms-label">All</span>
+                        <span class="lis-ms-clear" role="button" tabindex="0" aria-label="Clear referring physician filter" title="Clear referring physician filter">&times;</span>
                         <span class="lis-ms-caret">v</span>
                     </button>
                     <div class="lis-ms-panel">
@@ -1038,6 +1073,7 @@
                     <input type="hidden" name="SalesRep" value="@filters.SalesRep" />
                     <button type="button" class="lis-ms-btn" aria-haspopup="listbox" aria-expanded="false">
                         <span class="lis-ms-label">All</span>
+                        <span class="lis-ms-clear" role="button" tabindex="0" aria-label="Clear sales rep filter" title="Clear sales rep filter">&times;</span>
                         <span class="lis-ms-caret">v</span>
                     </button>
                     <div class="lis-ms-panel">
@@ -1064,6 +1100,7 @@
                     <input type="hidden" name="Collector" value="@filters.Collector" />
                     <button type="button" class="lis-ms-btn" aria-haspopup="listbox" aria-expanded="false">
                         <span class="lis-ms-label">All</span>
+                        <span class="lis-ms-clear" role="button" tabindex="0" aria-label="Clear collector filter" title="Clear collector filter">&times;</span>
                         <span class="lis-ms-caret">v</span>
                     </button>
                     <div class="lis-ms-panel">
@@ -1360,10 +1397,12 @@ else
         function updateMultiSelect(widget) {
             const hidden = widget.querySelector('input[type="hidden"]');
             const label = widget.querySelector('.lis-ms-label');
+            const clear = widget.querySelector('.lis-ms-clear');
             const selected = selectedCheckboxes(widget);
             const values = selected.map(input => input.value);
 
             if (hidden) hidden.value = values.join('|');
+            clear?.classList.toggle('is-visible', values.length > 0);
 
             if (!label) return;
             if (values.length === 0) {
@@ -1388,6 +1427,7 @@ else
             const button = widget.querySelector('.lis-ms-btn');
             const panel = widget.querySelector('.lis-ms-panel');
             const search = widget.querySelector('.lis-ms-search');
+            const clear = widget.querySelector('.lis-ms-clear');
 
             updateMultiSelect(widget);
 
@@ -1407,6 +1447,19 @@ else
             });
 
             panel?.addEventListener('click', event => event.stopPropagation());
+
+            const clearSelection = event => {
+                event.preventDefault();
+                event.stopPropagation();
+                widget.querySelectorAll('.lis-ms-option input[type="checkbox"]:checked')
+                    .forEach(input => input.checked = false);
+                updateMultiSelect(widget);
+            };
+
+            clear?.addEventListener('click', clearSelection);
+            clear?.addEventListener('keydown', event => {
+                if (event.key === 'Enter' || event.key === ' ') clearSelection(event);
+            });
 
             widget.addEventListener('change', () => updateMultiSelect(widget));
 
