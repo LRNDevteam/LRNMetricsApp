@@ -3,7 +3,3 @@ bin/
 obj/
 *.user
 *.suo
-/LRN.WebUI/dist
-/LRN.WebUI/node_modules
-/LabMetricsDashboard/appsettings.json
-/LRN.ReportsApi/appsettings.json
