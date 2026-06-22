@@ -126,6 +126,16 @@
         margin-bottom: .25rem;
     }
 
+    .lis-kpi-sublabel {
+        display: block;
+        margin-top: .08rem;
+        font-size: .62rem;
+        font-weight: 600;
+        letter-spacing: .02em;
+        text-transform: none;
+        color: #71859b;
+    }
+
     .lis-kpi-value {
         font-size: 1.35rem;
         font-weight: 800;
@@ -1114,11 +1124,11 @@ else if (activeTab == "summary")
             <div class="lis-kpi-value">@result.KpiCards.TotalSamples.ToString("N0")</div>
         </div>
         <div class="lis-kpi-card">
-            <div class="lis-kpi-label">Billed Count</div>
+            <div class="lis-kpi-label">Billed<span class="lis-kpi-sublabel">Insurance Bills</span></div>
             <div class="lis-kpi-value">@result.KpiCards.BilledCount.ToString("N0")</div>
         </div>
         <div class="lis-kpi-card">
-            <div class="lis-kpi-label">Unbilled Count</div>
+            <div class="lis-kpi-label">Unbilled<span class="lis-kpi-sublabel">Insurance Bills</span></div>
             <div class="lis-kpi-value">@result.KpiCards.UnbilledCount.ToString("N0")</div>
         </div>
         <div class="lis-kpi-card">

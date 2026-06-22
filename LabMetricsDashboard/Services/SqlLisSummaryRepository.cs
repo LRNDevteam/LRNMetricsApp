@@ -491,7 +491,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			.GroupBy(x => x.CollectedYear)
 			.ToDictionary(g => g.Key, g => g.Sum(x => x.TotalClaims));
 
-		var kpiCards = BuildKpiCards(summaryRaw, grandByMonth.Values.Sum());
+		var kpiCards = BuildKpiCards(summaryRaw, rows, grandByMonth.Values.Sum());
 
 		return new LisSummaryResult(
 			profile.LogicSheetName,
@@ -1640,19 +1640,15 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			_ => "Collected"
 		};
 
-	private static LisSummaryKpiCards BuildKpiCards(List<RawLisGroup> raw, int totalSamples)
+	private static LisSummaryKpiCards BuildKpiCards(
+		List<RawLisGroup> raw,
+		List<LisSummaryRow> summaryRows,
+		int totalSamples)
 	{
-		var billedCount = raw
-			.Where(x => IsBilledStatus(GetField(x, "Billing Status"))
-				|| IsBilledStatus(GetField(x, "Bill Status"))
-				|| IsBilledStatus(GetField(x, "Billed/Not")))
-			.Sum(x => x.TotalClaims);
-
-		var unbilledCount = raw
-			.Where(x => IsUnbilledStatus(GetField(x, "Billing Status"))
-				|| IsUnbilledStatus(GetField(x, "Bill Status"))
-				|| IsUnbilledStatus(GetField(x, "Billed/Not")))
-			.Sum(x => x.TotalClaims);
+		// Keep the cards tied to the same insurance-bill rows shown in the summary.
+		// Reading the already-built rows also preserves every lab's existing template logic.
+		var billedCount = FindInsuranceBillSummaryTotal(summaryRows, "BILLED", "BILLEDTOINSURANCE");
+		var unbilledCount = FindInsuranceBillSummaryTotal(summaryRows, "UNBILLED", "NOTBILLED");
 
 		var selfPayCount = raw
 			.Where(x => IsSelfPay(GetField(x, "Bill To"))
@@ -1661,6 +1657,23 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			.Sum(x => x.TotalClaims);
 
 		return new LisSummaryKpiCards(totalSamples, billedCount, unbilledCount, selfPayCount);
+	}
+
+	private static int FindInsuranceBillSummaryTotal(List<LisSummaryRow> rows, params string[] descriptions)
+	{
+		var descriptionKeys = descriptions.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+		// Insurance/billable detail rows are the first matching level-one rows in every
+		// configured lab template. Later matches belong to self-pay, client, or test sections.
+		var templateRow = rows.FirstOrDefault(row => row.Level == 1
+			&& descriptionKeys.Contains(CompareKey(row.Description)));
+		if (templateRow is not null) return templateRow.Total;
+
+		// Labs without a configured template use nested dynamic rows. In that layout,
+		// the billed status is level two and its logic carries the insurance parent.
+		return rows.FirstOrDefault(row => row.Level == 2
+			&& descriptionKeys.Contains(CompareKey(row.Description))
+			&& CompareKey(row.Logic).Contains("INSURANCE", StringComparison.OrdinalIgnoreCase))?.Total ?? 0;
 	}
 
 	private static bool IsBilledStatus(string? value)
