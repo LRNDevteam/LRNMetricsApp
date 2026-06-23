@@ -1,5 +1,6 @@
 @using LabMetricsDashboard.Models
 @inject LabSettings LabSettingsInstance
+@inject IConfiguration Configuration
 <!DOCTYPE html>
 <html lang="en">
 
@@ -520,6 +521,11 @@
 </head>
 
 <body>
+@{
+    var denialReactUrl = Configuration["DenialWorkflowReactUrl"] ?? "http://localhost:5173";
+    var denialReactAgingUrl = denialReactUrl.Contains('#') ? denialReactUrl : $"{denialReactUrl}#aging";
+}
+
 
     <!-- Full-screen loader overlay -->
     <div id="lmd-loader" role="status" aria-live="polite" aria-label="Loading">
@@ -676,8 +682,8 @@
                         @if (isArRestricted)
                         {
                             <li class="nav-item">
-                                <a class="nav-link active" asp-controller="DenialDashboard" asp-action="Index">
-                                    <i class="bi bi-exclamation-triangle-fill"></i> Denial Dashboard
+                                <a class="nav-link" href="@denialReactAgingUrl" target="_blank" rel="noopener">
+                                    <i class="bi bi-kanban-fill"></i> Denial Workflow <span class="badge text-bg-info ms-1">React</span>
                                 </a>
                             </li>
                         }
@@ -744,6 +750,24 @@
                                         </a>
                                     </li> *@
 
+                                    @* <li>
+                                        <a class="dropdown-item" asp-controller="PhiExecutiveSummary" asp-action="Index">
+                                            <i class="bi bi-table"></i> Executive Summary
+                                        </a>
+                                    </li> *@
+
+                                    <li>
+                                        <a class="dropdown-item" asp-controller="ExecutiveSummary" asp-action="Index" data-lab-link="Executive Summary">
+                                            <i class="bi bi-table"></i> Executive Summary
+                                        </a>
+                                    </li>
+
+                                    @* <li>
+                                        <a class="dropdown-item" asp-controller="PhiExecutiveSummary" asp-action="Index">
+                                            <i class="bi bi-table"></i> Executive Summary
+                                        </a>
+                                    </li> *@
+
                                     <li>
                                         <a class="dropdown-item" asp-controller="ExecutiveSummary" asp-action="Index" data-lab-link="Executive Summary">
                                             <i class="bi bi-table"></i> Executive Summary
@@ -767,6 +791,12 @@
                             <li class="nav-item">
                                 <a class="nav-link" asp-controller="DenialDashboard" asp-action="Index">
                                     <i class="bi bi-exclamation-triangle-fill"></i> Denial Dashboard
+                                </a>
+                            </li>
+
+                            <li class="nav-item">
+                                <a class="nav-link" href="@denialReactAgingUrl" target="_blank" rel="noopener">
+                                    <i class="bi bi-kanban-fill"></i> Denial Workflow
                                 </a>
                             </li>
 
