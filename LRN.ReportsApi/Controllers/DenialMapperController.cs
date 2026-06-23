@@ -62,6 +62,14 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
     public async Task<ActionResult> PushVerification(long pushAuditId,CancellationToken ct)
     {if(!IsPushManager())return Denied();var audit=await repository.PushAuditAsync(pushAuditId,ct);if(audit is null)return NotFound(new{message="Mapper push audit was not found."});var lab=await AuthorizedLab(audit.TargetLabId,ct);if(!IsAdmin()&&lab!=audit.TargetLabId)return Denied();return Ok(audit);}
 
+    [HttpPut("push-verification/{pushAuditId:long}/details/{detailId:long}")]
+    public async Task<ActionResult> UpdatePushVerificationDetail(long pushAuditId,long detailId,DenialMapperPushDetailEditRequest request,CancellationToken ct)
+    {
+        if(!IsPushManager())return Denied();var validation=ValidatePushDetail(request);if(validation is not null)return BadRequest(new{message=validation});
+        var audit=await repository.PushAuditAsync(pushAuditId,ct);if(audit is null)return NotFound(new{message="Mapper push audit was not found."});var lab=await AuthorizedLab(audit.TargetLabId,ct);if(!IsAdmin()&&lab!=audit.TargetLabId)return Denied();
+        await repository.UpdatePushAuditDetailAsync(pushAuditId,detailId,request,UserName(),Role(),ct);return Ok(new{message="Mapper push verification row updated."});
+    }
+
     [HttpGet("push-verification/{pushAuditId:long}/export")]
     public async Task<ActionResult> ExportPushVerification(long pushAuditId,CancellationToken ct)
     {
@@ -90,7 +98,7 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
     public async Task<ActionResult> RemoveOverride(long superMasterId,[FromQuery]int labId,CancellationToken ct){if(!CanOverride())return Denied();var effective=await AuthorizedLab(labId,ct);if(effective is null)return Denied();await repository.RemoveOverrideAsync(effective.Value,superMasterId,UserName(),Role(),ct);return Ok(new{message="Lab override removed."});}
 
     [HttpGet("audit")]
-    public async Task<ActionResult> Audit([FromQuery]int? labId,[FromQuery]int take=100,CancellationToken ct=default){if(!IsAdmin()&&!IsManager())return Denied();var effective=await AuthorizedLab(labId,ct);if(!IsAdmin()&&effective is null)return Denied();return Ok(await repository.AuditAsync(IsAdmin()?labId:effective,take,ct));}
+    public async Task<ActionResult> Audit([FromQuery]int? labId,[FromQuery]int take=100,CancellationToken ct=default){if(!IsPushManager()&&!IsManager())return Denied();var effective=await AuthorizedLab(labId,ct);if(!IsAdmin()&&effective is null)return Denied();return Ok(await repository.AuditAsync(IsAdmin()?labId:effective,take,ct));}
 
     [HttpGet("classifications")]
     public async Task<ActionResult> Classifications([FromQuery]int? labId,CancellationToken ct){if(!CanView())return Denied();if(labId.HasValue){var effective=await AuthorizedLab(labId,ct);if(effective is null)return Denied();return Ok(await repository.ClassificationsAsync(effective,ct));}if(!IsAdmin()&&!IsViewer())return Denied();return Ok(await repository.ClassificationsAsync(null,ct));}
@@ -123,5 +131,6 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
     private ActionResult Denied()=>StatusCode(StatusCodes.Status403Forbidden,new{message="You do not have permission to use this Denial Mapper action."});
     private static string? Validate(DenialMapperSaveRequest q)=>Required(q.DenialCode,q.ActionCode,q.ActionCategory,q.Task,q.RecommendedAction,q.SLA,q.Priority);
     private static string? Validate(DenialMapperOverrideRequest q)=>Required(q.ActionCode,q.ActionCategory,q.Task,q.RecommendedAction);
+    private static string? ValidatePushDetail(DenialMapperPushDetailEditRequest q)=>Required(q.ActionCode,q.ActionCategory,q.Task,q.RecommendedAction);
     private static string? Required(params string?[] values)=>values.Any(string.IsNullOrWhiteSpace)?"Complete all required fields.":null;
 }
