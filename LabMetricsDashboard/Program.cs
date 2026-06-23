@@ -6,6 +6,7 @@ using LabMetricsDashboard.Models.DenialWorkflow;
 using LabMetricsDashboard.Services.Security;
 using LRN.ProductionReports.Services;
 using LRN.ProductionReports.Services;
+using LRN.ProductionReports.Services;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
@@ -389,8 +390,6 @@ builder.Services.AddScoped<ICptSearchRepository, SqlCptSearchRepository>();
 builder.Services.AddScoped<ICollectionSummaryRepository, SqlCollectionSummaryRepository>();
 builder.Services.AddScoped<AllLabsCollectionExcelBuilder>();
 builder.Services.AddScoped<ILisSummaryRepository, SqlLisSummaryRepository>();
-builder.Services.AddScoped<SqlPhiExecutiveSummaryRepository>();
-builder.Services.AddScoped<ExecutiveSummaryExcelBuilder>();
 builder.Services.AddScoped<SqlPhiExecutiveSummaryRepository>();
 builder.Services.AddScoped<ExecutiveSummaryExcelBuilder>();
 
