@@ -3,6 +3,95 @@
 (function(){
     function jsonFormData(form) { return new FormData(form); }
 
+    function wireLabChipPickers(root){
+        (root || document).querySelectorAll('.lab-chip-picker').forEach(function(picker){
+            if (picker.dataset.wired === 'true') return;
+            picker.dataset.wired = 'true';
+
+            const inputName = picker.getAttribute('data-input-name');
+            const select = picker.querySelector('select');
+            const selectedBox = picker.querySelector('[data-selected-labs]');
+            const hiddenBox = picker.querySelector('[data-hidden-labs]');
+            if (!inputName || !select || !selectedBox || !hiddenBox) return;
+
+            const selected = new Map();
+
+            function render(){
+                selectedBox.innerHTML = '';
+                hiddenBox.innerHTML = '';
+
+                if (selected.size === 0) {
+                    const empty = document.createElement('span');
+                    empty.className = 'lab-chip-empty';
+                    empty.textContent = 'No labs selected';
+                    selectedBox.appendChild(empty);
+                }
+
+                selected.forEach(function(name, id){
+                    const hidden = document.createElement('input');
+                    hidden.type = 'hidden';
+                    hidden.name = inputName;
+                    hidden.value = id;
+                    hiddenBox.appendChild(hidden);
+
+                    const chip = document.createElement('span');
+                    chip.className = 'lab-chip';
+                    chip.textContent = name;
+
+                    const remove = document.createElement('button');
+                    remove.type = 'button';
+                    remove.setAttribute('aria-label', 'Remove ' + name);
+                    remove.innerHTML = '&times;';
+                    remove.addEventListener('click', function(){
+                        selected.delete(id);
+                        const option = Array.from(select.options).find(function(item){ return item.value === id; });
+                        if (option) option.disabled = false;
+                        render();
+                    });
+
+                    chip.appendChild(remove);
+                    selectedBox.appendChild(chip);
+                });
+
+                select.setCustomValidity(selected.size === 0 && select.required ? 'Select at least one lab' : '');
+            }
+
+            function addSelectedOption(option){
+                if (!option || !option.value || selected.has(option.value)) return;
+                selected.set(option.value, option.textContent.trim());
+                option.disabled = true;
+                select.value = '';
+                render();
+            }
+
+            Array.from(select.options).forEach(function(option){
+                if (option.dataset.selected === 'true') addSelectedOption(option);
+            });
+            select.addEventListener('change', function(){
+                addSelectedOption(select.selectedOptions[0]);
+            });
+
+            const form = picker.closest('form');
+            if (form) {
+                form.addEventListener('reset', function(){
+                    setTimeout(function(){
+                        selected.clear();
+                        Array.from(select.options).forEach(function(option){ option.disabled = false; });
+                        Array.from(select.options).forEach(function(option){
+                            if (option.dataset.selected === 'true') addSelectedOption(option);
+                        });
+                        render();
+                    }, 0);
+                });
+            }
+
+            render();
+        });
+    }
+
+    wireLabChipPickers(document);
+    window.wireLabChipPickers = wireLabChipPickers;
+
     // Generic helper to POST FormData and handle JSON errors
     async function postForm(url, fd){
         const resp = await fetch(url, { method: 'POST', body: fd, credentials: 'same-origin' });
@@ -90,7 +179,8 @@
                 try { conf.setCustomValidity(''); } catch(e){}
             }
             if (role && (!role.value || role.value === '')) { role.classList.add('is-invalid'); const fb = document.getElementById('createUserRoleFeedback'); if(fb) fb.textContent = 'Role is required'; ok = false; }
-            if (lab && (!lab.value || lab.value === '')) { lab.classList.add('is-invalid'); const fb = document.getElementById('createUserLabFeedback'); if(fb) fb.textContent = 'Lab is required'; ok = false; }
+            const selectedLabs = frmCreateUser.querySelectorAll('[data-hidden-labs] input[name="NewUserLabIds"]');
+            if (lab && selectedLabs.length === 0) { lab.classList.add('is-invalid'); const fb = document.getElementById('createUserLabFeedback'); if(fb) fb.textContent = 'Lab is required'; ok = false; }
 
             // Trigger native validation bubble when something is invalid
             if (!ok) {
@@ -245,9 +335,42 @@
     // Remove delegated
     document.addEventListener('click', function(e){ const tr = e.target.closest('[data-remove-role]'); if (tr){ const id = tr.getAttribute('data-remove-role'); fetch('/Admin/RemoveUserRole',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'userRoleId='+encodeURIComponent(id),credentials:'same-origin'}).then(r=>{ if(r.ok){ const uid = (document.getElementById('mapUserSelect')||document.getElementById('mapUserSelectPage')).value; if(uid) loadMappingsForUser(uid);} else alert('Remove failed');}); } });
     document.addEventListener('click', function(e){ const tr = e.target.closest('[data-remove-ul]'); if (tr){ const id = tr.getAttribute('data-remove-ul'); fetch('/Admin/RemoveUserLab',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'ulid='+encodeURIComponent(id),credentials:'same-origin'}).then(r=>{ if(r.ok){ const uid = (document.getElementById('mapUserSelect2')||document.getElementById('mapUserSelectPage2')).value; if(uid) loadMappingsForUser(uid);} else alert('Remove failed');}); } });
+    document.addEventListener('click', function(e){
+        const btn = e.target.closest('[data-remove-userid]');
+        if (!btn) return;
+        const id = btn.getAttribute('data-remove-userid');
+        const row = btn.closest('tr');
+        const name = row ? (row.children[0]?.textContent || 'this user').trim() : 'this user';
+        if (!confirm('Deactivate ' + name + '?')) return;
+        btn.disabled = true;
+        fetch('/Admin/RemoveUser', {
+            method: 'POST',
+            headers: { 'Content-Type':'application/x-www-form-urlencoded' },
+            body: 'userId=' + encodeURIComponent(id),
+            credentials: 'same-origin'
+        }).then(async r=>{
+            if (!r.ok) {
+                const d = await r.json().catch(()=>null);
+                alert(d && d.errors ? d.errors.join('; ') : 'Remove user failed');
+                btn.disabled = false;
+                return;
+            }
+            await refreshUsers();
+        }).catch(err=>{
+            console.error(err);
+            alert('Remove user failed');
+            btn.disabled = false;
+        });
+    });
 
     // Refresh helpers
-    window.refreshUsers = async function(){ try{ const r = await fetch('/Admin/GetUsersJson', {credentials:'same-origin'}); const data = await r.json(); const tbody = document.getElementById('tblUsersBody'); if(tbody){ tbody.innerHTML=''; data.forEach(u=>{ const tr = document.createElement('tr'); tr.setAttribute('data-userid', u.labUserID); const labs = (u.labs||[]).map(x=>x.labName||x.labId).join(', '); tr.innerHTML = `<td>${u.userName}</td><td>${(u.firstName||'')+' '+(u.lastName||'')}</td><td>${u.email||''}</td><td>${u.mobile||''}</td><td>${labs}</td><td>${u.isActive? 'Yes':'No'}</td><td><a class="btn btn-sm btn-outline-primary" href="/Admin/Edit/${u.labUserID}">Edit</a></td>`; tbody.appendChild(tr); }); populateUserSelects(data);}catch(e){console.error(e);} };
+    function escapeHtml(value){
+        return (value || '').toString().replace(/[&<>"']/g, function(ch){
+            return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[ch];
+        });
+    }
+
+    window.refreshUsers = async function(){ try{ const r = await fetch('/Admin/GetUsersJson', {credentials:'same-origin'}); const data = await r.json(); const tbody = document.getElementById('tblUsersBody'); if(tbody){ tbody.innerHTML=''; data.forEach(u=>{ const tr = document.createElement('tr'); tr.setAttribute('data-userid', u.labUserID); const labs = [...new Set((u.labs||[]).map(x=>x.labName||x.labId).filter(Boolean))]; const roles = [...new Set((u.roles||[]).map(x=>x.roleName||x.RoleName||x.roleID||x.roleId).filter(Boolean))]; const name = `${u.firstName||''} ${u.lastName||''}`.trim(); const searchText = [u.userName, name, u.email, u.mobile, roles.join(' '), labs.join(' ')].filter(Boolean).join(' '); tr.setAttribute('data-search', searchText); tr.setAttribute('data-roles', roles.join(' ')); tr.setAttribute('data-labs', labs.join(' ')); const roleBadges = roles.map(x=>`<span class="badge user-badge user-badge-role me-1">${escapeHtml(x)}</span>`).join(''); const labBadges = labs.map(x=>`<span class="badge user-badge user-badge-lab me-1">${escapeHtml(x)}</span>`).join(''); tr.innerHTML = `<td>${escapeHtml(u.userName)}</td><td>${escapeHtml(name)}</td><td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.mobile)}</td><td>${roleBadges}</td><td>${labBadges}</td><td>${u.isActive? 'Yes':'No'}</td><td><div class="btn-group" role="group"><a class="btn btn-sm btn-primary user-action-btn" href="/Admin/Edit/${u.labUserID}" title="Edit user" aria-label="Edit ${escapeHtml(u.userName)}"><i class="bi bi-pencil-square"></i></a><button class="btn btn-sm btn-outline-danger user-action-btn" data-remove-userid="${u.labUserID}" title="Remove user" aria-label="Remove ${escapeHtml(u.userName)}"><i class="bi bi-trash3"></i></button></div></td>`; tbody.appendChild(tr); }); populateUserSelects(data); if (window.applyUserFilters) window.applyUserFilters(); }}catch(e){console.error(e);} };
     window.refreshRoles = async function(){ try{ const r = await fetch('/Admin/GetRolesJson', {credentials:'same-origin'}); const data = await r.json(); document.querySelectorAll('#mapRoleSelect, #mapRoleSelectPage').forEach(sel=>{ if(!sel) return; sel.innerHTML = '<option value="">-- select role --</option>'; data.forEach(r=>{ const id = r.roleID||r.RoleID||r.roleId||r.RoleId; const name = r.roleName||r.RoleName||r.name||r.role; const opt = document.createElement('option'); opt.value = id; opt.textContent = name; sel.appendChild(opt); }); }); // labs
         const lr = await fetch('/Admin/GetLabsJson', {credentials:'same-origin'}); const labs = await lr.json(); const labSel = document.getElementById('mapLabSelect')||document.getElementById('mapLabSelectPage'); if(labSel){ labSel.innerHTML = '<option value="">-- select lab --</option>'; labs.forEach(l=>{ const id = l.labId||l.LabId||l.labID||l.LabID; const name = l.labName||l.LabName||l.name; const o = document.createElement('option'); o.value = id; o.textContent = name; labSel.appendChild(o); }); }
     }catch(e){console.error(e);} };
@@ -305,7 +428,7 @@ $(function(){
         var $conf = $form.find('#createUserConfirm, [name="NewUserConfirmPassword"]');
         var $email = $form.find('#createUserEmail, [name="NewUser.Email"]');
         var $role = $form.find('#createUserRole, [name="NewUserRoleId"]');
-        var $lab  = $form.find('#createUserLab, [name="NewUserLabId"]');
+        var $lab  = $form.find('#createUserLab, [name="NewUserLabId"], [name="NewUserLabIds"]');
 
         var $confFb = $form.find('#createUserConfirmFeedback');
         if (!$confFb.length && $conf.length) $confFb = ensureFeedback($conf, '.create-confirm-feedback');
@@ -342,7 +465,7 @@ $(function(){
             if (!validateConfirm()) ok = false;
             if (!validateEmail()) ok = false;
             if ($role.length && !$role.val()) ok = false;
-            if ($lab.length && !$lab.val()) ok = false;
+            if ($lab.length && !$form.find('[data-hidden-labs] input[name="NewUserLabIds"]').length) ok = false;
             if (!ok) {
                 e.preventDefault();
                 e.stopImmediatePropagation();

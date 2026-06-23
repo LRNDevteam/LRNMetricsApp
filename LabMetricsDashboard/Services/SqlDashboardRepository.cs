@@ -19,9 +19,9 @@ public sealed class SqlDashboardRepository : IDashboardRepository
     public async Task<DashboardResult> GetDashboardAsync(
         string connectionString,
         string labName,
-        string? filterPayerName = null,
+        List<string>? filterPayerNames = null,
         string? filterPayerType = null,
-        string? filterPanelName = null,
+        List<string>? filterPanelNames = null,
         string? filterClinicName = null,
         string? filterReferringProvider = null,
         DateOnly? filterDosFrom = null,
@@ -31,14 +31,16 @@ public sealed class SqlDashboardRepository : IDashboardRepository
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+        filterPayerNames = NormalizeFilterValues(filterPayerNames);
+        filterPanelNames = NormalizeFilterValues(filterPanelNames);
 
         // Build WHERE for ClaimLevelData
         var claimWhere = new List<string>();
         var parameters = new List<SqlParameter>();
 
-        AddFilterClause(claimWhere, parameters, "PayerName", "@fp", filterPayerName);
+        AddInClause(claimWhere, parameters, "PayerName", "@fp", filterPayerNames);
         AddFilterClause(claimWhere, parameters, "PayerType", "@fpt", filterPayerType);
-        AddFilterClause(claimWhere, parameters, "PanelName", "@fpl", filterPanelName);
+        AddInClause(claimWhere, parameters, "PanelName", "@fpl", filterPanelNames);
         AddFilterClause(claimWhere, parameters, "ClinicName", "@fcn", filterClinicName);
         AddFilterClause(claimWhere, parameters, "ReferringProvider", "@frp", filterReferringProvider);
         AddDateRangeClause(claimWhere, parameters, "DateOfService", "@dosFrom", "@dosTo", filterDosFrom, filterDosTo);
@@ -48,9 +50,11 @@ public sealed class SqlDashboardRepository : IDashboardRepository
 
         // Line-level reuses the same parameter names so the same SqlParameter set works
         var lineWhere = new List<string>();
-        if (!string.IsNullOrWhiteSpace(filterPayerName))          lineWhere.Add("LTRIM(RTRIM(PayerName)) = @fp");
+        if (filterPayerNames is { Count: > 0 })
+            lineWhere.Add(BuildInClause("PayerName", "@fp", filterPayerNames.Count));
         if (!string.IsNullOrWhiteSpace(filterPayerType))          lineWhere.Add("LTRIM(RTRIM(PayerType)) = @fpt");
-        if (!string.IsNullOrWhiteSpace(filterPanelName))          lineWhere.Add("LTRIM(RTRIM(PanelName)) = @fpl");
+        if (filterPanelNames is { Count: > 0 })
+            lineWhere.Add(BuildInClause("PanelName", "@fpl", filterPanelNames.Count));
         if (!string.IsNullOrWhiteSpace(filterClinicName))         lineWhere.Add("LTRIM(RTRIM(ClinicName)) = @fcn");
         if (!string.IsNullOrWhiteSpace(filterReferringProvider))  lineWhere.Add("LTRIM(RTRIM(ReferringProvider)) = @frp");
         if (filterDosFrom.HasValue)       lineWhere.Add("TRY_CAST(DateOfService AS DATE) >= @dosFrom");
@@ -486,6 +490,11 @@ public sealed class SqlDashboardRepository : IDashboardRepository
         }
     }
 
+    private static List<string> NormalizeFilterValues(IEnumerable<string>? values) => values?
+        .Where(v => !string.IsNullOrWhiteSpace(v))
+        .Select(v => v.Trim())
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList() ?? [];
     private static void AddFilterClause(List<string> where, List<SqlParameter> parms,
         string column, string paramName, string? value)
     {
@@ -494,6 +503,27 @@ public sealed class SqlDashboardRepository : IDashboardRepository
         parms.Add(new SqlParameter(paramName, value.Trim()));
     }
 
+    private static void AddInClause(List<string> where, List<SqlParameter> parms,
+        string column, string paramPrefix, List<string>? values)
+    {
+        var cleanValues = values?
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Select(v => v.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (cleanValues is not { Count: > 0 }) return;
+
+        where.Add(BuildInClause(column, paramPrefix, cleanValues.Count));
+        for (var i = 0; i < cleanValues.Count; i++)
+            parms.Add(new SqlParameter($"{paramPrefix}{i}", cleanValues[i]));
+    }
+
+    private static string BuildInClause(string column, string paramPrefix, int count)
+    {
+        var names = Enumerable.Range(0, count).Select(i => $"{paramPrefix}{i}");
+        return $"LTRIM(RTRIM({column})) IN ({string.Join(", ", names)})";
+    }
     private static void AddDateRangeClause(List<string> where, List<SqlParameter> parms,
         string column, string fromParam, string toParam, DateOnly? from, DateOnly? to)
     {

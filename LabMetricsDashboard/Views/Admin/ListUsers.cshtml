@@ -2,11 +2,129 @@
 @model LabMetricsDashboard.Models.AdminViewModel
 @{
     ViewData["Title"] = "Admin - User List";
+    var roleOptions = Model.Roles
+        .Where(role => !string.IsNullOrWhiteSpace(role.RoleName))
+        .GroupBy(role => role.RoleName.Trim(), StringComparer.OrdinalIgnoreCase)
+        .Select(group => group.First())
+        .OrderBy(role => role.RoleName)
+        .ToList();
+    var labOptions = Model.Labs
+        .Where(lab => lab.IsActive && !string.IsNullOrWhiteSpace(lab.LabName))
+        .GroupBy(lab => lab.LabName.Trim(), StringComparer.OrdinalIgnoreCase)
+        .Select(group => group.First())
+        .OrderBy(lab => lab.LabName)
+        .ToList();
 }
 
-<div class="d-flex align-items-center justify-content-between mb-3">
-    <h2 class="m-0">Manage Users</h2>
-    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createUserModal">Create User</button>
+<style>
+    .users-page-shell {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 14px;
+        padding: 18px;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+    }
+    .users-header {
+        gap: 12px;
+    }
+    .users-title {
+        font-weight: 700;
+        letter-spacing: 0;
+    }
+    .users-filter-panel {
+        background: #fff;
+        border: 1px solid #dbe4ef;
+        border-radius: 12px;
+        padding: 14px;
+    }
+    .users-filter-panel .form-label {
+        color: #475569;
+        font-size: .85rem;
+        font-weight: 600;
+        margin-bottom: .35rem;
+    }
+    .users-filter-panel .form-control,
+    .users-filter-panel .form-select {
+        border-color: #cbd5e1;
+        border-radius: 10px;
+        min-height: 42px;
+    }
+    .users-table-wrap {
+        background: #fff;
+        border: 1px solid #cbd5e1;
+        border-radius: 12px;
+        overflow: hidden;
+    }
+    .users-table {
+        margin-bottom: 0;
+        border-collapse: collapse;
+    }
+    .users-table thead th {
+        background: #0f2942;
+        color: #fff;
+        border: 1px solid #27445f;
+        font-size: .82rem;
+        letter-spacing: .02em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        padding: .55rem .65rem;
+    }
+    .users-table thead th button {
+        width: 100%;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        display: inline-flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 0;
+        font: inherit;
+        text-transform: inherit;
+        letter-spacing: inherit;
+    }
+    .users-table tbody td {
+        vertical-align: middle;
+        border: 1px solid #d7dee8;
+        padding: .45rem .65rem;
+    }
+    .users-table tbody tr:hover {
+        background: #eef6ff;
+    }
+    .user-badge {
+        border-radius: 999px;
+        font-weight: 700;
+        padding: .35rem .55rem;
+    }
+    .user-badge-role {
+        background: #0dbbd7;
+        color: #06202a;
+    }
+    .user-badge-lab {
+        background: #64748b;
+        color: #fff;
+    }
+    .user-action-btn {
+        width: 34px;
+        height: 34px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 10px;
+        box-shadow: 0 3px 10px rgba(15, 23, 42, .08);
+    }
+    .sort-icon {
+        opacity: .7;
+        font-size: .8rem;
+    }
+</style>
+
+<div class="users-page-shell">
+<div class="d-flex flex-wrap align-items-center justify-content-between mb-3 users-header">
+    <h2 class="m-0 users-title">Manage Users</h2>
+    <button class="btn btn-primary px-4" data-bs-toggle="modal" data-bs-target="#createUserModal">
+        <i class="bi bi-person-plus-fill me-2"></i>Create User
+    </button>
 </div>
 
 @if (ViewData["OpenCreateUserModal"] as bool? == true)
@@ -39,33 +157,88 @@
   </div>
 </div>
 
-<div>
-    <table class="table table-sm table-striped">
+<div class="row g-3 align-items-end mb-3 users-filter-panel" id="userFilters">
+    <div class="col-md-5 col-lg-4">
+        <label class="form-label" for="userFreeTextFilter">Search</label>
+        <input class="form-control" id="userFreeTextFilter" type="search" placeholder="User name, email, mobile, or name" autocomplete="off" />
+    </div>
+    <div class="col-md-3 col-lg-3">
+        <label class="form-label" for="userRoleFilter">Role</label>
+        <select class="form-select" id="userRoleFilter">
+            <option value="">All roles</option>
+            @foreach (var role in roleOptions)
+            {
+                <option value="@role.RoleName">@role.RoleName</option>
+            }
+        </select>
+    </div>
+    <div class="col-md-3 col-lg-3">
+        <label class="form-label" for="userLabFilter">Lab</label>
+        <select class="form-select" id="userLabFilter">
+            <option value="">All labs</option>
+            @foreach (var lab in labOptions)
+            {
+                <option value="@lab.LabName">@lab.LabName</option>
+            }
+        </select>
+    </div>
+    <div class="col-md-1 col-lg-2">
+        <button class="btn btn-outline-secondary w-100" type="button" id="clearUserFilters">Clear</button>
+    </div>
+</div>
+
+<div class="users-table-wrap table-responsive">
+    <table class="table table-sm table-striped users-table" id="usersTable">
         <thead>
-            <tr><th>UserName</th><th>Name</th><th>Email</th><th>Mobile</th><th>Labs</th><th>Active</th><th>Actions</th></tr>
+            <tr>
+                <th><button type="button" data-sort-column="0">UserName <i class="bi bi-arrow-down-up sort-icon"></i></button></th>
+                <th><button type="button" data-sort-column="1">Name <i class="bi bi-arrow-down-up sort-icon"></i></button></th>
+                <th><button type="button" data-sort-column="2">Email <i class="bi bi-arrow-down-up sort-icon"></i></button></th>
+                <th><button type="button" data-sort-column="3">Mobile <i class="bi bi-arrow-down-up sort-icon"></i></button></th>
+                <th><button type="button" data-sort-column="4">Role <i class="bi bi-arrow-down-up sort-icon"></i></button></th>
+                <th><button type="button" data-sort-column="5">Labs <i class="bi bi-arrow-down-up sort-icon"></i></button></th>
+                <th><button type="button" data-sort-column="6">Active <i class="bi bi-arrow-down-up sort-icon"></i></button></th>
+                <th>Actions</th>
+            </tr>
         </thead>
         <tbody id="tblUsersBody">
             @foreach(var u in Model.Users)
             {
-                <tr>
+                var roleText = Model.UserRolesMap != null && Model.UserRolesMap.TryGetValue(u.LabUserID, out var roles)
+                    ? string.Join(" ", roles.GroupBy(r => r.RoleName, StringComparer.OrdinalIgnoreCase).Select(g => g.First().RoleName))
+                    : string.Empty;
+                var labText = Model.UserLabsMap != null && Model.UserLabsMap.TryGetValue(u.LabUserID, out var assignedLabs)
+                    ? string.Join(" ", assignedLabs.GroupBy(l => l.LabId).Select(g => g.First().LabName))
+                    : string.Empty;
+                var searchText = string.Join(" ", new[] { u.UserName, u.FirstName, u.LastName, u.Email, u.Mobile, roleText, labText });
+                <tr data-search="@searchText" data-roles="@roleText" data-labs="@labText">
                     <td class="text-nowrap">@u.UserName</td>
                     <td>@u.FirstName @u.LastName</td>
                     <td class="text-truncate" style="max-width:180px">@u.Email</td>
                     <td>@u.Mobile</td>
                     <td>
+                        @if (Model.UserRolesMap != null && Model.UserRolesMap.TryGetValue(u.LabUserID, out var displayRoles))
+                        {
+                            foreach (var role in displayRoles.GroupBy(r => r.RoleName, StringComparer.OrdinalIgnoreCase).Select(g => g.First()))
+                            {
+                                <span class="badge user-badge user-badge-role me-1">@role.RoleName</span>
+                            }
+                        }
+                    </td>
+                    <td>
                         @if (Model.UserLabsMap != null && Model.UserLabsMap.TryGetValue(u.LabUserID, out var labs))
                         {
-                            foreach (var lab in labs)
+                            foreach (var lab in labs.GroupBy(l => l.LabId).Select(g => g.First()))
                             {
-                                <span class="badge bg-secondary me-1">@lab.LabName</span>
+                                <span class="badge user-badge user-badge-lab me-1">@lab.LabName</span>
                             }
                         }
                     </td>
                     <td>@(u.IsActive?"Yes":"No")</td>
                     <td>
                         <div class="btn-group" role="group">
-                            <a class="btn btn-sm btn-outline-primary" asp-action="Edit" asp-route-id="@u.LabUserID">Edit</a>
-                            <button class="btn btn-sm btn-outline-danger" data-remove-userid="@u.LabUserID">Remove</button>
+                            <a class="btn btn-sm btn-primary user-action-btn" asp-action="Edit" asp-route-id="@u.LabUserID" title="Edit user" aria-label="Edit @u.UserName"><i class="bi bi-pencil-square"></i></a>
+                            <button class="btn btn-sm btn-outline-danger user-action-btn" data-remove-userid="@u.LabUserID" title="Remove user" aria-label="Remove @u.UserName"><i class="bi bi-trash3"></i></button>
                         </div>
                     </td>
                 </tr>
@@ -73,5 +246,66 @@
         </tbody>
     </table>
 </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const freeText = document.getElementById('userFreeTextFilter');
+    const role = document.getElementById('userRoleFilter');
+    const lab = document.getElementById('userLabFilter');
+    const clear = document.getElementById('clearUserFilters');
+
+    function normalize(value) {
+        return (value || '').toString().trim().toLowerCase();
+    }
+
+    window.applyUserFilters = function () {
+        const q = normalize(freeText && freeText.value);
+        const selectedRole = normalize(role && role.value);
+        const selectedLab = normalize(lab && lab.value);
+
+        document.querySelectorAll('#tblUsersBody tr').forEach(function (row) {
+            const text = normalize(row.getAttribute('data-search'));
+            const roles = normalize(row.getAttribute('data-roles'));
+            const labs = normalize(row.getAttribute('data-labs'));
+            const matchesText = !q || text.indexOf(q) >= 0;
+            const matchesRole = !selectedRole || roles.indexOf(selectedRole) >= 0;
+            const matchesLab = !selectedLab || labs.indexOf(selectedLab) >= 0;
+            row.classList.toggle('d-none', !(matchesText && matchesRole && matchesLab));
+        });
+    };
+
+    [freeText, role, lab].forEach(function (el) {
+        if (el) el.addEventListener('input', window.applyUserFilters);
+        if (el) el.addEventListener('change', window.applyUserFilters);
+    });
+    if (clear) {
+        clear.addEventListener('click', function () {
+            if (freeText) freeText.value = '';
+            if (role) role.value = '';
+            if (lab) lab.value = '';
+            window.applyUserFilters();
+        });
+    }
+
+    let currentSort = { column: -1, direction: 1 };
+    document.querySelectorAll('[data-sort-column]').forEach(function (button) {
+        button.addEventListener('click', function () {
+            const column = Number(button.getAttribute('data-sort-column'));
+            currentSort.direction = currentSort.column === column ? currentSort.direction * -1 : 1;
+            currentSort.column = column;
+
+            const tbody = document.getElementById('tblUsersBody');
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            rows.sort(function (a, b) {
+                const av = normalize(a.children[column] && a.children[column].textContent);
+                const bv = normalize(b.children[column] && b.children[column].textContent);
+                return av.localeCompare(bv, undefined, { numeric: true }) * currentSort.direction;
+            });
+            rows.forEach(function (row) { tbody.appendChild(row); });
+        });
+    });
+});
+</script>
 
 @await Html.PartialAsync("_AdminScripts")

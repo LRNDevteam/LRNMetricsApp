@@ -6,6 +6,11 @@ namespace LabMetricsDashboard.Services;
 
 public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 {
+	private sealed record LineDataColumnSpec(
+		string Key,
+		string Header,
+		string Selector);
+
 	private sealed record RawLisGroup(
 		Dictionary<string, string> Fields,
 		int CollectedYear,
@@ -15,7 +20,16 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 	private sealed record DimensionProfile(
 		string LogicSheetName,
 		string DateColumn,
+		string? CountDistinctColumn,
+		string? IncorrectDosColumn,
 		Dictionary<string, string?> FieldColumns);
+
+	private sealed record FilterColumnProfile(
+		string? PanelExpression,
+		string? ClinicExpression,
+		string? RefPhyExpression,
+		string? SalesRepExpression,
+		string? CollectorExpression);
 
 	private sealed record TemplateRow(string Code, string Description, string Logic);
 
@@ -44,9 +58,9 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("B", "Yet to be validate", "Bill To = Yet to be validate"),
 				new TemplateRow("1", "Billed", "Bill To = Yet to be validate AND Bill Status = Billed"),
 				new TemplateRow("2", "Unbilled", "Bill To = Yet to be validate AND Bill Status = Unbilled"),
-				new TemplateRow("•", "Not Resulted", "Bill To = Insurance Bill AND Bill Status = Unbilled AND Final Status 2 = Not Resulted"),
-				new TemplateRow("•", "Non Billable", "Bill To = Insurance Bill AND Bill Status = Unbilled AND Final Status 2 = Non Billable"),
-				new TemplateRow("•", "Charges Created and Not Submitted", "Bill To = Insurance Bill AND Bill Status = Unbilled AND Final Status 2 = Charges Created and Not Submitted"),
+				new TemplateRow("•", "Not Resulted", "Bill To = Yet to be validate AND Bill Status = Unbilled AND Final Status 2 = Not Resulted"),
+				new TemplateRow("•", "Non Billable", "Bill To = Yet to be validate AND Bill Status = Unbilled AND Final Status 2 = Non Billable"),
+				new TemplateRow("•", "Charges Created and Not Submitted", "Bill To = Yet to be validate AND Bill Status = Unbilled AND Final Status 2 = Charges Created and Not Submitted"),
 				new TemplateRow("C", "Self pay", "Bill To = Self pay"),
 				new TemplateRow("1", "Billed", "Bill To = Self pay AND Bill Status = Billed"),
 				new TemplateRow("2", "Unbilled", "Bill To = Self pay AND Bill Status = Unbilled"),
@@ -81,7 +95,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("•", "Claim Submitted in Daqbilling", "Bill to = Insurance Bills AND Bill status = Billed AND Final Status =  Claim Submitted in Daqbilling"),
 				new TemplateRow("2", "Unbilled", "Bill to = Insurance Bills AND Bill status = Unbilled"),
 				new TemplateRow("•", "Resulted yet to be billed", "Bill to = Insurance Bills AND Bill status = Unbilled AND Final Status =  Resulted yet to be billed"),
-				new TemplateRow("*", "Ready to bill", "Bill to = Insurance Bills AND Bill status = Unbilled AND Final Status =  Resulted yet to be billed AND Client Status 2 = Ready to bill"),
+				new TemplateRow("*", "Ready to bill", "Bill to = Insurance Bills AND Bill status = Unbilled AND Final Status =  Resulted yet to be billed"),
 				new TemplateRow("•", "Insurance name not listed", "Bill to = Insurance Bills AND Bill status = Unbilled AND Final Status =  Insurance Name Not Listed"),
 				new TemplateRow("B", "Yet to be Validated", "Bill to = Yet to be Validated"),
 				new TemplateRow("1", "Billed", "Bill to = Yet to be Validated AND Bill Status = Billed"),
@@ -97,12 +111,12 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("1", "Billed", "Bill to = Insurance Bill AND Billing status = Billed"),
 				new TemplateRow("•", "Claim submitted in Daqbilling", "Bill to = Insurance Bill AND Billing status = Billed AND Final Status = Claim submitted in Daqbilling"),
 				new TemplateRow("2", "Not Billed", "Bill to = Insurance Bill AND Billing status = Not Billed"),
-				new TemplateRow("•", "Claim Entered in Daqbilling", "Bill to = Insurance Bill AND Billing status = Billed AND Final Status = Claim Entered in Daqbilling"),
-				new TemplateRow("•", "Resulted yet to be billed", "Bill to = Insurance Bill AND Billing status = Billed AND Final Status = Resulted yet to be billed"),
-				new TemplateRow("•", "D/L Isomer", "Bill to = Insurance Bill AND Billing status = Billed AND Final Status = D/L Isomer"),
+				new TemplateRow("•", "Claim Entered in Daqbilling", "Bill to = Insurance Bill AND Billing status = Not Billed AND Final Status = Claim Entered in Daqbilling"),
+				new TemplateRow("•", "Resulted yet to be billed", "Bill to = Insurance Bill AND Billing status = Not Billed AND Final Status = Resulted yet to be billed"),
+				new TemplateRow("•", "D/L Isomer", "Bill to = Insurance Bill AND Billing status = Not Billed AND Final Status = D/L Isomer"),
 				new TemplateRow("B", "Duplicate", "Bill to = Duplicate"),
-				new TemplateRow("1", "Billed", "Bill to = Duplicate Bill AND Billing status = Billed"),
-				new TemplateRow("•", "Claim submitted in Daqbilling", "Bill to = Duplicate Bill AND Billing status = Billed AND Final Status = Claim submitted in Daqbilling"),
+				new TemplateRow("1", "Billed", "Bill to = Duplicate AND Billing status = Billed"),
+				new TemplateRow("•", "Claim submitted in Daqbilling", "Bill to = Duplicate AND Billing status = Billed AND Final Status = Claim submitted in Daqbilling"),
 				new TemplateRow("C", "Client Bill", "Bill to = Client Bill"),
 				new TemplateRow("1", "Billed", "Bill to = Client Bill AND Billing status = Billed"),
 				new TemplateRow("•", "Claim submitted in Daqbilling", "Bill to = Client Bill AND Billing status = Billed AND Final Status = Claim submitted in Daqbilling"),
@@ -119,6 +133,84 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("1", "Billed", "Bill to = System Test AND Billing status = Billed"),
 				new TemplateRow("•", "Claim submitted in Daqbilling", "Bill to = System Test AND Billing status = Billed AND Final Status = Claim submitted in Daqbilling"),
 			},
+		["Cove"] = new[] {
+				new TemplateRow("A", "Billable", "Final Status = [Billable]"),
+				new TemplateRow("•", "UTI", "Final Status = [Billable] AND Panel Type = [UTI]"),
+				new TemplateRow("•", "Wound", "Final Status = [Billable] AND Panel Type = [Wound]"),
+				new TemplateRow("•", "RPP", "Final Status = [Billable] AND Panel Type = [RPP]"),
+				new TemplateRow("•", "Womens Health", "Final Status = [Billable] AND Panel Type = [Womens Health]"),
+				new TemplateRow("•", "GI", "Final Status = [Billable] AND Panel Type = [GI]"),
+				new TemplateRow("•", "Urinalysis", "Final Status = [Billable] AND Panel Type = [Urinalysis]"),
+				new TemplateRow("•", "Fungus", "Final Status = [Billable] AND Panel Type = [Fungus]"),
+				new TemplateRow("•", "STI", "Final Status = [Billable] AND Panel Type = [STI]"),
+				new TemplateRow("•", "Tox", "Final Status = [Billable] AND Panel Type = [Tox]"),
+				new TemplateRow("•", "Fungus + Wound", "Final Status = [Billable] AND Panel Type = [Fungus + Wound]"),
+				new TemplateRow("•", "PGx", "Final Status = [Billable] AND Panel Type = [PGX]"),
+				new TemplateRow("•", "Neurocognitive", "Final Status = [Billable] AND Panel Type = [Neurocognitive]"),
+				new TemplateRow("•", "Immunodeficiency", "Final Status = [Billable] AND Panel Type = [Immunodeficiency]"),
+				new TemplateRow("•", "CGx", "Final Status = [Billable] AND Panel Type = [CGx]"),
+				new TemplateRow("•", "Unable To Locate", "Final Status = [Billable] AND Panel Type = [Unable To Locate]"),
+				new TemplateRow("•", "Thyroid", "Final Status = [Billable] AND Panel Type = [Thyroid]"),
+				new TemplateRow("1", "Billed", "Final Status = [Billable] AND Billed/Not = [Billed]"),
+				new TemplateRow("2", "Not Billed", "Final Status = [Billable] AND Billed/Not = [Not Billed]"),
+				new TemplateRow("•", "Ready To Bill", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Ready To Bill]"),
+				new TemplateRow("•", "Ignored - CP Exception", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Ignored - CP Exception]"),
+				new TemplateRow("•", "Ignored - Client Response Pure Selfpay", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Ignored - Client Response Pure Selfpay]"),
+				new TemplateRow("•", "Billed In Elixir Dx", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Billed In Elixir Dx]"),
+				new TemplateRow("•", "Client Bill Cases", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Client Bill Cases]"),
+				new TemplateRow("•", "Ignored - NGS & PGX in Cove", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Ignored - NGS & PGX in Cove]"),
+				new TemplateRow("•", "Ignored - Duplicate Accession", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Ignored - Duplicate Accession]"),
+				new TemplateRow("•", "Coding exception -In review", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Coding exception -In review]"),
+				new TemplateRow("•", "In process", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [In process]"),
+				new TemplateRow("•", "CP Exception", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [CP Exception]"),
+				new TemplateRow("•", "Coding exception", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Coding exception]"),
+				new TemplateRow("•", "Discovery File need to be sent to Medlytix", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Discovery File need to be sent to Medlytix]"),
+				new TemplateRow("•", "Ignored - Medicaid AR Prior to Sep 19'2025", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Ignored - Medicaid AR Prior to Sep 19'2025]"),
+				new TemplateRow("•", "Discovery File sent to Medlytix", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Discovery File sent to Medlytix]"),
+				new TemplateRow("•", "Ignored - Reported in Elixir Truemed", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Ignored - Reported in Elixir Truemed]"),
+				new TemplateRow("•", "Hold-Amerihealth Lousiana", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Hold-Amerihealth Lousiana]"),
+				new TemplateRow("•", "Medicaid Credentialling In Process", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Medicaid Credentialling In Process]"),
+				new TemplateRow("•", "Selfpay", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Selfpay]"),
+				new TemplateRow("•", "Referring provider Issues", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Referring provider Issues]"),
+				new TemplateRow("•", "Billed In Variantx Lab", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Billed In Variantx Lab]"),
+				new TemplateRow("•", "Billed Insurance In Covedx", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Billed Insurance In Covedx]"),
+				new TemplateRow("•", "Ignored - Client Response Non Billiable", "Final Status = [Billable] AND Billed/Not = [Not Billed] AND Sub Status = [Ignored - Client Response Non Billiable]"),
+				new TemplateRow("B", "System Test", "Final Status = [System Test]"),
+				new TemplateRow("1", "Billed", "Final Status = [System Test] AND Billed/Not = [Billed]"),
+				new TemplateRow("2", "UnBilled", "Final Status = [System Test] AND Billed/Not = [Unbilled]"),
+				new TemplateRow("C", "Self Pay", "Final Status = [Self Pay]"),
+				new TemplateRow("1", "Billed", "Final Status = [Self Pay] AND Billed/Not = [Billed]"),
+				new TemplateRow("2", "UnBilled", "Final Status = [Self Pay] AND Billed/Not = [Unbilled]"),
+				new TemplateRow("D", "Deleted/Rejected", "Final Status = [Deleted/Rejected]"),
+				new TemplateRow("1", "Billed", "Final Status = [Deleted/Rejected] AND Billed/Not = [Billed]"),
+				new TemplateRow("2", "UnBilled", "Final Status = [Deleted/Rejected] AND Billed/Not = [Unbilled]"),
+				new TemplateRow("E", "Client Bill", "Final Status = [Client Bill]"),
+				new TemplateRow("1", "Billed", "Final Status = [Client Bill] AND Billed/Not = [Billed]"),
+				new TemplateRow("2", "UnBilled", "Final Status = [Client Bill] AND Billed/Not = [Unbilled]"),
+				new TemplateRow("F", "Yet To Be Validated", "Final Status = [Yet To Be Validated]"),
+				new TemplateRow("G", "Ref Lab - Bill Patient", "Final Status = [Ref Lab - Bill Patient]"),
+				new TemplateRow("H", "Missing Accession", "Final Status = [Missing Accession]"),
+			},
+		["Elixir"] = new[] {
+				new TemplateRow("", "Total Samples", "Count [Order ID]"),
+				new TemplateRow("A", "Insurance Bill", "Final Status = [Billable]"),
+				new TemplateRow("1", "Billed", "Final Status = [Billable] AND Billed/Not = [Billed]"),
+				new TemplateRow("2", "Not Billed", "Final Status = [Billable] AND Billed/Not = [Not Billed]"),
+				new TemplateRow("•", "Resulted yet to be billed", "Final Status = [Billable] AND Billed/Not = [Not Billed]"),
+				new TemplateRow("B", "Client Bill", "Final Status = [Client Bill]"),
+				new TemplateRow("C", "Self Pay", "Final Status = [Self Pay]"),
+				new TemplateRow("1", "Billed", "Final Status = [Self Pay] AND Billed/Not = [Billed]"),
+				new TemplateRow("D", "System Test", "Final Status = [System Test]"),
+				new TemplateRow("1", "Billed", "Final Status = [System Test] AND Billed/Not = [Billed]"),
+				new TemplateRow("E", "Deleted/Rejected", "Final Status = [Deleted/Rejected]"),
+				new TemplateRow("F", "Yet to be validated", "Final Status = [Yet to be validated]"),
+				new TemplateRow("G", "CIP/Pending", "Final Status = [CIP/Pending]"),
+				new TemplateRow("1", "Billed", "Final Status = [CIP/Pending] AND Billed/Not = [Billed]"),
+				new TemplateRow("•", "Pending Smart PGx", "Final Status = [CIP/Pending] AND Billed/Not = [Billed]"),
+				new TemplateRow("2", "Not Billed", "Final Status = [CIP/Pending] AND Billed/Not = [Not Billed]"),
+				new TemplateRow("•", "SaveForSignature", "Final Status = [CIP/Pending] AND Billed/Not = [Not Billed] AND Payment Method != [Blank]"),
+				new TemplateRow("•", "Missing info", "Final Status = [CIP/Pending] AND Billed/Not = [Not Billed] AND Payment Method = [Blank]"),
+			},
 		["Beech Tree"] = new[] {
 				new TemplateRow("", "Total Samples", "Count [Order ID]"),
 				new TemplateRow("A", "Billable Samples - Resulted", "Resulted / Not = [Resulted]"),
@@ -133,14 +225,14 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("3", "Unbilled", "Resulted / Not = [Resulted] AND Claim Status = [Entered] AND Billed/Not = UnBilled AND Client Status = [Blank]"),
 				new TemplateRow("4", "Client Bill", "Resulted / Not = [Resulted] AND Claim Status = [ALL] AND Billed/Not = [Billed AND Unbilled] AND Client Status = [Client Bill]"),
 				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [Unbilled] AND Client Status = [Client Bill]"),
-				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Billed/Not = [Unbilled] AND Client Status = [Client Bill]"),
+				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Client Bill]"),
 				new TemplateRow("5", "Self Pay", "Resulted / Not = [Resulted] AND Claim Status = [All] AND Billed/Not = [ALL] AND Client Status = [Self Pay]"),
 				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Self Pay]"),
 				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Self Pay]"),
 				new TemplateRow("•", "Entered", "Resulted / Not = [Resulted] AND Claim Status = [Entered] AND Billed/Not = [UnBilled] AND Client Status = [Self Pay]"),
-				new TemplateRow("6", "Test Entries", "Resulted / Not = [Resulted] AND Claim Status = [All] AND Billed/Not = [ALL] AND Client Status = [Test Entries]"),
-				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Test Entries]"),
-				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Test Entries]"),
+				new TemplateRow("6", "Test Entries", "Resulted / Not = [Resulted] AND Claim Status = [All] AND Billed/Not = [ALL] AND Client Status = [Test Entries] AND Payment Method != [No Bill]"),
+				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Test Entries] AND Payment Method != [No Bill]"),
+				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Test Entries] AND Payment Method != [No Bill]"),
 				new TemplateRow("7", "Rejected Sample", "Resulted / Not = [Resulted] AND Claim Status = [All] AND Billed/Not = [ALL] AND Client Status = [Rejected Sample]"),
 				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Rejected Sample]"),
 				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Rejected Sample]"),
@@ -158,30 +250,64 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("•", "Billed", "Resulted / Not = [Not Resulted] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Self Pay]"),
 				new TemplateRow("5", "Test Entries", "Resulted / Not = [Not Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [Test Entries]"),
 				new TemplateRow("6", "Rejected Sample", "Resulted / Not = [Not Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [Rejected Sample]"),
-			},
+		},
+		["InHealth"] = new[] {
+				new TemplateRow("A", "Billable", "NA = Blank AND LRN Sample Status = Billable"),
+				new TemplateRow("1", "Billed", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Billed"),
+				new TemplateRow("•", "Billed Via AMD", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Billed AND LRN Sub Status = Billed Via AMD"),
+				new TemplateRow("2", "Not Billed", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed"),
+				new TemplateRow("•", "Nexum_Claim_scrubber_Eligibility", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed AND LRN Sub Status = Nexum_Claim_scrubber_Eligibility"),
+				new TemplateRow("•", "Entered in AMD but not billed", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed AND LRN Sub Status = Entered in AMD but not billed"),
+				new TemplateRow("•", "Requires Review", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed AND LRN Sub Status = Requires Review"),
+				new TemplateRow("•", "Nexum Pre Processing Queue", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed AND LRN Sub Status = Nexum Pre Processing Queue"),
+				new TemplateRow("•", "Nexum_Claim_scrubber_AMD Output", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed AND LRN Sub Status = Nexum_Claim_scrubber_AMD Output"),
+				new TemplateRow("•", "Nexum_Claim_scrubber_Diagnosis Validity", "NA = Blank AND LRN Sample Status = Billable AND LRN Bill Category = Not Billed AND LRN Sub Status = Nexum_Claim_scrubber_Diagnosis Validity"),
+				new TemplateRow("B", "Self Pay", "NA = Blank AND LRN Sample Status = Self Pay"),
+				new TemplateRow("1", "Billed", "NA = Blank AND LRN Sample Status = Self Pay AND LRN Bill Category = Billed"),
+				new TemplateRow("2", "Not Billed", "NA = Blank AND LRN Sample Status = Self Pay AND LRN Bill Category = Not Billed"),
+				new TemplateRow("C", "Other Samples", "NA = Blank AND LRN Sample Status = Other Samples"),
+				new TemplateRow("1", "Billed", "NA = Blank AND LRN Sample Status = Other Samples AND LRN Bill Category = Billed"),
+				new TemplateRow("2", "Not Billed", "NA = Blank AND LRN Sample Status = Other Samples AND LRN Bill Category = Not Billed"),
+				new TemplateRow("•", "Ordered", "NA = Blank AND LRN Sample Status = Other Samples AND LRN Bill Category = Not Billed AND Entry_Status = Ordered"),
+				new TemplateRow("•", "Unpayable Policies", "NA = Blank AND LRN Sample Status = Other Samples AND LRN Bill Category = Not Billed AND Entry_Status = Unpayable Policies"),
+				new TemplateRow("•", "Failed Discovery", "NA = Blank AND LRN Sample Status = Other Samples AND LRN Bill Category = Not Billed AND Entry_Status = Failed Discovery"),
+				new TemplateRow("•", "Waiting for Information", "NA = Blank AND LRN Sample Status = Other Samples AND LRN Bill Category = Not Billed AND Entry_Status = Waiting for Information"),
+				new TemplateRow("•", "Results Posted", "NA = Blank AND LRN Sample Status = Other Samples AND LRN Bill Category = Not Billed AND Entry_Status = Results Posted"),
+				new TemplateRow("D", "System Test", "NA = Blank AND LRN Sample Status = System Test"),
+				new TemplateRow("E", "Duplicate", "NA = Blank AND LRN Sample Status = Duplicate"),
+				new TemplateRow("F", "Deleted/Rejected", "NA = Blank AND LRN Sample Status = Deleted/Rejected"),
+				new TemplateRow("", "Total Samples", "NA = Blank"),
+		},
 		["PCRLOA"] = new[] {
+				new TemplateRow("", "Total Samples", "Count [Unique Sample ID]"),
 				new TemplateRow("A", "Resulted", "Resulted / Not = [Resulted]"),
-				new TemplateRow("1", "Billed to Insurance", "Resulted / Not = [Resulted] AND Claim Status = [Billed]"),
-				new TemplateRow("◦", "Claims Billed to Payor via AMD", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Billed/Not = [Billed]"),
-				new TemplateRow("2", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Insurance category = [Insurance AND Missing Insurance AND PAID]"),
-				new TemplateRow("•", "Completed", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Order Status = [Completed] AND Client Status = [Billing Review Required AND Blank]"),
-				new TemplateRow("•", "Billing Review Required", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Order Status = [Completed] AND Client Status = [Billing Review Required]"),
-				new TemplateRow("•", "Rejected", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Order Status = [Rejected] AND Client Status = [Rejected Sample]"),
-				new TemplateRow("•", "In Transit", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Order Status = [In Transit] AND Client Status = [Blank]"),
-				new TemplateRow("•", "Partially Resulted", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Order Status = [Partially Resulted] AND Client Status = [Blank]"),
-				new TemplateRow("3", "Client Bill", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client Status = [Client Bill]"),
-				new TemplateRow("4", "Unbilled", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Entered]"),
-				new TemplateRow("◦", "Charges Entered in AMD - Not Released to Payor (EDI Hold)", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Entered]"),
+				new TemplateRow("1", "Billed to Insurance", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Client Status = [Blank]"),
+				new TemplateRow("◦", "Claims Billed to Payor via AMD", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Client Status = [Blank]"),
+				new TemplateRow("2", "Client Bill", "Resulted / Not = [Resulted] AND Client Status = [Client Bill]"),
+				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Client Status = [Client Bill] AND Claim Status = [Billed]"),
+				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Client Status = [Client Bill] AND Claim Status = [Not Entered in AMD]"),
+				new TemplateRow("•", "Entered", "Resulted / Not = [Resulted] AND Client Status = [Client Bill] AND Claim Status = [Entered]"),
+				new TemplateRow("3", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required, Blank]"),
+				new TemplateRow("•", "Completed", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required]"),
+				new TemplateRow("•", "Billing Review Required", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required, Blank] AND Order Status = [Completed]"),
+				new TemplateRow("•", "In Transit", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required, Blank] AND Order Status = [In Transit]"),
+				new TemplateRow("4", "Unbilled", "Resulted / Not = [Resulted] AND Claim Status = [Entered] AND Client Status = [Blank]"),
+				new TemplateRow("◦", "Charges Entered in AMD - Not Released to Payor (EDI Hold)", "Resulted / Not = [Resulted] AND Claim Status = [Entered] AND Client Status = [Blank]"),
 				new TemplateRow("5", "Test Entries", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client Status = [Test Entries]"),
+				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client Status = [Test Entries]"),
+				new TemplateRow("6", "Rejected Sample", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client Status = [Rejected Sample]"),
+				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client Status = [Rejected Sample]"),
 				new TemplateRow("B", "Not Resulted", "Resulted / Not = [Not Resulted]"),
-				new TemplateRow("1", "Not Entered in AMD", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client  Status = [Rejected Sample AND Blank]"),
-				new TemplateRow("•", "In Transit", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client  Status = [Rejected Sample AND Blank] AND Order Status = [In Transit]"),
-				new TemplateRow("•", "Rejected", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client  Status = [Rejected Sample] AND Order Status = [Rejected]"),
+				new TemplateRow("1", "Not Entered in AMD", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank]"),
+				new TemplateRow("•", "In Transit", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Order Status = [In Transit]"),
+				new TemplateRow("•", "Received", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Order Status = [Received]"),
 				new TemplateRow("2", "Client Bill", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client  Status = [Client Bill]"),
 				new TemplateRow("3", "Test Entries", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client  Status = [Test Entries]"),
-				new TemplateRow("4", "Self Pay", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client  Status = [Self Pay]"),
-			},
-		["PhiLife"] = new[] {
+				new TemplateRow("4", "Rejected Sample", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client  Status = [Rejected Sample]"),
+				new TemplateRow("5", "Self Pay", "Resulted / Not = [Not Resulted] AND Billed/Not = [UnBilled] AND Claim Status = [Not Entered in AMD] AND Client  Status = [Self Pay]"),
+		},
+		["PhiLifeLegacy"] = new[] {
+				new TemplateRow("", "Total Samples", "Count [Unique Sample ID]"),
 				new TemplateRow("A", "Billable Samples - Resulted", "Resulted / Not = [Resulted]"),
 				new TemplateRow("1", "Billed to Insurance", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Blank AND Billing Review Required]"),
 				new TemplateRow("•", "Billed In AMD", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Blank AND Billing Review Required]"),
@@ -215,8 +341,41 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("3", "No Result date on LIS but Billed", "Resulted / Not = [Not Resulted] AND Claim Status = Billed AND Billed/Not = [Billed]"),
 				new TemplateRow("4", "Test Entries", "Resulted / Not = [Not Resulted] AND Payment Method = Insurance AND Claim Status = Not Entered in AMD AND Billed/Not = [UnBilled] AND Client Status = [Test Entries]"),
 				new TemplateRow("5", "Payment Method No Bill", "Resulted / Not = [Not Resulted] AND Payment Method = [No Bill]"),
-			},
-		["Rising Tides"] = new[] {
+		},
+		["PhiLife"] = new[] {
+				new TemplateRow("", "Total Samples", "Count [Unique Sample ID]"),
+				new TemplateRow("A", "Billable Samples - Resulted", "Resulted / Not = [Resulted]"),
+				new TemplateRow("1", "Billed to Insurance", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Client Status = [Blank]"),
+				new TemplateRow("•", "Billed In AMD", "Resulted / Not = [Resulted] AND Claim Status = [Billed] AND Client Status = [Blank]"),
+				new TemplateRow("2", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required, Blank] AND Payment Method = [Insurance]"),
+				new TemplateRow("•", "Received", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required] AND Payment Method = [Insurance] AND Sample Status = [Received]"),
+				new TemplateRow("•", "Billing Review Required", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required] AND Payment Method = [Insurance]"),
+				new TemplateRow("•", "Collected", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Payment Method = [Insurance] AND Sample Status = [Collected]"),
+				new TemplateRow("3", "Unbilled", "Resulted / Not = [Resulted] AND Client Status = [Blank] AND Claim Status = [Entered]"),
+				new TemplateRow("4", "Client Bill", "Resulted / Not = [Resulted] AND Client Status = [Client Bill]"),
+				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Client Status = [Client Bill] AND Claim Status = [Not Entered in AMD]"),
+				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Client Status = [Client Bill] AND Claim Status = [Billed]"),
+				new TemplateRow("5", "Self Pay", "Resulted / Not = [Resulted] AND Client Status = [Self Pay]"),
+				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Client Status = [Self Pay] AND Claim Status = [Billed]"),
+				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Client Status = [Self Pay] AND Claim Status = [Not Entered in AMD]"),
+				new TemplateRow("6", "Test Entries", "Resulted / Not = [Resulted] AND Client Status = [Test Entries] AND Payment Method != [No Bill]"),
+				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Client Status = [Test Entries] AND Payment Method != [No Bill] AND Claim Status = [Not Entered in AMD]"),
+				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Client Status = [Test Entries] AND Payment Method != [No Bill] AND Claim Status = [Billed]"),
+				new TemplateRow("7", "Rejected Sample", "Resulted / Not = [Resulted] AND Client Status = [Rejected Sample]"),
+				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Client Status = [Rejected Sample] AND Claim Status = [Not Entered in AMD]"),
+				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Client Status = [Rejected Sample] AND Claim Status = [Billed]"),
+				new TemplateRow("8", "Payment Method No Bill", "Resulted / Not = [Resulted] AND Payment Method = [No Bill]"),
+				new TemplateRow("B", "Not Resulted", "Resulted / Not = [Not Resulted]"),
+				new TemplateRow("1", "Not Entered in AMD", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Payment Method = [Insurance]"),
+				new TemplateRow("•", "Received", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Payment Method = [Insurance] AND Sample Status = [Received]"),
+				new TemplateRow("•", "Collected", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Payment Method = [Insurance] AND Sample Status = [Collected]"),
+				new TemplateRow("2", "Client Bill", "Resulted / Not = [Not Resulted] AND Client Status = [Client Bill]"),
+				new TemplateRow("3", "Test Entries", "Resulted / Not = [Not Resulted] AND Client Status = [Test Entries] AND Payment Method = [Insurance]"),
+				new TemplateRow("4", "Rejected Sample", "Resulted / Not = [Not Resulted] AND Client Status = [Rejected Sample] AND Payment Method = [Insurance]"),
+				new TemplateRow("5", "Payment Method No Bill", "Resulted / Not = [Not Resulted] AND Payment Method = [No Bill]"),
+		},
+		["Rising TidesLegacy"] = new[] {
+				new TemplateRow("", "Total Samples", "Count [Unique Sample ID]"),
 				new TemplateRow("A", "Billable Samples - Resulted", "Resulted / Not = [Resulted]"),
 				new TemplateRow("1", "Billed to Insurance", "Resulted / Not = [Resulted] AND Payment Method = [Insurance] AND Claim Status = [Billed]"),
 				new TemplateRow("•", "Billed In AMD", "Resulted / Not = [Resulted] AND Payment Method = [Insurance] AND Claim Status = [Billed] AND Billed/Not = [Billed]"),
@@ -234,13 +393,42 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("6", "Test Entries", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Test Entries] AND Billing Status = [Billed]"),
 				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Test Entries] AND Billing Status = [Billed]"),
 				new TemplateRow("7", "Billing Status - No Bill", "Resulted / Not = [Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [ALL] AND Billing Status = [No Bill]"),
-				new TemplateRow("•", "Rejected", "Resulted / Not = [Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [ALL] AND Billing Status = [No Bill] Order Status = [Rejected]"),
-				new TemplateRow("•", "Completed", "Resulted / Not = [Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [ALL] AND Billing Status = [No Bill] Order Status = [Completed]"),
-				new TemplateRow("•", "Recollect Required", "Resulted / Not = [Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [ALL] AND Billing Status = [No Bill] Order Status = [Recollect Required]"),
+				new TemplateRow("•", "Rejected", "Resulted / Not = [Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [ALL] AND Billing Status = [No Bill] AND Order Status = [Rejected]"),
+				new TemplateRow("•", "Completed", "Resulted / Not = [Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [ALL] AND Billing Status = [No Bill] AND Order Status = [Completed]"),
+				new TemplateRow("•", "Recollect Required", "Resulted / Not = [Resulted] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [ALL] AND Billing Status = [No Bill] AND Order Status = [Recollect Required]"),
 				new TemplateRow("B", "Not Resulted", "Resulted / Not = [Not Resulted]"),
 				new TemplateRow("1", "Not Entered in AMD", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD]"),
-				new TemplateRow("•", "Collected", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] Sample Status = [Collected]"),
-				new TemplateRow("2", "Rejected Sample", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] Sample Status = [Rejected]"),
+				new TemplateRow("•", "Collected", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Sample Status = [Collected]"),
+				new TemplateRow("2", "Rejected Sample", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Sample Status = [Rejected]"),
+			},
+		["Rising Tides"] = new[] {
+				new TemplateRow("", "Total Samples", "Count [Unique Sample ID]"),
+				new TemplateRow("A", "Billable Samples - Resulted", "Resulted / Not = [Resulted]"),
+				new TemplateRow("1", "Billed to Insurance", "Resulted / Not = [Resulted] AND Payment Method = [Insurance] AND Claim Status = [Billed]"),
+				new TemplateRow("•", "Billed In AMD", "Resulted / Not = [Resulted] AND Payment Method = [Insurance] AND Claim Status = [Billed] AND Billed/Not = [Billed]"),
+				new TemplateRow("2", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required, Blank] AND Payment Method = [Insurance] AND Billing Status != [No Bill]"),
+				new TemplateRow("•", "Received", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required, Blank] AND Payment Method = [Insurance] AND Billing Status != [No Bill] AND Sample Status = [Received]"),
+				new TemplateRow("•", "Billing Review Required", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Billing Review Required, Blank] AND Payment Method = [Insurance] AND Billing Status != [No Bill]"),
+				new TemplateRow("3", "Unbilled", "Resulted / Not = [Resulted] AND Payment Method = [Insurance] AND Claim Status = [Entered] AND Billed/Not = [UnBilled]"),
+				new TemplateRow("4", "Client Bill", "Resulted / Not = [Resulted] AND Payment Method = [Client Bill] AND Claim Status = [Billed, Not Entered in AMD] AND Billed/Not = [Billed, UnBilled] AND Client Status = [Client Bill] AND Billing Status != [No Bill]"),
+				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Payment Method = [Client Bill] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Client Bill] AND Billing Status != [No Bill]"),
+				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Payment Method = [Client Bill] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Client Bill] AND Billing Status != [No Bill]"),
+				new TemplateRow("5", "Self Pay", "Resulted / Not = [Resulted] AND Payment Method = [Self Pay] AND Claim Status = [ALL] AND Billed/Not = [ALL] AND Client Status = [Self Pay] AND Billing Status != [No Bill]"),
+				new TemplateRow("•", "Billed", "Resulted / Not = [Resulted] AND Payment Method = [Self Pay] AND Claim Status = [Billed] AND Billed/Not = [Billed] AND Client Status = [Self Pay] AND Billing Status != [No Bill]"),
+				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Payment Method = [Self Pay] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Self Pay] AND Billing Status != [No Bill]"),
+				new TemplateRow("•", "Entered", "Resulted / Not = [Resulted] AND Payment Method = [Self Pay] AND Claim Status = [Entered] AND Billed/Not = [UnBilled] AND Client Status = [Self Pay] AND Billing Status != [No Bill]"),
+				new TemplateRow("6", "Test Entries", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Test Entries] AND Billing Status != [No Bill]"),
+				new TemplateRow("•", "Not Entered in AMD", "Resulted / Not = [Resulted] AND Claim Status = [Not Entered in AMD] AND Billed/Not = [UnBilled] AND Client Status = [Test Entries] AND Billing Status != [No Bill]"),
+				new TemplateRow("7", "Billing Status - No Bill", "Resulted / Not = [Resulted] AND Billing Status = [No Bill]"),
+				new TemplateRow("•", "Rejected", "Resulted / Not = [Resulted] AND Billing Status = [No Bill] AND Order Status = [Rejected]"),
+				new TemplateRow("•", "Completed", "Resulted / Not = [Resulted] AND Billing Status = [No Bill] AND Order Status = [Completed]"),
+				new TemplateRow("•", "Recollect Required", "Resulted / Not = [Resulted] AND Billing Status = [No Bill] AND Order Status = [Recollect Required]"),
+				new TemplateRow("B", "Not Resulted", "Resulted / Not = [Not Resulted]"),
+				new TemplateRow("1", "Not Entered in AMD", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank]"),
+				new TemplateRow("•", "Collected", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Sample Status = [Collected]"),
+				new TemplateRow("•", "Received", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Blank] AND Sample Status = [Received]"),
+				new TemplateRow("2", "Rejected Sample", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Rejected Sample]"),
+				new TemplateRow("3", "Client Bill", "Resulted / Not = [Not Resulted] AND Claim Status = [Not Entered in AMD] AND Client Status = [Client Bill]"),
 			},
 	};
 
@@ -248,8 +436,14 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		string connectionString,
 		string labName,
 		int? labId = null,
-		DateOnly? collectedFrom = null,
-		DateOnly? collectedTo = null,
+		string dateType = "Collected",
+		DateOnly? dateFrom = null,
+		DateOnly? dateTo = null,
+		string? panel = null,
+		string? clinic = null,
+		string? refPhy = null,
+		string? salesRep = null,
+		string? collector = null,
 		CancellationToken ct = default)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
@@ -263,10 +457,17 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			throw new InvalidOperationException("dbo.LIMSMaster was not found, or no columns were found in dbo.LIMSMaster.");
 		}
 
-		var profile = ResolveProfile(labName, labId, columns);
-		var raw = await LoadDynamicGroupsAsync(conn, profile, collectedFrom, collectedTo, ct);
+		var profile = ResolveProfile(labName, labId, columns, dateType);
+		var filterColumns = ResolveFilterColumns(columns, profile.LogicSheetName);
+		var sourceFileName = await GetLatestSourceFileNameAsync(conn, columns, ct);
+		var raw = await LoadDynamicGroupsAsync(conn, profile, filterColumns, dateFrom, dateTo, panel, clinic, refPhy, salesRep, collector, ct);
+		var summaryRaw = UsesBlankIncorrectDosSummary(profile.LogicSheetName)
+			? raw.Where(HasBlankIncorrectDos).ToList()
+			: UsesBlankNaSummary(profile.LogicSheetName)
+			? raw.Where(HasBlankNa).ToList()
+			: raw;
 
-		var months = raw
+		var months = summaryRaw
 			.Select(x => $"{x.CollectedYear:D4}-{x.CollectedMonth:D2}")
 			.Distinct()
 			.OrderBy(x => x)
@@ -279,21 +480,22 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			.ToList();
 
 		var rows = SheetTemplates.ContainsKey(profile.LogicSheetName)
-			? BuildTemplatePivotRows(profile.LogicSheetName, raw)
-			: BuildDynamicPivotRows(raw);
+			? BuildTemplatePivotRows(profile.LogicSheetName, summaryRaw)
+			: BuildDynamicPivotRows(summaryRaw);
 
-		var grandByMonth = raw
+		var grandByMonth = summaryRaw
 			.GroupBy(x => $"{x.CollectedYear:D4}-{x.CollectedMonth:D2}")
 			.ToDictionary(g => g.Key, g => g.Sum(x => x.TotalClaims));
 
-		var grandByYear = raw
+		var grandByYear = summaryRaw
 			.GroupBy(x => x.CollectedYear)
 			.ToDictionary(g => g.Key, g => g.Sum(x => x.TotalClaims));
 
-		var kpiCards = BuildKpiCards(raw, grandByMonth.Values.Sum());
+		var kpiCards = BuildKpiCards(summaryRaw, rows, grandByMonth.Values.Sum());
 
 		return new LisSummaryResult(
 			profile.LogicSheetName,
+			sourceFileName,
 			months,
 			years,
 			rows,
@@ -323,14 +525,160 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		return columns;
 	}
 
-	private static DimensionProfile ResolveProfile(string labName, int? labId, HashSet<string> columns)
+	private static async Task<string> GetLatestSourceFileNameAsync(
+		SqlConnection conn,
+		HashSet<string> columns,
+		CancellationToken ct)
+	{
+		if (!columns.Contains("SourceFile") || !columns.Contains("CreatedOn"))
+		{
+			return string.Empty;
+		}
+
+		const string sql = """
+            SELECT TOP 1 SourceFile
+            FROM dbo.LIMSMaster WITH (NOLOCK)
+            ORDER BY CreatedOn DESC;
+            """;
+
+		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 60 };
+		var value = await cmd.ExecuteScalarAsync(ct);
+		return value == null || value == DBNull.Value
+			? string.Empty
+			: Convert.ToString(value)?.Trim() ?? string.Empty;
+	}
+
+	public async Task<LisSummaryFilterOptions> GetFilterOptionsAsync(
+		string connectionString,
+		string labName,
+		CancellationToken ct = default)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+		await using var conn = new SqlConnection(connectionString);
+		await conn.OpenAsync(ct);
+
+		var columns = await GetLimsMasterColumnsAsync(conn, ct);
+		var logicSheet = ResolveLogicSheet(labName, null);
+		var filterColumns = ResolveFilterColumns(columns, logicSheet);
+
+		return new LisSummaryFilterOptions(
+			await LoadFilterValuesAsync(conn, filterColumns.PanelExpression, ct),
+			await LoadFilterValuesAsync(conn, filterColumns.ClinicExpression, ct),
+			await LoadFilterValuesAsync(conn, filterColumns.RefPhyExpression, ct),
+			await LoadFilterValuesAsync(conn, filterColumns.SalesRepExpression, ct),
+			await LoadFilterValuesAsync(conn, filterColumns.CollectorExpression, ct));
+	}
+
+	public async Task<LisLineDataResult> GetLisLineDataAsync(
+		string connectionString,
+		string labName,
+		string dateType = "Collected",
+		DateOnly? dateFrom = null,
+		DateOnly? dateTo = null,
+		string? panel = null,
+		string? clinic = null,
+		string? refPhy = null,
+		string? salesRep = null,
+		string? collector = null,
+		int pageNumber = 1,
+		int pageSize = 100,
+		CancellationToken ct = default)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+		pageNumber = Math.Max(1, pageNumber);
+		pageSize = pageSize is < 10 or > 500 ? 100 : pageSize;
+
+		await using var conn = new SqlConnection(connectionString);
+		await conn.OpenAsync(ct);
+
+		var columns = await GetLimsMasterColumnsAsync(conn, ct);
+		if (columns.Count == 0)
+		{
+			throw new InvalidOperationException("dbo.LIMSMaster was not found, or no columns were found in dbo.LIMSMaster.");
+		}
+
+		var logicSheet = ResolveLogicSheet(labName, null);
+		var dateColumn = ResolveDateColumn(columns, logicSheet, dateType);
+		var filterColumns = ResolveFilterColumns(columns, logicSheet);
+		var dateExpr = $"TRY_CONVERT(date, {Q(dateColumn)})";
+		var where = new List<string>
+		{
+			$"{dateExpr} IS NOT NULL",
+			$"YEAR({dateExpr}) > 1900"
+		};
+		var parameters = new List<SqlParameter>();
+
+		if (dateFrom.HasValue)
+		{
+			where.Add($"{dateExpr} >= @fromDate");
+			parameters.Add(new SqlParameter("@fromDate", SqlDbType.Date) { Value = dateFrom.Value.ToDateTime(TimeOnly.MinValue) });
+		}
+
+		if (dateTo.HasValue)
+		{
+			where.Add($"{dateExpr} <= @toDate");
+			parameters.Add(new SqlParameter("@toDate", SqlDbType.Date) { Value = dateTo.Value.ToDateTime(TimeOnly.MinValue) });
+		}
+
+		AddOptionalFilter(where, parameters, filterColumns.PanelExpression, "@panel", panel);
+		AddOptionalFilter(where, parameters, filterColumns.ClinicExpression, "@clinic", clinic);
+		AddOptionalFilter(where, parameters, filterColumns.RefPhyExpression, "@refPhy", refPhy);
+		AddOptionalFilter(where, parameters, filterColumns.SalesRepExpression, "@salesRep", salesRep);
+		AddOptionalFilter(where, parameters, filterColumns.CollectorExpression, "@collector", collector);
+
+		var whereSql = string.Join(" AND ", where);
+		var lineColumns = LineDataColumns(columns, logicSheet);
+		var sql = $"""
+			SELECT {string.Join("," + Environment.NewLine + "                   ", lineColumns.Select(x => x.Selector))}
+			FROM dbo.LIMSMaster WITH (NOLOCK)
+			WHERE {whereSql}
+			ORDER BY {dateExpr} DESC, {OrderByText(columns)}
+			OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY;
+			""";
+
+		var countSql = $"""
+			SELECT COUNT(1)
+			FROM dbo.LIMSMaster WITH (NOLOCK)
+			WHERE {whereSql};
+			""";
+
+		await using var countCmd = new SqlCommand(countSql, conn) { CommandTimeout = 240 };
+		foreach (var p in parameters) countCmd.Parameters.Add(CloneParameter(p));
+		var totalCount = Convert.ToInt32(await countCmd.ExecuteScalarAsync(ct));
+
+		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 240 };
+		foreach (var p in parameters) cmd.Parameters.Add(CloneParameter(p));
+		cmd.Parameters.Add(new SqlParameter("@offset", SqlDbType.Int) { Value = (pageNumber - 1) * pageSize });
+		cmd.Parameters.Add(new SqlParameter("@pageSize", SqlDbType.Int) { Value = pageSize });
+
+		var rows = new List<Dictionary<string, string>>();
+		await using var rdr = await cmd.ExecuteReaderAsync(ct);
+		while (await rdr.ReadAsync(ct))
+		{
+			var row = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+			foreach (var column in lineColumns)
+			{
+				row[column.Key] = ReadText(rdr, column.Key);
+			}
+
+			rows.Add(row);
+		}
+
+		var resultColumns = lineColumns
+			.Select(x => new LisLineDataColumn(x.Key, x.Header))
+			.ToList();
+
+		return new LisLineDataResult(resultColumns, rows, totalCount, pageNumber, pageSize);
+	}
+
+	private static DimensionProfile ResolveProfile(string labName, int? labId, HashSet<string> columns, string dateType)
 	{
 		var logicSheet = ResolveLogicSheet(labName, labId);
-		var dateColumn = FirstExisting(columns, DateCandidatesFor(logicSheet))
-			?? FirstExisting(columns,
-				"RequestCollectDate", "ReqCollectDate", "DateOfCollection", "Entry_DateCreated",
-				"ReceivedDate", "CollectionDate", "CollectedDate", "Collection_Date", "DOS")
-			?? throw new InvalidOperationException("No usable collected-date column was found in dbo.LIMSMaster.");
+		var dateColumn = ResolveDateColumn(columns, logicSheet, dateType);
+
+		var incorrectDosColumn = FirstExisting(columns, IncorrectDosCandidatesFor(logicSheet));
 
 		var fields = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
 		{
@@ -338,6 +686,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			["Result Status"] = FirstExisting(columns, ResultCandidatesFor(logicSheet)),
 			["ResultedStatus"] = FirstExisting(columns, ResultCandidatesFor(logicSheet)),
 			["Claim Status"] = FirstExisting(columns, ClaimStatusCandidatesFor(logicSheet)),
+			["NA"] = FirstExisting(columns, "NA"),
 			["Bill Status"] = FirstExisting(columns, BillStatusCandidatesFor(logicSheet)),
 			["Billing Status"] = FirstExisting(columns, BillStatusCandidatesFor(logicSheet)),
 			["Billed/Not"] = FirstExisting(columns, BillCategoryCandidatesFor(logicSheet)),
@@ -350,19 +699,47 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			["Final Status 2"] = FirstExisting(columns, FinalStatus2CandidatesFor(logicSheet)),
 			["Sample Status"] = FirstExisting(columns, SampleStatusCandidatesFor(logicSheet)),
 			["Order Status"] = FirstExisting(columns, OrderStatusCandidatesFor(logicSheet)),
+			["Entry Status"] = FirstExisting(columns, EntryStatusCandidatesFor(logicSheet)),
+			["Panel Type"] = FirstExisting(columns, PanelTypeCandidatesFor(logicSheet)),
+			["Sub Status"] = FirstExisting(columns, SubStatusCandidatesFor(logicSheet)),
+			["LRN Sample Status"] = FirstExisting(columns, SampleStatusCandidatesFor(logicSheet)),
+			["LRN Bill Category"] = FirstExisting(columns, BillCategoryCandidatesFor(logicSheet)),
+			["LRN Sub Status"] = FirstExisting(columns, SubStatusCandidatesFor(logicSheet)),
 			["Source"] = FirstExisting(columns, SourceCandidatesFor(logicSheet)),
 			["Charges not entered status"] = FirstExisting(columns, ChargesNotEnteredCandidatesFor(logicSheet)),
-			["Insurance category"] = FirstExisting(columns, InsuranceCategoryCandidatesFor(logicSheet))
+			["Insurance category"] = FirstExisting(columns, InsuranceCategoryCandidatesFor(logicSheet)),
+			["Incorrect DOS"] = ShouldGroupByIncorrectDos(logicSheet) ? incorrectDosColumn : null
 		};
 
-		return new DimensionProfile(logicSheet, dateColumn, fields);
+		if (logicSheet.Equals("Augustus", StringComparison.OrdinalIgnoreCase))
+		{
+			fields = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+			{
+				["Billing Status"] = FirstExisting(columns, "BillingStatus", "Billing Status"),
+				["Bill To"] = FirstExisting(columns, "BillTo", "Bill To"),
+				["Result Status"] = FirstExisting(columns, "ResultStatus", "Result Status"),
+				["Final Status"] = FirstExisting(columns, "FinalStatus", "Final Status"),
+				["Client Status"] = FirstExisting(columns, "ClientStatus", "Client Status"),
+				["Client Status 2"] = FirstExisting(columns, "ClientStatus2", "Client Status 2", "ClientStatus", "Client Status")
+			};
+		}
+
+		var countDistinctColumn = FirstExisting(columns, CountDistinctCandidatesFor(logicSheet));
+
+		return new DimensionProfile(logicSheet, dateColumn, countDistinctColumn, incorrectDosColumn, fields);
 	}
 
 	private static async Task<List<RawLisGroup>> LoadDynamicGroupsAsync(
 		SqlConnection conn,
 		DimensionProfile profile,
-		DateOnly? collectedFrom,
-		DateOnly? collectedTo,
+		FilterColumnProfile filterColumns,
+		DateOnly? dateFrom,
+		DateOnly? dateTo,
+		string? panel,
+		string? clinic,
+		string? refPhy,
+		string? salesRep,
+		string? collector,
 		CancellationToken ct)
 	{
 		var dateExpr = $"TRY_CONVERT(date, {Q(profile.DateColumn)})";
@@ -373,16 +750,27 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		};
 
 		var parameters = new List<SqlParameter>();
-		if (collectedFrom.HasValue)
+		if (dateFrom.HasValue)
 		{
 			where.Add($"{dateExpr} >= @fromDate");
-			parameters.Add(new SqlParameter("@fromDate", SqlDbType.Date) { Value = collectedFrom.Value.ToDateTime(TimeOnly.MinValue) });
+			parameters.Add(new SqlParameter("@fromDate", SqlDbType.Date) { Value = dateFrom.Value.ToDateTime(TimeOnly.MinValue) });
 		}
 
-		if (collectedTo.HasValue)
+		if (dateTo.HasValue)
 		{
 			where.Add($"{dateExpr} <= @toDate");
-			parameters.Add(new SqlParameter("@toDate", SqlDbType.Date) { Value = collectedTo.Value.ToDateTime(TimeOnly.MinValue) });
+			parameters.Add(new SqlParameter("@toDate", SqlDbType.Date) { Value = dateTo.Value.ToDateTime(TimeOnly.MinValue) });
+		}
+
+		AddOptionalFilter(where, parameters, filterColumns.PanelExpression, "@panel", panel);
+		AddOptionalFilter(where, parameters, filterColumns.ClinicExpression, "@clinic", clinic);
+		AddOptionalFilter(where, parameters, filterColumns.RefPhyExpression, "@refPhy", refPhy);
+		AddOptionalFilter(where, parameters, filterColumns.SalesRepExpression, "@salesRep", salesRep);
+		AddOptionalFilter(where, parameters, filterColumns.CollectorExpression, "@collector", collector);
+
+		if (RequiresBlankIncorrectDos(profile.LogicSheetName) && !string.IsNullOrWhiteSpace(profile.IncorrectDosColumn))
+		{
+			where.Add($"{TextExpr(profile.IncorrectDosColumn)} = ''");
 		}
 
 		var fieldList = profile.FieldColumns.Keys.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
@@ -400,12 +788,16 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			.Concat(new[] { $"YEAR({dateExpr})", $"MONTH({dateExpr})" })
 			.ToList();
 
+		var countExpr = !string.IsNullOrWhiteSpace(profile.CountDistinctColumn)
+			? $"COUNT(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(4000), {Q(profile.CountDistinctColumn)}))), ''))"
+			: "COUNT(*)";
+
 		var sql = $"""
             SELECT
                 {string.Join("," + Environment.NewLine + "                ", selectDimensions)},
                 YEAR({dateExpr}) AS CollectedYear,
                 MONTH({dateExpr}) AS CollectedMonth,
-                COUNT(*) AS TotalClaims
+                {countExpr} AS TotalClaims
             FROM dbo.LIMSMaster WITH (NOLOCK)
             WHERE {string.Join(" AND ", where)}
             GROUP BY
@@ -436,19 +828,859 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		return raw;
 	}
 
-	private static LisSummaryKpiCards BuildKpiCards(List<RawLisGroup> raw, int totalSamples)
+	private static string ResolveDateColumn(HashSet<string> columns, string logicSheet, string dateType)
 	{
-		var billedCount = raw
-			.Where(x => IsBilledStatus(GetField(x, "Billing Status"))
-				|| IsBilledStatus(GetField(x, "Bill Status"))
-				|| IsBilledStatus(GetField(x, "Billed/Not")))
-			.Sum(x => x.TotalClaims);
+		var normalized = NormalizeDateType(dateType);
+		var configuredDateColumn = ResolveConfiguredDateColumn(logicSheet, normalized);
+		if (!string.IsNullOrWhiteSpace(configuredDateColumn))
+		{
+			if (columns.Contains(configuredDateColumn))
+			{
+				return configuredDateColumn;
+			}
 
-		var unbilledCount = raw
-			.Where(x => IsUnbilledStatus(GetField(x, "Billing Status"))
-				|| IsUnbilledStatus(GetField(x, "Bill Status"))
-				|| IsUnbilledStatus(GetField(x, "Billed/Not")))
-			.Sum(x => x.TotalClaims);
+			throw new InvalidOperationException($"{DateTypeLabel(normalized)} date column '{configuredDateColumn}' was not found in dbo.LIMSMaster for {logicSheet}.");
+		}
+
+		var candidates = new List<string>();
+
+		if (normalized.Equals("Received", StringComparison.OrdinalIgnoreCase))
+		{
+			candidates.AddRange(new[] { "ReqReceivedDate", "ReceivedDate", "RequestReceivedDate" });
+		}
+		else if (normalized.Equals("Resulted", StringComparison.OrdinalIgnoreCase))
+		{
+			candidates.AddRange(new[] { "ReqReportedDate", "ResultDate", "ReportedDate", "ReqResultedDate" });
+		}
+		else
+		{
+			candidates.AddRange(new[] { "RequestCollectDate", "ReqCollectDate", "CollectionDate", "DateOfCollection", "CollectedDate" });
+			candidates.AddRange(DateCandidatesFor(logicSheet));
+		}
+
+		var dateColumn = candidates.Distinct(StringComparer.OrdinalIgnoreCase).FirstOrDefault(columns.Contains);
+		if (!string.IsNullOrWhiteSpace(dateColumn))
+		{
+			return dateColumn;
+		}
+
+		throw new InvalidOperationException($"{DateTypeLabel(normalized)} date column was not found in dbo.LIMSMaster.");
+	}
+
+	private static string? ResolveConfiguredDateColumn(string logicSheet, string dateType)
+		=> (logicSheet, dateType) switch
+		{
+			("PhiLife", "Collected") or ("Beech Tree", "Collected") or ("Rising Tides", "Collected") or ("PCRLOA", "Collected") => "RequestCollectDate",
+			("PhiLife", "Received") or ("Beech Tree", "Received") or ("Rising Tides", "Received") or ("PCRLOA", "Received") => "ReqReceivedDate",
+			("PhiLife", "Resulted") or ("Beech Tree", "Resulted") or ("Rising Tides", "Resulted") => "ReqReportedDate",
+			("PCRLOA", "Resulted") => "ReqResultedDate",
+			("Cove", "Collected") or ("Elixir", "Collected") => "DateOfCollection",
+			("Cove", "Received") or ("Elixir", "Received") => "ReceivedDate",
+			("Cove", "Resulted") => "ValidatedDate",
+			("Elixir", "Resulted") => "SampleResultedDate",
+			("InHealth", "Collected") => "LastTest",
+			("Augustus", "Collected") or ("NWL", "Collected") => "RequestCollectDate",
+			("Augustus", "Received") => "ReqReceivedDate",
+			("NWL", "Received") => "RequestReceivedDate",
+			("Augustus", "Resulted") or ("NWL", "Resulted") or ("Certus", "Resulted") => "ResultDate",
+			("Certus", "Collected") => "ReqCollectDate",
+			("Certus", "Received") => "ReqReceivedDate",
+			_ => null
+		};
+
+	private static FilterColumnProfile ResolveFilterColumns(HashSet<string> columns, string logicSheetName)
+	{
+		return logicSheetName switch
+		{
+			"PhiLife" or "Beech Tree" or "Rising Tides" => new FilterColumnProfile(
+				ExpressionForColumn(FirstExisting(columns, "PanelCategory")),
+				ExpressionForColumn(FirstExisting(columns, "Facility")),
+				ExpressionForColumn(FirstExisting(columns, "Provider")),
+				null,
+				ExpressionForColumn(FirstExisting(columns, "Collector"))),
+			"PCRLOA" => new FilterColumnProfile(
+				ExpressionForColumn(FirstExisting(columns, "PanelCategory")),
+				null, null, null, null),
+			"Cove" => new FilterColumnProfile(
+				ExpressionForColumn(FirstExisting(columns, "PanelType")),
+				ExpressionForColumn(FirstExisting(columns, "FacilityName")),
+				ExpressionForColumn(FirstExisting(columns, "ProviderName")),
+				ExpressionForColumn(FirstExisting(columns, "SaleRepName")),
+				null),
+			"Elixir" => new FilterColumnProfile(
+				ExpressionForColumn(FirstExisting(columns, "PanelName")),
+				ExpressionForColumn(FirstExisting(columns, "FacilityName")),
+				ExpressionForColumn(FirstExisting(columns, "ProviderName")),
+				ExpressionForColumn(FirstExisting(columns, "SaleRepName")),
+				null),
+			"InHealth" => new FilterColumnProfile(
+				ExpressionForColumn(FirstExisting(columns, "LRNPanelName")),
+				ExpressionForColumn(FirstExisting(columns, "Account")),
+				BuildConcatenatedNameExpression(columns, "ProviderFirstName", "ProviderLastName"),
+				ExpressionForColumn(FirstExisting(columns, "SalesRepEmail")),
+				null),
+			"Augustus" => new FilterColumnProfile(
+				ExpressionForColumn(FirstExisting(columns, "PanelName")),
+				ExpressionForColumn(FirstExisting(columns, "ClinicName")),
+				BuildAugustusProviderExpression(columns),
+				null, null),
+			"NWL" => new FilterColumnProfile(
+				ExpressionForColumn(FirstExisting(columns, "PanelType")),
+				ExpressionForColumn(FirstExisting(columns, "ClinicName")),
+				ExpressionForColumn(FirstExisting(columns, "ReferringProvider")),
+				null, null),
+			"Certus" => new FilterColumnProfile(
+				ExpressionForColumn(FirstExisting(columns, "PanelName")),
+				null,
+				ExpressionForColumn(FirstExisting(columns, "DoctorFullName")),
+				null, null),
+			_ => new FilterColumnProfile(
+				ExpressionForColumn(ResolvePanelFilterColumn(columns)),
+				ExpressionForColumn(FirstExisting(columns, "Facility", "FacilityName", "Clinic", "ClinicName")),
+				ExpressionForColumn(FirstExisting(columns, "Provider", "ProviderName", "ReferringProvider", "DoctorFullName")),
+				ExpressionForColumn(FirstExisting(columns, "SaleRepName", "SalesRepName", "SalesRep")),
+				ExpressionForColumn(FirstExisting(columns, "Collector")))
+		};
+	}
+
+	private static string? ExpressionForColumn(string? column)
+		=> string.IsNullOrWhiteSpace(column) ? null : TextExpr(column);
+
+	private static string? BuildConcatenatedNameExpression(HashSet<string> columns, string firstNameColumn, string lastNameColumn)
+	{
+		var firstName = FirstExisting(columns, firstNameColumn);
+		var lastName = FirstExisting(columns, lastNameColumn);
+		if (firstName is null || lastName is null) return null;
+
+		return $"LTRIM(RTRIM(CONVERT(nvarchar(4000), {Q(firstName)}) + CONVERT(nvarchar(4000), {Q(lastName)})))";
+	}
+
+	private static string? BuildAugustusProviderExpression(HashSet<string> columns)
+	{
+		var lastName = FirstExisting(columns, "DoctorLastName");
+		var firstName = FirstExisting(columns, "DoctorFirstName");
+		var middleName = FirstExisting(columns, "DoctorMiddleName");
+		if (lastName is null || firstName is null || middleName is null) return null;
+
+		return $"ISNULL(CONVERT(nvarchar(4000), {Q(lastName)}) + ',' + CONVERT(nvarchar(4000), {Q(firstName)}), CONVERT(nvarchar(4000), {Q(middleName)}))";
+	}
+
+	private static string? ResolvePanelFilterColumn(HashSet<string> columns)
+		=> IsElixirColumnShape(columns)
+			? FirstExisting(columns, "PanelName", "Panel Name", "Panel", "PanelCategory", "Panel Category", "PanelType", "Panel Type")
+			: IsCoveColumnShape(columns)
+			? FirstExisting(columns, "PanelType", "Panel Type", "PanelCategory", "Panel Category", "Panel", "PanelName", "Panel Name")
+			: FirstExisting(columns, "PanelCategory", "Panel Category", "Panel", "PanelName", "Panel Name", "Tests", "Test", "ActualPanel", "Actual Panel", "PanelType", "Panel Type");
+
+	private static bool IsElixirColumnShape(HashSet<string> columns)
+		=> columns.Contains("PanelName")
+		   && columns.Contains("SampleResultedDate")
+		   && columns.Contains("PolicyId")
+		   && columns.Contains("NoInsuranceInfo");
+
+	private static bool IsCoveColumnShape(HashSet<string> columns)
+		=> columns.Contains("PanelType")
+		   && columns.Contains("NewStatus")
+		   && columns.Contains("BillCategory")
+		   && (columns.Contains("DateOfCollection") || columns.Contains("FacilityName"));
+
+	private static async Task<List<string>> LoadFilterValuesAsync(SqlConnection conn, string? valueExpr, CancellationToken ct)
+	{
+		if (string.IsNullOrWhiteSpace(valueExpr))
+		{
+			return [];
+		}
+
+		var sql = $"""
+			SELECT DISTINCT TOP (1000) {valueExpr} AS [Value]
+			FROM dbo.LIMSMaster WITH (NOLOCK)
+			WHERE {valueExpr} <> ''
+			ORDER BY [Value];
+			""";
+
+		var values = new List<string>();
+		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 120 };
+		await using var rdr = await cmd.ExecuteReaderAsync(ct);
+		while (await rdr.ReadAsync(ct))
+		{
+			values.Add(rdr.GetString(0));
+		}
+
+		return values;
+	}
+
+	private static void AddOptionalFilter(List<string> where, List<SqlParameter> parameters, string? valueExpr, string parameterName, string? value)
+	{
+		if (string.IsNullOrWhiteSpace(valueExpr) || string.IsNullOrWhiteSpace(value))
+		{
+			return;
+		}
+
+		var values = ParseSelectedFilterValues(value);
+		if (values.Count == 0)
+		{
+			return;
+		}
+
+		if (values.Count == 1)
+		{
+			where.Add($"{valueExpr} = {parameterName}");
+			parameters.Add(new SqlParameter(parameterName, SqlDbType.NVarChar, 4000) { Value = values[0] });
+			return;
+		}
+
+		var parameterNames = new List<string>();
+		for (var i = 0; i < values.Count; i++)
+		{
+			var indexedName = $"{parameterName}{i}";
+			parameterNames.Add(indexedName);
+			parameters.Add(new SqlParameter(indexedName, SqlDbType.NVarChar, 4000) { Value = values[i] });
+		}
+
+		where.Add($"{valueExpr} IN ({string.Join(", ", parameterNames)})");
+	}
+
+	private static List<string> ParseSelectedFilterValues(string? value)
+		=> (value ?? string.Empty)
+			.Split(['|'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+			.Select(CleanValue)
+			.Where(x => !string.IsNullOrWhiteSpace(x))
+			.Distinct(StringComparer.OrdinalIgnoreCase)
+			.ToList();
+
+	private static SqlParameter CloneParameter(SqlParameter parameter)
+	{
+		var clone = new SqlParameter(parameter.ParameterName, parameter.SqlDbType)
+		{
+			Direction = parameter.Direction,
+			IsNullable = parameter.IsNullable,
+			Precision = parameter.Precision,
+			Scale = parameter.Scale,
+			Size = parameter.Size,
+			Value = parameter.Value
+		};
+		return clone;
+	}
+
+	private static List<LineDataColumnSpec> LineDataColumns(HashSet<string> columns, string logicSheetName)
+	{
+		var specs = logicSheetName.Equals("InHealth", StringComparison.OrdinalIgnoreCase)
+			? InHealthLineDataColumns(columns)
+			: logicSheetName.Equals("NWL", StringComparison.OrdinalIgnoreCase)
+			? NorthWestLineDataColumns(columns)
+			: logicSheetName.Equals("Augustus", StringComparison.OrdinalIgnoreCase)
+			? AugustusLineDataColumns(columns)
+			: logicSheetName.Equals("Cove", StringComparison.OrdinalIgnoreCase)
+			? CoveLineDataColumns(columns)
+			: logicSheetName.Equals("Elixir", StringComparison.OrdinalIgnoreCase)
+			? ElixirLineDataColumns(columns)
+			: logicSheetName.Equals("PCRLOA", StringComparison.OrdinalIgnoreCase)
+			? PcrLoaLineDataColumns(columns)
+			: logicSheetName.Equals("Beech Tree", StringComparison.OrdinalIgnoreCase)
+			? BeechTreeLineDataColumns(columns)
+			: logicSheetName.Equals("PhiLife", StringComparison.OrdinalIgnoreCase) || logicSheetName.Equals("Rising Tides", StringComparison.OrdinalIgnoreCase)
+			? StandardOrderLineDataColumns(columns)
+			: GenericLineDataColumns(columns);
+
+		return AvailableLineDataColumns(specs);
+	}
+
+	private static List<LineDataColumnSpec> AvailableLineDataColumns(IEnumerable<LineDataColumnSpec> specs)
+		=> specs
+			.Where(spec => !spec.Selector.StartsWith("CAST('' AS nvarchar", StringComparison.OrdinalIgnoreCase)
+						   && !spec.Selector.StartsWith("CAST(NULL AS datetime)", StringComparison.OrdinalIgnoreCase))
+			.ToList();
+
+	private static List<LineDataColumnSpec> GenericLineDataColumns(HashSet<string> columns)
+		=> new()
+		{
+			TextColumn(columns, "OrderId", "Order Id", "OrderId", "OrderID", "Order ID", "RecordId", "Record ID"),
+			TextColumn(columns, "SampleId", "Sample Id", "Accession", "SampleId", "SampleID", "Sample ID", "UniqueSampleID", "Unique Sample ID", "OrderId", "OrderID", "Order ID"),
+			TextColumn(columns, "PaymentMethod", "Payment Method", "PaymentMethod", "Payment Method", "BillTo", "Bill To", "BilledTo", "Billed To"),
+			TextColumn(columns, "Barcode", "Barcode", "Barcode", "BarCode"),
+			TextColumn(columns, "Specimen", "Specimen", "Specimen", "SpecimenType", "Specimen Type"),
+			TextColumn(columns, "Collector", "Collector", "Collector", "CollectedBy", "Collected By"),
+			TextColumn(columns, "OrderStatus", "Order Status", "OrderStatus", "Order Status", "Status"),
+			TextColumn(columns, "BillingStatus", "Billing Status", "BillingStatus", "Billing Status", "BillStatus", "Bill Status"),
+			TextColumn(columns, "SampleStatus", "Sample Status", "SampleStatus", "Sample Status", "LRNSampleStatus", "LRN Sample Status"),
+			DateColumn(columns, "RequestSubmittedDate", "Request Submitted Date", "RequestSubmittedDate", "Request Submitted Date", "ReqSubmittedDate", "SubmittedDate"),
+			DateColumn(columns, "RequestCollectDate", "Request Collect Date", "RequestCollectDate", "ReqCollectDate", "REQ_COLLECT_DATE", "CollectionDate", "DateOfCollection", "CollectedDate", "Entry_DateCreated"),
+			DateColumn(columns, "ReqReceivedDate", "Req Received Date", "ReqReceivedDate", "ReceivedDate", "RequestReceivedDate"),
+			DateColumn(columns, "ReqReportedDate", "Req Reported Date", "ReqReportedDate", "ResultDate", "ReportedDate", "ReqResultedDate", "SampleResultedDate"),
+			DateColumn(columns, "ValidatedDate", "Validated Date", "ValidatedDate", "Validated Date"),
+			TextColumn(columns, "ResultedStatus", "Resulted Status", "RessultedStatus", "ResultedStatus", "Result Status", "ResultStatus", "LRNResultStatus"),
+			TextColumn(columns, "ClientStatus", "Client Status", "ClientStatus", "Client Status", "SubStatus", "Sub Status"),
+			TextColumn(columns, "SubStatus", "Sub Status", "SubStatus", "Sub Status", "ClientStatus", "Client Status"),
+			TextColumn(columns, "TimetoResult", "Time to Result", "TimetoResult", "Time to Result", "TimeToResult"),
+			TextColumn(columns, "TurnaroundTime", "Turnaround Time", "TurnaroundTime", "Turnaround Time", "TAT"),
+			TextColumn(columns, "PerformingLaboratory", "Performing Laboratory", "Performing Laboratory", "PerformingLaboratory", "PerformingLab"),
+			TextColumn(columns, "Results", "Results", "Results", "Result"),
+			TextColumn(columns, "PatientName", "Patient Name", "PatientName", "Patient Name", "PatientFullName", "Patient Full Name", "FullName", "Full Name"),
+			TextColumn(columns, "PatientFirstName", "Patient First Name", "PatientFirstName", "Patient First Name", "FirstName", "First Name"),
+			TextColumn(columns, "PatientLastName", "Patient Last Name", "PatientLastName", "Patient Last Name", "LastName", "Last Name"),
+			DateColumn(columns, "PatientDateofBirth", "Patient DOB", "PatientDateofBirth", "Patient Date of Birth", "DOB", "DateOfBirth", "Date of Birth"),
+			TextColumn(columns, "VisitNumber", "Visit Number", "VisitNumber", "Visit Number"),
+			TextColumn(columns, "AMDDOE", "AMD DOE", "AMDDOE", "AMD DOE"),
+			TextColumn(columns, "AMDLBD", "AMD LBD", "AMDLBD", "AMD LBD"),
+			DateColumn(columns, "BilledDate", "Billed Date", "BilledDate", "Billed Date"),
+			TextColumn(columns, "TimetoBill", "Time to Bill", "TimetoBill", "Time to Bill", "TimeToBill"),
+			TextColumn(columns, "ClaimStatus", "Claim Status", "ClaimStatus", "Claim Status", "NewStatus", "FinalStatus", "Final Status"),
+			TextColumn(columns, "BilledorNot", "Billed or Not", "BilledorNot", "Billed/Not", "Billed Or Not", "BillCategory", "Bill Category", "LRNBillCategory"),
+			TextColumn(columns, "ClinicName", "Clinic Name", "Facility", "FacilityName", "ClinicName", "Clinic Name", "Clinic", "ReqLocationName", "REQ_LOCATION_NAME", "Location", "LocationName", "ClientName", "Client Name"),
+			TextColumn(columns, "Provider", "Provider", "Provider", "ProviderName", "PhysicianName", "RefPhy", "Ref Phy", "ReferringProvider", "Referring Physician", "DoctorFullName", "Doctor Full Name"),
+			TextColumn(columns, "SalesRepName", "Sales Rep", "SaleRepName", "SalesRepName", "Sales Rep Name", "SalesRep", "Sales Rep", "SalesRepresentative", "Sales Representative"),
+			TextColumn(columns, "PrimaryInsurance", "Primary Insurance", "PrimaryInsurance", "Primary Insurance", "PrimaryInsuranceProvider", "Primary Insurance Provider", "Insurance", "InsuranceName", "Insurance Name"),
+			TextColumn(columns, "PrimaryInsuranceID", "Primary Insurance ID", "PrimaryInsuranceID", "Primary Insurance ID", "InsuranceID", "Insurance ID"),
+			TextColumn(columns, "ICD10Codes", "ICD10 Codes", "ICD10Codes", "ICD10 Codes", "ICD Codes", "DiagnosisCodes"),
+			TextColumn(columns, "Tests", "Tests", "Tests", "Test", "Panel", "PanelName", "Panel Name"),
+			TextColumn(columns, "PanelCategory", "Panel Category", "PanelCategory", "Panel Category", "PanelName", "Panel Name", "PanelType", "Panel Type"),
+			TextColumn(columns, "InsuranceCategory", "Insurance Category", "InsuranceCategory", "Insurance Category", "InsuranceType", "Insurance Type"),
+			TextColumn(columns, "Client", "Client", "Client", "ClientName", "Client Name"),
+			TextColumn(columns, "RequisitionType", "Requisition Type", "RequistionType", "RequisitionType", "Requisition Type"),
+			DateColumn(columns, "DateOfService", "Date of Service", "DateofService", "DateOfService", "Date of Service"),
+			TextColumn(columns, "Medications", "Medications", "Medications", "Medication"),
+			TextColumn(columns, "FacilityState", "Facility State", "FacilityState", "Facility State"),
+			TextColumn(columns, "RelationshipToInsured", "Relationship To Insured", "RelationshipToInsured", "Relationship To Insured"),
+			TextColumn(columns, "FacilityCity", "Facility City", "FacilityCity", "Facility City"),
+			TextColumn(columns, "FacilityZipcode", "Facility Zipcode", "FacilityZipcode", "Facility Zipcode", "FacilityZipCode", "Facility Zip Code"),
+			TextColumn(columns, "FacilityAddress", "Facility Address", "FacilityAddress", "Facility Address"),
+			TextColumn(columns, "PolicyId", "Policy ID", "PolicyId", "Policy ID"),
+			TextColumn(columns, "GroupId", "Group ID", "GroupId", "Group ID"),
+			TextColumn(columns, "ReferenceId", "Reference ID", "ReferenceId", "Reference ID"),
+			DateColumn(columns, "PolicyHolderDOB", "Policy Holder DOB", "Policy_Holder_DOB", "PolicyHolderDOB", "Policy Holder DOB"),
+			TextColumn(columns, "Address", "Address", "Address"),
+			TextColumn(columns, "Email", "Email", "Email"),
+			TextColumn(columns, "City", "City", "City"),
+			TextColumn(columns, "Gender", "Gender", "Gender"),
+			TextColumn(columns, "State", "State", "State"),
+			TextColumn(columns, "TransferTo", "Transfer To", "TransferTo", "Transfer To"),
+			TextColumn(columns, "PatientEthnicity", "Patient Ethnicity", "PatientEthnicity", "Patient Ethnicity"),
+			TextColumn(columns, "ZipCode", "Zip Code", "ZipCode", "Zip Code", "Zipcode"),
+			TextColumn(columns, "Race", "Race", "Race"),
+			TextColumn(columns, "LabCode", "Lab Code", "LabCode", "Lab Code"),
+			TextColumn(columns, "UID", "UID", "UID"),
+			TextColumn(columns, "CollectionWeek", "Collection Week", "CollectionWeek", "Collection Week"),
+			TextColumn(columns, "NPI", "NPI", "NPI"),
+			TextColumn(columns, "NoInsuranceInfo", "No Insurance Info", "NoInsuranceInfo", "No Insurance Info")
+		};
+
+	private static List<LineDataColumnSpec> AugustusLineDataColumns(HashSet<string> columns)
+		=> new()
+		{
+			TextColumn(columns, "Source", "Source", "Source"),
+			TextColumn(columns, "Accession", "Accession", "Accession"),
+			TextColumn(columns, "PatientCode", "PatientCode", "PatientCode"),
+			TextColumn(columns, "PatientLastName", "PatientLastName", "PatientLastName"),
+			TextColumn(columns, "PatientFirstName", "PatientFirstName", "PatientFirstName"),
+			TextColumn(columns, "PatientMiddleName", "PatientMiddleName", "PatientMiddleName"),
+			TextColumn(columns, "PatientFullName", "PatientFullName", "PatientFullName"),
+			DateColumn(columns, "PatientDOB", "PatientDOB", "PatientDOB"),
+			TextColumn(columns, "PatientEthnicity", "PatientEthnicity", "PatientEthnicity"),
+			TextColumn(columns, "DoctorCode", "DoctorCode", "DoctorCode"),
+			TextColumn(columns, "DoctorLastName", "DoctorLastName", "DoctorLastName"),
+			TextColumn(columns, "DoctorFirstName", "DoctorFirstName", "DoctorFirstName"),
+			TextColumn(columns, "DoctorFullName", "DoctorFullName", "DoctorFullName"),
+			TextColumn(columns, "DoctorMiddleName", "DoctorMiddleName", "DoctorMiddleName"),
+			TextColumn(columns, "DoctorNPI", "DoctorNPI", "DoctorNPI"),
+			TextColumn(columns, "Valid", "Valid", "Valid"),
+			TextColumn(columns, "AccessionWithoutLetter", "AccessionWithoutLetter", "AccessionWithoutLetter"),
+			TextColumn(columns, "AccessionWithoutLetter2", "AccessionWithoutLetter2", "AccessionWithoutLetter2"),
+			TextColumn(columns, "AccessionWithoutLetter3", "AccessionWithoutLetter3", "AccessionWithoutLetter3"),
+			TextColumn(columns, "AccessionWithoutLetter4", "AccessionWithoutLetter4", "AccessionWithoutLetter4"),
+			TextColumn(columns, "AccessionWithoutLetter5", "AccessionWithoutLetter5", "AccessionWithoutLetter5"),
+			TextColumn(columns, "AccessionWithoutLetter6", "AccessionWithoutLetter6", "AccessionWithoutLetter6"),
+			TextColumn(columns, "ReqternalNo", "ReqternalNo", "ReqternalNo"),
+			DateColumn(columns, "RequestSubmittedDate", "RequestSubmittedDate", "RequestSubmittedDate"),
+			DateColumn(columns, "RequestCollectDate", "RequestCollectDate", "RequestCollectDate"),
+			DateColumn(columns, "ReqReceivedDate", "ReqReceivedDate", "ReqReceivedDate"),
+			DateColumn(columns, "ReqReportedDate", "ReqReportedDate", "ReqReportedDate"),
+			TextColumn(columns, "LocationCode", "LocationCode", "LocationCode"),
+			TextColumn(columns, "LocationName", "LocationName", "LocationName"),
+			TextColumn(columns, "BillType", "BillType", "BillType"),
+			TextColumn(columns, "InsuranceCode", "InsuranceCode", "InsuranceCode"),
+			TextColumn(columns, "InsuredPolicyNo", "InsuredPolicyNo", "InsuredPolicyNo"),
+			TextColumn(columns, "InsuredGroupNo", "InsuredGroupNo", "InsuredGroupNo"),
+			DateColumn(columns, "InsuredEffectiveDate", "InsuredEffectiveDate", "InsuredEffectiveDate"),
+			DateColumn(columns, "InsuredExpireDate", "InsuredExpireDate", "InsuredExpireDate"),
+			TextColumn(columns, "PanelLabName", "PanelLabName", "PanelLabName"),
+			TextColumn(columns, "PanelCode", "PanelCode", "PanelCode"),
+			DateColumn(columns, "PanelRunDate", "PanelRunDate", "PanelRunDate"),
+			TextColumn(columns, "PanelStat", "PanelStat", "PanelStat"),
+			TextColumn(columns, "CombinedCPTCode", "CombinedCPTCode", "CombinedCPTCode"),
+			TextColumn(columns, "CombinedPanel", "CombinedPanel", "CombinedPanel"),
+			TextColumn(columns, "PanelName", "PanelName", "PanelName"),
+			TextColumn(columns, "PanelType", "PanelType", "PanelType"),
+			TextColumn(columns, "InsuranceName", "InsuranceName", "InsuranceName"),
+			TextColumn(columns, "InsuranceNameNotListed", "InsuranceNameNotListed", "InsuranceNameNotListed"),
+			DateColumn(columns, "ResultDate", "ResultDate", "ResultDate"),
+			TextColumn(columns, "ResultStatus", "ResultStatus", "ResultStatus"),
+			TextColumn(columns, "BillTo", "BillTo", "BillTo"),
+			TextColumn(columns, "BillingStatus", "BillingStatus", "BillingStatus"),
+			DateColumn(columns, "EnteredDate", "EnteredDate", "EnteredDate"),
+			TextColumn(columns, "EnteredStatus", "EnteredStatus", "EnteredStatus"),
+			DateColumn(columns, "FirstBilledDate", "FirstBilledDate", "FirstBilledDate"),
+			TextColumn(columns, "BilledStatus", "BilledStatus", "BilledStatus"),
+			TextColumn(columns, "ClaimStatus", "ClaimStatus", "ClaimStatus"),
+			TextColumn(columns, "FinalStatus", "FinalStatus", "FinalStatus"),
+			TextColumn(columns, "TimetoBill", "TimetoBill", "TimetoBill"),
+			TextColumn(columns, "TimetoResult", "TimetoResult", "TimetoResult"),
+			TextColumn(columns, "OrganizationCode", "OrganizationCode", "OrganizationCode"),
+			TextColumn(columns, "ClinicName", "ClinicName", "ClinicName"),
+			TextColumn(columns, "ClientStatus1", "ClientStatus1", "ClientStatus1"),
+			TextColumn(columns, "ClientStatus", "ClientStatus", "ClientStatus"),
+			TextColumn(columns, "OrderICDCode", "OrderICDCode", "OrderICDCode"),
+			TextColumn(columns, "ServiceICDCode", "ServiceICDCode", "ServiceICDCode"),
+			DateColumn(columns, "CreatedOn", "CreatedOn", "CreatedOn"),
+			TextColumn(columns, "SourceFile", "SourceFile", "SourceFile"),
+			TextColumn(columns, "RunId", "RunId", "RunId")
+		};
+
+	private static List<LineDataColumnSpec> CoveLineDataColumns(HashSet<string> columns)
+		=> new()
+		{
+			TextColumn(columns, "Accession", "Accession", "Accession"),
+			TextColumn(columns, "RecordId", "RecordId", "OrderId", "OrderID", "RecordId"),
+			TextColumn(columns, "Status", "Status", "Status"),
+			DateColumn(columns, "DateOfCollection", "DateOfCollection", "DateOfCollection"),
+			DateColumn(columns, "ReceivedDate", "ReceivedDate", "ReceivedDate"),
+			DateColumn(columns, "ValidatedDate", "ValidatedDate", "ValidatedDate"),
+			TextColumn(columns, "ClientStatus", "ClientStatus", "ClientStatus"),
+			TextColumn(columns, "FirstName", "FirstName", "FirstName", "PatientFirstName"),
+			TextColumn(columns, "LastName", "LastName", "LastName", "PatientLastName"),
+			TextColumn(columns, "TimetoResult", "TimetoResult", "TimetoResult", "TimeToResult"),
+			DateColumn(columns, "BilledDate", "BilledDate", "BilledDate"),
+			TextColumn(columns, "TimetoBill", "TimetoBill", "TimetoBill", "TimeToBill"),
+			TextColumn(columns, "BillCategory", "BillCategory", "BillCategory"),
+			TextColumn(columns, "FacilityName", "FacilityName", "FacilityName"),
+			TextColumn(columns, "PhysicianName", "PhysicianName", "PhysicianName"),
+			TextColumn(columns, "ProviderName", "ProviderName", "ProviderName"),
+			TextColumn(columns, "SaleRepName", "SaleRepName", "SaleRepName", "SalesRepName"),
+			TextColumn(columns, "PrimaryInsuranceProvider", "PrimaryInsuranceProvider", "PrimaryInsuranceProvider"),
+			TextColumn(columns, "ICDCodes", "ICDCodes", "ICDCodes"),
+			TextColumn(columns, "RequistionType", "RequistionType", "RequistionType", "RequisitionType"),
+			TextColumn(columns, "PanelType", "PanelType", "PanelType"),
+			TextColumn(columns, "Panel", "Panel", "Panel"),
+			TextColumn(columns, "NewStatus", "NewStatus", "NewStatus"),
+			TextColumn(columns, "SubStatus", "SubStatus", "SubStatus"),
+			DateColumn(columns, "DateOfBirth", "DateOfBirth", "DateOfBirth", "DOB"),
+			DateColumn(columns, "DateofService", "DateofService", "DateofService", "DateOfService"),
+			TextColumn(columns, "Medications", "Medications", "Medications"),
+			TextColumn(columns, "InsuranceType", "InsuranceType", "InsuranceType"),
+			TextColumn(columns, "FacilityState", "FacilityState", "FacilityState"),
+			TextColumn(columns, "Relationship_To_Insured", "Relationship_To_Insured", "Relationship_To_Insured", "RelationshipToInsured"),
+			TextColumn(columns, "FacilityCity", "FacilityCity", "FacilityCity"),
+			TextColumn(columns, "FacilityZipcode", "FacilityZipcode", "FacilityZipcode", "FacilityZipCode"),
+			TextColumn(columns, "FacilityAddress", "FacilityAddress", "FacilityAddress"),
+			TextColumn(columns, "PolicyId", "PolicyId", "PolicyId"),
+			TextColumn(columns, "GroupId", "GroupId", "GroupId"),
+			TextColumn(columns, "ReferenceId", "ReferenceId", "ReferenceId"),
+			DateColumn(columns, "Policy_Holder_DOB", "Policy_Holder_DOB", "Policy_Holder_DOB"),
+			TextColumn(columns, "Address", "Address", "Address"),
+			TextColumn(columns, "Email", "Email", "Email"),
+			TextColumn(columns, "City", "City", "City"),
+			TextColumn(columns, "Gender", "Gender", "Gender"),
+			TextColumn(columns, "State", "State", "State"),
+			TextColumn(columns, "TransferTo", "TransferTo", "TransferTo"),
+			TextColumn(columns, "PatientEthnicity", "PatientEthnicity", "PatientEthnicity"),
+			TextColumn(columns, "ZipCode", "ZipCode", "ZipCode", "Zipcode"),
+			TextColumn(columns, "Race", "Race", "Race"),
+			TextColumn(columns, "LabCode", "LabCode", "LabCode"),
+			TextColumn(columns, "UID", "UID", "UID"),
+			TextColumn(columns, "CollectionWeek", "CollectionWeek", "CollectionWeek"),
+			TextColumn(columns, "NPI", "NPI", "NPI")
+		};
+
+	private static List<LineDataColumnSpec> ElixirLineDataColumns(HashSet<string> columns)
+		=> new()
+		{
+			TextColumn(columns, "Accession", "Accession", "Accession"),
+			TextColumn(columns, "RecordId", "RecordId", "RecordId", "OrderId", "OrderID"),
+			TextColumn(columns, "Status", "Status", "Status"),
+			DateColumn(columns, "DateOfCollection", "DateOfCollection", "DateOfCollection"),
+			DateColumn(columns, "ReceivedDate", "ReceivedDate", "ReceivedDate"),
+			TextColumn(columns, "ResultStatus", "ResultStatus", "ResultStatus"),
+			DateColumn(columns, "SampleResultedDate", "SampleResultedDate", "SampleResultedDate"),
+			TextColumn(columns, "TimetoResult", "TimetoResult", "TimetoResult", "TimeToResult"),
+			TextColumn(columns, "PatientFirstName", "PatientFirstName", "PatientFirstName", "FirstName"),
+			TextColumn(columns, "PatientLastName", "PatientLastName", "PatientLastName", "LastName"),
+			TextColumn(columns, "PatientFullName", "PatientFullName", "PatientFullName", "PatientName"),
+			DateColumn(columns, "BilledDate", "BilledDate", "BilledDate"),
+			TextColumn(columns, "TimetoBill", "TimetoBill", "TimetoBill", "TimeToBill"),
+			TextColumn(columns, "FacilityName", "FacilityName", "FacilityName"),
+			TextColumn(columns, "PhysicianName", "PhysicianName", "PhysicianName"),
+			TextColumn(columns, "ProviderName", "ProviderName", "ProviderName"),
+			TextColumn(columns, "SaleRepName", "SaleRepName", "SaleRepName", "SalesRepName"),
+			TextColumn(columns, "PrimaryInsuranceProvider", "PrimaryInsuranceProvider", "PrimaryInsuranceProvider"),
+			TextColumn(columns, "ICDCodes", "ICDCodes", "ICDCodes"),
+			TextColumn(columns, "RequistionType", "RequistionType", "RequistionType", "RequisitionType"),
+			TextColumn(columns, "PanelName", "PanelName", "PanelName"),
+			TextColumn(columns, "Panel", "Panel", "Panel"),
+			TextColumn(columns, "NewStatus", "NewStatus", "NewStatus"),
+			TextColumn(columns, "BillCategory", "BillCategory", "BillCategory"),
+			TextColumn(columns, "SubStatus", "SubStatus", "SubStatus"),
+			TextColumn(columns, "FacilityState", "FacilityState", "FacilityState"),
+			TextColumn(columns, "RelationshipToInsured", "RelationshipToInsured", "RelationshipToInsured"),
+			TextColumn(columns, "FacilityCity", "FacilityCity", "FacilityCity"),
+			TextColumn(columns, "FacilityZipcode", "FacilityZipcode", "FacilityZipcode", "FacilityZipCode"),
+			TextColumn(columns, "FacilityAddress", "FacilityAddress", "FacilityAddress"),
+			TextColumn(columns, "PolicyId", "PolicyId", "PolicyId"),
+			TextColumn(columns, "GroupId", "GroupId", "GroupId"),
+			TextColumn(columns, "ReferenceId", "ReferenceId", "ReferenceId"),
+			DateColumn(columns, "Policy_Holder_DOB", "Policy_Holder_DOB", "Policy_Holder_DOB"),
+			TextColumn(columns, "Address", "Address", "Address"),
+			TextColumn(columns, "Medications", "Medications", "Medications"),
+			TextColumn(columns, "Email", "Email", "Email"),
+			TextColumn(columns, "City", "City", "City"),
+			TextColumn(columns, "Gender", "Gender", "Gender"),
+			TextColumn(columns, "State", "State", "State"),
+			DateColumn(columns, "DOB", "DOB", "DOB", "DateOfBirth"),
+			DateColumn(columns, "DateofService", "DateofService", "DateofService", "DateOfService"),
+			TextColumn(columns, "TransferTo", "TransferTo", "TransferTo"),
+			TextColumn(columns, "PatientEthnicity", "PatientEthnicity", "PatientEthnicity"),
+			TextColumn(columns, "ZipCode", "ZipCode", "ZipCode", "Zipcode"),
+			TextColumn(columns, "Race", "Race", "Race"),
+			TextColumn(columns, "LabCode", "LabCode", "LabCode"),
+			TextColumn(columns, "NoInsuranceInfo", "NoInsuranceInfo", "NoInsuranceInfo"),
+			TextColumn(columns, "InsuranceType", "InsuranceType", "InsuranceType")
+		};
+
+	private static List<LineDataColumnSpec> PcrLoaLineDataColumns(HashSet<string> columns)
+		=> new()
+		{
+			TextColumn(columns, "SpecimenID", "Specimen ID", "Accession", "SpecimenID", "Specimen ID"),
+			TextColumn(columns, "OrderStatus", "Order Status", "OrderStatus", "Order Status"),
+			DateColumn(columns, "RequestCollectDate", "RequestCollectDate", "RequestCollectDate", "ReqCollectDate"),
+			DateColumn(columns, "ReqReceivedDate", "ReqReceivedDate", "ReqReceivedDate", "ReceivedDate"),
+			DateColumn(columns, "ReqResultedDate", "ReqResultedDate", "ReqResultedDate", "ResultDate"),
+			TextColumn(columns, "ResultedNot", "Resulted / Not", "RessultedStatus", "ResultedStatus", "ResultStatus"),
+			TextColumn(columns, "ClientStatus", "Client Status", "ClientStatus", "Client Status"),
+			TextColumn(columns, "TimetoResult", "Time to Result (Resulted - Received)", "TimetoResult", "TimeToResult"),
+			TextColumn(columns, "PatientName", "Patient Name", "PatientName", "Patient Name"),
+			TextColumn(columns, "VisitNumber", "VisitNumber", "VisitNumber"),
+			TextColumn(columns, "AMDDOE", "AMDDOE", "AMDDOE"),
+			TextColumn(columns, "AMDLBD", "AMDLBD", "AMDLBD"),
+			TextColumn(columns, "TimetoBill", "TimetoBill", "TimetoBill", "TimeToBill"),
+			TextColumn(columns, "ClaimStatus", "ClaimStatus", "ClaimStatus"),
+			TextColumn(columns, "BilledorNot", "Billed/Not", "BilledorNot", "BillCategory"),
+			TextColumn(columns, "PrimaryInsurance", "PrimaryInsurance", "PrimaryInsurance"),
+			TextColumn(columns, "PanelCategory", "PanelCategory", "PanelCategory"),
+			TextColumn(columns, "InsuranceCategory", "InsuranceCategory", "InsuranceCategory"),
+			TextColumn(columns, "Client", "Client", "Client")
+		};
+
+	private static List<LineDataColumnSpec> BeechTreeLineDataColumns(HashSet<string> columns)
+		=> new()
+		{
+			TextColumn(columns, "OrderId", "OrderId", "OrderId", "OrderID", "Order ID"),
+			TextColumn(columns, "SampleId", "SampleId", "Accession", "SampleId", "SampleID"),
+			TextColumn(columns, "PaymentMethod", "PaymentMethod", "PaymentMethod"),
+			TextColumn(columns, "Barcode", "Barcode", "Barcode"),
+			TextColumn(columns, "Specimen", "Specimen", "Specimen"),
+			TextColumn(columns, "Collector", "Collector", "Collector"),
+			TextColumn(columns, "OrderStatus", "OrderStatus", "OrderStatus"),
+			TextColumn(columns, "BillingStatus", "BillingStatus", "BillingStatus"),
+			TextColumn(columns, "SampleStatus", "SampleStatus", "SampleStatus"),
+			DateColumn(columns, "RequestSubmittedDate", "RequestSubmittedDate", "RequestSubmittedDate"),
+			DateColumn(columns, "RequestCollectDate", "RequestCollectDate", "RequestCollectDate", "ReqCollectDate"),
+			DateColumn(columns, "ReqReceivedDate", "ReqReceivedDate", "ReqReceivedDate"),
+			DateColumn(columns, "ReqReportedDate", "ReqReportedDate", "ReqReportedDate"),
+			TextColumn(columns, "ResultedStatus", "ResultedStatus", "RessultedStatus", "ResultedStatus"),
+			TextColumn(columns, "ClientStatus", "ClientStatus", "ClientStatus"),
+			TextColumn(columns, "TimetoResult", "TimetoResult", "TimetoResult", "TimeToResult"),
+			TextColumn(columns, "TurnaroundTime", "TurnaroundTime", "TurnaroundTime"),
+			TextColumn(columns, "PerformingLaboratory", "Performing Laboratory", "Performing Laboratory", "PerformingLaboratory"),
+			TextColumn(columns, "Results", "Results", "Results"),
+			TextColumn(columns, "PatientFirstName", "PatientFirstName", "PatientFirstName"),
+			TextColumn(columns, "PatientLastName", "PatientLastName", "PatientLastName"),
+			DateColumn(columns, "PatientDateofBirth", "PatientDateofBirth", "PatientDateofBirth", "PatientDateOfBirth"),
+			TextColumn(columns, "VisitNumber", "VisitNumber", "VisitNumber"),
+			TextColumn(columns, "AMDDOE", "AMDDOE", "AMDDOE"),
+			TextColumn(columns, "AMDLBD", "AMDLBD", "AMDLBD"),
+			TextColumn(columns, "TimetoBill", "TimetoBill", "TimetoBill", "TimeToBill"),
+			TextColumn(columns, "ClaimStatus", "ClaimStatus", "ClaimStatus"),
+			TextColumn(columns, "BilledorNot", "Billed/Not", "BilledorNot"),
+			TextColumn(columns, "ClinicName", "Clinic Name", "Facility", "ClinicName"),
+			TextColumn(columns, "Provider", "Provider", "Provider"),
+			TextColumn(columns, "PrimaryInsurance", "PrimaryInsurance", "PrimaryInsurance"),
+			TextColumn(columns, "PrimaryInsuranceID", "PrimaryInsuranceID", "PrimaryInsuranceID"),
+			TextColumn(columns, "ICD10Codes", "ICD10Codes", "ICD10Codes"),
+			TextColumn(columns, "Tests", "Tests", "Tests"),
+			TextColumn(columns, "PanelCategory", "PanelCategory", "PanelCategory")
+		};
+
+	private static List<LineDataColumnSpec> StandardOrderLineDataColumns(HashSet<string> columns)
+		=> new()
+		{
+			TextColumn(columns, "OrderID", "OrderID", "OrderID", "OrderId", "Order ID"),
+			TextColumn(columns, "SampleID", "Sample ID", "Accession", "SampleID", "Sample ID"),
+			TextColumn(columns, "PaymentMethod", "PaymentMethod", "PaymentMethod"),
+			TextColumn(columns, "Barcode", "Barcode", "Barcode"),
+			TextColumn(columns, "Specimen", "Specimen", "Specimen"),
+			TextColumn(columns, "Collector", "Collector", "Collector"),
+			TextColumn(columns, "OrderStatus", "OrderStatus", "OrderStatus"),
+			TextColumn(columns, "BillingStatus", "BillingStatus", "BillingStatus"),
+			TextColumn(columns, "SampleStatus", "SampleStatus", "SampleStatus"),
+			DateColumn(columns, "RequestSubmittedDate", "RequestSubmittedDate", "RequestSubmittedDate"),
+			DateColumn(columns, "RequestCollectDate", "RequestCollectDate", "RequestCollectDate", "ReqCollectDate"),
+			DateColumn(columns, "ReqReceivedDate", "ReqReceivedDate", "ReqReceivedDate"),
+			DateColumn(columns, "ReqReportedDate", "ReqReportedDate", "ReqReportedDate"),
+			TextColumn(columns, "ResultedNot", "Resulted / Not", "RessultedStatus", "ResultedStatus"),
+			TextColumn(columns, "ClientStatus", "ClientStatus", "ClientStatus"),
+			TextColumn(columns, "TimeToResult", "Time to Result (Resulted - Received)", "TimeToResult", "TimetoResult"),
+			TextColumn(columns, "PerformingLaboratory", "Performing Laboratory", "Performing Laboratory", "PerformingLaboratory"),
+			TextColumn(columns, "Results", "Results", "Results"),
+			TextColumn(columns, "PatientFirstName", "Patient First Name", "PatientFirstName"),
+			TextColumn(columns, "PatientLastName", "Patient Last Name", "PatientLastname", "PatientLastName"),
+			DateColumn(columns, "PatientDateOfBirth", "Patient Date of Birth", "PatientDateOfBirth", "PatientDateofBirth"),
+			TextColumn(columns, "VisitNumber", "VisitNumber", "VisitNumber"),
+			TextColumn(columns, "AMDDOE", "AMD DOE", "AMDDOE"),
+			TextColumn(columns, "AMDLBD", "AMD LBD", "AMDLBD"),
+			TextColumn(columns, "TimetoBill", "Time to Bill", "TimetoBill", "TimeToBill"),
+			TextColumn(columns, "ClaimStatus", "ClaimStatus", "ClaimStatus"),
+			TextColumn(columns, "BilledorNot", "Billed/Not", "BilledorNot"),
+			TextColumn(columns, "Facility", "Facility", "Facility"),
+			TextColumn(columns, "Provider", "Provider", "Provider"),
+			TextColumn(columns, "PrimaryInsurance", "Primary Insurance", "PrimaryInsurance"),
+			TextColumn(columns, "PrimaryInsuranceID", "Primary Insurance ID #", "PrimaryInsuranceID"),
+			TextColumn(columns, "ICD10Codes", "ICD-10 Codes", "ICD10Codes"),
+			TextColumn(columns, "Tests", "Tests", "Tests"),
+			TextColumn(columns, "PanelCategory", "PanelCategory", "PanelCategory")
+		};
+
+	private static List<LineDataColumnSpec> InHealthLineDataColumns(HashSet<string> columns)
+		=> new()
+		{
+			TextColumn(columns, "Accession", "Accession", "Accession"),
+			TextColumn(columns, "TestOrderHistory82_Id", "TestOrderHistory82_Id", "OrderId", "OrderID", "Order ID"),
+			TextColumn(columns, "EntryStatus", "EntryStatus", "EntryStatus"),
+			TextColumn(columns, "LastTest", "LastTest", "LastTest"),
+			TextColumn(columns, "ResultStatus", "ResultStatus", "ResultStatus"),
+			TextColumn(columns, "TimetoResult", "TimetoResult", "TimetoResult", "TimeToResult", "Time to Result"),
+			TextColumn(columns, "PatientID", "PatientID", "PatientID", "Patient ID"),
+			TextColumn(columns, "PatientFirstName", "PatientFirstName", "PatientFirstName", "FirstName", "First Name"),
+			TextColumn(columns, "PatientLastName", "PatientLastName", "PatientLastName", "LastName", "Last Name"),
+			DateColumn(columns, "BilledDate", "BilledDate", "BilledDate", "Billed Date"),
+			TextColumn(columns, "TimetoBill", "TimetoBill", "TimetoBill", "TimeToBill", "Time to Bill"),
+			TextColumn(columns, "Clinic", "Clinic", "Account"),
+			TextColumn(columns, "ProviderLastName", "ProviderLastName", "ProviderLastName"),
+			TextColumn(columns, "ProviderFirstName", "ProviderFirstName", "ProviderFirstName"),
+			TextColumn(columns, "PrimaryInsurance", "PrimaryInsurance", "PrimaryInsurance", "Primary Insurance"),
+			TextColumn(columns, "ICD10", "ICD10", "ICD10", "ICD10Codes", "ICD Codes"),
+			TextColumn(columns, "TestCategory", "TestCategory", "TestCategory"),
+			TextColumn(columns, "LRNPanelName", "LRNPanelName", "LRNPanelName"),
+			TextColumn(columns, "OrderInfo", "OrderInfo", "OrderInfo"),
+			TextColumn(columns, "LRNSampleStatus", "LRN Sample Status", "SampleStatus"),
+			TextColumn(columns, "LRNBillCategory", "LRN Bill Category", "BillCategory"),
+			TextColumn(columns, "LRNSubStatus", "LRN Sub Status", "SubStatus"),
+			TextColumn(columns, "NexumStatus", "Nexum Status", "NexumStatus"),
+			TextColumn(columns, "PrimaryPolicyInformation", "PrimaryPolicyInformation", "PrimaryPolicyInformation"),
+			TextColumn(columns, "StreetAddress", "StreetAddress", "StreetAddress"),
+			TextColumn(columns, "Medications", "Medications", "Medications"),
+			TextColumn(columns, "City", "City", "City"),
+			TextColumn(columns, "Gender", "Gender", "Gender"),
+			TextColumn(columns, "State", "State", "State"),
+			DateColumn(columns, "DateOfBirth", "DateOfBirth", "DateOfBirth", "DOB"),
+			TextColumn(columns, "Ethnicity", "Ethnicity", "Ethnicity"),
+			TextColumn(columns, "Zip", "Zip", "Zip", "ZipCode", "Zipcode"),
+			TextColumn(columns, "Race", "Race", "Race"),
+			TextColumn(columns, "PerformingLab", "PerformingLab", "PerformingLab"),
+			TextColumn(columns, "DocRequest", "DocRequest", "DocRequest"),
+			TextColumn(columns, "InAppeals", "InAppeals", "InAppeals"),
+			TextColumn(columns, "ClaimDenied", "ClaimDenied", "ClaimDenied"),
+			DateColumn(columns, "UpdateDate", "UpdateDate", "UpdateDate"),
+			TextColumn(columns, "ClaimNote", "ClaimNote", "ClaimNote"),
+			TextColumn(columns, "Verified", "Verified", "Verified"),
+			TextColumn(columns, "ReverifyBy", "ReverifyBy", "ReverifyBy"),
+			TextColumn(columns, "PayerCodeLookup", "PayerCodeLookup", "PayerCodeLookup"),
+			TextColumn(columns, "PayerCodeLookup_Label", "PayerCodeLookup_Label", "PayerCodeLookup_Label"),
+			TextColumn(columns, "Note", "Note", "Note"),
+			TextColumn(columns, "BenefitsVerified", "BenefitsVerified", "BenefitsVerified"),
+			TextColumn(columns, "PVerifyCode", "PVerifyCode", "PVerifyCode"),
+			TextColumn(columns, "EligibilityPortal", "EligibilityPortal", "EligibilityPortal"),
+			TextColumn(columns, "ClearinghouseName", "ClearinghouseName", "ClearinghouseName"),
+			TextColumn(columns, "PortalName", "PortalName", "PortalName"),
+			TextColumn(columns, "HCPCS", "HCPCS", "HCPCS"),
+			TextColumn(columns, "PracticeType", "PracticeType", "PracticeType"),
+			TextColumn(columns, "NonCoveredToxCodes", "NonCoveredToxCodes", "NonCoveredToxCodes"),
+			TextColumn(columns, "SendToBilling", "SendToBilling", "SendToBilling"),
+			TextColumn(columns, "CheckForClaim", "CheckForClaim", "CheckForClaim"),
+			TextColumn(columns, "ClaimRcvd", "ClaimRcvd", "ClaimRcvd"),
+			TextColumn(columns, "HCPCS2", "HCPCS2", "HCPCS2"),
+			TextColumn(columns, "RegistrationID", "RegistrationID", "RegistrationID"),
+			TextColumn(columns, "WTHold", "WTHold", "WTHold"),
+			TextColumn(columns, "Rejected", "Rejected", "Rejected"),
+			TextColumn(columns, "AnnualTestCount", "AnnualTestCount", "AnnualTestCount"),
+			DateColumn(columns, "RegisteredDate", "RegisteredDate", "RegisteredDate"),
+			TextColumn(columns, "PatientIDEntry", "PatientIDEntry", "PatientIDEntry"),
+			TextColumn(columns, "SecondaryInsurance", "SecondaryInsurance", "SecondaryInsurance"),
+			TextColumn(columns, "SecondaryPolicyInformation", "SecondaryPolicyInformation", "SecondaryPolicyInformation"),
+			DateColumn(columns, "VerifiedDate", "VerifiedDate", "VerifiedDate"),
+			TextColumn(columns, "NewPatient", "NewPatient", "NewPatient"),
+			TextColumn(columns, "EditPatient", "EditPatient", "EditPatient"),
+			TextColumn(columns, "Reflex", "Reflex", "Reflex"),
+			TextColumn(columns, "EntryNumber", "EntryNumber", "EntryNumber"),
+			TextColumn(columns, "CollectionMedia", "CollectionMedia", "CollectionMedia"),
+			TextColumn(columns, "CollectedBy", "CollectedBy", "CollectedBy"),
+			TextColumn(columns, "OrderReason", "OrderReason", "OrderReason"),
+			TextColumn(columns, "SpecimenType", "SpecimenType", "SpecimenType"),
+			TextColumn(columns, "Components", "Components", "Components"),
+			TextColumn(columns, "OrderFormEntryNumber", "OrderFormEntryNumber", "OrderFormEntryNumber"),
+			TextColumn(columns, "CollectedTime", "CollectedTime", "CollectedTime"),
+			TextColumn(columns, "ElectronicSignature", "ElectronicSignature", "ElectronicSignature"),
+			TextColumn(columns, "AccountID", "AccountID", "AccountID"),
+			TextColumn(columns, "ParentAccountID", "ParentAccountID", "ParentAccountID"),
+			TextColumn(columns, "AccountContactEmail", "AccountContactEmail", "AccountContactEmail"),
+			TextColumn(columns, "SalesRepEmail", "SalesRepEmail", "SalesRepEmail"),
+			TextColumn(columns, "OrderIPAddress", "OrderIPAddress", "OrderIPAddress"),
+			TextColumn(columns, "PerformingLabAddress", "PerformingLabAddress", "PerformingLabAddress"),
+			TextColumn(columns, "PerformingLabCLIA", "PerformingLabCLIA", "PerformingLabCLIA"),
+			TextColumn(columns, "BillingLabCLIA", "BillingLabCLIA", "BillingLabCLIA"),
+			TextColumn(columns, "ResultsPortal", "ResultsPortal", "ResultsPortal"),
+			TextColumn(columns, "BillingLabAddress", "BillingLabAddress", "BillingLabAddress"),
+			TextColumn(columns, "Division", "Division", "Division"),
+			TextColumn(columns, "IHBillingForDTR", "IHBillingForDTR", "IHBillingForDTR"),
+			TextColumn(columns, "EditLink", "EditLink", "EditLink"),
+			TextColumn(columns, "UploadToQbench", "UploadToQbench", "UploadToQbench"),
+			TextColumn(columns, "InsuranceCode", "InsuranceCode", "InsuranceCode"),
+			TextColumn(columns, "CPT", "CPT", "CPT"),
+			TextColumn(columns, "PatientRegisterLink", "PatientRegisterLink", "PatientRegisterLink"),
+			TextColumn(columns, "ReqLink", "ReqLink", "ReqLink"),
+			TextColumn(columns, "ResultLink", "ResultLink", "ResultLink"),
+			TextColumn(columns, "ToxRules1", "ToxRules1", "ToxRules1"),
+			TextColumn(columns, "ToxRules2", "ToxRules2", "ToxRules2"),
+			TextColumn(columns, "ToxRules3", "ToxRules3", "ToxRules3"),
+			TextColumn(columns, "ToxRules4", "ToxRules4", "ToxRules4"),
+			TextColumn(columns, "ToxRules5", "ToxRules5", "ToxRules5"),
+			TextColumn(columns, "ToxGate1", "ToxGate1", "ToxGate1"),
+			TextColumn(columns, "ToxGate2", "ToxGate2", "ToxGate2"),
+			TextColumn(columns, "ToxApproved", "ToxApproved", "ToxApproved"),
+			TextColumn(columns, "PolicyNumberCharacteristics", "PolicyNumberCharacteristics", "PolicyNumberCharacteristics"),
+			TextColumn(columns, "ResultMatched", "ResultMatched", "ResultMatched"),
+			DateColumn(columns, "Entry_DateCreated", "Entry_DateCreated", "Entry_DateCreated"),
+			DateColumn(columns, "Entry_DateSubmitted", "Entry_DateSubmitted", "Entry_DateSubmitted"),
+			DateColumn(columns, "Entry_DateUpdated", "Entry_DateUpdated", "Entry_DateUpdated"),
+			TextColumn(columns, "BillingLab", "BillingLab", "BillingLab"),
+			TextColumn(columns, "BillingLab2", "BillingLab2", "BillingLab2"),
+			TextColumn(columns, "InsuranceCode2", "InsuranceCode2", "InsuranceCode2"),
+			TextColumn(columns, "Insurance", "Insurance", "Insurance"),
+			TextColumn(columns, "LRNBillingLab", "LRN Billing Lab", "LRNBillingLab"),
+			TextColumn(columns, "Week", "Week", "Week")
+		};
+
+	private static List<LineDataColumnSpec> NorthWestLineDataColumns(HashSet<string> columns)
+		=> new()
+		{
+			TextColumn(columns, "Accession", "Accession", "Accession"),
+			TextColumn(columns, "PatientName", "PatientName", "PatientName", "Patient Name"),
+			DateColumn(columns, "RequestCollectDate", "RequestCollectDate", "RequestCollectDate", "Request Collect Date"),
+			TextColumn(columns, "IncorrectDOS", "IncorrectDOS", "IncorrectDOS", "IncorrectDos"),
+			DateColumn(columns, "RequestReceivedDate", "RequestReceivedDate", "RequestReceivedDate", "Request Received Date", "ReceivedDate"),
+			TextColumn(columns, "BillType", "BillType", "BillType"),
+			TextColumn(columns, "ResultStatus", "ResultStatus", "ResultStatus", "Result Status"),
+			TextColumn(columns, "BilledTo", "BilledTo", "BilledTo", "Billed To", "BillTo", "Bill To"),
+			TextColumn(columns, "BillStatus", "BillStatus", "BillStatus", "Bill Status"),
+			TextColumn(columns, "FinalStatus", "FinalStatus", "FinalStatus", "Final Status"),
+			TextColumn(columns, "Category", "Category", "Category"),
+			DateColumn(columns, "DateOfBirth", "DateOfBirth", "DateOfBirth", "DOB"),
+			TextColumn(columns, "ReferringProvider", "ReferringProvider", "ReferringProvider", "Referring Provider"),
+			TextColumn(columns, "ActualPanel", "ActualPanel", "ActualPanel", "Actual Panel"),
+			TextColumn(columns, "PanelType", "PanelType", "PanelType", "Panel Type"),
+			TextColumn(columns, "InsuranceName", "InsuranceName", "InsuranceName", "Insurance Name"),
+			DateColumn(columns, "ResultDate", "ResultDate", "ResultDate", "Result Date"),
+			TextColumn(columns, "PanelName", "PanelName", "PanelName", "Panel Name"),
+			TextColumn(columns, "ClinicName", "ClinicName", "ClinicName", "Clinic Name"),
+			TextColumn(columns, "ReqLocationName", "ReqLocationName", "ReqLocationName", "REQ_LOCATION_NAME"),
+			DateColumn(columns, "EnteredDate", "EnteredDate", "EnteredDate", "Entered Date"),
+			DateColumn(columns, "BilledDateDaq", "BilledDateDaq", "BilledDateDaq"),
+			DateColumn(columns, "BilledDateWeb", "BilledDateWeb", "BilledDateWeb"),
+			TextColumn(columns, "EnteredStatus", "EnteredStatus", "EnteredStatus"),
+			TextColumn(columns, "BilledStatus", "BilledStatus", "BilledStatus"),
+			TextColumn(columns, "ClaimTypeDaq", "ClaimTypeDaq", "ClaimTypeDaq"),
+			TextColumn(columns, "ClaimStatusDaq", "ClaimStatusDaq", "ClaimStatusDaq"),
+			TextColumn(columns, "ClaimTypeWebpm", "ClaimTypeWebpm", "ClaimTypeWebpm"),
+			TextColumn(columns, "ClaimStatusWebpm", "ClaimStatusWebpm", "ClaimStatusWebpm"),
+			TextColumn(columns, "SourceSystem", "SourceSystem", "SourceSystem"),
+			TextColumn(columns, "ChargesNotEnteredStatus", "ChargesNotEnteredStatus", "ChargesNotEnteredStatus"),
+			TextColumn(columns, "TimetoResult", "TimetoResult", "TimetoResult", "TimeToResult", "Time to Result"),
+			TextColumn(columns, "TimetoBill", "TimetoBill", "TimetoBill", "TimeToBill", "Time to Bill"),
+			TextColumn(columns, "PATIENT_CODE", "PATIENT_CODE", "PATIENT_CODE"),
+			TextColumn(columns, "PATIENT_F_NAME", "PATIENT_F_NAME", "PATIENT_F_NAME"),
+			TextColumn(columns, "PATIENT_L_NAME", "PATIENT_L_NAME", "PATIENT_L_NAME"),
+			TextColumn(columns, "PATIENT_M_NAME", "PATIENT_M_NAME", "PATIENT_M_NAME"),
+			TextColumn(columns, "PATIENT_GENDER", "PATIENT_GENDER", "PATIENT_GENDER")
+		};
+
+	private static LineDataColumnSpec TextColumn(HashSet<string> columns, string key, string header, params string[] candidates)
+		=> new(key, header, TextSelect(columns, key, candidates));
+
+	private static LineDataColumnSpec DateColumn(HashSet<string> columns, string key, string header, params string[] candidates)
+		=> new(key, header, DateSelect(columns, key, candidates));
+
+	private static string TextSelect(HashSet<string> columns, string alias, params string[] candidates)
+		=> TextExpr(FirstExisting(columns, candidates), alias);
+
+	private static string DateSelect(HashSet<string> columns, string alias, params string[] candidates)
+	{
+		var column = FirstExisting(columns, candidates);
+		var expr = string.IsNullOrWhiteSpace(column)
+			? "CAST('' AS nvarchar(10))"
+			: $"ISNULL(CONVERT(nvarchar(10), TRY_CONVERT(date, {Q(column)}), 23), '')";
+		return $"{expr} AS {Q(alias)}";
+	}
+
+	private static string OrderByText(HashSet<string> columns)
+	{
+		var column = FirstExisting(columns, "OrderId", "OrderID", "Order ID", "Accession", "SampleId", "SampleID", "Sample ID");
+		return string.IsNullOrWhiteSpace(column) ? "(SELECT 0)" : Q(column);
+	}
+
+	private static string ReadText(SqlDataReader rdr, string alias)
+	{
+		var ordinal = rdr.GetOrdinal(alias);
+		return rdr.IsDBNull(ordinal) ? string.Empty : Convert.ToString(rdr.GetValue(ordinal))?.Trim() ?? string.Empty;
+	}
+
+	private static DateTime? ReadDate(SqlDataReader rdr, string alias)
+	{
+		var ordinal = rdr.GetOrdinal(alias);
+		if (rdr.IsDBNull(ordinal))
+		{
+			return null;
+		}
+
+		var value = rdr.GetValue(ordinal);
+		if (value is DateTime date)
+		{
+			return date;
+		}
+
+		return DateTime.TryParse(Convert.ToString(value), out var parsed) ? parsed : null;
+	}
+
+	private static string NormalizeDateType(string? dateType)
+		=> dateType?.Trim().Equals("Received", StringComparison.OrdinalIgnoreCase) == true
+			? "Received"
+			: dateType?.Trim().Equals("Resulted", StringComparison.OrdinalIgnoreCase) == true
+				? "Resulted"
+				: "Collected";
+
+	private static string DateTypeLabel(string dateType)
+		=> NormalizeDateType(dateType) switch
+		{
+			"Received" => "Received",
+			"Resulted" => "Resulted",
+			_ => "Collected"
+		};
+
+	private static LisSummaryKpiCards BuildKpiCards(
+		List<RawLisGroup> raw,
+		List<LisSummaryRow> summaryRows,
+		int totalSamples)
+	{
+		// Keep the cards tied to the same insurance-bill rows shown in the summary.
+		// Reading the already-built rows also preserves every lab's existing template logic.
+		var billedCount = FindInsuranceBillSummaryTotal(summaryRows, "BILLED", "BILLEDTOINSURANCE");
+		var unbilledCount = FindInsuranceBillSummaryTotal(summaryRows, "UNBILLED", "NOTBILLED");
 
 		var selfPayCount = raw
 			.Where(x => IsSelfPay(GetField(x, "Bill To"))
@@ -457,6 +1689,23 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			.Sum(x => x.TotalClaims);
 
 		return new LisSummaryKpiCards(totalSamples, billedCount, unbilledCount, selfPayCount);
+	}
+
+	private static int FindInsuranceBillSummaryTotal(List<LisSummaryRow> rows, params string[] descriptions)
+	{
+		var descriptionKeys = descriptions.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+		// Insurance/billable detail rows are the first matching level-one rows in every
+		// configured lab template. Later matches belong to self-pay, client, or test sections.
+		var templateRow = rows.FirstOrDefault(row => row.Level == 1
+			&& descriptionKeys.Contains(CompareKey(row.Description)));
+		if (templateRow is not null) return templateRow.Total;
+
+		// Labs without a configured template use nested dynamic rows. In that layout,
+		// the billed status is level two and its logic carries the insurance parent.
+		return rows.FirstOrDefault(row => row.Level == 2
+			&& descriptionKeys.Contains(CompareKey(row.Description))
+			&& CompareKey(row.Logic).Contains("INSURANCE", StringComparison.OrdinalIgnoreCase))?.Total ?? 0;
 	}
 
 	private static bool IsBilledStatus(string? value)
@@ -490,32 +1739,217 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 		foreach (var template in templateRows)
 		{
-			var matches = IsTotalLogic(template.Logic)
+			var matches = IsAugustusReadyToBillRow(logicSheetName, template)
+				? raw.Where(x => MatchesTemplateLogic(x, AugustusReadyToBillCountLogic)).ToList()
+				: IsTotalLogic(template.Logic)
 				? raw
 				: raw.Where(x => MatchesTemplateLogic(x, template.Logic)).ToList();
 
-			rows.Add(BuildRow(template.Code, template.Description, template.Logic, ResolveTemplateLevel(template.Code), matches.ToList()));
+			rows.Add(BuildRow(template.Code, template.Description, template.Logic, ResolveTemplateLevel(logicSheetName, template), matches.ToList()));
+		}
+
+		if (!UsesDirectTemplateParentCounts(logicSheetName))
+		{
+			RecalculateParentRowsFromChildren(rows);
+		}
+
+		if (logicSheetName.Equals("NWL", StringComparison.OrdinalIgnoreCase))
+		{
+			ApplyNwlChargesCreatedRows(rows, raw);
 		}
 
 		return rows;
 	}
 
+	private const string AugustusReadyToBillCountLogic = "Bill to = Insurance Bills AND Bill status = Unbilled AND Final Status =  Resulted yet to be billed";
+
+	private static bool IsAugustusReadyToBillRow(string logicSheetName, TemplateRow template)
+		=> logicSheetName.Equals("Augustus", StringComparison.OrdinalIgnoreCase)
+		   && template.Description.Equals("Ready to bill", StringComparison.OrdinalIgnoreCase);
+
+	private static bool UsesDirectTemplateParentCounts(string logicSheetName)
+		=> logicSheetName.Equals("Augustus", StringComparison.OrdinalIgnoreCase)
+		   || logicSheetName.Equals("Certus", StringComparison.OrdinalIgnoreCase)
+		   || logicSheetName.Equals("NWL", StringComparison.OrdinalIgnoreCase)
+		   || logicSheetName.Equals("Beech Tree", StringComparison.OrdinalIgnoreCase)
+		   || logicSheetName.Equals("Cove", StringComparison.OrdinalIgnoreCase)
+		   || logicSheetName.Equals("PhiLife", StringComparison.OrdinalIgnoreCase)
+		   || logicSheetName.Equals("Elixir", StringComparison.OrdinalIgnoreCase)
+		   || logicSheetName.Equals("Rising Tides", StringComparison.OrdinalIgnoreCase)
+		   || logicSheetName.Equals("PCRLOA", StringComparison.OrdinalIgnoreCase)
+		   || logicSheetName.Equals("InHealth", StringComparison.OrdinalIgnoreCase);
+
+	private static bool ShouldGroupByIncorrectDos(string logicSheetName)
+		=> logicSheetName.Equals("Certus", StringComparison.OrdinalIgnoreCase)
+		   || logicSheetName.Equals("NWL", StringComparison.OrdinalIgnoreCase);
+
+	private static bool UsesBlankIncorrectDosSummary(string logicSheetName)
+		=> logicSheetName.Equals("Certus", StringComparison.OrdinalIgnoreCase);
+
+	private static bool HasBlankIncorrectDos(RawLisGroup row)
+	{
+		var incorrectDos = GetField(row, "Incorrect DOS");
+		return string.IsNullOrWhiteSpace(incorrectDos) || IsBlankValue(incorrectDos);
+	}
+
+	private static bool UsesBlankNaSummary(string logicSheetName)
+		=> logicSheetName.Equals("InHealth", StringComparison.OrdinalIgnoreCase);
+
+	private static bool HasBlankNa(RawLisGroup row)
+	{
+		var na = GetField(row, "NA");
+		return string.IsNullOrWhiteSpace(na) || IsBlankValue(na);
+	}
+
+	private static void ApplyNwlChargesCreatedRows(List<LisSummaryRow> rows, List<RawLisGroup> raw)
+	{
+		for (var index = 0; index < rows.Count; index++)
+		{
+			var row = rows[index];
+			if (!IsNwlInsuranceChargesCreatedLogic(row.Logic)) continue;
+
+			string? source = null;
+			if (row.Logic.Contains("Source = Webpm", StringComparison.OrdinalIgnoreCase))
+			{
+				source = "Webpm";
+			}
+			else if (row.Logic.Contains("Source = Daqbilling", StringComparison.OrdinalIgnoreCase))
+			{
+				source = "Daqbilling";
+			}
+
+			var matches = raw.Where(x => MatchesNwlInsuranceChargesCreated(x, source)).ToList();
+			rows[index] = BuildRow(row.Code, row.Description, row.Logic, row.Level, matches);
+		}
+	}
+
+	private static bool IsNwlInsuranceChargesCreatedLogic(string logic)
+	{
+		return logic.Contains("Bill To = Insurance Bill", StringComparison.OrdinalIgnoreCase)
+			   && logic.Contains("Bill Status = Unbilled", StringComparison.OrdinalIgnoreCase)
+			   && logic.Contains("Final Status = Charges Created and Not Submitted", StringComparison.OrdinalIgnoreCase);
+	}
+
+	private static bool MatchesNwlInsuranceChargesCreated(RawLisGroup row, string? source)
+	{
+		if (!ValueMatches("Bill To", GetField(row, "Bill To"), "Insurance Bill")) return false;
+		if (!ValueMatches("Bill Status", GetField(row, "Bill Status"), "Unbilled")) return false;
+
+		var matchesFinalStatus =
+			ValueMatches("Final Status", GetField(row, "Final Status"), "Charges Created and Not Submitted")
+			|| ValueMatches("Final Status 2", GetField(row, "Final Status 2"), "Charges Created and Not Submitted")
+			|| ValueMatches("Final Status", ValueOrBlank(row, "FinalStatus"), "Charges Created and Not Submitted")
+			|| ValueMatches("Final Status", ValueOrBlank(row, "Final Status"), "Charges Created and Not Submitted");
+
+		if (!matchesFinalStatus) return false;
+
+		return string.IsNullOrWhiteSpace(source)
+			   || ValueMatches("Source", GetField(row, "Source"), source)
+			   || ValueMatches("Source", ValueOrBlank(row, "SourceSystem"), source);
+	}
+
+	private static void RecalculateParentRowsFromChildren(List<LisSummaryRow> rows)
+	{
+		for (var index = rows.Count - 1; index >= 0; index--)
+		{
+			var childRows = GetImmediateChildren(rows, index);
+			if (childRows.Count == 0) continue;
+
+			rows[index] = BuildChildAggregateRow(rows[index], childRows);
+		}
+	}
+
+	private static List<LisSummaryRow> GetImmediateChildren(List<LisSummaryRow> rows, int parentIndex)
+	{
+		var parentLevel = rows[parentIndex].Level;
+		var childLevel = parentLevel + 1;
+		var children = new List<LisSummaryRow>();
+
+		for (var index = parentIndex + 1; index < rows.Count && rows[index].Level > parentLevel; index++)
+		{
+			if (rows[index].Level == childLevel)
+			{
+				children.Add(rows[index]);
+			}
+		}
+
+		return children;
+	}
+
+	private static LisSummaryRow BuildChildAggregateRow(LisSummaryRow parent, List<LisSummaryRow> children)
+	{
+		var byMonth = SumChildMonths(children);
+		var byYear = SumChildYears(children);
+
+		return new LisSummaryRow
+		{
+			Code = parent.Code,
+			Description = parent.Description,
+			Logic = parent.Logic,
+			Level = parent.Level,
+			ByMonth = byMonth,
+			ByYear = byYear,
+			Total = children.Sum(x => x.Total)
+		};
+	}
+
+	private static Dictionary<string, int> SumChildMonths(List<LisSummaryRow> children)
+		=> children
+			.SelectMany(x => x.ByMonth)
+			.GroupBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+			.ToDictionary(g => g.Key, g => g.Sum(x => x.Value), StringComparer.OrdinalIgnoreCase);
+
+	private static Dictionary<int, int> SumChildYears(List<LisSummaryRow> children)
+		=> children
+			.SelectMany(x => x.ByYear)
+			.GroupBy(x => x.Key)
+			.ToDictionary(g => g.Key, g => g.Sum(x => x.Value));
+
 	private static bool MatchesTemplateLogic(RawLisGroup row, string logic)
 	{
 		foreach (var condition in SplitConditions(logic))
 		{
-			var parts = condition.Split('=', 2, StringSplitOptions.TrimEntries);
-			if (parts.Length != 2) continue;
+			if (!TryParseCondition(condition, out var fieldName, out var expectedText, out var negate)) continue;
 
-			var field = CanonicalFieldName(parts[0]);
-			var expectedValues = ParseExpectedValues(parts[1]);
+			var field = CanonicalFieldName(fieldName);
+			var expectedValues = ParseExpectedValues(expectedText);
 			if (expectedValues.Count == 0 || expectedValues.Any(v => IsAllValue(v))) continue;
 
 			var actual = GetField(row, field);
-			if (!expectedValues.Any(v => ValueMatches(actual, v))) return false;
+			var matches = expectedValues.Any(v => ValueMatches(field, actual, v));
+			if (negate ? matches : !matches) return false;
 		}
 
 		return true;
+	}
+
+	private static bool TryParseCondition(string condition, out string field, out string expectedText, out bool negate)
+	{
+		foreach (var op in new[] { " NOT EQUAL TO ", "!=", "<>" })
+		{
+			var index = condition.IndexOf(op, StringComparison.OrdinalIgnoreCase);
+			if (index >= 0)
+			{
+				field = condition[..index].Trim();
+				expectedText = condition[(index + op.Length)..].Trim();
+				negate = true;
+				return true;
+			}
+		}
+
+		var equalsIndex = condition.IndexOf('=', StringComparison.Ordinal);
+		if (equalsIndex >= 0)
+		{
+			field = condition[..equalsIndex].Trim();
+			expectedText = condition[(equalsIndex + 1)..].Trim();
+			negate = false;
+			return true;
+		}
+
+		field = string.Empty;
+		expectedText = string.Empty;
+		negate = false;
+		return false;
 	}
 
 	private static List<string> SplitConditions(string logic)
@@ -539,8 +1973,14 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		}
 
 		result.Add(logic[start..].Trim());
-		return result.Where(x => x.Contains('=')).ToList();
+		return result.Where(ContainsConditionOperator).ToList();
 	}
+
+	private static bool ContainsConditionOperator(string condition)
+		=> condition.Contains('=', StringComparison.Ordinal)
+		   || condition.Contains("!=", StringComparison.Ordinal)
+		   || condition.Contains("<>", StringComparison.Ordinal)
+		   || condition.Contains(" NOT EQUAL TO ", StringComparison.OrdinalIgnoreCase);
 
 	private static List<string> ParseExpectedValues(string valueText)
 	{
@@ -555,7 +1995,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 	private static string GetField(RawLisGroup row, string field)
 	{
-		if (row.Fields.TryGetValue(field, out var value)) return value;
+		if (row.Fields.TryGetValue(field, out var value) && !string.IsNullOrWhiteSpace(value)) return value;
 
 		return field switch
 		{
@@ -564,9 +2004,14 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			"Billed/Not" => FirstNonBlank(ValueOrBlank(row, "Billed/Not"), ValueOrBlank(row, "Billing Status"), ValueOrBlank(row, "Bill Status")),
 			"Bill To" => FirstNonBlank(ValueOrBlank(row, "Bill To"), ValueOrBlank(row, "Payment Method")),
 			"Payment Method" => FirstNonBlank(ValueOrBlank(row, "Payment Method"), ValueOrBlank(row, "Bill To")),
+			"Client Status" => FirstNonBlank(ValueOrBlank(row, "Client Status"), ValueOrBlank(row, "Client Status 2")),
 			"Client Status 2" => FirstNonBlank(ValueOrBlank(row, "Client Status 2"), ValueOrBlank(row, "Client Status")),
 			"Final Status 2" => FirstNonBlank(ValueOrBlank(row, "Final Status 2"), ValueOrBlank(row, "Final Status"), ValueOrBlank(row, "Claim Status")),
 			"Final Status" => FirstNonBlank(ValueOrBlank(row, "Final Status"), ValueOrBlank(row, "Claim Status")),
+			"Sub Status" => FirstNonBlank(ValueOrBlank(row, "Sub Status"), ValueOrBlank(row, "Client Status"), ValueOrBlank(row, "Sample Status")),
+			"Panel Type" => FirstNonBlank(ValueOrBlank(row, "Panel Type"), ValueOrBlank(row, "Sample Status")),
+			"Source" => FirstNonBlank(ValueOrBlank(row, "Source"), ValueOrBlank(row, "SourceSystem")),
+			"Charges not entered status" => FirstNonBlank(ValueOrBlank(row, "Charges not entered status"), ValueOrBlank(row, "ChargeNotEnteredStatus")),
 			_ => string.Empty
 		};
 	}
@@ -574,20 +2019,45 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 	private static string ValueOrBlank(RawLisGroup row, string field)
 		=> row.Fields.TryGetValue(field, out var value) ? value : string.Empty;
 
-	private static bool ValueMatches(string actual, string expected)
+	private static bool ValueMatches(string field, string actual, string expected)
 	{
-		if (IsBlankValue(expected)) return string.IsNullOrWhiteSpace(actual);
+		if (IsBlankValue(expected)) return string.IsNullOrWhiteSpace(actual) || IsBlankValue(actual);
 		if (IsAllValue(expected)) return true;
+
+		var actualClean = CleanValue(actual);
+		var expectedClean = CleanValue(expected);
+		if (actualClean.Equals(expectedClean, StringComparison.OrdinalIgnoreCase)) return true;
 
 		var actualKey = CompareKey(actual);
 		var expectedKey = CompareKey(expected);
 		if (actualKey == expectedKey) return true;
+		if (string.IsNullOrWhiteSpace(actualKey) || string.IsNullOrWhiteSpace(expectedKey)) return false;
+
+		if (IsBillStatusField(field))
+		{
+			var actualStatusKey = CompareKey(NormalizeBillStatus(actual));
+			var expectedStatusKey = CompareKey(NormalizeBillStatus(expected));
+			if (IsCanonicalBillStatusKey(actualStatusKey)
+				&& IsCanonicalBillStatusKey(expectedStatusKey)
+				&& actualStatusKey == expectedStatusKey)
+			{
+				return true;
+			}
+		}
 
 		// Allow small wording differences used by the lab templates, e.g. Insurance Bill(s), Selfpay/Self Pay.
 		return actualKey.TrimEnd('S') == expectedKey.TrimEnd('S')
-			   || actualKey.Contains(expectedKey, StringComparison.OrdinalIgnoreCase)
-			   || expectedKey.Contains(actualKey, StringComparison.OrdinalIgnoreCase);
+			   || actualKey.TrimEnd('D') == expectedKey.TrimEnd('D');
 	}
+
+	private static bool IsBillStatusField(string field)
+	{
+		var canonical = CanonicalFieldName(field);
+		return canonical is "Billing Status" or "Bill Status" or "Billed/Not";
+	}
+
+	private static bool IsCanonicalBillStatusKey(string key)
+		=> key is "BILLED" or "UNBILLED" or "NONBILLABLE";
 
 	private static bool IsAllValue(string value)
 		=> CompareKey(value) == "ALL";
@@ -603,14 +2073,24 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			   || key == "COUNTORDERID";
 	}
 
-	private static int ResolveTemplateLevel(string code)
+	private static int ResolveTemplateLevel(string logicSheetName, TemplateRow template)
 	{
-		var c = CleanValue(code);
+		if (IsAugustusReadyToBillRow(logicSheetName, template)) return 3;
+		if (IsCoveBillablePanelTypeRow(logicSheetName, template)) return 1;
+
+		var c = CleanValue(template.Code);
 		if (string.IsNullOrWhiteSpace(c)) return 0;
+		if (c is "•" or "◦") return 2;
+		if (c is "•" or "◦") return 2;
 		if (c is "•" or "◦" or "*") return 2;
 		if (int.TryParse(c, out _)) return 1;
 		return 0;
 	}
+
+	private static bool IsCoveBillablePanelTypeRow(string logicSheetName, TemplateRow template)
+		=> logicSheetName.Equals("Cove", StringComparison.OrdinalIgnoreCase)
+		   && template.Logic.Contains("Final Status = [Billable]", StringComparison.OrdinalIgnoreCase)
+		   && template.Logic.Contains("Panel Type =", StringComparison.OrdinalIgnoreCase);
 
 	private static List<LisSummaryRow> BuildDynamicPivotRows(List<RawLisGroup> raw)
 	{
@@ -623,6 +2103,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		AddNestedRows(rows, raw, "Bill To / Payment Type", x => GetField(x, "Bill To"), "Billed Status", x => GetField(x, "Billing Status"), "B");
 		AddNestedRows(rows, raw, "Final / Client Status", x => GetField(x, "Final Status"), "Sample / Category", x => GetField(x, "Sample Status"), "C");
 
+		RecalculateParentRowsFromChildren(rows);
 		return rows;
 	}
 
@@ -690,17 +2171,20 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 			"CLAIMSTATUS" => "Claim Status",
 			"BILLSTATUS" => "Bill Status",
 			"BILLINGSTATUS" => "Billing Status",
-			"BILLEDNOT" or "BILLEDORNOT" => "Billed/Not",
+			"BILLEDNOT" or "BILLEDORNOT" or "LRNBILLCATEGORY" => "Billed/Not",
 			"BILLTO" => "Bill To",
 			"PAYMENTMETHOD" => "Payment Method",
 			"CLIENTSTATUS" => "Client Status",
 			"CLIENTSTATUS2" => "Client Status 2",
 			"FINALSTATUS" => "Final Status",
 			"FINALSTATUS2" => "Final Status 2",
-			"SAMPLESTATUS" => "Sample Status",
+			"SUBSTATUS" or "SUBSTATUS2" or "LRNSUBSTATUS" => "Sub Status",
+			"PANELTYPE" => "Panel Type",
+			"SAMPLESTATUS" or "LRNSAMPLESTATUS" => "Sample Status",
 			"ORDERSTATUS" => "Order Status",
-			"SOURCE" => "Source",
-			"CHARGESNOTENTEREDSTATUS" or "CHARGESNOTENTERED" => "Charges not entered status",
+			"ENTRYSTATUS" => "Entry Status",
+			"SOURCE" or "SOURCESYSTEM" => "Source",
+			"CHARGESNOTENTEREDSTATUS" or "CHARGENOTENTEREDSTATUS" or "CHARGESNOTENTERED" => "Charges not entered status",
 			"INSURANCECATEGORY" => "Insurance category",
 			_ => field.Trim()
 		};
@@ -734,8 +2218,11 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		var cleaned = CleanValue(value);
 		var key = CompareKey(cleaned);
 		if (string.IsNullOrWhiteSpace(key)) return string.Empty;
-		if (ContainsAny(key, "UNBILL", "NOTBILL", "NOBILL", "PENDINGBILL", "NOTREADYTOBILL")) return "Unbilled";
-		if (ContainsAny(key, "BILLED", "SUBMITTED", "CHARGECREATED", "CLAIMCREATED", "READYTOBILL")) return "Billed";
+		if (key == "NOBILL") return "No Bill";
+		if (key.Contains("NOTREADYTOBILL", StringComparison.OrdinalIgnoreCase)) return "Not Ready To Bill";
+		if (key.Contains("READYTOBILL", StringComparison.OrdinalIgnoreCase)) return "Ready To Bill";
+		if (ContainsAny(key, "UNBILL", "NOTBILL", "PENDINGBILL")) return "Unbilled";
+		if (ContainsAny(key, "BILLED", "SUBMITTED", "CHARGECREATED", "CLAIMCREATED")) return "Billed";
 		if (ContainsAny(key, "NONBILL", "DONOTBILL", "EXCLUDED")) return "Non Billable";
 		return cleaned;
 	}
@@ -795,13 +2282,26 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 
 	private static string[] DateCandidatesFor(string logicSheet) => logicSheet switch
 	{
-		"Augustus" or "Certus" => new[] { "ReqCollectDate", "RequestCollectDate", "CollectionDate" },
+		"Augustus" => new[] { "RequestCollectDate", "ReqCollectDate", "REQ_COLLECT_DATE", "CollectionDate" },
+		"Certus" => new[] { "ReqCollectDate", "REQ_COLLECT_DATE", "RequestCollectDate", "CollectionDate" },
 		"Cove" or "Elixir" => new[] { "DateOfCollection", "RequestCollectDate", "CollectionDate" },
 		"InHealth" => new[] { "Entry_DateCreated", "RequestCollectDate", "DateOfCollection" },
 		"PCRDx-AL" => new[] { "ReceivedDate", "RequestCollectDate", "CollectionDate" },
 		"PCRDx-CO" => new[] { "CollectionDate", "RequestCollectDate", "ReceivedDate" },
 		_ => new[] { "RequestCollectDate", "ReqCollectDate", "DateOfCollection", "ReceivedDate", "CollectionDate", "Entry_DateCreated", "Collected" }
 	};
+
+	private static string[] CountDistinctCandidatesFor(string logicSheet) => logicSheet switch
+	{
+		"Beech Tree" => new[] { "Accession", "OrderID", "Order ID", "UniqueSampleID", "Unique Sample ID", "SampleID", "Sample ID", "AccessionNumber", "AccessionNo" },
+		_ => new[] { "Accession", "OrderID", "Order ID", "UniqueSampleID", "Unique Sample ID", "SampleID", "Sample ID", "AccessionNumber", "AccessionNo", "SpecimenID", "Specimen ID" }
+	};
+
+	private static string[] IncorrectDosCandidatesFor(string logicSheet)
+		=> new[] { "IncorrectDOS", "Incorrect DOS", "Incorrect_DOS", "IncorrectDos" };
+
+	private static bool RequiresBlankIncorrectDos(string logicSheet)
+		=> logicSheet is "NWL";
 
 	private static string[] ResultCandidatesFor(string logicSheet) => logicSheet switch
 	{
@@ -857,7 +2357,11 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		"PCRDx-AL" => new[] { "LRNSampleStatus", "FinalStatus", "ClientStatus" },
 		_ => new[] { "ClientStatus", "FinalStatus", "SubStatus", "NewStatus", "LRNSubStatus", "LRNSampleStatus" }
 	};
-	private static string[] FinalStatus2CandidatesFor(string logicSheet) => new[] { "FinalStatus2", "Final Status 2", "FinalStatus", "Category", "ClientStatus", "SubStatus" };
+	private static string[] FinalStatus2CandidatesFor(string logicSheet) => logicSheet switch
+	{
+		"NWL" => new[] { "Category", "FinalStatus2", "Final Status 2", "FinalStatus", "ClientStatus", "SubStatus" },
+		_ => new[] { "FinalStatus2", "Final Status 2", "FinalStatus", "Category", "ClientStatus", "SubStatus" }
+	};
 	private static string[] SampleStatusCandidatesFor(string logicSheet) => logicSheet switch
 	{
 		"NWL" => new[] { "Category", "SampleStatus", "SubStatus" },
@@ -866,7 +2370,15 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		_ => new[] { "SampleStatus", "Sample Status", "Category", "SubStatus", "LRNSampleStatus", "LRNSubStatus", "InsuranceType" }
 	};
 	private static string[] OrderStatusCandidatesFor(string logicSheet) => new[] { "OrderStatus", "Order Status", "SampleStatus", "LRNSampleStatus", "ClientStatus", "FinalStatus", "NewStatus" };
-	private static string[] SourceCandidatesFor(string logicSheet) => new[] { "Source", "BillingSource", "Billing Source", "SystemSource" };
+	private static string[] EntryStatusCandidatesFor(string logicSheet) => new[] { "EntryStatus", "Entry_Status", "Entry Status", "OrderStatus", "Order Status" };
+	private static string[] PanelTypeCandidatesFor(string logicSheet) => new[] { "PanelType", "Panel Type" };
+	private static string[] SubStatusCandidatesFor(string logicSheet) => new[] { "SubStatus", "Sub Status", "ClientStatus", "Client Status" };
+	private static string[] SourceCandidatesFor(string logicSheet) => logicSheet switch
+	{
+		"NWL" => new[] { "SourceSystem", "SystemSource", "Source", "BillingSource", "Billing Source" },
+		_ => new[] { "Source", "BillingSource", "Billing Source", "SystemSource", "SourceSystem" }
+	};
 	private static string[] ChargesNotEnteredCandidatesFor(string logicSheet) => new[] { "ChargesNotEnteredStatus", "Charges not entered status", "ChargesNotEntered", "Charges_Not_Entered_Status" };
 	private static string[] InsuranceCategoryCandidatesFor(string logicSheet) => new[] { "InsuranceCategory", "Insurance category", "InsuranceType", "Category" };
 }
+

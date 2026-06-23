@@ -29,3 +29,24 @@ body {
 .form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
   text-align: start;
 }
+
+.workflow-table {
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+    .workflow-table thead th {
+        background: #0f172a;
+        color: white;
+        position: sticky;
+        top: 0;
+        z-index: 5;
+    }
+
+    .workflow-table tbody tr:nth-child(even) {
+        background: #f8fafc;
+    }
+
+    .workflow-table tbody tr:hover {
+        background: #dbeafe;
+    }

@@ -12,6 +12,19 @@ public class DashboardController : Controller
 {
     private const int PageSize = 50;
 
+    private static List<string> NormalizeFilterValues(IEnumerable<string>? values) => values?
+        .Where(v => !string.IsNullOrWhiteSpace(v))
+        .Select(v => v.Trim())
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList() ?? [];
+
+    private static string? DisplayFilterValue(IReadOnlyCollection<string>? values) => values switch
+    {
+        null or { Count: 0 } => null,
+        { Count: 1 } => values.First(),
+        _ => string.Join(", ", values),
+    };
+
     private readonly LabSettings _labSettings;
     private readonly LabCsvFileResolver _resolver;
     private readonly CsvParserService _csvParser;
@@ -56,9 +69,9 @@ public class DashboardController : Controller
     // GET /Dashboard  or  /Dashboard/Index?lab=PCRLabsofAmerica&filterPayerName=...
     public async Task<IActionResult> Index(
         string? lab,
-        string? filterPayerName,
+        List<string>? filterPayerName,
         string? filterPayerType,
-        string? filterPanelName,
+        List<string>? filterPanelName,
         string? filterClinicName,
         string? filterReferringProvider,
         string? filterDosFrom,
@@ -69,6 +82,8 @@ public class DashboardController : Controller
     {
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+        filterPayerName = NormalizeFilterValues(filterPayerName);
+        filterPanelName = NormalizeFilterValues(filterPanelName);
 
         // Resolve lab config to check for DB availability
         _labSettings.Labs.TryGetValue(selectedLab, out var labConfig);
@@ -94,7 +109,7 @@ public class DashboardController : Controller
     /// <summary>Dashboard Index backed by the database.</summary>
     private async Task<IActionResult> IndexFromDbAsync(
         List<string> availableLabs, string selectedLab, LabCsvConfig labConfig,
-        string? filterPayerName, string? filterPayerType, string? filterPanelName,
+        List<string>? filterPayerName, string? filterPayerType, List<string>? filterPanelName,
         string? filterClinicName, string? filterReferringProvider,
         string? filterDosFrom, string? filterDosTo,
         string? filterFirstBillFrom, string? filterFirstBillTo,
@@ -109,12 +124,13 @@ public class DashboardController : Controller
         DateOnly.TryParse(filterFirstBillTo, out var fbTo);
 
         // Use pre-aggregated snapshot tables when UseDBDashboard=true and no filters are active
-        bool hasActiveFilters = new[]
-        {
-            filterPayerName, filterPayerType, filterPanelName, filterClinicName,
-            filterReferringProvider, filterDosFrom, filterDosTo,
-            filterFirstBillFrom, filterFirstBillTo
-        }.Any(f => !string.IsNullOrWhiteSpace(f));
+        bool hasActiveFilters = filterPayerName is { Count: > 0 }
+            || filterPanelName is { Count: > 0 }
+            || new[]
+            {
+                filterPayerType, filterClinicName, filterReferringProvider,
+                filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo
+            }.Any(f => !string.IsNullOrWhiteSpace(f));
 
         bool useAggregates = labConfig.UseDBDashboard && !hasActiveFilters;
 
@@ -143,9 +159,11 @@ public class DashboardController : Controller
                 AvailableLabs        = availableLabs,
                 SelectedLab          = selectedLab,
 
-                FilterPayerName          = filterPayerName,
+                FilterPayerName          = DisplayFilterValue(filterPayerName),
                 FilterPayerType          = filterPayerType,
-                FilterPanelName          = filterPanelName,
+                FilterPanelName          = DisplayFilterValue(filterPanelName),
+                FilterPayerNames         = filterPayerName ?? [],
+                FilterPanelNames         = filterPanelName ?? [],
                 FilterClinicName         = filterClinicName,
                 FilterReferringProvider  = filterReferringProvider,
                 FilterDosFrom            = filterDosFrom,
@@ -217,7 +235,7 @@ public class DashboardController : Controller
     /// <summary>Dashboard Index backed by CSV files (legacy fallback).</summary>
     private IActionResult IndexFromCsv(
         List<string> availableLabs, string selectedLab,
-        string? filterPayerName, string? filterPayerType, string? filterPanelName,
+        List<string>? filterPayerName, string? filterPayerType, List<string>? filterPanelName,
         string? filterClinicName, string? filterReferringProvider,
         string? filterDosFrom, string? filterDosTo,
         string? filterFirstBillFrom, string? filterFirstBillTo)
@@ -239,12 +257,18 @@ public class DashboardController : Controller
         // ?? Apply filters to claim records ????????????????????????????????????
         var filtered = allClaims.AsEnumerable();
 
-        if (!string.IsNullOrWhiteSpace(filterPayerName))
-            filtered = filtered.Where(r => r.PayerName.Equals(filterPayerName, StringComparison.OrdinalIgnoreCase));
+        if (filterPayerName is { Count: > 0 })
+        {
+            var set = filterPayerName.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            filtered = filtered.Where(r => set.Contains(r.PayerName));
+        }
         if (!string.IsNullOrWhiteSpace(filterPayerType))
             filtered = filtered.Where(r => r.PayerType.Equals(filterPayerType, StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrWhiteSpace(filterPanelName))
-            filtered = filtered.Where(r => r.PanelName.Equals(filterPanelName, StringComparison.OrdinalIgnoreCase));
+        if (filterPanelName is { Count: > 0 })
+        {
+            var set = filterPanelName.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            filtered = filtered.Where(r => set.Contains(r.PanelName));
+        }
         if (!string.IsNullOrWhiteSpace(filterClinicName))
             filtered = filtered.Where(r => r.ClinicName.Equals(filterClinicName, StringComparison.OrdinalIgnoreCase));
         if (!string.IsNullOrWhiteSpace(filterReferringProvider))
@@ -262,12 +286,18 @@ public class DashboardController : Controller
 
         // Apply same filters to line records (shared dimensions)
         var lineFiltered = allLines.AsEnumerable();
-        if (!string.IsNullOrWhiteSpace(filterPayerName))
-            lineFiltered = lineFiltered.Where(r => r.PayerName.Equals(filterPayerName, StringComparison.OrdinalIgnoreCase));
+        if (filterPayerName is { Count: > 0 })
+        {
+            var set = filterPayerName.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            lineFiltered = lineFiltered.Where(r => set.Contains(r.PayerName));
+        }
         if (!string.IsNullOrWhiteSpace(filterPayerType))
             lineFiltered = lineFiltered.Where(r => r.PayerType.Equals(filterPayerType, StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrWhiteSpace(filterPanelName))
-            lineFiltered = lineFiltered.Where(r => r.PanelName.Equals(filterPanelName, StringComparison.OrdinalIgnoreCase));
+        if (filterPanelName is { Count: > 0 })
+        {
+            var set = filterPanelName.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            lineFiltered = lineFiltered.Where(r => set.Contains(r.PanelName));
+        }
         if (!string.IsNullOrWhiteSpace(filterClinicName))
             lineFiltered = lineFiltered.Where(r => r.ClinicName.Equals(filterClinicName, StringComparison.OrdinalIgnoreCase));
         if (!string.IsNullOrWhiteSpace(filterReferringProvider))
@@ -445,9 +475,11 @@ public class DashboardController : Controller
             SelectedLab          = selectedLab,
 
             // Filters
-            FilterPayerName          = filterPayerName,
+            FilterPayerName          = DisplayFilterValue(filterPayerName),
             FilterPayerType          = filterPayerType,
-            FilterPanelName          = filterPanelName,
+            FilterPanelName          = DisplayFilterValue(filterPanelName),
+            FilterPayerNames         = filterPayerName ?? [],
+            FilterPanelNames         = filterPanelName ?? [],
             FilterClinicName         = filterClinicName,
             FilterReferringProvider  = filterReferringProvider,
             FilterDosFrom            = filterDosFrom,
@@ -1634,9 +1666,9 @@ public class DashboardController : Controller
     /// </summary>
     public async Task<IActionResult> ExportDashboardExcel(
         string? lab,
-        string? filterPayerName,
+        List<string>? filterPayerName,
         string? filterPayerType,
-        string? filterPanelName,
+        List<string>? filterPanelName,
         string? filterClinicName,
         string? filterReferringProvider,
         string? filterDosFrom,
@@ -1647,6 +1679,8 @@ public class DashboardController : Controller
     {
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+        filterPayerName = NormalizeFilterValues(filterPayerName);
+        filterPanelName = NormalizeFilterValues(filterPanelName);
 
         try
         {
@@ -1793,12 +1827,15 @@ public class DashboardController : Controller
     /// <summary>Builds a DashboardViewModel from either DB or CSV source.</summary>
     private async Task<DashboardViewModel> BuildDashboardViewModelAsync(
         string selectedLab,
-        string? filterPayerName, string? filterPayerType, string? filterPanelName,
+        List<string>? filterPayerName, string? filterPayerType, List<string>? filterPanelName,
         string? filterClinicName, string? filterReferringProvider,
         string? filterDosFrom, string? filterDosTo,
         string? filterFirstBillFrom, string? filterFirstBillTo,
         CancellationToken ct)
     {
+        filterPayerName = NormalizeFilterValues(filterPayerName);
+        filterPanelName = NormalizeFilterValues(filterPanelName);
+
         _labSettings.Labs.TryGetValue(selectedLab, out var labConfig);
         var useDb = labConfig is { LineClaimEnable: true }
                     && !string.IsNullOrWhiteSpace(labConfig.DbConnectionString);
@@ -1826,9 +1863,11 @@ public class DashboardController : Controller
             return new DashboardViewModel
             {
                 SelectedLab          = selectedLab,
-                FilterPayerName      = filterPayerName,
+                FilterPayerName      = DisplayFilterValue(filterPayerName),
                 FilterPayerType      = filterPayerType,
-                FilterPanelName      = filterPanelName,
+                FilterPanelName      = DisplayFilterValue(filterPanelName),
+                FilterPayerNames     = filterPayerName ?? [],
+                FilterPanelNames     = filterPanelName ?? [],
                 FilterClinicName     = filterClinicName,
                 FilterReferringProvider = filterReferringProvider,
                 FilterDosFrom        = filterDosFrom,
@@ -1877,12 +1916,18 @@ public class DashboardController : Controller
         var allLines  = lineFilePath  is not null ? _csvParser.ParseLineLevel(lineFilePath)   : [];
 
         var filtered = allClaims.AsEnumerable();
-        if (!string.IsNullOrWhiteSpace(filterPayerName))
-            filtered = filtered.Where(x => x.PayerName.Equals(filterPayerName, StringComparison.OrdinalIgnoreCase));
+        if (filterPayerName is { Count: > 0 })
+        {
+            var set = filterPayerName.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            filtered = filtered.Where(x => set.Contains(x.PayerName));
+        }
         if (!string.IsNullOrWhiteSpace(filterPayerType))
             filtered = filtered.Where(x => x.PayerType.Equals(filterPayerType, StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrWhiteSpace(filterPanelName))
-            filtered = filtered.Where(x => x.PanelName.Equals(filterPanelName, StringComparison.OrdinalIgnoreCase));
+        if (filterPanelName is { Count: > 0 })
+        {
+            var set = filterPanelName.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            filtered = filtered.Where(x => set.Contains(x.PanelName));
+        }
         if (!string.IsNullOrWhiteSpace(filterClinicName))
             filtered = filtered.Where(x => x.ClinicName.Equals(filterClinicName, StringComparison.OrdinalIgnoreCase));
         if (!string.IsNullOrWhiteSpace(filterReferringProvider))
@@ -1899,12 +1944,18 @@ public class DashboardController : Controller
         var claimRecords = filtered.ToList();
 
         var lineFiltered = allLines.AsEnumerable();
-        if (!string.IsNullOrWhiteSpace(filterPayerName))
-            lineFiltered = lineFiltered.Where(x => x.PayerName.Equals(filterPayerName, StringComparison.OrdinalIgnoreCase));
+        if (filterPayerName is { Count: > 0 })
+        {
+            var set = filterPayerName.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            lineFiltered = lineFiltered.Where(x => set.Contains(x.PayerName));
+        }
         if (!string.IsNullOrWhiteSpace(filterPayerType))
             lineFiltered = lineFiltered.Where(x => x.PayerType.Equals(filterPayerType, StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrWhiteSpace(filterPanelName))
-            lineFiltered = lineFiltered.Where(x => x.PanelName.Equals(filterPanelName, StringComparison.OrdinalIgnoreCase));
+        if (filterPanelName is { Count: > 0 })
+        {
+            var set = filterPanelName.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            lineFiltered = lineFiltered.Where(x => set.Contains(x.PanelName));
+        }
         if (!string.IsNullOrWhiteSpace(filterClinicName))
             lineFiltered = lineFiltered.Where(x => x.ClinicName.Equals(filterClinicName, StringComparison.OrdinalIgnoreCase));
         if (!string.IsNullOrWhiteSpace(filterReferringProvider))

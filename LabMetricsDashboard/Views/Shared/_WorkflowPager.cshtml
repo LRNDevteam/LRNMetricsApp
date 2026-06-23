@@ -1,0 +1,19 @@
+@model Tuple<string,int,int,int>
+@{
+    var tab = Model.Item1;
+    var page = Model.Item2;
+    var totalPages = Model.Item3;
+    var total = Model.Item4;
+    int start = Math.Max(1, page - 2);
+    int end = Math.Min(totalPages, page + 2);
+    string MakeUrl(int p){
+        var q = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(Context.Request.QueryString.Value ?? "");
+        var dict = q.ToDictionary(x => x.Key, x => x.Value.ToString());
+        dict["tab"] = tab; dict["page"] = p.ToString();
+        return Context.Request.Path + Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString("", dict);
+    }
+}
+@if (totalPages > 1)
+{
+    <div class="wf-pager my-3"><span>Total: @total</span>@if(page>1){<a href="@MakeUrl(page-1)">Prev</a>}@for(var i=start;i<=end;i++){if(i==page){<span class="active">@i</span>}else{<a href="@MakeUrl(i)">@i</a>}}@if(page<totalPages){<a href="@MakeUrl(page+1)">Next</a>}</div>
+}

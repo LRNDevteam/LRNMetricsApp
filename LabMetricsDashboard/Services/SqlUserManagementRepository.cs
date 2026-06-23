@@ -242,6 +242,21 @@ ORDER BY FullName, UserName;";
         await cmd.ExecuteNonQueryAsync();
     }
 
+    public async Task DeactivateUserAsync(int labUserId, string? modifiedBy = null)
+    {
+        const string sql = @"UPDATE dbo.LabUsers
+                             SET IsActive = 0,
+                                 ModifiedBy = @ModifiedBy,
+                                 ModifiedDate = SYSUTCDATETIME()
+                             WHERE LabUserID = @LabUserID";
+        await using var conn = new SqlConnection(_conn);
+        await conn.OpenAsync();
+        await using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@LabUserID", labUserId);
+        cmd.Parameters.AddWithValue("@ModifiedBy", (object?)modifiedBy ?? DBNull.Value);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
     public async Task<int> CreateUserAsync(LabUser user)
     {
         const string sql = @"INSERT INTO dbo.LabUsers

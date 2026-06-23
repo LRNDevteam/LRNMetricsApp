@@ -11,13 +11,24 @@ public static class LisSummaryExcelExportBuilder
     private static readonly XLColor BorderColor = XLColor.FromHtml("#AFC4DF");
     private static readonly XLColor SectionBlue = XLColor.FromHtml("#EAF3FF");
 
-    public static XLWorkbook CreateWorkbook(LisSummaryResult result, string labName, DateOnly? collectedFrom, DateOnly? collectedTo)
+    public static XLWorkbook CreateWorkbook(
+        LisSummaryResult result,
+        LisLineDataResult? lineData,
+        string labName,
+        string dateType,
+        DateOnly? dateFrom,
+        DateOnly? dateTo,
+        string? panel,
+        string? clinic,
+        string? refPhy,
+        string? salesRep,
+        string? collector)
     {
         var workbook = new XLWorkbook();
-        var worksheetName = CleanSheetName(string.IsNullOrWhiteSpace(result.LogicSheetName) ? "LIS Summary" : result.LogicSheetName);
-        var sheet = workbook.Worksheets.Add(worksheetName);
+        var sheet = workbook.Worksheets.Add("LIS Summary");
 
-        BuildSummarySheet(sheet, result, labName, collectedFrom, collectedTo);
+        BuildSummarySheet(sheet, result, labName, dateType, dateFrom, dateTo, panel, clinic, refPhy, salesRep, collector);
+        BuildLineDataSheet(workbook.Worksheets.Add("LIMS Master"), lineData);
 
         workbook.Properties.Title = $"LIS Summary - {labName}";
         workbook.Properties.Subject = "LIS Summary";
@@ -25,20 +36,30 @@ public static class LisSummaryExcelExportBuilder
         return workbook;
     }
 
-    private static void BuildSummarySheet(IXLWorksheet sheet, LisSummaryResult result, string labName, DateOnly? collectedFrom, DateOnly? collectedTo)
+    private static void BuildSummarySheet(
+        IXLWorksheet sheet,
+        LisSummaryResult result,
+        string labName,
+        string dateType,
+        DateOnly? dateFrom,
+        DateOnly? dateTo,
+        string? panel,
+        string? clinic,
+        string? refPhy,
+        string? salesRep,
+        string? collector)
     {
         var monthColumns = BuildMonthColumns(result.Months, result.Years);
 
-        var includeLogicColumn = ShouldUseUploadedLogicTemplate(result.LogicSheetName);
-        // Default export keeps previous compact format: Code, Description, months.
-        // Augustus and Certus use the uploaded workbook template: S.No, Description, Logic, months.
-        var firstDataColumn = includeLogicColumn ? 4 : 3;
+        var includeLogicColumn = false;
+        var firstDataColumn = 3;
         var titleRow = 1;
         var metaStartRow = 2;
-        var sampleNoteRow = 6;
-        var yearHeaderRow = 7;
-        var monthHeaderRow = 8;
-        var dataStartRow = 9;
+        var metaEndRow = 11;
+        var sampleNoteRow = 12;
+        var yearHeaderRow = 13;
+        var monthHeaderRow = 14;
+        var dataStartRow = 15;
 
         var lastColumn = firstDataColumn + monthColumns.Count;
 
@@ -52,22 +73,44 @@ public static class LisSummaryExcelExportBuilder
         sheet.Cell(2, 2).Value = labName;
         sheet.Cell(3, 1).Value = "Logic Sheet";
         sheet.Cell(3, 2).Value = result.LogicSheetName;
-        sheet.Cell(4, 1).Value = "Collected Date";
-        sheet.Cell(4, 2).Value = BuildDateRangeLabel(collectedFrom, collectedTo);
+        sheet.Cell(4, 1).Value = "Date Type";
+        sheet.Cell(4, 2).Value = string.IsNullOrWhiteSpace(dateType) ? "Collected" : dateType;
+        sheet.Cell(5, 1).Value = "Date From";
+        sheet.Cell(5, 2).Value = FormatDateFilter(dateFrom);
+        sheet.Cell(6, 1).Value = "Date To";
+        sheet.Cell(6, 2).Value = FormatDateFilter(dateTo);
+        sheet.Cell(7, 1).Value = "Panel";
+        sheet.Cell(7, 2).Value = FormatFilter(panel);
+        sheet.Cell(8, 1).Value = "Clinic";
+        sheet.Cell(8, 2).Value = FormatFilter(clinic);
+        sheet.Cell(9, 1).Value = "Ref Phy";
+        sheet.Cell(9, 2).Value = FormatFilter(refPhy);
+        sheet.Cell(10, 1).Value = "Sales Rep";
+        sheet.Cell(10, 2).Value = FormatFilter(salesRep);
+        sheet.Cell(11, 1).Value = "Collector";
+        sheet.Cell(11, 2).Value = FormatFilter(collector);
+        sheet.Cell(12, 1).Value = "Top Source File name";
+        sheet.Cell(12, 2).Value = string.IsNullOrWhiteSpace(result.SourceFileName) ? "-" : result.SourceFileName;
 
-        sheet.Range(metaStartRow, 1, 4, 1).Style.Font.Bold = true;
-        sheet.Range(metaStartRow, 1, 4, 2).Style.Fill.BackgroundColor = SectionBlue;
-        sheet.Range(metaStartRow, 1, 4, 2).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-        sheet.Range(metaStartRow, 1, 4, 2).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
-        sheet.Range(metaStartRow, 1, 4, 2).Style.Border.OutsideBorderColor = BorderColor;
-        sheet.Range(metaStartRow, 1, 4, 2).Style.Border.InsideBorderColor = BorderColor;
+        metaEndRow = 12;
+        sampleNoteRow = 13;
+        yearHeaderRow = 14;
+        monthHeaderRow = 15;
+        dataStartRow = 16;
 
-        sheet.Cell(sampleNoteRow, 1).Value = "Sample Count = Count [Unique Accession / Order ID]";
+        sheet.Range(metaStartRow, 1, metaEndRow, 1).Style.Font.Bold = true;
+        sheet.Range(metaStartRow, 1, metaEndRow, 2).Style.Fill.BackgroundColor = SectionBlue;
+        sheet.Range(metaStartRow, 1, metaEndRow, 2).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        sheet.Range(metaStartRow, 1, metaEndRow, 2).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+        sheet.Range(metaStartRow, 1, metaEndRow, 2).Style.Border.OutsideBorderColor = BorderColor;
+        sheet.Range(metaStartRow, 1, metaEndRow, 2).Style.Border.InsideBorderColor = BorderColor;
+
+        sheet.Cell(sampleNoteRow, 1).Value = "Sample Count = Count [Rows]";
         sheet.Range(sampleNoteRow, 1, sampleNoteRow, Math.Min(lastColumn, 6)).Merge();
         sheet.Cell(sampleNoteRow, 1).Style.Font.Italic = true;
         sheet.Cell(sampleNoteRow, 1).Style.Font.FontColor = XLColor.FromHtml("#5C738A");
 
-        sheet.Cell(yearHeaderRow, 1).Value = includeLogicColumn ? "S.No" : "Logic";
+        sheet.Cell(yearHeaderRow, 1).Value = "S.No";
         sheet.Cell(yearHeaderRow, 2).Value = "Description";
         sheet.Range(yearHeaderRow, 1, monthHeaderRow, 1).Merge();
         sheet.Range(yearHeaderRow, 2, monthHeaderRow, 2).Merge();
@@ -137,8 +180,8 @@ public static class LisSummaryExcelExportBuilder
         tableRange.Style.Border.OutsideBorderColor = BorderColor;
         tableRange.Style.Border.InsideBorderColor = BorderColor;
 
-        sheet.SheetView.FreezeRows(monthHeaderRow);
-        sheet.SheetView.FreezeColumns(includeLogicColumn ? 3 : 2);
+        // Keep row labels visible horizontally without freezing the metadata/filter rows above the counts.
+        sheet.SheetView.FreezeColumns(2);
 
         sheet.Columns(firstDataColumn, lastColumn).Style.NumberFormat.Format = "#,##0";
         sheet.Column(1).Width = 10;
@@ -158,10 +201,65 @@ public static class LisSummaryExcelExportBuilder
         sheet.Range(1, 1, rowNumber, lastColumn).Style.Font.FontName = "Calibri";
         sheet.Range(1, 1, rowNumber, lastColumn).Style.Font.FontSize = 10;
         sheet.Range(dataStartRow, firstDataColumn, rowNumber, lastColumn).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
-        sheet.Range(dataStartRow, 1, rowNumber, includeLogicColumn ? 3 : 2).Style.Alignment.Vertical = XLAlignmentVerticalValues.Top;
+        sheet.Range(dataStartRow, 1, rowNumber, 2).Style.Alignment.Vertical = XLAlignmentVerticalValues.Top;
 
         sheet.PageSetup.PageOrientation = XLPageOrientation.Landscape;
         sheet.PageSetup.FitToPages(1, 0);
+    }
+
+    private static void BuildLineDataSheet(IXLWorksheet sheet, LisLineDataResult? lineData)
+    {
+        sheet.TabColor = XLColor.FromHtml("#0D5F93");
+
+        if (lineData is null || lineData.Columns.Count == 0)
+        {
+            sheet.Cell(1, 1).Value = "No LIMS Master data found for the selected filters.";
+            sheet.Cell(1, 1).Style.Font.Bold = true;
+            sheet.Cell(1, 1).Style.Font.FontColor = XLColor.FromHtml("#1B3A5C");
+            sheet.Column(1).Width = 52;
+            return;
+        }
+
+        for (var col = 0; col < lineData.Columns.Count; col++)
+        {
+            sheet.Cell(1, col + 1).Value = lineData.Columns[col].Header;
+        }
+
+        var rowNumber = 2;
+        foreach (var row in lineData.Rows)
+        {
+            for (var col = 0; col < lineData.Columns.Count; col++)
+            {
+                var column = lineData.Columns[col];
+                sheet.Cell(rowNumber, col + 1).Value = row.TryGetValue(column.Key, out var value) ? value : string.Empty;
+            }
+
+            rowNumber++;
+        }
+
+        var lastRow = Math.Max(1, rowNumber - 1);
+        var lastColumn = Math.Max(1, lineData.Columns.Count);
+        var header = sheet.Range(1, 1, 1, lastColumn);
+        header.Style.Font.Bold = true;
+        header.Style.Font.FontColor = XLColor.White;
+        header.Style.Fill.BackgroundColor = XLColor.FromHtml("#123B63");
+        header.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+        var usedRange = sheet.Range(1, 1, lastRow, lastColumn);
+        usedRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        usedRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+        usedRange.Style.Border.OutsideBorderColor = BorderColor;
+        usedRange.Style.Border.InsideBorderColor = XLColor.FromHtml("#DDE7F0");
+        usedRange.Style.Font.FontName = "Calibri";
+        usedRange.Style.Font.FontSize = 10;
+
+        sheet.SheetView.FreezeRows(1);
+        sheet.Columns(1, lastColumn).AdjustToContents(1, Math.Min(lastRow, 500));
+        foreach (var column in sheet.Columns(1, lastColumn))
+        {
+            if (column.Width < 12) column.Width = 12;
+            if (column.Width > 42) column.Width = 42;
+        }
     }
 
     private static void WriteDataRow(IXLWorksheet sheet, int rowNumber, LisSummaryRow row, IReadOnlyList<MonthColumn> monthColumns, IReadOnlyList<int> years, int firstDataColumn, bool includeLogicColumn)
@@ -234,12 +332,9 @@ public static class LisSummaryExcelExportBuilder
         }
         else
         {
-            sheet.Cell(rowNumber, 2).Style.Alignment.Indent = 2;
+            sheet.Cell(rowNumber, 2).Style.Alignment.Indent = Math.Min(level, 4);
         }
     }
-
-    private static bool ShouldUseUploadedLogicTemplate(string logicSheetName)
-        => true;
 
     private static List<MonthColumn> BuildMonthColumns(IReadOnlyList<string> months, IReadOnlyList<int> years)
     {
@@ -266,13 +361,12 @@ public static class LisSummaryExcelExportBuilder
         return result;
     }
 
-    private static string BuildDateRangeLabel(DateOnly? from, DateOnly? to)
-    {
-        if (from.HasValue && to.HasValue) return $"{from:MM/dd/yyyy} to {to:MM/dd/yyyy}";
-        if (from.HasValue) return $"From {from:MM/dd/yyyy}";
-        if (to.HasValue) return $"Until {to:MM/dd/yyyy}";
-        return "All collected dates";
-    }
+    private static string FormatDateFilter(DateOnly? value) => value?.ToString("MM/dd/yyyy") ?? "All";
+
+    private static string FormatFilter(string? value)
+        => string.IsNullOrWhiteSpace(value)
+            ? "All"
+            : string.Join(", ", value.Split(['|'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
     private static string CleanSheetName(string value)
     {

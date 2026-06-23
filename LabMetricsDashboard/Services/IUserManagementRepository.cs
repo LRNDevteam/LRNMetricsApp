@@ -18,6 +18,7 @@ public interface IUserManagementRepository
     Task UpdateUserAsync(LabUser user, string? passwordHash = null);
     Task<IEnumerable<UserRole>> GetUserRolesAsync(int labUserId);
     Task<IEnumerable<UserLab>> GetUserLabsAsync(int labUserId);
+    Task DeactivateUserAsync(int labUserId, string? modifiedBy = null);
     Task RemoveUserRoleAsync(int userRoleId);
     Task RemoveUserLabAsync(int ulid);
     Task<IEnumerable<LabMetricsDashboard.Models.Lab>> GetAllLabsAsync();

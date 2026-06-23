@@ -17,9 +17,9 @@ public interface IDashboardRepository
     Task<DashboardResult> GetDashboardAsync(
         string connectionString,
         string labName,
-        string? filterPayerName = null,
+        List<string>? filterPayerNames = null,
         string? filterPayerType = null,
-        string? filterPanelName = null,
+        List<string>? filterPanelNames = null,
         string? filterClinicName = null,
         string? filterReferringProvider = null,
         DateOnly? filterDosFrom = null,

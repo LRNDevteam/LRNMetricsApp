@@ -8,6 +8,7 @@ namespace LabMetricsDashboard.Controllers;
 public class LisSummaryController : Controller
 {
 	private const string PreferredInitialLabName = "PCRLabsofAmerica";
+	private const int ExcelMaxDataRows = 1_048_575;
 
 	private readonly ILisSummaryRepository _lisSummaryRepository;
 	private readonly IDenialRecordRepository _labRepository;
@@ -33,9 +34,11 @@ public class LisSummaryController : Controller
 		CancellationToken cancellationToken)
 	{
 		filters ??= new LisSummaryFilters();
+		filters.Normalize();
 
 		var availableLabs = GetAvailableLisLabs();
 		var selectedLabName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+		selectedLabName = ResolveConfiguredLabKey(selectedLabName, availableLabs);
 
 		if (availableLabs.Count == 0 || string.IsNullOrWhiteSpace(selectedLabName))
 		{
@@ -51,6 +54,7 @@ public class LisSummaryController : Controller
 		var labOptions = await GetLabOptionsAsync(availableLabs, cancellationToken);
 		var selectedLabOption = ResolveSelectedLabOption(labOptions, selectedLabName, filters.LabId);
 		filters.LabId = selectedLabOption?.LabId;
+		NormalizeLabDateType(filters, selectedLabOption?.LabName ?? selectedLabName);
 
 		if (!_labSettings.Labs.TryGetValue(selectedLabName, out var config))
 		{
@@ -76,12 +80,38 @@ public class LisSummaryController : Controller
 
 		try
 		{
+			var filterOptions = await _lisSummaryRepository.GetFilterOptionsAsync(
+				config.DbConnectionString,
+				selectedLabOption?.LabName ?? selectedLabName,
+				cancellationToken);
+
 			var result = await _lisSummaryRepository.GetLisSummaryAsync(
 				config.DbConnectionString,
 				selectedLabOption?.LabName ?? selectedLabName,
 				selectedLabOption?.LabId ?? 0,
-				filters.CollectedFrom,
-				filters.CollectedTo,
+				filters.EffectiveDateType,
+				filters.EffectiveDateFrom,
+				filters.EffectiveDateTo,
+				filters.Panel,
+				filters.Clinic,
+				filters.RefPhy,
+				filters.SalesRep,
+				filters.Collector,
+				cancellationToken);
+
+			var lineData = await _lisSummaryRepository.GetLisLineDataAsync(
+				config.DbConnectionString,
+				selectedLabOption?.LabName ?? selectedLabName,
+				filters.EffectiveDateType,
+				filters.EffectiveDateFrom,
+				filters.EffectiveDateTo,
+				filters.Panel,
+				filters.Clinic,
+				filters.RefPhy,
+				filters.SalesRep,
+				filters.Collector,
+				filters.PageNumber,
+				filters.PageSize,
 				cancellationToken);
 
 			ViewData["SelectedLab"] = selectedLabName;
@@ -92,7 +122,9 @@ public class LisSummaryController : Controller
 				Filters = filters,
 				LabOptions = labOptions,
 				CurrentLabName = selectedLabOption?.LabName ?? selectedLabName,
-				Result = result
+				Result = result,
+				LineData = lineData,
+				FilterOptions = filterOptions
 			});
 		}
 		catch (Exception ex)
@@ -115,9 +147,11 @@ public class LisSummaryController : Controller
 		CancellationToken cancellationToken)
 	{
 		filters ??= new LisSummaryFilters();
+		filters.Normalize();
 
 		var availableLabs = GetAvailableLisLabs();
 		var selectedLabName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+		selectedLabName = ResolveConfiguredLabKey(selectedLabName, availableLabs);
 
 		if (availableLabs.Count == 0 || string.IsNullOrWhiteSpace(selectedLabName))
 		{
@@ -128,18 +162,14 @@ public class LisSummaryController : Controller
 		var labOptions = await GetLabOptionsAsync(availableLabs, cancellationToken);
 		var selectedLabOption = ResolveSelectedLabOption(labOptions, selectedLabName, filters.LabId);
 		filters.LabId = selectedLabOption?.LabId;
+		NormalizeLabDateType(filters, selectedLabOption?.LabName ?? selectedLabName);
 
 		if (!_labSettings.Labs.TryGetValue(selectedLabName, out var config)
 			|| !config.LineClaimEnable
 			|| string.IsNullOrWhiteSpace(config.DbConnectionString))
 		{
 			TempData["LisSummaryError"] = "LIS Summary export is not available for the selected lab.";
-			return RedirectToAction(nameof(Index), new
-			{
-				lab = selectedLabName,
-				CollectedFrom = filters.CollectedFrom?.ToString("yyyy-MM-dd"),
-				CollectedTo = filters.CollectedTo?.ToString("yyyy-MM-dd")
-			});
+			return RedirectToAction(nameof(Index), ToRouteValues(selectedLabName, filters));
 		}
 
 		try
@@ -148,34 +178,71 @@ public class LisSummaryController : Controller
 				config.DbConnectionString,
 				selectedLabOption?.LabName ?? selectedLabName,
 				selectedLabOption?.LabId ?? 0,
-				filters.CollectedFrom,
-				filters.CollectedTo,
+				filters.EffectiveDateType,
+				filters.EffectiveDateFrom,
+				filters.EffectiveDateTo,
+				filters.Panel,
+				filters.Clinic,
+				filters.RefPhy,
+				filters.SalesRep,
+				filters.Collector,
+				cancellationToken);
+
+			if (result.Rows.Count == 0)
+			{
+				TempData["LisSummaryError"] = $"No LIS Summary data found for export for {selectedLabOption?.LabName ?? selectedLabName}.";
+				return RedirectToAction(nameof(Index), ToRouteValues(selectedLabName, filters));
+			}
+
+			var lineData = await _lisSummaryRepository.GetLisLineDataAsync(
+				config.DbConnectionString,
+				selectedLabOption?.LabName ?? selectedLabName,
+				filters.EffectiveDateType,
+				filters.EffectiveDateFrom,
+				filters.EffectiveDateTo,
+				filters.Panel,
+				filters.Clinic,
+				filters.RefPhy,
+				filters.SalesRep,
+				filters.Collector,
+				1,
+				ExcelMaxDataRows,
 				cancellationToken);
 
 			using var workbook = LisSummaryExcelExportBuilder.CreateWorkbook(
 				result,
+				lineData,
 				selectedLabOption?.LabName ?? selectedLabName,
-				filters.CollectedFrom,
-				filters.CollectedTo);
+				filters.EffectiveDateType,
+				filters.EffectiveDateFrom,
+				filters.EffectiveDateTo,
+				filters.Panel,
+				filters.Clinic,
+				filters.RefPhy,
+				filters.SalesRep,
+				filters.Collector);
 
 			await using var stream = new MemoryStream();
 			workbook.SaveAs(stream);
 			stream.Position = 0;
 
 			var safeLabName = MakeSafeFileName(selectedLabOption?.LabName ?? selectedLabName);
-			var fileName = $"{safeLabName}_LIS_Summary_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
+			var fileName = $"{safeLabName}_LIS_Summary_{filters.EffectiveDateType}_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
 			return File(stream.ToArray(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
 		}
 		catch (Exception ex)
 		{
 			_logger.LogError(ex, "LIS Summary Excel export failed for lab '{LabName}'.", selectedLabName);
 			TempData["LisSummaryError"] = $"Failed to export LIS Summary: {ex.Message}";
-			return RedirectToAction(nameof(Index), new
-			{
-				lab = selectedLabName,
-				CollectedFrom = filters.CollectedFrom?.ToString("yyyy-MM-dd"),
-				CollectedTo = filters.CollectedTo?.ToString("yyyy-MM-dd")
-			});
+			return RedirectToAction(nameof(Index), ToRouteValues(selectedLabName, filters));
+		}
+	}
+
+	private static void NormalizeLabDateType(LisSummaryFilters filters, string labName)
+	{
+		if (labName.Contains("InHealth", StringComparison.OrdinalIgnoreCase))
+		{
+			filters.DateType = "Collected";
 		}
 	}
 
@@ -227,11 +294,25 @@ public class LisSummaryController : Controller
 		=> left.Equals(right, StringComparison.OrdinalIgnoreCase)
 		   || NormalizeLabToken(left).Equals(NormalizeLabToken(right), StringComparison.OrdinalIgnoreCase);
 
+	private static string ResolveConfiguredLabKey(string selectedLabName, IReadOnlyList<string> availableLabs)
+	{
+		if (string.IsNullOrWhiteSpace(selectedLabName)) return string.Empty;
+
+		var selectedToken = NormalizeLabToken(selectedLabName);
+		return availableLabs.FirstOrDefault(x => NormalizeLabToken(x).Equals(selectedToken, StringComparison.OrdinalIgnoreCase))
+			?? selectedLabName;
+	}
+
 	private static string NormalizeLabToken(string value)
-		=> new string((value ?? string.Empty)
+	{
+		var token = new string((value ?? string.Empty)
 			.Where(char.IsLetterOrDigit)
 			.Select(char.ToUpperInvariant)
 			.ToArray());
+		return token.EndsWith("DTR", StringComparison.OrdinalIgnoreCase)
+			? token[..^3]
+			: token;
+	}
 
 	private static string MakeSafeFileName(string value)
 	{
@@ -239,4 +320,23 @@ public class LisSummaryController : Controller
 		var safe = new string(value.Select(ch => invalidChars.Contains(ch) ? '_' : ch).ToArray()).Trim('_');
 		return string.IsNullOrWhiteSpace(safe) ? "Lab" : safe;
 	}
+
+	private static object ToRouteValues(string selectedLabName, LisSummaryFilters filters)
+		=> new
+		{
+			lab = selectedLabName,
+			LabId = filters.LabId,
+			DateType = filters.EffectiveDateType,
+			DateRange = filters.EffectiveDateRange,
+			DateFrom = filters.EffectiveDateFrom?.ToString("yyyy-MM-dd"),
+			DateTo = filters.EffectiveDateTo?.ToString("yyyy-MM-dd"),
+			Panel = filters.Panel,
+			Clinic = filters.Clinic,
+			RefPhy = filters.RefPhy,
+			SalesRep = filters.SalesRep,
+			Collector = filters.Collector,
+			ActiveTab = filters.EffectiveActiveTab,
+			PageNumber = filters.PageNumber,
+			PageSize = filters.PageSize
+		};
 }

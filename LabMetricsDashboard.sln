@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.14.37027.9
+# Visual Studio Version 18
+VisualStudioVersion = 18.6.11723.189 insiders
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LabMetricsDashboard", "LabMetricsDashboard\LabMetricsDashboard.csproj", "{28C8D0C9-0B2C-25B1-944F-544054B185DE}"
 EndProject
@@ -16,6 +16,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ClaimLineCSVDataCapture", "ClaimLineCSVDataCapture\ClaimLineCSVDataCapture.csproj", "{4BD2A6E2-67E4-444A-B244-F169BC8F8C77}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodingMasterGenerator", "CodingMasterGenerator\CodingMasterGenerator.csproj", "{FC8B7EDE-5518-4358-8664-3D0B51E19DFE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LRN.ReportsApi", "LRN.ReportsApi\LRN.ReportsApi.csproj", "{0AFDFC9B-AA9B-08CF-431B-765B8A1F4680}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LRN.ProductionReports", "LRN.ProductionReports\LRN.ProductionReports.csproj", "{E3E628EE-CB37-4B5B-B45B-7359E377E118}"
 EndProject
@@ -109,6 +111,10 @@ Global
 		{FC8B7EDE-5518-4358-8664-3D0B51E19DFE}.Debug|x86.Build.0 = Debug|Any CPU
 		{FC8B7EDE-5518-4358-8664-3D0B51E19DFE}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{FC8B7EDE-5518-4358-8664-3D0B51E19DFE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0AFDFC9B-AA9B-08CF-431B-765B8A1F4680}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0AFDFC9B-AA9B-08CF-431B-765B8A1F4680}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0AFDFC9B-AA9B-08CF-431B-765B8A1F4680}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0AFDFC9B-AA9B-08CF-431B-765B8A1F4680}.Release|Any CPU.Build.0 = Release|Any CPU
 		{FC8B7EDE-5518-4358-8664-3D0B51E19DFE}.Release|x64.ActiveCfg = Release|Any CPU
 		{FC8B7EDE-5518-4358-8664-3D0B51E19DFE}.Release|x64.Build.0 = Release|Any CPU
 		{FC8B7EDE-5518-4358-8664-3D0B51E19DFE}.Release|x86.ActiveCfg = Release|Any CPU

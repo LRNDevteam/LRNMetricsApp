@@ -1,6 +1,5 @@
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
-using LabMetricsDashboard.Models;
 using Microsoft.AspNetCore.Mvc;
 
 namespace LabMetricsDashboard.Controllers;
@@ -64,12 +63,25 @@ public class AdminController : Controller
         };
         // Populate user -> labs map for server-side rendering
         var map = new Dictionary<int, IEnumerable<UserLab>>();
+        var roleMap = new Dictionary<int, IEnumerable<Role>>();
+        var rolesById = vm.Roles.ToDictionary(r => r.RoleID);
+        var activeLabIds = vm.Labs.Where(lab => lab.IsActive).Select(lab => lab.LabId).ToHashSet();
         foreach (var u in vm.Users)
         {
-            var labs = await _repo.GetUserLabsAsync(u.LabUserID);
+            var labs = (await _repo.GetUserLabsAsync(u.LabUserID)).Where(lab => activeLabIds.Contains(lab.LabId)).ToList();
             map[u.LabUserID] = labs;
+
+            var userRoles = await _repo.GetUserRolesAsync(u.LabUserID);
+            roleMap[u.LabUserID] = userRoles
+                .Select(ur => rolesById.TryGetValue(ur.RoleID, out var role) ? role : null)
+                .Where(role => role != null)
+                .Cast<Role>()
+                .GroupBy(role => role.RoleID)
+                .Select(group => group.First())
+                .ToList();
         }
         vm.UserLabsMap = map;
+        vm.UserRolesMap = roleMap;
 
         return View(vm);
     }
@@ -114,9 +126,24 @@ public class AdminController : Controller
         var users = (await _repo.GetAllUsersAsync()).ToList();
 
         var result = new List<object>();
+        var allRoles = (await _repo.GetAllRolesAsync()).ToDictionary(r => r.RoleID);
+        var activeLabIds = (await _repo.GetAllLabsAsync()).Where(lab => lab.IsActive).Select(lab => lab.LabId).ToHashSet();
         foreach (var u in users)
         {
-            var labs = (await _repo.GetUserLabsAsync(u.LabUserID)).Select(ul => new { ul.ULID, ul.LabId, ul.LabName }).ToList();
+            var labs = (await _repo.GetUserLabsAsync(u.LabUserID))
+                .Where(ul => activeLabIds.Contains(ul.LabId))
+                .Select(ul => new { ul.ULID, ul.LabId, ul.LabName })
+                .ToList();
+            var roles = (await _repo.GetUserRolesAsync(u.LabUserID))
+                .Select(ur => new
+                {
+                    ur.UserRoleId,
+                    ur.RoleID,
+                    RoleName = allRoles.TryGetValue(ur.RoleID, out var role) ? role.RoleName : string.Empty
+                })
+                .GroupBy(role => role.RoleID)
+                .Select(group => group.First())
+                .ToList();
             result.Add(new {
                 labUserID = u.LabUserID,
                 userName = u.UserName,
@@ -126,6 +153,7 @@ public class AdminController : Controller
                 mobile = u.Mobile,
                 isExternalUser = u.IsExternalUser,
                 isActive = u.IsActive,
+                roles = roles,
                 labs = labs
             });
         }
@@ -187,6 +215,7 @@ public class AdminController : Controller
 
         if (errors.Count > 0) return BadRequest(new { success = false, errors });
 
+        user ??= new LabUser();
         user.PasswordHash = _hasher.Hash(vm.NewUserPassword!);
         var id = await _repo.CreateUserAsync(user);
 
@@ -195,9 +224,10 @@ public class AdminController : Controller
         {
             await _repo.AssignRoleAsync(id, vm.NewUserRoleId.Value);
         }
-        if (vm.NewUserLabId.HasValue && vm.NewUserLabId.Value > 0)
+        var labIds = GetSelectedLabIds(vm);
+        foreach (var labId in labIds)
         {
-            await _repo.AssignUserLabAsync(new UserLab { LabUserID = id, LabId = vm.NewUserLabId.Value });
+            await _repo.AssignUserLabAsync(new UserLab { LabUserID = id, LabId = labId });
         }
 
         return Json(new { success = true, id });
@@ -246,6 +276,14 @@ public class AdminController : Controller
     }
 
     [HttpPost]
+    public async Task<IActionResult> RemoveUser([FromForm] int userId)
+    {
+        if (userId <= 0) return BadRequest(new { success = false, errors = new[] { "Invalid user" } });
+        await _repo.DeactivateUserAsync(userId, User?.Identity?.Name);
+        return Json(new { success = true });
+    }
+
+    [HttpPost]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> CreateUser(AdminViewModel vm)
     {
@@ -277,9 +315,10 @@ public class AdminController : Controller
         {
             await _repo.AssignRoleAsync(id, vm.NewUserRoleId.Value);
         }
-        if (vm.NewUserLabId.HasValue && vm.NewUserLabId.Value > 0)
+        var labIds = GetSelectedLabIds(vm);
+        foreach (var labId in labIds)
         {
-            await _repo.AssignUserLabAsync(new UserLab { LabUserID = id, LabId = vm.NewUserLabId.Value });
+            await _repo.AssignUserLabAsync(new UserLab { LabUserID = id, LabId = labId });
         }
         return RedirectToAction("ListUsers");
     }
@@ -289,12 +328,14 @@ public class AdminController : Controller
     {
         var user = await _repo.GetUserByIdAsync(id);
         if (user == null) return NotFound();
+        ViewBag.Labs = (await _repo.GetAllLabsAsync()).Where(lab => lab.IsActive).ToList();
+        ViewBag.SelectedLabIds = (await _repo.GetUserLabsAsync(id)).Select(lab => lab.LabId).Distinct().ToList();
         return View(user);
     }
 
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Edit([FromForm] LabUser user, [FromForm] string? Password, [FromForm] string? ConfirmPassword)
+    public async Task<IActionResult> Edit([FromForm] LabUser user, [FromForm] string? Password, [FromForm] string? ConfirmPassword, [FromForm] int[] LabIds)
     {
         if (user == null || user.LabUserID <= 0) return RedirectToAction(nameof(ListUsers));
 
@@ -321,7 +362,24 @@ public class AdminController : Controller
         }
 
         await _repo.UpdateUserAsync(existing, pwdHash);
+        var existingLabs = await _repo.GetUserLabsAsync(existing.LabUserID);
+        foreach (var lab in existingLabs)
+        {
+            await _repo.RemoveUserLabAsync(lab.ULID);
+        }
+        foreach (var labId in LabIds.Where(id => id > 0).Distinct())
+        {
+            await _repo.AssignUserLabAsync(new UserLab { LabUserID = existing.LabUserID, LabId = labId });
+        }
         return RedirectToAction(nameof(ListUsers));
+    }
+
+    private static IEnumerable<int> GetSelectedLabIds(AdminViewModel vm)
+    {
+        return vm.NewUserLabIds
+            .Concat(vm.NewUserLabId.HasValue ? new[] { vm.NewUserLabId.Value } : Array.Empty<int>())
+            .Where(id => id > 0)
+            .Distinct();
     }
 
     [HttpPost]

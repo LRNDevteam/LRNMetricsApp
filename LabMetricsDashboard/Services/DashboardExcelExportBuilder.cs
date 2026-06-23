@@ -36,9 +36,9 @@ public static class DashboardExcelExportBuilder
 
         var filters = new List<(string Label, string? Value)>
         {
-            ("Payer Name", vm.FilterPayerName),
+            ("Payer Name", vm.FilterPayerNames.Count > 0 ? string.Join(", ", vm.FilterPayerNames) : vm.FilterPayerName),
             ("Payer Type", vm.FilterPayerType),
-            ("Panel Name", vm.FilterPanelName),
+            ("Panel Name", vm.FilterPanelNames.Count > 0 ? string.Join(", ", vm.FilterPanelNames) : vm.FilterPanelName),
             ("Clinic Name", vm.FilterClinicName),
             ("Referring Provider", vm.FilterReferringProvider),
             ("DOS From", vm.FilterDosFrom),

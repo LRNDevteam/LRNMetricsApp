@@ -222,17 +222,17 @@ ORDER BY {OrderBy(cols, "DueDate", "TaskID")};";
 		var whereLegacy = BuildLineItemWhere(cols, filters, currentRunId);
 
 		var sqlLegacy = $@"
-SELECT
-    {SelectDate(cols, "DenialDate")},
-    {SelectString(cols, "VisitNumber")},
-    {SelectInsuranceBalance(cols, useBilledAmountInsuranceBalance, 4)},
-    {SelectDecimal(cols, "TotalBalance", 4)},
-    {SelectString(cols, "PayerName")},
-    {SelectString(cols, "PayerNameNormalized")},
-    {SelectString(cols, "DenialCodeNormalized")},
-    {SelectString(cols, "DenialDescription")}
-FROM dbo.DenialLineItem dli
-WHERE {whereLegacy};";
+						SELECT
+							{SelectDate(cols, "DenialDate")},
+							{SelectString(cols, "VisitNumber")},
+							{SelectInsuranceBalance(cols, useBilledAmountInsuranceBalance, 4)},
+							{SelectDecimal(cols, "TotalBalance", 4)},
+							{SelectString(cols, "PayerName")},
+							{SelectString(cols, "PayerNameNormalized")},
+							{SelectString(cols, "DenialCodeNormalized")},
+							{SelectString(cols, "DenialDescription")}
+						FROM dbo.DenialLineItem dli
+						WHERE {whereLegacy};";
 
 		await using var legacyCommand = new SqlCommand(sqlLegacy, connection)
 		{

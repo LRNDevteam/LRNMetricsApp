@@ -1,0 +1,335 @@
+@model LabMetricsDashboard.Models.DenialWorkflow.DenialWorkflowPageViewModel
+@{
+    ViewData["Title"] = "Denial Workflow";
+    string active = Model.ActiveTab?.ToLowerInvariant() ?? "dashboard";
+    var statuses = new[] { "New", "Pending Review", "In-Progress", "Verification Pending", "Duplicate", "Completed", "Closed" };
+    string ExportUrl(string tabName) => Url.Action("ExportExcel", "DenialWorkflow", new { tab = tabName, status = Model.Filter.Status, reviewer = Model.Filter.Reviewer, assignedTo = Model.Filter.AssignedTo, denialCode = Model.Filter.DenialCode, payerName = Model.Filter.PayerName }) ?? "#";
+}
+
+<div class="container-fluid py-3 denial-workflow-page">
+    <div class="d-flex justify-content-between align-items-start mb-3">
+        <div>
+            <h3 class="mb-0">Denial Workflow</h3>
+            <div class="text-muted small">Selected lab: <strong>@Model.LabName</strong>. Server-side workflow; each grid loads 100 records.</div>
+        </div>
+        <div class="d-flex gap-2">
+            <a class="btn btn-success btn-sm" href="@ExportUrl(active)"><i class="bi bi-file-earmark-excel me-1"></i>Export Excel</a>
+            <button type="button" class="btn btn-outline-primary btn-sm" onclick="toggleWorkflowFilters()">Show / Hide Filters</button>
+        </div>
+    </div>
+
+    @if (TempData["DenialWorkflowSuccess"] is string success)
+    {
+        <div class="alert alert-success">@success</div>
+    }
+    @if (TempData["DenialWorkflowError"] is string error)
+    {
+        <div class="alert alert-danger">@error</div>
+    }
+
+    <form method="get" class="card shadow-sm mb-3" id="workflowFilters">
+        <div class="card-body py-3">
+            <input type="hidden" name="tab" value="@active" />
+            <input type="hidden" name="page" value="1" />
+            <div class="row g-3 align-items-end">
+                <div class="col-lg-3 col-md-6">
+                    <label class="form-label small mb-1">Status</label>
+                    <select name="status" class="form-select form-select-sm">
+                        <option value="">All</option>
+                        @foreach (var s in statuses)
+                        {
+                            <option value="@s" selected="@(string.Equals(Model.Filter.Status, s, StringComparison.OrdinalIgnoreCase))">@s</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-lg-3 col-md-6">
+                    <label class="form-label small mb-1">Reviewer</label>
+                    <select name="reviewer" class="form-select form-select-sm">
+                        <option value="">All</option>
+                        @foreach (var r in Model.ReviewerOptions)
+                        {
+                            <option value="@r.UserName" selected="@(string.Equals(Model.Filter.AssignedTo ?? Model.Filter.Reviewer, r.UserName, StringComparison.OrdinalIgnoreCase))">@r.DisplayName</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-lg-3 col-md-6">
+                    <label class="form-label small mb-1">Denial Code</label>
+                    <input name="denialCode" value="@Model.Filter.DenialCode" class="form-control form-control-sm" />
+                </div>
+                <div class="col-lg-3 col-md-6">
+                    <label class="form-label small mb-1">Payer</label>
+                    <input name="payerName" value="@Model.Filter.PayerName" class="form-control form-control-sm" />
+                </div>
+                <div class="col-12 d-flex gap-2">
+                    <button class="btn btn-primary btn-sm px-4" type="submit">Apply Filter</button>
+                    <a class="btn btn-outline-secondary btn-sm px-4" asp-action="Index" asp-route-tab="@active">Clear</a>
+                </div>
+            </div>
+        </div>
+    </form>
+
+    <ul class="nav nav-tabs mb-3">
+        <li class="nav-item"><a class="nav-link @(active == "dashboard" ? "active" : "")" href='@TabUrl("dashboard")'>Dashboard</a></li>
+        <li class="nav-item"><a class="nav-link @(active == "insight" ? "active" : "")" href='@TabUrl("insight")'>Denial Insight</a></li>
+        <li class="nav-item"><a class="nav-link @(active == "tasks" ? "active" : "")" href='@TabUrl("tasks")'>Task Board</a></li>
+        <li class="nav-item"><a class="nav-link @(active == "verification" ? "active" : "")" href='@TabUrl("verification")'>Verification</a></li>
+    </ul>
+
+    @if (active == "dashboard")
+    {
+        <div class="row g-3 mb-4">
+            <div class="col-md"><div class="card shadow-sm h-100"><div class="card-body"><div class="text-muted small">Assigned</div><h3 class="mb-0">@Model.Summary.Assigned</h3></div></div></div>
+            <div class="col-md"><div class="card shadow-sm h-100"><div class="card-body"><div class="text-muted small">Closed</div><h3 class="mb-0">@Model.Summary.Completed</h3></div></div></div>
+            <div class="col-md"><div class="card shadow-sm h-100"><div class="card-body"><div class="text-muted small">Pending</div><h3 class="mb-0">@Model.Summary.Pending</h3></div></div></div>
+            <div class="col-md"><div class="card shadow-sm h-100"><div class="card-body"><div class="text-muted small">Verification Pending</div><h3 class="mb-0">@Model.Summary.VerificationPending</h3></div></div></div>
+            <div class="col-md"><div class="card shadow-sm h-100"><div class="card-body"><div class="text-muted small">Unassigned</div><h3 class="mb-0">@Model.Summary.Unassigned</h3></div></div></div>
+        </div>
+
+        <div class="card shadow-sm workflow-card">
+            <div class="card-header fw-semibold d-flex justify-content-between align-items-center">
+                <span>AR Reviewer Summary</span>
+                <a class="btn btn-success btn-sm" href="@ExportUrl("dashboard")"><i class="bi bi-file-earmark-excel me-1"></i>Export</a>
+            </div>
+            <div class="table-responsive workflow-table-wrap">
+                <table class="table table-sm table-bordered table-hover align-middle mb-0 workflow-table">
+                    <thead><tr><th>AR Reviewer Name</th><th>Total Assigned</th><th>Closed</th><th>Pending</th></tr></thead>
+                    <tbody>
+                    @if (Model.ReviewerSummary.Any())
+                    {
+                        foreach (var r in Model.ReviewerSummary)
+                        {
+                            <tr><td>@r.ReviewerName</td><td>@r.TotalAssigned</td><td>@r.Closed</td><td>@r.Pending</td></tr>
+                        }
+                    }
+                    else
+                    {
+                        <tr><td colspan="4" class="text-center text-muted">No reviewer data found.</td></tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+    else if (active == "insight")
+    {
+        if (!(Model.IsAdmin || Model.IsArManager))
+        {
+            <div class="alert alert-warning">Only Admin and AR Manager can assign from Denial Insight.</div>
+        }
+        else
+        {
+            <form asp-action="AssignInsightGrid" method="post" id="insightGridAssignForm">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="labId" value="@Model.LabId" />
+                <input type="hidden" name="returnTab" value="insight" />
+                <input type="hidden" name="status" value="@Model.Filter.Status" />
+                <input type="hidden" name="reviewer" value="@Model.Filter.Reviewer" />
+                <input type="hidden" name="assignedTo" value="@Model.Filter.AssignedTo" />
+                <input type="hidden" name="denialCode" value="@Model.Filter.DenialCode" />
+                <input type="hidden" name="payerName" value="@Model.Filter.PayerName" />
+                <input type="hidden" name="page" value="@Model.Insights.Page" />
+
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 small text-muted mb-2">
+                    <span>Showing @Model.Insights.Items.Count of @Model.Insights.TotalCount records.</span>
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        <label class="fw-semibold text-dark mb-0">Assign selected rows to</label>
+                        <select name="gridReviewerUserName" class="form-select form-select-sm workflow-grid-reviewer-select">
+                            <option value="">Select Reviewer</option>
+                            @foreach (var r in Model.ReviewerOptions)
+                            { <option value="@r.UserName">@r.DisplayName</option> }
+                        </select>
+                        <button class="btn btn-primary btn-sm" type="submit">Assign Selected</button>
+                        <a class="btn btn-success btn-sm" href="@ExportUrl("insight")"><i class="bi bi-file-earmark-excel me-1"></i>Export</a>
+                    </div>
+                </div>
+
+                <div class="table-responsive workflow-table-wrap">
+                    <table class="table table-sm table-bordered table-hover align-middle text-nowrap workflow-table workflow-insight-table">
+                        <thead>
+                            <tr>
+                                <th class="workflow-sticky-col sticky-select-col text-center"><input class="form-check-input" type="checkbox" id="selectAllInsightRows" title="Select all visible rows" /></th>
+                                <th class="workflow-sticky-col sticky-reviewer-col">Reviewer</th>
+                                <th class="workflow-sticky-col sticky-assign-col">Assign</th>
+                                <th>Denial Code</th><th>Description</th><th>Denial Count</th><th>Claims</th><th>Total Balance</th><th>High Impact Insurance</th><th>Insurance Balance</th><th>Impact %</th><th>Action Category</th><th>Action Code</th><th>Action</th><th>Task</th><th>Feedback</th><th>Responsibility</th><th>Assigned To</th><th>Run Id</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @for (var rowIndex = 0; rowIndex < Model.Insights.Items.Count; rowIndex++)
+                        {
+                            var i = Model.Insights.Items[rowIndex];
+                            <tr>
+                                <td class="workflow-sticky-col sticky-select-col text-center">
+                                    <input type="hidden" name="rows[@rowIndex].IsSelected" value="false" />
+                                    <input class="form-check-input workflow-insight-row-check" type="checkbox" name="rows[@rowIndex].IsSelected" value="true" />
+                                </td>
+                                <td class="workflow-sticky-col sticky-reviewer-col">
+                                    <input type="hidden" name="rows[@rowIndex].RunId" value="@i.RunId" />
+                                    <input type="hidden" name="rows[@rowIndex].DenialCode" value="@i.DenialCodes" />
+                                    <input type="hidden" name="rows[@rowIndex].PayerName" value="@i.HighImpactInsurance" />
+                                    <select name="rows[@rowIndex].ReviewerUserName" class="form-select form-select-sm workflow-row-reviewer-select">
+                                        <option value="">Reviewer</option>
+                                        @foreach (var r in Model.ReviewerOptions)
+                                        { <option value="@r.UserName">@r.DisplayName</option> }
+                                    </select>
+                                </td>
+                                <td class="workflow-sticky-col sticky-assign-col">
+                                    <button class="btn btn-sm btn-primary" type="submit" name="singleRowIndex" value="@rowIndex">Assign</button>
+                                </td>
+                                <td>@i.DenialCodes</td><td class="text-wrap min-w-300">@i.Descriptions</td><td>@i.NoOfDenialCount</td><td>@i.NoOfClaimsCount</td><td>@i.TotalBalance?.ToString("N2")</td><td>@i.HighImpactInsurance</td><td>@i.InsuranceBalance.ToString("N2")</td><td>@i.ImpactPercentage?.ToString("N2")</td><td>@i.ActionCategory</td><td>@i.ActionCode</td><td class="text-wrap min-w-300">@i.Action</td><td class="text-wrap min-w-300">@i.Task</td><td>@i.Feedback</td><td>@i.Responsibility</td><td>@i.AssignedTo</td><td>@i.RunId</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            </form>
+            @RenderPager(Model.Insights)
+        }
+    }
+    else if (active == "tasks")
+    {
+        <div class="d-flex justify-content-between align-items-center small text-muted mb-2"><span>Showing @Model.Tasks.Items.Count of @Model.Tasks.TotalCount records.</span><a class="btn btn-success btn-sm" href="@ExportUrl("tasks")"><i class="bi bi-file-earmark-excel me-1"></i>Export</a></div>
+        <div class="table-responsive workflow-table-wrap">
+            <table class="table table-sm table-bordered table-hover align-middle text-nowrap workflow-table">
+                <thead><tr><th class="workflow-sticky-col sticky-edit-col">Edit</th><th>Task ID</th><th>Claim</th><th>Patient</th><th>CPT</th><th>Denial</th><th>Description</th><th>Classification</th><th>Action Code</th><th>Recommended Action</th><th>Action Category</th><th>Task</th><th>Priority</th><th>Status</th><th>Assigned To</th><th>Insurance Balance</th><th>Date Opened</th><th>Due</th><th>Days Remaining</th><th>SLA</th><th>Payer</th><th>Payer Type</th><th>Clinic</th><th>Sales Rep</th><th>Referring Provider</th><th>Panel</th><th>DOS</th><th>Comments</th></tr></thead>
+                <tbody>
+                @foreach (var t in Model.Tasks.Items)
+                {
+                    var modalId = "task_" + (t.TaskID ?? string.Empty).Replace("-", "_").Replace(".", "_");
+                    <tr>
+                        <td class="workflow-sticky-col sticky-edit-col"><button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#@modalId">Edit</button></td>
+                        <td>@t.TaskID</td><td>@t.ClaimID</td><td>@t.PatientId</td><td>@t.CPTCode</td><td>@t.DenialCode</td><td class="text-wrap min-w-300">@t.DenialDescription</td><td>@t.DenialClassification</td><td>@t.ActionCode</td><td class="text-wrap min-w-300">@t.RecommendedAction</td><td>@t.ActionCategory</td><td class="text-wrap min-w-300">@t.Task</td><td>@t.Priority</td><td>@t.Status</td><td>@t.AssignedTo</td><td>@t.InsuranceBalance.ToString("N2")</td><td>@t.DateOpened?.ToString("MM/dd/yyyy")</td><td>@t.DueDate?.ToString("MM/dd/yyyy")</td><td>@t.DaysRemaining</td><td>@t.SLAStatus</td><td>@t.PayerName</td><td>@t.PayerType</td><td>@t.ClinicName</td><td>@t.SalesRepname</td><td>@t.ReferringProvider</td><td>@t.PanelName</td><td>@t.DateOfService?.ToString("MM/dd/yyyy")</td><td class="text-wrap min-w-300">@t.ReviewerComments</td>
+                    </tr>
+                    <div class="modal fade" id="@modalId" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content">
+                        <form asp-action="UpdateTask" method="post">
+                            @Html.AntiForgeryToken()
+                            <div class="modal-header"><h5 class="modal-title">Update @t.TaskID</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                            <div class="modal-body">
+                                <input type="hidden" name="labId" value="@Model.LabId" /><input type="hidden" name="taskId" value="@t.TaskID" />
+                                <label class="form-label">Status</label>
+                                <select name="status" class="form-select mb-2">
+                                    @foreach (var s in statuses)
+                                    { <option value="@s" selected="@(s.Equals(t.Status, StringComparison.OrdinalIgnoreCase))">@s</option> }
+                                </select>
+                                <label class="form-label">Comments</label><textarea name="comments" class="form-control" rows="5">@t.ReviewerComments</textarea>
+                            </div>
+                            <div class="modal-footer"><button class="btn btn-primary" type="submit">Save</button></div>
+                        </form>
+                    </div></div></div>
+                }
+                </tbody>
+            </table>
+        </div>
+        @RenderPager(Model.Tasks)
+    }
+    else if (active == "verification")
+    {
+        <div class="d-flex justify-content-between align-items-center small text-muted mb-2"><span>Showing @Model.VerificationTasks.Items.Count of @Model.VerificationTasks.TotalCount records.</span><a class="btn btn-success btn-sm" href="@ExportUrl("verification")"><i class="bi bi-file-earmark-excel me-1"></i>Export</a></div>
+        <div class="table-responsive workflow-table-wrap">
+            <table class="table table-sm table-bordered table-hover align-middle text-nowrap workflow-table">
+                <thead><tr><th>Review</th><th>Task ID</th><th>Claim</th><th>Patient</th><th>CPT</th><th>Denial</th><th>Description</th><th>Action</th><th>Status</th><th>Verification Status</th><th>Assigned To</th><th>Payer</th><th>Balance</th><th>Moved Run</th><th>Reason</th></tr></thead>
+                <tbody>
+                @foreach (var v in Model.VerificationTasks.Items)
+                {
+                    <tr>
+                        <td><button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#verify_@v.VerificationId">Open</button></td>
+                        <td>@v.TaskID</td><td>@v.ClaimID</td><td>@v.PatientId</td><td>@v.CPTCode</td><td>@v.DenialCode</td><td class="text-wrap min-w-300">@v.DenialDescription</td><td>@v.ActionCategory</td><td>@v.Status</td><td>@v.VerificationStatus</td><td>@v.AssignedTo</td><td>@v.PayerName</td><td>@v.InsuranceBalance.ToString("N2")</td><td>@v.MissingDetectedRunId</td><td class="text-wrap min-w-300">@v.VerificationComments</td>
+                    </tr>
+                    <div class="modal fade" id="verify_@v.VerificationId" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content">
+                        <form asp-action="DecideVerification" method="post">
+                            @Html.AntiForgeryToken()
+                            <div class="modal-header"><h5 class="modal-title">Verify @v.TaskID</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                            <div class="modal-body">
+                                <input type="hidden" name="labId" value="@Model.LabId" /><input type="hidden" name="verificationId" value="@v.VerificationId" />
+                                <div class="form-check"><input class="form-check-input" type="radio" name="isValidDenial" value="true" checked /><label class="form-check-label">Valid denial - move back to Task Board</label></div>
+                                <div class="form-check mb-3"><input class="form-check-input" type="radio" name="isValidDenial" value="false" /><label class="form-check-label">Not valid / resolved - close to History</label></div>
+                                <label class="form-label">Status if valid</label><select name="status" class="form-select mb-2"><option>Pending Review</option><option>In-Progress</option><option>New</option></select>
+                                <label class="form-label">Comments</label><textarea name="comments" class="form-control" rows="5">@v.VerificationComments</textarea>
+                            </div>
+                            <div class="modal-footer"><button class="btn btn-primary" type="submit">Save Verification</button></div>
+                        </form>
+                    </div></div></div>
+                }
+                </tbody>
+            </table>
+        </div>
+        @RenderPager(Model.VerificationTasks)
+    }
+</div>
+
+@functions {
+    private string TabUrl(string tabName) => Url.Action("Index", "DenialWorkflow", new
+    {
+        labId = Model.LabId,
+        tab = tabName,
+        status = Model.Filter.Status,
+        reviewer = Model.Filter.Reviewer,
+        assignedTo = Model.Filter.AssignedTo,
+        denialCode = Model.Filter.DenialCode,
+        payerName = Model.Filter.PayerName,
+        page = 1
+    }) ?? "#";
+
+    private Microsoft.AspNetCore.Html.IHtmlContent RenderPager<T>(LabMetricsDashboard.Models.DenialWorkflow.PagedResult<T> result)
+    {
+        if (result.TotalPages <= 1) return Microsoft.AspNetCore.Html.HtmlString.Empty;
+        var previousDisabled = result.Page <= 1 ? "disabled" : "";
+        var nextDisabled = result.Page >= result.TotalPages ? "disabled" : "";
+        var prev = result.Page - 1;
+        var next = result.Page + 1;
+        var html = $@"<nav class='mt-3'><ul class='pagination pagination-sm'>
+<li class='page-item {previousDisabled}'><a class='page-link' href='?tab={Model.ActiveTab}&status={Model.Filter.Status}&reviewer={Model.Filter.Reviewer}&denialCode={Model.Filter.DenialCode}&payerName={Model.Filter.PayerName}&page={prev}'>Previous</a></li>
+<li class='page-item disabled'><span class='page-link'>Page {result.Page} of {result.TotalPages}</span></li>
+<li class='page-item {nextDisabled}'><a class='page-link' href='?tab={Model.ActiveTab}&status={Model.Filter.Status}&reviewer={Model.Filter.Reviewer}&denialCode={Model.Filter.DenialCode}&payerName={Model.Filter.PayerName}&page={next}'>Next</a></li>
+</ul></nav>";
+        return new Microsoft.AspNetCore.Html.HtmlString(html);
+    }
+}
+
+<style>
+.denial-workflow-page .workflow-card,
+.denial-workflow-page .card { border-radius: 10px; }
+.workflow-table-wrap { max-height: 62vh; overflow: auto; background: #fff; border: 1px solid #dee2e6; border-radius: 8px; }
+.workflow-table thead th { position: sticky; top: 0; z-index: 2; background: #f8fafc; color: #111827; font-weight: 700; border-bottom: 1px solid #cbd5e1; }
+.workflow-table tbody tr:nth-child(even) { background: #fbfdff; }
+.workflow-table tbody tr:hover { background: #eef6ff; }
+.workflow-sticky-col { position: sticky; z-index: 3; background: #fff; box-shadow: 1px 0 0 #dee2e6; }
+.workflow-table thead .workflow-sticky-col { z-index: 5; background: #f8fafc; }
+.sticky-select-col { left: 0; min-width: 54px; width: 54px; text-align: center; }
+.sticky-reviewer-col { left: 54px; min-width: 260px; width: 260px; }
+.sticky-assign-col { left: 314px; min-width: 95px; width: 95px; text-align: center; }
+.sticky-edit-col { left: 0; min-width: 90px; width: 90px; text-align: center; }
+.workflow-row-reviewer-select { min-width: 240px; }
+.workflow-grid-reviewer-select { min-width: 230px; }
+.min-w-300 { min-width: 300px; white-space: normal !important; }
+</style>
+
+<script>
+function toggleWorkflowFilters() {
+    const panel = document.getElementById('workflowFilters');
+    if (!panel) return;
+    panel.style.display = panel.style.display === 'none' ? '' : 'none';
+}
+
+
+document.addEventListener('DOMContentLoaded', function () {
+    const selectAll = document.getElementById('selectAllInsightRows');
+    if (!selectAll) return;
+
+    const rowChecks = Array.from(document.querySelectorAll('.workflow-insight-row-check'));
+
+    function refreshSelectAllState() {
+        const checkedCount = rowChecks.filter(x => x.checked).length;
+        selectAll.checked = rowChecks.length > 0 && checkedCount === rowChecks.length;
+        selectAll.indeterminate = checkedCount > 0 && checkedCount < rowChecks.length;
+    }
+
+    selectAll.addEventListener('change', function () {
+        rowChecks.forEach(x => x.checked = selectAll.checked);
+        refreshSelectAllState();
+    });
+
+    rowChecks.forEach(x => x.addEventListener('change', refreshSelectAllState));
+    refreshSelectAllState();
+});
+
+</script>
