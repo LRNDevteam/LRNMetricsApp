@@ -108,6 +108,15 @@ public sealed class DenialMapperPushDecisionRequest
     public IReadOnlyList<long> PushAuditIds { get; set; } = Array.Empty<long>();
 }
 
+public sealed class DenialMapperPushDetailEditRequest
+{
+    public string ActionCode { get; set; } = string.Empty;
+    public string ActionCategory { get; set; } = string.Empty;
+    public string Task { get; set; } = string.Empty;
+    public string RecommendedAction { get; set; } = string.Empty;
+    public string? DenialClassification { get; set; }
+}
+
 public sealed class DenialMapperNotification
 {
     public long PushAuditId { get; set; }

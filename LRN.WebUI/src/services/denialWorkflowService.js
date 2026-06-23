@@ -83,6 +83,7 @@ export const denialWorkflowService = {
   ,confirmDenialMapperPush: (pushAuditIds) => api('/denial-mapper/confirm-push', { method: 'POST', body: JSON.stringify({ pushAuditIds }) })
   ,cancelDenialMapperPush: (pushAuditIds) => api('/denial-mapper/cancel-push', { method: 'POST', body: JSON.stringify({ pushAuditIds }) })
   ,getDenialMapperPushVerification: (pushAuditId) => api(`/denial-mapper/push-verification/${pushAuditId}`)
+  ,updateDenialMapperPushVerificationDetail: (pushAuditId, detailId, payload) => api(`/denial-mapper/push-verification/${pushAuditId}/details/${detailId}`, { method: 'PUT', body: JSON.stringify(payload) })
   ,getDenialMapperPushVerificationExportUrl: (pushAuditId) => apiUrl(`/denial-mapper/push-verification/${pushAuditId}/export`)
   ,getDenialMapperNotifications: (labId) => api(`/denial-mapper/notifications?labId=${encodeURIComponent(labId)}`)
   ,acknowledgeDenialMapperNotification: (pushAuditId, labId) => api(`/denial-mapper/notifications/${pushAuditId}/acknowledge?labId=${encodeURIComponent(labId)}`, { method: 'POST' })
