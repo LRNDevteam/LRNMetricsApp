@@ -11,8 +11,8 @@
 
     string FmtCount(decimal v, string cat) =>
         (cat == "Cash" || cat == "Avg")
-            ? (v == 0 ? "—" : v.ToString("C0"))
-            : (v == 0 ? "—" : ((long)v).ToString("N0"));
+            ? v.ToString("C0")
+            : ((long)v).ToString("N0");
 
     bool IsDollar(string cat) => cat is "Cash" or "Avg";
 
