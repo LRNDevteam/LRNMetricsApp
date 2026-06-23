@@ -26,8 +26,16 @@ CREATE TABLE dbo.BT_CS_Top5ReimbursementPct
     SumInsurancePayment DECIMAL(18,2)   NOT NULL DEFAULT 0,
     SumChargeAmount     DECIMAL(18,2)   NOT NULL DEFAULT 0,
     UniqueVisitCount    INT             NOT NULL DEFAULT 0,
+    PaymentPct          DECIMAL(9,4)    NOT NULL DEFAULT 0,
     RefreshedAt         DATETIME        NOT NULL DEFAULT GETDATE()
 );
+GO
+IF NOT EXISTS (
+    SELECT 1 FROM sys.columns
+    WHERE object_id = OBJECT_ID('dbo.BT_CS_Top5ReimbursementPct') AND name = 'PaymentPct'
+)
+    ALTER TABLE dbo.BT_CS_Top5ReimbursementPct
+        ADD PaymentPct DECIMAL(9,4) NOT NULL DEFAULT 0;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'BT_CS_Top5ReimbursementPay')
@@ -235,42 +243,55 @@ GO
 -- =====================================================================
 
 -- 1. Top 5 Insurances | Reimbursement % (vs Billed Charge)
-CREATE or alter   PROCEDURE dbo.usp_RefreshBT_CS_Top5ReimbursementPct  
-AS  
-BEGIN  
-    SET NOCOUNT ON;  
-  
-    ;WITH agg AS (  
-        SELECT  
-            LTRIM(RTRIM(PayerName_Raw))                                AS PayerName,  
-            ISNULL(SUM(TRY_CAST(PaymentPercent AS DECIMAL(18,2))),0) AS SumIns,  
-            ISNULL(SUM(TRY_CAST(ChargeAmount     AS DECIMAL(18,2))),0) AS SumChg,  
-            COUNT(DISTINCT NULLIF(LTRIM(RTRIM(AccessionNumber)), '')) AS Visits  
-        FROM dbo.ClaimLevelData  
-        WHERE 
-           NOT (LTRIM(RTRIM(ClaimStatus)) = 'No Response' AND LTRIM(RTRIM(BilledUnbilled)) = 'Unbilled')  
-		    AND ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0 
-        GROUP BY LTRIM(RTRIM(PayerName_Raw))  
-    ),  
-    ranked AS (  
-        SELECT TOP 5 PayerName, SumIns, SumChg, Visits,  
-               ROW_NUMBER() OVER (ORDER BY SumIns DESC) AS Rnk  
-        FROM agg  
-        ORDER BY SumIns DESC  
-    )  
-    SELECT * INTO #out FROM ranked;  
-  
-    TRUNCATE TABLE dbo.BT_CS_Top5ReimbursementPct;  
-    INSERT INTO dbo.BT_CS_Top5ReimbursementPct  
-        (PayerRank, PayerName, SumInsurancePayment, SumChargeAmount, UniqueVisitCount, RefreshedAt)  
-    SELECT CAST(Rnk AS TINYINT), PayerName, SumIns, SumChg, Visits, GETDATE()  
-    FROM #out  
-    ORDER BY Rnk;  
-  
-    DROP TABLE IF EXISTS #out;  
-    PRINT 'usp_RefreshBT_CS_Top5ReimbursementPct completed.';  
-END  
-go
+CREATE OR ALTER PROCEDURE dbo.usp_RefreshBT_CS_Top5ReimbursementPct
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    ;WITH agg AS (
+        SELECT
+            LTRIM(RTRIM(PayerName_Raw))                                                     AS PayerName,
+            ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)                     AS SumIns,
+            ISNULL(SUM(TRY_CAST(ChargeAmount     AS DECIMAL(18,2))), 0)                     AS SumChg,
+            COUNT(NULLIF(LTRIM(RTRIM(AccessionNumber)), ''))                                AS Visits,
+            ROUND(
+                ISNULL(AVG(TRY_CAST(PaymentPercent AS DECIMAL(18,4))), 0) * 100,
+                0
+            )                                                                               AS PaymentPct
+        FROM dbo.ClaimLevelData
+        WHERE NOT (LTRIM(RTRIM(ClaimStatus)) = 'No Response' AND LTRIM(RTRIM(BilledUnbilled)) = 'Unbilled')
+          AND ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+        GROUP BY LTRIM(RTRIM(PayerName_Raw))
+    ),
+    grand AS (
+        SELECT NULLIF(SUM(SumIns), 0) AS GrandTotal
+        FROM agg
+    ),
+    ranked AS (
+        SELECT TOP 5
+               ROW_NUMBER() OVER (ORDER BY a.SumIns DESC) AS Rnk,
+               a.PayerName,
+               a.SumIns,
+               a.SumChg,
+               a.Visits,
+               a.PaymentPct
+        FROM agg a
+        CROSS JOIN grand g
+        ORDER BY a.SumIns DESC
+    )
+    SELECT * INTO #out FROM ranked;
+
+    TRUNCATE TABLE dbo.BT_CS_Top5ReimbursementPct;
+    INSERT INTO dbo.BT_CS_Top5ReimbursementPct
+        (PayerRank, PayerName, SumInsurancePayment, SumChargeAmount, UniqueVisitCount, PaymentPct, RefreshedAt)
+    SELECT CAST(Rnk AS TINYINT), PayerName, SumIns, SumChg, Visits, PaymentPct, GETDATE()
+    FROM #out
+    ORDER BY Rnk;
+
+    DROP TABLE IF EXISTS #out;
+    PRINT 'usp_RefreshBT_CS_Top5ReimbursementPct completed.';
+END
+GO
 
 
 

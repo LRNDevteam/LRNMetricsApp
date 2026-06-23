@@ -1,4 +1,4 @@
--- ClaimLineCSVDataCapture  –  Claim Level & Line Level CSV Tables
+-- ClaimLineCSVDataCapture  ï¿½  Claim Level & Line Level CSV Tables
 -- Run once per lab database.
 -- ============================================================
 
@@ -254,7 +254,7 @@ CREATE TABLE dbo.LineLevelData
     ChargeEnteredDate     NVARCHAR(500)  NULL,
     FirstBilledDate       NVARCHAR(500)  NULL,
     Panelname             NVARCHAR(500)  NULL,
-    CPTCode               NVARCHAR(500)  NULL,
+    CPTCode               NVARCHAR(MAX)  NULL,
     Units                 NVARCHAR(500)  NULL,
     Modifier              NVARCHAR(500)  NULL,
     POS                   NVARCHAR(500)  NULL,
@@ -330,7 +330,7 @@ CREATE TABLE dbo.LineLevelDataArchive
     ChargeEnteredDate     NVARCHAR(500)  NULL,
     FirstBilledDate       NVARCHAR(500)  NULL,
     Panelname             NVARCHAR(500)  NULL,
-    CPTCode               NVARCHAR(500)  NULL,
+    CPTCode               NVARCHAR(MAX)  NULL,
     Units                 NVARCHAR(500)  NULL,
     Modifier              NVARCHAR(500)  NULL,
     POS                   NVARCHAR(500)  NULL,
@@ -498,7 +498,7 @@ CREATE TYPE dbo.LineLevelDataTVP AS TABLE
     ChargeEnteredDate     NVARCHAR(500),
     FirstBilledDate       NVARCHAR(500),
     Panelname             NVARCHAR(500),
-    CPTCode               NVARCHAR(500),
+    CPTCode               NVARCHAR(MAX),
     Units                 NVARCHAR(500),
     Modifier              NVARCHAR(500),
     POS                   NVARCHAR(500),
@@ -534,7 +534,7 @@ CREATE TYPE dbo.LineLevelDataTVP AS TABLE
 );
 GO
 
--- ?? 5. Stored procedure – bulk insert ClaimLevelData rows ???????????????????
+-- ?? 5. Stored procedure ï¿½ bulk insert ClaimLevelData rows ???????????????????
 CREATE OR ALTER PROCEDURE dbo.usp_BulkInsertClaimLevelData
     @Rows               dbo.ClaimLevelDataTVP READONLY,
     @LabName            NVARCHAR(500),
@@ -551,7 +551,7 @@ BEGIN
     -- 1. Skip if this exact RunId + FileType was already processed
     IF EXISTS (SELECT 1 FROM dbo.LineClaimFileLogs WHERE RunId = @RunId AND FileType = 'claimlevel')
     BEGIN
-        PRINT 'RunId already in FileLog for claimlevel — skipping: ' + @RunId;
+        PRINT 'RunId already in FileLog for claimlevel ï¿½ skipping: ' + @RunId;
         SELECT 0 AS InsertedCount;
         RETURN;
     END
@@ -570,7 +570,7 @@ BEGIN
     --    Unchanged rows (same RowHash) are not archived.
     --    Changed rows get a remark listing which columns differ.
     --    Removed rows (in old data but not in new file) get 'row_removed'.
-    --    Single-pass inserts (no WHILE/OFFSET) for speed — archive result sets are small.
+    --    Single-pass inserts (no WHILE/OFFSET) for speed ï¿½ archive result sets are small.
     IF EXISTS (SELECT 1 FROM dbo.ClaimLevelData)
     BEGIN
         -- 3a. Archive rows whose data changed (matched by ClaimID+LabID, RowHash differs)
@@ -761,7 +761,7 @@ BEGIN
 END;
 GO
 
--- ?? 6. Stored procedure – bulk insert LineLevelData rows ????????????????????
+-- ?? 6. Stored procedure ï¿½ bulk insert LineLevelData rows ????????????????????
 CREATE OR ALTER PROCEDURE dbo.usp_BulkInsertLineLevelData
     @Rows               dbo.LineLevelDataTVP READONLY,
     @LabName            NVARCHAR(500),
@@ -778,7 +778,7 @@ BEGIN
     -- 1. Skip if this exact RunId + FileType was already processed
     IF EXISTS (SELECT 1 FROM dbo.LineClaimFileLogs WHERE RunId = @RunId AND FileType = 'linelevel')
     BEGIN
-        PRINT 'RunId already in FileLog for linelevel — skipping: ' + @RunId;
+        PRINT 'RunId already in FileLog for linelevel ï¿½ skipping: ' + @RunId;
         SELECT 0 AS InsertedCount;
         RETURN;
     END
@@ -797,7 +797,7 @@ BEGIN
     --    Unchanged rows (same RowHash) are not archived.
     --    Changed rows get a remark listing which columns differ.
     --    Removed rows (in old data but not in new file) get 'row_removed'.
-    --    Single-pass inserts (no WHILE/OFFSET) for speed — archive result sets are small.
+    --    Single-pass inserts (no WHILE/OFFSET) for speed ï¿½ archive result sets are small.
     IF EXISTS (SELECT 1 FROM dbo.LineLevelData)
     BEGIN
         -- 3a. Archive rows whose data changed (matched by ClaimID+LabID+CPTCode, RowHash differs)

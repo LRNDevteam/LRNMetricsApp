@@ -13,6 +13,12 @@ public sealed class FieldMappingsRoot
 
     [JsonPropertyName("LineLevel")]
     public FileTypeMapping LineLevel { get; set; } = new();
+
+    [JsonPropertyName("ClientPaidList")]
+    public FileTypeMapping ClientPaidList { get; set; } = new();
+
+    [JsonPropertyName("TransactionDetailAdjustment")]
+    public FileTypeMapping TransactionDetailAdjustment { get; set; } = new();
 }
 
 /// <summary>

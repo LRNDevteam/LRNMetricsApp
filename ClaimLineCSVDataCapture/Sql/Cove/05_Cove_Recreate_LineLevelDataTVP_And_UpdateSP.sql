@@ -42,7 +42,7 @@ CREATE TYPE dbo.LineLevelDataTVP AS TABLE
     ChargeEnteredDate    NVARCHAR(500),
     FirstBilledDate      NVARCHAR(500),
     Panelname            NVARCHAR(500),
-    CPTCode              NVARCHAR(500),
+    CPTCode              NVARCHAR(MAX),
     Units                NVARCHAR(500),
     Modifier             NVARCHAR(500),
     POS                  NVARCHAR(500),
