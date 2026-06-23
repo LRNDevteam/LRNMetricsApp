@@ -263,7 +263,7 @@ GO
 
 
 -- 2. Top 5 Insurances | Reimbursement Payments
---    Source: LineLevelData
+--    Source: ClaimLevelData
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshIHD_CS_Top5ReimbursementPay
 AS
 BEGIN
@@ -274,8 +274,9 @@ BEGIN
             LTRIM(RTRIM(PayerName_Raw))                                   AS PayerName,
             ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)   AS TotalPay,
             COUNT(NULLIF(LTRIM(RTRIM(AccessionNumber)), ''))               AS Visits
-        FROM dbo.LineLevelData
+        FROM dbo.ClaimLevelData
         WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+          AND NOT (LTRIM(RTRIM(ClaimStatus)) = 'No Response' AND LTRIM(RTRIM(BilledUnbilled)) = 'Unbilled')
         GROUP BY LTRIM(RTRIM(PayerName_Raw))
     ),
     ranked AS (
