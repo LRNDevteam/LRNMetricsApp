@@ -85,8 +85,11 @@ public static class CsvFileReader
         return allRows;
     }
 
-    /// <summary>Maps a single CSV record to a <see cref="CsvDataRow"/>.</summary>
-    private static CsvDataRow MapRow(
+    /// <summary>
+    /// Maps a single record (CSV fields array, or XLSX row cell values) to a <see cref="CsvDataRow"/>.
+    /// Internal so other readers (e.g., <see cref="XlsxFileReader"/>) can reuse the same mapping logic.
+    /// </summary>
+    internal static CsvDataRow MapRow(
         string[] fields, Dictionary<string, int> headerIndex,
         FileTypeMapping mapping, List<FieldMapping> hashFields,
         string runId, string weekFolder, string sourceFullPath,
@@ -207,7 +210,7 @@ public static class CsvFileReader
                 if (fields.Count > 0 && !fields.All(string.IsNullOrWhiteSpace))
                     return fields.ToArray();
 
-                // Empty row — reset and continue to next record
+                // Empty row ï¿½ reset and continue to next record
                 fields.Clear();
                 hasData = false;
             }
@@ -215,7 +218,7 @@ public static class CsvFileReader
     }
 
     /// <summary>Builds a case-insensitive header-to-column-index map.</summary>
-    private static Dictionary<string, int> BuildHeaderIndex(string[] headers)
+    internal static Dictionary<string, int> BuildHeaderIndex(string[] headers)
     {
         var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         for (int ci = 0; ci < headers.Length; ci++)
@@ -227,7 +230,7 @@ public static class CsvFileReader
     }
 
     /// <summary>Gets a field value by header name, returning empty string if not found.</summary>
-    private static string GetField(string[] fields, Dictionary<string, int> headerIndex, string headerName)
+    internal static string GetField(string[] fields, Dictionary<string, int> headerIndex, string headerName)
     {
         if (headerIndex.TryGetValue(headerName, out int idx) && idx < fields.Length)
             return fields[idx].Trim();
@@ -258,7 +261,7 @@ public static class CsvFileReader
     /// Computes a SHA256 hash using only the fields marked with IncludeInHash=true.
     /// Uses incremental hashing to avoid large intermediate string allocations.
     /// </summary>
-    private static string ComputeRowHash(CsvDataRow row, List<FieldMapping> hashFields)
+    internal static string ComputeRowHash(CsvDataRow row, List<FieldMapping> hashFields)
     {
         var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         Span<byte> separatorBytes = stackalloc byte[] { (byte)'|' };
