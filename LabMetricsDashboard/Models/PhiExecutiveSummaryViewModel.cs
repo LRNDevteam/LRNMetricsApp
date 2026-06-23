@@ -26,6 +26,12 @@ public sealed class ExecSummaryRow
     /// </summary>
     public bool IsSubRow => Description.StartsWith("  ", StringComparison.Ordinal);
 
+    /// <summary>
+    /// True when the description starts with four or more leading spaces,
+    /// indicating a second-level sub-row (e.g. D.5.1 PanelType under D.5 Coding Exception).
+    /// </summary>
+    public bool IsSubSubRow => Description.StartsWith("    ", StringComparison.Ordinal);
+
     /// <summary>Values keyed by (Year, Month). Year=0, Month=0 is the grand total.</summary>
     public Dictionary<(int Year, int Month), decimal> ValuesByYearMonth { get; set; } = [];
 
@@ -44,14 +50,37 @@ public sealed class PhiExecutiveSummaryViewModel
     /// <summary>Currently selected lab name (e.g. "Phi_Life").</summary>
     public string SelectedLab { get; set; } = string.Empty;
 
-    // ── Filter state ────────────────────────────────────────────────
+    // ── Filter state – legacy year/month ───────────────────────────
     public int? SelectedYearFrom  { get; set; }
     public int? SelectedYearTo    { get; set; }
     public int? SelectedMonthFrom { get; set; }
     public int? SelectedMonthTo   { get; set; }
 
+    // ── Filter state – exact date ranges (Cove and future labs) ────
+    public DateTime? DosFrom      { get; set; }
+    public DateTime? DosTo        { get; set; }
+    public DateTime? ReceivedFrom { get; set; }
+    public DateTime? ReceivedTo   { get; set; }
+    public DateTime? BilledFrom   { get; set; }
+    public DateTime? BilledTo     { get; set; }
+    public DateTime? PostedFrom   { get; set; }
+    public DateTime? PostedTo     { get; set; }
+
+    // ── Filter state – dimension multi-select (Cove and future labs)
+    public List<string> SelectedPanels    { get; set; } = [];
+    public List<string> SelectedClinics   { get; set; } = [];
+    public List<string> SelectedProviders { get; set; } = [];
+    public List<string> SelectedReps      { get; set; } = [];
+
     // ── Filter option lists ─────────────────────────────────────────
-    public List<int> AvailableYears  { get; set; } = [];
+    public List<int>    AvailableYears     { get; set; } = [];
+
+    // Available dimension options (populated for Cove only on initial load;
+    // also refreshable via /ExecutiveSummary/FilterOptions AJAX for all labs)
+    public List<string> AvailablePanels    { get; set; } = [];
+    public List<string> AvailableClinics   { get; set; } = [];
+    public List<string> AvailableProviders { get; set; } = [];
+    public List<string> AvailableReps      { get; set; } = [];
 
     // ── Data ────────────────────────────────────────────────────────
     /// <summary>
@@ -60,8 +89,12 @@ public sealed class PhiExecutiveSummaryViewModel
     /// </summary>
     public List<(int Year, int Month)> YearMonthColumns { get; set; } = [];
 
+    /// <summary>Grand totals for each year, keyed by year.</summary>
+    public Dictionary<int, decimal> YearlyTotals { get; set; } = [];
+
     /// <summary>All metric rows, in display order (A, B, B1…B31, C … AL).</summary>
     public List<ExecSummaryRow> Rows { get; set; } = [];
+
 
     /// <summary>Error message when the query fails or is unavailable.</summary>
     public string? ErrorMessage { get; set; }

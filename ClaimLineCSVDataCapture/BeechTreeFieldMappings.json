@@ -73,6 +73,43 @@
       { "CsvHeader": "DOE_Month", "SqlColumn": "DOE_Month", "IncludeInHash": false }
     ]
   },
+  "TransactionDetailAdjustment": {
+    "SqlTableName": "dbo.BTTransactionDetailData",
+    "TvpTypeName": "dbo.BTTransactionDetailDataTVP",
+    "SprocName": "dbo.usp_BulkInsertBTTransactionDetailData",
+    "FileTypeKey": "transactiondetailadjustment",
+    "Fields": [
+      { "CsvHeader": "Office Key",                "SqlColumn": "OfficeKey",             "IncludeInHash": true  },
+      { "CsvHeader": "Transaction Type",          "SqlColumn": "TransactionType",        "IncludeInHash": true  },
+      { "CsvHeader": "Chart Number",              "SqlColumn": "ChartNumber",            "IncludeInHash": true  },
+      { "CsvHeader": "Patient Name",              "SqlColumn": "PatientName",            "IncludeInHash": false },
+      { "CsvHeader": "Financial Class",           "SqlColumn": "FinancialClass",         "IncludeInHash": true  },
+      { "CsvHeader": "Visit #",                   "SqlColumn": "VisitNumber",            "IncludeInHash": true  },
+      { "CsvHeader": "Facility Name",             "SqlColumn": "FacilityName",           "IncludeInHash": true  },
+      { "CsvHeader": "Provider Profile",          "SqlColumn": "ProviderProfile",        "IncludeInHash": true  },
+      { "CsvHeader": "Charge Code",               "SqlColumn": "ChargeCode",             "IncludeInHash": true  },
+      { "CsvHeader": "Transaction Code",          "SqlColumn": "TransactionCode",        "IncludeInHash": true  },
+      { "CsvHeader": "Transaction Code Desc",     "SqlColumn": "TransactionCodeDesc",    "IncludeInHash": true  },
+      { "CsvHeader": "Modifiers",                 "SqlColumn": "Modifiers",              "IncludeInHash": true  },
+      { "CsvHeader": "Visit - Primary Carrier",   "SqlColumn": "VisitPrimaryCarrier",    "IncludeInHash": true  },
+      { "CsvHeader": "Visit - Secondary Carrier", "SqlColumn": "VisitSecondaryCarrier",  "IncludeInHash": true  },
+      { "CsvHeader": "Transaction Carrier",       "SqlColumn": "TransactionCarrier",     "IncludeInHash": true  },
+      { "CsvHeader": "Primary Dx (ICD-9)",        "SqlColumn": "PrimaryDxICD9",          "IncludeInHash": true  },
+      { "CsvHeader": "Primary Dx (ICD-10)",       "SqlColumn": "PrimaryDxICD10",         "IncludeInHash": true  },
+      { "CsvHeader": "Payment Method",            "SqlColumn": "PaymentMethod",          "IncludeInHash": true  },
+      { "CsvHeader": "Check Number",              "SqlColumn": "CheckNumber",            "IncludeInHash": true  },
+      { "CsvHeader": "Date of Service",           "SqlColumn": "DateOfService",          "IncludeInHash": true  },
+      { "CsvHeader": "Date of Entry",             "SqlColumn": "DateOfEntry",            "IncludeInHash": true  },
+      { "CsvHeader": "Date of Deposit",           "SqlColumn": "DateOfDeposit",          "IncludeInHash": true  },
+      { "CsvHeader": "Void",                      "SqlColumn": "Void",                   "IncludeInHash": true  },
+      { "CsvHeader": "Units",                     "SqlColumn": "Units",                  "IncludeInHash": true  },
+      { "CsvHeader": "Charges",                   "SqlColumn": "Charges",                "IncludeInHash": true  },
+      { "CsvHeader": "Patient Payments",          "SqlColumn": "PatientPayments",        "IncludeInHash": true  },
+      { "CsvHeader": "Insurance Payments",        "SqlColumn": "InsurancePayments",      "IncludeInHash": true  },
+      { "CsvHeader": "Total Payments",            "SqlColumn": "TotalPayments",          "IncludeInHash": true  },
+      { "CsvHeader": "Adjustments",               "SqlColumn": "Adjustments",            "IncludeInHash": true  }
+    ]
+  },
   "LineLevel": {
     "SqlTableName": "dbo.LineLevelData",
     "TvpTypeName": "dbo.LineLevelDataTVP",

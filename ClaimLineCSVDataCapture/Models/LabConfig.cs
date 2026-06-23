@@ -77,6 +77,19 @@ public sealed class LabPaths
     /// When set and the file exists, it overrides the global FieldMappingsPath from appsettings.json.
     /// </summary>
     public string? LabFieldMappingsPath { get; set; }
+
+    /// <summary>
+    /// Keyword used to identify TransactionDetail Adjustment XLSX files by filename.
+    /// Example: "TransactionDetail Adjustment"
+    /// Required when the lab receives this supplemental file.
+    /// </summary>
+    public string? TransactionDetailAdjustmentKeyword { get; set; }
+
+    /// <summary>
+    /// Folder path where TransactionDetail Adjustment XLSX files are searched.
+    /// When null or empty, falls back to the lab's <c>ServerMastersPath</c>.
+    /// </summary>
+    public string? TransactionDetailAdjustmentPath { get; set; }
 }
 
 public sealed class LabOutput
