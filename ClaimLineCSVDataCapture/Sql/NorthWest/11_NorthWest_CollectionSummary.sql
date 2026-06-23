@@ -255,7 +255,7 @@ BEGIN
                ROW_NUMBER() OVER (ORDER BY a.SumIns DESC) AS Rnk,
                a.PayerName, a.SumIns, a.SumChg, a.Visits,
               -- CAST(a.SumIns * 100.0 / ISNULL(g.GrandTotal, 1) AS DECIMAL(9,4)) AS PayPct
-              CAST(a.SumIns * 100.0 / NULLIF(a.SumChg, 0) AS DECIMAL(9,4)) AS PayPct   
+              CAST(a.SumIns * 100.0 / NULLIF(a.SumChg, 0) AS DECIMAL(9,4)) AS PayPct
         FROM agg a CROSS JOIN grand g
         ORDER BY a.SumIns DESC
     )
