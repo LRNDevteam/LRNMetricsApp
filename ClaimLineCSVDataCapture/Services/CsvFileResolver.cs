@@ -7,8 +7,21 @@ namespace ClaimLineCSVDataCapture.Services;
 /// </summary>
 public static class CsvFileResolver
 {
-    private static readonly string[] ClaimLevelKeywords = ["Claim Level", "ClaimLevel"];
-    private static readonly string[] LineLevelKeywords  = ["Line Level",  "LineLevel"];
+    private static readonly string[] ClaimLevelKeywords     = ["Claim Level", "ClaimLevel"];
+    private static readonly string[] LineLevelKeywords      = ["Line Level",  "LineLevel"];
+    private static readonly string[] ClientPaidListKeywords = ["Client Paid List", "ClientPaidList"];
+
+    /// <summary>
+    /// Resolves the latest matching TransactionDetail Adjustment .xlsx file.
+    /// The keyword is supplied by the caller (from lab config
+    /// <c>Paths.TransactionDetailAdjustmentKeyword</c>), e.g. "TransactionDetail Adjustment".
+    /// When <paramref name="searchPath"/> is null or empty the caller should pass
+    /// the lab's <c>ServerMastersPath</c> as a fallback.
+    /// </summary>
+    public static (string FilePath, string WeekFolder)? ResolveLatestTransactionDetailAdjustmentWithDiag(
+        string searchPath, string keyword,
+        out ResolveFailureReason reason, out int totalCount, out int matchedCount)
+        => ResolveLatestWithDiag(searchPath, [keyword], "*.xlsx", out reason, out totalCount, out matchedCount);
 
     /// <summary>
     /// Returns (filePath, weekFolder) for the latest CSV file matching the given keyword
@@ -44,15 +57,29 @@ public static class CsvFileResolver
         string basePath, out ResolveFailureReason reason, out int totalCsvCount, out int matchedCsvCount)
         => ResolveLatestWithDiag(basePath, LineLevelKeywords, out reason, out totalCsvCount, out matchedCsvCount);
 
+    /// <summary>
+    /// Resolves the latest matching ClientPaidList .xlsx file (RisingTides "Master" file)
+    /// and also returns the failure reason when null is returned.
+    /// Unlike Claim/Line Level (.csv), ClientPaidList arrives as an Excel workbook.
+    /// </summary>
+    public static (string FilePath, string WeekFolder)? ResolveLatestClientPaidListWithDiag(
+        string basePath, out ResolveFailureReason reason, out int totalCount, out int matchedCount)
+        => ResolveLatestWithDiag(basePath, ClientPaidListKeywords, "*.xlsx", out reason, out totalCount, out matchedCount);
+
     private static (string FilePath, string WeekFolder)? ResolveLatest(string basePath, string[] keywords)
-        => ResolveLatestWithDiag(basePath, keywords, out _, out _, out _);
+        => ResolveLatestWithDiag(basePath, keywords, "*.csv", out _, out _, out _);
 
     private static (string FilePath, string WeekFolder)? ResolveLatestWithDiag(
         string basePath, string[] keywords,
         out ResolveFailureReason reason, out int totalCsvCount, out int matchedCsvCount)
+        => ResolveLatestWithDiag(basePath, keywords, "*.csv", out reason, out totalCsvCount, out matchedCsvCount);
+
+    private static (string FilePath, string WeekFolder)? ResolveLatestWithDiag(
+        string basePath, string[] keywords, string searchPattern,
+        out ResolveFailureReason reason, out int totalCount, out int matchedCount)
     {
-        totalCsvCount   = 0;
-        matchedCsvCount = 0;
+        totalCount   = 0;
+        matchedCount = 0;
 
         if (string.IsNullOrWhiteSpace(basePath) || !Directory.Exists(basePath))
         {
@@ -60,26 +87,29 @@ public static class CsvFileResolver
             return null;
         }
 
-        var allCsvFiles = Directory
-            .EnumerateFiles(basePath, "*.csv", SearchOption.AllDirectories)
+        var allFiles = Directory
+            .EnumerateFiles(basePath, searchPattern, SearchOption.AllDirectories)
+            // Exclude Excel lock/temp files (e.g., "~$ClientPaidList.xlsx") created while a
+            // workbook is open.
+            .Where(f => !Path.GetFileName(f).StartsWith("~$", StringComparison.Ordinal))
             .ToList();
 
-        totalCsvCount = allCsvFiles.Count;
+        totalCount = allFiles.Count;
 
-        if (totalCsvCount == 0)
+        if (totalCount == 0)
         {
             reason = ResolveFailureReason.NoCsvFiles;
             return null;
         }
 
-        var matched = allCsvFiles
+        var matched = allFiles
             .Where(f => keywords.Any(k => Path.GetFileName(f).Contains(k, StringComparison.OrdinalIgnoreCase)))
             .Select(f => new FileInfo(f))
             .ToList();
 
-        matchedCsvCount = matched.Count;
+        matchedCount = matched.Count;
 
-        if (matchedCsvCount == 0)
+        if (matchedCount == 0)
         {
             reason = ResolveFailureReason.NoKeywordMatch;
             return null;

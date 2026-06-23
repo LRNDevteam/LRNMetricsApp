@@ -1,0 +1,192 @@
+@model LabMetricsDashboard.Models.ExecSummaryDetailRowsViewModel
+@{
+    ViewData["Title"] = "Executive Summary — " + Model.Description.TrimStart();
+    Layout = "~/Views/Shared/_Layout.cshtml";
+
+    string FmtCell(object? v) => v switch
+    {
+        null                    => "—",
+        DateTime dt when dt == dt.Date
+                                => dt.ToString("MM/dd/yyyy"),
+        DateTime dt             => dt.ToString("MM/dd/yyyy HH:mm"),
+        decimal dec             => dec.ToString("N2"),
+        double dbl              => dbl.ToString("N2"),
+        float flt               => flt.ToString("N2"),
+        bool b                  => b ? "Yes" : "No",
+        string s when s.Trim() == ""
+                                => "—",
+        _                       => v.ToString() ?? "—"
+    };
+
+    string Align(object? sampleValue) => sampleValue switch
+    {
+        decimal or double or float or int or long => "right",
+        DateTime => "center",
+        _ => "left"
+    };
+
+    // Use the first non-null value in each column to decide alignment.
+    var colAlign = new string[Model.Columns.Count];
+    for (int c = 0; c < Model.Columns.Count; c++)
+    {
+        object? sample = null;
+        foreach (var row in Model.Rows)
+        {
+            if (row[c] is not null) { sample = row[c]; break; }
+        }
+        colAlign[c] = Align(sample);
+    }
+
+    var excelUrl = Url.Action("Detail", "ExecutiveSummary", new
+    {
+        lab         = Context.Request.Query["lab"],
+        category    = Model.Category,
+        rowCode     = Model.RowCode,
+        description = Model.Description,
+        year        = Model.Year,
+        month       = Model.Month,
+        value       = Model.SelectedValue,
+        yearFrom    = Context.Request.Query["yearFrom"],
+        yearTo      = Context.Request.Query["yearTo"],
+        monthFrom   = Context.Request.Query["monthFrom"],
+        monthTo     = Context.Request.Query["monthTo"],
+        export      = "excel",
+    });
+}
+
+<style>
+    /* ── Page header ──────────────────────────────────────────── */
+    .page-header {
+        display: flex; align-items: center; justify-content: space-between;
+        flex-wrap: wrap; gap: .75rem;
+        padding-bottom: .75rem;
+        border-bottom: 1px solid #e0e6ed;
+    }
+    .page-actions { display: flex; align-items: center; gap: .5rem; flex-shrink: 0; }
+
+    .detail-tbl {
+        font-size: .72rem; width: 100%;
+        border-collapse: separate; border-spacing: 0;
+    }
+    .detail-tbl thead th {
+        background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
+        color: rgba(255,255,255,.92); font-weight: 700; font-size: .62rem;
+        letter-spacing: .04em; text-transform: uppercase;
+        padding: .5rem .45rem; white-space: nowrap; text-align: center;
+        position: sticky; top: 0; z-index: 5;
+        border-bottom: 1px solid #0a2a4a;
+    }
+    .detail-tbl tbody tr:nth-child(even) { background: #f7faff; }
+    .detail-tbl tbody tr:hover           { background: #e8f0fe; }
+    .detail-tbl td {
+        padding: .32rem .45rem; border-bottom: 1px solid #e8ecf0;
+        vertical-align: middle; white-space: nowrap;
+    }
+    .detail-scroll { overflow-x: auto; }
+    .detail-wrap {
+        border-radius: 14px; overflow: hidden;
+        background: #fff; border: 1px solid #e0e6ed;
+        box-shadow: 0 2px 12px rgba(0,0,0,.05);
+    }
+    .detail-meta-bar {
+        display: flex; align-items: center; gap: .75rem;
+        padding: .6rem 1rem; border-bottom: 1px solid #e0e6ed;
+        background: #f8faff; flex-wrap: wrap;
+    }
+</style>
+
+<!-- ── Page header ──────────────────────────────────────────── -->
+<div class="page-header mb-3">
+    <h2 class="mb-0 fw-bold" style="font-size:1.15rem">
+        <i class="bi bi-table me-1"></i>@Model.Description.TrimStart()
+    </h2>
+    <div class="page-actions">
+        @if (Model.HasData)
+        {
+            <a href="@excelUrl" class="btn btn-sm btn-success">
+                <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
+            </a>
+        }
+        <a href="@Model.BackUrl" class="btn btn-sm btn-outline-secondary">
+            <i class="bi bi-arrow-left me-1"></i>Back to Executive Summary
+        </a>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(Model.ErrorMessage))
+{
+    <div class="alert alert-danger">
+        <i class="bi bi-exclamation-circle-fill me-1"></i>@Model.ErrorMessage
+    </div>
+}
+else
+{
+    <!-- ── Meta bar ────────────────────────────────────────────── -->
+    <div class="card mb-3 p-0">
+        <div class="detail-meta-bar">
+            <span class="fw-semibold text-muted" style="font-size:.75rem">CATEGORY</span>
+            <span class="badge bg-primary">@Model.Category</span>
+
+            <span class="fw-semibold text-muted ms-3" style="font-size:.75rem">PERIOD</span>
+            <span class="badge bg-secondary">@Model.MonthLabel</span>
+
+            @if (Model.SelectedValue.HasValue)
+            {
+                <span class="fw-semibold text-muted ms-3" style="font-size:.75rem">VALUE</span>
+                <span class="badge bg-warning text-dark">@Model.SelectedValueFormatted</span>
+            }
+
+            <span class="fw-semibold text-muted ms-3" style="font-size:.75rem">SOURCE</span>
+            <span class="badge bg-info text-dark">@Model.SourceLabel</span>
+
+            @if (Model.HasData)
+            {
+                <span class="fw-semibold text-muted ms-3" style="font-size:.75rem">RECORDS</span>
+                <span class="badge bg-success">@Model.Rows.Count</span>
+            }
+        </div>
+    </div>
+
+    @if (!Model.HasData)
+    {
+        <div class="text-center p-5 text-muted">
+            <i class="bi bi-inbox" style="font-size:3rem"></i>
+            <p class="mt-2">No records found for this selection.</p>
+        </div>
+    }
+    else
+    {
+        <div class="detail-wrap">
+            <div class="detail-scroll">
+                <table class="detail-tbl">
+                    <thead>
+                        <tr>
+                            @for (int c = 0; c < Model.Columns.Count; c++)
+                            {
+                                <th>@Model.Columns[c]</th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in Model.Rows)
+                        {
+                            <tr>
+                                @for (int c = 0; c < row.Length; c++)
+                                {
+                                    <td style="text-align:@colAlign[c]">@FmtCell(row[c])</td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ── Back link repeated at bottom for convenience ───────── -->
+        <div class="mt-3">
+            <a href="@Model.BackUrl" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-arrow-left me-1"></i>Back to Executive Summary
+            </a>
+        </div>
+    }
+}

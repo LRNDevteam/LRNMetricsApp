@@ -1,0 +1,1196 @@
+@model LabMetricsDashboard.Models.PhiExecutiveSummaryViewModel
+@using LabMetricsDashboard.Models
+@{
+    ViewData["Title"]       = "Executive Summary";
+    ViewData["SelectedLab"] = Model.SelectedLab;
+    Layout = "~/Views/Shared/_Layout.cshtml";
+
+    static string MonthName(int m) => m == 0 ? "Total" :
+        System.Globalization.CultureInfo.InvariantCulture.DateTimeFormat.GetAbbreviatedMonthName(m);
+
+    string FmtCount(decimal v, string cat) =>
+        (cat == "Cash" || cat == "Avg")
+            ? v.ToString("C0")
+            : ((long)v).ToString("N0");
+
+    bool IsDollar(string cat) => cat is "Cash" or "Avg";
+
+    static string TabId(string cat) => cat switch
+    {
+        "LIS"  => "lis",
+        "PMS"  => "pms",
+        "Cash" => "cash",
+        "Avg"  => "avg",
+        _      => "other"
+    };
+
+    static string TabLabel(string cat) => cat switch
+    {
+        "LIS"  => "LIS Breakdown",
+        "PMS"  => "PMS Breakdown",
+        "Cash" => "Cash Breakdown",
+        "Avg"  => "Averages",
+        _      => cat
+    };
+
+    var tabs = new[] { "LIS", "PMS", "Cash", "Avg" };
+
+    // Ordered list of data years (excludes the (0,0) grand-total sentinel column).
+    var esYears = Model.YearMonthColumns
+        .Where(c => c.Year != 0)
+        .Select(c => c.Year)
+        .Distinct()
+        .OrderBy(y => y)
+        .ToList();
+
+    // Ordered months within each year.
+    var esMonthsByYear = Model.YearMonthColumns
+        .Where(c => c.Year != 0)
+        .GroupBy(c => c.Year)
+        .ToDictionary(g => g.Key, g => g.Select(c => c.Month).OrderBy(m => m).ToList());
+
+    // Per-row total for a single year (sum of that row's monthly values in the year).
+    decimal RowYearTotal(ExecSummaryRow row, int year) =>
+        row.ValuesByYearMonth.Where(kv => kv.Key.Year == year && kv.Key.Month != 0).Sum(kv => kv.Value);
+
+    // Per-row grand total across all years/months.
+    // "Avg" rows (AJ/AK/AL) are averages, not additive — summing the monthly
+    // values would produce a meaningless number (e.g. ~$4,193 instead of the
+    // correct overall average of ~$305). For those rows use the precomputed
+    // (0,0) grand-total sentinel value instead of summing.
+    decimal RowGrandTotal(ExecSummaryRow row)
+    {
+        if (row.Category == "Avg")
+        {
+            row.ValuesByYearMonth.TryGetValue((0, 0), out var avgTotal);
+            return avgTotal;
+        }
+        return row.ValuesByYearMonth.Where(kv => kv.Key.Year != 0 && kv.Key.Month != 0).Sum(kv => kv.Value);
+    }
+}
+
+<style>
+    /* ── Page header ──────────────────────────────────────────── */
+    .page-header {
+        display: flex; align-items: center; justify-content: space-between;
+        flex-wrap: wrap; gap: .75rem;
+        padding-bottom: .75rem;
+        border-bottom: 1px solid #e0e6ed;
+    }
+    .page-actions { display: flex; align-items: center; gap: .5rem; flex-shrink: 0; }
+
+    /* ── Executive Summary table — styled to match Production Report ── */
+    .es-wrap {
+        border-radius: 14px; overflow: hidden;
+        background: #fff; border: 1px solid #e0e6ed;
+        box-shadow: 0 2px 12px rgba(0,0,0,.05);
+    }
+    .es-scroll { max-height: 78vh; overflow: auto; }
+
+    .es-table {
+        border-collapse: separate; border-spacing: 0;
+        font-size: .72rem; width: 100%; table-layout: fixed;
+    }
+
+    .es-table thead th {
+        background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
+        color: rgba(255,255,255,.92); font-weight: 700; font-size: .62rem;
+        letter-spacing: .04em; text-transform: uppercase;
+        padding: .5rem .45rem; text-align: center; white-space: nowrap;
+        position: sticky; top: 0; z-index: 5;
+        border-bottom: 1px solid #0a2a4a;
+        border-right: 1px solid rgba(255,255,255,.08);
+        line-height: 1.2;
+    }
+    .es-table thead tr:nth-child(2) th {
+        top: 30px; z-index: 4;
+        background: linear-gradient(135deg, #162d50 0%, #1b4a6c 100%);
+        font-size: .58rem;
+    }
+    .es-table thead th.col-desc {
+        text-align: left; position: sticky; left: 0; z-index: 7; min-width: 240px;
+    }
+    .es-table thead tr:nth-child(2) th.col-desc { z-index: 6; }
+
+    .es-table td {
+        padding: .35rem .5rem; vertical-align: middle;
+        text-align: right; white-space: nowrap;
+        border-right: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0;
+        overflow: hidden; text-overflow: ellipsis;
+    }
+    .es-table td.col-desc {
+        text-align: left; font-weight: 600; color: #1e293b;
+        position: sticky; left: 0; z-index: 1; background: #fff;
+        min-width: 240px; max-width: 320px;
+    }
+
+    tr.es-cat-row td { background: #f0fdf4; font-weight: 700; }
+    tr.es-cat-row td.col-desc { background: #f0fdf4; color: #166534; }
+
+    tr.es-sub-row td { background: #fff; color: #475569; font-weight: 400; }
+    tr.es-sub-row td.col-desc { padding-left: 1.6rem; font-weight: 500; color: #64748b; background: #fff; }
+    tr.es-sub-row:hover td, tr.es-sub-row:hover td.col-desc { background: #f8fafc; }
+
+    /* Second-level sub-rows (e.g. D.5.1 PanelType under D.5 Coding Exception) */
+    tr.es-sub-sub-row td { background: #fafbfc; color: #64748b; font-weight: 400; }
+    tr.es-sub-sub-row td.col-desc { padding-left: 3rem; font-weight: 400; color: #64748b; background: #fafbfc; }
+    tr.es-sub-sub-row:hover td, tr.es-sub-sub-row:hover td.col-desc { background: #f1f5f9; }
+
+    /* ── Collapsible sub-rows ─────────────────────────────────── */
+    tr.es-cat-row.has-children td.col-desc { cursor: pointer; user-select: none; }
+    tr.es-cat-row.has-children td.col-desc::before {
+        content: '\25BE'; /* ▾ */
+        display: inline-block;
+        width: 1em; margin-right: .3rem;
+        font-size: .6rem; color: #166534;
+    }
+    tr.es-cat-row.has-children.es-collapsed td.col-desc::before {
+        content: '\25B8'; /* ▸ */
+    }
+    tr.es-sub-row.es-hidden { display: none; }
+
+    /* Second-level collapsible: es-sub-row acting as parent of es-sub-sub-rows */
+    tr.es-sub-row.has-children td.col-desc { cursor: pointer; user-select: none; }
+    tr.es-sub-row.has-children td.col-desc::before {
+        content: '\25BE'; /* ▾ */
+        display: inline-block;
+        width: 1em; margin-right: .3rem;
+        font-size: .6rem; color: #334155;
+    }
+    tr.es-sub-row.has-children.es-collapsed td.col-desc::before {
+        content: '\25B8'; /* ▸ */
+    }
+    tr.es-sub-sub-row.es-hidden { display: none; }
+
+    /* ── Description filter ───────────────────────────────────── */
+    tr.es-filter-hidden { display: none !important; }
+    tbody.es-filtering tr.es-sub-row.es-hidden:not(.es-filter-hidden) { display: table-row; }
+
+    td.es-year-total { background: #fefce8 !important; font-weight: 700; }
+    .es-table thead th.es-year-total {
+        background: linear-gradient(135deg, #854d0e 0%, #a16207 100%) !important;
+    }
+    .es-table thead tr:nth-child(2) th.es-year-total { background: #a16207 !important; }
+
+    td.es-grand { background: #fef3c7 !important; font-weight: 800; }
+    .es-table thead th.es-grand {
+        background: linear-gradient(135deg, #78350f 0%, #92400e 100%) !important;
+    }
+
+    .dollar-badge { background: #1e7e34; color: #fff; font-size: .6rem; border-radius: 3px;
+        padding: 1px 4px; margin-right: 4px; }
+
+    a.es-drill-link {
+        display: inline-block;
+        color: #0e3460; font-weight: 700; text-decoration: none;
+        background: #e8f1fb; border: 1px solid #c7ddf5; border-radius: 999px;
+        padding: 1px 10px; line-height: 1.4; min-width: 2.2em; text-align: center;
+        cursor: pointer; transition: background .15s, color .15s, border-color .15s;
+    }
+    a.es-drill-link:hover {
+        background: #0e3460; border-color: #0e3460; color: #fff; text-decoration: none;
+    }
+
+    /* Non-clickable "pill" for zero-value / non-drillable cells, matching
+       .es-drill-link's box model so columns stay visually aligned. */
+    span.es-pill {
+        display: inline-block;
+        color: #6c757d; font-weight: 700;
+        background: #f1f3f5; border: 1px solid #e2e6ea; border-radius: 999px;
+        padding: 1px 10px; line-height: 1.4; min-width: 2.2em; text-align: center;
+    }
+
+    /* Tighter pill/link sizing for dollar-formatted cells (Cash/Avg rows) so
+       larger currency values like "$2,045,975" aren't clipped by the
+       fixed-width columns. */
+    .es-pill.es-pill-dollar, a.es-drill-link.es-link-dollar {
+        padding: 1px 3px; min-width: 0; font-size: .68rem; letter-spacing: -0.02em;
+    }
+
+    /* ── Single-grid section separator rows (LIS / PMS / Cash / Avg) ──── */
+    tr.es-section-row td.es-section-cell {
+        background: linear-gradient(135deg, #0a1628 0%, #0e3460 50%, #0d5c74 100%);
+        color: #fff; font-weight: 800; font-size: .78rem;
+        letter-spacing: .06em; text-transform: uppercase;
+        text-align: left; padding: .45rem .75rem;
+    }
+
+    .nav-tabs-pms { border-bottom: 2px solid #0e3460; }
+    .nav-tabs-pms .nav-link {
+        border: 1px solid transparent;
+        border-top-left-radius: .25rem; border-top-right-radius: .25rem;
+        color: #0e3460; font-weight: 600; font-size: .78rem;
+    }
+    .nav-tabs-pms .nav-link.active, .nav-tabs-pms .nav-item.show .nav-link {
+        color: #fff; background-color: #0e3460; border-color: #0e3460;
+    }
+
+    /* ── Filter panel ─────────────────────────────────────────── */
+    .es-filter-panel {
+        background: #fff; border-radius: 12px;
+        box-shadow: 0 2px 10px rgba(0,0,0,.07);
+        border: 1px solid #e2e8f0;
+    }
+    .es-filter-header {
+        cursor: pointer; user-select: none;
+        border-bottom: 1px solid #f1f5f9;
+        transition: background .15s;
+    }
+    .es-filter-header:hover { background: #f8fafc; border-radius: 12px 12px 0 0; }
+    .es-filter-chevron {
+        font-size: .8rem; color: #64748b;
+        transition: transform .2s;
+    }
+    .es-filter-panel.collapsed .es-filter-chevron { transform: rotate(180deg); }
+
+    .es-filter-section-label {
+        font-size: .65rem; font-weight: 700; letter-spacing: .07em;
+        text-transform: uppercase; color: #64748b; margin-bottom: .4rem;
+    }
+    .es-filter-label {
+        display: block; font-size: .67rem; font-weight: 700;
+        letter-spacing: .04em; color: #374151; margin-bottom: .25rem;
+    }
+
+    /* ── Custom checkbox-dropdown for dimension filters ────────── */
+    .es-hidden-select { display: none; }
+
+    .es-dd-btn {
+        display: flex; align-items: center; justify-content: space-between;
+        width: 100%; padding: .3rem .55rem;
+        background: #fff; border: 1px solid #dee2e6; border-radius: .375rem;
+        font-size: .78rem; color: #374151; cursor: pointer;
+        transition: border-color .15s, box-shadow .15s;
+        min-height: 31px;
+    }
+    .es-dd-btn:hover { border-color: #0e3460; }
+    .es-dd-btn.active { border-color: #0e3460; box-shadow: 0 0 0 2px rgba(14,52,96,.12); }
+    .es-dd-btn .es-dd-count {
+        background: #0e3460; color: #fff; border-radius: 10px;
+        font-size: .6rem; padding: 1px 6px; margin-left: 4px; flex-shrink: 0;
+    }
+    .es-dd-btn .es-dd-caret { font-size: .65rem; color: #9ca3af; flex-shrink: 0; margin-left: 4px; }
+    .es-dd-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+    .es-dd-placeholder { color: #9ca3af; }
+
+    .es-dd-menu {
+        display: none; position: absolute; z-index: 1050;
+        min-width: 220px; max-width: 320px;
+        background: #fff; border: 1px solid #dee2e6; border-radius: .5rem;
+        box-shadow: 0 8px 24px rgba(0,0,0,.12);
+        overflow: hidden;
+    }
+    .es-dd-menu.open { display: block; }
+    .es-dd-search {
+        padding: .4rem .5rem; border-bottom: 1px solid #f1f5f9;
+    }
+    .es-dd-search input {
+        width: 100%; border: 1px solid #e2e8f0; border-radius: .3rem;
+        padding: .25rem .4rem; font-size: .75rem; outline: none;
+    }
+    .es-dd-search input:focus { border-color: #0e3460; }
+    .es-dd-list {
+        max-height: 200px; overflow-y: auto; padding: .25rem 0;
+    }
+    .es-dd-item {
+        display: flex; align-items: center; gap: .4rem;
+        padding: .25rem .6rem; cursor: pointer; font-size: .75rem;
+        transition: background .1s;
+    }
+    .es-dd-item:hover { background: #f0f4ff; }
+    .es-dd-item input[type=checkbox] { flex-shrink: 0; }
+    .es-dd-empty { padding: .4rem .6rem; font-size: .75rem; color: #9ca3af; }
+    .es-dd-footer {
+        padding: .3rem .5rem; border-top: 1px solid #f1f5f9;
+        display: flex; gap: .4rem; justify-content: flex-end;
+    }
+
+    /* ── Active filter chips ───────────────────────────────────── */
+    .es-chip {
+        display: inline-flex; align-items: center; gap: .3rem;
+        background: #e8f1fb; border: 1px solid #c7ddf5; border-radius: 999px;
+        padding: 2px 8px; font-size: .7rem; color: #0e3460;
+    }
+    .es-chip .es-chip-x {
+        cursor: pointer; opacity: .6; line-height: 1;
+    }
+    .es-chip .es-chip-x:hover { opacity: 1; }
+
+    /* Quick preset buttons */
+    .es-preset {
+        font-size: .7rem; padding: .18rem .55rem; border-radius: 999px;
+    }
+</style>
+
+@{
+    bool isCoveView = Model.AvailablePanels.Count > 0 || Model.AvailableClinics.Count > 0
+                   || Model.AvailableProviders.Count > 0 || Model.AvailableReps.Count > 0;
+    string ddPlaceholder = isCoveView ? "All" : "Cove lab only";
+}
+
+<div class="page-header mb-3">
+    <h2 class="mb-0 fw-bold" style="font-size:1.15rem">
+        <i class="bi bi-grid-3x3-gap-fill me-1"></i>Executive Summary
+    </h2>
+</div>
+
+<!-- ── Filter panel ─────────────────────────────────────────── -->
+<div class="es-filter-panel mb-4" id="esFilterCard">
+
+    <!-- Header row -->
+    <div class="d-flex align-items-center justify-content-between p-3 es-filter-header"
+         id="esFilterToggle" role="button" aria-expanded="true" aria-controls="esFilterBody">
+        <span class="fw-semibold" style="font-size:.88rem">
+            <i class="bi bi-funnel-fill me-1 text-primary"></i>Filters
+            <span id="esActiveCountBadge" class="badge bg-primary ms-1" style="display:none;font-size:.68rem"></span>
+        </span>
+        <i class="bi bi-chevron-up es-filter-chevron"></i>
+    </div>
+
+    <!-- Body (collapsible) -->
+    <div id="esFilterBody">
+        <form method="get" asp-controller="ExecutiveSummary" asp-action="Index" id="esFilterForm">
+            <input type="hidden" name="lab" value="@Model.SelectedLab" />
+
+            <!-- Quick presets -->
+            <div class="px-3 pt-2 pb-1 d-flex flex-wrap align-items-center gap-1">
+                <span class="text-muted me-1" style="font-size:.72rem;font-weight:600">QUICK:</span>
+                <button type="button" class="btn btn-sm btn-outline-secondary es-preset" data-preset="ytd">YTD</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary es-preset" data-preset="this-year">This Year</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary es-preset" data-preset="last-year">Last Year</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary es-preset" data-preset="this-month">This Month</button>
+            </div>
+
+            <hr class="mx-3 my-1" />
+
+            <!-- ── Section 1: Date Ranges ───────────────────────────── -->
+            <div class="px-3 pt-2 pb-1">
+                <div class="es-filter-section-label">Date Ranges</div>
+                <div class="row g-2">
+                    <div class="col-12 col-md-6 col-xl-3">
+                        <label class="es-filter-label">SAMPLES RECEIVED</label>
+                        <div class="d-flex gap-1 align-items-center">
+                            <input type="date" name="receivedFrom" class="form-control form-control-sm es-date-input"
+                                   data-label="Received From"
+                                   value="@(Model.ReceivedFrom?.ToString("yyyy-MM-dd"))" />
+                            <span class="text-muted" style="font-size:.7rem">–</span>
+                            <input type="date" name="receivedTo" class="form-control form-control-sm es-date-input"
+                                   data-label="Received To"
+                                   value="@(Model.ReceivedTo?.ToString("yyyy-MM-dd"))" />
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-6 col-xl-3">
+                        <label class="es-filter-label">DATE OF SERVICE</label>
+                        <div class="d-flex gap-1 align-items-center">
+                            <input type="date" name="dosFrom" class="form-control form-control-sm es-date-input"
+                                   data-label="DOS From"
+                                   value="@(Model.DosFrom?.ToString("yyyy-MM-dd"))" />
+                            <span class="text-muted" style="font-size:.7rem">–</span>
+                            <input type="date" name="dosTo" class="form-control form-control-sm es-date-input"
+                                   data-label="DOS To"
+                                   value="@(Model.DosTo?.ToString("yyyy-MM-dd"))" />
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-6 col-xl-3">
+                        <label class="es-filter-label">FIRST BILLED DATE</label>
+                        <div class="d-flex gap-1 align-items-center">
+                            <input type="date" name="billedFrom" class="form-control form-control-sm es-date-input"
+                                   data-label="Billed From"
+                                   value="@(Model.BilledFrom?.ToString("yyyy-MM-dd"))" />
+                            <span class="text-muted" style="font-size:.7rem">–</span>
+                            <input type="date" name="billedTo" class="form-control form-control-sm es-date-input"
+                                   data-label="Billed To"
+                                   value="@(Model.BilledTo?.ToString("yyyy-MM-dd"))" />
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-6 col-xl-3">
+                        <label class="es-filter-label">POSTED DATE</label>
+                        <div class="d-flex gap-1 align-items-center">
+                            <input type="date" name="postedFrom" class="form-control form-control-sm es-date-input"
+                                   data-label="Posted From"
+                                   value="@(Model.PostedFrom?.ToString("yyyy-MM-dd"))" />
+                            <span class="text-muted" style="font-size:.7rem">–</span>
+                            <input type="date" name="postedTo" class="form-control form-control-sm es-date-input"
+                                   data-label="Posted To"
+                                   value="@(Model.PostedTo?.ToString("yyyy-MM-dd"))" />
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <hr class="mx-3 my-1" />
+
+            <!-- ── Section 2: Dimension Multi-selects ──────────────── -->
+            <div class="px-3 pt-2 pb-1">
+                <div class="es-filter-section-label">Dimensions</div>
+                <div class="row g-2">
+                    <div class="col-12 col-md-6 col-xl-3">
+                        <label class="es-filter-label">PANEL</label>
+                        <div class="position-relative es-dropdown-wrap">
+                            <button type="button" class="es-dd-btn" data-target="selPanels"
+                                    data-placeholder="@ddPlaceholder">
+                                <span class="es-dd-label es-dd-placeholder">@ddPlaceholder</span>
+                                <i class="bi bi-chevron-down es-dd-caret"></i>
+                            </button>
+                            <div class="es-dd-menu" id="menuPanels">
+                                <div class="es-dd-search"><input type="text" placeholder="Search…" /></div>
+                                <div class="es-dd-list" id="listPanels">
+                                    @if (Model.AvailablePanels.Count == 0)
+                                    {
+                                        <div class="es-dd-empty">@(isCoveView ? "No options" : "Options load for Cove lab")</div>
+                                    }
+                                    @foreach (var p in Model.AvailablePanels)
+                                    {
+                                        bool chk = Model.SelectedPanels.Contains(p);
+                                        <label class="es-dd-item">
+                                            <input type="checkbox" value="@p" checked="@(chk ? "checked" : null)" />@p
+                                        </label>
+                                    }
+                                </div>
+                                <div class="es-dd-footer">
+                                    <button type="button" class="btn btn-xs btn-link text-muted es-dd-clear" style="font-size:.7rem">Clear</button>
+                                    <button type="button" class="btn btn-xs btn-primary es-dd-done" style="font-size:.7rem;padding:2px 10px">Done</button>
+                                </div>
+                            </div>
+                            <select name="panels" multiple class="es-hidden-select" id="selPanels">
+                                @foreach (var p in Model.AvailablePanels)
+                                {
+                                    bool chk = Model.SelectedPanels.Contains(p);
+                                    <option value="@p" selected="@(chk ? "selected" : null)">@p</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-6 col-xl-3">
+                        <label class="es-filter-label">CLINICS</label>
+                        <div class="position-relative es-dropdown-wrap">
+                            <button type="button" class="es-dd-btn" data-target="selClinics"
+                                    data-placeholder="@ddPlaceholder">
+                                <span class="es-dd-label es-dd-placeholder">@ddPlaceholder</span>
+                                <i class="bi bi-chevron-down es-dd-caret"></i>
+                            </button>
+                            <div class="es-dd-menu" id="menuClinics">
+                                <div class="es-dd-search"><input type="text" placeholder="Search…" /></div>
+                                <div class="es-dd-list" id="listClinics">
+                                    @if (Model.AvailableClinics.Count == 0)
+                                    {
+                                        <div class="es-dd-empty">@(isCoveView ? "No options" : "Options load for Cove lab")</div>
+                                    }
+                                    @foreach (var c in Model.AvailableClinics)
+                                    {
+                                        bool chk = Model.SelectedClinics.Contains(c);
+                                        <label class="es-dd-item">
+                                            <input type="checkbox" value="@c" checked="@(chk ? "checked" : null)" />@c
+                                        </label>
+                                    }
+                                </div>
+                                <div class="es-dd-footer">
+                                    <button type="button" class="btn btn-xs btn-link text-muted es-dd-clear" style="font-size:.7rem">Clear</button>
+                                    <button type="button" class="btn btn-xs btn-primary es-dd-done" style="font-size:.7rem;padding:2px 10px">Done</button>
+                                </div>
+                            </div>
+                            <select name="clinics" multiple class="es-hidden-select" id="selClinics">
+                                @foreach (var c in Model.AvailableClinics)
+                                {
+                                    bool chk = Model.SelectedClinics.Contains(c);
+                                    <option value="@c" selected="@(chk ? "selected" : null)">@c</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-6 col-xl-3">
+                        <label class="es-filter-label">REFERRING PROVIDER</label>
+                        <div class="position-relative es-dropdown-wrap">
+                            <button type="button" class="es-dd-btn" data-target="selProviders"
+                                    data-placeholder="@ddPlaceholder">
+                                <span class="es-dd-label es-dd-placeholder">@ddPlaceholder</span>
+                                <i class="bi bi-chevron-down es-dd-caret"></i>
+                            </button>
+                            <div class="es-dd-menu" id="menuProviders">
+                                <div class="es-dd-search"><input type="text" placeholder="Search…" /></div>
+                                <div class="es-dd-list" id="listProviders">
+                                    @if (Model.AvailableProviders.Count == 0)
+                                    {
+                                        <div class="es-dd-empty">@(isCoveView ? "No options" : "Options load for Cove lab")</div>
+                                    }
+                                    @foreach (var p in Model.AvailableProviders)
+                                    {
+                                        bool chk = Model.SelectedProviders.Contains(p);
+                                        <label class="es-dd-item">
+                                            <input type="checkbox" value="@p" checked="@(chk ? "checked" : null)" />@p
+                                        </label>
+                                    }
+                                </div>
+                                <div class="es-dd-footer">
+                                    <button type="button" class="btn btn-xs btn-link text-muted es-dd-clear" style="font-size:.7rem">Clear</button>
+                                    <button type="button" class="btn btn-xs btn-primary es-dd-done" style="font-size:.7rem;padding:2px 10px">Done</button>
+                                </div>
+                            </div>
+                            <select name="providers" multiple class="es-hidden-select" id="selProviders">
+                                @foreach (var p in Model.AvailableProviders)
+                                {
+                                    bool chk = Model.SelectedProviders.Contains(p);
+                                    <option value="@p" selected="@(chk ? "selected" : null)">@p</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-6 col-xl-3">
+                        <label class="es-filter-label">SALES REP</label>
+                        <div class="position-relative es-dropdown-wrap">
+                            <button type="button" class="es-dd-btn" data-target="selReps"
+                                    data-placeholder="@ddPlaceholder">
+                                <span class="es-dd-label es-dd-placeholder">@ddPlaceholder</span>
+                                <i class="bi bi-chevron-down es-dd-caret"></i>
+                            </button>
+                            <div class="es-dd-menu" id="menuReps">
+                                <div class="es-dd-search"><input type="text" placeholder="Search…" /></div>
+                                <div class="es-dd-list" id="listReps">
+                                    @if (Model.AvailableReps.Count == 0)
+                                    {
+                                        <div class="es-dd-empty">@(isCoveView ? "No options" : "Options load for Cove lab")</div>
+                                    }
+                                    @foreach (var r in Model.AvailableReps)
+                                    {
+                                        bool chk = Model.SelectedReps.Contains(r);
+                                        <label class="es-dd-item">
+                                            <input type="checkbox" value="@r" checked="@(chk ? "checked" : null)" />@r
+                                        </label>
+                                    }
+                                </div>
+                                <div class="es-dd-footer">
+                                    <button type="button" class="btn btn-xs btn-link text-muted es-dd-clear" style="font-size:.7rem">Clear</button>
+                                    <button type="button" class="btn btn-xs btn-primary es-dd-done" style="font-size:.7rem;padding:2px 10px">Done</button>
+                                </div>
+                            </div>
+                            <select name="reps" multiple class="es-hidden-select" id="selReps">
+                                @foreach (var r in Model.AvailableReps)
+                                {
+                                    bool chk = Model.SelectedReps.Contains(r);
+                                    <option value="@r" selected="@(chk ? "selected" : null)">@r</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <hr class="mx-3 my-1" />
+
+            <!-- ── Section 3: Time Period & Search ─────────────────── -->
+            <div class="px-3 pt-2 pb-1">
+                <div class="es-filter-section-label">Time Period &amp; Search</div>
+                <div class="row g-2 align-items-end">
+                    <div class="col-6 col-md-3 col-xl-2">
+                        <label class="es-filter-label">YEAR FROM</label>
+                        <select name="yearFrom" class="form-select form-select-sm" id="selYearFrom">
+                            <option value="">All</option>
+                            @foreach (var y in Model.AvailableYears)
+                            {
+                                <option value="@y" selected="@(y == Model.SelectedYearFrom ? "selected" : null)">@y</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-6 col-md-3 col-xl-2">
+                        <label class="es-filter-label">YEAR TO</label>
+                        <select name="yearTo" class="form-select form-select-sm" id="selYearTo">
+                            <option value="">All</option>
+                            @foreach (var y in Model.AvailableYears)
+                            {
+                                <option value="@y" selected="@(y == Model.SelectedYearTo ? "selected" : null)">@y</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-6 col-md-3 col-xl-2">
+                        <label class="es-filter-label">MONTH FROM</label>
+                        <select name="monthFrom" class="form-select form-select-sm" id="selMonthFrom">
+                            <option value="">All</option>
+                            @for (int m = 1; m <= 12; m++)
+                            {
+                                <option value="@m" selected="@(m == Model.SelectedMonthFrom ? "selected" : null)">@MonthName(m)</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-6 col-md-3 col-xl-2">
+                        <label class="es-filter-label">MONTH TO</label>
+                        <select name="monthTo" class="form-select form-select-sm" id="selMonthTo">
+                            <option value="">All</option>
+                            @for (int m = 1; m <= 12; m++)
+                            {
+                                <option value="@m" selected="@(m == Model.SelectedMonthTo ? "selected" : null)">@MonthName(m)</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-12 col-xl-4">
+                        <label class="es-filter-label">DESCRIPTION SEARCH (client-side)</label>
+                        <div class="input-group input-group-sm">
+                            <input type="text" id="esDescFilter" class="form-control"
+                                   list="esDescList" placeholder="Filter rows by description…" autocomplete="off" />
+                            <button type="button" id="esDescFilterClear" class="btn btn-outline-secondary" title="Clear">
+                                <i class="bi bi-x-lg"></i>
+                            </button>
+                        </div>
+                        <datalist id="esDescList">
+                            @foreach (var d in Model.Rows.Select(r => r.Description.Trim()).Where(d => !string.IsNullOrWhiteSpace(d)).Distinct().OrderBy(d => d))
+                            {
+                                <option value="@d"></option>
+                            }
+                        </datalist>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active filter chips -->
+            <div id="esActiveChips" class="px-3 pb-1" style="display:none">
+                <div class="d-flex flex-wrap gap-1 pt-1" id="esChipsContainer"></div>
+            </div>
+
+            <!-- Actions -->
+            <div class="px-3 pb-3 pt-2 d-flex gap-2 align-items-center">
+                <button type="submit" class="btn btn-sm btn-primary">
+                    <i class="bi bi-funnel-fill me-1"></i>Apply Filters
+                </button>
+                <a asp-controller="ExecutiveSummary" asp-action="Index" asp-route-lab="@Model.SelectedLab"
+                   class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-x-circle me-1"></i>Clear All
+                </a>
+                <a href="@Url.Action("Index", new { lab = Model.SelectedLab, export = "excel", yearFrom = Model.SelectedYearFrom, yearTo = Model.SelectedYearTo, monthFrom = Model.SelectedMonthFrom, monthTo = Model.SelectedMonthTo })"
+                   class="btn btn-sm btn-outline-success ms-auto">
+                    <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+        {
+            <div class="alert alert-danger m-3">
+                <i class="bi bi-exclamation-circle-fill"></i>
+                @Model.ErrorMessage
+            </div>
+        }
+        else if (!Model.HasData)
+        {
+            <div class="text-center p-5">
+                <i class="bi bi-inbox" style="font-size: 3rem; color: #6c757d;"></i>
+                <p class="mt-2">No data found for the selected filters.</p>
+            </div>
+        }
+        else
+        {
+            int totalDataCols = esYears.Sum(year => (esMonthsByYear.ContainsKey(year) ? esMonthsByYear[year].Count : 0) + 1);
+            int totalCols = 1 + totalDataCols + 1; // description + (months + year-total) per year + grand total
+            <div class="es-wrap m-2">
+                <div class="es-scroll">
+                    <table class="es-table">
+                        <colgroup>
+                            <col style="width:240px" />
+                            @foreach (var year in esYears)
+                            {
+                                var mons = esMonthsByYear.ContainsKey(year) ? esMonthsByYear[year] : new List<int>();
+                                foreach (var _ in mons)
+                                {
+                                    <col style="width:78px" />
+                                }
+                                <col style="width:100px" />
+                            }
+                            <col style="width:108px" />
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th rowspan="2" class="col-desc">Description</th>
+                                @foreach (var year in esYears)
+                                {
+                                    var mons = esMonthsByYear.ContainsKey(year) ? esMonthsByYear[year] : new List<int>();
+                                    <th colspan="@(mons.Count + 1)">Data Based on DOS &mdash; @year</th>
+                                }
+                                <th rowspan="2" class="es-grand">Grand Total</th>
+                            </tr>
+                            <tr>
+                                @foreach (var year in esYears)
+                                {
+                                    var mons = esMonthsByYear.ContainsKey(year) ? esMonthsByYear[year] : new List<int>();
+                                    foreach (var m in mons)
+                                    {
+                                        <th>@MonthName(m).ToUpper()</th>
+                                    }
+                                    <th class="es-year-total">@year Total</th>
+                                }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @{ int sectionNum = 0; }
+                            @foreach (var tab in tabs)
+                            {
+                                var rows = Model.Rows.Where(r => r.Category == tab).ToList();
+                                if (rows.Count == 0) continue;
+                                sectionNum++;
+                                <tr class="es-section-row">
+                                    <td class="es-section-cell" colspan="@totalCols">@sectionNum. @TabLabel(tab)</td>
+                                </tr>
+                                @foreach (var row in rows)
+                                {
+                                    bool isSub = row.IsSubRow;
+                                    string rClass = row.IsSubSubRow ? "es-sub-sub-row"
+                                                  : isSub           ? "es-sub-row"
+                                                  :                   "es-cat-row";
+                                    bool dollarRow = IsDollar(row.Category);
+                                    bool canDrill = row.Category is "PMS" or "Cash" or "LIS";
+
+                                    <tr class="@rClass" data-row-code="@row.RowCode">
+                                        <td class="col-desc">
+                                            @if (dollarRow)
+                                            {
+                                                <span class="dollar-badge">$</span>
+                                            }
+                                            @row.Description.TrimStart()
+                                        </td>
+                                        @foreach (var year in esYears)
+                                        {
+                                            var mons = esMonthsByYear.ContainsKey(year) ? esMonthsByYear[year] : new List<int>();
+                                            foreach (var m in mons)
+                                            {
+                                                row.ValuesByYearMonth.TryGetValue((year, m), out var v);
+                                                string cellVal = FmtCount(v, row.Category);
+                                                if (canDrill && v != 0)
+                                                {
+                                                    string drillUrl = Url.Action("Detail", "ExecutiveSummary", new {
+                                                        lab         = Model.SelectedLab,
+                                                        category    = row.Category,
+                                                        rowCode     = row.RowCode,
+                                                        description = row.Description.TrimStart(),
+                                                        year,
+                                                        month       = m,
+                                                        value       = v,
+                                                        yearFrom    = Model.SelectedYearFrom,
+                                                        yearTo      = Model.SelectedYearTo,
+                                                        monthFrom   = Model.SelectedMonthFrom,
+                                                        monthTo     = Model.SelectedMonthTo,
+                                                    })!;
+                                                    <td><a href="@drillUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@cellVal</a></td>
+                                                }
+                                                else
+                                                {
+                                                    <td><span class="es-pill@(dollarRow ? " es-pill-dollar" : "")">@cellVal</span></td>
+                                                }
+                                            }
+                                            var yrTot = RowYearTotal(row, year);
+                                            @if (canDrill && yrTot != 0)
+                                            {
+                                                string yrUrl = Url.Action("Detail", "ExecutiveSummary", new {
+                                                    lab         = Model.SelectedLab,
+                                                    category    = row.Category,
+                                                    rowCode     = row.RowCode,
+                                                    description = row.Description.TrimStart(),
+                                                    year,
+                                                    month       = 0,
+                                                    value       = yrTot,
+                                                    yearFrom    = Model.SelectedYearFrom,
+                                                    yearTo      = Model.SelectedYearTo,
+                                                    monthFrom   = Model.SelectedMonthFrom,
+                                                    monthTo     = Model.SelectedMonthTo,
+                                                })!;
+                                                <td class="es-year-total">
+                                                    <a href="@yrUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@FmtCount(yrTot, row.Category)</a>
+                                                </td>
+                                            }
+                                            else
+                                            {
+                                                <td class="es-year-total"><span class="es-pill@(dollarRow ? " es-pill-dollar" : "")">@FmtCount(yrTot, row.Category)</span></td>
+                                            }
+                                        }
+                                        @{ var gTot = RowGrandTotal(row); }
+                                        @if (canDrill && gTot != 0)
+                                        {
+                                            string gtUrl = Url.Action("Detail", "ExecutiveSummary", new {
+                                                lab         = Model.SelectedLab,
+                                                category    = row.Category,
+                                                rowCode     = row.RowCode,
+                                                description = row.Description.TrimStart(),
+                                                year        = 0,
+                                                month       = 0,
+                                                value       = gTot,
+                                                yearFrom    = Model.SelectedYearFrom,
+                                                yearTo      = Model.SelectedYearTo,
+                                                monthFrom   = Model.SelectedMonthFrom,
+                                                monthTo     = Model.SelectedMonthTo,
+                                            })!;
+                                            <td class="es-grand">
+                                                <a href="@gtUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@FmtCount(gTot, row.Category)</a>
+                                            </td>
+                                        }
+                                        else
+                                        {
+                                            <td class="es-grand"><span class="es-pill@(dollarRow ? " es-pill-dollar" : "")">@FmtCount(gTot, row.Category)</span></td>
+                                        }
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+<script>
+    // ── Collapsible rows (3-level hierarchy) ───────────────────────────
+    // Level 1: es-cat-row  → collapses es-sub-row children
+    //          (stops at next es-cat-row; skips es-sub-sub-row)
+    // Level 2: es-sub-row  → collapses es-sub-sub-row children
+    //          (stops at next es-sub-row OR es-cat-row)
+    // State persists per RowCode via localStorage.
+    document.addEventListener('DOMContentLoaded', function () {
+        document.querySelectorAll('.es-table tbody').forEach(function (tbody) {
+            var rows = Array.prototype.slice.call(tbody.children).filter(function (r) {
+                return r.tagName === 'TR';
+            });
+
+            function wireCollapse(parentClass, childClass, stopClass, grandchildClass) {
+                rows.forEach(function (row, i) {
+                    if (!row.classList.contains(parentClass)) return;
+
+                    var children = [];
+                    var grandchildren = [];
+                    for (var j = i + 1; j < rows.length; j++) {
+                        // stop at next sibling of same or higher level
+                        if (rows[j].classList.contains(stopClass)) break;
+                        if (rows[j].classList.contains(parentClass)) break;
+                        if (rows[j].classList.contains(childClass)) children.push(rows[j]);
+                        if (grandchildClass && rows[j].classList.contains(grandchildClass)) grandchildren.push(rows[j]);
+                    }
+                    if (children.length === 0) return;
+
+                    row.classList.add('has-children');
+                    var desc = row.querySelector('td.col-desc');
+                    var storeKey = 'es-collapse-' + (row.getAttribute('data-row-code') || row.rowIndex);
+
+                    function applyState(collapsed) {
+                        row.classList.toggle('es-collapsed', collapsed);
+                        children.forEach(function (r) { r.classList.toggle('es-hidden', collapsed); });
+                        if (collapsed) {
+                            // Also hide grandchildren when parent collapses
+                            grandchildren.forEach(function (r) { r.classList.add('es-hidden'); });
+                        } else {
+                            // When expanding, only show grandchildren whose direct child-row parent is not itself collapsed
+                            grandchildren.forEach(function (r) {
+                                var rIdx = rows.indexOf(r);
+                                var parentCollapsed = false;
+                                for (var k = rIdx - 1; k > i; k--) {
+                                    if (rows[k].classList.contains(childClass)) {
+                                        parentCollapsed = rows[k].classList.contains('es-collapsed');
+                                        break;
+                                    }
+                                }
+                                if (!parentCollapsed) {
+                                    r.classList.remove('es-hidden');
+                                }
+                            });
+                        }
+                    }
+
+                    applyState(localStorage.getItem(storeKey) === '1');
+
+                    desc.addEventListener('click', function (e) {
+                        // Prevent the click from bubbling to a parent collapsible row
+                        e.stopPropagation();
+                        var collapsed = !row.classList.contains('es-collapsed');
+                        applyState(collapsed);
+                        localStorage.setItem(storeKey, collapsed ? '1' : '0');
+                    });
+                });
+            }
+
+            // Wire level-2 first (sub-sub inside sub) then level-1 (sub inside cat)
+            // Pass 'es-sub-sub-row' as grandchildClass so cat-row collapse also hides grandchildren
+            wireCollapse('es-sub-row',  'es-sub-sub-row', 'es-cat-row');
+            wireCollapse('es-cat-row',  'es-sub-row',     'es-cat-row', 'es-sub-sub-row');
+        });
+    });
+
+    // ── Description filter (client-side only) ─────────────────────────
+    document.addEventListener('DOMContentLoaded', function () {
+        var input = document.getElementById('esDescFilter');
+        var clearBtn = document.getElementById('esDescFilterClear');
+        if (!input) return;
+
+        function applyDescFilter() {
+            var q = input.value.trim().toLowerCase();
+            document.querySelectorAll('.es-table tbody').forEach(function (tbody) {
+                var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+                if (!q) {
+                    tbody.classList.remove('es-filtering');
+                    rows.forEach(function (r) { r.classList.remove('es-filter-hidden'); });
+                    return;
+                }
+                tbody.classList.add('es-filtering');
+                rows.forEach(function (r) {
+                    if (r.classList.contains('es-section-row')) { r.classList.remove('es-filter-hidden'); return; }
+                    var desc = r.querySelector('td.col-desc');
+                    var label = desc ? desc.textContent.trim().toLowerCase() : '';
+                    r.classList.toggle('es-filter-hidden', label.indexOf(q) === -1);
+                });
+            });
+        }
+
+        input.addEventListener('input', applyDescFilter);
+        input.addEventListener('keydown', function (e) { if (e.key === 'Enter') e.preventDefault(); });
+        if (clearBtn) { clearBtn.addEventListener('click', function () { input.value = ''; applyDescFilter(); input.focus(); }); }
+    });
+
+    // ── Filter panel collapse/expand ───────────────────────────────────
+    document.addEventListener('DOMContentLoaded', function () {
+        var toggle = document.getElementById('esFilterToggle');
+        var body   = document.getElementById('esFilterBody');
+        var card   = document.getElementById('esFilterCard');
+        if (!toggle || !body) return;
+
+        toggle.addEventListener('click', function () {
+            var open = body.style.display !== 'none' && body.style.display !== '';
+            if (open || body.offsetParent !== null) {
+                body.style.display = 'none';
+                card.classList.add('collapsed');
+                toggle.setAttribute('aria-expanded', 'false');
+            } else {
+                body.style.display = '';
+                card.classList.remove('collapsed');
+                toggle.setAttribute('aria-expanded', 'true');
+            }
+        });
+    });
+
+    // ── Custom checkbox-dropdown widget ────────────────────────────────
+    document.addEventListener('DOMContentLoaded', function () {
+        var openMenu = null;
+
+        // Build a dropdown from a .es-dropdown-wrap that contains
+        // .es-dd-btn, .es-dd-menu, and .es-hidden-select
+        document.querySelectorAll('.es-dropdown-wrap').forEach(function (wrap) {
+            var btn       = wrap.querySelector('.es-dd-btn');
+            var menu      = wrap.querySelector('.es-dd-menu');
+            var select    = wrap.querySelector('.es-hidden-select');
+            var searchInp = menu && menu.querySelector('.es-dd-search input');
+            var list      = menu && menu.querySelector('.es-dd-list');
+            var clearBtn  = menu && menu.querySelector('.es-dd-clear');
+            var doneBtn   = menu && menu.querySelector('.es-dd-done');
+            if (!btn || !menu || !select) return;
+
+            var placeholder = btn.getAttribute('data-placeholder') || 'Select…';
+
+            function updateBtnLabel() {
+                var selected = Array.prototype.filter.call(select.options, function (o) { return o.selected; });
+                var labelEl  = btn.querySelector('.es-dd-label');
+                var countEl  = btn.querySelector('.es-dd-count');
+                if (selected.length === 0) {
+                    if (labelEl) { labelEl.textContent = placeholder; labelEl.className = 'es-dd-label es-dd-placeholder'; }
+                    if (countEl) countEl.remove();
+                    btn.classList.remove('active');
+                } else {
+                    var txt = selected.length === 1 ? selected[0].value : selected.length + ' selected';
+                    if (labelEl) { labelEl.textContent = txt; labelEl.className = 'es-dd-label'; }
+                    if (!countEl) {
+                        countEl = document.createElement('span');
+                        countEl.className = 'es-dd-count';
+                        var caret = btn.querySelector('.es-dd-caret');
+                        btn.insertBefore(countEl, caret);
+                    }
+                    countEl.textContent = selected.length;
+                    btn.classList.add('active');
+                }
+                refreshActiveChips();
+            }
+
+            // Sync hidden <select> from checkboxes
+            function syncSelectFromCheckboxes() {
+                if (!list) return;
+                var checks = list.querySelectorAll('input[type=checkbox]');
+                Array.prototype.forEach.call(checks, function (cb) {
+                    Array.prototype.forEach.call(select.options, function (opt) {
+                        if (opt.value === cb.value) opt.selected = cb.checked;
+                    });
+                });
+                updateBtnLabel();
+            }
+
+            // Sync checkboxes from hidden <select>
+            function syncCheckboxesFromSelect() {
+                if (!list) return;
+                var checks = list.querySelectorAll('input[type=checkbox]');
+                Array.prototype.forEach.call(checks, function (cb) {
+                    Array.prototype.forEach.call(select.options, function (opt) {
+                        if (opt.value === cb.value) cb.checked = opt.selected;
+                    });
+                });
+            }
+
+            if (list) {
+                list.addEventListener('change', function (e) {
+                    if (e.target.type === 'checkbox') syncSelectFromCheckboxes();
+                });
+            }
+
+            if (searchInp && list) {
+                searchInp.addEventListener('input', function () {
+                    var q = searchInp.value.trim().toLowerCase();
+                    Array.prototype.forEach.call(list.querySelectorAll('.es-dd-item'), function (item) {
+                        item.style.display = (!q || item.textContent.toLowerCase().indexOf(q) > -1) ? '' : 'none';
+                    });
+                });
+            }
+
+            if (clearBtn) {
+                clearBtn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    Array.prototype.forEach.call(select.options, function (o) { o.selected = false; });
+                    syncCheckboxesFromSelect();
+                    updateBtnLabel();
+                });
+            }
+
+            if (doneBtn) {
+                doneBtn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    closeMenu();
+                });
+            }
+
+            function openMenuFn() {
+                if (openMenu && openMenu !== menu) { openMenu.classList.remove('open'); }
+                menu.classList.add('open');
+                openMenu = menu;
+                // Position menu so it doesn't overflow viewport bottom
+                var rect = btn.getBoundingClientRect();
+                var spaceBelow = window.innerHeight - rect.bottom;
+                menu.style.top    = spaceBelow > 240 ? '100%' : '';
+                menu.style.bottom = spaceBelow > 240 ? ''      : '100%';
+                if (searchInp) { searchInp.value = ''; searchInp.dispatchEvent(new Event('input')); searchInp.focus(); }
+                syncCheckboxesFromSelect();
+            }
+
+            function closeMenu() { menu.classList.remove('open'); if (openMenu === menu) openMenu = null; }
+
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                menu.classList.contains('open') ? closeMenu() : openMenuFn();
+            });
+
+            menu.addEventListener('click', function (e) { e.stopPropagation(); });
+
+            // initialise label
+            updateBtnLabel();
+        });
+
+        // Close any open menu on outside click
+        document.addEventListener('click', function () {
+            if (openMenu) { openMenu.classList.remove('open'); openMenu = null; }
+        });
+
+        // ── Active filter chips ─────────────────────────────────────────
+        var chipsWrap = document.getElementById('esActiveChips');
+        var chipsContainer = document.getElementById('esChipsContainer');
+        var countBadge = document.getElementById('esActiveCountBadge');
+
+        function makeChip(label, clearFn) {
+            var chip = document.createElement('span');
+            chip.className = 'es-chip';
+            chip.innerHTML = label + ' <span class="es-chip-x" title="Remove">&times;</span>';
+            chip.querySelector('.es-chip-x').addEventListener('click', function () { clearFn(); refreshActiveChips(); });
+            return chip;
+        }
+
+        function refreshActiveChips() {
+            if (!chipsContainer) return;
+            chipsContainer.innerHTML = '';
+            var count = 0;
+
+            // Date inputs
+            document.querySelectorAll('.es-date-input').forEach(function (inp) {
+                if (inp.value) {
+                    count++;
+                    var lbl = (inp.dataset.label || inp.name) + ': ' + inp.value;
+                    chipsContainer.appendChild(makeChip(lbl, function () { inp.value = ''; }));
+                }
+            });
+
+            // Year/month selects
+            ['selYearFrom','selYearTo','selMonthFrom','selMonthTo'].forEach(function (id) {
+                var sel = document.getElementById(id);
+                if (sel && sel.value) {
+                    count++;
+                    var lbl = sel.previousElementSibling ? sel.previousElementSibling.textContent.trim() : id;
+                    chipsContainer.appendChild(makeChip(lbl + ': ' + sel.options[sel.selectedIndex].text, function () { sel.value = ''; }));
+                }
+            });
+
+            // Dimension selects
+            ['selPanels','selClinics','selProviders','selReps'].forEach(function (id) {
+                var sel = document.getElementById(id);
+                if (!sel) return;
+                var selected = Array.prototype.filter.call(sel.options, function (o) { return o.selected; });
+                selected.forEach(function (opt) {
+                    count++;
+                    var val = opt.value;
+                    chipsContainer.appendChild(makeChip(val, function () {
+                        opt.selected = false;
+                        // Uncheck matching checkbox in the menu
+                        document.querySelectorAll('#' + id.replace('sel', 'list') + ' input[type=checkbox]').forEach(function (cb) {
+                            if (cb.value === val) cb.checked = false;
+                        });
+                        // Re-sync the button label
+                        var wrap = sel.closest('.es-dropdown-wrap');
+                        if (wrap) {
+                            var btn = wrap.querySelector('.es-dd-btn');
+                            if (btn) btn.dispatchEvent(new CustomEvent('_labelUpdate'));
+                        }
+                    }));
+                });
+            });
+
+            if (chipsWrap) chipsWrap.style.display = count ? '' : 'none';
+            if (countBadge) { countBadge.textContent = count; countBadge.style.display = count ? '' : 'none'; }
+        }
+
+        // Trigger chip refresh when date/year/month inputs change
+        document.querySelectorAll('.es-date-input').forEach(function (inp) { inp.addEventListener('change', refreshActiveChips); });
+        ['selYearFrom','selYearTo','selMonthFrom','selMonthTo'].forEach(function (id) {
+            var sel = document.getElementById(id);
+            if (sel) sel.addEventListener('change', refreshActiveChips);
+        });
+
+        refreshActiveChips(); // initial pass for server-restored values
+
+        // ── Quick preset buttons ────────────────────────────────────────
+        var now = new Date();
+        var thisYear  = now.getFullYear();
+        var thisMonth = now.getMonth() + 1; // 1-based
+        var monthNames = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+        function setYearMonth(yFrom, mFrom, yTo, mTo) {
+            var syf = document.getElementById('selYearFrom');
+            var syt = document.getElementById('selYearTo');
+            var smf = document.getElementById('selMonthFrom');
+            var smt = document.getElementById('selMonthTo');
+            function setVal(sel, v) {
+                if (!sel) return;
+                var s = String(v);
+                for (var i = 0; i < sel.options.length; i++) { if (sel.options[i].value === s) { sel.selectedIndex = i; return; } }
+            }
+            setVal(syf, yFrom); setVal(syt, yTo); setVal(smf, mFrom); setVal(smt, mTo);
+            refreshActiveChips();
+        }
+
+        document.querySelectorAll('.es-preset').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var preset = btn.getAttribute('data-preset');
+                if (preset === 'ytd')        setYearMonth(thisYear, 1, thisYear, thisMonth);
+                if (preset === 'this-year')  setYearMonth(thisYear, 1, thisYear, 12);
+                if (preset === 'last-year')  setYearMonth(thisYear - 1, 1, thisYear - 1, 12);
+                if (preset === 'this-month') setYearMonth(thisYear, thisMonth, thisYear, thisMonth);
+            });
+        });
+    });
+</script>

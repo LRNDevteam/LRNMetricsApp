@@ -356,27 +356,41 @@ BEGIN
 
     ;WITH agg AS (
         SELECT
-            LTRIM(RTRIM(PayerName_Raw))                                AS PayerName,
-            ISNULL(SUM(TRY_CAST(PaymentPercent AS DECIMAL(18,2))),0) AS SumIns,
-            ISNULL(SUM(TRY_CAST(ChargeAmount     AS DECIMAL(18,2))),0) AS SumChg,
-            COUNT(NULLIF(LTRIM(RTRIM(Claimid)), '')) AS Visits
-        FROM dbo.ClaimLevelData 
+            LTRIM(RTRIM(PayerName_Raw))                                                     AS PayerName,
+            ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)                     AS SumIns,
+            ISNULL(SUM(TRY_CAST(ChargeAmount     AS DECIMAL(18,2))), 0)                     AS SumChg,
+            COUNT(NULLIF(LTRIM(RTRIM(ClaimID)), ''))                                        AS Visits,
+            ROUND(
+                ISNULL(AVG(TRY_CAST(PaymentPercent AS DECIMAL(18,4))), 0) * 100,
+                0
+            )                                                                               AS PaymentPct
+        FROM dbo.ClaimLevelData
         WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
-		and PayerName_Raw not in ('None', 'ClientBill', 'Selfpay')
-         GROUP BY LTRIM(RTRIM(PayerName_Raw))
+          AND PayerName_Raw NOT IN ('None', 'ClientBill', 'Selfpay')
+        GROUP BY LTRIM(RTRIM(PayerName_Raw))
+    ),
+    grand AS (
+        SELECT NULLIF(SUM(SumIns), 0) AS GrandTotal
+        FROM agg
     ),
     ranked AS (
-        SELECT TOP 5 PayerName, SumIns, SumChg, Visits,
-               ROW_NUMBER() OVER (ORDER BY SumIns DESC) AS Rnk
-        FROM agg
-        ORDER BY SumIns DESC
+        SELECT TOP 5
+               ROW_NUMBER() OVER (ORDER BY a.SumIns DESC) AS Rnk,
+               a.PayerName,
+               a.SumIns,
+               a.SumChg,
+               a.Visits,
+               a.PaymentPct
+        FROM agg a
+        CROSS JOIN grand g
+        ORDER BY a.SumIns DESC
     )
     SELECT * INTO #out FROM ranked;
 
     TRUNCATE TABLE dbo.Aug_CS_Top5ReimbursementPct;
     INSERT INTO dbo.Aug_CS_Top5ReimbursementPct
-        (PayerRank, PayerName, SumInsurancePayment, SumChargeAmount, UniqueVisitCount, RefreshedAt)
-    SELECT CAST(Rnk AS TINYINT), PayerName, SumIns, SumChg, Visits, GETDATE()
+        (PayerRank, PayerName, SumInsurancePayment, SumChargeAmount, UniqueVisitCount, PaymentPct, RefreshedAt)
+    SELECT CAST(Rnk AS TINYINT), PayerName, SumIns, SumChg, Visits, PaymentPct, GETDATE()
     FROM #out
     ORDER BY Rnk;
 
@@ -390,26 +404,33 @@ CREATE OR ALTER PROCEDURE dbo.usp_RefreshAug_CS_Top5ReimbursementPay
 AS
 BEGIN
     SET NOCOUNT ON;
+
     ;WITH agg AS (
         SELECT
-            LTRIM(RTRIM(PayerName_Raw))                                AS PayerName,
-            ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))),0) AS TotalPay,
-            COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)),''))   AS Visits
+            LTRIM(RTRIM(PayerName_Raw))                                                     AS PayerName,
+            ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)                     AS TotalPay,
+            COUNT(NULLIF(LTRIM(RTRIM(ClaimID)), ''))                                        AS Visits
         FROM dbo.ClaimLevelData
-        WHERE PayerName_Raw not in ('None', 'ClientBill', 'Selfpay') and ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)),0) > 0
+        WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+          AND PayerName_Raw NOT IN ('None', 'ClientBill', 'Selfpay')
         GROUP BY LTRIM(RTRIM(PayerName_Raw))
     ),
     ranked AS (
-        SELECT TOP 5 ROW_NUMBER() OVER (ORDER BY TotalPay DESC) AS Rnk,
+        SELECT TOP 5
+               ROW_NUMBER() OVER (ORDER BY TotalPay DESC) AS Rnk,
                PayerName, TotalPay, Visits
-        FROM agg ORDER BY TotalPay DESC
+        FROM agg
+        ORDER BY TotalPay DESC
     )
     SELECT * INTO #out FROM ranked;
+
     TRUNCATE TABLE dbo.Aug_CS_Top5ReimbursementPay;
     INSERT INTO dbo.Aug_CS_Top5ReimbursementPay
         (PayerRank, PayerName, TotalPayments, UniqueVisitCount, RefreshedAt)
     SELECT CAST(Rnk AS TINYINT), PayerName, TotalPay, Visits, GETDATE()
-    FROM #out ORDER BY Rnk;
+    FROM #out
+    ORDER BY Rnk;
+
     DROP TABLE IF EXISTS #out;
     PRINT 'usp_RefreshAug_CS_Top5ReimbursementPay completed.';
 END
