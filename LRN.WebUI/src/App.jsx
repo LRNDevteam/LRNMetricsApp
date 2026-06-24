@@ -101,7 +101,7 @@ export default function App() {
   const adminRole = String(user.role || '').toLowerCase().includes('admin');
   const readOnlyWorkflow = isReadOnlyWorkflowRole(user.role);
   const denialMapperRole = adminRole || arManagerOnly || clientManager || accountManager || /lab\s*user|viewer|read\s*only/i.test(String(user.role || ''));
-  const denialMapperAdmin = adminRole || arManagerOnly;
+  const denialMapperAdmin = adminRole;
   const exportBusy = !!claimExportJob && ['Queued', 'Running'].includes(claimExportJob.status);
   const activeQueueKey = view === 'myworklist' ? myWorklistView : view === 'claims' ? claimTaskView : '';
   const visibleFilters = useMemo(() => (view === 'dashboard'
