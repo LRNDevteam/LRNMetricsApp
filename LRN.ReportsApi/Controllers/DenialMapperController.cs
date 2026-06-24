@@ -22,7 +22,7 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
     [HttpGet("super-master")]
     public async Task<ActionResult<PagedResult<DenialMapperRecord>>> SuperMaster([FromQuery] string? search, [FromQuery] string? classification, [FromQuery] int page=1, [FromQuery] int pageSize=25, CancellationToken ct=default)
     {
-        if (!IsPushManager() && !IsViewer()) return Denied();
+        if (!IsAdmin()) return Denied();
         return Ok(await repository.SuperMasterAsync(search, classification, page, pageSize, ct));
     }
 
@@ -44,19 +44,19 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
     public async Task<ActionResult> Delete(long id,CancellationToken ct){if(!IsAdmin())return Denied();await repository.DeleteSuperMasterAsync(id,UserName(),Role(),ct);return Ok(new{message="Super Master mapping deleted."});}
 
     [HttpGet("labs")]
-    public async Task<ActionResult> Labs(CancellationToken ct){if(!IsPushManager())return Denied();return Ok(await repository.LabsAsync(ct));}
+    public async Task<ActionResult> Labs(CancellationToken ct){if(!IsAdmin())return Denied();return Ok(await repository.LabsAsync(ct));}
 
     [HttpPost("compare-push")]
     public async Task<ActionResult<DenialMapperPushCompareResult>> ComparePush(DenialMapperPushRequest request,CancellationToken ct)
-    {if(!IsPushManager())return Denied();return Ok(await repository.ComparePushAsync(request.LabIds,UserName(),ct));}
+    {if(!IsAdmin())return Denied();return Ok(await repository.ComparePushAsync(request.LabIds,UserName(),ct));}
 
     [HttpPost("confirm-push")]
     public async Task<ActionResult> ConfirmPush(DenialMapperPushDecisionRequest request,CancellationToken ct)
-    {if(!IsPushManager())return Denied();var count=await repository.ConfirmPushAsync(request.PushAuditIds,UserName(),Role(),ct);return Ok(new{labCount=count,message=$"Super Master pushed to {count} lab(s). Existing overrides were preserved."});}
+    {if(!IsAdmin())return Denied();var count=await repository.ConfirmPushAsync(request.PushAuditIds,UserName(),Role(),ct);return Ok(new{labCount=count,message=$"Super Master pushed to {count} lab(s). Existing overrides were preserved."});}
 
     [HttpPost("cancel-push")]
     public async Task<ActionResult> CancelPush(DenialMapperPushDecisionRequest request,CancellationToken ct)
-    {if(!IsPushManager())return Denied();await repository.CancelPushAsync(request.PushAuditIds,UserName(),ct);return Ok(new{message="Mapper push cancelled."});}
+    {if(!IsAdmin())return Denied();await repository.CancelPushAsync(request.PushAuditIds,UserName(),ct);return Ok(new{message="Mapper push cancelled."});}
 
     [HttpGet("push-verification/{pushAuditId:long}")]
     public async Task<ActionResult> PushVerification(long pushAuditId,CancellationToken ct)
@@ -122,7 +122,7 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
     private bool IsPushManager()=>IsAdmin()||IsArManager();
     private bool IsManager()=>TokenRole().Contains("CLIENTMANAGER")||TokenRole().Contains("ACCOUNTMANAGER");
     private bool IsViewer()=>TokenRole().Contains("VIEWER")||TokenRole().Contains("READONLY");
-    private bool CanView()=>IsAdmin()||IsManager()||IsViewer()||TokenRole().Contains("LABUSER");
+    private bool CanView()=>IsAdmin()||IsArManager()||IsManager()||IsViewer()||TokenRole().Contains("LABUSER");
     private bool CanOverride()=>IsManager();
     private string TokenRole()=>new(Role().Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
     private string Role()=>First(ClaimTypes.Role,"role","roles")??"";
