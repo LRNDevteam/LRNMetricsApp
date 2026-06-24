@@ -420,45 +420,109 @@ BEGIN
 	) cash;
 
 	-- ───────────────────────────────────────────────────────────────────────
-	--  3.  Average Payment Per Claim (PCR_ES_Avg)
+	--  3.  Average Payment Per Claim (PCR_ES_Avg)  [TABLE-DRIVEN]
+	--
+	--  Z   Average Payment ($) - Total Pay/Billed Claims
+	--      Numerator  : S + T + W  (Insurance Payment fully paid + Partially Paid + Patient Balance)
+	--      Denominator: I          (Billed)
+	--
+	--  AA  Average Payment ($) - Total Pay/Paid Claims
+	--      Numerator  : S + T      (Insurance Payment fully paid + Partially Paid)
+	--      Denominator: L + O      (Fully Paid - Insurance Pay + Partially Paid)
+	--
+	--  AB  Average Payment ($) - Total Pay/Adjudicated Claims
+	--      Numerator  : S + T + W  (Insurance Payment fully paid + Partially Paid + Patient Balance)
+	--      Denominator: L+M+N+O+P.2+P.3
+	--                   (Fully Paid + Fully Adjusted + Patient Responsibility +
+	--                    Partially Paid + Fully Denied + Partially Denied)
 	-- ───────────────────────────────────────────────────────────────────────
 	TRUNCATE TABLE dbo.PCR_ES_Avg;
 
-	;WITH AvgBase AS
+	;WITH
+	AvgNumST AS
 	(
-		SELECT
-			p.ESYear, p.ESMonth,
-			ISNULL(SUM(CASE WHEN b.BilledUnbilled='Billed' AND b.ClaimStatus IN ('Fully Paid','Partially Paid')
-							THEN b.InsurancePayment ELSE 0 END), 0)
-			  + ISNULL(SUM(CASE WHEN b.BilledUnbilled='Billed' THEN b.PatientPayment ELSE 0 END), 0) AS TotalPay,
-			COUNT(DISTINCT CASE WHEN b.BilledUnbilled='Billed'
-								 THEN b.VisitNumber END) AS BilledClaims,
-			COUNT(DISTINCT CASE WHEN b.BilledUnbilled='Billed'
-								  AND b.ClaimStatus IN ('Fully Paid','Partially Paid','Patient Payment')
-								 THEN b.VisitNumber END) AS PaidClaims,
-			COUNT(DISTINCT CASE WHEN b.BilledUnbilled='Billed'
-								  AND b.ClaimStatus IN ('Fully Paid','Complete W/O','Patient Responsibility',
-														 'Partially Paid','Patient Payment','Fully Denied',
-														 'Partially Adjusted','Partially Denied')
-								 THEN b.VisitNumber END) AS AdjudicatedClaims
-		FROM #Periods p
-		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-		GROUP BY p.ESYear, p.ESMonth
+		-- AA Numerator: S + T
+		-- Insurance Payment (fully paid) ($) + Partially Paid ($)
+		SELECT ESYear, ESMonth, SUM(ESMonthChargeAmount) AS NumValue
+		FROM dbo.PCR_ES_Cash
+		WHERE RoleID IN ('S','T')
+		GROUP BY ESYear, ESMonth
+	),
+	AvgNumSTW AS
+	(
+		-- Z & AB Numerator: S + T + W
+		-- Insurance Payment (fully paid) ($) + Partially Paid ($) + Patient Balance ($)
+		SELECT ESYear, ESMonth, SUM(ESMonthChargeAmount) AS NumValue
+		FROM dbo.PCR_ES_Cash
+		WHERE RoleID IN ('S','T','W')
+		GROUP BY ESYear, ESMonth
+	),
+	DenZ AS
+	(
+		-- Z Denominator: I — all Billed claims
+		SELECT ESYear, ESMonth, ESMonthClaimCount AS DenomCount
+		FROM dbo.PCR_ES_PMS
+		WHERE RoleID = 'I'
+	),
+	DenAA AS
+	(
+		-- AA Denominator: L + O — Fully Paid + Partially Paid
+		SELECT ESYear, ESMonth, SUM(ESMonthClaimCount) AS DenomCount
+		FROM dbo.PCR_ES_PMS
+		WHERE RoleID IN ('L','O')
+		GROUP BY ESYear, ESMonth
+	),
+	DenAB AS
+	(
+		-- AB Denominator: L+M+N+O+P.2+P.3
+		-- Fully Paid + Fully Adjusted + Patient Responsibility +
+		-- Partially Paid + Fully Denied + Partially Denied
+		SELECT ESYear, ESMonth, SUM(ESMonthClaimCount) AS DenomCount
+		FROM dbo.PCR_ES_PMS
+		WHERE RoleID IN ('L','M','N','O','P.2','P.3')
+		GROUP BY ESYear, ESMonth
 	)
-	INSERT INTO dbo.PCR_ES_Avg (RoleID, Description, ESYear, ESMonth, ESMonthClaimCount, ESMonthChargeAmount, RefreshedAt)
-	SELECT 'AH', 'Average Payment ($) - Total Pay/Billed Claims', ESYear, ESMonth, BilledClaims,
-		   CASE WHEN BilledClaims = 0 THEN 0 ELSE TotalPay / BilledClaims END, GETDATE()
-	FROM AvgBase
+	INSERT INTO dbo.PCR_ES_Avg
+	(
+		RoleID, Description, ESYear, ESMonth, ESMonthClaimCount, ESMonthChargeAmount, RefreshedAt
+	)
+	-- Z: (S + T + W) / I
+	SELECT
+		'Z',
+		'Average Payment ($) - Total Pay/Billed Claims',
+		p.ESYear, p.ESMonth,
+		ISNULL(d.DenomCount, 0),
+		ISNULL(ROUND(ISNULL(n.NumValue, 0) / NULLIF(d.DenomCount, 0), 2), 0),
+		GETDATE()
+	FROM #Periods p
+	LEFT JOIN AvgNumSTW n ON n.ESYear=p.ESYear AND n.ESMonth=p.ESMonth
+	LEFT JOIN DenZ      d ON d.ESYear=p.ESYear AND d.ESMonth=p.ESMonth
 
 	UNION ALL
-	SELECT 'AI1', 'Average Payment ($) - Total Pay/Paid Claims', ESYear, ESMonth, PaidClaims,
-		   CASE WHEN PaidClaims = 0 THEN 0 ELSE TotalPay / PaidClaims END, GETDATE()
-	FROM AvgBase
+	-- AA: (S + T) / (L + O)
+	SELECT
+		'AA',
+		'Average Payment ($) - Total Pay/Paid Claims',
+		p.ESYear, p.ESMonth,
+		ISNULL(d.DenomCount, 0),
+		ISNULL(ROUND(ISNULL(n.NumValue, 0) / NULLIF(d.DenomCount, 0), 2), 0),
+		GETDATE()
+	FROM #Periods p
+	LEFT JOIN AvgNumST n ON n.ESYear=p.ESYear AND n.ESMonth=p.ESMonth
+	LEFT JOIN DenAA    d ON d.ESYear=p.ESYear AND d.ESMonth=p.ESMonth
 
 	UNION ALL
-	SELECT 'AJ', 'Average Payment ($) - Total Pay/Adjudicated Claims', ESYear, ESMonth, AdjudicatedClaims,
-		   CASE WHEN AdjudicatedClaims = 0 THEN 0 ELSE TotalPay / AdjudicatedClaims END, GETDATE()
-	FROM AvgBase;
+	-- AB: (S + T + W) / (L + M + N + O + P.2 + P.3)
+	SELECT
+		'AB',
+		'Average Payment ($) - Total Pay/Adjudicated Claims',
+		p.ESYear, p.ESMonth,
+		ISNULL(d.DenomCount, 0),
+		ISNULL(ROUND(ISNULL(n.NumValue, 0) / NULLIF(d.DenomCount, 0), 2), 0),
+		GETDATE()
+	FROM #Periods p
+	LEFT JOIN AvgNumSTW n ON n.ESYear=p.ESYear AND n.ESMonth=p.ESMonth
+	LEFT JOIN DenAB     d ON d.ESYear=p.ESYear AND d.ESMonth=p.ESMonth;
 
 	DROP TABLE IF EXISTS #Base;
 	DROP TABLE IF EXISTS #Periods;

@@ -59,12 +59,8 @@ public sealed class PhiExecutiveSummaryViewModel
     // ── Filter state – exact date ranges (Cove and future labs) ────
     public DateTime? DosFrom      { get; set; }
     public DateTime? DosTo        { get; set; }
-    public DateTime? ReceivedFrom { get; set; }
-    public DateTime? ReceivedTo   { get; set; }
     public DateTime? BilledFrom   { get; set; }
     public DateTime? BilledTo     { get; set; }
-    public DateTime? PostedFrom   { get; set; }
-    public DateTime? PostedTo     { get; set; }
 
     // ── Filter state – dimension multi-select (Cove and future labs)
     public List<string> SelectedPanels    { get; set; } = [];

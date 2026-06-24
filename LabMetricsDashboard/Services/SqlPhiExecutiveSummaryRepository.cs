@@ -141,12 +141,8 @@ public sealed class SqlPhiExecutiveSummaryRepository
         bool      useExtendedFilters = false,
         DateTime? dosFrom            = null,
         DateTime? dosTo              = null,
-        DateTime? receivedFrom       = null,
-        DateTime? receivedTo         = null,
         DateTime? billedFrom         = null,
         DateTime? billedTo           = null,
-        DateTime? postedFrom         = null,
-        DateTime? postedTo           = null,
         string?   panels             = null,
         string?   clinics            = null,
         string?   providers          = null,
@@ -165,12 +161,8 @@ public sealed class SqlPhiExecutiveSummaryRepository
             SelectedMonthTo   = monthTo,
             DosFrom      = dosFrom,
             DosTo        = dosTo,
-            ReceivedFrom = receivedFrom,
-            ReceivedTo   = receivedTo,
             BilledFrom   = billedFrom,
             BilledTo     = billedTo,
-            PostedFrom   = postedFrom,
-            PostedTo     = postedTo,
             SelectedPanels    = panels    is null ? [] : [.. panels.Split(',',    StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)],
             SelectedClinics   = clinics   is null ? [] : [.. clinics.Split(',',   StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)],
             SelectedProviders = providers is null ? [] : [.. providers.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)],
@@ -199,12 +191,8 @@ public sealed class SqlPhiExecutiveSummaryRepository
             {
                 cmd.Parameters.Add("@DosFrom",       System.Data.SqlDbType.Date).Value = (object?)dosFrom       ?? DBNull.Value;
                 cmd.Parameters.Add("@DosTo",         System.Data.SqlDbType.Date).Value = (object?)dosTo         ?? DBNull.Value;
-                cmd.Parameters.Add("@ReceivedFrom",  System.Data.SqlDbType.Date).Value = (object?)receivedFrom  ?? DBNull.Value;
-                cmd.Parameters.Add("@ReceivedTo",    System.Data.SqlDbType.Date).Value = (object?)receivedTo    ?? DBNull.Value;
                 cmd.Parameters.Add("@BilledFrom",    System.Data.SqlDbType.Date).Value = (object?)billedFrom    ?? DBNull.Value;
                 cmd.Parameters.Add("@BilledTo",      System.Data.SqlDbType.Date).Value = (object?)billedTo      ?? DBNull.Value;
-                cmd.Parameters.Add("@PostedFrom",    System.Data.SqlDbType.Date).Value = (object?)postedFrom    ?? DBNull.Value;
-                cmd.Parameters.Add("@PostedTo",      System.Data.SqlDbType.Date).Value = (object?)postedTo      ?? DBNull.Value;
                 cmd.Parameters.Add("@Panels",    System.Data.SqlDbType.NVarChar, -1).Value = (object?)panels    ?? DBNull.Value;
                 cmd.Parameters.Add("@Clinics",   System.Data.SqlDbType.NVarChar, -1).Value = (object?)clinics   ?? DBNull.Value;
                 cmd.Parameters.Add("@Providers", System.Data.SqlDbType.NVarChar, -1).Value = (object?)providers ?? DBNull.Value;

@@ -186,7 +186,7 @@ BEGIN
 
         -- ── B2.1  Billed (was A.1) ────────────────────────────────────────────
         UNION ALL
-        SELECT p.ESYear, p.ESMonth, 'B2.1', '  Billed',
+        SELECT p.ESYear, p.ESMonth, 'B2.1', '  Billed (First Billed Date = Date AND Billed Amount <> 0)',
                COUNT(DISTINCT CASE WHEN l.BillTo LIKE '%Insurance%' AND l.BillingStatus = 'Billed' THEN l.Accession END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
@@ -194,7 +194,7 @@ BEGIN
 
         -- ── B2.1.1  Claim Submitted in IRCM (was A.1.1) ──────────────────────
         UNION ALL
-        SELECT p.ESYear, p.ESMonth, 'B2.1.1', '    Claim Submitted in IRCM',
+        SELECT p.ESYear, p.ESMonth, 'B2.1.1', '    Claim Submitted in IRCM (First Billed Date = Date AND Billed Amount <> 0 AND Source = IRCM)',
                COUNT(DISTINCT CASE WHEN l.BillTo LIKE '%Insurance%' AND l.BillingStatus = 'Billed'
                                     AND l.FinalStatus = 'Claim Submitted in IRCM' THEN l.Accession END)
         FROM #LisPeriods p
@@ -203,7 +203,7 @@ BEGIN
 
         -- ── B2.1.2  Claim Submitted in Daqbilling (was A.1.2) ────────────────
         UNION ALL
-        SELECT p.ESYear, p.ESMonth, 'B2.1.2', '    Claim Submitted in Daqbilling',
+        SELECT p.ESYear, p.ESMonth, 'B2.1.2', '    Claim Submitted in Daqbilling (First Billed Date = Date AND Billed Amount <> 0 AND Source = Daq)',
                COUNT(DISTINCT CASE WHEN l.BillTo LIKE '%Insurance%' AND l.BillingStatus = 'Billed'
                                     AND l.FinalStatus = 'Claim Submitted in Daqbilling' THEN l.Accession END)
         FROM #LisPeriods p
@@ -212,7 +212,7 @@ BEGIN
 
         -- ── B2.2  Unbilled (was A.2) ──────────────────────────────────────────
         UNION ALL
-        SELECT p.ESYear, p.ESMonth, 'B2.2', '  Unbilled',
+        SELECT p.ESYear, p.ESMonth, 'B2.2', '  Unbilled (First Billed Date = Blank AND Billed Amount <> 0)',
                COUNT(DISTINCT CASE WHEN l.BillTo LIKE '%Insurance%' AND l.BillingStatus = 'Unbilled' THEN l.Accession END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))

@@ -16,8 +16,6 @@
 --   @ReceivedTo    DATE = NULL     Samples-Received upper bound
 --   @BilledFrom    DATE = NULL     First-Billed-Date lower bound
 --   @BilledTo      DATE = NULL     First-Billed-Date upper bound
---   @PostedFrom    DATE = NULL     Payment-Posted-Date lower bound
---   @PostedTo      DATE = NULL     Payment-Posted-Date upper bound
 --   @Panels        NVARCHAR(MAX) = NULL  Comma-separated PanelName list (NULL = all)
 --   @Clinics       NVARCHAR(MAX) = NULL  Comma-separated ClinicName list
 --   @Providers     NVARCHAR(MAX) = NULL  Comma-separated ReferringProvider list
@@ -48,12 +46,8 @@ CREATE OR ALTER PROCEDURE dbo.usp_GetCove_ExecutiveSummary
     -- New exact date-range filters
     @DosFrom      DATE          = NULL,
     @DosTo        DATE          = NULL,
-    @ReceivedFrom DATE          = NULL,
-    @ReceivedTo   DATE          = NULL,
     @BilledFrom   DATE          = NULL,
     @BilledTo     DATE          = NULL,
-    @PostedFrom   DATE          = NULL,
-    @PostedTo     DATE          = NULL,
     -- Dimension filters (comma-separated value lists; NULL = no filter)
     @Panels       NVARCHAR(MAX) = NULL,
     @Clinics      NVARCHAR(MAX) = NULL,
@@ -74,12 +68,8 @@ BEGIN
         WHEN ISNULL(@MonthTo,   0) <> 0 THEN 1
         WHEN @DosFrom     IS NOT NULL THEN 1
         WHEN @DosTo       IS NOT NULL THEN 1
-        WHEN @ReceivedFrom IS NOT NULL THEN 1
-        WHEN @ReceivedTo  IS NOT NULL THEN 1
         WHEN @BilledFrom  IS NOT NULL THEN 1
         WHEN @BilledTo    IS NOT NULL THEN 1
-        WHEN @PostedFrom  IS NOT NULL THEN 1
-        WHEN @PostedTo    IS NOT NULL THEN 1
         WHEN NULLIF(LTRIM(RTRIM(@Panels)),    '') IS NOT NULL THEN 1
         WHEN NULLIF(LTRIM(RTRIM(@Clinics)),   '') IS NOT NULL THEN 1
         WHEN NULLIF(LTRIM(RTRIM(@Providers)), '') IS NOT NULL THEN 1
@@ -241,19 +231,14 @@ BEGIN
                   AND (ISNULL(@iYearTo,    0) = 0 OR YEAR (TRY_CAST([' + @DateCol + N'] AS DATE)) <= @iYearTo)
                   AND (ISNULL(@iMonthFrom, 0) = 0 OR MONTH(TRY_CAST([' + @DateCol + N'] AS DATE)) >= @iMonthFrom)
                   AND (ISNULL(@iMonthTo,   0) = 0 OR MONTH(TRY_CAST([' + @DateCol + N'] AS DATE)) <= @iMonthTo)
-                  -- Samples-Received exact date range
-                  AND (@iReceivedFrom IS NULL OR TRY_CAST([' + @DateCol + N'] AS DATE) >= @iReceivedFrom)
-                  AND (@iReceivedTo   IS NULL OR TRY_CAST([' + @DateCol + N'] AS DATE) <= @iReceivedTo)
                   -- Panel dimension filter on LIMSMaster
                   AND (@iHasPanelFilter = 0 OR
                        LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200),[' + @PanelNameCol + N']),'''')))
                        IN (SELECT Val FROM #FilterPanels));';
 
             EXEC sp_executesql @LisSql,
-                N'@iYearFrom INT, @iYearTo INT, @iMonthFrom INT, @iMonthTo INT,
-                  @iReceivedFrom DATE, @iReceivedTo DATE, @iHasPanelFilter BIT',
+                N'@iYearFrom INT, @iYearTo INT, @iMonthFrom INT, @iMonthTo INT, @iHasPanelFilter BIT',
                 @iYearFrom=@YearFrom, @iYearTo=@YearTo, @iMonthFrom=@MonthFrom, @iMonthTo=@MonthTo,
-                @iReceivedFrom=@ReceivedFrom, @iReceivedTo=@ReceivedTo,
                 @iHasPanelFilter=@HasPanelFilter;
         END
     END
@@ -286,11 +271,9 @@ BEGIN
       AND (@DosTo      IS NULL OR TRY_CAST(DateofService   AS DATE) <= @DosTo)
       AND (@BilledFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @BilledFrom)
       AND (@BilledTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @BilledTo)
-      -- PaymentPostedDate filter — column may not exist in all environments;
       -- guarded by checking OBJECT_ID inline at the WHERE level via CASE.
       -- If the column does not exist the filter is silently skipped at ingestion
       -- time because the SP would fail to compile — kept as a no-op placeholder.
-      -- (PostedFrom/PostedTo are accepted as params for future use.)
       -- Dimension filters
       AND (@HasPanelFilter    = 0 OR LTRIM(RTRIM(ISNULL(PanelName,         ''))) IN (SELECT Val FROM #FilterPanels))
       AND (@HasClinicFilter   = 0 OR LTRIM(RTRIM(ISNULL(ClinicName,        ''))) IN (SELECT Val FROM #FilterClinics))

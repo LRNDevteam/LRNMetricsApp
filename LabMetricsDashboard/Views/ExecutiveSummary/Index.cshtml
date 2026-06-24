@@ -316,10 +316,6 @@
     }
     .es-chip .es-chip-x:hover { opacity: 1; }
 
-    /* Quick preset buttons */
-    .es-preset {
-        font-size: .7rem; padding: .18rem .55rem; border-radius: 999px;
-    }
 </style>
 
 @{
@@ -352,33 +348,10 @@
         <form method="get" asp-controller="ExecutiveSummary" asp-action="Index" id="esFilterForm">
             <input type="hidden" name="lab" value="@Model.SelectedLab" />
 
-            <!-- Quick presets -->
-            <div class="px-3 pt-2 pb-1 d-flex flex-wrap align-items-center gap-1">
-                <span class="text-muted me-1" style="font-size:.72rem;font-weight:600">QUICK:</span>
-                <button type="button" class="btn btn-sm btn-outline-secondary es-preset" data-preset="ytd">YTD</button>
-                <button type="button" class="btn btn-sm btn-outline-secondary es-preset" data-preset="this-year">This Year</button>
-                <button type="button" class="btn btn-sm btn-outline-secondary es-preset" data-preset="last-year">Last Year</button>
-                <button type="button" class="btn btn-sm btn-outline-secondary es-preset" data-preset="this-month">This Month</button>
-            </div>
-
-            <hr class="mx-3 my-1" />
-
             <!-- ── Section 1: Date Ranges ───────────────────────────── -->
             <div class="px-3 pt-2 pb-1">
                 <div class="es-filter-section-label">Date Ranges</div>
                 <div class="row g-2">
-                    <div class="col-12 col-md-6 col-xl-3">
-                        <label class="es-filter-label">SAMPLES RECEIVED</label>
-                        <div class="d-flex gap-1 align-items-center">
-                            <input type="date" name="receivedFrom" class="form-control form-control-sm es-date-input"
-                                   data-label="Received From"
-                                   value="@(Model.ReceivedFrom?.ToString("yyyy-MM-dd"))" />
-                            <span class="text-muted" style="font-size:.7rem">–</span>
-                            <input type="date" name="receivedTo" class="form-control form-control-sm es-date-input"
-                                   data-label="Received To"
-                                   value="@(Model.ReceivedTo?.ToString("yyyy-MM-dd"))" />
-                        </div>
-                    </div>
                     <div class="col-12 col-md-6 col-xl-3">
                         <label class="es-filter-label">DATE OF SERVICE</label>
                         <div class="d-flex gap-1 align-items-center">
@@ -401,18 +374,6 @@
                             <input type="date" name="billedTo" class="form-control form-control-sm es-date-input"
                                    data-label="Billed To"
                                    value="@(Model.BilledTo?.ToString("yyyy-MM-dd"))" />
-                        </div>
-                    </div>
-                    <div class="col-12 col-md-6 col-xl-3">
-                        <label class="es-filter-label">POSTED DATE</label>
-                        <div class="d-flex gap-1 align-items-center">
-                            <input type="date" name="postedFrom" class="form-control form-control-sm es-date-input"
-                                   data-label="Posted From"
-                                   value="@(Model.PostedFrom?.ToString("yyyy-MM-dd"))" />
-                            <span class="text-muted" style="font-size:.7rem">–</span>
-                            <input type="date" name="postedTo" class="form-control form-control-sm es-date-input"
-                                   data-label="Posted To"
-                                   value="@(Model.PostedTo?.ToString("yyyy-MM-dd"))" />
                         </div>
                     </div>
                 </div>
@@ -577,51 +538,11 @@
 
             <hr class="mx-3 my-1" />
 
-            <!-- ── Section 3: Time Period & Search ─────────────────── -->
+            <!-- ── Section 3: Description Search ──────────────────── -->
             <div class="px-3 pt-2 pb-1">
-                <div class="es-filter-section-label">Time Period &amp; Search</div>
+                <div class="es-filter-section-label">Search</div>
                 <div class="row g-2 align-items-end">
-                    <div class="col-6 col-md-3 col-xl-2">
-                        <label class="es-filter-label">YEAR FROM</label>
-                        <select name="yearFrom" class="form-select form-select-sm" id="selYearFrom">
-                            <option value="">All</option>
-                            @foreach (var y in Model.AvailableYears)
-                            {
-                                <option value="@y" selected="@(y == Model.SelectedYearFrom ? "selected" : null)">@y</option>
-                            }
-                        </select>
-                    </div>
-                    <div class="col-6 col-md-3 col-xl-2">
-                        <label class="es-filter-label">YEAR TO</label>
-                        <select name="yearTo" class="form-select form-select-sm" id="selYearTo">
-                            <option value="">All</option>
-                            @foreach (var y in Model.AvailableYears)
-                            {
-                                <option value="@y" selected="@(y == Model.SelectedYearTo ? "selected" : null)">@y</option>
-                            }
-                        </select>
-                    </div>
-                    <div class="col-6 col-md-3 col-xl-2">
-                        <label class="es-filter-label">MONTH FROM</label>
-                        <select name="monthFrom" class="form-select form-select-sm" id="selMonthFrom">
-                            <option value="">All</option>
-                            @for (int m = 1; m <= 12; m++)
-                            {
-                                <option value="@m" selected="@(m == Model.SelectedMonthFrom ? "selected" : null)">@MonthName(m)</option>
-                            }
-                        </select>
-                    </div>
-                    <div class="col-6 col-md-3 col-xl-2">
-                        <label class="es-filter-label">MONTH TO</label>
-                        <select name="monthTo" class="form-select form-select-sm" id="selMonthTo">
-                            <option value="">All</option>
-                            @for (int m = 1; m <= 12; m++)
-                            {
-                                <option value="@m" selected="@(m == Model.SelectedMonthTo ? "selected" : null)">@MonthName(m)</option>
-                            }
-                        </select>
-                    </div>
-                    <div class="col-12 col-xl-4">
+                    <div class="col-12 col-md-6">
                         <label class="es-filter-label">DESCRIPTION SEARCH (client-side)</label>
                         <div class="input-group input-group-sm">
                             <input type="text" id="esDescFilter" class="form-control"
@@ -654,7 +575,7 @@
                    class="btn btn-sm btn-outline-secondary">
                     <i class="bi bi-x-circle me-1"></i>Clear All
                 </a>
-                <a href="@Url.Action("Index", new { lab = Model.SelectedLab, export = "excel", yearFrom = Model.SelectedYearFrom, yearTo = Model.SelectedYearTo, monthFrom = Model.SelectedMonthFrom, monthTo = Model.SelectedMonthTo })"
+                <a href="@Url.Action("Index", new { lab = Model.SelectedLab, export = "excel" })"
                    class="btn btn-sm btn-outline-success ms-auto">
                     <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
                 </a>
@@ -765,10 +686,6 @@
                                                         year,
                                                         month       = m,
                                                         value       = v,
-                                                        yearFrom    = Model.SelectedYearFrom,
-                                                        yearTo      = Model.SelectedYearTo,
-                                                        monthFrom   = Model.SelectedMonthFrom,
-                                                        monthTo     = Model.SelectedMonthTo,
                                                     })!;
                                                     <td><a href="@drillUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@cellVal</a></td>
                                                 }
@@ -788,10 +705,6 @@
                                                     year,
                                                     month       = 0,
                                                     value       = yrTot,
-                                                    yearFrom    = Model.SelectedYearFrom,
-                                                    yearTo      = Model.SelectedYearTo,
-                                                    monthFrom   = Model.SelectedMonthFrom,
-                                                    monthTo     = Model.SelectedMonthTo,
                                                 })!;
                                                 <td class="es-year-total">
                                                     <a href="@yrUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@FmtCount(yrTot, row.Category)</a>
@@ -813,10 +726,6 @@
                                                 year        = 0,
                                                 month       = 0,
                                                 value       = gTot,
-                                                yearFrom    = Model.SelectedYearFrom,
-                                                yearTo      = Model.SelectedYearTo,
-                                                monthFrom   = Model.SelectedMonthFrom,
-                                                monthTo     = Model.SelectedMonthTo,
                                             })!;
                                             <td class="es-grand">
                                                 <a href="@gtUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@FmtCount(gTot, row.Category)</a>
@@ -1116,15 +1025,6 @@
                 }
             });
 
-            // Year/month selects
-            ['selYearFrom','selYearTo','selMonthFrom','selMonthTo'].forEach(function (id) {
-                var sel = document.getElementById(id);
-                if (sel && sel.value) {
-                    count++;
-                    var lbl = sel.previousElementSibling ? sel.previousElementSibling.textContent.trim() : id;
-                    chipsContainer.appendChild(makeChip(lbl + ': ' + sel.options[sel.selectedIndex].text, function () { sel.value = ''; }));
-                }
-            });
 
             // Dimension selects
             ['selPanels','selClinics','selProviders','selReps'].forEach(function (id) {
@@ -1154,12 +1054,8 @@
             if (countBadge) { countBadge.textContent = count; countBadge.style.display = count ? '' : 'none'; }
         }
 
-        // Trigger chip refresh when date/year/month inputs change
+        // Trigger chip refresh when date inputs change
         document.querySelectorAll('.es-date-input').forEach(function (inp) { inp.addEventListener('change', refreshActiveChips); });
-        ['selYearFrom','selYearTo','selMonthFrom','selMonthTo'].forEach(function (id) {
-            var sel = document.getElementById(id);
-            if (sel) sel.addEventListener('change', refreshActiveChips);
-        });
 
         refreshActiveChips(); // initial pass for server-restored values
 
@@ -1169,28 +1065,5 @@
         var thisMonth = now.getMonth() + 1; // 1-based
         var monthNames = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-        function setYearMonth(yFrom, mFrom, yTo, mTo) {
-            var syf = document.getElementById('selYearFrom');
-            var syt = document.getElementById('selYearTo');
-            var smf = document.getElementById('selMonthFrom');
-            var smt = document.getElementById('selMonthTo');
-            function setVal(sel, v) {
-                if (!sel) return;
-                var s = String(v);
-                for (var i = 0; i < sel.options.length; i++) { if (sel.options[i].value === s) { sel.selectedIndex = i; return; } }
-            }
-            setVal(syf, yFrom); setVal(syt, yTo); setVal(smf, mFrom); setVal(smt, mTo);
-            refreshActiveChips();
-        }
-
-        document.querySelectorAll('.es-preset').forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                var preset = btn.getAttribute('data-preset');
-                if (preset === 'ytd')        setYearMonth(thisYear, 1, thisYear, thisMonth);
-                if (preset === 'this-year')  setYearMonth(thisYear, 1, thisYear, 12);
-                if (preset === 'last-year')  setYearMonth(thisYear - 1, 1, thisYear - 1, 12);
-                if (preset === 'this-month') setYearMonth(thisYear, thisMonth, thisYear, thisMonth);
-            });
-        });
     });
 </script>

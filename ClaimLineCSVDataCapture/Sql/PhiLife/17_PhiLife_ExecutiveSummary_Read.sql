@@ -48,12 +48,8 @@ CREATE OR ALTER PROCEDURE dbo.usp_GetPhi_ExecutiveSummary
 	@MonthTo      INT           = NULL,
 	@DosFrom      DATE          = NULL,
 	@DosTo        DATE          = NULL,
-	@ReceivedFrom DATE          = NULL,
-	@ReceivedTo   DATE          = NULL,
 	@BilledFrom   DATE          = NULL,
 	@BilledTo     DATE          = NULL,
-	@PostedFrom   DATE          = NULL,
-	@PostedTo     DATE          = NULL,
 	@Panels       NVARCHAR(MAX) = NULL,
 	@Clinics      NVARCHAR(MAX) = NULL,
 	@Providers    NVARCHAR(MAX) = NULL,
@@ -71,12 +67,8 @@ BEGIN
 			WHEN @MonthTo      IS NOT NULL THEN 1
 			WHEN @DosFrom      IS NOT NULL THEN 1
 			WHEN @DosTo        IS NOT NULL THEN 1
-			WHEN @ReceivedFrom IS NOT NULL THEN 1
-			WHEN @ReceivedTo   IS NOT NULL THEN 1
 			WHEN @BilledFrom   IS NOT NULL THEN 1
 			WHEN @BilledTo     IS NOT NULL THEN 1
-			WHEN @PostedFrom   IS NOT NULL THEN 1
-			WHEN @PostedTo     IS NOT NULL THEN 1
 			WHEN NULLIF(LTRIM(RTRIM(@Panels)),   '') IS NOT NULL THEN 1
 			WHEN NULLIF(LTRIM(RTRIM(@Clinics)),  '') IS NOT NULL THEN 1
 			WHEN NULLIF(LTRIM(RTRIM(@Providers)),'') IS NOT NULL THEN 1
@@ -195,8 +187,6 @@ BEGIN
 	  AND (@DosTo      IS NULL OR TRY_CAST(DateofService   AS DATE) <= @DosTo)
 	  AND (@BilledFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @BilledFrom)
 	  AND (@BilledTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @BilledTo)
-	  AND (@PostedFrom IS NULL OR TRY_CAST(CheckDate      AS DATE) >= @PostedFrom)
-	  AND (@PostedTo   IS NULL OR TRY_CAST(CheckDate      AS DATE) <= @PostedTo)
 	  AND (@HasPanelFilter    = 0 OR LTRIM(RTRIM(ISNULL(Panelname,          ''))) COLLATE DATABASE_DEFAULT IN (SELECT Val FROM #FilterPanels))
 	  AND (@HasClinicFilter   = 0 OR LTRIM(RTRIM(ISNULL(ClinicName,         ''))) COLLATE DATABASE_DEFAULT IN (SELECT Val FROM #FilterClinics))
 	  AND (@HasProviderFilter = 0 OR LTRIM(RTRIM(ISNULL(ReferringProvider,  ''))) COLLATE DATABASE_DEFAULT IN (SELECT Val FROM #FilterProviders))

@@ -18,12 +18,8 @@ CREATE OR ALTER PROCEDURE dbo.usp_GetNW_ExecutiveSummary
     @MonthTo      INT           = 0,
     @DosFrom      DATE          = NULL,
     @DosTo        DATE          = NULL,
-    @ReceivedFrom DATE          = NULL,
-    @ReceivedTo   DATE          = NULL,
     @BilledFrom   DATE          = NULL,
     @BilledTo     DATE          = NULL,
-    @PostedFrom   DATE          = NULL,
-    @PostedTo     DATE          = NULL,
     @Panels       NVARCHAR(MAX) = NULL,
     @Clinics      NVARCHAR(MAX) = NULL,
     @Providers    NVARCHAR(MAX) = NULL,
@@ -40,12 +36,8 @@ BEGIN
         WHEN ISNULL(@MonthTo,   0) <> 0 THEN 1
         WHEN @DosFrom      IS NOT NULL THEN 1
         WHEN @DosTo        IS NOT NULL THEN 1
-        WHEN @ReceivedFrom IS NOT NULL THEN 1
-        WHEN @ReceivedTo   IS NOT NULL THEN 1
         WHEN @BilledFrom   IS NOT NULL THEN 1
         WHEN @BilledTo     IS NOT NULL THEN 1
-        WHEN @PostedFrom   IS NOT NULL THEN 1
-        WHEN @PostedTo     IS NOT NULL THEN 1
         WHEN NULLIF(LTRIM(RTRIM(@Panels)),   '') IS NOT NULL THEN 1
         WHEN NULLIF(LTRIM(RTRIM(@Clinics)),  '') IS NOT NULL THEN 1
         WHEN NULLIF(LTRIM(RTRIM(@Providers)),'') IS NOT NULL THEN 1
@@ -200,18 +192,15 @@ BEGIN
               AND (@dt IS NULL OR TRY_CAST(DateofService   AS DATE) <= @dt)
               AND (@bf IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @bf)
               AND (@bt IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @bt)
-              AND (@pf IS NULL OR TRY_CAST(PostedDate      AS DATE) >= @pf)
-              AND (@pt IS NULL OR TRY_CAST(PostedDate      AS DATE) <= @pt)
               AND (@hpf=0 OR LTRIM(RTRIM(ISNULL(PanelType,        ''''))) COLLATE DATABASE_DEFAULT IN (SELECT Val FROM #FilterPanels))
               AND (@hcf=0 OR LTRIM(RTRIM(ISNULL(ClinicName,       ''''))) COLLATE DATABASE_DEFAULT IN (SELECT Val FROM #FilterClinics))
               AND (@hpvf=0 OR LTRIM(RTRIM(ISNULL(ReferringProvider,''''))) COLLATE DATABASE_DEFAULT IN (SELECT Val FROM #FilterProviders))
               AND (@hrf=0 OR LTRIM(RTRIM(ISNULL(SalesRepname,     ''''))) COLLATE DATABASE_DEFAULT IN (SELECT Val FROM #FilterReps));';
         EXEC sp_executesql @BaseSql,
-             N'@yf INT,@yt INT,@mf INT,@mt INT,@df DATE,@dt DATE,@bf DATE,@bt DATE,@pf DATE,@pt DATE,@hpf BIT,@hcf BIT,@hpvf BIT,@hrf BIT',
+             N'@yf INT,@yt INT,@mf INT,@mt INT,@df DATE,@dt DATE,@bf DATE,@bt DATE,@hpf BIT,@hcf BIT,@hpvf BIT,@hrf BIT',
              @yf=@YearFrom, @yt=@YearTo, @mf=@MonthFrom, @mt=@MonthTo,
              @df=@DosFrom, @dt=@DosTo,
              @bf=@BilledFrom, @bt=@BilledTo,
-             @pf=@PostedFrom, @pt=@PostedTo,
              @hpf=@HasPanelFilter, @hcf=@HasClinicFilter, @hpvf=@HasProviderFilter, @hrf=@HasRepFilter;
     END
 
