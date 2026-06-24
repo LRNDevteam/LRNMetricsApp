@@ -6,6 +6,7 @@ const labels = [
   'New Line Status',
   'Next Follow-up Date',
   'Actual Action / Outcome',
+  'Recommended Action',
   'Action Completed',
   'Documentation Type',
   'Documentation Description',
@@ -38,7 +39,7 @@ export default function StructuredNoteText({ text }) {
   const fields = parseStructuredNote(text);
   if (!fields.length) return <span className="structured-note-plain">{text || '-'}</span>;
   return <div className="structured-note">
-    {fields.map(field => <div className={`structured-note-field ${field.label === 'Note' || field.label === 'Affected Lines' || field.label === 'Documentation Description' ? 'wide' : ''}`} key={field.label}>
+    {fields.map(field => <div className={`structured-note-field ${field.label === 'Note' || field.label === 'Affected Lines' || field.label === 'Documentation Description' ? 'wide' : ''} ${field.label === 'Recommended Action' ? 'recommended-action' : ''}`} key={field.label}>
       <span>{field.label}</span>
       <strong>{formatFieldValue(field)}</strong>
     </div>)}

@@ -403,6 +403,7 @@ public sealed class DenialWorkflowController : ControllerBase
         if (request.LabId <= 0) return BadRequest("LabId is required.");
         if (request.EscalationId <= 0) return BadRequest("EscalationId is required.");
         if (string.IsNullOrWhiteSpace(request.ResponseNote)) return BadRequest("Manager response note is required.");
+        if (string.IsNullOrWhiteSpace(request.RecommendedNextAction)) return BadRequest("Recommended next action is required.");
         request.ActionBy = string.IsNullOrWhiteSpace(request.ActionBy) ? (FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "ReactWorkflow") : request.ActionBy;
         var rows = await _service.ResolveEscalationAsync(request, ct);
         return Ok(new DenialWorkflowResult { Success = rows > 0, RowsAffected = rows, Message = rows > 0 ? "Escalation response saved." : "Escalation response was not saved." });
