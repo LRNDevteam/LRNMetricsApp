@@ -16,9 +16,10 @@ public sealed class AdminViewModel
 
     public Role NewRole { get; set; } = new Role();
 
-    // For create-user form: optionally select a role and a lab to assign after creating the user
+    // For create-user form: optionally select a role and labs to assign after creating the user
     public int? NewUserRoleId { get; set; }
     public int? NewUserLabId { get; set; }
+    public List<int> NewUserLabIds { get; set; } = new();
 
     // List of available labs (populated by controller)
     public IEnumerable<Lab> Labs { get; set; } = new List<Lab>();
@@ -30,4 +31,5 @@ public sealed class AdminViewModel
     public int AssignLabId { get; set; }
     // Map of userId -> assigned labs for server-side rendering
     public IDictionary<int, IEnumerable<UserLab>> UserLabsMap { get; set; } = new Dictionary<int, IEnumerable<UserLab>>();
+    public IDictionary<int, IEnumerable<Role>> UserRolesMap { get; set; } = new Dictionary<int, IEnumerable<Role>>();
 }

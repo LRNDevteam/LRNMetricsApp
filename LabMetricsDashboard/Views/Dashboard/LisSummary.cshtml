@@ -24,7 +24,7 @@
     var useUploadedLogicTemplate = result is not null;
     var logicTemplateCss = useUploadedLogicTemplate ? "lis-template-with-logic" : string.Empty;
     string DateValue(DateOnly? value) => value?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty;
-    string RowCss(int level) => level <= 0 ? "lis-summary-section-row" : level == 1 ? "lis-summary-level-one" : "lis-summary-level-two";
+    string RowCss(int level) => level <= 0 ? "lis-summary-section-row" : level == 1 ? "lis-summary-level-one" : level == 2 ? "lis-summary-level-two" : "lis-summary-level-three";
 }
 
 <style>
@@ -165,8 +165,40 @@
         font-weight: 700;
     }
 
-    .lis-summary-level-two td:nth-child(2) {
-        padding-left: 2rem;
+    .lis-summary-desc-content {
+        display: inline-flex;
+        align-items: center;
+        gap: .35rem;
+        padding-left: calc(var(--lis-row-level, 0) * .8rem);
+    }
+
+    .lis-toggle-btn {
+        width: 1.25rem;
+        height: 1.25rem;
+        border: 0;
+        border-radius: .25rem;
+        background: transparent;
+        color: #1b3a5c;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1rem;
+        font-weight: 800;
+        line-height: 1;
+        padding: 0;
+    }
+
+    .lis-toggle-btn:hover {
+        background: #e6f0fb;
+    }
+
+    .lis-toggle-placeholder {
+        width: 1.1rem;
+        flex: 0 0 1.1rem;
+    }
+
+    .lis-summary-has-children {
+        cursor: pointer;
     }
 
     .lis-summary-table.lis-template-with-logic .logic-col {
@@ -301,6 +333,7 @@
                 @if (result is not null)
                 {
                     <span class="chip">Logic: @result.LogicSheetName</span>
+                    <span class="chip">Top Source File name: @(string.IsNullOrWhiteSpace(result.SourceFileName) ? "-" : result.SourceFileName)</span>
                     <span class="chip">Total: @result.GrandTotal.ToString("N0")</span>
                 }
             </div>
@@ -394,11 +427,25 @@ else
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var row in result.Rows)
+                        @for (var rowIndex = 0; rowIndex < result.Rows.Count; rowIndex++)
                         {
-                            <tr class="@RowCss(row.Level)">
+                            var row = result.Rows[rowIndex];
+                            var hasChildren = rowIndex + 1 < result.Rows.Count && result.Rows[rowIndex + 1].Level > row.Level;
+                            <tr class="@RowCss(row.Level) @(hasChildren ? "lis-summary-has-children" : "")" data-lis-row="true" data-level="@row.Level" data-expanded="true">
                                 <td class="lis-code-col sticky-col-1">@row.Code</td>
-                                <td class="desc-col sticky-col-2">@row.Description</td>
+                                <td class="desc-col sticky-col-2">
+                                    <span class="lis-summary-desc-content" style="--lis-row-level:@row.Level">
+                                        @if (hasChildren)
+                                        {
+                                            <button type="button" class="lis-toggle-btn" aria-label="Collapse @row.Description" aria-expanded="true">▾</button>
+                                        }
+                                        else
+                                        {
+                                            <span class="lis-toggle-placeholder"></span>
+                                        }
+                                        <span>@row.Description</span>
+                                    </span>
+                                </td>
                                 @if (useUploadedLogicTemplate)
                                 {
                                     <td class="logic-col sticky-col-3">@row.Logic</td>
@@ -458,6 +505,40 @@ else
             });
         };
 
+        const updateHierarchy = () => {
+            const rows = Array.from(root.querySelectorAll('tbody tr[data-lis-row="true"]'));
+            const expandedByLevel = [];
+
+            rows.forEach(row => {
+                const level = Number(row.dataset.level || 0);
+                expandedByLevel.length = level;
+                const isVisible = expandedByLevel.every(Boolean);
+                row.hidden = !isVisible;
+
+                const isExpanded = row.dataset.expanded !== 'false';
+                expandedByLevel[level] = isVisible && isExpanded;
+
+                const button = row.querySelector('.lis-toggle-btn');
+                if (button) {
+                    button.textContent = isExpanded ? '▾' : '▸';
+                    button.setAttribute('aria-expanded', String(isExpanded));
+                    button.setAttribute('aria-label', `${isExpanded ? 'Collapse' : 'Expand'} ${row.querySelector('.lis-summary-desc-content span:last-child')?.textContent?.trim() || 'row'}`);
+                }
+            });
+        };
+
+        root.addEventListener('click', event => {
+            const button = event.target.closest('.lis-toggle-btn');
+            const row = event.target.closest('tr[data-lis-row="true"]');
+            if (!row || !root.contains(row) || !row.classList.contains('lis-summary-has-children')) return;
+            if (!button && event.target.closest('a, input, select, textarea')) return;
+
+            row.dataset.expanded = row.dataset.expanded === 'false' ? 'true' : 'false';
+            updateHierarchy();
+            requestAnimationFrame(updateLisHeaderOffsets);
+        });
+
+        updateHierarchy();
         requestAnimationFrame(updateLisHeaderOffsets);
         window.addEventListener('resize', updateLisHeaderOffsets, { passive: true });
     })();

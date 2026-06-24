@@ -1,11 +1,89 @@
 @model LabMetricsDashboard.Models.LabUser
+@using LabMetricsDashboard.Models
 
 @{
     ViewData["Title"] = "Edit User";
+    var labs = (ViewBag.Labs as IEnumerable<Lab> ?? Enumerable.Empty<Lab>()).Where(lab => lab.IsActive).ToList();
+    var selectedLabIds = new HashSet<int>(ViewBag.SelectedLabIds as IEnumerable<int> ?? Enumerable.Empty<int>());
 }
 
-<div class="container">
-    <h2>Edit User</h2>
+<style>
+    .edit-user-shell {
+        max-width: 960px;
+        margin: 0 auto;
+    }
+    .edit-user-card {
+        border: 1px solid #dbe4ef;
+        border-radius: 14px;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+        overflow: hidden;
+    }
+    .edit-user-card .card-header {
+        background: #0f2942;
+        color: #fff;
+        border: 0;
+        padding: 18px 22px;
+    }
+    .edit-user-card .card-body {
+        background: #f8fafc;
+        padding: 22px;
+    }
+    .edit-user-card .form-control,
+    .edit-user-card .form-select {
+        border-color: #cbd5e1;
+        border-radius: 10px;
+        min-height: 42px;
+    }
+    .access-panel {
+        background: #fff;
+        border: 1px solid #dbe4ef;
+        border-radius: 12px;
+        padding: 14px;
+    }
+    .lab-chip-picker .selected-labs {
+        min-height: 42px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        padding: 8px;
+        border: 1px solid #d8e1ef;
+        border-radius: 10px;
+        background: #fff;
+        margin-bottom: 10px;
+    }
+    .lab-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 999px;
+        background: #0f2942;
+        color: #fff;
+        font-weight: 700;
+        padding: .35rem .5rem .35rem .7rem;
+    }
+    .lab-chip button {
+        border: 0;
+        background: rgba(255,255,255,.18);
+        color: #fff;
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        line-height: 1;
+    }
+    .lab-chip-empty {
+        color: #64748b;
+        font-size: .9rem;
+    }
+</style>
+
+<div class="edit-user-shell">
+    <div class="card edit-user-card">
+        <div class="card-header d-flex align-items-center justify-content-between">
+            <h2 class="h4 mb-0">Edit User</h2>
+            <a class="btn btn-sm btn-outline-light" asp-action="ListUsers">Back</a>
+        </div>
+        <div class="card-body">
 
     @if (TempData["AdminError"] is string adminError && !string.IsNullOrWhiteSpace(adminError))
     {
@@ -15,43 +93,133 @@
     <form asp-action="Edit" method="post">
         @Html.AntiForgeryToken()
         <input type="hidden" name="LabUserID" value="@Model.LabUserID" />
-        <div class="mb-2">
-            <label class="form-label">UserName</label>
-            <input class="form-control" name="UserName" value="@Model.UserName" required />
-        </div>
-        <div class="mb-2">
-            <label class="form-label">First Name</label>
-            <input class="form-control" name="FirstName" value="@Model.FirstName" />
-        </div>
-        <div class="mb-2">
-            <label class="form-label">Last Name</label>
-            <input class="form-control" name="LastName" value="@Model.LastName" />
-        </div>
-        <div class="mb-2">
-            <label class="form-label">Email</label>
-            <input class="form-control" name="Email" value="@Model.Email" />
-        </div>
-        <div class="mb-2">
-            <label class="form-label">Mobile</label>
-            <input class="form-control" name="Mobile" value="@Model.Mobile" />
-        </div>
-        <div class="mb-2 form-check">
-            <input class="form-check-input" type="checkbox" name="IsActive" value="true" @(Model.IsActive ? "checked" : "") />
-            <label class="form-check-label">Active</label>
+        <div class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label">UserName</label>
+                <input class="form-control" name="UserName" value="@Model.UserName" required />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">First Name</label>
+                <input class="form-control" name="FirstName" value="@Model.FirstName" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Last Name</label>
+                <input class="form-control" name="LastName" value="@Model.LastName" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Email</label>
+                <input class="form-control" name="Email" value="@Model.Email" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Mobile</label>
+                <input class="form-control" name="Mobile" value="@Model.Mobile" />
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" name="IsActive" value="true" @(Model.IsActive ? "checked" : "") />
+                    <label class="form-check-label">Active</label>
+                </div>
+            </div>
+            <div class="col-12">
+                <label class="form-label">Labs</label>
+                <div class="access-panel lab-chip-picker" data-input-name="LabIds">
+                    <div class="selected-labs" data-selected-labs>
+                        <span class="lab-chip-empty">No labs selected</span>
+                    </div>
+                    <div data-hidden-labs></div>
+                    <select class="form-select">
+                        <option value="">Select lab to add</option>
+                        @foreach (var lab in labs)
+                        {
+                            <option value="@lab.LabId" data-selected="@(selectedLabIds.Contains(lab.LabId).ToString().ToLowerInvariant())">@lab.LabName</option>
+                        }
+                    </select>
+                </div>
+            </div>
         </div>
 
-        <h5>Change Password (optional)</h5>
-        <div class="mb-2">
-            <label class="form-label">New Password</label>
-            <input class="form-control" name="Password" type="password" />
-        </div>
-        <div class="mb-2">
-            <label class="form-label">Confirm Password</label>
-            <input class="form-control" name="ConfirmPassword" type="password" />
+        <h5 class="mt-4">Change Password</h5>
+        <div class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label">New Password</label>
+                <input class="form-control" name="Password" type="password" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Confirm Password</label>
+                <input class="form-control" name="ConfirmPassword" type="password" />
+            </div>
         </div>
 
-        <div class="d-grid">
+        <div class="d-grid mt-4">
             <button class="btn btn-primary">Save Changes</button>
         </div>
     </form>
+        </div>
+    </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.lab-chip-picker').forEach(function (picker) {
+        const inputName = picker.getAttribute('data-input-name');
+        const select = picker.querySelector('select');
+        const selectedBox = picker.querySelector('[data-selected-labs]');
+        const hiddenBox = picker.querySelector('[data-hidden-labs]');
+        if (!inputName || !select || !selectedBox || !hiddenBox) return;
+
+        const selected = new Map();
+
+        function render() {
+            selectedBox.innerHTML = '';
+            hiddenBox.innerHTML = '';
+            if (selected.size === 0) {
+                const empty = document.createElement('span');
+                empty.className = 'lab-chip-empty';
+                empty.textContent = 'No labs selected';
+                selectedBox.appendChild(empty);
+            }
+            selected.forEach(function (name, id) {
+                const hidden = document.createElement('input');
+                hidden.type = 'hidden';
+                hidden.name = inputName;
+                hidden.value = id;
+                hiddenBox.appendChild(hidden);
+
+                const chip = document.createElement('span');
+                chip.className = 'lab-chip';
+                chip.textContent = name;
+
+                const remove = document.createElement('button');
+                remove.type = 'button';
+                remove.setAttribute('aria-label', 'Remove ' + name);
+                remove.innerHTML = '&times;';
+                remove.addEventListener('click', function () {
+                    selected.delete(id);
+                    const option = Array.from(select.options).find(function (item) { return item.value === id; });
+                    if (option) option.disabled = false;
+                    render();
+                });
+
+                chip.appendChild(remove);
+                selectedBox.appendChild(chip);
+            });
+        }
+
+        function addOption(option) {
+            if (!option || !option.value || selected.has(option.value)) return;
+            selected.set(option.value, option.textContent.trim());
+            option.disabled = true;
+            select.value = '';
+            render();
+        }
+
+        Array.from(select.options).forEach(function (option) {
+            if (option.dataset.selected === 'true') addOption(option);
+        });
+        select.addEventListener('change', function () {
+            addOption(select.selectedOptions[0]);
+        });
+        render();
+    });
+});
+</script>

@@ -16,19 +16,22 @@ public class AccountController : Controller
     private readonly LabConfigOptions _labConfig;
     private readonly LabSettings _labSettings;
     private readonly ILogger<AccountController> _logger;
+    private readonly IConfiguration _configuration;
 
     public AccountController(
         IUserManagementRepository repo,
         IPasswordHasher hasher,
         LabConfigOptions labConfig,
         LabSettings labSettings,
-        ILogger<AccountController> logger)
+        ILogger<AccountController> logger,
+        IConfiguration configuration)
     {
         _repo = repo;
         _hasher = hasher;
         _labConfig = labConfig;
         _labSettings = labSettings;
         _logger = logger;
+        _configuration = configuration;
     }
 
     [HttpGet]
@@ -108,6 +111,8 @@ public class AccountController : Controller
         var isAdmin = roleNames.Any(r => string.Equals(r, "Admin", StringComparison.OrdinalIgnoreCase));
         var isArManager = roleNames.Any(r => IsRole(r, "AR Manager") || IsRole(r, "ARManager"));
         var isArReviewer = roleNames.Any(r => IsRole(r, "AR Reviewer") || IsRole(r, "ARReviewer") || IsRole(r, "AR Analyser") || IsRole(r, "ARAnalyser") || IsRole(r, "AR Analyzer") || IsRole(r, "ARAnalyzer"));
+        var isClientManager = roleNames.Any(r => IsRole(r, "Client Manager") || IsRole(r, "ClientManager"));
+        var isAccountManager = roleNames.Any(r => IsRole(r, "Account Manager") || IsRole(r, "AccountManager"));
 
         // Build claims
         var claims = new List<Claim>
@@ -143,8 +148,11 @@ public class AccountController : Controller
         }
 
         // Routing rules
-        // 1) Admin ? home page (full landing with lab tiles)
-        if (isAdmin)
+        var isDenialWorkflowUser = isArManager || isArReviewer || isClientManager || isAccountManager;
+
+        // 1) Admin without a Denial Workflow role => home page (full landing with lab tiles).
+        //    Users with Denial Workflow roles are routed to the workflow dashboard below.
+        if (isAdmin && !isDenialWorkflowUser)
         {
             return RedirectToAction("Index", "Home");
         }
@@ -178,14 +186,17 @@ public class AccountController : Controller
             IsEssential = true
         });
 
-        if (isArManager)
+        if (isDenialWorkflowUser)
         {
-            return RedirectToAction("Index", "DenialDashboard", new { lab = defaultLabName, ActiveTab = "denial-insight" });
-        }
+            var workflowUrl = _configuration["DenialWorkflowReactUrl"];
+            if (!string.IsNullOrWhiteSpace(workflowUrl))
+            {
+                var url = workflowUrl.Trim();
+                if (!url.Contains('#')) url += "#dashboard";
+                return Redirect(url);
+            }
 
-        if (isArReviewer)
-        {
-            return RedirectToAction("Index", "DenialDashboard", new { lab = defaultLabName, ActiveTab = "task-board" });
+            return RedirectToAction("Index", "DenialWorkflow", new { tab = "dashboard" });
         }
 
         return RedirectToAction("Index", "Dashboard", new { lab = defaultLabName });

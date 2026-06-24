@@ -1,0 +1,142 @@
+using LRN.ReportsApi.Models;
+using LRN.ReportsApi.Services;
+using LRN.ReportsApi.Security;
+using System.Security.Claims;
+using System.IO.Compression;
+using Microsoft.AspNetCore.ResponseCompression;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.Configure<DenialWorkflowOptions>(builder.Configuration.GetSection("Workflow"));
+builder.Services.Configure<DenialWorkflowSupportOptions>(builder.Configuration.GetSection("DenialWorkflowSupport"));
+builder.Services.Configure<DenialCodeMasterExportOptions>(builder.Configuration.GetSection("DenialCodeMasterExport"));
+builder.Services.AddScoped<IDenialWorkflowRepository, SqlDenialWorkflowRepository>();
+builder.Services.AddScoped<IDenialWorkflowService, DenialWorkflowService>();
+builder.Services.AddScoped<IDenialCodeMasterRepository, SqlDenialCodeMasterRepository>();
+builder.Services.AddScoped<IDenialCodeMasterExcelService, DenialCodeMasterExcelService>();
+builder.Services.AddScoped<IDenialActionChangeVerificationRepository, SqlDenialActionChangeVerificationRepository>();
+builder.Services.AddScoped<IDenialMapperRepository, SqlDenialMapperRepository>();
+builder.Services.AddScoped<IDenialWorkflowIssueNotifier, DenialWorkflowIssueNotifier>();
+builder.Services.AddScoped<IDenialWorkflowSupportService, DenialWorkflowSupportService>();
+builder.Services.AddSingleton<IDenialWorkflowExportJobService, DenialWorkflowExportJobService>();
+builder.Services.AddHttpClient();
+builder.Services.AddAuthorization();
+builder.Services.AddControllers();
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<GzipCompressionProvider>();
+});
+builder.Services.Configure<GzipCompressionProviderOptions>(options =>
+{
+    options.Level = CompressionLevel.Fastest;
+});
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("MetricsWeb", policy => policy
+        .WithOrigins(
+            "https://www.lrnanalytics.com",
+            "https://lrnanalytics.com",
+            "http://localhost:5173",
+            "https://localhost:5173",
+            "http://localhost:5174",
+            "https://localhost:5174",
+            "http://localhost:3000",
+            "https://localhost:3000")
+        .AllowAnyHeader()
+        .AllowAnyMethod()
+        .AllowCredentials());
+});
+
+var app = builder.Build();
+app.UseResponseCompression();
+app.UseCors("MetricsWeb");
+app.UseSwagger();
+app.UseSwaggerUI();
+
+// Auth is required only for Denial Workflow API endpoints.
+// Do not block React static files, fonts, swagger, health, favicon, etc.
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path;
+    var isWorkflowApi = path.StartsWithSegments("/api/denialworkflow")
+        || path.StartsWithSegments("/api/denial-workflow");
+
+    if (!isWorkflowApi
+        || path.StartsWithSegments("/api/denialworkflow/health")
+        || path.StartsWithSegments("/api/denial-workflow/health"))
+    {
+        await next();
+        return;
+    }
+
+    var configuration = context.RequestServices.GetRequiredService<IConfiguration>();
+
+    if (!WorkflowJwt.TryValidate(context.Request, configuration, out var principal, out var authFailureReason))
+    {
+        var importKey = configuration["DenialWorkflowAuth:ImportApiKey"] ?? string.Empty;
+        var suppliedImportKey = context.Request.Headers["X-LRN-Workflow-Key"].ToString();
+        var isImportEndpoint = path.StartsWithSegments("/api/denialworkflow/import")
+            || path.StartsWithSegments("/api/denial-workflow/import");
+
+        if (isImportEndpoint && !string.IsNullOrWhiteSpace(importKey) && string.Equals(importKey, suppliedImportKey, StringComparison.Ordinal))
+        {
+            var identity = new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.Name, "DenialWorker"),
+                new Claim(ClaimTypes.Role, "Admin")
+            }, "LRNWorkflowImportKey");
+            principal = new ClaimsPrincipal(identity);
+        }
+        else
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsJsonAsync(new
+            {
+                message = "Unauthorized. Login through LRN Metrics and open the workflow again.", reason = authFailureReason
+            });
+            return;
+        }
+    }
+
+    try
+    {
+        context.User = principal;
+        await next();
+    }
+    catch (UnauthorizedAccessException ex)
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await context.Response.WriteAsJsonAsync(new { message = ex.Message });
+    }
+    catch (InvalidOperationException ex) when (ex.Message.Contains("LabId", StringComparison.OrdinalIgnoreCase))
+    {
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await context.Response.WriteAsJsonAsync(new { message = ex.Message });
+    }
+    catch (Exception ex)
+    {
+        var notifier = context.RequestServices.GetRequiredService<IDenialWorkflowIssueNotifier>();
+        var report = await notifier.ReportAsync(context, ex, $"{context.Request.Method} {context.Request.Path}", CancellationToken.None);
+        var support = context.RequestServices.GetRequiredService<IConfiguration>()
+            .GetSection("DenialWorkflowSupport:AdminEmails")
+            .Get<string[]>() ?? Array.Empty<string>();
+
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        context.Response.Headers["X-Correlation-ID"] = report.CorrelationId;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            message = "Issue happened. Please contact admin support.",
+            correlationId = report.CorrelationId,
+            supportEmails = support
+        });
+    }
+});
+
+app.UseAuthorization();
+app.MapGet("/", () => Results.Redirect("/swagger"));
+app.MapGet("/health", () => Results.Ok("LRN.ReportsApi running"));
+app.MapControllers();
+app.Run();

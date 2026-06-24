@@ -1,0 +1,2 @@
+import React from 'react';
+export default function Pager({ data, changePage }) { if (!data.totalPages || data.totalPages <= 1) return null; return <div className="pager"><button className="topbar-btn" disabled={data.page <= 1} onClick={() => changePage(data.page - 1)}>Previous</button><span>Page {data.page} of {data.totalPages}</span><button className="topbar-btn" disabled={data.page >= data.totalPages} onClick={() => changePage(data.page + 1)}>Next</button></div>; }
