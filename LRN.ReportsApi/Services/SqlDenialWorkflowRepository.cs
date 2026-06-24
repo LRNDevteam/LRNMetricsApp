@@ -3439,7 +3439,7 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
             "escalations" => $"(LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) LIKE '%escal%' OR LOWER(LTRIM(RTRIM(ISNULL({a}.SLAStatus,'')))) IN ('breached','overdue','at risk','atrisk'))",
             "internalescalation" => $"LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) IN ('internal escalation','escalated')",
             "externalescalation" => $"LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) = 'external escalation'",
-            "escalationresponse" => $"LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) IN ('required review','in review','responded','response submitted','manager response','writeoffapproved','writeoffrejected')",
+            "escalationresponse" => $"(LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) IN ('required review','in review','responded','response submitted','manager response','writeoffapproved','writeoffrejected') OR (LOWER(LTRIM(RTRIM(ISNULL({a}.Status,''))))='rework' AND LOWER(LTRIM(RTRIM(ISNULL({a}.WorkFlowStatus,''))))='response escalation'))",
             "verification" => $"LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) IN ('required review','verification pending')",
 
             // My Worklist: Rework - closed once and reassigned again
@@ -4165,6 +4165,7 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
         await using var con = OpenLab(request.LabId);
         await con.OpenAsync(ct);
         await EnsureDenialTaskBoardNormalizedClaimIdAsync(con, ct);
+        var escalationColumns = await GetColumnSetAsync(con, "dbo.DenialClaimEscalations", ct);
         var action = (request.ResolutionAction ?? string.Empty).Trim().ToLowerInvariant();
         var nextEscStatus = action switch
         {
@@ -4188,10 +4189,17 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
         };
         var level = string.Equals(request.EscalationLevel, "Line", StringComparison.OrdinalIgnoreCase) ? "Line" : "Claim";
         var note = request.ResponseNote.Trim();
+        var recommendedNextAction = request.RecommendedNextAction?.Trim() ?? string.Empty;
+        var responseDetail = string.IsNullOrWhiteSpace(recommendedNextAction)
+            ? note
+            : $"{note}{Environment.NewLine}Recommended Next Action: {recommendedNextAction}";
         var actionBy = string.IsNullOrWhiteSpace(request.ActionBy) ? "ReactWorkflow" : request.ActionBy.Trim();
         var reassignTo = request.ReassignTo?.Trim() ?? string.Empty;
+        var escalationRecommendationSet = escalationColumns.Contains("RecommendedNextAction")
+            ? ", RecommendedNextAction=@RecommendedNextAction"
+            : string.Empty;
 
-        var sql = @"
+        var sql = $@"
 DECLARE @TargetClaimId nvarchar(150), @TargetTaskId nvarchar(100), @TargetCptCode nvarchar(100), @OriginalReviewer nvarchar(256);
 SELECT @TargetClaimId=ClaimId, @TargetTaskId=ISNULL(TaskId,''), @TargetCptCode=ISNULL(CptCode,''), @OriginalReviewer=ISNULL(CreatedBy,'')
 FROM dbo.DenialClaimEscalations WITH (UPDLOCK, ROWLOCK)
@@ -4211,16 +4219,17 @@ BEGIN
 END
 
 UPDATE dbo.DenialClaimEscalations
-SET Status=@EscalationStatus, Comments = CONCAT(ISNULL(Comments,''), CHAR(13)+CHAR(10), 'Manager Response: ', @ResponseNote)
+SET Status=@EscalationStatus, Comments = CONCAT(ISNULL(Comments,''), CHAR(13)+CHAR(10), 'Manager Response: ', @ResponseDetail){escalationRecommendationSet}
 WHERE IsDeleted=0 AND LabId=@LabId AND EscalationId=@EscalationId;
 
 DECLARE @Changed TABLE(TaskID nvarchar(100), UniqueTrackId nvarchar(100), ClaimId nvarchar(150), LabId int, RunId nvarchar(100), OldStatus nvarchar(100), NewStatus nvarchar(100), OldAssignedTo nvarchar(256), NewAssignedTo nvarchar(256));
 
 UPDATE t
 SET Status=@TaskStatus,
+    RecommendedAction = CASE WHEN NULLIF(LTRIM(RTRIM(@RecommendedNextAction)),'') IS NULL THEN t.RecommendedAction ELSE @RecommendedNextAction END,
     AssignedTo = CASE WHEN @ReassignTo<>'' THEN @ReassignTo WHEN @ResolutionAction='rework' THEN '' ELSE t.AssignedTo END,
     WorkFlowStatus = CASE WHEN @TaskStatus IN ('Closed','Completed') THEN 'Closed Claim' WHEN @TaskStatus IN ('WriteOffApproved','WriteOffRejected') THEN @TaskStatus ELSE 'Response Escalation' END,
-    ReviewerComments = CONCAT(ISNULL(NULLIF(t.ReviewerComments,''),''), CASE WHEN NULLIF(t.ReviewerComments,'') IS NULL THEN '' ELSE CHAR(13)+CHAR(10) END, 'Manager Response: ', @ResponseNote),
+    ReviewerComments = CONCAT(ISNULL(NULLIF(t.ReviewerComments,''),''), CASE WHEN NULLIF(t.ReviewerComments,'') IS NULL THEN '' ELSE CHAR(13)+CHAR(10) END, 'Manager Response: ', @ResponseDetail),
     ReviewerUpdatedBy=@ActionBy,
     ReviewerUpdatedOn=SYSDATETIME(),
     DateCompleted = CASE WHEN @TaskStatus IN ('Closed','Completed') THEN CONVERT(date, GETDATE()) ELSE DateCompleted END
@@ -4289,7 +4298,7 @@ BEGIN
         VALUES(source.LabId,source.ClaimId,source.PayerName,source.PanelName,source.PatientName,source.PatientDOB,source.PatientId,source.SubscriberId,source.ClinicName,source.SalesRepname,source.ReferringProvider,source.DateOfService,source.AssignedTo,'Closed','Closed Claim',source.TaskCount,source.InsuranceBalance,@ActionBy);
 
     INSERT INTO dbo.DenialClosedClaimsHistory(ClosedClaimId,LabId,ClaimId,ActionType,OldWorkFlowStatus,NewWorkFlowStatus,OldAssignedTo,NewAssignedTo,Comments,ActionBy)
-    SELECT dc.ClosedClaimId,@LabId,c.ClaimId,'ClosedByEscalationResponse','Response Escalation','Closed Claim',c.OldAssignedTo,c.NewAssignedTo,@ResponseNote,@ActionBy
+    SELECT dc.ClosedClaimId,@LabId,c.ClaimId,'ClosedByEscalationResponse','Response Escalation','Closed Claim',c.OldAssignedTo,c.NewAssignedTo,@ResponseDetail,@ActionBy
     FROM @Changed c
     JOIN dbo.DenialClosedClaims dc ON dc.LabId=@LabId AND dc.ClaimId=c.ClaimId;
 END;
@@ -4297,7 +4306,7 @@ END;
 IF OBJECT_ID('dbo.DenialTaskHistory','U') IS NOT NULL
 BEGIN
     INSERT INTO dbo.DenialTaskHistory(TaskID,UniqueTrackId,LabId,RunId,ActionType,OldStatus,NewStatus,OldAssignedTo,NewAssignedTo,Comments,ActionBy,ActionDate,SnapshotJson)
-    SELECT ISNULL(TaskID,''),ISNULL(UniqueTrackId,''),ISNULL(LabId,@LabId),ISNULL(RunId,''),CASE WHEN @ResolutionAction IN ('approvewriteoff','rejectwriteoff') THEN 'WriteOffDecision' ELSE 'ManagerEscalationResponse' END,ISNULL(OldStatus,''),ISNULL(NewStatus,''),ISNULL(OldAssignedTo,''),ISNULL(NewAssignedTo,''),@ResponseNote,@ActionBy,SYSDATETIME(),''
+    SELECT ISNULL(TaskID,''),ISNULL(UniqueTrackId,''),ISNULL(LabId,@LabId),ISNULL(RunId,''),CASE WHEN @ResolutionAction IN ('approvewriteoff','rejectwriteoff') THEN 'WriteOffDecision' ELSE 'ManagerEscalationResponse' END,ISNULL(OldStatus,''),ISNULL(NewStatus,''),ISNULL(OldAssignedTo,''),ISNULL(NewAssignedTo,''),@ResponseDetail,@ActionBy,SYSDATETIME(),''
     FROM @Changed;
 END
 
@@ -4309,6 +4318,8 @@ SELECT @TaskRows;";
         cmd.Parameters.AddWithValue("@TaskStatus", nextTaskStatus);
         cmd.Parameters.AddWithValue("@ResolutionAction", action);
         cmd.Parameters.AddWithValue("@ResponseNote", note);
+        cmd.Parameters.AddWithValue("@ResponseDetail", responseDetail);
+        cmd.Parameters.AddWithValue("@RecommendedNextAction", recommendedNextAction);
         cmd.Parameters.AddWithValue("@ActionBy", actionBy);
         cmd.Parameters.AddWithValue("@ReassignTo", reassignTo);
         cmd.Parameters.AddWithValue("@Level", level);
