@@ -70,6 +70,7 @@ public sealed class DenialWorkflowFilter
     public string SearchText { get; set; } = string.Empty;
     public DateTime? FromDate { get; set; }
     public DateTime? ToDate { get; set; }
+    public bool UploadTemplate { get; set; }
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 100;
 }
@@ -297,6 +298,36 @@ public sealed class ClaimExportStatusResponse
     public DateTime CreatedOnUtc { get; set; }
     public DateTime? CompletedOnUtc { get; set; }
     public string? DownloadUrl { get; set; }
+}
+
+public sealed class ClaimCsvUploadResult
+{
+    public bool Success { get; set; }
+    public int TotalRows { get; set; }
+    public int ProcessedRows { get; set; }
+    public int SkippedRows { get; set; }
+    public int UpdatedTasks { get; set; }
+    public int AddedComments { get; set; }
+    public int EscalatedClaims { get; set; }
+    public int EscalationResponses { get; set; }
+    public IReadOnlyList<string> Errors { get; set; } = Array.Empty<string>();
+    public string Message { get; set; } = string.Empty;
+}
+
+public sealed class ClaimUploadForm
+{
+    public int LabId { get; set; }
+    public IFormFile? File { get; set; }
+}
+
+public sealed class ReactClientLogRequest
+{
+    public string Level { get; set; } = "Error";
+    public string Message { get; set; } = string.Empty;
+    public string Stack { get; set; } = string.Empty;
+    public string Url { get; set; } = string.Empty;
+    public string UserAgent { get; set; } = string.Empty;
+    public string Context { get; set; } = string.Empty;
 }
 
 public class DenialWorkflowSummary

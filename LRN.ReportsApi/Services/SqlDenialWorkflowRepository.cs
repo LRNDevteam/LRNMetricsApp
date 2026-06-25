@@ -1772,6 +1772,8 @@ DROP TABLE #TaskClaimAgg;";
         await con.OpenAsync(ct);
         await EnsureDenialTaskBoardNormalizedClaimIdAsync(con, ct);
         await EnsureClaimSupportTablesAsync(filter.LabId, ct);
+        if (filter.UploadTemplate)
+            return await WriteClaimUploadTemplateAsync(con, filter, output, ct);
         try
         {
             return await WriteTaskBoardClaimsExportAsync(con, filter, output, ct);
@@ -2015,6 +2017,7 @@ SELECT
     {CoalesceText("ClaimID", TextExpr(taskColumns, "t", "ClaimID"))},
     {CoalesceText("AccessionNo", TextExpr(lineColumns, "l", "AccessionNo"), TextExpr(lineColumns, "l", "AccessionNumber"))},
     ClaimUID = {taskClaimUidExpr},
+    {CoalesceText("TaskID", TextExpr(taskColumns, "t", "TaskID"))},
     {CoalesceText("PatientName", TextExpr(taskColumns, "t", "PatName"), TextExpr(taskColumns, "t", "PatientName"), TextExpr(lineColumns, "l", "PatName"), TextExpr(lineColumns, "l", "PatientName"))},
     {CoalesceText("PatientID", TextExpr(taskColumns, "t", "PatientId"), TextExpr(taskColumns, "t", "PatientID"), TextExpr(lineColumns, "l", "PatientID"), TextExpr(lineColumns, "l", "PatientId"))},
     {CoalesceDate("PateintDOB", DateExpr(taskColumns, "t", "PatientDOB"), DateExpr(lineColumns, "l", "PatientDOB"))},
@@ -2057,7 +2060,8 @@ SELECT
     ClaimNotes = ISNULL(notes.ClaimNotes, ''),
     EscalationNotes = ISNULL(escalations.EscalationNotes, ''),
     CombinedNotes = CONCAT_WS(CHAR(10) + CHAR(10), NULLIF(notes.ClaimNotes, ''), NULLIF(escalations.EscalationNotes, '')),
-    DocumentComments = ISNULL(documents.DocumentComments, '')
+    DocumentComments = ISNULL(documents.DocumentComments, ''),
+    {CoalesceText("AssignedTo", TextExpr(taskColumns, "t", "AssignedTo"))}
 FROM #ExportTasks t
 LEFT JOIN #LineOne l ON l.__ExportRowId = t.__ExportRowId AND l.__LineRank = 1
 LEFT JOIN #ClaimNotes notes ON notes.__ExportRowId = t.__ExportRowId
@@ -2769,6 +2773,137 @@ SELECT COUNT(1) FROM @Changed;";
         cmd.Parameters.AddWithValue("@ValidationStatus", request.ValidationStatus ?? string.Empty);
         cmd.Parameters.AddWithValue("@ExpectedResponseDate", request.ExpectedResponseDate.HasValue ? request.ExpectedResponseDate.Value.Date : (object)DBNull.Value);
         cmd.Parameters.AddWithValue("@SnapshotJson", historySnapshot);
+        var scalar = await cmd.ExecuteScalarAsync(ct);
+        return scalar == DBNull.Value || scalar is null ? 0 : Convert.ToInt32(scalar);
+    }
+
+    private async Task<int> WriteClaimUploadTemplateAsync(SqlConnection con, DenialWorkflowFilter filter, Stream output, CancellationToken ct)
+    {
+        var where = BuildCommonWhere(filter, "t", includeStatus: true, includeAssigned: true);
+        var taskColumns = await GetColumnSetAsync(con, "dbo.DenialTaskBoard", ct);
+        var claimUid = taskColumns.Contains("ClaimUID")
+            ? "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.ClaimUID,''))),''), LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))), LTRIM(RTRIM(ISNULL(t.ClaimID,''))))"
+            : "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))),''), LTRIM(RTRIM(ISNULL(t.ClaimID,''))))";
+        var patientName = taskColumns.Contains("PatName")
+            ? "LTRIM(RTRIM(ISNULL(t.PatName,'')))"
+            : taskColumns.Contains("PatientName") ? "LTRIM(RTRIM(ISNULL(t.PatientName,'')))" : "CAST('' AS nvarchar(255))";
+        var taskLabPredicate = taskColumns.Contains("LabId")
+            ? $"(@HasTaskLab=0 OR {LabScopeSql("t.LabId")})"
+            : "1=1";
+        var hasTaskLab = taskColumns.Contains("LabId")
+            ? $"CASE WHEN EXISTS (SELECT 1 FROM dbo.DenialTaskBoard WITH (NOLOCK) WHERE {LabScopeSql("LabId")}) THEN 1 ELSE 0 END"
+            : "CAST(0 AS bit)";
+        var sql = $@"
+DECLARE @HasTaskLab bit = {hasTaskLab};
+SELECT ClaimID={claimUid}, PatientName=MAX({patientName}), PayerName=MAX(LTRIM(RTRIM(ISNULL(t.PayerName,''))))
+FROM dbo.DenialTaskBoard t WITH (NOLOCK)
+WHERE {taskLabPredicate}
+  AND NULLIF({claimUid},'') IS NOT NULL
+  {where.WhereClause}
+GROUP BY {claimUid}
+ORDER BY {claimUid};";
+
+        var claims = new List<(string ClaimId, string PatientName, string PayerName)>();
+        await using (var cmd = new SqlCommand(sql, con) { CommandTimeout = 900 })
+        {
+            AddFilterParams(cmd, filter);
+            AddExtraParams(cmd, where.Parameters);
+            await using var rd = await cmd.ExecuteReaderAsync(ct);
+            while (await rd.ReadAsync(ct))
+                claims.Add((GetString(rd, "ClaimID"), GetString(rd, "PatientName"), GetString(rd, "PayerName")));
+        }
+
+        using var workbook = new ClosedXML.Excel.XLWorkbook();
+        var sheet = workbook.Worksheets.Add("Claim Upload");
+        var lookupSheet = workbook.Worksheets.Add("Dropdown Values");
+        var reviewerTemplate = IsReviewerOnly(filter.Role);
+        var headers = reviewerTemplate
+            ? new[] { "ClaimID", "PatientName", "PayerName", "UpdateStatus", "ExpectedResponseDate", "ActionCompleted", "ActualOutcome", "DocumentationType", "FollowUpReason", "ClosureReason", "ValidationStatus", "Comments" }
+            : new[] { "ClaimID", "PatientName", "PayerName", "EscalationResponse", "EscalationResponseComment" };
+
+        for (var col = 0; col < headers.Length; col++)
+        {
+            sheet.Cell(1, col + 1).Value = headers[col];
+            sheet.Cell(1, col + 1).Style.Font.Bold = true;
+            sheet.Cell(1, col + 1).Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromHtml("#D9EAF7");
+        }
+        for (var row = 0; row < claims.Count; row++)
+        {
+            sheet.Cell(row + 2, 1).Value = claims[row].ClaimId;
+            sheet.Cell(row + 2, 2).Value = claims[row].PatientName;
+            sheet.Cell(row + 2, 3).Value = claims[row].PayerName;
+        }
+
+        var lastRow = Math.Max(claims.Count + 1, 2);
+        var lookupColumn = 1;
+        void AddDropdown(string columnName, IEnumerable<string> values)
+        {
+            var column = Array.FindIndex(headers, x => string.Equals(x, columnName, StringComparison.OrdinalIgnoreCase)) + 1;
+            if (column <= 0) return;
+            var items = values.ToArray();
+            lookupSheet.Cell(1, lookupColumn).Value = columnName;
+            for (var i = 0; i < items.Length; i++) lookupSheet.Cell(i + 2, lookupColumn).Value = items[i];
+            var source = lookupSheet.Range(2, lookupColumn, items.Length + 1, lookupColumn);
+            sheet.Range(2, column, lastRow, column).CreateDataValidation().List(source, true);
+            lookupColumn++;
+        }
+
+        if (reviewerTemplate)
+        {
+            AddDropdown("UpdateStatus", ["Assigned", "Payer Follow-up Required", "Pending Payer Response", "Pending Documentation", "Write-Off Pending Approval", "Escalated to AR Manager", "Closed"]);
+            AddDropdown("ActionCompleted", ["Yes", "No"]);
+            AddDropdown("ActualOutcome", ["Appeal Submitted", "Documentation Uploaded", "Rebill Submitted", "Corrected Claim Submitted", "Write-Off Recommended", "Payer Call Completed", "Claim Paid", "Claim Reprocessed", "Closed No Recovery", "Other"]);
+            AddDropdown("DocumentationType", ["Medical Records Required", "Clinical Notes Required", "Authorization Reference Required", "Updated Insurance Required", "Requisition / Order Required", "Provider Information Required", "Diagnosis / ICD Clarification Required", "Patient Demographics Required", "EOB / Payer Correspondence Required", "Client Confirmation Required", "Other Documentation Required"]);
+            AddDropdown("FollowUpReason", ["Denial unclear", "Action uncertain", "Payer policy conflict", "Need filing instructions", "Claim status check", "Timely filing confirmation", "Other"]);
+            AddDropdown("ClosureReason", ["Paid/Recovered", "Written Off", "Denial Upheld", "No Further Action", "Invalid Denial", "Timely Filing Expired", "Duplicate", "Client Approved Closure"]);
+        }
+        else
+        {
+            AddDropdown("EscalationResponse", ["Proceed with Appeal", "Proceed with Rebill", "Proceed with Write-Off Request", "Perform Payer Follow-up", "Request Documentation", "Additional Information Needed", "No Further Action Required", "Close Claim / Line", "Other"]);
+        }
+
+        sheet.SheetView.FreezeRows(1);
+        sheet.Columns().AdjustToContents(10, 42);
+        sheet.Column(1).Style.Protection.Locked = true;
+        sheet.Column(2).Style.Protection.Locked = true;
+        sheet.Column(3).Style.Protection.Locked = true;
+        lookupSheet.Hide();
+        workbook.SaveAs(output);
+        return claims.Count;
+    }
+
+    public async Task<int> UpdateClaimCommentsAsync(int labId, string claimId, string comments, string actionBy, CancellationToken ct)
+    {
+        await using var con = OpenLab(labId);
+        await con.OpenAsync(ct);
+        await EnsureDenialTaskBoardNormalizedClaimIdAsync(con, ct);
+        const string sql = @"
+DECLARE @Changed TABLE(TaskID nvarchar(100),UniqueTrackId nvarchar(100),LabId int,RunId nvarchar(100),CurrentStatus nvarchar(100),AssignedTo nvarchar(256));
+
+UPDATE t
+SET ReviewerComments=@Comments,
+    ReviewerUpdatedBy=@ActionBy,
+    ReviewerUpdatedOn=SYSDATETIME()
+OUTPUT INSERTED.TaskID,INSERTED.UniqueTrackId,ISNULL(INSERTED.LabId,@LabId),INSERTED.RunId,INSERTED.Status,INSERTED.AssignedTo
+INTO @Changed(TaskID,UniqueTrackId,LabId,RunId,CurrentStatus,AssignedTo)
+FROM dbo.DenialTaskBoard t
+WHERE LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,'')))=@ClaimId
+   OR LTRIM(RTRIM(ISNULL(t.ClaimID,'')))=@ClaimId
+   OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) LIKE '%' + @ClaimId;
+
+IF OBJECT_ID('dbo.DenialTaskHistory','U') IS NOT NULL
+BEGIN
+    INSERT INTO dbo.DenialTaskHistory(TaskID,UniqueTrackId,LabId,RunId,ActionType,OldStatus,NewStatus,OldAssignedTo,NewAssignedTo,Comments,ActionBy,ActionDate,SnapshotJson)
+    SELECT ISNULL(TaskID,''),ISNULL(UniqueTrackId,''),ISNULL(LabId,@LabId),ISNULL(RunId,''),'ClaimComment',ISNULL(CurrentStatus,''),ISNULL(CurrentStatus,''),ISNULL(AssignedTo,''),ISNULL(AssignedTo,''),@Comments,@ActionBy,SYSDATETIME(),''
+    FROM @Changed;
+END
+
+SELECT COUNT(1) FROM @Changed;";
+        await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 180 };
+        AddLabScopeParams(cmd, labId);
+        cmd.Parameters.AddWithValue("@ClaimId", claimId.Trim());
+        cmd.Parameters.AddWithValue("@Comments", comments.Trim());
+        cmd.Parameters.AddWithValue("@ActionBy", string.IsNullOrWhiteSpace(actionBy) ? "ReactWorkflow" : actionBy.Trim());
         var scalar = await cmd.ExecuteScalarAsync(ct);
         return scalar == DBNull.Value || scalar is null ? 0 : Convert.ToInt32(scalar);
     }

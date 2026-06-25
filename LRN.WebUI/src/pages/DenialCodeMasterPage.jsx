@@ -23,8 +23,6 @@ const dropdownFields = [
   ['coverageStatus', 'Coverage Status', 'coverageStatuses'],
   ['icdComplianceStatus', 'ICD Compliance Status', 'icdComplianceStatuses'],
   ['denialValidity', 'Denial Validity', 'denialValidities'],
-  ['actionCode', 'Action Code', 'actionCodes'],
-  ['actionCategory', 'Action Category', 'actionCategories'],
   ['task', 'Task', 'tasks']
 ];
 
@@ -62,10 +60,35 @@ function ChoiceField({ label, value, options = [], onChange, disabled = false })
   </label>;
 }
 
-function EditorModal({ initial, lookups, onClose, onSave }) {
-  const [form, setForm] = useState(() => ({ ...blankForm, ...(initial || {}), slaDays: initial?.slaDays ?? initial?.SLADays ?? '' }));
+function SelectField({ label, value, options = [], onChange, disabled = false, required = false }) {
+  const uniqueOptions = Array.from(new Set([value, ...(options || [])].filter(x => String(x || '').trim()).map(x => String(x).trim())));
+  return <label className="dcm-field">
+    <span>{label}</span>
+    <select value={value || ''} disabled={disabled} required={required} onChange={e => onChange(e.target.value)}>
+      <option value="">Select {label.replace(' *', '')}</option>
+      {uniqueOptions.map(x => <option key={x} value={x}>{x}</option>)}
+    </select>
+  </label>;
+}
+
+function EditorModal({ initial, lookups, masterData, onClose, onSave }) {
+  const actionCategories = masterData?.actionCategories || [];
+  const actionCodeFor = category => actionCategories.find(x => x.actionCategory === category)?.actionCode || '';
+  const actionCategoryFor = code => actionCategories.find(x => x.actionCode === code)?.actionCategory || '';
+  const [form, setForm] = useState(() => {
+    const base = { ...blankForm, ...(initial || {}), slaDays: initial?.slaDays ?? initial?.SLADays ?? '' };
+    if (!base.actionCategory && base.actionCode) base.actionCategory = actionCategoryFor(base.actionCode);
+    if (base.actionCategory) base.actionCode = actionCodeFor(base.actionCategory) || base.actionCode;
+    return base;
+  });
   const isEdit = !!initial;
   const setField = (key, value) => setForm(prev => ({ ...prev, [key]: value }));
+  const masterOptions = {
+    denialClassification: masterData?.denialClassifications || [],
+    coverageStatus: masterData?.coverageStatuses || [],
+    icdComplianceStatus: masterData?.icdComplianceStatuses || [],
+    denialValidity: masterData?.denialValidities || []
+  };
 
   function submit(e) {
     e.preventDefault();
@@ -82,10 +105,14 @@ function EditorModal({ initial, lookups, onClose, onSave }) {
       </div>
       <div className="dcm-form-grid">
         <TextField label="Denial Code *" value={form.denialCode} readOnly={isEdit} onChange={v => setField('denialCode', v)} />
-        <TextField label="Priority" value={form.priority} onChange={v => setField('priority', v)} />
-        <TextField label="SLA Days" value={form.slaDays} onChange={v => setField('slaDays', v)} />
+        <SelectField label="Priority" value={form.priority} options={masterData?.priorities || []} onChange={v => setField('priority', v)} />
+        <SelectField label="SLA Days" value={form.slaDays} options={masterData?.slaDays || []} onChange={v => setField('slaDays', v)} />
         <TextField label="Denial Description" value={form.denialDescription} rows={2} onChange={v => setField('denialDescription', v)} />
-        {dropdownFields.map(([key, label, lookupKey]) => <ChoiceField key={key} label={label} value={form[key]} options={lookups?.[lookupKey] || lookups?.[lookupKey[0].toUpperCase() + lookupKey.slice(1)] || []} disabled={isEdit && (key === 'coverageStatus' || key === 'icdComplianceStatus')} onChange={v => setField(key, v)} />)}
+        {dropdownFields.map(([key, label, lookupKey]) => key === 'task'
+          ? <ChoiceField key={key} label={label} value={form[key]} options={lookups?.[lookupKey] || lookups?.[lookupKey[0].toUpperCase() + lookupKey.slice(1)] || []} onChange={v => setField(key, v)} />
+          : <SelectField key={key} label={label} value={form[key]} options={masterOptions[key]} disabled={isEdit && (key === 'coverageStatus' || key === 'icdComplianceStatus')} onChange={v => setField(key, v)} />)}
+        <SelectField label="Action Category *" value={form.actionCategory} options={actionCategories.map(x => x.actionCategory)} required onChange={v => setForm(prev => ({ ...prev, actionCategory: v, actionCode: actionCodeFor(v) }))} />
+        <TextField label="Action Code *" value={form.actionCode} readOnly onChange={() => {}} />
         <TextField label="Recommended Action" value={form.recommendedAction} rows={2} onChange={v => setField('recommendedAction', v)} />
         <TextField label="Short Category" value={form.shortCategory} onChange={v => setField('shortCategory', v)} />
         <TextField label="Notes / Comments" value={form.notesComments} rows={3} onChange={v => setField('notesComments', v)} />
@@ -120,16 +147,57 @@ function ActionWarningModal({ warning, onLater, onReview }) {
   </div>;
 }
 
-export default function DenialCodeMasterPage({ labId, setMessage, onReviewActionChanges }) {
+function PushReviewEditor({ row, masterData, onClose, onSave }) {
+  const actionCategories = masterData?.actionCategories || [];
+  const actionCodeFor = category => actionCategories.find(x => x.actionCategory === category)?.actionCode || '';
+  const actionCategoryFor = code => actionCategories.find(x => x.actionCode === code)?.actionCategory || '';
+  const [form, setForm] = useState({
+    actionCode: actionCodeFor(row?.newActionCategory) || row?.newActionCode || '',
+    actionCategory: row?.newActionCategory || actionCategoryFor(row?.newActionCode) || '',
+    task: row?.newTask || '',
+    recommendedAction: row?.newShortCategory || '',
+    denialClassification: row?.newDenialClassification || ''
+  });
+  const setField = (key, value) => setForm(prev => ({ ...prev, [key]: value }));
+  return <div className="modal-backdrop">
+    <form className="dcm-modal" onSubmit={e => { e.preventDefault(); onSave(form); }}>
+      <div className="claim-modal-header">
+        <div><div className="claim-modal-title">Review Push · {row?.denialCode}</div><small>These approved values will be written to Denial Action Master.</small></div>
+        <button type="button" className="modal-close" onClick={onClose}><i className="bi bi-x-lg" /></button>
+      </div>
+      <div className="dcm-form-grid">
+        <SelectField label="Action Category *" value={form.actionCategory} options={actionCategories.map(x => x.actionCategory)} required onChange={v => setForm(prev => ({ ...prev, actionCategory: v, actionCode: actionCodeFor(v) }))} />
+        <TextField label="Action Code *" value={form.actionCode} readOnly onChange={() => {}} />
+        <SelectField label="Denial Classification" value={form.denialClassification} options={masterData?.denialClassifications || []} onChange={v => setField('denialClassification', v)} />
+        <TextField label="Task *" value={form.task} rows={2} onChange={v => setField('task', v)} />
+        <TextField label="Recommended Action *" value={form.recommendedAction} rows={3} onChange={v => setField('recommendedAction', v)} />
+      </div>
+      <div className="dcm-modal-actions">
+        <button type="button" className="wl-btn" onClick={onClose}>Cancel</button>
+        <button type="submit" className="wl-btn teal">Save Review</button>
+      </div>
+    </form>
+  </div>;
+}
+
+export default function DenialCodeMasterPage({ labId, setMessage, onReviewActionChanges, initialPushAuditId = null, onPushConfirmed }) {
   const [rows, setRows] = useState([]);
   const [pageInfo, setPageInfo] = useState({ page: 1, totalCount: 0, totalPages: 0 });
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState({ search: '', page: 1, pageSize: 25 });
   const [lookups, setLookups] = useState({});
+  const [masterData, setMasterData] = useState({ actionCategories: [], denialClassifications: [], coverageStatuses: [], icdComplianceStatuses: [], denialValidities: [], slaDays: [], priorities: [] });
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [editor, setEditor] = useState(null);
   const [actionWarning, setActionWarning] = useState(null);
+  const [activeTab, setActiveTab] = useState(initialPushAuditId ? 'push' : 'master');
+  const [pendingPushes, setPendingPushes] = useState([]);
+  const [selectedPushId, setSelectedPushId] = useState(initialPushAuditId || null);
+  const [pushAudit, setPushAudit] = useState(null);
+  const [pushLoading, setPushLoading] = useState(false);
+  const [pushConfirming, setPushConfirming] = useState(false);
+  const [pushEditor, setPushEditor] = useState(null);
 
   const totalPages = useMemo(() => Number(pageInfo.totalPages || pageInfo.TotalPages || 0), [pageInfo]);
 
@@ -137,13 +205,15 @@ export default function DenialCodeMasterPage({ labId, setMessage, onReviewAction
     if (!labId) return;
     setLoading(true);
     try {
-      const [data, lookupData] = await Promise.all([
+      const [data, lookupData, centralMasterData] = await Promise.all([
         denialWorkflowService.getDenialCodeMaster({ ...next, labId }),
-        denialWorkflowService.getDenialCodeMasterLookups(labId)
+        denialWorkflowService.getDenialCodeMasterLookups(labId),
+        denialWorkflowService.getDenialMapperMasterData()
       ]);
       setRows(data.items || []);
       setPageInfo(data);
       setLookups(lookupData || {});
+      setMasterData(centralMasterData || {});
     } catch (err) {
       setMessage({ type: 'danger', text: err.message || 'Unable to load Denial Code Master.' });
     } finally {
@@ -152,6 +222,35 @@ export default function DenialCodeMasterPage({ labId, setMessage, onReviewAction
   }
 
   useEffect(() => { load(query); }, [labId, query.page, query.search]);
+
+  async function loadPendingPushes(preferredId = null) {
+    if (!labId) return;
+    try {
+      const items = await denialWorkflowService.getDenialMapperNotifications(labId);
+      const pending = Array.isArray(items) ? items : [];
+      setPendingPushes(pending);
+      const requested = Number(preferredId || selectedPushId || initialPushAuditId || 0);
+      const nextId = pending.some(x => Number(x.pushAuditId) === requested) ? requested : Number(pending[0]?.pushAuditId || 0);
+      setSelectedPushId(nextId || null);
+      if (!nextId) setPushAudit(null);
+    } catch (err) {
+      setMessage({ type: 'danger', text: err.message || 'Unable to load pending Denial Code pushes.' });
+    }
+  }
+
+  useEffect(() => {
+    setActiveTab(initialPushAuditId ? 'push' : 'master');
+    loadPendingPushes(initialPushAuditId);
+  }, [labId, initialPushAuditId]);
+
+  useEffect(() => {
+    if (activeTab !== 'push' || !selectedPushId) return;
+    setPushLoading(true);
+    denialWorkflowService.getDenialMapperPushVerification(selectedPushId)
+      .then(setPushAudit)
+      .catch(err => setMessage({ type: 'danger', text: err.message || 'Unable to load Denial Code Push Verification.' }))
+      .finally(() => setPushLoading(false));
+  }, [activeTab, selectedPushId]);
 
   async function save(payload, isEdit) {
     try {
@@ -217,11 +316,54 @@ export default function DenialCodeMasterPage({ labId, setMessage, onReviewAction
     a.remove();
   }
 
+  async function savePushReview(payload) {
+    if (!pushAudit || !pushEditor) return;
+    try {
+      await denialWorkflowService.updateDenialMapperPushVerificationDetail(pushAudit.pushAuditId, pushEditor.pushAuditDetailId, payload);
+      setPushEditor(null);
+      setPushAudit(await denialWorkflowService.getDenialMapperPushVerification(pushAudit.pushAuditId));
+      setMessage({ type: 'success', text: 'Pending push row updated.' });
+    } catch (err) {
+      setMessage({ type: 'danger', text: err.message || 'Unable to update the pending push row.' });
+    }
+  }
+
+  async function confirmPush() {
+    if (!pushAudit || pushConfirming) return;
+    if (!window.confirm(`Apply this push to the ${pushAudit.targetLabName || 'selected lab'} Denial Action Master?`)) return;
+    setPushConfirming(true);
+    try {
+      const result = await denialWorkflowService.acknowledgeDenialMapperNotification(pushAudit.pushAuditId, labId);
+      setMessage({ type: 'success', text: result.message || 'Denial Code push confirmed.' });
+      await Promise.all([load(query), loadPendingPushes()]);
+      setPushAudit(null);
+      setActiveTab('master');
+      onPushConfirmed?.();
+    } catch (err) {
+      setMessage({ type: 'danger', text: err.message || 'Unable to confirm the Denial Code push.' });
+    } finally {
+      setPushConfirming(false);
+    }
+  }
+
   return <section className="dcm-page">
     <div className="claim-view-top">
       <div><div className="claim-view-title">Denial Code Master</div><div className="claim-view-subtitle">AR Manager only classifier maintenance</div></div>
       <span className="table-count">{pageInfo.totalCount || 0} records</span>
     </div>
+    <div className="dcm-tabs">
+      <button type="button" className={activeTab === 'master' ? 'active' : ''} onClick={() => setActiveTab('master')}>Denial Action Master</button>
+      <button type="button" className={`${activeTab === 'push' ? 'active' : ''} ${pendingPushes.length ? 'pending' : ''}`} onClick={() => setActiveTab('push')}>
+        Denial Code Push Verification
+        {pendingPushes.length > 0 && <span>{pendingPushes.length}</span>}
+      </button>
+    </div>
+    {pendingPushes.length > 0 && activeTab === 'master' && <button type="button" className="dcm-pending-banner" onClick={() => setActiveTab('push')}>
+      <i className="bi bi-exclamation-circle-fill" />
+      <span><strong>{pendingPushes.length} Denial Code push{pendingPushes.length === 1 ? '' : 'es'} awaiting confirmation</strong>Review and confirm before the codes are applied to Denial Action Master.</span>
+      <i className="bi bi-arrow-right" />
+    </button>}
+    {activeTab === 'master' && <>
     <div className="claim-list-toolbar">
       <label className="claim-search-wrap"><i className="bi bi-search" /><input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') setQuery({ ...query, search, page: 1 }); }} placeholder="Search denial code, classification, action" /></label>
       <button className="wl-btn xs" onClick={() => setQuery({ ...query, search, page: 1 })}>Search</button>
@@ -256,7 +398,33 @@ export default function DenialCodeMasterPage({ labId, setMessage, onReviewAction
       <span>Page {pageInfo.page || 1} of {Math.max(1, totalPages)}</span>
       <button className="wl-btn xs" disabled={(pageInfo.page || 1) >= Math.max(1, totalPages)} onClick={() => setQuery(q => ({ ...q, page: (q.page || 1) + 1 }))}>Next</button>
     </div>
-    {editor && <EditorModal initial={editor.denialCode ? editor : null} lookups={lookups} onClose={() => setEditor(null)} onSave={save} />}
+    </>}
+    {activeTab === 'push' && <div className="dcm-push-review">
+      {pendingPushes.length > 1 && <label className="dcm-push-select"><span>Pending push</span><select value={selectedPushId || ''} onChange={e => setSelectedPushId(Number(e.target.value))}>{pendingPushes.map(item => <option key={item.pushAuditId} value={item.pushAuditId}>{item.targetLabName} · {new Date(item.createdOn).toLocaleString()}</option>)}</select></label>}
+      {(pushLoading || pushConfirming) && <div className="loading-line" />}
+      {!pendingPushes.length && !pushLoading && <div className="dcm-no-push"><i className="bi bi-check-circle" /><strong>No pending push confirmation</strong><span>Approved Denial Code pushes will appear here until confirmed.</span></div>}
+      {pushAudit && <div className="dcm-push-panel">
+        <div className="dcm-push-summary">
+          <div><span>Target Lab</span><strong>{pushAudit.targetLabName}</strong></div>
+          <div><span>Codes Compared</span><strong>{pushAudit.totalCompared || 0}</strong></div>
+          <div><span>Pending Changes</span><strong>{pushAudit.totalDifferences || 0}</strong></div>
+          <div><span>Pushed By</span><strong>{pushAudit.pushedByUserId || '-'}</strong></div>
+        </div>
+        <div className="dcm-push-note"><i className="bi bi-info-circle" />Confirming applies all active Lab Master mappings to the lab-level <code>DenialCodeMaster</code>. Rows below highlight new or changed codes.</div>
+        <div className="claim-assign-scroll dcm-table-wrap">
+          <table className="lrn-table workflow-table dcm-table dcm-push-table">
+            <thead><tr><th>Denial Code</th><th>Type</th><th>Coverage</th><th>ICD</th><th>Current Action</th><th>New Action</th><th>New Category</th><th>New Task</th><th>New Classification</th><th>Action</th></tr></thead>
+            <tbody>{pushAudit.differences?.length ? pushAudit.differences.map(row => <tr className="dcm-pending-row" key={row.pushAuditDetailId}>
+              <td><strong>{row.denialCode}</strong></td><td><span className="dcm-change-badge">{row.differenceType}</span></td><td>{row.coverageStatus || 'N/A'}</td><td>{row.icdComplianceStatus || 'N/A'}</td><td>{row.existingActionCode || '-'}</td><td>{row.newActionCode || '-'}</td><td>{row.newActionCategory || '-'}</td><td>{row.newTask || '-'}</td><td>{row.newDenialClassification || '-'}</td>
+              <td><button className="wl-btn xs" onClick={() => setPushEditor(row)}><i className="bi bi-pencil-square" /> Review</button></td>
+            </tr>) : <tr><td colSpan="10" className="empty-cell">No field differences were detected. Confirm to synchronize the current Lab Master into Denial Action Master.</td></tr>}</tbody>
+          </table>
+        </div>
+        <div className="dcm-push-actions"><button type="button" className="wl-btn teal" disabled={pushConfirming} onClick={confirmPush}><i className="bi bi-check2-circle" />{pushConfirming ? 'Applying Codes...' : 'Confirm and Apply to Denial Action Master'}</button></div>
+      </div>}
+    </div>}
+    {editor && <EditorModal initial={editor.denialCode ? editor : null} lookups={lookups} masterData={masterData} onClose={() => setEditor(null)} onSave={save} />}
+    {pushEditor && <PushReviewEditor row={pushEditor} masterData={masterData} onClose={() => setPushEditor(null)} onSave={savePushReview} />}
     {actionWarning && <ActionWarningModal warning={actionWarning} onLater={() => setActionWarning(null)} onReview={(batchId) => { setActionWarning(null); onReviewActionChanges?.(batchId); }} />}
   </section>;
 }

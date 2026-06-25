@@ -75,7 +75,7 @@
     <div class="text-end text-white-50">Required fields <span class="text-danger">*</span></div>
   </div>
   <div class="card-body">
-    <form id="frmCreateUserModal" method="post" asp-action="CreateUser">
+    <form id="frmCreateUserModal" method="post" asp-action="CreateUser" autocomplete="off">
       @Html.AntiForgeryToken()
       <div id="createUserErrors" class="alert alert-danger d-none"></div>
       @* Server-side fallback validation (in case JS is blocked/disabled) *@
@@ -86,7 +86,7 @@
         <div class="col-12">
           <label class="form-label">UserName <span class="text-danger">*</span></label>
           <div class="input-group">
-            <input id="createUserUserName" class="form-control smooth" name="NewUser.UserName" placeholder="e.g. john.doe" required />
+            <input id="createUserUserName" class="form-control smooth" name="NewUser.UserName" placeholder="e.g. john.doe" required autocomplete="off" autocapitalize="none" spellcheck="false" />
             <span class="input-group-text bg-transparent"><i class="bi bi-at"></i></span>
             <div class="invalid-feedback" id="createUserUserNameFeedback"></div>
           </div>
@@ -97,7 +97,7 @@
         <div class="col-md-6">
           <label class="form-label">Password <span class="text-danger">*</span></label>
           <div class="input-group">
-            <input id="createUserPassword" class="form-control smooth" name="NewUserPassword" type="password" placeholder="Min 8 characters" minlength="8" required />
+            <input id="createUserPassword" class="form-control smooth" name="NewUserPassword" type="password" placeholder="Min 8 characters" minlength="8" required autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" />
             <span class="input-group-text bg-transparent"><i class="bi bi-lock"></i></span>
             <div class="invalid-feedback" id="createUserPasswordFeedback"></div>
           </div>
@@ -110,7 +110,7 @@
         <div class="col-md-6">
           <label class="form-label">Confirm Password <span class="text-danger">*</span></label>
           <div class="input-group">
-            <input id="createUserConfirm" class="form-control smooth" name="NewUserConfirmPassword" type="password" placeholder="Re-enter password" minlength="8" required />
+            <input id="createUserConfirm" class="form-control smooth" name="NewUserConfirmPassword" type="password" placeholder="Re-enter password" minlength="8" required autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" />
             <span class="input-group-text bg-transparent"><i class="bi bi-lock-fill"></i></span>
           </div>
           <div class="invalid-feedback" id="createUserConfirmFeedback"></div>
@@ -175,7 +175,7 @@
         <button type="reset" class="btn btn-outline-secondary">Reset</button>
         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
         <div class="ms-auto">
-          <button type="submit" class="btn btn-primary"><i class="bi bi-person-plus me-2"></i> Create User</button>
+          <button type="submit" class="btn btn-primary" data-create-user-submit data-default-text="Create User"><i class="bi bi-person-plus me-2"></i> <span>Create User</span></button>
         </div>
       </div>
 

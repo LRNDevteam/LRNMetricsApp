@@ -162,3 +162,20 @@ public sealed class DenialMapperDashboard
     public int TotalOverrides { get; set; }
     public DateTime? LastModifiedOn { get; set; }
 }
+
+public sealed class DenialMapperActionCategoryMaster
+{
+    public string ActionCategory { get; set; } = string.Empty;
+    public string ActionCode { get; set; } = string.Empty;
+}
+
+public sealed class DenialMapperMasterData
+{
+    public IReadOnlyList<string> DenialClassifications { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> CoverageStatuses { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> ICDComplianceStatuses { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> DenialValidities { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> SLADays { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> Priorities { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<DenialMapperActionCategoryMaster> ActionCategories { get; set; } = Array.Empty<DenialMapperActionCategoryMaster>();
+}

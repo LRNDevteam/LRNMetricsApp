@@ -34,19 +34,19 @@
                             <div class="card mb-3">
                                 <div class="card-body">
                                     <h5 class="card-title">Create User</h5>
-                                    <form id="frmCreateUser" asp-action="CreateUser" method="post">
+                                    <form id="frmCreateUser" asp-action="CreateUser" method="post" autocomplete="off">
                                         @Html.AntiForgeryToken()
                                         <div id="indexCreateUserErrors" class="alert alert-danger d-none"></div>
                                         <div asp-validation-summary="ModelOnly" class="text-danger"></div>
                                         <div class="mb-2">
                                             <label class="form-label">UserName</label>
-                                            <input class="form-control" asp-for="NewUser.UserName" />
+                                            <input class="form-control" asp-for="NewUser.UserName" autocomplete="off" />
                                             <span asp-validation-for="NewUser.UserName" class="text-danger"></span>
                                         </div>
                                         <div class="mb-2">
                                             <label class="form-label">Password</label>
                                             <div class="input-group">
-                                                <input id="pwd" class="form-control" asp-for="NewUserPassword" type="password" minlength="8" required />
+                                                <input id="pwd" class="form-control" asp-for="NewUserPassword" type="password" minlength="8" required autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" />
                                                 <button class="btn btn-outline-secondary" type="button" id="pwdToggle" title="Show/Hide">
                                                     <i class="bi bi-eye"></i>
                                                 </button>
@@ -59,7 +59,7 @@
                                         </div>
                                         <div class="mb-2">
                                             <label class="form-label">Confirm Password</label>
-                                            <input id="pwdConfirm" class="form-control" asp-for="NewUserConfirmPassword" type="password" minlength="8" required />
+                                            <input id="pwdConfirm" class="form-control" asp-for="NewUserConfirmPassword" type="password" minlength="8" required autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" />
                                             <span asp-validation-for="NewUserConfirmPassword" class="text-danger"></span>
                                         </div>
                                         <div class="mb-2">
@@ -79,7 +79,7 @@
                                             <input class="form-control" asp-for="NewUser.Mobile" />
                                         </div>
                                         <div class="d-grid">
-                                            <button id="btnCreateUser" class="btn btn-primary">Create User</button>
+                                            <button id="btnCreateUser" class="btn btn-primary" type="submit"><span>Create User</span></button>
                                         </div>
                                     </form>
                                 </div>
@@ -320,8 +320,24 @@
         if (frmUser) {
             frmUser.addEventListener('submit', function(e){
                 e.preventDefault();
+                if (frmUser.dataset.submitting === 'true') return;
                 const errEl = document.getElementById('indexCreateUserErrors');
                 if (errEl) { errEl.classList.add('d-none'); errEl.textContent = ''; }
+                frmUser.dataset.submitting = 'true';
+                const button = document.getElementById('btnCreateUser');
+                if (button) {
+                    button.disabled = true;
+                    button.setAttribute('aria-busy', 'true');
+                    button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span><span>Creating User...</span>';
+                }
+                const release = () => {
+                    frmUser.dataset.submitting = 'false';
+                    if (button) {
+                        button.disabled = false;
+                        button.removeAttribute('aria-busy');
+                        button.innerHTML = '<span>Create User</span>';
+                    }
+                };
                 const fd = jsonFormData(frmUser);
                 fetch('@Url.Action("CreateUserAjax", "Admin")', { method: 'POST', body: fd, credentials: 'same-origin' })
                 .then(async r => {
@@ -334,14 +350,16 @@
                         } else {
                             alert('Create user failed');
                         }
+                        release();
                         return;
                     }
                     // success - refresh users list
                     refreshUsers();
                     frmUser.reset();
+                    release();
                     if (errEl) { errEl.classList.add('d-none'); errEl.textContent = ''; }
                 })
-                .catch(err=>{ console.error(err); alert('Network error'); });
+                .catch(err=>{ release(); console.error(err); alert('Network error'); });
             });
         }
 
