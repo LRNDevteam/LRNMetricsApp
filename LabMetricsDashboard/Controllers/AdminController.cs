@@ -6,6 +6,7 @@ namespace LabMetricsDashboard.Controllers;
 
 public class AdminController : Controller
 {
+    private static readonly SemaphoreSlim CreateUserGate = new(1, 1);
     private readonly IUserManagementRepository _repo;
     private readonly IPasswordHasher _hasher;
 
@@ -215,22 +216,29 @@ public class AdminController : Controller
 
         if (errors.Count > 0) return BadRequest(new { success = false, errors });
 
-        user ??= new LabUser();
-        user.PasswordHash = _hasher.Hash(vm.NewUserPassword!);
-        var id = await _repo.CreateUserAsync(user);
-
-        // Optionally assign role and lab
-        if (vm.NewUserRoleId.HasValue && vm.NewUserRoleId.Value > 0)
+        await CreateUserGate.WaitAsync();
+        try
         {
-            await _repo.AssignRoleAsync(id, vm.NewUserRoleId.Value);
-        }
-        var labIds = GetSelectedLabIds(vm);
-        foreach (var labId in labIds)
-        {
-            await _repo.AssignUserLabAsync(new UserLab { LabUserID = id, LabId = labId });
-        }
+            user ??= new LabUser();
+            user.UserName = user.UserName.Trim();
+            if (await _repo.GetUserByUserNameAsync(user.UserName) != null)
+                return Conflict(new { success = false, errors = new[] { $"UserName '{user.UserName}' already exists" } });
 
-        return Json(new { success = true, id });
+            user.PasswordHash = _hasher.Hash(vm.NewUserPassword!);
+            var id = await _repo.CreateUserAsync(user);
+
+            if (vm.NewUserRoleId.HasValue && vm.NewUserRoleId.Value > 0)
+                await _repo.AssignRoleAsync(id, vm.NewUserRoleId.Value);
+
+            foreach (var labId in GetSelectedLabIds(vm))
+                await _repo.AssignUserLabAsync(new UserLab { LabUserID = id, LabId = labId });
+
+            return Json(new { success = true, id });
+        }
+        finally
+        {
+            CreateUserGate.Release();
+        }
     }
 
     [HttpPost]
@@ -307,20 +315,35 @@ public class AdminController : Controller
             return View("ListUsers", vm);
         }
 
-        var user = vm.NewUser;
-        user.PasswordHash = _hasher.Hash(vm.NewUserPassword ?? string.Empty);
-        var id = await _repo.CreateUserAsync(user);
+        await CreateUserGate.WaitAsync();
+        try
+        {
+            var user = vm.NewUser;
+            user.UserName = user.UserName.Trim();
+            if (await _repo.GetUserByUserNameAsync(user.UserName) != null)
+            {
+                ModelState.AddModelError("NewUser.UserName", $"UserName '{user.UserName}' already exists");
+                vm.Users = await _repo.GetAllUsersAsync();
+                vm.Roles = await _repo.GetAllRolesAsync();
+                vm.Labs = await _repo.GetAllLabsAsync();
+                ViewData["OpenCreateUserModal"] = true;
+                return View("ListUsers", vm);
+            }
+            user.PasswordHash = _hasher.Hash(vm.NewUserPassword ?? string.Empty);
+            var id = await _repo.CreateUserAsync(user);
 
-        if (vm.NewUserRoleId.HasValue && vm.NewUserRoleId.Value > 0)
-        {
-            await _repo.AssignRoleAsync(id, vm.NewUserRoleId.Value);
+            if (vm.NewUserRoleId.HasValue && vm.NewUserRoleId.Value > 0)
+                await _repo.AssignRoleAsync(id, vm.NewUserRoleId.Value);
+
+            foreach (var labId in GetSelectedLabIds(vm))
+                await _repo.AssignUserLabAsync(new UserLab { LabUserID = id, LabId = labId });
+
+            return RedirectToAction("ListUsers");
         }
-        var labIds = GetSelectedLabIds(vm);
-        foreach (var labId in labIds)
+        finally
         {
-            await _repo.AssignUserLabAsync(new UserLab { LabUserID = id, LabId = labId });
+            CreateUserGate.Release();
         }
-        return RedirectToAction("ListUsers");
     }
 
     [HttpGet]

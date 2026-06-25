@@ -293,20 +293,42 @@
 
         frmCreateUser.addEventListener('submit', function(e){
             e.preventDefault();
+            if (frmCreateUser.dataset.submitting === 'true') return;
             clearCreateUserValidation();
             if (!validateCreateUserForm()) return;
+            frmCreateUser.dataset.submitting = 'true';
+            const submitButton = frmCreateUser.querySelector('[data-create-user-submit], button[type="submit"]');
+            const submitLabel = submitButton ? submitButton.querySelector('span') : null;
+            if (submitButton) {
+                submitButton.disabled = true;
+                submitButton.setAttribute('aria-busy', 'true');
+                if (submitLabel) submitLabel.textContent = 'Creating User...';
+                else submitButton.textContent = 'Creating User...';
+                submitButton.insertAdjacentHTML('afterbegin', '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>');
+            }
+            function releaseCreateUserSubmit() {
+                frmCreateUser.dataset.submitting = 'false';
+                if (!submitButton) return;
+                submitButton.disabled = false;
+                submitButton.removeAttribute('aria-busy');
+                const spinner = submitButton.querySelector('.spinner-border');
+                if (spinner) spinner.remove();
+                if (submitLabel) submitLabel.textContent = submitButton.dataset.defaultText || 'Create User';
+            }
             const fd = jsonFormData(frmCreateUser);
             fetch('/Admin/CreateUserAjax', { method: 'POST', body: fd, credentials: 'same-origin' })
             .then(async r=>{
                 if (!r.ok) { const d = await r.json().catch(()=>null); const msg = d && d.errors ? d.errors.join('; ') : 'Create user failed';
                     const errEl = document.getElementById('createUserErrors'); if (errEl) { errEl.classList.remove('d-none'); errEl.textContent = msg; }
                     else alert(msg);
+                    releaseCreateUserSubmit();
                     return; }
                 await refreshUsers();
                 frmCreateUser.reset();
+                releaseCreateUserSubmit();
                 const modalEl = document.getElementById('createUserModal');
                 if (modalEl) { const m = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl); m.hide(); }
-            }).catch(err=>{ console.error(err); alert(err.message||'Error'); });
+            }).catch(err=>{ releaseCreateUserSubmit(); console.error(err); alert(err.message||'Error'); });
         });
     }
 

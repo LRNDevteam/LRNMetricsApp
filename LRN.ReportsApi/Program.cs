@@ -7,6 +7,21 @@ using Microsoft.AspNetCore.ResponseCompression;
 
 var builder = WebApplication.CreateBuilder(args);
 
+var apiFileLogSection = builder.Configuration.GetSection("Logging:File");
+try
+{
+    builder.Logging.AddProvider(new FileLoggerProvider(new FileLoggerOptions
+    {
+        LogDirectory = apiFileLogSection["LogDirectory"] ?? "Logs/Api",
+        MinLevel = Enum.TryParse<LogLevel>(apiFileLogSection["LogLevel"], true, out var apiLogLevel) ? apiLogLevel : LogLevel.Information,
+        RetainDays = int.TryParse(apiFileLogSection["RetainDays"], out var apiRetainDays) ? apiRetainDays : 30
+    }));
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine($"API file logger initialization failed: {ex}");
+}
+
 builder.Services.Configure<DenialWorkflowOptions>(builder.Configuration.GetSection("Workflow"));
 builder.Services.Configure<DenialWorkflowSupportOptions>(builder.Configuration.GetSection("DenialWorkflowSupport"));
 builder.Services.Configure<DenialCodeMasterExportOptions>(builder.Configuration.GetSection("DenialCodeMasterExport"));

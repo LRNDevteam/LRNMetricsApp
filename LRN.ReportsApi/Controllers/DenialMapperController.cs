@@ -52,7 +52,7 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
 
     [HttpPost("confirm-push")]
     public async Task<ActionResult> ConfirmPush(DenialMapperPushDecisionRequest request,CancellationToken ct)
-    {if(!IsAdmin())return Denied();var count=await repository.ConfirmPushAsync(request.PushAuditIds,UserName(),Role(),ct);return Ok(new{labCount=count,message=$"Super Master pushed to {count} lab(s). Existing overrides were preserved."});}
+    {if(!IsAdmin())return Denied();var count=await repository.ConfirmPushAsync(request.PushAuditIds,UserName(),Role(),ct);return Ok(new{labCount=count,message=$"Super Master staged in {count} lab(s) and is awaiting AR Manager confirmation. Existing overrides were preserved."});}
 
     [HttpPost("cancel-push")]
     public async Task<ActionResult> CancelPush(DenialMapperPushDecisionRequest request,CancellationToken ct)
@@ -86,7 +86,20 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
 
     [HttpPost("notifications/{pushAuditId:long}/acknowledge")]
     public async Task<ActionResult> Acknowledge(long pushAuditId,[FromQuery]int labId,CancellationToken ct)
-    {if(!IsArManager())return Denied();var effective=await AuthorizedLab(labId,ct);if(effective is null)return Denied();await repository.AcknowledgeNotificationAsync(pushAuditId,effective.Value,UserName(),ct);return Ok(new{message="Mapper update acknowledged."});}
+    {
+        if(!IsArManager())return Denied();
+        var effective=await AuthorizedLab(labId,ct);
+        if(effective is null)return Denied();
+        var count=await repository.AcknowledgeNotificationAsync(pushAuditId,effective.Value,UserName(),ct);
+        return Ok(new{mappingCount=count,message=$"{count} approved mapping(s) were applied to Denial Action Master."});
+    }
+
+    [HttpGet("master-data")]
+    public async Task<ActionResult<DenialMapperMasterData>> MasterData(CancellationToken ct)
+    {
+        if(!CanView())return Denied();
+        return Ok(await repository.MasterDataAsync(ct));
+    }
 
     [HttpGet("lab-master")]
     public async Task<ActionResult> LabMaster([FromQuery]int labId,[FromQuery]string? search,[FromQuery]string? classification,[FromQuery]int page=1,[FromQuery]int pageSize=25,CancellationToken ct=default){if(!CanView())return Denied();var effective=await AuthorizedLab(labId,ct);if(effective is null)return Denied();return Ok(await repository.LabMasterAsync(effective.Value,search,classification,page,pageSize,ct));}

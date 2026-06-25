@@ -3,6 +3,8 @@ using LRN.ReportsApi.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Http;
 using System.Security.Claims;
+using System.Text;
+using ClosedXML.Excel;
 
 namespace LRN.ReportsApi.Controllers;
 
@@ -11,6 +13,7 @@ namespace LRN.ReportsApi.Controllers;
 [Route("api/denial-workflow")]
 public sealed class DenialWorkflowController : ControllerBase
 {
+    private static readonly object ReactLogLock = new();
     private readonly IDenialWorkflowService _service;
     private readonly IDenialWorkflowExportJobService _exportJobs;
     private readonly IDenialWorkflowSupportService _supportService;
@@ -27,6 +30,36 @@ public sealed class DenialWorkflowController : ControllerBase
 
     [HttpGet("health")]
     public IActionResult Health() => Ok("LRN.ReportsApi DenialWorkflow running");
+
+    [HttpGet("log-paths")]
+    public IActionResult LogPaths()
+    {
+        string Resolve(string key, string fallback)
+        {
+            var configured = _configuration[key] ?? fallback;
+            return Path.IsPathRooted(configured) ? configured : Path.Combine(AppContext.BaseDirectory, configured);
+        }
+        return Ok(new
+        {
+            apiLogs = Resolve("Logging:File:LogDirectory", "Logs/Api"),
+            reactLogs = Resolve("Logging:ReactClient:LogDirectory", "Logs/React"),
+            workflowIssueLogs = Resolve("DenialWorkflowSupport:IssueLogFolder", "Logs/Issues")
+        });
+    }
+
+    [HttpPost("client-logs")]
+    public IActionResult SaveReactClientLog([FromBody] ReactClientLogRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Message)) return BadRequest(new { message = "Log message is required." });
+        var configured = _configuration["Logging:ReactClient:LogDirectory"] ?? "Logs/React";
+        var folder = Path.IsPathRooted(configured) ? configured : Path.Combine(AppContext.BaseDirectory, configured);
+        Directory.CreateDirectory(folder);
+        var path = Path.Combine(folder, $"react-{DateTime.UtcNow:yyyy-MM-dd}.log");
+        var userName = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "anonymous";
+        var entry = $"[{DateTime.UtcNow:O}] [{request.Level}] User={userName} URL={request.Url}{Environment.NewLine}Message={request.Message}{Environment.NewLine}Context={request.Context}{Environment.NewLine}UserAgent={request.UserAgent}{Environment.NewLine}Stack={request.Stack}{Environment.NewLine}{new string('-', 100)}{Environment.NewLine}";
+        lock (ReactLogLock) System.IO.File.AppendAllText(path, entry, Encoding.UTF8);
+        return Accepted();
+    }
 
     [HttpGet("support-contacts")]
     public IActionResult SupportContacts()
@@ -166,6 +199,257 @@ public sealed class DenialWorkflowController : ControllerBase
         var requestedBy = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? string.Empty;
         var status = _exportJobs.Cancel(jobId, requestedBy);
         return status is null ? NotFound(new { message = "Export job was not found." }) : Ok(status);
+    }
+
+    [HttpPost("claims/upload-csv")]
+    [RequestFormLimits(MultipartBodyLengthLimit = 104_857_600)]
+    [RequestSizeLimit(104_857_600)]
+    public async Task<ActionResult<ClaimCsvUploadResult>> UploadClaimsCsv([FromForm] ClaimUploadForm upload, CancellationToken ct)
+    {
+        var labId = upload.LabId;
+        var file = upload.File;
+        if (labId <= 0) return BadRequest(new { message = "LabId is required." });
+        if (file is null || file.Length == 0) return BadRequest(new { message = "A CSV file is required." });
+        var extension = Path.GetExtension(file.FileName);
+        if (!string.Equals(extension, ".csv", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(extension, ".xlsx", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { message = "Only CSV and Excel (.xlsx) upload templates are supported." });
+
+        var role = FirstClaim(ClaimTypes.Role, "role", "roles") ?? string.Empty;
+        var userName = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? string.Empty;
+        var managerRole = CanAssignFromToken();
+        var reviewerOnly = IsReviewerOnly(role);
+        if (!managerRole && !reviewerOnly)
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only AR Manager/Admin and AR Reviewer users can process workflow CSV files." });
+
+        List<Dictionary<string, string>> rows;
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            rows = string.Equals(extension, ".xlsx", StringComparison.OrdinalIgnoreCase)
+                ? ReadExcelRows(stream, 200_000)
+                : await ReadCsvRowsAsync(stream, 200_000, ct);
+        }
+        catch (InvalidDataException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+
+        var errors = new List<string>();
+        var actionableRows = rows
+            .Select((row, index) => new { Row = row, RowNumber = index + 2, ClaimId = CsvValue(row, "ClaimUID", "ClaimUid", "ClaimID", "ClaimId") })
+            .Where(x => CsvHasClaimAction(x.Row))
+            .ToList();
+        var skipped = rows.Count - actionableRows.Count;
+        var claimRows = new List<(int RowNumber, string ClaimId, Dictionary<string, string> Row)>();
+        foreach (var group in actionableRows.GroupBy(x => x.ClaimId, StringComparer.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(group.Key))
+            {
+                foreach (var missingClaimRow in group) AddCsvError(errors, missingClaimRow.RowNumber, "ClaimUID or ClaimID is required.");
+                continue;
+            }
+            if (group.Count() > 1)
+            {
+                AddCsvError(errors, group.First().RowNumber, $"Claim '{group.Key}' has updates on more than one CSV row. Enter claim-level values on only one row.");
+                continue;
+            }
+            var claimRow = group.Single();
+            claimRows.Add((claimRow.RowNumber, claimRow.ClaimId, claimRow.Row));
+        }
+
+        var updatedTasks = 0;
+        var addedComments = 0;
+        var escalatedClaims = 0;
+        var escalationResponses = 0;
+        var processedRows = 0;
+        foreach (var item in claimRows)
+        {
+            var claimTasks = await _service.GetTasksByClaimAsync(labId, item.ClaimId, ct);
+            if (claimTasks.Count == 0)
+            {
+                AddCsvError(errors, item.RowNumber, $"Claim '{item.ClaimId}' was not found.");
+                continue;
+            }
+            if (reviewerOnly && claimTasks.Any(x => !string.Equals(x.AssignedTo?.Trim(), userName.Trim(), StringComparison.OrdinalIgnoreCase)))
+            {
+                AddCsvError(errors, item.RowNumber, "AR Reviewers can update only claims whose tasks are assigned to themselves.");
+                continue;
+            }
+
+            var updateStatusRaw = CsvValue(item.Row, "UpdateStatus", "NewStatus");
+            var updateStatus = string.IsNullOrWhiteSpace(updateStatusRaw) ? string.Empty : NormalizeWorkflowStatus(updateStatusRaw);
+            var comments = CsvValue(item.Row, "Comments", "ReviewerComments", "Comment");
+            var escalationReason = CsvValue(item.Row, "EscalationReason");
+            var otherEscalationReason = CsvValue(item.Row, "OtherEscalationReason");
+            var escalationComment = CsvValue(item.Row, "EscalationComment");
+            var escalationResponse = CsvValue(item.Row, "EscalationResponse", "RecommendedNextAction");
+            var escalationResponseComment = CsvValue(item.Row, "EscalationResponseComment", "ResponseComment");
+            var rowChanged = false;
+            var hasStatusOrNote = !string.IsNullOrWhiteSpace(updateStatus) || !string.IsNullOrWhiteSpace(comments);
+            var hasReviewerEscalation = !string.IsNullOrWhiteSpace(escalationReason) || !string.IsNullOrWhiteSpace(escalationComment);
+            var hasManagerResponse = !string.IsNullOrWhiteSpace(escalationResponse) || !string.IsNullOrWhiteSpace(escalationResponseComment);
+            if (new[] { hasStatusOrNote, hasReviewerEscalation, hasManagerResponse }.Count(x => x) > 1)
+            {
+                AddCsvError(errors, item.RowNumber, "Use one claim action per row: status/note, reviewer escalation, or manager escalation response.");
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(updateStatus))
+            {
+                if (string.IsNullOrWhiteSpace(comments))
+                {
+                    AddCsvError(errors, item.RowNumber, "Comments are required when UpdateStatus is provided.");
+                    continue;
+                }
+                var template = new UpdateTaskRequest
+                {
+                    LabId = labId, Status = updateStatus, Comments = comments, ActionBy = userName,
+                    ActionCompleted = CsvNullableBool(item.Row, "ActionCompleted"),
+                    ActualOutcome = CsvValue(item.Row, "ActualOutcome"),
+                    DocumentationType = CsvValue(item.Row, "DocumentationType"),
+                    FollowUpReason = CsvValue(item.Row, "FollowUpReason"),
+                    ClosureReason = CsvValue(item.Row, "ClosureReason"),
+                    ValidationStatus = CsvValue(item.Row, "ValidationStatus"),
+                    ExpectedResponseDate = CsvNullableDate(item.Row, "ExpectedResponseDate"),
+                    UpdateScope = "Claim", UpdateScopeValue = item.ClaimId
+                };
+                var validationError = ValidateTaskStatusUpdate(template, role);
+                if (!string.IsNullOrWhiteSpace(validationError))
+                {
+                    AddCsvError(errors, item.RowNumber, validationError);
+                    continue;
+                }
+                await _service.SaveNoteAsync(new SaveDenialNoteRequest
+                {
+                    LabId = labId, ClaimId = item.ClaimId, NoteLevel = "Claim", NoteText = comments,
+                    Status = updateStatus, NextFollowUpDate = template.ExpectedResponseDate, CreatedBy = userName
+                }, ct);
+                addedComments++;
+                foreach (var task in claimTasks)
+                {
+                    template.TaskId = task.TaskId;
+                    if (await _service.UpdateTaskAsync(template, ct) > 0) updatedTasks++;
+                }
+                rowChanged = true;
+            }
+            else if (!string.IsNullOrWhiteSpace(comments))
+            {
+                await _service.SaveNoteAsync(new SaveDenialNoteRequest
+                {
+                    LabId = labId, ClaimId = item.ClaimId, NoteLevel = "Claim", NoteText = comments,
+                    Status = NormalizeWorkflowStatus(claimTasks[0].Status), CreatedBy = userName
+                }, ct);
+                updatedTasks += await _service.UpdateClaimCommentsAsync(labId, item.ClaimId, comments, userName, ct);
+                addedComments++;
+                rowChanged = true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(escalationReason) || !string.IsNullOrWhiteSpace(escalationComment))
+            {
+                if (!reviewerOnly)
+                {
+                    AddCsvError(errors, item.RowNumber, "EscalationReason upload is for AR Reviewer claim escalation. AR Managers should use EscalationResponse.");
+                    continue;
+                }
+                if (!ReviewerEscalationReasons.Contains(escalationReason))
+                {
+                    AddCsvError(errors, item.RowNumber, $"'{escalationReason}' is not a valid EscalationReason.");
+                    continue;
+                }
+                if (string.Equals(escalationReason, "Other", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(otherEscalationReason))
+                {
+                    AddCsvError(errors, item.RowNumber, "OtherEscalationReason is required when EscalationReason is Other.");
+                    continue;
+                }
+                if (string.IsNullOrWhiteSpace(escalationComment))
+                {
+                    AddCsvError(errors, item.RowNumber, "EscalationComment is required.");
+                    continue;
+                }
+                var finalReason = string.Equals(escalationReason, "Other", StringComparison.OrdinalIgnoreCase)
+                    ? $"Other - {otherEscalationReason}"
+                    : escalationReason;
+                await _service.SaveEscalationAsync(new SaveDenialEscalationRequest
+                {
+                    LabId = labId, ClaimId = item.ClaimId, EscalationLevel = "Claim",
+                    EscalationScope = "Overall Claim", EscalationScopeValue = item.ClaimId,
+                    EscalationScopeDisplay = "Overall Claim",
+                    AffectedTaskIds = string.Join(",", claimTasks.Select(x => x.TaskId).Where(x => !string.IsNullOrWhiteSpace(x))),
+                    RecommendedNextAction = "Manager review", EscalationReason = finalReason,
+                    Comments = escalationComment, Status = finalReason.Contains("write-off decision required", StringComparison.OrdinalIgnoreCase) ? "WriteOffPending" : "Open",
+                    NextFollowUpDate = CsvNullableDate(item.Row, "EscalationExpectedResponseDate"), CreatedBy = userName
+                }, ct);
+                foreach (var task in claimTasks)
+                {
+                    updatedTasks += await _service.UpdateTaskAsync(new UpdateTaskRequest
+                    {
+                        LabId = labId, TaskId = task.TaskId, Status = "Escalated to AR Manager",
+                        Comments = $"{finalReason} - {escalationComment}", ActionBy = userName,
+                        UpdateScope = "Claim", UpdateScopeValue = item.ClaimId
+                    }, ct);
+                }
+                escalatedClaims++;
+                rowChanged = true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(escalationResponse) || !string.IsNullOrWhiteSpace(escalationResponseComment))
+            {
+                if (!managerRole)
+                {
+                    AddCsvError(errors, item.RowNumber, "Only AR Manager/Admin can upload an EscalationResponse.");
+                    continue;
+                }
+                if (!ManagerEscalationResponses.Contains(escalationResponse))
+                {
+                    AddCsvError(errors, item.RowNumber, $"'{escalationResponse}' is not a valid EscalationResponse.");
+                    continue;
+                }
+                if (string.IsNullOrWhiteSpace(escalationResponseComment))
+                {
+                    AddCsvError(errors, item.RowNumber, "EscalationResponseComment is required.");
+                    continue;
+                }
+                var escalation = (await _service.GetEscalationsAsync(labId, item.ClaimId, null, null, "Claim", ct))
+                    .FirstOrDefault(x => !string.Equals(x.Status, "Resolved", StringComparison.OrdinalIgnoreCase)
+                        && !string.Equals(x.Status, "Closed", StringComparison.OrdinalIgnoreCase));
+                if (escalation is null)
+                {
+                    AddCsvError(errors, item.RowNumber, "No active claim-level escalation was found for the response.");
+                    continue;
+                }
+                var affected = await _service.ResolveEscalationAsync(new ResolveDenialEscalationRequest
+                {
+                    LabId = labId, EscalationId = escalation.EscalationId, ClaimId = item.ClaimId,
+                    EscalationLevel = "Claim", ResolutionAction = "rework",
+                    ResponseNote = escalationResponseComment, RecommendedNextAction = escalationResponse,
+                    ActionBy = userName
+                }, ct);
+                if (affected > 0)
+                {
+                    escalationResponses++;
+                    rowChanged = true;
+                }
+                else AddCsvError(errors, item.RowNumber, "Escalation response was not applied.");
+            }
+
+            if (rowChanged) processedRows++;
+        }
+
+        var result = new ClaimCsvUploadResult
+        {
+            Success = errors.Count == 0,
+            TotalRows = rows.Count,
+            ProcessedRows = processedRows,
+            SkippedRows = skipped,
+            UpdatedTasks = updatedTasks,
+            AddedComments = addedComments,
+            EscalatedClaims = escalatedClaims,
+            EscalationResponses = escalationResponses,
+            Errors = errors,
+            Message = $"Processed {processedRows} claim row(s): {updatedTasks} task status update(s), {addedComments} claim comment(s), {escalatedClaims} escalation(s), and {escalationResponses} escalation response(s). Skipped {skipped} unchanged row(s).{(errors.Count > 0 ? $" {errors.Count} error(s) require correction." : string.Empty)}"
+        };
+        return Ok(result);
     }
 
 	[HttpGet("claim-tasks")]
@@ -646,6 +930,34 @@ public sealed class DenialWorkflowController : ControllerBase
         "Closed"
     };
 
+    private static readonly HashSet<string> ReviewerEscalationReasons = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Denial reason unclear",
+        "Action clarification required",
+        "Denial-action mapping unclear",
+        "Payer policy conflict",
+        "Appeal eligibility unclear",
+        "Rebill eligibility unclear",
+        "Write-off decision required",
+        "Payer follow-up guidance needed",
+        "Documentation requirement unclear",
+        "EOB / payer response clarification",
+        "Other"
+    };
+
+    private static readonly HashSet<string> ManagerEscalationResponses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Proceed with Appeal",
+        "Proceed with Rebill",
+        "Proceed with Write-Off Request",
+        "Perform Payer Follow-up",
+        "Request Documentation",
+        "Additional Information Needed",
+        "No Further Action Required",
+        "Close Claim / Line",
+        "Other"
+    };
+
     private static string NormalizeWorkflowStatus(string? status)
     {
         var value = (status ?? string.Empty).Trim();
@@ -691,4 +1003,126 @@ public sealed class DenialWorkflowController : ControllerBase
 
     private static string NormalizeRoleToken(string? value)
         => new string((value ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+
+    private static string CsvValue(IReadOnlyDictionary<string, string> row, params string[] names)
+    {
+        foreach (var name in names)
+            if (row.TryGetValue(name, out var value))
+                return (value ?? string.Empty).Trim().TrimStart('\uFEFF').TrimStart('\'');
+        return string.Empty;
+    }
+
+    private static bool CsvHasClaimAction(IReadOnlyDictionary<string, string> row)
+        => new[]
+        {
+            "UpdateStatus", "NewStatus", "Comments", "ReviewerComments", "Comment",
+            "EscalationReason", "OtherEscalationReason", "EscalationComment",
+            "EscalationExpectedResponseDate", "EscalationResponse",
+            "RecommendedNextAction", "EscalationResponseComment", "ResponseComment"
+        }.Any(name => row.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value));
+
+    private static bool? CsvNullableBool(IReadOnlyDictionary<string, string> row, params string[] names)
+    {
+        var value = CsvValue(row, names);
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        if (bool.TryParse(value, out var parsed)) return parsed;
+        if (value is "1" or "Y" or "Yes" or "yes") return true;
+        if (value is "0" or "N" or "No" or "no") return false;
+        return null;
+    }
+
+    private static DateTime? CsvNullableDate(IReadOnlyDictionary<string, string> row, params string[] names)
+        => DateTime.TryParse(CsvValue(row, names), out var parsed) ? parsed.Date : null;
+
+    private static void AddCsvError(List<string> errors, int rowNumber, string message)
+    {
+        if (errors.Count >= 200) return;
+        errors.Add(rowNumber > 0 ? $"Row {rowNumber}: {message}" : message);
+    }
+
+    private static async Task<List<Dictionary<string, string>>> ReadCsvRowsAsync(Stream stream, int maxRows, CancellationToken ct)
+    {
+        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 64 * 1024, leaveOpen: true);
+        var records = new List<string[]>();
+        var fields = new List<string>();
+        var field = new StringBuilder();
+        var inQuotes = false;
+        var buffer = new char[64 * 1024];
+
+        void FinishField()
+        {
+            fields.Add(field.ToString());
+            field.Clear();
+        }
+        void FinishRecord()
+        {
+            FinishField();
+            if (fields.Any(x => !string.IsNullOrWhiteSpace(x))) records.Add(fields.ToArray());
+            fields.Clear();
+            if (records.Count > maxRows + 1) throw new InvalidDataException($"CSV contains more than the supported {maxRows:N0} data rows.");
+        }
+
+        int read;
+        while ((read = await reader.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
+        {
+            for (var i = 0; i < read; i++)
+            {
+                var ch = buffer[i];
+                if (inQuotes)
+                {
+                    if (ch == '"')
+                    {
+                        if (i + 1 < read && buffer[i + 1] == '"') { field.Append('"'); i++; }
+                        else if (i + 1 == read && reader.Peek() == '"') { field.Append('"'); await reader.ReadAsync(buffer.AsMemory(0, 1), ct); }
+                        else inQuotes = false;
+                    }
+                    else field.Append(ch);
+                }
+                else if (ch == '"') inQuotes = true;
+                else if (ch == ',') FinishField();
+                else if (ch == '\n') FinishRecord();
+                else if (ch != '\r') field.Append(ch);
+            }
+        }
+        if (inQuotes) throw new InvalidDataException("CSV contains an unterminated quoted field.");
+        if (field.Length > 0 || fields.Count > 0) FinishRecord();
+        if (records.Count == 0) throw new InvalidDataException("CSV is empty.");
+
+        var headers = records[0].Select(x => x.Trim().TrimStart('\uFEFF')).ToArray();
+        if (headers.Distinct(StringComparer.OrdinalIgnoreCase).Count() != headers.Length)
+            throw new InvalidDataException("CSV contains duplicate column names.");
+        if (!headers.Any(x => string.Equals(x, "ClaimUID", StringComparison.OrdinalIgnoreCase) || string.Equals(x, "ClaimID", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidDataException("CSV must contain ClaimUID or ClaimID.");
+
+        return records.Skip(1).Select(values =>
+        {
+            var row = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < headers.Length; i++) row[headers[i]] = i < values.Length ? values[i] : string.Empty;
+            return row;
+        }).ToList();
+    }
+
+    private static List<Dictionary<string, string>> ReadExcelRows(Stream stream, int maxRows)
+    {
+        using var workbook = new XLWorkbook(stream);
+        var sheet = workbook.Worksheet("Claim Upload");
+        var used = sheet.RangeUsed() ?? throw new InvalidDataException("The Claim Upload worksheet is empty.");
+        var headerRow = used.FirstRow();
+        var headers = headerRow.Cells().Select(x => x.GetString().Trim()).ToArray();
+        if (!headers.Any(x => string.Equals(x, "ClaimID", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidDataException("Excel template must contain ClaimID.");
+        if (headers.Distinct(StringComparer.OrdinalIgnoreCase).Count() != headers.Length)
+            throw new InvalidDataException("Excel template contains duplicate column names.");
+
+        var rows = new List<Dictionary<string, string>>();
+        foreach (var excelRow in used.RowsUsed().Skip(1))
+        {
+            if (rows.Count >= maxRows) throw new InvalidDataException($"Excel template contains more than the supported {maxRows:N0} data rows.");
+            var row = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < headers.Length; i++)
+                row[headers[i]] = excelRow.Cell(i + 1).GetFormattedString().Trim();
+            if (row.Values.Any(x => !string.IsNullOrWhiteSpace(x))) rows.Add(row);
+        }
+        return rows;
+    }
 }

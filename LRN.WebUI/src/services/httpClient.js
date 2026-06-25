@@ -1,5 +1,6 @@
 import { REPORTS_API_BASE_URL } from '../config/apiConfig';
 import { clearWorkflowJwt, ensureWorkflowJwt } from '../utils/auth';
+import { logClientError } from './clientLogger';
 
 const API_BASE_URL = REPORTS_API_BASE_URL;
 export const GENERIC_WORKFLOW_ERROR = 'Issue happened. Please contact admin support.';
@@ -95,12 +96,14 @@ export async function api(path, options = {}) {
       response = await executeRequest(path, options, token);
     }
   } catch (err) {
+    logClientError(err, `API request failed before response: ${path}`);
     if (err?.message && String(err.message).toLowerCase().includes('login')) throw err;
     throw new DenialWorkflowError(GENERIC_WORKFLOW_ERROR);
   }
 
   if (!response.ok) {
     const error = await readError(response);
+    logClientError(error instanceof Error ? error : new Error(String(error || `API error ${response.status}`)), `API ${response.status}: ${path}`);
     throw error instanceof Error ? error : new Error(error || `API error ${response.status}`);
   }
 

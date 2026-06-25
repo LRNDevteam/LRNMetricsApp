@@ -643,6 +643,25 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
 
     internal static async Task EnsureActionChangeSchemaAsync(SqlConnection conn, SqlTransaction? tx, CancellationToken ct)
     {
+        const string schemaLockResource = "LRN.DenialCodeActionChangeVerification.Schema";
+        await using (var lockCmd = new SqlCommand("""
+            DECLARE @Result int;
+            EXEC @Result = sys.sp_getapplock
+                @Resource = @Resource,
+                @LockMode = 'Exclusive',
+                @LockOwner = 'Session',
+                @LockTimeout = 30000;
+            SELECT @Result;
+            """, conn, tx))
+        {
+            lockCmd.Parameters.Add(new SqlParameter("@Resource", schemaLockResource));
+            var lockResult = Convert.ToInt32(await lockCmd.ExecuteScalarAsync(ct));
+            if (lockResult < 0)
+                throw new InvalidOperationException($"Could not acquire the denial action-change schema lock (result {lockResult}).");
+        }
+
+        try
+        {
         const string sql = """
             IF OBJECT_ID('dbo.DenialCodeActionChangeBatch','U') IS NULL
             BEGIN
@@ -772,6 +791,17 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
             END
             """, conn, tx) { CommandTimeout = 180 };
         await procCmd.ExecuteNonQueryAsync(ct);
+        }
+        finally
+        {
+            await using var releaseCmd = new SqlCommand("""
+                EXEC sys.sp_releaseapplock
+                    @Resource = @Resource,
+                    @LockOwner = 'Session';
+                """, conn, tx);
+            releaseCmd.Parameters.Add(new SqlParameter("@Resource", schemaLockResource));
+            await releaseCmd.ExecuteNonQueryAsync(CancellationToken.None);
+        }
     }
 
     private static async Task<HashSet<string>> GetColumnSetAsync(SqlConnection conn, SqlTransaction? tx, string tableName, CancellationToken ct)
