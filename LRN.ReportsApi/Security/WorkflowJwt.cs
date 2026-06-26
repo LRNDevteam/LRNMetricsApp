@@ -21,7 +21,7 @@ public static class WorkflowJwt
         var token = ExtractToken(request);
         if (string.IsNullOrWhiteSpace(token))
         {
-            reason = "Missing workflow JWT. Expected Authorization: Bearer token, X-LRN-Workflow-Jwt header, or __workflowToken query string.";
+            reason = "Missing workflow JWT. Expected Authorization: Bearer token or X-LRN-Workflow-Jwt header.";
             return false;
         }
 
@@ -51,7 +51,25 @@ public static class WorkflowJwt
             return false;
         }
 
+        JsonElement headerRoot;
         JsonElement root;
+        try
+        {
+            using var headerDoc = JsonDocument.Parse(Encoding.UTF8.GetString(Base64UrlDecode(parts[0])));
+            headerRoot = headerDoc.RootElement.Clone();
+        }
+        catch
+        {
+            reason = "JWT header could not be decoded.";
+            return false;
+        }
+
+        if (!string.Equals(GetString(headerRoot, "alg"), "HS256", StringComparison.Ordinal))
+        {
+            reason = "JWT algorithm is not supported.";
+            return false;
+        }
+
         try
         {
             using var payloadDoc = JsonDocument.Parse(Encoding.UTF8.GetString(Base64UrlDecode(parts[1])));
@@ -129,20 +147,6 @@ public static class WorkflowJwt
                     ? header["Bearer ".Length..].Trim()
                     : header.Trim();
             }
-        }
-
-        var queryNames = new[]
-        {
-            "__workflowToken",
-            "workflowToken",
-            "access_token",
-            "token"
-        };
-
-        foreach (var queryName in queryNames)
-        {
-            var value = request.Query[queryName].ToString();
-            if (!string.IsNullOrWhiteSpace(value)) return value.Trim();
         }
 
         return string.Empty;

@@ -183,6 +183,7 @@ public class AccountController : Controller
             Expires     = DateTimeOffset.UtcNow.AddDays(30),
             HttpOnly    = false,
             SameSite    = SameSiteMode.Lax,
+            Secure      = Request.IsHttps,
             IsEssential = true
         });
 

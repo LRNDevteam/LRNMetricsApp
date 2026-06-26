@@ -67,10 +67,24 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+app.Use(async (context, next) =>
+{
+    ApplySecurityHeaders(context, app.Environment.IsDevelopment());
+    await next();
+});
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+}
+
 app.UseResponseCompression();
 app.UseCors("MetricsWeb");
-app.UseSwagger();
-app.UseSwaggerUI();
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
 
 // Auth is required only for Denial Workflow API endpoints.
 // Do not block React static files, fonts, swagger, health, favicon, etc.
@@ -153,7 +167,24 @@ app.Use(async (context, next) =>
 });
 
 app.UseAuthorization();
-app.MapGet("/", () => Results.Redirect("/swagger"));
+app.MapGet("/", () => Results.Ok("LRN.ReportsApi running"));
 app.MapGet("/health", () => Results.Ok("LRN.ReportsApi running"));
 app.MapControllers();
 app.Run();
+
+static void ApplySecurityHeaders(HttpContext context, bool isDevelopment)
+{
+    var headers = context.Response.Headers;
+    headers["X-Content-Type-Options"] = "nosniff";
+    headers["X-Frame-Options"] = "DENY";
+    headers["Referrer-Policy"] = "no-referrer";
+    headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()";
+    headers["Content-Security-Policy"] = isDevelopment
+        ? "default-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:* https://localhost:* ws://localhost:* wss://localhost:* http://127.0.0.1:* https://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:*"
+        : "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+
+    if (context.Request.IsHttps)
+    {
+        headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
+    }
+}

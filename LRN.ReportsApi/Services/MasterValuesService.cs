@@ -514,8 +514,8 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         AddLike(parts, p, "IsActive", q.IsActive);
         if (!string.IsNullOrWhiteSpace(q.Search))
         {
-            parts.Add("(PayerCode LIKE @Search OR PayerNameRaw LIKE @Search OR PayerNameNormalized LIKE @Search OR LabName LIKE @Search)");
-            p.Add(new SqlParameter("@Search", $"%{q.Search.Trim()}%"));
+            parts.Add("(PayerCode LIKE @Search ESCAPE '\\' OR PayerNameRaw LIKE @Search ESCAPE '\\' OR PayerNameNormalized LIKE @Search ESCAPE '\\' OR LabName LIKE @Search ESCAPE '\\')");
+            p.Add(new SqlParameter("@Search", LikePattern(q.Search)));
         }
         return string.Join(" AND ", parts);
     }
@@ -533,8 +533,8 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         AddLike(parts, p, "IsMCO", q.IsMCO);
         if (!string.IsNullOrWhiteSpace(q.Search))
         {
-            parts.Add("(PayerCode LIKE @Search OR PayerName LIKE @Search OR PayerNameNormalized LIKE @Search)");
-            p.Add(new SqlParameter("@Search", $"%{q.Search.Trim()}%"));
+            parts.Add("(PayerCode LIKE @Search ESCAPE '\\' OR PayerName LIKE @Search ESCAPE '\\' OR PayerNameNormalized LIKE @Search ESCAPE '\\')");
+            p.Add(new SqlParameter("@Search", LikePattern(q.Search)));
         }
         return string.Join(" AND ", parts);
     }
@@ -598,8 +598,8 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
     {
         if (string.IsNullOrWhiteSpace(value)) return;
         var name = "@" + column;
-        parts.Add($"{column} LIKE {name}");
-        p.Add(new SqlParameter(name, $"%{value.Trim()}%"));
+        parts.Add($"{column} LIKE {name} ESCAPE '\\'");
+        p.Add(new SqlParameter(name, LikePattern(value)));
     }
 
     private static void AddEquals(List<string> parts, List<SqlParameter> p, string column, int? value)
@@ -609,6 +609,15 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         parts.Add($"{column} = {name}");
         p.Add(new SqlParameter(name, value.Value));
     }
+
+    private static string LikePattern(string value)
+        => $"%{EscapeLike(value.Trim())}%";
+
+    private static string EscapeLike(string value)
+        => value.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal)
+            .Replace("[", "\\[", StringComparison.Ordinal);
 
     private static Dictionary<string, int> HeaderMap(IXLWorksheet ws, bool allowDuplicateNames)
     {

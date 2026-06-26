@@ -937,10 +937,10 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
     {
         parameters = [];
         if (string.IsNullOrWhiteSpace(search)) return "1 = 1";
-        parameters.Add(new SqlParameter("@Search", $"%{search.Trim()}%"));
+        parameters.Add(new SqlParameter("@Search", LikePattern(search)));
         return """
-            (DenialCode LIKE @Search OR DenialDescription LIKE @Search OR DenialClassification LIKE @Search
-             OR CoverageStatus LIKE @Search OR ICDComplianceStatus LIKE @Search OR ActionCode LIKE @Search OR ActionCategory LIKE @Search)
+            (DenialCode LIKE @Search ESCAPE '\' OR DenialDescription LIKE @Search ESCAPE '\' OR DenialClassification LIKE @Search ESCAPE '\'
+             OR CoverageStatus LIKE @Search ESCAPE '\' OR ICDComplianceStatus LIKE @Search ESCAPE '\' OR ActionCode LIKE @Search ESCAPE '\' OR ActionCategory LIKE @Search ESCAPE '\')
             """;
     }
 
@@ -977,6 +977,8 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
     }
 
     private static object DbValue(string? value) => string.IsNullOrWhiteSpace(value) ? DBNull.Value : value.Trim();
+    private static string LikePattern(string value) => $"%{EscapeLike(value.Trim())}%";
+    private static string EscapeLike(string value) => value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal).Replace("[", "\\[", StringComparison.Ordinal);
     private static SqlParameter[] CloneParams(List<SqlParameter> source) => source.Select(p => new SqlParameter(p.ParameterName, p.Value)).ToArray();
 
     private static async Task<IReadOnlyList<string>> ReadStringsAsync(SqlDataReader reader, CancellationToken ct)
@@ -1422,8 +1424,8 @@ public sealed class SqlDenialActionChangeVerificationRepository : IDenialActionC
         if (!string.IsNullOrWhiteSpace(q.AssignedTo)) { parts.Add("v.AssignedTo = @AssignedTo"); p.Add(new SqlParameter("@AssignedTo", q.AssignedTo.Trim())); }
         if (!string.IsNullOrWhiteSpace(q.Search))
         {
-            parts.Add("(v.ClaimID LIKE @Search OR v.TaskID LIKE @Search OR v.PatientId LIKE @Search OR v.PayerName LIKE @Search OR v.DenialCode LIKE @Search)");
-            p.Add(new SqlParameter("@Search", $"%{q.Search.Trim()}%"));
+            parts.Add("(v.ClaimID LIKE @Search ESCAPE '\\' OR v.TaskID LIKE @Search ESCAPE '\\' OR v.PatientId LIKE @Search ESCAPE '\\' OR v.PayerName LIKE @Search ESCAPE '\\' OR v.DenialCode LIKE @Search ESCAPE '\\')");
+            p.Add(new SqlParameter("@Search", LikePattern(q.Search)));
         }
         return string.Join(" AND ", parts);
     }
@@ -1435,6 +1437,8 @@ public sealed class SqlDenialActionChangeVerificationRepository : IDenialActionC
 
     private static SqlParameter[] CloneParams(List<SqlParameter> source) => source.Select(x => new SqlParameter(x.ParameterName, x.Value)).ToArray();
     private static object DbValue(string? value) => string.IsNullOrWhiteSpace(value) ? DBNull.Value : value.Trim();
+    private static string LikePattern(string value) => $"%{EscapeLike(value.Trim())}%";
+    private static string EscapeLike(string value) => value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal).Replace("[", "\\[", StringComparison.Ordinal);
     private static string? GetString(SqlDataReader r, string column) => r.IsDBNull(r.GetOrdinal(column)) ? null : r.GetString(r.GetOrdinal(column));
     private static DateTime? GetDate(SqlDataReader r, string column) => r.IsDBNull(r.GetOrdinal(column)) ? null : r.GetDateTime(r.GetOrdinal(column));
     private static int? GetNullableInt(SqlDataReader r, string column) => r.IsDBNull(r.GetOrdinal(column)) ? null : r.GetInt32(r.GetOrdinal(column));

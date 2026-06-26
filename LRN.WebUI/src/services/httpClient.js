@@ -21,12 +21,6 @@ function joinUrl(base, path) {
   return p ? `${b}/${p}` : b;
 }
 
-function appendWorkflowToken(url, token) {
-  if (!token) return url;
-  const separator = url.includes('?') ? '&' : '?';
-  return `${url}${separator}__workflowToken=${encodeURIComponent(token)}`;
-}
-
 async function readError(response) {
   const requestId =
     response.headers.get('x-correlation-id') ||
@@ -72,7 +66,7 @@ async function executeRequest(path, options = {}, jwt = '') {
     headers.set('X-Authorization', `Bearer ${jwt}`);
   }
 
-  const url = appendWorkflowToken(joinUrl(API_BASE_URL, path), jwt);
+  const url = joinUrl(API_BASE_URL, path);
 
   return fetch(url, {
     ...options,
@@ -116,7 +110,15 @@ export async function api(path, options = {}) {
 
 export async function apiUrl(path) {
   const token = await ensureWorkflowJwt();
-  return appendWorkflowToken(joinUrl(API_BASE_URL, path), token);
+  const response = await executeRequest(path, { headers: { Accept: '*/*' } }, token);
+
+  if (!response.ok) {
+    const error = await readError(response);
+    throw error instanceof Error ? error : new Error(error || `API download error ${response.status}`);
+  }
+
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
 }
 
 // Backward-compatible export names used by existing files.
