@@ -1027,49 +1027,7 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
     }
 
     private static string ResolveLabConnectionString(IConfiguration configuration, int labId, string labName, string? connectionKey = null)
-    {
-        var byId = configuration.GetConnectionString($"Lab_{labId}");
-        if (!string.IsNullOrWhiteSpace(byId)) return byId;
-
-        if (!string.IsNullOrWhiteSpace(connectionKey))
-        {
-            var byConnectionKey = configuration.GetConnectionString(connectionKey.Trim());
-            if (!string.IsNullOrWhiteSpace(byConnectionKey)) return byConnectionKey;
-        }
-
-        var normalized = NormalizeKey(labName);
-        var knownKey = normalized switch
-        {
-            "PCRLABSOFAMERICA" or "PCRLOA" => "PCRLOAConnStr",
-            "COVE" => "CoveConnection",
-            "INHEALTHDTR" or "INHEALTH" => "InHealthConn",
-            "ELIXIR" => "ElixirConnection",
-            "CERTUS" or "CERTUSLABORATORIES" => "CertusConnection",
-            "BEECHTREE" => "BeechTreeConnStr",
-            "AUGUSTUSLABS" or "AUGUSTUS" => "AugustusConnStr",
-            "NORTHWEST" or "NWL" => "NWLConnection",
-            "PCRDXAL" => "PCRALConnection",
-            "PCRDXCO" => "PCRDxConnection",
-            "PHILIFE" => "PhiLifeConnStr",
-            "RISINGTIDES" => "RisingTidesConnStr",
-            _ => string.Empty
-        };
-
-        if (!string.IsNullOrWhiteSpace(knownKey))
-        {
-            var conn = configuration.GetConnectionString(knownKey);
-            if (!string.IsNullOrWhiteSpace(conn)) return conn;
-        }
-
-        foreach (var section in configuration.GetSection("ConnectionStrings").GetChildren())
-        {
-            var key = NormalizeKey(section.Key);
-            if (key.Contains(normalized, StringComparison.OrdinalIgnoreCase) || normalized.Contains(key.Replace("CONNECTION", "").Replace("CONNSTR", ""), StringComparison.OrdinalIgnoreCase))
-                return section.Value ?? string.Empty;
-        }
-
-        return string.Empty;
-    }
+        => LabConnectionResolver.Resolve(configuration, labId, labName, connectionKey);
 
     private static string NormalizeKey(string value)
         => new string((value ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());

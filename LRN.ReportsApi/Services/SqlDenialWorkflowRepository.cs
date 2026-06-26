@@ -17,6 +17,8 @@ public sealed class SqlDenialWorkflowRepository : IDenialWorkflowRepository
     private static readonly TimeSpan DashboardCacheDuration = TimeSpan.FromSeconds(90);
     private static readonly ConcurrentDictionary<string, ClaimCountsCacheEntry> ClaimCountsCache = new();
     private static readonly TimeSpan ClaimCountsCacheDuration = TimeSpan.FromSeconds(60);
+    private static readonly ConcurrentDictionary<int, byte> ClaimSupportSchemaReady = new();
+    private static readonly ConcurrentDictionary<int, SemaphoreSlim> ClaimSupportSchemaLocks = new();
 
     private readonly IConfiguration _configuration;
     private readonly string _masterConnectionString;
@@ -2921,51 +2923,7 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
 
 
     private static string ResolveLabConnectionString(IConfiguration configuration, int labId, string labName, string? connectionKey = null)
-    {
-        // First allow an exact per-lab override: ConnectionStrings:Lab_{LabId}
-        var byId = configuration.GetConnectionString($"Lab_{labId}");
-        if (!string.IsNullOrWhiteSpace(byId)) return byId;
-
-        // Preferred LRN Metrics mapping: LabId -> ConnectionKey -> ConnectionStrings entry.
-        if (!string.IsNullOrWhiteSpace(connectionKey))
-        {
-            var byConnectionKey = configuration.GetConnectionString(connectionKey.Trim());
-            if (!string.IsNullOrWhiteSpace(byConnectionKey)) return byConnectionKey;
-        }
-
-        var normalized = NormalizeKey(labName);
-        var knownKey = normalized switch
-        {
-            "PCRLABSOFAMERICA" or "PCRLOA" => "PCRLOAConnStr",
-            "COVE" => "CoveConnection",
-            "INHEALTHDTR" or "INHEALTH" => "InHealthConn",
-            "ELIXIR" => "ElixirConnection",
-            "CERTUS" or "CERTUSLABORATORIES" => "CertusConnection",
-            "BEECHTREE" => "BeechTreeConnStr",
-            "AUGUSTUSLABS" or "AUGUSTUS" => "AugustusConnStr",
-            "NORTHWEST" or "NWL" => "NWLConnection",
-            "PCRDXAL" => "PCRALConnection",
-            "PCRDXCO" => "PCRDxConnection",
-            "PHILIFE" => "PhiLifeConnStr",
-            "RISINGTIDES" => "RisingTidesConnStr",
-            _ => string.Empty
-        };
-
-        if (!string.IsNullOrWhiteSpace(knownKey))
-        {
-            var conn = configuration.GetConnectionString(knownKey);
-            if (!string.IsNullOrWhiteSpace(conn)) return conn;
-        }
-
-        foreach (var section in configuration.GetSection("ConnectionStrings").GetChildren())
-        {
-            var key = NormalizeKey(section.Key);
-            if (key.Contains(normalized, StringComparison.OrdinalIgnoreCase) || normalized.Contains(key.Replace("CONNECTION", "").Replace("CONNSTR", ""), StringComparison.OrdinalIgnoreCase))
-                return section.Value ?? string.Empty;
-        }
-
-        return string.Empty;
-    }
+        => LabConnectionResolver.Resolve(configuration, labId, labName, connectionKey);
 
     private static string NormalizeKey(string value)
         => new string((value ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
@@ -3633,6 +3591,12 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
 
     public async Task EnsureClaimSupportTablesAsync(int labId, CancellationToken ct)
     {
+        if (ClaimSupportSchemaReady.ContainsKey(labId)) return;
+        var schemaLock = ClaimSupportSchemaLocks.GetOrAdd(labId, _ => new SemaphoreSlim(1, 1));
+        await schemaLock.WaitAsync(ct);
+        try
+        {
+            if (ClaimSupportSchemaReady.ContainsKey(labId)) return;
         const string sql = @"
 IF OBJECT_ID('dbo.DenialClaimNotes','U') IS NULL
 BEGIN
@@ -3752,6 +3716,19 @@ END;
 
 IF COL_LENGTH('dbo.DenialClaimNotes','Status') IS NULL ALTER TABLE dbo.DenialClaimNotes ADD Status nvarchar(50) NULL;
 IF COL_LENGTH('dbo.DenialClaimNotes','NextFollowUpDate') IS NULL ALTER TABLE dbo.DenialClaimNotes ADD NextFollowUpDate date NULL;
+IF COL_LENGTH('dbo.DenialClaimNotes','ClaimIdNormalized') IS NULL
+    ALTER TABLE dbo.DenialClaimNotes ADD ClaimIdNormalized AS CONVERT(varchar(150),REPLACE(LTRIM(RTRIM(ISNULL(ClaimId,''))),'CLM-','')) PERSISTED;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID('dbo.DenialClaimNotes') AND name='IX_DenialClaimNotes_Normalized')
+   AND NOT EXISTS (SELECT 1 FROM sys.stats WHERE object_id=OBJECT_ID('dbo.DenialClaimNotes') AND name='IX_DenialClaimNotes_Normalized')
+BEGIN
+    BEGIN TRY
+        CREATE INDEX IX_DenialClaimNotes_Normalized ON dbo.DenialClaimNotes(LabId,NoteLevel,ClaimIdNormalized,CreatedOn DESC)
+        INCLUDE(TaskId,CptCode,IsDeleted);
+    END TRY
+    BEGIN CATCH
+        IF ERROR_NUMBER() NOT IN (1913,2714) THROW;
+    END CATCH
+END;
 IF COL_LENGTH('dbo.DenialClaimEscalations','EscalatedTo') IS NULL ALTER TABLE dbo.DenialClaimEscalations ADD EscalatedTo nvarchar(256) NULL;
 IF COL_LENGTH('dbo.DenialClaimEscalations','EscalatedToRole') IS NULL ALTER TABLE dbo.DenialClaimEscalations ADD EscalatedToRole nvarchar(100) NULL;
 IF COL_LENGTH('dbo.DenialClaimEscalations','NextFollowUpDate') IS NULL ALTER TABLE dbo.DenialClaimEscalations ADD NextFollowUpDate date NULL;
@@ -3763,6 +3740,12 @@ IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL AND COL_LENGTH('dbo.DenialLin
         await con.OpenAsync(ct);
         await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 120 };
         await cmd.ExecuteNonQueryAsync(ct);
+            ClaimSupportSchemaReady[labId] = 1;
+        }
+        finally
+        {
+            schemaLock.Release();
+        }
     }
 
     public async Task<IReadOnlyList<DenialNoteRow>> GetNotesAsync(int labId, string claimId, string? taskId, string? cptCode, string noteLevel, CancellationToken ct)
@@ -3774,26 +3757,21 @@ IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL AND COL_LENGTH('dbo.DenialLin
 SELECT TOP (200) NoteId,LabId,ClaimId,TaskId,CptCode,NoteLevel,NoteText,Status,NextFollowUpDate,CreatedBy,CreatedOn
 FROM dbo.DenialClaimNotes WITH (NOLOCK)
 WHERE IsDeleted=0 AND LabId=@LabId AND NoteLevel='Line'
-  AND (ClaimId=@ClaimId
-       OR REPLACE(LTRIM(RTRIM(ISNULL(ClaimId,''))), 'CLM-', '') = REPLACE(LTRIM(RTRIM(ISNULL(@ClaimId,''))), 'CLM-', '')
-       OR REPLACE(LTRIM(RTRIM(ISNULL(ClaimId,''))), 'CLM-', '') LIKE REPLACE(LTRIM(RTRIM(ISNULL(@ClaimId,''))), 'CLM-', '') + '\_%' ESCAPE '\'
-       OR REPLACE(LTRIM(RTRIM(ISNULL(@ClaimId,''))), 'CLM-', '') LIKE REPLACE(LTRIM(RTRIM(ISNULL(ClaimId,''))), 'CLM-', '') + '\_%' ESCAPE '\')
+  AND ClaimIdNormalized=@ClaimIdNormalized
   AND (@TaskId='' OR ISNULL(TaskId,'')=@TaskId)
   AND (@CptCode='' OR ISNULL(CptCode,'')=@CptCode)
 ORDER BY CreatedOn DESC, NoteId DESC;" : @"
 SELECT TOP (200) NoteId,LabId,ClaimId,TaskId,CptCode,NoteLevel,NoteText,Status,NextFollowUpDate,CreatedBy,CreatedOn
 FROM dbo.DenialClaimNotes WITH (NOLOCK)
 WHERE IsDeleted=0 AND LabId=@LabId AND NoteLevel='Claim'
-  AND (ClaimId=@ClaimId
-       OR REPLACE(LTRIM(RTRIM(ISNULL(ClaimId,''))), 'CLM-', '') = REPLACE(LTRIM(RTRIM(ISNULL(@ClaimId,''))), 'CLM-', '')
-       OR REPLACE(LTRIM(RTRIM(ISNULL(ClaimId,''))), 'CLM-', '') LIKE REPLACE(LTRIM(RTRIM(ISNULL(@ClaimId,''))), 'CLM-', '') + '\_%' ESCAPE '\'
-       OR REPLACE(LTRIM(RTRIM(ISNULL(@ClaimId,''))), 'CLM-', '') LIKE REPLACE(LTRIM(RTRIM(ISNULL(ClaimId,''))), 'CLM-', '') + '\_%' ESCAPE '\')
+  AND ClaimIdNormalized=@ClaimIdNormalized
 ORDER BY CreatedOn DESC, NoteId DESC;";
         await using var con = OpenLab(labId);
         await con.OpenAsync(ct);
         await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 120 };
         cmd.Parameters.AddWithValue("@LabId", labId);
         cmd.Parameters.AddWithValue("@ClaimId", claimId.Trim());
+        cmd.Parameters.AddWithValue("@ClaimIdNormalized", NormalizeClaimId(claimId));
         cmd.Parameters.AddWithValue("@TaskId", taskId?.Trim() ?? string.Empty);
         cmd.Parameters.AddWithValue("@CptCode", cptCode?.Trim() ?? string.Empty);
         await using var rd = await cmd.ExecuteReaderAsync(ct);
@@ -3824,6 +3802,9 @@ VALUES(@LabId,@ClaimId,@TaskId,@CptCode,@NoteLevel,@NoteText,@Status,@NextFollow
         if (await rd.ReadAsync(ct)) return ReadNote(rd);
         throw new InvalidOperationException("Unable to save note.");
     }
+
+    private static string NormalizeClaimId(string? claimId)
+        => (claimId ?? string.Empty).Trim().Replace("CLM-", string.Empty, StringComparison.OrdinalIgnoreCase);
 
     public async Task<IReadOnlyList<ClaimDocumentRow>> GetClaimDocumentsAsync(int labId, string claimId, CancellationToken ct)
     {

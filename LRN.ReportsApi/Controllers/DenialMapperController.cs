@@ -123,8 +123,20 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
     private async Task<int?> AuthorizedLab(int? requested, CancellationToken ct)
     {
         if(IsAdmin())return requested;
-        var claim=First("labId","LabId","lab_id");
-        if(int.TryParse(claim,out var id)&&id>0)return !requested.HasValue||requested==id?id:null;
+        var tokenLabIds=User.Claims
+            .Where(c=>string.Equals(c.Type,"lab_id",StringComparison.OrdinalIgnoreCase)
+                   ||string.Equals(c.Type,"labId",StringComparison.OrdinalIgnoreCase)
+                   ||string.Equals(c.Type,"LabId",StringComparison.OrdinalIgnoreCase))
+            .SelectMany(c=>c.Value.Split([',',';'],StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries))
+            .Select(value=>int.TryParse(value,out var id)?id:0)
+            .Where(id=>id>0)
+            .ToHashSet();
+        if(tokenLabIds.Count>0)
+        {
+            if(requested is >0)return tokenLabIds.Contains(requested.Value)?requested:null;
+            return tokenLabIds.Count==1?tokenLabIds.First():null;
+        }
+
         var labs=await workflowService.GetLabsForUserAsync(UserName(),ct);
         var allowed=labs.Select(x=>x.LabId).ToHashSet();
         if(requested is >0&&allowed.Contains(requested.Value))return requested;
