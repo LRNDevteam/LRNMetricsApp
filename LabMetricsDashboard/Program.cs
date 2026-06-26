@@ -481,14 +481,14 @@ builder.Services
 		options.SlidingExpiration = true;
 		options.Cookie.Name = "LRN.Auth";
 		options.Cookie.HttpOnly = true;
-		options.Cookie.SameSite = useWorkflowCrossOriginCookie ? SameSiteMode.None : SameSiteMode.None;
+		options.Cookie.SameSite = useWorkflowCrossOriginCookie ? SameSiteMode.None : SameSiteMode.Lax;
 		options.Cookie.Path = "/";
 		// Required for local React/Vite cross-origin AuthToken fetch.
 		// If this is SameAsRequest/Lax in Development, Chrome will not send LRN.Auth
 		// from http://localhost:5173 to https://localhost:44350, causing login loops.
 		options.Cookie.SecurePolicy = useWorkflowCrossOriginCookie
 			? CookieSecurePolicy.Always
-			: CookieSecurePolicy.Always;
+			: (builder.Environment.IsDevelopment() ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always);
 
 		// ── ReturnUrl loop guard ──────────────────────────────────────────────
 		// Prevent the error and login pages from being embedded as a ReturnUrl.
@@ -556,6 +556,8 @@ if (!app.Environment.IsDevelopment())
 // sees the correct scheme.  Without this, IIS terminates SSL and the app sees
 // "http://" — cookies are issued without the Secure flag and Chrome drops them.
 app.UseForwardedHeaders();
+
+app.Use(ApplySecurityHeadersMiddleware);
 
 // ── Stale cookie self-healing ──────────────────────────────────────────────
 // When the DataProtection key ring changes (e.g. when persistence was first turned on,
@@ -694,3 +696,34 @@ app.MapControllerRoute(
 app.MapControllers();
 
 app.Run();
+
+static async Task ApplySecurityHeadersMiddleware(HttpContext context, Func<Task> next)
+{
+	ApplySecurityHeaders(context);
+	await next();
+}
+
+static void ApplySecurityHeaders(HttpContext context)
+{
+	var headers = context.Response.Headers;
+	headers["X-Content-Type-Options"] = "nosniff";
+	headers["X-Frame-Options"] = "SAMEORIGIN";
+	headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+	headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()";
+	headers["Content-Security-Policy"] =
+		"default-src 'self'; " +
+		"base-uri 'self'; " +
+		"object-src 'none'; " +
+		"frame-ancestors 'self'; " +
+		"form-action 'self'; " +
+		"img-src 'self' data: blob:; " +
+		"font-src 'self' data:; " +
+		"style-src 'self' 'unsafe-inline'; " +
+		"script-src 'self' 'unsafe-inline'; " +
+		"connect-src 'self' http://localhost:* https://localhost:* ws://localhost:* wss://localhost:* http://127.0.0.1:* https://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:*";
+
+	if (context.Request.IsHttps)
+	{
+		headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
+	}
+}
