@@ -154,7 +154,7 @@ public sealed class DenialWorkflowService : IDenialWorkflowService
     public Task<int> UpdateClaimCommentsAsync(int labId, string claimId, string comments, string actionBy, CancellationToken ct) => _repo.UpdateClaimCommentsAsync(labId, claimId, comments, actionBy, ct);
     public Task<int> DecideVerificationAsync(VerificationDecisionRequest request, CancellationToken ct) => _repo.DecideVerificationAsync(request, !request.IsValidDenial || IsClosed(request.Status), ct);
     public Task<IReadOnlyList<DenialNoteRow>> GetNotesAsync(int labId, string claimId, string? taskId, string? cptCode, string noteLevel, CancellationToken ct) => _repo.GetNotesAsync(labId, claimId, taskId, cptCode, noteLevel, ct);
-    public async Task<DenialNoteRow> SaveNoteAsync(SaveDenialNoteRequest request, CancellationToken ct) { await _repo.EnsureClaimSupportTablesAsync(request.LabId, ct); return await _repo.SaveNoteAsync(request, ct); }
+    public Task<DenialNoteRow> SaveNoteAsync(SaveDenialNoteRequest request, CancellationToken ct) => _repo.SaveNoteAsync(request, ct);
     public Task<IReadOnlyList<ClaimDocumentRow>> GetClaimDocumentsAsync(int labId, string claimId, CancellationToken ct) => _repo.GetClaimDocumentsAsync(labId, claimId, ct);
     public Task<ClaimDocumentRow?> GetClaimDocumentAsync(int labId, long documentId, CancellationToken ct) => _repo.GetClaimDocumentAsync(labId, documentId, ct);
     public async Task<ClaimDocumentRow> SaveClaimDocumentAsync(ClaimDocumentRow row, CancellationToken ct) { await _repo.EnsureClaimSupportTablesAsync(row.LabId, ct); return await _repo.SaveClaimDocumentAsync(row, ct); }

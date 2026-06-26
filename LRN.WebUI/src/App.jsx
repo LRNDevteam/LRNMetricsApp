@@ -572,7 +572,7 @@ export default function App() {
           reviewer: user.userName,
           assignedTo: user.userName,
           page: 1,
-          pageSize: 500
+          pageSize: 50
         };
         const [assigned, pending, actionRequired, escalations, responses] = await Promise.all([
           denialWorkflowService.getTasks({ ...baseQuery, taskView: 'assigned' }),
@@ -599,7 +599,7 @@ export default function App() {
           role: user.role,
           userName: user.userName,
           page: 1,
-          pageSize: 500
+          pageSize: 50
         };
         const escalations = await denialWorkflowService.getEscalationQueue(managerBaseQuery, 'Claim');
         const escalationItems = normalizeEscalationNotificationItems(escalations);
@@ -735,29 +735,16 @@ export default function App() {
     }
 
     try {
-      const myFilters = {
-        ...menuCountQuery,
-        reviewer: reviewerOnly ? (user.userName || '') : (menuCountQuery.reviewer || user.userName || ''),
-        assignedTo: reviewerOnly ? (user.userName || '') : (menuCountQuery.assignedTo || user.userName || ''),
-        pageSize: 500
-      };
-      const [newTasks, assignedTasks, escalatedTasks, responseTasks, closedTasks] = await Promise.all([
-        denialWorkflowService.getTasks({ ...myFilters, taskView: 'assigned' }),
-        denialWorkflowService.getTasks({ ...myFilters, taskView: 'assigned' }),
-        denialWorkflowService.getTasks({ ...myFilters, taskView: 'escalations' }),
-        denialWorkflowService.getTasks({ ...myFilters, taskView: 'response' }),
-        denialWorkflowService.getTasks({ ...myFilters, taskView: 'closed' })
-      ]);
       setMyWorklistMenuCounts({
-        assigned: distinctClaimCount(normalizeNotificationItems(assignedTasks)),
+        assigned: Number(latestClaimCounts?.assigned ?? latestClaimCounts?.Assigned ?? 0),
         payerFollowup: Number(latestClaimCounts?.payerFollowup ?? latestClaimCounts?.PayerFollowup ?? 0),
         pendingDocumentation: Number(latestClaimCounts?.pendingDocumentation ?? latestClaimCounts?.PendingDocumentation ?? 0),
         pendingPayerResponse: Number(latestClaimCounts?.pendingPayerResponse ?? latestClaimCounts?.PendingPayerResponse ?? 0),
         internalEscalation: Number(latestClaimCounts?.internalEscalation ?? latestClaimCounts?.InternalEscalation ?? 0),
         externalEscalation: Number(latestClaimCounts?.externalEscalation ?? latestClaimCounts?.ExternalEscalation ?? 0),
-        escalationResponse: distinctClaimCount(normalizeNotificationItems(responseTasks)),
+        escalationResponse: Number(latestClaimCounts?.escalationResponse ?? latestClaimCounts?.EscalationResponse ?? 0),
         all: Number(latestClaimCounts?.allClaims ?? latestClaimCounts?.AllClaims ?? latestClaimCounts?.totalClaims ?? latestClaimCounts?.TotalClaims ?? 0),
-        closed: distinctClaimCount(normalizeNotificationItems(closedTasks))
+        closed: Number(latestClaimCounts?.closed ?? latestClaimCounts?.Closed ?? 0)
       });
     } catch {
       setMyWorklistMenuCounts({ assigned: null, payerFollowup: null, pendingDocumentation: null, pendingPayerResponse: null, internalEscalation: null, externalEscalation: null, escalationResponse: null, all: null, closed: null });
