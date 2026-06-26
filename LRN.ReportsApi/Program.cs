@@ -31,6 +31,7 @@ builder.Services.AddScoped<IDenialCodeMasterRepository, SqlDenialCodeMasterRepos
 builder.Services.AddScoped<IDenialCodeMasterExcelService, DenialCodeMasterExcelService>();
 builder.Services.AddScoped<IDenialActionChangeVerificationRepository, SqlDenialActionChangeVerificationRepository>();
 builder.Services.AddScoped<IDenialMapperRepository, SqlDenialMapperRepository>();
+builder.Services.AddScoped<IMasterValuesRepository, SqlMasterValuesRepository>();
 builder.Services.AddScoped<IDenialWorkflowIssueNotifier, DenialWorkflowIssueNotifier>();
 builder.Services.AddScoped<IDenialWorkflowSupportService, DenialWorkflowSupportService>();
 builder.Services.AddSingleton<IDenialWorkflowExportJobService, DenialWorkflowExportJobService>();
@@ -77,7 +78,8 @@ app.Use(async (context, next) =>
 {
     var path = context.Request.Path;
     var isWorkflowApi = path.StartsWithSegments("/api/denialworkflow")
-        || path.StartsWithSegments("/api/denial-workflow");
+        || path.StartsWithSegments("/api/denial-workflow")
+        || path.StartsWithSegments("/api/master-values");
 
     if (!isWorkflowApi
         || path.StartsWithSegments("/api/denialworkflow/health")
