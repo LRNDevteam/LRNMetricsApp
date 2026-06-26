@@ -410,6 +410,7 @@ builder.Services.AddSingleton<HelpBotService>();
 
 builder.Services.Configure<DenialWorkflowOptions>(builder.Configuration.GetSection("DenialWorkflowApi"));
 builder.Services.AddHttpClient<IDenialWorkflowApiClient, DenialWorkflowApiClient>();
+builder.Services.AddHttpClient<IMasterValuesApiClient, MasterValuesApiClient>();
 
 // Allow local Vite React dev server to call MVC AuthToken endpoint with cookies.
 // Production stays same-origin, but these origins are useful while debugging React locally.

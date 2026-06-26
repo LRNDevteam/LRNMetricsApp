@@ -1,0 +1,152 @@
+@model LabMetricsDashboard.Models.MasterValuesPageViewModel
+@{
+    ViewData["Title"] = "Payer Policy Insurance Master";
+}
+
+<style>
+    .mv-shell { display: flex; flex-direction: column; gap: 1rem; }
+    .mv-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+    .mv-title h2 { margin: 0; font-size: 1.45rem; font-weight: 800; color: #162033; }
+    .mv-title small { color: #64748b; font-weight: 600; }
+    .mv-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+    .mv-card { background: #fff; border: 1px solid #d9e2ef; border-radius: 8px; box-shadow: 0 6px 18px rgba(15, 23, 42, .06); }
+    .mv-filter { padding: 1rem; }
+    .mv-filter .form-label { margin-bottom: .25rem; font-size: .74rem; color: #475569; font-weight: 800; text-transform: uppercase; }
+    .mv-filter .form-control, .mv-filter .form-select { min-height: 38px; font-size: .9rem; }
+    .mv-grid-wrap { position: relative; }
+    .mv-grid-scroll { overflow: auto; max-height: calc(100vh - 315px); min-height: 315px; }
+    .mv-table { min-width: 1320px; font-size: .82rem; }
+    .mv-table th, .mv-table td { border: 1px solid #d8e1ee; }
+    .mv-table thead th { position: sticky; top: 0; z-index: 2; background: #f8fafc; color: #0f172a; border-bottom: 1px solid #b8c5d6; white-space: nowrap; font-size: .75rem; text-transform: uppercase; letter-spacing: .02em; }
+    .mv-table thead th.sortable { cursor: pointer; user-select: none; }
+    .mv-table thead th.sortable:hover { background: #eef6ff; color: #0b5ed7; }
+    .mv-sort { color: #64748b; font-size: .72rem; margin-left: .25rem; }
+    .mv-table thead th.sorted .mv-sort { color: #0b5ed7; }
+    .mv-table tbody td { white-space: nowrap; max-width: 230px; overflow: hidden; text-overflow: ellipsis; }
+    .mv-table tbody tr:hover { background: #f8fbff; }
+    .mv-primary { font-weight: 800; color: #0f172a; }
+    .mv-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: .15rem .5rem; font-size: .72rem; font-weight: 800; background: #eef2f7; color: #334155; }
+    .mv-badge.on { background: #dcfce7; color: #166534; }
+    .mv-badge.off { background: #fee2e2; color: #991b1b; }
+    .mv-loader { display: none; position: absolute; inset: 0; z-index: 5; align-items: center; justify-content: center; background: rgba(248, 250, 252, .74); backdrop-filter: blur(1px); }
+    .mv-loader.active { display: flex; }
+    .mv-loader-box { background: #0f172a; color: white; border-radius: 8px; padding: .75rem 1rem; display: inline-flex; gap: .7rem; align-items: center; box-shadow: 0 18px 40px rgba(15, 23, 42, .22); }
+    .mv-empty { padding: 4rem 1rem; text-align: center; color: #64748b; }
+    .mv-footer { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .75rem 1rem; border-top: 1px solid #e2e8f0; }
+</style>
+
+<div class="mv-shell">
+    <div class="mv-header">
+        <div class="mv-title">
+            <h2>Payer Policy Insurance Master</h2>
+            <small>Maintain policy payer mapping, active status, MCO flags, and payer attributes.</small>
+        </div>
+        <div class="mv-actions">
+            <button type="button" class="btn btn-primary" id="addBtn"><i class="bi bi-plus-lg"></i> Add New Policy Payer</button>
+            <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#importModal"><i class="bi bi-upload"></i> Import Excel</button>
+            <button type="button" class="btn btn-outline-success" id="exportBtn"><i class="bi bi-file-earmark-excel"></i> Export Excel</button>
+        </div>
+    </div>
+
+    <div class="mv-card mv-filter">
+        <form id="filterForm" class="row g-3 align-items-end">
+            <div class="col-lg-3 col-md-6"><label class="form-label">Search</label><input class="form-control" name="search" placeholder="Code, name, normalized name" /></div>
+            <div class="col-lg-2 col-md-6"><label class="form-label">Payer Code</label><input class="form-control" name="payerCode" /></div>
+            <div class="col-lg-2 col-md-6"><label class="form-label">Payer Name</label><input class="form-control" name="payerName" /></div>
+            <div class="col-lg-2 col-md-6"><label class="form-label">Global Payer ID</label><input class="form-control" name="globalPayerId" type="number" /></div>
+            <div class="col-lg-1 col-md-4"><label class="form-label">Plan</label><input class="form-control" name="planType" /></div>
+            <div class="col-lg-1 col-md-4"><label class="form-label">State</label><input class="form-control" name="payerState" /></div>
+            <div class="col-lg-1 col-md-4"><label class="form-label">Active</label><select class="form-select" name="isActive"><option value="">All</option><option>Active</option><option>Inactive</option><option>Yes</option><option>No</option></select></div>
+            <div class="col-lg-1 col-md-4"><label class="form-label">MCO</label><select class="form-select" name="isMCO"><option value="">All</option><option>Yes</option><option>No</option><option>True</option><option>False</option></select></div>
+            <div class="col-12 d-flex gap-2 justify-content-end">
+                <button class="btn btn-primary" type="submit" id="searchBtn"><i class="bi bi-search"></i> Search</button>
+                <button class="btn btn-outline-secondary" type="button" id="resetBtn"><i class="bi bi-arrow-counterclockwise"></i> Reset</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="mv-card mv-grid-wrap">
+        <div class="mv-loader" id="gridLoader"><div class="mv-loader-box"><span class="spinner-border spinner-border-sm"></span><span id="busyText">Loading records...</span></div></div>
+        <div class="mv-grid-scroll">
+            <table class="table table-sm table-hover table-bordered align-middle mv-table mb-0">
+                <thead><tr><th class="sortable" data-sort="payerCode">Payer Code <span class="mv-sort"></span></th><th class="sortable" data-sort="payerName">Payer Name <span class="mv-sort"></span></th><th class="sortable" data-sort="payerNameNormalized">Normalized <span class="mv-sort"></span></th><th class="sortable" data-sort="globalPayerID">Global ID <span class="mv-sort"></span></th><th class="sortable" data-sort="payerGroupCode">Group <span class="mv-sort"></span></th><th class="sortable" data-sort="payerCommonCode">Common <span class="mv-sort"></span></th><th class="sortable" data-sort="planType">Plan <span class="mv-sort"></span></th><th class="sortable" data-sort="payerState">State <span class="mv-sort"></span></th><th class="sortable" data-sort="isActive">Active <span class="mv-sort"></span></th><th class="sortable" data-sort="benefitAdminCode">Benefit Code <span class="mv-sort"></span></th><th class="sortable" data-sort="benefitAdministrator">Benefit Admin <span class="mv-sort"></span></th><th class="sortable" data-sort="isMCO">MCO <span class="mv-sort"></span></th><th class="sortable" data-sort="remarks">Remarks <span class="mv-sort"></span></th><th class="text-end">Action</th></tr></thead>
+                <tbody id="rows"></tbody>
+            </table>
+        </div>
+        <div class="mv-footer"><small id="pageInfo" class="text-muted"></small><div class="btn-group"><button class="btn btn-outline-secondary btn-sm" id="prevBtn">Previous</button><button class="btn btn-outline-secondary btn-sm" id="nextBtn">Next</button></div></div>
+    </div>
+</div>
+
+<div class="modal fade" id="editModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title" id="editTitle">Policy Payer</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <form id="editForm" class="row g-3">
+                    <input type="hidden" id="id" />
+                    <div class="col-md-4"><label class="form-label">Payer Code</label><input class="form-control" name="payerCode" /></div>
+                    <div class="col-md-4"><label class="form-label">Payer Name</label><input class="form-control" name="payerName" required /></div>
+                    <div class="col-md-4"><label class="form-label">Normalized Name</label><input class="form-control" name="payerNameNormalized" /></div>
+                    <div class="col-md-4"><label class="form-label">Global Payer ID</label><input class="form-control" name="globalPayerID" type="number" /></div>
+                    <div class="col-md-4"><label class="form-label">Payer Group Code</label><input class="form-control" name="payerGroupCode" /></div>
+                    <div class="col-md-4"><label class="form-label">Payer Common Code</label><input class="form-control" name="payerCommonCode" /></div>
+                    <div class="col-md-4"><label class="form-label">Plan Type</label><input class="form-control" name="planType" /></div>
+                    <div class="col-md-4"><label class="form-label">Payer State</label><input class="form-control" name="payerState" /></div>
+                    <div class="col-md-4"><label class="form-label">Is Active</label><input class="form-control" name="isActive" /></div>
+                    <div class="col-md-4"><label class="form-label">Benefit Admin Code</label><input class="form-control" name="benefitAdminCode" /></div>
+                    <div class="col-md-4"><label class="form-label">Benefit Administrator</label><input class="form-control" name="benefitAdministrator" /></div>
+                    <div class="col-md-4"><label class="form-label">Is MCO</label><input class="form-control" name="isMCO" /></div>
+                    <div class="col-md-12"><label class="form-label">Remarks</label><textarea class="form-control" name="remarks" rows="2"></textarea></div>
+                </form>
+                <div id="saveError" class="alert alert-danger mt-3 d-none"></div>
+            </div>
+            <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" id="saveBtn">Save</button></div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="importModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title">Import Policy Payers</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <div class="alert alert-info py-2">Upload PayerPolicy Insurance Master Excel with sheet <strong>PP_Ins.Master</strong>.</div>
+                <input class="form-control" type="file" id="importFile" accept=".xlsx" />
+                <div id="importResult" class="mt-3 small"></div>
+            </div>
+            <div class="modal-footer"><button class="btn btn-primary" id="importBtn"><i class="bi bi-upload"></i> Import</button></div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+(function(){
+let page=1,pageSize=25,totalPages=1,sortColumn='',sortDirection='asc';
+const urls={data:'@Url.Action("PolicyPayersData","MasterValues")',get:'@Url.Action("PolicyPayer","MasterValues")',save:'@Url.Action("SavePolicyPayer","MasterValues")',status:'@Url.Action("PolicyStatus","MasterValues")',import:'@Url.Action("ImportPolicy","MasterValues")',export:'@Url.Action("ExportPolicy","MasterValues")'};
+const editModal=new bootstrap.Modal(document.getElementById('editModal'));
+const loader=document.getElementById('gridLoader'),busyText=document.getElementById('busyText');
+function esc(v){return (v??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+function qs(){const fd=new FormData(document.getElementById('filterForm'));fd.set('page',page);fd.set('pageSize',pageSize);if(sortColumn){fd.set('sortColumn',sortColumn);fd.set('sortDirection',sortDirection);}return new URLSearchParams(fd).toString();}
+function updateSortHeaders(){document.querySelectorAll('th.sortable').forEach(th=>{const active=th.dataset.sort===sortColumn;th.classList.toggle('sorted',active);th.querySelector('.mv-sort').textContent=active?(sortDirection==='asc'?'▲':'▼'):'↕';});}
+function setBusy(on,text){busyText.textContent=text||'Working...';loader.classList.toggle('active',on);document.querySelectorAll('button,input,select,textarea').forEach(x=>{if(!x.closest('.modal.show'))x.disabled=on;});}
+function setBtn(btn,on,text){btn.disabled=on;if(on){btn.dataset.old=btn.innerHTML;btn.innerHTML='<span class="spinner-border spinner-border-sm me-1"></span>'+text;}else if(btn.dataset.old){btn.innerHTML=btn.dataset.old;delete btn.dataset.old;}}
+async function errorText(r){try{const j=await r.json();return j.message||j.title||JSON.stringify(j);}catch{return await r.text();}}
+function badge(v){const on=/active|yes|true|1/i.test(v||''),off=/inactive|no|false|0/i.test(v||'');return `<span class="mv-badge ${on?'on':off?'off':''}">${esc(v||'')}</span>`;}
+function renderRows(items){document.getElementById('rows').innerHTML=(items||[]).map(x=>`<tr><td class="mv-primary">${esc(x.payerCode)}</td><td class="mv-primary" title="${esc(x.payerName)}">${esc(x.payerName)}</td><td title="${esc(x.payerNameNormalized)}">${esc(x.payerNameNormalized)}</td><td>${esc(x.globalPayerID)}</td><td>${esc(x.payerGroupCode)}</td><td>${esc(x.payerCommonCode)}</td><td>${esc(x.planType)}</td><td>${esc(x.payerState)}</td><td>${badge(x.isActive)}</td><td>${esc(x.benefitAdminCode)}</td><td title="${esc(x.benefitAdministrator)}">${esc(x.benefitAdministrator)}</td><td>${badge(x.isMCO)}</td><td title="${esc(x.remarks)}">${esc(x.remarks)}</td><td class="text-end text-nowrap"><button class="btn btn-sm btn-outline-primary edit" data-id="${x.payerPolicyInsuranceMasterId}" title="Edit"><i class="bi bi-pencil"></i></button> <button class="btn btn-sm btn-outline-secondary stat" data-id="${x.payerPolicyInsuranceMasterId}" data-active="${esc(x.isActive)}" title="Activate/deactivate"><i class="bi bi-toggle-on"></i></button></td></tr>`).join('')||'<tr><td colspan="14"><div class="mv-empty"><div class="fw-bold">No records found</div><div>Adjust filters or import the master file.</div></div></td></tr>';}
+async function load(){updateSortHeaders();const query=qs();setBusy(true,'Loading records...');try{const r=await fetch(urls.data+'?'+query);const d=await r.json();totalPages=d.totalPages||1;document.getElementById('pageInfo').textContent=`Page ${d.page||1} of ${totalPages} - ${d.totalCount||0} records`;renderRows(d.items);}catch(e){document.getElementById('rows').innerHTML='<tr><td colspan="14"><div class="mv-empty text-danger">Unable to load records.</div></td></tr>';}finally{setBusy(false);}}
+function fill(x){const f=document.getElementById('editForm');f.reset();document.getElementById('id').value=x?.payerPolicyInsuranceMasterId||'';for(const e of f.elements){if(e.name&&x&&x[e.name]!==undefined)e.value=x[e.name]??'';}document.getElementById('saveError').classList.add('d-none');}
+document.getElementById('filterForm').onsubmit=e=>{e.preventDefault();page=1;load();};
+document.querySelectorAll('th.sortable').forEach(th=>th.addEventListener('click',()=>{const col=th.dataset.sort;if(sortColumn===col){sortDirection=sortDirection==='asc'?'desc':'asc';}else{sortColumn=col;sortDirection='asc';}page=1;load();}));
+document.getElementById('resetBtn').onclick=()=>{document.getElementById('filterForm').reset();page=1;load();};
+document.getElementById('prevBtn').onclick=()=>{if(page>1){page--;load();}};
+document.getElementById('nextBtn').onclick=()=>{if(page<totalPages){page++;load();}};
+document.getElementById('addBtn').onclick=()=>{fill(null);document.getElementById('editTitle').textContent='Add New Policy Payer';editModal.show();};
+document.getElementById('rows').onclick=async e=>{const edit=e.target.closest('.edit'),stat=e.target.closest('.stat');if(edit){setBusy(true,'Opening record...');try{const r=await fetch(urls.get+'?id='+edit.dataset.id);fill(await r.json());document.getElementById('editTitle').textContent='Edit Policy Payer';editModal.show();}finally{setBusy(false);}}if(stat){const next=/active|yes|true/i.test(stat.dataset.active)?'Inactive':'Active';setBusy(true,'Updating status...');try{await fetch(urls.status+`?id=${stat.dataset.id}&isActive=${encodeURIComponent(next)}`,{method:'POST'});await load();}finally{setBusy(false);}}};
+document.getElementById('saveBtn').onclick=async()=>{const btn=document.getElementById('saveBtn'),f=document.getElementById('editForm');if(!f.reportValidity())return;const data=Object.fromEntries(new FormData(f));data.globalPayerID=data.globalPayerID?Number(data.globalPayerID):null;const id=document.getElementById('id').value;setBtn(btn,true,'Saving...');try{const r=await fetch(urls.save+(id?'?id='+id:''),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});if(!r.ok){document.getElementById('saveError').textContent=await errorText(r);document.getElementById('saveError').classList.remove('d-none');return;}editModal.hide();await load();}finally{setBtn(btn,false);}};
+document.getElementById('importBtn').onclick=async()=>{const btn=document.getElementById('importBtn'),file=document.getElementById('importFile').files[0];if(!file)return;const fd=new FormData();fd.append('file',file);setBtn(btn,true,'Importing...');document.getElementById('importResult').innerHTML='<span class="text-muted">Import running. Please keep this window open.</span>';try{const r=await fetch(urls.import,{method:'POST',body:fd});const d=await r.json();document.getElementById('importResult').innerHTML=`<div class="alert alert-light border mb-0"><strong>Total:</strong> ${d.totalRows||0} &nbsp; <strong>Inserted:</strong> ${d.insertedRows||0} &nbsp; <strong>Updated:</strong> ${d.updatedRows||0} &nbsp; <strong>Skipped:</strong> ${d.skippedRows||0} &nbsp; <strong>Errors:</strong> ${d.errorRows||0}<div class="mt-2 text-warning">${(d.warnings||[]).map(esc).slice(0,8).join('<br>')}</div><div class="mt-2 text-danger">${(d.errors||[]).map(esc).slice(0,8).join('<br>')}</div></div>`;await load();}finally{setBtn(btn,false);}};
+document.getElementById('exportBtn').onclick=()=>{const btn=document.getElementById('exportBtn');setBtn(btn,true,'Exporting...');window.lmdExcelDownload(urls.export+'?'+qs());setTimeout(()=>setBtn(btn,false),1800);};
+load();
+})();
+</script>
+}
