@@ -293,7 +293,8 @@
                 </div>
             }
 
-            <form asp-action="Login" method="post" autocomplete="off" id="loginForm">
+            @* Keep the login POST on the exact origin that served this page. *@
+            <form action="./Login" method="post" autocomplete="off" id="loginForm">
                 @Html.AntiForgeryToken()
                 <input type="hidden" name="returnUrl" value="@(ViewData["ReturnUrl"] as string)" />
 
@@ -346,7 +347,7 @@
 
 </div>
 
-<script>
+<script nonce='@Context.Items["CspNonce"]'>
     (function() {
         var pwd = document.getElementById('Password');
         var btn = document.getElementById('togglePwd');

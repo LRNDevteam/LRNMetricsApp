@@ -141,7 +141,7 @@
 </div>
 
 @section Scripts {
-<script>
+<script nonce='@Context.Items["CspNonce"]'>
 (function(){
 let page=1,pageSize=25,totalPages=1,labs=[],sortColumn='',sortDirection='asc';
 const urls={data:'@Url.Action("InsurancePayersData","MasterValues")',get:'@Url.Action("InsurancePayer","MasterValues")',save:'@Url.Action("SaveInsurancePayer","MasterValues")',status:'@Url.Action("InsuranceStatus","MasterValues")',import:'@Url.Action("ImportInsurance","MasterValues")',export:'@Url.Action("ExportInsurance","MasterValues")',labs:'@Url.Action("Labs","MasterValues")'};

@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using LRN.ReportsApi.Models;
+using LRN.ReportsApi.Security;
 using LRN.ReportsApi.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -61,7 +62,8 @@ public sealed class InsurancePayerMasterController : ControllerBase
     public async Task<ActionResult<ImportResultDto>> Import([FromForm] MasterValueImportRequest request, CancellationToken ct)
     {
         if (!IsAdmin()) return Denied();
-        if (request.File is null || request.File.Length == 0) return BadRequest(new { message = "Select an .xlsx file." });
+        var uploadError = await FileUploadGuard.ValidateExcelAsync(request.File, 25 * 1024 * 1024, ct);
+        if (uploadError != null) return BadRequest(new { message = uploadError });
         await using var stream = request.File.OpenReadStream();
         return Ok(await _repository.ImportInsurancePayersAsync(stream, UserName(), ct));
     }

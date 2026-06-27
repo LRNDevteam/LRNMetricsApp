@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using LRN.ReportsApi.Models;
+using LRN.ReportsApi.Security;
 using LRN.ReportsApi.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -101,7 +102,8 @@ public sealed class DenialCodeMasterController : ControllerBase
         if (labId <= 0) return BadRequest(new { message = "LabId is required." });
         if (!await CanAccessLabAsync(labId, ct)) return LabAccessDenied();
         var file = request.File;
-        if (file is null || file.Length == 0) return BadRequest(new { message = "Select an Excel file." });
+        var uploadError = await FileUploadGuard.ValidateExcelAsync(file, 25 * 1024 * 1024, ct);
+        if (uploadError != null) return BadRequest(new { message = uploadError });
         await using var stream = file.OpenReadStream();
         return Ok(await _excelService.ImportAsync(labId, stream, file.FileName, CurrentUserName(), ct));
     }

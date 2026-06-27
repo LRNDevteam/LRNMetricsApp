@@ -496,6 +496,13 @@ public class DenialDashboardController : Controller
 			return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
 		}
 
+		var uploadError = await FileUploadGuard.ValidateCsvAsync(taskBoardCsv, 25 * 1024 * 1024, cancellationToken);
+		if (uploadError != null)
+		{
+			TempData["DenialDashboardError"] = uploadError;
+			return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
+		}
+
 		List<TaskBoardCsvUpdate> updates;
 		try
 		{

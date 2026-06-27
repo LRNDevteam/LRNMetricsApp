@@ -1,4 +1,5 @@
 using LRN.ReportsApi.Models;
+using LRN.ReportsApi.Security;
 using LRN.ReportsApi.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Http;
@@ -209,7 +210,8 @@ public sealed class DenialWorkflowController : ControllerBase
         var labId = upload.LabId;
         var file = upload.File;
         if (labId <= 0) return BadRequest(new { message = "LabId is required." });
-        if (file is null || file.Length == 0) return BadRequest(new { message = "A CSV file is required." });
+        var uploadError = await FileUploadGuard.ValidateCsvOrExcelAsync(file, 25 * 1024 * 1024, ct);
+        if (uploadError != null) return BadRequest(new { message = uploadError });
         var extension = Path.GetExtension(file.FileName);
         if (!string.Equals(extension, ".csv", StringComparison.OrdinalIgnoreCase)
             && !string.Equals(extension, ".xlsx", StringComparison.OrdinalIgnoreCase))
@@ -586,6 +588,12 @@ public sealed class DenialWorkflowController : ControllerBase
         if ((IsClientManagerRole(role) || IsAccountManagerRole(role)) && !await HasExternalManagerDocumentAccessAsync(labId, claimId, null, null, role, ct))
             return StatusCode(StatusCodes.Status403Forbidden, new { message = "Client/Account Manager can upload documents only for claims escalated to their role." });
         if (files == null || files.Count == 0) return BadRequest("Select at least one file.");
+        if (files.Count > 10) return BadRequest(new { message = "Upload a maximum of 10 files at a time." });
+        foreach (var file in files)
+        {
+            var uploadError = await FileUploadGuard.ValidateDocumentAsync(file, 25 * 1024 * 1024, ct);
+            if (uploadError != null) return BadRequest(new { message = $"{Path.GetFileName(file.FileName)}: {uploadError}" });
+        }
 
         uploadedBy = string.IsNullOrWhiteSpace(uploadedBy) ? (FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "ReactWorkflow") : uploadedBy;
         var configuredRoot = _configuration["DenialWorkflowFileStorage:UploadRootPath"];
