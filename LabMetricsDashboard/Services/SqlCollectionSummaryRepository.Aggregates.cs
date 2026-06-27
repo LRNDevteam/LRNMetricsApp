@@ -245,6 +245,13 @@ public sealed partial class SqlCollectionSummaryRepository
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(tableName);
+        tableName = SafeSqlIdentifier(tableName);
+        claimCountCol = SafePanelAveragesColumn(claimCountCol);
+        carrierPayCol = SafePanelAveragesColumn(carrierPayCol);
+        days30CountCol = SafePanelAveragesColumn(days30CountCol);
+        days30AmtCol = SafePanelAveragesColumn(days30AmtCol);
+        days60CountCol = SafePanelAveragesColumn(days60CountCol);
+        days60AmtCol = SafePanelAveragesColumn(days60AmtCol);
 
         string BuildSql(bool withAdj)
         {
@@ -1026,5 +1033,23 @@ public sealed partial class SqlCollectionSummaryRepository
             GrandInsuranceBalance  = flat.Sum(x => x.IB),
             GrandPatientBalance    = flat.Sum(x => x.PB),
         };
+    }
+    private static string SafeSqlIdentifier(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Any(c => !(char.IsLetterOrDigit(c) || c == '_')))
+            throw new InvalidOperationException("Unsupported SQL identifier.");
+        return value;
+    }
+
+    private static string SafePanelAveragesColumn(string value)
+    {
+        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "NoOfClaims", "ClaimCount", "CarrierPayment", "InsurancePayment",
+            "Days30Count", "Days30Amount", "Over30Count", "Over30Amount",
+            "Days60Count", "Days60Amount", "Over60Count", "Over60Amount"
+        };
+        if (!allowed.Contains(value)) throw new InvalidOperationException("Unsupported aggregate column.");
+        return value;
     }
 }

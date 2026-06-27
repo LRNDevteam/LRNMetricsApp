@@ -97,14 +97,16 @@ public sealed class MasterValuesController : Controller
     [HttpPost]
     public async Task<IActionResult> ImportInsurance(IFormFile file, CancellationToken ct)
     {
-        if (file == null || file.Length == 0) return BadRequest(new { message = "Select an .xlsx file." });
+        var uploadError = await FileUploadGuard.ValidateExcelAsync(file, 25 * 1024 * 1024, ct);
+        if (uploadError != null) return BadRequest(new { message = uploadError });
         return Json(await _api.ImportInsuranceAsync(file, ct));
     }
 
     [HttpPost]
     public async Task<IActionResult> ImportPolicy(IFormFile file, CancellationToken ct)
     {
-        if (file == null || file.Length == 0) return BadRequest(new { message = "Select an .xlsx file." });
+        var uploadError = await FileUploadGuard.ValidateExcelAsync(file, 25 * 1024 * 1024, ct);
+        if (uploadError != null) return BadRequest(new { message = uploadError });
         return Json(await _api.ImportPolicyAsync(file, ct));
     }
 

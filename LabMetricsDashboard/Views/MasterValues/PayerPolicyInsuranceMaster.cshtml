@@ -120,7 +120,7 @@
 </div>
 
 @section Scripts {
-<script>
+<script nonce='@Context.Items["CspNonce"]'>
 (function(){
 let page=1,pageSize=25,totalPages=1,sortColumn='',sortDirection='asc';
 const urls={data:'@Url.Action("PolicyPayersData","MasterValues")',get:'@Url.Action("PolicyPayer","MasterValues")',save:'@Url.Action("SavePolicyPayer","MasterValues")',status:'@Url.Action("PolicyStatus","MasterValues")',import:'@Url.Action("ImportPolicy","MasterValues")',export:'@Url.Action("ExportPolicy","MasterValues")'};

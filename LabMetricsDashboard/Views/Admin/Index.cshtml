@@ -240,7 +240,7 @@
                     </div>
                 </div>
 
-<script>
+<script nonce='@Context.Items["CspNonce"]'>
     (function(){
         const pwd = document.getElementById('pwd');
         const pwdConfirm = document.getElementById('pwdConfirm');
@@ -307,7 +307,7 @@
         }
     })();
 </script>
-<script>
+<script nonce='@Context.Items["CspNonce"]'>
     // AJAX handlers for create user/role and mapping actions
     (function(){
         function jsonFormData(form) {

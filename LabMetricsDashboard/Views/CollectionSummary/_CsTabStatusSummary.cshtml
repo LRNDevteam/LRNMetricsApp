@@ -115,7 +115,7 @@
         <strong>Rows:</strong> ClaimStatus &rarr; PanelName &rarr; CPT Code &times; Units &times; Modifier &rarr; PayerName_Raw &bull;
         <strong>Sorted by:</strong> Count of Claims DESC &bull; Click any row to expand / collapse
     </div>
-    <script>
+    <script nonce='@Context.Items["CspNonce"]'>
     (function () {
         var tbl = document.getElementById('tblStatusSummary');
         if (!tbl) return;

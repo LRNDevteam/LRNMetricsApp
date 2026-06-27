@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>@ViewData["Title"] - Lab Revenue Intelligence</title>
-    <script type="importmap"></script>
+    <script nonce='@Context.Items["CspNonce"]' type="importmap"></script>
     <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="~/lib/bootstrap-icons/font/bootstrap-icons.min.css" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
@@ -522,7 +522,7 @@
 
 <body>
 @{
-    var denialReactUrl = Configuration["DenialWorkflowReactUrl"] ?? "http://localhost:5173";
+    var denialReactUrl = Configuration["DenialWorkflowReactUrl"] ?? "https://localhost:5173";
     var denialReactAgingUrl = denialReactUrl.Contains('#') ? denialReactUrl : $"{denialReactUrl}#aging";
 }
 
@@ -929,12 +929,12 @@
         </div>
     </footer>
 
-    <script src="~/lib/jquery/dist/jquery.min.js"></script>
-    <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="~/lib/chart.js/dist/chart.umd.js"></script>
-    <script src="~/js/site.js" asp-append-version="true"></script>
+    <script nonce='@Context.Items["CspNonce"]' src="~/lib/jquery/dist/jquery.min.js"></script>
+    <script nonce='@Context.Items["CspNonce"]' src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
+    <script nonce='@Context.Items["CspNonce"]' src="~/lib/chart.js/chart.umd.js"></script>
+    <script nonce='@Context.Items["CspNonce"]' src="~/js/site.js" asp-append-version="true"></script>
 
-    <script>
+    <script nonce='@Context.Items["CspNonce"]'>
         // Show the loader whenever a lab-selector dropdown changes.
         // Any <select data-lab-selector> on the page triggers this.
         document.addEventListener('change', function (e) {
@@ -1067,7 +1067,7 @@
         })();
     </script>
 
-    <script>
+    <script nonce='@Context.Items["CspNonce"]'>
         (function () {
         const heartbeatUrl = '@Url.Action("Heartbeat", "Usage")';
         if (!heartbeatUrl || !window.fetch || !window.sessionStorage) {

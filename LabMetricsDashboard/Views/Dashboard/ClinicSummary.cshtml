@@ -771,7 +771,7 @@ else
 </style>
 
 <!-- ── Multi-select dropdown + Export JS ──────────────────────────── -->
-<script>
+<script nonce='@Context.Items["CspNonce"]'>
     document.addEventListener('DOMContentLoaded', function () {
         document.querySelectorAll('.cs-ms').forEach(function (ms) {
             var btn = ms.querySelector('.cs-ms-btn');
@@ -845,7 +845,7 @@ else
 </script>
 
 <!-- ── Tab switching + lazy-load JS ──────────────────────────────── -->
-<script>
+<script nonce='@Context.Items["CspNonce"]'>
 (function () {
     var tabs = document.querySelectorAll('.cs-tab[data-cs-tab]');
     var panels = document.querySelectorAll('.cs-tab-panel');
