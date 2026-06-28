@@ -110,10 +110,11 @@ function ClaimTaskLevelView({ claim, canEditClaim, canEditLine, openNote, showMa
 function WorklistClaimSplit({ claims, rows, loading, data, expanded, setExpanded, drawerTab, setDrawerTab, activeClaim, clientManager, accountManager, taskView, setTaskView, myTabs, tabCounts = {}, notes, docs, escalations, canEditClaim, canEditLine, canCreateEscalation, canDeleteDocumentForClaim, openNote, openDocs, openEsc, openDocument, deleteDocument, loadDrawerTab, canDownloadWorkflow = false, onDownloadTab = () => {}, csvUpload = null, exportBusy = false, exportStatusText = '' }) {
   const roleLabel = clientManager ? 'Client Manager' : accountManager ? 'Account Manager' : 'AR Reviewer';
   const activeTab = myTabs.find(x => x.key === taskView);
-  return <div className={`claim-split-shell ${activeClaim ? 'drawer-open' : ''}`}>
+  return <div className={`claim-split-shell ${activeClaim ? 'drawer-open' : ''} ${loading ? 'claims-loading' : ''}`}>
     <section className={`claim-list-pane my-worklist-pane thin-list-border ${activeClaim ? 'narrow' : 'full'}`}>
       <div className="claim-view-top"><div><div className="claim-view-title">My Worklist</div><div className="claim-view-subtitle">{activeTab?.label || 'Work'} claims - {claims.length} claim(s), {rows.length} task(s)</div></div><span className="table-count">{loading ? 'Loading...' : activeTab?.label || 'Work'}</span></div>
-      <div className="claim-list-toolbar"><label className="claim-search-wrap"><i className="bi bi-search" /><input readOnly value="" placeholder="Search claim, payer, patient" /></label><div className="claim-tab-row">{myTabs.map(t => { const count = Number(tabCounts?.[t.countKey || t.key] || 0); return <button key={t.key} type="button" className={`claim-tab ${taskView === t.key ? 'active' : ''} ${t.alert && count > 0 ? 'has-alert' : ''}`} title={t.hint} onClick={() => setTaskView(t.key)}><span>{t.label}</span><b>{tabCounts?.[t.countKey || t.key] ?? 0}</b></button>; })}{canDownloadWorkflow && activeTab ? <button type="button" className="claim-tab-download" onClick={() => onDownloadTab(activeTab)} disabled={exportBusy} title={exportStatusText || `Download ${activeTab.label} worklist records using current filters`}><i className="bi bi-download" />{exportBusy ? 'Export running' : `Download ${activeTab.label}`}</button> : null}{csvUpload}</div></div>
+      <div className="claim-list-toolbar"><label className="claim-search-wrap"><i className="bi bi-search" /><input readOnly value="" placeholder="Search claim, payer, patient" /></label><div className="claim-tab-row">{myTabs.map(t => { const count = Number(tabCounts?.[t.countKey || t.key] || 0); const active = taskView === t.key; return <button key={t.key} type="button" className={`claim-tab ${active ? 'active' : ''} ${active && loading ? 'is-loading' : ''} ${t.alert && count > 0 ? 'has-alert' : ''}`} title={t.hint} onClick={() => setTaskView(t.key)} disabled={active && loading}><span>{t.label}</span>{active && loading ? <i className="bi bi-arrow-repeat claim-tab-spinner" aria-label="Loading claims" /> : <b>{tabCounts?.[t.countKey || t.key] ?? 0}</b>}</button>; })}{canDownloadWorkflow && activeTab ? <button type="button" className="claim-tab-download" onClick={() => onDownloadTab(activeTab)} disabled={exportBusy} title={exportStatusText || `Download ${activeTab.label} worklist records using current filters`}><i className="bi bi-download" />{exportBusy ? 'Export running' : `Download ${activeTab.label}`}</button> : null}{csvUpload}</div></div>
+      {loading && <div className="claim-tab-loading" role="status"><i className="bi bi-arrow-repeat" /><strong>Loading {activeTab?.label || 'worklist'} claims</strong><span>Refreshing this queue with the latest assignments...</span></div>}
       <div className="claim-list-head claim-list-head-wide my-worklist-head"><span>Claim</span><span>Source</span><span>Payer Name</span><span>Patient Name</span><span>Patient ID</span><span>Subscriber ID</span><span>DOS</span><span>Balance</span><span>Status</span></div>
       <div className="claim-rows-scroll">{claims.length ? claims.map(c => <button type="button" key={c.claimId} className={`claim-list-row claim-list-row-wide my-worklist-row ${expanded === c.claimId ? 'active' : ''}`} onClick={() => { setExpanded(expanded === c.claimId ? '' : c.claimId); setDrawerTab('lines'); }}><span className="claim-row-check my-worklist-spacer" aria-hidden="true" /><span className="claim-expand-dot"><i className={`bi ${expanded === c.claimId ? 'bi-chevron-down' : 'bi-chevron-right'}`} /></span><span className="claim-list-id"><strong className="claim-id-link as-text">{c.claimId}</strong><small>UID {c.claimId || '-'}</small></span><span className="claim-list-payer" title={c.source}>{c.source || '-'}</span><span className="claim-list-payer" title={c.payerName}>{c.payerName}</span><span className="claim-list-payer" title={c.patientName}>{c.patientName || '-'}</span><span className="claim-list-payer" title={c.patientId}>{c.patientId || '-'}</span><span className="claim-list-payer" title={c.subscriberId}>{c.subscriberId || '-'}</span><span className="claim-list-payer">{fmtDate(c.dateOfService)}</span><span className="claim-list-amt">{money(c.balance)}</span><span className={`wl-badge ${String(c.status).toLowerCase().replaceAll(' ', '-')}`}>{c.status}</span></button>) : <div className="claim-empty-panel">No worklist claims found.</div>}</div>
     </section>
@@ -175,6 +176,7 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
   const [escalations, setEscalations] = useState([]);
   const [escSaving, setEscSaving] = useState(false);
   const escSavingRef = useRef(false);
+  const loadRequestRef = useRef(0);
 
   const role = user?.role || '';
   const clientManager = isClientManagerRole(role);
@@ -215,16 +217,28 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
 
   useEffect(() => { onExportQueryChange(query); }, [query, onExportQueryChange]);
 
-  async function load() {
+  async function load(signal) {
     if (!labId) return;
+    const requestId = ++loadRequestRef.current;
     setLoading(true);
+    setData({ items: [], page, pageSize: 100, totalCount: 0, totalPages: 0 });
+    setExpanded('');
     try {
-      const result = await denialWorkflowService.getTasks(query);
+      const result = await denialWorkflowService.getTasks(query, signal ? { signal } : {});
+      if (signal?.aborted || requestId !== loadRequestRef.current) return;
       setData({ items: result?.items || [], page: result?.page || page, pageSize: result?.pageSize || 100, totalCount: result?.totalCount || 0, totalPages: result?.totalPages || 0 });
-    } catch (e) { setMessage?.({ type: 'danger', text: e.message }); }
-    finally { setLoading(false); }
+    } catch (e) {
+      if (!signal?.aborted && requestId === loadRequestRef.current) setMessage?.({ type: 'danger', text: e.message });
+    }
+    finally {
+      if (requestId === loadRequestRef.current) setLoading(false);
+    }
   }
-  useEffect(() => { load(); }, [query, onRefreshToken]);
+  useEffect(() => {
+    const controller = new AbortController();
+    load(controller.signal);
+    return () => controller.abort();
+  }, [query, onRefreshToken]);
 
   const rows = data.items || [];
   function changePage(nextPage) { setExpanded(''); setPage(nextPage); }

@@ -1309,10 +1309,22 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .claim-search-wrap{height:32px;min-width:240px;display:flex;align-items:center;gap:7px;border:.5px solid #cbd5e1;border-radius:7px;padding:0 9px;color:#64748b;background:#fff}
 .claim-search-wrap input{border:0;outline:0;font-size:11px;width:100%;background:transparent;color:#64748b}
 .claim-tab-row{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
-.claim-tab{height:30px;border:.5px solid transparent;background:#f1f5f9;color:#475569;border-radius:6px;padding:0 8px;font-size:11px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.claim-tab{height:30px;border:.5px solid transparent;background:#f1f5f9;color:#475569;border-radius:6px;padding:0 8px;font-size:11px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;transition:transform .16s ease,background-color .16s ease,border-color .16s ease,box-shadow .16s ease}
+.claim-tab:not(:disabled):hover{transform:translateY(-1px);box-shadow:0 3px 9px rgba(15,23,42,.11)}
+.claim-tab:not(:disabled):active{transform:translateY(0) scale(.98)}
 .claim-tab b{min-width:22px;height:18px;padding:0 6px;border-radius:999px;background:#fff;color:#0f766e;display:inline-flex;align-items:center;justify-content:center;font-size:10px;line-height:18px;font-variant-numeric:tabular-nums}
 .claim-tab.active{background:#1abc9c;color:#fff;border-color:#1abc9c}
 .claim-tab.active b{background:rgba(255,255,255,.94);color:#0f766e}
+.claim-tab:disabled{cursor:default}
+.claim-tab-spinner{font-size:15px;animation:claim-spin .8s linear infinite}
+.claim-tab-loading{min-height:190px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;color:#64748b;background:linear-gradient(110deg,#f8fafc 8%,#eef7f5 18%,#f8fafc 33%);background-size:220% 100%;animation:claim-shimmer 1.4s linear infinite;border-top:1px solid #e2e8f0}
+.claim-tab-loading>i{font-size:28px;color:#1abc9c;animation:claim-spin .8s linear infinite}
+.claim-tab-loading>strong{font-size:13px;color:#334155}
+.claim-tab-loading>span{font-size:11px}
+.claim-split-shell.claims-loading .claim-assign-bar2,.claim-split-shell.claims-loading .claim-list-head,.claim-split-shell.claims-loading .claim-rows-scroll{display:none}
+@keyframes claim-spin{to{transform:rotate(360deg)}}
+@keyframes claim-shimmer{to{background-position:-220% 0}}
+@media (prefers-reduced-motion:reduce){.claim-tab-spinner,.claim-tab-loading>i,.claim-tab-loading{animation:none}}
 .claim-tab.has-alert:not(.active){border-color:#ef4444;color:#991b1b;background:#fff1f2}
 .claim-tab.has-alert b{background:#ef4444;color:#fff}
 .lrn-nav-subitem.has-alert:not(.active) .nav-sub-count{background:#ef4444;color:#fff}
