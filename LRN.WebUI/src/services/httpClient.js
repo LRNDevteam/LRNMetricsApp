@@ -1,5 +1,6 @@
 import { REPORTS_API_BASE_URL } from '../config/apiConfig';
 import { clearWorkflowJwt, ensureWorkflowJwt } from '../utils/auth';
+import { logClientError } from './clientLogger';
 
 const API_BASE_URL = REPORTS_API_BASE_URL;
 export const GENERIC_WORKFLOW_ERROR = 'Issue happened. Please contact admin support.';
@@ -18,12 +19,6 @@ function joinUrl(base, path) {
   const b = String(base || '').replace(/\/+$/, '');
   const p = String(path || '').replace(/^\/+/, '');
   return p ? `${b}/${p}` : b;
-}
-
-function appendWorkflowToken(url, token) {
-  if (!token) return url;
-  const separator = url.includes('?') ? '&' : '?';
-  return `${url}${separator}__workflowToken=${encodeURIComponent(token)}`;
 }
 
 async function readError(response) {
@@ -71,7 +66,7 @@ async function executeRequest(path, options = {}, jwt = '') {
     headers.set('X-Authorization', `Bearer ${jwt}`);
   }
 
-  const url = appendWorkflowToken(joinUrl(API_BASE_URL, path), jwt);
+  const url = joinUrl(API_BASE_URL, path);
 
   return fetch(url, {
     ...options,
@@ -95,12 +90,14 @@ export async function api(path, options = {}) {
       response = await executeRequest(path, options, token);
     }
   } catch (err) {
+    logClientError(err, `API request failed before response: ${path}`);
     if (err?.message && String(err.message).toLowerCase().includes('login')) throw err;
     throw new DenialWorkflowError(GENERIC_WORKFLOW_ERROR);
   }
 
   if (!response.ok) {
     const error = await readError(response);
+    logClientError(error instanceof Error ? error : new Error(String(error || `API error ${response.status}`)), `API ${response.status}: ${path}`);
     throw error instanceof Error ? error : new Error(error || `API error ${response.status}`);
   }
 
@@ -113,7 +110,15 @@ export async function api(path, options = {}) {
 
 export async function apiUrl(path) {
   const token = await ensureWorkflowJwt();
-  return appendWorkflowToken(joinUrl(API_BASE_URL, path), token);
+  const response = await executeRequest(path, { headers: { Accept: '*/*' } }, token);
+
+  if (!response.ok) {
+    const error = await readError(response);
+    throw error instanceof Error ? error : new Error(error || `API download error ${response.status}`);
+  }
+
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
 }
 
 // Backward-compatible export names used by existing files.

@@ -4,6 +4,8 @@ using LabMetricsDashboard.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.AspNetCore.Mvc;
 
 namespace LabMetricsDashboard.Controllers;
@@ -17,6 +19,7 @@ public class AccountController : Controller
     private readonly LabSettings _labSettings;
     private readonly ILogger<AccountController> _logger;
     private readonly IConfiguration _configuration;
+    private readonly IMemoryCache _cache;
 
     public AccountController(
         IUserManagementRepository repo,
@@ -24,7 +27,8 @@ public class AccountController : Controller
         LabConfigOptions labConfig,
         LabSettings labSettings,
         ILogger<AccountController> logger,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IMemoryCache cache)
     {
         _repo = repo;
         _hasher = hasher;
@@ -32,6 +36,7 @@ public class AccountController : Controller
         _labSettings = labSettings;
         _logger = logger;
         _configuration = configuration;
+        _cache = cache;
     }
 
     [HttpGet]
@@ -43,23 +48,35 @@ public class AccountController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
+    [EnableRateLimiting("login")]
     public async Task<IActionResult> Login(LoginViewModel model, string? returnUrl = null)
     {
         ViewData["ReturnUrl"] = returnUrl;
         if (!ModelState.IsValid) return View(model);
 
+        var lockoutKey = LoginLockoutKey(model.UserName);
+        if (_cache.TryGetValue<DateTimeOffset>(lockoutKey, out var lockedUntil) && lockedUntil > DateTimeOffset.UtcNow)
+        {
+            ModelState.AddModelError(string.Empty, "Too many failed sign-in attempts. Please wait a few minutes and try again.");
+            return View(model);
+        }
+
         var user = await _repo.GetUserByUserNameAsync(model.UserName);
         if (user == null || !user.IsActive)
         {
+            RecordFailedLogin(model.UserName);
             ModelState.AddModelError(string.Empty, "Invalid username or password.");
             return View(model);
         }
 
         if (string.IsNullOrEmpty(user.PasswordHash) || !_hasher.Verify(user.PasswordHash, model.Password))
         {
+            RecordFailedLogin(model.UserName);
             ModelState.AddModelError(string.Empty, "Invalid username or password.");
             return View(model);
         }
+
+        ClearFailedLogin(model.UserName);
 
         // Resolve roles + labs for the user
         var rolesForUser = await _repo.GetUserRolesAsync(user.LabUserID);
@@ -183,6 +200,7 @@ public class AccountController : Controller
             Expires     = DateTimeOffset.UtcNow.AddDays(30),
             HttpOnly    = false,
             SameSite    = SameSiteMode.Lax,
+            Secure      = Request.IsHttps,
             IsEssential = true
         });
 
@@ -218,6 +236,39 @@ public class AccountController : Controller
 
     private static string NormalizeRoleToken(string? value)
         => new string((value ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+
+    private string LoginFailureKey(string userName)
+        => $"login-fail:{HttpContext.Connection.RemoteIpAddress}:{NormalizeUserName(userName)}";
+
+    private string LoginLockoutKey(string userName)
+        => $"login-lock:{HttpContext.Connection.RemoteIpAddress}:{NormalizeUserName(userName)}";
+
+    private void RecordFailedLogin(string userName)
+    {
+        var failureKey = LoginFailureKey(userName);
+        var attempts = _cache.Get<int>(failureKey) + 1;
+        var maxAttempts = _configuration.GetValue<int?>("Security:LoginLockout:MaxFailedAttempts") ?? 5;
+        var windowMinutes = _configuration.GetValue<int?>("Security:LoginLockout:WindowMinutes") ?? 15;
+        var lockoutMinutes = _configuration.GetValue<int?>("Security:LoginLockout:LockoutMinutes") ?? 15;
+
+        _cache.Set(failureKey, attempts, TimeSpan.FromMinutes(windowMinutes));
+        if (attempts >= maxAttempts)
+        {
+            var until = DateTimeOffset.UtcNow.AddMinutes(lockoutMinutes);
+            _cache.Set(LoginLockoutKey(userName), until, TimeSpan.FromMinutes(lockoutMinutes));
+            _cache.Remove(failureKey);
+            _logger.LogWarning("Login lockout applied for user key {UserKey} from IP {RemoteIp}.", NormalizeUserName(userName), HttpContext.Connection.RemoteIpAddress);
+        }
+    }
+
+    private void ClearFailedLogin(string userName)
+    {
+        _cache.Remove(LoginFailureKey(userName));
+        _cache.Remove(LoginLockoutKey(userName));
+    }
+
+    private static string NormalizeUserName(string? value)
+        => (value ?? string.Empty).Trim().ToUpperInvariant();
 }
 
 public sealed class LoginViewModel

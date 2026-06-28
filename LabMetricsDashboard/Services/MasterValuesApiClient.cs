@@ -1,0 +1,157 @@
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
+using LabMetricsDashboard.Models;
+using LabMetricsDashboard.Models.DenialWorkflow;
+using LabMetricsDashboard.Services.Security;
+using Microsoft.Extensions.Options;
+
+namespace LabMetricsDashboard.Services;
+
+public interface IMasterValuesApiClient
+{
+    Task<MasterPagedResult<InsurancePayerMasterDto>> GetInsurancePayersAsync(IQueryCollection query, CancellationToken ct);
+    Task<InsurancePayerMasterDto?> GetInsurancePayerAsync(int id, CancellationToken ct);
+    Task SaveInsurancePayerAsync(int? id, InsurancePayerMasterDto dto, CancellationToken ct);
+    Task UpdateInsuranceStatusAsync(int id, string? isActive, CancellationToken ct);
+    Task<ImportResultDto> ImportInsuranceAsync(IFormFile file, CancellationToken ct);
+    Task<(byte[] Content, string FileName)> ExportInsuranceAsync(IQueryCollection query, CancellationToken ct);
+
+    Task<MasterPagedResult<PayerPolicyInsuranceMasterDto>> GetPolicyPayersAsync(IQueryCollection query, CancellationToken ct);
+    Task<PayerPolicyInsuranceMasterDto?> GetPolicyPayerAsync(int id, CancellationToken ct);
+    Task SavePolicyPayerAsync(int? id, PayerPolicyInsuranceMasterDto dto, CancellationToken ct);
+    Task UpdatePolicyStatusAsync(int id, string? isActive, CancellationToken ct);
+    Task<ImportResultDto> ImportPolicyAsync(IFormFile file, CancellationToken ct);
+    Task<(byte[] Content, string FileName)> ExportPolicyAsync(IQueryCollection query, CancellationToken ct);
+    Task<IReadOnlyList<MasterValueLabOption>> GetLabsAsync(CancellationToken ct);
+}
+
+public sealed class MasterValuesApiClient : IMasterValuesApiClient
+{
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+    private readonly HttpClient _http;
+    private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly WorkflowJwtIssuer _jwtIssuer;
+
+    public MasterValuesApiClient(HttpClient http, IOptions<DenialWorkflowOptions> options, IHttpContextAccessor httpContextAccessor, WorkflowJwtIssuer jwtIssuer)
+    {
+        _http = http;
+        _httpContextAccessor = httpContextAccessor;
+        _jwtIssuer = jwtIssuer;
+        var baseUrl = options.Value.BaseUrl?.Trim();
+        if (!string.IsNullOrWhiteSpace(baseUrl))
+        {
+            if (!baseUrl.EndsWith("/", StringComparison.Ordinal)) baseUrl += "/";
+            if (Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri)) _http.BaseAddress = uri;
+        }
+    }
+
+    public async Task<MasterPagedResult<InsurancePayerMasterDto>> GetInsurancePayersAsync(IQueryCollection query, CancellationToken ct)
+        => await GetAsync<MasterPagedResult<InsurancePayerMasterDto>>("api/master-values/insurance-payers" + Query(query), ct) ?? new();
+
+    public async Task<InsurancePayerMasterDto?> GetInsurancePayerAsync(int id, CancellationToken ct)
+        => await GetAsync<InsurancePayerMasterDto>($"api/master-values/insurance-payers/{id}", ct);
+
+    public Task SaveInsurancePayerAsync(int? id, InsurancePayerMasterDto dto, CancellationToken ct)
+        => SendJsonAsync(id.HasValue ? HttpMethod.Put : HttpMethod.Post, id.HasValue ? $"api/master-values/insurance-payers/{id}" : "api/master-values/insurance-payers", dto, ct);
+
+    public Task UpdateInsuranceStatusAsync(int id, string? isActive, CancellationToken ct)
+        => SendJsonAsync(HttpMethod.Patch, $"api/master-values/insurance-payers/{id}/status", new { isActive }, ct);
+
+    public Task<ImportResultDto> ImportInsuranceAsync(IFormFile file, CancellationToken ct)
+        => ImportAsync("api/master-values/insurance-payers/import", file, ct);
+
+    public Task<(byte[] Content, string FileName)> ExportInsuranceAsync(IQueryCollection query, CancellationToken ct)
+        => ExportAsync("api/master-values/insurance-payers/export" + Query(query), "InsurancePayerMaster.xlsx", ct);
+
+    public async Task<MasterPagedResult<PayerPolicyInsuranceMasterDto>> GetPolicyPayersAsync(IQueryCollection query, CancellationToken ct)
+        => await GetAsync<MasterPagedResult<PayerPolicyInsuranceMasterDto>>("api/master-values/payer-policy-insurance" + Query(query), ct) ?? new();
+
+    public async Task<PayerPolicyInsuranceMasterDto?> GetPolicyPayerAsync(int id, CancellationToken ct)
+        => await GetAsync<PayerPolicyInsuranceMasterDto>($"api/master-values/payer-policy-insurance/{id}", ct);
+
+    public Task SavePolicyPayerAsync(int? id, PayerPolicyInsuranceMasterDto dto, CancellationToken ct)
+        => SendJsonAsync(id.HasValue ? HttpMethod.Put : HttpMethod.Post, id.HasValue ? $"api/master-values/payer-policy-insurance/{id}" : "api/master-values/payer-policy-insurance", dto, ct);
+
+    public Task UpdatePolicyStatusAsync(int id, string? isActive, CancellationToken ct)
+        => SendJsonAsync(HttpMethod.Patch, $"api/master-values/payer-policy-insurance/{id}/status", new { isActive }, ct);
+
+    public Task<ImportResultDto> ImportPolicyAsync(IFormFile file, CancellationToken ct)
+        => ImportAsync("api/master-values/payer-policy-insurance/import", file, ct);
+
+    public Task<(byte[] Content, string FileName)> ExportPolicyAsync(IQueryCollection query, CancellationToken ct)
+        => ExportAsync("api/master-values/payer-policy-insurance/export" + Query(query), "PayerPolicyInsuranceMaster.xlsx", ct);
+
+    public async Task<IReadOnlyList<MasterValueLabOption>> GetLabsAsync(CancellationToken ct)
+        => await GetAsync<List<MasterValueLabOption>>("api/master-values/insurance-payers/labs", ct) ?? [];
+
+    private async Task<T?> GetAsync<T>(string url, CancellationToken ct)
+    {
+        await AuthorizeAsync(ct);
+        using var response = await _http.GetAsync(url, ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return default;
+        await EnsureSuccessAsync(response, ct);
+        return await response.Content.ReadFromJsonAsync<T>(JsonOptions, ct);
+    }
+
+    private async Task SendJsonAsync<T>(HttpMethod method, string url, T payload, CancellationToken ct)
+    {
+        await AuthorizeAsync(ct);
+        using var request = new HttpRequestMessage(method, url)
+        {
+            Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+        };
+        using var response = await _http.SendAsync(request, ct);
+        await EnsureSuccessAsync(response, ct);
+    }
+
+    private async Task<ImportResultDto> ImportAsync(string url, IFormFile file, CancellationToken ct)
+    {
+        await AuthorizeAsync(ct);
+        using var form = new MultipartFormDataContent();
+        await using var stream = file.OpenReadStream();
+        using var content = new StreamContent(stream);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        form.Add(content, "File", file.FileName);
+        using var response = await _http.PostAsync(url, form, ct);
+        await EnsureSuccessAsync(response, ct);
+        return await response.Content.ReadFromJsonAsync<ImportResultDto>(JsonOptions, ct) ?? new();
+    }
+
+    private async Task<(byte[] Content, string FileName)> ExportAsync(string url, string fallbackName, CancellationToken ct)
+    {
+        await AuthorizeAsync(ct);
+        using var response = await _http.GetAsync(url, ct);
+        await EnsureSuccessAsync(response, ct);
+        var fileName = response.Content.Headers.ContentDisposition?.FileNameStar
+            ?? response.Content.Headers.ContentDisposition?.FileName?.Trim('"')
+            ?? fallbackName;
+        return (await response.Content.ReadAsByteArrayAsync(ct), fileName);
+    }
+
+    private async Task AuthorizeAsync(CancellationToken ct)
+    {
+        if (_http.BaseAddress == null) throw new InvalidOperationException("Master Values API base URL is missing or invalid. Configure DenialWorkflowApi:BaseUrl to the LRN.ReportsApi URL.");
+        var user = _httpContextAccessor.HttpContext?.User;
+        if (user?.Identity?.IsAuthenticated != true) return;
+        var token = await _jwtIssuer.CreateTokenAsync(user, ct);
+        _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+    }
+
+    private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        if (response.IsSuccessStatusCode) return;
+        var body = await response.Content.ReadAsStringAsync(ct);
+        throw new InvalidOperationException(string.IsNullOrWhiteSpace(body) ? $"API request failed: {(int)response.StatusCode}" : body);
+    }
+
+    private static string Query(IQueryCollection query)
+    {
+        var pairs = query
+            .Where(x => !string.Equals(x.Key, "id", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(x => x.Value, (x, v) => $"{Uri.EscapeDataString(x.Key)}={Uri.EscapeDataString(v ?? string.Empty)}");
+        var text = string.Join("&", pairs);
+        return string.IsNullOrWhiteSpace(text) ? string.Empty : "?" + text;
+    }
+}

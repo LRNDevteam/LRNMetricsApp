@@ -328,7 +328,7 @@
         </div>
     </div>
 
-    <script>
+    <script nonce='@Context.Items["CspNonce"]'>
         document.addEventListener('DOMContentLoaded', function () {
             document.querySelectorAll('.cs-ms').forEach(function (ms) {
                 var btn = ms.querySelector('.cs-ms-btn');
@@ -389,7 +389,7 @@
             });
         });
     </script>
-    <script>
+    <script nonce='@Context.Items["CspNonce"]'>
         (function () {
             var el = document.getElementById('filterBody');
             var btn = document.getElementById('filterToggleBtn');
@@ -418,7 +418,7 @@
         </div>
     }
 
-    <script>
+    <script nonce='@Context.Items["CspNonce"]'>
         (function () {
             var exportBtn = document.getElementById('exportExcelBtn');
             if (exportBtn) {

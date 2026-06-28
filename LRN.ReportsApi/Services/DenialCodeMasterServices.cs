@@ -643,6 +643,25 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
 
     internal static async Task EnsureActionChangeSchemaAsync(SqlConnection conn, SqlTransaction? tx, CancellationToken ct)
     {
+        const string schemaLockResource = "LRN.DenialCodeActionChangeVerification.Schema";
+        await using (var lockCmd = new SqlCommand("""
+            DECLARE @Result int;
+            EXEC @Result = sys.sp_getapplock
+                @Resource = @Resource,
+                @LockMode = 'Exclusive',
+                @LockOwner = 'Session',
+                @LockTimeout = 30000;
+            SELECT @Result;
+            """, conn, tx))
+        {
+            lockCmd.Parameters.Add(new SqlParameter("@Resource", schemaLockResource));
+            var lockResult = Convert.ToInt32(await lockCmd.ExecuteScalarAsync(ct));
+            if (lockResult < 0)
+                throw new InvalidOperationException($"Could not acquire the denial action-change schema lock (result {lockResult}).");
+        }
+
+        try
+        {
         const string sql = """
             IF OBJECT_ID('dbo.DenialCodeActionChangeBatch','U') IS NULL
             BEGIN
@@ -772,6 +791,17 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
             END
             """, conn, tx) { CommandTimeout = 180 };
         await procCmd.ExecuteNonQueryAsync(ct);
+        }
+        finally
+        {
+            await using var releaseCmd = new SqlCommand("""
+                EXEC sys.sp_releaseapplock
+                    @Resource = @Resource,
+                    @LockOwner = 'Session';
+                """, conn, tx);
+            releaseCmd.Parameters.Add(new SqlParameter("@Resource", schemaLockResource));
+            await releaseCmd.ExecuteNonQueryAsync(CancellationToken.None);
+        }
     }
 
     private static async Task<HashSet<string>> GetColumnSetAsync(SqlConnection conn, SqlTransaction? tx, string tableName, CancellationToken ct)
@@ -907,10 +937,10 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
     {
         parameters = [];
         if (string.IsNullOrWhiteSpace(search)) return "1 = 1";
-        parameters.Add(new SqlParameter("@Search", $"%{search.Trim()}%"));
+        parameters.Add(new SqlParameter("@Search", LikePattern(search)));
         return """
-            (DenialCode LIKE @Search OR DenialDescription LIKE @Search OR DenialClassification LIKE @Search
-             OR CoverageStatus LIKE @Search OR ICDComplianceStatus LIKE @Search OR ActionCode LIKE @Search OR ActionCategory LIKE @Search)
+            (DenialCode LIKE @Search ESCAPE '\' OR DenialDescription LIKE @Search ESCAPE '\' OR DenialClassification LIKE @Search ESCAPE '\'
+             OR CoverageStatus LIKE @Search ESCAPE '\' OR ICDComplianceStatus LIKE @Search ESCAPE '\' OR ActionCode LIKE @Search ESCAPE '\' OR ActionCategory LIKE @Search ESCAPE '\')
             """;
     }
 
@@ -947,6 +977,8 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
     }
 
     private static object DbValue(string? value) => string.IsNullOrWhiteSpace(value) ? DBNull.Value : value.Trim();
+    private static string LikePattern(string value) => $"%{EscapeLike(value.Trim())}%";
+    private static string EscapeLike(string value) => value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal).Replace("[", "\\[", StringComparison.Ordinal);
     private static SqlParameter[] CloneParams(List<SqlParameter> source) => source.Select(p => new SqlParameter(p.ParameterName, p.Value)).ToArray();
 
     private static async Task<IReadOnlyList<string>> ReadStringsAsync(SqlDataReader reader, CancellationToken ct)
@@ -997,49 +1029,7 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
     }
 
     private static string ResolveLabConnectionString(IConfiguration configuration, int labId, string labName, string? connectionKey = null)
-    {
-        var byId = configuration.GetConnectionString($"Lab_{labId}");
-        if (!string.IsNullOrWhiteSpace(byId)) return byId;
-
-        if (!string.IsNullOrWhiteSpace(connectionKey))
-        {
-            var byConnectionKey = configuration.GetConnectionString(connectionKey.Trim());
-            if (!string.IsNullOrWhiteSpace(byConnectionKey)) return byConnectionKey;
-        }
-
-        var normalized = NormalizeKey(labName);
-        var knownKey = normalized switch
-        {
-            "PCRLABSOFAMERICA" or "PCRLOA" => "PCRLOAConnStr",
-            "COVE" => "CoveConnection",
-            "INHEALTHDTR" or "INHEALTH" => "InHealthConn",
-            "ELIXIR" => "ElixirConnection",
-            "CERTUS" or "CERTUSLABORATORIES" => "CertusConnection",
-            "BEECHTREE" => "BeechTreeConnStr",
-            "AUGUSTUSLABS" or "AUGUSTUS" => "AugustusConnStr",
-            "NORTHWEST" or "NWL" => "NWLConnection",
-            "PCRDXAL" => "PCRALConnection",
-            "PCRDXCO" => "PCRDxConnection",
-            "PHILIFE" => "PhiLifeConnStr",
-            "RISINGTIDES" => "RisingTidesConnStr",
-            _ => string.Empty
-        };
-
-        if (!string.IsNullOrWhiteSpace(knownKey))
-        {
-            var conn = configuration.GetConnectionString(knownKey);
-            if (!string.IsNullOrWhiteSpace(conn)) return conn;
-        }
-
-        foreach (var section in configuration.GetSection("ConnectionStrings").GetChildren())
-        {
-            var key = NormalizeKey(section.Key);
-            if (key.Contains(normalized, StringComparison.OrdinalIgnoreCase) || normalized.Contains(key.Replace("CONNECTION", "").Replace("CONNSTR", ""), StringComparison.OrdinalIgnoreCase))
-                return section.Value ?? string.Empty;
-        }
-
-        return string.Empty;
-    }
+        => LabConnectionResolver.Resolve(configuration, labId, labName, connectionKey);
 
     private static string NormalizeKey(string value)
         => new string((value ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
@@ -1434,8 +1424,8 @@ public sealed class SqlDenialActionChangeVerificationRepository : IDenialActionC
         if (!string.IsNullOrWhiteSpace(q.AssignedTo)) { parts.Add("v.AssignedTo = @AssignedTo"); p.Add(new SqlParameter("@AssignedTo", q.AssignedTo.Trim())); }
         if (!string.IsNullOrWhiteSpace(q.Search))
         {
-            parts.Add("(v.ClaimID LIKE @Search OR v.TaskID LIKE @Search OR v.PatientId LIKE @Search OR v.PayerName LIKE @Search OR v.DenialCode LIKE @Search)");
-            p.Add(new SqlParameter("@Search", $"%{q.Search.Trim()}%"));
+            parts.Add("(v.ClaimID LIKE @Search ESCAPE '\\' OR v.TaskID LIKE @Search ESCAPE '\\' OR v.PatientId LIKE @Search ESCAPE '\\' OR v.PayerName LIKE @Search ESCAPE '\\' OR v.DenialCode LIKE @Search ESCAPE '\\')");
+            p.Add(new SqlParameter("@Search", LikePattern(q.Search)));
         }
         return string.Join(" AND ", parts);
     }
@@ -1447,6 +1437,8 @@ public sealed class SqlDenialActionChangeVerificationRepository : IDenialActionC
 
     private static SqlParameter[] CloneParams(List<SqlParameter> source) => source.Select(x => new SqlParameter(x.ParameterName, x.Value)).ToArray();
     private static object DbValue(string? value) => string.IsNullOrWhiteSpace(value) ? DBNull.Value : value.Trim();
+    private static string LikePattern(string value) => $"%{EscapeLike(value.Trim())}%";
+    private static string EscapeLike(string value) => value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal).Replace("[", "\\[", StringComparison.Ordinal);
     private static string? GetString(SqlDataReader r, string column) => r.IsDBNull(r.GetOrdinal(column)) ? null : r.GetString(r.GetOrdinal(column));
     private static DateTime? GetDate(SqlDataReader r, string column) => r.IsDBNull(r.GetOrdinal(column)) ? null : r.GetDateTime(r.GetOrdinal(column));
     private static int? GetNullableInt(SqlDataReader r, string column) => r.IsDBNull(r.GetOrdinal(column)) ? null : r.GetInt32(r.GetOrdinal(column));

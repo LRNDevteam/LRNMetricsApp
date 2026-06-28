@@ -38,7 +38,9 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
     {
         var jobId = Guid.NewGuid().ToString("N");
         var safeUser = SafeFilePart(requestedBy);
-        var fileName = $"Claim_Detail_Export_{filter.LabId}_{DateTime.UtcNow:yyyyMMdd_HHmmss}_{safeUser}.csv";
+        var fileName = filter.UploadTemplate
+            ? $"Claim_Upload_Template_{filter.LabId}_{DateTime.UtcNow:yyyyMMdd_HHmmss}_{safeUser}.xlsx"
+            : $"Claim_Detail_Export_{filter.LabId}_{DateTime.UtcNow:yyyyMMdd_HHmmss}_{safeUser}.csv";
         var filePath = Path.Combine(_exportRoot, $"{jobId}_{fileName}");
         var state = new ExportJobState
         {
@@ -47,6 +49,7 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
             FileName = fileName,
             FilePath = filePath,
             LabId = filter.LabId,
+            ContentType = filter.UploadTemplate ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : "text/csv",
             Status = "Queued",
             Message = "Export request received. File creation is running in the background.",
             CreatedOnUtc = DateTime.UtcNow,
@@ -108,7 +111,7 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
         if (!Jobs.TryGetValue(jobId, out var state) || !CanAccess(state, requestedBy)) return null;
         if (!string.Equals(state.Status, "Completed", StringComparison.OrdinalIgnoreCase)) return null;
         if (!File.Exists(state.FilePath)) return null;
-        return new ClaimExportFile(state.FilePath, state.FileName, "text/csv");
+        return new ClaimExportFile(state.FilePath, state.FileName, state.ContentType);
     }
 
     public ClaimExportStatusResponse? Cancel(string jobId, string requestedBy)
@@ -132,7 +135,9 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
         try
         {
             state.Status = "Running";
-            state.Message = "Building claim detail export. You can continue using the system.";
+            state.Message = filter.UploadTemplate
+                ? "Building claim upload template. You can continue using the system."
+                : "Building claim detail export. You can continue using the system.";
 
             await using var stream = File.Create(state.FilePath);
             using var scope = _scopeFactory.CreateScope();
@@ -223,6 +228,7 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
         public string FileName { get; init; } = string.Empty;
         public string FilePath { get; init; } = string.Empty;
         public int LabId { get; init; }
+        public string ContentType { get; init; } = "text/csv";
         public string Status { get; set; } = string.Empty;
         public string Message { get; set; } = string.Empty;
         public int RowCount { get; set; }

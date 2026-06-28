@@ -126,7 +126,7 @@
                     class="btn btn-sm btn-outline-light ms-2" style="font-size:.76rem">
                 <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
             </button>
-            <script>
+            <script nonce='@Context.Items["CspNonce"]'>
                 (function () {
                     var btn = document.getElementById('exportForecastingExcelBtn');
                     if (btn) {

@@ -129,7 +129,7 @@
 
 @if (ViewData["OpenCreateUserModal"] as bool? == true)
 {
-    <script>
+    <script nonce='@Context.Items["CspNonce"]'>
         document.addEventListener('DOMContentLoaded', function(){
             try {
                 var modalEl = document.getElementById('createUserModal');
@@ -248,7 +248,7 @@
 </div>
 </div>
 
-<script>
+<script nonce='@Context.Items["CspNonce"]'>
 document.addEventListener('DOMContentLoaded', function () {
     const freeText = document.getElementById('userFreeTextFilter');
     const role = document.getElementById('userRoleFilter');

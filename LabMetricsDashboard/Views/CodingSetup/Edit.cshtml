@@ -148,7 +148,7 @@
 </div>
 
 @section Scripts {
-<script>
+<script nonce='@Context.Items["CspNonce"]'>
     function updatePreview() {
         var panel = document.querySelector('[name="PanelName"]').value || '';
         var test  = document.querySelector('[name="TestName"]').value || '';
