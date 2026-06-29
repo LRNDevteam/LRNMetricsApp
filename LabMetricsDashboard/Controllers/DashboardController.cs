@@ -2624,6 +2624,7 @@ public class DashboardController : Controller
             }
 
             var (runWeekFolder, runId) = await _productionReportRepo.GetRunInfoAsync(connStr, ct);
+            var limsRunId = await _productionReportRepo.GetLimsRunIdAsync(connStr, ct);
 
             return View(new ProductionReportViewModel
             {
@@ -2682,6 +2683,7 @@ public class DashboardController : Controller
                 CptUnitsLabel                  = genericSummaryRepo?.IsCertus == true ? "Billed Units" : "No. of Claims",
                 ReportWeekFolder               = runWeekFolder,
                 ReportRunId                    = runId,
+                LimsRunId                      = limsRunId,
             });
         }
         catch (Exception ex)

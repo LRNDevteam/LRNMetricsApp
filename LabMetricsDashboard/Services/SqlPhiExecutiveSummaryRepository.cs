@@ -52,6 +52,70 @@ public sealed class SqlPhiExecutiveSummaryRepository
         => _logger = logger;
 
     /// <summary>
+    /// Reads the run/analysis-range banner values for the Executive Summary header:
+    ///   • <c>WeekFolder</c> + <c>RunId</c> from the latest <c>ClaimLevelData</c> row
+    ///     (drives "Analysis Range: Billed Date — …" and "ReportId (RUNID)").
+    ///   • <c>RunId</c> from <c>LIMSMaster</c> (shown alongside, per request).
+    /// All lookups are best-effort: any missing table/column or error degrades to
+    /// NULL rather than failing the page. RunId is sorted DESC so the most recent
+    /// run wins (RunId values like '20260617R0271' sort chronologically as text).
+    /// </summary>
+    public async Task<(string? WeekFolder, string? ClaimRunId, string? LimsRunId)> GetRunInfoAsync(
+        string connectionString, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+        string? weekFolder = null, claimRunId = null, limsRunId = null;
+
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+
+            // ClaimLevelData — latest WeekFolder + RunId
+            const string claimSql = @"
+                IF OBJECT_ID('dbo.ClaimLevelData','U') IS NOT NULL
+                   AND COL_LENGTH('dbo.ClaimLevelData','RunId') IS NOT NULL
+                SELECT TOP 1
+                       CAST(WeekFolder AS NVARCHAR(200)),
+                       CAST(RunId      AS NVARCHAR(50))
+                FROM dbo.ClaimLevelData
+                WHERE NULLIF(LTRIM(RTRIM(RunId)), '') IS NOT NULL
+                ORDER BY RunId DESC;";
+            await using (var cmd = new SqlCommand(claimSql, conn) { CommandTimeout = 30 })
+            await using (var rdr = await cmd.ExecuteReaderAsync(ct))
+            {
+                if (await rdr.ReadAsync(ct))
+                {
+                    weekFolder = rdr.IsDBNull(0) ? null : rdr.GetString(0);
+                    claimRunId = rdr.IsDBNull(1) ? null : rdr.GetString(1);
+                }
+            }
+
+            // LIMSMaster — latest RunId
+            const string limsSql = @"
+                IF OBJECT_ID('dbo.LIMSMaster','U') IS NOT NULL
+                   AND COL_LENGTH('dbo.LIMSMaster','RunId') IS NOT NULL
+                SELECT TOP 1 CAST(RunId AS NVARCHAR(50))
+                FROM dbo.LIMSMaster
+                WHERE NULLIF(LTRIM(RTRIM(RunId)), '') IS NOT NULL
+                ORDER BY RunId DESC;";
+            await using (var cmd = new SqlCommand(limsSql, conn) { CommandTimeout = 30 })
+            await using (var rdr = await cmd.ExecuteReaderAsync(ct))
+            {
+                if (await rdr.ReadAsync(ct))
+                    limsRunId = rdr.IsDBNull(0) ? null : rdr.GetString(0);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read Executive Summary RunInfo (ClaimLevelData / LIMSMaster).");
+        }
+
+        return (weekFolder, claimRunId, limsRunId);
+    }
+
+    /// <summary>
     /// Returns a stable floating-point sort key for a RowCode.
     ///
     /// Exact matches use their position in <see cref="RowOrder"/>.

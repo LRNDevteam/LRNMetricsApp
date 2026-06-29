@@ -160,6 +160,23 @@ public sealed class ExecutiveSummaryController : Controller
         if (vm.AvailableYears.Count == 0)
             vm.AvailableYears = availableYears;
 
+        // The repository reconstructs Selected* by splitting the comma-joined
+        // filter strings, which corrupts values that themselves contain commas
+        // (e.g. ReferringProvider = 'LastName,FirstName' → 'ABBOTT,JOEL').
+        // Restore the true selections from the original posted arrays so the
+        // dropdown checkboxes / chips reflect what the user actually selected.
+        vm.SelectedPanels    = panels    is null ? [] : [.. panels];
+        vm.SelectedClinics   = clinics   is null ? [] : [.. clinics];
+        vm.SelectedProviders = providers is null ? [] : [.. providers];
+        vm.SelectedReps      = reps      is null ? [] : [.. reps];
+
+        // Run / analysis-range banner: RunID + week range from ClaimLevelData,
+        // plus the LIMSMaster RunID alongside (mirrors the Production Report header).
+        var (weekFolder, claimRunId, limsRunId) = await _repo.GetRunInfoAsync(connStr, ct);
+        vm.ReportWeekFolder = weekFolder;
+        vm.ReportRunId      = claimRunId;
+        vm.LimsRunId        = limsRunId;
+
         // Pre-populate dimension filter options from the lab's FilterOptions SP (if it exists)
         var filterSpName = $"dbo.usp_Get{prefix}_ExecutiveSummary_FilterOptions";
         bool filterSpExists = await _repo.StoredProcedureExistsAsync(connStr, filterSpName, ct);

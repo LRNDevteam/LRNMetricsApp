@@ -152,7 +152,7 @@ BEGIN
                COUNT(DISTINCT b.AccessionNumber) AS ClaimCount
         FROM #Periods p
         LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-                          AND b.BillStatus IN ('Billed','Billed-Client')
+                          AND b.BillStatus IN ('Billed','Billed-Client','Billed - Client')
         GROUP BY p.ESYear, p.ESMonth
 
         -- G  Billed Mismatches - Accessions NA / Other Sample
@@ -163,7 +163,7 @@ BEGIN
                     ELSE 0 END
         FROM #Periods p
         LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-                          AND b.BillStatus IN ('Billed','Billed-Client')
+                          AND b.BillStatus IN ('Billed','Billed-Client','Billed - Client')
         LEFT JOIN #LisBilled lb ON lb.ESYear=p.ESYear AND lb.ESMonth=p.ESMonth
         GROUP BY p.ESYear, p.ESMonth
 
@@ -267,7 +267,7 @@ BEGIN
     (
         -- O  Total Billed ($)
         SELECT p.ESYear, p.ESMonth, 'O' AS RoleID, 'Total Billed ($)' AS Description,
-               SUM(CASE WHEN b.BillStatus IN ('Billed','Billed-Client') THEN b.ChargeAmount ELSE 0 END) AS ChargeAmount
+               SUM(CASE WHEN b.BillStatus IN ('Billed','Billed-Client','Billed - Client') THEN b.ChargeAmount ELSE 0 END) AS ChargeAmount
         FROM #Periods p
         LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -355,8 +355,8 @@ BEGIN
     (
         -- V  Average Payment ($) - Total Pay / Billed Claims
         SELECT p.ESYear, p.ESMonth, 'V' AS RoleID, 'Average Payment ($) - Total Pay/Billed Claims' AS Description,
-               COUNT(DISTINCT CASE WHEN b.BillStatus IN ('Billed','Billed-Client') THEN b.AccessionNumber END) AS ClaimCount,
-               SUM(CASE WHEN b.BillStatus IN ('Billed','Billed-Client') THEN b.InsurancePayment + b.PatientPayment ELSE 0 END) AS PayTotal
+               COUNT(DISTINCT CASE WHEN b.BillStatus IN ('Billed','Billed-Client','Billed - Client') THEN b.AccessionNumber END) AS ClaimCount,
+               SUM(CASE WHEN b.BillStatus IN ('Billed','Billed-Client','Billed - Client') THEN b.InsurancePayment + b.PatientPayment ELSE 0 END) AS PayTotal
         FROM #Periods p
         LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth

@@ -21,10 +21,10 @@ BEGIN
 
     UNION ALL
 
-    SELECT 'Panel', LTRIM(RTRIM(PanelType)), 0
+    SELECT 'Panel', LTRIM(RTRIM(PanelName)), 0
     FROM dbo.ClaimLevelData
-    WHERE NULLIF(LTRIM(RTRIM(PanelType)), '') IS NOT NULL
-    GROUP BY LTRIM(RTRIM(PanelType))
+    WHERE NULLIF(LTRIM(RTRIM(PanelName)), '') IS NOT NULL
+    GROUP BY LTRIM(RTRIM(PanelName))
 
     UNION ALL
 

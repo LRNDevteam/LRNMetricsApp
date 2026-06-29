@@ -111,8 +111,8 @@ BEGIN
     DROP TABLE IF EXISTS #Counts;
     SELECT
         ESYear, ESMonth,
-        -- Row A
-        COUNT(DISTINCT CASE WHEN IncorrectDOS=''                                                                                                           THEN OrderID END) AS cnt_A,
+        -- Row A  (all samples — no IncorrectDOS filter so it matches SELECT COUNT(Accession) FROM LIMSMaster)
+        COUNT(DISTINCT OrderID) AS cnt_A,
         -- Row B
         COUNT(DISTINCT CASE WHEN IncorrectDOS='' AND BilledTo='Insurance Bill'                                                                             THEN OrderID END) AS cnt_B,
         -- Row C and sub-rows
@@ -153,7 +153,7 @@ BEGIN
     -- Grand-total row (ESYear=0, ESMonth=0) – second pass but on the already-indexed #LisBase
     SELECT
         0, 0,
-        COUNT(DISTINCT CASE WHEN IncorrectDOS=''                                                                                                           THEN OrderID END),
+        COUNT(DISTINCT OrderID),  -- Row A grand total: all samples
         COUNT(DISTINCT CASE WHEN IncorrectDOS='' AND BilledTo='Insurance Bill'                                                                             THEN OrderID END),
         COUNT(DISTINCT CASE WHEN IncorrectDOS='' AND BilledTo='Insurance Bill' AND BillStatus='Billed'                                                     THEN OrderID END),
         COUNT(DISTINCT CASE WHEN IncorrectDOS='' AND BilledTo='Insurance Bill' AND BillStatus='Billed' AND FinalStatus='Claim Submitted in Webpm'          THEN OrderID END),

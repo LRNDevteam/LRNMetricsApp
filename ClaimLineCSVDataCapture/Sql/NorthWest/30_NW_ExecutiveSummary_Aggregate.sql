@@ -33,13 +33,32 @@ BEGIN
     TRUNCATE TABLE dbo.NW_ES_Avg;
 
     -- ── Dynamic column detection ─────────────────────────────────────────────
-    -- Detect 'Billed' column (NW) vs 'BillStatus' / 'BillingStatus' (other labs)
+    -- Detect 'Billed' column (NW) vs 'BillStatus' / 'BillingStatus' (other labs).
+    -- If none found, BilledStatus is DERIVED from FirstBillDate / EmedixSubmissionDate:
+    --   FirstBillDate is not blank  → 'Billed'
+    --   EmedixSubmissionDate is not blank → 'Billed'
+    --   both blank                  → 'Unbilled'
     DECLARE @BilledCol SYSNAME = (
         SELECT TOP 1 name FROM sys.columns
         WHERE object_id = OBJECT_ID('dbo.ClaimLevelData')
           AND name IN ('Billed','BillStatus','BillingStatus','BilledStatus')
         ORDER BY CASE name WHEN 'Billed' THEN 0 WHEN 'BillStatus' THEN 1
                            WHEN 'BillingStatus' THEN 2 WHEN 'BilledStatus' THEN 3 ELSE 4 END);
+
+    -- Fallback date columns used to derive Billed status when @BilledCol IS NULL
+    DECLARE @FirstBillDateCol SYSNAME = (
+        SELECT TOP 1 name FROM sys.columns
+        WHERE object_id = OBJECT_ID('dbo.ClaimLevelData')
+          AND name IN ('FirstBillDate','FirstBilledDate','First_Bill_Date','FirstBilled')
+        ORDER BY CASE name WHEN 'FirstBillDate' THEN 0 WHEN 'FirstBilledDate' THEN 1
+                           WHEN 'First_Bill_Date' THEN 2 ELSE 3 END);
+
+    DECLARE @EmedixSubDateCol SYSNAME = (
+        SELECT TOP 1 name FROM sys.columns
+        WHERE object_id = OBJECT_ID('dbo.ClaimLevelData')
+          AND name IN ('EmedixSubmissionDate','EmedixSubmitDate','Emedix_Submission_Date','EmedixDate')
+        ORDER BY CASE name WHEN 'EmedixSubmissionDate' THEN 0 WHEN 'EmedixSubmitDate' THEN 1
+                           WHEN 'Emedix_Submission_Date' THEN 2 ELSE 3 END);
 
     DECLARE @ClaimTypeCol SYSNAME = (
         SELECT TOP 1 name FROM sys.columns
@@ -59,9 +78,29 @@ BEGIN
           AND name IN ('DuplicatePayment','DuplicatePay','Duplicate_Payment')
         ORDER BY CASE name WHEN 'DuplicatePayment' THEN 0 WHEN 'DuplicatePay' THEN 1 WHEN 'Duplicate_Payment' THEN 2 ELSE 3 END);
 
-    IF @BilledCol IS NULL OR @ClaimTypeCol IS NULL
+    -- Build the Billed expression for @BaseSql.
+    -- Use existing column if found; otherwise derive from date columns.
+    -- Output values are always 'Billed' / 'Unbilled' so all downstream b.Billed checks work unchanged.
+    DECLARE @BilledExpr NVARCHAR(MAX) =
+        CASE
+            WHEN @BilledCol IS NOT NULL
+                THEN N'ISNULL(LTRIM(RTRIM([' + @BilledCol + N'])),'''')'
+            WHEN @FirstBillDateCol IS NOT NULL OR @EmedixSubDateCol IS NOT NULL
+                THEN
+                    N'CASE'
+                    + CASE WHEN @FirstBillDateCol IS NOT NULL
+                           THEN N' WHEN NULLIF(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(50),[' + @FirstBillDateCol + N']),''''))),'''') IS NOT NULL THEN ''Billed'''
+                           ELSE N'' END
+                    + CASE WHEN @EmedixSubDateCol IS NOT NULL
+                           THEN N' WHEN NULLIF(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(50),[' + @EmedixSubDateCol + N']),''''))),'''') IS NOT NULL THEN ''Billed'''
+                           ELSE N'' END
+                    + N' ELSE ''Unbilled'' END'
+            ELSE NULL
+        END;
+
+    IF @BilledExpr IS NULL OR @ClaimTypeCol IS NULL
     BEGIN
-        PRINT 'usp_RefreshNW_ExecutiveSummary: required columns (Billed/ClaimType) not found on dbo.ClaimLevelData – skipping.';
+        PRINT 'usp_RefreshNW_ExecutiveSummary: required columns (Billed/ClaimType or FirstBillDate/EmedixSubmissionDate) not found on dbo.ClaimLevelData – skipping.';
         RETURN;
     END
 
@@ -99,7 +138,7 @@ BEGIN
             LTRIM(RTRIM(ISNULL(AccessionNumber,''''))) AS AccessionNumber,
             YEAR (TRY_CAST(DateofService AS DATE)),
             MONTH(TRY_CAST(DateofService AS DATE)),
-            ISNULL(LTRIM(RTRIM([' + @BilledCol    + N'])),'''') AS Billed,
+            ' + @BilledExpr + N' AS Billed,
             ISNULL(LTRIM(RTRIM([' + @ClaimTypeCol + N'])),'''') AS ClaimType,
             ISNULL(LTRIM(RTRIM(ClaimStatus)),'''') AS ClaimStatus,
             ISNULL(TRY_CAST(ChargeAmount         AS DECIMAL(18,2)),0),

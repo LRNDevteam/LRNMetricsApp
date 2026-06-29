@@ -153,6 +153,13 @@ BEGIN
 	DECLARE @HasProviderFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM #FilterProviders) THEN 1 ELSE 0 END;
 	DECLARE @HasRepFilter      BIT = CASE WHEN EXISTS (SELECT 1 FROM #FilterReps)      THEN 1 ELSE 0 END;
 
+	-- LIS filter: Panel, Clinic, and Provider are applied to LIMSMaster for PhiLife.
+	-- SalesRep is not available for PhiLife LIS → always skipped.
+	-- Date parameters are also ignored for LIMSMaster (LIS uses its own period system).
+	DECLARE @HasLisFilter BIT = CASE
+		WHEN @HasPanelFilter = 1 OR @HasClinicFilter = 1 OR @HasProviderFilter = 1
+		THEN 1 ELSE 0 END;
+
 	DROP TABLE IF EXISTS #Base;
 
 	SELECT
@@ -187,10 +194,10 @@ BEGIN
 	  AND (@DosTo      IS NULL OR TRY_CAST(DateofService   AS DATE) <= @DosTo)
 	  AND (@BilledFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @BilledFrom)
 	  AND (@BilledTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @BilledTo)
-	  AND (@HasPanelFilter    = 0 OR LTRIM(RTRIM(ISNULL(Panelname,          ''))) COLLATE DATABASE_DEFAULT IN (SELECT Val FROM #FilterPanels))
-	  AND (@HasClinicFilter   = 0 OR LTRIM(RTRIM(ISNULL(ClinicName,         ''))) COLLATE DATABASE_DEFAULT IN (SELECT Val FROM #FilterClinics))
-	  AND (@HasProviderFilter = 0 OR LTRIM(RTRIM(ISNULL(ReferringProvider,  ''))) COLLATE DATABASE_DEFAULT IN (SELECT Val FROM #FilterProviders))
-	  AND (@HasRepFilter      = 0 OR LTRIM(RTRIM(ISNULL(SalesRepname,       ''))) COLLATE DATABASE_DEFAULT IN (SELECT Val FROM #FilterReps));
+	  AND (@HasPanelFilter    = 0 OR CHARINDEX((',' + LTRIM(RTRIM(ISNULL(Panelname,          ''))) + ',') COLLATE DATABASE_DEFAULT, (',' + @Panels + ',') COLLATE DATABASE_DEFAULT) > 0)
+	  AND (@HasClinicFilter   = 0 OR CHARINDEX((',' + LTRIM(RTRIM(ISNULL(ClinicName,         ''))) + ',') COLLATE DATABASE_DEFAULT, (',' + @Clinics + ',') COLLATE DATABASE_DEFAULT) > 0)
+	  AND (@HasProviderFilter = 0 OR CHARINDEX((',' + LTRIM(RTRIM(ISNULL(ReferringProvider,  ''))) + ',') COLLATE DATABASE_DEFAULT, (',' + @Providers + ',') COLLATE DATABASE_DEFAULT) > 0)
+	  AND (@HasRepFilter      = 0 OR CHARINDEX((',' + LTRIM(RTRIM(ISNULL(SalesRepname,       ''))) + ',') COLLATE DATABASE_DEFAULT, (',' + @Reps + ',') COLLATE DATABASE_DEFAULT) > 0);
 
 	-- Periods: every (Year,Month) present in #Base PLUS a (0,0) grand-total sentinel.
 	DROP TABLE IF EXISTS #Periods;
@@ -209,6 +216,104 @@ BEGIN
 	UNION ALL
 	SELECT 0, 0, COUNT(DISTINCT AccessionNumber) FROM #Base WHERE BilledUnbilled = 'Billed';
 
+	-- ── LIS dimension filter via LIMSMaster ─────────────────────────────────
+	--    Build an accession whitelist from LIMSMaster when Panel / Clinic /
+	--    Provider filter is active.  Date parameters are intentionally NOT
+	--    applied to LIMSMaster (LIS uses its own period system).
+	--    SalesRep is not available for PhiLife LIS — always skipped.
+	-- ────────────────────────────────────────────────────────────────────────
+	DROP TABLE IF EXISTS #LisFilterAccessions;
+	CREATE TABLE #LisFilterAccessions
+	(
+	    Accession     NVARCHAR(100) COLLATE DATABASE_DEFAULT NOT NULL,
+	    PanelCategory NVARCHAR(300) COLLATE DATABASE_DEFAULT NULL   -- populated when @HasPanelFilter = 1
+	);
+
+	DECLARE @LisMasterFiltered BIT = 0;   -- 1 when whitelist was successfully built
+
+	IF @HasLisFilter = 1 AND OBJECT_ID('dbo.LIMSMaster', 'U') IS NOT NULL
+	BEGIN
+		DECLARE @LisAccCol SYSNAME = (
+			SELECT TOP 1 name FROM sys.columns
+			WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+			  AND name IN ('Accession','AccessionNumber','AccessionNo','OrderID')
+			ORDER BY CASE name
+				WHEN 'Accession'       THEN 0 WHEN 'AccessionNumber' THEN 1
+				WHEN 'AccessionNo'     THEN 2 WHEN 'OrderID'         THEN 3 ELSE 4 END);
+
+		-- Keep in sync with 19_PhiLife_ExecutiveSummary_LIS_Alt.sql @PanelCatCol detection.
+		DECLARE @LisPanelCatCol SYSNAME = (
+			SELECT TOP 1 name FROM sys.columns
+			WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+			  AND name IN ('PanelCategory','Panel','PanelName','PanelType','PanelGroup')
+			ORDER BY CASE name
+				WHEN 'PanelCategory' THEN 0 WHEN 'Panel'     THEN 1
+				WHEN 'PanelName'     THEN 2 WHEN 'PanelType' THEN 3 WHEN 'PanelGroup' THEN 4 ELSE 5 END);
+
+		DECLARE @LisFacilityCol SYSNAME = (
+			SELECT TOP 1 name FROM sys.columns
+			WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+			  AND name IN ('Facility','FacilityName','ClinicName','Clinic','FacilityID')
+			ORDER BY CASE name
+				WHEN 'Facility'     THEN 0 WHEN 'FacilityName' THEN 1
+				WHEN 'ClinicName'   THEN 2 WHEN 'Clinic'       THEN 3 WHEN 'FacilityID' THEN 4 ELSE 5 END);
+
+		DECLARE @LisProviderCol SYSNAME = (
+			SELECT TOP 1 name FROM sys.columns
+			WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+			  AND name IN ('Provider','PhysicianName','ProviderName','ReferringProvider','ReferringPhysician')
+			ORDER BY CASE name
+				WHEN 'Provider'            THEN 0 WHEN 'PhysicianName'      THEN 1
+				WHEN 'ProviderName'        THEN 2 WHEN 'ReferringProvider'  THEN 3
+				WHEN 'ReferringPhysician'  THEN 4 ELSE 5 END);
+
+		-- Build whitelist only when the accession column AND at least one
+		-- dimension column matching the active filter could be found.
+		IF @LisAccCol IS NOT NULL
+		   AND ((@HasPanelFilter    = 1 AND @LisPanelCatCol IS NOT NULL)
+			 OR (@HasClinicFilter   = 1 AND @LisFacilityCol IS NOT NULL)
+			 OR (@HasProviderFilter = 1 AND @LisProviderCol IS NOT NULL))
+		BEGIN
+			-- PanelCategory expression: select the panel column value when panel filter is active.
+			DECLARE @LisPanelCatExpr NVARCHAR(MAX) =
+				CASE WHEN @HasPanelFilter = 1 AND @LisPanelCatCol IS NOT NULL
+				     THEN 'LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @LisPanelCatCol + ']), '''')))'
+				     ELSE 'NULL'
+				END;
+
+			DECLARE @LisFilterSql NVARCHAR(MAX) = N'
+				INSERT INTO #LisFilterAccessions (Accession, PanelCategory)
+				SELECT DISTINCT
+					LTRIM(RTRIM(CONVERT(NVARCHAR(100), [' + @LisAccCol + N']))),
+					' + @LisPanelCatExpr + N'
+				FROM dbo.LIMSMaster
+				WHERE NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(100), [' + @LisAccCol + N']))), '''') IS NOT NULL';
+
+			-- COLLATE DATABASE_DEFAULT prevents collation conflicts in CHARINDEX.
+			-- Date parameters intentionally omitted — LIS ignores date filter.
+			IF @HasPanelFilter = 1 AND @LisPanelCatCol IS NOT NULL
+				SET @LisFilterSql += N'
+				  AND CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @LisPanelCatCol + N']), ''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @iPanels + '','') COLLATE DATABASE_DEFAULT) > 0';
+
+			IF @HasClinicFilter = 1 AND @LisFacilityCol IS NOT NULL
+				SET @LisFilterSql += N'
+				  AND CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @LisFacilityCol + N']), ''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @iClinics + '','') COLLATE DATABASE_DEFAULT) > 0';
+
+			IF @HasProviderFilter = 1 AND @LisProviderCol IS NOT NULL
+				SET @LisFilterSql += N'
+				  AND CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @LisProviderCol + N']), ''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @iProviders + '','') COLLATE DATABASE_DEFAULT) > 0';
+
+			SET @LisFilterSql += N';';
+
+			EXEC sp_executesql @LisFilterSql,
+				N'@iPanels NVARCHAR(MAX), @iClinics NVARCHAR(MAX), @iProviders NVARCHAR(MAX)',
+				@iPanels = @Panels, @iClinics = @Clinics, @iProviders = @Providers;
+
+			SET @LisMasterFiltered = 1;
+		END
+	END
+
+	-- ── #LisBilled ────────────────────────────────────────────────────────
 	DROP TABLE IF EXISTS #LisBilled;
 	CREATE TABLE #LisBilled
 	(
@@ -228,7 +333,13 @@ BEGIN
 			MONTH(TRY_CAST(RequestCollectDate AS DATE))
 		FROM dbo.LIMSMaster
 		WHERE TRY_CAST(RequestCollectDate AS DATE) IS NOT NULL
-		  AND NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(100), Accession))), '') IS NOT NULL;
+		  AND NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(100), Accession))), '') IS NOT NULL
+		  -- When a LIS dimension whitelist was built, restrict to matching accessions.
+		  AND (@LisMasterFiltered = 0 OR EXISTS (
+				SELECT 1 FROM #LisFilterAccessions fa
+				WHERE fa.Accession COLLATE DATABASE_DEFAULT
+				      = LTRIM(RTRIM(CONVERT(NVARCHAR(100), Accession))) COLLATE DATABASE_DEFAULT
+		  ));
 	END
 
 	DROP TABLE IF EXISTS #LisBilledCount;
@@ -240,32 +351,136 @@ BEGIN
 	UNION ALL
 	SELECT 0, 0, COUNT(DISTINCT Accession) FROM #LisBilled WHERE BilledUnbilled = 'Billed';
 
-	-- Distinct Panelnames among Resulted samples, for A.<Panelname> sub-rows.
-	DROP TABLE IF EXISTS #Panels;
-	SELECT DISTINCT Panelname INTO #Panels
-	FROM #Base
-	WHERE IsResulted = 1 AND Panelname <> '';
+	-- ── #LisBase + #LisPeriods : source tables for the Lis / LisPanel CTEs ──
+	--    When @LisMasterFiltered = 1, rebuild ClaimLevelData without date
+	--    filters, restricted only to accessions in the LIMSMaster whitelist.
+	--    Otherwise mirror #Base directly so existing behaviour is unchanged.
+	--
+	--    NOTE: CREATE TABLE + INSERT INTO is used (instead of SELECT INTO) to
+	--    avoid SQL Server compile-time error 2714 ("object already exists") that
+	--    is raised when two SELECT INTO #SameName statements appear in the same
+	--    procedure scope, even inside separate IF / ELSE branches.
+	DROP TABLE IF EXISTS #LisBase;
+	CREATE TABLE #LisBase
+	(
+		AccessionNumber      NVARCHAR(200) NOT NULL,
+		ESYear               INT           NULL,
+		ESMonth              INT           NULL,
+		BilledUnbilled       NVARCHAR(100) NOT NULL,
+		ClaimStatus          NVARCHAR(200) NOT NULL,
+		Panelname            NVARCHAR(200) NOT NULL,
+		PayerType            NVARCHAR(200) NOT NULL,
+		ChargeAmount         DECIMAL(18,2) NOT NULL,
+		InsurancePayment     DECIMAL(18,2) NOT NULL,
+		PatientPayment       DECIMAL(18,2) NOT NULL,
+		InsuranceAdjustments DECIMAL(18,2) NOT NULL,
+		PatientAdjustments   DECIMAL(18,2) NOT NULL,
+		InsuranceBalance     DECIMAL(18,2) NOT NULL,
+		PatientBalance       DECIMAL(18,2) NOT NULL,
+		IsResulted           INT           NOT NULL
+	);
 
+	IF @LisMasterFiltered = 1
+	BEGIN
+		-- No date-range parameters applied here — LIS ignores the date filter.
+		INSERT INTO #LisBase
+		       (AccessionNumber, ESYear, ESMonth, BilledUnbilled, ClaimStatus,
+		        Panelname, PayerType, ChargeAmount, InsurancePayment, PatientPayment,
+		        InsuranceAdjustments, PatientAdjustments, InsuranceBalance, PatientBalance,
+		        IsResulted)
+		SELECT
+			AccessionNumber,
+			YEAR (TRY_CAST(DateofService AS DATE)),
+			MONTH(TRY_CAST(DateofService AS DATE)),
+			ISNULL(BilledUnbilled, ''),
+			ISNULL(LTRIM(RTRIM(ClaimStatus)), ''),
+			ISNULL(LTRIM(RTRIM(Panelname)), ''),
+			ISNULL(LTRIM(RTRIM(PayerType)), ''),
+			ISNULL(TRY_CAST(ChargeAmount         AS DECIMAL(18,2)), 0),
+			ISNULL(TRY_CAST(InsurancePayment     AS DECIMAL(18,2)), 0),
+			ISNULL(TRY_CAST(PatientPayment       AS DECIMAL(18,2)), 0),
+			ISNULL(TRY_CAST(InsuranceAdjustments AS DECIMAL(18,2)), 0),
+			ISNULL(TRY_CAST(PatientAdjustments   AS DECIMAL(18,2)), 0),
+			ISNULL(TRY_CAST(InsuranceBalance     AS DECIMAL(18,2)), 0),
+			ISNULL(TRY_CAST(PatientBalance       AS DECIMAL(18,2)), 0),
+			CASE
+				WHEN FirstBilledDate IS NOT NULL THEN 1
+				WHEN ClaimStatus IS NOT NULL AND LTRIM(RTRIM(ClaimStatus)) <> '' THEN 1
+				ELSE 0
+			END
+		FROM dbo.ClaimLevelData
+		WHERE TRY_CAST(DateofService AS DATE) IS NOT NULL
+		  AND NULLIF(LTRIM(RTRIM(AccessionNumber)), '') IS NOT NULL
+		  AND EXISTS (
+				SELECT 1 FROM #LisFilterAccessions fa
+				WHERE fa.Accession COLLATE DATABASE_DEFAULT
+				      = LTRIM(RTRIM(AccessionNumber)) COLLATE DATABASE_DEFAULT
+		  );
+	END
+	ELSE
+	BEGIN
+		INSERT INTO #LisBase
+		       (AccessionNumber, ESYear, ESMonth, BilledUnbilled, ClaimStatus,
+		        Panelname, PayerType, ChargeAmount, InsurancePayment, PatientPayment,
+		        InsuranceAdjustments, PatientAdjustments, InsuranceBalance, PatientBalance,
+		        IsResulted)
+		SELECT AccessionNumber, ESYear, ESMonth, BilledUnbilled, ClaimStatus,
+		       Panelname, PayerType, ChargeAmount, InsurancePayment, PatientPayment,
+		       InsuranceAdjustments, PatientAdjustments, InsuranceBalance, PatientBalance,
+		       IsResulted
+		FROM #Base;
+	END
+
+	SELECT DISTINCT ESYear, ESMonth INTO #LisPeriods FROM #LisBase
+	UNION ALL SELECT 0, 0;
+
+	-- Distinct Panelnames for A.<Panelname> sub-rows.
+	-- When @LisMasterFiltered = 1 AND @HasPanelFilter = 1, use the PanelCategory values from
+	-- the LIMSMaster whitelist (individual panel labels, e.g. "ABR Panel") so they match
+	-- what the user selected — ClaimLevelData Panelname is a compound label ("ABR Panel, UTI Panel, ...")
+	-- that would never equal a single selection.  Otherwise use the ClaimLevelData Panelname directly.
+	--
+	-- CREATE TABLE + INSERT INTO avoids SQL Server compile-time error 2714 that is raised
+	-- when two SELECT INTO #SameName statements appear in IF / ELSE branches.
+	DROP TABLE IF EXISTS #Panels;
+	CREATE TABLE #Panels (Panelname NVARCHAR(200) NOT NULL);
+
+	IF @LisMasterFiltered = 1 AND @HasPanelFilter = 1
+	BEGIN
+	    INSERT INTO #Panels (Panelname)
+	    SELECT DISTINCT PanelCategory
+	    FROM #LisFilterAccessions
+	    WHERE PanelCategory IS NOT NULL AND PanelCategory <> '';
+	END
+	ELSE
+	BEGIN
+	    INSERT INTO #Panels (Panelname)
+	    SELECT DISTINCT Panelname FROM #LisBase WHERE IsResulted = 1 AND Panelname <> '';
+	END
+
+	-- Lis / LisPanel use #LisBase + #LisPeriods so the LIS aggregation reflects
+	-- the LIMSMaster-based dimension filter (when active).
+	-- PMS / Cash / AvgRows below continue to use #Base + #Periods â untouched.
 	;WITH Lis AS
 	(
 		-- Total  Total Samples
 		SELECT p.ESYear, p.ESMonth, 'Total' AS RowCode, 'Total Samples' AS Description,
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2)) AS MetricValue
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 		GROUP BY p.ESYear, p.ESMonth
 
 		-- A  Billable Samples - Resulted
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'A', 'Billable Samples - Resulted',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth)) AND b.IsResulted = 1
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth)) AND b.IsResulted = 1
 		GROUP BY p.ESYear, p.ESMonth
 
 		-- A1  Billed to Insurance
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'A1', '  Billed to Insurance',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 1 AND b.ClaimStatus = 'Billed' AND b.BilledUnbilled = 'Billed'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -273,7 +488,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'A1.1', '    Billed in AMD',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 1 AND b.ClaimStatus = 'Billed' AND b.BilledUnbilled = 'Billed'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -281,7 +496,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'A2', '  Not Entered in AMD (Insurance Unbilled)',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 1 AND b.ClaimStatus = 'Not Entered in AMD' AND b.BilledUnbilled = 'Unbilled' AND b.PayerType = 'Insurance'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -289,7 +504,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'A2.1', '    Received',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 1 AND b.BilledUnbilled = 'Unbilled' AND b.PayerType = 'Insurance' AND b.ClaimStatus IN ('Received','Not Entered in AMD')
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -297,7 +512,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'A2.2', '    Billing Review Required',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 1 AND b.BilledUnbilled = 'Unbilled' AND b.PayerType = 'Insurance' AND b.ClaimStatus = 'Billing Review Required'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -305,7 +520,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'A2.3', '    Collected',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 1 AND b.BilledUnbilled = 'Unbilled' AND b.PayerType = 'Insurance' AND b.ClaimStatus = 'Collected'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -313,7 +528,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'A3', '  Unbilled Not Released to Payer (EDI Hold)',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 1 AND b.BilledUnbilled = 'Unbilled' AND b.ClaimStatus = 'Entered'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -321,7 +536,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'A4', '  Client Bill',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 1 AND b.PayerType = 'Client Bill'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -329,7 +544,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'A4.1', '    Not Entered in AMD',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 1 AND b.PayerType = 'Client Bill' AND b.ClaimStatus = 'Not Entered in AMD'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -337,7 +552,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'A4.2', '    Billed',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 1 AND b.PayerType = 'Client Bill' AND b.ClaimStatus = 'Billed'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -345,7 +560,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'A5', '  Self Pay',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 1 AND b.PayerType = 'Self Pay'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -353,7 +568,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'A5.1', '    Billed',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 1 AND b.PayerType = 'Self Pay' AND b.ClaimStatus = 'Billed'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -361,7 +576,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'A5.2', '    Not Entered in AMD',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 1 AND b.PayerType = 'Self Pay' AND b.ClaimStatus = 'Not Entered in AMD'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -369,7 +584,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'A6', '  Test Entries',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 1 AND b.PayerType <> 'No Bill' AND b.ClaimStatus = 'Test Entries'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -377,7 +592,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'A6.1', '    Not Entered in AMD',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 1 AND b.PayerType <> 'No Bill' AND b.ClaimStatus = 'Not Entered in AMD'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -385,7 +600,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'A6.2', '    Billed',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 1 AND b.PayerType <> 'No Bill' AND b.ClaimStatus = 'Billed'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -393,7 +608,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'A7', '  Rejected Sample',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 1 AND b.ClaimStatus = 'Rejected'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -401,7 +616,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'A7.1', '    Not Entered in AMD',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 1 AND b.ClaimStatus = 'Not Entered in AMD'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -409,7 +624,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'A7.2', '    Billed (Rejected)',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 1 AND b.ClaimStatus = 'Billed'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -417,7 +632,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'A8', '  Payment Method No Bill',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 1 AND b.PayerType = 'No Bill'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -425,14 +640,14 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'B', 'Not Resulted',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth)) AND b.IsResulted = 0
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth)) AND b.IsResulted = 0
 		GROUP BY p.ESYear, p.ESMonth
 
 		-- B1  Not Entered in AMD (Not Resulted)
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'B1', '  Not Entered in AMD (Not Resulted)',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 0 AND b.ClaimStatus = 'Not Entered in AMD' AND b.PayerType = 'Insurance'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -440,7 +655,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'B1.1', '    Received',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 0 AND b.PayerType = 'Insurance' AND b.ClaimStatus IN ('Received','Not Entered in AMD')
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -448,7 +663,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'B1.2', '    Collected',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 0 AND b.PayerType = 'Insurance' AND b.ClaimStatus = 'Collected'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -456,7 +671,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'B2', '  Client Bill (Not Resulted)',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 0 AND b.PayerType = 'Client Bill'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -464,7 +679,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'B3', '  Test Entries (Not Resulted)',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 0 AND b.PayerType = 'Insurance' AND b.ClaimStatus = 'Test Entries'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -472,7 +687,7 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'B4', '  Rejected Sample (Not Resulted)',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 0 AND b.PayerType = 'Insurance' AND b.ClaimStatus = 'Rejected'
 		GROUP BY p.ESYear, p.ESMonth
 
@@ -480,21 +695,42 @@ BEGIN
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'B5', '  Payment Method No Bill (Not Resulted)',
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2))
-		FROM #Periods p LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+		FROM #LisPeriods p LEFT JOIN #LisBase b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
 						   AND b.IsResulted = 0 AND b.PayerType = 'No Bill'
 		GROUP BY p.ESYear, p.ESMonth
 	),
 	LisPanel AS
 	(
 		-- A.<Panelname> sub-rows under "Billable Samples - Resulted"
+		--
+		-- Path A (LIMSMaster panel filter active): match via #LisFilterAccessions.PanelCategory.
+		--   #Panels.Panelname contains individual LIMSMaster PanelCategory values.
+		--   Join to #LisBase through the whitelist: accession is in the whitelist AND
+		--   the whitelist row carries the selected PanelCategory that matches this sub-row.
+		--
+		-- Path B (no LIMSMaster panel filter): direct ClaimLevelData Panelname match.
+		--   Only used when no PanelCategory values are present in the whitelist.
 		SELECT p.ESYear, p.ESMonth, 'A.' + pn.Panelname AS RowCode, '  ' + pn.Panelname AS Description,
 			   CAST(COUNT(DISTINCT b.AccessionNumber) AS DECIMAL(18,2)) AS MetricValue
 		FROM #Panels pn
-		CROSS JOIN #Periods p
-		LEFT JOIN #Base b
+		CROSS JOIN #LisPeriods p
+		LEFT JOIN #LisBase b
 		       ON (p.ESYear = 0 OR (b.ESYear = p.ESYear AND b.ESMonth = p.ESMonth))
 		      AND b.IsResulted = 1
-		      AND b.Panelname = pn.Panelname
+		      AND (
+		              -- Path A: match via LIMSMaster PanelCategory whitelist
+		              EXISTS (
+		                  SELECT 1 FROM #LisFilterAccessions fa
+		                  WHERE fa.Accession       COLLATE DATABASE_DEFAULT = b.AccessionNumber COLLATE DATABASE_DEFAULT
+		                    AND fa.PanelCategory   COLLATE DATABASE_DEFAULT = pn.Panelname      COLLATE DATABASE_DEFAULT
+		              )
+		              OR
+		              -- Path B: direct Panelname match when no PanelCategory in whitelist
+		              (
+		                  NOT EXISTS (SELECT 1 FROM #LisFilterAccessions WHERE PanelCategory IS NOT NULL)
+		                  AND b.Panelname COLLATE DATABASE_DEFAULT = pn.Panelname COLLATE DATABASE_DEFAULT
+		              )
+		          )
 		GROUP BY pn.Panelname, p.ESYear, p.ESMonth
 	),
 	PMS AS
@@ -759,6 +995,9 @@ BEGIN
 	DROP TABLE IF EXISTS #LisBilled;
 	DROP TABLE IF EXISTS #LisBilledCount;
 	DROP TABLE IF EXISTS #Panels;
+	DROP TABLE IF EXISTS #LisFilterAccessions;
+	DROP TABLE IF EXISTS #LisBase;
+	DROP TABLE IF EXISTS #LisPeriods;
 END;
 GO
 

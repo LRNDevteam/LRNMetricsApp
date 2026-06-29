@@ -21,10 +21,12 @@ BEGIN
 
     UNION ALL
 
-    SELECT 'Panel', LTRIM(RTRIM(PanelType)), 0
+    -- Panel dropdown is sourced from PanelNameBasedOnCPT so the listed values
+    -- match the panel filter in usp_GetInh_ExecutiveSummary (file 24).
+    SELECT 'Panel', LTRIM(RTRIM(PanelNameBasedOnCPT)), 0
     FROM dbo.ClaimLevelData
-    WHERE NULLIF(LTRIM(RTRIM(PanelType)), '') IS NOT NULL
-    GROUP BY LTRIM(RTRIM(PanelType))
+    WHERE NULLIF(LTRIM(RTRIM(PanelNameBasedOnCPT)), '') IS NOT NULL
+    GROUP BY LTRIM(RTRIM(PanelNameBasedOnCPT))
 
     UNION ALL
 

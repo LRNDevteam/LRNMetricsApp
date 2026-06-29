@@ -92,6 +92,18 @@ public sealed class PhiExecutiveSummaryViewModel
     public List<ExecSummaryRow> Rows { get; set; } = [];
 
 
+    // ── Run / analysis-range banner (mirrors the Production Report header) ──
+    /// <summary>Week range label for the "Analysis Range: Billed Date — …" banner.
+    /// Sourced from ClaimLevelData.WeekFolder (latest run).</summary>
+    public string? ReportWeekFolder { get; set; }
+
+    /// <summary>Primary ReportId (RUNID) shown in the banner.
+    /// Sourced from ClaimLevelData.RunId (latest run).</summary>
+    public string? ReportRunId { get; set; }
+
+    /// <summary>LIMSMaster RunId, shown alongside the ClaimLevelData RunId.</summary>
+    public string? LimsRunId { get; set; }
+
     /// <summary>Error message when the query fails or is unavailable.</summary>
     public string? ErrorMessage { get; set; }
 

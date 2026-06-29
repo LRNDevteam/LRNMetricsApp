@@ -3,9 +3,14 @@
 -- File : 31_NW_ExecutiveSummary_Read.sql
 -- DB   : NorthWest_LRN
 --
--- usp_GetNW_ExecutiveSummary(@YearFrom,@YearTo,@MonthFrom,@MonthTo)
---   @HasFilter = 0  → fast read from 4 NW_ES_ aggregate tables.
---   @HasFilter = 1  → live re-aggregate from LIMSMaster + ClaimLevelData.
+-- usp_GetNW_ExecutiveSummary(@YearFrom,@YearTo,@MonthFrom,@MonthTo,...)
+--   @HasFilter = 0                      → fast read from 4 NW_ES_ aggregate tables.
+--   Date / Rep filter only              → PMS+Cash+Avg live from ClaimLevelData;
+--                                         LIS from NW_ES_LIS (period-filtered).
+--   Panel / Clinic / Provider filter    → additionally re-aggregates LIS live from
+--                                         LIMSMaster via #LisBase (dimension-filtered,
+--                                         date-independent). Columns: PanelType,
+--                                         ClinicName, ReferringProvider. SalesRep skipped.
 -- ============================================================
 SET NOCOUNT ON;
 GO
@@ -106,17 +111,390 @@ BEGIN
     DECLARE @HasProviderFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM #FilterProviders) THEN 1 ELSE 0 END;
     DECLARE @HasRepFilter      BIT = CASE WHEN EXISTS (SELECT 1 FROM #FilterReps)      THEN 1 ELSE 0 END;
 
-    -- ── LIS: read from aggregate table with period filter ────────────────
-    SELECT RoleID AS RowCode, 'LIS' AS Category, Description,
-           ESYear AS BillYear, ESMonth AS BillMonth,
-           CAST(ESMonthClaimCount AS DECIMAL(18,2)) AS MetricValue
-    INTO #LisRows
-    FROM dbo.NW_ES_LIS
-    WHERE (@YearFrom=0  OR ESYear  >= @YearFrom)
-      AND (@YearTo=0    OR ESYear  <= @YearTo)
-      AND (@MonthFrom=0 OR ESMonth >= @MonthFrom)
-      AND (@MonthTo=0   OR ESMonth <= @MonthTo)
-      AND ESYear<>0;
+    -- ── LIS dimension filter via LIMSMaster ──────────────────────────────
+    --    When Panel / Clinic / Provider filter is active, re-aggregate LIS
+    --    live from dbo.LIMSMaster (filtered) instead of the pre-built
+    --    aggregate table.  Date parameters are intentionally NOT applied
+    --    to LIMSMaster.  SalesRep is not available for NW LIS — skipped.
+    --    Column logic mirrors usp_RefreshNW_ExecutiveSummary_LIS_Alt (file 33).
+    -- ─────────────────────────────────────────────────────────────────────
+    DECLARE @HasLisFilter BIT = CASE
+        WHEN @HasPanelFilter = 1 OR @HasClinicFilter = 1 OR @HasProviderFilter = 1
+        THEN 1 ELSE 0 END;
+
+    -- #LisBase: mirrors #LisBase in the refresh SP (file 33).
+    -- Populated from LIMSMaster when @HasLisFilter = 1; empty otherwise.
+    DROP TABLE IF EXISTS #LisBase;
+    CREATE TABLE #LisBase
+    (
+        OrderID                 NVARCHAR(100) COLLATE DATABASE_DEFAULT NOT NULL,
+        ESYear                  INT           NOT NULL,
+        ESMonth                 INT           NOT NULL,
+        IncorrectDOS            NVARCHAR(50)  COLLATE DATABASE_DEFAULT NOT NULL,
+        BilledTo                NVARCHAR(200) COLLATE DATABASE_DEFAULT NOT NULL,
+        BillStatus              NVARCHAR(100) COLLATE DATABASE_DEFAULT NOT NULL,
+        FinalStatus             NVARCHAR(200) COLLATE DATABASE_DEFAULT NOT NULL,
+        Source                  NVARCHAR(100) COLLATE DATABASE_DEFAULT NOT NULL,
+        ChargesNotEnteredStatus NVARCHAR(200) COLLATE DATABASE_DEFAULT NOT NULL,
+        PanelName               NVARCHAR(200) COLLATE DATABASE_DEFAULT NOT NULL
+    );
+
+    DECLARE @LisMasterFiltered BIT = 0;
+
+    IF @HasLisFilter = 1 AND OBJECT_ID('dbo.LIMSMaster', 'U') IS NOT NULL
+    BEGIN
+        -- ── Column detection (same priority order as file 33) ──────────────
+        DECLARE @LisOrderIDCol  SYSNAME = (SELECT TOP 1 name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.LIMSMaster')
+            AND name IN ('OrderID','OrderId','AccessionNumber','Accession')
+            ORDER BY CASE name WHEN 'OrderID' THEN 0 WHEN 'OrderId' THEN 1 WHEN 'AccessionNumber' THEN 2 ELSE 3 END);
+        DECLARE @LisDateCol     SYSNAME = (SELECT TOP 1 name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.LIMSMaster')
+            AND name IN ('ReqCollectDate','Entry_DateCreated','RequestCollectDate','DateOfCollection','DateofService','CollectionDate','ServiceDate','AccessionDate')
+            ORDER BY CASE name WHEN 'ReqCollectDate' THEN 0 WHEN 'Entry_DateCreated' THEN 1 WHEN 'RequestCollectDate' THEN 2
+                WHEN 'DateOfCollection' THEN 3 WHEN 'DateofService' THEN 4 WHEN 'CollectionDate' THEN 5
+                WHEN 'ServiceDate' THEN 6 WHEN 'AccessionDate' THEN 7 ELSE 8 END);
+        DECLARE @LisIncorrectDOSCol SYSNAME = (SELECT TOP 1 name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.LIMSMaster')
+            AND name IN ('IncorrectDOS','IncorrectDos','Incorrect_DOS','BadDOS')
+            ORDER BY CASE name WHEN 'IncorrectDOS' THEN 0 WHEN 'IncorrectDos' THEN 1 WHEN 'Incorrect_DOS' THEN 2 ELSE 3 END);
+        DECLARE @LisBilledToCol SYSNAME = (SELECT TOP 1 name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.LIMSMaster')
+            AND name IN ('BilledTo','BillTo','Billed_To')
+            ORDER BY CASE name WHEN 'BilledTo' THEN 0 WHEN 'BillTo' THEN 1 ELSE 2 END);
+        DECLARE @LisBillStatusCol SYSNAME = (SELECT TOP 1 name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.LIMSMaster')
+            AND name IN ('BillStatus','BillingStatus','Bill_Status')
+            ORDER BY CASE name WHEN 'BillStatus' THEN 0 WHEN 'BillingStatus' THEN 1 ELSE 2 END);
+        DECLARE @LisFinalStatusCol SYSNAME = (SELECT TOP 1 name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.LIMSMaster')
+            AND name IN ('FinalStatus','Final_Status','SubStatus','Status')
+            ORDER BY CASE name WHEN 'FinalStatus' THEN 0 WHEN 'Final_Status' THEN 1 WHEN 'SubStatus' THEN 2 ELSE 3 END);
+        DECLARE @LisSourceCol SYSNAME = (SELECT TOP 1 name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.LIMSMaster')
+            AND name IN ('Source','ClaimSource','System_Source')
+            ORDER BY CASE name WHEN 'Source' THEN 0 WHEN 'ClaimSource' THEN 1 ELSE 2 END);
+        DECLARE @LisChargesNotCol SYSNAME = (SELECT TOP 1 name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.LIMSMaster')
+            AND name IN ('ChargesNotEnteredStatus','ChargesNotEntered','NotEnteredStatus')
+            ORDER BY CASE name WHEN 'ChargesNotEnteredStatus' THEN 0 WHEN 'ChargesNotEntered' THEN 1 ELSE 2 END);
+        DECLARE @LisPanelNameCol SYSNAME = (SELECT TOP 1 name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.LIMSMaster')
+            AND name IN ('LRNPanelName','PanelName','Panelname','PanelType','Panel','TestPanel')
+            ORDER BY CASE name WHEN 'LRNPanelName' THEN 0 WHEN 'PanelName' THEN 1 WHEN 'Panelname' THEN 2
+                WHEN 'PanelType' THEN 3 WHEN 'Panel' THEN 4 ELSE 5 END);
+
+        -- Dimension filter columns (separate from the sub-row label column above).
+        -- Panel filter uses PanelType per spec; Clinic uses ClinicName; Provider uses ReferringProvider.
+        DECLARE @LisPanelFilterCol SYSNAME = (SELECT TOP 1 name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.LIMSMaster')
+            AND name IN ('PanelType','PanelCategory','PanelName','Panelname','Panel','TestPanel')
+            ORDER BY CASE name WHEN 'PanelType' THEN 0 WHEN 'PanelCategory' THEN 1 WHEN 'PanelName' THEN 2
+                WHEN 'Panelname' THEN 3 WHEN 'Panel' THEN 4 ELSE 5 END);
+        DECLARE @LisFacilityCol SYSNAME = (SELECT TOP 1 name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.LIMSMaster')
+            AND name IN ('ClinicName','Facility','FacilityName','Clinic','FacilityID')
+            ORDER BY CASE name WHEN 'ClinicName' THEN 0 WHEN 'Facility' THEN 1 WHEN 'FacilityName' THEN 2
+                WHEN 'Clinic' THEN 3 WHEN 'FacilityID' THEN 4 ELSE 5 END);
+        DECLARE @LisProviderCol SYSNAME = (SELECT TOP 1 name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.LIMSMaster')
+            AND name IN ('ReferringProvider','Provider','PhysicianName','ProviderName','ReferringPhysician')
+            ORDER BY CASE name WHEN 'ReferringProvider' THEN 0 WHEN 'Provider' THEN 1 WHEN 'PhysicianName' THEN 2
+                WHEN 'ProviderName' THEN 3 WHEN 'ReferringPhysician' THEN 4 ELSE 5 END);
+
+        -- Required base columns must be present; each active filter must have its column.
+        IF @LisOrderIDCol IS NOT NULL AND @LisDateCol IS NOT NULL
+           AND @LisIncorrectDOSCol IS NOT NULL AND @LisBilledToCol IS NOT NULL
+           AND (@HasPanelFilter    = 0 OR @LisPanelFilterCol IS NOT NULL)
+           AND (@HasClinicFilter   = 0 OR @LisFacilityCol    IS NOT NULL)
+           AND (@HasProviderFilter = 0 OR @LisProviderCol    IS NOT NULL)
+        BEGIN
+            DECLARE @LisBsExpr  NVARCHAR(300) = CASE WHEN @LisBillStatusCol  IS NOT NULL THEN N'ISNULL(LTRIM(RTRIM([' + @LisBillStatusCol  + N'])),'''')' ELSE N'''''' END;
+            DECLARE @LisFsExpr  NVARCHAR(300) = CASE WHEN @LisFinalStatusCol IS NOT NULL THEN N'ISNULL(LTRIM(RTRIM([' + @LisFinalStatusCol + N'])),'''')' ELSE N'''''' END;
+            DECLARE @LisSrcExpr NVARCHAR(300) = CASE WHEN @LisSourceCol      IS NOT NULL THEN N'ISNULL(LTRIM(RTRIM([' + @LisSourceCol      + N'])),'''')' ELSE N'''''' END;
+            DECLARE @LisCnsExpr NVARCHAR(300) = CASE WHEN @LisChargesNotCol  IS NOT NULL THEN N'ISNULL(LTRIM(RTRIM([' + @LisChargesNotCol  + N'])),'''')' ELSE N'''''' END;
+            DECLARE @LisPnExpr  NVARCHAR(300) = CASE WHEN @LisPanelNameCol   IS NOT NULL THEN N'ISNULL(LTRIM(RTRIM([' + @LisPanelNameCol   + N'])),'''')' ELSE N'''''' END;
+
+            DECLARE @LisBaseSql NVARCHAR(MAX) = N'
+            INSERT INTO #LisBase
+            SELECT
+                LTRIM(RTRIM(ISNULL([' + @LisOrderIDCol + N'],''''))),
+                YEAR (TRY_CAST([' + @LisDateCol + N'] AS DATE)),
+                MONTH(TRY_CAST([' + @LisDateCol + N'] AS DATE)),
+                ISNULL(LTRIM(RTRIM([' + @LisIncorrectDOSCol + N'])),''''),
+                ISNULL(LTRIM(RTRIM([' + @LisBilledToCol + N'])),''''),
+                ' + @LisBsExpr + N',
+                ' + @LisFsExpr + N',
+                ' + @LisSrcExpr + N',
+                ' + @LisCnsExpr + N',
+                ' + @LisPnExpr + N'
+            FROM dbo.LIMSMaster
+            WHERE TRY_CAST([' + @LisDateCol + N'] AS DATE) IS NOT NULL
+              AND NULLIF(LTRIM(RTRIM(ISNULL([' + @LisOrderIDCol + N'],''''))),'''') IS NOT NULL';
+
+            -- Dimension predicates (Date intentionally omitted — LIS ignores date filter).
+            -- COLLATE DATABASE_DEFAULT prevents collation conflicts in CHARINDEX.
+            IF @HasPanelFilter = 1 AND @LisPanelFilterCol IS NOT NULL
+                SET @LisBaseSql += N'
+              AND CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300),[' + @LisPanelFilterCol + N']),''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @iPanels + '','') COLLATE DATABASE_DEFAULT) > 0';
+
+            IF @HasClinicFilter = 1 AND @LisFacilityCol IS NOT NULL
+                SET @LisBaseSql += N'
+              AND CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300),[' + @LisFacilityCol + N']),''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @iClinics + '','') COLLATE DATABASE_DEFAULT) > 0';
+
+            IF @HasProviderFilter = 1 AND @LisProviderCol IS NOT NULL
+                SET @LisBaseSql += N'
+              AND CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300),[' + @LisProviderCol + N']),''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @iProviders + '','') COLLATE DATABASE_DEFAULT) > 0';
+
+            SET @LisBaseSql += N';';
+
+            EXEC sp_executesql @LisBaseSql,
+                N'@iPanels NVARCHAR(MAX), @iClinics NVARCHAR(MAX), @iProviders NVARCHAR(MAX)',
+                @iPanels = @Panels, @iClinics = @Clinics, @iProviders = @Providers;
+
+            SET @LisMasterFiltered = 1;
+        END
+    END
+
+    -- #LisPeriods: distinct periods from filtered LIMSMaster.
+    -- NOTE: No (0,0) grand-total sentinel — NW filtered path does not produce grand totals.
+    DROP TABLE IF EXISTS #LisPeriods;
+    CREATE TABLE #LisPeriods (ESYear INT NOT NULL, ESMonth INT NOT NULL);
+
+    -- #LisPanels: distinct panel names for B.{PanelName} sub-rows.
+    DROP TABLE IF EXISTS #LisPanels;
+    CREATE TABLE #LisPanels (PanelName NVARCHAR(200) COLLATE DATABASE_DEFAULT NOT NULL);
+
+    IF @LisMasterFiltered = 1
+    BEGIN
+        INSERT INTO #LisPeriods (ESYear, ESMonth)
+        SELECT DISTINCT ESYear, ESMonth FROM #LisBase;
+
+        INSERT INTO #LisPanels (PanelName)
+        SELECT DISTINCT PanelName FROM #LisBase WHERE IncorrectDOS = '' AND BilledTo = 'Insurance Bill' AND PanelName <> '';
+    END
+
+    -- #LisOut: final LIS rows served to the UNION ALL below.
+    -- Widened RowCode/Description to accommodate B.{PanelName} sub-row codes.
+    DROP TABLE IF EXISTS #LisOut;
+    CREATE TABLE #LisOut
+    (
+        RowCode     NVARCHAR(500) COLLATE DATABASE_DEFAULT NOT NULL,
+        Description NVARCHAR(500) COLLATE DATABASE_DEFAULT NOT NULL,
+        ESYear      INT           NOT NULL,
+        ESMonth     INT           NOT NULL,
+        MetricValue DECIMAL(18,2) NOT NULL
+    );
+
+    IF @LisMasterFiltered = 1
+    BEGIN
+        -- Live aggregation from #LisBase — row logic mirrors usp_RefreshNW_ExecutiveSummary_LIS_Alt (file 33).
+        INSERT INTO #LisOut (RowCode, Description, ESYear, ESMonth, MetricValue)
+        SELECT RowCode, Description, ESYear, ESMonth, CAST(SampleCount AS DECIMAL(18,2))
+        FROM
+        (
+            -- A  Total No. of Samples (all rows, no IncorrectDOS filter)
+            SELECT p.ESYear, p.ESMonth, 'A' AS RowCode, 'Total No. of Samples' AS Description,
+                   COUNT(DISTINCT l.OrderID) AS SampleCount
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- B  Billable Samples
+            SELECT p.ESYear, p.ESMonth, 'B', 'Billable Samples',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='Insurance Bill' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- C  No. of Billed Claims
+            SELECT p.ESYear, p.ESMonth, 'C', 'No. of Billed Claims',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='Insurance Bill' AND l.BillStatus='Billed' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- C.1
+            SELECT p.ESYear, p.ESMonth, 'C.1', '  Claim Submitted in Webpm',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='Insurance Bill' AND l.BillStatus='Billed' AND l.FinalStatus='Claim Submitted in Webpm' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- C.2
+            SELECT p.ESYear, p.ESMonth, 'C.2', '  Claim Submitted in Daqbilling',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='Insurance Bill' AND l.BillStatus='Billed' AND l.FinalStatus='Claim Submitted in Daqbilling' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- C.3
+            SELECT p.ESYear, p.ESMonth, 'C.3', '  Claim Submitted in Daq & Webpm',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='Insurance Bill' AND l.BillStatus='Billed' AND l.FinalStatus='Claim Submitted in Daq & Webpm' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- C.4
+            SELECT p.ESYear, p.ESMonth, 'C.4', '  Non Billable - Excluded Organizations',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='Insurance Bill' AND l.BillStatus='Billed' AND l.FinalStatus='Non Billable - Excluded Organizations' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- C.5
+            SELECT p.ESYear, p.ESMonth, 'C.5', '  Manually Pushed in Emedix',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='Insurance Bill' AND l.BillStatus='Billed' AND l.FinalStatus='Manually Pushed in Emedix' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- D  No. of Unbilled Claims
+            SELECT p.ESYear, p.ESMonth, 'D', 'No. of Unbilled Claims',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='Insurance Bill' AND l.BillStatus='Unbilled' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- D.1
+            SELECT p.ESYear, p.ESMonth, 'D.1', '  Unbilled - Charge Not Created',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='Insurance Bill' AND l.BillStatus='Unbilled' AND l.FinalStatus='Charge Not Created' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- D.1.W
+            SELECT p.ESYear, p.ESMonth, 'D.1.W', '    Charge Not Created - Webpm',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='Insurance Bill' AND l.BillStatus='Unbilled' AND l.FinalStatus='Charge Not Created' AND l.Source='Webpm' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- D.1.NC
+            SELECT p.ESYear, p.ESMonth, 'D.1.NC', '    Charge Not Created - No Charges found in Webpm',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='Insurance Bill' AND l.BillStatus='Unbilled' AND l.FinalStatus='Charge Not Created' AND l.ChargesNotEnteredStatus='No Charges found in Webpm' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- D.1.UP
+            SELECT p.ESYear, p.ESMonth, 'D.1.UP', '    Charge Not Created - Unposted Charges in Webpm',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='Insurance Bill' AND l.BillStatus='Unbilled' AND l.FinalStatus='Charge Not Created' AND l.ChargesNotEnteredStatus='Unposted Charges in Webpm' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- D.1.DQ
+            SELECT p.ESYear, p.ESMonth, 'D.1.DQ', '    Charge Not Created - Daqbilling',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='Insurance Bill' AND l.BillStatus='Unbilled' AND l.FinalStatus='Charge Not Created' AND l.Source='Daqbilling' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- D.2
+            SELECT p.ESYear, p.ESMonth, 'D.2', '  Unbilled - Non Billable (Excluded PAP Codes)',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='Insurance Bill' AND l.BillStatus='Unbilled' AND l.FinalStatus='Non Billable - Excluded PAP Codes' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- D.3
+            SELECT p.ESYear, p.ESMonth, 'D.3', '  Unbilled - Non Billable (Excluded Validity Codes)',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='Insurance Bill' AND l.BillStatus='Unbilled' AND l.FinalStatus='Non Billable - Excluded Validity Codes' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- D.4
+            SELECT p.ESYear, p.ESMonth, 'D.4', '  Unbilled - Non Billable (Excluded Organizations)',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='Insurance Bill' AND l.BillStatus='Unbilled' AND l.FinalStatus='Non Billable - Excluded Organizations' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- D.5
+            SELECT p.ESYear, p.ESMonth, 'D.5', '  Unbilled - Charges Created and Not Submitted',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='Insurance Bill' AND l.BillStatus='Unbilled' AND l.FinalStatus='Charges Created and Not Submitted' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- D.5.W
+            SELECT p.ESYear, p.ESMonth, 'D.5.W', '    Charges Not Submitted - Webpm',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='Insurance Bill' AND l.BillStatus='Unbilled' AND l.FinalStatus='Charges Created and Not Submitted' AND l.Source='Webpm' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- D.5.DQ
+            SELECT p.ESYear, p.ESMonth, 'D.5.DQ', '    Charges Not Submitted - Daqbilling',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='Insurance Bill' AND l.BillStatus='Unbilled' AND l.FinalStatus='Charges Created and Not Submitted' AND l.Source='Daqbilling' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- E  No. of ADCS Claims
+            SELECT p.ESYear, p.ESMonth, 'E', 'No. of ADCS Claims',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='ADCS Claims' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- F  No. of Other Claims
+            SELECT p.ESYear, p.ESMonth, 'F', 'No. of Other Claims',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo NOT IN ('Insurance Bill','ADCS Claims') THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- F.1
+            SELECT p.ESYear, p.ESMonth, 'F.1', '  Other - Yet to be validate',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='Yet to be validate' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- F.2
+            SELECT p.ESYear, p.ESMonth, 'F.2', '  Other - Self pay',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='Self pay' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- F.3
+            SELECT p.ESYear, p.ESMonth, 'F.3', '  Other - Client Bills',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='Client Bills' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- F.4
+            SELECT p.ESYear, p.ESMonth, 'F.4', '  Other - System Test',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='System Test' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+
+            UNION ALL
+            -- F.5
+            SELECT p.ESYear, p.ESMonth, 'F.5', '  Other - Rejections',
+                   COUNT(DISTINCT CASE WHEN l.IncorrectDOS='' AND l.BilledTo='Rejections' THEN l.OrderID END)
+            FROM #LisPeriods p LEFT JOIN #LisBase l ON (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)
+            GROUP BY p.ESYear, p.ESMonth
+        ) lis_rows;
+
+        -- B.{PanelName} panel sub-rows (collapses under Row B in the dashboard).
+        INSERT INTO #LisOut (RowCode, Description, ESYear, ESMonth, MetricValue)
+        SELECT 'B.' + pn.PanelName, '  ' + pn.PanelName,
+               p.ESYear, p.ESMonth, CAST(COUNT(DISTINCT l.OrderID) AS DECIMAL(18,2))
+        FROM #LisPanels pn
+        CROSS JOIN #LisPeriods p
+        LEFT JOIN #LisBase l
+               ON l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth
+              AND l.IncorrectDOS = '' AND l.BilledTo = 'Insurance Bill'
+              AND l.PanelName COLLATE DATABASE_DEFAULT = pn.PanelName COLLATE DATABASE_DEFAULT
+        GROUP BY pn.PanelName, p.ESYear, p.ESMonth;
+    END
+    ELSE
+    BEGIN
+        -- No LIS dimension filter: serve from pre-built aggregate table with period filter.
+        -- Preserves existing behaviour exactly (ESYear<>0 excludes grand-total rows).
+        INSERT INTO #LisOut (RowCode, Description, ESYear, ESMonth, MetricValue)
+        SELECT RoleID, Description, ESYear, ESMonth, CAST(ESMonthClaimCount AS DECIMAL(18,2))
+        FROM dbo.NW_ES_LIS
+        WHERE (@YearFrom=0  OR ESYear  >= @YearFrom)
+          AND (@YearTo=0    OR ESYear  <= @YearTo)
+          AND (@MonthFrom=0 OR ESMonth >= @MonthFrom)
+          AND (@MonthTo=0   OR ESMonth <= @MonthTo)
+          AND ESYear<>0;
+    END
 
     -- ── ClaimLevelData column detection ──────────────────────────────────
     DECLARE @BilledCol SYSNAME = (
@@ -192,23 +570,23 @@ BEGIN
               AND (@dt IS NULL OR TRY_CAST(DateofService   AS DATE) <= @dt)
               AND (@bf IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @bf)
               AND (@bt IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @bt)
-              AND (@hpf=0 OR LTRIM(RTRIM(ISNULL(PanelType,        ''''))) COLLATE DATABASE_DEFAULT IN (SELECT Val FROM #FilterPanels))
-              AND (@hcf=0 OR LTRIM(RTRIM(ISNULL(ClinicName,       ''''))) COLLATE DATABASE_DEFAULT IN (SELECT Val FROM #FilterClinics))
-              AND (@hpvf=0 OR LTRIM(RTRIM(ISNULL(ReferringProvider,''''))) COLLATE DATABASE_DEFAULT IN (SELECT Val FROM #FilterProviders))
-              AND (@hrf=0 OR LTRIM(RTRIM(ISNULL(SalesRepname,     ''''))) COLLATE DATABASE_DEFAULT IN (SELECT Val FROM #FilterReps));';
+              AND (@hpf=0 OR CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(PanelType,        ''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @ipnl + '','') COLLATE DATABASE_DEFAULT) > 0)
+              AND (@hcf=0 OR CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(ClinicName,       ''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @icln + '','') COLLATE DATABASE_DEFAULT) > 0)
+              AND (@hpvf=0 OR CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(ReferringProvider,''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @iprv + '','') COLLATE DATABASE_DEFAULT) > 0)
+              AND (@hrf=0 OR CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(SalesRepname,     ''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @irep + '','') COLLATE DATABASE_DEFAULT) > 0);';
         EXEC sp_executesql @BaseSql,
-             N'@yf INT,@yt INT,@mf INT,@mt INT,@df DATE,@dt DATE,@bf DATE,@bt DATE,@hpf BIT,@hcf BIT,@hpvf BIT,@hrf BIT',
+             N'@yf INT,@yt INT,@mf INT,@mt INT,@df DATE,@dt DATE,@bf DATE,@bt DATE,@hpf BIT,@hcf BIT,@hpvf BIT,@hrf BIT,@ipnl NVARCHAR(MAX),@icln NVARCHAR(MAX),@iprv NVARCHAR(MAX),@irep NVARCHAR(MAX)',
              @yf=@YearFrom, @yt=@YearTo, @mf=@MonthFrom, @mt=@MonthTo,
              @df=@DosFrom, @dt=@DosTo,
              @bf=@BilledFrom, @bt=@BilledTo,
-             @hpf=@HasPanelFilter, @hcf=@HasClinicFilter, @hpvf=@HasProviderFilter, @hrf=@HasRepFilter;
+             @hpf=@HasPanelFilter, @hcf=@HasClinicFilter, @hpvf=@HasProviderFilter, @hrf=@HasRepFilter, @ipnl=@Panels, @icln=@Clinics, @iprv=@Providers, @irep=@Reps;
     END
 
     DROP TABLE IF EXISTS #Periods;
     SELECT DISTINCT ESYear, ESMonth INTO #Periods FROM #Base;
 
-    -- Combine LIS (from aggregate table) + PMS/Cash/Avg (live) + Avg sentinel
-    SELECT RowCode, Category, Description, BillYear, BillMonth, MetricValue FROM #LisRows
+    -- Combine LIS (#LisOut) + PMS/Cash/Avg (live from ClaimLevelData)
+    SELECT RowCode, 'LIS' AS Category, Description, ESYear AS BillYear, ESMonth AS BillMonth, MetricValue FROM #LisOut
 
     UNION ALL
     -- PMS: G, H, M-S
@@ -265,7 +643,10 @@ BEGIN
 
     ORDER BY BillYear, BillMonth, Category, RowCode;
 
-    DROP TABLE IF EXISTS #LisRows;
+    DROP TABLE IF EXISTS #LisBase;
+    DROP TABLE IF EXISTS #LisPeriods;
+    DROP TABLE IF EXISTS #LisPanels;
+    DROP TABLE IF EXISTS #LisOut;
     DROP TABLE IF EXISTS #Base;
     DROP TABLE IF EXISTS #Periods;
 END;

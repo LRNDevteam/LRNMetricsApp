@@ -187,6 +187,9 @@ public sealed class ProductionReportViewModel
     /// <summary>The most recent RunId from LineClaimFileLogs.</summary>
     public string? ReportRunId { get; init; }
 
+    /// <summary>The most recent RunId from LIMSMaster, shown alongside the LineClaimFileLogs RunId.</summary>
+    public string? LimsRunId { get; init; }
+
     public bool HasFilters => FilterPayerNames.Count > 0
         || FilterPanelNames.Count > 0
         || FilterPayerNamesExclude

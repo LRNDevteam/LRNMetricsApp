@@ -330,6 +330,40 @@
     </h2>
 </div>
 
+<!-- ── Analysis-range / RunID banner (mirrors Production Report) ───── -->
+@if (!string.IsNullOrWhiteSpace(Model.ReportWeekFolder)
+     || !string.IsNullOrWhiteSpace(Model.ReportRunId)
+     || !string.IsNullOrWhiteSpace(Model.LimsRunId))
+{
+    <div class="d-flex flex-wrap gap-3 align-items-center mb-3 px-1" style="font-size:.82rem;color:#374151;">
+        <span>
+            <span class="fw-semibold text-secondary" style="font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;">Analysis Range:</span>
+            <span class="ms-1 fw-semibold text-dark">Billed Week Range</span>
+            @if (!string.IsNullOrWhiteSpace(Model.ReportWeekFolder))
+            {
+                <span class="ms-1 text-muted">&mdash;</span>
+                <span class="ms-1 fw-semibold" style="color:#0e3460;">@Model.ReportWeekFolder</span>
+            }
+        </span>
+        @if (!string.IsNullOrWhiteSpace(Model.ReportRunId))
+        {
+            <span class="vr" style="height:1.1em;align-self:center;opacity:.3;"></span>
+            <span>
+                <span class="fw-semibold text-secondary" style="font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;">ReportId (RunID):</span>
+                <span class="ms-1 fw-semibold" style="color:#0e3460;">@Model.ReportRunId</span>
+            </span>
+        }
+      @*   @if (!string.IsNullOrWhiteSpace(Model.LimsRunId))
+        {
+            <span class="vr" style="height:1.1em;align-self:center;opacity:.3;"></span>
+            <span>
+                <span class="fw-semibold text-secondary" style="font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;">LIMSMaster RunID:</span>
+                <span class="ms-1 fw-semibold" style="color:#0e3460;">@Model.LimsRunId</span>
+            </span>
+        } *@
+    </div>
+}
+
 <!-- ── Filter panel ─────────────────────────────────────────── -->
 <div class="es-filter-panel mb-4" id="esFilterCard">
 
@@ -575,10 +609,10 @@
                    class="btn btn-sm btn-outline-secondary">
                     <i class="bi bi-x-circle me-1"></i>Clear All
                 </a>
-                <a href="@Url.Action("Index", new { lab = Model.SelectedLab, export = "excel" })"
-                   class="btn btn-sm btn-outline-success ms-auto">
+                <button type="submit" name="export" value="excel"
+                        class="btn btn-sm btn-outline-success ms-auto">
                     <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
-                </a>
+                </button>
             </div>
         </form>
     </div>

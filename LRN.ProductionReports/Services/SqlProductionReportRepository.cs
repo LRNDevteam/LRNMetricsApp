@@ -13,7 +13,7 @@ namespace LRN.ProductionReports.Services;
 
 /// <summary>
 /// Reads Monthly Claim Volume data from <c>dbo.ClaimLevelData</c>.
-/// Groups by PanelName × Year/Month(FirstBilledDate), counts unique ClaimIDs,
+/// Groups by PanelName ï¿½ Year/Month(FirstBilledDate), counts unique ClaimIDs,
 /// and sums ChargeAmount. Includes top-3 payer drill-down per panel.
 /// </summary>
 public sealed class SqlProductionReportRepository : IProductionReportRepository
@@ -79,7 +79,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             ? "TRY_CAST(ChargeEnteredDate AS DATE)"
             : "TRY_CAST(FirstBilledDate AS DATE)";
 
-        // Rule4 = PanelType; Rule3 (Augustus) = PanelNew only — no PanelName fallback.
+        // Rule4 = PanelType; Rule3 (Augustus) = PanelNew only ï¿½ no PanelName fallback.
         // panelNewStrict=true  (ProductionSummaryReport): use bare PanelNew, PanelNew IS NOT NULL guard.
         // panelNewStrict=false (standard ProductionReport): use PanelNew; null/empty displayed as '(No PanelNew)'.
         var rule3PanelExpr  = panelNewStrict
@@ -138,7 +138,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         }
 
         // Rule3 (Augustus): require ChargeEnteredDate. Rows with null/empty PanelNew
-        // are kept and displayed as '(No PanelNew)' — no PanelName fallback.
+        // are kept and displayed as '(No PanelNew)' ï¿½ no PanelName fallback.
         if (isRule3)
         {
             whereClauses.Add("TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL");
@@ -220,7 +220,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         // Query 1: filter option lists (unfiltered).
         // Rule4 = PanelType; Rule3 (Augustus) = PanelNew; others = PanelName.
         // Dropdown options: always use the real PanelNew column so '(No PanelNew)' rows are
-        // not listed as a selectable filter — they are a display-only label for unassigned rows.
+        // not listed as a selectable filter ï¿½ they are a display-only label for unassigned rows.
         var panelOptionsCol = isRule4 ? "PanelType" : isRule3 ? "PanelNew" : "PanelName";
         var optionsSql = $"""
             SELECT DISTINCT LTRIM(RTRIM(PayerName_Raw)) FROM dbo.ClaimLevelData
@@ -229,7 +229,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             WHERE {panelOptionsCol} IS NOT NULL AND LTRIM(RTRIM({panelOptionsCol})) <> '' ORDER BY 1;
             """;
 
-        // Query 2: panel × month aggregation (unique claim count + sum charges).
+        // Query 2: panel ï¿½ month aggregation (unique claim count + sum charges).
         // Year/Month columns come from the rule-selected date source (FirstBilledDate by default,
         // ChargeEnteredDate when rule = "Rule1" / "Rule2" / "Rule3" / "Rule4").
         // Row column comes from panelColumnExpr ("PanelName" today; will be "PanelNameNew" for Rule3/Rule4 in future).
@@ -468,13 +468,13 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         var isRule4 = string.Equals(rule, "Rule4", StringComparison.OrdinalIgnoreCase);
         var isRule5 = string.Equals(rule, "Rule5", StringComparison.OrdinalIgnoreCase);
         _ = isRule1; // legacy default behavior; flag kept for readability
-        _ = isRule2; // FirstBilledDate + PayerName not blank — same as default branch
+        _ = isRule2; // FirstBilledDate + PayerName not blank ï¿½ same as default branch
         var useChargeEnteredDate = isRule3 || isRule4 || isRule5;
         var weekDateExpr = useChargeEnteredDate
             ? "TRY_CAST(ChargeEnteredDate AS DATE)"
             : "TRY_CAST(FirstBilledDate AS DATE)";
 
-        // Resolve lab-specific week boundary (Mon–Sun by default).
+        // Resolve lab-specific week boundary (Monï¿½Sun by default).
         var weekStartDay = WeekRangeHelper.ResolveWeekStart(weekRange);
 
         // Determine the last 4 complete weeks based on today + chosen week-start day.
@@ -490,7 +490,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             $"{weekDateExpr} <= @WeekEnd",
         };
 
-        // Rule4 (NorthWest) does NOT require FirstBilledDate — it uses ClaimStatus exclusion.
+        // Rule4 (NorthWest) does NOT require FirstBilledDate ï¿½ it uses ClaimStatus exclusion.
         // All other rules keep the legacy FirstBilledDate guard.
         if (!isRule4)
         {
@@ -536,14 +536,14 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         }
 
         // Rule3 (Augustus): rows with null/empty PanelNew are kept and shown as '(No PanelNew)'.
-        // No PanelName fallback — coalesce to label handled in SELECT/GROUP BY.
+        // No PanelName fallback ï¿½ coalesce to label handled in SELECT/GROUP BY.
         if (isRule3)
         {
             // No additional WHERE guard; null PanelNew rendered as '(No PanelNew)' in the pivot.
         }
 
         // Rule3 panel expression: strict (ProductionSummaryReport) = bare PanelNew with IS NOT NULL guard;
-        // non-strict (ProductionReport) = ISNULL(PanelNew, '(No PanelNew)') — no PanelName fallback.
+        // non-strict (ProductionReport) = ISNULL(PanelNew, '(No PanelNew)') ï¿½ no PanelName fallback.
         var rule3WeekPanelExpr = panelNewStrict
             ? "PanelNew"
             : "ISNULL(NULLIF(LTRIM(RTRIM(PanelNew)),''), '(No PanelNew)')";
@@ -613,7 +613,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
 
         var whereStr = string.Join(" AND ", whereClauses);
 
-        // Query: panel × payer × week-date aggregation within the 4-week window.
+        // Query: panel ï¿½ payer ï¿½ week-date aggregation within the 4-week window.
         // Rule4 (NW) = PanelType; Rule3 (Augustus) = PanelNew only, null ? '(No PanelNew)'; others = PanelName.
         var weekPanelExpr = isRule4 ? "PanelType" : isRule3 ? rule3WeekPanelExpr : "PanelName";
         var pivotSql = $"""
@@ -1443,7 +1443,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         }
         else if (isRule3)
         {
-            // Augustus: row = PanelNew only — no PanelName fallback.
+            // Augustus: row = PanelNew only ï¿½ no PanelName fallback.
             // Null/empty PanelNew rows are labelled '(No PanelNew)' so they remain visible.
             agingSql = $"""
                 SELECT
@@ -1897,7 +1897,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             ct);
     }
 
-    // Internal model — used only by the SP-backed bucket export path.
+    // Internal model ï¿½ used only by the SP-backed bucket export path.
     private sealed record SpExportBucket(
         string   BucketType,
         int?     YearNo,
@@ -2161,7 +2161,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                 workbookPart.Workbook.Save();
             }
             ForceGc();
-            _logger.LogInformation("[SpExportFile] No data — placeholder sheet added: {Sheet}", placeholderName);
+            _logger.LogInformation("[SpExportFile] No data ï¿½ placeholder sheet added: {Sheet}", placeholderName);
             return 0;
         }
 
@@ -2206,7 +2206,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                 totalRows += written;
 
                 _logger.LogInformation(
-                    "[SpExportFile] [Phase1] Bucket {Idx}/{Total} done — {Rows:N0} rows in {Ms} ms ({Rps:N0} rows/s, file={Size:N0} bytes)",
+                    "[SpExportFile] [Phase1] Bucket {Idx}/{Total} done ï¿½ {Rows:N0} rows in {Ms} ms ({Rps:N0} rows/s, file={Size:N0} bytes)",
                     bucketIdx, buckets.Count, written, sw.ElapsedMilliseconds,
                     written / Math.Max(0.001, sw.Elapsed.TotalSeconds),
                     new FileInfo(bucketFile).Length);
@@ -2245,7 +2245,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                     "[SpExportFile] [Phase2] Merged {Idx}/{Total}={Sheet} in {Ms} ms",
                     mergeIdx, bucketFiles.Count, sheetName, oneSw.ElapsedMilliseconds);
 
-                // Delete the bucket file as soon as it's merged — frees disk space
+                // Delete the bucket file as soon as it's merged ï¿½ frees disk space
                 // and keeps the temp folder small.
                 try { File.Delete(path); }
                 catch (Exception ex) { _logger.LogWarning(ex, "[SpExportFile] Failed to delete bucket file {File}", path); }
@@ -2255,7 +2255,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             mergeSw.Stop();
 
             _logger.LogInformation(
-                "[SpExportFile] [Phase2] Merge done — {Count} sheet(s) in {Ms} ms",
+                "[SpExportFile] [Phase2] Merge done ï¿½ {Count} sheet(s) in {Ms} ms",
                 bucketFiles.Count, mergeSw.ElapsedMilliseconds);
         }
         finally
@@ -2311,7 +2311,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
     /// <summary>
     /// Stream-copies the first WorksheetPart from <paramref name="bucketFile"/> into
     /// <paramref name="mainWorkbookPart"/> and registers it as a new sheet named <paramref name="sheetName"/>.
-    /// Pure byte copy — no XML parsing.
+    /// Pure byte copy ï¿½ no XML parsing.
     /// </summary>
     private static void CopyWorksheetPartFromFile(
         string bucketFile,
@@ -2587,7 +2587,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         }
     }
 
-    /// <summary>Converts a 1-based column index to its A1-style letter (1?A, 27?AA, …).</summary>
+    /// <summary>Converts a 1-based column index to its A1-style letter (1?A, 27?AA, ï¿½).</summary>
     private static string ColumnLetter(int col)
     {
         Span<char> buf = stackalloc char[8];
@@ -2611,7 +2611,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
 
     /// <summary>
     /// Opens the data SP for one bucket and streams every row directly into a freshly created worksheet.
-    /// One row of memory at a time — no intermediate List buffer.
+    /// One row of memory at a time ï¿½ no intermediate List buffer.
     /// </summary>
     private static async Task<int> StreamSpDataToWorksheetAsync(
         XLWorkbook workbook,
@@ -2661,7 +2661,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         }
         ws.SheetView.FreezeRows(1);
 
-        // Stream data rows — one row at a time, no buffering
+        // Stream data rows ï¿½ one row at a time, no buffering
         int row = 2;
         while (await rdr.ReadAsync(ct).ConfigureAwait(false))
         {
@@ -3028,7 +3028,15 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         string connectionString, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
-        const string sql = "SELECT TOP 1 WeekFolder, CAST(RunId AS NVARCHAR(50)) FROM LineClaimFileLogs ORDER BY 1 DESC";
+        const string sql = @"
+            IF OBJECT_ID('dbo.ClaimLevelData','U') IS NOT NULL
+               AND COL_LENGTH('dbo.ClaimLevelData','RunId') IS NOT NULL
+            SELECT TOP 1
+                   CAST(WeekFolder AS NVARCHAR(200)),
+                   CAST(RunId      AS NVARCHAR(50))
+            FROM dbo.ClaimLevelData
+            WHERE NULLIF(LTRIM(RTRIM(RunId)), '') IS NOT NULL
+            ORDER BY RunId DESC;";
         try
         {
             await using var conn = new SqlConnection(connectionString);
@@ -3044,9 +3052,40 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to read RunInfo from LineClaimFileLogs.");
+            _logger.LogWarning(ex, "Failed to read RunInfo from ClaimLevelData.");
         }
         return (null, null);
+    }
+
+    /// <inheritdoc />
+    public async Task<string?> GetLimsRunIdAsync(
+        string connectionString, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+        // Best-effort: guard against missing table/column so the banner degrades
+        // to nothing rather than failing the page. RunId sorts DESC so the most
+        // recent run wins (values like '20260617R0271' sort chronologically).
+        const string sql = @"
+            IF OBJECT_ID('dbo.LIMSMaster','U') IS NOT NULL
+               AND COL_LENGTH('dbo.LIMSMaster','RunId') IS NOT NULL
+            SELECT TOP 1 CAST(RunId AS NVARCHAR(50))
+            FROM dbo.LIMSMaster
+            WHERE NULLIF(LTRIM(RTRIM(RunId)), '') IS NOT NULL
+            ORDER BY RunId DESC;";
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+            await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 30 };
+            await using var rdr = await cmd.ExecuteReaderAsync(ct);
+            if (await rdr.ReadAsync(ct))
+                return rdr.IsDBNull(0) ? null : rdr.GetString(0);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read RunId from LIMSMaster.");
+        }
+        return null;
     }
 
     private static string GetClaimLevelExportColumns() => """
@@ -3466,7 +3505,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(rule);
 
-        // Panel column hardcoded per lab rule — ClaimLevelData only (filter options are always claim-level):
+        // Panel column hardcoded per lab rule ï¿½ ClaimLevelData only (filter options are always claim-level):
         //   NorthWest  (NW_  / Rule4) = PanelType
         //   Augustus   (Aug_ / Rule3) = PanelNew
         //   all others               = PanelName

@@ -138,17 +138,255 @@ BEGIN
 	DECLARE @HasProviderFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM #FilterProviders) THEN 1 ELSE 0 END;
 	DECLARE @HasRepFilter      BIT = CASE WHEN EXISTS (SELECT 1 FROM #FilterReps)      THEN 1 ELSE 0 END;
 
-	-- LIS: filter/re-sum the pre-computed aggregate table (different period
-	-- system to ClaimLevelData – see header note).
-	DROP TABLE IF EXISTS #LisFiltered;
-	SELECT RoleID, Description, ESYear, ESMonth, ESMonthClaimCount
-	INTO #LisFiltered
-	FROM dbo.Elix_ES_LIS
-	WHERE ESYear <> 0
-	  AND (@YearFrom  IS NULL OR ESYear  >= @YearFrom)
-	  AND (@YearTo    IS NULL OR ESYear  <= @YearTo)
-	  AND (@MonthFrom IS NULL OR ESMonth >= @MonthFrom)
-	  AND (@MonthTo   IS NULL OR ESMonth <= @MonthTo);
+	-- @HasLisFilter: 1 when Panel/Clinic/Provider filter(s) are active.
+	-- Date params are intentionally NOT applied to LIMSMaster for Elixir (independent period system).
+	-- SalesRep is also excluded: no date bounds on LIMSMaster means a Rep-only filter
+	-- would cause a full table scan with only a CHARINDEX predicate → runs indefinitely.
+	DECLARE @HasLisFilter BIT = CASE
+		WHEN @HasPanelFilter = 1 OR @HasClinicFilter = 1 OR @HasProviderFilter = 1
+		THEN 1 ELSE 0 END;
+
+	-- ── LIMSMaster column detection (shared by #Lis LIS scan and #LisBilled) ──
+	DECLARE @AccCol          SYSNAME = NULL;
+	DECLARE @DateCol         SYSNAME = NULL;
+	DECLARE @NewStatusCol    SYSNAME = NULL;
+	DECLARE @BillCategoryCol SYSNAME = NULL;
+	DECLARE @ResultStatusCol SYSNAME = NULL;
+	DECLARE @PanelCol        SYSNAME = NULL;
+	DECLARE @ClinicCol       SYSNAME = NULL;
+	DECLARE @ProviderCol     SYSNAME = NULL;
+
+	IF OBJECT_ID('dbo.LIMSMaster', 'U') IS NOT NULL
+	BEGIN
+		SET @AccCol = (
+			SELECT TOP 1 name FROM sys.columns
+			WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+			  AND name IN ('AccessionNumber','Accession','AccessionNo')
+			ORDER BY CASE name WHEN 'AccessionNumber' THEN 0 WHEN 'Accession' THEN 1 WHEN 'AccessionNo' THEN 2 ELSE 3 END);
+
+		SET @DateCol = (
+			SELECT TOP 1 name FROM sys.columns
+			WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+			  AND name IN ('DateOfCollection','RequestCollectDate','DateofService','CollectionDate','ServiceDate','AccessionDate')
+			ORDER BY CASE name
+				WHEN 'DateOfCollection' THEN 0 WHEN 'RequestCollectDate' THEN 1
+				WHEN 'DateofService' THEN 2 WHEN 'CollectionDate' THEN 3
+				WHEN 'ServiceDate' THEN 4 WHEN 'AccessionDate' THEN 5 ELSE 6 END);
+
+		SET @NewStatusCol = (
+			SELECT TOP 1 name FROM sys.columns
+			WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+			  AND name IN ('NewStatus','Status')
+			ORDER BY CASE name WHEN 'NewStatus' THEN 0 WHEN 'Status' THEN 1 ELSE 2 END);
+
+		SET @BillCategoryCol = (
+			SELECT TOP 1 name FROM sys.columns
+			WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+			  AND name IN ('BillCategory','Bill_Category','BillingCategory','BillStatus')
+			ORDER BY CASE name WHEN 'BillCategory' THEN 0 WHEN 'Bill_Category' THEN 1 WHEN 'BillingCategory' THEN 2 WHEN 'BillStatus' THEN 3 ELSE 4 END);
+
+		SET @ResultStatusCol = (
+			SELECT TOP 1 name FROM sys.columns
+			WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+			  AND name IN ('ResultStatus','Result_Status','ResultedStatus','RessultedStatus','IsResulted')
+			ORDER BY CASE name
+				WHEN 'ResultStatus' THEN 0 WHEN 'Result_Status' THEN 1
+				WHEN 'ResultedStatus' THEN 2 WHEN 'RessultedStatus' THEN 3
+				WHEN 'IsResulted' THEN 4 ELSE 5 END);
+
+		-- Dimension filter columns (Panels → Panel, Clinics → FacilityName, Provider → PhysicianName)
+		SET @PanelCol = (
+			SELECT TOP 1 name FROM sys.columns
+			WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+			  AND name IN ('Panel','PanelName','PanelType','TestPanel')
+			ORDER BY CASE name WHEN 'Panel' THEN 0 WHEN 'PanelName' THEN 1 WHEN 'PanelType' THEN 2 WHEN 'TestPanel' THEN 3 ELSE 4 END);
+
+		SET @ClinicCol = (
+			SELECT TOP 1 name FROM sys.columns
+			WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+			  AND name IN ('FacilityName','ClinicName','Clinic','FacilityID')
+			ORDER BY CASE name WHEN 'FacilityName' THEN 0 WHEN 'ClinicName' THEN 1 WHEN 'Clinic' THEN 2 WHEN 'FacilityID' THEN 3 ELSE 4 END);
+
+		SET @ProviderCol = (
+			SELECT TOP 1 name FROM sys.columns
+			WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+			  AND name IN ('PhysicianName','ReferringProvider','ReferringPhysician','ProviderName')
+			ORDER BY CASE name WHEN 'PhysicianName' THEN 0 WHEN 'ReferringProvider' THEN 1 WHEN 'ReferringPhysician' THEN 2 WHEN 'ProviderName' THEN 3 ELSE 4 END);
+	END
+
+	-- ── LIS rows ─────────────────────────────────────────────────────────────
+	-- #LisOut holds all LIS rows; populated from aggregate (fast path) or
+	-- live LIMSMaster scan (dimension-filtered path).
+	-- Created before any branching so LisFinal CTE always has a valid source.
+	DROP TABLE IF EXISTS #LisOut;
+	CREATE TABLE #LisOut
+	(
+		RowCode     NVARCHAR(420) NOT NULL,
+		Description NVARCHAR(420) NOT NULL,
+		ESYear      INT           NOT NULL,
+		ESMonth     INT           NOT NULL,
+		MetricValue DECIMAL(18,2) NOT NULL
+	);
+
+	IF @HasLisFilter = 0
+	BEGIN
+		-- No LIS-applicable dimension filter → re-sum aggregate by Year/Month only.
+		DROP TABLE IF EXISTS #LisFiltered;
+		SELECT RoleID, Description, ESYear, ESMonth, ESMonthClaimCount
+		INTO #LisFiltered
+		FROM dbo.Elix_ES_LIS
+		WHERE ESYear <> 0
+		  AND (@YearFrom  IS NULL OR ESYear  >= @YearFrom)
+		  AND (@YearTo    IS NULL OR ESYear  <= @YearTo)
+		  AND (@MonthFrom IS NULL OR ESMonth >= @MonthFrom)
+		  AND (@MonthTo   IS NULL OR ESMonth <= @MonthTo);
+
+		INSERT INTO #LisOut (RowCode, Description, ESYear, ESMonth, MetricValue)
+		SELECT RoleID, Description, ESYear, ESMonth, CAST(ESMonthClaimCount AS DECIMAL(18,2))
+		FROM #LisFiltered
+		UNION ALL
+		SELECT RoleID, MAX(Description), 0, 0, CAST(SUM(ESMonthClaimCount) AS DECIMAL(18,2))
+		FROM #LisFiltered
+		GROUP BY RoleID;
+	END
+	ELSE
+	BEGIN
+		-- Panel/Clinic/Provider filter active → scan LIMSMaster (no date bounds; independent period system).
+		IF @AccCol IS NOT NULL AND @DateCol IS NOT NULL
+		   AND @NewStatusCol IS NOT NULL AND @BillCategoryCol IS NOT NULL AND @ResultStatusCol IS NOT NULL
+		BEGIN
+			-- ResultStatus normalizer (IsResulted may be a bit/flag column)
+			DECLARE @ResultExpr NVARCHAR(400);
+			IF @ResultStatusCol = 'IsResulted'
+				SET @ResultExpr = N'(CASE WHEN TRY_CAST([' + @ResultStatusCol + N'] AS INT) = 1 THEN ''Resulted''
+								           WHEN CONVERT(NVARCHAR(20), [' + @ResultStatusCol + N']) IN (''Y'',''Yes'',''True'',''Resulted'') THEN ''Resulted''
+								           ELSE ''Not Resulted'' END)';
+			ELSE
+				SET @ResultExpr = N'LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(100), [' + @ResultStatusCol + N']), '''')))';
+
+			DROP TABLE IF EXISTS #Lis;
+			CREATE TABLE #Lis
+			(
+				Accession    NVARCHAR(100) NOT NULL,
+				ESYear       INT           NOT NULL,
+				ESMonth      INT           NOT NULL,
+				NewStatus    NVARCHAR(100) NOT NULL,
+				BillCategory NVARCHAR(100) NOT NULL,
+				ResultStatus NVARCHAR(100) NOT NULL,
+				Panel        NVARCHAR(300) NOT NULL  -- '' when @PanelCol not found
+			);
+
+			-- Panel SELECT expression: use detected column or empty string if column absent
+			DECLARE @PanelExpr NVARCHAR(200) =
+				CASE WHEN @PanelCol IS NOT NULL
+				     THEN N'LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @PanelCol + N']), '''')))'
+				     ELSE N'CAST('''' AS NVARCHAR(300))'
+				END;
+
+			DECLARE @LisSql NVARCHAR(MAX) = N'
+				INSERT INTO #Lis (Accession, ESYear, ESMonth, NewStatus, BillCategory, ResultStatus, Panel)
+				SELECT
+					LTRIM(RTRIM(CONVERT(NVARCHAR(100), [' + @AccCol + N']))),
+					YEAR (TRY_CAST([' + @DateCol + N'] AS DATE)),
+					MONTH(TRY_CAST([' + @DateCol + N'] AS DATE)),
+					LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(100), [' + @NewStatusCol + N']), ''''))),
+					LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(100), [' + @BillCategoryCol + N']), ''''))),
+					' + @ResultExpr + N',
+					' + @PanelExpr + N'
+				FROM dbo.LIMSMaster
+				WHERE TRY_CAST([' + @DateCol + N'] AS DATE) IS NOT NULL
+				  AND NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(100), [' + @AccCol + N']))), '''') IS NOT NULL';
+
+			-- Dimension filter predicates — COLLATE DATABASE_DEFAULT on both sides to avoid
+			-- collation conflicts between LIMSMaster columns and NVARCHAR(MAX) parameters.
+			IF @HasPanelFilter = 1 AND @PanelCol IS NOT NULL
+				SET @LisSql += N'
+				  AND CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @PanelCol + N']), ''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @iPanels + '','') COLLATE DATABASE_DEFAULT) > 0';
+
+			IF @HasClinicFilter = 1 AND @ClinicCol IS NOT NULL
+				SET @LisSql += N'
+				  AND CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @ClinicCol + N']), ''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @iClinics + '','') COLLATE DATABASE_DEFAULT) > 0';
+
+			IF @HasProviderFilter = 1 AND @ProviderCol IS NOT NULL
+				SET @LisSql += N'
+				  AND CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @ProviderCol + N']), ''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @iProviders + '','') COLLATE DATABASE_DEFAULT) > 0';
+
+			SET @LisSql += N';';
+
+			EXEC sp_executesql @LisSql,
+				N'@iPanels    NVARCHAR(MAX),
+				  @iClinics   NVARCHAR(MAX),
+				  @iProviders NVARCHAR(MAX)',
+				@iPanels    = @Panels,
+				@iClinics   = @Clinics,
+				@iProviders = @Providers;
+
+			-- Aggregate #Lis into #LisOut, one row per (RowCode, ESYear, ESMonth)
+			INSERT INTO #LisOut (RowCode, Description, ESYear, ESMonth, MetricValue)
+			-- A  Total Samples
+			SELECT 'A',   'Total Samples',                ESYear, ESMonth, CAST(COUNT(DISTINCT Accession) AS DECIMAL(18,2))
+			FROM #Lis GROUP BY ESYear, ESMonth
+			-- B  Billable Samples
+			UNION ALL
+			SELECT 'B',   'Billable Samples',             ESYear, ESMonth, CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'Billable'                                                           THEN Accession END) AS DECIMAL(18,2))
+			FROM #Lis GROUP BY ESYear, ESMonth
+			-- C  Billed
+			UNION ALL
+			SELECT 'C',   'Billed',                       ESYear, ESMonth, CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'Billable' AND BillCategory = 'Billed'                             THEN Accession END) AS DECIMAL(18,2))
+			FROM #Lis GROUP BY ESYear, ESMonth
+			-- D  Unbilled
+			UNION ALL
+			SELECT 'D',   'Unbilled',                     ESYear, ESMonth, CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'Billable' AND BillCategory = 'Not Billed'                         THEN Accession END) AS DECIMAL(18,2))
+			FROM #Lis GROUP BY ESYear, ESMonth
+			-- D.1  Resulted yet to be billed
+			UNION ALL
+			SELECT 'D.1', '  Resulted yet to be billed', ESYear, ESMonth, CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'Billable' AND BillCategory = 'Not Billed' AND ResultStatus = 'Resulted' THEN Accession END) AS DECIMAL(18,2))
+			FROM #Lis GROUP BY ESYear, ESMonth
+			-- E  Other Samples
+			UNION ALL
+			SELECT 'E',   'Other Samples',                ESYear, ESMonth, CAST(COUNT(DISTINCT CASE WHEN NewStatus <> 'Billable'                                                          THEN Accession END) AS DECIMAL(18,2))
+			FROM #Lis GROUP BY ESYear, ESMonth
+			-- E.1  Client Bill
+			UNION ALL
+			SELECT 'E.1', '  Client Bill',                ESYear, ESMonth, CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'Client Bill'         THEN Accession END) AS DECIMAL(18,2))
+			FROM #Lis GROUP BY ESYear, ESMonth
+			-- E.2  Self Pay
+			UNION ALL
+			SELECT 'E.2', '  Self Pay',                   ESYear, ESMonth, CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'Self Pay'            THEN Accession END) AS DECIMAL(18,2))
+			FROM #Lis GROUP BY ESYear, ESMonth
+			-- E.3  System Test
+			UNION ALL
+			SELECT 'E.3', '  System Test',                ESYear, ESMonth, CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'System Test'         THEN Accession END) AS DECIMAL(18,2))
+			FROM #Lis GROUP BY ESYear, ESMonth
+			-- E.4  Deleted/Rejected
+			UNION ALL
+			SELECT 'E.4', '  Deleted/Rejected',           ESYear, ESMonth, CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'Deleted/Rejected'    THEN Accession END) AS DECIMAL(18,2))
+			FROM #Lis GROUP BY ESYear, ESMonth
+			-- E.5  CIP/Pending
+			UNION ALL
+			SELECT 'E.5', '  CIP/Pending',                ESYear, ESMonth, CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'CIP/Pending'         THEN Accession END) AS DECIMAL(18,2))
+			FROM #Lis GROUP BY ESYear, ESMonth
+			-- E.6  Yet to be validated
+			UNION ALL
+			SELECT 'E.6', '  Yet to be validated',        ESYear, ESMonth, CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'Yet to be validated' THEN Accession END) AS DECIMAL(18,2))
+			FROM #Lis GROUP BY ESYear, ESMonth;
+
+			-- B.x  Panel sub-rows (Billable Samples by Panel, displayed under row B)
+			INSERT INTO #LisOut (RowCode, Description, ESYear, ESMonth, MetricValue)
+			SELECT 'B.' + Panel, '  ' + Panel, ESYear, ESMonth,
+			       CAST(COUNT(DISTINCT CASE WHEN NewStatus = 'Billable' THEN Accession END) AS DECIMAL(18,2))
+			FROM #Lis
+			WHERE NewStatus = 'Billable' AND Panel <> ''
+			GROUP BY Panel, ESYear, ESMonth;
+
+			-- Grand-total sentinel (0,0) rows — sums all per-period rows, including B.x
+			INSERT INTO #LisOut (RowCode, Description, ESYear, ESMonth, MetricValue)
+			SELECT RowCode, MAX(Description), 0, 0, SUM(MetricValue)
+			FROM #LisOut
+			WHERE ESYear <> 0
+			GROUP BY RowCode;
+		END
+	END
 
 	-- PMS/Cash/Avg: live re-aggregation from ClaimLevelData, same #Base shape as file 16.
 	DROP TABLE IF EXISTS #Base;
@@ -178,10 +416,10 @@ BEGIN
 	  AND (@DosTo      IS NULL OR TRY_CAST(DateofService   AS DATE) <= @DosTo)
 	  AND (@BilledFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @BilledFrom)
 	  AND (@BilledTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @BilledTo)
-	  AND (@HasPanelFilter    = 0 OR LTRIM(RTRIM(ISNULL(PanelType,         ''))) COLLATE DATABASE_DEFAULT IN (SELECT Val FROM #FilterPanels))
-	  AND (@HasClinicFilter   = 0 OR LTRIM(RTRIM(ISNULL(ClinicName,        ''))) COLLATE DATABASE_DEFAULT IN (SELECT Val FROM #FilterClinics))
-	  AND (@HasProviderFilter = 0 OR LTRIM(RTRIM(ISNULL(ReferringProvider, ''))) COLLATE DATABASE_DEFAULT IN (SELECT Val FROM #FilterProviders))
-	  AND (@HasRepFilter      = 0 OR LTRIM(RTRIM(ISNULL(SalesRepname,      ''))) COLLATE DATABASE_DEFAULT IN (SELECT Val FROM #FilterReps));
+	  AND (@HasPanelFilter    = 0 OR CHARINDEX((',' + LTRIM(RTRIM(ISNULL(Panelname,         ''))) + ',') COLLATE DATABASE_DEFAULT, (',' + @Panels + ',') COLLATE DATABASE_DEFAULT) > 0)
+	  AND (@HasClinicFilter   = 0 OR CHARINDEX((',' + LTRIM(RTRIM(ISNULL(ClinicName,        ''))) + ',') COLLATE DATABASE_DEFAULT, (',' + @Clinics + ',') COLLATE DATABASE_DEFAULT) > 0)
+	  AND (@HasProviderFilter = 0 OR CHARINDEX((',' + LTRIM(RTRIM(ISNULL(ReferringProvider, ''))) + ',') COLLATE DATABASE_DEFAULT, (',' + @Providers + ',') COLLATE DATABASE_DEFAULT) > 0)
+	  AND (@HasRepFilter      = 0 OR CHARINDEX((',' + LTRIM(RTRIM(ISNULL(SalesRepname,      ''))) + ',') COLLATE DATABASE_DEFAULT, (',' + @Reps + ',') COLLATE DATABASE_DEFAULT) > 0);
 
 	-- Periods: every (Year,Month) present in #Base PLUS a (0,0) grand-total sentinel.
 	DROP TABLE IF EXISTS #Periods;
@@ -210,55 +448,51 @@ BEGIN
 		ESMonth   INT           NOT NULL
 	);
 
-	IF OBJECT_ID('dbo.LIMSMaster','U') IS NOT NULL
+	-- Reuses @AccCol / @DateCol / @NewStatusCol / @BillCategoryCol / @PanelCol / @ClinicCol / @ProviderCol
+	-- detected in the shared column-detection block above.
+	-- When @HasLisFilter = 1, dimension filters are also applied so the
+	-- Billed-Mismatch count (row I) stays consistent with the filtered LIS rows.
+	IF @AccCol IS NOT NULL AND @DateCol IS NOT NULL AND @NewStatusCol IS NOT NULL AND @BillCategoryCol IS NOT NULL
 	BEGIN
-		DECLARE @AccCol SYSNAME = (
-			SELECT TOP 1 name FROM sys.columns
-			WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
-			  AND name IN ('AccessionNumber','Accession','AccessionNo')
-			ORDER BY CASE name WHEN 'AccessionNumber' THEN 0 WHEN 'Accession' THEN 1 WHEN 'AccessionNo' THEN 2 ELSE 3 END);
+		DECLARE @LisBilledSql NVARCHAR(MAX) = N'
+			INSERT INTO #LisBilled (Accession, ESYear, ESMonth)
+			SELECT
+				LTRIM(RTRIM(CONVERT(NVARCHAR(100), [' + @AccCol + N']))),
+				YEAR (TRY_CAST([' + @DateCol + N'] AS DATE)),
+				MONTH(TRY_CAST([' + @DateCol + N'] AS DATE))
+			FROM dbo.LIMSMaster
+			WHERE TRY_CAST([' + @DateCol + N'] AS DATE) IS NOT NULL
+			  AND NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(100), [' + @AccCol + N']))), '''') IS NOT NULL
+			  AND LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(100), [' + @NewStatusCol + N']), ''''))) = ''Billable''
+			  AND LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(100), [' + @BillCategoryCol + N']), ''''))) = ''Billed''
+			  AND (' + ISNULL(CONVERT(NVARCHAR(20), @YearFrom), 'NULL') + N' IS NULL OR YEAR (TRY_CAST([' + @DateCol + N'] AS DATE)) >= ' + ISNULL(CONVERT(NVARCHAR(20), @YearFrom), '0') + N')
+			  AND (' + ISNULL(CONVERT(NVARCHAR(20), @YearTo), 'NULL') + N' IS NULL OR YEAR (TRY_CAST([' + @DateCol + N'] AS DATE)) <= ' + ISNULL(CONVERT(NVARCHAR(20), @YearTo), '0') + N')
+			  AND (' + ISNULL(CONVERT(NVARCHAR(20), @MonthFrom), 'NULL') + N' IS NULL OR MONTH(TRY_CAST([' + @DateCol + N'] AS DATE)) >= ' + ISNULL(CONVERT(NVARCHAR(20), @MonthFrom), '0') + N')
+			  AND (' + ISNULL(CONVERT(NVARCHAR(20), @MonthTo), 'NULL') + N' IS NULL OR MONTH(TRY_CAST([' + @DateCol + N'] AS DATE)) <= ' + ISNULL(CONVERT(NVARCHAR(20), @MonthTo), '0') + N')';
 
-		DECLARE @DateCol SYSNAME = (
-			SELECT TOP 1 name FROM sys.columns
-			WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
-			  AND name IN ('RequestCollectDate','DateofService','CollectionDate','ServiceDate','AccessionDate')
-			ORDER BY CASE name
-				WHEN 'RequestCollectDate' THEN 0 WHEN 'DateofService' THEN 1
-				WHEN 'CollectionDate' THEN 2 WHEN 'ServiceDate' THEN 3
-				WHEN 'AccessionDate' THEN 4 ELSE 5 END);
+		-- When LIS dimension filters are active, apply them here too for consistent row-I mismatch count.
+		-- COLLATE DATABASE_DEFAULT prevents collation conflicts between LIMSMaster columns and parameters.
+		IF @HasPanelFilter = 1 AND @PanelCol IS NOT NULL
+			SET @LisBilledSql += N'
+			  AND CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @PanelCol + N']), ''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @iPanels + '','') COLLATE DATABASE_DEFAULT) > 0';
 
-		DECLARE @NewStatusCol SYSNAME = (
-			SELECT TOP 1 name FROM sys.columns
-			WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
-			  AND name IN ('NewStatus','Status')
-			ORDER BY CASE name WHEN 'NewStatus' THEN 0 WHEN 'Status' THEN 1 ELSE 2 END);
+		IF @HasClinicFilter = 1 AND @ClinicCol IS NOT NULL
+			SET @LisBilledSql += N'
+			  AND CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @ClinicCol + N']), ''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @iClinics + '','') COLLATE DATABASE_DEFAULT) > 0';
 
-		DECLARE @BillCategoryCol SYSNAME = (
-			SELECT TOP 1 name FROM sys.columns
-			WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
-			  AND name IN ('BillCategory','Bill_Category','BillingCategory','BillStatus')
-			ORDER BY CASE name WHEN 'BillCategory' THEN 0 WHEN 'Bill_Category' THEN 1 WHEN 'BillingCategory' THEN 2 WHEN 'BillStatus' THEN 3 ELSE 4 END);
+		IF @HasProviderFilter = 1 AND @ProviderCol IS NOT NULL
+			SET @LisBilledSql += N'
+			  AND CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @ProviderCol + N']), ''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @iProviders + '','') COLLATE DATABASE_DEFAULT) > 0';
 
-		IF @AccCol IS NOT NULL AND @DateCol IS NOT NULL AND @NewStatusCol IS NOT NULL AND @BillCategoryCol IS NOT NULL
-		BEGIN
-			DECLARE @LisBilledSql NVARCHAR(MAX) = N'
-				INSERT INTO #LisBilled (Accession, ESYear, ESMonth)
-				SELECT
-					LTRIM(RTRIM(CONVERT(NVARCHAR(100), [' + @AccCol + N']))),
-					YEAR (TRY_CAST([' + @DateCol + N'] AS DATE)),
-					MONTH(TRY_CAST([' + @DateCol + N'] AS DATE))
-				FROM dbo.LIMSMaster
-				WHERE TRY_CAST([' + @DateCol + N'] AS DATE) IS NOT NULL
-				  AND NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(100), [' + @AccCol + N']))), '''') IS NOT NULL
-				  AND LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(100), [' + @NewStatusCol + N']), ''''))) = ''Billable''
-				  AND LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(100), [' + @BillCategoryCol + N']), ''''))) = ''Billed''
-				  AND (' + ISNULL(CONVERT(NVARCHAR(20), @YearFrom), 'NULL') + N' IS NULL OR YEAR (TRY_CAST([' + @DateCol + N'] AS DATE)) >= ' + ISNULL(CONVERT(NVARCHAR(20), @YearFrom), '0') + N')
-				  AND (' + ISNULL(CONVERT(NVARCHAR(20), @YearTo), 'NULL') + N' IS NULL OR YEAR (TRY_CAST([' + @DateCol + N'] AS DATE)) <= ' + ISNULL(CONVERT(NVARCHAR(20), @YearTo), '0') + N')
-				  AND (' + ISNULL(CONVERT(NVARCHAR(20), @MonthFrom), 'NULL') + N' IS NULL OR MONTH(TRY_CAST([' + @DateCol + N'] AS DATE)) >= ' + ISNULL(CONVERT(NVARCHAR(20), @MonthFrom), '0') + N')
-				  AND (' + ISNULL(CONVERT(NVARCHAR(20), @MonthTo), 'NULL') + N' IS NULL OR MONTH(TRY_CAST([' + @DateCol + N'] AS DATE)) <= ' + ISNULL(CONVERT(NVARCHAR(20), @MonthTo), '0') + N');';
+		SET @LisBilledSql += N';';
 
-			EXEC sp_executesql @LisBilledSql;
-		END
+		EXEC sp_executesql @LisBilledSql,
+			N'@iPanels    NVARCHAR(MAX),
+			  @iClinics   NVARCHAR(MAX),
+			  @iProviders NVARCHAR(MAX)',
+			@iPanels    = @Panels,
+			@iClinics   = @Clinics,
+			@iProviders = @Providers;
 	END
 
 	DROP TABLE IF EXISTS #LisBilledCount;
@@ -271,14 +505,11 @@ BEGIN
 
 	;WITH LisFinal AS
 	(
-		SELECT RoleID AS RowCode, Description, ESYear, ESMonth, CAST(ESMonthClaimCount AS DECIMAL(18,2)) AS MetricValue
-		FROM #LisFiltered
-
-		UNION ALL
-
-		SELECT RoleID, MAX(Description), 0, 0, CAST(SUM(ESMonthClaimCount) AS DECIMAL(18,2))
-		FROM #LisFiltered
-		GROUP BY RoleID
+		-- Reads from #LisOut which is populated by either the aggregate fast-path
+		-- (no LIS-applicable filter) or the live LIMSMaster scan (filtered path).
+		-- Grand-total (0,0) sentinel rows are already present in #LisOut.
+		SELECT RowCode, Description, ESYear, ESMonth, MetricValue
+		FROM #LisOut
 	),
 	PMS AS
 	(
@@ -553,7 +784,9 @@ BEGIN
 	) all_rows
 	ORDER BY BillYear, BillMonth, RowCode;
 
+	DROP TABLE IF EXISTS #LisOut;
 	DROP TABLE IF EXISTS #LisFiltered;
+	DROP TABLE IF EXISTS #Lis;
 	DROP TABLE IF EXISTS #Base;
 	DROP TABLE IF EXISTS #Periods;
 	DROP TABLE IF EXISTS #BaseBilledCount;

@@ -6,8 +6,9 @@ namespace LabMetricsDashboard.Services;
 
 /// <summary>
 /// Creates an Excel workbook from an Executive Summary view model.
-/// All categories (LIS, PMS, Cash, Avg) are written to a single sheet,
-/// one after another, each preceded by a coloured section-heading row.
+/// A metadata block (analysis / week range + applied filters) is written at
+/// the top, followed by all categories (LIS, PMS, Cash, Avg) on a single
+/// sheet, each preceded by a coloured section-heading row.
 /// </summary>
 public sealed class ExecutiveSummaryExcelBuilder
 {
@@ -17,15 +18,94 @@ public sealed class ExecutiveSummaryExcelBuilder
     {
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add("Executive Summary");
-        BuildSheet(sheet, vm.Rows, vm.YearMonthColumns);
+
+        // Work out how wide the table is so the info block can span it.
+        var columns = vm.YearMonthColumns;
+        var years = columns.Where(c => c.Year != 0).Select(c => c.Year).Distinct().OrderBy(y => y).ToList();
+        var monthsByYear = columns.Where(c => c.Year != 0)
+            .GroupBy(c => c.Year)
+            .ToDictionary(g => g.Key, g => g.Select(c => c.Month).OrderBy(m => m).ToList());
+        int totalDataCols = years.Sum(y => monthsByYear[y].Count + 1);
+        int grandCol = 2 + totalDataCols;
+
+        // Top metadata block; returns the first row for the data table header.
+        int startRow = WriteInfoBlock(sheet, vm, grandCol);
+
+        BuildSheet(sheet, vm.Rows, vm.YearMonthColumns, startRow);
 
         using var stream = new MemoryStream();
         workbook.SaveAs(stream);
         return stream.ToArray();
     }
 
+    /// <summary>
+    /// Writes the title, analysis/week range banner and the applied filter
+    /// details at the top of the sheet. Returns the next free row (where the
+    /// data-table header should begin).
+    /// </summary>
+    private int WriteInfoBlock(IXLWorksheet sheet, PhiExecutiveSummaryViewModel vm, int grandCol)
+    {
+        var darkBlue = XLColor.FromHtml("#0e3460");
+        int lastCol  = Math.Max(grandCol, 2);
+        int r = 1;
+
+        void Line(string text, bool bold, bool title = false, bool sectionHead = false)
+        {
+            var cell = sheet.Cell(r, 1);
+            cell.Value = text;
+            cell.Style.Font.Bold = bold;
+            cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
+            cell.Style.Alignment.Vertical   = XLAlignmentVerticalValues.Center;
+            if (title)
+            {
+                cell.Style.Font.FontSize  = 14;
+                cell.Style.Font.FontColor = darkBlue;
+            }
+            if (sectionHead)
+            {
+                cell.Style.Font.FontColor = darkBlue;
+                cell.Style.Font.FontSize  = 11;
+            }
+            sheet.Range(r, 1, r, lastCol).Merge();
+            r++;
+        }
+
+        // ── Title + analysis / week range banner ─────────────────────────────
+        Line($"Executive Summary — {Blank(vm.SelectedLab, "All Labs")}", bold: true, title: true);
+
+        if (!string.IsNullOrWhiteSpace(vm.ReportWeekFolder))
+            Line($"Analysis Range:  Billed Week Range — {vm.ReportWeekFolder}", bold: true);
+        if (!string.IsNullOrWhiteSpace(vm.ReportRunId))
+            Line($"ReportId (RunID):  {vm.ReportRunId}", bold: false);
+        if (!string.IsNullOrWhiteSpace(vm.LimsRunId))
+            Line($"LIMSMaster RunID:  {vm.LimsRunId}", bold: false);
+
+        Line($"Generated:  {DateTime.Now:MM/dd/yyyy hh:mm tt}", bold: false);
+
+        r++; // blank spacer
+
+        // ── Applied filters ──────────────────────────────────────────────────
+        Line("Applied Filters", bold: true, sectionHead: true);
+        Line($"Date of Service:  {DateRange(vm.DosFrom, vm.DosTo)}", bold: false);
+        Line($"First Billed Date:  {DateRange(vm.BilledFrom, vm.BilledTo)}", bold: false);
+        if (vm.SelectedYearFrom.HasValue || vm.SelectedYearTo.HasValue
+            || vm.SelectedMonthFrom.HasValue || vm.SelectedMonthTo.HasValue)
+        {
+            Line($"Year Range:  {NumRange(vm.SelectedYearFrom, vm.SelectedYearTo)}", bold: false);
+            Line($"Month Range:  {NumRange(vm.SelectedMonthFrom, vm.SelectedMonthTo)}", bold: false);
+        }
+        Line($"Panel:  {ListOrAll(vm.SelectedPanels)}", bold: false);
+        Line($"Clinics:  {ListOrAll(vm.SelectedClinics)}", bold: false);
+        Line($"Referring Provider:  {ListOrAll(vm.SelectedProviders)}", bold: false);
+        Line($"Sales Rep:  {ListOrAll(vm.SelectedReps)}", bold: false);
+
+        r++; // blank spacer before the data table
+
+        return r;
+    }
+
     private void BuildSheet(IXLWorksheet sheet, List<ExecSummaryRow> allRows,
-        List<(int Year, int Month)> columns)
+        List<(int Year, int Month)> columns, int startRow)
     {
         var years = columns.Where(c => c.Year != 0).Select(c => c.Year).Distinct().OrderBy(y => y).ToList();
         var monthsByYear = columns.Where(c => c.Year != 0)
@@ -35,6 +115,10 @@ public sealed class ExecutiveSummaryExcelBuilder
         // Total number of data columns
         int totalDataCols = years.Sum(y => monthsByYear[y].Count + 1); // months + year total per year
         var grandCol = 2 + totalDataCols;
+
+        // Header occupies two rows starting at startRow; data begins after.
+        int hr1 = startRow;
+        int hr2 = startRow + 1;
 
         var darkBlue  = XLColor.FromHtml("#0e3460");
         var gold      = XLColor.FromHtml("#a16207");
@@ -52,33 +136,33 @@ public sealed class ExecutiveSummaryExcelBuilder
             ["Avg"]  = XLColor.FromHtml("#7c2d12"),
         };
 
-        // ── Header rows 1-2 (written once at the top) ────────────────────────
+        // ── Header rows (written once at the top of the table) ───────────────
 
-        sheet.Cell(1, 1).Value = "Description";
-        sheet.Range(1, 1, 2, 1).Merge();
+        sheet.Cell(hr1, 1).Value = "Description";
+        sheet.Range(hr1, 1, hr2, 1).Merge();
 
         var colIdx = 2;
         foreach (var year in years)
         {
             var mons = monthsByYear[year];
             int span = mons.Count + 1;
-            sheet.Cell(1, colIdx).Value = $"Data Based on DOS — {year}";
-            sheet.Range(1, colIdx, 1, colIdx + span - 1).Merge();
+            sheet.Cell(hr1, colIdx).Value = $"Data Based on DOS — {year}";
+            sheet.Range(hr1, colIdx, hr1, colIdx + span - 1).Merge();
             colIdx += span;
         }
 
-        sheet.Cell(1, grandCol).Value = "Grand Total";
-        sheet.Range(1, grandCol, 2, grandCol).Merge();
+        sheet.Cell(hr1, grandCol).Value = "Grand Total";
+        sheet.Range(hr1, grandCol, hr2, grandCol).Merge();
 
         colIdx = 2;
         foreach (var year in years)
         {
             foreach (var m in monthsByYear[year])
             {
-                sheet.Cell(2, colIdx).Value = MonthName(m).ToUpper();
+                sheet.Cell(hr2, colIdx).Value = MonthName(m).ToUpper();
                 colIdx++;
             }
-            var yt = sheet.Cell(2, colIdx);
+            var yt = sheet.Cell(hr2, colIdx);
             yt.Value = $"{year} Total";
             yt.Style.Fill.BackgroundColor = gold;
             yt.Style.Font.FontColor = XLColor.White;
@@ -86,12 +170,12 @@ public sealed class ExecutiveSummaryExcelBuilder
         }
 
         // Style the two header rows
-        var headerRange = sheet.Range(1, 1, 2, grandCol);
+        var headerRange = sheet.Range(hr1, 1, hr2, grandCol);
         headerRange.Style.Font.Bold = true;
         headerRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
         headerRange.Style.Alignment.Vertical   = XLAlignmentVerticalValues.Center;
 
-        for (int r = 1; r <= 2; r++)
+        for (int r = hr1; r <= hr2; r++)
         {
             sheet.Cell(r, 1).Style.Fill.BackgroundColor = darkBlue;
             sheet.Cell(r, 1).Style.Font.FontColor       = XLColor.White;
@@ -103,12 +187,12 @@ public sealed class ExecutiveSummaryExcelBuilder
         {
             var mons = monthsByYear[year];
             int span = mons.Count + 1;
-            sheet.Cell(1, colIdx).Style.Fill.BackgroundColor = darkBlue;
-            sheet.Cell(1, colIdx).Style.Font.FontColor       = XLColor.White;
+            sheet.Cell(hr1, colIdx).Style.Fill.BackgroundColor = darkBlue;
+            sheet.Cell(hr1, colIdx).Style.Font.FontColor       = XLColor.White;
             for (int i = 0; i < mons.Count; i++)
             {
-                sheet.Cell(2, colIdx + i).Style.Fill.BackgroundColor = darkBlue;
-                sheet.Cell(2, colIdx + i).Style.Font.FontColor       = XLColor.White;
+                sheet.Cell(hr2, colIdx + i).Style.Fill.BackgroundColor = darkBlue;
+                sheet.Cell(hr2, colIdx + i).Style.Font.FontColor       = XLColor.White;
             }
             colIdx += span;
         }
@@ -118,7 +202,7 @@ public sealed class ExecutiveSummaryExcelBuilder
 
         // ── Data sections ─────────────────────────────────────────────────────
 
-        var rowIdx = 3;
+        var rowIdx = startRow + 2;
 
         foreach (var section in Sections)
         {
@@ -199,9 +283,13 @@ public sealed class ExecutiveSummaryExcelBuilder
                 rowIdx++;
         }
 
-        sheet.SheetView.FreezeRows(2);
+        sheet.SheetView.FreezeRows(hr2);
         sheet.SheetView.FreezeColumns(1);
         sheet.Columns().AdjustToContents();
+
+        // Keep the Description column from being over-widened by the long
+        // merged filter/banner lines at the top of the sheet.
+        if (sheet.Column(1).Width > 60) sheet.Column(1).Width = 60;
     }
 
     private void SetNumberFormat(IXLCell cell, string category)
@@ -222,4 +310,28 @@ public sealed class ExecutiveSummaryExcelBuilder
         "Avg"  => "Averages",
         _      => cat
     };
+
+    // ── Filter-formatting helpers ───────────────────────────────────────────
+
+    private static string Blank(string? s, string fallback) =>
+        string.IsNullOrWhiteSpace(s) ? fallback : s;
+
+    private static string DateRange(DateTime? from, DateTime? to)
+    {
+        if (from is null && to is null) return "All";
+        string f = from?.ToString("MM/dd/yyyy") ?? "(any)";
+        string t = to?.ToString("MM/dd/yyyy")   ?? "(any)";
+        return $"{f}  to  {t}";
+    }
+
+    private static string NumRange(int? from, int? to)
+    {
+        if (from is null && to is null) return "All";
+        string f = from?.ToString() ?? "(any)";
+        string t = to?.ToString()   ?? "(any)";
+        return $"{f}  to  {t}";
+    }
+
+    private static string ListOrAll(List<string>? xs) =>
+        xs is { Count: > 0 } ? string.Join(", ", xs) : "All";
 }

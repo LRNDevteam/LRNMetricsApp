@@ -18,10 +18,12 @@
 --   Cash / Avg → ESMonthChargeAmount (dollar value)
 --
 -- Filter behaviour:
---   No filter (all NULL) → read straight from the 5 aggregate tables (instant).
---   Any filter           → re-aggregate live from dbo.ClaimLevelData for PMS+Cash+Avg
---                          (LIS rows still come from the aggregate tables, which
---                           is harmless while LIS is dummy/empty).
+--   No filter (all NULL)           → read straight from the 5 aggregate tables (instant).
+--   Date / Rep filter only         → re-aggregate PMS+Cash+Avg live from ClaimLevelData;
+--                                    LIS still served from aggregate tables (period-filtered).
+--   Panel / Clinic / Provider filter → additionally re-aggregate LIS live from LIMSMaster
+--                                    via #LisBase (dimension-filtered, date-independent).
+--                                    SalesRep is not available for LIS; Date is ignored.
 -- ============================================================
 SET NOCOUNT ON;
 GO
@@ -140,6 +142,461 @@ BEGIN
 	DECLARE @HasProviderFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM #FilterProviders) THEN 1 ELSE 0 END;
 	DECLARE @HasRepFilter      BIT = CASE WHEN EXISTS (SELECT 1 FROM #FilterReps)      THEN 1 ELSE 0 END;
 
+	-- ── LIS dimension filter via LIMSMaster ─────────────────────────────────────
+	--    When Panel / Clinic / Provider filter is active, re-aggregate LIS rows
+	--    live from dbo.LIMSMaster (filtered) instead of the pre-built aggregate
+	--    tables.  Date parameters are intentionally NOT applied to LIMSMaster
+	--    (LIS uses RequestCollectDate periods independently).
+	--    SalesRep is not available for RisingTides LIS — always skipped.
+	-- ────────────────────────────────────────────────────────────────────────────
+	DECLARE @HasLisFilter BIT = CASE
+		WHEN @HasPanelFilter = 1 OR @HasClinicFilter = 1 OR @HasProviderFilter = 1
+		THEN 1 ELSE 0 END;
+
+	-- #LisBase: mirrors #Lis2 in usp_RefreshRT_ExecutiveSummary_LIS_Alt (file 29).
+	-- Populated from LIMSMaster when @HasLisFilter = 1; empty otherwise.
+	DROP TABLE IF EXISTS #LisBase;
+	CREATE TABLE #LisBase
+	(
+		Accession     NVARCHAR(100) COLLATE DATABASE_DEFAULT NOT NULL,
+		ESYear        INT           NOT NULL,
+		ESMonth       INT           NOT NULL,
+		ResultedNot   NVARCHAR(50)  COLLATE DATABASE_DEFAULT NOT NULL,
+		ClientStatus  NVARCHAR(100) COLLATE DATABASE_DEFAULT NOT NULL,
+		BilledNot     NVARCHAR(20)  COLLATE DATABASE_DEFAULT NOT NULL,
+		BillingStatus NVARCHAR(100) COLLATE DATABASE_DEFAULT NOT NULL,
+		ClaimStatus   NVARCHAR(100) COLLATE DATABASE_DEFAULT NOT NULL,
+		OrderStatus   NVARCHAR(100) COLLATE DATABASE_DEFAULT NOT NULL,
+		PaymentMethod NVARCHAR(100) COLLATE DATABASE_DEFAULT NOT NULL,
+		SampleStatus  NVARCHAR(100) COLLATE DATABASE_DEFAULT NOT NULL,
+		PanelName     NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL
+	);
+
+	DECLARE @LisMasterFiltered BIT = 0;   -- 1 when #LisBase was populated from LIMSMaster
+
+	IF @HasLisFilter = 1 AND OBJECT_ID('dbo.LIMSMaster', 'U') IS NOT NULL
+	BEGIN
+		-- Auto-detect dimension columns on dbo.LIMSMaster.
+		-- Panel column: same candidate list / priority as usp_RefreshRT_ExecutiveSummary_LIS_Alt.
+		DECLARE @LisPanelCatCol SYSNAME = (
+			SELECT TOP 1 name FROM sys.columns
+			WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+			  AND name IN ('PanelCategory','PanelName','Panelname','TestPanel','TestPanelName',
+			               'Panel','PanelDescription','TestName','Test_Panel','TestPanelname')
+			ORDER BY CASE name
+				WHEN 'PanelCategory'   THEN 0 WHEN 'PanelName'      THEN 1 WHEN 'Panelname'      THEN 2
+				WHEN 'TestPanelName'   THEN 3 WHEN 'TestPanelname'  THEN 4 WHEN 'TestPanel'      THEN 5
+				WHEN 'Panel'           THEN 6 WHEN 'PanelDescription' THEN 7 WHEN 'TestName'      THEN 8 ELSE 9 END);
+
+		DECLARE @LisFacilityCol SYSNAME = (
+			SELECT TOP 1 name FROM sys.columns
+			WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+			  AND name IN ('Facility','FacilityName','ClinicName','Clinic','FacilityID')
+			ORDER BY CASE name
+				WHEN 'Facility'     THEN 0 WHEN 'FacilityName' THEN 1
+				WHEN 'ClinicName'   THEN 2 WHEN 'Clinic'       THEN 3 WHEN 'FacilityID' THEN 4 ELSE 5 END);
+
+		DECLARE @LisProviderCol SYSNAME = (
+			SELECT TOP 1 name FROM sys.columns
+			WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+			  AND name IN ('Provider','PhysicianName','ProviderName','ReferringProvider','ReferringPhysician')
+			ORDER BY CASE name
+				WHEN 'Provider'           THEN 0 WHEN 'PhysicianName'     THEN 1
+				WHEN 'ProviderName'       THEN 2 WHEN 'ReferringProvider' THEN 3
+				WHEN 'ReferringPhysician' THEN 4 ELSE 5 END);
+
+		-- Only proceed when each active filter dimension has a matching column.
+		IF (@HasPanelFilter    = 0 OR @LisPanelCatCol  IS NOT NULL)
+		   AND (@HasClinicFilter   = 0 OR @LisFacilityCol  IS NOT NULL)
+		   AND (@HasProviderFilter = 0 OR @LisProviderCol  IS NOT NULL)
+		BEGIN
+			DECLARE @LisPanelExpr NVARCHAR(400) = ISNULL(
+				'LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @LisPanelCatCol + ']), '''')))', '''''');
+
+			-- Build base SELECT from LIMSMaster; date filter intentionally omitted.
+			DECLARE @LisBaseSql NVARCHAR(MAX) = N'
+			INSERT INTO #LisBase
+			       (Accession, ESYear, ESMonth, ResultedNot, ClientStatus, BilledNot,
+			        BillingStatus, ClaimStatus, OrderStatus, PaymentMethod, SampleStatus, PanelName)
+			SELECT
+			    LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(100), Accession), ''''))),
+			    YEAR (TRY_CAST(RequestCollectDate AS DATE)),
+			    MONTH(TRY_CAST(RequestCollectDate AS DATE)),
+			    LTRIM(RTRIM(ISNULL(RessultedStatus, ''''))),
+			    LTRIM(RTRIM(ISNULL(ClientStatus,    ''''))),
+			    CASE WHEN LTRIM(RTRIM(ISNULL(BillingStatus, ''''))) = ''Billed'' THEN ''Billed'' ELSE ''Unbilled'' END,
+			    LTRIM(RTRIM(ISNULL(BillingStatus,   ''''))),
+			    LTRIM(RTRIM(ISNULL(ClaimStatus,     ''''))),
+			    LTRIM(RTRIM(ISNULL(OrderStatus,     ''''))),
+			    LTRIM(RTRIM(ISNULL(PaymentMethod,   ''''))),
+			    LTRIM(RTRIM(ISNULL(SampleStatus,    ''''))),
+			    ' + @LisPanelExpr + N'
+			FROM dbo.LIMSMaster
+			WHERE TRY_CAST(RequestCollectDate AS DATE) IS NOT NULL
+			  AND NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(100), Accession))), '''') IS NOT NULL';
+
+			-- Append dimension predicates (COLLATE DATABASE_DEFAULT prevents collation conflicts).
+			-- Date parameters intentionally omitted.
+			IF @HasPanelFilter = 1 AND @LisPanelCatCol IS NOT NULL
+				SET @LisBaseSql += N'
+			  AND CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @LisPanelCatCol + N']), ''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @iPanels + '','') COLLATE DATABASE_DEFAULT) > 0';
+
+			IF @HasClinicFilter = 1 AND @LisFacilityCol IS NOT NULL
+				SET @LisBaseSql += N'
+			  AND CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @LisFacilityCol + N']), ''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @iClinics + '','') COLLATE DATABASE_DEFAULT) > 0';
+
+			IF @HasProviderFilter = 1 AND @LisProviderCol IS NOT NULL
+				SET @LisBaseSql += N'
+			  AND CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300), [' + @LisProviderCol + N']), ''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @iProviders + '','') COLLATE DATABASE_DEFAULT) > 0';
+
+			SET @LisBaseSql += N';';
+
+			EXEC sp_executesql @LisBaseSql,
+				N'@iPanels NVARCHAR(MAX), @iClinics NVARCHAR(MAX), @iProviders NVARCHAR(MAX)',
+				@iPanels = @Panels, @iClinics = @Clinics, @iProviders = @Providers;
+
+			SET @LisMasterFiltered = 1;
+		END
+	END
+
+	-- #LisPeriods: distinct (ESYear,ESMonth) from filtered LIMSMaster + (0,0) sentinel.
+	-- Only meaningful when @LisMasterFiltered = 1; left empty otherwise.
+	DROP TABLE IF EXISTS #LisPeriods;
+	CREATE TABLE #LisPeriods (ESYear INT NOT NULL, ESMonth INT NOT NULL);
+
+	-- #LisPanels: distinct panel names for L_A.<PanelName> sub-rows.
+	DROP TABLE IF EXISTS #LisPanels;
+	CREATE TABLE #LisPanels (PanelName NVARCHAR(300) COLLATE DATABASE_DEFAULT NOT NULL);
+
+	IF @LisMasterFiltered = 1
+	BEGIN
+		INSERT INTO #LisPeriods (ESYear, ESMonth)
+		SELECT DISTINCT ESYear, ESMonth FROM #LisBase
+		UNION ALL SELECT 0, 0;
+
+		INSERT INTO #LisPanels (PanelName)
+		SELECT DISTINCT PanelName FROM #LisBase WHERE ResultedNot = 'Resulted' AND PanelName <> '';
+	END
+
+	-- #LisOut: final LIS rows (RowCode / Description / period / MetricValue).
+	-- Populated either from live #LisBase aggregation (filtered) or aggregate tables (unfiltered).
+	DROP TABLE IF EXISTS #LisOut;
+	CREATE TABLE #LisOut
+	(
+		RowCode     NVARCHAR(500) COLLATE DATABASE_DEFAULT NOT NULL,  -- widened: panel sub-rows = 'L_A.' + PanelName (up to 300 chars)
+		Description NVARCHAR(500) COLLATE DATABASE_DEFAULT NOT NULL,
+		ESYear      INT           NOT NULL,
+		ESMonth     INT           NOT NULL,
+		MetricValue DECIMAL(18,2) NOT NULL
+	);
+
+	IF @LisMasterFiltered = 1
+	BEGIN
+		-- Live aggregation from #LisBase — mirrors the L_* row logic in
+		-- usp_RefreshRT_ExecutiveSummary_LIS_Alt (file 29, the authoritative source).
+		INSERT INTO #LisOut (RowCode, Description, ESYear, ESMonth, MetricValue)
+		SELECT RowCode, Description, ESYear, ESMonth, CAST(SampleCount AS DECIMAL(18,2))
+		FROM
+		(
+			-- L_0  Total Samples
+			SELECT p.ESYear, p.ESMonth, 'L_0' AS RowCode, 'Total Samples' AS Description,
+			       COUNT(DISTINCT l.Accession) AS SampleCount
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_A  Billable Samples - Resulted
+			SELECT p.ESYear, p.ESMonth, 'L_A', 'Billable Samples - Resulted',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Resulted'
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_A1  Billed to Insurance
+			SELECT p.ESYear, p.ESMonth, 'L_A1', 'Billed to Insurance',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Resulted' AND l.PaymentMethod = 'Insurance' AND l.ClaimStatus = 'Billed'
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_A1a  Billed to Insurance – Billed In AMD
+			SELECT p.ESYear, p.ESMonth, 'L_A1a', '    Billed In AMD',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Resulted' AND l.PaymentMethod = 'Insurance' AND l.ClaimStatus = 'Billed'
+			      AND l.BilledNot = 'Billed'
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_A2  Not Entered in AMD
+			SELECT p.ESYear, p.ESMonth, 'L_A2', 'Not Entered in AMD',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Resulted' AND l.PaymentMethod = 'Insurance' AND l.ClaimStatus = 'Billed'
+			      AND l.BilledNot = 'Billed' AND l.ClientStatus = 'Billing Review Required'
+			      AND l.BillingStatus IN ('Billed','Not Ready To Bill','Ready To Bill')
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_A2a  Not Entered in AMD – Received
+			SELECT p.ESYear, p.ESMonth, 'L_A2a', '    Received',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Resulted' AND l.PaymentMethod = 'Insurance' AND l.ClaimStatus = 'Billed'
+			      AND l.BilledNot = 'Billed' AND l.ClientStatus = 'Billing Review Required'
+			      AND l.BillingStatus IN ('Billed','Not Ready To Bill','Ready To Bill')
+			      AND l.SampleStatus = 'Received'
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_A2b  Not Entered in AMD – Billing Review Required (identical to L_A2a per spec)
+			SELECT p.ESYear, p.ESMonth, 'L_A2b', '    Billing Review Required',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Resulted' AND l.PaymentMethod = 'Insurance' AND l.ClaimStatus = 'Billed'
+			      AND l.BilledNot = 'Billed' AND l.ClientStatus = 'Billing Review Required'
+			      AND l.BillingStatus IN ('Billed','Not Ready To Bill','Ready To Bill')
+			      AND l.SampleStatus = 'Received'
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_A3  Unbilled
+			SELECT p.ESYear, p.ESMonth, 'L_A3', 'Unbilled',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Resulted' AND l.PaymentMethod = 'Insurance' AND l.ClaimStatus = 'Entered'
+			      AND l.BilledNot = 'Unbilled'
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_A4  Client Bill
+			SELECT p.ESYear, p.ESMonth, 'L_A4', 'Client Bill',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Resulted' AND l.PaymentMethod = 'Client Bill'
+			      AND l.ClaimStatus IN ('Billed','Not Entered in AMD')
+			      AND l.ClientStatus = 'Client Bill' AND l.BillingStatus = 'Billed'
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_A4a  Client Bill – Not Entered in AMD
+			SELECT p.ESYear, p.ESMonth, 'L_A4a', '    Not Entered in AMD',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Resulted' AND l.PaymentMethod = 'Client Bill'
+			      AND l.ClaimStatus = 'Not Entered in AMD' AND l.BilledNot = 'Unbilled'
+			      AND l.ClientStatus = 'Client Bill'
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_A4b  Client Bill – Billed
+			SELECT p.ESYear, p.ESMonth, 'L_A4b', '    Billed',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Resulted' AND l.PaymentMethod = 'Client Bill'
+			      AND l.ClaimStatus = 'Billed' AND l.BilledNot = 'Billed'
+			      AND l.ClientStatus = 'Client Bill' AND l.BillingStatus = 'Billed'
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_A5  Self Pay
+			SELECT p.ESYear, p.ESMonth, 'L_A5', 'Self Pay',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Resulted' AND l.PaymentMethod = 'Self Pay'
+			      AND l.ClientStatus = 'Self Pay'
+			      AND l.BillingStatus IN ('Billed','Not Ready To Bill')
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_A5a  Self Pay – Billed
+			SELECT p.ESYear, p.ESMonth, 'L_A5a', '    Billed',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Resulted' AND l.PaymentMethod = 'Self Pay'
+			      AND l.ClaimStatus = 'Billed' AND l.BilledNot = 'Billed'
+			      AND l.ClientStatus = 'Self Pay' AND l.BillingStatus IN ('Billed','Not Ready To Bill')
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_A5b  Self Pay – Not Entered in AMD
+			SELECT p.ESYear, p.ESMonth, 'L_A5b', '    Not Entered in AMD',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Resulted' AND l.PaymentMethod = 'Self Pay'
+			      AND l.ClaimStatus = 'Not Entered in AMD' AND l.BilledNot = 'Unbilled'
+			      AND l.ClientStatus = 'Self Pay'
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_A5c  Self Pay – Entered
+			SELECT p.ESYear, p.ESMonth, 'L_A5c', '    Entered',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Resulted' AND l.PaymentMethod = 'Self Pay'
+			      AND l.ClaimStatus = 'Entered' AND l.BilledNot = 'Unbilled'
+			      AND l.ClientStatus = 'Self Pay'
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_A6  Test Entries
+			SELECT p.ESYear, p.ESMonth, 'L_A6', 'Test Entries',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Resulted' AND l.ClaimStatus = 'Not Entered in AMD'
+			      AND l.BilledNot = 'Unbilled' AND l.ClientStatus = 'Test Entries'
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_A6a  Test Entries – Not Entered in AMD (identical to L_A6 per spec)
+			SELECT p.ESYear, p.ESMonth, 'L_A6a', '    Not Entered in AMD',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Resulted' AND l.ClaimStatus = 'Not Entered in AMD'
+			      AND l.BilledNot = 'Unbilled' AND l.ClientStatus = 'Test Entries'
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_A7  Billing Status – No Bill
+			SELECT p.ESYear, p.ESMonth, 'L_A7', 'Billing Status - No Bill',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Resulted' AND l.BillingStatus = 'No Bill'
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_A7a  Billing Status – No Bill – Rejected
+			SELECT p.ESYear, p.ESMonth, 'L_A7a', '    Rejected',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Resulted' AND l.BillingStatus = 'No Bill'
+			      AND l.OrderStatus = 'Rejected'
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_A7b  Billing Status – No Bill – Completed
+			SELECT p.ESYear, p.ESMonth, 'L_A7b', '    Completed',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Resulted' AND l.BillingStatus = 'No Bill'
+			      AND l.OrderStatus = 'Completed'
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_A7c  Billing Status – No Bill – Recollect Required
+			SELECT p.ESYear, p.ESMonth, 'L_A7c', '    Recollect Required',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Resulted' AND l.BillingStatus = 'No Bill'
+			      AND l.OrderStatus = 'Recollect Required'
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_B  Not Resulted
+			SELECT p.ESYear, p.ESMonth, 'L_B', 'Not Resulted',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Not Resulted'
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_B1  Not Resulted – Not Entered in AMD
+			SELECT p.ESYear, p.ESMonth, 'L_B1', 'Not Entered in AMD',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Not Resulted' AND l.ClaimStatus = 'Not Entered in AMD'
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_B1a  Not Entered in AMD – Collected
+			SELECT p.ESYear, p.ESMonth, 'L_B1a', '    Collected',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Not Resulted' AND l.ClaimStatus = 'Not Entered in AMD'
+			      AND l.SampleStatus = 'Collected'
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_B1b  Not Entered in AMD – Received (identical to L_B1a per spec)
+			SELECT p.ESYear, p.ESMonth, 'L_B1b', '    Received',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Not Resulted' AND l.ClaimStatus = 'Not Entered in AMD'
+			      AND l.SampleStatus = 'Collected'
+			GROUP BY p.ESYear, p.ESMonth
+
+			UNION ALL
+			-- L_B2  Not Resulted – Rejected Sample
+			SELECT p.ESYear, p.ESMonth, 'L_B2', 'Rejected Sample',
+			       COUNT(DISTINCT l.Accession)
+			FROM #LisPeriods p LEFT JOIN #LisBase l
+			       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+			      AND l.ResultedNot = 'Not Resulted' AND l.ClaimStatus = 'Not Entered in AMD'
+			      AND l.SampleStatus = 'Rejected'
+			GROUP BY p.ESYear, p.ESMonth
+		) lis_rows;
+
+		-- L_A.<PanelName> sub-rows (panel-wise breakdown of "Billable Samples - Resulted").
+		INSERT INTO #LisOut (RowCode, Description, ESYear, ESMonth, MetricValue)
+		SELECT 'L_A.' + pn.PanelName, '    ' + pn.PanelName,
+		       p.ESYear, p.ESMonth, CAST(COUNT(DISTINCT l.Accession) AS DECIMAL(18,2))
+		FROM #LisPanels pn
+		CROSS JOIN #LisPeriods p
+		LEFT JOIN #LisBase l
+		       ON (p.ESYear = 0 OR (l.ESYear = p.ESYear AND l.ESMonth = p.ESMonth))
+		      AND l.ResultedNot = 'Resulted'
+		      AND l.PanelName COLLATE DATABASE_DEFAULT = pn.PanelName COLLATE DATABASE_DEFAULT
+		GROUP BY pn.PanelName, p.ESYear, p.ESMonth;
+	END
+	ELSE
+	BEGIN
+		-- No LIS dimension filter: serve from pre-built aggregate tables filtered by period.
+		INSERT INTO #LisOut (RowCode, Description, ESYear, ESMonth, MetricValue)
+		SELECT RoleID, Description, ESYear, ESMonth, CAST(ESMonthClaimCount AS DECIMAL(18,2))
+		FROM dbo.RT_ES_LIS
+		WHERE (ESYear=0 AND ESMonth=0)
+		   OR ( (@YearFrom  IS NULL OR ESYear  >= @YearFrom)
+			AND (@YearTo    IS NULL OR ESYear  <= @YearTo)
+			AND (@MonthFrom IS NULL OR ESMonth >= @MonthFrom)
+			AND (@MonthTo   IS NULL OR ESMonth <= @MonthTo))
+
+		UNION ALL
+		SELECT RoleID, Description, ESYear, ESMonth, CAST(ESMonthClaimCount AS DECIMAL(18,2))
+		FROM dbo.RT_ES_LIS_Panel
+		WHERE (ESYear=0 AND ESMonth=0)
+		   OR ( (@YearFrom  IS NULL OR ESYear  >= @YearFrom)
+			AND (@YearTo    IS NULL OR ESYear  <= @YearTo)
+			AND (@MonthFrom IS NULL OR ESMonth >= @MonthFrom)
+			AND (@MonthTo   IS NULL OR ESMonth <= @MonthTo));
+	END
+
 	DROP TABLE IF EXISTS #Base;
 
 	SELECT
@@ -167,10 +624,10 @@ BEGIN
 	  AND (@DosTo      IS NULL OR TRY_CAST(DateofService   AS DATE) <= @DosTo)
 	  AND (@BilledFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @BilledFrom)
 	  AND (@BilledTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @BilledTo)
-	  AND (@HasPanelFilter    = 0 OR LTRIM(RTRIM(ISNULL(PanelName,         ''))) COLLATE DATABASE_DEFAULT IN (SELECT Val FROM #FilterPanels))
-	  AND (@HasClinicFilter   = 0 OR LTRIM(RTRIM(ISNULL(ClinicName,        ''))) COLLATE DATABASE_DEFAULT IN (SELECT Val FROM #FilterClinics))
-	  AND (@HasProviderFilter = 0 OR LTRIM(RTRIM(ISNULL(ReferringProvider, ''))) COLLATE DATABASE_DEFAULT IN (SELECT Val FROM #FilterProviders))
-	  AND (@HasRepFilter      = 0 OR LTRIM(RTRIM(ISNULL(SalesRepname,      ''))) COLLATE DATABASE_DEFAULT IN (SELECT Val FROM #FilterReps));
+	  AND (@HasPanelFilter    = 0 OR CHARINDEX((',' + LTRIM(RTRIM(ISNULL(PanelName,         ''))) + ',') COLLATE DATABASE_DEFAULT, (',' + @Panels + ',') COLLATE DATABASE_DEFAULT) > 0)
+	  AND (@HasClinicFilter   = 0 OR CHARINDEX((',' + LTRIM(RTRIM(ISNULL(ClinicName,        ''))) + ',') COLLATE DATABASE_DEFAULT, (',' + @Clinics + ',') COLLATE DATABASE_DEFAULT) > 0)
+	  AND (@HasProviderFilter = 0 OR CHARINDEX((',' + LTRIM(RTRIM(ISNULL(ReferringProvider, ''))) + ',') COLLATE DATABASE_DEFAULT, (',' + @Providers + ',') COLLATE DATABASE_DEFAULT) > 0)
+	  AND (@HasRepFilter      = 0 OR CHARINDEX((',' + LTRIM(RTRIM(ISNULL(SalesRepname,      ''))) + ',') COLLATE DATABASE_DEFAULT, (',' + @Reps + ',') COLLATE DATABASE_DEFAULT) > 0);
 
 	DROP TABLE IF EXISTS #Periods;
 	SELECT DISTINCT ESYear, ESMonth INTO #Periods FROM #Base
@@ -375,26 +832,11 @@ BEGIN
 	SELECT RowCode, Category, Description, BillYear, BillMonth, MetricValue
 	FROM
 	(
-		-- LIS rows from aggregate table (filtered by period)
-		SELECT RoleID AS RowCode,'LIS' AS Category, Description,
-			   ESYear AS BillYear, ESMonth AS BillMonth,
-			   CAST(ESMonthClaimCount AS DECIMAL(18,2)) AS MetricValue
-		FROM dbo.RT_ES_LIS
-		WHERE (ESYear=0 AND ESMonth=0)
-		   OR ( (@YearFrom  IS NULL OR ESYear  >= @YearFrom)
-			AND (@YearTo    IS NULL OR ESYear  <= @YearTo)
-			AND (@MonthFrom IS NULL OR ESMonth >= @MonthFrom)
-			AND (@MonthTo   IS NULL OR ESMonth <= @MonthTo))
-
-		UNION ALL
-		SELECT RoleID,'LIS', Description, ESYear, ESMonth,
-			   CAST(ESMonthClaimCount AS DECIMAL(18,2))
-		FROM dbo.RT_ES_LIS_Panel
-		WHERE (ESYear=0 AND ESMonth=0)
-		   OR ( (@YearFrom  IS NULL OR ESYear  >= @YearFrom)
-			AND (@YearTo    IS NULL OR ESYear  <= @YearTo)
-			AND (@MonthFrom IS NULL OR ESMonth >= @MonthFrom)
-			AND (@MonthTo   IS NULL OR ESMonth <= @MonthTo))
+		-- LIS rows — populated from #LisOut (either live #LisBase aggregation when
+		-- a dimension filter is active, or pre-built aggregate tables otherwise).
+		SELECT RowCode, 'LIS' AS Category, Description,
+			   ESYear AS BillYear, ESMonth AS BillMonth, MetricValue
+		FROM #LisOut
 
 		UNION ALL
 		SELECT RowCode,'PMS', Description, ESYear, ESMonth,
@@ -413,6 +855,10 @@ BEGIN
 
 	DROP TABLE IF EXISTS #Base;
 	DROP TABLE IF EXISTS #Periods;
+	DROP TABLE IF EXISTS #LisBase;
+	DROP TABLE IF EXISTS #LisPeriods;
+	DROP TABLE IF EXISTS #LisPanels;
+	DROP TABLE IF EXISTS #LisOut;
 END;
 GO
 

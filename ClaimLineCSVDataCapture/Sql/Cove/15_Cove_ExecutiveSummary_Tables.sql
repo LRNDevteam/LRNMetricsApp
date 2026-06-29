@@ -43,8 +43,10 @@ BEGIN
     CREATE TABLE dbo.Cove_ES_LIS
     (
         Id                  INT IDENTITY(1,1) PRIMARY KEY,
-        RoleID              NVARCHAR(50)    NOT NULL,
-        Description         NVARCHAR(300)   NOT NULL,
+        -- RoleID holds panel-keyed codes like 'B.<PanelType>'; Cove panel names
+        -- can be long (≈200 chars), so this is sized well above NVARCHAR(50).
+        RoleID              NVARCHAR(420)   NOT NULL,
+        Description         NVARCHAR(420)   NOT NULL,
         ESYear              INT             NOT NULL,
         ESMonth             INT             NOT NULL,
         ESMonthClaimCount   INT             NOT NULL DEFAULT 0,

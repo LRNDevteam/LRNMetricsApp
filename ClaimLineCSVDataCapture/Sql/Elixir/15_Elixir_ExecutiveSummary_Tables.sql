@@ -12,10 +12,10 @@
 --   Cash Breakdown  : Q, R, S, T, U, V, W, X (+X.1-X.3)
 --   Average/Claim   : Y, Z, AA
 --
--- Four category tables (1 row per RoleID per Year-Month). No
--- LIS_Panel table is created — the Elixir spec does not define a
--- panel-wise sub-breakdown for the LIS Breakdown category.
---   dbo.Elix_ES_LIS   – LIS Breakdown (A, B, C, D, D.1, E, E.1-E.6)
+-- Four category tables (1 row per RoleID per Year-Month).
+-- Elix_ES_LIS.RoleID is NVARCHAR(420) to accommodate dynamic B.x panel
+-- sub-rows (e.g. 'B.Comprehensive Metabolic Panel') whose names can be long.
+--   dbo.Elix_ES_LIS   – LIS Breakdown (A, B, B.x panel sub-rows, C, D, D.1, E, E.1-E.6)
 --   dbo.Elix_ES_PMS   – PMS Breakdown (F-P + P.1-P.3)
 --   dbo.Elix_ES_Cash  – Cash Breakdown ($) (Q-X + X.1-X.3)
 --   dbo.Elix_ES_Avg   – Average Payment Per Claim (Y, Z, AA)
@@ -37,7 +37,7 @@ IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'Elix_ES_LIS')
 CREATE TABLE dbo.Elix_ES_LIS
 (
 	Id                  INT             NOT NULL IDENTITY(1,1) PRIMARY KEY,
-	RoleID              NVARCHAR(10)    NOT NULL,
+	RoleID              NVARCHAR(420)   NOT NULL,  -- wide: B.x panel names can be long
 	Description         NVARCHAR(300)   NOT NULL,
 	ESYear              INT             NOT NULL,
 	ESMonth             INT             NOT NULL,
@@ -45,6 +45,11 @@ CREATE TABLE dbo.Elix_ES_LIS
 	ESMonthChargeAmount DECIMAL(18,2)   NOT NULL DEFAULT 0,
 	RefreshedAt         DATETIME        NOT NULL DEFAULT GETDATE()
 );
+GO
+
+-- Widen RoleID if the table already exists with the old NVARCHAR(10) definition.
+IF COL_LENGTH('dbo.Elix_ES_LIS', 'RoleID') < 420
+	ALTER TABLE dbo.Elix_ES_LIS ALTER COLUMN RoleID NVARCHAR(420) NOT NULL;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_Elix_ES_LIS_Period' AND object_id=OBJECT_ID('dbo.Elix_ES_LIS'))
