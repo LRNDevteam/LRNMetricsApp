@@ -7,6 +7,7 @@ let authTokenPromise = null;
 let redirectStarted = false;
 let lastAuthTokenError = null;
 let lastAuthTokenErrorAt = 0;
+let workflowJwt = '';
 const AUTH_ERROR_COOLDOWN_MS = 8000;
 
 function isLocalReactHost() {
@@ -22,10 +23,14 @@ function allTokenKeys() {
 }
 
 export function getJwt() {
+  if (isJwtValid(workflowJwt)) return workflowJwt;
   for (const key of allTokenKeys()) {
     const value = localStorage.getItem(key) || sessionStorage.getItem(key);
     const token = cleanToken(value);
-    if (token) return token;
+    if (token) {
+      clearWorkflowJwt();
+      return '';
+    }
   }
   return '';
 }
@@ -33,11 +38,11 @@ export function getJwt() {
 export function setWorkflowJwt(token) {
   const clean = cleanToken(token);
   if (!clean) return;
-  localStorage.setItem('lrn.workflow.jwt', clean);
-  sessionStorage.setItem('lrn.workflow.jwt', clean);
+  workflowJwt = clean;
 }
 
 export function clearWorkflowJwt() {
+  workflowJwt = '';
   for (const key of allTokenKeys()) {
     localStorage.removeItem(key);
     sessionStorage.removeItem(key);
@@ -204,7 +209,7 @@ export async function ensureWorkflowJwt(options = {}) {
         if (isLocalReactHost() && (error instanceof TypeError || String(error?.message || '').includes('Failed to fetch'))) {
           throw new Error(
             `Cannot call AuthToken from React localhost. Check CORS and local HTTPS. Auth URL: ${AUTH_TOKEN_URL}. ` +
-            'Use the updated LabMetricsDashboard Program.cs, restart MVC, and ensure the Vite origin http://localhost:5173 is allowed.'
+            'Use the updated LabMetricsDashboard Program.cs, restart MVC, and ensure the Vite origin https://localhost:5173 is allowed.'
           );
         }
         throw error;

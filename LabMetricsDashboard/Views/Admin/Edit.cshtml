@@ -90,13 +90,13 @@
         <div class="alert alert-danger">@adminError</div>
     }
 
-    <form asp-action="Edit" method="post">
+    <form asp-action="Edit" method="post" autocomplete="off" id="editUserForm">
         @Html.AntiForgeryToken()
         <input type="hidden" name="LabUserID" value="@Model.LabUserID" />
         <div class="row g-3">
             <div class="col-md-6">
                 <label class="form-label">UserName</label>
-                <input class="form-control" name="UserName" value="@Model.UserName" required />
+                <input class="form-control" name="UserName" value="@Model.UserName" required autocomplete="off" />
             </div>
             <div class="col-md-3">
                 <label class="form-label">First Name</label>
@@ -138,28 +138,58 @@
             </div>
         </div>
 
-        <h5 class="mt-4">Change Password</h5>
+        <h5 class="mt-4">Change Password <small class="text-muted fw-normal">(optional)</small></h5>
+        <p class="text-muted small mb-2">Leave both fields blank to keep the existing password.</p>
         <div class="row g-3">
             <div class="col-md-6">
                 <label class="form-label">New Password</label>
-                <input class="form-control" name="Password" type="password" />
+                <input class="form-control" name="Password" type="password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" />
             </div>
             <div class="col-md-6">
                 <label class="form-label">Confirm Password</label>
-                <input class="form-control" name="ConfirmPassword" type="password" />
+                <input class="form-control" name="ConfirmPassword" type="password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" />
             </div>
         </div>
 
         <div class="d-grid mt-4">
-            <button class="btn btn-primary">Save Changes</button>
+            <button class="btn btn-primary" type="submit" data-save-user-submit><span>Save Changes</span></button>
         </div>
     </form>
         </div>
     </div>
 </div>
 
-<script>
+<script nonce='@Context.Items["CspNonce"]'>
 document.addEventListener('DOMContentLoaded', function () {
+    const editForm = document.getElementById('editUserForm');
+    if (editForm) {
+        editForm.querySelectorAll('input[type="password"]').forEach(function (input) { input.value = ''; });
+        editForm.addEventListener('submit', function (event) {
+            if (editForm.dataset.submitting === 'true') {
+                event.preventDefault();
+                return;
+            }
+            const password = editForm.querySelector('[name="Password"]');
+            const confirm = editForm.querySelector('[name="ConfirmPassword"]');
+            if ((password?.value || '') !== (confirm?.value || '')) {
+                event.preventDefault();
+                if (confirm) {
+                    confirm.setCustomValidity('Password and confirmation do not match.');
+                    confirm.reportValidity();
+                }
+                return;
+            }
+            if (confirm) confirm.setCustomValidity('');
+            editForm.dataset.submitting = 'true';
+            const button = editForm.querySelector('[data-save-user-submit]');
+            if (button) {
+                button.disabled = true;
+                button.querySelector('span').textContent = 'Saving...';
+                button.insertAdjacentHTML('afterbegin', '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>');
+            }
+        });
+    }
+
     document.querySelectorAll('.lab-chip-picker').forEach(function (picker) {
         const inputName = picker.getAttribute('data-input-name');
         const select = picker.querySelector('select');

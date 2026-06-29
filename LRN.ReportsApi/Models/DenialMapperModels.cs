@@ -108,6 +108,15 @@ public sealed class DenialMapperPushDecisionRequest
     public IReadOnlyList<long> PushAuditIds { get; set; } = Array.Empty<long>();
 }
 
+public sealed class DenialMapperPushDetailEditRequest
+{
+    public string ActionCode { get; set; } = string.Empty;
+    public string ActionCategory { get; set; } = string.Empty;
+    public string Task { get; set; } = string.Empty;
+    public string RecommendedAction { get; set; } = string.Empty;
+    public string? DenialClassification { get; set; }
+}
+
 public sealed class DenialMapperNotification
 {
     public long PushAuditId { get; set; }
@@ -152,4 +161,21 @@ public sealed class DenialMapperDashboard
     public int PendingPushLabs { get; set; }
     public int TotalOverrides { get; set; }
     public DateTime? LastModifiedOn { get; set; }
+}
+
+public sealed class DenialMapperActionCategoryMaster
+{
+    public string ActionCategory { get; set; } = string.Empty;
+    public string ActionCode { get; set; } = string.Empty;
+}
+
+public sealed class DenialMapperMasterData
+{
+    public IReadOnlyList<string> DenialClassifications { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> CoverageStatuses { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> ICDComplianceStatuses { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> DenialValidities { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> SLADays { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> Priorities { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<DenialMapperActionCategoryMaster> ActionCategories { get; set; } = Array.Empty<DenialMapperActionCategoryMaster>();
 }

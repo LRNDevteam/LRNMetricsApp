@@ -8,24 +8,24 @@
 
 <div class="card mb-3">
     <div class="card-body">
-        <form id="frmCreateUserPage" method="post" asp-action="CreateUser">
+        <form id="frmCreateUserPage" method="post" asp-action="CreateUser" autocomplete="off">
             @Html.AntiForgeryToken()
             <div asp-validation-summary="ModelOnly" class="text-danger mb-2"></div>
 
             <div class="row g-2 mb-2">
                 <div class="col-md-2">
                     <label class="form-label">UserName</label>
-                    <input class="form-control" asp-for="NewUser.UserName" />
+                    <input class="form-control" asp-for="NewUser.UserName" autocomplete="off" />
                     <span asp-validation-for="NewUser.UserName" class="text-danger"></span>
                 </div>
                 <div class="col-md-2">
                     <label class="form-label">Password</label>
-                    <input class="form-control" asp-for="NewUserPassword" type="password" />
+                    <input class="form-control" asp-for="NewUserPassword" type="password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" />
                     <span asp-validation-for="NewUserPassword" class="text-danger"></span>
                 </div>
                 <div class="col-md-2">
                     <label class="form-label">Confirm</label>
-                    <input class="form-control" asp-for="NewUserConfirmPassword" type="password" />
+                    <input class="form-control" asp-for="NewUserConfirmPassword" type="password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" />
                     <span asp-validation-for="NewUserConfirmPassword" class="text-danger"></span>
                 </div>
                 <div class="col-md-2">
@@ -38,7 +38,7 @@
                 </div>
                 <div class="col-md-2 d-flex align-items-end">
                     <div class="d-grid">
-                        <button class="btn btn-primary">Create User</button>
+                        <button class="btn btn-primary" type="submit" data-create-user-submit data-default-text="Create User"><span>Create User</span></button>
                     </div>
                 </div>
             </div>

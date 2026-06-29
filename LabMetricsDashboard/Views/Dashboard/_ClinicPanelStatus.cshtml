@@ -152,7 +152,7 @@
     </table>
 </div>
 
-<script>
+<script nonce='@Context.Items["CspNonce"]'>
 function cpsToggle(groupId) {
     var rows = document.querySelectorAll('tr[data-cps-group="' + groupId + '"]');
     var parent = document.querySelector('tr[data-cps-toggle="' + groupId + '"]');

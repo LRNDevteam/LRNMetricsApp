@@ -15,12 +15,16 @@ using Microsoft.Extensions.Primitives;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Net;
+using System.Security.Cryptography;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
 const string DenialWorkflowLocalDevCorsPolicy = "DenialWorkflowLocalDevCors";
 
-// Local React/Vite runs on http://localhost:5173 and calls MVC on https://localhost:44350.
+// Local React/Vite runs on https://localhost:5173 and calls MVC on https://localhost:44350.
 // For fetch(..., credentials: "include") the auth cookie must be SameSite=None and Secure.
 var useWorkflowCrossOriginCookie = builder.Environment.IsDevelopment()
 	|| builder.Configuration.GetValue<bool>("DenialWorkflowAuth:UseCrossOriginCookies");
@@ -338,8 +342,10 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
 	options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
 	// Trust loopback (127.0.0.1 / ::1) — the address IIS uses when forwarding internally.
-	options.KnownNetworks.Clear();
-	options.KnownProxies.Clear();
+	foreach (var proxy in builder.Configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>() ?? Array.Empty<string>())
+	{
+		if (IPAddress.TryParse(proxy, out var address)) options.KnownProxies.Add(address);
+	}
 });
 
 var useMockData = builder.Configuration.GetValue<bool>("DashboardData:UseMockData");
@@ -410,6 +416,7 @@ builder.Services.AddSingleton<HelpBotService>();
 
 builder.Services.Configure<DenialWorkflowOptions>(builder.Configuration.GetSection("DenialWorkflowApi"));
 builder.Services.AddHttpClient<IDenialWorkflowApiClient, DenialWorkflowApiClient>();
+builder.Services.AddHttpClient<IMasterValuesApiClient, MasterValuesApiClient>();
 
 // Allow local Vite React dev server to call MVC AuthToken endpoint with cookies.
 // Production stays same-origin, but these origins are useful while debugging React locally.
@@ -438,6 +445,21 @@ builder.Services.AddCors(options =>
 			.AllowAnyMethod()
 			.AllowCredentials();
 	});
+});
+
+builder.Services.AddRateLimiter(options =>
+{
+	options.AddPolicy("login", context =>
+		RateLimitPartition.GetFixedWindowLimiter(
+			$"{context.Connection.RemoteIpAddress}|{(context.Request.HasFormContentType ? context.Request.Form["UserName"].ToString().Trim().ToUpperInvariant() : string.Empty)}",
+			_ => new FixedWindowRateLimiterOptions
+			{
+				PermitLimit = builder.Configuration.GetValue<int?>("Security:LoginRateLimit:PermitLimit") ?? 5,
+				Window = TimeSpan.FromMinutes(builder.Configuration.GetValue<int?>("Security:LoginRateLimit:WindowMinutes") ?? 1),
+				QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+				QueueLimit = 0
+			}));
+	options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 });
 
 builder.Services.AddControllersWithViews(options =>
@@ -480,14 +502,14 @@ builder.Services
 		options.SlidingExpiration = true;
 		options.Cookie.Name = "LRN.Auth";
 		options.Cookie.HttpOnly = true;
-		options.Cookie.SameSite = useWorkflowCrossOriginCookie ? SameSiteMode.None : SameSiteMode.None;
+		options.Cookie.SameSite = useWorkflowCrossOriginCookie ? SameSiteMode.None : SameSiteMode.Lax;
 		options.Cookie.Path = "/";
 		// Required for local React/Vite cross-origin AuthToken fetch.
 		// If this is SameAsRequest/Lax in Development, Chrome will not send LRN.Auth
-		// from http://localhost:5173 to https://localhost:44350, causing login loops.
+		// from https://localhost:5173 to https://localhost:44350, causing login loops.
 		options.Cookie.SecurePolicy = useWorkflowCrossOriginCookie
 			? CookieSecurePolicy.Always
-			: CookieSecurePolicy.Always;
+			: (builder.Environment.IsDevelopment() ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always);
 
 		// ── ReturnUrl loop guard ──────────────────────────────────────────────
 		// Prevent the error and login pages from being embedded as a ReturnUrl.
@@ -555,6 +577,8 @@ if (!app.Environment.IsDevelopment())
 // sees the correct scheme.  Without this, IIS terminates SSL and the app sees
 // "http://" — cookies are issued without the Secure flag and Chrome drops them.
 app.UseForwardedHeaders();
+
+app.Use(ApplySecurityHeadersMiddleware);
 
 // ── Stale cookie self-healing ──────────────────────────────────────────────
 // When the DataProtection key ring changes (e.g. when persistence was first turned on,
@@ -674,6 +698,7 @@ if (app.Environment.IsDevelopment())
 }
 app.UseStaticFiles();
 app.UseRouting();
+app.UseRateLimiter();
 
 // Must be after UseRouting and before UseAuthentication so preflight/AuthToken
 // responses include Access-Control-Allow-Origin for local React dev.
@@ -693,3 +718,40 @@ app.MapControllerRoute(
 app.MapControllers();
 
 app.Run();
+
+static async Task ApplySecurityHeadersMiddleware(HttpContext context, Func<Task> next)
+{
+	context.Items["CspNonce"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16));
+	ApplySecurityHeaders(context);
+	await next();
+}
+
+static void ApplySecurityHeaders(HttpContext context)
+{
+	var environment = context.RequestServices.GetRequiredService<IWebHostEnvironment>();
+	var formActionSources = environment.IsDevelopment()
+		? "'self' https://localhost:44350 https://localhost:57996 https://localhost:5173 https://127.0.0.1:44350 https://127.0.0.1:57996 https://127.0.0.1:5173"
+		: "'self'";
+
+	var headers = context.Response.Headers;
+	headers["X-Content-Type-Options"] = "nosniff";
+	headers["X-Frame-Options"] = "SAMEORIGIN";
+	headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+	headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()";
+	headers["Content-Security-Policy"] =
+		"default-src 'self'; " +
+		"base-uri 'self'; " +
+		"object-src 'none'; " +
+		"frame-ancestors 'self'; " +
+		$"form-action {formActionSources}; " +
+		"img-src 'self' data: blob:; " +
+		"font-src 'self' data:; " +
+		"style-src 'self' 'unsafe-inline'; " +
+		$"script-src 'self' 'nonce-{context.Items["CspNonce"]}'; " +
+		"connect-src 'self' http://localhost:* https://localhost:* ws://localhost:* wss://localhost:* http://127.0.0.1:* https://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:*";
+
+	if (context.Request.IsHttps)
+	{
+		headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
+	}
+}

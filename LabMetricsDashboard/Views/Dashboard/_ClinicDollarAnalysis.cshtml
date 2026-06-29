@@ -126,7 +126,7 @@
     Source: dbo.ClaimLevelData &middot; Lab: @Model.SelectedLab
 </div>
 
-<script>
+<script nonce='@Context.Items["CspNonce"]'>
 (function () {
     document.querySelectorAll('.cda-clinic-row[data-cda-toggle]').forEach(function (row) {
         row.addEventListener('click', function () {

@@ -25,6 +25,12 @@ export const denialWorkflowService = {
   getClaimsExportStatus: (jobId) => api(`/claims/export/${encodeURIComponent(jobId)}`),
   cancelClaimsExport: (jobId) => api(`/claims/export/${encodeURIComponent(jobId)}`, { method: 'DELETE' }),
   getClaimsExportDownloadUrl: (jobId) => apiUrl(`/claims/export/${encodeURIComponent(jobId)}/download`),
+  uploadClaimsCsv: (labId, file) => {
+    const form = new FormData();
+    form.append('labId', labId);
+    form.append('file', file);
+    return api('/claims/upload-csv', { method: 'POST', body: form });
+  },
   getTasks: async (query, options = {}) => normalizePagedResult(await api(`/tasks?${qs(query)}`, options)),
   getVerification: async (query, options = {}) => normalizePagedResult(await api(`/verification?${qs(query)}`, options)),
   getClaimTasks: (labId, claimId, taskView = '') => api(`/claims/${encodeURIComponent(claimId)}/tasks?${qs({ labId, taskView })}`),
@@ -74,6 +80,7 @@ export const denialWorkflowService = {
   ignoreDenialActionVerification: (labId, verificationId) => api(`/denial-action-verification/${encodeURIComponent(verificationId)}/ignore?labId=${encodeURIComponent(labId)}`, { method: 'POST' }),
   getDenialActionVerificationExportUrl: (query) => apiUrl(`/denial-action-verification/export?${qs(query)}`)
   ,getDenialMapperDashboard: (labId) => api(`/denial-mapper/dashboard?${qs({ labId })}`)
+  ,getDenialMapperMasterData: () => api('/denial-mapper/master-data')
   ,getDenialMapperSuper: async (query) => normalizePagedResult(await api(`/denial-mapper/super-master?${qs(query)}`))
   ,createDenialMapperSuper: (payload) => api('/denial-mapper/super-master', { method: 'POST', body: JSON.stringify(payload) })
   ,updateDenialMapperSuper: (id, payload) => api(`/denial-mapper/super-master/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
@@ -83,6 +90,7 @@ export const denialWorkflowService = {
   ,confirmDenialMapperPush: (pushAuditIds) => api('/denial-mapper/confirm-push', { method: 'POST', body: JSON.stringify({ pushAuditIds }) })
   ,cancelDenialMapperPush: (pushAuditIds) => api('/denial-mapper/cancel-push', { method: 'POST', body: JSON.stringify({ pushAuditIds }) })
   ,getDenialMapperPushVerification: (pushAuditId) => api(`/denial-mapper/push-verification/${pushAuditId}`)
+  ,updateDenialMapperPushVerificationDetail: (pushAuditId, detailId, payload) => api(`/denial-mapper/push-verification/${pushAuditId}/details/${detailId}`, { method: 'PUT', body: JSON.stringify(payload) })
   ,getDenialMapperPushVerificationExportUrl: (pushAuditId) => apiUrl(`/denial-mapper/push-verification/${pushAuditId}/export`)
   ,getDenialMapperNotifications: (labId) => api(`/denial-mapper/notifications?labId=${encodeURIComponent(labId)}`)
   ,acknowledgeDenialMapperNotification: (pushAuditId, labId) => api(`/denial-mapper/notifications/${pushAuditId}/acknowledge?labId=${encodeURIComponent(labId)}`, { method: 'POST' })

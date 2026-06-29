@@ -17,6 +17,8 @@ public sealed class SqlDenialWorkflowRepository : IDenialWorkflowRepository
     private static readonly TimeSpan DashboardCacheDuration = TimeSpan.FromSeconds(90);
     private static readonly ConcurrentDictionary<string, ClaimCountsCacheEntry> ClaimCountsCache = new();
     private static readonly TimeSpan ClaimCountsCacheDuration = TimeSpan.FromSeconds(60);
+    private static readonly ConcurrentDictionary<int, byte> ClaimSupportSchemaReady = new();
+    private static readonly ConcurrentDictionary<int, SemaphoreSlim> ClaimSupportSchemaLocks = new();
 
     private readonly IConfiguration _configuration;
     private readonly string _masterConnectionString;
@@ -1772,6 +1774,8 @@ DROP TABLE #TaskClaimAgg;";
         await con.OpenAsync(ct);
         await EnsureDenialTaskBoardNormalizedClaimIdAsync(con, ct);
         await EnsureClaimSupportTablesAsync(filter.LabId, ct);
+        if (filter.UploadTemplate)
+            return await WriteClaimUploadTemplateAsync(con, filter, output, ct);
         try
         {
             return await WriteTaskBoardClaimsExportAsync(con, filter, output, ct);
@@ -2015,6 +2019,7 @@ SELECT
     {CoalesceText("ClaimID", TextExpr(taskColumns, "t", "ClaimID"))},
     {CoalesceText("AccessionNo", TextExpr(lineColumns, "l", "AccessionNo"), TextExpr(lineColumns, "l", "AccessionNumber"))},
     ClaimUID = {taskClaimUidExpr},
+    {CoalesceText("TaskID", TextExpr(taskColumns, "t", "TaskID"))},
     {CoalesceText("PatientName", TextExpr(taskColumns, "t", "PatName"), TextExpr(taskColumns, "t", "PatientName"), TextExpr(lineColumns, "l", "PatName"), TextExpr(lineColumns, "l", "PatientName"))},
     {CoalesceText("PatientID", TextExpr(taskColumns, "t", "PatientId"), TextExpr(taskColumns, "t", "PatientID"), TextExpr(lineColumns, "l", "PatientID"), TextExpr(lineColumns, "l", "PatientId"))},
     {CoalesceDate("PateintDOB", DateExpr(taskColumns, "t", "PatientDOB"), DateExpr(lineColumns, "l", "PatientDOB"))},
@@ -2057,7 +2062,8 @@ SELECT
     ClaimNotes = ISNULL(notes.ClaimNotes, ''),
     EscalationNotes = ISNULL(escalations.EscalationNotes, ''),
     CombinedNotes = CONCAT_WS(CHAR(10) + CHAR(10), NULLIF(notes.ClaimNotes, ''), NULLIF(escalations.EscalationNotes, '')),
-    DocumentComments = ISNULL(documents.DocumentComments, '')
+    DocumentComments = ISNULL(documents.DocumentComments, ''),
+    {CoalesceText("AssignedTo", TextExpr(taskColumns, "t", "AssignedTo"))}
 FROM #ExportTasks t
 LEFT JOIN #LineOne l ON l.__ExportRowId = t.__ExportRowId AND l.__LineRank = 1
 LEFT JOIN #ClaimNotes notes ON notes.__ExportRowId = t.__ExportRowId
@@ -2773,6 +2779,137 @@ SELECT COUNT(1) FROM @Changed;";
         return scalar == DBNull.Value || scalar is null ? 0 : Convert.ToInt32(scalar);
     }
 
+    private async Task<int> WriteClaimUploadTemplateAsync(SqlConnection con, DenialWorkflowFilter filter, Stream output, CancellationToken ct)
+    {
+        var where = BuildCommonWhere(filter, "t", includeStatus: true, includeAssigned: true);
+        var taskColumns = await GetColumnSetAsync(con, "dbo.DenialTaskBoard", ct);
+        var claimUid = taskColumns.Contains("ClaimUID")
+            ? "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.ClaimUID,''))),''), LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))), LTRIM(RTRIM(ISNULL(t.ClaimID,''))))"
+            : "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))),''), LTRIM(RTRIM(ISNULL(t.ClaimID,''))))";
+        var patientName = taskColumns.Contains("PatName")
+            ? "LTRIM(RTRIM(ISNULL(t.PatName,'')))"
+            : taskColumns.Contains("PatientName") ? "LTRIM(RTRIM(ISNULL(t.PatientName,'')))" : "CAST('' AS nvarchar(255))";
+        var taskLabPredicate = taskColumns.Contains("LabId")
+            ? $"(@HasTaskLab=0 OR {LabScopeSql("t.LabId")})"
+            : "1=1";
+        var hasTaskLab = taskColumns.Contains("LabId")
+            ? $"CASE WHEN EXISTS (SELECT 1 FROM dbo.DenialTaskBoard WITH (NOLOCK) WHERE {LabScopeSql("LabId")}) THEN 1 ELSE 0 END"
+            : "CAST(0 AS bit)";
+        var sql = $@"
+DECLARE @HasTaskLab bit = {hasTaskLab};
+SELECT ClaimID={claimUid}, PatientName=MAX({patientName}), PayerName=MAX(LTRIM(RTRIM(ISNULL(t.PayerName,''))))
+FROM dbo.DenialTaskBoard t WITH (NOLOCK)
+WHERE {taskLabPredicate}
+  AND NULLIF({claimUid},'') IS NOT NULL
+  {where.WhereClause}
+GROUP BY {claimUid}
+ORDER BY {claimUid};";
+
+        var claims = new List<(string ClaimId, string PatientName, string PayerName)>();
+        await using (var cmd = new SqlCommand(sql, con) { CommandTimeout = 900 })
+        {
+            AddFilterParams(cmd, filter);
+            AddExtraParams(cmd, where.Parameters);
+            await using var rd = await cmd.ExecuteReaderAsync(ct);
+            while (await rd.ReadAsync(ct))
+                claims.Add((GetString(rd, "ClaimID"), GetString(rd, "PatientName"), GetString(rd, "PayerName")));
+        }
+
+        using var workbook = new ClosedXML.Excel.XLWorkbook();
+        var sheet = workbook.Worksheets.Add("Claim Upload");
+        var lookupSheet = workbook.Worksheets.Add("Dropdown Values");
+        var reviewerTemplate = IsReviewerOnly(filter.Role);
+        var headers = reviewerTemplate
+            ? new[] { "ClaimID", "PatientName", "PayerName", "UpdateStatus", "ExpectedResponseDate", "ActionCompleted", "ActualOutcome", "DocumentationType", "FollowUpReason", "ClosureReason", "ValidationStatus", "Comments" }
+            : new[] { "ClaimID", "PatientName", "PayerName", "EscalationResponse", "EscalationResponseComment" };
+
+        for (var col = 0; col < headers.Length; col++)
+        {
+            sheet.Cell(1, col + 1).Value = headers[col];
+            sheet.Cell(1, col + 1).Style.Font.Bold = true;
+            sheet.Cell(1, col + 1).Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromHtml("#D9EAF7");
+        }
+        for (var row = 0; row < claims.Count; row++)
+        {
+            sheet.Cell(row + 2, 1).Value = claims[row].ClaimId;
+            sheet.Cell(row + 2, 2).Value = claims[row].PatientName;
+            sheet.Cell(row + 2, 3).Value = claims[row].PayerName;
+        }
+
+        var lastRow = Math.Max(claims.Count + 1, 2);
+        var lookupColumn = 1;
+        void AddDropdown(string columnName, IEnumerable<string> values)
+        {
+            var column = Array.FindIndex(headers, x => string.Equals(x, columnName, StringComparison.OrdinalIgnoreCase)) + 1;
+            if (column <= 0) return;
+            var items = values.ToArray();
+            lookupSheet.Cell(1, lookupColumn).Value = columnName;
+            for (var i = 0; i < items.Length; i++) lookupSheet.Cell(i + 2, lookupColumn).Value = items[i];
+            var source = lookupSheet.Range(2, lookupColumn, items.Length + 1, lookupColumn);
+            sheet.Range(2, column, lastRow, column).CreateDataValidation().List(source, true);
+            lookupColumn++;
+        }
+
+        if (reviewerTemplate)
+        {
+            AddDropdown("UpdateStatus", ["Assigned", "Payer Follow-up Required", "Pending Payer Response", "Pending Documentation", "Write-Off Pending Approval", "Escalated to AR Manager", "Closed"]);
+            AddDropdown("ActionCompleted", ["Yes", "No"]);
+            AddDropdown("ActualOutcome", ["Appeal Submitted", "Documentation Uploaded", "Rebill Submitted", "Corrected Claim Submitted", "Write-Off Recommended", "Payer Call Completed", "Claim Paid", "Claim Reprocessed", "Closed No Recovery", "Other"]);
+            AddDropdown("DocumentationType", ["Medical Records Required", "Clinical Notes Required", "Authorization Reference Required", "Updated Insurance Required", "Requisition / Order Required", "Provider Information Required", "Diagnosis / ICD Clarification Required", "Patient Demographics Required", "EOB / Payer Correspondence Required", "Client Confirmation Required", "Other Documentation Required"]);
+            AddDropdown("FollowUpReason", ["Denial unclear", "Action uncertain", "Payer policy conflict", "Need filing instructions", "Claim status check", "Timely filing confirmation", "Other"]);
+            AddDropdown("ClosureReason", ["Paid/Recovered", "Written Off", "Denial Upheld", "No Further Action", "Invalid Denial", "Timely Filing Expired", "Duplicate", "Client Approved Closure"]);
+        }
+        else
+        {
+            AddDropdown("EscalationResponse", ["Proceed with Appeal", "Proceed with Rebill", "Proceed with Write-Off Request", "Perform Payer Follow-up", "Request Documentation", "Additional Information Needed", "No Further Action Required", "Close Claim / Line", "Other"]);
+        }
+
+        sheet.SheetView.FreezeRows(1);
+        sheet.Columns().AdjustToContents(10, 42);
+        sheet.Column(1).Style.Protection.Locked = true;
+        sheet.Column(2).Style.Protection.Locked = true;
+        sheet.Column(3).Style.Protection.Locked = true;
+        lookupSheet.Hide();
+        workbook.SaveAs(output);
+        return claims.Count;
+    }
+
+    public async Task<int> UpdateClaimCommentsAsync(int labId, string claimId, string comments, string actionBy, CancellationToken ct)
+    {
+        await using var con = OpenLab(labId);
+        await con.OpenAsync(ct);
+        await EnsureDenialTaskBoardNormalizedClaimIdAsync(con, ct);
+        const string sql = @"
+DECLARE @Changed TABLE(TaskID nvarchar(100),UniqueTrackId nvarchar(100),LabId int,RunId nvarchar(100),CurrentStatus nvarchar(100),AssignedTo nvarchar(256));
+
+UPDATE t
+SET ReviewerComments=@Comments,
+    ReviewerUpdatedBy=@ActionBy,
+    ReviewerUpdatedOn=SYSDATETIME()
+OUTPUT INSERTED.TaskID,INSERTED.UniqueTrackId,ISNULL(INSERTED.LabId,@LabId),INSERTED.RunId,INSERTED.Status,INSERTED.AssignedTo
+INTO @Changed(TaskID,UniqueTrackId,LabId,RunId,CurrentStatus,AssignedTo)
+FROM dbo.DenialTaskBoard t
+WHERE LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,'')))=@ClaimId
+   OR LTRIM(RTRIM(ISNULL(t.ClaimID,'')))=@ClaimId
+   OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) LIKE '%' + @ClaimId;
+
+IF OBJECT_ID('dbo.DenialTaskHistory','U') IS NOT NULL
+BEGIN
+    INSERT INTO dbo.DenialTaskHistory(TaskID,UniqueTrackId,LabId,RunId,ActionType,OldStatus,NewStatus,OldAssignedTo,NewAssignedTo,Comments,ActionBy,ActionDate,SnapshotJson)
+    SELECT ISNULL(TaskID,''),ISNULL(UniqueTrackId,''),ISNULL(LabId,@LabId),ISNULL(RunId,''),'ClaimComment',ISNULL(CurrentStatus,''),ISNULL(CurrentStatus,''),ISNULL(AssignedTo,''),ISNULL(AssignedTo,''),@Comments,@ActionBy,SYSDATETIME(),''
+    FROM @Changed;
+END
+
+SELECT COUNT(1) FROM @Changed;";
+        await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 180 };
+        AddLabScopeParams(cmd, labId);
+        cmd.Parameters.AddWithValue("@ClaimId", claimId.Trim());
+        cmd.Parameters.AddWithValue("@Comments", comments.Trim());
+        cmd.Parameters.AddWithValue("@ActionBy", string.IsNullOrWhiteSpace(actionBy) ? "ReactWorkflow" : actionBy.Trim());
+        var scalar = await cmd.ExecuteScalarAsync(ct);
+        return scalar == DBNull.Value || scalar is null ? 0 : Convert.ToInt32(scalar);
+    }
+
     public async Task<int> DecideVerificationAsync(VerificationDecisionRequest request, bool isClosed, CancellationToken ct)
     {
         await EnsureClaimSupportTablesAsync(request.LabId, ct);
@@ -2786,51 +2923,7 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
 
 
     private static string ResolveLabConnectionString(IConfiguration configuration, int labId, string labName, string? connectionKey = null)
-    {
-        // First allow an exact per-lab override: ConnectionStrings:Lab_{LabId}
-        var byId = configuration.GetConnectionString($"Lab_{labId}");
-        if (!string.IsNullOrWhiteSpace(byId)) return byId;
-
-        // Preferred LRN Metrics mapping: LabId -> ConnectionKey -> ConnectionStrings entry.
-        if (!string.IsNullOrWhiteSpace(connectionKey))
-        {
-            var byConnectionKey = configuration.GetConnectionString(connectionKey.Trim());
-            if (!string.IsNullOrWhiteSpace(byConnectionKey)) return byConnectionKey;
-        }
-
-        var normalized = NormalizeKey(labName);
-        var knownKey = normalized switch
-        {
-            "PCRLABSOFAMERICA" or "PCRLOA" => "PCRLOAConnStr",
-            "COVE" => "CoveConnection",
-            "INHEALTHDTR" or "INHEALTH" => "InHealthConn",
-            "ELIXIR" => "ElixirConnection",
-            "CERTUS" or "CERTUSLABORATORIES" => "CertusConnection",
-            "BEECHTREE" => "BeechTreeConnStr",
-            "AUGUSTUSLABS" or "AUGUSTUS" => "AugustusConnStr",
-            "NORTHWEST" or "NWL" => "NWLConnection",
-            "PCRDXAL" => "PCRALConnection",
-            "PCRDXCO" => "PCRDxConnection",
-            "PHILIFE" => "PhiLifeConnStr",
-            "RISINGTIDES" => "RisingTidesConnStr",
-            _ => string.Empty
-        };
-
-        if (!string.IsNullOrWhiteSpace(knownKey))
-        {
-            var conn = configuration.GetConnectionString(knownKey);
-            if (!string.IsNullOrWhiteSpace(conn)) return conn;
-        }
-
-        foreach (var section in configuration.GetSection("ConnectionStrings").GetChildren())
-        {
-            var key = NormalizeKey(section.Key);
-            if (key.Contains(normalized, StringComparison.OrdinalIgnoreCase) || normalized.Contains(key.Replace("CONNECTION", "").Replace("CONNSTR", ""), StringComparison.OrdinalIgnoreCase))
-                return section.Value ?? string.Empty;
-        }
-
-        return string.Empty;
-    }
+        => LabConnectionResolver.Resolve(configuration, labId, labName, connectionKey);
 
     private static string NormalizeKey(string value)
         => new string((value ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
@@ -3439,7 +3532,7 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
             "escalations" => $"(LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) LIKE '%escal%' OR LOWER(LTRIM(RTRIM(ISNULL({a}.SLAStatus,'')))) IN ('breached','overdue','at risk','atrisk'))",
             "internalescalation" => $"LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) IN ('internal escalation','escalated')",
             "externalescalation" => $"LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) = 'external escalation'",
-            "escalationresponse" => $"LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) IN ('required review','in review','responded','response submitted','manager response','writeoffapproved','writeoffrejected')",
+            "escalationresponse" => $"(LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) IN ('required review','in review','responded','response submitted','manager response','writeoffapproved','writeoffrejected') OR (LOWER(LTRIM(RTRIM(ISNULL({a}.Status,''))))='rework' AND LOWER(LTRIM(RTRIM(ISNULL({a}.WorkFlowStatus,''))))='response escalation'))",
             "verification" => $"LOWER(LTRIM(RTRIM(ISNULL({a}.Status,'')))) IN ('required review','verification pending')",
 
             // My Worklist: Rework - closed once and reassigned again
@@ -3498,6 +3591,12 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
 
     public async Task EnsureClaimSupportTablesAsync(int labId, CancellationToken ct)
     {
+        if (ClaimSupportSchemaReady.ContainsKey(labId)) return;
+        var schemaLock = ClaimSupportSchemaLocks.GetOrAdd(labId, _ => new SemaphoreSlim(1, 1));
+        await schemaLock.WaitAsync(ct);
+        try
+        {
+            if (ClaimSupportSchemaReady.ContainsKey(labId)) return;
         const string sql = @"
 IF OBJECT_ID('dbo.DenialClaimNotes','U') IS NULL
 BEGIN
@@ -3617,6 +3716,19 @@ END;
 
 IF COL_LENGTH('dbo.DenialClaimNotes','Status') IS NULL ALTER TABLE dbo.DenialClaimNotes ADD Status nvarchar(50) NULL;
 IF COL_LENGTH('dbo.DenialClaimNotes','NextFollowUpDate') IS NULL ALTER TABLE dbo.DenialClaimNotes ADD NextFollowUpDate date NULL;
+IF COL_LENGTH('dbo.DenialClaimNotes','ClaimIdNormalized') IS NULL
+    ALTER TABLE dbo.DenialClaimNotes ADD ClaimIdNormalized AS CONVERT(varchar(150),REPLACE(LTRIM(RTRIM(ISNULL(ClaimId,''))),'CLM-','')) PERSISTED;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID('dbo.DenialClaimNotes') AND name='IX_DenialClaimNotes_Normalized')
+   AND NOT EXISTS (SELECT 1 FROM sys.stats WHERE object_id=OBJECT_ID('dbo.DenialClaimNotes') AND name='IX_DenialClaimNotes_Normalized')
+BEGIN
+    BEGIN TRY
+        CREATE INDEX IX_DenialClaimNotes_Normalized ON dbo.DenialClaimNotes(LabId,NoteLevel,ClaimIdNormalized,CreatedOn DESC)
+        INCLUDE(TaskId,CptCode,IsDeleted);
+    END TRY
+    BEGIN CATCH
+        IF ERROR_NUMBER() NOT IN (1913,2714) THROW;
+    END CATCH
+END;
 IF COL_LENGTH('dbo.DenialClaimEscalations','EscalatedTo') IS NULL ALTER TABLE dbo.DenialClaimEscalations ADD EscalatedTo nvarchar(256) NULL;
 IF COL_LENGTH('dbo.DenialClaimEscalations','EscalatedToRole') IS NULL ALTER TABLE dbo.DenialClaimEscalations ADD EscalatedToRole nvarchar(100) NULL;
 IF COL_LENGTH('dbo.DenialClaimEscalations','NextFollowUpDate') IS NULL ALTER TABLE dbo.DenialClaimEscalations ADD NextFollowUpDate date NULL;
@@ -3628,6 +3740,12 @@ IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL AND COL_LENGTH('dbo.DenialLin
         await con.OpenAsync(ct);
         await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 120 };
         await cmd.ExecuteNonQueryAsync(ct);
+            ClaimSupportSchemaReady[labId] = 1;
+        }
+        finally
+        {
+            schemaLock.Release();
+        }
     }
 
     public async Task<IReadOnlyList<DenialNoteRow>> GetNotesAsync(int labId, string claimId, string? taskId, string? cptCode, string noteLevel, CancellationToken ct)
@@ -3639,26 +3757,21 @@ IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL AND COL_LENGTH('dbo.DenialLin
 SELECT TOP (200) NoteId,LabId,ClaimId,TaskId,CptCode,NoteLevel,NoteText,Status,NextFollowUpDate,CreatedBy,CreatedOn
 FROM dbo.DenialClaimNotes WITH (NOLOCK)
 WHERE IsDeleted=0 AND LabId=@LabId AND NoteLevel='Line'
-  AND (ClaimId=@ClaimId
-       OR REPLACE(LTRIM(RTRIM(ISNULL(ClaimId,''))), 'CLM-', '') = REPLACE(LTRIM(RTRIM(ISNULL(@ClaimId,''))), 'CLM-', '')
-       OR REPLACE(LTRIM(RTRIM(ISNULL(ClaimId,''))), 'CLM-', '') LIKE REPLACE(LTRIM(RTRIM(ISNULL(@ClaimId,''))), 'CLM-', '') + '\_%' ESCAPE '\'
-       OR REPLACE(LTRIM(RTRIM(ISNULL(@ClaimId,''))), 'CLM-', '') LIKE REPLACE(LTRIM(RTRIM(ISNULL(ClaimId,''))), 'CLM-', '') + '\_%' ESCAPE '\')
+  AND ClaimIdNormalized=@ClaimIdNormalized
   AND (@TaskId='' OR ISNULL(TaskId,'')=@TaskId)
   AND (@CptCode='' OR ISNULL(CptCode,'')=@CptCode)
 ORDER BY CreatedOn DESC, NoteId DESC;" : @"
 SELECT TOP (200) NoteId,LabId,ClaimId,TaskId,CptCode,NoteLevel,NoteText,Status,NextFollowUpDate,CreatedBy,CreatedOn
 FROM dbo.DenialClaimNotes WITH (NOLOCK)
 WHERE IsDeleted=0 AND LabId=@LabId AND NoteLevel='Claim'
-  AND (ClaimId=@ClaimId
-       OR REPLACE(LTRIM(RTRIM(ISNULL(ClaimId,''))), 'CLM-', '') = REPLACE(LTRIM(RTRIM(ISNULL(@ClaimId,''))), 'CLM-', '')
-       OR REPLACE(LTRIM(RTRIM(ISNULL(ClaimId,''))), 'CLM-', '') LIKE REPLACE(LTRIM(RTRIM(ISNULL(@ClaimId,''))), 'CLM-', '') + '\_%' ESCAPE '\'
-       OR REPLACE(LTRIM(RTRIM(ISNULL(@ClaimId,''))), 'CLM-', '') LIKE REPLACE(LTRIM(RTRIM(ISNULL(ClaimId,''))), 'CLM-', '') + '\_%' ESCAPE '\')
+  AND ClaimIdNormalized=@ClaimIdNormalized
 ORDER BY CreatedOn DESC, NoteId DESC;";
         await using var con = OpenLab(labId);
         await con.OpenAsync(ct);
         await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 120 };
         cmd.Parameters.AddWithValue("@LabId", labId);
         cmd.Parameters.AddWithValue("@ClaimId", claimId.Trim());
+        cmd.Parameters.AddWithValue("@ClaimIdNormalized", NormalizeClaimId(claimId));
         cmd.Parameters.AddWithValue("@TaskId", taskId?.Trim() ?? string.Empty);
         cmd.Parameters.AddWithValue("@CptCode", cptCode?.Trim() ?? string.Empty);
         await using var rd = await cmd.ExecuteReaderAsync(ct);
@@ -3689,6 +3802,9 @@ VALUES(@LabId,@ClaimId,@TaskId,@CptCode,@NoteLevel,@NoteText,@Status,@NextFollow
         if (await rd.ReadAsync(ct)) return ReadNote(rd);
         throw new InvalidOperationException("Unable to save note.");
     }
+
+    private static string NormalizeClaimId(string? claimId)
+        => (claimId ?? string.Empty).Trim().Replace("CLM-", string.Empty, StringComparison.OrdinalIgnoreCase);
 
     public async Task<IReadOnlyList<ClaimDocumentRow>> GetClaimDocumentsAsync(int labId, string claimId, CancellationToken ct)
     {
@@ -4165,6 +4281,7 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
         await using var con = OpenLab(request.LabId);
         await con.OpenAsync(ct);
         await EnsureDenialTaskBoardNormalizedClaimIdAsync(con, ct);
+        var escalationColumns = await GetColumnSetAsync(con, "dbo.DenialClaimEscalations", ct);
         var action = (request.ResolutionAction ?? string.Empty).Trim().ToLowerInvariant();
         var nextEscStatus = action switch
         {
@@ -4188,10 +4305,17 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
         };
         var level = string.Equals(request.EscalationLevel, "Line", StringComparison.OrdinalIgnoreCase) ? "Line" : "Claim";
         var note = request.ResponseNote.Trim();
+        var recommendedNextAction = request.RecommendedNextAction?.Trim() ?? string.Empty;
+        var responseDetail = string.IsNullOrWhiteSpace(recommendedNextAction)
+            ? note
+            : $"{note}{Environment.NewLine}Recommended Next Action: {recommendedNextAction}";
         var actionBy = string.IsNullOrWhiteSpace(request.ActionBy) ? "ReactWorkflow" : request.ActionBy.Trim();
         var reassignTo = request.ReassignTo?.Trim() ?? string.Empty;
+        var escalationRecommendationSet = escalationColumns.Contains("RecommendedNextAction")
+            ? ", RecommendedNextAction=@RecommendedNextAction"
+            : string.Empty;
 
-        var sql = @"
+        var sql = $@"
 DECLARE @TargetClaimId nvarchar(150), @TargetTaskId nvarchar(100), @TargetCptCode nvarchar(100), @OriginalReviewer nvarchar(256);
 SELECT @TargetClaimId=ClaimId, @TargetTaskId=ISNULL(TaskId,''), @TargetCptCode=ISNULL(CptCode,''), @OriginalReviewer=ISNULL(CreatedBy,'')
 FROM dbo.DenialClaimEscalations WITH (UPDLOCK, ROWLOCK)
@@ -4211,16 +4335,17 @@ BEGIN
 END
 
 UPDATE dbo.DenialClaimEscalations
-SET Status=@EscalationStatus, Comments = CONCAT(ISNULL(Comments,''), CHAR(13)+CHAR(10), 'Manager Response: ', @ResponseNote)
+SET Status=@EscalationStatus, Comments = CONCAT(ISNULL(Comments,''), CHAR(13)+CHAR(10), 'Manager Response: ', @ResponseDetail){escalationRecommendationSet}
 WHERE IsDeleted=0 AND LabId=@LabId AND EscalationId=@EscalationId;
 
 DECLARE @Changed TABLE(TaskID nvarchar(100), UniqueTrackId nvarchar(100), ClaimId nvarchar(150), LabId int, RunId nvarchar(100), OldStatus nvarchar(100), NewStatus nvarchar(100), OldAssignedTo nvarchar(256), NewAssignedTo nvarchar(256));
 
 UPDATE t
 SET Status=@TaskStatus,
+    RecommendedAction = CASE WHEN NULLIF(LTRIM(RTRIM(@RecommendedNextAction)),'') IS NULL THEN t.RecommendedAction ELSE @RecommendedNextAction END,
     AssignedTo = CASE WHEN @ReassignTo<>'' THEN @ReassignTo WHEN @ResolutionAction='rework' THEN '' ELSE t.AssignedTo END,
     WorkFlowStatus = CASE WHEN @TaskStatus IN ('Closed','Completed') THEN 'Closed Claim' WHEN @TaskStatus IN ('WriteOffApproved','WriteOffRejected') THEN @TaskStatus ELSE 'Response Escalation' END,
-    ReviewerComments = CONCAT(ISNULL(NULLIF(t.ReviewerComments,''),''), CASE WHEN NULLIF(t.ReviewerComments,'') IS NULL THEN '' ELSE CHAR(13)+CHAR(10) END, 'Manager Response: ', @ResponseNote),
+    ReviewerComments = CONCAT(ISNULL(NULLIF(t.ReviewerComments,''),''), CASE WHEN NULLIF(t.ReviewerComments,'') IS NULL THEN '' ELSE CHAR(13)+CHAR(10) END, 'Manager Response: ', @ResponseDetail),
     ReviewerUpdatedBy=@ActionBy,
     ReviewerUpdatedOn=SYSDATETIME(),
     DateCompleted = CASE WHEN @TaskStatus IN ('Closed','Completed') THEN CONVERT(date, GETDATE()) ELSE DateCompleted END
@@ -4289,7 +4414,7 @@ BEGIN
         VALUES(source.LabId,source.ClaimId,source.PayerName,source.PanelName,source.PatientName,source.PatientDOB,source.PatientId,source.SubscriberId,source.ClinicName,source.SalesRepname,source.ReferringProvider,source.DateOfService,source.AssignedTo,'Closed','Closed Claim',source.TaskCount,source.InsuranceBalance,@ActionBy);
 
     INSERT INTO dbo.DenialClosedClaimsHistory(ClosedClaimId,LabId,ClaimId,ActionType,OldWorkFlowStatus,NewWorkFlowStatus,OldAssignedTo,NewAssignedTo,Comments,ActionBy)
-    SELECT dc.ClosedClaimId,@LabId,c.ClaimId,'ClosedByEscalationResponse','Response Escalation','Closed Claim',c.OldAssignedTo,c.NewAssignedTo,@ResponseNote,@ActionBy
+    SELECT dc.ClosedClaimId,@LabId,c.ClaimId,'ClosedByEscalationResponse','Response Escalation','Closed Claim',c.OldAssignedTo,c.NewAssignedTo,@ResponseDetail,@ActionBy
     FROM @Changed c
     JOIN dbo.DenialClosedClaims dc ON dc.LabId=@LabId AND dc.ClaimId=c.ClaimId;
 END;
@@ -4297,7 +4422,7 @@ END;
 IF OBJECT_ID('dbo.DenialTaskHistory','U') IS NOT NULL
 BEGIN
     INSERT INTO dbo.DenialTaskHistory(TaskID,UniqueTrackId,LabId,RunId,ActionType,OldStatus,NewStatus,OldAssignedTo,NewAssignedTo,Comments,ActionBy,ActionDate,SnapshotJson)
-    SELECT ISNULL(TaskID,''),ISNULL(UniqueTrackId,''),ISNULL(LabId,@LabId),ISNULL(RunId,''),CASE WHEN @ResolutionAction IN ('approvewriteoff','rejectwriteoff') THEN 'WriteOffDecision' ELSE 'ManagerEscalationResponse' END,ISNULL(OldStatus,''),ISNULL(NewStatus,''),ISNULL(OldAssignedTo,''),ISNULL(NewAssignedTo,''),@ResponseNote,@ActionBy,SYSDATETIME(),''
+    SELECT ISNULL(TaskID,''),ISNULL(UniqueTrackId,''),ISNULL(LabId,@LabId),ISNULL(RunId,''),CASE WHEN @ResolutionAction IN ('approvewriteoff','rejectwriteoff') THEN 'WriteOffDecision' ELSE 'ManagerEscalationResponse' END,ISNULL(OldStatus,''),ISNULL(NewStatus,''),ISNULL(OldAssignedTo,''),ISNULL(NewAssignedTo,''),@ResponseDetail,@ActionBy,SYSDATETIME(),''
     FROM @Changed;
 END
 
@@ -4309,6 +4434,8 @@ SELECT @TaskRows;";
         cmd.Parameters.AddWithValue("@TaskStatus", nextTaskStatus);
         cmd.Parameters.AddWithValue("@ResolutionAction", action);
         cmd.Parameters.AddWithValue("@ResponseNote", note);
+        cmd.Parameters.AddWithValue("@ResponseDetail", responseDetail);
+        cmd.Parameters.AddWithValue("@RecommendedNextAction", recommendedNextAction);
         cmd.Parameters.AddWithValue("@ActionBy", actionBy);
         cmd.Parameters.AddWithValue("@ReassignTo", reassignTo);
         cmd.Parameters.AddWithValue("@Level", level);

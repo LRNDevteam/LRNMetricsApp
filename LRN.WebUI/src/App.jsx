@@ -101,7 +101,7 @@ export default function App() {
   const adminRole = String(user.role || '').toLowerCase().includes('admin');
   const readOnlyWorkflow = isReadOnlyWorkflowRole(user.role);
   const denialMapperRole = adminRole || arManagerOnly || clientManager || accountManager || /lab\s*user|viewer|read\s*only/i.test(String(user.role || ''));
-  const denialMapperAdmin = adminRole || arManagerOnly;
+  const denialMapperAdmin = adminRole;
   const exportBusy = !!claimExportJob && ['Queued', 'Running'].includes(claimExportJob.status);
   const activeQueueKey = view === 'myworklist' ? myWorklistView : view === 'claims' ? claimTaskView : '';
   const visibleFilters = useMemo(() => (view === 'dashboard'
@@ -572,7 +572,7 @@ export default function App() {
           reviewer: user.userName,
           assignedTo: user.userName,
           page: 1,
-          pageSize: 500
+          pageSize: 50
         };
         const [assigned, pending, actionRequired, escalations, responses] = await Promise.all([
           denialWorkflowService.getTasks({ ...baseQuery, taskView: 'assigned' }),
@@ -599,7 +599,7 @@ export default function App() {
           role: user.role,
           userName: user.userName,
           page: 1,
-          pageSize: 500
+          pageSize: 50
         };
         const escalations = await denialWorkflowService.getEscalationQueue(managerBaseQuery, 'Claim');
         const escalationItems = normalizeEscalationNotificationItems(escalations);
@@ -735,29 +735,16 @@ export default function App() {
     }
 
     try {
-      const myFilters = {
-        ...menuCountQuery,
-        reviewer: reviewerOnly ? (user.userName || '') : (menuCountQuery.reviewer || user.userName || ''),
-        assignedTo: reviewerOnly ? (user.userName || '') : (menuCountQuery.assignedTo || user.userName || ''),
-        pageSize: 500
-      };
-      const [newTasks, assignedTasks, escalatedTasks, responseTasks, closedTasks] = await Promise.all([
-        denialWorkflowService.getTasks({ ...myFilters, taskView: 'assigned' }),
-        denialWorkflowService.getTasks({ ...myFilters, taskView: 'assigned' }),
-        denialWorkflowService.getTasks({ ...myFilters, taskView: 'escalations' }),
-        denialWorkflowService.getTasks({ ...myFilters, taskView: 'response' }),
-        denialWorkflowService.getTasks({ ...myFilters, taskView: 'closed' })
-      ]);
       setMyWorklistMenuCounts({
-        assigned: distinctClaimCount(normalizeNotificationItems(assignedTasks)),
+        assigned: Number(latestClaimCounts?.assigned ?? latestClaimCounts?.Assigned ?? 0),
         payerFollowup: Number(latestClaimCounts?.payerFollowup ?? latestClaimCounts?.PayerFollowup ?? 0),
         pendingDocumentation: Number(latestClaimCounts?.pendingDocumentation ?? latestClaimCounts?.PendingDocumentation ?? 0),
         pendingPayerResponse: Number(latestClaimCounts?.pendingPayerResponse ?? latestClaimCounts?.PendingPayerResponse ?? 0),
         internalEscalation: Number(latestClaimCounts?.internalEscalation ?? latestClaimCounts?.InternalEscalation ?? 0),
         externalEscalation: Number(latestClaimCounts?.externalEscalation ?? latestClaimCounts?.ExternalEscalation ?? 0),
-        escalationResponse: distinctClaimCount(normalizeNotificationItems(responseTasks)),
+        escalationResponse: Number(latestClaimCounts?.escalationResponse ?? latestClaimCounts?.EscalationResponse ?? 0),
         all: Number(latestClaimCounts?.allClaims ?? latestClaimCounts?.AllClaims ?? latestClaimCounts?.totalClaims ?? latestClaimCounts?.TotalClaims ?? 0),
-        closed: distinctClaimCount(normalizeNotificationItems(closedTasks))
+        closed: Number(latestClaimCounts?.closed ?? latestClaimCounts?.Closed ?? 0)
       });
     } catch {
       setMyWorklistMenuCounts({ assigned: null, payerFollowup: null, pendingDocumentation: null, pendingPayerResponse: null, internalEscalation: null, externalEscalation: null, escalationResponse: null, all: null, closed: null });
@@ -1068,7 +1055,7 @@ export default function App() {
     }
   }
 
-  async function startClaimExport({ currentTab = false, queryOverride = null, tabKey = '', tabLabel = '' } = {}) {
+  async function startClaimExport({ currentTab = false, queryOverride = null, tabKey = '', tabLabel = '', uploadTemplate = false } = {}) {
     if (!labId) return setMessage({ type: 'warning', text: 'Please select a lab before exporting.' });
     if (claimExportInFlightRef.current || (claimExportJob && ['Queued', 'Running'].includes(claimExportJob.status))) {
       return setMessage({ type: 'info', text: 'Claim detail export is already in progress. Please wait until it completes.' });
@@ -1080,11 +1067,12 @@ export default function App() {
       const activeTabLabel = (tabLabel || (view === 'myworklist'
         ? myWorklistNavTabs.find(t => t.key === activeTabKey)?.label
         : claimNavTabs.find(t => t.key === activeTabKey)?.label) || activeTabKey || 'Current Tab').trim();
-      const jobScope = currentTab ? `${activeTabLabel} tab` : 'Overall filtered';
+      const jobScope = uploadTemplate ? `${activeTabLabel} upload template` : currentTab ? `${activeTabLabel} tab` : 'Overall filtered';
       const baseQuery = queryOverride || (view === 'myworklist' && myWorklistExportQuery ? myWorklistExportQuery : query);
       const exportQuery = {
         ...baseQuery,
         taskView: currentTab ? activeTabKey : '',
+        uploadTemplate,
         page: 1,
         pageSize: 100,
         fromDate: baseQuery.fromDate || null,
@@ -1273,8 +1261,7 @@ export default function App() {
         </div>
         <div className="topbar-actions">
           {workflowNotifications.total > 0 && <div className="notification-wrap"><button type="button" className="notification-btn" title="Claims needing attention" onClick={() => setNotificationOpen(v => !v)}><i className="bi bi-bell-fill" /><span className="notification-count">{workflowNotifications.total}</span><span className="notification-text"><b>{workflowNotifications.total}</b> {reviewerOnly ? 'claims need attention' : 'escalation claim(s)'}</span></button>{notificationOpen && <NotificationDetails />}</div>}
-          {(view !== 'denialmapper' || denialMapperAdmin) && <select className="top-lab-select" value={labId || ''} onChange={e => setLabId(Number(e.target.value))}>{headerLabs.map(l => <option key={l.labId ?? l.LabId} value={l.labId ?? l.LabId}>{l.labName ?? l.LabName}</option>)}</select>}
-          {!mapperHeaderActive && <span className="current-lab">{labName}</span>}
+          {headerLabs.length > 0 && <select className="top-lab-select" value={labId || ''} onChange={e => setLabId(Number(e.target.value))}>{headerLabs.map(l => <option key={l.labId ?? l.LabId} value={l.labId ?? l.LabId}>{l.labName ?? l.LabName}</option>)}</select>}
           {showOverallDownload && claimExportJob && <span className={`export-status-pill ${claimExportJob.status === 'Completed' ? 'done' : exportBusy ? 'running' : 'failed'}`} title={claimExportJob.message || claimExportJob.status}>{exportStatusText()}</span>}
           {showOverallDownload && claimExportJob && <button type="button" className={`topbar-btn ${claimExportJob.status === 'Completed' ? 'teal' : ''}`} disabled={claimExportJob.status !== 'Completed'} onClick={downloadClaimExport} title={claimExportJob.message || claimExportJob.status}><i className={`bi ${claimExportJob.status === 'Completed' ? 'bi-file-earmark-excel' : 'bi-hourglass-split'}`} />{claimExportJob.status === 'Completed' ? 'Download File' : 'Waiting'}</button>}
           {showOverallDownload && exportBusy && <button type="button" className="topbar-btn" onClick={refreshClaimExportStatus}><i className="bi bi-arrow-clockwise" />Refresh Export</button>}
@@ -1300,7 +1287,7 @@ export default function App() {
         </div>
       </header>
       <main className="lrn-content">
-        {mapperNotification&&<div className="lrn-alert warning mapper-login-alert"><div><strong>Denial Mapper update is available for your lab.</strong><span>Please verify and confirm the Denial Code Master changes.</span></div><div><button className="wl-btn teal xs" onClick={()=>{setMapperReviewAuditId(mapperNotification.pushAuditId);setDenialMapperView('verification');setView('denialmapper');}}>Review Now</button><button className="wl-btn xs" onClick={()=>setMapperNotification(null)}>Later</button></div></div>}
+        {mapperNotification&&<div className="lrn-alert warning mapper-login-alert"><div><strong>Denial Code push confirmation is pending.</strong><span>Review it in Denial Action Master before applying the codes to this lab.</span></div><div><button className="wl-btn teal xs" onClick={()=>{setMapperReviewAuditId(mapperNotification.pushAuditId);setView('denialcodemaster');}}>Review Now</button><button className="wl-btn xs" onClick={()=>setMapperNotification(null)}>Later</button></div></div>}
         {view !== 'denialmapper' && <div className="claim-filter-toggle-row">
           <div className="last-run-reference" title={lastRunReference?.outputFileName || lastRunReference?.OutputFileName || lastRunReference?.runId || lastRunReference?.RunId || ''}>
             <i className="bi bi-file-earmark-text" />
@@ -1343,12 +1330,12 @@ export default function App() {
           setMessage({ type: 'info', text: `Showing claims for ${row?.name || 'selected group'} / ${bucket?.label || 'aging bucket'}.` });
         }} />}
         {view === 'summary' && <DenialSummaryPage data={dashboard} canAssign={canAssign} onClassificationClick={openClaimsByClassification} onActionCategoryClick={openClaimsByActionCategory} onAssign={() => { setClaimTaskView('new'); setView(reviewerOnly ? 'myworklist' : 'claims'); setMessage({ type: 'info', text: canAssign ? 'Select the required claim rows, choose reviewer, then assign.' : 'This role has read-only workflow access.' }); }} />}
-        {view === 'claims' && <ClaimAssignmentPage data={claims} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} canAssign={canAssign} readOnlyWorkflow={readOnlyWorkflow} taskView={claimTaskView} setTaskView={handleClaimTaskViewChange} tabCounts={claimMenuCounts} openEscalationResponse={() => handleClaimTabRoute('response')} openVerification={() => handleClaimTabRoute('verification')} setMessage={setWorkflowMessage} onDownloadTab={() => startClaimExport({ currentTab: true })} exportBusy={exportBusy} exportStatusText={exportStatusText()} />}
+        {view === 'claims' && <ClaimAssignmentPage data={claims} loading={loading} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} canAssign={canAssign} readOnlyWorkflow={readOnlyWorkflow} taskView={claimTaskView} setTaskView={handleClaimTaskViewChange} tabCounts={claimMenuCounts} openEscalationResponse={() => handleClaimTabRoute('response')} openVerification={() => handleClaimTabRoute('verification')} setMessage={setWorkflowMessage} onDownloadTab={() => startClaimExport({ currentTab: true })} onDownloadTemplate={() => startClaimExport({ currentTab: true, uploadTemplate: true })} onCsvUploaded={async () => { setClaimTasks({}); setExpandedClaim(''); setClaims(await denialWorkflowService.getClaims({ ...query, taskView: claimTaskView })); await refreshMenuCounts(); }} exportBusy={exportBusy} exportStatusText={exportStatusText()} />}
         {view === 'verification' && <VerificationPage data={verification} changePage={changePage} tabCounts={claimMenuCounts} onTabChange={handleClaimTabRoute} reviewers={reviewers} canAssign={canAssign} assignClaims={assignClaims} />}
-        {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setWorkflowMessage} onSaved={() => { refreshReviewerNotification(); refreshWorkflowNotifications(); }} taskView={myWorklistView} setTaskView={handleMyWorklistViewChange} tabCounts={myWorklistMenuCounts} onExportQueryChange={setMyWorklistExportQuery} onDownloadTab={(exportQuery, tab) => startClaimExport({ currentTab: true, queryOverride: exportQuery, tabKey: tab?.key || myWorklistView, tabLabel: tab?.label || '' })} exportBusy={exportBusy} exportStatusText={exportStatusText()} canDownloadWorkflow={canDownloadWorkflow} />}
+        {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setWorkflowMessage} onSaved={() => { refreshReviewerNotification(); refreshWorkflowNotifications(); }} taskView={myWorklistView} setTaskView={handleMyWorklistViewChange} tabCounts={myWorklistMenuCounts} onExportQueryChange={setMyWorklistExportQuery} onDownloadTab={(exportQuery, tab) => startClaimExport({ currentTab: true, queryOverride: exportQuery, tabKey: tab?.key || myWorklistView, tabLabel: tab?.label || '' })} onDownloadTemplate={(exportQuery, tab) => startClaimExport({ currentTab: true, uploadTemplate: true, queryOverride: exportQuery, tabKey: tab?.key || myWorklistView, tabLabel: tab?.label || '' })} exportBusy={exportBusy} exportStatusText={exportStatusText()} canDownloadWorkflow={canDownloadWorkflow} />}
         {view === 'escalations' && <EscalationQueuePage labId={labId} user={user} reviewers={reviewers} taskView={escalationView === 'response' ? 'claim' : escalationView} responseOnly={escalationView === 'response'} setTaskView={setEscalationView} tabCounts={claimMenuCounts} onClaimTabChange={handleClaimTabRoute} canAssign={canAssign} assignClaims={assignClaims} setMessage={setWorkflowMessage} />}
-        {view === 'denialcodemaster' && arManagerOnly && <DenialCodeMasterPage labId={labId} setMessage={setWorkflowMessage} onReviewActionChanges={(batchId) => { setActionVerificationBatchId(batchId || ''); setView('denialactionverification'); }} />}
-        {view === 'denialmapper' && denialMapperRole && <DenialMapperPage user={user} labs={labs} labId={labId} setLabId={setLabId} setMessage={setWorkflowMessage} screen={denialMapperView} onScreenChange={setDenialMapperView} pushAuditId={mapperReviewAuditId} onAuditAcknowledged={()=>{setMapperNotification(null);setMapperReviewAuditId(null);setDenialMapperView('lab');}} />}
+        {view === 'denialcodemaster' && arManagerOnly && <DenialCodeMasterPage labId={labId} setMessage={setWorkflowMessage} initialPushAuditId={mapperReviewAuditId} onPushConfirmed={()=>{setMapperNotification(null);setMapperReviewAuditId(null);}} onReviewActionChanges={(batchId) => { setActionVerificationBatchId(batchId || ''); setView('denialactionverification'); }} />}
+        {view === 'denialmapper' && denialMapperRole && <DenialMapperPage user={user} labs={labs} labId={labId} setLabId={setLabId} setMessage={setWorkflowMessage} screen={denialMapperView} onScreenChange={setDenialMapperView} />}
         {view === 'denialactionverification' && (denialMapperAdmin || arManagerOnly) && <DenialActionVerificationPage labId={labId} setMessage={setWorkflowMessage} initialBatchId={actionVerificationBatchId} />}
         {view === 'exports' && <WorkflowPlaceholder title="Exports">Use Overall Download or per-tab Download from Claim Assignment for claim extracts. Aging Dashboard also includes a Download Excel action.</WorkflowPlaceholder>}
         {view === 'support' && <ContactSupportPage user={user} currentPage={pageTitle} setMessage={setWorkflowMessage} />}

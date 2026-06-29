@@ -439,7 +439,7 @@ else
     };
 }
 
-<script>
+<script nonce='@Context.Items["CspNonce"]'>
     document.addEventListener('DOMContentLoaded', function () {
         document.querySelectorAll('.cs-ms').forEach(function (ms) {
             var btn   = ms.querySelector('.cs-ms-btn');

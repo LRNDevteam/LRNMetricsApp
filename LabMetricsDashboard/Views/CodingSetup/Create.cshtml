@@ -122,7 +122,7 @@
 </div>
 
 @section Scripts {
-<script>
+<script nonce='@Context.Items["CspNonce"]'>
 (function () {
     var cptIdx = @Model.CptEntries.Count;
     var labName = '@Uri.EscapeDataString(Model.LabName)';

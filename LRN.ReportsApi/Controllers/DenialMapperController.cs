@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text;
 using LRN.ReportsApi.Models;
+using LRN.ReportsApi.Security;
 using LRN.ReportsApi.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -22,7 +23,7 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
     [HttpGet("super-master")]
     public async Task<ActionResult<PagedResult<DenialMapperRecord>>> SuperMaster([FromQuery] string? search, [FromQuery] string? classification, [FromQuery] int page=1, [FromQuery] int pageSize=25, CancellationToken ct=default)
     {
-        if (!IsPushManager() && !IsViewer()) return Denied();
+        if (!IsAdmin()) return Denied();
         return Ok(await repository.SuperMasterAsync(search, classification, page, pageSize, ct));
     }
 
@@ -44,23 +45,31 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
     public async Task<ActionResult> Delete(long id,CancellationToken ct){if(!IsAdmin())return Denied();await repository.DeleteSuperMasterAsync(id,UserName(),Role(),ct);return Ok(new{message="Super Master mapping deleted."});}
 
     [HttpGet("labs")]
-    public async Task<ActionResult> Labs(CancellationToken ct){if(!IsPushManager())return Denied();return Ok(await repository.LabsAsync(ct));}
+    public async Task<ActionResult> Labs(CancellationToken ct){if(!IsAdmin())return Denied();return Ok(await repository.LabsAsync(ct));}
 
     [HttpPost("compare-push")]
     public async Task<ActionResult<DenialMapperPushCompareResult>> ComparePush(DenialMapperPushRequest request,CancellationToken ct)
-    {if(!IsPushManager())return Denied();return Ok(await repository.ComparePushAsync(request.LabIds,UserName(),ct));}
+    {if(!IsAdmin())return Denied();return Ok(await repository.ComparePushAsync(request.LabIds,UserName(),ct));}
 
     [HttpPost("confirm-push")]
     public async Task<ActionResult> ConfirmPush(DenialMapperPushDecisionRequest request,CancellationToken ct)
-    {if(!IsPushManager())return Denied();var count=await repository.ConfirmPushAsync(request.PushAuditIds,UserName(),Role(),ct);return Ok(new{labCount=count,message=$"Super Master pushed to {count} lab(s). Existing overrides were preserved."});}
+    {if(!IsAdmin())return Denied();var count=await repository.ConfirmPushAsync(request.PushAuditIds,UserName(),Role(),ct);return Ok(new{labCount=count,message=$"Super Master staged in {count} lab(s) and is awaiting AR Manager confirmation. Existing overrides were preserved."});}
 
     [HttpPost("cancel-push")]
     public async Task<ActionResult> CancelPush(DenialMapperPushDecisionRequest request,CancellationToken ct)
-    {if(!IsPushManager())return Denied();await repository.CancelPushAsync(request.PushAuditIds,UserName(),ct);return Ok(new{message="Mapper push cancelled."});}
+    {if(!IsAdmin())return Denied();await repository.CancelPushAsync(request.PushAuditIds,UserName(),ct);return Ok(new{message="Mapper push cancelled."});}
 
     [HttpGet("push-verification/{pushAuditId:long}")]
     public async Task<ActionResult> PushVerification(long pushAuditId,CancellationToken ct)
     {if(!IsPushManager())return Denied();var audit=await repository.PushAuditAsync(pushAuditId,ct);if(audit is null)return NotFound(new{message="Mapper push audit was not found."});var lab=await AuthorizedLab(audit.TargetLabId,ct);if(!IsAdmin()&&lab!=audit.TargetLabId)return Denied();return Ok(audit);}
+
+    [HttpPut("push-verification/{pushAuditId:long}/details/{detailId:long}")]
+    public async Task<ActionResult> UpdatePushVerificationDetail(long pushAuditId,long detailId,DenialMapperPushDetailEditRequest request,CancellationToken ct)
+    {
+        if(!IsPushManager())return Denied();var validation=ValidatePushDetail(request);if(validation is not null)return BadRequest(new{message=validation});
+        var audit=await repository.PushAuditAsync(pushAuditId,ct);if(audit is null)return NotFound(new{message="Mapper push audit was not found."});var lab=await AuthorizedLab(audit.TargetLabId,ct);if(!IsAdmin()&&lab!=audit.TargetLabId)return Denied();
+        await repository.UpdatePushAuditDetailAsync(pushAuditId,detailId,request,UserName(),Role(),ct);return Ok(new{message="Mapper push verification row updated."});
+    }
 
     [HttpGet("push-verification/{pushAuditId:long}/export")]
     public async Task<ActionResult> ExportPushVerification(long pushAuditId,CancellationToken ct)
@@ -78,7 +87,20 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
 
     [HttpPost("notifications/{pushAuditId:long}/acknowledge")]
     public async Task<ActionResult> Acknowledge(long pushAuditId,[FromQuery]int labId,CancellationToken ct)
-    {if(!IsArManager())return Denied();var effective=await AuthorizedLab(labId,ct);if(effective is null)return Denied();await repository.AcknowledgeNotificationAsync(pushAuditId,effective.Value,UserName(),ct);return Ok(new{message="Mapper update acknowledged."});}
+    {
+        if(!IsArManager())return Denied();
+        var effective=await AuthorizedLab(labId,ct);
+        if(effective is null)return Denied();
+        var count=await repository.AcknowledgeNotificationAsync(pushAuditId,effective.Value,UserName(),ct);
+        return Ok(new{mappingCount=count,message=$"{count} approved mapping(s) were applied to Denial Action Master."});
+    }
+
+    [HttpGet("master-data")]
+    public async Task<ActionResult<DenialMapperMasterData>> MasterData(CancellationToken ct)
+    {
+        if(!CanView())return Denied();
+        return Ok(await repository.MasterDataAsync(ct));
+    }
 
     [HttpGet("lab-master")]
     public async Task<ActionResult> LabMaster([FromQuery]int labId,[FromQuery]string? search,[FromQuery]string? classification,[FromQuery]int page=1,[FromQuery]int pageSize=25,CancellationToken ct=default){if(!CanView())return Denied();var effective=await AuthorizedLab(labId,ct);if(effective is null)return Denied();return Ok(await repository.LabMasterAsync(effective.Value,search,classification,page,pageSize,ct));}
@@ -90,20 +112,32 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
     public async Task<ActionResult> RemoveOverride(long superMasterId,[FromQuery]int labId,CancellationToken ct){if(!CanOverride())return Denied();var effective=await AuthorizedLab(labId,ct);if(effective is null)return Denied();await repository.RemoveOverrideAsync(effective.Value,superMasterId,UserName(),Role(),ct);return Ok(new{message="Lab override removed."});}
 
     [HttpGet("audit")]
-    public async Task<ActionResult> Audit([FromQuery]int? labId,[FromQuery]int take=100,CancellationToken ct=default){if(!IsAdmin()&&!IsManager())return Denied();var effective=await AuthorizedLab(labId,ct);if(!IsAdmin()&&effective is null)return Denied();return Ok(await repository.AuditAsync(IsAdmin()?labId:effective,take,ct));}
+    public async Task<ActionResult> Audit([FromQuery]int? labId,[FromQuery]int take=100,CancellationToken ct=default){if(!IsPushManager()&&!IsManager())return Denied();var effective=await AuthorizedLab(labId,ct);if(!IsAdmin()&&effective is null)return Denied();return Ok(await repository.AuditAsync(IsAdmin()?labId:effective,take,ct));}
 
     [HttpGet("classifications")]
     public async Task<ActionResult> Classifications([FromQuery]int? labId,CancellationToken ct){if(!CanView())return Denied();if(labId.HasValue){var effective=await AuthorizedLab(labId,ct);if(effective is null)return Denied();return Ok(await repository.ClassificationsAsync(effective,ct));}if(!IsAdmin()&&!IsViewer())return Denied();return Ok(await repository.ClassificationsAsync(null,ct));}
 
     [HttpPost("upload")]
     [RequestSizeLimit(100_000_000)]
-    public async Task<ActionResult<DenialCodeMasterImportResult>> Upload([FromForm] DenialCodeMasterImportRequest request,CancellationToken ct){if(!IsAdmin())return Denied();if(request.File is null||request.File.Length==0)return BadRequest(new{message="Select a mapper Excel file."});await using var stream=request.File.OpenReadStream();return Ok(await repository.ImportSuperMasterAsync(stream,request.File.FileName,UserName(),Role(),ct));}
+    public async Task<ActionResult<DenialCodeMasterImportResult>> Upload([FromForm] DenialCodeMasterImportRequest request,CancellationToken ct){if(!IsAdmin())return Denied();var uploadError=await FileUploadGuard.ValidateExcelAsync(request.File,25*1024*1024,ct);if(uploadError!=null)return BadRequest(new{message=uploadError});await using var stream=request.File!.OpenReadStream();return Ok(await repository.ImportSuperMasterAsync(stream,request.File.FileName,UserName(),Role(),ct));}
 
     private async Task<int?> AuthorizedLab(int? requested, CancellationToken ct)
     {
         if(IsAdmin())return requested;
-        var claim=First("labId","LabId","lab_id");
-        if(int.TryParse(claim,out var id)&&id>0)return !requested.HasValue||requested==id?id:null;
+        var tokenLabIds=User.Claims
+            .Where(c=>string.Equals(c.Type,"lab_id",StringComparison.OrdinalIgnoreCase)
+                   ||string.Equals(c.Type,"labId",StringComparison.OrdinalIgnoreCase)
+                   ||string.Equals(c.Type,"LabId",StringComparison.OrdinalIgnoreCase))
+            .SelectMany(c=>c.Value.Split([',',';'],StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries))
+            .Select(value=>int.TryParse(value,out var id)?id:0)
+            .Where(id=>id>0)
+            .ToHashSet();
+        if(tokenLabIds.Count>0)
+        {
+            if(requested is >0)return tokenLabIds.Contains(requested.Value)?requested:null;
+            return tokenLabIds.Count==1?tokenLabIds.First():null;
+        }
+
         var labs=await workflowService.GetLabsForUserAsync(UserName(),ct);
         var allowed=labs.Select(x=>x.LabId).ToHashSet();
         if(requested is >0&&allowed.Contains(requested.Value))return requested;
@@ -114,7 +148,7 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
     private bool IsPushManager()=>IsAdmin()||IsArManager();
     private bool IsManager()=>TokenRole().Contains("CLIENTMANAGER")||TokenRole().Contains("ACCOUNTMANAGER");
     private bool IsViewer()=>TokenRole().Contains("VIEWER")||TokenRole().Contains("READONLY");
-    private bool CanView()=>IsAdmin()||IsManager()||IsViewer()||TokenRole().Contains("LABUSER");
+    private bool CanView()=>IsAdmin()||IsArManager()||IsManager()||IsViewer()||TokenRole().Contains("LABUSER");
     private bool CanOverride()=>IsManager();
     private string TokenRole()=>new(Role().Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
     private string Role()=>First(ClaimTypes.Role,"role","roles")??"";
@@ -123,5 +157,6 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
     private ActionResult Denied()=>StatusCode(StatusCodes.Status403Forbidden,new{message="You do not have permission to use this Denial Mapper action."});
     private static string? Validate(DenialMapperSaveRequest q)=>Required(q.DenialCode,q.ActionCode,q.ActionCategory,q.Task,q.RecommendedAction,q.SLA,q.Priority);
     private static string? Validate(DenialMapperOverrideRequest q)=>Required(q.ActionCode,q.ActionCategory,q.Task,q.RecommendedAction);
+    private static string? ValidatePushDetail(DenialMapperPushDetailEditRequest q)=>Required(q.ActionCode,q.ActionCategory,q.Task,q.RecommendedAction);
     private static string? Required(params string?[] values)=>values.Any(string.IsNullOrWhiteSpace)?"Complete all required fields.":null;
 }

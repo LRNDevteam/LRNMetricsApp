@@ -1193,7 +1193,7 @@
 }
 
 @* ?? Excel export progress overlay (driven by csExportDone cookie set by ExportExcel) ?? *@
-<script>
+<script nonce='@Context.Items["CspNonce"]'>
 (function () {
     var btn         = document.getElementById('csExportExcelBtn');
     var form        = document.getElementById('csRptFilterForm');
@@ -1317,7 +1317,7 @@
 })();
 </script>
 
-<script>
+<script nonce='@Context.Items["CspNonce"]'>
 (function () {
     var tabList = document.getElementById('csRptTabs');
     var overlay = document.getElementById('csTabLoading');
@@ -1423,7 +1423,7 @@
 }
 @@keyframes spin { to { transform: rotate(360deg); } }
 </style>
-<script>
+<script nonce='@Context.Items["CspNonce"]'>
 (function () {
     'use strict';
     // Base URL for lazy tab AJAX calls � carries all current filter params.
@@ -1495,7 +1495,7 @@
 </script>
 }
 
-<script>
+<script nonce='@Context.Items["CspNonce"]'>
 /* ?? Collection Summary filter multiselect widget ?????????????????????????
    Handles every .cs-rpt-ms container on this page:
      - Click button  ? toggle dropdown panel open/closed

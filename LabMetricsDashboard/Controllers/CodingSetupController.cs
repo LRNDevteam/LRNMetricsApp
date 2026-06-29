@@ -409,6 +409,13 @@ public class CodingSetupController : Controller
             return RedirectToAction(nameof(Import), new { lab = selectedLab });
         }
 
+        var uploadError = await FileUploadGuard.ValidateCsvAsync(csvFile, 10 * 1024 * 1024, ct);
+        if (uploadError != null)
+        {
+            TempData["Error"] = uploadError;
+            return RedirectToAction(nameof(Import), new { lab = selectedLab });
+        }
+
         var records = new List<CodingSetupFormModel>();
         using var stream = csvFile.OpenReadStream();
         using var reader = new StreamReader(stream);
