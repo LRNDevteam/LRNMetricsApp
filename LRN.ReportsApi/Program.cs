@@ -137,6 +137,12 @@ app.Use(async (context, next) =>
         context.User = principal;
         await next();
     }
+    catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+    {
+        // The caller disconnected or deliberately superseded the request. This is not an
+        // application incident and must not generate an error file or Teams notification.
+        return;
+    }
     catch (UnauthorizedAccessException ex)
     {
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
