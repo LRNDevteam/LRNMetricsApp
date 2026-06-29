@@ -96,22 +96,69 @@ function Modal({ title, children, onClose, className = '' }) {
 
 function ClaimTaskLevelView({ claim, canEditClaim, canEditLine, openNote, showManagerResponse = false }) {
   const lines = claim?.lines || [];
-  const completeCount = lines.filter(l => String(l.status || '').toLowerCase().includes('closed')).length;
-  const pct = lines.length ? Math.round((completeCount / lines.length) * 100) : 0;
+  const tableScrollRef = useRef(null);
+  const topScrollRef = useRef(null);
+  const [tableScrollWidth, setTableScrollWidth] = useState(0);
+  const [hasHorizontalOverflow, setHasHorizontalOverflow] = useState(false);
+
+  useEffect(() => {
+    const tableScrollEl = tableScrollRef.current;
+    const topScrollEl = topScrollRef.current;
+    if (!tableScrollEl || !topScrollEl) return undefined;
+
+    const syncMetrics = () => {
+      const nextScrollWidth = tableScrollEl.scrollWidth;
+      setTableScrollWidth(prev => prev === nextScrollWidth ? prev : nextScrollWidth);
+      setHasHorizontalOverflow(nextScrollWidth > tableScrollEl.clientWidth + 1);
+      if (topScrollEl.scrollLeft !== tableScrollEl.scrollLeft) topScrollEl.scrollLeft = tableScrollEl.scrollLeft;
+    };
+
+    const handleTableScroll = () => {
+      if (topScrollEl.scrollLeft !== tableScrollEl.scrollLeft) topScrollEl.scrollLeft = tableScrollEl.scrollLeft;
+    };
+
+    const handleTopScroll = () => {
+      if (tableScrollEl.scrollLeft !== topScrollEl.scrollLeft) tableScrollEl.scrollLeft = topScrollEl.scrollLeft;
+    };
+
+    syncMetrics();
+    tableScrollEl.addEventListener('scroll', handleTableScroll, { passive: true });
+    topScrollEl.addEventListener('scroll', handleTopScroll, { passive: true });
+
+    const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(syncMetrics) : null;
+    const tableEl = tableScrollEl.querySelector('table');
+    if (resizeObserver) {
+      resizeObserver.observe(tableScrollEl);
+      if (tableEl) resizeObserver.observe(tableEl);
+    }
+    window.addEventListener('resize', syncMetrics);
+
+    return () => {
+      tableScrollEl.removeEventListener('scroll', handleTableScroll);
+      topScrollEl.removeEventListener('scroll', handleTopScroll);
+      window.removeEventListener('resize', syncMetrics);
+      if (resizeObserver) resizeObserver.disconnect();
+    };
+  }, [claim?.claimId, lines.length, showManagerResponse]);
+
   return <div className="claim-task-workbench">
     <div className="claim-task-workbench-main">
       <div className="claim-task-panel-head"><div><h3>Denial Lines / Action Tracker</h3><p>Use status updates by claim, action group, denial classification, CPT, or selected lines.</p></div><button className="wl-btn teal" type="button" disabled={!canEditClaim(claim)} onClick={() => openNote('Claim', claim)}>Open Update Status Modal</button></div>
-      <div className="claim-action-table-wrap"><table className="claim-action-table full-line-table"><thead><tr><th>TaskID</th><th>CPTCode</th><th>Units</th><th>Modifier</th><th>DenialCode</th><th>DenialDescription</th><th>DenialClassification</th><th>ActionCode</th><th>ActionCategory</th><th>RecommendedAction</th>{showManagerResponse && <th>Manager Response</th>}<th>Priority</th><th>InsuranceBalance</th><th>SLADays</th><th>Status</th><th>DateOpened</th><th>DueDate</th><th>SLAStatus</th><th>FirstBilledDate</th><th>ChargeEnteredDate</th><th>ICDComplianceStatus</th><th>DenialValidity</th><th>Update</th></tr></thead><tbody>{lines.length ? lines.map((l, i) => <tr key={l.taskId || i} className={String(l.status || '').toLowerCase().includes('closed') ? 'dim' : ''}><td><strong>{l.taskId || '-'}</strong></td><td><code className="code">{l.cptCode || '-'}</code></td><td>{l.units ?? '-'}</td><td>{l.modifier || '-'}</td><td><code className="code">{l.denialCode || '-'}</code></td><td className="wrap-wide">{l.denialDescription || '-'}</td><td>{l.denialClassification || '-'}</td><td>{l.actionCode || '-'}</td><td>{l.actionCategory || '-'}</td><td className={`wrap-wide ${showManagerResponse ? 'recommended-action-cell' : ''}`}><strong>{l.recommendedAction || '-'}</strong></td>{showManagerResponse && <td className="wrap-wide manager-response-cell">{l.reviewerComments || 'No manager response recorded.'}</td>}<td>{l.priority || '-'}</td><td>{money(l.insuranceBalance)}</td><td>{l.slaDays ?? '-'}</td><td><span className={`wl-badge ${String(l.status || 'Assigned').toLowerCase().replaceAll(' ', '-')}`}>{l.status || 'Assigned'}</span></td><td>{fmtDate(l.dateOpened)}</td><td>{fmtDate(l.dueDate)}</td><td><span className={`wl-badge ${String(l.slaStatus || '').toLowerCase().replaceAll(' ', '-')}`}>{l.slaStatus || '-'}</span></td><td>{fmtDate(l.firstBilledDate)}</td><td>{fmtDate(l.chargeEnteredDate)}</td><td>{l.icdComplianceStatus || '-'}</td><td>{l.denialValidity || '-'}</td><td><button className="wl-btn xs" type="button" disabled={!canEditLine(l)} onClick={() => openNote('Line', claim, l)}>Update</button></td></tr>) : <tr><td colSpan={showManagerResponse ? 23 : 22} className="empty-cell">No task lines found for this claim.</td></tr>}</tbody></table></div>
+      {hasHorizontalOverflow && <div className="claim-action-scroll-rail" ref={topScrollRef} aria-label="Horizontal table scroll"><div style={{ width: `${tableScrollWidth}px` }} /></div>}
+      <div className="claim-action-table-wrap" ref={tableScrollRef} tabIndex="0" aria-label="Claim action lines; scroll horizontally to view all columns"><table className="claim-action-table full-line-table"><thead><tr><th className="sticky-cpt">CPT Code</th><th className="sticky-denial">Denial Code</th><th>Task ID</th><th>Units</th><th>Modifier</th><th>Denial Description</th><th>Denial Classification</th><th>Action Code</th><th>Action Category</th><th>Recommended Action</th>{showManagerResponse && <th>Manager Response</th>}<th>Priority</th><th>Insurance Balance</th><th>SLA Days</th><th>Status</th><th>Date Opened</th><th>Due Date</th><th>SLA Status</th><th>First Billed Date</th><th>Charge Entered Date</th><th>ICD Compliance Status</th><th>Denial Validity</th><th>Update</th></tr></thead><tbody>{lines.length ? lines.map((l, i) => <tr key={l.taskId || i} className={String(l.status || '').toLowerCase().includes('closed') ? 'dim' : ''}><td className="sticky-cpt"><code className="code">{l.cptCode || '-'}</code></td><td className="sticky-denial"><code className="code">{l.denialCode || '-'}</code></td><td><strong>{l.taskId || '-'}</strong></td><td>{l.units ?? '-'}</td><td>{l.modifier || '-'}</td><td className="wrap-wide">{l.denialDescription || '-'}</td><td>{l.denialClassification || '-'}</td><td>{l.actionCode || '-'}</td><td>{l.actionCategory || '-'}</td><td className={`wrap-wide ${showManagerResponse ? 'recommended-action-cell' : ''}`}><strong>{l.recommendedAction || '-'}</strong></td>{showManagerResponse && <td className="wrap-wide manager-response-cell">{l.reviewerComments || 'No manager response recorded.'}</td>}<td>{l.priority || '-'}</td><td>{money(l.insuranceBalance)}</td><td>{l.slaDays ?? '-'}</td><td><span className={`wl-badge ${String(l.status || 'Assigned').toLowerCase().replaceAll(' ', '-')}`}>{l.status || 'Assigned'}</span></td><td>{fmtDate(l.dateOpened)}</td><td>{fmtDate(l.dueDate)}</td><td><span className={`wl-badge ${String(l.slaStatus || '').toLowerCase().replaceAll(' ', '-')}`}>{l.slaStatus || '-'}</span></td><td>{fmtDate(l.firstBilledDate)}</td><td>{fmtDate(l.chargeEnteredDate)}</td><td>{l.icdComplianceStatus || '-'}</td><td>{l.denialValidity || '-'}</td><td><button className="wl-btn xs" type="button" disabled={!canEditLine(l)} onClick={() => openNote('Line', claim, l)}>Update</button></td></tr>) : <tr><td colSpan={showManagerResponse ? 23 : 22} className="empty-cell">No task lines found for this claim.</td></tr>}</tbody></table></div>
     </div>
-    <aside className="claim-task-side"><div><h4>Claim Status</h4><span className={`wl-badge ${String(claim?.status || 'Assigned').toLowerCase().replaceAll(' ', '-')}`}>{claim?.status || 'Assigned'}</span><p>Calculated from line status precedence.</p></div><div><h4>Status Completion</h4><div className="scope-progress"><i style={{ width: `${pct}%` }} /></div><p>{completeCount} of {lines.length} actions completed</p></div><div><h4>Action Summary</h4>{Array.from(new Set(lines.map(l => l.actionCategory || l.task || l.recommendedAction).filter(Boolean))).map(action => { const group = lines.filter(l => (l.actionCategory || l.task || l.recommendedAction) === action); const done = group.filter(l => String(l.status || '').toLowerCase().includes('closed')).length; return <div className="scope-kv" key={action}><span>{action}</span><strong>{done}/{group.length}</strong></div>; })}</div></aside>
   </div>;
 }
 
 function WorklistClaimSplit({ claims, rows, loading, data, expanded, setExpanded, drawerTab, setDrawerTab, activeClaim, clientManager, accountManager, taskView, setTaskView, myTabs, tabCounts = {}, notes, docs, escalations, canEditClaim, canEditLine, canCreateEscalation, canDeleteDocumentForClaim, openNote, openDocs, openEsc, openDocument, deleteDocument, loadDrawerTab, canDownloadWorkflow = false, onDownloadTab = () => {}, csvUpload = null, exportBusy = false, exportStatusText = '' }) {
   const roleLabel = clientManager ? 'Client Manager' : accountManager ? 'Account Manager' : 'AR Reviewer';
   const activeTab = myTabs.find(x => x.key === taskView);
+  const activeClaimLines = activeClaim?.lines || [];
+  const activeClaimCompleted = activeClaimLines.filter(line => String(line.status || '').toLowerCase().includes('closed')).length;
+  const activeClaimPct = activeClaimLines.length ? Math.round((activeClaimCompleted / activeClaimLines.length) * 100) : 0;
+  const activeClaimActions = Array.from(new Set(activeClaimLines.map(line => line.actionCategory || line.task || line.recommendedAction).filter(Boolean)));
   return <div className={`claim-split-shell ${activeClaim ? 'drawer-open' : ''} ${loading ? 'claims-loading' : ''}`}>
-    <section className={`claim-list-pane my-worklist-pane thin-list-border ${activeClaim ? 'narrow' : 'full'}`}>
+    <section className={`claim-list-pane my-worklist-pane thin-list-border ${activeClaim ? 'narrow claim-id-rail' : 'full'}`}>
       <div className="claim-view-top"><div><div className="claim-view-title">My Worklist</div><div className="claim-view-subtitle">{activeTab?.label || 'Work'} claims - {claims.length} claim(s), {rows.length} task(s)</div></div><span className="table-count">{loading ? 'Loading...' : activeTab?.label || 'Work'}</span></div>
       <div className="claim-list-toolbar"><label className="claim-search-wrap"><i className="bi bi-search" /><input readOnly value="" placeholder="Search claim, payer, patient" /></label><div className="claim-tab-row">{myTabs.map(t => { const count = Number(tabCounts?.[t.countKey || t.key] || 0); const active = taskView === t.key; return <button key={t.key} type="button" className={`claim-tab ${active ? 'active' : ''} ${active && loading ? 'is-loading' : ''} ${t.alert && count > 0 ? 'has-alert' : ''}`} title={t.hint} onClick={() => setTaskView(t.key)} disabled={active && loading}><span>{t.label}</span>{active && loading ? <i className="bi bi-arrow-repeat claim-tab-spinner" aria-label="Loading claims" /> : <b>{tabCounts?.[t.countKey || t.key] ?? 0}</b>}</button>; })}{canDownloadWorkflow && activeTab ? <button type="button" className="claim-tab-download" onClick={() => onDownloadTab(activeTab)} disabled={exportBusy} title={exportStatusText || `Download ${activeTab.label} worklist records using current filters`}><i className="bi bi-download" />{exportBusy ? 'Export running' : `Download ${activeTab.label}`}</button> : null}{csvUpload}</div></div>
       {loading && <div className="claim-tab-loading" role="status"><i className="bi bi-arrow-repeat" /><strong>Loading {activeTab?.label || 'worklist'} claims</strong><span>Refreshing this queue with the latest assignments...</span></div>}
@@ -119,7 +166,7 @@ function WorklistClaimSplit({ claims, rows, loading, data, expanded, setExpanded
       <div className="claim-rows-scroll">{claims.length ? claims.map(c => <button type="button" key={c.claimId} className={`claim-list-row claim-list-row-wide my-worklist-row ${expanded === c.claimId ? 'active' : ''}`} onClick={() => { setExpanded(expanded === c.claimId ? '' : c.claimId); setDrawerTab('lines'); }}><span className="claim-row-check my-worklist-spacer" aria-hidden="true" /><span className="claim-expand-dot"><i className={`bi ${expanded === c.claimId ? 'bi-chevron-down' : 'bi-chevron-right'}`} /></span><span className="claim-list-id"><strong className="claim-id-link as-text">{c.claimId}</strong><small>UID {c.claimId || '-'}</small></span><span className="claim-list-payer" title={c.source}>{c.source || '-'}</span><span className="claim-list-payer" title={c.payerName}>{c.payerName}</span><span className="claim-list-payer" title={c.patientName}>{c.patientName || '-'}</span><span className="claim-list-payer" title={c.patientId}>{c.patientId || '-'}</span><span className="claim-list-payer" title={c.subscriberId}>{c.subscriberId || '-'}</span><span className="claim-list-payer">{fmtDate(c.dateOfService)}</span><span className="claim-list-amt">{money(c.balance)}</span><span className={`wl-badge ${String(c.status).toLowerCase().replaceAll(' ', '-')}`}>{c.status}</span></button>) : <div className="claim-empty-panel">No worklist claims found.</div>}</div>
     </section>
     {activeClaim && <section className="claim-drawer open">
-      <div className="claim-drawer-header"><div><div className="claim-drawer-kicker">My Worklist / Claim / Line Level</div><h3>{activeClaim.claimId}</h3><p>{activeClaim.payerName || '-'} - {money(activeClaim.balance)}</p></div><button className="wl-icon" title="Close claim drawer" type="button" onClick={() => setExpanded('')}><i className="bi bi-x-lg" /></button></div>
+      <div className="claim-drawer-header"><div className="claim-drawer-header-main"><div className="claim-drawer-header-title"><div className="claim-drawer-kicker">My Worklist / Claim / Line Level</div><h3>{activeClaim.claimId}</h3><p>{activeClaim.payerName || '-'} - {money(activeClaim.balance)}</p></div><div className="claim-drawer-header-overview"><span><b>Claim Status</b><strong className={`wl-badge ${String(activeClaim.status || 'Assigned').toLowerCase().replaceAll(' ', '-')}`}>{activeClaim.status || 'Assigned'}</strong></span><span><b>Status Completion</b><strong>{activeClaimCompleted} of {activeClaimLines.length} actions completed</strong><i className="scope-progress inline"><i style={{ width: `${activeClaimPct}%` }} /></i></span><span className="claim-drawer-overview-actions"><b>Action Summary</b>{activeClaimActions.length ? activeClaimActions.map(action => { const group = activeClaimLines.filter(line => (line.actionCategory || line.task || line.recommendedAction) === action); const done = group.filter(line => String(line.status || '').toLowerCase().includes('closed')).length; return <em className="scope-kv" key={action}><span>{action}</span><strong>{done}/{group.length}</strong></em>; }) : <small>No actions available.</small>}</span></div></div><button className="wl-icon" title="Close claim drawer" type="button" onClick={() => setExpanded('')}><i className="bi bi-x-lg" /></button></div>
       <div className="claim-drawer-meta"><span><b>Source</b>{activeClaim.source || '-'}</span><span><b>Panel</b>{activeClaim.panelName || '-'}</span><span><b>Patient</b>{activeClaim.patientName || '-'}</span><span><b>Subscriber</b>{activeClaim.subscriberId || '-'}</span><span><b>DOS</b>{fmtDate(activeClaim.dateOfService)}</span><span><b>Created</b>{fmtDate(activeClaim.createdOn)}</span><span><b>Clinic</b>{activeClaim.clinicName || '-'}</span><span><b>Provider</b>{activeClaim.referringProvider || '-'}</span><span><b>Assigned</b>{activeClaim.assignedTo || '-'}</span></div>
       <div className="claim-drawer-actions"><button className="wl-icon icon-note" title="Claim notes" type="button" onClick={() => openNote('Claim', activeClaim)}><i className="bi bi-pencil-square" /></button><button className="wl-icon icon-doc" title="Claim documents" type="button" onClick={() => openDocs(activeClaim)}><i className="bi bi-paperclip" /></button>{canCreateEscalation ? <button className="wl-btn red xs" type="button" onClick={() => openEsc('Claim', activeClaim)}>Escalate</button> : <span className="muted-text">View only</span>}</div>
       <div className="claim-drawer-tabs"><button className={drawerTab === 'lines' ? 'active' : ''} type="button" onClick={() => setDrawerTab('lines')}>Tasks ({activeClaim.lines?.length || 0})</button><button className={drawerTab === 'notes' ? 'active' : ''} type="button" onClick={() => loadDrawerTab('notes', activeClaim)}>Notes ({notes.length})</button><button className={drawerTab === 'documents' ? 'active' : ''} type="button" onClick={() => loadDrawerTab('documents', activeClaim)}>Documents ({docs.length})</button><button className={drawerTab === 'history' ? 'active' : ''} type="button" onClick={() => loadDrawerTab('history', activeClaim)}>History</button></div>
@@ -221,8 +268,6 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
     if (!labId) return;
     const requestId = ++loadRequestRef.current;
     setLoading(true);
-    setData({ items: [], page, pageSize: 100, totalCount: 0, totalPages: 0 });
-    setExpanded('');
     try {
       const result = await denialWorkflowService.getTasks(query, signal ? { signal } : {});
       if (signal?.aborted || requestId !== loadRequestRef.current) return;

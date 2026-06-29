@@ -170,12 +170,6 @@ export async function ensureWorkflowJwt(options = {}) {
         }
 
         if (response.status === 401 || response.status === 403) {
-          if (isLocalReactHost()) {
-            throw new Error(
-              'AuthToken returned Unauthorized from MVC. You are logged in when opening the URL directly, ' +
-              'but the LRN.Auth cookie is not being sent from React localhost. Rebuild/restart LabMetricsDashboard with the updated Program.cs, then delete the old LRN.Auth cookie and login again.'
-            );
-          }
           redirectToMetricsLogin();
           throw new Error('Login required. Redirecting to LRN Metrics login.');
         }
