@@ -8,13 +8,13 @@ export default function DashboardFilter({ filter, setFilterValue, clearFilter, r
   const actions = listWithDefault(options?.actionCategories, actionCategoryOptions);
   const priorities = listWithDefault(options?.priorities, priorityOptions);
   const denialClassifications = listWithDefault(options?.denialClassifications, []);
-  const reviewerOptions = (reviewers || []).map(r => ({ value: r.userName, label: r.displayName || r.userName }));
+  const reviewerOptions = (reviewers || []).map(r => ({ value: r.userName || r.UserName, label: r.displayName || r.DisplayName || r.userName || r.UserName })).filter(x => x.value);
   const visible = new Set(visibleFilters?.length ? visibleFilters : ['status', 'reviewer', 'payerName', 'denialClassification', 'actionCategory', 'denialCode', 'priority', 'clinic', 'salesRepname', 'referringProvider']);
   const show = key => visible.has(key);
 
   return <div className="lrn-card filter-card"><div className="filter-row">
     {show('status') && <SearchableMultiSelect label="Status" value={filter.status} onChange={v => setFilterValue('status', v)} options={statuses} placeholder="All statuses" />}
-    {show('reviewer') && <SearchableMultiSelect label="Reviewer" value={filter.reviewer} onChange={v => setFilterValue('reviewer', v)} options={reviewerOptions} placeholder="All reviewers" />}
+    {show('reviewer') && <SearchableMultiSelect label="Assigned To" value={filter.reviewer} onChange={v => setFilterValue('reviewer', v)} options={reviewerOptions} placeholder="All reviewers" />}
     {show('payerName') && <SearchableMultiSelect label="Payer Name" value={filter.payerName} onChange={v => setFilterValue('payerName', v)} options={options?.payerNames || []} placeholder="All payers" />}
     {show('panelName') && <SearchableMultiSelect label="Panel" value={filter.panelName} onChange={v => setFilterValue('panelName', v)} options={options?.panelNames || []} placeholder="All panels" />}
     {show('denialClassification') && <SearchableMultiSelect label="Denial Classification" value={filter.denialClassification} onChange={v => setFilterValue('denialClassification', v)} options={denialClassifications} placeholder="All classifications" />}

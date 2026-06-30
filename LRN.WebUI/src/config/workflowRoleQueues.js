@@ -1,12 +1,12 @@
 import { canAssignRole, isAccountManagerRole, isArReviewerRole, isClientManagerRole } from '../utils/formatters';
 
-const commonManagerFilters = ['aging', 'denialClassification', 'actionCategory', 'payerName', 'panelName', 'clinic', 'salesRepname'];
+const commonManagerFilters = ['reviewer', 'aging', 'denialClassification', 'actionCategory', 'payerName', 'panelName', 'clinic', 'salesRepname'];
 const externalManagerQueues = [
   { key: 'new', label: 'New', filters: commonManagerFilters },
   { key: 'unassigned', label: 'Unassigned', filters: [...commonManagerFilters, 'balanceBucket'] },
   { key: 'assigned', label: 'Assigned', filters: commonManagerFilters },
   { key: 'closed', label: 'Closed', filters: commonManagerFilters },
-  { key: 'all', label: 'All Claims', filters: ['status', 'aging', 'denialClassification', 'actionCategory', 'payerName', 'panelName'] }
+  { key: 'all', label: 'All Claims', filters: ['status', 'reviewer', 'aging', 'denialClassification', 'actionCategory', 'payerName', 'panelName'] }
 ];
 
 export const workflowQueueConfig = {
@@ -30,7 +30,7 @@ export const workflowQueueConfig = {
     { key: 'escalationResponse', label: 'Escalation Response', filters: [...commonManagerFilters, 'documentationType', 'escalationReason'] },
     { key: 'writeOffApproval', label: 'Write Off Approval', filters: commonManagerFilters },
     { key: 'closed', label: 'Closed', filters: commonManagerFilters },
-    { key: 'all', label: 'All Claims', filters: ['status', 'aging', 'denialClassification', 'actionCategory', 'payerName', 'panelName'] }
+    { key: 'all', label: 'All Claims', filters: ['status', 'reviewer', 'aging', 'denialClassification', 'actionCategory', 'payerName', 'panelName'] }
   ],
   accountManager: externalManagerQueues,
   clientManager: externalManagerQueues

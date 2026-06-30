@@ -1284,7 +1284,7 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .claim-assign-toolbar,.claim-card{display:none}
 .my-worklist-old-table{display:none}
 .claim-split-shell{display:grid;grid-template-columns:minmax(360px,1fr);gap:12px;align-items:start}
-.claim-split-shell.drawer-open{grid-template-columns:132px minmax(0,1fr)}
+.claim-split-shell.drawer-open{grid-template-columns:minmax(0,1fr)}
 .claim-list-pane,.claim-drawer{background:#fff;border:.5px solid #d8dee9;border-radius:8px;box-shadow:0 2px 8px rgba(15,23,42,.08);overflow:hidden}
 .thin-list-border{border:.5px solid #d8dee9!important}
 .thin-list-border .claim-list-toolbar,
@@ -1357,10 +1357,10 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .claim-assign-bar2 label{display:flex;align-items:center;gap:6px;margin:0}
 .claim-assign-bar2 select{height:28px;border:.5px solid #cbd5e1;border-radius:6px;padding:0 8px;font-size:11px;background:#fff}
 .claim-list-head{display:grid;grid-template-columns:minmax(150px,1.3fr) minmax(120px,1fr) 94px 92px;gap:10px;padding:8px 14px;background:#f8fafc;border-bottom:.5px solid #e5e7eb;color:#64748b;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.06em}
-.claim-list-head-wide{grid-template-columns:minmax(150px,1.2fr) minmax(90px,.7fr) minmax(150px,1.1fr) minmax(140px,1fr) minmax(100px,.75fr) minmax(120px,.8fr) minmax(92px,.65fr) 94px 96px;min-width:1340px}
+.claim-list-head-wide{grid-template-columns:auto auto minmax(150px,1.2fr) minmax(90px,.7fr) minmax(150px,1.1fr) minmax(140px,1fr) minmax(100px,.75fr) minmax(120px,.8fr) minmax(92px,.65fr) 94px minmax(120px,.8fr) 100px 96px;min-width:1560px}
 .claim-rows-scroll{max-height:none;overflow:visible}
 .claim-list-row{width:100%;display:grid;grid-template-columns:auto auto minmax(150px,1.3fr) minmax(120px,1fr) 94px 92px;gap:10px;align-items:center;border:0;border-bottom:.5px solid #eef2f7;background:#fff;padding:10px 14px;text-align:left;cursor:default;color:#0f172a}
-.claim-list-row-wide{grid-template-columns:auto auto minmax(150px,1.2fr) minmax(90px,.7fr) minmax(150px,1.1fr) minmax(140px,1fr) minmax(100px,.75fr) minmax(120px,.8fr) minmax(92px,.65fr) 94px 96px;min-width:1340px}
+.claim-list-row-wide{grid-template-columns:auto auto minmax(150px,1.2fr) minmax(90px,.7fr) minmax(150px,1.1fr) minmax(140px,1fr) minmax(100px,.75fr) minmax(120px,.8fr) minmax(92px,.65fr) 94px minmax(120px,.8fr) 100px 96px;min-width:1560px}
 .claim-sort-btn{border:0;background:transparent;color:inherit;font:inherit;font-weight:800;text-transform:uppercase;letter-spacing:.06em;padding:0;display:inline-flex;align-items:center;gap:4px;cursor:pointer}
 .claim-sort-btn i{font-size:10px;color:#1abc9c}
 .claim-filter-toggle-row{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0 0 8px}
@@ -1784,9 +1784,9 @@ body{background:#f5f7fb;color:#101828}
 .workflow-table-shell{overflow:auto;max-width:100%;border:1px solid #e1e7ef;border-radius:8px;background:#fff}
 .modern-workflow-table{min-width:920px}.modern-workflow-table th{background:#f8fafc}.modern-workflow-table tbody tr{cursor:pointer}
 .reusable-claim-drawer .claim-drawer-meta.compact{grid-template-columns:repeat(5,minmax(0,1fr))}
-.claim-list-head-wide,.claim-list-row-wide{min-width:1040px}
-.claim-list-row-wide{grid-template-columns:auto auto minmax(140px,1.1fr) minmax(92px,.65fr) minmax(140px,1fr) minmax(130px,.9fr) minmax(95px,.7fr) minmax(112px,.75fr) minmax(92px,.65fr) 94px 96px}
-.claim-list-head-wide{grid-template-columns:minmax(140px,1.1fr) minmax(92px,.65fr) minmax(140px,1fr) minmax(130px,.9fr) minmax(95px,.7fr) minmax(112px,.75fr) minmax(92px,.65fr) 94px 96px}
+.claim-list-head-wide,.claim-list-row-wide{min-width:1280px}
+.claim-list-row-wide{grid-template-columns:auto auto minmax(140px,1.1fr) minmax(92px,.65fr) minmax(140px,1fr) minmax(130px,.9fr) minmax(95px,.7fr) minmax(112px,.75fr) minmax(92px,.65fr) 94px minmax(115px,.8fr) 96px 96px}
+.claim-list-head-wide{grid-template-columns:auto auto minmax(140px,1.1fr) minmax(92px,.65fr) minmax(140px,1fr) minmax(130px,.9fr) minmax(95px,.7fr) minmax(112px,.75fr) minmax(92px,.65fr) 94px minmax(115px,.8fr) 96px 96px}
 .claim-drawer-body{max-height:none}
 .aging-toolbar-filters{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
 @media(max-width:1500px){.modern-kpi.balance{grid-column:span 1}}
@@ -1815,3 +1815,20 @@ body{background:#f5f7fb;color:#101828}
 /* Keep Push-to-Labs actions visible while the lab list scrolls */
 .dm-modal{max-height:86vh}.dm-modal>.dm-push-list{flex:1;min-height:0;overflow-y:auto;padding-bottom:12px}.dm-modal>.dm-modal-actions{position:sticky;bottom:0;z-index:4;flex:0 0 auto;background:#fff;box-shadow:0 -5px 12px rgba(15,23,42,.06)}.dm-modal>.dm-modal-head{flex:0 0 auto}
 .dm-push-progress{position:sticky;top:0;z-index:3;margin:-4px -8px 8px;padding:12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:7px;color:#1e40af}.dm-push-progress strong,.dm-push-progress small{display:block}.dm-push-progress strong{margin-top:8px;font-size:11px}.dm-push-progress small{margin-top:3px;color:#64748b;font-size:9px}.dm-progress-track{height:6px;overflow:hidden;border-radius:999px;background:#dbeafe}.dm-progress-track span{display:block;width:38%;height:100%;border-radius:999px;background:#2563eb;animation:dmPushProgress 1.15s ease-in-out infinite}.dm-btn-spinner{display:inline-block;width:11px;height:11px;margin-right:5px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;vertical-align:-2px;animation:dmSpin .7s linear infinite}@keyframes dmPushProgress{0%{transform:translateX(-110%)}100%{transform:translateX(310%)}}@keyframes dmSpin{to{transform:rotate(360deg)}}.dm-modal button:disabled,.dm-push-list input:disabled{cursor:not-allowed;opacity:.6}
+
+.dashboard-overview-grid-full{grid-template-columns:minmax(0,1fr)}
+.role-table-link{border:0;background:transparent;color:#007f73;font:inherit;font-weight:800;padding:0;cursor:pointer;text-align:left}
+.role-table-link:hover{text-decoration:underline}
+.role-table-link.numeric{font-variant-numeric:tabular-nums;text-align:right}
+.role-table-link.reviewer-link{display:inline-flex;align-items:center;gap:6px}
+
+/* Claim assignment: bounded two-axis tables with pinned context. */
+.claim-list-grid-scroll{position:relative;max-width:100%;max-height:58vh;overflow:auto;scrollbar-gutter:stable}
+.claim-list-grid-scroll .claim-list-head{position:sticky;top:0;z-index:8}
+.claim-list-grid-scroll .claim-rows-scroll{max-height:none;overflow:visible}
+.claim-split-shell .claim-drawer-body{position:relative;max-width:100%;max-height:58vh!important;overflow:auto!important;scrollbar-gutter:stable}
+.claim-split-shell .claim-task-table{border-collapse:separate;border-spacing:0}
+.claim-split-shell .claim-task-table th{position:sticky;top:0;z-index:6}
+.claim-split-shell .claim-task-table .sticky-cpt-col{position:sticky;left:0;width:100px;min-width:100px;max-width:100px;background:#fff;box-shadow:1px 0 0 #d8dee9;z-index:4}
+.claim-split-shell .claim-task-table .sticky-denial-col{position:sticky;left:100px;width:118px;min-width:118px;max-width:118px;background:#fff;box-shadow:8px 0 12px -12px rgba(15,23,42,.55),1px 0 0 #d8dee9;z-index:4}
+.claim-split-shell .claim-task-table th.sticky-cpt-col,.claim-split-shell .claim-task-table th.sticky-denial-col{background:#f8fafc;z-index:9}

@@ -81,21 +81,33 @@ export async function api(path, options = {}) {
   let response;
   try {
     token = await ensureWorkflowJwt();
+    // #region debug-point C:api-start
+    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"metrics-auth-failure",runId:"pre",hypothesisId:"C",location:"src/services/httpClient.js:api:start",msg:"[DEBUG] API request starting",data:{path,method:options?.method||'GET',hasToken:Boolean(token)},ts:Date.now()})}).catch(()=>{});
+    // #endregion
     response = await executeRequest(path, options, token);
 
     // Token expired/changed signature: refresh once only.
     if (response.status === 401 || response.status === 403) {
+      // #region debug-point C:api-retry-auth
+      fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"metrics-auth-failure",runId:"pre",hypothesisId:"C",location:"src/services/httpClient.js:api:retry-auth",msg:"[DEBUG] API request got auth retry status",data:{path,status:response.status},ts:Date.now()})}).catch(()=>{});
+      // #endregion
       clearWorkflowJwt();
       token = await ensureWorkflowJwt({ forceRefresh: true });
       response = await executeRequest(path, options, token);
     }
   } catch (err) {
+    // #region debug-point C:api-catch
+    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"metrics-auth-failure",runId:"pre",hypothesisId:"C",location:"src/services/httpClient.js:api:catch",msg:"[DEBUG] API request failed before response",data:{path,method:options?.method||'GET',message:err?.message||String(err||''),name:err?.name||'',safeForUser:err?.safeForUser,correlationId:err?.correlationId||''},ts:Date.now()})}).catch(()=>{});
+    // #endregion
     logClientError(err, `API request failed before response: ${path}`);
     if (err?.message && String(err.message).toLowerCase().includes('login')) throw err;
     throw new DenialWorkflowError(GENERIC_WORKFLOW_ERROR);
   }
 
   if (!response.ok) {
+    // #region debug-point C:api-non-ok
+    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"metrics-auth-failure",runId:"pre",hypothesisId:"C",location:"src/services/httpClient.js:api:non-ok",msg:"[DEBUG] API response non-ok",data:{path,status:response.status,statusText:response.statusText},ts:Date.now()})}).catch(()=>{});
+    // #endregion
     const error = await readError(response);
     logClientError(error instanceof Error ? error : new Error(String(error || `API error ${response.status}`)), `API ${response.status}: ${path}`);
     throw error instanceof Error ? error : new Error(error || `API error ${response.status}`);

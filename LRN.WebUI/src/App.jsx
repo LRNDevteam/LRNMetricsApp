@@ -142,11 +142,17 @@ export default function App() {
       : next);
   }, [supportEmailList]);
 
-  function setView(nextView, { closeSidebar = true } = {}) {
+  function resetWorkflowFilters() {
+    setFilter(emptyFilter);
+    setDebouncedFilter(emptyFilter);
+  }
+
+  function setView(nextView, { closeSidebar = true, preserveFilters = false } = {}) {
     let safeView = workflowViews.includes(nextView) ? nextView : 'dashboard';
     if (reviewerOnly && safeView === 'claims') safeView = 'myworklist';
     if (externalManager && safeView === 'myworklist') safeView = 'claims';
     if ((safeView === 'denialcodemaster' || safeView === 'denialactionverification') && !isArManagerRole(user.role) && !String(user.role || '').toLowerCase().includes('admin')) safeView = resolveLandingView(user.role);
+    if (!preserveFilters && safeView !== view) resetWorkflowFilters();
     setViewState(safeView);
     if (closeSidebar) setSidebarOpen(false);
     if (window.location.hash !== `#${safeView}`) {
@@ -273,9 +279,15 @@ export default function App() {
         const me = await refreshLoginUserFromMetrics({ forceRefresh: true, resetData: false, applyLanding: true });
         if (cancelled) return;
 
+        // #region debug-point C:boot-auth-success
+        fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"metrics-auth-failure",runId:"pre",hypothesisId:"C",location:"src/App.jsx:bootAuth:success",msg:"[DEBUG] bootAuth succeeded",data:{userName:me?.userName||me?.UserName||'',role:me?.role||me?.Role||'',labsCount:Array.isArray(me?.labs)?me.labs.length:Array.isArray(me?.Labs)?me.Labs.length:0},ts:Date.now()})}).catch(()=>{});
+        // #endregion
         setAuthReady(true);
       } catch (err) {
         if (!cancelled) {
+          // #region debug-point C:boot-auth-failure
+          fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"metrics-auth-failure",runId:"pre",hypothesisId:"C",location:"src/App.jsx:bootAuth:catch",msg:"[DEBUG] bootAuth failed",data:{message:err?.message||String(err||''),name:err?.name||'',safeForUser:err?.safeForUser,correlationId:err?.correlationId||''},ts:Date.now()})}).catch(()=>{});
+          // #endregion
           setAuthReady(false);
           setAuthError(err?.message || 'Login required.');
         }
@@ -333,7 +345,7 @@ export default function App() {
   }, [filter]);
 
   useEffect(() => {
-    if (!authReady || !labId || !canAssign) { setReviewers([]); return; }
+    if (!authReady || !labId || (!canAssign && !externalManager)) { setReviewers([]); return; }
     const cacheKey = `denial.reviewers.${labId}`;
     try {
       const cached = sessionStorage.getItem(cacheKey);
@@ -350,7 +362,7 @@ export default function App() {
         if (!reviewers.length) setReviewers([]);
         setMessage(workflowIssueMessage(err));
       });
-  }, [authReady, labId, canAssign]);
+  }, [authReady, labId, canAssign, externalManager]);
 
   useEffect(() => {
     if (!authReady || !labId) return;
@@ -460,22 +472,7 @@ export default function App() {
     searchText: filterValue(debouncedFilter.searchText),
     page: 1,
     pageSize: 1
-  }), [
-    labId,
-    user.role,
-    user.userName,
-    reviewerOnly,
-    debouncedFilter.reviewer,
-    debouncedFilter.actionCategory,
-    debouncedFilter.priority,
-    debouncedFilter.denialCode,
-    debouncedFilter.payerName,
-    debouncedFilter.clinic,
-    debouncedFilter.salesRepname,
-    debouncedFilter.referringProvider,
-    debouncedFilter.denialClassification,
-    debouncedFilter.searchText
-  ]);
+  }), [labId, user.role, user.userName, reviewerOnly, debouncedFilter]);
 
 
   async function refreshReviewerNotification() {
@@ -809,23 +806,25 @@ export default function App() {
   }, [externalManager, myWorklistView]);
 
   function setFilterValue(k, v) { setFilter(f => ({ ...f, [k]: v, page: 1 })); }
-  function clearFilter() { setFilter(emptyFilter); }
+  function clearFilter() { resetWorkflowFilters(); }
   function changePage(page) { setFilter(f => ({ ...f, page })); }
+
+  function applyDrilldownFilters(next = {}) {
+    const nextFilter = { ...filter, ...next, page: 1 };
+    setFilter(nextFilter);
+    setDebouncedFilter(nextFilter);
+  }
 
 
   function openClaimsByClassification(classification) {
-    setFilter(f => ({
-      ...f,
-      denialClassification: classification || '',
-      page: 1
-    }));
+    applyDrilldownFilters({ denialClassification: classification || '' });
     if (reviewerOnly) {
       setMyWorklistView('assigned');
-      setView('myworklist');
+      setView('myworklist', { preserveFilters: true });
       return;
     }
-    setClaimTaskView('new');
-    setView('claims');
+    setClaimTaskView('all');
+    setView('claims', { preserveFilters: true });
     setMessage({
       type: 'info',
       text: classification
@@ -835,18 +834,14 @@ export default function App() {
   }
 
   function openClaimsByActionCategory(actionCategory) {
-    setFilter(f => ({
-      ...f,
-      actionCategory: actionCategory || '',
-      page: 1
-    }));
+    applyDrilldownFilters({ actionCategory: actionCategory || '' });
     if (reviewerOnly) {
       setMyWorklistView('assigned');
-      setView('myworklist');
+      setView('myworklist', { preserveFilters: true });
       return;
     }
-    setClaimTaskView('new');
-    setView('claims');
+    setClaimTaskView('all');
+    setView('claims', { preserveFilters: true });
     setMessage({
       type: 'info',
       text: actionCategory
@@ -860,24 +855,15 @@ export default function App() {
     setNotificationPopupOpen(false);
     if (reviewerOnly) {
       setMyWorklistView(section?.targetView || 'assigned');
-      setFilter(f => ({
-        ...f,
-        status: section?.status || '',
-        searchText: item?.claimId || '',
-        page: 1
-      }));
-      setView('myworklist');
+      applyDrilldownFilters({ status: section?.status || '', searchText: item?.claimId || '' });
+      setView('myworklist', { preserveFilters: true });
       return;
     }
 
     if (externalManager) {
       setEscalationView('claim');
-      setFilter(f => ({
-        ...f,
-        searchText: item?.claimId || '',
-        page: 1
-      }));
-      setView('escalations');
+      applyDrilldownFilters({ searchText: item?.claimId || '' });
+      setView('escalations', { preserveFilters: true });
     }
   }
 
@@ -1312,11 +1298,13 @@ export default function App() {
           {message.type === 'danger' && message.correlationId && <small>Error ID: {message.correlationId}</small>}
         </div>}
         {loading && <div className="loading-line" />}
-        {view === 'dashboard' && <DashboardPage data={dashboard} user={user} labName={labName} onKpiClick={(next = {}) => {
+        {view === 'dashboard' && <DashboardPage data={{ ...dashboard, assignedClaims: (reviewerOnly ? myWorklistMenuCounts.assigned : claimMenuCounts.assigned) ?? dashboard.assignedClaims }} user={user} labName={labName} onKpiClick={(next = {}) => {
           const { taskView: nextTaskView, ...nextFilter } = next;
-          if (nextTaskView) setClaimTaskView(nextTaskView);
-          setFilter(f => ({ ...f, ...nextFilter, page: 1 }));
-          setView(reviewerOnly ? 'myworklist' : 'claims');
+          const targetQueue = normalizeQueueKey(nextTaskView || 'all');
+          applyDrilldownFilters(nextFilter);
+          if (reviewerOnly) setMyWorklistView(targetQueue === 'new' || targetQueue === 'unassigned' ? 'assigned' : targetQueue);
+          else setClaimTaskView(targetQueue);
+          setView(reviewerOnly ? 'myworklist' : 'claims', { preserveFilters: true });
         }} />}
         {view === 'aging' && <AgingDashboardPage data={agingDashboard} filter={filter} setFilterValue={setFilterValue} clearFilter={clearFilter} reviewers={reviewers} options={filterOptions} onCellClick={({ pivot, row, bucket }) => {
           const next = { page: 1 };
@@ -1324,15 +1312,16 @@ export default function App() {
           if (pivot === 'classification') next.denialClassification = row?.name || '';
           if (pivot === 'action') next.actionCategory = row?.name || '';
           if (pivot === 'panel') next.panelName = row?.name || '';
-          setFilter(f => ({ ...f, ...next }));
-          setClaimTaskView('new');
-          setView(reviewerOnly ? 'myworklist' : 'claims');
+          applyDrilldownFilters(next);
+          if (reviewerOnly) setMyWorklistView('assigned');
+          else setClaimTaskView('all');
+          setView(reviewerOnly ? 'myworklist' : 'claims', { preserveFilters: true });
           setMessage({ type: 'info', text: `Showing claims for ${row?.name || 'selected group'} / ${bucket?.label || 'aging bucket'}.` });
         }} />}
         {view === 'summary' && <DenialSummaryPage data={dashboard} canAssign={canAssign} onClassificationClick={openClaimsByClassification} onActionCategoryClick={openClaimsByActionCategory} onAssign={() => { setClaimTaskView('new'); setView(reviewerOnly ? 'myworklist' : 'claims'); setMessage({ type: 'info', text: canAssign ? 'Select the required claim rows, choose reviewer, then assign.' : 'This role has read-only workflow access.' }); }} />}
         {view === 'claims' && <ClaimAssignmentPage data={claims} loading={loading} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} canAssign={canAssign} readOnlyWorkflow={readOnlyWorkflow} taskView={claimTaskView} setTaskView={handleClaimTaskViewChange} tabCounts={claimMenuCounts} openEscalationResponse={() => handleClaimTabRoute('response')} openVerification={() => handleClaimTabRoute('verification')} setMessage={setWorkflowMessage} onDownloadTab={() => startClaimExport({ currentTab: true })} onDownloadTemplate={() => startClaimExport({ currentTab: true, uploadTemplate: true })} onCsvUploaded={async () => { setClaimTasks({}); setExpandedClaim(''); setClaims(await denialWorkflowService.getClaims({ ...query, taskView: claimTaskView })); await refreshMenuCounts(); }} exportBusy={exportBusy} exportStatusText={exportStatusText()} />}
         {view === 'verification' && <VerificationPage data={verification} changePage={changePage} tabCounts={claimMenuCounts} onTabChange={handleClaimTabRoute} reviewers={reviewers} canAssign={canAssign} assignClaims={assignClaims} />}
-        {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setWorkflowMessage} onSaved={() => { refreshReviewerNotification(); refreshWorkflowNotifications(); }} taskView={myWorklistView} setTaskView={handleMyWorklistViewChange} tabCounts={myWorklistMenuCounts} onExportQueryChange={setMyWorklistExportQuery} onDownloadTab={(exportQuery, tab) => startClaimExport({ currentTab: true, queryOverride: exportQuery, tabKey: tab?.key || myWorklistView, tabLabel: tab?.label || '' })} onDownloadTemplate={(exportQuery, tab) => startClaimExport({ currentTab: true, uploadTemplate: true, queryOverride: exportQuery, tabKey: tab?.key || myWorklistView, tabLabel: tab?.label || '' })} exportBusy={exportBusy} exportStatusText={exportStatusText()} canDownloadWorkflow={canDownloadWorkflow} />}
+        {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setWorkflowMessage} onSaved={() => { refreshMenuCounts(); refreshReviewerNotification(); refreshWorkflowNotifications(); }} taskView={myWorklistView} setTaskView={handleMyWorklistViewChange} tabCounts={myWorklistMenuCounts} onExportQueryChange={setMyWorklistExportQuery} onDownloadTab={(exportQuery, tab) => startClaimExport({ currentTab: true, queryOverride: exportQuery, tabKey: tab?.key || myWorklistView, tabLabel: tab?.label || '' })} onDownloadTemplate={(exportQuery, tab) => startClaimExport({ currentTab: true, uploadTemplate: true, queryOverride: exportQuery, tabKey: tab?.key || myWorklistView, tabLabel: tab?.label || '' })} exportBusy={exportBusy} exportStatusText={exportStatusText()} canDownloadWorkflow={canDownloadWorkflow} />}
         {view === 'escalations' && <EscalationQueuePage labId={labId} user={user} reviewers={reviewers} taskView={escalationView === 'response' ? 'claim' : escalationView} responseOnly={escalationView === 'response'} setTaskView={setEscalationView} tabCounts={claimMenuCounts} onClaimTabChange={handleClaimTabRoute} canAssign={canAssign} assignClaims={assignClaims} setMessage={setWorkflowMessage} />}
         {view === 'denialcodemaster' && arManagerOnly && <DenialCodeMasterPage labId={labId} setMessage={setWorkflowMessage} initialPushAuditId={mapperReviewAuditId} onPushConfirmed={()=>{setMapperNotification(null);setMapperReviewAuditId(null);}} onReviewActionChanges={(batchId) => { setActionVerificationBatchId(batchId || ''); setView('denialactionverification'); }} />}
         {view === 'denialmapper' && denialMapperRole && <DenialMapperPage user={user} labs={labs} labId={labId} setLabId={setLabId} setMessage={setWorkflowMessage} screen={denialMapperView} onScreenChange={setDenialMapperView} />}

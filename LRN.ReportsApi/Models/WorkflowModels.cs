@@ -508,6 +508,7 @@ public sealed class ClaimLevelRow
     public DateTime? DateOfService { get; set; }
     public DateTime? CreatedOn { get; set; }
     public string AssignedTo { get; set; } = string.Empty;
+    public DateTime? AssignedOn { get; set; }
     public string Status { get; set; } = string.Empty;
     public string ClaimStatus { get; set; } = string.Empty;
     public string WorkflowStatus { get; set; } = string.Empty;

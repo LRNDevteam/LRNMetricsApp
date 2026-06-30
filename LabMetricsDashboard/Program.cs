@@ -24,6 +24,15 @@ var builder = WebApplication.CreateBuilder(args);
 
 const string DenialWorkflowLocalDevCorsPolicy = "DenialWorkflowLocalDevCors";
 
+// Windows Event Log requires elevated access on some developer machines. Keep local
+// startup independent of that external service while retaining normal production logging.
+if (builder.Environment.IsDevelopment())
+{
+	builder.Logging.ClearProviders();
+	builder.Logging.AddConsole();
+	builder.Logging.AddDebug();
+}
+
 // Local React/Vite runs on https://localhost:5173 and calls MVC through the
 // project or IIS Express HTTPS ports (44350/44351/57996).
 // For fetch(..., credentials: "include") the auth cookie must be SameSite=None and Secure.
@@ -34,7 +43,9 @@ var useWorkflowCrossOriginCookie = builder.Environment.IsDevelopment()
 // Writes Warning+ logs (DB errors, crashes) to rolling daily text files.
 var fileLogSection = builder.Configuration.GetSection("Logging:File");
 
-var configuredLogDir = fileLogSection["LogDirectory"];
+var configuredLogDir = builder.Environment.IsDevelopment()
+	? Path.Combine(AppContext.BaseDirectory, "Logs")
+	: fileLogSection["LogDirectory"];
 var resolvedLogDir = string.IsNullOrWhiteSpace(configuredLogDir)
 	? Path.Combine(AppContext.BaseDirectory, "Logs")
 	: (Path.IsPathRooted(configuredLogDir)
