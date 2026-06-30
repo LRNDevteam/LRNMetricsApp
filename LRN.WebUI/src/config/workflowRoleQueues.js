@@ -22,7 +22,7 @@ export const workflowQueueConfig = {
   arManager: [
     { key: 'new', label: 'New', filters: commonManagerFilters },
     { key: 'unassigned', label: 'Unassigned', filters: [...commonManagerFilters, 'balanceBucket'] },
-    { key: 'assigned', label: 'Assigned', filters: commonManagerFilters },
+    { key: 'assigned', label: 'Assigned', filters: commonManagerFilters.filter(x => x !== 'reviewer') },
     { key: 'payerFollowup', label: 'Payer Followup', filters: commonManagerFilters },
     { key: 'pendingDocumentation', label: 'Pending Documentation', filters: [...commonManagerFilters, 'documentationType', 'reviewer', 'expectedResponseBy'] },
     { key: 'internalEscalation', label: 'Internal Escalation', filters: [...commonManagerFilters, 'documentationType', 'escalationReason'] },

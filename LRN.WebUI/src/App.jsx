@@ -229,7 +229,8 @@ export default function App() {
       denialClassifications: toStrings(fromMaybeDelimitedString(source.denialClassifications ?? source.DenialClassifications), ['denialClassification', 'DenialClassification', 'classification', 'Classification', 'name', 'Name']),
       clinics: toStrings(fromMaybeDelimitedString(source.clinics ?? source.Clinics), ['clinic', 'Clinic', 'clinicName', 'ClinicName', 'name', 'Name']),
       salesReps: toStrings(fromMaybeDelimitedString(source.salesReps ?? source.SalesReps), ['salesRepname', 'SalesRepname', 'salesRep', 'SalesRep', 'name', 'Name']),
-      referringProviders: toStrings(fromMaybeDelimitedString(source.referringProviders ?? source.ReferringProviders), ['referringProvider', 'ReferringProvider', 'providerName', 'ProviderName', 'name', 'Name'])
+      referringProviders: toStrings(fromMaybeDelimitedString(source.referringProviders ?? source.ReferringProviders), ['referringProvider', 'ReferringProvider', 'providerName', 'ProviderName', 'name', 'Name']),
+      assignedUsers: toStrings(fromMaybeDelimitedString(source.assignedUsers ?? source.AssignedUsers), ['userName', 'UserName', 'assignedTo', 'AssignedTo', 'name', 'Name'])
     };
   }
 
@@ -421,6 +422,8 @@ export default function App() {
     status: filterValue(debouncedFilter.status),
     reviewer: reviewerOnly ? (user.userName || '') : filterValue(debouncedFilter.reviewer),
     assignedTo: reviewerOnly ? (user.userName || '') : filterValue(debouncedFilter.reviewer),
+    assignedUserId: filterValue(debouncedFilter.assignedUserId),
+    assignedDuration: filterValue(debouncedFilter.assignedDuration),
     actionCategory: filterValue(debouncedFilter.actionCategory),
     priority: filterValue(debouncedFilter.priority),
     denialCode: filterValue(debouncedFilter.denialCode),
@@ -452,6 +455,8 @@ export default function App() {
     userName: user.userName,
     reviewer: reviewerOnly ? (user.userName || '') : filterValue(debouncedFilter.reviewer),
     assignedTo: reviewerOnly ? (user.userName || '') : filterValue(debouncedFilter.reviewer),
+    assignedUserId: filterValue(debouncedFilter.assignedUserId),
+    assignedDuration: filterValue(debouncedFilter.assignedDuration),
     actionCategory: filterValue(debouncedFilter.actionCategory),
     priority: filterValue(debouncedFilter.priority),
     denialCode: filterValue(debouncedFilter.denialCode),
@@ -531,6 +536,17 @@ export default function App() {
     return new Set((items || []).map(item => item.claimId).filter(Boolean)).size;
   }
 
+  function normalizeFollowUpNotificationItems(rows) {
+    return (rows || []).map(row => ({
+      claimId: row.claimId || row.ClaimId || '', taskId: row.taskId || row.TaskId || '',
+      cptCode: row.cptCode || row.CptCode || '', payerName: row.payerName || row.PayerName || '',
+      status: 'Follow-up due tomorrow', assignedTo: row.assignedTo || row.AssignedTo || '',
+      actionCategory: row.lastAction || row.LastAction || row.actionCode || row.ActionCode || 'Follow-up',
+      followUpDate: row.followUpDate || row.FollowUpDate || '', followUpReason: row.followUpReason || row.FollowUpReason || '',
+      slaStatus: row.cptCode || row.CptCode ? `CPT ${row.cptCode || row.CptCode}` : ''
+    })).filter(item => item.claimId);
+  }
+
   function distinctSectionClaimCount(sections) {
     return distinctClaimCount((sections || []).flatMap(section => section.items || []));
   }
@@ -571,19 +587,22 @@ export default function App() {
           page: 1,
           pageSize: 50
         };
-        const [assigned, pending, actionRequired, escalations, responses] = await Promise.all([
+        const [assigned, pending, actionRequired, escalations, responses, followUps] = await Promise.all([
           denialWorkflowService.getTasks({ ...baseQuery, taskView: 'assigned' }),
           denialWorkflowService.getTasks({ ...baseQuery, taskView: 'open' }),
           denialWorkflowService.getTasks({ ...baseQuery, status: 'Pending Review' }),
           denialWorkflowService.getTasks({ ...baseQuery, taskView: 'escalations' }),
-          denialWorkflowService.getTasks({ ...baseQuery, taskView: 'response' })
+          denialWorkflowService.getTasks({ ...baseQuery, taskView: 'response' }),
+          denialWorkflowService.getFollowUpNotifications(labId)
         ]);
         const assignedItems = normalizeNotificationItems(assigned);
         const pendingItems = normalizeNotificationItems(pending);
         const actionRequiredItems = normalizeNotificationItems(actionRequired);
         const escalationItems = normalizeNotificationItems(escalations);
         const responseItems = normalizeNotificationItems(responses);
+        const followUpItems = normalizeFollowUpNotificationItems(followUps);
         sections = [
+          { key: 'follow-up', label: 'Follow-ups due tomorrow', count: distinctClaimCount(followUpItems), items: followUpItems, targetView: 'all' },
           { key: 'assigned', label: 'Assigned claims', count: distinctClaimCount(assignedItems), items: assignedItems, targetView: 'assigned' },
           { key: 'pending', label: 'Pending claims', count: distinctClaimCount(pendingItems), items: pendingItems, targetView: 'open' },
           { key: 'action', label: 'Action required claims', count: distinctClaimCount(actionRequiredItems), items: actionRequiredItems, targetView: 'open', status: 'Pending Review' },
@@ -1319,7 +1338,7 @@ export default function App() {
           setMessage({ type: 'info', text: `Showing claims for ${row?.name || 'selected group'} / ${bucket?.label || 'aging bucket'}.` });
         }} />}
         {view === 'summary' && <DenialSummaryPage data={dashboard} canAssign={canAssign} onClassificationClick={openClaimsByClassification} onActionCategoryClick={openClaimsByActionCategory} onAssign={() => { setClaimTaskView('new'); setView(reviewerOnly ? 'myworklist' : 'claims'); setMessage({ type: 'info', text: canAssign ? 'Select the required claim rows, choose reviewer, then assign.' : 'This role has read-only workflow access.' }); }} />}
-        {view === 'claims' && <ClaimAssignmentPage data={claims} loading={loading} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} canAssign={canAssign} readOnlyWorkflow={readOnlyWorkflow} taskView={claimTaskView} setTaskView={handleClaimTaskViewChange} tabCounts={claimMenuCounts} openEscalationResponse={() => handleClaimTabRoute('response')} openVerification={() => handleClaimTabRoute('verification')} setMessage={setWorkflowMessage} onDownloadTab={() => startClaimExport({ currentTab: true })} onDownloadTemplate={() => startClaimExport({ currentTab: true, uploadTemplate: true })} onCsvUploaded={async () => { setClaimTasks({}); setExpandedClaim(''); setClaims(await denialWorkflowService.getClaims({ ...query, taskView: claimTaskView })); await refreshMenuCounts(); }} exportBusy={exportBusy} exportStatusText={exportStatusText()} />}
+        {view === 'claims' && <ClaimAssignmentPage data={claims} loading={loading} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} canAssign={canAssign} readOnlyWorkflow={readOnlyWorkflow} taskView={claimTaskView} setTaskView={handleClaimTaskViewChange} tabCounts={claimMenuCounts} openEscalationResponse={() => handleClaimTabRoute('response')} openVerification={() => handleClaimTabRoute('verification')} setMessage={setWorkflowMessage} onDownloadTab={() => startClaimExport({ currentTab: true })} onDownloadTemplate={() => startClaimExport({ currentTab: true, uploadTemplate: true })} onCsvUploaded={async () => { setClaimTasks({}); setExpandedClaim(''); setClaims(await denialWorkflowService.getClaims({ ...query, taskView: claimTaskView })); await refreshMenuCounts(); }} exportBusy={exportBusy} exportStatusText={exportStatusText()} filter={filter} setFilterValue={setFilterValue} assignedUsers={filterOptions.assignedUsers || []} />}
         {view === 'verification' && <VerificationPage data={verification} changePage={changePage} tabCounts={claimMenuCounts} onTabChange={handleClaimTabRoute} reviewers={reviewers} canAssign={canAssign} assignClaims={assignClaims} />}
         {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setWorkflowMessage} onSaved={() => { refreshMenuCounts(); refreshReviewerNotification(); refreshWorkflowNotifications(); }} taskView={myWorklistView} setTaskView={handleMyWorklistViewChange} tabCounts={myWorklistMenuCounts} onExportQueryChange={setMyWorklistExportQuery} onDownloadTab={(exportQuery, tab) => startClaimExport({ currentTab: true, queryOverride: exportQuery, tabKey: tab?.key || myWorklistView, tabLabel: tab?.label || '' })} onDownloadTemplate={(exportQuery, tab) => startClaimExport({ currentTab: true, uploadTemplate: true, queryOverride: exportQuery, tabKey: tab?.key || myWorklistView, tabLabel: tab?.label || '' })} exportBusy={exportBusy} exportStatusText={exportStatusText()} canDownloadWorkflow={canDownloadWorkflow} />}
         {view === 'escalations' && <EscalationQueuePage labId={labId} user={user} reviewers={reviewers} taskView={escalationView === 'response' ? 'claim' : escalationView} responseOnly={escalationView === 'response'} setTaskView={setEscalationView} tabCounts={claimMenuCounts} onClaimTabChange={handleClaimTabRoute} canAssign={canAssign} assignClaims={assignClaims} setMessage={setWorkflowMessage} />}

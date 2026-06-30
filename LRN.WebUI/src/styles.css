@@ -1255,19 +1255,21 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .claim-action-scroll-rail{height:16px;overflow-x:auto;overflow-y:hidden;padding:0 0 6px;border-bottom:1px solid #d8e0ea;background:#fff}
 .claim-action-scroll-rail>div{height:1px}
 .claim-action-scroll-rail::-webkit-scrollbar{height:12px}
-.claim-action-table-wrap{--claim-sticky-cpt-width:104px;--claim-sticky-denial-width:112px;overflow:auto;max-height:clamp(280px,42vh,430px);padding:0 0 10px;overscroll-behavior:contain;scrollbar-gutter:stable;background:#fff;isolation:isolate}
+.claim-action-table-wrap{--claim-sticky-cpt-width:104px;--claim-sticky-denial-width:112px;overflow:auto;max-height:clamp(280px,42vh,430px);padding:0;overscroll-behavior:contain;scrollbar-gutter:stable;background:#fff;isolation:isolate;border:1px solid #d8e0ea;border-radius:10px}
 .claim-action-table-wrap:focus{outline:2px solid rgba(26,188,156,.28);outline-offset:-2px}
-.claim-action-table{width:100%;min-width:980px;border-collapse:separate;border-spacing:0;border:1px solid #d8e0ea;border-radius:10px;overflow:hidden;font-size:12px}
+.claim-action-table{width:100%;min-width:980px;border-collapse:separate;border-spacing:0;font-size:12px}
 .claim-action-table.full-line-table{min-width:2600px;font-size:11px}
-.claim-action-table th{position:sticky;top:0;background:#f8fafc;color:#475569;text-transform:uppercase;font-size:10px;letter-spacing:.03em;padding:10px;border-bottom:1px solid #d8e0ea;text-align:left;white-space:nowrap;box-shadow:inset 0 -1px 0 #d8e0ea;z-index:4}
+.claim-action-table th{position:sticky;top:0;background:#f8fafc;color:#475569;text-transform:uppercase;font-size:10px;letter-spacing:.03em;padding:10px;border-bottom:1.5px solid #bfcfe0;text-align:left;white-space:nowrap;box-shadow:0 2px 4px rgba(15,23,42,.06);z-index:6}
 .claim-action-table td{padding:10px;border-bottom:1px solid #edf2f7;vertical-align:middle;color:#172033}.claim-action-table tr:last-child td{border-bottom:0}.claim-action-table tr.dim{opacity:.62;background:#f8fafc}
 .claim-action-table .sticky-cpt,.claim-action-table .sticky-denial{position:sticky;background:#fff;background-clip:padding-box}
-.claim-action-table .sticky-cpt{left:0;min-width:var(--claim-sticky-cpt-width);width:var(--claim-sticky-cpt-width);z-index:2}
-.claim-action-table .sticky-denial{left:var(--claim-sticky-cpt-width);min-width:var(--claim-sticky-denial-width);width:var(--claim-sticky-denial-width);z-index:3;box-shadow:6px 0 10px -8px #334155}
-.claim-action-table th.sticky-cpt,.claim-action-table th.sticky-denial{position:sticky;top:0;z-index:8;background:#f8fafc}
+.claim-action-table .sticky-cpt{left:0;min-width:var(--claim-sticky-cpt-width);width:var(--claim-sticky-cpt-width);z-index:4}
+.claim-action-table .sticky-denial{left:var(--claim-sticky-cpt-width);min-width:var(--claim-sticky-denial-width);width:var(--claim-sticky-denial-width);z-index:5;box-shadow:4px 0 8px -3px rgba(15,23,42,.18)}
+.claim-action-table th.sticky-cpt,.claim-action-table th.sticky-denial{position:sticky;top:0;z-index:12;background:#f8fafc;border-bottom:1.5px solid #bfcfe0}
 .claim-action-table th.sticky-cpt{left:0}
 .claim-action-table th.sticky-denial{left:var(--claim-sticky-cpt-width)}
 .claim-action-table tr.dim .sticky-cpt,.claim-action-table tr.dim .sticky-denial{background:#f8fafc}
+.claim-split-shell .my-worklist-claim-drawer .claim-drawer-body{max-height:none!important;overflow:hidden!important}
+.my-worklist-claim-drawer .claim-action-table-wrap{max-height:clamp(320px,52vh,560px);overflow:auto}
 .claim-action-table td.recommended-action-cell{background:#ccfbf1;color:#0f766e;border-left:3px solid #14b8a6}
 .claim-action-table td.manager-response-cell{background:#f8fafc;color:#334155}
 .structured-note-field.recommended-action{background:#ccfbf1;border:1px solid #5eead4;border-radius:8px;padding:8px}
@@ -1356,6 +1358,10 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .claim-assign-bar2{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:.5px solid #e5e7eb;background:#fbfdff;font-size:11px;color:#475569;flex-wrap:wrap}
 .claim-assign-bar2 label{display:flex;align-items:center;gap:6px;margin:0}
 .claim-assign-bar2 select{height:28px;border:.5px solid #cbd5e1;border-radius:6px;padding:0 8px;font-size:11px;background:#fff}
+.claim-assigned-inline-filters{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:.5px solid #e5e7eb;background:#f8fafc;flex-wrap:wrap}
+.claim-inline-filter-item{display:flex;align-items:center;gap:6px;font-size:11px;color:#475569}
+.claim-inline-filter-item label{font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;margin:0}
+.claim-inline-filter-item select{height:28px;border:.5px solid #cbd5e1;border-radius:6px;padding:0 8px;font-size:11px;background:#fff;color:#334155;min-width:160px}
 .claim-list-head{display:grid;grid-template-columns:minmax(150px,1.3fr) minmax(120px,1fr) 94px 92px;gap:10px;padding:8px 14px;background:#f8fafc;border-bottom:.5px solid #e5e7eb;color:#64748b;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.06em}
 .claim-list-head-wide{grid-template-columns:auto auto minmax(150px,1.2fr) minmax(90px,.7fr) minmax(150px,1.1fr) minmax(140px,1fr) minmax(100px,.75fr) minmax(120px,.8fr) minmax(92px,.65fr) 94px minmax(120px,.8fr) 100px 96px;min-width:1560px}
 .claim-rows-scroll{max-height:none;overflow:visible}

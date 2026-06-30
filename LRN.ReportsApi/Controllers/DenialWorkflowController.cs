@@ -239,25 +239,50 @@ public sealed class DenialWorkflowController : ControllerBase
 
         var errors = new List<string>();
         var actionableRows = rows
-            .Select((row, index) => new { Row = row, RowNumber = index + 2, ClaimId = CsvValue(row, "ClaimUID", "ClaimUid", "ClaimID", "ClaimId") })
+            .Select((row, index) => new
+            {
+                Row = row,
+                RowNumber = index + 2,
+                ClaimId = CsvValue(row, "ClaimUID", "ClaimUid", "ClaimID", "ClaimId"),
+                TaskId = CsvValue(row, "TaskID", "TaskId")
+            })
             .Where(x => CsvHasClaimAction(x.Row))
             .ToList();
         var skipped = rows.Count - actionableRows.Count;
-        var claimRows = new List<(int RowNumber, string ClaimId, Dictionary<string, string> Row)>();
-        foreach (var group in actionableRows.GroupBy(x => x.ClaimId, StringComparer.OrdinalIgnoreCase))
+
+        // Task-level template when any row has a TaskID column value
+        var isTaskLevel = actionableRows.Any(x => !string.IsNullOrWhiteSpace(x.TaskId));
+
+        var claimRows = new List<(int RowNumber, string ClaimId, string TaskId, Dictionary<string, string> Row)>();
+        if (isTaskLevel)
         {
-            if (string.IsNullOrWhiteSpace(group.Key))
+            foreach (var r in actionableRows)
             {
-                foreach (var missingClaimRow in group) AddCsvError(errors, missingClaimRow.RowNumber, "ClaimUID or ClaimID is required.");
-                continue;
+                if (string.IsNullOrWhiteSpace(r.ClaimId))
+                {
+                    AddCsvError(errors, r.RowNumber, "ClaimUID or ClaimID is required.");
+                    continue;
+                }
+                claimRows.Add((r.RowNumber, r.ClaimId, r.TaskId, r.Row));
             }
-            if (group.Count() > 1)
+        }
+        else
+        {
+            foreach (var group in actionableRows.GroupBy(x => x.ClaimId, StringComparer.OrdinalIgnoreCase))
             {
-                AddCsvError(errors, group.First().RowNumber, $"Claim '{group.Key}' has updates on more than one CSV row. Enter claim-level values on only one row.");
-                continue;
+                if (string.IsNullOrWhiteSpace(group.Key))
+                {
+                    foreach (var missingClaimRow in group) AddCsvError(errors, missingClaimRow.RowNumber, "ClaimUID or ClaimID is required.");
+                    continue;
+                }
+                if (group.Count() > 1)
+                {
+                    AddCsvError(errors, group.First().RowNumber, $"Claim '{group.Key}' has updates on more than one CSV row. Enter claim-level values on only one row.");
+                    continue;
+                }
+                var claimRow = group.Single();
+                claimRows.Add((claimRow.RowNumber, claimRow.ClaimId, string.Empty, claimRow.Row));
             }
-            var claimRow = group.Single();
-            claimRows.Add((claimRow.RowNumber, claimRow.ClaimId, claimRow.Row));
         }
 
         var updatedTasks = 0;
@@ -267,10 +292,18 @@ public sealed class DenialWorkflowController : ControllerBase
         var processedRows = 0;
         foreach (var item in claimRows)
         {
-            var claimTasks = await _service.GetTasksByClaimAsync(labId, item.ClaimId, ct);
-            if (claimTasks.Count == 0)
+            var allClaimTasks = await _service.GetTasksByClaimAsync(labId, item.ClaimId, ct);
+            if (allClaimTasks.Count == 0)
             {
                 AddCsvError(errors, item.RowNumber, $"Claim '{item.ClaimId}' was not found.");
+                continue;
+            }
+            var claimTasks = !string.IsNullOrWhiteSpace(item.TaskId)
+                ? allClaimTasks.Where(x => string.Equals(x.TaskId?.Trim(), item.TaskId.Trim(), StringComparison.OrdinalIgnoreCase)).ToList()
+                : allClaimTasks;
+            if (claimTasks.Count == 0)
+            {
+                AddCsvError(errors, item.RowNumber, $"Task '{item.TaskId}' was not found for claim '{item.ClaimId}'.");
                 continue;
             }
             if (reviewerOnly && claimTasks.Any(x => !string.Equals(x.AssignedTo?.Trim(), userName.Trim(), StringComparison.OrdinalIgnoreCase)))
@@ -282,6 +315,7 @@ public sealed class DenialWorkflowController : ControllerBase
             var updateStatusRaw = CsvValue(item.Row, "UpdateStatus", "NewStatus");
             var updateStatus = string.IsNullOrWhiteSpace(updateStatusRaw) ? string.Empty : NormalizeWorkflowStatus(updateStatusRaw);
             var comments = CsvValue(item.Row, "Comments", "ReviewerComments", "Comment");
+            var notes = CsvValue(item.Row, "Notes");
             var escalationReason = CsvValue(item.Row, "EscalationReason");
             var otherEscalationReason = CsvValue(item.Row, "OtherEscalationReason");
             var escalationComment = CsvValue(item.Row, "EscalationComment");
@@ -297,6 +331,20 @@ public sealed class DenialWorkflowController : ControllerBase
                 continue;
             }
 
+            // Save standalone Notes column if provided (task-level template)
+            if (!string.IsNullOrWhiteSpace(notes) && string.IsNullOrWhiteSpace(comments) && !hasReviewerEscalation && !hasManagerResponse)
+            {
+                var noteTask = claimTasks[0];
+                await _service.SaveNoteAsync(new SaveDenialNoteRequest
+                {
+                    LabId = labId, ClaimId = item.ClaimId,
+                    NoteLevel = !string.IsNullOrWhiteSpace(item.TaskId) ? "Task" : "Claim",
+                    NoteText = notes, Status = NormalizeWorkflowStatus(noteTask.Status), CreatedBy = userName
+                }, ct);
+                addedComments++;
+                rowChanged = true;
+            }
+
             if (!string.IsNullOrWhiteSpace(updateStatus))
             {
                 if (string.IsNullOrWhiteSpace(comments))
@@ -304,6 +352,7 @@ public sealed class DenialWorkflowController : ControllerBase
                     AddCsvError(errors, item.RowNumber, "Comments are required when UpdateStatus is provided.");
                     continue;
                 }
+                var noteLevel = !string.IsNullOrWhiteSpace(item.TaskId) ? "Task" : "Claim";
                 var template = new UpdateTaskRequest
                 {
                     LabId = labId, Status = updateStatus, Comments = comments, ActionBy = userName,
@@ -324,7 +373,7 @@ public sealed class DenialWorkflowController : ControllerBase
                 }
                 await _service.SaveNoteAsync(new SaveDenialNoteRequest
                 {
-                    LabId = labId, ClaimId = item.ClaimId, NoteLevel = "Claim", NoteText = comments,
+                    LabId = labId, ClaimId = item.ClaimId, NoteLevel = noteLevel, NoteText = comments,
                     Status = updateStatus, NextFollowUpDate = template.ExpectedResponseDate, CreatedBy = userName
                 }, ct);
                 addedComments++;
@@ -337,9 +386,10 @@ public sealed class DenialWorkflowController : ControllerBase
             }
             else if (!string.IsNullOrWhiteSpace(comments))
             {
+                var noteLevel = !string.IsNullOrWhiteSpace(item.TaskId) ? "Task" : "Claim";
                 await _service.SaveNoteAsync(new SaveDenialNoteRequest
                 {
-                    LabId = labId, ClaimId = item.ClaimId, NoteLevel = "Claim", NoteText = comments,
+                    LabId = labId, ClaimId = item.ClaimId, NoteLevel = noteLevel, NoteText = comments,
                     Status = NormalizeWorkflowStatus(claimTasks[0].Status), CreatedBy = userName
                 }, ct);
                 updatedTasks += await _service.UpdateClaimCommentsAsync(labId, item.ClaimId, comments, userName, ct);
@@ -552,10 +602,31 @@ public sealed class DenialWorkflowController : ControllerBase
         if (request.LabId <= 0) return BadRequest("LabId is required.");
         if (string.IsNullOrWhiteSpace(request.ClaimId)) return BadRequest("ClaimId is required.");
         if (string.IsNullOrWhiteSpace(request.NoteText)) return BadRequest("Note text is required.");
+        var normalizedStatus = NormalizeWorkflowStatus(request.Status);
+        if (request.ValidateWorkflowFields && normalizedStatus == "Payer Follow-up Required" && string.IsNullOrWhiteSpace(request.FollowUpReason))
+            return BadRequest(new { success = false, message = "Follow-up reason is required." });
+        if (request.ValidateWorkflowFields && (normalizedStatus is "Payer Follow-up Required" or "Pending Payer Response" or "Pending Documentation") && request.NextFollowUpDate is null)
+            return BadRequest(new { success = false, message = "Expected response date is required." });
+        if (request.ValidateWorkflowFields && normalizedStatus == "Pending Payer Response" && request.ActionCompleted != true)
+            return BadRequest(new { success = false, message = "Action completed must be confirmed." });
+        if (request.ValidateWorkflowFields && normalizedStatus == "Pending Documentation" && string.IsNullOrWhiteSpace(request.DocumentationType))
+            return BadRequest(new { success = false, message = "Documentation type is required." });
+        if (request.ValidateWorkflowFields && normalizedStatus == "Write-Off Pending Approval" && string.IsNullOrWhiteSpace(request.ActualOutcome))
+            return BadRequest(new { success = false, message = "Actual outcome is required for write-off approval." });
         if (IsClientManagerRole(role) && !await HasClientInfoPendingEscalationAsync(request.LabId, request.ClaimId, request.TaskId, request.CptCode, ct))
             return StatusCode(StatusCodes.Status403Forbidden, new { message = "Client Manager can update comments only for Client Info Pending escalations." });
         request.CreatedBy = string.IsNullOrWhiteSpace(request.CreatedBy) ? (FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "ReactWorkflow") : request.CreatedBy;
         return Ok(await _service.SaveNoteAsync(request, ct));
+    }
+
+    [HttpGet("follow-up-notifications")]
+    public async Task<ActionResult<IReadOnlyList<FollowUpNotificationRow>>> FollowUpNotifications([FromQuery] int labId, CancellationToken ct)
+    {
+        var role = FirstClaim(ClaimTypes.Role, "role", "roles");
+        var userName = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? string.Empty;
+        if (labId <= 0) return BadRequest("LabId is required.");
+        if (!IsReviewerOnly(role)) return Ok(Array.Empty<FollowUpNotificationRow>());
+        return Ok(await _service.GetFollowUpNotificationsAsync(labId, userName, ct));
     }
 
     [HttpGet("claim-documents")]

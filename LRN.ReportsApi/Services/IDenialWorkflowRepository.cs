@@ -34,6 +34,7 @@ public interface IDenialWorkflowRepository
     Task EnsureClaimSupportTablesAsync(int labId, CancellationToken ct);
     Task<IReadOnlyList<DenialNoteRow>> GetNotesAsync(int labId, string claimId, string? taskId, string? cptCode, string noteLevel, CancellationToken ct);
     Task<DenialNoteRow> SaveNoteAsync(SaveDenialNoteRequest request, CancellationToken ct);
+    Task<IReadOnlyList<FollowUpNotificationRow>> GetFollowUpNotificationsAsync(int labId, string userName, CancellationToken ct);
     Task<IReadOnlyList<ClaimDocumentRow>> GetClaimDocumentsAsync(int labId, string claimId, CancellationToken ct);
     Task<ClaimDocumentRow?> GetClaimDocumentAsync(int labId, long documentId, CancellationToken ct);
     Task<ClaimDocumentRow> SaveClaimDocumentAsync(ClaimDocumentRow row, CancellationToken ct);

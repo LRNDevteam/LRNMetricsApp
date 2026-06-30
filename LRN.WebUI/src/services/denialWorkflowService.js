@@ -40,6 +40,7 @@ export const denialWorkflowService = {
   updateTask: (payload) => api('/update-task', { method: 'POST', body: JSON.stringify(payload) }),
   getNotes: (query) => api(`/notes?${qs(query)}`),
   saveNote: (payload) => api('/notes', { method: 'POST', body: JSON.stringify(payload) }),
+  getFollowUpNotifications: (labId) => api(`/follow-up-notifications?labId=${encodeURIComponent(labId)}`),
   getClaimDocuments: (labId, claimId) => api(`/claim-documents?labId=${encodeURIComponent(labId)}&claimId=${encodeURIComponent(claimId)}`),
   getClaimDocumentDownloadUrl: (labId, documentId) => apiUrl(`/claim-documents/${encodeURIComponent(documentId)}/download?labId=${encodeURIComponent(labId)}`),
   deleteClaimDocument: (labId, documentId) => api(`/claim-documents/${encodeURIComponent(documentId)}?labId=${encodeURIComponent(labId)}`, { method: 'DELETE' }),

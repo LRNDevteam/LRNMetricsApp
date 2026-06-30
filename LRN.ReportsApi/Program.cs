@@ -4,6 +4,7 @@ using LRN.ReportsApi.Security;
 using System.Security.Claims;
 using System.IO.Compression;
 using Microsoft.AspNetCore.ResponseCompression;
+using Microsoft.Data.SqlClient;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -141,6 +142,15 @@ app.Use(async (context, next) =>
     {
         // The caller disconnected or deliberately superseded the request. This is not an
         // application incident and must not generate an error file or Teams notification.
+        return;
+    }
+    catch (SqlException ex) when (
+        context.RequestAborted.IsCancellationRequested &&
+        ex.Message.Contains("Operation cancelled by user", StringComparison.OrdinalIgnoreCase))
+    {
+        // SqlClient can report cancellation of ExecuteReaderAsync as a SqlException instead
+        // of OperationCanceledException after it has sent ATTENTION to SQL Server. React
+        // intentionally aborts stale workflow loads, so this is also a normal disconnect.
         return;
     }
     catch (UnauthorizedAccessException ex)

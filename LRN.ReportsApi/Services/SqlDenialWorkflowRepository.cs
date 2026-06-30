@@ -19,6 +19,9 @@ public sealed class SqlDenialWorkflowRepository : IDenialWorkflowRepository
     private static readonly TimeSpan ClaimCountsCacheDuration = TimeSpan.FromSeconds(60);
     private static readonly ConcurrentDictionary<int, byte> ClaimSupportSchemaReady = new();
     private static readonly ConcurrentDictionary<int, SemaphoreSlim> ClaimSupportSchemaLocks = new();
+    // Guards EnsureDenialTaskBoardNormalizedClaimIdAsync — runs DDL once per database per process lifetime
+    private static readonly ConcurrentDictionary<string, byte> TaskBoardSchemaReady = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> TaskBoardSchemaLocks = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly IConfiguration _configuration;
     private readonly string _masterConnectionString;
@@ -59,6 +62,14 @@ public sealed class SqlDenialWorkflowRepository : IDenialWorkflowRepository
 
     private static async Task EnsureDenialTaskBoardNormalizedClaimIdAsync(SqlConnection con, CancellationToken ct)
     {
+        // Run DDL only once per database per process lifetime — concurrent callers skip after the first succeeds.
+        var dbKey = con.Database ?? string.Empty;
+        if (TaskBoardSchemaReady.ContainsKey(dbKey)) return;
+        var gate = TaskBoardSchemaLocks.GetOrAdd(dbKey, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
+        try
+        {
+            if (TaskBoardSchemaReady.ContainsKey(dbKey)) return;
         // Keep this runtime schema helper idempotent. Some SQL Server databases can have
         // auto/user statistics with the same name as the index we want to create. Checking
         // only sys.indexes causes error 1913: "index or statistics with name already exists".
@@ -69,6 +80,21 @@ IF OBJECT_ID('dbo.DenialTaskBoard','U') IS NOT NULL
 BEGIN
     IF COL_LENGTH('dbo.DenialTaskBoard','WorkFlowStatus') IS NULL
         ALTER TABLE dbo.DenialTaskBoard ADD WorkFlowStatus nvarchar(100) NULL;
+
+    IF COL_LENGTH('dbo.DenialTaskBoard','AssignedOn') IS NULL
+        ALTER TABLE dbo.DenialTaskBoard ADD AssignedOn datetime2 NULL;
+
+    -- SQL Server compiles an entire batch before executing ALTER TABLE. Compile
+    -- AssignedOn-dependent statements only after the column has been created.
+    EXEC sys.sp_executesql N'
+        UPDATE dbo.DenialTaskBoard
+        SET AssignedOn=COALESCE(ReviewerUpdatedOn,CreatedOn,SYSDATETIME())
+        WHERE NULLIF(LTRIM(RTRIM(ISNULL(AssignedTo,''''))),'''') IS NOT NULL
+          AND AssignedOn IS NULL;';
+
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_DenialTaskBoard_AssignedOn' AND object_id=OBJECT_ID('dbo.DenialTaskBoard'))
+       AND NOT EXISTS (SELECT 1 FROM sys.stats WHERE name='IX_DenialTaskBoard_AssignedOn' AND object_id=OBJECT_ID('dbo.DenialTaskBoard'))
+        EXEC sys.sp_executesql N'CREATE NONCLUSTERED INDEX IX_DenialTaskBoard_AssignedOn ON dbo.DenialTaskBoard(AssignedOn,AssignedTo) INCLUDE(ClaimID,TaskID,CPTCode,Status);';
 
     IF COL_LENGTH('dbo.DenialTaskBoard','ClaimIDNormalized') IS NULL
     BEGIN
@@ -238,6 +264,12 @@ BEGIN
 END;";
         await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 180 };
         await cmd.ExecuteNonQueryAsync(ct);
+        TaskBoardSchemaReady.TryAdd(dbKey, 0);
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
 
@@ -1077,6 +1109,17 @@ FROM (
       AND NULLIF(LTRIM(RTRIM(ISNULL(ReferringProvider,''))),'') IS NOT NULL
     GROUP BY LTRIM(RTRIM(ISNULL(ReferringProvider,'')))
 ) x
+ORDER BY Value;
+
+-- Only users that currently own at least one task are offered by Assigned User.
+SELECT TOP (500) Value
+FROM (
+    SELECT Value = LTRIM(RTRIM(ISNULL(AssignedTo,'')))
+    FROM dbo.DenialTaskBoard WITH (NOLOCK)
+    WHERE (@HasTaskLab=0 OR {LabScopeSql("LabId")})
+      AND NULLIF(LTRIM(RTRIM(ISNULL(AssignedTo,''))),'') IS NOT NULL
+    GROUP BY LTRIM(RTRIM(ISNULL(AssignedTo,'')))
+) x
 ORDER BY Value;";
         var result = new DenialWorkflowFilterOptions();
         await using var con = OpenLab(labId); await con.OpenAsync(ct);
@@ -1093,6 +1136,7 @@ ORDER BY Value;";
         await rd.NextResultAsync(ct); result.Clinics = await ReadStringListAsync(rd, ct);
         await rd.NextResultAsync(ct); result.SalesReps = await ReadStringListAsync(rd, ct);
         await rd.NextResultAsync(ct); result.ReferringProviders = await ReadStringListAsync(rd, ct);
+        await rd.NextResultAsync(ct); result.AssignedUsers = await ReadStringListAsync(rd, ct);
 
         FilterOptionsCache[labId] = new FilterOptionsCacheEntry(DateTime.UtcNow, result);
         return result;
@@ -1334,6 +1378,9 @@ SELECT VerificationPending = COUNT(1) FROM dbo.DenialVerificationTask WHERE {Lab
         var closedLabScope = LabScopeSql("dc.LabId");
         var normalizedStatusSql = NormalizedTaskStatusSql("t");
         var queueCaseSql = ClaimQueueCaseSql("r");
+        var assignedCountSql = NormalizeRoleToken(filter.Role).Contains("ARMANAGER")
+            ? "SUM(CASE WHEN ISNULL(tca.AssignedReviewerCount, 0) > 0 THEN 1 ELSE 0 END)"
+            : "SUM(CASE WHEN ISNULL(tca.[Status], '') = 'Assigned' THEN 1 ELSE 0 END)";
         var sql = $@"
 IF OBJECT_ID('tempdb..#TaskClaimAgg') IS NOT NULL DROP TABLE #TaskClaimAgg;
 IF OBJECT_ID('tempdb..#TaskClaimRaw') IS NOT NULL DROP TABLE #TaskClaimRaw;
@@ -1404,7 +1451,7 @@ SELECT
     TotalClaims = COUNT(1),
     [New] = SUM(CASE WHEN ISNULL(tca.[Status], 'New') = 'New' THEN 1 ELSE 0 END),
     Unassigned = SUM(CASE WHEN ISNULL(tca.[Status], '') = 'Unassigned' THEN 1 ELSE 0 END),
-    Assigned = SUM(CASE WHEN ISNULL(tca.[Status], '') = 'Assigned' THEN 1 ELSE 0 END),
+    Assigned = {assignedCountSql},
     PayerFollowup = SUM(CASE WHEN ISNULL(tca.[Status], '') = 'Payer Followup' THEN 1 ELSE 0 END),
     PendingDocumentation = SUM(CASE WHEN ISNULL(tca.[Status], '') = 'Pending Documentation' THEN 1 ELSE 0 END),
     PendingPayerResponse = SUM(CASE WHEN ISNULL(tca.[Status], '') = 'Pending Payer Response' THEN 1 ELSE 0 END),
@@ -1552,6 +1599,8 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
             Status = filter.Status,
             Reviewer = filter.Reviewer,
             AssignedTo = filter.AssignedTo,
+            AssignedUserId = filter.AssignedUserId,
+            AssignedDuration = filter.AssignedDuration,
             DenialCode = filter.DenialCode,
             PayerName = filter.PayerName,
             PanelName = filter.PanelName,
@@ -1579,7 +1628,9 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
         var normalizedStatusSql = NormalizedTaskStatusSql("t");
         var queueCaseSql = ClaimQueueCaseSql("r");
         var claimStatusCaseSql = ClaimStatusCaseSql("r");
-        var claimStatusWhere = ClaimQueueWhereSql(claimView);
+        var claimStatusWhere = claimView == "assigned" && NormalizeRoleToken(filter.Role).Contains("ARMANAGER")
+            ? "ISNULL(tca.AssignedReviewerCount, 0) > 0"
+            : ClaimQueueWhereSql(claimView);
 
         var sql = $@"
 IF OBJECT_ID('tempdb..#TaskClaimAgg') IS NOT NULL DROP TABLE #TaskClaimAgg;
@@ -1653,7 +1704,7 @@ SELECT
     TaskCount = COUNT(t.TaskID),
     MaxCreatedOn = MAX(t.CreatedOn),
     AssignedOn = MAX(CASE
-        WHEN NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))),'') IS NOT NULL THEN t.ReviewerUpdatedOn
+        WHEN NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))),'') IS NOT NULL THEN COALESCE(t.AssignedOn,t.ReviewerUpdatedOn,t.CreatedOn)
         ELSE NULL
     END),
     HasVerification = MAX(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) IN ('required review','verification pending') THEN 1 ELSE 0 END),
@@ -1890,7 +1941,15 @@ SELECT
     {CoalesceText("SLADays", IntTextExpr("SLADays"))},
     {CoalesceText("SLAStatus", TextExpr("SLAStatus"))},
     {CoalesceText("AssignedTo", TextExpr("AssignedTo"))},
-    {CoalesceDate("CreatedOn", DateExpr("CreatedOn"))}
+    {CoalesceDate("CreatedOn", DateExpr("CreatedOn"))},
+    CAST('' AS nvarchar(max)) AS [CCWICD10Code],
+    CAST('' AS nvarchar(max)) AS [BilledICDCodesNotAvailableInPayerPolicy],
+    CAST('' AS nvarchar(max)) AS [CoveredICD10CodesAsPerPayerPolicy],
+    CAST('' AS nvarchar(max)) AS [CoveredICD10CodesBilled],
+    CAST('' AS nvarchar(max)) AS [CoveredICDPresence],
+    CAST('' AS nvarchar(max)) AS [LISICD10Codes],
+    CAST('' AS nvarchar(max)) AS [NonCoveredICD10CodesAsPerPayerPolicy],
+    CAST('' AS nvarchar(max)) AS [NonCoveredICD10CodesBilled]
 FROM dbo.DenialTaskBoard t WITH (NOLOCK)
 WHERE {taskLabPredicate}
   AND NULLIF(LTRIM(RTRIM(ISNULL(t.ClaimID,''))),'') IS NOT NULL
@@ -2095,7 +2154,15 @@ SELECT
     EscalationNotes = ISNULL(escalations.EscalationNotes, ''),
     CombinedNotes = CONCAT_WS(CHAR(10) + CHAR(10), NULLIF(notes.ClaimNotes, ''), NULLIF(escalations.EscalationNotes, '')),
     DocumentComments = ISNULL(documents.DocumentComments, ''),
-    {CoalesceText("AssignedTo", TextExpr(taskColumns, "t", "AssignedTo"))}
+    {CoalesceText("AssignedTo", TextExpr(taskColumns, "t", "AssignedTo"))},
+    {CoalesceText("CCWICD10Code", TextExpr(lineColumns, "l", "CCWICD10Code"))},
+    {CoalesceText("BilledICDCodesNotAvailableInPayerPolicy", TextExpr(lineColumns, "l", "BilledICDCodesNotAvailableInPayerPolicy"))},
+    {CoalesceText("CoveredICD10CodesAsPerPayerPolicy", TextExpr(lineColumns, "l", "CoveredICD10CodesAsPerPayerPolicy"))},
+    {CoalesceText("CoveredICD10CodesBilled", TextExpr(lineColumns, "l", "CoveredICD10CodesBilled"))},
+    {CoalesceText("CoveredICDPresence", TextExpr(lineColumns, "l", "CoveredICDPresence"))},
+    {CoalesceText("LISICD10Codes", TextExpr(lineColumns, "l", "LISICD10Codes"))},
+    {CoalesceText("NonCoveredICD10CodesAsPerPayerPolicy", TextExpr(lineColumns, "l", "NonCoveredICD10CodesAsPerPayerPolicy"))},
+    {CoalesceText("NonCoveredICD10CodesBilled", TextExpr(lineColumns, "l", "NonCoveredICD10CodesBilled"))}
 FROM #ExportTasks t
 LEFT JOIN #LineOne l ON l.__ExportRowId = t.__ExportRowId AND l.__LineRank = 1
 LEFT JOIN #ClaimNotes notes ON notes.__ExportRowId = t.__ExportRowId
@@ -2234,9 +2301,16 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
         await EnsureDenialTaskBoardNormalizedClaimIdAsync(con, ct);
 
         var taskColumns = await GetColumnSetAsync(con, "dbo.DenialTaskBoard", ct);
+        var lineTableExists = await TableExistsAsync(con, "dbo.DenialLineItem", ct);
+        var lineColumns = lineTableExists
+            ? await GetColumnSetAsync(con, "dbo.DenialLineItem", ct)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         string TaskText(string column, string alias) => taskColumns.Contains(column)
             ? $"LTRIM(RTRIM(ISNULL(t.{column},''))) AS {alias}"
             : $"CAST('' AS nvarchar(255)) AS {alias}";
+        string LineText(string column) => lineColumns.Contains(column)
+            ? $"ISNULL(LTRIM(RTRIM(lx.[{column}])),'')"
+            : "CAST('' AS nvarchar(max))";
         var patientNameSelect = taskColumns.Contains("PatName")
             ? "LTRIM(RTRIM(ISNULL(t.PatName,''))) AS PatientName"
             : TaskText("PatientName", "PatientName");
@@ -2261,6 +2335,20 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
 				   OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) = @ClaimId
 				   OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) LIKE '%' + @ClaimId";
         var taskLabScope = LabScopeSql("t.LabId");
+        var taskClaimUidExpr = hasTaskClaimUid
+            ? "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.[ClaimUID],''))), ''), LTRIM(RTRIM(ISNULL(t.[ClaimIDNormalized],''))), LTRIM(RTRIM(ISNULL(t.[ClaimID],''))))"
+            : "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.[ClaimIDNormalized],''))), ''), LTRIM(RTRIM(ISNULL(t.[ClaimID],''))))";
+        var lineJoinSql = "";
+        if (lineTableExists)
+        {
+            var lineClaimKeyExpr = lineColumns.Contains("ClaimUID")
+                ? "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(lx.[ClaimUID],''))), ''), CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(lx.[VisitNumber],''))), 'CLM-', '')))"
+                : "CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(lx.[VisitNumber],''))), 'CLM-', ''))";
+            var lineMatchExpr = $"{lineClaimKeyExpr} = {taskClaimUidExpr}";
+            if (lineColumns.Contains("CPTCode"))
+                lineMatchExpr += " AND LTRIM(RTRIM(ISNULL(lx.[CPTCode],''))) = LTRIM(RTRIM(ISNULL(t.[CPTCode],'')))";
+            lineJoinSql = $"LEFT JOIN dbo.DenialLineItem lx WITH (NOLOCK) ON {lineMatchExpr}";
+        }
 
         var sql = $@"
 				DECLARE @HasTaskLab bit = CASE WHEN EXISTS (SELECT 1 FROM dbo.DenialTaskBoard WITH (NOLOCK) WHERE {LabScopeSql("LabId")}) THEN 1 ELSE 0 END;
@@ -2317,8 +2405,17 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
 					t.ICDCodes,
 					t.CoverageStatus,
 					t.ICDComplianceStatus,
-					t.DenialValidity
+					t.DenialValidity,
+					CCWICD10Code = {LineText("CCWICD10Code")},
+					BilledICDCodesNotAvailableInPayerPolicy = {LineText("BilledICDCodesNotAvailableInPayerPolicy")},
+					CoveredICD10CodesAsPerPayerPolicy = {LineText("CoveredICD10CodesAsPerPayerPolicy")},
+					CoveredICD10CodesBilled = {LineText("CoveredICD10CodesBilled")},
+					CoveredICDPresence = {LineText("CoveredICDPresence")},
+					LISICD10Codes = {LineText("LISICD10Codes")},
+					NonCoveredICD10CodesAsPerPayerPolicy = {LineText("NonCoveredICD10CodesAsPerPayerPolicy")},
+					NonCoveredICD10CodesBilled = {LineText("NonCoveredICD10CodesBilled")}
 				FROM dbo.DenialTaskBoard t WITH (NOLOCK)
+				{lineJoinSql}
 				WHERE (@HasTaskLab=0 OR {taskLabScope})
 				  AND ({claimLookupWhere})
 				ORDER BY t.CPTCode, t.TaskID;";
@@ -2405,6 +2502,7 @@ ORDER BY c.ClaimId, t.TaskID;";
             var updateSql = $@"
 UPDATE t
 SET AssignedTo=@ReviewerUserName,
+    AssignedOn=SYSDATETIME(),
     Status=CASE WHEN ISNULL(t.Status,'') IN ('','New','Open') THEN 'Pending Review' ELSE t.Status END,
     WorkFlowStatus='Assigned To AR Reviewer',
     ReviewerUpdatedBy=@ActionBy,
@@ -2430,6 +2528,8 @@ END;";
                 rows = await cmd.ExecuteNonQueryAsync(ct);
             }
             await tx.CommitAsync(ct);
+            FilterOptionsCache.TryRemove(request.LabId, out _);
+            InvalidateClaimCounts(request.LabId);
             return new ClaimAssignmentResult { Success = rows > 0, RowsAffected = rows, Message = rows > 0 ? $"Assigned {rows} task(s) for {claimIds.Count} claim(s)." : "No matching task found for selected claim(s)." };
         }
         catch
@@ -2666,6 +2766,7 @@ DECLARE @ChangedClaims TABLE(ClaimId nvarchar(150) NOT NULL);
 
 UPDATE dbo.DenialTaskBoard
 SET AssignedTo=@ReviewerUserName,
+    AssignedOn=SYSDATETIME(),
     Status=CASE WHEN ISNULL(Status,'') IN ('','New') THEN 'Pending Review' ELSE Status END,
     WorkFlowStatus='Assigned To AR Reviewer',
     ReviewerUpdatedBy=@ActionBy,
@@ -2681,7 +2782,7 @@ BEGIN
     FROM dbo.DenialLineItem l
     JOIN @ChangedClaims c ON CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))), 'CLM-', ''))=c.ClaimId;
 END;";
-        await using var con = OpenLab(request.LabId); await con.OpenAsync(ct); await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 180 }; cmd.Parameters.AddWithValue("@LabId", request.LabId); cmd.Parameters.AddWithValue("@ReviewerUserName", request.ReviewerUserName); cmd.Parameters.AddWithValue("@ActionBy", request.ActionBy); cmd.Parameters.AddWithValue("@DenialCode", request.DenialCode); cmd.Parameters.AddWithValue("@PayerName", request.PayerName); cmd.Parameters.AddWithValue("@RunId", request.RunId ?? string.Empty); return await cmd.ExecuteNonQueryAsync(ct);
+        await using var con = OpenLab(request.LabId); await con.OpenAsync(ct); await EnsureDenialTaskBoardNormalizedClaimIdAsync(con, ct); await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 180 }; cmd.Parameters.AddWithValue("@LabId", request.LabId); cmd.Parameters.AddWithValue("@ReviewerUserName", request.ReviewerUserName); cmd.Parameters.AddWithValue("@ActionBy", request.ActionBy); cmd.Parameters.AddWithValue("@DenialCode", request.DenialCode); cmd.Parameters.AddWithValue("@PayerName", request.PayerName); cmd.Parameters.AddWithValue("@RunId", request.RunId ?? string.Empty); var rows = await cmd.ExecuteNonQueryAsync(ct); FilterOptionsCache.TryRemove(request.LabId, out _); InvalidateClaimCounts(request.LabId); return rows;
     }
 
     public async Task<int> UpdateTaskAsync(UpdateTaskRequest request, bool isClosed, bool isDuplicate, CancellationToken ct)
@@ -2817,60 +2918,166 @@ SELECT COUNT(1) FROM @Changed;";
     {
         var where = BuildCommonWhere(filter, "t", includeStatus: true, includeAssigned: true);
         var taskColumns = await GetColumnSetAsync(con, "dbo.DenialTaskBoard", ct);
+        var lineTableExists = await TableExistsAsync(con, "dbo.DenialLineItem", ct);
+        var lineColumns = lineTableExists
+            ? await GetColumnSetAsync(con, "dbo.DenialLineItem", ct)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         var claimUid = taskColumns.Contains("ClaimUID")
-            ? "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.ClaimUID,''))),''), LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))), LTRIM(RTRIM(ISNULL(t.ClaimID,''))))"
-            : "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))),''), LTRIM(RTRIM(ISNULL(t.ClaimID,''))))";
+            ? "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.ClaimUID,''))), ''), LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))), LTRIM(RTRIM(ISNULL(t.ClaimID,''))))"
+            : "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))), ''), LTRIM(RTRIM(ISNULL(t.ClaimID,''))))";
         var patientName = taskColumns.Contains("PatName")
             ? "LTRIM(RTRIM(ISNULL(t.PatName,'')))"
-            : taskColumns.Contains("PatientName") ? "LTRIM(RTRIM(ISNULL(t.PatientName,'')))" : "CAST('' AS nvarchar(255))";
+            : taskColumns.Contains("PatientName") ? "LTRIM(RTRIM(ISNULL(t.PatientName,'')))" : "''";
         var taskLabPredicate = taskColumns.Contains("LabId")
             ? $"(@HasTaskLab=0 OR {LabScopeSql("t.LabId")})"
             : "1=1";
         var hasTaskLab = taskColumns.Contains("LabId")
             ? $"CASE WHEN EXISTS (SELECT 1 FROM dbo.DenialTaskBoard WITH (NOLOCK) WHERE {LabScopeSql("LabId")}) THEN 1 ELSE 0 END"
             : "CAST(0 AS bit)";
+
+        string T(string col) => taskColumns.Contains(col) ? $"ISNULL(LTRIM(RTRIM(t.[{col}])),'')" : "''";
+        string TDate(string col) => taskColumns.Contains(col) ? $"ISNULL(CONVERT(varchar(10), t.[{col}], 101),'')" : "''";
+        string TNum(string col) => taskColumns.Contains(col) ? $"ISNULL(CONVERT(varchar(20), t.[{col}]),'')" : "''";
+        string L(string col) => lineColumns.Contains(col) ? $"ISNULL(LTRIM(RTRIM(lx.[{col}])),'')" : "''";
+
+        // OUTER APPLY SELECT TOP 1 avoids row fan-out when multiple DenialLineItem rows match the same task.
+        var lineJoinSql = "";
+        var lineLabDeclaration = "DECLARE @HasLineLab bit = 0;";
+        if (lineTableExists)
+        {
+            if (lineColumns.Contains("LabId"))
+                lineLabDeclaration = $"DECLARE @HasLineLab bit = CASE WHEN EXISTS (SELECT 1 FROM dbo.DenialLineItem WITH (NOLOCK) WHERE {LabScopeSql("LabId")}) THEN 1 ELSE 0 END;";
+            var lineLabPart = lineColumns.Contains("LabId") ? $" AND (@HasLineLab=0 OR {LabScopeSql("lx.[LabId]")})" : "";
+            var lineClaimKeyExpr = lineColumns.Contains("ClaimUID")
+                ? "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(lx.[ClaimUID],''))), ''), CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(lx.[VisitNumber],''))), 'CLM-', '')))"
+                : "CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(lx.[VisitNumber],''))), 'CLM-', ''))";
+            var lineClaimMatch = $"{lineClaimKeyExpr} = {claimUid}";
+            var lineCptMatch = (lineColumns.Contains("CPTCode") && taskColumns.Contains("CPTCode"))
+                ? " AND LTRIM(RTRIM(ISNULL(li.[CPTCode],''))) = LTRIM(RTRIM(ISNULL(t.[CPTCode],'')))"
+                : "";
+            var lineOrderBy = lineColumns.Contains("DateOfService") ? " ORDER BY li.[DateOfService] DESC"
+                : lineColumns.Contains("VisitNumber") ? " ORDER BY li.[VisitNumber] DESC"
+                : string.Empty;
+            // Use a different inner alias (li) to avoid collision with the outer alias (lx) used by L().
+            lineJoinSql = $"OUTER APPLY (SELECT TOP 1 li.* FROM dbo.DenialLineItem li WITH (NOLOCK) WHERE {lineClaimMatch.Replace("lx.", "li.")}{lineCptMatch}{lineLabPart.Replace("lx.", "li.")}{lineOrderBy}) lx";
+        }
+
+        // Only include non-constant expressions in ORDER BY to avoid SQL Server warnings.
+        var orderByParts = new List<string> { claimUid };
+        if (taskColumns.Contains("CPTCode")) orderByParts.Add("t.[CPTCode]");
+        if (taskColumns.Contains("TaskID")) orderByParts.Add("t.[TaskID]");
+
         var sql = $@"
 DECLARE @HasTaskLab bit = {hasTaskLab};
-SELECT ClaimID={claimUid}, PatientName=MAX({patientName}), PayerName=MAX(LTRIM(RTRIM(ISNULL(t.PayerName,''))))
+{lineLabDeclaration}
+SELECT
+    ClaimID                                 = {claimUid},
+    TaskID                                  = {T("TaskID")},
+    UniqueTrackId                           = {T("UniqueTrackId")},
+    PatientName                             = {patientName},
+    PatientID                               = {T("PatientId")},
+    PayerName                               = {T("PayerName")},
+    PanelName                               = {T("PanelName")},
+    ClinicName                              = {T("ClinicName")},
+    SalesRepname                            = {T("SalesRepname")},
+    ReferringProvider                       = {T("ReferringProvider")},
+    DateOfService                           = {TDate("DateOfService")},
+    CPTCode                                 = {T("CPTCode")},
+    Units                                   = {TNum("Units")},
+    Modifier                                = {T("Modifier")},
+    DenialCode                              = {T("DenialCode")},
+    DenialDescription                       = {T("DenialDescription")},
+    DenialClassification                    = {T("DenialClassification")},
+    ActionCategory                          = {T("ActionCategory")},
+    ActionCode                              = {T("ActionCode")},
+    RecommendedAction                       = {T("RecommendedAction")},
+    Task                                    = {T("Task")},
+    Priority                                = {T("Priority")},
+    InsuranceBalance                        = {TNum("InsuranceBalance")},
+    SLADays                                 = {TNum("SLADays")},
+    CurrentStatus                           = {T("Status")},
+    AssignedTo                              = {T("AssignedTo")},
+    DateOpened                              = {TDate("DateOpened")},
+    DueDate                                 = {TDate("DueDate")},
+    SLAStatus                               = {T("SLAStatus")},
+    FirstBilledDate                         = {TDate("FirstBilledDate")},
+    ChargeEnteredDate                       = {TDate("ChargeEnteredDate")},
+    ICDCodes                                = {T("ICDCodes")},
+    ICDComplianceStatus                     = {T("ICDComplianceStatus")},
+    CoverageStatus                          = {T("CoverageStatus")},
+    DenialValidity                          = {T("DenialValidity")},
+    CCWICD10Code                            = {L("CCWICD10Code")},
+    BilledICDCodesNotAvailableInPayerPolicy = {L("BilledICDCodesNotAvailableInPayerPolicy")},
+    CoveredICD10CodesAsPerPayerPolicy       = {L("CoveredICD10CodesAsPerPayerPolicy")},
+    CoveredICD10CodesBilled                 = {L("CoveredICD10CodesBilled")},
+    CoveredICDPresence                      = {L("CoveredICDPresence")},
+    LISICD10Codes                           = {L("LISICD10Codes")},
+    NonCoveredICD10CodesAsPerPayerPolicy    = {L("NonCoveredICD10CodesAsPerPayerPolicy")},
+    NonCoveredICD10CodesBilled              = {L("NonCoveredICD10CodesBilled")}
 FROM dbo.DenialTaskBoard t WITH (NOLOCK)
+{lineJoinSql}
 WHERE {taskLabPredicate}
   AND NULLIF({claimUid},'') IS NOT NULL
   {where.WhereClause}
-GROUP BY {claimUid}
-ORDER BY {claimUid};";
+ORDER BY {string.Join(", ", orderByParts)};";
 
-        var claims = new List<(string ClaimId, string PatientName, string PayerName)>();
+        var readOnlyHeaders = new[]
+        {
+            "ClaimID","TaskID","UniqueTrackId","PatientName","PatientID","PayerName","PanelName",
+            "ClinicName","SalesRepname","ReferringProvider","DateOfService","CPTCode","Units","Modifier",
+            "DenialCode","DenialDescription","DenialClassification","ActionCategory","ActionCode",
+            "RecommendedAction","Task","Priority","InsuranceBalance","SLADays","CurrentStatus","AssignedTo",
+            "DateOpened","DueDate","SLAStatus","FirstBilledDate","ChargeEnteredDate",
+            "ICDCodes","ICDComplianceStatus","CoverageStatus","DenialValidity",
+            "CCWICD10Code","BilledICDCodesNotAvailableInPayerPolicy","CoveredICD10CodesAsPerPayerPolicy",
+            "CoveredICD10CodesBilled","CoveredICDPresence","LISICD10Codes",
+            "NonCoveredICD10CodesAsPerPayerPolicy","NonCoveredICD10CodesBilled"
+        };
+        var editableHeaders = new[]
+        {
+            "UpdateStatus","ExpectedResponseDate","ActionCompleted","ActualOutcome",
+            "DocumentationType","FollowUpReason","ClosureReason","ValidationStatus","Comments",
+            "EscalationResponse","EscalationResponseComment","Notes"
+        };
+        var headers = readOnlyHeaders.Concat(editableHeaders).ToArray();
+        var readOnlyCount = readOnlyHeaders.Length;
+
+        var taskRows = new List<string[]>();
         await using (var cmd = new SqlCommand(sql, con) { CommandTimeout = 900 })
         {
             AddFilterParams(cmd, filter);
             AddExtraParams(cmd, where.Parameters);
             await using var rd = await cmd.ExecuteReaderAsync(ct);
             while (await rd.ReadAsync(ct))
-                claims.Add((GetString(rd, "ClaimID"), GetString(rd, "PatientName"), GetString(rd, "PayerName")));
+            {
+                var row = new string[readOnlyCount];
+                for (var i = 0; i < readOnlyCount; i++)
+                    row[i] = GetString(rd, readOnlyHeaders[i]);
+                taskRows.Add(row);
+            }
         }
 
         using var workbook = new ClosedXML.Excel.XLWorkbook();
-        var sheet = workbook.Worksheets.Add("Claim Upload");
+        var sheet = workbook.Worksheets.Add("Task Upload");
         var lookupSheet = workbook.Worksheets.Add("Dropdown Values");
-        var reviewerTemplate = IsReviewerOnly(filter.Role);
-        var headers = reviewerTemplate
-            ? new[] { "ClaimID", "PatientName", "PayerName", "UpdateStatus", "ExpectedResponseDate", "ActionCompleted", "ActualOutcome", "DocumentationType", "FollowUpReason", "ClosureReason", "ValidationStatus", "Comments" }
-            : new[] { "ClaimID", "PatientName", "PayerName", "EscalationResponse", "EscalationResponseComment" };
 
         for (var col = 0; col < headers.Length; col++)
         {
-            sheet.Cell(1, col + 1).Value = headers[col];
-            sheet.Cell(1, col + 1).Style.Font.Bold = true;
-            sheet.Cell(1, col + 1).Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromHtml("#D9EAF7");
-        }
-        for (var row = 0; row < claims.Count; row++)
-        {
-            sheet.Cell(row + 2, 1).Value = claims[row].ClaimId;
-            sheet.Cell(row + 2, 2).Value = claims[row].PatientName;
-            sheet.Cell(row + 2, 3).Value = claims[row].PayerName;
+            var cell = sheet.Cell(1, col + 1);
+            cell.Value = headers[col];
+            cell.Style.Font.Bold = true;
+            cell.Style.Alignment.Horizontal = ClosedXML.Excel.XLAlignmentHorizontalValues.Center;
+            cell.Style.Fill.BackgroundColor = col < readOnlyCount
+                ? ClosedXML.Excel.XLColor.FromHtml("#D9EAF7")
+                : ClosedXML.Excel.XLColor.FromHtml("#E2EFDA");
         }
 
-        var lastRow = Math.Max(claims.Count + 1, 2);
+        for (var row = 0; row < taskRows.Count; row++)
+            for (var col = 0; col < readOnlyCount; col++)
+                sheet.Cell(row + 2, col + 1).Value = taskRows[row][col];
+
+        var lastRow = Math.Max(taskRows.Count + 1, 2);
         var lookupColumn = 1;
         void AddDropdown(string columnName, IEnumerable<string> values)
         {
@@ -2884,28 +3091,23 @@ ORDER BY {claimUid};";
             lookupColumn++;
         }
 
-        if (reviewerTemplate)
-        {
-            AddDropdown("UpdateStatus", ["Assigned", "Payer Follow-up Required", "Pending Payer Response", "Pending Documentation", "Write-Off Pending Approval", "Escalated to AR Manager", "Closed"]);
-            AddDropdown("ActionCompleted", ["Yes", "No"]);
-            AddDropdown("ActualOutcome", ["Appeal Submitted", "Documentation Uploaded", "Rebill Submitted", "Corrected Claim Submitted", "Write-Off Recommended", "Payer Call Completed", "Claim Paid", "Claim Reprocessed", "Closed No Recovery", "Other"]);
-            AddDropdown("DocumentationType", ["Medical Records Required", "Clinical Notes Required", "Authorization Reference Required", "Updated Insurance Required", "Requisition / Order Required", "Provider Information Required", "Diagnosis / ICD Clarification Required", "Patient Demographics Required", "EOB / Payer Correspondence Required", "Client Confirmation Required", "Other Documentation Required"]);
-            AddDropdown("FollowUpReason", ["Denial unclear", "Action uncertain", "Payer policy conflict", "Need filing instructions", "Claim status check", "Timely filing confirmation", "Other"]);
-            AddDropdown("ClosureReason", ["Paid/Recovered", "Written Off", "Denial Upheld", "No Further Action", "Invalid Denial", "Timely Filing Expired", "Duplicate", "Client Approved Closure"]);
-        }
-        else
-        {
-            AddDropdown("EscalationResponse", ["Proceed with Appeal", "Proceed with Rebill", "Proceed with Write-Off Request", "Perform Payer Follow-up", "Request Documentation", "Additional Information Needed", "No Further Action Required", "Close Claim / Line", "Other"]);
-        }
+        AddDropdown("UpdateStatus", ["Assigned", "Payer Follow-up Required", "Pending Payer Response", "Pending Documentation", "Write-Off Pending Approval", "Escalated to AR Manager", "Closed"]);
+        AddDropdown("ActionCompleted", ["Yes", "No"]);
+        AddDropdown("ActualOutcome", ["Appeal Submitted", "Documentation Uploaded", "Rebill Submitted", "Corrected Claim Submitted", "Write-Off Recommended", "Payer Call Completed", "Claim Paid", "Claim Reprocessed", "Closed No Recovery", "Other"]);
+        AddDropdown("DocumentationType", ["Medical Records Required", "Clinical Notes Required", "Authorization Reference Required", "Updated Insurance Required", "Requisition / Order Required", "Provider Information Required", "Diagnosis / ICD Clarification Required", "Patient Demographics Required", "EOB / Payer Correspondence Required", "Client Confirmation Required", "Other Documentation Required"]);
+        AddDropdown("FollowUpReason", ["Denial unclear", "Action uncertain", "Payer policy conflict", "Need filing instructions", "Claim status check", "Timely filing confirmation", "Other"]);
+        AddDropdown("ClosureReason", ["Paid/Recovered", "Written Off", "Denial Upheld", "No Further Action", "Invalid Denial", "Timely Filing Expired", "Duplicate", "Client Approved Closure"]);
+        AddDropdown("EscalationResponse", ["Proceed with Appeal", "Proceed with Rebill", "Proceed with Write-Off Request", "Perform Payer Follow-up", "Request Documentation", "Additional Information Needed", "No Further Action Required", "Close Claim / Line", "Other"]);
+
+        for (var col = 1; col <= readOnlyCount; col++)
+            sheet.Column(col).Style.Protection.Locked = true;
 
         sheet.SheetView.FreezeRows(1);
-        sheet.Columns().AdjustToContents(10, 42);
-        sheet.Column(1).Style.Protection.Locked = true;
-        sheet.Column(2).Style.Protection.Locked = true;
-        sheet.Column(3).Style.Protection.Locked = true;
+        sheet.SheetView.FreezeColumns(2);
+        sheet.Columns().AdjustToContents(8, 50);
         lookupSheet.Hide();
         workbook.SaveAs(output);
-        return claims.Count;
+        return taskRows.Count;
     }
 
     public async Task<int> UpdateClaimCommentsAsync(int labId, string claimId, string comments, string actionBy, CancellationToken ct)
@@ -2974,6 +3176,8 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
             Clean(f.TaskView),
             Clean(f.Reviewer),
             Clean(f.AssignedTo),
+            Clean(f.AssignedUserId),
+            Clean(f.AssignedDuration),
             Clean(f.DenialCode),
             Clean(f.PayerName),
             Clean(f.Clinic),
@@ -3478,6 +3682,37 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
             )");
             if (!unassignedOnly) p["@ClaimAssignedTo"] = assignedTo.Trim();
         }
+
+        if (!string.IsNullOrWhiteSpace(f.AssignedUserId) && !IsReviewerOnly(f.Role))
+        {
+            w.Add($@"EXISTS (
+                SELECT 1 FROM dbo.DenialTaskBoard tbx WITH (NOLOCK)
+                WHERE {LabScopeSql("tbx.LabId")} AND {claimMatchSql}
+                  AND LOWER(LTRIM(RTRIM(ISNULL(tbx.AssignedTo,''))))=LOWER(@AssignedUserId)
+            )");
+            p["@AssignedUserId"] = f.AssignedUserId.Trim();
+        }
+
+        var assignedDuration = NormalizeRoleToken(f.AssignedDuration);
+        if (!string.IsNullOrWhiteSpace(assignedDuration) && assignedDuration != "ALL" && !IsReviewerOnly(f.Role))
+        {
+            var assignedDate = "CAST(COALESCE(tbx.AssignedOn,tbx.ReviewerUpdatedOn,tbx.CreatedOn) AS date)";
+            var durationPredicate = assignedDuration switch
+            {
+                "ASSIGNEDTODAY" => $"{assignedDate}=CAST(GETDATE() AS date)",
+                "ASSIGNEDTHISWEEK" => $"{assignedDate}>=DATEADD(day,-(DATEDIFF(day,'19000101',CAST(GETDATE() AS date))%7),CAST(GETDATE() AS date)) AND {assignedDate}<DATEADD(day,7-(DATEDIFF(day,'19000101',CAST(GETDATE() AS date))%7),CAST(GETDATE() AS date))",
+                "ASSIGNEDTHISMONTH" => $"{assignedDate}>=DATEFROMPARTS(YEAR(GETDATE()),MONTH(GETDATE()),1) AND {assignedDate}<DATEADD(month,1,DATEFROMPARTS(YEAR(GETDATE()),MONTH(GETDATE()),1))",
+                "ASSIGNEDMORETHANTHISMONTH" => $"{assignedDate}<DATEFROMPARTS(YEAR(GETDATE()),MONTH(GETDATE()),1)",
+                _ => string.Empty
+            };
+            if (!string.IsNullOrWhiteSpace(durationPredicate))
+                w.Add($@"EXISTS (
+                    SELECT 1 FROM dbo.DenialTaskBoard tbx WITH (NOLOCK)
+                    WHERE {LabScopeSql("tbx.LabId")} AND {claimMatchSql}
+                      AND NULLIF(LTRIM(RTRIM(ISNULL(tbx.AssignedTo,''))),'') IS NOT NULL
+                      AND {durationPredicate}
+                )");
+        }
         if (!string.IsNullOrWhiteSpace(f.DenialCode))
         {
             w.Add(TextInSql($"ISNULL({a}.DenialCodeNormalized,'')", "@DenialCode"));
@@ -3565,7 +3800,12 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
         var view = NormalizeTaskView(taskView);
         var queueStatus = "LOWER(LTRIM(RTRIM(ISNULL(q.Status,''))))";
         var queueWorkflowStatus = "LOWER(LTRIM(RTRIM(ISNULL(q.WorkFlowStatus,''))))";
-        var sameClaim = $"q.ClaimIDNormalized = {a}.ClaimIDNormalized AND {LabScopeSql("q.LabId")}";
+        // ClaimIDNormalized was added after the original task-board rows. Fall back to ClaimID
+        // so claim-level queues (especially an AR Reviewer's Worklist) do not hide legacy rows
+        // when both normalized values are NULL/blank.
+        var queueClaimKey = "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(q.ClaimIDNormalized,''))), ''), CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(q.ClaimID,''))), 'CLM-', '')))";
+        var rowClaimKey = $"COALESCE(NULLIF(LTRIM(RTRIM(ISNULL({a}.ClaimIDNormalized,''))), ''), CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL({a}.ClaimID,''))), 'CLM-', '')))";
+        var sameClaim = $"{queueClaimKey} = {rowClaimKey} AND {LabScopeSql("q.LabId")}";
         string ClaimHas(string predicate) => $"EXISTS (SELECT 1 FROM dbo.DenialTaskBoard q WITH (NOLOCK) WHERE {sameClaim} AND {predicate})";
         string ClaimHasNo(string predicate) => $"NOT EXISTS (SELECT 1 FROM dbo.DenialTaskBoard q WITH (NOLOCK) WHERE {sameClaim} AND {predicate})";
         var internalEscalation = $"({queueStatus} IN ('internal escalation','escalated','escalated to ar manager') OR {queueWorkflowStatus} IN ('internal escalation','escalated','escalated to ar manager'))";
@@ -3790,6 +4030,7 @@ END;
 
 IF COL_LENGTH('dbo.DenialClaimNotes','Status') IS NULL ALTER TABLE dbo.DenialClaimNotes ADD Status nvarchar(50) NULL;
 IF COL_LENGTH('dbo.DenialClaimNotes','NextFollowUpDate') IS NULL ALTER TABLE dbo.DenialClaimNotes ADD NextFollowUpDate date NULL;
+IF COL_LENGTH('dbo.DenialClaimNotes','FollowUpReason') IS NULL ALTER TABLE dbo.DenialClaimNotes ADD FollowUpReason nvarchar(250) NULL;
 IF COL_LENGTH('dbo.DenialClaimNotes','ClaimIdNormalized') IS NULL
     ALTER TABLE dbo.DenialClaimNotes ADD ClaimIdNormalized AS CONVERT(varchar(150),REPLACE(LTRIM(RTRIM(ISNULL(ClaimId,''))),'CLM-','')) PERSISTED;
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID('dbo.DenialClaimNotes') AND name='IX_DenialClaimNotes_Normalized')
@@ -3857,9 +4098,9 @@ ORDER BY CreatedOn DESC, NoteId DESC;";
     {
         await EnsureClaimSupportTablesAsync(request.LabId, ct);
         const string sql = @"
-INSERT INTO dbo.DenialClaimNotes(LabId,ClaimId,TaskId,CptCode,NoteLevel,NoteText,Status,NextFollowUpDate,CreatedBy)
+INSERT INTO dbo.DenialClaimNotes(LabId,ClaimId,TaskId,CptCode,NoteLevel,NoteText,Status,NextFollowUpDate,FollowUpReason,CreatedBy)
 OUTPUT INSERTED.NoteId,INSERTED.LabId,INSERTED.ClaimId,INSERTED.TaskId,INSERTED.CptCode,INSERTED.NoteLevel,INSERTED.NoteText,INSERTED.Status,INSERTED.NextFollowUpDate,INSERTED.CreatedBy,INSERTED.CreatedOn
-VALUES(@LabId,@ClaimId,@TaskId,@CptCode,@NoteLevel,@NoteText,@Status,@NextFollowUpDate,@CreatedBy);";
+VALUES(@LabId,@ClaimId,@TaskId,@CptCode,@NoteLevel,@NoteText,@Status,@NextFollowUpDate,@FollowUpReason,@CreatedBy);";
         await using var con = OpenLab(request.LabId);
         await con.OpenAsync(ct);
         await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 120 };
@@ -3871,10 +4112,61 @@ VALUES(@LabId,@ClaimId,@TaskId,@CptCode,@NoteLevel,@NoteText,@Status,@NextFollow
         cmd.Parameters.AddWithValue("@NoteText", request.NoteText.Trim());
         cmd.Parameters.AddWithValue("@Status", string.IsNullOrWhiteSpace(request.Status) ? (object)DBNull.Value : request.Status.Trim());
         cmd.Parameters.AddWithValue("@NextFollowUpDate", request.NextFollowUpDate.HasValue ? request.NextFollowUpDate.Value.Date : (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("@FollowUpReason", string.IsNullOrWhiteSpace(request.FollowUpReason) ? (object)DBNull.Value : request.FollowUpReason.Trim());
         cmd.Parameters.AddWithValue("@CreatedBy", string.IsNullOrWhiteSpace(request.CreatedBy) ? "ReactWorkflow" : request.CreatedBy.Trim());
         await using var rd = await cmd.ExecuteReaderAsync(ct);
         if (await rd.ReadAsync(ct)) return ReadNote(rd);
         throw new InvalidOperationException("Unable to save note.");
+    }
+
+    public async Task<IReadOnlyList<FollowUpNotificationRow>> GetFollowUpNotificationsAsync(int labId, string userName, CancellationToken ct)
+    {
+        await EnsureClaimSupportTablesAsync(labId, ct);
+        await using var con = OpenLab(labId);
+        await con.OpenAsync(ct);
+        await EnsureDenialTaskBoardNormalizedClaimIdAsync(con, ct);
+        const string sql = @"
+;WITH LatestNote AS
+(
+    SELECT n.*,
+           rn=ROW_NUMBER() OVER(PARTITION BY n.ClaimIdNormalized,ISNULL(n.TaskId,''),ISNULL(n.CptCode,'') ORDER BY n.CreatedOn DESC,n.NoteId DESC)
+    FROM dbo.DenialClaimNotes n WITH (NOLOCK)
+    WHERE n.IsDeleted=0 AND n.LabId=@LabId
+)
+SELECT TOP (100)
+    n.NoteId,
+    ClaimId=ISNULL(t.ClaimID,n.ClaimId),
+    TaskId=ISNULL(t.TaskID,ISNULL(n.TaskId,'')),
+    CptCode=ISNULL(t.CPTCode,ISNULL(n.CptCode,'')),
+    PayerName=ISNULL(t.PayerName,''),
+    FollowUpDate=n.NextFollowUpDate,
+    LastAction=COALESCE(NULLIF(t.RecommendedAction,''),NULLIF(t.Task,''),NULLIF(t.ActionCategory,''),''),
+    ActionCode=ISNULL(t.ActionCode,''),
+    FollowUpReason=ISNULL(n.FollowUpReason,''),
+    AssignedTo=ISNULL(t.AssignedTo,'')
+FROM LatestNote n
+JOIN dbo.DenialTaskBoard t WITH (NOLOCK)
+  ON t.ClaimIDNormalized=n.ClaimIdNormalized
+ AND (NULLIF(n.TaskId,'') IS NULL OR t.TaskID=n.TaskId)
+ AND (NULLIF(n.CptCode,'') IS NULL OR t.CPTCode=n.CptCode)
+WHERE n.rn=1
+  AND CAST(n.NextFollowUpDate AS date)=CAST(DATEADD(day,1,GETDATE()) AS date)
+  AND LOWER(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))))=LOWER(LTRIM(RTRIM(@UserName)))
+  AND LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) NOT IN ('closed','completed')
+ORDER BY n.NextFollowUpDate,n.NoteId DESC;";
+        var rows = new List<FollowUpNotificationRow>();
+        await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 120 };
+        cmd.Parameters.AddWithValue("@LabId", labId);
+        cmd.Parameters.AddWithValue("@UserName", userName?.Trim() ?? string.Empty);
+        await using var rd = await cmd.ExecuteReaderAsync(ct);
+        while (await rd.ReadAsync(ct)) rows.Add(new FollowUpNotificationRow
+        {
+            NoteId=GetLong(rd,"NoteId"), ClaimId=GetString(rd,"ClaimId"), TaskId=GetString(rd,"TaskId"),
+            CptCode=GetString(rd,"CptCode"), PayerName=GetString(rd,"PayerName"),
+            FollowUpDate=GetDate(rd,"FollowUpDate") ?? DateTime.MinValue, LastAction=GetString(rd,"LastAction"),
+            ActionCode=GetString(rd,"ActionCode"), FollowUpReason=GetString(rd,"FollowUpReason"), AssignedTo=GetString(rd,"AssignedTo")
+        });
+        return rows;
     }
 
     private static string NormalizeClaimId(string? claimId)
@@ -5234,7 +5526,7 @@ ORDER BY UserName;";
         AssignedTo = GetString(rd, "AssignedTo")
     };
 
-    private static WorkflowTaskRow ReadTask(SqlDataReader rd) => new() { TaskId = GetString(rd, "TaskID"), UniqueTrackId = GetString(rd, "UniqueTrackId"), ClaimUid = GetString(rd, "ClaimUID"), ClaimId = GetString(rd, "ClaimID"), Source = GetString(rd, "Source"), PatientName = GetString(rd, "PatientName"), PatientId = GetString(rd, "PatientId"), SubscriberId = GetString(rd, "SubscriberId"), CptCode = GetString(rd, "CPTCode"), Units = GetNullableInt(rd, "Units"), Modifier = GetString(rd, "Modifier"), DenialCode = GetString(rd, "DenialCode"), DenialDescription = GetString(rd, "DenialDescription"), DenialClassification = GetString(rd, "DenialClassification"), ActionCode = GetString(rd, "ActionCode"), RecommendedAction = GetString(rd, "RecommendedAction"), ActionCategory = GetString(rd, "ActionCategory"), Task = GetString(rd, "Task"), Priority = GetString(rd, "Priority"), InsuranceBalance = GetDecimal(rd, "InsuranceBalance"), IsCurrentDenial = GetBool(rd, "IsCurrentDenial"), SlaDays = GetNullableInt(rd, "SLADays"), Status = GetString(rd, "Status"), DateOpened = GetDate(rd, "DateOpened"), DueDate = GetDate(rd, "DueDate"), DateCompleted = GetDate(rd, "DateCompleted"), DaysRemaining = GetNullableInt(rd, "DaysRemaining"), SlaStatus = GetString(rd, "SLAStatus"), AssignedTo = GetString(rd, "AssignedTo"), LabId = GetInt(rd, "LabId"), LabName = GetString(rd, "LabName"), RunId = GetString(rd, "RunId"), CreatedOn = GetDate(rd, "CreatedOn"), SalesRepname = GetString(rd, "SalesRepname"), ClinicName = GetString(rd, "ClinicName"), ReferringProvider = GetString(rd, "ReferringProvider"), PayerName = GetString(rd, "PayerName"), PayerNameNormalized = GetString(rd, "PayerNameNormalized"), PayerCode = GetNullableInt(rd, "PayerCode"), PayerType = GetString(rd, "PayerType"), FirstBilledDate = GetDate(rd, "FirstBilledDate"), ChargeEnteredDate = GetDate(rd, "ChargeEnteredDate"), BillingProvider = GetString(rd, "BillingProvider"), PanelName = GetString(rd, "PanelName"), DateOfService = GetDate(rd, "DateOfService"), ReviewerComments = GetString(rd, "ReviewerComments"), ReviewerUpdatedOn = GetDate(rd, "ReviewerUpdatedOn"), ReviewerUpdatedBy = GetString(rd, "ReviewerUpdatedBy"), ICDCodes = GetString(rd, "ICDCodes"), CoverageStatus = GetString(rd, "CoverageStatus"), ICDComplianceStatus = GetString(rd, "ICDComplianceStatus"), DenialValidity = GetString(rd, "DenialValidity") };
+    private static WorkflowTaskRow ReadTask(SqlDataReader rd) => new() { TaskId = GetString(rd, "TaskID"), UniqueTrackId = GetString(rd, "UniqueTrackId"), ClaimUid = GetString(rd, "ClaimUID"), ClaimId = GetString(rd, "ClaimID"), Source = GetString(rd, "Source"), PatientName = GetString(rd, "PatientName"), PatientId = GetString(rd, "PatientId"), SubscriberId = GetString(rd, "SubscriberId"), CptCode = GetString(rd, "CPTCode"), Units = GetNullableInt(rd, "Units"), Modifier = GetString(rd, "Modifier"), DenialCode = GetString(rd, "DenialCode"), DenialDescription = GetString(rd, "DenialDescription"), DenialClassification = GetString(rd, "DenialClassification"), ActionCode = GetString(rd, "ActionCode"), RecommendedAction = GetString(rd, "RecommendedAction"), ActionCategory = GetString(rd, "ActionCategory"), Task = GetString(rd, "Task"), Priority = GetString(rd, "Priority"), InsuranceBalance = GetDecimal(rd, "InsuranceBalance"), IsCurrentDenial = GetBool(rd, "IsCurrentDenial"), SlaDays = GetNullableInt(rd, "SLADays"), Status = GetString(rd, "Status"), DateOpened = GetDate(rd, "DateOpened"), DueDate = GetDate(rd, "DueDate"), DateCompleted = GetDate(rd, "DateCompleted"), DaysRemaining = GetNullableInt(rd, "DaysRemaining"), SlaStatus = GetString(rd, "SLAStatus"), AssignedTo = GetString(rd, "AssignedTo"), LabId = GetInt(rd, "LabId"), LabName = GetString(rd, "LabName"), RunId = GetString(rd, "RunId"), CreatedOn = GetDate(rd, "CreatedOn"), SalesRepname = GetString(rd, "SalesRepname"), ClinicName = GetString(rd, "ClinicName"), ReferringProvider = GetString(rd, "ReferringProvider"), PayerName = GetString(rd, "PayerName"), PayerNameNormalized = GetString(rd, "PayerNameNormalized"), PayerCode = GetNullableInt(rd, "PayerCode"), PayerType = GetString(rd, "PayerType"), FirstBilledDate = GetDate(rd, "FirstBilledDate"), ChargeEnteredDate = GetDate(rd, "ChargeEnteredDate"), BillingProvider = GetString(rd, "BillingProvider"), PanelName = GetString(rd, "PanelName"), DateOfService = GetDate(rd, "DateOfService"), ReviewerComments = GetString(rd, "ReviewerComments"), ReviewerUpdatedOn = GetDate(rd, "ReviewerUpdatedOn"), ReviewerUpdatedBy = GetString(rd, "ReviewerUpdatedBy"), ICDCodes = GetString(rd, "ICDCodes"), CoverageStatus = GetString(rd, "CoverageStatus"), ICDComplianceStatus = GetString(rd, "ICDComplianceStatus"), DenialValidity = GetString(rd, "DenialValidity"), CcwIcd10Code = GetString(rd, "CCWICD10Code"), BilledIcdCodesNotAvailableInPayerPolicy = GetString(rd, "BilledICDCodesNotAvailableInPayerPolicy"), CoveredIcd10CodesAsPerPayerPolicy = GetString(rd, "CoveredICD10CodesAsPerPayerPolicy"), CoveredIcd10CodesBilled = GetString(rd, "CoveredICD10CodesBilled"), CoveredIcdPresence = GetString(rd, "CoveredICDPresence"), LisIcd10Codes = GetString(rd, "LISICD10Codes"), NonCoveredIcd10CodesAsPerPayerPolicy = GetString(rd, "NonCoveredICD10CodesAsPerPayerPolicy"), NonCoveredIcd10CodesBilled = GetString(rd, "NonCoveredICD10CodesBilled") };
     private static VerificationTaskRow ReadVerification(SqlDataReader rd) { var t = ReadTask(rd); return new VerificationTaskRow { TaskId = t.TaskId, UniqueTrackId = t.UniqueTrackId, ClaimUid = t.ClaimUid, ClaimId = t.ClaimId, Source = t.Source, PatientName = t.PatientName, PatientId = t.PatientId, SubscriberId = t.SubscriberId, CptCode = t.CptCode, DenialCode = t.DenialCode, DenialDescription = t.DenialDescription, DenialClassification = t.DenialClassification, ActionCode = t.ActionCode, RecommendedAction = t.RecommendedAction, ActionCategory = t.ActionCategory, Task = t.Task, Priority = t.Priority, InsuranceBalance = t.InsuranceBalance, IsCurrentDenial = t.IsCurrentDenial, SlaDays = t.SlaDays, Status = t.Status, DateOpened = t.DateOpened, DueDate = t.DueDate, DateCompleted = t.DateCompleted, DaysRemaining = t.DaysRemaining, SlaStatus = t.SlaStatus, AssignedTo = t.AssignedTo, LabId = t.LabId, LabName = t.LabName, RunId = t.RunId, CreatedOn = t.CreatedOn, SalesRepname = t.SalesRepname, ClinicName = t.ClinicName, ReferringProvider = t.ReferringProvider, PayerName = t.PayerName, PayerNameNormalized = t.PayerNameNormalized, PayerCode = t.PayerCode, PayerType = t.PayerType, FirstBilledDate = t.FirstBilledDate, ChargeEnteredDate = t.ChargeEnteredDate, BillingProvider = t.BillingProvider, PanelName = t.PanelName, DateOfService = t.DateOfService, ReviewerComments = t.ReviewerComments, ReviewerUpdatedOn = t.ReviewerUpdatedOn, ReviewerUpdatedBy = t.ReviewerUpdatedBy, VerificationId = GetLong(rd, "VerificationId"), VerificationStatus = GetString(rd, "VerificationStatus"), VerificationComments = GetString(rd, "VerificationComments"), OriginalRunId = GetString(rd, "OriginalRunId"), MissingDetectedRunId = GetString(rd, "MissingDetectedRunId"), MovedOn = GetDate(rd, "MovedOn"), VerifiedBy = GetString(rd, "VerifiedBy"), VerifiedOn = GetDate(rd, "VerifiedOn") }; }
     private static DenialWorkflowInsightRow ReadInsight(SqlDataReader rd) => new() { DenialCodes = GetString(rd, "DenialCodes"), Descriptions = GetString(rd, "Descriptions"), NoOfDenialCount = GetInt(rd, "NoOfDenialCount"), NoOfClaimsCount = GetInt(rd, "NoOfClaimsCount"), TotalBalance = GetDecimal(rd, "TotalBalance"), HighImpactInsurance = GetString(rd, "HighImpactInsurance"), InsuranceBalance = GetDecimal(rd, "InsuranceBalance"), ImpactPercentage = GetDecimal(rd, "ImpactPercentage"), ActionCategory = GetString(rd, "ActionCategory"), ActionCode = GetString(rd, "ActionCode"), Action = GetString(rd, "Action"), Task = GetString(rd, "Task"), Feedback = GetString(rd, "Feedback"), Responsibility = GetString(rd, "Responsibility"), DiscussionDate = GetDate(rd, "DiscussionDate"), ETA = GetString(rd, "ETA"), LabName = GetString(rd, "LabName"), LabId = GetInt(rd, "LabId"), RunId = GetString(rd, "RunId"), CreatedOn = GetDate(rd, "CreatedOn"), AssignedTo = GetString(rd, "AssignedTo"), ResponsibilityReviewer = GetString(rd, "ResponsibilityReviewer") };
     private static void AddTaskParams(SqlCommand cmd, DenialTaskImportRow r, int labId, string labName, string runId, string taskId) { cmd.Parameters.AddWithValue("@TaskID", taskId); cmd.Parameters.AddWithValue("@LabId", labId); cmd.Parameters.AddWithValue("@LabName", labName); cmd.Parameters.AddWithValue("@RunId", runId); cmd.Parameters.AddWithValue("@UniqueTrackId", r.UniqueTrackId); cmd.Parameters.AddWithValue("@ClaimID", r.ClaimId); cmd.Parameters.AddWithValue("@PatientId", r.PatientId); cmd.Parameters.AddWithValue("@CPTCode", r.CptCode); cmd.Parameters.AddWithValue("@Units", (object?)r.Units ?? DBNull.Value); cmd.Parameters.AddWithValue("@Modifier", r.Modifier ?? string.Empty); cmd.Parameters.AddWithValue("@DenialCode", r.DenialCode); cmd.Parameters.AddWithValue("@DenialDescription", r.DenialDescription); cmd.Parameters.AddWithValue("@DenialClassification", r.DenialClassification); cmd.Parameters.AddWithValue("@ActionCode", r.ActionCode); cmd.Parameters.AddWithValue("@RecommendedAction", r.RecommendedAction); cmd.Parameters.AddWithValue("@ActionCategory", r.ActionCategory); cmd.Parameters.AddWithValue("@Task", r.Task); cmd.Parameters.AddWithValue("@Priority", r.Priority); cmd.Parameters.AddWithValue("@InsuranceBalance", r.InsuranceBalance); cmd.Parameters.AddWithValue("@SLADays", (object?)r.SlaDays ?? DBNull.Value); cmd.Parameters.AddWithValue("@DateOpened", (object?)r.DateOpened ?? DateTime.Today); cmd.Parameters.AddWithValue("@DueDate", (object?)r.DueDate ?? DBNull.Value); cmd.Parameters.AddWithValue("@SalesRepname", r.SalesRepname); cmd.Parameters.AddWithValue("@ClinicName", r.ClinicName); cmd.Parameters.AddWithValue("@ReferringProvider", r.ReferringProvider); cmd.Parameters.AddWithValue("@PayerName", r.PayerName); cmd.Parameters.AddWithValue("@PayerNameNormalized", r.PayerNameNormalized); cmd.Parameters.AddWithValue("@PayerCode", (object?)r.PayerCode ?? DBNull.Value); cmd.Parameters.AddWithValue("@PayerType", r.PayerType); cmd.Parameters.AddWithValue("@FirstBilledDate", (object?)r.FirstBilledDate ?? DBNull.Value); cmd.Parameters.AddWithValue("@ChargeEnteredDate", (object?)r.ChargeEnteredDate ?? DBNull.Value); cmd.Parameters.AddWithValue("@BillingProvider", r.BillingProvider); cmd.Parameters.AddWithValue("@PanelName", r.PanelName); cmd.Parameters.AddWithValue("@DateOfService", (object?)r.DateOfService ?? DBNull.Value); }
