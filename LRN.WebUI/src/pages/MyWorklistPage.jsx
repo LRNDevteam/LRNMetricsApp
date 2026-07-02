@@ -226,6 +226,16 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
   const [drawerTab, setDrawerTab] = useState('lines');
   const [page, setPage] = useState(1);
   const [local, setLocal] = useState({ payerName: '', denialClassification: '', actionCategory: '', status: '', searchText: '' });
+  const [debouncedLocal, setDebouncedLocal] = useState(local);
+
+  // Cumulative Audit F-23: the claim search box fired a full /claims or /tasks refetch on every
+  // keystroke with no debounce (unlike App.jsx's own filters, which already debounce at 450ms).
+  // Match that pattern here so typing a claim/payer/CPT search term doesn't reload the query on
+  // every character.
+  useEffect(() => {
+    const handle = window.setTimeout(() => setDebouncedLocal(local), 450);
+    return () => window.clearTimeout(handle);
+  }, [local]);
   const [noteCtx, setNoteCtx] = useState(null);
   const [noteText, setNoteText] = useState('');
   const [noteStatus, setNoteStatus] = useState('Assigned');
@@ -285,10 +295,10 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
     userName: user?.userName || '',
     assignedTo: roleIsReviewerOnly(user?.role) ? (user?.userName || '') : (filter?.reviewer || ''),
     reviewer: roleIsReviewerOnly(user?.role) ? (user?.userName || '') : (filter?.reviewer || ''),
-    payerName: local.payerName || filter?.payerName || '',
-    denialClassification: local.denialClassification || filter?.denialClassification || '',
-    actionCategory: local.actionCategory || filter?.actionCategory || '',
-    status: local.status || filter?.status || '',
+    payerName: debouncedLocal.payerName || filter?.payerName || '',
+    denialClassification: debouncedLocal.denialClassification || filter?.denialClassification || '',
+    actionCategory: debouncedLocal.actionCategory || filter?.actionCategory || '',
+    status: debouncedLocal.status || filter?.status || '',
     followUpReason: filter?.followUpReason || '',
     documentationType: filter?.documentationType || '',
     escalationReason: filter?.escalationReason || '',
@@ -298,7 +308,7 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
     agingBucket: filter?.agingBucket || '',
     balanceBucket: filter?.balanceBucket || '',
     taskView: taskView === 'open' ? 'myopen' : taskView,
-    searchText: local.searchText || filter?.searchText || '',
+    searchText: debouncedLocal.searchText || filter?.searchText || '',
     page,
     pageSize: 100
     // Depend on the specific fields actually read above, not the whole `user`/`filter` objects.
@@ -306,7 +316,7 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
     // refocus (even when nothing about the user actually changed), and that new object reference
     // was enough to rebuild this memo and refire the load effect below — reloading the current
     // tab's data every time the browser tab regained focus.
-  }), [labId, user?.role, user?.userName, filter, local, taskView, page]);
+  }), [labId, user?.role, user?.userName, filter, debouncedLocal, taskView, page]);
 
   useEffect(() => { onExportQueryChange(query); }, [query, onExportQueryChange]);
 

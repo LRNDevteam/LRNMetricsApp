@@ -147,9 +147,14 @@ export default function App() {
 
   function setView(nextView, { closeSidebar = true, preserveFilters = false } = {}) {
     let safeView = workflowViews.includes(nextView) ? nextView : 'dashboard';
-    if (reviewerOnly && safeView === 'claims') safeView = 'myworklist';
-    if (externalManager && safeView === 'myworklist') safeView = 'claims';
-    if ((safeView === 'denialcodemaster' || safeView === 'denialactionverification') && !isArManagerRole(user.role) && !String(user.role || '').toLowerCase().includes('admin')) safeView = resolveLandingView(user.role);
+    let blockedByRole = false;
+    if (reviewerOnly && safeView === 'claims') { safeView = 'myworklist'; blockedByRole = true; }
+    if (externalManager && safeView === 'myworklist') { safeView = 'claims'; blockedByRole = true; }
+    if ((safeView === 'denialcodemaster' || safeView === 'denialactionverification') && !isArManagerRole(user.role) && !String(user.role || '').toLowerCase().includes('admin')) { safeView = resolveLandingView(user.role); blockedByRole = true; }
+    // Cumulative Audit F-19: the security boundary was already enforced (the restricted
+    // content never rendered), but the user got no explanation for why they landed somewhere
+    // else — just a silently-swapped page. Surface it so the redirect isn't confusing.
+    if (blockedByRole) setMessage({ type: 'warning', text: 'You do not have access to that page. Showing your default view instead.' });
     if (!preserveFilters && safeView !== view) resetWorkflowFilters();
     setViewState(safeView);
     if (closeSidebar) setSidebarOpen(false);
