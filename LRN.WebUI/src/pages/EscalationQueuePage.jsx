@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { denialWorkflowService } from '../services/denialWorkflowService';
 import Pager from '../components/Pager';
 import ClaimHistoryModal from '../components/ClaimHistoryModal';
@@ -99,6 +99,7 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
   const [responseDocs, setResponseDocs] = useState([]);
   const [selectedClaims, setSelectedClaims] = useState({});
   const [bulkReviewer, setBulkReviewer] = useState('');
+  const loadRequestRef = useRef(0);
   const level = taskView === 'line' ? 'Line' : 'Claim';
   const claimTabs = [...getQueuesForRole(user?.role).map(t => t.key === 'escalationResponse' ? { ...t, countKey: 'escalationResponse' } : t), { key: 'verification', label: 'Verification Claim' }];
   const tabCountText = value => {
@@ -118,20 +119,26 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
     pageSize: 100
   }), [labId, user, status, searchText, responseOnly, page]);
 
-  async function load() {
+  async function load(signal) {
     if (!labId) return;
+    const requestId = ++loadRequestRef.current;
     setBusy(true);
     try {
-      const result = await denialWorkflowService.getEscalationQueue(query, level);
+      const result = await denialWorkflowService.getEscalationQueue(query, level, signal ? { signal } : {});
+      if (signal?.aborted || requestId !== loadRequestRef.current) return;
       setData({ items: result?.items || [], page: result?.page || page, pageSize: result?.pageSize || 100, totalCount: result?.totalCount || 0, totalPages: result?.totalPages || 0 });
     } catch (e) {
-      setMessage({ type: 'danger', text: e.message || 'Escalation queue load failed.' });
+      if (!signal?.aborted && requestId === loadRequestRef.current) setMessage({ type: 'danger', text: e.message || 'Escalation queue load failed.' });
     } finally {
-      setBusy(false);
+      if (requestId === loadRequestRef.current) setBusy(false);
     }
   }
 
-  useEffect(() => { load(); }, [query, level]);
+  useEffect(() => {
+    const controller = new AbortController();
+    load(controller.signal);
+    return () => controller.abort();
+  }, [query, level]);
   useEffect(() => { setPage(1); closeModal(); }, [level, status, searchText]);
 
   const rows = data.items || [];
@@ -290,6 +297,7 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
             </div>
             <span className="table-count">{busy ? 'Loading...' : `Showing ${rows.length} of ${data.totalCount || 0}`}</span>
           </div>
+          {busy && <div className="claim-tab-loading" role="status"><i className="bi bi-arrow-repeat" /><strong>Loading escalation queue</strong><span>Refreshing this queue with the latest workflow status...</span></div>}
           <div className="claim-list-head claim-list-head-wide"><span>Claim</span><span>Source</span><span>Payer Name</span><span>Patient Name</span><span>Patient ID</span><span>Subscriber ID</span><span>DOS</span><span>Balance</span><span>Status</span></div>
           <div className="claim-rows-scroll">{rows.length ? rows.map(row => {
             const isOpen = drawerRow?.escalationId === row.escalationId;
@@ -336,6 +344,7 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
             <div className="claim-tab-row">{claimTabs.map(t => <button key={t.key} type="button" className={`claim-tab ${responseOnly && t.key === 'escalationResponse' ? 'active' : ''}`} onClick={() => onClaimTabChange(t.key)}><span>{t.label}</span><b>{tabCountText(tabCounts?.[t.countKey || t.key])}</b></button>)}</div>
           </div>
           {canAssign && <div className="claim-assign-bar2"><label><input type="checkbox" checked={allSelected} onChange={e => { const next = {}; if (e.target.checked) rows.forEach((_, i) => next[i] = true); setSelectedClaims(next); }} /> Select page</label><strong>{selectedClaimIds.length} selected</strong><select value={bulkReviewer} onChange={e => setBulkReviewer(e.target.value)}><option value="">Select AR Reviewer</option>{arReviewers.map(r => <option key={r.userName || r.UserName} value={r.userName || r.UserName}>{r.displayName || r.DisplayName || r.userName || r.UserName}</option>)}</select><button className="wl-btn teal xs" type="button" disabled={!selectedClaimIds.length} onClick={() => assignClaims(selectedClaimIds, bulkReviewer)}>Assign</button></div>}
+          {busy && <div className="claim-tab-loading" role="status"><i className="bi bi-arrow-repeat" /><strong>Loading Escalation Response claims</strong><span>Refreshing this queue with the latest workflow status...</span></div>}
           <div className="claim-list-head claim-list-head-wide"><span>Claim</span><span>Source</span><span>Payer Name</span><span>Patient Name</span><span>Patient ID</span><span>Subscriber ID</span><span>DOS</span><span>Balance</span><span>Status</span></div>
           <div className="claim-rows-scroll">{rows.length ? rows.map((row, index) => {
             const isOpen = drawerRow?.escalationId === row.escalationId;

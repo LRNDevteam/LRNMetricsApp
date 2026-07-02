@@ -26,7 +26,7 @@ function ManagerDashboard({ data, onKpiClick }) {
   const unassignedClaims = data.pendingClaims ?? data.unassignedClaims ?? 0;
   const escalated = data.escalatedClaims ?? data.escalationCount ?? data.escalatedCount ?? 0;
   const totalTasks = data.openInProgressCount ?? data.totalOpenTasks ?? data.totalTasks ?? data.totalDenials ?? 0;
-  const slaBreached = data.slaBreached ?? data.slaBreachedCount ?? (data.slaTiles || []).find(x => String(x.label || '').toLowerCase().includes('breach'))?.count ?? 0;
+  const slaBreached = data.slaBreachedClaims ?? data.slaBreached ?? data.slaBreachedCount ?? (data.slaTiles || []).find(x => String(x.label || '').toLowerCase().includes('breach'))?.count ?? 0;
   const verificationPending = data.verificationPending ?? data.verificationPendingCount ?? 0;
   const balance = data.outstandingAmount || 0;
 
@@ -42,7 +42,7 @@ function ManagerDashboard({ data, onKpiClick }) {
       <DashboardKpi label="Total Insurance Balance" value={money(balance)} icon="bi-cash-stack" tone="teal balance" onClick={() => onKpiClick?.({})} />
     </div>
     <div className="dashboard-overview-grid dashboard-overview-grid-full">
-      <RoleCard title="Denial Classification Summary">
+      <RoleCard title="Denial Classification Summary" subtitle="Claims are counted once per classification they carry. A claim with more than one denial classification appears in more than one row, so column totals can exceed Total Open Claims.">
         <div className="role-table-wrap"><table className="role-table wide"><thead><tr><th>Classification</th><th>Claims</th><th>Balance</th><th>Assigned</th><th>In Progress</th><th>Closed</th><th>SLA Risk</th></tr></thead><tbody>
           {classifications.length ? classifications.map((r, i) => <tr key={i}><td><button type="button" className="role-table-link" onClick={() => onKpiClick?.({ taskView: 'all', denialClassification: r.classification || '' })}>{r.classification || 'Unclassified'}</button></td><td><button type="button" className="role-table-link numeric" onClick={() => onKpiClick?.({ taskView: 'all', denialClassification: r.classification || '' })}>{n(r.count)}</button></td><td>{money(r.outstanding)}</td><td><button type="button" className="role-table-link numeric" onClick={() => onKpiClick?.({ taskView: 'assigned', denialClassification: r.classification || '' })}>{n(r.assigned ?? r.assignedCount ?? 0)}</button></td><td>{n(r.inProgress ?? r.inProgressCount ?? 0)}</td><td>{n(r.closed ?? r.closedCount ?? 0)}</td><td><RiskPill value={r.slaRisk || r.risk || (Number(r.percentageOfTotal || 0) > 25 ? 'High' : 'Medium')} /></td></tr>) : <EmptyRow colSpan={7} />}
         </tbody></table></div>
@@ -122,6 +122,6 @@ function ReviewerAgingTable({ rows = [], title = 'Aging View by AR Reviewer', on
 function RoleHeader({ title, subtitle, tag, user, labName }) { return <div className="role-page-head"><div><h2>{title}</h2><p>DenialFlow / <b>{subtitle}</b>{labName ? ` - ${labName}` : ''}</p></div><div className="role-head-right"><span className="role-tag">{tag}</span><span className="role-user"><span className="avatar-sm">{initials(user?.displayName || user?.userName)}</span>{user?.displayName || user?.userName || 'Workflow User'}</span></div></div>; }
 function RoleKpi({ label, value, tone }) { return <div className={`role-kpi ${tone || ''}`}><div className="role-kpi-value">{value}</div><div className="role-kpi-label">{label}</div></div>; }
 function DashboardKpi({ label, value, icon, tone, onClick }) { return <button type="button" className={`modern-kpi ${tone || ''}`} onClick={onClick}><span className="modern-kpi-icon"><i className={`bi ${icon}`} /></span><span><small>{label}</small><b>{value}</b><em>Click to view filtered claims</em></span></button>; }
-function RoleCard({ title, children }) { return <div className="role-card"><div className="role-card-hd"><div className="role-card-title">{title}</div></div><div className="role-card-body">{children}</div></div>; }
+function RoleCard({ title, subtitle, children }) { return <div className="role-card"><div className="role-card-hd"><div><div className="role-card-title">{title}</div>{subtitle && <div className="role-card-subtitle">{subtitle}</div>}</div></div><div className="role-card-body">{children}</div></div>; }
 function RiskPill({ value }) { return <span className={`role-flag ${riskClass(value)}`}>{value || 'Medium'}</span>; }
 function EmptyRow({ colSpan }) { return <tr><td colSpan={colSpan} className="empty-cell">No dashboard data found.</td></tr>; }

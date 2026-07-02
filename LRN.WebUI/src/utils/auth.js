@@ -148,10 +148,6 @@ export async function ensureWorkflowJwt(options = {}) {
   const forceRefresh = options.forceRefresh === true;
   const current = getJwt();
 
-  // #region debug-point D:auth-entry
-  fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"metrics-auth-failure",runId:"pre",hypothesisId:"D",location:"src/utils/auth.js:ensureWorkflowJwt:entry",msg:"[DEBUG] ensureWorkflowJwt called",data:{forceRefresh,hasCurrentToken:Boolean(current),authUrl:AUTH_TOKEN_URL,lastAuthTokenError:lastAuthTokenError?.message||"",cooldownActive:Boolean(!forceRefresh && lastAuthTokenError && Date.now() - lastAuthTokenErrorAt < AUTH_ERROR_COOLDOWN_MS)},ts:Date.now()})}).catch(()=>{});
-  // #endregion
-
   if (!forceRefresh && isJwtValid(current)) return current;
 
   if (!forceRefresh && lastAuthTokenError && Date.now() - lastAuthTokenErrorAt < AUTH_ERROR_COOLDOWN_MS) {
@@ -159,9 +155,6 @@ export async function ensureWorkflowJwt(options = {}) {
   }
 
   if (!authTokenPromise) {
-    // #region debug-point A:auth-fetch-start
-    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"metrics-auth-failure",runId:"pre",hypothesisId:"A",location:"src/utils/auth.js:ensureWorkflowJwt:fetch-start",msg:"[DEBUG] starting AuthToken fetch",data:{authUrl:AUTH_TOKEN_URL,forceRefresh},ts:Date.now()})}).catch(()=>{});
-    // #endregion
     authTokenPromise = fetch(AUTH_TOKEN_URL, {
       method: 'GET',
       credentials: 'include',
@@ -169,9 +162,6 @@ export async function ensureWorkflowJwt(options = {}) {
       headers: { Accept: 'application/json' }
     })
       .then(async (response) => {
-        // #region debug-point B:auth-response
-        fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"metrics-auth-failure",runId:"pre",hypothesisId:"B",location:"src/utils/auth.js:ensureWorkflowJwt:response",msg:"[DEBUG] AuthToken response received",data:{status:response.status,ok:response.ok,contentType:response.headers.get('content-type')||"",redirected:response.redirected,url:response.url||AUTH_TOKEN_URL},ts:Date.now()})}).catch(()=>{});
-        // #endregion
         if (response.status === 502 || response.status === 503 || response.status === 504) {
           const err = new Error(`Auth service unavailable (${response.status}). Auth URL: ${AUTH_TOKEN_URL}`);
           lastAuthTokenError = err;
@@ -200,9 +190,6 @@ export async function ensureWorkflowJwt(options = {}) {
 
         const data = await response.json();
         const token = data.token || data.Token || data.accessToken || data.AccessToken || data.jwt || data.Jwt;
-        // #region debug-point B:auth-payload
-        fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"metrics-auth-failure",runId:"pre",hypothesisId:"B",location:"src/utils/auth.js:ensureWorkflowJwt:payload",msg:"[DEBUG] AuthToken payload parsed",data:{hasToken:Boolean(token),keys:Object.keys(data||{}).slice(0,10)},ts:Date.now()})}).catch(()=>{});
-        // #endregion
         if (!token) throw new Error('AuthToken response did not contain token/accessToken.');
 
         setWorkflowJwt(token);
@@ -211,15 +198,16 @@ export async function ensureWorkflowJwt(options = {}) {
         return cleanToken(token);
       })
       .catch((error) => {
-        // #region debug-point A:auth-error
-        fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"metrics-auth-failure",runId:"pre",hypothesisId:"A",location:"src/utils/auth.js:ensureWorkflowJwt:catch",msg:"[DEBUG] AuthToken fetch failed",data:{name:error?.name||"",message:error?.message||String(error||""),isTypeError:error instanceof TypeError,authUrl:AUTH_TOKEN_URL},ts:Date.now()})}).catch(()=>{});
-        // #endregion
         lastAuthTokenError = error instanceof Error ? error : new Error(String(error || 'Auth token error'));
         lastAuthTokenErrorAt = Date.now();
         if (isLocalReactHost() && (error instanceof TypeError || String(error?.message || '').includes('Failed to fetch'))) {
+          const metricsHint = AUTH_TOKEN_URL.includes('localhost:44351')
+            ? 'Your AuthToken URL is still pointing at IIS Express (44351). If LabMetricsDashboard is running on https://localhost:57996, set VITE_LRN_METRICS_BASE_URL=https://localhost:57996 and restart Vite.'
+            : 'If LabMetricsDashboard is running on https://localhost:57996, set VITE_LRN_METRICS_BASE_URL=https://localhost:57996 and restart Vite.';
           throw new Error(
             `Cannot call AuthToken from React localhost. Check CORS and local HTTPS. Auth URL: ${AUTH_TOKEN_URL}. ` +
-            'Use the updated LabMetricsDashboard Program.cs, restart MVC, and ensure the Vite origin https://localhost:5173 is allowed.'
+            'Use the updated LabMetricsDashboard Program.cs, restart MVC, and ensure the Vite origin https://localhost:5173 is allowed. ' +
+            metricsHint
           );
         }
         throw error;

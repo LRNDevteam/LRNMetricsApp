@@ -125,6 +125,37 @@ function EditorModal({ initial, lookups, masterData, onClose, onSave }) {
   </div>;
 }
 
+function ImpactPreviewModal({ impact, saving, onCancel, onConfirm }) {
+  const queues = impact?.queues || impact?.Queues || [];
+  const affectedClaims = impact?.affectedClaims ?? impact?.AffectedClaims ?? 0;
+  const affectedTasks = impact?.affectedTasks ?? impact?.AffectedTasks ?? 0;
+  return <div className="modal-backdrop">
+    <div className="action-warning-modal">
+      <div className="claim-modal-header">
+        <div><div className="claim-modal-title">Confirm Denial-Action Mapping Update</div><small>This change will apply to every open claim/task currently matching this denial code.</small></div>
+        <button type="button" className="modal-close" onClick={onCancel}><i className="bi bi-x-lg" /></button>
+      </div>
+      <div className="action-warning-body">
+        {affectedTasks > 0
+          ? <p>This denial code currently maps <strong>{affectedTasks}</strong> open task(s) across <strong>{affectedClaims}</strong> claim(s). Saving will change how those claims are classified and actioned going forward.</p>
+          : <p>No open claims or tasks currently reference this denial code. It is safe to save.</p>}
+        <div className="action-warning-counts">
+          <div><span>Affected Claims</span><strong>{affectedClaims}</strong></div>
+          <div><span>Affected Tasks</span><strong>{affectedTasks}</strong></div>
+        </div>
+        {queues.length > 0 && <table className="lrn-table workflow-table dcm-table" style={{ marginTop: '12px' }}>
+          <thead><tr><th>Queue</th><th>Claims</th><th>Tasks</th></tr></thead>
+          <tbody>{queues.map(q => <tr key={q.queueName || q.QueueName}><td>{q.queueName || q.QueueName}</td><td>{q.claimCount ?? q.ClaimCount ?? 0}</td><td>{q.taskCount ?? q.TaskCount ?? 0}</td></tr>)}</tbody>
+        </table>}
+      </div>
+      <div className="dcm-modal-actions">
+        <button type="button" className="wl-btn" disabled={saving} onClick={onCancel}>Cancel</button>
+        <button type="button" className="wl-btn teal" disabled={saving} onClick={onConfirm}>{saving ? 'Saving...' : 'Confirm and Save'}</button>
+      </div>
+    </div>
+  </div>;
+}
+
 function ActionWarningModal({ warning, onLater, onReview }) {
   return <div className="modal-backdrop">
     <div className="action-warning-modal">
@@ -191,6 +222,8 @@ export default function DenialCodeMasterPage({ labId, setMessage, onReviewAction
   const [importing, setImporting] = useState(false);
   const [editor, setEditor] = useState(null);
   const [actionWarning, setActionWarning] = useState(null);
+  const [impactPreview, setImpactPreview] = useState(null);
+  const [impactSaving, setImpactSaving] = useState(false);
   const [activeTab, setActiveTab] = useState(initialPushAuditId ? 'push' : 'master');
   const [pendingPushes, setPendingPushes] = useState([]);
   const [selectedPushId, setSelectedPushId] = useState(initialPushAuditId || null);
@@ -253,15 +286,38 @@ export default function DenialCodeMasterPage({ labId, setMessage, onReviewAction
   }, [activeTab, selectedPushId]);
 
   async function save(payload, isEdit) {
+    const key = payload.__key || { denialCode: payload.denialCode, coverageStatus: payload.coverageStatus, icdComplianceStatus: payload.icdComplianceStatus };
+    if (!isEdit) {
+      await commitSave(payload, isEdit, key);
+      return;
+    }
     try {
-      if (isEdit) await denialWorkflowService.updateDenialCodeMaster(labId, payload.__key || { denialCode: payload.denialCode, coverageStatus: payload.coverageStatus, icdComplianceStatus: payload.icdComplianceStatus }, payload);
+      const impact = await denialWorkflowService.getDenialCodeMasterImpact(labId, key.denialCode);
+      setImpactPreview({ payload, isEdit, key, impact });
+    } catch (err) {
+      setMessage({ type: 'danger', text: err.message || 'Unable to calculate the impact of this change.' });
+    }
+  }
+
+  async function commitSave(payload, isEdit, key) {
+    try {
+      if (isEdit) await denialWorkflowService.updateDenialCodeMaster(labId, key, payload);
       else await denialWorkflowService.createDenialCodeMaster(labId, payload);
       setEditor(null);
+      setImpactPreview(null);
       setMessage({ type: 'success', text: 'Denial Code Master saved and classifier Excel regenerated.' });
       load(query);
     } catch (err) {
       setMessage({ type: 'danger', text: err.message || 'Save failed.' });
+    } finally {
+      setImpactSaving(false);
     }
+  }
+
+  async function confirmImpactSave() {
+    if (!impactPreview || impactSaving) return;
+    setImpactSaving(true);
+    await commitSave(impactPreview.payload, impactPreview.isEdit, impactPreview.key);
   }
 
   async function remove(row) {
@@ -298,6 +354,7 @@ export default function DenialCodeMasterPage({ labId, setMessage, onReviewAction
   }
 
   async function regenerate() {
+    if (!window.confirm('This will regenerate the denial classifier export for all records. This action cannot be undone. Continue?')) return;
     try {
       await denialWorkflowService.regenerateDenialCodeMasterExcel(labId);
       setMessage({ type: 'success', text: 'Classifier Excel regenerated.' });
@@ -424,6 +481,7 @@ export default function DenialCodeMasterPage({ labId, setMessage, onReviewAction
       </div>}
     </div>}
     {editor && <EditorModal initial={editor.denialCode ? editor : null} lookups={lookups} masterData={masterData} onClose={() => setEditor(null)} onSave={save} />}
+    {impactPreview && <ImpactPreviewModal impact={impactPreview.impact} saving={impactSaving} onCancel={() => setImpactPreview(null)} onConfirm={confirmImpactSave} />}
     {pushEditor && <PushReviewEditor row={pushEditor} masterData={masterData} onClose={() => setPushEditor(null)} onSave={savePushReview} />}
     {actionWarning && <ActionWarningModal warning={actionWarning} onLater={() => setActionWarning(null)} onReview={(batchId) => { setActionWarning(null); onReviewActionChanges?.(batchId); }} />}
   </section>;

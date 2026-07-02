@@ -137,6 +137,8 @@ public sealed class DenialWorkflowDashboardSummary
     public decimal OutstandingAmount { get; set; }
     public int OpenInProgressCount { get; set; }
     public int ClosedCount { get; set; }
+    public int SlaBreachedClaims { get; set; }
+    public int SlaAtRiskClaims { get; set; }
     public IReadOnlyList<DenialClassificationSummaryRow> DenialClassifications { get; set; } = Array.Empty<DenialClassificationSummaryRow>();
     public IReadOnlyList<ReviewerWorkflowSummaryRow> AnalystWorkload { get; set; } = Array.Empty<ReviewerWorkflowSummaryRow>();
     public IReadOnlyList<ActionCategorySummaryRow> ActionCategories { get; set; } = Array.Empty<ActionCategorySummaryRow>();
@@ -366,6 +368,7 @@ public sealed class ClaimSubMenuCounts
     public int PendingDocumentation { get; set; }
     public int PendingPayerResponse { get; set; }
     public int WriteOffApproval { get; set; }
+    public int SlaAtRisk { get; set; }
     public int AllClaims { get => TotalClaims; set => TotalClaims = value; }
 }
 

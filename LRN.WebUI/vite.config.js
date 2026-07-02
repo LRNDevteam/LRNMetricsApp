@@ -21,10 +21,13 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     https: httpsOptions,
-    hmr: {
-      protocol: 'wss',
-      clientPort: 5173
-    }
+    // No trusted dev certificate is present (LRN.WebUI/.certs/localhost.pem+key), so the server
+    // falls back to @vitejs/plugin-basic-ssl's auto-generated, browser-untrusted certificate. The
+    // page itself loads once you click through the browser's warning, but the HMR client's
+    // separate wss:// upgrade over that untrusted cert gets rejected and retries forever, flooding
+    // the console and burning CPU. Disable HMR until a trusted cert is generated (e.g. via mkcert)
+    // and dropped in .certs/, then restore hmr: { protocol: 'wss', clientPort: 5173 }.
+    hmr: false
   },
   preview: {
     https: httpsOptions

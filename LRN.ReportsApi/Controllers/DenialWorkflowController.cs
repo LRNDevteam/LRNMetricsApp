@@ -869,7 +869,7 @@ public sealed class DenialWorkflowController : ControllerBase
         if (filter.Page <= 0) filter.Page = 1;
         filter.PageSize = filter.PageSize <= 0 ? 50 : Math.Clamp(filter.PageSize, 25, 200);
 
-        var tokenUserName = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? filter.UserName ?? string.Empty;
+        var tokenUserName = (FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? filter.UserName ?? string.Empty).Trim();
         var tokenRole = FirstClaim(ClaimTypes.Role, "role", "roles") ?? filter.Role ?? string.Empty;
 
         // Never trust role/userName passed from React query string. Always scope from JWT.
@@ -1184,8 +1184,12 @@ public sealed class DenialWorkflowController : ControllerBase
     private static List<Dictionary<string, string>> ReadExcelRows(Stream stream, int maxRows)
     {
         using var workbook = new XLWorkbook(stream);
-        var sheet = workbook.Worksheet("Claim Upload");
-        var used = sheet.RangeUsed() ?? throw new InvalidDataException("The Claim Upload worksheet is empty.");
+        // Must match the worksheet name WriteClaimUploadTemplateAsync actually creates
+        // (workbook.Worksheets.Add("Task Upload")) — these had drifted apart, so every
+        // downloaded template failed to re-upload with "There isn't a worksheet named
+        // 'Claim Upload'".
+        var sheet = workbook.Worksheet("Task Upload");
+        var used = sheet.RangeUsed() ?? throw new InvalidDataException("The Task Upload worksheet is empty.");
         var headerRow = used.FirstRow();
         var headers = headerRow.Cells().Select(x => x.GetString().Trim()).ToArray();
         if (!headers.Any(x => string.Equals(x, "ClaimID", StringComparison.OrdinalIgnoreCase)))

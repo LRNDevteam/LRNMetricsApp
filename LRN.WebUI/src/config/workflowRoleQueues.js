@@ -12,7 +12,7 @@ const externalManagerQueues = [
 export const workflowQueueConfig = {
   arReviewer: [
     { key: 'assigned', label: 'Worklist', filters: ['status', 'aging', 'denialClassification', 'actionCategory', 'payerName', 'panelName', 'followupDue'] },
-    { key: 'payerFollowup', label: 'Payer Followup Queue', filters: ['followUpReason', 'aging', 'payerName', 'panelName', 'followupDue'] },
+    { key: 'payerFollowup', label: 'Payer Follow-up Required', filters: ['followUpReason', 'aging', 'payerName', 'panelName', 'followupDue'] },
     { key: 'pendingDocumentation', label: 'Pending Documentation', filters: [...commonManagerFilters, 'documentationType'] },
     { key: 'pendingPayerResponse', label: 'Pending Payer Response', filters: ['aging', 'nextFollowUpDate', 'payerName', 'actionCategory'] },
     { key: 'escalationResponse', label: 'Escalation Response', filters: [...commonManagerFilters, 'documentationType', 'escalationReason'] },
@@ -22,9 +22,11 @@ export const workflowQueueConfig = {
   arManager: [
     { key: 'new', label: 'New', filters: commonManagerFilters },
     { key: 'unassigned', label: 'Unassigned', filters: [...commonManagerFilters, 'balanceBucket'] },
+    { key: 'slaAtRisk', label: 'SLA At Risk', filters: commonManagerFilters, alert: true },
     { key: 'assigned', label: 'Assigned', filters: commonManagerFilters.filter(x => x !== 'reviewer') },
-    { key: 'payerFollowup', label: 'Payer Followup', filters: commonManagerFilters },
+    { key: 'payerFollowup', label: 'Payer Follow-up Required', filters: commonManagerFilters },
     { key: 'pendingDocumentation', label: 'Pending Documentation', filters: [...commonManagerFilters, 'documentationType', 'reviewer', 'expectedResponseBy'] },
+    { key: 'pendingPayerResponse', label: 'Pending Payer Response', filters: [...commonManagerFilters, 'reviewer', 'nextFollowUpDate'] },
     { key: 'internalEscalation', label: 'Internal Escalation', filters: [...commonManagerFilters, 'documentationType', 'escalationReason'] },
     { key: 'externalEscalation', label: 'External Escalation', filters: [...commonManagerFilters, 'documentationType', 'escalationReason'] },
     { key: 'escalationResponse', label: 'Escalation Response', filters: [...commonManagerFilters, 'documentationType', 'escalationReason'] },
@@ -53,6 +55,8 @@ export function normalizeQueueKey(key) {
     response: 'escalationResponse',
     writeoffapproval: 'writeOffApproval',
     writeoff: 'writeOffApproval',
+    slaatrisk: 'slaAtRisk',
+    atrisk: 'slaAtRisk',
     allclaims: 'all'
   }[value] || value || 'assigned';
 }
