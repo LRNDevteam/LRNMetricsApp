@@ -72,7 +72,7 @@ function groupByClaim(rows) {
   rows.forEach(t => {
     const id = t.claimUid || t.claimUID || t.claimId || '-';
     const displayId = t.claimId || id;
-    if (!map.has(id)) map.set(id, { claimUid: id, claimId: displayId, source: t.source || '-', payerName: t.payerName || t.payerNameNormalized || '-', panelName: t.panelName || '-', patientName: t.patientName || '-', patientId: t.patientId || '-', subscriberId: t.subscriberId || '-', dateOfService: t.dateOfService, createdOn: t.createdOn, clinicName: t.clinicName || '-', referringProvider: t.referringProvider || '-', assignedTo: t.assignedTo || '-', status: t.status || 'Open', balance: 0, lines: [] });
+    if (!map.has(id)) map.set(id, { claimUid: id, claimId: displayId, source: t.source || '-', payerName: t.payerName || t.payerNameNormalized || '-', panelName: t.panelName || '-', patientName: t.patientName || '-', patientId: t.patientId || '-', subscriberId: t.subscriberId || '-', dateOfService: t.dateOfService, createdOn: t.createdOn, clinicName: t.clinicName || '-', referringProvider: t.referringProvider || '-', assignedTo: t.assignedTo || '-', status: normalizeStatus(t.status || 'Open'), balance: 0, lines: [] });
     const c = map.get(id);
     c.balance += Number(t.insuranceBalance || 0);
     c.lines.push(t);
@@ -81,10 +81,21 @@ function groupByClaim(rows) {
     if ((!c.subscriberId || c.subscriberId === '-') && t.subscriberId) c.subscriberId = t.subscriberId;
     if (!c.createdOn || (t.createdOn && new Date(t.createdOn) > new Date(c.createdOn))) c.createdOn = t.createdOn;
     if (!c.assignedTo || c.assignedTo === '-') c.assignedTo = t.assignedTo || '-';
-    const rowStatus = t.status || 'Open';
-    const currentRank = statusRank.findIndex(x => x.toLowerCase() === String(c.status || '').toLowerCase());
-    const rowRank = statusRank.findIndex(x => x.toLowerCase() === String(rowStatus).toLowerCase());
-    if (rowRank >= 0 && (currentRank < 0 || rowRank < currentRank)) c.status = rowStatus;
+    // Raw task.status values (e.g. "Review") don't appear in statusRank or in normalizeStatus's
+    // mapping table, so the rank comparison below silently skips them — which let a claim's
+    // displayed status get "stuck" on Closed from whichever task was processed first, even while
+    // another line on the same claim was still active with an unrecognized status string. An
+    // active line must always outrank a stale Closed placeholder, known status or not.
+    const rowStatus = normalizeStatus(t.status || 'Open');
+    const currentIsClosed = String(c.status || '').toLowerCase() === 'closed';
+    const rowIsClosed = String(rowStatus).toLowerCase() === 'closed';
+    if (currentIsClosed && !rowIsClosed) {
+      c.status = rowStatus;
+    } else if (!currentIsClosed) {
+      const currentRank = statusRank.findIndex(x => x.toLowerCase() === String(c.status || '').toLowerCase());
+      const rowRank = statusRank.findIndex(x => x.toLowerCase() === String(rowStatus).toLowerCase());
+      if (rowRank >= 0 && (currentRank < 0 || rowRank < currentRank)) c.status = rowStatus;
+    }
     if (String(rowStatus).toLowerCase().includes('escal')) c.status = 'Escalated to AR Manager';
   });
   return Array.from(map.values());
@@ -260,7 +271,12 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
     searchText: local.searchText || filter?.searchText || '',
     page,
     pageSize: 100
-  }), [labId, user, filter, local, taskView, page]);
+    // Depend on the specific fields actually read above, not the whole `user`/`filter` objects.
+    // App.jsx's window-focus handler calls setUser(me) with a freshly-parsed object on every tab
+    // refocus (even when nothing about the user actually changed), and that new object reference
+    // was enough to rebuild this memo and refire the load effect below — reloading the current
+    // tab's data every time the browser tab regained focus.
+  }), [labId, user?.role, user?.userName, filter, local, taskView, page]);
 
   useEffect(() => { onExportQueryChange(query); }, [query, onExportQueryChange]);
 

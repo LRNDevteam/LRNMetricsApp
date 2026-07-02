@@ -112,10 +112,15 @@ GO
 
 IF OBJECT_ID('dbo.DenialTaskBoard', 'U') IS NOT NULL AND COL_LENGTH('dbo.DenialTaskBoard', 'AssignedToNormalized') IS NOT NULL
 BEGIN
+    -- INCLUDE list confirmed against sys.dm_db_missing_index_details on NWL_LRN after the first
+    -- (narrower) version of this index was live: every caller also filters by LabId, and several
+    -- pull ClaimUID, so without those two an index-only seek wasn't possible and the optimizer
+    -- fell back to key lookups/scans depending on the plan (observed as the same query sometimes
+    -- fast, sometimes ~180s/timeout, on the same page).
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_DenialTaskBoard_AssignedToNormalized' AND object_id = OBJECT_ID('dbo.DenialTaskBoard'))
         CREATE NONCLUSTERED INDEX IX_DenialTaskBoard_AssignedToNormalized
         ON dbo.DenialTaskBoard (AssignedToNormalized)
-        INCLUDE (ClaimIDNormalized, Status, TaskID, SLAStatus, DueDate, CreatedOn);
+        INCLUDE (LabId, ClaimUID, ClaimIDNormalized, Status, TaskID, SLAStatus, DueDate, CreatedOn);
 END;
 GO
 

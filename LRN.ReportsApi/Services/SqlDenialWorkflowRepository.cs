@@ -30,6 +30,20 @@ public sealed class SqlDenialWorkflowRepository : IDenialWorkflowRepository
     // Guards EnsureDenialTaskBoardNormalizedClaimIdAsync — runs DDL once per database per process lifetime
     private static readonly ConcurrentDictionary<string, byte> TaskBoardSchemaReady = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> TaskBoardSchemaLocks = new(StringComparer.OrdinalIgnoreCase);
+    // Whether dbo.DenialTaskBoard.AssignedToNormalized exists on a given database. That computed
+    // column + index is applied manually per lab via Sql/DenialWorkflow_Performance_Indexes_And_
+    // Backfill_20260701.sql (not automatically — see the comment in EnsureDenialTaskBoardNormalizedClaimIdAsync),
+    // so labs migrate one at a time. Cached per process so the metadata check only runs once per db.
+    private static readonly ConcurrentDictionary<string, bool> TaskBoardAssignedToNormalizedReady = new(StringComparer.OrdinalIgnoreCase);
+
+    private static async Task<bool> HasTaskBoardAssignedToNormalizedAsync(SqlConnection con, CancellationToken ct)
+    {
+        var dbKey = con.Database ?? string.Empty;
+        if (TaskBoardAssignedToNormalizedReady.TryGetValue(dbKey, out var cached)) return cached;
+        var exists = await HasColumnAsync(con, "dbo.DenialTaskBoard", "AssignedToNormalized", ct);
+        TaskBoardAssignedToNormalizedReady[dbKey] = exists;
+        return exists;
+    }
 
     private readonly IConfiguration _configuration;
     private readonly string _masterConnectionString;
@@ -140,33 +154,16 @@ BEGIN
         END CATCH
     END;
 
-    IF COL_LENGTH('dbo.DenialTaskBoard','AssignedToNormalized') IS NULL
-    BEGIN
-        ALTER TABLE dbo.DenialTaskBoard
-        ADD AssignedToNormalized AS LOWER(LTRIM(RTRIM(ISNULL([AssignedTo],'')))) PERSISTED;
-    END;
-
-    -- AR Reviewer views filter every task/claim query by AssignedTo. Wrapping the column in
-    -- LOWER/LTRIM/RTRIM at query time (as older code did) is non-sargable and forces a full
-    -- scan of this 300k+ row table on every My Worklist / claim-menu-counts request. This
-    -- persisted, indexed mirror lets those filters seek instead — see BuildCommonWhere,
-    -- BuildAgingTaskWhere, and the reviewer EXISTS clause in BuildClaimWhere.
-    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_DenialTaskBoard_AssignedToNormalized' AND object_id = OBJECT_ID('dbo.DenialTaskBoard'))
-    BEGIN
-        BEGIN TRY
-            IF NOT EXISTS (SELECT 1 FROM sys.stats WHERE name = 'IX_DenialTaskBoard_AssignedToNormalized' AND object_id = OBJECT_ID('dbo.DenialTaskBoard'))
-                CREATE NONCLUSTERED INDEX IX_DenialTaskBoard_AssignedToNormalized
-                ON dbo.DenialTaskBoard (AssignedToNormalized)
-                INCLUDE (ClaimIDNormalized, Status, TaskID, SLAStatus, DueDate, CreatedOn);
-            ELSE IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_DenialTaskBoard_AssignedToNormalized_Auto' AND object_id = OBJECT_ID('dbo.DenialTaskBoard'))
-                CREATE NONCLUSTERED INDEX IX_DenialTaskBoard_AssignedToNormalized_Auto
-                ON dbo.DenialTaskBoard (AssignedToNormalized)
-                INCLUDE (ClaimIDNormalized, Status, TaskID, SLAStatus, DueDate, CreatedOn);
-        END TRY
-        BEGIN CATCH
-            IF ERROR_NUMBER() NOT IN (1911, 1913, 2714) THROW;
-        END CATCH
-    END;
+    -- AssignedToNormalized (persisted computed column + index) is intentionally NOT created here.
+    -- Adding a computed column to a 300k+ row table takes a schema-modification lock and rewrites
+    -- every row; running that automatically on first request under production load caused this
+    -- DDL batch to blow past its timeout, and because that failure prevented the schema-ready flag
+    -- from ever being set, every subsequent request kept retrying the same expensive batch, taking
+    -- every page down with it. It ships instead in
+    -- Sql/DenialWorkflow_Performance_Indexes_And_Backfill_20260701.sql for a DBA to run once in a
+    -- maintenance window. The C# query builders check COL_LENGTH/HasColumnAsync and only use the
+    -- fast plain-column comparison once that column actually exists; until then they fall back to
+    -- the older (slower but always-correct) LOWER/LTRIM/RTRIM comparison.
 
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_DenialTaskBoard_ClaimAssignment_Status' AND object_id = OBJECT_ID('dbo.DenialTaskBoard'))
     BEGIN
@@ -412,9 +409,9 @@ ORDER BY CreatedOn DESC;";
             return cachedDashboard.Summary;
         }
 
-        var where = BuildCommonWhere(filter, "t", includeStatus: true, includeAssigned: true);
         await using var con = OpenLab(filter.LabId); await con.OpenAsync(ct);
         await EnsureDenialTaskBoardNormalizedClaimIdAsync(con, ct);
+        var where = BuildCommonWhere(filter, "t", includeStatus: true, includeAssigned: true, await HasTaskBoardAssignedToNormalizedAsync(con, ct));
         var taskColumns = await GetColumnSetAsync(con, "dbo.DenialTaskBoard", ct);
         var lineColumns = await GetColumnSetAsync(con, "dbo.DenialLineItem", ct);
         static string MoneySql(string columnName) => $"ISNULL(TRY_CONVERT(decimal(18,2), REPLACE(REPLACE(CONVERT(nvarchar(100), d.{columnName}), '$', ''), ',', '')), 0)";
@@ -777,7 +774,7 @@ DROP TABLE #TaskBoardBase;";
                 PageSize = filter.PageSize
             }
             : filter;
-        var where = BuildClaimWhere(lineFilter, "d");
+        var where = BuildClaimWhere(lineFilter, "d", null, await HasTaskBoardAssignedToNormalizedAsync(con, ct));
         var taskWhere = BuildAgingTaskWhere(filter, "t", taskCols);
         var taskAmountExpression = taskCols.Contains("InsuranceBalance") ? TaskMoneySql("InsuranceBalance") : "CAST(0 AS decimal(18,2))";
         var taskServiceDateExpression = TaskDateSql(taskCols, "DateOfService");
@@ -1322,7 +1319,12 @@ WHERE {LabScopeSql("h.LabId")} AND h.UniqueTrackId IN ({string.Join(',', keys.Se
 
     public async Task<DenialWorkflowSummary> GetSummaryAsync(int labId, string role, string userName, CancellationToken ct)
     {
-        var reviewerWhere = IsReviewerOnly(role) ? " AND AssignedToNormalized=LOWER(LTRIM(RTRIM(@UserName)))" : "";
+        await using var con = OpenLab(labId); await con.OpenAsync(ct);
+        await EnsureDenialTaskBoardNormalizedClaimIdAsync(con, ct);
+        var taskBoardHasAssignedToNormalized = await HasTaskBoardAssignedToNormalizedAsync(con, ct);
+        var reviewerWhere = IsReviewerOnly(role)
+            ? (taskBoardHasAssignedToNormalized ? " AND AssignedToNormalized=LOWER(LTRIM(RTRIM(@UserName)))" : " AND LOWER(LTRIM(RTRIM(ISNULL(AssignedTo,''))))=LOWER(LTRIM(RTRIM(@UserName)))")
+            : "";
         var verificationReviewerWhere = IsReviewerOnly(role) ? " AND LOWER(LTRIM(RTRIM(ISNULL(AssignedTo,''))))=LOWER(LTRIM(RTRIM(@UserName)))" : "";
         var sql = $@"
 SELECT
@@ -1333,8 +1335,6 @@ Unassigned = SUM(CASE WHEN ISNULL(AssignedTo,'')='' AND ISNULL(Status,'') NOT IN
 FROM dbo.DenialTaskBoard WITH (NOLOCK)
 WHERE ({LabScopeSql("LabId")} OR @LabId <= 0) {reviewerWhere};
 SELECT VerificationPending = COUNT(1) FROM dbo.DenialVerificationTask WHERE {LabScopeSql("LabId")} {verificationReviewerWhere};";
-        await using var con = OpenLab(labId); await con.OpenAsync(ct);
-        await EnsureDenialTaskBoardNormalizedClaimIdAsync(con, ct);
         await using var cmd = new SqlCommand(sql, con); AddLabScopeParams(cmd, labId); cmd.Parameters.AddWithValue("@UserName", (userName ?? string.Empty).Trim());
         var s = new DenialWorkflowSummary();
         await using var rd = await cmd.ExecuteReaderAsync(ct);
@@ -1445,7 +1445,7 @@ SELECT VerificationPending = COUNT(1) FROM dbo.DenialVerificationTask WHERE {Lab
         var reviewerClaimMatchSql = hasLineClaimUid && hasTaskClaimUid
             ? "(NULLIF(LTRIM(RTRIM(ISNULL(tbx.ClaimUID,''))), '') = NULLIF(LTRIM(RTRIM(ISNULL(l.ClaimUID,''))), '') OR tbx.ClaimIDNormalized = l.VisitNumberNormalized)"
             : "tbx.ClaimIDNormalized = l.VisitNumberNormalized";
-        var where = BuildClaimWhere(filter, "l", reviewerClaimMatchSql);
+        var where = BuildClaimWhere(filter, "l", reviewerClaimMatchSql, await HasTaskBoardAssignedToNormalizedAsync(con, ct));
         var lineLabScope = LabScopeSql("l.LabId");
         var taskLabScope = LabScopeSql("t.LabId");
         var escalationLabScope = LabScopeSql("e.LabId");
@@ -1493,14 +1493,15 @@ SELECT
     MaxCreatedOn = MAX(t.CreatedOn),
     HasVerification = MAX(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) IN ('required review','verification pending') THEN 1 ELSE 0 END),
     HasSlaAtRisk = MAX(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.SLAStatus,'')))) IN ('at risk','atrisk','breached','overdue') AND {normalizedStatusSql} <> 'Closed' THEN 1 ELSE 0 END),
-    HasEscalationResponse = CASE WHEN EXISTS (
-            SELECT 1 FROM dbo.DenialClaimEscalations e WITH (NOLOCK)
-            WHERE e.IsDeleted=0 AND {escalationLabScope} AND e.ClaimId IN (c.ClaimUid, c.ClaimId)
-              AND (LOWER(LTRIM(RTRIM(ISNULL(e.Status,'')))) IN ('in review','responded','response submitted','manager response')
-                   OR ISNULL(e.Comments,'') LIKE '%Manager Response:%'
-                   OR ISNULL(e.Comments,'') LIKE '%Client Response:%'
-                   OR ISNULL(e.Comments,'') LIKE '%Account Manager Response:%')
-        ) THEN 1 ELSE 0 END,
+    -- Live task status, not the permanent has-any-escalation-ever-been-responded-to flag. The
+    -- latter never resets, so a claim the manager responded to weeks ago kept counting toward
+    -- Escalation Response in this badge/precedence long after the reviewer moved it elsewhere or
+    -- closed it, while the actual tab (BuildTaskViewSql's escalationresponse case) correctly
+    -- required the live status to still be pending-response -- badge said 2, tab showed nothing.
+    HasEscalationResponse = MAX(CASE
+        WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) IN ('required review','in review','responded','response submitted','manager response','writeoffapproved','writeoffrejected') THEN 1
+        WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) = 'rework' AND LOWER(LTRIM(RTRIM(ISNULL(t.WorkFlowStatus,'')))) = 'response escalation' THEN 1
+        ELSE 0 END),
     ExternalEscalationExists = CASE WHEN EXISTS (
             SELECT 1 FROM dbo.DenialClaimEscalations e WITH (NOLOCK)
             WHERE e.IsDeleted=0 AND {escalationLabScope} AND e.ClaimId IN (c.ClaimUid, c.ClaimId)
@@ -1703,7 +1704,7 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
         var reviewerClaimMatchSql = hasLineClaimUid && hasTaskClaimUid
             ? "(NULLIF(LTRIM(RTRIM(ISNULL(tbx.ClaimUID,''))), '') = NULLIF(LTRIM(RTRIM(ISNULL(l.ClaimUID,''))), '') OR tbx.ClaimIDNormalized = l.VisitNumberNormalized)"
             : "tbx.ClaimIDNormalized = l.VisitNumberNormalized";
-        var where = BuildClaimWhere(baseFilter, "l", reviewerClaimMatchSql);
+        var where = BuildClaimWhere(baseFilter, "l", reviewerClaimMatchSql, await HasTaskBoardAssignedToNormalizedAsync(con, ct));
         var lineLabScope = LabScopeSql("l.LabId");
         var taskLabScope = LabScopeSql("t.LabId");
         var escalationLabScope = LabScopeSql("e.LabId");
@@ -1792,7 +1793,14 @@ SELECT
     END),
     HasVerification = MAX(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) IN ('required review','verification pending') THEN 1 ELSE 0 END),
     HasSlaAtRisk = MAX(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.SLAStatus,'')))) IN ('at risk','atrisk','breached','overdue') AND {normalizedStatusSql} <> 'Closed' THEN 1 ELSE 0 END),
-    HasEscalationResponse = ISNULL(MAX(eca.HasEscalationResponse), 0),
+    -- Live task status, not the permanent has-any-escalation-ever-been-responded-to flag from
+    -- EscalationClaimAgg (see the matching fix in GetClaimSubMenuCountsAsync) -- that never
+    -- resets once true, so it kept claiming a claim for Escalation Response long after the
+    -- reviewer moved it elsewhere or closed it.
+    HasEscalationResponse = MAX(CASE
+        WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) IN ('required review','in review','responded','response submitted','manager response','writeoffapproved','writeoffrejected') THEN 1
+        WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) = 'rework' AND LOWER(LTRIM(RTRIM(ISNULL(t.WorkFlowStatus,'')))) = 'response escalation' THEN 1
+        ELSE 0 END),
     ExternalEscalationExists = ISNULL(MAX(eca.ExternalEscalationExists), 0),
     WorkFlowStatus = CASE
         WHEN MAX(CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(t.WorkFlowStatus,''))),'') IS NOT NULL THEN 1 ELSE 0 END) = 1
@@ -1956,7 +1964,7 @@ DROP TABLE #TaskClaimAgg;";
 
     private async Task<int> WriteTaskBoardClaimsBasicExportAsync(SqlConnection con, DenialWorkflowFilter filter, Stream output, CancellationToken ct)
     {
-        var where = BuildCommonWhere(filter, "t", includeStatus: true, includeAssigned: true);
+        var where = BuildCommonWhere(filter, "t", includeStatus: true, includeAssigned: true, await HasTaskBoardAssignedToNormalizedAsync(con, ct));
         var taskColumns = await GetColumnSetAsync(con, "dbo.DenialTaskBoard", ct);
 
         string TextExpr(string column)
@@ -2049,7 +2057,7 @@ ORDER BY {orderByCreated} t.ClaimID, t.TaskID;";
 
     private async Task<int> WriteTaskBoardClaimsExportAsync(SqlConnection con, DenialWorkflowFilter filter, Stream output, CancellationToken ct)
     {
-        var where = BuildCommonWhere(filter, "t", includeStatus: true, includeAssigned: true);
+        var where = BuildCommonWhere(filter, "t", includeStatus: true, includeAssigned: true, await HasTaskBoardAssignedToNormalizedAsync(con, ct));
         var taskColumns = await GetColumnSetAsync(con, "dbo.DenialTaskBoard", ct);
         var lineTableExists = await TableExistsAsync(con, "dbo.DenialLineItem", ct);
         var lineColumns = lineTableExists
@@ -2639,9 +2647,9 @@ END;";
     {
         filter.PageSize = filter.PageSize <= 0 ? 100 : Math.Clamp(filter.PageSize, 25, 500);
         if (filter.Page <= 0) filter.Page = 1;
-        var where = BuildCommonWhere(filter, "t", includeStatus: true, includeAssigned: true);
         await using var con = OpenLab(filter.LabId); await con.OpenAsync(ct);
         await EnsureDenialTaskBoardNormalizedClaimIdAsync(con, ct);
+        var where = BuildCommonWhere(filter, "t", includeStatus: true, includeAssigned: true, await HasTaskBoardAssignedToNormalizedAsync(con, ct));
         var taskColumns = await GetColumnSetAsync(con, "dbo.DenialTaskBoard", ct);
         string TaskText(string column, string alias) => taskColumns.Contains(column)
             ? $"LTRIM(RTRIM(ISNULL(t.{column},''))) AS {alias}"
@@ -3013,7 +3021,7 @@ SELECT COUNT(1) FROM @Changed;";
 
     private async Task<int> WriteClaimUploadTemplateAsync(SqlConnection con, DenialWorkflowFilter filter, Stream output, CancellationToken ct)
     {
-        var where = BuildCommonWhere(filter, "t", includeStatus: true, includeAssigned: true);
+        var where = BuildCommonWhere(filter, "t", includeStatus: true, includeAssigned: true, await HasTaskBoardAssignedToNormalizedAsync(con, ct));
         var taskColumns = await GetColumnSetAsync(con, "dbo.DenialTaskBoard", ct);
         var lineTableExists = await TableExistsAsync(con, "dbo.DenialLineItem", ct);
         var lineColumns = lineTableExists
@@ -3466,7 +3474,8 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
         DenialWorkflowFilter f,
         string a,
         bool includeStatus,
-        bool includeAssigned)
+        bool includeAssigned,
+        bool taskBoardHasAssignedToNormalized = false)
     {
         var w = new List<string>();
         var p = new Dictionary<string, object>();
@@ -3481,10 +3490,11 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
 
         if (IsReviewerOnly(f.Role))
         {
-            // DenialTaskBoard has a persisted AssignedToNormalized mirror (see
-            // EnsureDenialTaskBoardNormalizedClaimIdAsync) so this 300k+ row scan can seek
-            // instead of scanning every row through LOWER/LTRIM/RTRIM.
-            w.Add(string.Equals(a, "t", StringComparison.Ordinal)
+            // Only use the fast plain-column comparison once the caller has confirmed
+            // AssignedToNormalized actually exists on this database (see
+            // HasTaskBoardAssignedToNormalizedAsync) — referencing it unconditionally fails
+            // outright ("Invalid column name") on labs that haven't been migrated yet.
+            w.Add(taskBoardHasAssignedToNormalized && string.Equals(a, "t", StringComparison.Ordinal)
                 ? $"{a}.AssignedToNormalized = LOWER(LTRIM(RTRIM(@RoleUserName)))"
                 : $"LOWER(LTRIM(RTRIM(ISNULL({a}.AssignedTo,''))))=LOWER(LTRIM(RTRIM(@RoleUserName)))");
             p["@RoleUserName"] = (f.UserName ?? string.Empty).Trim();
@@ -3753,7 +3763,7 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
         return (w.Count == 0 ? string.Empty : " AND " + string.Join(" AND ", w), p);
     }
 
-    private static (string WhereClause, Dictionary<string, object> Parameters) BuildClaimWhere(DenialWorkflowFilter f, string a, string? reviewerClaimMatchSql = null)
+    private static (string WhereClause, Dictionary<string, object> Parameters) BuildClaimWhere(DenialWorkflowFilter f, string a, string? reviewerClaimMatchSql = null, bool taskBoardHasAssignedToNormalized = false)
     {
         var w = new List<string>();
         var p = new Dictionary<string, object>();
@@ -3766,10 +3776,13 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
 
         if (IsReviewerOnly(f.Role))
         {
+            var assignedToPredicate = taskBoardHasAssignedToNormalized
+                ? "tbx.AssignedToNormalized = LOWER(LTRIM(RTRIM(@RoleUserName)))"
+                : "LOWER(LTRIM(RTRIM(ISNULL(tbx.AssignedTo,'')))) = LOWER(LTRIM(RTRIM(@RoleUserName)))";
             w.Add($@"EXISTS (
                 SELECT 1
                 FROM dbo.DenialTaskBoard tbx WITH (NOLOCK)
-                WHERE tbx.AssignedToNormalized = LOWER(LTRIM(RTRIM(@RoleUserName)))
+                WHERE {assignedToPredicate}
                   AND {LabScopeSql("tbx.LabId")}
                   AND {claimMatchSql}
             )");

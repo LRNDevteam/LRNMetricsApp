@@ -117,7 +117,10 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
     taskView: responseOnly ? 'response' : '',
     page,
     pageSize: 100
-  }), [labId, user, status, searchText, responseOnly, page]);
+    // Depend on user?.role/user?.userName, not the whole user object — App.jsx's window-focus
+    // handler replaces the user object on every tab refocus even when nothing changed, which was
+    // enough to rebuild this memo and reload the queue every time the browser tab regained focus.
+  }), [labId, user?.role, user?.userName, status, searchText, responseOnly, page]);
 
   async function load(signal) {
     if (!labId) return;
