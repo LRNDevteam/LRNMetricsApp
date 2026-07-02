@@ -1,0 +1,590 @@
+{
+	"TargetTable": "dbo.DenialLineItem",
+	"Columns": [
+		{
+			"ExcelColumn": "Accession No",
+			"SqlColumn": "AccessionNo",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Visit Number",
+			"SqlColumn": "VisitNumber",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "ClaimUID",
+			"SqlColumn": "ClaimUID",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "CPTCode",
+			"SqlColumn": "CPTCode",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Patient DOB",
+			"SqlColumn": "PatientDOB",
+			"DataType": "date"
+		},
+		{
+			"ExcelColumn": "Payer Code",
+			"SqlColumn": "PayerCode",
+			"DataType": "int"
+		},
+		{
+			"ExcelColumn": "Payer Name",
+			"SqlColumn": "PayerName",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "PayerName Normalized",
+			"SqlColumn": "PayerNameNormalized",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Pay Status",
+			"SqlColumn": "PayStatus",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Historical Payment",
+			"SqlColumn": "HistoricalPayment",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Historical Paid Line-Item Count",
+			"SqlColumn": "HistoricalPaidLineItemCount",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Historical Payment Confidence Score",
+			"SqlColumn": "HistoricalPaymentConfidenceScore",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Total Line-Item Count",
+			"SqlColumn": "TotalLineItemCount",
+			"DataType": "int"
+		},
+		{
+			"ExcelColumn": "Paid Line-Item Count",
+			"SqlColumn": "PaidLineItemCount",
+			"DataType": "int"
+		},
+		{
+			"ExcelColumn": "% Paid Line-Item Count",
+			"SqlColumn": "PaidLineItemCountPercent",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Payer Type",
+			"SqlColumn": "PayerType",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "PayerFound in Policy",
+			"SqlColumn": "PayerFoundInPolicy",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Date of Service",
+			"SqlColumn": "DateOfService",
+			"DataType": "date"
+		},
+		{
+			"ExcelColumn": "First Billed Date",
+			"SqlColumn": "FirstBilledDate",
+			"DataType": "date"
+		},
+		{
+			"ExcelColumn": "Panel Name",
+			"SqlColumn": "PanelName",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "LIS ICD 10 Codes",
+			"SqlColumn": "LISICD10Codes",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "CCW ICD10Code",
+			"SqlColumn": "CCWICD10Code",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Units",
+			"SqlColumn": "Units",
+			"DataType": "int"
+		},
+		{
+			"ExcelColumn": "Modifier",
+			"SqlColumn": "Modifier",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "DenialCode_Original",
+			"SqlColumn": "DenialCodeOriginal",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "DenialCode_Normalized",
+			"SqlColumn": "DenialCodeNormalized",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Denial Description",
+			"SqlColumn": "DenialDescription",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Billed Amount",
+			"SqlColumn": "BilledAmount",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Allowed Amount",
+			"SqlColumn": "AllowedAmount",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Insurance Payment",
+			"SqlColumn": "InsurancePayment",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Insurance Adjustment",
+			"SqlColumn": "InsuranceAdjustment",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Patient Paid Amount",
+			"SqlColumn": "PatientPaidAmount",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Patient Adjustment",
+			"SqlColumn": "PatientAdjustment",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Insurance Balance",
+			"SqlColumn": "InsuranceBalance",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Patient Balance",
+			"SqlColumn": "PatientBalance",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Total Balance",
+			"SqlColumn": "TotalBalance",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Medicare Fee",
+			"SqlColumn": "MedicareFee",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Final Claim Status",
+			"SqlColumn": "FinalClaimStatus",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Covered ICD 10 Codes Billed",
+			"SqlColumn": "CoveredICD10CodesBilled",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Non Covered ICD 10 Codes Billed",
+			"SqlColumn": "NonCoveredICD10CodesBilled",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Billed ICD codes not available in Payer Policy",
+			"SqlColumn": "BilledICDCodesNotAvailableInPayerPolicy",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Coverage Status",
+			"SqlColumn": "CoverageStatus",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Final Coverage Status",
+			"SqlColumn": "FinalCoverageStatus",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Covered ICD 10 codes as per Payer Policy",
+			"SqlColumn": "CoveredICD10CodesAsPerPayerPolicy",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Non Covered ICD 10 Codes as per Payer Policy",
+			"SqlColumn": "NonCoveredICD10CodesAsPerPayerPolicy",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Action Comment",
+			"SqlColumn": "ActionComment",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Resolution",
+			"SqlColumn": "Resolution",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Coding Validation",
+			"SqlColumn": "CodingValidation",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Coding Validation Sub-Status",
+			"SqlColumn": "CodingValidationSubStatus",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "ICD Compliance Status",
+			"SqlColumn": "ICDComplianceStatus",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "ICD Compliance Substatus",
+			"SqlColumn": "ICDComplianceSubstatus",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "ICD Primary Indicator Available",
+			"SqlColumn": "ICDPrimaryIndicatorAvailable",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Covered ICD Presence",
+			"SqlColumn": "CoveredICDPresence",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "ICD Validation Confidence",
+			"SqlColumn": "ICDValidationConfidence",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Frequency Condition Met",
+			"SqlColumn": "FrequencyConditionMet",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Gender Condition Met",
+			"SqlColumn": "GenderConditionMet",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Payability",
+			"SqlColumn": "Payability",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Forecasting Payability",
+			"SqlColumn": "ForecastingPayability",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Policy Coverage Expectation",
+			"SqlColumn": "PolicyCoverageExpectation",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Denial Validity",
+			"SqlColumn": "DenialValidity",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Coverage Expectation Remarks",
+			"SqlColumn": "CoverageExpectationRemarks",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Expected Average Allowed Amount",
+			"SqlColumn": "ExpectedAverageAllowedAmount",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Expected Average Insurance Payment",
+			"SqlColumn": "ExpectedAverageInsurancePayment",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Expected Allowed Amount - Same Lab",
+			"SqlColumn": "ExpectedAllowedAmountSameLab",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Expected Insurance Payment - Same Lab",
+			"SqlColumn": "ExpectedInsurancePaymentSameLab",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Mode Allowed Amount - Same Lab",
+			"SqlColumn": "ModeAllowedAmountSameLab",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Mode Insurance Paid - Same Lab",
+			"SqlColumn": "ModeInsurancePaidSameLab",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Mode Allowed Amount- Peer",
+			"SqlColumn": "ModeAllowedAmountPeer",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Mode Insurance Paid - Peer",
+			"SqlColumn": "ModeInsurancePaidPeer",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Median Allowed Amount- Same Lab",
+			"SqlColumn": "MedianAllowedAmountSameLab",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Median Insurance Paid - Same Lab",
+			"SqlColumn": "MedianInsurancePaidSameLab",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Median Allowed Amount- Peer",
+			"SqlColumn": "MedianAllowedAmountPeer",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Median Insurance Paid - Peer",
+			"SqlColumn": "MedianInsurancePaidPeer",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Mode Allowed Amount Difference",
+			"SqlColumn": "ModeAllowedAmountDifference",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Mode Insurance Paid Difference",
+			"SqlColumn": "ModeInsurancePaidDifference",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Median Allowed Amount Difference",
+			"SqlColumn": "MedianAllowedAmountDifference",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Median Insurance Paid Difference",
+			"SqlColumn": "MedianInsurancePaidDifference",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Denial Rate",
+			"SqlColumn": "DenialRate",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Adjustment Rate",
+			"SqlColumn": "AdjustmentRate",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "Payment Days",
+			"SqlColumn": "PaymentDays",
+			"DataType": "int"
+		},
+		{
+			"ExcelColumn": "Expected Payment Date",
+			"SqlColumn": "ExpectedPaymentDate",
+			"DataType": "date"
+		},
+		{
+			"ExcelColumn": "Expected Payment Month",
+			"SqlColumn": "ExpectedPaymentMonth",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "BillingProvider",
+			"SqlColumn": "BillingProvider",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "ReferringProvider",
+			"SqlColumn": "ReferringProvider",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "ClinicName",
+			"SqlColumn": "ClinicName",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "SalesRepname",
+			"SqlColumn": "SalesRepname",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "PatientID",
+			"SqlColumn": "PatientID",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Source",
+			"SqlColumn": "Source",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Pat name",
+			"SqlColumn": "PatName",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Subscriber Id",
+			"SqlColumn": "SubscriberId",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "ChargeEnteredDate",
+			"SqlColumn": "ChargeEnteredDate",
+			"DataType": "date"
+		},
+		{
+			"ExcelColumn": "POS",
+			"SqlColumn": "POS",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "TOS",
+			"SqlColumn": "TOS",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "CheckDate",
+			"SqlColumn": "CheckDate",
+			"DataType": "date"
+		},
+		{
+			"ExcelColumn": "DaystoDOS",
+			"SqlColumn": "DaystoDOS",
+			"DataType": "int"
+		},
+		{
+			"ExcelColumn": "RollingDays",
+			"SqlColumn": "RollingDays",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "DaystoBill",
+			"SqlColumn": "DaystoBill",
+			"DataType": "int"
+		},
+		{
+			"ExcelColumn": "DaystoPost",
+			"SqlColumn": "DaystoPost",
+			"DataType": "int"
+		},
+		{
+			"ExcelColumn": "Denial Classification",
+			"SqlColumn": "DenialClassification",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Denial Type",
+			"SqlColumn": "DenialType",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Action Category",
+			"SqlColumn": "ActionCategory",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Action Code",
+			"SqlColumn": "ActionCode",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Recommended Action",
+			"SqlColumn": "RecommendedAction",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Task Guidance",
+			"SqlColumn": "TaskGuidance",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Denial Date",
+			"SqlColumn": "DenialDate",
+			"DataType": "date"
+		},
+		{
+			"ExcelColumn": "Task Status",
+			"SqlColumn": "TaskStatus",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Assigned To",
+			"SqlColumn": "AssignedTo",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "WorkFlowStatus",
+			"SqlColumn": "WorkFlowStatus",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "ClaimFrom",
+			"SqlColumn": "ClaimFrom",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Short Category",
+			"SqlColumn": "ShortCategory",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Priority",
+			"SqlColumn": "Priority",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "SLA (Days)",
+			"SqlColumn": "SLADays",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Notes / Comments",
+			"SqlColumn": "NotesComments",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "LabId",
+			"SqlColumn": "LabId",
+			"DataType": "int"
+		},
+		{
+			"ExcelColumn": "LabName",
+			"SqlColumn": "LabName",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "RunId",
+			"SqlColumn": "RunId",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "CreatedOn",
+			"SqlColumn": "CreatedOn",
+			"DataType": "datetime"
+		}
+	]
+}

@@ -1,0 +1,260 @@
+{
+	"TargetTable": "dbo.DenialTaskBoard",
+	"Columns": [
+		{
+			"ExcelColumn": "Task ID",
+			"SqlColumn": "TaskID",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Claim ID",
+			"SqlColumn": "ClaimID",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "ClaimUID",
+			"SqlColumn": "ClaimUID",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Patient / Acct #",
+			"SqlColumn": "PatientId",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "CPT Code",
+			"SqlColumn": "CPTCode",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Denial Code",
+			"SqlColumn": "DenialCode",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Denial Description",
+			"SqlColumn": "DenialDescription",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Denial Classification",
+			"SqlColumn": "DenialClassification",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Action Code",
+			"SqlColumn": "ActionCode",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Recommended Action",
+			"SqlColumn": "RecommendedAction",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Task",
+			"SqlColumn": "Task",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Action Category",
+			"SqlColumn": "ActionCategory",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Priority",
+			"SqlColumn": "Priority",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "SLA (Days)",
+			"SqlColumn": "SLADays",
+			"DataType": "int"
+		},
+		{
+			"ExcelColumn": "Status",
+			"SqlColumn": "Status",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "WorkFlowStatus",
+			"SqlColumn": "WorkFlowStatus",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "ClaimFrom",
+			"SqlColumn": "ClaimFrom",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Insurance Balance",
+			"SqlColumn": "InsuranceBalance",
+			"DataType": "decimal"
+		},
+		{
+			"ExcelColumn": "IsCurrentDenial",
+			"SqlColumn": "IsCurrentDenial",
+			"DataType": "boolean"
+		},
+		{
+			"ExcelColumn": "Assigned To",
+			"SqlColumn": "AssignedTo",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Date Opened",
+			"SqlColumn": "DateOpened",
+			"DataType": "date"
+		},
+		{
+			"ExcelColumn": "Due Date",
+			"SqlColumn": "DueDate",
+			"DataType": "date"
+		},
+		{
+			"ExcelColumn": "Date Completed",
+			"SqlColumn": "DateCompleted",
+			"DataType": "date"
+		},
+		{
+			"ExcelColumn": "Days Remaining",
+			"SqlColumn": "DaysRemaining",
+			"DataType": "int"
+		},
+		{
+			"ExcelColumn": "SLA Status",
+			"SqlColumn": "SLAStatus",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "LabId",
+			"SqlColumn": "LabId",
+			"DataType": "int"
+		},
+		{
+			"ExcelColumn": "LabName",
+			"SqlColumn": "LabName",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "RunId",
+			"SqlColumn": "RunId",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "CreatedOn",
+			"SqlColumn": "CreatedOn",
+			"DataType": "datetime"
+		},
+		{
+			"ExcelColumn": "UniqueTrackId",
+			"SqlColumn": "UniqueTrackId",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "SalesRepname",
+			"SqlColumn": "SalesRepname",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "ClinicName",
+			"SqlColumn": "ClinicName",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "ReferringProvider",
+			"SqlColumn": "ReferringProvider",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Source",
+			"SqlColumn": "Source",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Pat name",
+			"SqlColumn": "PatName",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Subscriber Id",
+			"SqlColumn": "SubscriberId",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "PayerName Normalized",
+			"SqlColumn": "PayerNameNormalized",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Payer Name",
+			"SqlColumn": "PayerName",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Payer Code",
+			"SqlColumn": "PayerCode",
+			"DataType": "int"
+		},
+		{
+			"ExcelColumn": "Payer Type",
+			"SqlColumn": "PayerType",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "First Billed Date",
+			"SqlColumn": "FirstBilledDate",
+			"DataType": "date"
+		},
+		{
+			"ExcelColumn": "ChargeEnteredDate",
+			"SqlColumn": "ChargeEnteredDate",
+			"DataType": "date"
+		},
+		{
+			"ExcelColumn": "BillingProvider",
+			"SqlColumn": "BillingProvider",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Panel Name",
+			"SqlColumn": "PanelName",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Date of Service",
+			"SqlColumn": "DateOfService",
+			"DataType": "date"
+		},
+		{
+			"ExcelColumn": "ICDCodes",
+			"SqlColumn": "ICDCodes",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "CoverageStatus",
+			"SqlColumn": "CoverageStatus",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "ICDComplianceStatus",
+			"SqlColumn": "ICDComplianceStatus",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "DenialValidity",
+			"SqlColumn": "DenialValidity",
+			"DataType": "string"
+		},
+		{
+			"ExcelColumn": "Units",
+			"SqlColumn": "Units",
+			"DataType": "int"
+		},
+		{
+			"ExcelColumn": "Modifier",
+			"SqlColumn": "Modifier",
+			"DataType": "string"
+		}
+	]
+}
