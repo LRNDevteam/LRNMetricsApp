@@ -579,7 +579,7 @@ export default function App() {
           { key: 'assigned', label: 'Assigned claims', count: distinctClaimCount(assignedItems), items: assignedItems, targetView: 'assigned' },
           { key: 'pending', label: 'Pending claims', count: distinctClaimCount(pendingItems), items: pendingItems, targetView: 'open' },
           { key: 'action', label: 'Action required claims', count: distinctClaimCount(actionRequiredItems), items: actionRequiredItems, targetView: 'open', status: 'Pending Review' },
-          { key: 'response', label: 'Escalated response claims', count: distinctClaimCount(responseItems), items: responseItems, targetView: 'response' },
+          { key: 'response', label: 'Escalated response claims', count: distinctClaimCount(responseItems), items: responseItems, targetView: 'escalationResponse' },
           { key: 'escalations', label: 'Escalation claims', count: distinctClaimCount(escalationItems), items: escalationItems, targetView: 'escalations' }
         ].filter(section => section.count > 0);
       } else if (externalManager) {
