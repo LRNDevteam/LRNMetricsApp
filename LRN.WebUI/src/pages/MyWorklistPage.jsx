@@ -272,7 +272,9 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
   const canUploadDocuments = canUpdateTasks || clientManager;
   const canSaveComments = canUpdateTasks || clientManager;
   const showEscalationReason = roleIsReviewerOnly(role);
-  const reviewerEscalationClaimOnly = roleIsReviewerOnly(role);
+  // Escalation is always a claim-level action for every role; a single line/task can never be
+  // escalated independently of its claim, so this is not gated by role.
+  const reviewerEscalationClaimOnly = true;
   const canEditClaim = (claim) => canUpdateTasks || (clientManager && claimHasClientInfoPending(claim));
   const canEditLine = (line) => canUpdateTasks || (clientManager && isClientInfoPending(line));
   const canDeleteDocumentForClaim = (claim) => canDeleteClaimDocument(claim, { canUpload: canUploadDocuments, canEdit: canEditClaim(claim), uploading: docUploading, taskView });

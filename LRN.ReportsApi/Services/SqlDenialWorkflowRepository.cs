@@ -2933,8 +2933,11 @@ WHERE TaskID=@TaskID;
 
 IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL
 BEGIN
+    -- TaskStatus mirrors normal task-progression Status (independent of WorkFlowStatus, which
+    -- carries escalation/assignment/closure signal state read by the claim precedence engine).
     UPDATE l
-    SET WorkFlowStatus = CASE WHEN @IsClosed=1 THEN 'Closed Claim' ELSE NULLIF(@Status,'') END
+    SET WorkFlowStatus = CASE WHEN @IsClosed=1 THEN 'Closed Claim' ELSE NULLIF(@Status,'') END,
+        TaskStatus = CASE WHEN @IsClosed=1 THEN 'Closed' ELSE NULLIF(@Status,'') END
     FROM dbo.DenialLineItem l
     JOIN @Changed c ON CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))), 'CLM-', ''))=c.ClaimId;
 END;
@@ -3017,6 +3020,22 @@ SELECT COUNT(1) FROM @Changed;";
         var rowsAffected = scalar == DBNull.Value || scalar is null ? 0 : Convert.ToInt32(scalar);
         if (rowsAffected > 0) InvalidateClaimCounts(request.LabId);
         return rowsAffected;
+    }
+
+    public async Task<bool> IsTaskUnderInternalEscalationAsync(int labId, string taskId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(taskId)) return false;
+        await EnsureClaimSupportTablesAsync(labId, ct);
+        const string sql = @"
+SELECT CAST(1 AS bit)
+FROM dbo.DenialTaskBoard WITH (NOLOCK)
+WHERE TaskID = @TaskID AND LOWER(LTRIM(RTRIM(ISNULL(WorkFlowStatus,'')))) = 'internal escalation';";
+        await using var con = OpenLab(labId);
+        await con.OpenAsync(ct);
+        await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 60 };
+        cmd.Parameters.AddWithValue("@TaskID", taskId.Trim());
+        var result = await cmd.ExecuteScalarAsync(ct);
+        return result is bool b ? b : result != null && result != DBNull.Value && Convert.ToBoolean(result);
     }
 
     private async Task<int> WriteClaimUploadTemplateAsync(SqlConnection con, DenialWorkflowFilter filter, Stream output, CancellationToken ct)

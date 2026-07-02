@@ -26,6 +26,7 @@ public interface IDenialWorkflowService
     Task<PagedResult<VerificationTaskRow>> GetVerificationAsync(DenialWorkflowFilter filter, CancellationToken ct);
     Task<int> AssignByInsightAsync(AssignInsightRequest request, CancellationToken ct);
     Task<int> UpdateTaskAsync(UpdateTaskRequest request, CancellationToken ct);
+    Task<bool> IsTaskUnderInternalEscalationAsync(int labId, string taskId, CancellationToken ct);
     Task<int> UpdateClaimCommentsAsync(int labId, string claimId, string comments, string actionBy, CancellationToken ct);
     Task<int> DecideVerificationAsync(VerificationDecisionRequest request, CancellationToken ct);
     Task<IReadOnlyList<DenialNoteRow>> GetNotesAsync(int labId, string claimId, string? taskId, string? cptCode, string noteLevel, CancellationToken ct);
@@ -152,6 +153,7 @@ public sealed class DenialWorkflowService : IDenialWorkflowService
     public Task<PagedResult<VerificationTaskRow>> GetVerificationAsync(DenialWorkflowFilter filter, CancellationToken ct) => _repo.GetVerificationAsync(filter, ct);
     public Task<int> AssignByInsightAsync(AssignInsightRequest request, CancellationToken ct) => _repo.AssignByInsightAsync(request, ct);
     public Task<int> UpdateTaskAsync(UpdateTaskRequest request, CancellationToken ct) => _repo.UpdateTaskAsync(request, IsClosed(request.Status), request.Status.Equals("Duplicate", StringComparison.OrdinalIgnoreCase), ct);
+    public Task<bool> IsTaskUnderInternalEscalationAsync(int labId, string taskId, CancellationToken ct) => _repo.IsTaskUnderInternalEscalationAsync(labId, taskId, ct);
     public Task<int> UpdateClaimCommentsAsync(int labId, string claimId, string comments, string actionBy, CancellationToken ct) => _repo.UpdateClaimCommentsAsync(labId, claimId, comments, actionBy, ct);
     public Task<int> DecideVerificationAsync(VerificationDecisionRequest request, CancellationToken ct) => _repo.DecideVerificationAsync(request, !request.IsValidDenial || IsClosed(request.Status), ct);
     public Task<IReadOnlyList<DenialNoteRow>> GetNotesAsync(int labId, string claimId, string? taskId, string? cptCode, string noteLevel, CancellationToken ct) => _repo.GetNotesAsync(labId, claimId, taskId, cptCode, noteLevel, ct);

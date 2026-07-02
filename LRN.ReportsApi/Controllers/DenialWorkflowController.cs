@@ -576,6 +576,8 @@ public sealed class DenialWorkflowController : ControllerBase
     {
         var role = FirstClaim(ClaimTypes.Role, "role", "roles");
         if (IsReadOnlyWorkflowRole(role)) return StatusCode(StatusCodes.Status403Forbidden, new { message = "This role cannot update task status." });
+        if (IsReviewerOnly(role) && await _service.IsTaskUnderInternalEscalationAsync(request.LabId, request.TaskId, ct))
+            return StatusCode(StatusCodes.Status409Conflict, new { message = "This claim is under AR Manager escalation review. Status cannot be updated until the manager responds." });
         request.Status = NormalizeWorkflowStatus(request.Status);
         var validationError = ValidateTaskStatusUpdate(request, role);
         if (!string.IsNullOrWhiteSpace(validationError)) return BadRequest(new { message = validationError });
@@ -788,15 +790,16 @@ public sealed class DenialWorkflowController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.ClaimId)) return BadRequest("ClaimId is required.");
         if (string.IsNullOrWhiteSpace(request.EscalationReason)) return BadRequest("Escalation reason is required.");
         var role = FirstClaim(ClaimTypes.Role, "role", "roles");
-        if (IsReviewerOnly(role))
-        {
-            request.EscalationLevel = "Claim";
-            request.TaskId = string.Empty;
-            request.CptCode = string.Empty;
-            request.EscalationScope = "Overall Claim";
-            request.EscalationScopeValue = request.ClaimId;
-            request.EscalationScopeDisplay = "Overall Claim";
-        }
+        if (IsExternalEscalationTarget(request.EscalatedToRole) && !CanExternalEscalateFromToken())
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only Admin and AR Manager users can escalate a claim to Client Manager or Account Manager." });
+        // Escalation (internal and external) is always a claim-level action; no code path may
+        // escalate a single line/task independently of its claim.
+        request.EscalationLevel = "Claim";
+        request.TaskId = string.Empty;
+        request.CptCode = string.Empty;
+        request.EscalationScope = "Overall Claim";
+        request.EscalationScopeValue = request.ClaimId;
+        request.EscalationScopeDisplay = "Overall Claim";
         request.CreatedBy = string.IsNullOrWhiteSpace(request.CreatedBy) ? (FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "ReactWorkflow") : request.CreatedBy;
         return Ok(await _service.SaveEscalationAsync(request, ct));
     }
@@ -809,6 +812,16 @@ public sealed class DenialWorkflowController : ControllerBase
         if (request.EscalationId <= 0) return BadRequest("EscalationId is required.");
         if (string.IsNullOrWhiteSpace(request.ClaimId)) return BadRequest("ClaimId is required.");
         if (string.IsNullOrWhiteSpace(request.EscalationReason)) return BadRequest("Escalation reason is required.");
+        if (IsExternalEscalationTarget(request.EscalatedToRole) && !CanExternalEscalateFromToken())
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only Admin and AR Manager users can escalate a claim to Client Manager or Account Manager." });
+        // Escalation (internal and external) is always a claim-level action; no code path may
+        // escalate a single line/task independently of its claim.
+        request.EscalationLevel = "Claim";
+        request.TaskId = string.Empty;
+        request.CptCode = string.Empty;
+        request.EscalationScope = "Overall Claim";
+        request.EscalationScopeValue = request.ClaimId;
+        request.EscalationScopeDisplay = "Overall Claim";
         request.ActionBy = string.IsNullOrWhiteSpace(request.ActionBy) ? (FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "ReactWorkflow") : request.ActionBy;
         var rows = await _service.UpdateEscalationAsync(request, ct);
         return Ok(new DenialWorkflowResult { Success = rows > 0, RowsAffected = rows, Message = rows > 0 ? "Escalation updated." : "Escalation update failed." });
@@ -948,6 +961,19 @@ public sealed class DenialWorkflowController : ControllerBase
         var role = FirstClaim(ClaimTypes.Role, "role", "roles");
         var r = NormalizeRoleToken(role);
         return r.Contains("ADMIN") || r.Contains("ARMANAGER") || r.Contains("CLIENTMANAGER") || r.Contains("ACCOUNTMANAGER");
+    }
+
+    private bool CanExternalEscalateFromToken()
+    {
+        var role = FirstClaim(ClaimTypes.Role, "role", "roles");
+        var r = NormalizeRoleToken(role);
+        return r.Contains("ADMIN") || r.Contains("ARMANAGER");
+    }
+
+    private static bool IsExternalEscalationTarget(string? escalatedToRole)
+    {
+        var r = NormalizeRoleToken(escalatedToRole);
+        return r.Contains("CLIENTMANAGER") || r.Contains("ACCOUNTMANAGER");
     }
 
     private bool CanAccessWorkflowTaskView(string? taskView)
