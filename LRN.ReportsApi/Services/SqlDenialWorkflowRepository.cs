@@ -637,11 +637,15 @@ SELECT
     ClosedTasks = SUM(CASE WHEN LOWER(tb.StatusValue) IN ('closed', 'completed') THEN 1 ELSE 0 END),
     Pending = COUNT(DISTINCT CASE WHEN LOWER(tb.StatusValue) NOT IN ('closed', 'completed') THEN tb.ClaimId END),
     PendingTasks = SUM(CASE WHEN LOWER(tb.StatusValue) NOT IN ('closed', 'completed') THEN 1 ELSE 0 END),
-    Aging0To30 = COUNT(DISTINCT CASE WHEN ISNULL(ca.AgeDays, 0) BETWEEN 0 AND 30 THEN tb.ClaimId END),
-    Aging31To60 = COUNT(DISTINCT CASE WHEN ISNULL(ca.AgeDays, 0) BETWEEN 31 AND 60 THEN tb.ClaimId END),
-    Aging61To90 = COUNT(DISTINCT CASE WHEN ISNULL(ca.AgeDays, 0) BETWEEN 61 AND 90 THEN tb.ClaimId END),
-    Aging91To120 = COUNT(DISTINCT CASE WHEN ISNULL(ca.AgeDays, 0) BETWEEN 91 AND 120 THEN tb.ClaimId END),
-    AgingOver120 = COUNT(DISTINCT CASE WHEN ISNULL(ca.AgeDays, 0) > 120 THEN tb.ClaimId END)
+    -- UAT: these buckets applied no status filter at all, so a Closed claim (excluded from
+    -- Assigned/InProgress/Pending above) still landed in an aging bucket -- the bucket sum
+    -- silently drifted from Pending+Closed for the same reviewer row. Aging is a how-old-is-
+    -- my-open-work view, so scope it to the same non-closed population as Pending.
+    Aging0To30 = COUNT(DISTINCT CASE WHEN LOWER(tb.StatusValue) NOT IN ('closed', 'completed') AND ISNULL(ca.AgeDays, 0) BETWEEN 0 AND 30 THEN tb.ClaimId END),
+    Aging31To60 = COUNT(DISTINCT CASE WHEN LOWER(tb.StatusValue) NOT IN ('closed', 'completed') AND ISNULL(ca.AgeDays, 0) BETWEEN 31 AND 60 THEN tb.ClaimId END),
+    Aging61To90 = COUNT(DISTINCT CASE WHEN LOWER(tb.StatusValue) NOT IN ('closed', 'completed') AND ISNULL(ca.AgeDays, 0) BETWEEN 61 AND 90 THEN tb.ClaimId END),
+    Aging91To120 = COUNT(DISTINCT CASE WHEN LOWER(tb.StatusValue) NOT IN ('closed', 'completed') AND ISNULL(ca.AgeDays, 0) BETWEEN 91 AND 120 THEN tb.ClaimId END),
+    AgingOver120 = COUNT(DISTINCT CASE WHEN LOWER(tb.StatusValue) NOT IN ('closed', 'completed') AND ISNULL(ca.AgeDays, 0) > 120 THEN tb.ClaimId END)
 FROM #TaskBoardBase tb
 INNER JOIN #ClaimQueueState cqs ON cqs.ClaimId = tb.ClaimId
 LEFT JOIN #ClaimAmount ca ON ca.ClaimId = tb.ClaimId
@@ -708,6 +712,15 @@ DROP TABLE #TaskBoardBase;";
         var menuCounts = await GetClaimSubMenuCountsAsync(filter, ct);
         result.AssignedClaims = menuCounts.Assigned;
         result.EscalatedClaims = menuCounts.Escalated;
+        // UAT: this fix was previously applied only to Assigned/Escalated, leaving
+        // TotalOpenClaims/Unassigned on the old #TaskBoardBase-derived formula — so "Total Open
+        // Claims" could still disagree with "Assigned + Unassigned" by a few claims (reported as
+        // "off by 4, reproducible"). Converge these onto the same menuCounts source too so every
+        // KPI tile on this dashboard is internally consistent by construction.
+        result.TotalClaims = menuCounts.TotalClaims;
+        result.PendingClaims = menuCounts.Unassigned;
+        result.ClosedClaims = menuCounts.Closed;
+        result.OpenClaims = Math.Max(menuCounts.TotalClaims - menuCounts.Closed, 0);
 
         DashboardCache[cacheKey] = new DashboardCacheEntry(DateTime.UtcNow, result);
         return result;
@@ -776,6 +789,9 @@ DROP TABLE #TaskBoardBase;";
             : filter;
         var where = BuildClaimWhere(lineFilter, "d", null, await HasTaskBoardAssignedToNormalizedAsync(con, ct));
         var taskWhere = BuildAgingTaskWhere(filter, "t", taskCols);
+        // Claim-visibility/reviewer-assignment gates join straight into #LineAging, which already
+        // applies the date range against DenialLineItem — see the comment in BuildAgingTaskWhere.
+        var taskWhereForVisibility = BuildAgingTaskWhere(filter, "t", taskCols, includeDateRange: false);
         var taskAmountExpression = taskCols.Contains("InsuranceBalance") ? TaskMoneySql("InsuranceBalance") : "CAST(0 AS decimal(18,2))";
         var taskServiceDateExpression = TaskDateSql(taskCols, "DateOfService");
         var taskClaimUidExpression = taskCols.Contains("ClaimUID")
@@ -808,7 +824,7 @@ INTO #VisibleAgingClaims
 FROM dbo.DenialTaskBoard t WITH (NOLOCK)
 WHERE (@HasTaskLab=0 OR {taskLabScope})
   AND NULLIF({taskClaimUidExpression}, '') IS NOT NULL
-  {taskWhere.WhereClause}
+  {taskWhereForVisibility.WhereClause}
 GROUP BY {taskClaimRootExpression};
 
 CREATE UNIQUE CLUSTERED INDEX IX_VisibleAgingClaims_Root ON #VisibleAgingClaims(ClaimRoot);
@@ -820,7 +836,7 @@ INTO #TaskAssignment
 FROM dbo.DenialTaskBoard t WITH (NOLOCK)
 WHERE (@HasTaskLab=0 OR {taskLabScope})
   AND NULLIF({taskClaimUidExpression}, '') IS NOT NULL
-  {taskWhere.WhereClause}
+  {taskWhereForVisibility.WhereClause}
 GROUP BY {taskClaimRootExpression},
          COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))), ''), 'Unassigned');
 
@@ -2604,6 +2620,9 @@ ORDER BY c.ClaimId, t.TaskID;";
             }
 
             var updateSql = $@"
+DECLARE @Changed TABLE(TaskID nvarchar(100) NULL, UniqueTrackId nvarchar(100) NULL, LabId int NULL, RunId nvarchar(100) NULL, OldStatus nvarchar(100) NULL, NewStatus nvarchar(100) NULL, OldAssignedTo nvarchar(256) NULL, NewAssignedTo nvarchar(256) NULL);
+DECLARE @Rows int = 0;
+
 UPDATE t
 SET AssignedTo=@ReviewerUserName,
     AssignedOn=SYSDATETIME(),
@@ -2611,9 +2630,15 @@ SET AssignedTo=@ReviewerUserName,
     WorkFlowStatus='Assigned To AR Reviewer',
     ReviewerUpdatedBy=@ActionBy,
     ReviewerUpdatedOn=SYSDATETIME()
+OUTPUT
+    INSERTED.TaskID, INSERTED.UniqueTrackId, ISNULL(INSERTED.LabId,@LabId), INSERTED.RunId,
+    DELETED.Status, INSERTED.Status, DELETED.AssignedTo, INSERTED.AssignedTo
+INTO @Changed(TaskID, UniqueTrackId, LabId, RunId, OldStatus, NewStatus, OldAssignedTo, NewAssignedTo)
 FROM dbo.DenialTaskBoard t
 JOIN #ClaimIds c ON {taskClaimMatchSql}
 WHERE 1=1;
+
+SET @Rows = @@ROWCOUNT;
 
 IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL
 BEGIN
@@ -2622,14 +2647,28 @@ BEGIN
         WorkFlowStatus='Assigned To AR Reviewer'
     FROM dbo.DenialLineItem l
     JOIN #ClaimIds c ON {lineClaimMatchSql};
-END;";
+END;
+
+-- Cumulative Audit / UAT: assignment and reassignment actions produced no DenialTaskHistory
+-- row, so the claim History tab only ever showed the original 'Claim created / By: System'
+-- entry even after a confirmed reassignment. Escalation actions already wrote history; mirror
+-- that pattern here so assignment shows up in the audit trail too.
+IF OBJECT_ID('dbo.DenialTaskHistory','U') IS NOT NULL
+BEGIN
+    INSERT INTO dbo.DenialTaskHistory(TaskID,UniqueTrackId,LabId,RunId,ActionType,OldStatus,NewStatus,OldAssignedTo,NewAssignedTo,Comments,ActionBy,ActionDate,SnapshotJson)
+    SELECT ISNULL(TaskID,''),ISNULL(UniqueTrackId,''),ISNULL(LabId,@LabId),ISNULL(RunId,''),'Assign',ISNULL(OldStatus,''),ISNULL(NewStatus,''),ISNULL(OldAssignedTo,''),ISNULL(NewAssignedTo,''),CONCAT('Assigned to ',@ReviewerUserName),@ActionBy,SYSDATETIME(),''
+    FROM @Changed;
+END;
+
+SELECT @Rows;";
             int rows;
             await using (var cmd = new SqlCommand(updateSql, con, (SqlTransaction)tx) { CommandTimeout = 180 })
             {
                 cmd.Parameters.AddWithValue("@LabId", request.LabId);
                 cmd.Parameters.AddWithValue("@ReviewerUserName", request.ReviewerUserName.Trim());
                 cmd.Parameters.AddWithValue("@ActionBy", request.ActionBy ?? string.Empty);
-                rows = await cmd.ExecuteNonQueryAsync(ct);
+                var scalar = await cmd.ExecuteScalarAsync(ct);
+                rows = scalar == DBNull.Value || scalar is null ? 0 : Convert.ToInt32(scalar);
             }
             await tx.CommitAsync(ct);
             FilterOptionsCache.TryRemove(request.LabId, out _);
@@ -2867,7 +2906,7 @@ DELETE FROM dbo.DenialTaskBoard WHERE TaskID=@TaskID;";
     public async Task<int> AssignByInsightAsync(AssignInsightRequest request, CancellationToken ct)
     {
         const string sql = @"
-DECLARE @ChangedClaims TABLE(ClaimId nvarchar(150) NOT NULL);
+DECLARE @Changed TABLE(TaskID nvarchar(100) NULL, UniqueTrackId nvarchar(100) NULL, LabId int NULL, RunId nvarchar(100) NULL, ClaimId nvarchar(150) NULL, OldStatus nvarchar(100) NULL, NewStatus nvarchar(100) NULL, OldAssignedTo nvarchar(256) NULL, NewAssignedTo nvarchar(256) NULL);
 
 UPDATE dbo.DenialTaskBoard
 SET AssignedTo=@ReviewerUserName,
@@ -2876,7 +2915,11 @@ SET AssignedTo=@ReviewerUserName,
     WorkFlowStatus='Assigned To AR Reviewer',
     ReviewerUpdatedBy=@ActionBy,
     ReviewerUpdatedOn=SYSDATETIME()
-OUTPUT CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(INSERTED.ClaimID,''))), 'CLM-', '')) INTO @ChangedClaims(ClaimId)
+OUTPUT
+    INSERTED.TaskID, INSERTED.UniqueTrackId, ISNULL(INSERTED.LabId,@LabId), INSERTED.RunId,
+    CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(INSERTED.ClaimID,''))), 'CLM-', '')),
+    DELETED.Status, INSERTED.Status, DELETED.AssignedTo, INSERTED.AssignedTo
+INTO @Changed(TaskID, UniqueTrackId, LabId, RunId, ClaimId, OldStatus, NewStatus, OldAssignedTo, NewAssignedTo)
 WHERE DenialCode=@DenialCode AND ISNULL(PayerName,'')=@PayerName AND (@RunId='' OR RunId=@RunId);
 
 IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL
@@ -2885,9 +2928,20 @@ BEGIN
     SET AssignedTo=@ReviewerUserName,
         WorkFlowStatus='Assigned To AR Reviewer'
     FROM dbo.DenialLineItem l
-    JOIN @ChangedClaims c ON CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))), 'CLM-', ''))=c.ClaimId;
-END;";
-        await using var con = OpenLab(request.LabId); await con.OpenAsync(ct); await EnsureDenialTaskBoardNormalizedClaimIdAsync(con, ct); await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 180 }; cmd.Parameters.AddWithValue("@LabId", request.LabId); cmd.Parameters.AddWithValue("@ReviewerUserName", request.ReviewerUserName); cmd.Parameters.AddWithValue("@ActionBy", request.ActionBy); cmd.Parameters.AddWithValue("@DenialCode", request.DenialCode); cmd.Parameters.AddWithValue("@PayerName", request.PayerName); cmd.Parameters.AddWithValue("@RunId", request.RunId ?? string.Empty); var rows = await cmd.ExecuteNonQueryAsync(ct); FilterOptionsCache.TryRemove(request.LabId, out _); InvalidateClaimCounts(request.LabId); return rows;
+    JOIN (SELECT DISTINCT ClaimId FROM @Changed) c ON CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))), 'CLM-', ''))=c.ClaimId;
+END;
+
+-- Cumulative Audit / UAT: assignment actions produced no DenialTaskHistory row (see
+-- AssignClaimsAsync for the matching fix on the bulk-assign path).
+IF OBJECT_ID('dbo.DenialTaskHistory','U') IS NOT NULL
+BEGIN
+    INSERT INTO dbo.DenialTaskHistory(TaskID,UniqueTrackId,LabId,RunId,ActionType,OldStatus,NewStatus,OldAssignedTo,NewAssignedTo,Comments,ActionBy,ActionDate,SnapshotJson)
+    SELECT ISNULL(TaskID,''),ISNULL(UniqueTrackId,''),ISNULL(LabId,@LabId),ISNULL(RunId,''),'Assign',ISNULL(OldStatus,''),ISNULL(NewStatus,''),ISNULL(OldAssignedTo,''),ISNULL(NewAssignedTo,''),CONCAT('Assigned to ',@ReviewerUserName),@ActionBy,SYSDATETIME(),''
+    FROM @Changed;
+END;
+
+SELECT COUNT(1) FROM @Changed;";
+        await using var con = OpenLab(request.LabId); await con.OpenAsync(ct); await EnsureDenialTaskBoardNormalizedClaimIdAsync(con, ct); await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 180 }; cmd.Parameters.AddWithValue("@LabId", request.LabId); cmd.Parameters.AddWithValue("@ReviewerUserName", request.ReviewerUserName); cmd.Parameters.AddWithValue("@ActionBy", request.ActionBy); cmd.Parameters.AddWithValue("@DenialCode", request.DenialCode); cmd.Parameters.AddWithValue("@PayerName", request.PayerName); cmd.Parameters.AddWithValue("@RunId", request.RunId ?? string.Empty); var scalar = await cmd.ExecuteScalarAsync(ct); var rows = scalar == DBNull.Value || scalar is null ? 0 : Convert.ToInt32(scalar); FilterOptionsCache.TryRemove(request.LabId, out _); InvalidateClaimCounts(request.LabId); return rows;
     }
 
     public async Task<int> UpdateTaskAsync(UpdateTaskRequest request, bool isClosed, bool isDuplicate, CancellationToken ct)
@@ -3331,6 +3385,15 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
         var prefix = $"claim-counts|{labId}|";
         foreach (var key in ClaimCountsCache.Keys.Where(key => key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
             ClaimCountsCache.TryRemove(key, out _);
+
+        // UAT: queue tab badges refresh immediately after a bulk action (ClaimCountsCache is
+        // invalidated above), but the top-level Dashboard KPI cards read from a separate,
+        // 90-second-TTL DashboardCache that nothing ever busted — so the dashboard could still
+        // show stale Assigned/Unassigned/Escalated numbers for up to 90s after the same action.
+        // Every call site that already invalidates claim counts gets this for free.
+        var dashboardPrefix = $"dashboard|{labId}|";
+        foreach (var key in DashboardCache.Keys.Where(key => key.StartsWith(dashboardPrefix, StringComparison.OrdinalIgnoreCase)))
+            DashboardCache.TryRemove(key, out _);
     }
 
     private sealed record FilterOptionsCacheEntry(DateTime CachedOnUtc, DenialWorkflowFilterOptions Options);
@@ -3671,7 +3734,7 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
         return (w.Count == 0 ? string.Empty : " AND " + string.Join(" AND ", w), p);
     }
 
-    private static (string WhereClause, Dictionary<string, object> Parameters) BuildAgingTaskWhere(DenialWorkflowFilter f, string a, HashSet<string> cols)
+    private static (string WhereClause, Dictionary<string, object> Parameters) BuildAgingTaskWhere(DenialWorkflowFilter f, string a, HashSet<string> cols, bool includeDateRange = true)
     {
         var w = new List<string>();
         var p = new Dictionary<string, object>();
@@ -3758,13 +3821,22 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
             p["@TaskRunId"] = f.RunId.Trim();
         }
 
-        if (f.FromDate.HasValue && Has("DateOfService"))
+        // UAT: applying this date range to DenialTaskBoard.DateOfService here AND separately to
+        // DenialLineItem.DateOfService (via BuildClaimWhere, the aging page's own documented
+        // basis: "Aging is based on DenialLineItem Date of Service") double-gates every claim —
+        // both independently-populated date columns had to agree with the same window for a row
+        // to survive the join, which is why selecting any period beyond the "All Date of
+        // Service" default collapsed to "No aging data found." Callers that gate claim
+        // visibility (#VisibleAgingClaims, #TaskAssignment) pass includeDateRange=false and let
+        // #LineAging's own date filter be the sole date determinant; callers that compute their
+        // own age buckets directly off this same table's DateOfService (TaskSource) keep it.
+        if (includeDateRange && f.FromDate.HasValue && Has("DateOfService"))
         {
             w.Add($"CAST({a}.DateOfService AS date)>=@TaskFromDate");
             p["@TaskFromDate"] = f.FromDate.Value.Date;
         }
 
-        if (f.ToDate.HasValue && Has("DateOfService"))
+        if (includeDateRange && f.ToDate.HasValue && Has("DateOfService"))
         {
             w.Add($"CAST({a}.DateOfService AS date)<=@TaskToDate");
             p["@TaskToDate"] = f.ToDate.Value.Date;
@@ -4744,7 +4816,19 @@ FROM dbo.DenialClaimEscalations e WITH (NOLOCK)
 WHERE e.IsDeleted=0 AND {escalationLabScope} AND e.EscalationLevel=@Level {statusWhere} {searchWhere} {responseWhere};
 
 SELECT
-    e.EscalationId,e.LabId,e.ClaimId,TaskId=ISNULL(e.TaskId,''),CptCode=ISNULL(e.CptCode,''),e.EscalationLevel,e.EscalationReason,e.Comments,e.Status,EscalatedTo=ISNULL(e.EscalatedTo,''),EscalatedToRole=ISNULL(e.EscalatedToRole,''),e.NextFollowUpDate,e.CreatedBy,e.CreatedOn,
+    e.EscalationId,e.LabId,e.ClaimId,TaskId=ISNULL(e.TaskId,''),CptCode=ISNULL(e.CptCode,''),e.EscalationLevel,e.EscalationReason,e.Comments,
+    -- UAT: this page rendered the raw DenialClaimEscalations.Status value ('Response Submitted',
+    -- 'Resolved', 'WriteOffApproved'...) while the Claim Assignment grid shows the friendly,
+    -- claim-level label from ClaimStatusCaseSql ('Escalated to AR Manager' / 'Escalation
+    -- Response') for the identical claim. Map to that same two-value vocabulary here so both
+    -- screens agree; filtering/sorting below still use the untouched raw e.Status column.
+    Status = CASE
+        WHEN LOWER(LTRIM(RTRIM(ISNULL(e.Status,'')))) IN ('in review','responded','response submitted','manager response','writeoffapproved','writeoffrejected','resolved')
+             OR ISNULL(e.Comments,'') LIKE '%Manager Response:%' OR ISNULL(e.Comments,'') LIKE '%Client Response:%' OR ISNULL(e.Comments,'') LIKE '%Account Manager Response:%'
+        THEN 'Escalation Response'
+        ELSE 'Escalated to AR Manager'
+    END,
+    EscalatedTo=ISNULL(e.EscalatedTo,''),EscalatedToRole=ISNULL(e.EscalatedToRole,''),e.NextFollowUpDate,e.CreatedBy,e.CreatedOn,
     Analyst = e.CreatedBy,
     LabName = ISNULL(tb.LabName,''),
     Source = ISNULL(tb.Source,''),

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { denialWorkflowService } from '../services/denialWorkflowService';
+import { canAssignRole } from '../utils/formatters';
 
 const blankForm = {
   denialCode: '',
@@ -211,7 +212,12 @@ function PushReviewEditor({ row, masterData, onClose, onSave }) {
   </div>;
 }
 
-export default function DenialCodeMasterPage({ labId, setMessage, onReviewActionChanges, initialPushAuditId = null, onPushConfirmed }) {
+export default function DenialCodeMasterPage({ labId, role = '', setMessage, onReviewActionChanges, initialPushAuditId = null, onPushConfirmed }) {
+  // UAT: this component had zero independent role awareness — App.jsx's router is the only
+  // thing keeping Account/Client Manager off this page today. Gate Add/Edit/Delete at the
+  // component level too (backend already enforces Admin/AR-Manager-only on every endpoint),
+  // so the controls stay correctly hidden even if this page is ever reused/rerouted.
+  const canEdit = canAssignRole(role);
   const [rows, setRows] = useState([]);
   const [pageInfo, setPageInfo] = useState({ page: 1, totalCount: 0, totalPages: 0 });
   const [search, setSearch] = useState('');
@@ -220,6 +226,7 @@ export default function DenialCodeMasterPage({ labId, setMessage, onReviewAction
   const [masterData, setMasterData] = useState({ actionCategories: [], denialClassifications: [], coverageStatuses: [], icdComplianceStatuses: [], denialValidities: [], slaDays: [], priorities: [] });
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const [editor, setEditor] = useState(null);
   const [actionWarning, setActionWarning] = useState(null);
   const [impactPreview, setImpactPreview] = useState(null);
@@ -354,12 +361,21 @@ export default function DenialCodeMasterPage({ labId, setMessage, onReviewAction
   }
 
   async function regenerate() {
+    if (regenerating) return;
     if (!window.confirm('This will regenerate the denial classifier export for all records. This action cannot be undone. Continue?')) return;
+    // UAT: this fired with no busy/disabled state at all, so the button stayed clickable and
+    // there was no indication the (genuinely slow, full-row-scan) regenerate was in flight —
+    // reported as "the tab becomes unresponsive for 20+ seconds; unclear if the sync completes."
+    // Match the same busy pattern already used for Import below.
+    setRegenerating(true);
+    setMessage?.({ type: 'info', text: 'Regenerating the classifier export for all records. This may take a while for large datasets...' });
     try {
       await denialWorkflowService.regenerateDenialCodeMasterExcel(labId);
       setMessage({ type: 'success', text: 'Classifier Excel regenerated.' });
     } catch (err) {
       setMessage({ type: 'danger', text: err.message || 'Regenerate failed.' });
+    } finally {
+      setRegenerating(false);
     }
   }
 
@@ -424,13 +440,14 @@ export default function DenialCodeMasterPage({ labId, setMessage, onReviewAction
     <div className="claim-list-toolbar">
       <label className="claim-search-wrap"><i className="bi bi-search" /><input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') setQuery({ ...query, search, page: 1 }); }} placeholder="Search denial code, classification, action" /></label>
       <button className="wl-btn xs" onClick={() => setQuery({ ...query, search, page: 1 })}>Search</button>
-      <button className="wl-btn teal xs" onClick={() => setEditor({})}><i className="bi bi-plus-circle" /> Add</button>
-      <label className={`wl-btn xs dcm-upload ${importing ? 'disabled' : ''}`} aria-disabled={importing}><i className={`bi ${importing ? 'bi-hourglass-split' : 'bi-upload'}`} /> {importing ? 'Importing Excel...' : 'Import Excel'}<input type="file" accept=".xlsx,.xlsm,.xltx,.xltm" disabled={importing} onChange={e => { importFile(e.target.files?.[0]); e.target.value = ''; }} /></label>
-      <button className="wl-btn xs" onClick={regenerate}><i className="bi bi-arrow-repeat" /> Regenerate</button>
+      {canEdit && <button className="wl-btn teal xs" onClick={() => setEditor({})}><i className="bi bi-plus-circle" /> Add</button>}
+      {canEdit && <label className={`wl-btn xs dcm-upload ${importing ? 'disabled' : ''}`} aria-disabled={importing}><i className={`bi ${importing ? 'bi-hourglass-split' : 'bi-upload'}`} /> {importing ? 'Importing Excel...' : 'Import Excel'}<input type="file" accept=".xlsx,.xlsm,.xltx,.xltm" disabled={importing} onChange={e => { importFile(e.target.files?.[0]); e.target.value = ''; }} /></label>}
+      {canEdit && <button className={`wl-btn xs ${regenerating ? 'disabled' : ''}`} disabled={regenerating} onClick={regenerate}><i className={`bi ${regenerating ? 'bi-hourglass-split' : 'bi-arrow-repeat'}`} /> {regenerating ? 'Regenerating...' : 'Regenerate'}</button>}
       <button className="wl-btn xs" onClick={downloadExport}><i className="bi bi-download" /> Export Excel</button>
     </div>
-    {(loading || importing) && <div className="loading-line" />}
+    {(loading || importing || regenerating) && <div className="loading-line" />}
     {importing && <div className="dcm-import-status"><i className="bi bi-hourglass-split" /> Import is running. Please keep this page open while the file is uploaded and processed.</div>}
+    {regenerating && <div className="dcm-import-status"><i className="bi bi-hourglass-split" /> Regenerating the classifier export. Please keep this page open until it completes.</div>}
     <div className="claim-assign-scroll dcm-table-wrap">
       <table className="lrn-table workflow-table dcm-table">
         <thead><tr><th>Denial Code</th><th>Denial Classification</th><th>Coverage Status</th><th>ICD Compliance Status</th><th>Action Code</th><th>Action Category</th><th>Actions</th></tr></thead>
@@ -443,8 +460,10 @@ export default function DenialCodeMasterPage({ labId, setMessage, onReviewAction
             <td>{valueOf(row, 'actionCode') || '-'}</td>
             <td>{valueOf(row, 'actionCategory') || '-'}</td>
             <td className="dcm-row-actions">
-              <button className="wl-btn xs" onClick={() => setEditor({ ...blankForm, ...Object.fromEntries(Object.keys(blankForm).map(k => [k, valueOf(row, k)])), __key: { denialCode: valueOf(row, 'denialCode'), coverageStatus: valueOf(row, 'coverageStatus'), icdComplianceStatus: valueOf(row, 'icdComplianceStatus') } })}><i className="bi bi-pencil" /> Edit</button>
-              <button className="wl-btn xs danger" onClick={() => remove(row)}><i className="bi bi-trash" /> Delete</button>
+              {canEdit ? <>
+                <button className="wl-btn xs" onClick={() => setEditor({ ...blankForm, ...Object.fromEntries(Object.keys(blankForm).map(k => [k, valueOf(row, k)])), __key: { denialCode: valueOf(row, 'denialCode'), coverageStatus: valueOf(row, 'coverageStatus'), icdComplianceStatus: valueOf(row, 'icdComplianceStatus') } })}><i className="bi bi-pencil" /> Edit</button>
+                <button className="wl-btn xs danger" onClick={() => remove(row)}><i className="bi bi-trash" /> Delete</button>
+              </> : <span className="muted-text">View only</span>}
             </td>
           </tr>) : <tr><td colSpan="7" className="empty-cell">No denial codes found.</td></tr>}
         </tbody>

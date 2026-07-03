@@ -202,8 +202,8 @@ export async function ensureWorkflowJwt(options = {}) {
         lastAuthTokenErrorAt = Date.now();
         if (isLocalReactHost() && (error instanceof TypeError || String(error?.message || '').includes('Failed to fetch'))) {
           const metricsHint = AUTH_TOKEN_URL.includes('localhost:44351')
-            ? 'Your AuthToken URL is still pointing at IIS Express (44351). If LabMetricsDashboard is running on https://localhost:57996, set VITE_LRN_METRICS_BASE_URL=https://localhost:57996 and restart Vite.'
-            : 'If LabMetricsDashboard is running on https://localhost:57996, set VITE_LRN_METRICS_BASE_URL=https://localhost:57996 and restart Vite.';
+            ? 'LabMetricsDashboard should be running under IIS Express on https://localhost:44351. Keep VITE_LRN_METRICS_BASE_URL=https://localhost:44351 and restart Vite after any config change.'
+            : 'Set VITE_LRN_METRICS_BASE_URL=https://localhost:44351, restart Vite, and run LabMetricsDashboard under IIS Express on https://localhost:44351.';
           throw new Error(
             `Cannot call AuthToken from React localhost. Check CORS and local HTTPS. Auth URL: ${AUTH_TOKEN_URL}. ` +
             'Use the updated LabMetricsDashboard Program.cs, restart MVC, and ensure the Vite origin https://localhost:5173 is allowed. ' +

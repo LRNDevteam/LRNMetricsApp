@@ -21,6 +21,14 @@ import DenialMapperPage from './pages/DenialMapperPage';
 
 function roleIsReviewerOnly(role) { return isArReviewerRole(role); }
 
+// UAT: the role badge showed the raw "AR Reviewer" role string, but the spec calls that role
+// "AR Analyst" in the UI. Only relabel the display text here -- permission checks throughout
+// this file (isArReviewerRole, etc.) keep matching on the underlying "AR Reviewer" role string.
+function roleDisplayLabel(role) {
+  const value = String(role || '').trim();
+  return isArReviewerRole(value) ? 'AR Analyst' : (value || 'Workflow User');
+}
+
 function WorkflowPlaceholder({ title, children }) {
   return <div className="workflow-placeholder">
     <div className="workflow-placeholder-icon"><i className="bi bi-tools" /></div>
@@ -98,7 +106,9 @@ export default function App() {
   const externalManager = clientManager || accountManager;
   const adminRole = String(user.role || '').toLowerCase().includes('admin');
   const readOnlyWorkflow = isReadOnlyWorkflowRole(user.role);
-  const denialMapperRole = adminRole || arManagerOnly || clientManager || accountManager || /lab\s*user|viewer|read\s*only/i.test(String(user.role || ''));
+  const denialMapperViewer = /viewer|read\s*only/i.test(String(user.role || ''));
+  const denialMapperLabUser = /lab\s*user/i.test(String(user.role || ''));
+  const denialMapperRole = adminRole || arManagerOnly || clientManager || accountManager || denialMapperViewer || denialMapperLabUser;
   const denialMapperAdmin = adminRole;
   const exportBusy = !!claimExportJob && ['Queued', 'Running'].includes(claimExportJob.status);
   const activeQueueKey = view === 'myworklist' ? myWorklistView : view === 'claims' ? claimTaskView : '';
@@ -751,6 +761,9 @@ export default function App() {
   const headerLabs = mapperHeaderActive && denialMapperLabs.length ? denialMapperLabs : labs;
   const labName = [...denialMapperLabs, ...labs].find(l => Number(l.labId ?? l.LabId) === Number(labId))?.labName || 'Select Lab';
   const pageTitle = { dashboard: 'Denial Dashboard', aging: 'Aging Dashboard', summary: 'Denial Summary', claims: canAssign ? 'Claim Assignment' : 'Claim View', myworklist: 'My Worklist', escalations: escalationView === 'response' ? 'Escalation Response' : 'Escalation Queue', verification: 'Verification', denialcodemaster: 'Denial Code Master', denialmapper: 'Denial Mapper', denialactionverification: 'Action Change Verification', exports: 'Exports', reports: 'Reports', support: 'Contact Support', admin: 'Admin Setup' }[view] || 'Denial Workflow';
+  // UAT: the browser tab title stayed on the generic static value from index.html and never
+  // reflected which page was open.
+  useEffect(() => { document.title = `${pageTitle} · LRN Denial Workflow`; }, [pageTitle]);
   const showOverallDownload = canDownloadWorkflow && (view === 'claims' || view === 'myworklist');
   const claimNavTabs = useMemo(() => [
     ...getQueuesForRole(user.role),
@@ -1124,10 +1137,13 @@ export default function App() {
     finally { setLoading(false); }
   }
 
-  async function saveTask(task, status, comments) {
+  async function saveTask(task, status, comments, extra = {}) {
     setLoading(true);
     try {
-      const result = await denialWorkflowService.updateTask({ labId, taskId: task.taskId, status, comments, actionBy: user.userName || 'ReactWorkflow' });
+      // UAT: this call sent none of the fields ValidateTaskStatusUpdate requires for several
+      // statuses (e.g. ActualOutcome for Closed) -- every such save genuinely 400'd. Let callers
+      // pass the extra fields their status transition needs (see TasksPage.jsx).
+      const result = await denialWorkflowService.updateTask({ labId, taskId: task.taskId, status, comments, actionBy: user.userName || 'ReactWorkflow', ...extra });
       setMessage({ type: result.success ? 'success' : 'warning', text: result.message || 'Task saved.' });
       setTasks(await denialWorkflowService.getTasks(query));
       refreshWorkflowNotifications();
@@ -1160,7 +1176,7 @@ export default function App() {
     <div className={`sidebar-backdrop ${sidebarOpen ? 'open' : ''}`} onClick={() => setSidebarOpen(false)} />
     <aside className={`lrn-sidebar ${sidebarOpen ? 'open' : ''}`}>
       <div className="lrn-brand"><div className="lrn-brand-icon"><i className="bi bi-layers" /></div><div><div className="lrn-brand-text">Denial Workflow</div><div className="lrn-brand-sub">Revenue recovery</div></div></div>
-      <div className="user-card"><span className="avatar-sm">{initials(user.displayName || user.userName)}</span><div><strong>{user.displayName || user.userName || 'LRN User'}</strong><small>{user.role || 'Workflow User'}</small></div></div>
+      <div className="user-card"><span className="avatar-sm">{initials(user.displayName || user.userName)}</span><div><strong>{user.displayName || user.userName || 'LRN User'}</strong><small>{roleDisplayLabel(user.role)}</small></div></div>
       <nav className="lrn-nav">
         <div className="lrn-nav-section">Overview</div>
         <button className={`lrn-nav-item ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}><i className="bi bi-speedometer2" />Denial Dashboard</button>
@@ -1216,13 +1232,16 @@ export default function App() {
           </>
         )}
         {denialMapperRole && <>
-          <button className={`lrn-nav-item ${view === 'denialmapper' || view === 'denialcodemaster' || view === 'denialactionverification' ? 'active' : ''}`} onClick={() => { if (arManagerOnly) setView('denialcodemaster', { closeSidebar: false }); else { setDenialMapperView(adminRole ? 'dashboard' : 'lab'); setView('denialmapper', { closeSidebar: false }); } }}><i className="bi bi-diagram-3" />Denial Code Master</button>
+          <button className={`lrn-nav-item ${view === 'denialmapper' || view === 'denialcodemaster' || view === 'denialactionverification' ? 'active' : ''}`} onClick={() => { if (arManagerOnly) setView('denialcodemaster', { closeSidebar: false }); else { setDenialMapperView(adminRole ? 'dashboard' : 'lab'); setView('denialmapper', { closeSidebar: false }); } }}><i className="bi bi-diagram-3" />Denial Mapper</button>
           {(view === 'denialmapper' || view === 'denialcodemaster' || view === 'denialactionverification') && <div className="lrn-nav-submenu dm-nav-submenu">
             {arManagerOnly && <button className={`lrn-nav-subitem ${view === 'denialcodemaster' ? 'active' : ''}`} onClick={() => setView('denialcodemaster')}><span className="nav-sub-label">Denial Action Master</span></button>}
             {(denialMapperAdmin || clientManager || accountManager) && <button className={`lrn-nav-subitem ${view === 'denialmapper' && denialMapperView === 'dashboard' ? 'active' : ''}`} onClick={() => { setDenialMapperView('dashboard'); setView('denialmapper'); }}><span className="nav-sub-label">Dashboard</span></button>}
-            {denialMapperAdmin && <button className={`lrn-nav-subitem ${view === 'denialmapper' && denialMapperView === 'super' ? 'active' : ''}`} onClick={() => { setDenialMapperView('super'); setView('denialmapper'); }}><span className="nav-sub-label">Super Master / Push</span></button>}
+            {(denialMapperAdmin || denialMapperViewer) && <button className={`lrn-nav-subitem ${view === 'denialmapper' && denialMapperView === 'super' ? 'active' : ''}`} onClick={() => { setDenialMapperView('super'); setView('denialmapper'); }}><span className="nav-sub-label">{denialMapperAdmin ? 'Super Master / Push' : 'Super Master'}</span></button>}
             <button className={`lrn-nav-subitem ${view === 'denialmapper' && (denialMapperView === 'labs' || denialMapperView === 'lab') ? 'active' : ''}`} onClick={() => { setDenialMapperView(denialMapperAdmin ? 'labs' : 'lab'); setView('denialmapper'); }}><span className="nav-sub-label">Lab Master</span></button>
-            {(denialMapperAdmin || clientManager || accountManager) && <button className={`lrn-nav-subitem ${view === 'denialmapper' && denialMapperView === 'audit' ? 'active' : ''}`} onClick={() => { setDenialMapperView('audit'); setView('denialmapper'); }}><span className="nav-sub-label">Audit Log</span></button>}
+            {/* UAT: AR Manager owns Denial Code Master but had no way to see its change history —
+                there's no DCM-specific audit table, so grant them the Denial Mapper's existing
+                Audit Log (Super Master/push/override history) instead of building a new one. */}
+            {(denialMapperAdmin || clientManager || accountManager || denialMapperLabUser || arManagerOnly) && <button className={`lrn-nav-subitem ${view === 'denialmapper' && denialMapperView === 'audit' ? 'active' : ''}`} onClick={() => { setDenialMapperView('audit'); setView('denialmapper'); }}><span className="nav-sub-label">Audit Log</span></button>}
             {denialMapperAdmin && <button className={`lrn-nav-subitem ${view === 'denialmapper' && denialMapperView === 'upload' ? 'active' : ''}`} onClick={() => { setDenialMapperView('upload'); setView('denialmapper'); }}><span className="nav-sub-label">Upload Mapper</span></button>}
             {(denialMapperAdmin || arManagerOnly) && <button className={`lrn-nav-subitem ${view === 'denialactionverification' ? 'active' : ''}`} onClick={() => setView('denialactionverification')}><span className="nav-sub-label">Action Code Verification</span></button>}
           </div>}
@@ -1257,7 +1276,7 @@ export default function App() {
             {profileOpen && <div className="profile-dropdown">
               <div className="profile-dropdown-head">
                 <span className="avatar-sm">{initials(user.displayName || user.userName)}</span>
-                <div><strong>{user.displayName || user.userName || 'Workflow User'}</strong><small>{user.role || 'Workflow User'}</small></div>
+                <div><strong>{user.displayName || user.userName || 'Workflow User'}</strong><small>{roleDisplayLabel(user.role)}</small></div>
               </div>
               <button type="button" onClick={() => { setProfileOpen(false); setView('support'); }}><i className="bi bi-life-preserver" />Contact Support</button>
               <button type="button" onClick={logoutWorkflow}><i className="bi bi-box-arrow-right" />Logout</button>
@@ -1313,11 +1332,11 @@ export default function App() {
           setMessage({ type: 'info', text: `Showing claims for ${row?.name || 'selected group'} / ${bucket?.label || 'aging bucket'}.` });
         }} />}
         {view === 'summary' && <DenialSummaryPage data={dashboard} canAssign={canAssign} onClassificationClick={openClaimsByClassification} onActionCategoryClick={openClaimsByActionCategory} onAssign={() => { setClaimTaskView('new'); setView(reviewerOnly ? 'myworklist' : 'claims'); setMessage({ type: 'info', text: canAssign ? 'Select the required claim rows, choose reviewer, then assign.' : 'This role has read-only workflow access.' }); }} />}
-        {view === 'claims' && <ClaimAssignmentPage data={claims} loading={loading} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} canAssign={canAssign} readOnlyWorkflow={readOnlyWorkflow} taskView={claimTaskView} setTaskView={handleClaimTaskViewChange} tabCounts={claimMenuCounts} openEscalationResponse={() => handleClaimTabRoute('response')} openVerification={() => handleClaimTabRoute('verification')} setMessage={setWorkflowMessage} onDownloadTemplate={() => startClaimExport({ currentTab: true, uploadTemplate: true })} onCsvUploaded={async () => { setClaimTasks({}); setExpandedClaim(''); setClaims(await denialWorkflowService.getClaims({ ...query, taskView: claimTaskView })); await refreshMenuCounts(); }} exportBusy={exportBusy} filter={filter} setFilterValue={setFilterValue} assignedUsers={filterOptions.assignedUsers || []} />}
+        {view === 'claims' && <ClaimAssignmentPage data={claims} loading={loading} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} currentUserRole={user.role || ''} canAssign={canAssign} readOnlyWorkflow={readOnlyWorkflow} taskView={claimTaskView} setTaskView={handleClaimTaskViewChange} tabCounts={claimMenuCounts} openEscalationResponse={() => handleClaimTabRoute('response')} openVerification={() => handleClaimTabRoute('verification')} setMessage={setWorkflowMessage} onDownloadTemplate={() => startClaimExport({ currentTab: true, uploadTemplate: true })} onCsvUploaded={async () => { setClaimTasks({}); setExpandedClaim(''); setClaims(await denialWorkflowService.getClaims({ ...query, taskView: claimTaskView })); await refreshMenuCounts(); }} exportBusy={exportBusy} filter={filter} setFilterValue={setFilterValue} assignedUsers={filterOptions.assignedUsers || []} />}
         {view === 'verification' && <VerificationPage data={verification} changePage={changePage} tabCounts={claimMenuCounts} onTabChange={handleClaimTabRoute} reviewers={reviewers} canAssign={canAssign} assignClaims={assignClaims} />}
         {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setWorkflowMessage} onSaved={() => { refreshMenuCounts(); refreshWorkflowNotifications(); }} taskView={myWorklistView} setTaskView={handleMyWorklistViewChange} tabCounts={myWorklistMenuCounts} onExportQueryChange={setMyWorklistExportQuery} onDownloadTemplate={(exportQuery, tab) => startClaimExport({ currentTab: true, uploadTemplate: true, queryOverride: exportQuery, tabKey: tab?.key || myWorklistView, tabLabel: tab?.label || '' })} exportBusy={exportBusy} />}
         {view === 'escalations' && <EscalationQueuePage labId={labId} user={user} reviewers={reviewers} taskView={escalationView === 'response' ? 'claim' : escalationView} responseOnly={escalationView === 'response'} setTaskView={setEscalationView} tabCounts={claimMenuCounts} onClaimTabChange={handleClaimTabRoute} canAssign={canAssign} assignClaims={assignClaims} setMessage={setWorkflowMessage} />}
-        {view === 'denialcodemaster' && arManagerOnly && <DenialCodeMasterPage labId={labId} setMessage={setWorkflowMessage} initialPushAuditId={mapperReviewAuditId} onPushConfirmed={()=>{setMapperNotification(null);setMapperReviewAuditId(null);}} onReviewActionChanges={(batchId) => { setActionVerificationBatchId(batchId || ''); setView('denialactionverification'); }} />}
+        {view === 'denialcodemaster' && arManagerOnly && <DenialCodeMasterPage labId={labId} role={user.role || ''} setMessage={setWorkflowMessage} initialPushAuditId={mapperReviewAuditId} onPushConfirmed={()=>{setMapperNotification(null);setMapperReviewAuditId(null);}} onReviewActionChanges={(batchId) => { setActionVerificationBatchId(batchId || ''); setView('denialactionverification'); }} />}
         {view === 'denialmapper' && denialMapperRole && <DenialMapperPage user={user} labs={labs} labId={labId} setLabId={setLabId} setMessage={setWorkflowMessage} screen={denialMapperView} onScreenChange={setDenialMapperView} />}
         {view === 'denialactionverification' && (denialMapperAdmin || arManagerOnly) && <DenialActionVerificationPage labId={labId} setMessage={setWorkflowMessage} initialBatchId={actionVerificationBatchId} />}
         {view === 'exports' && <WorkflowPlaceholder title="Exports">Use Overall Download or per-tab Download from Claim Assignment for claim extracts. Aging Dashboard also includes a Download Excel action.</WorkflowPlaceholder>}

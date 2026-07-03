@@ -16,7 +16,11 @@ import ClaimCsvUpload from '../components/ClaimCsvUpload';
 const fmtDate = v => v ? new Date(v).toLocaleDateString() : '-';
 const money = v => Number(v || 0).toLocaleString(undefined, { style: 'currency', currency: 'USD' });
 const statusOptions = ['Assigned', 'Payer Follow-up Required', 'Pending Payer Response', 'Pending Documentation', 'Write-Off Pending Approval', 'Closed'];
-const escalationReasons = ['Denial reason unclear', 'Action clarification required', 'Denial-action mapping unclear', 'Payer policy conflict', 'Appeal eligibility unclear', 'Rebill eligibility unclear', 'Write-off decision required', 'Payer follow-up guidance needed', 'Documentation requirement unclear', 'EOB / payer response clarification', 'Other'];
+// UAT: reconciled against spec (and against ClaimAssignmentPage.jsx's equivalent list) --
+// added "Coding / CPT clarification" and "ICD / diagnosis clarification" (were missing),
+// removed "EOB / payer response clarification" (not in spec), and renamed "Documentation
+// requirement unclear" to "Documentation required" to match spec wording.
+const escalationReasons = ['Denial reason unclear', 'Action clarification required', 'Denial-action mapping unclear', 'Payer policy conflict', 'Appeal eligibility unclear', 'Rebill eligibility unclear', 'Write-off decision required', 'Payer follow-up guidance needed', 'Documentation required', 'Coding / CPT clarification', 'ICD / diagnosis clarification', 'Other'];
 const statusRank = ['Escalated to AR Manager', 'Rework', 'Pending Documentation', 'Pending Payer Response', 'Payer Follow-up Required', 'Write-Off Pending Approval', 'Assigned', 'New', 'Unassigned', 'Closed'];
 const escalationAppliesToOptions = ['Overall Claim', 'Specific CPT', 'Action Group', 'Denial Classification'];
 const documentationTypes = ['Medical Records Required', 'Clinical Notes Required', 'Authorization Reference Required', 'Updated Insurance Required', 'Requisition / Order Required', 'Provider Information Required', 'Diagnosis / ICD Clarification Required', 'Patient Demographics Required', 'EOB / Payer Correspondence Required', 'Client Confirmation Required', 'Other Documentation Required'];
@@ -248,6 +252,11 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
   const [noteSelectedLineKeys, setNoteSelectedLineKeys] = useState([]);
   const [followUpReason, setFollowUpReason] = useState('');
   const [closureReason, setClosureReason] = useState('');
+  // UAT: the Pending Documentation form had no way to escalate that documentation request —
+  // reviewers had to leave this form and use the separate Escalate button. Add an inline
+  // shortcut that fires the existing internal-escalation flow (reason: "Documentation
+  // requirement unclear") alongside the status save.
+  const [escalateOnDocRequest, setEscalateOnDocRequest] = useState(false);
   const [validationStatus, setValidationStatus] = useState('');
   const [notes, setNotes] = useState([]);
   const [noteSaving, setNoteSaving] = useState(false);
@@ -435,7 +444,7 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
     const ctx = { level: level === 'Line' || task ? 'Line' : 'Claim', claim, task: task || null };
     const defaultScope = task ? 'By CPT' : 'By Claim';
     const selectedKeys = task ? (claim.lines || []).map((l, i) => ((l.taskId || '') === (task.taskId || '') && (l.cptCode || '') === (task.cptCode || '') ? lineKey(l, i) : '')).filter(Boolean) : [];
-    setNoteError(''); setNoteCtx(ctx); setNoteLineTarget(key); setNoteText(''); setNoteStatus(normalizeStatus(task?.status || claim?.status || 'Assigned')); setNoteFollowUpDate(''); setActionCompleted(''); setActualOutcome(''); setDocumentationType(''); setFollowUpReason(''); setClosureReason(''); setValidationStatus(''); setNoteSelectedLineKeys(selectedKeys); setNoteUpdateScope(defaultScope); setNoteScopeValue(task?.cptCode || scopeValues(defaultScope, claim)[0] || '');
+    setNoteError(''); setNoteCtx(ctx); setNoteLineTarget(key); setNoteText(''); setNoteStatus(normalizeStatus(task?.status || claim?.status || 'Assigned')); setNoteFollowUpDate(''); setActionCompleted(''); setActualOutcome(''); setDocumentationType(''); setFollowUpReason(''); setClosureReason(''); setValidationStatus(''); setNoteSelectedLineKeys(selectedKeys); setNoteUpdateScope(defaultScope); setNoteScopeValue(task?.cptCode || scopeValues(defaultScope, claim)[0] || ''); setEscalateOnDocRequest(false);
     const data = await denialWorkflowService.getNotes({ labId, claimId: claim.claimId, taskId: task?.taskId || '', cptCode: task?.cptCode || '', noteLevel: ctx.level });
     setNotes(data || []);
   }
@@ -499,6 +508,9 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
         for (const l of affectedLines) await denialWorkflowService.updateTask(updatePayload(l.taskId));
       }
       await denialWorkflowService.saveNote({ labId, claimId: claim.claimId, taskId: affectedLines.length === 1 ? affectedLines[0].taskId || '' : '', cptCode: affectedLines.length === 1 ? affectedLines[0].cptCode || '' : '', noteLevel, noteText: selectedNoteText, status: noteStatus, nextFollowUpDate: noteFollowUpDate || null, followUpReason, actionCompleted: actionCompleted === '' ? null : actionCompleted === 'true', actualOutcome: effectiveActualOutcome, documentationType, validateWorkflowFields: true, createdBy: user?.userName || 'ReactWorkflow' });
+      if (noteStatus === 'Pending Documentation' && escalateOnDocRequest) {
+        await denialWorkflowService.saveEscalation({ labId, claimId: claim.claimId, taskId: '', cptCode: '', escalationLevel: 'Claim', escalationScope: 'Overall Claim', escalationScopeValue: claim.claimId, escalationScopeDisplay: 'Overall Claim', recommendedNextAction: 'Manager review', escalationReason: 'Documentation requirement unclear', comments: noteText, status: 'Open', nextFollowUpDate: noteFollowUpDate || null, createdBy: user?.userName || 'ReactWorkflow' });
+      }
       setMessage?.({ type: 'success', text: canUpdateTasks ? 'Comment and status saved.' : 'Comment saved.' });
       onSaved?.();
       setNoteCtx(null); await load();
@@ -647,6 +659,7 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
           <label>Actual Action / Outcome<select className="wl-full" value={actualOutcomeValue} disabled={noteSaving || !!pendingPayerAutoOutcome} onChange={e => { setNoteError(''); setActualOutcome(e.target.value); }}><option value="">Select outcome</option>{actualOutcomes.map(x => <option key={x}>{x}</option>)}</select>{pendingPayerAutoOutcome ? <span className="doctype-help">Auto-assigned from Action Category for Pending Payer Response.</span> : null}</label>
           <label><span className="field-label-row">Action Completed? {noteStatus === 'Pending Payer Response' ? <span className="required-star">*</span> : null}</span><select className="wl-full" value={actionCompleted} disabled={noteSaving} onChange={e => { setNoteError(''); setActionCompleted(e.target.value); }}><option value="">Select</option><option value="true">Yes</option><option value="false">No</option></select></label>
           {noteStatus === 'Pending Documentation' && <label className="doc-type-field">Documentation Type<select className="wl-full" value={documentationType} disabled={noteSaving} onChange={e => { setNoteError(''); setDocumentationType(e.target.value); }}><option value="">Select type</option>{documentationTypes.map(x => <option key={x}>{x}</option>)}</select>{docDescription ? <span className="doctype-help">{docDescription}</span> : null}</label>}
+          {noteStatus === 'Pending Documentation' && <label className="doc-type-field escalate-to-field"><span className="field-label-row">Escalate To</span><label className="wl-checkbox-inline"><input type="checkbox" checked={escalateOnDocRequest} disabled={noteSaving} onChange={e => setEscalateOnDocRequest(e.target.checked)} /> AR Manager</label><span className="doctype-help">Optional - also submits an internal escalation ("Documentation requirement unclear") to the AR Manager.</span></label>}
           {noteStatus === 'Payer Follow-up Required' && <label>Follow-up Reason <span className="required-star">*</span><select className="wl-full" value={followUpReason} disabled={noteSaving} onChange={e => { setNoteError(''); setFollowUpReason(e.target.value); }}><option value="">Select reason</option>{followUpReasons.map(x => <option key={x}>{x}</option>)}</select></label>}
         </div>
         <label className="status-scope-comments">Clarification / Status Note<textarea className="wl-textarea" maxLength={MAX_TEXT_LENGTH} value={noteText} onChange={e => { setNoteError(''); setNoteText(limitText(e.target.value)); }} placeholder="Enter comments..." disabled={noteSaving} /><div className="text-count">{textCountLabel(noteText)}</div></label>
