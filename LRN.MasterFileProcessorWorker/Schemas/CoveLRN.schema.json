@@ -1,0 +1,26 @@
+{
+  "labName": "CoveLRN",
+  "input": {
+    "lineLevelSheetName": "Line",
+    "claimLevelSheetName": "",
+    "headerRow": 1
+  },
+  "claimKey": "ClaimId",
+  "lineLevel": {
+    "mandatoryColumns": ["ClaimId", "AccessionNo"],
+    "commonOutputMappings": [
+      { "target": "RunID", "sourceAliases": ["RunID"], "required": false, "dataType": "string", "defaultValue": "" },
+      { "target": "ClaimId", "sourceAliases": ["ClaimId", "Claim ID"], "required": true, "dataType": "string" },
+      { "target": "AccessionNo", "sourceAliases": ["AccessionNo", "Accession No"], "required": true, "dataType": "string" },
+      { "target": "LineAmount", "sourceAliases": ["LineAmount", "Line Amount"], "required": false, "dataType": "decimal" }
+    ]
+  },
+  "claimLevel": {
+    "mandatoryColumns": ["ClaimId"],
+    "commonOutputMappings": [
+      { "target": "RunID", "sourceAliases": ["RunID"], "required": false, "dataType": "string", "defaultValue": "" },
+      { "target": "ClaimId", "sourceAliases": ["ClaimId", "Claim ID"], "required": true, "dataType": "string" },
+      { "target": "MemberId", "sourceAliases": ["MemberId", "Member ID"], "required": false, "dataType": "string" }
+    ]
+  }
+}

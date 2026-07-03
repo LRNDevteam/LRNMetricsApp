@@ -1,0 +1,121 @@
+{
+  "SchemaName": "Certus_ClaimLevel",
+  "HeaderRow": 1,
+  "Columns": [
+    {
+      "Name": "Encounter ID",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Accession",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Insurance Name",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Ref Physician Name",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Organization Name",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Patient ID",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "DOS",
+      "Required": true,
+      "DataType": "date"
+    },
+    {
+      "Name": "Charge Entered Date",
+      "Required": false,
+      "DataType": "date"
+    },
+    {
+      "Name": "Billed Date",
+      "Required": true,
+      "DataType": "date"
+    },
+    {
+      "Name": "Panel Name",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Claim Level CPT",
+      "Required": true,
+      "DataType": "int"
+    },
+    {
+      "Name": "Billed Amounts",
+      "Required": true,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Insurance Payments",
+      "Required": true,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Patient Payments",
+      "Required": true,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Adjustments",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Insurance Balance",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Patient Balance",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Posted Date",
+      "Required": true,
+      "DataType": "date"
+    },
+    {
+      "Name": "Claim Status",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Claim Level Denials",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Denial Date",
+      "Required": false,
+      "DataType": "date"
+    },
+    {
+      "Name": "Claim Level ICD Code",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Diag Pointer",
+      "Required": false,
+      "DataType": "string"
+    }
+  ]
+}

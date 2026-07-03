@@ -1,0 +1,217 @@
+{
+	"SchemaName": "LIMSMaster",
+	"SheetName": "LIMS Master",
+	"HeaderRow": 1,
+	"Columns": [
+		{
+			"ExcelColName": "Order ID",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "OrderID"
+		},
+		{
+			"ExcelColName": "Sample ID",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "Accession"
+		},
+		{
+			"ExcelColName": "Payment Method",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "PaymentMethod"
+		},
+		{
+			"ExcelColName": "Barcode",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "Barcode"
+		},
+		{
+			"ExcelColName": "Specimen",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "Specimen"
+		},
+		{
+			"ExcelColName": "Collector",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "Collector"
+		},
+		{
+			"ExcelColName": "Order Status",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "OrderStatus"
+		},
+		{
+			"ExcelColName": "Billing Status",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "BillingStatus"
+		},
+		{
+			"ExcelColName": "Sample Status",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "SampleStatus"
+		},
+		{
+			"ExcelColName": "Submitted",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "RequestSubmittedDate"
+		},
+		{
+			"ExcelColName": "Collected",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "RequestCollectDate"
+		},
+		{
+			"ExcelColName": "Received",
+			"Required": true,
+			"DataType": "date",
+			"SQLColName": "ReqReceivedDate"
+		},
+		{
+			"ExcelColName": "Reported",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "ReqReportedDate"
+		},
+		{
+			"ExcelColName": "Resulted / Not",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "RessultedStatus"
+		},
+		{
+			"ExcelColName": "Client Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ClientStatus"
+		},
+		{
+			"ExcelColName": "Time to Result (Resulted - Received)",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "TimetoResult"
+		},
+		{
+			"ExcelColName": "Turnaround Time (Hours)",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "TurnaroundTime"
+		},
+		{
+			"ExcelColName": "Facility",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Facility"
+		},
+		{
+			"ExcelColName": "Performing Laboratory",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Performing Laboratory"
+		},
+		{
+			"ExcelColName": "Results",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Results"
+		},
+		{
+			"ExcelColName": "Patient First Name",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PatientFirstName"
+		},
+		{
+			"ExcelColName": "Patient Last Name",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PatientLastName"
+		},
+		{
+			"ExcelColName": "Patient Date of Birth",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "PatientDateOfBirth"
+		},
+		{
+			"ExcelColName": "VisitNum",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "VisitNumber"
+		},
+		{
+			"ExcelColName": "AMD DOE",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "AMDDOE"
+		},
+		{
+			"ExcelColName": "AMD LBD",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "AMDLBD"
+		},
+		{
+			"ExcelColName": "Time to Bill",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "TimetoBill"
+		},
+		{
+			"ExcelColName": "Claim Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ClaimStatus"
+		},
+		{
+			"ExcelColName": "Billed/Not",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "BilledorNot"
+		},
+		{
+			"ExcelColName": "Provider",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Provider"
+		},
+		{
+			"ExcelColName": "Primary Insurance",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PrimaryInsurance"
+		},
+		{
+			"ExcelColName": "Primary Insurance ID #",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PrimaryInsuranceID"
+		},
+		{
+			"ExcelColName": "ICD-10 Codes",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ICD10Codes"
+		},
+		{
+			"ExcelColName": "Tests",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Tests"
+		},
+		{
+			"ExcelColName": "Panel Category",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PanelCategory"
+		}
+	]
+}

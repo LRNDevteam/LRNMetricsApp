@@ -1,0 +1,241 @@
+{
+	"SchemaName": "LIMSMaster",
+	"SheetName": "Masterfile",
+	"HeaderRow": 1,
+	"Columns": [
+		{
+			"ExcelColName": "REQ_ACCESSION",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "Accession"
+		},
+		{
+			"ExcelColName": "Patient Name",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PatientName"
+		},
+		{
+			"ExcelColName": "REQ_LOCATION_NAME",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ReqLocationName"
+		},
+		{
+			"ExcelColName": "PATIENT_BIRTH",
+			"Required": true,
+			"DataType": "date",
+			"SQLColName": "DateOfBirth"
+		},
+		{
+			"ExcelColName": "Provider Name",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ReferringProvider"
+		},
+		{
+			"ExcelColName": "Actual Panel",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ActualPanel"
+		},
+		{
+			"ExcelColName": "INSURED_POLICY_NO",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "InsurancePolicyNumber"
+		},
+		{
+			"ExcelColName": "Panel Type",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PanelType"
+		},
+		{
+			"ExcelColName": "INSURANCE_NAME",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "InsuranceName"
+		},
+		{
+			"ExcelColName": "Result_Date",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "ResultDate"
+		},
+		{
+			"ExcelColName": "Entered Date",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "EnteredDate"
+		},
+		{
+			"ExcelColName": "Billed Date - Daq",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "BilledDateDaq"
+		},
+		{
+			"ExcelColName": "Entered Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "EnteredStatus"
+		},
+		{
+			"ExcelColName": "Billed Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "BilledStatus"
+		},
+		{
+			"ExcelColName": "Billed Date - Web",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "BilledDateWeb"
+		},
+		{
+			"ExcelColName": "Claim Type - Daq",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ClaimTypeDaq"
+		},
+		{
+			"ExcelColName": "Claim Status - Daq",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ClaimStatusDaq"
+		},
+		{
+			"ExcelColName": "Claim Type - Webpm",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ClaimTypeWebpm"
+		},
+		{
+			"ExcelColName": "Claim Status - Webpm",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ClaimStatusWebpm"
+		},
+		{
+			"ExcelColName": "PANEL_NAME",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PanelName"
+		},
+		{
+			"ExcelColName": "REQ_COLLECT_DATE",
+			"Required": true,
+			"DataType": "date",
+			"SQLColName": "RequestCollectDate"
+		},
+		{
+			"ExcelColName": "Incorrect DOS",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "IncorrectDOS"
+		},
+		{
+			"ExcelColName": "REQ_RECEIVED_DATE",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "RequestReceivedDate"
+		},
+		{
+			"ExcelColName": "BILL_TYPE",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "BillType"
+		},
+		{
+			"ExcelColName": "Result Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ResultStatus"
+		},
+		{
+			"ExcelColName": "Bill to",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "BilledTo"
+		},
+		{
+			"ExcelColName": "Bill status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "BillStatus"
+		},
+		{
+			"ExcelColName": "Final Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "FinalStatus"
+		},
+		{
+			"ExcelColName": "Category",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Category"
+		},
+		{
+			"ExcelColName": "ORGANIZATION_NAME",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ClinicName"
+		},
+		{
+			"ExcelColName": "Source",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "SourceSystem"
+		},
+		{
+			"ExcelColName": "Charges not entered status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ChargesNotEnteredStatus"
+		},
+		{
+			"ExcelColName": "Time to Result",
+			"Required": false,
+			"DataType": "int",
+			"SQLColName": "TimeToResult"
+		},
+		{
+			"ExcelColName": "Time to Bill",
+			"Required": false,
+			"DataType": "int",
+			"SQLColName": "TimetoBill"
+		},
+		{
+			"ExcelColName": "PATIENT_CODE",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PATIENT_CODE"
+		},
+		{
+			"ExcelColName": "PATIENT_F_NAME",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PATIENT_F_NAME"
+		},
+		{
+			"ExcelColName": "PATIENT_L_NAME",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PATIENT_L_NAME"
+		},
+		{
+			"ExcelColName": "PATIENT_M_NAME",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PATIENT_M_NAME"
+		},
+		{
+			"ExcelColName": "PATIENT_GENDER",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PATIENT_GENDER"
+		}
+	]
+}

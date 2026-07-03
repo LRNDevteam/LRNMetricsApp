@@ -1,0 +1,146 @@
+{
+  "SchemaName": "Prism_ClaimLevel",
+  "HeaderRow": 1,
+  "Columns": [
+    {
+      "Name": "VisitNum",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Accession",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Carrier",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "FinancialClass",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Provider",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "ReferringProvider",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Facility",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "ChartNum",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "BeginDOS",
+      "Required": true,
+      "DataType": "date"
+    },
+    {
+      "Name": "DOE",
+      "Required": false,
+      "DataType": "date"
+    },
+    {
+      "Name": "LastBillDate",
+      "Required": true,
+      "DataType": "date"
+    },
+    {
+      "Name": "Panel",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "CPTs",
+      "Required": true,
+      "DataType": "int"
+    },
+    {
+      "Name": "POS",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "TOS",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "TotalCharge",
+      "Required": true,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "TotalAllowed",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "CarrierPayment",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "PatientPayment",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "CarrierWO",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "PatientWO",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "CarrierBalance",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "PatientBalance",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Deposit Date",
+      "Required": true,
+      "DataType": "date"
+    },
+    {
+      "Name": "Claim Status",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Claim Level Denial Code",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Denial Date",
+      "Required": false,
+      "DataType": "date"
+    },
+    {
+      "Name": "PrimaryDiagnosis",
+      "Required": true,
+      "DataType": "string"
+    }
+  ]
+}

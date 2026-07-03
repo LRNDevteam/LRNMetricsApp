@@ -1,0 +1,313 @@
+{
+	"SchemaName": "LIMSMaster",
+	"SheetName": "LIMS Master",
+	"HeaderRow": 1,
+	"Columns": [
+		{
+			"ExcelColName": "RecordId",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "OrderID"
+		},
+		{
+			"ExcelColName": "AccessionNo",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "Accession"
+		},
+		{
+			"ExcelColName": "PhysicianName",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "PhysicianName"
+		},
+		{
+			"ExcelColName": "DOB",
+			"Required": true,
+			"DataType": "date",
+			"SQLColName": "DateOfBirth"
+		},
+		{
+			"ExcelColName": "Medications",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "Medications"
+		},
+		{
+			"ExcelColName": "FacilityName",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "FacilityName"
+		},
+		{
+			"ExcelColName": "ICDCodes",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "ICDCodes"
+		},
+		{
+			"ExcelColName": "DateofService",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "DateofService"
+		},
+		{
+			"ExcelColName": "SaleRepName",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "SaleRepName"
+		},
+		{
+			"ExcelColName": "FirstName",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "FirstName"
+		},
+		{
+			"ExcelColName": "LastName",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "LastName"
+		},
+		{
+			"ExcelColName": "LabCode",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "LabCode"
+		},
+		{
+			"ExcelColName": "ProviderName",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "ProviderName"
+		},
+		{
+			"ExcelColName": "Received_Date",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "ReceivedDate"
+		},
+		{
+			"ExcelColName": "Validated_Date",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "ValidatedDate"
+		},
+		{
+			"ExcelColName": "DateOfCollection",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "DateOfCollection"
+		},
+		{
+			"ExcelColName": "Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Status"
+		},
+		{
+			"ExcelColName": "PrimaryInsuranceProvider",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PrimaryInsuranceProvider"
+		},
+		{
+			"ExcelColName": "Insurance_Type",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Insurance_Type"
+		},
+		{
+			"ExcelColName": "Requistion_Type",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Requistion_Type"
+		},
+		{
+			"ExcelColName": "Panel",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Panel"
+		},
+		{
+			"ExcelColName": "Panel type",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Panel type"
+		},
+		{
+			"ExcelColName": "Client Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ClientStatus"
+		},
+		{
+			"ExcelColName": "New Status ",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "New Status "
+		},
+		{
+			"ExcelColName": "Bill Category",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "BillCategory"
+		},
+		{
+			"ExcelColName": "Sub Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "SubStatus"
+		},
+		{
+			"ExcelColName": "Billed Date",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "BilledDate"
+		},
+		{
+			"ExcelColName": "Time to Result",
+			"Required": false,
+			"DataType": "int",
+			"SQLColName": "TimetoResult"
+		},
+		{
+			"ExcelColName": "FacilityState",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "FacilityState"
+		},
+		{
+			"ExcelColName": "Relationship_To_Insured",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Relationship_To_Insured"
+		},
+		{
+			"ExcelColName": "FacilityCity",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "FacilityCity"
+		},
+		{
+			"ExcelColName": "FacilityZipcode",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "FacilityZipcode"
+		},
+		{
+			"ExcelColName": "FacilityAddress",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "FacilityAddress"
+		},
+		{
+			"ExcelColName": "PolicyId",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PolicyId"
+		},
+		{
+			"ExcelColName": "GroupId",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "GroupId"
+		},
+		{
+			"ExcelColName": "Policy_Holder_DOB",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "Policy_Holder_DOB"
+		},
+		{
+			"ExcelColName": "Address",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Address"
+		},
+		{
+			"ExcelColName": "Email",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Email"
+		},
+		{
+			"ExcelColName": "City",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "City"
+		},
+		{
+			"ExcelColName": "Gender",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Gender"
+		},
+		{
+			"ExcelColName": "State",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "State"
+		},
+		{
+			"ExcelColName": "Time to Bill",
+			"Required": false,
+			"DataType": "int",
+			"SQLColName": "TimetoBill"
+		},
+		{
+			"ExcelColName": "TransferTo",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "TransferTo"
+		},
+		{
+			"ExcelColName": "ReferenceId",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ReferenceId"
+		},
+		{
+			"ExcelColName": "PatientEthnicity",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PatientEthnicity"
+		},
+		{
+			"ExcelColName": "ZipCode",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ZipCode"
+		},
+		{
+			"ExcelColName": "Race",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Race"
+		},
+		{
+			"ExcelColName": "LabCode",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "LabCode"
+		},
+		{
+			"ExcelColName": "UID",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "UID"
+		},
+		{
+			"ExcelColName": "Collection Week",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "CollectionWeek"
+		},
+		{
+			"ExcelColName": "NPI",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "NPI"
+		}
+	]
+}

@@ -1,0 +1,141 @@
+{
+	"SchemaName": "Line Level",
+	"HeaderRow": 1,
+	"Columns": [
+		{
+			"Name": "VisitNum",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Accession",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Carrier",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "ReferringProvider",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "Facility Name",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "Facility",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "ChartNum",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "DOB",
+			"Required": true,
+			"DataType": "date"
+		},
+		{
+			"Name": "BeginDOS",
+			"Required": true,
+			"DataType": "date"
+		},
+		{
+			"Name": "LastBillDate",
+			"Required": true,
+			"DataType": "date"
+		},
+		{
+			"Name": "Panel",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Procedure",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Units",
+			"Required": true,
+			"DataType": "int"
+		},
+		{
+			"Name": "Modifier",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "TotalCharge",
+			"Required": true,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "CarrierPayment",
+			"Required": true,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "PatientPayment",
+			"Required": true,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "CarrierWO",
+			"Required": false,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "CarrierBalance",
+			"Required": false,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "PatientBalance",
+			"Required": false,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "TotalAllowed",
+			"Required": false,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "PatientWO",
+			"Required": false,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "Payment %",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "Line Level ICD",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "Denial Date",
+			"Required": true,
+			"DataType": "date"
+		},
+		{
+			"Name": "Deposit Date",
+			"Required": true,
+			"DataType": "date"
+		},
+		{
+			"Name": "Denial Code",
+			"Required": true,
+			"DataType": "string"
+		}
+	]
+}

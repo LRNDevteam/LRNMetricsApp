@@ -1,0 +1,116 @@
+{
+	"SchemaName": "Augustus_LineLevel",
+	"HeaderRow": 1,
+	"Columns": [
+		{
+			"Name": "Enc",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Accession# Without Letters",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Payer",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Ref Physician Name",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "Organization Name",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "Pat id",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "Diag Pointer",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "DOB",
+			"Required": true,
+			"DataType": "date"
+		},
+		{
+			"Name": "DOS",
+			"Required": true,
+			"DataType": "date"
+		},
+		{
+			"Name": "Last billed date",
+			"Required": true,
+			"DataType": "date"
+		},
+		{
+			"Name": "Panel Name",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "CPT",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Units",
+			"Required": true,
+			"DataType": "int"
+		},
+		{
+			"Name": "Mod",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Billed Amount",
+			"Required": true,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "Ins. Payment",
+			"Required": true,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "Pat. Payments",
+			"Required": true,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "Denial Adj Amount",
+			"Required": true,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "Total Balance",
+			"Required": true,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "Posted Date",
+			"Required": false,
+			"DataType": "datetime"
+		},
+		{
+			"Name": "Claim Level Denial Code",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "ICD Line level",
+			"Required": true,
+			"DataType": "string"
+		}
+	]
+}

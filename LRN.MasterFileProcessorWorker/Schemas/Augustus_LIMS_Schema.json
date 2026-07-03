@@ -1,0 +1,385 @@
+{
+	"SchemaName": "LIMSMaster",
+	"SheetName": "Masterfile",
+	"HeaderRow": 1,
+	"Columns": [
+		{
+			"ExcelColName": "Source",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Source"
+		},
+		{
+			"ExcelColName": "REQ_ACCESSION",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "Accession"
+		},
+		{
+			"ExcelColName": "PATIENT_CODE",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PatientCode"
+		},
+		{
+			"ExcelColName": "PATIENT_L_NAME",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PatientLastName"
+		},
+		{
+			"ExcelColName": "PATIENT_F_NAME",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PatientFirstName"
+		},
+		{
+			"ExcelColName": "PATIENT_M_NAME",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PatientMiddleName"
+		},
+		{
+			"ExcelColName": "Patient Full Name",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "PatientFullName"
+		},
+		{
+			"ExcelColName": "PATIENT_BIRTH",
+			"Required": true,
+			"DataType": "date",
+			"SQLColName": "PatientDOB"
+		},
+		{
+			"ExcelColName": "PATIENT_ETHNICITY",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PatientEthnicity"
+		},
+		{
+			"ExcelColName": "DOCTOR_CODE",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "DoctorCode"
+		},
+		{
+			"ExcelColName": "DOCTOR_LAST_NAME",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "DoctorLastName"
+		},
+		{
+			"ExcelColName": "DOCTOR_FIRST_NAME",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "DoctorFirstName"
+		},
+		{
+			"ExcelColName": "DoctorFullName",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "DoctorFullName"
+		},
+		{
+			"ExcelColName": "DOCTOR_MIDDLE_NAME",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "DoctorMiddleName"
+		},
+		{
+			"ExcelColName": "DOCTOR_NPI",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "DoctorNPI"
+		},
+		{
+			"ExcelColName": "Valid",
+			"Required": false,
+			"DataType": "bool",
+			"SQLColName": "Valid"
+		},
+		{
+			"ExcelColName": "Accn without the letter",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "AccessionWithoutLetter"
+		},
+		{
+			"ExcelColName": "Acc Without Letter 2",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "AccessionWithoutLetter2"
+		},
+		{
+			"ExcelColName": "Acc Without Letter 3",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "AccessionWithoutLetter3"
+		},
+		{
+			"ExcelColName": "Acc Without Letter 4",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "AccessionWithoutLetter4"
+		},
+		{
+			"ExcelColName": "Acc Without Letter 5",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "AccessionWithoutLetter5"
+		},
+		{
+			"ExcelColName": "Acc Without Letter 6",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "AccessionWithoutLetter6"
+		},
+		{
+			"ExcelColName": "REQTERNAL_NO",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ReqternalNo"
+		},
+		{
+			"ExcelColName": "REQ_DATE",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "RequestSubmittedDate"
+		},
+		{
+			"ExcelColName": "REQ_COLLECT_DATE",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "RequestCollectDate"
+		},
+		{
+			"ExcelColName": "REQ_RECEIVED_DATE",
+			"Required": true,
+			"DataType": "date",
+			"SQLColName": "ReqReceivedDate"
+		},
+		{
+			"ExcelColName": "REQ_PRINTED_DATE",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "ReqReportedDate"
+		},
+		{
+			"ExcelColName": "REQ_LOCATION_CODE",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "LocationCode"
+		},
+		{
+			"ExcelColName": "REQ_LOCATION_NAME",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "LocationName"
+		},
+		{
+			"ExcelColName": "BILL_TYPE",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "BillType"
+		},
+		{
+			"ExcelColName": "INSURANCE_CODE",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "InsuranceCode"
+		},
+		{
+			"ExcelColName": "INSURED_POLICY_NO",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "InsuredPolicyNo"
+		},
+		{
+			"ExcelColName": "INSURED_GROUP_NO",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "InsuredGroupNo"
+		},
+		{
+			"ExcelColName": "INSURED_EFFECTIVE_DATE",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "InsuredEffectiveDate"
+		},
+		{
+			"ExcelColName": "INSURED_EXPIRE_DATE",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "InsuredExpireDate"
+		},
+		{
+			"ExcelColName": "PANEL_LAB_NAME",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PanelLabName"
+		},
+		{
+			"ExcelColName": "PANEL_CODE",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PanelCode"
+		},
+		{
+			"ExcelColName": "PANEL_RUN_DATE",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "PanelRunDate"
+		},
+		{
+			"ExcelColName": "PANEL_STAT",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PanelStat"
+		},
+		{
+			"ExcelColName": "Combined CPT Code",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "CombinedCPTCode"
+		},
+		{
+			"ExcelColName": "Combined Panel",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "CombinedPanel"
+		},
+		{
+			"ExcelColName": "Panel Name",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "PanelName"
+		},
+		{
+			"ExcelColName": "Panel Type",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PanelType"
+		},
+		{
+			"ExcelColName": "INSURANCE_NAME",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "InsuranceName"
+		},
+		{
+			"ExcelColName": "Insurance Name Not Listed",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "InsuranceNameNotListed"
+		},
+		{
+			"ExcelColName": "Result_Date",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "ResultDate"
+		},
+		{
+			"ExcelColName": "Result Status",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "ResultStatus"
+		},
+		{
+			"ExcelColName": "Bill to",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "BillTo"
+		},
+		{
+			"ExcelColName": "Bill status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "BillingStatus"
+		},
+		{
+			"ExcelColName": "Entered Date",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "EnteredDate"
+		},
+		{
+			"ExcelColName": "Entered Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "EnteredStatus"
+		},
+		{
+			"ExcelColName": "First Billed Date",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "FirstBilledDate"
+		},
+		{
+			"ExcelColName": "Billed Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "BilledStatus"
+		},
+		{
+			"ExcelColName": "Claim Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ClaimStatus"
+		},
+		{
+			"ExcelColName": "Final Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "FinalStatus"
+		},
+		{
+			"ExcelColName": "Time to bill",
+			"Required": false,
+			"DataType": "int",
+			"SQLColName": "TimetoBill"
+		},
+		{
+			"ExcelColName": "Time to Result",
+			"Required": false,
+			"DataType": "int",
+			"SQLColName": "TimetoResult"
+		},
+		{
+			"ExcelColName": "ORGANIZATION_CODE",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "OrganizationCode"
+		},
+		{
+			"ExcelColName": "ORGANIZATION_NAME",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ClinicName"
+		},
+		{
+			"ExcelColName": "Client Status 1",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ClientStatus1"
+		},
+		{
+			"ExcelColName": "Client Status 2",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ClientStatus"
+		},
+		{
+			"ExcelColName": "Order ICD Code",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "OrderICDCode"
+		},
+		{
+			"ExcelColName": "Service ICD Code",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ServiceICDCode"
+		}
+	]
+}

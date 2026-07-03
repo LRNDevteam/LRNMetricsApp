@@ -1,0 +1,133 @@
+{
+	"SchemaName": "LIMSMaster",
+	"SheetName": "LIMS Master",
+	"HeaderRow": 1,
+	"Columns": [
+		{
+			"ExcelColName": "Location",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "Location"
+		},
+		{
+			"ExcelColName": "Accession",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "Accession"
+		},
+		{
+			"ExcelColName": "Account Manager",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "AccountManager"
+		},
+		{
+			"ExcelColName": "Requisition",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "Requisition"
+		},
+		{
+			"ExcelColName": "Received",
+			"Required": true,
+			"DataType": "date",
+			"SQLColName": "ReceivedDate"
+		},
+		{
+			"ExcelColName": "Process Date",
+			"Required": true,
+			"DataType": "date",
+			"SQLColName": "ProcessDate"
+		},
+		{
+			"ExcelColName": "Processing Days",
+			"Required": true,
+			"DataType": "int",
+			"SQLColName": "ProcessingDays"
+		},
+		{
+			"ExcelColName": "Patient Full Name",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "PatientFullName"
+		},
+		{
+			"ExcelColName": "Physician Full Name",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "PhysicianFullName"
+		},
+		{
+			"ExcelColName": "Test Category",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "TestCategory"
+		},
+		{
+			"ExcelColName": "Bill Type",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "BillType"
+		},
+		{
+			"ExcelColName": "DOS",
+			"Required": true,
+			"DataType": "date",
+			"SQLColName": "DOS"
+		},
+		{
+			"ExcelColName": "Reported",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "ReportedDate"
+		},
+		{
+			"ExcelColName": "LRN Result Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "LRNResultStatus"
+		},
+		{
+			"ExcelColName": "Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Status"
+		},
+		{
+			"ExcelColName": "Sub Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "SubStatus"
+		},
+		{
+			"ExcelColName": "Insurance",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Insurance"
+		},
+		{
+			"ExcelColName": "LRN Sample Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "LRNSampleStatus"
+		},
+		{
+			"ExcelColName": "LRN Bill Category",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "LRNBillCategory"
+		},
+		{
+			"ExcelColName": "LRN Sub Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "LRNSubStatus"
+		},
+		{
+			"ExcelColName": "Nexum Status - AL",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "NexumStatusAL"
+		}
+	]
+}

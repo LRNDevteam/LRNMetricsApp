@@ -1,0 +1,121 @@
+{
+  "SchemaName": "NWL_ClaimLevel",
+  "HeaderRow": 1,
+  "Columns": [
+    {
+      "Name": "Enc",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Acc",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Payer",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Loc",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Proc-Referring Dr Name",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Proc-Department Desc",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Pat id",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "DOS",
+      "Required": true,
+      "DataType": "date"
+    },
+    {
+      "Name": "Entered Date",
+      "Required": false,
+      "DataType": "date"
+    },
+    {
+      "Name": "Last Billed Date",
+      "Required": true,
+      "DataType": "date"
+    },
+    {
+      "Name": "Panel Name",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Claim Level CPT",
+      "Required": true,
+      "DataType": "int"
+    },
+    {
+      "Name": "Proc-Charge Amount $",
+      "Required": true,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Actual Payment",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Pat Payments",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Proc-Ins Balance",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Proc-Pt Balance",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Posted date",
+      "Required": true,
+      "DataType": "date"
+    },
+    {
+      "Name": "Claim Status",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Combined Claim Level Denial code",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Combined Claim Level ICD",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Diag Pointer",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Denial Date",
+      "Required": false,
+      "DataType": "date"
+    }
+  ]
+}
