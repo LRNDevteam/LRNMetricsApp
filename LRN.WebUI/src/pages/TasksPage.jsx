@@ -9,6 +9,9 @@ import { dedupeEscalations } from '../utils/escalations';
 
 const claimEscReasons = ['Client Info Pending', 'Payer policy conflict across claim — need manager guidance', 'Multiple CPT lines impacted by same denial', 'Timely filing risk at claim level', 'High value claim requires approval', 'Other'];
 const lineEscReasons = ['Client Info Pending', 'Payer policy unclear — need guidance', 'Appeal requires manager approval', 'Coding / modifier review required', 'ICD coverage rule requires review', 'Other'];
+// UAT: selecting Closed/Completed here saved with no ActualOutcome, which
+// ValidateTaskStatusUpdate requires for Closed -- the save 400'd with no visible field to fix it.
+const closedActualOutcomes = ['Appeal Submitted', 'Rebill Submitted', 'Write-Off Recommended', 'Payer Call Completed', 'Claim Paid', 'Claim Reprocessed', 'Closed No Recovery', 'Other'];
 
 function Modal({ title, children, onClose }) {
   return <div className="wl-modal-bg"><div className="wl-modal"><div className="wl-modal-hd"><strong>{title}</strong><button className="wl-btn xs" onClick={onClose}>✕</button></div>{children}</div></div>;
@@ -27,6 +30,7 @@ export default function TasksPage({ data, saveTask, changePage, labId, currentUs
   const [noteCtx, setNoteCtx] = useState(null);
   const [noteText, setNoteText] = useState('');
   const [noteStatus, setNoteStatus] = useState('In Progress');
+  const [noteActualOutcome, setNoteActualOutcome] = useState('');
   const [notes, setNotes] = useState([]);
   const [docCtx, setDocCtx] = useState(null);
   const [docs, setDocs] = useState([]);
@@ -62,18 +66,22 @@ export default function TasksPage({ data, saveTask, changePage, labId, currentUs
       setNoteCtx(task);
       setNoteText('');
       setNoteStatus(task.status || 'In Progress');
+      setNoteActualOutcome('');
       const data = await denialWorkflowService.getNotes({ labId, claimId: task.claimId, taskId: task.taskId || '', cptCode: task.cptCode || '', noteLevel: 'Line' });
       setNotes(data || []);
     } finally { setBusy(false); }
   }
 
+  const noteRequiresOutcome = noteStatus === 'Closed' || noteStatus === 'Completed';
+
   async function saveNote() {
     if (!noteText.trim()) return;
     if (!canEditTask(noteCtx)) return;
+    if (!clientManager && noteRequiresOutcome && !noteActualOutcome) return;
     setBusy(true);
     try {
       await denialWorkflowService.saveNote({ labId, claimId: noteCtx.claimId, taskId: noteCtx.taskId || '', cptCode: noteCtx.cptCode || '', noteLevel: 'Line', noteText, createdBy: currentUser || 'ReactWorkflow' });
-      if (!clientManager) await saveTask(noteCtx, noteStatus, noteText);
+      if (!clientManager) await saveTask(noteCtx, noteStatus, noteText, noteRequiresOutcome ? { actualOutcome: noteActualOutcome } : {});
       setNoteCtx(null);
     } finally { setBusy(false); }
   }
@@ -150,7 +158,7 @@ export default function TasksPage({ data, saveTask, changePage, labId, currentUs
     </div>
     <Pager data={data} changePage={changePage} />
 
-    {noteCtx && <Modal title={`Task Notes · ${noteCtx.taskId || ''}`} onClose={() => setNoteCtx(null)}><div className="wl-modal-body">{!clientManager && <label>Status<select className="wl-full" value={noteStatus} onChange={e => setNoteStatus(e.target.value)}>{statusOptions.filter(Boolean).map(x => <option key={x}>{x}</option>)}</select></label>}<label>Comments<textarea className="wl-textarea" maxLength={MAX_TEXT_LENGTH} value={noteText} onChange={e => setNoteText(limitText(e.target.value))} placeholder="Enter task note..." /><div className="text-count">{textCountLabel(noteText)}</div></label><button className="wl-btn teal" disabled={busy || !canEditTask(noteCtx)} onClick={saveNote}>Save comment</button><h4>History</h4>{notes.map(n => <div className="wl-history" key={n.noteId}><div>{n.noteText}</div><small>{n.createdBy} · {date(n.createdOn)}</small></div>)}</div></Modal>}
+    {noteCtx && <Modal title={`Task Notes · ${noteCtx.taskId || ''}`} onClose={() => setNoteCtx(null)}><div className="wl-modal-body">{!clientManager && <label>Status<select className="wl-full" value={noteStatus} onChange={e => { setNoteStatus(e.target.value); setNoteActualOutcome(''); }}>{statusOptions.filter(Boolean).map(x => <option key={x}>{x}</option>)}</select></label>}{!clientManager && noteRequiresOutcome && <label>Actual Outcome<select className="wl-full" value={noteActualOutcome} onChange={e => setNoteActualOutcome(e.target.value)}><option value="">Select outcome</option>{closedActualOutcomes.map(x => <option key={x}>{x}</option>)}</select></label>}<label>Comments<textarea className="wl-textarea" maxLength={MAX_TEXT_LENGTH} value={noteText} onChange={e => setNoteText(limitText(e.target.value))} placeholder="Enter task note..." /><div className="text-count">{textCountLabel(noteText)}</div></label><button className="wl-btn teal" disabled={busy || !canEditTask(noteCtx) || (!clientManager && noteRequiresOutcome && !noteActualOutcome)} onClick={saveNote}>Save comment</button><h4>History</h4>{notes.map(n => <div className="wl-history" key={n.noteId}><div>{n.noteText}</div><small>{n.createdBy} · {date(n.createdOn)}</small></div>)}</div></Modal>}
     {docCtx && <Modal title={`Upload Documents · ${docCtx.claimId || ''}`} onClose={() => setDocCtx(null)}><div className="wl-modal-body"><input type="file" multiple onChange={e => setDocFiles(e.target.files)} /><div><textarea className="wl-textarea" maxLength={MAX_TEXT_LENGTH} value={docComment} onChange={e => setDocComment(limitText(e.target.value))} placeholder="Document comment..." /><div className="text-count">{textCountLabel(docComment)}</div></div><button className="wl-btn teal" disabled={busy || !canEditTask(docCtx)} onClick={uploadDocs}>Upload documents</button><h4>Uploaded documents</h4>{docs.map(d => <div className="wl-history" key={d.documentId}><b>{d.originalFileName}</b><div>{d.comment}</div><small>{d.uploadedBy} · {date(d.uploadedOn)} · {Math.round(Number(d.fileSizeBytes || 0) / 1024)} KB</small><div className="doc-row-actions"><button className="wl-btn xs" type="button" onClick={() => openDocument(d.documentId)}>Download</button>{canDeleteDocumentForTask(docCtx) && <button className="wl-btn red xs" type="button" onClick={() => deleteDocument(d.documentId)}>Delete</button>}</div></div>)}</div></Modal>}
     {escCtx && <Modal title={`Escalation · ${escCtx.taskId || ''}`} onClose={() => setEscCtx(null)}><div className="wl-modal-body"><label>Escalation reason<select className="wl-full" value={escReason} disabled={busy} onChange={e => setEscReason(e.target.value)}>{lineEscReasons.map(x => <option key={x}>{x}</option>)}</select></label><label>Escalation comments<textarea className="wl-textarea" maxLength={MAX_TEXT_LENGTH} value={escComment} disabled={busy} onChange={e => setEscComment(limitText(e.target.value))} placeholder="Explain what manager has to review..." /><div className="text-count">{textCountLabel(escComment)}</div></label><button className="wl-btn red" disabled={busy || !canEscalateTask(escCtx)} onClick={saveEscalation}>{busy ? 'Submitting escalation...' : 'Submit escalation'}</button><h4>Escalation history</h4>{escalations.map(x => <div className="wl-history" key={x.escalationId}><b>{x.escalationReason}</b><div>{x.comments}</div><small>{x.status} · {x.createdBy} · {date(x.createdOn)}</small></div>)}</div></Modal>}
   </>;

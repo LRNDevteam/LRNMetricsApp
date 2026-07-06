@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite --configLoader runner --host 0.0.0.0 --port 5173",
-    "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0 --port 5173",
+    "clean": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Remove-Item -Path 'dist' -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -Path 'node_modules\\.vite' -Recurse -Force -ErrorAction SilentlyContinue\"",
+    "build": "vite build --configLoader runner",
+    "preview": "vite preview --configLoader runner --host 0.0.0.0 --port 5173",
     "publish:prod": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -Command \"$dest=$env:DEPLOY_DIR; if (-not $dest) { $dest='C:\\\\inetpub\\\\wwwroot\\\\DenialWorkFlow' }; New-Item -ItemType Directory -Force -Path $dest | Out-Null; Copy-Item -Path 'dist\\\\*' -Destination $dest -Recurse -Force\"",
     "publish:prod:clean": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -Command \"$dest=$env:DEPLOY_DIR; if (-not $dest) { $dest='C:\\\\inetpub\\\\wwwroot\\\\DenialWorkFlow' }; New-Item -ItemType Directory -Force -Path $dest | Out-Null; Remove-Item -Path (Join-Path $dest '*') -Recurse -Force -ErrorAction SilentlyContinue; Copy-Item -Path 'dist\\\\*' -Destination $dest -Recurse -Force\""
   },

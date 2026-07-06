@@ -1,0 +1,151 @@
+{
+	"SchemaName": "LIMSMaster",
+	"SheetName": "LIMS Master",
+	"HeaderRow": 1,
+	"Columns": [
+		{
+			"ExcelColName": "Project",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "Project"
+		},
+		{
+			"ExcelColName": "Accession",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "Accession"
+		},
+		{
+			"ExcelColName": "Entered By",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "EnteredBy"
+		},
+		{
+			"ExcelColName": "Created Date",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "CreatedDate"
+		},
+		{
+			"ExcelColName": "Full Name",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "PatientFullName"
+		},
+		{
+			"ExcelColName": "Provider Account",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "ProviderAccount"
+		},
+		{
+			"ExcelColName": "Sales Rep",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "SalesRep"
+		},
+		{
+			"ExcelColName": "Provider Group",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "ProviderGroup"
+		},
+		{
+			"ExcelColName": "Test Panel Codes",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "TestPanelCodes"
+		},
+		{
+			"ExcelColName": "ICD-10 Codes",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ICD10Codes"
+		},
+		{
+			"ExcelColName": "Collection Date",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "CollectionDate"
+		},
+		{
+			"ExcelColName": "Provider",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "Provider"
+		},
+		{
+			"ExcelColName": "Bill To",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "BillTo"
+		},
+		{
+			"ExcelColName": "Primary Insurance",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PrimaryInsurance"
+		},
+		{
+			"ExcelColName": "Sample Type",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "SampleType"
+		},
+		{
+			"ExcelColName": "Sample Group",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "SampleGroup"
+		},
+		{
+			"ExcelColName": "Sample Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "SampleStatus"
+		},
+		{
+			"ExcelColName": "Sample Received Date",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "SampleReceivedDate"
+		},
+		{
+			"ExcelColName": "Sample Reject Reason",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "SampleRejectReason"
+		},
+		{
+			"ExcelColName": "Result Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ResultStatus"
+		},
+		{
+			"ExcelColName": "LRN Sample Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "LRNSampleStatus"
+		},
+		{
+			"ExcelColName": "LRN Bill Category",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "LRNBillCategory"
+		},
+		{
+			"ExcelColName": "LRN Sub Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "LRNSubStatus"
+		},
+		{
+			"ExcelColName": "Nexum Status - CO",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "NexumStatusCO"
+		}
+	]
+}

@@ -9,6 +9,7 @@ export const emptyFilterOptions = {
   clinics: [],
   salesReps: [],
   referringProviders: [],
+  assignedUsers: [],
   followUpReasons: [],
   documentationTypes: [],
   escalationReasons: [],
@@ -20,6 +21,8 @@ export const emptyFilterOptions = {
 export const emptyFilter = {
   status: '',
   reviewer: '',
+  assignedUserId: '',
+  assignedDuration: '',
   actionCategory: '',
   priority: '',
   denialCode: '',

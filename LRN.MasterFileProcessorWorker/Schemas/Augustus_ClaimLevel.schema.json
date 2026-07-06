@@ -1,0 +1,131 @@
+{
+  "SchemaName": "Augustus_ClaimLevel",
+  "HeaderRow": 1,
+  "Columns": [
+    {
+      "Name": "Enc",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Accession# Without Letters",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Payer",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Loc",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Ref Physician Name",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Organization Name",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Pat id",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "DOS",
+      "Required": true,
+      "DataType": "date"
+    },
+    {
+      "Name": "Date",
+      "Required": false,
+      "DataType": "date"
+    },
+    {
+      "Name": "Last billed date",
+      "Required": true,
+      "DataType": "date"
+    },
+    {
+      "Name": "Panel Name",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Claim Level CPT",
+      "Required": true,
+      "DataType": "int"
+    },
+    {
+      "Name": "Charge amount",
+      "Required": true,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Ins. Payment",
+      "Required": true,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Pat. Payments",
+      "Required": true,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "adj_amount",
+      "Required": true,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Total Balance",
+      "Required": true,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Ins Balance",
+      "Required": true,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Pat Balance",
+      "Required": true,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "Posted Date",
+      "Required": true,
+      "DataType": "date"
+    },
+    {
+      "Name": "Claim Status",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Claim Level Denial Code",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Denial Date",
+      "Required": false,
+      "DataType": "date"
+    },
+    {
+      "Name": "ICD Claim  Level",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Diag Pointer",
+      "Required": false,
+      "DataType": "string"
+    }
+  ]
+}

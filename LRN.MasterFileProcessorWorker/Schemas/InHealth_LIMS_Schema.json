@@ -1,0 +1,703 @@
+{
+	"SchemaName": "LIMSMaster",
+	"SheetName": "LIMS Master",
+	"HeaderRow": 1,
+	"Columns": [
+		{
+			"ExcelColName": "TestOrderHistory82_Id",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "OrderID"
+		},
+		{
+			"ExcelColName": "SampleID",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "Accession"
+		},
+		{
+			"ExcelColName": "PayerCodeLookup_Label",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "PayerCodeLookup"
+		},
+		{
+			"ExcelColName": "HCPCS",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "HCPCS"
+		},
+		{
+			"ExcelColName": "ICD10",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "ICD10"
+		},
+		{
+			"ExcelColName": "NonCoveredToxCodes",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "NonCoveredToxCodes"
+		},
+		{
+			"ExcelColName": "PracticeType",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "PracticeType"
+		},
+		{
+			"ExcelColName": "RegisteredDate",
+			"Required": true,
+			"DataType": "date",
+			"SQLColName": "RegisteredDate"
+		},
+		{
+			"ExcelColName": "Medications",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "Medications"
+		},
+		{
+			"ExcelColName": "OrderReason",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "OrderReason"
+		},
+		{
+			"ExcelColName": "SpecimenType",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "SpecimenType"
+		},
+		{
+			"ExcelColName": "Components",
+			"Required": true,
+			"DataType": "string",
+			"SQLColName": "Components"
+		},
+		{
+			"ExcelColName": "InsuranceCode",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "InsuranceCode"
+		},
+		{
+			"ExcelColName": "Entry_DateCreated",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "Entry_DateCreated"
+		},
+		{
+			"ExcelColName": "Entry_DateSubmitted",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "Entry_DateSubmitted"
+		},
+		{
+			"ExcelColName": "Entry_DateUpdated",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "Entry_DateUpdated"
+		},
+		{
+			"ExcelColName": "Account",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Account"
+		},
+		{
+			"ExcelColName": "LRN Panel Name",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "LRNPanelName"
+		},
+		{
+			"ExcelColName": "LRN Result Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ResultStatus"
+		},
+		{
+			"ExcelColName": "LRN Sample Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "SampleStatus"
+		},
+		{
+			"ExcelColName": "LRN Bill Category",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "BillCategory"
+		},
+		{
+			"ExcelColName": "LRN Sub Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "SubStatus"
+		},
+		{
+			"ExcelColName": "Nexum Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "NexumStatus"
+		},
+		{
+			"ExcelColName": "Billed Date",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "BilledDate"
+		},
+		{
+			"ExcelColName": "Entry_Status",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "EntryStatus"
+		},
+		{
+			"ExcelColName": "PrimaryPolicyInformation",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PrimaryPolicyInformation"
+		},
+		{
+			"ExcelColName": "PrimaryInsurance",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PrimaryInsurance"
+		},
+		{
+			"ExcelColName": "Order1",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "OrderInfo"
+		},
+		{
+			"ExcelColName": "DateOfBirth",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "DateOfBirth"
+		},
+		{
+			"ExcelColName": "RepEmail",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "SalesRepEmail"
+		},
+		{
+			"ExcelColName": "ProviderLast",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ProviderLastName"
+		},
+		{
+			"ExcelColName": "ProviderFirst",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ProviderFirstName"
+		},
+		{
+			"ExcelColName": "FirstName",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PatientFirstName"
+		},
+		{
+			"ExcelColName": "LastName",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PatientLastName"
+		},
+		{
+			"ExcelColName": "NA",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "NA"
+		},
+		{
+			"ExcelColName": "LastTest",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "LastTest"
+		},
+		{
+			"ExcelColName": "TimetoResult",
+			"Required": false,
+			"DataType": "int",
+			"SQLColName": "TimetoResult"
+		},
+		{
+			"ExcelColName": "PatientID",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PatientID"
+		},
+		{
+			"ExcelColName": "TimetoBill",
+			"Required": false,
+			"DataType": "int",
+			"SQLColName": "TimetoBill"
+		},
+		{
+			"ExcelColName": "StreetAddress",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "StreetAddress"
+		},
+		{
+			"ExcelColName": "City",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "City"
+		},
+		{
+			"ExcelColName": "Gender",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Gender"
+		},
+		{
+			"ExcelColName": "State",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "State"
+		},
+		{
+			"ExcelColName": "Ethnicity",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Ethnicity"
+		},
+		{
+			"ExcelColName": "Zip",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Zip"
+		},
+		{
+			"ExcelColName": "Race",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Race"
+		},
+		{
+			"ExcelColName": "PerformingLab",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PerformingLab"
+		},
+		{
+			"ExcelColName": "DocRequest",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "DocRequest"
+		},
+		{
+			"ExcelColName": "InAppeals",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "InAppeals"
+		},
+		{
+			"ExcelColName": "ClaimDenied",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ClaimDenied"
+		},
+		{
+			"ExcelColName": "UpdateDate",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "UpdateDate"
+		},
+		{
+			"ExcelColName": "Verified",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Verified"
+		},
+		{
+			"ExcelColName": "ReverifyBy",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ReverifyBy"
+		},
+		{
+			"ExcelColName": "ClaimNote",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ClaimNote"
+		},
+		{
+			"ExcelColName": "PayerCodeLookup_Label",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PayerCodeLookup_Label"
+		},
+		{
+			"ExcelColName": "Note",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Note"
+		},
+		{
+			"ExcelColName": "BenefitsVerified",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "BenefitsVerified"
+		},
+		{
+			"ExcelColName": "PVerifyCode",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PVerifyCode"
+		},
+		{
+			"ExcelColName": "EligibilityPortal",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "EligibilityPortal"
+		},
+		{
+			"ExcelColName": "ClearinghouseName",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ClearinghouseName"
+		},
+		{
+			"ExcelColName": "PortalName",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PortalName"
+		},
+		{
+			"ExcelColName": "SendToBilling",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "SendToBilling"
+		},
+		{
+			"ExcelColName": "CheckForClaim",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "CheckForClaim"
+		},
+		{
+			"ExcelColName": "ClaimRcvd",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ClaimRcvd"
+		},
+		{
+			"ExcelColName": "HCPCS2",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "HCPCS2"
+		},
+		{
+			"ExcelColName": "RegistrationID",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "RegistrationID"
+		},
+		{
+			"ExcelColName": "WTHold",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "WTHold"
+		},
+		{
+			"ExcelColName": "Rejected",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Rejected"
+		},
+		{
+			"ExcelColName": "AnnualTestCount",
+			"Required": false,
+			"DataType": "int",
+			"SQLColName": "AnnualTestCount"
+		},
+		{
+			"ExcelColName": "PatientIdentry",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PatientIdentry"
+		},
+		{
+			"ExcelColName": "SecondaryInsurance",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "SecondaryInsurance"
+		},
+		{
+			"ExcelColName": "SecondaryPolicyInformation",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "SecondaryPolicyInformation"
+		},
+		{
+			"ExcelColName": "VerifiedDate",
+			"Required": false,
+			"DataType": "date",
+			"SQLColName": "VerifiedDate"
+		},
+		{
+			"ExcelColName": "NewPatient",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "NewPatient"
+		},
+		{
+			"ExcelColName": "EditPatient",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "EditPatient"
+		},
+		{
+			"ExcelColName": "Reflex",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Reflex"
+		},
+		{
+			"ExcelColName": "EntryNumber",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "EntryNumber"
+		},
+		{
+			"ExcelColName": "CollectionMedia",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "CollectionMedia"
+		},
+		{
+			"ExcelColName": "CollectedBy",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "CollectedBy"
+		},
+		{
+			"ExcelColName": "OrderFormEntryNumber",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "OrderFormEntryNumber"
+		},
+		{
+			"ExcelColName": "CollectedTime",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "CollectedTime"
+		},
+		{
+			"ExcelColName": "ElectronicSignature",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ElectronicSignature"
+		},
+		{
+			"ExcelColName": "AccountID",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "AccountID"
+		},
+		{
+			"ExcelColName": "ParentAccountID",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ParentAccountID"
+		},
+		{
+			"ExcelColName": "AccountContactEmail",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "AccountContactEmail"
+		},
+		{
+			"ExcelColName": "OrderIPAddress",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "OrderIPAddress"
+		},
+		{
+			"ExcelColName": "PerformingLabAddress",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PerformingLabAddress"
+		},
+		{
+			"ExcelColName": "PerformingLabCLIA",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PerformingLabCLIA"
+		},
+		{
+			"ExcelColName": "BillingLabCLIA",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "BillingLabCLIA"
+		},
+		{
+			"ExcelColName": "ResultsPortal",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ResultsPortal"
+		},
+		{
+			"ExcelColName": "BillingLabAddress",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "BillingLabAddress"
+		},
+		{
+			"ExcelColName": "Division",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Division"
+		},
+		{
+			"ExcelColName": "IHBillingForDTR",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "IHBillingForDTR"
+		},
+		{
+			"ExcelColName": "EditLink",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "EditLink"
+		},
+		{
+			"ExcelColName": "UploadToQbench",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "UploadToQbench"
+		},
+		{
+			"ExcelColName": "CPT",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "CPT"
+		},
+		{
+			"ExcelColName": "PatientRegisterLink",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PatientRegisterLink"
+		},
+		{
+			"ExcelColName": "ReqLink",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ReqLink"
+		},
+		{
+			"ExcelColName": "ResultLink",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ResultLink"
+		},
+		{
+			"ExcelColName": "ToxRules1",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ToxRules1"
+		},
+		{
+			"ExcelColName": "ToxRules2",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ToxRules2"
+		},
+		{
+			"ExcelColName": "ToxRules3",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ToxRules3"
+		},
+		{
+			"ExcelColName": "ToxRules4",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ToxRules4"
+		},
+		{
+			"ExcelColName": "ToxRules5",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ToxRules5"
+		},
+		{
+			"ExcelColName": "ToxGate1",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ToxGate1"
+		},
+		{
+			"ExcelColName": "ToxGate2",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ToxGate2"
+		},
+		{
+			"ExcelColName": "ToxApproved",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ToxApproved"
+		},
+		{
+			"ExcelColName": "PolicyNumberCharacteristics",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "PolicyNumberCharacteristics"
+		},
+		{
+			"ExcelColName": "ResultMatched",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "ResultMatched"
+		},
+		{
+			"ExcelColName": "BillingLab",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "BillingLab"
+		},
+		{
+			"ExcelColName": "BillingLab2",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "BillingLab2"
+		},
+		{
+			"ExcelColName": "InsuranceCode2",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "InsuranceCode2"
+		},
+		{
+			"ExcelColName": "Insurance",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Insurance"
+		},
+		{
+			"ExcelColName": "LRNBillingLab",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "LRNBillingLab"
+		},
+		{
+			"ExcelColName": "Week",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "Week"
+		},
+		{
+			"ExcelColName": "TestCategory",
+			"Required": false,
+			"DataType": "string",
+			"SQLColName": "TestCategory"
+		}
+	]
+}

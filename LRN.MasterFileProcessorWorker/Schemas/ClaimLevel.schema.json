@@ -1,0 +1,430 @@
+{
+	"SchemaName": "ClaimLevel",
+	"HeaderRow": 1,
+	"Columns": [
+		{
+			"Name": "LabID",
+			"DataType": "string"
+		},
+		{
+			"Name": "LabName",
+			"DataType": "string"
+		},
+		{
+			"Name": "ClaimID",
+			"DataType": "string",
+			"Aliases": [
+				"VisitNum",
+				"Visit No",
+				"Enc",
+				"Encounter ID",
+				"VisitNumber",
+				"Visit Number"
+			]
+		},
+		{
+			"Name": "AccessionNumber",
+			"DataType": "string",
+			"Aliases": [
+				"Accession",
+				"Accession No",
+				"Accession# Without Letters",
+				"Acc",
+				"Specimen ID"
+			]
+		},
+		{
+			"Name": "SourceFileID",
+			"DataType": "string",
+			"Aliases": [
+				"Chart Number",
+				"Chart #",
+				"PatientId",
+				"Patient ID"
+			]
+		},
+		{
+			"Name": "IngestedOn",
+			"DataType": "string",
+			"Aliases": [
+				"Chart Number",
+				"Chart #",
+				"PatientId",
+				"Patient ID"
+			]
+		},
+		{
+			"Name": "RowHash",
+			"DataType": "string",
+			"Aliases": [
+				"Chart Number",
+				"Chart #",
+				"PatientId",
+				"Patient ID"
+			]
+		},
+		{
+			"Name": "PayerName_Raw",
+			"DataType": "string",
+			"Aliases": [
+				"PayerName",
+				"Primary Payer",
+				"Payer",
+				"Insurance Name",
+				"Carrier",
+				"Payer Name",
+				"Payer_Name_Raw",
+				"PayerName_Raw"
+			]
+		},
+		{
+			"Name": "PayerName",
+			"DataType": "string"
+		},
+		{
+			"Name": "Payer_Code",
+			"DataType": "string"
+		},
+		{
+			"Name": "Payer_Common_Code",
+			"DataType": "string"
+		},
+		{
+			"Name": "Payer_Group_Code",
+			"DataType": "string"
+		},
+		{
+			"Name": "Global_Payer_ID",
+			"DataType": "string"
+		},
+		{
+			"Name": "PayerType",
+			"DataType": "string",
+			"Aliases": [
+				"FinancialClass",
+				"PayerType"
+			]
+		},
+		{
+			"Name": "BillingProvider",
+			"DataType": "string",
+			"Aliases": [
+				"BillingProvider",
+				"Rendering Physician Last Name",
+				"RenderingPhysician First Name",
+				"Provider",
+				"Loc"
+			]
+		},
+		{
+			"Name": "ReferringProvider",
+			"DataType": "string",
+			"Aliases": [
+				"ReferringProvider",
+				"Ref Physician Name",
+				"Proc-Referring Dr Name",
+				"Ordering Physician Last Name",
+				"Ordering Physician First Name",
+				"ReferringProviderName"
+			]
+		},
+		{
+			"Name": "ClinicName",
+			"DataType": "string",
+			"Aliases": [
+				"ClinicName",
+				"Clinic Name",
+				"Organization Name",
+				"Proc-Department Desc",
+				"Facility Name",
+				"Account Name"
+			]
+		},
+		{
+			"Name": "SalesRepname",
+			"DataType": "string",
+			"Aliases": [
+				"SaleRepName"
+			]
+		},
+
+		{
+			"Name": "PatientID",
+			"DataType": "string",
+			"Aliases": [
+				"ChartNum",
+				"Patient ID",
+				"Pat id",
+				"Patient Ac No",
+				"ChartNumber"
+			]
+		},
+		{
+			"Name": "Patient DOB",
+			"DataType": "date",
+			"Aliases": [
+				"DOB",
+				"Patient Birth Date"
+			]
+		},
+		{
+			"Name": "DateofService",
+			"DataType": "date",
+			"Aliases": [
+				"BeginDOS",
+				"DOS",
+				"Service From Date"
+			]
+		},
+		{
+			"Name": "ChargeEnteredDate",
+			"DataType": "date",
+			"Aliases": [
+				"ChargeEntryDate",
+				"Entered Date",
+				"Charge Entered Date",
+				"DOE",
+				"Date"
+			]
+		},
+		{
+			"Name": "FirstBilledDate",
+			"DataType": "date",
+			"Aliases": [
+				"LastBillDate",
+				"Billed Date",
+				"Last billed date",
+				"Primary Insurance Billed Date",
+				"FirstBillDate"
+			]
+		},
+		{
+			"Name": "Panelname",
+			"DataType": "string",
+			"Aliases": [
+				"PanelName",
+				"Panel Name",
+				"Panel Group",
+				"Panel"
+			]
+		},
+		{
+			"Name": "CPT Code X Units X Modifier Orginal",
+			"DataType": "string",
+			"Aliases": [
+				"Claim Level CPT",
+				"CPTs",
+				"CPT"
+			]
+		},
+		{
+			"Name": "CPT Code X Units X Modifier",
+			"DataType": "string"
+		},
+		{
+			"Name": "POS",
+			"DataType": "string",
+			"Aliases": [
+				"POS"
+			]
+		},
+		{
+			"Name": "TOS",
+			"DataType": "string",
+			"Aliases": [
+				"TOS"
+			]
+		},
+		{
+			"Name": "ChargeAmount",
+			"DataType": "decimal",
+			"Aliases": [
+				"BilledAmount",
+				"Total Charges",
+				"Sum of Patient ID",
+				"Proc-Charge Amount $",
+				"TotalCharge",
+				"Biilled Amounts",
+				"Charge amount",
+				"Billed Amounts"
+			]
+		},
+		{
+			"Name": "AllowedAmount",
+			"DataType": "decimal",
+			"Aliases": [
+				"TotalAllowed",
+				"AllowedAmount"
+			]
+		},
+		{
+			"Name": "InsurancePayment",
+			"DataType": "decimal",
+			"Aliases": [
+				"InsurancePayment",
+				"CarrierPayment",
+				"Ins. Payment",
+				"ProcTotal Payments $",
+				"Insurance Payments"
+			]
+		},
+		{
+			"Name": "PatientPayment",
+			"DataType": "decimal",
+			"Aliases": [
+				"PatientPayment",
+				"Patient Paymnets",
+				"Patient Payments",
+				"Pat Payments",
+				"Pat. Payments",
+				"PatientPaidAmount"
+			]
+		},
+		{
+			"Name": "TotalPayments",
+			"DataType": "decimal",
+			"Calculation": "InsurancePayment + PatientPayment"
+		},
+		{
+			"Name": "InsuranceAdjustments",
+			"DataType": "decimal",
+			"Aliases": [
+				"InsuranceAdjustment",
+				"CarrierWO",
+				"Denial Adj Amount",
+				"Proc-Adjustment $",
+				"adj_amount",
+				"Adjustments"
+			]
+		},
+		{
+			"Name": "PatientAdjustments",
+			"DataType": "decimal",
+			"Aliases": [
+				"PatientWO",
+				"PatientAdjustment"
+			]
+		},
+		{
+			"Name": "TotalAdjustments",
+			"DataType": "decimal",
+			"Calculation": "PatientAdjustments + InsuranceAdjustments"
+		},
+		{
+			"Name": "InsuranceBalance",
+			"DataType": "decimal",
+			"Aliases": [
+				"InsuranceBalance",
+				"CarrierBalance",
+				"Proc-Ins Balance",
+				"CarrierBalance",
+				"Ins Balance",
+				"Insurance Balance"
+			]
+		},
+		{
+			"Name": "PatientBalance",
+			"DataType": "decimal",
+			"Aliases": [
+				"PatientBalance",
+				"Proc-Pt Balance",
+				"Pat Balance",
+				"Patient Balance"
+			]
+		},
+		{
+			"Name": "Total Balance",
+			"DataType": "decimal",
+			"Calculation": "PatientBalance + InsuranceBalance"
+		},
+		{
+			"Name": "CheckDate",
+			"DataType": "date",
+			"Aliases": [
+				"CheckDate",
+				"Deposit Date",
+				"Posted Date"
+			]
+		},
+		{
+			"Name": "ClaimStatus",
+			"DataType": "string",
+			"Aliases": [
+				"Claim Status",
+				"Payment Status"
+			]
+		},
+		{
+			"Name": "DenialCode",
+			"DataType": "string",
+			"Aliases": [
+				"Claim Level Denial Code",
+				"Denial Code",
+				"Claim Level Denials",
+				"Combined Claim Level Denial code"
+			]
+		},
+		{
+			"Name": "ICDCode",
+			"DataType": "string",
+			"Aliases": [
+				"Claim Level ICD",
+				"ICD Claim  Level",
+				"Combined Claim Level ICD",
+				"Claim Level ICD Code",
+				"PrimaryDiagnosis"
+			]
+		},
+		{
+			"Name": "DaystoDOS",
+			"DataType": "string"
+		},
+		{
+			"Name": "RollingDays",
+			"DataType": "string"
+		},
+		{
+			"Name": "DaystoBill",
+			"DataType": "string"
+		},
+		{
+			"Name": "DaystoPost",
+			"DataType": "string"
+		},
+		{
+			"Name": "ICD Pointer",
+			"DataType": "string",
+			"Aliases": [
+				"Diag Pointer"
+			]
+		},
+		{
+			"Name": "Panel Name LIS",
+			"DataType": "string",
+			"Aliases": [
+				"Panel Name LIS"
+			]
+		},
+		{
+			"Name": "Panel Name Based on CPT",
+			"DataType": "string",
+			"Aliases": [
+				"Panel Name Based on CPT"
+			]
+		},
+		{
+			"Name": "Aging DOS",
+			"DataType": "string",
+			"Aliases": [
+				"Aging DOS"
+			]
+		},
+		{
+			"Name": "Aging DOE",
+			"DataType": "string",
+			"Aliases": [
+				"Aging DOE"
+			]
+		}
+	]
+}

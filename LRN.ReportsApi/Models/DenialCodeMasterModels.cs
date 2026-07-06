@@ -70,6 +70,21 @@ public sealed class DenialCodeMasterImportRequest
     public IFormFile? File { get; set; }
 }
 
+public sealed class DenialCodeMasterImpactQueue
+{
+    public string QueueName { get; set; } = string.Empty;
+    public int ClaimCount { get; set; }
+    public int TaskCount { get; set; }
+}
+
+public sealed class DenialCodeMasterImpact
+{
+    public string DenialCode { get; set; } = string.Empty;
+    public int AffectedClaims { get; set; }
+    public int AffectedTasks { get; set; }
+    public IReadOnlyList<DenialCodeMasterImpactQueue> Queues { get; set; } = Array.Empty<DenialCodeMasterImpactQueue>();
+}
+
 public sealed class DenialCodeMasterExportOptions
 {
     public string ExportFolderPath { get; set; } = @"D:\LRN\DenialCodeMaster";

@@ -17,6 +17,7 @@ public interface IDenialCodeMasterRepository
     Task DeleteAsync(int labId, string denialCode, string coverageStatus, string icdComplianceStatus, CancellationToken ct);
     Task<DenialCodeMasterLookups> GetLookupsAsync(int labId, CancellationToken ct);
     Task<DenialCodeMasterImportResult> ReplaceFromImportAsync(int labId, IReadOnlyList<DenialCodeMasterRequest> records, int skippedCount, IReadOnlyList<string> errors, string? sourceFileName, string? userName, CancellationToken ct);
+    Task<DenialCodeMasterImpact> GetImpactAsync(int labId, string denialCode, CancellationToken ct);
 }
 
 public interface IDenialCodeMasterExcelService
@@ -215,6 +216,70 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
         result.ActionCategories = await ReadStringsAsync(reader, ct);
         await reader.NextResultAsync(ct);
         result.Tasks = await ReadStringsAsync(reader, ct);
+        return result;
+    }
+
+    public async Task<DenialCodeMasterImpact> GetImpactAsync(int labId, string denialCode, CancellationToken ct)
+    {
+        var result = new DenialCodeMasterImpact { DenialCode = denialCode };
+        if (string.IsNullOrWhiteSpace(denialCode)) return result;
+
+        await using var conn = OpenLab(labId);
+        await conn.OpenAsync(ct);
+        if (!await TableExistsAsync(conn, "dbo.DenialTaskBoard", ct)) return result;
+
+        const string sql = """
+            SELECT
+                QueueName = CASE
+                    WHEN LOWER(LTRIM(RTRIM(ISNULL(Status,'')))) IN ('internal escalation','escalated','escalated to ar manager') THEN 'Internal Escalation'
+                    WHEN LOWER(LTRIM(RTRIM(ISNULL(Status,'')))) = 'external escalation' THEN 'External Escalation'
+                    WHEN LOWER(LTRIM(RTRIM(ISNULL(Status,'')))) IN ('required review','in review','responded','response submitted','manager response') THEN 'Escalation Response'
+                    WHEN LOWER(LTRIM(RTRIM(ISNULL(Status,'')))) IN ('write off approval pending','write-off pending approval','write off pending approval','write-off approval pending') THEN 'Write Off Approval'
+                    WHEN LOWER(LTRIM(RTRIM(ISNULL(Status,'')))) IN ('pending documentation','documentation pending','document required') THEN 'Pending Documentation'
+                    WHEN LOWER(LTRIM(RTRIM(ISNULL(Status,'')))) IN ('payer followup required','payer follow-up required','followup required') THEN 'Payer Followup'
+                    WHEN LOWER(LTRIM(RTRIM(ISNULL(Status,'')))) IN ('pending payer','pending payer response') THEN 'Pending Payer Response'
+                    WHEN NULLIF(LTRIM(RTRIM(ISNULL(AssignedTo,''))),'') IS NOT NULL THEN 'Assigned'
+                    ELSE 'Unassigned'
+                END,
+                ClaimCount = COUNT(DISTINCT LTRIM(RTRIM(ISNULL(ClaimID,'')))),
+                TaskCount = COUNT(1)
+            FROM dbo.DenialTaskBoard WITH (NOLOCK)
+            WHERE LabId=@LabId
+              AND LOWER(LTRIM(RTRIM(ISNULL(DenialCode,''))))=LOWER(@DenialCode)
+              AND LOWER(LTRIM(RTRIM(ISNULL(Status,'')))) NOT IN ('closed','completed')
+            GROUP BY CASE
+                    WHEN LOWER(LTRIM(RTRIM(ISNULL(Status,'')))) IN ('internal escalation','escalated','escalated to ar manager') THEN 'Internal Escalation'
+                    WHEN LOWER(LTRIM(RTRIM(ISNULL(Status,'')))) = 'external escalation' THEN 'External Escalation'
+                    WHEN LOWER(LTRIM(RTRIM(ISNULL(Status,'')))) IN ('required review','in review','responded','response submitted','manager response') THEN 'Escalation Response'
+                    WHEN LOWER(LTRIM(RTRIM(ISNULL(Status,'')))) IN ('write off approval pending','write-off pending approval','write off pending approval','write-off approval pending') THEN 'Write Off Approval'
+                    WHEN LOWER(LTRIM(RTRIM(ISNULL(Status,'')))) IN ('pending documentation','documentation pending','document required') THEN 'Pending Documentation'
+                    WHEN LOWER(LTRIM(RTRIM(ISNULL(Status,'')))) IN ('payer followup required','payer follow-up required','followup required') THEN 'Payer Followup'
+                    WHEN LOWER(LTRIM(RTRIM(ISNULL(Status,'')))) IN ('pending payer','pending payer response') THEN 'Pending Payer Response'
+                    WHEN NULLIF(LTRIM(RTRIM(ISNULL(AssignedTo,''))),'') IS NOT NULL THEN 'Assigned'
+                    ELSE 'Unassigned'
+                END
+            ORDER BY TaskCount DESC;
+            """;
+        await using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@LabId", labId);
+        cmd.Parameters.AddWithValue("@DenialCode", denialCode.Trim());
+        var queues = new List<DenialCodeMasterImpactQueue>();
+        await using (var reader = await cmd.ExecuteReaderAsync(ct))
+        {
+            while (await reader.ReadAsync(ct))
+            {
+                var queue = new DenialCodeMasterImpactQueue
+                {
+                    QueueName = reader.IsDBNull(0) ? "Unassigned" : reader.GetString(0),
+                    ClaimCount = reader.IsDBNull(1) ? 0 : Convert.ToInt32(reader.GetValue(1)),
+                    TaskCount = reader.IsDBNull(2) ? 0 : Convert.ToInt32(reader.GetValue(2))
+                };
+                queues.Add(queue);
+                result.AffectedTasks += queue.TaskCount;
+            }
+        }
+        result.Queues = queues;
+        result.AffectedClaims = queues.Sum(q => q.ClaimCount);
         return result;
     }
 
@@ -1018,6 +1083,14 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
     };
 
     private static string? GetString(SqlDataReader r, string column) => r.IsDBNull(r.GetOrdinal(column)) ? null : r.GetString(r.GetOrdinal(column));
+
+    private static async Task<bool> TableExistsAsync(SqlConnection conn, string tableName, CancellationToken ct)
+    {
+        await using var cmd = new SqlCommand("SELECT CASE WHEN OBJECT_ID(@TableName, 'U') IS NOT NULL THEN 1 ELSE 0 END", conn);
+        cmd.Parameters.AddWithValue("@TableName", tableName);
+        var result = await cmd.ExecuteScalarAsync(ct);
+        return result is int i && i == 1;
+    }
 
     internal SqlConnection OpenLab(int labId)
     {

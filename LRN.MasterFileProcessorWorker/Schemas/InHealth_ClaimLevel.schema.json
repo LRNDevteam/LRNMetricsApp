@@ -1,0 +1,126 @@
+{
+	"SchemaName": "Claim Level",
+	"HeaderRow": 1,
+	"Columns": [
+		{
+			"Name": "VisitNum",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Accession",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "Carrier",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "ReferringProvider",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Panel Name LIS",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Panel Name Based on CPT",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Aging DOS",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Aging DOE",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "ChartNum",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "BeginDOS",
+			"Required": true,
+			"DataType": "date"
+		},
+		{
+			"Name": "LastBillDate",
+			"Required": true,
+			"DataType": "date"
+		},
+		{
+			"Name": "Claim Level ICD",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "TotalCharge",
+			"Required": true,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "CarrierPayment",
+			"Required": false,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "Account Name",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "PatientPayment",
+			"Required": false,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "TotalWO",
+			"Required": false,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "CarrierWO",
+			"Required": false,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "CarrierBalance",
+			"Required": true,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "PatientBalance",
+			"Required": true,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "TotalAllowed",
+			"Required": true,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "PatientWO",
+			"Required": true,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "Denial Code",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Denial Date",
+			"Required": false,
+			"DataType": "date"
+		}
+	]
+}

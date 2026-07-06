@@ -4,6 +4,7 @@ using LRN.ReportsApi.Security;
 using System.Security.Claims;
 using System.IO.Compression;
 using Microsoft.AspNetCore.ResponseCompression;
+using Microsoft.Data.SqlClient;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -95,9 +96,15 @@ app.Use(async (context, next) =>
         || path.StartsWithSegments("/api/denial-workflow")
         || path.StartsWithSegments("/api/master-values");
 
+    // client-logs exists to capture client-side errors, including ones caused by auth being
+    // broken or expired. Requiring a valid JWT here creates a chicken-and-egg failure: exactly
+    // when a user's session breaks (the case most worth reporting), the error report itself gets
+    // rejected with 401, and the client silently retries reporting on every subsequent error.
     if (!isWorkflowApi
         || path.StartsWithSegments("/api/denialworkflow/health")
-        || path.StartsWithSegments("/api/denial-workflow/health"))
+        || path.StartsWithSegments("/api/denial-workflow/health")
+        || path.StartsWithSegments("/api/denialworkflow/client-logs")
+        || path.StartsWithSegments("/api/denial-workflow/client-logs"))
     {
         await next();
         return;
@@ -136,6 +143,21 @@ app.Use(async (context, next) =>
     {
         context.User = principal;
         await next();
+    }
+    catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+    {
+        // The caller disconnected or deliberately superseded the request. This is not an
+        // application incident and must not generate an error file or Teams notification.
+        return;
+    }
+    catch (SqlException ex) when (
+        context.RequestAborted.IsCancellationRequested &&
+        ex.Message.Contains("Operation cancelled by user", StringComparison.OrdinalIgnoreCase))
+    {
+        // SqlClient can report cancellation of ExecuteReaderAsync as a SqlException instead
+        // of OperationCanceledException after it has sent ATTENTION to SQL Server. React
+        // intentionally aborts stale workflow loads, so this is also a normal disconnect.
+        return;
     }
     catch (UnauthorizedAccessException ex)
     {

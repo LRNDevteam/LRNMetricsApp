@@ -170,12 +170,6 @@ export async function ensureWorkflowJwt(options = {}) {
         }
 
         if (response.status === 401 || response.status === 403) {
-          if (isLocalReactHost()) {
-            throw new Error(
-              'AuthToken returned Unauthorized from MVC. You are logged in when opening the URL directly, ' +
-              'but the LRN.Auth cookie is not being sent from React localhost. Rebuild/restart LabMetricsDashboard with the updated Program.cs, then delete the old LRN.Auth cookie and login again.'
-            );
-          }
           redirectToMetricsLogin();
           throw new Error('Login required. Redirecting to LRN Metrics login.');
         }
@@ -207,9 +201,13 @@ export async function ensureWorkflowJwt(options = {}) {
         lastAuthTokenError = error instanceof Error ? error : new Error(String(error || 'Auth token error'));
         lastAuthTokenErrorAt = Date.now();
         if (isLocalReactHost() && (error instanceof TypeError || String(error?.message || '').includes('Failed to fetch'))) {
+          const metricsHint = AUTH_TOKEN_URL.includes('localhost:44351')
+            ? 'LabMetricsDashboard should be running under IIS Express on https://localhost:44351. Keep VITE_LRN_METRICS_BASE_URL=https://localhost:44351 and restart Vite after any config change.'
+            : 'Set VITE_LRN_METRICS_BASE_URL=https://localhost:44351, restart Vite, and run LabMetricsDashboard under IIS Express on https://localhost:44351.';
           throw new Error(
             `Cannot call AuthToken from React localhost. Check CORS and local HTTPS. Auth URL: ${AUTH_TOKEN_URL}. ` +
-            'Use the updated LabMetricsDashboard Program.cs, restart MVC, and ensure the Vite origin https://localhost:5173 is allowed.'
+            'Use the updated LabMetricsDashboard Program.cs, restart MVC, and ensure the Vite origin https://localhost:5173 is allowed. ' +
+            metricsHint
           );
         }
         throw error;

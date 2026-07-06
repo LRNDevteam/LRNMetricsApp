@@ -239,25 +239,50 @@ public sealed class DenialWorkflowController : ControllerBase
 
         var errors = new List<string>();
         var actionableRows = rows
-            .Select((row, index) => new { Row = row, RowNumber = index + 2, ClaimId = CsvValue(row, "ClaimUID", "ClaimUid", "ClaimID", "ClaimId") })
+            .Select((row, index) => new
+            {
+                Row = row,
+                RowNumber = index + 2,
+                ClaimId = CsvValue(row, "ClaimUID", "ClaimUid", "ClaimID", "ClaimId"),
+                TaskId = CsvValue(row, "TaskID", "TaskId")
+            })
             .Where(x => CsvHasClaimAction(x.Row))
             .ToList();
         var skipped = rows.Count - actionableRows.Count;
-        var claimRows = new List<(int RowNumber, string ClaimId, Dictionary<string, string> Row)>();
-        foreach (var group in actionableRows.GroupBy(x => x.ClaimId, StringComparer.OrdinalIgnoreCase))
+
+        // Task-level template when any row has a TaskID column value
+        var isTaskLevel = actionableRows.Any(x => !string.IsNullOrWhiteSpace(x.TaskId));
+
+        var claimRows = new List<(int RowNumber, string ClaimId, string TaskId, Dictionary<string, string> Row)>();
+        if (isTaskLevel)
         {
-            if (string.IsNullOrWhiteSpace(group.Key))
+            foreach (var r in actionableRows)
             {
-                foreach (var missingClaimRow in group) AddCsvError(errors, missingClaimRow.RowNumber, "ClaimUID or ClaimID is required.");
-                continue;
+                if (string.IsNullOrWhiteSpace(r.ClaimId))
+                {
+                    AddCsvError(errors, r.RowNumber, "ClaimUID or ClaimID is required.");
+                    continue;
+                }
+                claimRows.Add((r.RowNumber, r.ClaimId, r.TaskId, r.Row));
             }
-            if (group.Count() > 1)
+        }
+        else
+        {
+            foreach (var group in actionableRows.GroupBy(x => x.ClaimId, StringComparer.OrdinalIgnoreCase))
             {
-                AddCsvError(errors, group.First().RowNumber, $"Claim '{group.Key}' has updates on more than one CSV row. Enter claim-level values on only one row.");
-                continue;
+                if (string.IsNullOrWhiteSpace(group.Key))
+                {
+                    foreach (var missingClaimRow in group) AddCsvError(errors, missingClaimRow.RowNumber, "ClaimUID or ClaimID is required.");
+                    continue;
+                }
+                if (group.Count() > 1)
+                {
+                    AddCsvError(errors, group.First().RowNumber, $"Claim '{group.Key}' has updates on more than one CSV row. Enter claim-level values on only one row.");
+                    continue;
+                }
+                var claimRow = group.Single();
+                claimRows.Add((claimRow.RowNumber, claimRow.ClaimId, string.Empty, claimRow.Row));
             }
-            var claimRow = group.Single();
-            claimRows.Add((claimRow.RowNumber, claimRow.ClaimId, claimRow.Row));
         }
 
         var updatedTasks = 0;
@@ -267,10 +292,18 @@ public sealed class DenialWorkflowController : ControllerBase
         var processedRows = 0;
         foreach (var item in claimRows)
         {
-            var claimTasks = await _service.GetTasksByClaimAsync(labId, item.ClaimId, ct);
-            if (claimTasks.Count == 0)
+            var allClaimTasks = await _service.GetTasksByClaimAsync(labId, item.ClaimId, ct);
+            if (allClaimTasks.Count == 0)
             {
                 AddCsvError(errors, item.RowNumber, $"Claim '{item.ClaimId}' was not found.");
+                continue;
+            }
+            var claimTasks = !string.IsNullOrWhiteSpace(item.TaskId)
+                ? allClaimTasks.Where(x => string.Equals(x.TaskId?.Trim(), item.TaskId.Trim(), StringComparison.OrdinalIgnoreCase)).ToList()
+                : allClaimTasks;
+            if (claimTasks.Count == 0)
+            {
+                AddCsvError(errors, item.RowNumber, $"Task '{item.TaskId}' was not found for claim '{item.ClaimId}'.");
                 continue;
             }
             if (reviewerOnly && claimTasks.Any(x => !string.Equals(x.AssignedTo?.Trim(), userName.Trim(), StringComparison.OrdinalIgnoreCase)))
@@ -282,6 +315,7 @@ public sealed class DenialWorkflowController : ControllerBase
             var updateStatusRaw = CsvValue(item.Row, "UpdateStatus", "NewStatus");
             var updateStatus = string.IsNullOrWhiteSpace(updateStatusRaw) ? string.Empty : NormalizeWorkflowStatus(updateStatusRaw);
             var comments = CsvValue(item.Row, "Comments", "ReviewerComments", "Comment");
+            var notes = CsvValue(item.Row, "Notes");
             var escalationReason = CsvValue(item.Row, "EscalationReason");
             var otherEscalationReason = CsvValue(item.Row, "OtherEscalationReason");
             var escalationComment = CsvValue(item.Row, "EscalationComment");
@@ -297,6 +331,20 @@ public sealed class DenialWorkflowController : ControllerBase
                 continue;
             }
 
+            // Save standalone Notes column if provided (task-level template)
+            if (!string.IsNullOrWhiteSpace(notes) && string.IsNullOrWhiteSpace(comments) && !hasReviewerEscalation && !hasManagerResponse)
+            {
+                var noteTask = claimTasks[0];
+                await _service.SaveNoteAsync(new SaveDenialNoteRequest
+                {
+                    LabId = labId, ClaimId = item.ClaimId,
+                    NoteLevel = !string.IsNullOrWhiteSpace(item.TaskId) ? "Task" : "Claim",
+                    NoteText = notes, Status = NormalizeWorkflowStatus(noteTask.Status), CreatedBy = userName
+                }, ct);
+                addedComments++;
+                rowChanged = true;
+            }
+
             if (!string.IsNullOrWhiteSpace(updateStatus))
             {
                 if (string.IsNullOrWhiteSpace(comments))
@@ -304,6 +352,7 @@ public sealed class DenialWorkflowController : ControllerBase
                     AddCsvError(errors, item.RowNumber, "Comments are required when UpdateStatus is provided.");
                     continue;
                 }
+                var noteLevel = !string.IsNullOrWhiteSpace(item.TaskId) ? "Task" : "Claim";
                 var template = new UpdateTaskRequest
                 {
                     LabId = labId, Status = updateStatus, Comments = comments, ActionBy = userName,
@@ -324,7 +373,7 @@ public sealed class DenialWorkflowController : ControllerBase
                 }
                 await _service.SaveNoteAsync(new SaveDenialNoteRequest
                 {
-                    LabId = labId, ClaimId = item.ClaimId, NoteLevel = "Claim", NoteText = comments,
+                    LabId = labId, ClaimId = item.ClaimId, NoteLevel = noteLevel, NoteText = comments,
                     Status = updateStatus, NextFollowUpDate = template.ExpectedResponseDate, CreatedBy = userName
                 }, ct);
                 addedComments++;
@@ -337,9 +386,10 @@ public sealed class DenialWorkflowController : ControllerBase
             }
             else if (!string.IsNullOrWhiteSpace(comments))
             {
+                var noteLevel = !string.IsNullOrWhiteSpace(item.TaskId) ? "Task" : "Claim";
                 await _service.SaveNoteAsync(new SaveDenialNoteRequest
                 {
-                    LabId = labId, ClaimId = item.ClaimId, NoteLevel = "Claim", NoteText = comments,
+                    LabId = labId, ClaimId = item.ClaimId, NoteLevel = noteLevel, NoteText = comments,
                     Status = NormalizeWorkflowStatus(claimTasks[0].Status), CreatedBy = userName
                 }, ct);
                 updatedTasks += await _service.UpdateClaimCommentsAsync(labId, item.ClaimId, comments, userName, ct);
@@ -526,6 +576,8 @@ public sealed class DenialWorkflowController : ControllerBase
     {
         var role = FirstClaim(ClaimTypes.Role, "role", "roles");
         if (IsReadOnlyWorkflowRole(role)) return StatusCode(StatusCodes.Status403Forbidden, new { message = "This role cannot update task status." });
+        if (IsReviewerOnly(role) && await _service.IsTaskUnderInternalEscalationAsync(request.LabId, request.TaskId, ct))
+            return StatusCode(StatusCodes.Status409Conflict, new { message = "This claim is under AR Manager escalation review. Status cannot be updated until the manager responds." });
         request.Status = NormalizeWorkflowStatus(request.Status);
         var validationError = ValidateTaskStatusUpdate(request, role);
         if (!string.IsNullOrWhiteSpace(validationError)) return BadRequest(new { message = validationError });
@@ -552,10 +604,31 @@ public sealed class DenialWorkflowController : ControllerBase
         if (request.LabId <= 0) return BadRequest("LabId is required.");
         if (string.IsNullOrWhiteSpace(request.ClaimId)) return BadRequest("ClaimId is required.");
         if (string.IsNullOrWhiteSpace(request.NoteText)) return BadRequest("Note text is required.");
+        var normalizedStatus = NormalizeWorkflowStatus(request.Status);
+        if (request.ValidateWorkflowFields && normalizedStatus == "Payer Follow-up Required" && string.IsNullOrWhiteSpace(request.FollowUpReason))
+            return BadRequest(new { success = false, message = "Follow-up reason is required." });
+        if (request.ValidateWorkflowFields && (normalizedStatus is "Payer Follow-up Required" or "Pending Payer Response" or "Pending Documentation") && request.NextFollowUpDate is null)
+            return BadRequest(new { success = false, message = "Expected response date is required." });
+        if (request.ValidateWorkflowFields && normalizedStatus == "Pending Payer Response" && request.ActionCompleted != true)
+            return BadRequest(new { success = false, message = "Action completed must be confirmed." });
+        if (request.ValidateWorkflowFields && normalizedStatus == "Pending Documentation" && string.IsNullOrWhiteSpace(request.DocumentationType))
+            return BadRequest(new { success = false, message = "Documentation type is required." });
+        if (request.ValidateWorkflowFields && normalizedStatus == "Write-Off Pending Approval" && string.IsNullOrWhiteSpace(request.ActualOutcome))
+            return BadRequest(new { success = false, message = "Actual outcome is required for write-off approval." });
         if (IsClientManagerRole(role) && !await HasClientInfoPendingEscalationAsync(request.LabId, request.ClaimId, request.TaskId, request.CptCode, ct))
             return StatusCode(StatusCodes.Status403Forbidden, new { message = "Client Manager can update comments only for Client Info Pending escalations." });
         request.CreatedBy = string.IsNullOrWhiteSpace(request.CreatedBy) ? (FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "ReactWorkflow") : request.CreatedBy;
         return Ok(await _service.SaveNoteAsync(request, ct));
+    }
+
+    [HttpGet("follow-up-notifications")]
+    public async Task<ActionResult<IReadOnlyList<FollowUpNotificationRow>>> FollowUpNotifications([FromQuery] int labId, CancellationToken ct)
+    {
+        var role = FirstClaim(ClaimTypes.Role, "role", "roles");
+        var userName = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? string.Empty;
+        if (labId <= 0) return BadRequest("LabId is required.");
+        if (!IsReviewerOnly(role)) return Ok(Array.Empty<FollowUpNotificationRow>());
+        return Ok(await _service.GetFollowUpNotificationsAsync(labId, userName, ct));
     }
 
     [HttpGet("claim-documents")]
@@ -717,15 +790,16 @@ public sealed class DenialWorkflowController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.ClaimId)) return BadRequest("ClaimId is required.");
         if (string.IsNullOrWhiteSpace(request.EscalationReason)) return BadRequest("Escalation reason is required.");
         var role = FirstClaim(ClaimTypes.Role, "role", "roles");
-        if (IsReviewerOnly(role))
-        {
-            request.EscalationLevel = "Claim";
-            request.TaskId = string.Empty;
-            request.CptCode = string.Empty;
-            request.EscalationScope = "Overall Claim";
-            request.EscalationScopeValue = request.ClaimId;
-            request.EscalationScopeDisplay = "Overall Claim";
-        }
+        if (IsExternalEscalationTarget(request.EscalatedToRole) && !CanExternalEscalateFromToken())
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only Admin and AR Manager users can escalate a claim to Client Manager or Account Manager." });
+        // Escalation (internal and external) is always a claim-level action; no code path may
+        // escalate a single line/task independently of its claim.
+        request.EscalationLevel = "Claim";
+        request.TaskId = string.Empty;
+        request.CptCode = string.Empty;
+        request.EscalationScope = "Overall Claim";
+        request.EscalationScopeValue = request.ClaimId;
+        request.EscalationScopeDisplay = "Overall Claim";
         request.CreatedBy = string.IsNullOrWhiteSpace(request.CreatedBy) ? (FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "ReactWorkflow") : request.CreatedBy;
         return Ok(await _service.SaveEscalationAsync(request, ct));
     }
@@ -738,6 +812,16 @@ public sealed class DenialWorkflowController : ControllerBase
         if (request.EscalationId <= 0) return BadRequest("EscalationId is required.");
         if (string.IsNullOrWhiteSpace(request.ClaimId)) return BadRequest("ClaimId is required.");
         if (string.IsNullOrWhiteSpace(request.EscalationReason)) return BadRequest("Escalation reason is required.");
+        if (IsExternalEscalationTarget(request.EscalatedToRole) && !CanExternalEscalateFromToken())
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only Admin and AR Manager users can escalate a claim to Client Manager or Account Manager." });
+        // Escalation (internal and external) is always a claim-level action; no code path may
+        // escalate a single line/task independently of its claim.
+        request.EscalationLevel = "Claim";
+        request.TaskId = string.Empty;
+        request.CptCode = string.Empty;
+        request.EscalationScope = "Overall Claim";
+        request.EscalationScopeValue = request.ClaimId;
+        request.EscalationScopeDisplay = "Overall Claim";
         request.ActionBy = string.IsNullOrWhiteSpace(request.ActionBy) ? (FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "ReactWorkflow") : request.ActionBy;
         var rows = await _service.UpdateEscalationAsync(request, ct);
         return Ok(new DenialWorkflowResult { Success = rows > 0, RowsAffected = rows, Message = rows > 0 ? "Escalation updated." : "Escalation update failed." });
@@ -798,7 +882,7 @@ public sealed class DenialWorkflowController : ControllerBase
         if (filter.Page <= 0) filter.Page = 1;
         filter.PageSize = filter.PageSize <= 0 ? 50 : Math.Clamp(filter.PageSize, 25, 200);
 
-        var tokenUserName = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? filter.UserName ?? string.Empty;
+        var tokenUserName = (FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? filter.UserName ?? string.Empty).Trim();
         var tokenRole = FirstClaim(ClaimTypes.Role, "role", "roles") ?? filter.Role ?? string.Empty;
 
         // Never trust role/userName passed from React query string. Always scope from JWT.
@@ -877,6 +961,19 @@ public sealed class DenialWorkflowController : ControllerBase
         var role = FirstClaim(ClaimTypes.Role, "role", "roles");
         var r = NormalizeRoleToken(role);
         return r.Contains("ADMIN") || r.Contains("ARMANAGER") || r.Contains("CLIENTMANAGER") || r.Contains("ACCOUNTMANAGER");
+    }
+
+    private bool CanExternalEscalateFromToken()
+    {
+        var role = FirstClaim(ClaimTypes.Role, "role", "roles");
+        var r = NormalizeRoleToken(role);
+        return r.Contains("ADMIN") || r.Contains("ARMANAGER");
+    }
+
+    private static bool IsExternalEscalationTarget(string? escalatedToRole)
+    {
+        var r = NormalizeRoleToken(escalatedToRole);
+        return r.Contains("CLIENTMANAGER") || r.Contains("ACCOUNTMANAGER");
     }
 
     private bool CanAccessWorkflowTaskView(string? taskView)
@@ -1113,8 +1210,12 @@ public sealed class DenialWorkflowController : ControllerBase
     private static List<Dictionary<string, string>> ReadExcelRows(Stream stream, int maxRows)
     {
         using var workbook = new XLWorkbook(stream);
-        var sheet = workbook.Worksheet("Claim Upload");
-        var used = sheet.RangeUsed() ?? throw new InvalidDataException("The Claim Upload worksheet is empty.");
+        // Must match the worksheet name WriteClaimUploadTemplateAsync actually creates
+        // (workbook.Worksheets.Add("Task Upload")) — these had drifted apart, so every
+        // downloaded template failed to re-upload with "There isn't a worksheet named
+        // 'Claim Upload'".
+        var sheet = workbook.Worksheet("Task Upload");
+        var used = sheet.RangeUsed() ?? throw new InvalidDataException("The Task Upload worksheet is empty.");
         var headerRow = used.FirstRow();
         var headers = headerRow.Cells().Select(x => x.GetString().Trim()).ToArray();
         if (!headers.Any(x => string.Equals(x, "ClaimID", StringComparison.OrdinalIgnoreCase)))

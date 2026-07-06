@@ -155,6 +155,8 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
 
         var result = new ImportResultDto();
         var lastRow = ws.LastRowUsed()?.RowNumber() ?? 1;
+        var importRows = new List<(int RowNumber, InsurancePayerMasterDto Value)>();
+
         await using var conn = Open();
         await conn.OpenAsync(ct);
         var labs = await LabsByNameAsync(conn, ct);
@@ -181,6 +183,7 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
                 LabState = Cell(ws, row, header["Lab State"]),
                 LabStateCode = Cell(ws, row, header["Lab State Code"])
             };
+            Trim(dto);
             if (string.IsNullOrWhiteSpace(dto.PayerNameRaw))
             {
                 result.SkippedRows++;
@@ -190,20 +193,242 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
             if (!string.IsNullOrWhiteSpace(dto.LabName) && labs.TryGetValue(Norm(dto.LabName), out var lab)) dto.LabId = lab.LabId;
             else if (!string.IsNullOrWhiteSpace(dto.LabName)) result.Warnings.Add($"Row {row}: Lab Name '{dto.LabName}' was not found; LabId left blank.");
 
-            var existingId = await FindInsuranceImportMatchAsync(conn, dto, ct);
-            if (existingId.HasValue)
-            {
-                await UpdateInsurancePayerAsync(existingId.Value, dto, userName, ct);
-                result.UpdatedRows++;
-            }
-            else
-            {
-                await CreateInsurancePayerAsync(dto, userName, ct);
-                result.InsertedRows++;
-            }
+            importRows.Add((row, dto));
         }
+
+        if (importRows.Count > 0)
+        {
+            var counts = await BulkUpsertInsurancePayersAsync(conn, importRows, userName, ct);
+            result.InsertedRows = counts.Inserted;
+            result.UpdatedRows = counts.Updated;
+            result.SkippedRows += counts.DuplicateRows;
+            if (counts.DuplicateRows > 0)
+                result.Warnings.Add($"{counts.DuplicateRows} duplicate import row(s) were superseded by the last matching row in the workbook.");
+        }
+
         result.ErrorRows = result.Errors.Count;
         return result;
+    }
+
+    private static async Task<(int Inserted, int Updated, int DuplicateRows)> BulkUpsertInsurancePayersAsync(
+        SqlConnection conn,
+        IReadOnlyList<(int RowNumber, InsurancePayerMasterDto Value)> rows,
+        string? userName,
+        CancellationToken ct)
+    {
+        await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        try
+        {
+            const string createStageSql = """
+                CREATE TABLE #InsuranceImportStage
+                (
+                    RowNumber INT NOT NULL,
+                    PayerCode NVARCHAR(50) NULL,
+                    PayerNameRaw NVARCHAR(250) NOT NULL,
+                    PayerNameNormalized NVARCHAR(250) NULL,
+                    GlobalPayerID INT NULL,
+                    PayerGroupCode NVARCHAR(250) NULL,
+                    PayerCommonCode NVARCHAR(250) NULL,
+                    Parent NVARCHAR(250) NULL,
+                    PlanType NVARCHAR(250) NULL,
+                    MCOType NVARCHAR(250) NULL,
+                    PayerState NVARCHAR(50) NULL,
+                    IsActive NVARCHAR(50) NULL,
+                    BenefitAdminCode NVARCHAR(250) NULL,
+                    BenefitAdministrator NVARCHAR(250) NULL,
+                    Remarks NVARCHAR(500) NULL,
+                    LabName NVARCHAR(50) NULL,
+                    LabId INT NULL,
+                    LabState NVARCHAR(50) NULL,
+                    LabStateCode NVARCHAR(10) NULL,
+                    ExistingId INT NULL
+                );
+                """;
+            await using (var create = new SqlCommand(createStageSql, conn, tx) { CommandTimeout = 120 })
+                await create.ExecuteNonQueryAsync(ct);
+
+            var table = BuildInsuranceImportTable(rows);
+            using (var bulk = new SqlBulkCopy(conn, SqlBulkCopyOptions.CheckConstraints, tx)
+            {
+                DestinationTableName = "#InsuranceImportStage",
+                BatchSize = 2_000,
+                BulkCopyTimeout = 300
+            })
+            {
+                foreach (DataColumn column in table.Columns)
+                    bulk.ColumnMappings.Add(column.ColumnName, column.ColumnName);
+                await bulk.WriteToServerAsync(table, ct);
+            }
+
+            const string upsertSql = """
+                SET NOCOUNT ON;
+                SET XACT_ABORT ON;
+
+                -- Preserve the original row-by-row match precedence:
+                -- normalized name/global ID, then payer code/lab, then raw name/lab name.
+                UPDATE s
+                SET ExistingId = matched.LabInsuranceMasterId
+                FROM #InsuranceImportStage s
+                OUTER APPLY
+                (
+                    SELECT TOP (1) m.LabInsuranceMasterId
+                    FROM dbo.LabInsuranceMaster m WITH (UPDLOCK, HOLDLOCK)
+                    WHERE (NULLIF(s.PayerNameNormalized, '') IS NOT NULL
+                           AND s.GlobalPayerID IS NOT NULL
+                           AND m.PayerNameNormalized = s.PayerNameNormalized
+                           AND m.GlobalPayerID = s.GlobalPayerID)
+                       OR (NULLIF(s.PayerCode, '') IS NOT NULL
+                           AND s.LabId IS NOT NULL
+                           AND m.PayerCode = s.PayerCode
+                           AND m.LabId = s.LabId)
+                       OR (NULLIF(s.PayerNameRaw, '') IS NOT NULL
+                           AND NULLIF(s.LabName, '') IS NOT NULL
+                           AND m.PayerNameRaw = s.PayerNameRaw
+                           AND m.LabName = s.LabName)
+                    ORDER BY CASE
+                        WHEN NULLIF(s.PayerNameNormalized, '') IS NOT NULL
+                         AND s.GlobalPayerID IS NOT NULL
+                         AND m.PayerNameNormalized = s.PayerNameNormalized
+                         AND m.GlobalPayerID = s.GlobalPayerID THEN 1
+                        WHEN NULLIF(s.PayerCode, '') IS NOT NULL
+                         AND s.LabId IS NOT NULL
+                         AND m.PayerCode = s.PayerCode
+                         AND m.LabId = s.LabId THEN 2
+                        ELSE 3 END,
+                        m.LabInsuranceMasterId
+                ) matched;
+
+                SELECT s.*,
+                       SourceRank = ROW_NUMBER() OVER
+                       (
+                           PARTITION BY CASE
+                               WHEN s.ExistingId IS NOT NULL THEN CONCAT('E|', s.ExistingId)
+                               WHEN NULLIF(s.PayerNameNormalized, '') IS NOT NULL AND s.GlobalPayerID IS NOT NULL
+                                   THEN CONCAT('N|', s.PayerNameNormalized, '|', s.GlobalPayerID)
+                               WHEN NULLIF(s.PayerCode, '') IS NOT NULL AND s.LabId IS NOT NULL
+                                   THEN CONCAT('P|', s.PayerCode, '|', s.LabId)
+                               WHEN NULLIF(s.PayerNameRaw, '') IS NOT NULL AND NULLIF(s.LabName, '') IS NOT NULL
+                                   THEN CONCAT('R|', s.PayerNameRaw, '|', s.LabName)
+                               ELSE CONCAT('ROW|', s.RowNumber)
+                           END
+                           ORDER BY s.RowNumber DESC
+                       )
+                INTO #EffectiveInsuranceImport
+                FROM #InsuranceImportStage s;
+
+                UPDATE target
+                SET PayerNameNormalized = source.PayerNameNormalized,
+                    GlobalPayerID = source.GlobalPayerID,
+                    PayerGroupCode = source.PayerGroupCode,
+                    PayerCommonCode = source.PayerCommonCode,
+                    Parent = source.Parent,
+                    PlanType = source.PlanType,
+                    MCOType = source.MCOType,
+                    PayerState = source.PayerState,
+                    IsActive = source.IsActive,
+                    BenefitAdminCode = source.BenefitAdminCode,
+                    BenefitAdministrator = source.BenefitAdministrator,
+                    Remarks = source.Remarks,
+                    LabName = source.LabName,
+                    LabId = source.LabId,
+                    LabState = source.LabState,
+                    LabStateCode = source.LabStateCode,
+                    ModifiedBy = @UserName,
+                    ModifiedOn = SYSUTCDATETIME()
+                FROM dbo.LabInsuranceMaster target
+                JOIN #EffectiveInsuranceImport source
+                  ON source.ExistingId = target.LabInsuranceMasterId
+                 AND source.SourceRank = 1;
+                DECLARE @Updated INT = @@ROWCOUNT;
+
+                INSERT dbo.LabInsuranceMaster
+                    (PayerCode, PayerNameRaw, PayerNameNormalized, GlobalPayerID, PayerGroupCode,
+                     PayerCommonCode, Parent, PlanType, MCOType, PayerState, IsActive, BenefitAdminCode,
+                     BenefitAdministrator, Remarks, LabName, LabId, LabState, LabStateCode, CreatedBy)
+                SELECT PayerCode, PayerNameRaw, PayerNameNormalized, GlobalPayerID, PayerGroupCode,
+                       PayerCommonCode, Parent, PlanType, MCOType, PayerState, IsActive, BenefitAdminCode,
+                       BenefitAdministrator, Remarks, LabName, LabId, LabState, LabStateCode, @UserName
+                FROM #EffectiveInsuranceImport
+                WHERE ExistingId IS NULL
+                  AND SourceRank = 1;
+                DECLARE @Inserted INT = @@ROWCOUNT;
+
+                SELECT Inserted = @Inserted,
+                       Updated = @Updated,
+                       DuplicateRows = (SELECT COUNT(1) FROM #EffectiveInsuranceImport WHERE SourceRank > 1);
+                """;
+
+            int inserted;
+            int updated;
+            int duplicateRows;
+            await using (var upsert = new SqlCommand(upsertSql, conn, tx) { CommandTimeout = 300 })
+            {
+                upsert.Parameters.Add("@UserName", SqlDbType.NVarChar, 100).Value = DbValue(userName);
+                await using var reader = await upsert.ExecuteReaderAsync(ct);
+                if (!await reader.ReadAsync(ct)) throw new InvalidOperationException("Insurance payer import did not return row counts.");
+                inserted = reader.GetInt32(reader.GetOrdinal("Inserted"));
+                updated = reader.GetInt32(reader.GetOrdinal("Updated"));
+                duplicateRows = reader.GetInt32(reader.GetOrdinal("DuplicateRows"));
+            }
+
+            await tx.CommitAsync(ct);
+            return (inserted, updated, duplicateRows);
+        }
+        catch
+        {
+            await tx.RollbackAsync(CancellationToken.None);
+            throw;
+        }
+    }
+
+    private static DataTable BuildInsuranceImportTable(IReadOnlyList<(int RowNumber, InsurancePayerMasterDto Value)> rows)
+    {
+        var table = new DataTable();
+        table.Columns.Add("RowNumber", typeof(int));
+        table.Columns.Add("PayerCode", typeof(string));
+        table.Columns.Add("PayerNameRaw", typeof(string));
+        table.Columns.Add("PayerNameNormalized", typeof(string));
+        table.Columns.Add("GlobalPayerID", typeof(int));
+        table.Columns.Add("PayerGroupCode", typeof(string));
+        table.Columns.Add("PayerCommonCode", typeof(string));
+        table.Columns.Add("Parent", typeof(string));
+        table.Columns.Add("PlanType", typeof(string));
+        table.Columns.Add("MCOType", typeof(string));
+        table.Columns.Add("PayerState", typeof(string));
+        table.Columns.Add("IsActive", typeof(string));
+        table.Columns.Add("BenefitAdminCode", typeof(string));
+        table.Columns.Add("BenefitAdministrator", typeof(string));
+        table.Columns.Add("Remarks", typeof(string));
+        table.Columns.Add("LabName", typeof(string));
+        table.Columns.Add("LabId", typeof(int));
+        table.Columns.Add("LabState", typeof(string));
+        table.Columns.Add("LabStateCode", typeof(string));
+
+        foreach (var (rowNumber, value) in rows)
+        {
+            table.Rows.Add(
+                rowNumber,
+                DbValue(value.PayerCode),
+                value.PayerNameRaw,
+                DbValue(value.PayerNameNormalized),
+                DbValue(value.GlobalPayerID),
+                DbValue(value.PayerGroupCode),
+                DbValue(value.PayerCommonCode),
+                DbValue(value.Parent),
+                DbValue(value.PlanType),
+                DbValue(value.MCOType),
+                DbValue(value.PayerState),
+                DbValue(value.IsActive),
+                DbValue(value.BenefitAdminCode),
+                DbValue(value.BenefitAdministrator),
+                DbValue(value.Remarks),
+                DbValue(value.LabName),
+                DbValue(value.LabId),
+                DbValue(value.LabState),
+                DbValue(value.LabStateCode));
+        }
+
+        return table;
     }
 
     public async Task<byte[]> ExportInsurancePayersAsync(InsurancePayerMasterQuery query, CancellationToken ct)

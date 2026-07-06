@@ -1,0 +1,151 @@
+{
+	"SchemaName": "Claim Level File",
+	"HeaderRow": 1,
+	"Columns": [
+		{
+			"Name": "Visit No",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Accession No",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "Primary Payer",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "FinancialClass",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "[Rendering Physician Last Name], [RenderingPhysician First Name] {Referral Name}",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "[Ordering Physician Last Name], [Ordering Physician First Name] {Physician Name}",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "Facility Name",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "SaleRepName",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "Provider",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "Patient Ac No",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "Service From Date",
+			"Required": true,
+			"DataType": "date"
+		},
+		{
+			"Name": "DOE",
+			"Required": false,
+			"DataType": "date"
+		},
+		{
+			"Name": "Primary Insurance Billed Date",
+			"Required": true,
+			"DataType": "date"
+		},
+		{
+			"Name": "Panel Name",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "CPT",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "POS",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "TOS",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "Total Charges",
+			"Required": true,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "TotalAllowed",
+			"Required": false,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "CarrierPayment",
+			"Required": false,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "PatientPayment",
+			"Required": false,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "CarrierWO",
+			"Required": false,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "CarrierBalance",
+			"Required": false,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "PatientBalance",
+			"Required": false,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "Deposit Date",
+			"Required": true,
+			"DataType": "date"
+		},
+		{
+			"Name": "Claim Status",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Claim Level Denial Code",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Claim Level ICD",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Denial Date",
+			"Required": false,
+			"DataType": "date"
+		}
+	]
+}

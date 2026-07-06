@@ -27,7 +27,7 @@ export default function ClaimCsvUpload({ labId, setMessage = () => {}, onUploade
   return <>
     <input ref={inputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.csv,text/csv" hidden onChange={e => upload(e.target.files?.[0])} />
     <button type="button" className="claim-tab-download" disabled={templateBusy || !labId} onClick={onDownloadTemplate} title="Download the filtered claim-level Excel upload template with dropdowns.">
-      <i className="bi bi-file-earmark-arrow-down" />{templateBusy ? 'Preparing Template' : 'Download Upload Template'}
+      <i className="bi bi-file-earmark-arrow-down" />{templateBusy ? 'Preparing Claims' : 'Download Claims'}
     </button>
     <button type="button" className="claim-tab-download claim-csv-upload" disabled={busy || !labId} onClick={() => inputRef.current?.click()} title="Process the claim-level Excel upload template. The uploaded file is not stored.">
       <i className="bi bi-upload" />{busy ? 'Processing Template' : label}

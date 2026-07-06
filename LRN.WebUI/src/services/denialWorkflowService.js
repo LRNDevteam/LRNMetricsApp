@@ -40,12 +40,13 @@ export const denialWorkflowService = {
   updateTask: (payload) => api('/update-task', { method: 'POST', body: JSON.stringify(payload) }),
   getNotes: (query) => api(`/notes?${qs(query)}`),
   saveNote: (payload) => api('/notes', { method: 'POST', body: JSON.stringify(payload) }),
+  getFollowUpNotifications: (labId) => api(`/follow-up-notifications?labId=${encodeURIComponent(labId)}`),
   getClaimDocuments: (labId, claimId) => api(`/claim-documents?labId=${encodeURIComponent(labId)}&claimId=${encodeURIComponent(claimId)}`),
   getClaimDocumentDownloadUrl: (labId, documentId) => apiUrl(`/claim-documents/${encodeURIComponent(documentId)}/download?labId=${encodeURIComponent(labId)}`),
   deleteClaimDocument: (labId, documentId) => api(`/claim-documents/${encodeURIComponent(documentId)}?labId=${encodeURIComponent(labId)}`, { method: 'DELETE' }),
   getClaimHistory: (query) => api(`/claim-history?${qs(query)}`),
   getEscalations: (query) => api(`/escalations?${qs(query)}`),
-  getEscalationQueue: async (query, escalationLevel = 'Claim') => normalizePagedResult(await api(`/escalation-queue?${qs({ ...(query || {}), escalationLevel })}`)),
+  getEscalationQueue: async (query, escalationLevel = 'Claim', options = {}) => normalizePagedResult(await api(`/escalation-queue?${qs({ ...(query || {}), escalationLevel })}`, options)),
   resolveEscalation: (payload) => api('/resolve-escalation', { method: 'POST', body: JSON.stringify(payload) }),
   saveEscalation: (payload) => api('/escalations', { method: 'POST', body: JSON.stringify(payload) }),
   updateEscalation: (payload) => api('/update-escalation', { method: 'POST', body: JSON.stringify(payload) }),
@@ -63,6 +64,7 @@ export const denialWorkflowService = {
   getDenialCodeMasterLookups: (labId) => api(`/denial-code-master/lookups?labId=${encodeURIComponent(labId)}`),
   createDenialCodeMaster: (labId, payload) => api(`/denial-code-master?labId=${encodeURIComponent(labId)}`, { method: 'POST', body: JSON.stringify(payload) }),
   updateDenialCodeMaster: (labId, originalKey, payload) => api(`/denial-code-master/${encodeURIComponent(originalKey.denialCode)}?${qs({ labId, coverageStatus: originalKey.coverageStatus, icdComplianceStatus: originalKey.icdComplianceStatus })}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  getDenialCodeMasterImpact: (labId, denialCode) => api(`/denial-code-master/${encodeURIComponent(denialCode)}/impact?labId=${encodeURIComponent(labId)}`),
   deleteDenialCodeMaster: (labId, originalKey) => api(`/denial-code-master/${encodeURIComponent(originalKey.denialCode)}?${qs({ labId, coverageStatus: originalKey.coverageStatus, icdComplianceStatus: originalKey.icdComplianceStatus })}`, { method: 'DELETE' }),
   importDenialCodeMaster: (labId, file) => {
     const form = new FormData();

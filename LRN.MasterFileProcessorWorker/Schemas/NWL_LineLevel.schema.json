@@ -1,0 +1,131 @@
+{
+	"SchemaName": "NWL_LineLevel",
+	"HeaderRow": 1,
+	"Columns": [
+		{
+			"Name": "Enc",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Acc",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Payer",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Proc-Referring Dr Name",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "Diag Pointer",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "Proc-Department Desc",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "Pat id",
+			"Required": false,
+			"DataType": "string"
+		},
+		{
+			"Name": "Patient Birth Date",
+			"Required": true,
+			"DataType": "date"
+		},
+		{
+			"Name": "DOS",
+			"Required": true,
+			"DataType": "date"
+		},
+		{
+			"Name": "Entered Date",
+			"Required": false,
+			"DataType": "date"
+		},
+		{
+			"Name": "Billed date",
+			"Required": true,
+			"DataType": "date"
+		},
+		{
+			"Name": "Panel Name",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "CPT",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Units",
+			"Required": true,
+			"DataType": "int"
+		},
+		{
+			"Name": "Mod",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Proc-Charge Amount $",
+			"Required": true,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "ProcTotal Payments $",
+			"Required": true,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "Pat Payments",
+			"Required": true,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "Proc-Adjustment $",
+			"Required": false,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "Proc-Ins Balance",
+			"Required": false,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "Proc-Pt Balance",
+			"Required": false,
+			"DataType": "decimal"
+		},
+		{
+			"Name": "Posted date",
+			"Required": true,
+			"DataType": "date"
+		},
+		{
+			"Name": "Combined Claim Level Denial code",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "ICD",
+			"Required": true,
+			"DataType": "string"
+		},
+		{
+			"Name": "Denial Posted Date",
+			"Required": false,
+			"DataType": "date"
+		}
+	]
+}

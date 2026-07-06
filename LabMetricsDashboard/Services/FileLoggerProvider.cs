@@ -166,20 +166,37 @@ internal sealed class FileLogWriter : IDisposable
 
         lock (_lock)
         {
-            if (_currentDate != today)
+            try
             {
-                _currentWriter?.Flush();
-                _currentWriter?.Dispose();
-
-                var path = Path.Combine(_directory, $"{_filePrefix}-{today}.log");
-                _currentWriter = new StreamWriter(path, append: true, System.Text.Encoding.UTF8)
+                if (_currentDate != today)
                 {
-                    AutoFlush = true
-                };
-                _currentDate = today;
-            }
+                    _currentWriter?.Flush();
+                    _currentWriter?.Dispose();
 
-            _currentWriter!.WriteLine(entry);
+                    var path = Path.Combine(_directory, $"{_filePrefix}-{today}.log");
+                    _currentWriter = new StreamWriter(path, append: true, System.Text.Encoding.UTF8)
+                    {
+                        AutoFlush = true
+                    };
+                    _currentDate = today;
+                }
+
+                _currentWriter!.WriteLine(entry);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Logging must never terminate the web application.
+                _currentWriter?.Dispose();
+                _currentWriter = null;
+                _currentDate = string.Empty;
+            }
+            catch (IOException)
+            {
+                // Transient file locks or unavailable paths are best-effort logging failures.
+                _currentWriter?.Dispose();
+                _currentWriter = null;
+                _currentDate = string.Empty;
+            }
         }
     }
 

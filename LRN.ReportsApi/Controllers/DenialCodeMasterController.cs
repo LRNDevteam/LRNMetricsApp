@@ -69,6 +69,16 @@ public sealed class DenialCodeMasterController : ControllerBase
         return Ok(new { success = true, message = "Denial code created and classifier Excel regenerated." });
     }
 
+    [HttpGet("{denialCode}/impact")]
+    public async Task<ActionResult<DenialCodeMasterImpact>> Impact([FromRoute] string denialCode, [FromQuery] int labId, CancellationToken ct)
+    {
+        if (!IsArManagerFromToken()) return AccessDenied();
+        if (labId <= 0) return BadRequest(new { message = "LabId is required." });
+        if (!await CanAccessLabAsync(labId, ct)) return LabAccessDenied();
+        if (string.IsNullOrWhiteSpace(denialCode)) return BadRequest(new { message = "Denial Code is required." });
+        return Ok(await _repo.GetImpactAsync(labId, denialCode, ct));
+    }
+
     [HttpPut("{denialCode}")]
     public async Task<ActionResult> Update([FromRoute] string denialCode, [FromQuery] int labId, [FromQuery] string? coverageStatus, [FromQuery] string? icdComplianceStatus, DenialCodeMasterRequest request, CancellationToken ct)
     {

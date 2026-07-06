@@ -1,0 +1,105 @@
+	{
+		"TargetTable": "dbo.DenialInsight",
+		"Columns": [
+			{
+				"ExcelColumn": "Denial Codes",
+				"SqlColumn": "DenialCodes",
+				"DataType": "string"
+			},
+			{
+				"ExcelColumn": "Descriptions",
+				"SqlColumn": "Descriptions",
+				"DataType": "string"
+			},
+			{
+				"ExcelColumn": "# of Denial",
+				"SqlColumn": "NoOfDenialCount",
+				"DataType": "int"
+			},
+			{
+				"ExcelColumn": "# of Claims",
+				"SqlColumn": "NoOfClaimsCount",
+				"DataType": "int"
+			},
+			{
+				"ExcelColumn": "Total Balance ($)",
+				"SqlColumn": "TotalBalance",
+				"DataType": "decimal"
+			},
+			{
+				"ExcelColumn": "Highest $ Impact - Insurance",
+				"SqlColumn": "HighImpactInsurance",
+				"DataType": "string"
+			},
+			{
+				"ExcelColumn": "Ins. Balance ($)",
+				"SqlColumn": "InsuranceBalance",
+				"DataType": "decimal"
+			},
+			{
+				"ExcelColumn": "$ Impact (%)",
+				"SqlColumn": "ImpactPercentage",
+				"DataType": "decimal"
+			},
+			{
+				"ExcelColumn": "Category",
+				"SqlColumn": "ActionCategory",
+				"DataType": "string"
+			},
+			{
+				"ExcelColumn": "Action Code",
+				"SqlColumn": "ActionCode",
+				"DataType": "string"
+			},
+			{
+				"ExcelColumn": "Action",
+				"SqlColumn": "Action",
+				"DataType": "string"
+			},
+			{
+				"ExcelColumn": "Task",
+				"SqlColumn": "Task",
+				"DataType": "string"
+			},
+			{
+				"ExcelColumn": "Feedback / Response",
+				"SqlColumn": "Feedback",
+				"DataType": "string"
+			},
+			{
+				"ExcelColumn": "Responsibility",
+				"SqlColumn": "Responsibility",
+				"DataType": "string"
+			},
+			{
+				"ExcelColumn": "Discussion Date",
+				"SqlColumn": "DiscussionDate",
+				"DataType": "string"
+			},
+			{
+				"ExcelColumn": "ETA",
+				"SqlColumn": "ETA",
+				"DataType": "string"
+			},
+			{
+				"ExcelColumn": "LabId",
+				"SqlColumn": "LabId",
+				"DataType": "int"
+			},
+			{
+				"ExcelColumn": "LabName",
+				"SqlColumn": "LabName",
+				"DataType": "string"
+			},
+			{
+				"ExcelColumn": "RunId",
+				"SqlColumn": "RunId",
+				"DataType": "string"
+			},
+			{
+				"ExcelColumn": "CreatedOn",
+				"SqlColumn": "CreatedOn",
+				"DataType": "datetime"
+			}
+		]
+	}

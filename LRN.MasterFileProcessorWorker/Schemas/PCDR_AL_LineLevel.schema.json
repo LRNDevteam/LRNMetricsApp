@@ -1,0 +1,146 @@
+{
+  "SchemaName": "Line Level",
+  "HeaderRow": 1,
+  "Columns": [
+    {
+      "Name": "VisitNum",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Accession",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "Carrier",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "PayerType",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "BillingProvider",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "ReferringProviderName",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "ClinicName",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "ChartNumber",
+      "Required": false,
+      "DataType": "string"
+    },
+    {
+      "Name": "BeginDOS",
+      "Required": true,
+      "DataType": "date"
+    },
+    {
+      "Name": "ChargeEntryDate",
+      "Required": false,
+      "DataType": "date"
+    },
+    {
+      "Name": "LastBillDate",
+      "Required": true,
+      "DataType": "date"
+    },
+    {
+      "Name": "Panel",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Units",
+      "Required": true,
+      "DataType": "int"
+    },
+    {
+      "Name": "Modifier",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "ICD",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Procedure",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "TotalCharge",
+      "Required": true,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "AllowedAmount",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "CarrierPayment",
+      "Required": true,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "PatientPayment",
+      "Required": true,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "InsuranceAdjustment",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "PatientAdjustment",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "InsuranceBalance",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "PatientBalance",
+      "Required": false,
+      "DataType": "decimal"
+    },
+    {
+      "Name": "CheckDate",
+      "Required": false,
+      "DataType": "date"
+    },
+    {
+      "Name": "Denial Code",
+      "Required": true,
+      "DataType": "string"
+    },
+    {
+      "Name": "Denial Date",
+      "Required": true,
+      "DataType": "date"
+    },
+    {
+      "Name": "Deposit Date",
+      "Required": true,
+      "DataType": "date"
+    }
+  ]
+}

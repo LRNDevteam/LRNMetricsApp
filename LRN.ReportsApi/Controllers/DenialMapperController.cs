@@ -23,7 +23,9 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
     [HttpGet("super-master")]
     public async Task<ActionResult<PagedResult<DenialMapperRecord>>> SuperMaster([FromQuery] string? search, [FromQuery] string? classification, [FromQuery] int page=1, [FromQuery] int pageSize=25, CancellationToken ct=default)
     {
-        if (!IsAdmin()) return Denied();
+        // Viewer gets read-only Super Master access per spec; only Admin can reach the
+        // Add/Edit/Delete/Push routes below, which each keep their own IsAdmin() gate.
+        if (!IsAdmin() && !IsViewer()) return Denied();
         return Ok(await repository.SuperMasterAsync(search, classification, page, pageSize, ct));
     }
 
@@ -112,7 +114,7 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
     public async Task<ActionResult> RemoveOverride(long superMasterId,[FromQuery]int labId,CancellationToken ct){if(!CanOverride())return Denied();var effective=await AuthorizedLab(labId,ct);if(effective is null)return Denied();await repository.RemoveOverrideAsync(effective.Value,superMasterId,UserName(),Role(),ct);return Ok(new{message="Lab override removed."});}
 
     [HttpGet("audit")]
-    public async Task<ActionResult> Audit([FromQuery]int? labId,[FromQuery]int take=100,CancellationToken ct=default){if(!IsPushManager()&&!IsManager())return Denied();var effective=await AuthorizedLab(labId,ct);if(!IsAdmin()&&effective is null)return Denied();return Ok(await repository.AuditAsync(IsAdmin()?labId:effective,take,ct));}
+    public async Task<ActionResult> Audit([FromQuery]int? labId,[FromQuery]int take=100,CancellationToken ct=default){if(!IsPushManager()&&!IsManager()&&!IsLabUser())return Denied();var effective=await AuthorizedLab(labId,ct);if(!IsAdmin()&&effective is null)return Denied();return Ok(await repository.AuditAsync(IsAdmin()?labId:effective,take,ct));}
 
     [HttpGet("classifications")]
     public async Task<ActionResult> Classifications([FromQuery]int? labId,CancellationToken ct){if(!CanView())return Denied();if(labId.HasValue){var effective=await AuthorizedLab(labId,ct);if(effective is null)return Denied();return Ok(await repository.ClassificationsAsync(effective,ct));}if(!IsAdmin()&&!IsViewer())return Denied();return Ok(await repository.ClassificationsAsync(null,ct));}
@@ -148,7 +150,8 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
     private bool IsPushManager()=>IsAdmin()||IsArManager();
     private bool IsManager()=>TokenRole().Contains("CLIENTMANAGER")||TokenRole().Contains("ACCOUNTMANAGER");
     private bool IsViewer()=>TokenRole().Contains("VIEWER")||TokenRole().Contains("READONLY");
-    private bool CanView()=>IsAdmin()||IsArManager()||IsManager()||IsViewer()||TokenRole().Contains("LABUSER");
+    private bool IsLabUser()=>TokenRole().Contains("LABUSER");
+    private bool CanView()=>IsAdmin()||IsArManager()||IsManager()||IsViewer()||IsLabUser();
     private bool CanOverride()=>IsManager();
     private string TokenRole()=>new(Role().Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
     private string Role()=>First(ClaimTypes.Role,"role","roles")??"";

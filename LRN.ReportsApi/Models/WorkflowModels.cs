@@ -49,6 +49,8 @@ public sealed class DenialWorkflowFilter
     public string TaskView { get; set; } = string.Empty;
     public string Reviewer { get; set; } = string.Empty;
     public string AssignedTo { get; set; } = string.Empty;
+    public string AssignedUserId { get; set; } = string.Empty;
+    public string AssignedDuration { get; set; } = string.Empty;
     public string DenialCode { get; set; } = string.Empty;
     public string PayerName { get; set; } = string.Empty;
     public string PanelName { get; set; } = string.Empty;
@@ -89,6 +91,7 @@ public sealed class DenialWorkflowFilterOptions
     public IReadOnlyList<string> Clinics { get; set; } = Array.Empty<string>();
     public IReadOnlyList<string> SalesReps { get; set; } = Array.Empty<string>();
     public IReadOnlyList<string> ReferringProviders { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> AssignedUsers { get; set; } = Array.Empty<string>();
 }
 
 public sealed class DenialWorkflowUserContext
@@ -134,6 +137,8 @@ public sealed class DenialWorkflowDashboardSummary
     public decimal OutstandingAmount { get; set; }
     public int OpenInProgressCount { get; set; }
     public int ClosedCount { get; set; }
+    public int SlaBreachedClaims { get; set; }
+    public int SlaAtRiskClaims { get; set; }
     public IReadOnlyList<DenialClassificationSummaryRow> DenialClassifications { get; set; } = Array.Empty<DenialClassificationSummaryRow>();
     public IReadOnlyList<ReviewerWorkflowSummaryRow> AnalystWorkload { get; set; } = Array.Empty<ReviewerWorkflowSummaryRow>();
     public IReadOnlyList<ActionCategorySummaryRow> ActionCategories { get; set; } = Array.Empty<ActionCategorySummaryRow>();
@@ -363,6 +368,7 @@ public sealed class ClaimSubMenuCounts
     public int PendingDocumentation { get; set; }
     public int PendingPayerResponse { get; set; }
     public int WriteOffApproval { get; set; }
+    public int SlaAtRisk { get; set; }
     public int AllClaims { get => TotalClaims; set => TotalClaims = value; }
 }
 
@@ -465,6 +471,14 @@ public class WorkflowTaskRow
     public string CoverageStatus { get; set; } = string.Empty;
     public string ICDComplianceStatus { get; set; } = string.Empty;
     public string DenialValidity { get; set; } = string.Empty;
+    public string CcwIcd10Code { get; set; } = string.Empty;
+    public string BilledIcdCodesNotAvailableInPayerPolicy { get; set; } = string.Empty;
+    public string CoveredIcd10CodesAsPerPayerPolicy { get; set; } = string.Empty;
+    public string CoveredIcd10CodesBilled { get; set; } = string.Empty;
+    public string CoveredIcdPresence { get; set; } = string.Empty;
+    public string LisIcd10Codes { get; set; } = string.Empty;
+    public string NonCoveredIcd10CodesAsPerPayerPolicy { get; set; } = string.Empty;
+    public string NonCoveredIcd10CodesBilled { get; set; } = string.Empty;
     public bool? ActionCompleted { get; set; }
     public string ActualOutcome { get; set; } = string.Empty;
     public string DocumentationType { get; set; } = string.Empty;
@@ -508,6 +522,7 @@ public sealed class ClaimLevelRow
     public DateTime? DateOfService { get; set; }
     public DateTime? CreatedOn { get; set; }
     public string AssignedTo { get; set; } = string.Empty;
+    public DateTime? AssignedOn { get; set; }
     public string Status { get; set; } = string.Empty;
     public string ClaimStatus { get; set; } = string.Empty;
     public string WorkflowStatus { get; set; } = string.Empty;
@@ -606,7 +621,26 @@ public sealed class SaveDenialNoteRequest
     public string NoteText { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public DateTime? NextFollowUpDate { get; set; }
+    public string FollowUpReason { get; set; } = string.Empty;
+    public bool? ActionCompleted { get; set; }
+    public string ActualOutcome { get; set; } = string.Empty;
+    public string DocumentationType { get; set; } = string.Empty;
+    public bool ValidateWorkflowFields { get; set; }
     public string CreatedBy { get; set; } = string.Empty;
+}
+
+public sealed class FollowUpNotificationRow
+{
+    public long NoteId { get; set; }
+    public string ClaimId { get; set; } = string.Empty;
+    public string TaskId { get; set; } = string.Empty;
+    public string CptCode { get; set; } = string.Empty;
+    public string PayerName { get; set; } = string.Empty;
+    public DateTime FollowUpDate { get; set; }
+    public string LastAction { get; set; } = string.Empty;
+    public string ActionCode { get; set; } = string.Empty;
+    public string FollowUpReason { get; set; } = string.Empty;
+    public string AssignedTo { get; set; } = string.Empty;
 }
 
 public sealed class ClaimDocumentRow

@@ -29,11 +29,13 @@ public interface IDenialWorkflowRepository
     Task InsertHistoryAsync(string taskId, string uniqueTrackId, int labId, string runId, string actionType, string oldStatus, string newStatus, string oldAssignedTo, string newAssignedTo, string comments, string actionBy, string snapshotJson, CancellationToken ct);
     Task<int> AssignByInsightAsync(AssignInsightRequest request, CancellationToken ct);
     Task<int> UpdateTaskAsync(UpdateTaskRequest request, bool isClosed, bool isDuplicate, CancellationToken ct);
+    Task<bool> IsTaskUnderInternalEscalationAsync(int labId, string taskId, CancellationToken ct);
     Task<int> UpdateClaimCommentsAsync(int labId, string claimId, string comments, string actionBy, CancellationToken ct);
     Task<int> DecideVerificationAsync(VerificationDecisionRequest request, bool isClosed, CancellationToken ct);
     Task EnsureClaimSupportTablesAsync(int labId, CancellationToken ct);
     Task<IReadOnlyList<DenialNoteRow>> GetNotesAsync(int labId, string claimId, string? taskId, string? cptCode, string noteLevel, CancellationToken ct);
     Task<DenialNoteRow> SaveNoteAsync(SaveDenialNoteRequest request, CancellationToken ct);
+    Task<IReadOnlyList<FollowUpNotificationRow>> GetFollowUpNotificationsAsync(int labId, string userName, CancellationToken ct);
     Task<IReadOnlyList<ClaimDocumentRow>> GetClaimDocumentsAsync(int labId, string claimId, CancellationToken ct);
     Task<ClaimDocumentRow?> GetClaimDocumentAsync(int labId, long documentId, CancellationToken ct);
     Task<ClaimDocumentRow> SaveClaimDocumentAsync(ClaimDocumentRow row, CancellationToken ct);
