@@ -161,6 +161,15 @@ public sealed class DenialDatabaseWorker : BackgroundService
 
             await _stepLogger.LogAsync(lab, "Normalize DenialCode + map fields", "Completed", payerPolicyFile, claimActionMapperFile, outFile, null, ct);
 
+            // DenialLineItem and DenialTaskBoard must only carry denied line items.
+            // Insight still uses ALL rows because it aggregates paid vs denied.
+            var deniedRows = finalRows
+                .Where(r => string.Equals(
+                    GetValueByAnyKey(r, "Pay Status", "PayStatus").Trim(),
+                    "Denied",
+                    StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
             // 5. Build insight
             await _stepLogger.LogAsync(lab, "Build insight rows", "InProgress", payerPolicyFile, claimActionMapperFile, outFile, null, ct);
             var insight = _insightBuilder.Build(finalRows);
@@ -169,13 +178,13 @@ public sealed class DenialDatabaseWorker : BackgroundService
             // 6. Build task board
             await _stepLogger.LogAsync(lab, "Build task board rows", "InProgress", payerPolicyFile, claimActionMapperFile, outFile, null, ct);
             var taskBuilder = new TaskBoardBuilder(lab.LabId, lab.LabName, runId, existingTasks);
-            var taskRows = taskBuilder.Build(finalRows);
+            var taskRows = taskBuilder.Build(deniedRows);
             await _stepLogger.LogAsync(lab, "Build task board rows", "Completed", payerPolicyFile, claimActionMapperFile, outFile, null, ct);
 
             // 7. Write Excel
             await _stepLogger.LogAsync(lab, "Write DenialDatabase excel", "InProgress", payerPolicyFile, claimActionMapperFile, outFile, null, ct);
 
-            var filteredLineRows = finalRows
+            var filteredLineRows = deniedRows
               .Where(r =>
                   r.TryGetValue("DenialCode_Original", out var originalCode) &&
                   !string.IsNullOrWhiteSpace(originalCode))
