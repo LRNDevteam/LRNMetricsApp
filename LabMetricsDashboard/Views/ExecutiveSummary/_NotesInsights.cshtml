@@ -1,0 +1,34 @@
+@model LabMetricsDashboard.Models.PhiExecutiveSummaryViewModel
+@*
+    Generic Notes & Insights callout for a report page.
+    Context (lab, report name, RunID, week range) is passed to the
+    client via data-* attributes on #niRoot; the JS controller
+    (notes-insights.js) drives all interactions through the
+    NotesController JSON API.
+*@
+<div id="niRoot"
+     data-base="@Url.Content("~/")"
+     data-lab="@Model.SelectedLab"
+     data-report-name="Executive Summary"
+     data-run-id="@(Model.ReportRunId ?? "")"
+     data-week-text="@(Model.ReportWeekFolder ?? "")"
+     data-week-start=""
+     data-week-end="">
+
+    @Html.AntiForgeryToken()
+
+    <div class="ni-callout" role="dialog" aria-label="Notes and Insights">
+        <div class="ni-header">
+            <span class="ni-title">✎ Notes &amp; Insights</span>
+            <span class="ni-sub">Rolling current report log · most recent 4 weeks + carry-forward</span>
+            <span class="ni-win-actions">
+                <button type="button" data-ni-min title="Collapse">–</button>
+                <button type="button" data-ni-close title="Close">✕</button>
+            </span>
+        </div>
+        <div class="ni-context"></div>
+        <div class="ni-toolbar"></div>
+        <div class="ni-body"></div>
+        <div class="ni-footer" data-ni-footer></div>
+    </div>
+</div>

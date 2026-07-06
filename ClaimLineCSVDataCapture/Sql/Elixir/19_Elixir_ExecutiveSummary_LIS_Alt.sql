@@ -30,17 +30,17 @@
 --   E.5    CIP/Pending                -> NewStatus = 'CIP/Pending'
 --   E.6    Yet to be validated        -> NewStatus = 'Yet to be validated'
 --
--- Period bucket: LIMSMaster's own date column (auto-detected, same
--- candidate list as 16_Elixir_ExecutiveSummary_Aggregate.sql's @DateCol:
--- RequestCollectDate / DateofService / CollectionDate / ServiceDate /
--- AccessionDate), independent of the DateofService-based #Periods used
--- by PMS/Cash/Avg — same "different period system" precedent followed by
+-- Period bucket: LIMSMaster's own date column (auto-detected — always
+-- collection-date columns first: DateOfCollection / RequestCollectDate /
+-- CollectionDate, then DateofService / ServiceDate / AccessionDate as
+-- fallback), independent of the DateofService-based #Periods used by
+-- PMS/Cash/Avg — same "different period system" precedent followed by
 -- 17_Elixir_ExecutiveSummary_Read.sql's filtered LIS path.
 --
 -- Column auto-detection (sys.columns, same priority-ordered candidate
 -- lists used elsewhere in the Elixir suite):
 --   @AccCol          : AccessionNumber, Accession, AccessionNo
---   @DateCol         : RequestCollectDate, DateofService, CollectionDate, ServiceDate, AccessionDate
+--   @DateCol         : DateOfCollection, RequestCollectDate, CollectionDate, DateofService, ServiceDate, AccessionDate
 --   @NewStatusCol    : NewStatus, Status
 --   @BillCategoryCol : BillCategory, Bill_Category, BillingCategory, BillStatus
 --   @ResultStatusCol : ResultStatus, Result_Status, ResultedStatus, RessultedStatus, IsResulted
@@ -75,11 +75,15 @@ BEGIN
 	DECLARE @DateCol SYSNAME = (
 		SELECT TOP 1 name FROM sys.columns
 		WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
-		  AND name IN ('DateOfCollection','RequestCollectDate','DateofService','CollectionDate','ServiceDate','AccessionDate')
+		  AND name IN ('DateOfCollection','RequestCollectDate','CollectionDate','DateofService','ServiceDate','AccessionDate')
 		ORDER BY CASE name
-			WHEN 'DateOfCollection' THEN 0 WHEN 'DateofService' THEN 1
-			WHEN 'CollectionDate' THEN 2 WHEN 'ServiceDate' THEN 3
-			WHEN 'AccessionDate' THEN 4 ELSE 5 END);
+			WHEN 'DateOfCollection'   THEN 0
+			WHEN 'RequestCollectDate' THEN 1
+			WHEN 'CollectionDate'     THEN 2
+			WHEN 'DateofService'      THEN 3
+			WHEN 'ServiceDate'        THEN 4
+			WHEN 'AccessionDate'      THEN 5
+			ELSE 6 END);
 
 	DECLARE @NewStatusCol SYSNAME = (
 		SELECT TOP 1 name FROM sys.columns

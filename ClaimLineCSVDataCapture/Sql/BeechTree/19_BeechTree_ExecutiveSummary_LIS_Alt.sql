@@ -153,7 +153,7 @@ BEGIN
 
     -- ── Build #Lis staging table ─────────────────────────────────────────────
     DECLARE @AccExpr          NVARCHAR(300) = N'LTRIM(RTRIM(CONVERT(NVARCHAR(100), [' + @AccCol + N'])))';
-    DECLARE @DateExpr         NVARCHAR(300) = N'TRY_CAST([' + @DateCol + N'] AS DATE)';
+    DECLARE @DateExpr         NVARCHAR(300) = N'[' + @DateCol + N']';
     DECLARE @ResultedExpr     NVARCHAR(300) = N'LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200), [' + @ResultedCol + N']), '''')))';
     DECLARE @ClaimStatusExpr  NVARCHAR(300) = CASE WHEN @ClaimStatusCol IS NOT NULL
         THEN N'LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200), [' + @ClaimStatusCol + N']), '''')))' ELSE N'''''' END;
@@ -198,8 +198,7 @@ BEGIN
             ' + @PaymentMethodExpr + N',
             ' + @PanelExpr        + N'
         FROM dbo.LIMSMaster
-        WHERE ' + @DateExpr + N' IS NOT NULL
-          AND NULLIF(' + @AccExpr + N', '''') IS NOT NULL;';
+        WHERE [' + @DateCol + N'] IS NOT NULL;';
 
     EXEC sp_executesql @LisSql;
 
@@ -225,7 +224,7 @@ BEGIN
     (
         -- ── A: Total Samples (all accessions) ────────────────────────────────
         SELECT p.ESYear, p.ESMonth, 'A' AS RoleID, 'Total Samples' AS Description,
-               COUNT(DISTINCT CASE WHEN (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)) THEN l.Accession END) AS ClaimCount
+               SUM(CASE WHEN (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth)) THEN 1 ELSE 0 END) AS ClaimCount
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -233,7 +232,7 @@ BEGIN
         -- ── B: Billable Samples – Resulted ───────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B', 'Billable Samples - Resulted',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Resulted' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -241,8 +240,8 @@ BEGIN
         -- ── B2: Billed to Insurance ───────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B2', '  Billed to Insurance',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.ClaimStatus='Billed'
-                                    AND l.BilledorNot='Billed' AND l.ClientStatus='' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Resulted' AND l.ClaimStatus='Billed'
+                                    AND l.BilledorNot='Billed' AND l.ClientStatus='' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -250,8 +249,8 @@ BEGIN
         -- ── B2.1: Billed In AMD ───────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B2.1', '    Billed In AMD',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.ClaimStatus='Billed'
-                                    AND l.BilledorNot='Billed' AND l.ClientStatus='' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Resulted' AND l.ClaimStatus='Billed'
+                                    AND l.BilledorNot='Billed' AND l.ClientStatus='' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -259,9 +258,9 @@ BEGIN
         -- ── B3: Not Entered in AMD ────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B3', '  Not Entered in AMD',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.ClaimStatus='Not Entered in AMD'
+               SUM(CASE WHEN l.Resulted='Resulted' AND l.ClaimStatus='Not Entered in AMD'
                                     AND l.BilledorNot='UnBilled'
-                                    AND l.ClientStatus IN ('','Billing Review Required') THEN l.Accession END)
+                                    AND l.ClientStatus IN ('','Billing Review Required') THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -269,10 +268,10 @@ BEGIN
         -- ── B3.1: Received ────────────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B3.1', '    Received',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.ClaimStatus='Not Entered in AMD'
+               SUM(CASE WHEN l.Resulted='Resulted' AND l.ClaimStatus='Not Entered in AMD'
                                     AND l.BilledorNot='UnBilled'
                                     AND l.ClientStatus IN ('','Billing Review Required')
-                                    AND l.SampleStatus='Received' THEN l.Accession END)
+                                    AND l.SampleStatus='Received' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -280,10 +279,10 @@ BEGIN
         -- ── B3.2: Billing Review Required ────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B3.2', '    Billing Review Required',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.ClaimStatus='Not Entered in AMD'
+               SUM(CASE WHEN l.Resulted='Resulted' AND l.ClaimStatus='Not Entered in AMD'
                                     AND l.BilledorNot='UnBilled'
                                     AND l.SampleStatus='Received'
-                                    AND l.ClientStatus='Billing Review Required' THEN l.Accession END)
+                                    AND l.ClientStatus='Billing Review Required' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -291,10 +290,10 @@ BEGIN
         -- ── B3.3: In Transit ─────────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B3.3', '    In Transit',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.ClaimStatus='Not Entered in AMD'
+               SUM(CASE WHEN l.Resulted='Resulted' AND l.ClaimStatus='Not Entered in AMD'
                                     AND l.BilledorNot='UnBilled'
                                     AND l.ClientStatus IN ('','Billing Review Required')
-                                    AND l.SampleStatus='In Transit' THEN l.Accession END)
+                                    AND l.SampleStatus='In Transit' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -302,10 +301,10 @@ BEGIN
         -- ── B3.4: Transferred ────────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B3.4', '    Transferred',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.ClaimStatus='Not Entered in AMD'
+               SUM(CASE WHEN l.Resulted='Resulted' AND l.ClaimStatus='Not Entered in AMD'
                                     AND l.BilledorNot='UnBilled'
                                     AND l.ClientStatus IN ('','Billing Review Required')
-                                    AND l.SampleStatus='Transferred' THEN l.Accession END)
+                                    AND l.SampleStatus='Transferred' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -313,10 +312,10 @@ BEGIN
         -- ── B3.5: Collected ──────────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B3.5', '    Collected',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.ClaimStatus='Not Entered in AMD'
+               SUM(CASE WHEN l.Resulted='Resulted' AND l.ClaimStatus='Not Entered in AMD'
                                     AND l.BilledorNot='UnBilled'
                                     AND l.ClientStatus IN ('','Billing Review Required')
-                                    AND l.SampleStatus='Collected' THEN l.Accession END)
+                                    AND l.SampleStatus='Collected' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -324,8 +323,8 @@ BEGIN
         -- ── B4: Unbilled ─────────────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B4', '  Unbilled',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.ClaimStatus='Entered'
-                                    AND l.BilledorNot='UnBilled' AND l.ClientStatus='' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Resulted' AND l.ClaimStatus='Entered'
+                                    AND l.BilledorNot='UnBilled' AND l.ClientStatus='' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -333,7 +332,7 @@ BEGIN
         -- ── B5: Client Bill ───────────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B5', '  Client Bill',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Client Bill' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Client Bill' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -341,8 +340,8 @@ BEGIN
         -- ── B5.1: Not Entered in AMD ──────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B5.1', '    Not Entered in AMD',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Client Bill'
-                                    AND l.ClaimStatus='Not Entered in AMD' AND l.BilledorNot='UnBilled' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Client Bill'
+                                    AND l.ClaimStatus='Not Entered in AMD' AND l.BilledorNot='UnBilled' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -350,8 +349,8 @@ BEGIN
         -- ── B5.2: Billed ──────────────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B5.2', '    Billed',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Client Bill'
-                                    AND l.BilledorNot='Billed' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Client Bill'
+                                    AND l.BilledorNot='Billed' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -359,7 +358,7 @@ BEGIN
         -- ── B6: Self Pay ──────────────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B6', '  Self Pay',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Self Pay' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Self Pay' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -367,8 +366,8 @@ BEGIN
         -- ── B6.1: Not Entered in AMD ──────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B6.1', '    Not Entered in AMD',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Self Pay'
-                                    AND l.ClaimStatus='Not Entered in AMD' AND l.BilledorNot='UnBilled' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Self Pay'
+                                    AND l.ClaimStatus='Not Entered in AMD' AND l.BilledorNot='UnBilled' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -376,8 +375,8 @@ BEGIN
         -- ── B6.2: Billed ──────────────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B6.2', '    Billed',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Self Pay'
-                                    AND l.BilledorNot='Billed' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Self Pay'
+                                    AND l.BilledorNot='Billed' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -385,8 +384,8 @@ BEGIN
         -- ── B6.3: Entered ─────────────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B6.3', '    Entered',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Self Pay'
-                                    AND l.ClaimStatus='Entered' AND l.BilledorNot='UnBilled' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Self Pay'
+                                    AND l.ClaimStatus='Entered' AND l.BilledorNot='UnBilled' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -394,7 +393,7 @@ BEGIN
         -- ── B7: Test Entries ─────────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B7', '  Test Entries',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Test Entries' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Test Entries' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -402,8 +401,8 @@ BEGIN
         -- ── B7.1: Not Entered in AMD ──────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B7.1', '    Not Entered in AMD',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Test Entries'
-                                    AND l.ClaimStatus='Not Entered in AMD' AND l.BilledorNot='UnBilled' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Test Entries'
+                                    AND l.ClaimStatus='Not Entered in AMD' AND l.BilledorNot='UnBilled' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -411,8 +410,8 @@ BEGIN
         -- ── B7.2: Billed ──────────────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B7.2', '    Billed',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Test Entries'
-                                    AND l.BilledorNot='Billed' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Test Entries'
+                                    AND l.BilledorNot='Billed' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -420,7 +419,7 @@ BEGIN
         -- ── B8: Rejected Sample ───────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B8', '  Rejected Sample',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Rejected Sample' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Rejected Sample' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -428,8 +427,8 @@ BEGIN
         -- ── B8.1: Not Entered in AMD ──────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B8.1', '    Not Entered in AMD',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Rejected Sample'
-                                    AND l.ClaimStatus='Not Entered in AMD' AND l.BilledorNot='UnBilled' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Rejected Sample'
+                                    AND l.ClaimStatus='Not Entered in AMD' AND l.BilledorNot='UnBilled' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -437,8 +436,8 @@ BEGIN
         -- ── B8.2: Billed ──────────────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B8.2', '    Billed',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Rejected Sample'
-                                    AND l.BilledorNot='Billed' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Resulted' AND l.ClientStatus='Rejected Sample'
+                                    AND l.BilledorNot='Billed' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -446,7 +445,7 @@ BEGIN
         -- ── B9: Payment Method No Bill ────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'B9', '  Payment Method No Bill',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.PaymentMethod='No Bill' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Resulted' AND l.PaymentMethod='No Bill' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -454,7 +453,7 @@ BEGIN
         -- ── C: Not Resulted ───────────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'C', 'Not Resulted',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Not Resulted' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Not Resulted' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -462,8 +461,8 @@ BEGIN
         -- ── C1: No Result date on LIS but Billed ─────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'C1', '  No Result date on LIS but Billed',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Not Resulted' AND l.ClaimStatus='Billed'
-                                    AND l.BilledorNot='Billed' AND l.ClientStatus='' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Not Resulted' AND l.ClaimStatus='Billed'
+                                    AND l.BilledorNot='Billed' AND l.ClientStatus='' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -471,8 +470,8 @@ BEGIN
         -- ── C2: Not Entered in AMD ────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'C2', '  Not Entered in AMD',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Not Resulted' AND l.ClaimStatus='Not Entered in AMD'
-                                    AND l.BilledorNot='UnBilled' AND l.ClientStatus='' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Not Resulted' AND l.ClaimStatus='Not Entered in AMD'
+                                    AND l.BilledorNot='UnBilled' AND l.ClientStatus='' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -480,9 +479,9 @@ BEGIN
         -- ── C2.1: Received ────────────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'C2.1', '    Received',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Not Resulted' AND l.ClaimStatus='Not Entered in AMD'
+               SUM(CASE WHEN l.Resulted='Not Resulted' AND l.ClaimStatus='Not Entered in AMD'
                                     AND l.BilledorNot='UnBilled' AND l.ClientStatus=''
-                                    AND l.SampleStatus='Received' THEN l.Accession END)
+                                    AND l.SampleStatus='Received' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -490,9 +489,9 @@ BEGIN
         -- ── C2.2: In Transit ──────────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'C2.2', '    In Transit',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Not Resulted' AND l.ClaimStatus='Not Entered in AMD'
+               SUM(CASE WHEN l.Resulted='Not Resulted' AND l.ClaimStatus='Not Entered in AMD'
                                     AND l.BilledorNot='UnBilled' AND l.ClientStatus=''
-                                    AND l.SampleStatus='In Transit' THEN l.Accession END)
+                                    AND l.SampleStatus='In Transit' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -500,9 +499,9 @@ BEGIN
         -- ── C2.3: Collected ───────────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'C2.3', '    Collected',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Not Resulted' AND l.ClaimStatus='Not Entered in AMD'
+               SUM(CASE WHEN l.Resulted='Not Resulted' AND l.ClaimStatus='Not Entered in AMD'
                                     AND l.BilledorNot='UnBilled' AND l.ClientStatus=''
-                                    AND l.SampleStatus='Collected' THEN l.Accession END)
+                                    AND l.SampleStatus='Collected' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -510,9 +509,9 @@ BEGIN
         -- ── C2.4: Transferred ─────────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'C2.4', '    Transferred',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Not Resulted' AND l.ClaimStatus='Not Entered in AMD'
+               SUM(CASE WHEN l.Resulted='Not Resulted' AND l.ClaimStatus='Not Entered in AMD'
                                     AND l.BilledorNot='UnBilled' AND l.ClientStatus=''
-                                    AND l.SampleStatus='Transferred' THEN l.Accession END)
+                                    AND l.SampleStatus='Transferred' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -520,7 +519,7 @@ BEGIN
         -- ── C3: Client Bill ───────────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'C3', '  Client Bill',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Not Resulted' AND l.ClientStatus='Client Bill' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Not Resulted' AND l.ClientStatus='Client Bill' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -528,7 +527,7 @@ BEGIN
         -- ── C4: Self Pay ──────────────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'C4', '  Self Pay',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Not Resulted' AND l.ClientStatus='Self Pay' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Not Resulted' AND l.ClientStatus='Self Pay' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -536,8 +535,8 @@ BEGIN
         -- ── C4.1: Not Entered in AMD ──────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'C4.1', '    Not Entered in AMD',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Not Resulted' AND l.ClientStatus='Self Pay'
-                                    AND l.ClaimStatus='Not Entered in AMD' AND l.BilledorNot='UnBilled' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Not Resulted' AND l.ClientStatus='Self Pay'
+                                    AND l.ClaimStatus='Not Entered in AMD' AND l.BilledorNot='UnBilled' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -545,8 +544,8 @@ BEGIN
         -- ── C4.2: Billed ──────────────────────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'C4.2', '    Billed',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Not Resulted' AND l.ClientStatus='Self Pay'
-                                    AND l.BilledorNot='Billed' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Not Resulted' AND l.ClientStatus='Self Pay'
+                                    AND l.BilledorNot='Billed' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -554,7 +553,7 @@ BEGIN
         -- ── D: Test Entries (Not Resulted) ────────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'D', 'Test Entries',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Not Resulted' AND l.ClientStatus='Test Entries' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Not Resulted' AND l.ClientStatus='Test Entries' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -562,7 +561,7 @@ BEGIN
         -- ── E: Rejected Sample (Not Resulted) ─────────────────────────────────
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'E', 'Rejected Sample',
-               COUNT(DISTINCT CASE WHEN l.Resulted='Not Resulted' AND l.ClientStatus='Rejected Sample' THEN l.Accession END)
+               SUM(CASE WHEN l.Resulted='Not Resulted' AND l.ClientStatus='Rejected Sample' THEN 1 ELSE 0 END)
         FROM #LisPeriods p
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -576,7 +575,7 @@ BEGIN
         '  ' + pt.PanelType,
         p.ESYear,
         p.ESMonth,
-        COUNT(DISTINCT CASE WHEN l.Resulted='Resulted' AND l.PanelType=pt.PanelType THEN l.Accession END),
+        SUM(CASE WHEN l.Resulted='Resulted' AND l.PanelType=pt.PanelType THEN 1 ELSE 0 END),
         0,
         GETDATE()
     FROM #PanelTypes pt

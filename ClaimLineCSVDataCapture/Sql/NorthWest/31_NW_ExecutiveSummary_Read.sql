@@ -1,16 +1,29 @@
 -- ============================================================
 -- NorthWest – Executive Summary Read SP
 -- File : 31_NW_ExecutiveSummary_Read.sql
--- DB   : NorthWest_LRN
+-- DB   : NWL_LRN
 --
 -- usp_GetNW_ExecutiveSummary(@YearFrom,@YearTo,@MonthFrom,@MonthTo,...)
 --   @HasFilter = 0                      → fast read from 4 NW_ES_ aggregate tables.
 --   Date / Rep filter only              → PMS+Cash+Avg live from ClaimLevelData;
 --                                         LIS from NW_ES_LIS (period-filtered).
 --   Panel / Clinic / Provider filter    → additionally re-aggregates LIS live from
---                                         LIMSMaster via #LisBase (dimension-filtered,
---                                         date-independent). Columns: PanelType,
+--                                         LIMSMaster via #LisBase (dimension- AND
+--                                         DateofService-filtered). Columns: PanelType,
 --                                         ClinicName, ReferringProvider. SalesRep skipped.
+--
+-- Lisbreakdown (LIMSMaster) field mapping — confirmed in
+-- LabMetricsDashboard\Sql\LIMSScript\LAB_Filter_Reference_Script.sql (NWL_LRN block):
+--   Panel                -> PanelType
+--   DateofService         -> RequestCollectDate
+--   ClinicName            -> ClinicName
+--   ReferringProviderName -> ReferringProvider
+--   FirstBilledDate       -> N/A. LIMSMaster has no FirstBilledDate column, so
+--                            @BilledFrom/@BilledTo are NEVER applied to the LIS/
+--                            LIMSMaster path (#LisBase below). FirstBilledDate
+--                            (and DateofService range re-filtering beyond the
+--                            period bucket) only affect the PMS/Cash/Avg section
+--                            (#Base, built from ClaimLevelData) further down.
 -- ============================================================
 SET NOCOUNT ON;
 GO
@@ -114,8 +127,9 @@ BEGIN
     -- ── LIS dimension filter via LIMSMaster ──────────────────────────────
     --    When Panel / Clinic / Provider filter is active, re-aggregate LIS
     --    live from dbo.LIMSMaster (filtered) instead of the pre-built
-    --    aggregate table.  Date parameters are intentionally NOT applied
-    --    to LIMSMaster.  SalesRep is not available for NW LIS — skipped.
+    --    aggregate table.  The DateofService range (@DosFrom/@DosTo) IS applied
+    --    to LIMSMaster's resolved date column below.  SalesRep is not available
+    --    for NW LIS — skipped.
     --    Column logic mirrors usp_RefreshNW_ExecutiveSummary_LIS_Alt (file 33).
     -- ─────────────────────────────────────────────────────────────────────
     DECLARE @HasLisFilter BIT = CASE
@@ -147,9 +161,13 @@ BEGIN
         DECLARE @LisOrderIDCol  SYSNAME = (SELECT TOP 1 name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.LIMSMaster')
             AND name IN ('OrderID','OrderId','AccessionNumber','Accession')
             ORDER BY CASE name WHEN 'OrderID' THEN 0 WHEN 'OrderId' THEN 1 WHEN 'AccessionNumber' THEN 2 ELSE 3 END);
+        -- DateofService for NW maps to LIMSMaster.RequestCollectDate (confirmed in
+        -- LabMetricsDashboard\Sql\LIMSScript\LAB_Filter_Reference_Script.sql, NWL_LRN block).
+        -- RequestCollectDate is given top priority so an unrelated column (e.g. a
+        -- generic record-creation timestamp) can never silently outrank it.
         DECLARE @LisDateCol     SYSNAME = (SELECT TOP 1 name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.LIMSMaster')
-            AND name IN ('ReqCollectDate','Entry_DateCreated','RequestCollectDate','DateOfCollection','DateofService','CollectionDate','ServiceDate','AccessionDate')
-            ORDER BY CASE name WHEN 'ReqCollectDate' THEN 0 WHEN 'Entry_DateCreated' THEN 1 WHEN 'RequestCollectDate' THEN 2
+            AND name IN ('RequestCollectDate','ReqCollectDate','Entry_DateCreated','DateOfCollection','DateofService','CollectionDate','ServiceDate','AccessionDate')
+            ORDER BY CASE name WHEN 'RequestCollectDate' THEN 0 WHEN 'ReqCollectDate' THEN 1 WHEN 'Entry_DateCreated' THEN 2
                 WHEN 'DateOfCollection' THEN 3 WHEN 'DateofService' THEN 4 WHEN 'CollectionDate' THEN 5
                 WHEN 'ServiceDate' THEN 6 WHEN 'AccessionDate' THEN 7 ELSE 8 END);
         DECLARE @LisIncorrectDOSCol SYSNAME = (SELECT TOP 1 name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.LIMSMaster')
@@ -170,10 +188,14 @@ BEGIN
         DECLARE @LisChargesNotCol SYSNAME = (SELECT TOP 1 name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.LIMSMaster')
             AND name IN ('ChargesNotEnteredStatus','ChargesNotEntered','NotEnteredStatus')
             ORDER BY CASE name WHEN 'ChargesNotEnteredStatus' THEN 0 WHEN 'ChargesNotEntered' THEN 1 ELSE 2 END);
+        -- Panel display/grouping column for NW mirrors the Panel filter column
+        -- (PanelType — confirmed in LAB_Filter_Reference_Script.sql, NWL_LRN block:
+        -- "PanelType [Panel Name]"), so the B.{PanelName} breakdown rows line up
+        -- with whatever the user selects in the Panel filter.
         DECLARE @LisPanelNameCol SYSNAME = (SELECT TOP 1 name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.LIMSMaster')
-            AND name IN ('LRNPanelName','PanelName','Panelname','PanelType','Panel','TestPanel')
-            ORDER BY CASE name WHEN 'LRNPanelName' THEN 0 WHEN 'PanelName' THEN 1 WHEN 'Panelname' THEN 2
-                WHEN 'PanelType' THEN 3 WHEN 'Panel' THEN 4 ELSE 5 END);
+            AND name IN ('PanelType','LRNPanelName','PanelName','Panelname','Panel','TestPanel')
+            ORDER BY CASE name WHEN 'PanelType' THEN 0 WHEN 'LRNPanelName' THEN 1 WHEN 'PanelName' THEN 2
+                WHEN 'Panelname' THEN 3 WHEN 'Panel' THEN 4 ELSE 5 END);
 
         -- Dimension filter columns (separate from the sub-row label column above).
         -- Panel filter uses PanelType per spec; Clinic uses ClinicName; Provider uses ReferringProvider.
@@ -220,7 +242,12 @@ BEGIN
             WHERE TRY_CAST([' + @LisDateCol + N'] AS DATE) IS NOT NULL
               AND NULLIF(LTRIM(RTRIM(ISNULL([' + @LisOrderIDCol + N'],''''))),'''') IS NOT NULL';
 
-            -- Dimension predicates (Date intentionally omitted — LIS ignores date filter).
+            -- DOS date predicates applied to LIMSMaster via resolved date column.
+            SET @LisBaseSql += N'
+              AND (@iDosFrom IS NULL OR TRY_CAST([' + @LisDateCol + N'] AS DATE) >= @iDosFrom)
+              AND (@iDosTo   IS NULL OR TRY_CAST([' + @LisDateCol + N'] AS DATE) <= @iDosTo)';
+
+            -- Dimension predicates (COLLATE DATABASE_DEFAULT prevents collation conflicts).
             -- COLLATE DATABASE_DEFAULT prevents collation conflicts in CHARINDEX.
             IF @HasPanelFilter = 1 AND @LisPanelFilterCol IS NOT NULL
                 SET @LisBaseSql += N'
@@ -237,8 +264,8 @@ BEGIN
             SET @LisBaseSql += N';';
 
             EXEC sp_executesql @LisBaseSql,
-                N'@iPanels NVARCHAR(MAX), @iClinics NVARCHAR(MAX), @iProviders NVARCHAR(MAX)',
-                @iPanels = @Panels, @iClinics = @Clinics, @iProviders = @Providers;
+                N'@iPanels NVARCHAR(MAX), @iClinics NVARCHAR(MAX), @iProviders NVARCHAR(MAX), @iDosFrom DATE, @iDosTo DATE',
+                @iPanels = @Panels, @iClinics = @Clinics, @iProviders = @Providers, @iDosFrom = @DosFrom, @iDosTo = @DosTo;
 
             SET @LisMasterFiltered = 1;
         END
@@ -485,14 +512,26 @@ BEGIN
     ELSE
     BEGIN
         -- No LIS dimension filter: serve from pre-built aggregate table with period filter.
-        -- Preserves existing behaviour exactly (ESYear<>0 excludes grand-total rows).
+        -- (ESYear<>0 excludes grand-total rows.)
+        --
+        -- NULL-safe year/month predicates: the UI sends @YearFrom/@YearTo/@MonthFrom/@MonthTo
+        -- as NULL (not 0) whenever the user filters by a DateofService range instead of
+        -- Year/Month.  Without ISNULL, "@YearFrom = 0" is UNKNOWN and "ESYear >= @YearFrom"
+        -- is UNKNOWN, so every LIS row was silently dropped (no LIS breakdown rows).
+        --
+        -- DateofService range is also mapped onto the (ESYear,ESMonth) period key so a
+        -- DOS-only filter correctly restricts LIS to the selected months and lines its
+        -- columns up with the PMS/Cash/Avg path.  ESYear/ESMonth derive from the LIMSMaster
+        -- collection date in usp_RefreshNW_ExecutiveSummary_LIS_Alt (file 33).
         INSERT INTO #LisOut (RowCode, Description, ESYear, ESMonth, MetricValue)
         SELECT RoleID, Description, ESYear, ESMonth, CAST(ESMonthClaimCount AS DECIMAL(18,2))
         FROM dbo.NW_ES_LIS
-        WHERE (@YearFrom=0  OR ESYear  >= @YearFrom)
-          AND (@YearTo=0    OR ESYear  <= @YearTo)
-          AND (@MonthFrom=0 OR ESMonth >= @MonthFrom)
-          AND (@MonthTo=0   OR ESMonth <= @MonthTo)
+        WHERE (ISNULL(@YearFrom, 0)=0  OR ESYear  >= @YearFrom)
+          AND (ISNULL(@YearTo,   0)=0  OR ESYear  <= @YearTo)
+          AND (ISNULL(@MonthFrom,0)=0  OR ESMonth >= @MonthFrom)
+          AND (ISNULL(@MonthTo,  0)=0  OR ESMonth <= @MonthTo)
+          AND (@DosFrom IS NULL OR (ESYear*100 + ESMonth) >= (YEAR(@DosFrom)*100 + MONTH(@DosFrom)))
+          AND (@DosTo   IS NULL OR (ESYear*100 + ESMonth) <= (YEAR(@DosTo)*100   + MONTH(@DosTo)))
           AND ESYear<>0;
     END
 
@@ -501,6 +540,44 @@ BEGIN
         SELECT TOP 1 name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.ClaimLevelData')
           AND name IN ('Billed','BillStatus','BillingStatus','BilledStatus')
         ORDER BY CASE name WHEN 'Billed' THEN 0 WHEN 'BillStatus' THEN 1 WHEN 'BillingStatus' THEN 2 ELSE 3 END);
+
+    -- Fallback date columns used to derive Billed status when @BilledCol IS NULL
+    -- (mirrors usp_RefreshNW_ExecutiveSummary / file 30)
+    DECLARE @FirstBillDateCol SYSNAME = (
+        SELECT TOP 1 name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.ClaimLevelData')
+          AND name IN ('FirstBillDate','FirstBilledDate','First_Bill_Date','FirstBilled')
+        ORDER BY CASE name WHEN 'FirstBillDate' THEN 0 WHEN 'FirstBilledDate' THEN 1
+                           WHEN 'First_Bill_Date' THEN 2 ELSE 3 END);
+
+    DECLARE @EmedixSubDateCol SYSNAME = (
+        SELECT TOP 1 name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.ClaimLevelData')
+          AND name IN ('EmedixSubmissionDate','EmedixSubmitDate','Emedix_Submission_Date','EmedixDate')
+        ORDER BY CASE name WHEN 'EmedixSubmissionDate' THEN 0 WHEN 'EmedixSubmitDate' THEN 1
+                           WHEN 'Emedix_Submission_Date' THEN 2 ELSE 3 END);
+
+    -- Build the Billed expression — MUST match usp_RefreshNW_ExecutiveSummary production logic:
+    --   BilledStatus column exists but is NOT populated for NW.
+    --   Derive 'Billed'/'Unbilled' from FirstBilledDate / EmedixSubmissionDate (date columns).
+    --   BilledStatus / BillStatus column is used only as a last resort when no date columns exist.
+    --   Output: always 'Billed' or 'Unbilled' — same values the aggregate table was built from.
+    DECLARE @BilledExpr NVARCHAR(MAX) =
+        CASE
+            -- Priority 1: derive from date columns (matches production aggregate SP)
+            WHEN @FirstBillDateCol IS NOT NULL OR @EmedixSubDateCol IS NOT NULL
+                THEN
+                    N'CASE'
+                    + CASE WHEN @FirstBillDateCol IS NOT NULL
+                           THEN N' WHEN NULLIF(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(50),[' + @FirstBillDateCol + N']),''''))),'''') IS NOT NULL THEN ''Billed'''
+                           ELSE N'' END
+                    + CASE WHEN @EmedixSubDateCol IS NOT NULL
+                           THEN N' WHEN NULLIF(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(50),[' + @EmedixSubDateCol + N']),''''))),'''') IS NOT NULL THEN ''Billed'''
+                           ELSE N'' END
+                    + N' ELSE ''Unbilled'' END'
+            -- Priority 2: BilledStatus / Billed column (only if no date columns found)
+            WHEN @BilledCol IS NOT NULL
+                THEN N'ISNULL(LTRIM(RTRIM([' + @BilledCol + N'])),'''')'
+            ELSE NULL
+        END;
 
     DECLARE @ClaimTypeCol SYSNAME = (
         SELECT TOP 1 name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.ClaimLevelData')
@@ -526,6 +603,7 @@ BEGIN
         Billed           NVARCHAR(50)  NOT NULL,
         ClaimType        NVARCHAR(200) NOT NULL,
         ClaimStatus      NVARCHAR(200) NOT NULL,
+        FirstBilledDate  DATE          NULL,
         ChargeAmount     DECIMAL(18,2) NOT NULL,
         InsurancePayment DECIMAL(18,2) NOT NULL,
         ActualPayment    DECIMAL(18,2) NOT NULL,
@@ -537,20 +615,38 @@ BEGIN
         PatientBalance   DECIMAL(18,2) NOT NULL
     );
 
-    IF @BilledCol IS NOT NULL AND @ClaimTypeCol IS NOT NULL
+    IF @BilledExpr IS NOT NULL AND @ClaimTypeCol IS NOT NULL
     BEGIN
         DECLARE @ActExpr NVARCHAR(300) = CASE WHEN @ActualPayCol IS NOT NULL
             THEN N'ISNULL(TRY_CAST([' + @ActualPayCol + N'] AS DECIMAL(18,2)),0)' ELSE N'0' END;
         DECLARE @DupExpr NVARCHAR(300) = CASE WHEN @DupPayCol IS NOT NULL
             THEN N'ISNULL(TRY_CAST([' + @DupPayCol + N'] AS DECIMAL(18,2)),0)' ELSE N'0' END;
 
+        -- BilledDate predicate: use the dynamically-detected column so the query
+        -- does not fail when FirstBilledDate does not exist in ClaimLevelData.
+        DECLARE @BfPred NVARCHAR(300) =
+            CASE WHEN @FirstBillDateCol IS NOT NULL
+                 THEN N'(@bf IS NULL OR TRY_CAST([' + @FirstBillDateCol + N'] AS DATE) >= @bf)'
+                 ELSE N'(1=1)' END;
+        DECLARE @BtPred NVARCHAR(300) =
+            CASE WHEN @FirstBillDateCol IS NOT NULL
+                 THEN N'(@bt IS NULL OR TRY_CAST([' + @FirstBillDateCol + N'] AS DATE) <= @bt)'
+                 ELSE N'(1=1)' END;
+
+        -- FirstBilledDate captured into #Base (needed for the ARIA "submitted/not
+        -- submitted in the last 30 days" rows below — mirrors file 30).
+        DECLARE @FBDExpr NVARCHAR(300) = CASE WHEN @FirstBillDateCol IS NOT NULL
+            THEN N'TRY_CAST([' + @FirstBillDateCol + N'] AS DATE)'
+            ELSE N'CAST(NULL AS DATE)' END;
+
         DECLARE @BaseSql NVARCHAR(MAX) = N'
             INSERT INTO #Base SELECT
                 LTRIM(RTRIM(ISNULL(AccessionNumber,''''))),
                 YEAR(TRY_CAST(DateofService AS DATE)), MONTH(TRY_CAST(DateofService AS DATE)),
-                ISNULL(LTRIM(RTRIM([' + @BilledCol + N'])),''''),
+                ' + @BilledExpr + N',
                 ISNULL(LTRIM(RTRIM([' + @ClaimTypeCol + N'])),''''),
                 ISNULL(LTRIM(RTRIM(ClaimStatus)),''''),
+                ' + @FBDExpr + N',
                 ISNULL(TRY_CAST(ChargeAmount AS DECIMAL(18,2)),0),
                 ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)),0),
                 ' + @ActExpr + N', ' + @DupExpr + N',
@@ -566,10 +662,10 @@ BEGIN
               AND (ISNULL(@yt,0)=0 OR YEAR(TRY_CAST(DateofService AS DATE))<=@yt)
               AND (ISNULL(@mf,0)=0 OR MONTH(TRY_CAST(DateofService AS DATE))>=@mf)
               AND (ISNULL(@mt,0)=0 OR MONTH(TRY_CAST(DateofService AS DATE))<=@mt)
-              AND (@df IS NULL OR TRY_CAST(DateofService   AS DATE) >= @df)
-              AND (@dt IS NULL OR TRY_CAST(DateofService   AS DATE) <= @dt)
-              AND (@bf IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @bf)
-              AND (@bt IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @bt)
+              AND (@df IS NULL OR TRY_CAST(DateofService AS DATE) >= @df)
+              AND (@dt IS NULL OR TRY_CAST(DateofService AS DATE) <= @dt)
+              AND ' + @BfPred + N'
+              AND ' + @BtPred + N'
               AND (@hpf=0 OR CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(PanelType,        ''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @ipnl + '','') COLLATE DATABASE_DEFAULT) > 0)
               AND (@hcf=0 OR CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(ClinicName,       ''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @icln + '','') COLLATE DATABASE_DEFAULT) > 0)
               AND (@hpvf=0 OR CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(ReferringProvider,''''))) + '','') COLLATE DATABASE_DEFAULT, ('','' + @iprv + '','') COLLATE DATABASE_DEFAULT) > 0)
@@ -585,17 +681,65 @@ BEGIN
     DROP TABLE IF EXISTS #Periods;
     SELECT DISTINCT ESYear, ESMonth INTO #Periods FROM #Base;
 
+    -- ── ARIA "submitted / not submitted in the last 30 days" scalars ─────────
+    -- Mirrors usp_RefreshNW_ExecutiveSummary (file 30) exactly: point-in-time
+    -- snapshot (not period-bucketed), broadcast to every ESYear/ESMonth row
+    -- below. Anchor = most recent FirstBilledDate not in the future; window =
+    -- anchor minus one calendar month. Each group mirrors the same parent-row
+    -- filter conditions used in file 30 (ClaimType exclusion, ClaimStatus, and
+    -- for the AC.1/AC.3 dollar rows the Billed IN ('Billed','Billed - Client')
+    -- condition), with the FirstBilledDate window layered on top.
+    DECLARE @AriaAnchor      DATE = (SELECT MAX(FirstBilledDate) FROM #Base WHERE FirstBilledDate <= CAST(GETDATE() AS DATE));
+    DECLARE @AriaWindowStart DATE = DATEADD(MONTH, -1, @AriaAnchor);
+
+    -- S.1 (Count of AccessionNumber, ClaimStatus = 'Fully Denied')
+    DECLARE @S1_A1 DECIMAL(18,2) = (SELECT COUNT(DISTINCT AccessionNumber) FROM #Base
+        WHERE ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='Fully Denied'
+          AND @AriaAnchor IS NOT NULL AND FirstBilledDate BETWEEN @AriaWindowStart AND @AriaAnchor);
+    DECLARE @S1_A2 DECIMAL(18,2) = (SELECT COUNT(DISTINCT AccessionNumber) FROM #Base
+        WHERE ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='Fully Denied'
+          AND (@AriaAnchor IS NULL OR FirstBilledDate IS NULL OR FirstBilledDate < @AriaWindowStart OR FirstBilledDate > @AriaAnchor));
+    DECLARE @S1_AP DECIMAL(18,2) = CASE WHEN ISNULL(@S1_A2,0) > 0 THEN @S1_A1 / @S1_A2 ELSE 0 END;
+
+    -- S.3 (Count of AccessionNumber, ClaimStatus = 'No Response')
+    DECLARE @S3_A1 DECIMAL(18,2) = (SELECT COUNT(DISTINCT AccessionNumber) FROM #Base
+        WHERE ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='No Response'
+          AND @AriaAnchor IS NOT NULL AND FirstBilledDate BETWEEN @AriaWindowStart AND @AriaAnchor);
+    DECLARE @S3_A2 DECIMAL(18,2) = (SELECT COUNT(DISTINCT AccessionNumber) FROM #Base
+        WHERE ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='No Response'
+          AND (@AriaAnchor IS NULL OR FirstBilledDate IS NULL OR FirstBilledDate < @AriaWindowStart OR FirstBilledDate > @AriaAnchor));
+    DECLARE @S3_AP DECIMAL(18,2) = CASE WHEN ISNULL(@S3_A2,0) > 0 THEN @S3_A1 / @S3_A2 ELSE 0 END;
+
+    -- AC.1 (SUM of InsuranceBalance, ClaimStatus = 'Fully Denied')
+    DECLARE @AC1_A1 DECIMAL(18,2) = (SELECT ISNULL(SUM(InsuranceBalance),0) FROM #Base
+        WHERE Billed IN ('Billed','Billed - Client') AND ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='Fully Denied'
+          AND @AriaAnchor IS NOT NULL AND FirstBilledDate BETWEEN @AriaWindowStart AND @AriaAnchor);
+    DECLARE @AC1_A2 DECIMAL(18,2) = (SELECT ISNULL(SUM(InsuranceBalance),0) FROM #Base
+        WHERE Billed IN ('Billed','Billed - Client') AND ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='Fully Denied'
+          AND (@AriaAnchor IS NULL OR FirstBilledDate IS NULL OR FirstBilledDate < @AriaWindowStart OR FirstBilledDate > @AriaAnchor));
+    DECLARE @AC1_AP DECIMAL(18,2) = CASE WHEN ISNULL(@AC1_A2,0) > 0 THEN @AC1_A1 / @AC1_A2 ELSE 0 END;
+
+    -- AC.3 (SUM of InsuranceBalance, ClaimStatus = 'No Response')
+    DECLARE @AC3_A1 DECIMAL(18,2) = (SELECT ISNULL(SUM(InsuranceBalance),0) FROM #Base
+        WHERE Billed IN ('Billed','Billed - Client') AND ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='No Response'
+          AND @AriaAnchor IS NOT NULL AND FirstBilledDate BETWEEN @AriaWindowStart AND @AriaAnchor);
+    DECLARE @AC3_A2 DECIMAL(18,2) = (SELECT ISNULL(SUM(InsuranceBalance),0) FROM #Base
+        WHERE Billed IN ('Billed','Billed - Client') AND ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='No Response'
+          AND (@AriaAnchor IS NULL OR FirstBilledDate IS NULL OR FirstBilledDate < @AriaWindowStart OR FirstBilledDate > @AriaAnchor));
+    DECLARE @AC3_AP DECIMAL(18,2) = CASE WHEN ISNULL(@AC3_A2,0) > 0 THEN @AC3_A1 / @AC3_A2 ELSE 0 END;
+
     -- Combine LIS (#LisOut) + PMS/Cash/Avg (live from ClaimLevelData)
     SELECT RowCode, 'LIS' AS Category, Description, ESYear AS BillYear, ESMonth AS BillMonth, MetricValue FROM #LisOut
 
     UNION ALL
     -- PMS: G, H, M-S
+    -- G: Billed='Billed' matches production aggregate SP logic (derived from FirstBilledDate/EmedixSubmissionDate)
     SELECT 'G','PMS','No. of Billed Claims',b.ESYear,b.ESMonth,
-           COUNT(DISTINCT CASE WHEN b.Billed='Billed' AND b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND b.ClaimStatus<>'Billed Amount 0' THEN b.AccessionNumber END)
+           COUNT(CASE WHEN b.Billed='Billed' AND b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND b.ClaimStatus<>'Billed Amount 0' THEN b.AccessionNumber END)
     FROM #Base b GROUP BY b.ESYear, b.ESMonth
     UNION ALL
     SELECT 'H','PMS','No. of Unbilled Claims',b.ESYear,b.ESMonth,
-           COUNT(DISTINCT CASE WHEN ISNULL(b.Billed,'') IN ('','Unbilled') AND b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') THEN b.AccessionNumber END)
+           COUNT(CASE WHEN (b.Billed='Unbilled' OR b.Billed='' OR b.Billed IS NULL) AND b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') THEN b.AccessionNumber END)
     FROM #Base b GROUP BY b.ESYear, b.ESMonth
     UNION ALL
     SELECT 'J','PMS','Test Patient Entries',b.ESYear,b.ESMonth,
@@ -635,11 +779,37 @@ BEGIN
     UNION ALL
     -- Avg: AD, AE, AF (computed inline)
     SELECT 'AD','Avg','Average Payment ($) - Total Pay/Billed Claims',b.ESYear,b.ESMonth,
-           CASE WHEN COUNT(DISTINCT CASE WHEN b.Billed='Billed' AND b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND b.ClaimStatus<>'Billed Amount 0' THEN b.AccessionNumber END)>0
+           CASE WHEN COUNT(CASE WHEN b.Billed='Billed' AND b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND b.ClaimStatus<>'Billed Amount 0' THEN b.AccessionNumber END)>0
                 THEN SUM(CASE WHEN b.Billed='Billed' AND b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND b.ClaimStatus<>'Billed Amount 0' THEN b.InsurancePayment+b.PatientPayment ELSE 0 END)
-                   / COUNT(DISTINCT CASE WHEN b.Billed='Billed' AND b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND b.ClaimStatus<>'Billed Amount 0' THEN b.AccessionNumber END)
+                   / COUNT(CASE WHEN b.Billed='Billed' AND b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND b.ClaimStatus<>'Billed Amount 0' THEN b.AccessionNumber END)
                 ELSE 0 END
     FROM #Base b GROUP BY b.ESYear, b.ESMonth
+
+    UNION ALL
+    -- S.1 / S.3 / AC.1 / AC.3 ARIA rows (mirrors file 30's aggregate refresh)
+    SELECT 'S.1.A1','PMS','    Aria Submitted in the last 30 Days',p.ESYear,p.ESMonth,@S1_A1 FROM #Periods p
+    UNION ALL
+    SELECT 'S.1.A2','PMS','    Aria not submitted in the last 30 Days',p.ESYear,p.ESMonth,@S1_A2 FROM #Periods p
+    UNION ALL
+    SELECT 'S.1.AP','PMS','    % of the claim submitted in the last 30 Days',p.ESYear,p.ESMonth,@S1_AP FROM #Periods p
+    UNION ALL
+    SELECT 'S.3.A1','PMS','    Claim filed by ARIA in the last 30 days',p.ESYear,p.ESMonth,@S3_A1 FROM #Periods p
+    UNION ALL
+    SELECT 'S.3.A2','PMS','    Claims not filed in the last 30 days',p.ESYear,p.ESMonth,@S3_A2 FROM #Periods p
+    UNION ALL
+    SELECT 'S.3.AP','PMS','    % of the claim submitted in the last 30 Days',p.ESYear,p.ESMonth,@S3_AP FROM #Periods p
+    UNION ALL
+    SELECT 'AC.1.A1','Cash','    Claim filed by ARIA in the last 30 days',p.ESYear,p.ESMonth,@AC1_A1 FROM #Periods p
+    UNION ALL
+    SELECT 'AC.1.A2','Cash','    Claims not filed in the last 30 days',p.ESYear,p.ESMonth,@AC1_A2 FROM #Periods p
+    UNION ALL
+    SELECT 'AC.1.AP','Cash','    % of the claim submitted in the last 30 Days',p.ESYear,p.ESMonth,@AC1_AP FROM #Periods p
+    UNION ALL
+    SELECT 'AC.3.A1','Cash','    Claim filed by ARIA in the last 30 days',p.ESYear,p.ESMonth,@AC3_A1 FROM #Periods p
+    UNION ALL
+    SELECT 'AC.3.A2','Cash','    Claims not filed in the last 30 days',p.ESYear,p.ESMonth,@AC3_A2 FROM #Periods p
+    UNION ALL
+    SELECT 'AC.3.AP','Cash','    % of the claim submitted in the last 30 Days',p.ESYear,p.ESMonth,@AC3_AP FROM #Periods p
 
     ORDER BY BillYear, BillMonth, Category, RowCode;
 

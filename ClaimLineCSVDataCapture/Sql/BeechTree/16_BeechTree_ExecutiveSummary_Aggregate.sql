@@ -20,7 +20,8 @@
 --   S      Billed Mismatches – Non Diagnose LIS Samples    (BilledUnbilled='Billed' AND [mismatch flag])
 --   T      Unbilled – Entered to AMD – Yet to be released  (BilledUnbilled='UnBilled')
 --   U      Fully Paid – Insurance Pay                      (ClaimStatus='Fully Paid')
---   V      Fully Adjusted                                  (ClaimStatus='Fully Adjusted')
+--   V      Fully Adjusted                                  COUNT(DISTINCT ClaimID) from BTWOSummary
+--     V.1..Vn  One sub-row per TransactionCodeCombined     SUM(MatchingCount) from BTWOSummary
 --   W      Patient Responsibility                          (ClaimStatus='Pat Responsibility')
 --   X      Partially Paid                                  (ClaimStatus='Partial Paid')
 --   Y      Patient Payment                                 (PatientPayment > 0)
@@ -50,6 +51,16 @@ SET NOCOUNT ON;
 GO
 
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshBT_ExecutiveSummary
+    -- Period filters (NULL = no restriction)
+    @YearFrom   INT            = NULL,
+    @YearTo     INT            = NULL,
+    @MonthFrom  INT            = NULL,
+    @MonthTo    INT            = NULL,
+    -- Dimension filters — comma-separated values, NULL = all
+    @Panels     NVARCHAR(MAX)  = NULL,
+    @Clinics    NVARCHAR(MAX)  = NULL,
+    @Providers  NVARCHAR(MAX)  = NULL,
+    @Reps       NVARCHAR(MAX)  = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -65,19 +76,41 @@ BEGIN
         ClaimID,
         YEAR (TRY_CAST(DateofService AS DATE))  AS ESYear,
         MONTH(TRY_CAST(DateofService AS DATE))  AS ESMonth,
-        ISNULL(LTRIM(RTRIM(BilledUnbilled)), '')            AS BillStatus,
-        ISNULL(LTRIM(RTRIM(ClaimStatus)),    '')            AS ClaimStatus,
+        ISNULL(LTRIM(RTRIM(BilledUnbilled)),    '')  AS BillStatus,
+        ISNULL(LTRIM(RTRIM(ClaimStatus)),       '')  AS ClaimStatus,
         ISNULL(TRY_CAST(ChargeAmount         AS DECIMAL(18,2)), 0) AS ChargeAmount,
         ISNULL(TRY_CAST(InsurancePayment     AS DECIMAL(18,2)), 0) AS InsurancePayment,
         ISNULL(TRY_CAST(PatientPayment       AS DECIMAL(18,2)), 0) AS PatientPayment,
         ISNULL(TRY_CAST(InsuranceAdjustments AS DECIMAL(18,2)), 0) AS InsuranceAdjustments,
         ISNULL(TRY_CAST(PatientAdjustments   AS DECIMAL(18,2)), 0) AS PatientAdjustments,
         ISNULL(TRY_CAST(InsuranceBalance     AS DECIMAL(18,2)), 0) AS InsuranceBalance,
-        ISNULL(TRY_CAST(PatientBalance       AS DECIMAL(18,2)), 0) AS PatientBalance
+        ISNULL(TRY_CAST(PatientBalance       AS DECIMAL(18,2)), 0) AS PatientBalance,
+        -- Dimension columns (used for filter matching)
+        ISNULL(LTRIM(RTRIM(Panelname)),         '')  AS Panelname,
+        ISNULL(LTRIM(RTRIM(ClinicName)),        '')  AS ClinicName,
+        ISNULL(LTRIM(RTRIM(ReferringProvider)), '')  AS ReferringProvider,
+        ISNULL(LTRIM(RTRIM(SalesRepname)),      '')  AS SalesRepname
     INTO #Base
     FROM dbo.ClaimLevelData
     WHERE TRY_CAST(DateofService AS DATE) IS NOT NULL
-      AND NULLIF(CONVERT(NVARCHAR(50), ClaimID), '') IS NOT NULL;
+      -- ── Year / Month filters ────────────────────────────────────────────
+      AND (@YearFrom  IS NULL OR YEAR (TRY_CAST(DateofService AS DATE)) >= @YearFrom)
+      AND (@YearTo    IS NULL OR YEAR (TRY_CAST(DateofService AS DATE)) <= @YearTo)
+      AND (@MonthFrom IS NULL OR MONTH(TRY_CAST(DateofService AS DATE)) >= @MonthFrom)
+      AND (@MonthTo   IS NULL OR MONTH(TRY_CAST(DateofService AS DATE)) <= @MonthTo)
+      -- ── Dimension filters (comma-separated; NULL = no restriction) ──────
+      AND (@Panels    IS NULL OR EXISTS (
+              SELECT 1 FROM STRING_SPLIT(@Panels,    ',') s
+              WHERE LTRIM(RTRIM(s.value)) = LTRIM(RTRIM(Panelname))))
+      AND (@Clinics   IS NULL OR EXISTS (
+              SELECT 1 FROM STRING_SPLIT(@Clinics,   ',') s
+              WHERE LTRIM(RTRIM(s.value)) = LTRIM(RTRIM(ClinicName))))
+      AND (@Providers IS NULL OR EXISTS (
+              SELECT 1 FROM STRING_SPLIT(@Providers, ',') s
+              WHERE LTRIM(RTRIM(s.value)) = LTRIM(RTRIM(ReferringProvider))))
+      AND (@Reps      IS NULL OR EXISTS (
+              SELECT 1 FROM STRING_SPLIT(@Reps,      ',') s
+              WHERE LTRIM(RTRIM(s.value)) = LTRIM(RTRIM(SalesRepname))));
 
     -- ── #Periods : distinct (ESYear, ESMonth) + (0,0) grand-total sentinel ──
     DROP TABLE IF EXISTS #Periods;
@@ -117,28 +150,26 @@ BEGIN
                 SELECT
                     YEAR (TRY_CAST([' + @LbDateCol + N'] AS DATE)),
                     MONTH(TRY_CAST([' + @LbDateCol + N'] AS DATE)),
-                    COUNT(DISTINCT LTRIM(RTRIM(CONVERT(NVARCHAR(100), [' + @LbAccCol + N']))))
+                    COUNT(*)
                 FROM dbo.LIMSMaster
                 WHERE BilledorNot = ''Billed''
                   AND TRY_CAST([' + @LbDateCol + N'] AS DATE) IS NOT NULL
-                  AND NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(100), [' + @LbAccCol + N']))), '''') IS NOT NULL
                 GROUP BY
                     YEAR (TRY_CAST([' + @LbDateCol + N'] AS DATE)),
                     MONTH(TRY_CAST([' + @LbDateCol + N'] AS DATE));
 
                 INSERT INTO #LisBilled (ESYear, ESMonth, BilledCount)
-                SELECT 0, 0, COUNT(DISTINCT LTRIM(RTRIM(CONVERT(NVARCHAR(100), [' + @LbAccCol + N']))))
+                SELECT 0, 0, COUNT(*)
                 FROM dbo.LIMSMaster
                 WHERE BilledorNot = ''Billed''
-                  AND TRY_CAST([' + @LbDateCol + N'] AS DATE) IS NOT NULL
-                  AND NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(100), [' + @LbAccCol + N']))), '''') IS NOT NULL;';
+                  AND TRY_CAST([' + @LbDateCol + N'] AS DATE) IS NOT NULL;';
 
             EXEC sp_executesql @LbSql;
         END
     END
 
     -- ────────────────────────────────────────────────────────────────────
-    --  BeechTree_ES_PMS  -  R, S, T, U, V, W, X, Y, Z, Z.1, Z.2, Z.3
+    --  BeechTree_ES_PMS  -  R, S, T, U, V, V.1..Vn (BTWOSummary), W, X, Y, Z, Z.1, Z.2, Z.3
     -- ────────────────────────────────────────────────────────────────────
     INSERT INTO dbo.BeechTree_ES_PMS (RoleID, Description, ESYear, ESMonth, ESMonthClaimCount, ESMonthChargeAmount, RefreshedAt)
     SELECT RoleID, Description, ESYear, ESMonth, ClaimCount, 0, GETDATE()
@@ -147,7 +178,7 @@ BEGIN
         -- R  Billed – Includes all Claims Billed in AMD
         SELECT p.ESYear, p.ESMonth, 'R' AS RoleID,
                'Billed - Includes all Claims Billed in AMD' AS Description,
-               COUNT(DISTINCT CASE WHEN b.BillStatus = 'Billed' THEN b.ClaimID END) AS ClaimCount
+               SUM(CASE WHEN b.BillStatus = 'Billed' THEN 1 ELSE 0 END) AS ClaimCount
         FROM #Periods p
         LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -157,7 +188,7 @@ BEGIN
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'S',
                'Billed Mismatches - Non Diagnose LIS Samples',
-               COUNT(DISTINCT CASE WHEN b.BillStatus='Billed' THEN b.ClaimID END)
+               SUM(CASE WHEN b.BillStatus='Billed' THEN 1 ELSE 0 END)
                - ISNULL(MAX(lb.BilledCount), 0)
         FROM #Periods p
         LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
@@ -168,7 +199,7 @@ BEGIN
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'T',
                'Unbilled - Entered to AMD - Yet to be released to Payer',
-               COUNT(DISTINCT CASE WHEN b.BillStatus = 'UnBilled' THEN b.ClaimID END)
+               SUM(CASE WHEN b.BillStatus = 'UnBilled' THEN 1 ELSE 0 END)
         FROM #Periods p
         LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -176,23 +207,35 @@ BEGIN
         -- U  Fully Paid – Insurance Pay
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'U', 'Fully Paid - Insurance Pay',
-               COUNT(DISTINCT CASE WHEN b.ClaimStatus = 'Fully Paid' THEN b.ClaimID END)
+               SUM(CASE WHEN b.ClaimStatus = 'Fully Paid' THEN 1 ELSE 0 END)
         FROM #Periods p
         LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
 
-        -- V  Fully Adjusted
+        -- V  Fully Adjusted – SUM(MatchingCount) from BTWOSummary so the parent
+        --    total equals the sum of its V.n sub-rows.  Bucketed by
+        --    BTWOSummary.DateofService to avoid double-counting.
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'V', 'Fully Adjusted',
-               COUNT(DISTINCT CASE WHEN b.ClaimStatus = 'Fully Adjusted' THEN b.ClaimID END)
+               ISNULL(SUM(ws.MatchingCount), 0)
         FROM #Periods p
-        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
+        LEFT JOIN (
+            SELECT
+                ws2.MatchingCount,
+                ISNULL(YEAR (TRY_CAST(ws2.DateofService AS DATE)), 0) AS WOYear,
+                ISNULL(MONTH(TRY_CAST(ws2.DateofService AS DATE)), 0) AS WOMonth
+            FROM   dbo.BTWOSummary ws2
+            INNER JOIN #Base b
+                ON LTRIM(RTRIM(CAST(ws2.ClaimID AS NVARCHAR(50))))
+                 = LTRIM(RTRIM(CAST(b.ClaimID   AS NVARCHAR(50))))
+            WHERE  TRY_CAST(ws2.DateofService AS DATE) IS NOT NULL
+        ) ws ON (p.ESYear = 0 OR (ws.WOYear = p.ESYear AND ws.WOMonth = p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
 
         -- W  Patient Responsibility
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'W', 'Patient Responsibility',
-               COUNT(DISTINCT CASE WHEN b.ClaimStatus = 'Pat Responsibility' THEN b.ClaimID END)
+               SUM(CASE WHEN b.ClaimStatus = 'Pat Responsibility' THEN 1 ELSE 0 END)
         FROM #Periods p
         LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -200,7 +243,7 @@ BEGIN
         -- X  Partially Paid
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'X', 'Partially Paid',
-               COUNT(DISTINCT CASE WHEN b.ClaimStatus = 'Partial Paid' THEN b.ClaimID END)
+               SUM(CASE WHEN b.ClaimStatus = 'Partial Paid' THEN 1 ELSE 0 END)
         FROM #Periods p
         LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -208,7 +251,7 @@ BEGIN
         -- Y  Patient Payment
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'Y', 'Patient Payment',
-               COUNT(DISTINCT CASE WHEN b.PatientPayment > 0 THEN b.ClaimID END)
+               SUM(CASE WHEN b.PatientPayment > 0 THEN 1 ELSE 0 END)
         FROM #Periods p
         LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -216,7 +259,7 @@ BEGIN
         -- Z  Insurance Balance
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'Z', 'Insurance Balance',
-               COUNT(DISTINCT CASE WHEN b.ClaimStatus IN ('Fully Denied','No Response','Partially Denied') THEN b.ClaimID END)
+               SUM(CASE WHEN b.ClaimStatus IN ('Fully Denied','No Response','Partially Denied') THEN 1 ELSE 0 END)
         FROM #Periods p
         LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -224,7 +267,7 @@ BEGIN
         -- Z.1  Fully Denied
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'Z.1', '  Fully Denied',
-               COUNT(DISTINCT CASE WHEN b.ClaimStatus = 'Fully Denied' THEN b.ClaimID END)
+               SUM(CASE WHEN b.ClaimStatus = 'Fully Denied' THEN 1 ELSE 0 END)
         FROM #Periods p
         LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -232,7 +275,7 @@ BEGIN
         -- Z.2  No Response
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'Z.2', '  No Response',
-               COUNT(DISTINCT CASE WHEN b.ClaimStatus = 'No Response' THEN b.ClaimID END)
+               SUM(CASE WHEN b.ClaimStatus = 'No Response' THEN 1 ELSE 0 END)
         FROM #Periods p
         LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
@@ -240,11 +283,51 @@ BEGIN
         -- Z.3  Partially Denied
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'Z.3', '  Partially Denied',
-               COUNT(DISTINCT CASE WHEN b.ClaimStatus = 'Partially Denied' THEN b.ClaimID END)
+               SUM(CASE WHEN b.ClaimStatus = 'Partially Denied' THEN 1 ELSE 0 END)
         FROM #Periods p
         LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
     ) pms;
+
+    -- ────────────────────────────────────────────────────────────────────
+    --  BeechTree_ES_PMS  -  V.n  Fully Adjusted sub-rows (BTWOSummary)
+    --  One row per TransactionCodeCombined per period, ordered A-Z.
+    --  RoleID generated as V.1, V.2, ... per period bucket.
+    -- ────────────────────────────────────────────────────────────────────
+    INSERT INTO dbo.BeechTree_ES_PMS (RoleID, Description, ESYear, ESMonth, ESMonthClaimCount, ESMonthChargeAmount, RefreshedAt)
+    SELECT
+        'V.' + CAST(ROW_NUMBER() OVER (PARTITION BY agg.ESYear, agg.ESMonth
+                                       ORDER BY     agg.TransactionCodeCombined) AS NVARCHAR(10)) AS RoleID,
+        '  ' + agg.TransactionCodeCombined                                                         AS Description,
+        agg.ESYear,
+        agg.ESMonth,
+        agg.MatchingCount  AS ESMonthClaimCount,
+        0                  AS ESMonthChargeAmount,
+        GETDATE()          AS RefreshedAt
+    FROM (
+        SELECT
+            p.ESYear,
+            p.ESMonth,
+            ws.TransactionCodeCombined,
+            SUM(ws.MatchingCount)  AS MatchingCount
+        FROM #Periods p
+        JOIN (
+            -- Period bucketed from BTWOSummary.DateofService (not #Base) to avoid
+            -- double-counting ClaimIDs that appear in multiple months in ClaimLevelData.
+            SELECT
+                ws2.TransactionCodeCombined,
+                ws2.MatchingCount,
+                ISNULL(YEAR (TRY_CAST(ws2.DateofService AS DATE)), 0) AS WOYear,
+                ISNULL(MONTH(TRY_CAST(ws2.DateofService AS DATE)), 0) AS WOMonth
+            FROM   dbo.BTWOSummary ws2
+            INNER JOIN #Base b
+                ON LTRIM(RTRIM(CAST(ws2.ClaimID AS NVARCHAR(50))))
+                 = LTRIM(RTRIM(CAST(b.ClaimID   AS NVARCHAR(50))))
+            WHERE  ws2.TransactionCodeCombined IS NOT NULL
+              AND  TRY_CAST(ws2.DateofService AS DATE) IS NOT NULL
+        ) ws ON (p.ESYear = 0 OR (ws.WOYear = p.ESYear AND ws.WOMonth = p.ESMonth))
+        GROUP BY p.ESYear, p.ESMonth, ws.TransactionCodeCombined
+    ) agg;
 
     -- ────────────────────────────────────────────────────────────────────
     --  BeechTree_ES_Cash  -  AA through AJ
@@ -337,40 +420,76 @@ BEGIN
 
     -- ────────────────────────────────────────────────────────────────────
     --  BeechTree_ES_Avg  -  AK, AL, AM
+    --
+    --  Per confirmed spec, the numerator for all three rows is the SAME:
+    --  SUM of BeechTree_ES_Cash rows AC (Insurance Payment - fully paid) +
+    --  AD (Partially Paid) + AE (Patient Payment). Only the denominator
+    --  (claim count) differs, pulled from specific BeechTree_ES_PMS RoleIDs:
+    --    AK = SUM(AC,AD,AE) / PMS 'R'                       (Billed)
+    --    AL = SUM(AC,AD,AE) / SUM(PMS 'U','X','Y')          (Paid)
+    --    AM = SUM(AC,AD,AE) / SUM(PMS 'U','V','W','X','Y','Z.1','Z.3') (Adjudicated)
+    --  Sourced from the BeechTree_ES_PMS / BeechTree_ES_Cash rows this same
+    --  refresh just inserted above (not re-derived from #Base), so Avg always
+    --  reconciles exactly to what the PMS/Cash breakdowns show.
     -- ────────────────────────────────────────────────────────────────────
+    ;WITH CashTotal AS (
+        SELECT ESYear, ESMonth, SUM(ESMonthChargeAmount) AS PayTotal
+        FROM dbo.BeechTree_ES_Cash
+        WHERE RoleID IN ('AC','AD','AE')
+        GROUP BY ESYear, ESMonth
+    ),
+    PMS_R AS (
+        SELECT ESYear, ESMonth, SUM(ESMonthClaimCount) AS ClaimCount
+        FROM dbo.BeechTree_ES_PMS
+        WHERE RoleID = 'R'
+        GROUP BY ESYear, ESMonth
+    ),
+    PMS_UXY AS (
+        SELECT ESYear, ESMonth, SUM(ESMonthClaimCount) AS ClaimCount
+        FROM dbo.BeechTree_ES_PMS
+        WHERE RoleID IN ('U','X','Y')
+        GROUP BY ESYear, ESMonth
+    ),
+    PMS_Adjudicated AS (
+        SELECT ESYear, ESMonth, SUM(ESMonthClaimCount) AS ClaimCount
+        FROM dbo.BeechTree_ES_PMS
+        WHERE RoleID IN ('U','V','W','X','Y','Z.1','Z.3')
+        GROUP BY ESYear, ESMonth
+    )
     INSERT INTO dbo.BeechTree_ES_Avg (RoleID, Description, ESYear, ESMonth, ESMonthClaimCount, ESMonthChargeAmount, RefreshedAt)
     SELECT RoleID, Description, ESYear, ESMonth, ClaimCount,
            CASE WHEN ClaimCount > 0 THEN PayTotal / ClaimCount ELSE 0 END, GETDATE()
     FROM
     (
-        -- AK  Average Payment ($) - Total Pay / Billed Claims
+        -- AK  Average Payment ($) - Total Pay/Billed Claims = SUM(AC,AD,AE) / R
         SELECT p.ESYear, p.ESMonth, 'AK' AS RoleID,
                'Average Payment ($) - Total Pay/Billed Claims' AS Description,
-               COUNT(DISTINCT CASE WHEN b.BillStatus='Billed' THEN b.ClaimID END) AS ClaimCount,
-               SUM(CASE WHEN b.BillStatus='Billed' THEN b.InsurancePayment + b.PatientPayment ELSE 0 END) AS PayTotal
+               ISNULL(r.ClaimCount, 0)  AS ClaimCount,
+               ISNULL(ct.PayTotal, 0)   AS PayTotal
         FROM #Periods p
-        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-        GROUP BY p.ESYear, p.ESMonth
+        LEFT JOIN CashTotal ct ON ct.ESYear = p.ESYear AND ct.ESMonth = p.ESMonth
+        LEFT JOIN PMS_R      r ON r.ESYear  = p.ESYear AND r.ESMonth  = p.ESMonth
 
-        -- AL  Average Payment ($) - Total Pay / Paid Claims
+        -- AL  Average Payment ($) - Total Pay/Paid Claims = SUM(AC,AD,AE) / SUM(U,X,Y)
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'AL',
                'Average Payment ($) - Total Pay/Paid Claims',
-               COUNT(DISTINCT CASE WHEN b.ClaimStatus = 'Fully Paid' THEN b.ClaimID END),
-               SUM(CASE WHEN b.ClaimStatus = 'Fully Paid' THEN b.InsurancePayment + b.PatientPayment ELSE 0 END)
+               ISNULL(uxy.ClaimCount, 0),
+               ISNULL(ct.PayTotal, 0)
         FROM #Periods p
-        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-        GROUP BY p.ESYear, p.ESMonth
+        LEFT JOIN CashTotal ct  ON ct.ESYear  = p.ESYear AND ct.ESMonth  = p.ESMonth
+        LEFT JOIN PMS_UXY   uxy ON uxy.ESYear = p.ESYear AND uxy.ESMonth = p.ESMonth
 
-        -- AM  Average Payment ($) - Total Pay / Adjudicated Claims
+        -- AM  Average Payment ($) - Total Pay/Adjudicated Claims
+        --     = SUM(AC,AD,AE) / SUM(U,V,W,X,Y,Z.1,Z.3)
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'AM',
                'Average Payment ($) - Total Pay/Adjudicated Claims',
-               COUNT(DISTINCT CASE WHEN b.ClaimStatus NOT IN ('Unbilled','Unbilled - PB') THEN b.ClaimID END),
-               SUM(CASE WHEN b.ClaimStatus NOT IN ('Unbilled','Unbilled - PB') THEN b.InsurancePayment + b.PatientPayment ELSE 0 END)
+               ISNULL(adj.ClaimCount, 0),
+               ISNULL(ct.PayTotal, 0)
         FROM #Periods p
-        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-        GROUP BY p.ESYear, p.ESMonth
+        LEFT JOIN CashTotal       ct  ON ct.ESYear  = p.ESYear AND ct.ESMonth  = p.ESMonth
+        LEFT JOIN PMS_Adjudicated adj ON adj.ESYear = p.ESYear AND adj.ESMonth = p.ESMonth
     ) avgrows;
 
     DROP TABLE IF EXISTS #Base;

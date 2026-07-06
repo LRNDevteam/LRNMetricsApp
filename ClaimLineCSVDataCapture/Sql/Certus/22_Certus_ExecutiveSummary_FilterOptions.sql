@@ -2,6 +2,13 @@
 -- Certus – Executive Summary Filter Options SP
 -- File : 22_Certus_ExecutiveSummary_FilterOptions.sql
 -- DB   : Certus_LRN
+--
+-- Fix: Panel option list was reading dbo.ClaimLevelData.PanelType, the same
+-- stale/incorrect column already corrected to Panelname in
+-- 16_Certus_ExecutiveSummary_Aggregate.sql and 17_Certus_ExecutiveSummary_Read.sql.
+-- Because this SP fills the Panel dropdown, any value picked from it never
+-- matched a real Panelname value in the main SP's filter -> 0 rows whenever
+-- a Panel filter was applied, even though the unfiltered/aggregate path worked.
 -- ============================================================
 SET NOCOUNT ON;
 GO
@@ -21,10 +28,10 @@ BEGIN
 
     UNION ALL
 
-    SELECT 'Panel', LTRIM(RTRIM(PanelType)), 0
+    SELECT 'Panel', LTRIM(RTRIM(Panelname)), 0
     FROM dbo.ClaimLevelData
-    WHERE NULLIF(LTRIM(RTRIM(PanelType)), '') IS NOT NULL
-    GROUP BY LTRIM(RTRIM(PanelType))
+    WHERE NULLIF(LTRIM(RTRIM(Panelname)), '') IS NOT NULL
+    GROUP BY LTRIM(RTRIM(Panelname))
 
     UNION ALL
 

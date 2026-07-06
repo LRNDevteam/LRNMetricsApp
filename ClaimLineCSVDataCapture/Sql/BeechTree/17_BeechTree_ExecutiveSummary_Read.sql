@@ -13,14 +13,27 @@
 -- (BeechTree_ES_LIS, BeechTree_ES_PMS, BeechTree_ES_Cash, BeechTree_ES_Avg).
 --
 -- Filtered path (live re-aggregation): re-derives ALL RowCodes from
--- dbo.LIMSMaster (LIS, date-filtered on RequestCollectDate) and
--- dbo.ClaimLevelData (PMS/Cash/Avg, date-filtered on DateofService).
+-- dbo.LIMSMaster (LIS) and dbo.ClaimLevelData (PMS/Cash/Avg).
 -- BillYear/BillMonth are now derived from the source date so month-wise
 -- columns are preserved exactly as in the no-filter path.
 --
--- BeechTree LIS column mapping:
+-- Date mode (mirrors RisingTides, see @UseBilledDate): DOS and FirstBilledDate
+-- are mutually exclusive filters that switch the period-basis column:
+--   DOS mode (default)   : LIS -> LIMSMaster.RequestCollectDate
+--                           PMS/Cash/Avg -> ClaimLevelData.DateofService
+--   FirstBilledDate mode  : LIS -> LIMSMaster.AMDLBD
+--                           PMS/Cash/Avg -> ClaimLevelData.FirstBilledDate
+-- AMDLBD/FirstBilledDate have mixed content (real dates, text such as
+-- 'Not Entered in AMD', and blanks) - TRY_CAST(... AS DATE) returns NULL for
+-- the non-date content, so those rows are naturally excluded from billed-date
+-- filtering/period bucketing automatically; no special-casing is needed.
+--
+-- BeechTree LIS column mapping (passed to dbo.LIMSMaster):
 --   Accession   : AccessionNumber / VisitNumber / OrderID / Accession
---   Date        : RequestCollectDate (priority 0)
+--   DateofService (DOS)   : RequestCollectDate (priority 0)
+--   FirstBilledDate       : AMDLBD (mixed date/text/blank — see above)
+--   ClinicName            : Facility
+--   Referring ProviderName: Provider
 --   Resulted    : RessultedStatus / ResultedStatus / ...
 --   ClaimStatus : ClaimStatus
 --   BilledorNot : BilledorNot / BilledStatus / BilledUnbilled
@@ -131,10 +144,28 @@ BEGIN
     DECLARE @HasProviderFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM #FilterProviders) THEN 1 ELSE 0 END;
     DECLARE @HasRepFilter      BIT = CASE WHEN EXISTS (SELECT 1 FROM #FilterReps)      THEN 1 ELSE 0 END;
 
-    -- @HasLisFilter: 1 only when a filter that applies to LIMSMaster is active.
+    -- Date mode: DOS vs FirstBilledDate are mutually exclusive (same convention as
+    -- RisingTides). @UseBilledDate = 1 -> FirstBilledDate filter is active
+    -- (@BilledFrom/@BilledTo set, @DosFrom/@DosTo NULL) - LIS period basis switches
+    -- from RequestCollectDate to AMDLBD, and the PMS/Cash/Avg period basis switches
+    -- from DateofService to FirstBilledDate. @UseBilledDate = 0 -> DOS mode (or no
+    -- date filter) - period basis stays RequestCollectDate / DateofService.
+    DECLARE @UseBilledDate BIT = CASE
+        WHEN (@BilledFrom IS NOT NULL OR @BilledTo IS NOT NULL)
+         AND  @DosFrom IS NULL AND @DosTo IS NULL
+        THEN 1 ELSE 0 END;
+
+    -- @HasLisFilter: 1 when any filter that applies to LIMSMaster is active.
+    -- DOS date range (@DosFrom/@DosTo) is applied to LIMSMaster via RequestCollectDate;
+    -- FirstBilledDate range (@UseBilledDate=1) is applied via AMDLBD.
     -- SalesRep is not tracked in LIMSMaster for BeechTree, so a Rep-only filter
     -- must NOT trigger a full LIMSMaster scan; the aggregate table is used instead.
-    DECLARE @HasLisFilter BIT = CASE WHEN @HasPanelFilter = 1 OR @HasClinicFilter = 1 OR @HasProviderFilter = 1 THEN 1 ELSE 0 END;
+    DECLARE @HasLisFilter BIT = CASE WHEN @HasPanelFilter = 1 OR @HasClinicFilter = 1 OR @HasProviderFilter = 1
+                                       OR @DosFrom IS NOT NULL OR @DosTo IS NOT NULL
+                                       OR @UseBilledDate = 1
+                                       OR ISNULL(@YearFrom,0)  <> 0 OR ISNULL(@YearTo,0)    <> 0
+                                       OR ISNULL(@MonthFrom,0) <> 0 OR ISNULL(@MonthTo,0)   <> 0
+                                  THEN 1 ELSE 0 END;
 
     -- ── LIS: build #Lis from dbo.LIMSMaster, date-filtered on RequestCollectDate ──
     -- BillYear/BillMonth added so the filtered path produces month-wise rows.
@@ -239,6 +270,15 @@ BEGIN
             ORDER BY CASE name
                 WHEN 'Provider' THEN 0 WHEN 'ReferringProvider' THEN 1 WHEN 'ProviderName' THEN 2 ELSE 3 END);
 
+        -- FirstBilledDate -> AMDLBD (BeechTree LIMSMaster's billed-date column).
+        -- PLEASE NOTE: this column has mixed content - real dates, the literal text
+        -- 'Not Entered in AMD', and blanks. TRY_CAST(... AS DATE) returns NULL for the
+        -- latter two, so those rows are naturally excluded from billed-date filtering/
+        -- period bucketing below - no special-casing of the text value is needed.
+        DECLARE @LisBilledDateCol SYSNAME = (
+            SELECT TOP 1 name FROM sys.columns
+            WHERE object_id = OBJECT_ID('dbo.LIMSMaster') AND name = 'AMDLBD');
+
         IF @AccCol IS NOT NULL AND @DateCol IS NOT NULL AND @ResultedCol IS NOT NULL
         BEGIN
             DECLARE @CSExpr  NVARCHAR(400) = CASE WHEN @ClaimStatusCol IS NOT NULL
@@ -254,8 +294,20 @@ BEGIN
             DECLARE @PTExpr  NVARCHAR(400) = CASE WHEN @PanelNameCol IS NOT NULL
                 THEN N'LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(200),[' + @PanelNameCol + N']),'''')))'      ELSE N'''''' END;
 
-            -- Date parameters are intentionally NOT applied to LIMSMaster for BeechTree.
-            -- BillYear/BillMonth are still captured from the date column for period display.
+            -- LIS period basis:
+            --   DOS mode (default)   -> TRY_CAST([@DateCol] AS DATE)   (RequestCollectDate)
+            --   FirstBilledDate mode -> TRY_CAST([AMDLBD] AS DATE) — TRY_CAST returns NULL
+            --     for the non-date content ('Not Entered in AMD' text, blanks), and the
+            --     WHERE clause below requires the period expression to be NOT NULL, so
+            --     those rows are naturally excluded rather than mis-parsed.
+            DECLARE @LisPeriodExpr NVARCHAR(200) =
+                CASE WHEN @UseBilledDate = 1 AND @LisBilledDateCol IS NOT NULL
+                     THEN N'TRY_CAST([' + @LisBilledDateCol + N'] AS DATE)'
+                     ELSE N'[' + @DateCol + N']' END;
+
+            -- DOS date filter applies to LIMSMaster via @DateCol (RequestCollectDate);
+            -- FirstBilledDate filter applies via AMDLBD. The two modes are mutually
+            -- exclusive (see @UseBilledDate above), matching RisingTides.
             -- Dimension filters applied: Panels→PanelCategory, Clinics→Facility, Providers→Provider.
             -- SalesRep filter is skipped — column not present on LIMSMaster.
             DECLARE @LisSql NVARCHAR(MAX) = N'
@@ -269,10 +321,29 @@ BEGIN
                     ' + @SSExpr + N',
                     ' + @PMExpr + N',
                     ' + @PTExpr + N',
-                    ISNULL(YEAR (TRY_CAST([' + @DateCol + N'] AS DATE)), 0),
-                    ISNULL(MONTH(TRY_CAST([' + @DateCol + N'] AS DATE)), 0)
+                    ISNULL(YEAR (' + @LisPeriodExpr + N'), 0),
+                    ISNULL(MONTH(' + @LisPeriodExpr + N'), 0)
                 FROM dbo.LIMSMaster
-                WHERE NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(100),[' + @AccCol + N']))),'''') IS NOT NULL';
+                WHERE ' + @LisPeriodExpr + N' IS NOT NULL';
+
+            -- Date predicate: DOS mode filters on RequestCollectDate (@DateCol);
+            -- FirstBilledDate mode filters on AMDLBD (TRY_CAST — invalid/blank values
+            -- already excluded by the period-basis bucketing above).
+            IF @UseBilledDate = 1 AND @LisBilledDateCol IS NOT NULL
+                SET @LisSql = @LisSql + N'
+                  AND (@iBilledFrom IS NULL OR TRY_CAST([' + @LisBilledDateCol + N'] AS DATE) >= @iBilledFrom)
+                  AND (@iBilledTo   IS NULL OR TRY_CAST([' + @LisBilledDateCol + N'] AS DATE) <= @iBilledTo)';
+            ELSE
+                SET @LisSql = @LisSql + N'
+                  AND (@iDosFrom IS NULL OR TRY_CAST([' + @DateCol + N'] AS DATE) >= @iDosFrom)
+                  AND (@iDosTo   IS NULL OR TRY_CAST([' + @DateCol + N'] AS DATE) <= @iDosTo)';
+
+            -- Year/month on RequestCollectDate (DOS mode) or AMDLBD (billed mode).
+            SET @LisSql = @LisSql + N'
+                  AND (ISNULL(@iYearFrom,0)=0  OR YEAR (' + @LisPeriodExpr + N') >= @iYearFrom)
+                  AND (ISNULL(@iYearTo,0)=0    OR YEAR (' + @LisPeriodExpr + N') <= @iYearTo)
+                  AND (ISNULL(@iMonthFrom,0)=0 OR MONTH(' + @LisPeriodExpr + N') >= @iMonthFrom)
+                  AND (ISNULL(@iMonthTo,0)=0   OR MONTH(' + @LisPeriodExpr + N') <= @iMonthTo)';
 
             -- Panel filter: Panels → PanelCategory
             IF @PanelNameCol IS NOT NULL
@@ -294,46 +365,115 @@ BEGIN
             EXEC sp_executesql @LisSql,
                 N'@iHasPanelFilter    BIT,           @iPanels    NVARCHAR(MAX),
                   @iHasClinicFilter   BIT,           @iClinics   NVARCHAR(MAX),
-                  @iHasProviderFilter BIT,           @iProviders NVARCHAR(MAX)',
+                  @iHasProviderFilter BIT,           @iProviders NVARCHAR(MAX),
+                  @iDosFrom DATE, @iDosTo DATE,
+                  @iBilledFrom DATE, @iBilledTo DATE,
+                  @iYearFrom INT, @iYearTo INT, @iMonthFrom INT, @iMonthTo INT',
                 @iHasPanelFilter    = @HasPanelFilter,    @iPanels    = @Panels,
                 @iHasClinicFilter   = @HasClinicFilter,   @iClinics   = @Clinics,
-                @iHasProviderFilter = @HasProviderFilter, @iProviders = @Providers;
+                @iHasProviderFilter = @HasProviderFilter, @iProviders = @Providers,
+                @iDosFrom = @DosFrom, @iDosTo = @DosTo,
+                @iBilledFrom = @BilledFrom, @iBilledTo = @BilledTo,
+                @iYearFrom = @YearFrom, @iYearTo = @YearTo,
+                @iMonthFrom = @MonthFrom, @iMonthTo = @MonthTo;
         END
     END
 
     -- ── PMS/Cash/Avg: build #Base from dbo.ClaimLevelData, date-filtered ────
     -- BillYear/BillMonth added so the filtered path produces month-wise rows.
+    -- Period basis now follows the same DOS vs FirstBilledDate mode as LIS
+    -- (@UseBilledDate, declared above). Previously BillYear/BillMonth were ALWAYS
+    -- derived from DateofService even when filtering by FirstBilledDate — rows that
+    -- matched the FirstBilledDate WHERE bound still got bucketed under their
+    -- (unrelated) DOS year/month, so a Billed-mode filter could show prior-period
+    -- columns under a "DATA BASED ON BILLED DATE" header. Fixed by branching the
+    -- period expression (and the date WHERE bound) on @UseBilledDate, mirroring
+    -- RisingTides' #Base construction. Only the date-related logic changes here —
+    -- Panel/Clinic/Provider/Rep filters are unchanged in both branches.
+    --
+    -- NOTE: #Base is pre-declared via CREATE TABLE (not SELECT...INTO) because SQL
+    -- Server does not allow SELECT...INTO to target the same temp table name from
+    -- two different branches of the same procedure, even when the branches are
+    -- mutually exclusive at runtime ("There is already an object named '#Base'...").
+    -- Both branches below use INSERT INTO instead, matching RisingTides' pattern.
     DROP TABLE IF EXISTS #Base;
+    CREATE TABLE #Base
+    (
+        ClaimID              NVARCHAR(500) NOT NULL,
+        BillYear             INT           NOT NULL,
+        BillMonth            INT           NOT NULL,
+        BillStatus           NVARCHAR(500) NOT NULL,
+        ClaimStatus          NVARCHAR(500) NOT NULL,
+        ChargeAmount         DECIMAL(18,2) NOT NULL,
+        InsurancePayment     DECIMAL(18,2) NOT NULL,
+        PatientPayment       DECIMAL(18,2) NOT NULL,
+        InsuranceAdjustments DECIMAL(18,2) NOT NULL,
+        PatientAdjustments   DECIMAL(18,2) NOT NULL,
+        InsuranceBalance     DECIMAL(18,2) NOT NULL,
+        PatientBalance       DECIMAL(18,2) NOT NULL
+    );
 
-    SELECT
-        ClaimID,
-        ISNULL(YEAR (TRY_CAST(DateofService AS DATE)), 0)        AS BillYear,
-        ISNULL(MONTH(TRY_CAST(DateofService AS DATE)), 0)        AS BillMonth,
-        ISNULL(LTRIM(RTRIM(BilledUnbilled)), '')                 AS BillStatus,
-        ISNULL(LTRIM(RTRIM(ClaimStatus)),    '')                 AS ClaimStatus,
-        ISNULL(TRY_CAST(ChargeAmount         AS DECIMAL(18,2)), 0) AS ChargeAmount,
-        ISNULL(TRY_CAST(InsurancePayment     AS DECIMAL(18,2)), 0) AS InsurancePayment,
-        ISNULL(TRY_CAST(PatientPayment       AS DECIMAL(18,2)), 0) AS PatientPayment,
-        ISNULL(TRY_CAST(InsuranceAdjustments AS DECIMAL(18,2)), 0) AS InsuranceAdjustments,
-        ISNULL(TRY_CAST(PatientAdjustments   AS DECIMAL(18,2)), 0) AS PatientAdjustments,
-        ISNULL(TRY_CAST(InsuranceBalance     AS DECIMAL(18,2)), 0) AS InsuranceBalance,
-        ISNULL(TRY_CAST(PatientBalance       AS DECIMAL(18,2)), 0) AS PatientBalance
-    INTO #Base
-    FROM dbo.ClaimLevelData
-    WHERE TRY_CAST(DateofService AS DATE) IS NOT NULL
-      AND NULLIF(CONVERT(NVARCHAR(50), ClaimID), '') IS NOT NULL
-      AND (ISNULL(@YearFrom,0)=0  OR YEAR (TRY_CAST(DateofService AS DATE)) >= @YearFrom)
-      AND (ISNULL(@YearTo,0)=0    OR YEAR (TRY_CAST(DateofService AS DATE)) <= @YearTo)
-      AND (ISNULL(@MonthFrom,0)=0 OR MONTH(TRY_CAST(DateofService AS DATE)) >= @MonthFrom)
-      AND (ISNULL(@MonthTo,0)=0   OR MONTH(TRY_CAST(DateofService AS DATE)) <= @MonthTo)
-      AND (@DosFrom    IS NULL OR TRY_CAST(DateofService   AS DATE) >= @DosFrom)
-      AND (@DosTo      IS NULL OR TRY_CAST(DateofService   AS DATE) <= @DosTo)
-      AND (@BilledFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @BilledFrom)
-      AND (@BilledTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @BilledTo)
-      AND (@HasPanelFilter    = 0 OR CHARINDEX(',' + LTRIM(RTRIM(ISNULL(PanelName,         ''))) COLLATE DATABASE_DEFAULT + ',', ',' + @Panels + ',') > 0)
-      AND (@HasClinicFilter   = 0 OR CHARINDEX(',' + LTRIM(RTRIM(ISNULL(ClinicName,        ''))) COLLATE DATABASE_DEFAULT + ',', ',' + @Clinics + ',') > 0)
-      AND (@HasProviderFilter = 0 OR CHARINDEX(',' + LTRIM(RTRIM(ISNULL(ReferringProvider, ''))) COLLATE DATABASE_DEFAULT + ',', ',' + @Providers + ',') > 0)
-      AND (@HasRepFilter      = 0 OR CHARINDEX(',' + LTRIM(RTRIM(ISNULL(SalesRepname,      ''))) COLLATE DATABASE_DEFAULT + ',', ',' + @Reps + ',') > 0);
+    IF @UseBilledDate = 0
+    BEGIN
+        INSERT INTO #Base (ClaimID, BillYear, BillMonth, BillStatus, ClaimStatus,
+                            ChargeAmount, InsurancePayment, PatientPayment,
+                            InsuranceAdjustments, PatientAdjustments,
+                            InsuranceBalance, PatientBalance)
+        SELECT
+            ClaimID,
+            ISNULL(YEAR (TRY_CAST(DateofService AS DATE)), 0)        AS BillYear,
+            ISNULL(MONTH(TRY_CAST(DateofService AS DATE)), 0)        AS BillMonth,
+            ISNULL(LTRIM(RTRIM(BilledUnbilled)), '')                 AS BillStatus,
+            ISNULL(LTRIM(RTRIM(ClaimStatus)),    '')                 AS ClaimStatus,
+            ISNULL(TRY_CAST(ChargeAmount         AS DECIMAL(18,2)), 0) AS ChargeAmount,
+            ISNULL(TRY_CAST(InsurancePayment     AS DECIMAL(18,2)), 0) AS InsurancePayment,
+            ISNULL(TRY_CAST(PatientPayment       AS DECIMAL(18,2)), 0) AS PatientPayment,
+            ISNULL(TRY_CAST(InsuranceAdjustments AS DECIMAL(18,2)), 0) AS InsuranceAdjustments,
+            ISNULL(TRY_CAST(PatientAdjustments   AS DECIMAL(18,2)), 0) AS PatientAdjustments,
+            ISNULL(TRY_CAST(InsuranceBalance     AS DECIMAL(18,2)), 0) AS InsuranceBalance,
+            ISNULL(TRY_CAST(PatientBalance       AS DECIMAL(18,2)), 0) AS PatientBalance
+        FROM dbo.ClaimLevelData
+        WHERE TRY_CAST(DateofService AS DATE) IS NOT NULL
+          AND (ISNULL(@YearFrom,0)=0  OR YEAR (TRY_CAST(DateofService AS DATE)) >= @YearFrom)
+          AND (ISNULL(@YearTo,0)=0    OR YEAR (TRY_CAST(DateofService AS DATE)) <= @YearTo)
+          AND (ISNULL(@MonthFrom,0)=0 OR MONTH(TRY_CAST(DateofService AS DATE)) >= @MonthFrom)
+          AND (ISNULL(@MonthTo,0)=0   OR MONTH(TRY_CAST(DateofService AS DATE)) <= @MonthTo)
+          AND (@DosFrom    IS NULL OR TRY_CAST(DateofService   AS DATE) >= @DosFrom)
+          AND (@DosTo      IS NULL OR TRY_CAST(DateofService   AS DATE) <= @DosTo)
+          AND (@HasPanelFilter    = 0 OR CHARINDEX(',' + LTRIM(RTRIM(ISNULL(PanelName,         ''))) COLLATE DATABASE_DEFAULT + ',', ',' + @Panels + ',') > 0)
+          AND (@HasClinicFilter   = 0 OR CHARINDEX(',' + LTRIM(RTRIM(ISNULL(ClinicName,        ''))) COLLATE DATABASE_DEFAULT + ',', ',' + @Clinics + ',') > 0)
+          AND (@HasProviderFilter = 0 OR CHARINDEX(',' + LTRIM(RTRIM(ISNULL(ReferringProvider, ''))) COLLATE DATABASE_DEFAULT + ',', ',' + @Providers + ',') > 0)
+          AND (@HasRepFilter      = 0 OR CHARINDEX(',' + LTRIM(RTRIM(ISNULL(SalesRepname,      ''))) COLLATE DATABASE_DEFAULT + ',', ',' + @Reps + ',') > 0);
+    END
+    ELSE  -- @UseBilledDate = 1 : period + filter on FirstBilledDate (mixed date/text/blank — TRY_CAST excludes non-date rows)
+    BEGIN
+        INSERT INTO #Base (ClaimID, BillYear, BillMonth, BillStatus, ClaimStatus,
+                            ChargeAmount, InsurancePayment, PatientPayment,
+                            InsuranceAdjustments, PatientAdjustments,
+                            InsuranceBalance, PatientBalance)
+        SELECT
+            ClaimID,
+            ISNULL(YEAR (TRY_CAST(FirstBilledDate AS DATE)), 0)      AS BillYear,
+            ISNULL(MONTH(TRY_CAST(FirstBilledDate AS DATE)), 0)      AS BillMonth,
+            ISNULL(LTRIM(RTRIM(BilledUnbilled)), '')                 AS BillStatus,
+            ISNULL(LTRIM(RTRIM(ClaimStatus)),    '')                 AS ClaimStatus,
+            ISNULL(TRY_CAST(ChargeAmount         AS DECIMAL(18,2)), 0) AS ChargeAmount,
+            ISNULL(TRY_CAST(InsurancePayment     AS DECIMAL(18,2)), 0) AS InsurancePayment,
+            ISNULL(TRY_CAST(PatientPayment       AS DECIMAL(18,2)), 0) AS PatientPayment,
+            ISNULL(TRY_CAST(InsuranceAdjustments AS DECIMAL(18,2)), 0) AS InsuranceAdjustments,
+            ISNULL(TRY_CAST(PatientAdjustments   AS DECIMAL(18,2)), 0) AS PatientAdjustments,
+            ISNULL(TRY_CAST(InsuranceBalance     AS DECIMAL(18,2)), 0) AS InsuranceBalance,
+            ISNULL(TRY_CAST(PatientBalance       AS DECIMAL(18,2)), 0) AS PatientBalance
+        FROM dbo.ClaimLevelData
+        WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+          AND (@BilledFrom IS NULL OR TRY_CAST(FirstBilledDate AS DATE) >= @BilledFrom)
+          AND (@BilledTo   IS NULL OR TRY_CAST(FirstBilledDate AS DATE) <= @BilledTo)
+          AND (@HasPanelFilter    = 0 OR CHARINDEX(',' + LTRIM(RTRIM(ISNULL(PanelName,         ''))) COLLATE DATABASE_DEFAULT + ',', ',' + @Panels + ',') > 0)
+          AND (@HasClinicFilter   = 0 OR CHARINDEX(',' + LTRIM(RTRIM(ISNULL(ClinicName,        ''))) COLLATE DATABASE_DEFAULT + ',', ',' + @Clinics + ',') > 0)
+          AND (@HasProviderFilter = 0 OR CHARINDEX(',' + LTRIM(RTRIM(ISNULL(ReferringProvider, ''))) COLLATE DATABASE_DEFAULT + ',', ',' + @Providers + ',') > 0)
+          AND (@HasRepFilter      = 0 OR CHARINDEX(',' + LTRIM(RTRIM(ISNULL(SalesRepname,      ''))) COLLATE DATABASE_DEFAULT + ',', ',' + @Reps + ',') > 0)
+        OPTION (RECOMPILE);
+    END
 
     -- ── Populate #LisOut: aggregate (fast path) or live from #Lis (filtered path) ──
     -- When @HasLisFilter = 0 (SalesRep-only filter), LIMSMaster was not scanned
@@ -353,7 +493,12 @@ BEGIN
         -- No LIS-applicable filter — serve directly from aggregate (fast)
         INSERT INTO #LisOut (RowCode, Description, BillYear, BillMonth, MetricValue)
         SELECT RoleID, Description, ESYear, ESMonth, CAST(ESMonthClaimCount AS DECIMAL(18,2))
-        FROM dbo.BeechTree_ES_LIS;
+        FROM dbo.BeechTree_ES_LIS
+        WHERE (ESYear = 0 AND ESMonth = 0)
+           OR ( (ISNULL(@YearFrom,0)=0  OR ESYear  >= @YearFrom)
+            AND (ISNULL(@YearTo,0)=0    OR ESYear  <= @YearTo)
+            AND (ISNULL(@MonthFrom,0)=0 OR ESMonth >= @MonthFrom)
+            AND (ISNULL(@MonthTo,0)=0   OR ESMonth <= @MonthTo));
     END
     ELSE
     BEGIN
@@ -361,155 +506,155 @@ BEGIN
         ;WITH Lis AS
         (
             SELECT 'A' AS RowCode, 'Total Samples' AS Description, BillYear, BillMonth,
-               CAST(COUNT(DISTINCT Accession) AS DECIMAL(18,2)) AS MetricValue
+               CAST(COUNT(*) AS DECIMAL(18,2)) AS MetricValue
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B', 'Billable Samples - Resulted', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B2', '  Billed to Insurance', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' AND ClaimStatus='Billed' AND BilledorNot='Billed' AND ClientStatus='' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' AND ClaimStatus='Billed' AND BilledorNot='Billed' AND ClientStatus='' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B2.1', '    Billed In AMD', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' AND ClaimStatus='Billed' AND BilledorNot='Billed' AND ClientStatus='' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' AND ClaimStatus='Billed' AND BilledorNot='Billed' AND ClientStatus='' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B3', '  Not Entered in AMD', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' AND ClientStatus IN ('','Billing Review Required') THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' AND ClientStatus IN ('','Billing Review Required') THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B3.1', '    Received', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' AND ClientStatus IN ('','Billing Review Required') AND SampleStatus='Received' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' AND ClientStatus IN ('','Billing Review Required') AND SampleStatus='Received' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B3.2', '    Billing Review Required', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' AND SampleStatus='Received' AND ClientStatus='Billing Review Required' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' AND SampleStatus='Received' AND ClientStatus='Billing Review Required' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B3.3', '    In Transit', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' AND ClientStatus IN ('','Billing Review Required') AND SampleStatus='In Transit' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' AND ClientStatus IN ('','Billing Review Required') AND SampleStatus='In Transit' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B3.4', '    Transferred', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' AND ClientStatus IN ('','Billing Review Required') AND SampleStatus='Transferred' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' AND ClientStatus IN ('','Billing Review Required') AND SampleStatus='Transferred' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B3.5', '    Collected', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' AND ClientStatus IN ('','Billing Review Required') AND SampleStatus='Collected' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' AND ClientStatus IN ('','Billing Review Required') AND SampleStatus='Collected' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B4', '  Unbilled', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' AND ClaimStatus='Entered' AND BilledorNot='UnBilled' AND ClientStatus='' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' AND ClaimStatus='Entered' AND BilledorNot='UnBilled' AND ClientStatus='' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B5', '  Client Bill', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' AND ClientStatus='Client Bill' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' AND ClientStatus='Client Bill' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B5.1', '    Not Entered in AMD', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' AND ClientStatus='Client Bill' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' AND ClientStatus='Client Bill' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B5.2', '    Billed', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' AND ClientStatus='Client Bill' AND BilledorNot='Billed' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' AND ClientStatus='Client Bill' AND BilledorNot='Billed' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B6', '  Self Pay', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' AND ClientStatus='Self Pay' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' AND ClientStatus='Self Pay' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B6.1', '    Not Entered in AMD', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' AND ClientStatus='Self Pay' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' AND ClientStatus='Self Pay' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B6.2', '    Billed', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' AND ClientStatus='Self Pay' AND BilledorNot='Billed' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' AND ClientStatus='Self Pay' AND BilledorNot='Billed' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B6.3', '    Entered', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' AND ClientStatus='Self Pay' AND ClaimStatus='Entered' AND BilledorNot='UnBilled' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' AND ClientStatus='Self Pay' AND ClaimStatus='Entered' AND BilledorNot='UnBilled' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B7', '  Test Entries', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' AND ClientStatus='Test Entries' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' AND ClientStatus='Test Entries' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B7.1', '    Not Entered in AMD', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' AND ClientStatus='Test Entries' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' AND ClientStatus='Test Entries' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B7.2', '    Billed', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' AND ClientStatus='Test Entries' AND BilledorNot='Billed' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' AND ClientStatus='Test Entries' AND BilledorNot='Billed' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B8', '  Rejected Sample', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' AND ClientStatus='Rejected Sample' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' AND ClientStatus='Rejected Sample' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B8.1', '    Not Entered in AMD', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' AND ClientStatus='Rejected Sample' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' AND ClientStatus='Rejected Sample' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B8.2', '    Billed', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' AND ClientStatus='Rejected Sample' AND BilledorNot='Billed' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' AND ClientStatus='Rejected Sample' AND BilledorNot='Billed' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'B9', '  Payment Method No Bill', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Resulted' AND PaymentMethod='No Bill' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Resulted' AND PaymentMethod='No Bill' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'C', 'Not Resulted', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Not Resulted' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Not Resulted' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'C1', '  No Result date on LIS but Billed', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Not Resulted' AND ClaimStatus='Billed' AND BilledorNot='Billed' AND ClientStatus='' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Not Resulted' AND ClaimStatus='Billed' AND BilledorNot='Billed' AND ClientStatus='' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'C2', '  Not Entered in AMD', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Not Resulted' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' AND ClientStatus='' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Not Resulted' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' AND ClientStatus='' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'C2.1', '    Received', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Not Resulted' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' AND ClientStatus='' AND SampleStatus='Received' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Not Resulted' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' AND ClientStatus='' AND SampleStatus='Received' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'C2.2', '    In Transit', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Not Resulted' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' AND ClientStatus='' AND SampleStatus='In Transit' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Not Resulted' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' AND ClientStatus='' AND SampleStatus='In Transit' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'C2.3', '    Collected', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Not Resulted' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' AND ClientStatus='' AND SampleStatus='Collected' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Not Resulted' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' AND ClientStatus='' AND SampleStatus='Collected' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'C2.4', '    Transferred', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Not Resulted' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' AND ClientStatus='' AND SampleStatus='Transferred' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Not Resulted' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' AND ClientStatus='' AND SampleStatus='Transferred' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'C3', '  Client Bill', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Not Resulted' AND ClientStatus='Client Bill' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Not Resulted' AND ClientStatus='Client Bill' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'C4', '  Self Pay', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Not Resulted' AND ClientStatus='Self Pay' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Not Resulted' AND ClientStatus='Self Pay' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'C4.1', '    Not Entered in AMD', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Not Resulted' AND ClientStatus='Self Pay' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Not Resulted' AND ClientStatus='Self Pay' AND ClaimStatus='Not Entered in AMD' AND BilledorNot='UnBilled' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'C4.2', '    Billed', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Not Resulted' AND ClientStatus='Self Pay' AND BilledorNot='Billed' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Not Resulted' AND ClientStatus='Self Pay' AND BilledorNot='Billed' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'D', 'Test Entries', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Not Resulted' AND ClientStatus='Test Entries' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Not Resulted' AND ClientStatus='Test Entries' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'E', 'Rejected Sample', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted='Not Resulted' AND ClientStatus='Rejected Sample' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted='Not Resulted' AND ClientStatus='Rejected Sample' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis GROUP BY BillYear, BillMonth
         )
         INSERT INTO #LisOut (RowCode, Description, BillYear, BillMonth, MetricValue)
@@ -520,63 +665,109 @@ BEGIN
         INSERT INTO #LisOut (RowCode, Description, BillYear, BillMonth, MetricValue)
         SELECT 'B1.' + LTRIM(RTRIM(PanelName)), '  ' + LTRIM(RTRIM(PanelName)),
                BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN Resulted = 'Resulted' THEN Accession END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN Resulted = 'Resulted' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Lis
         WHERE Resulted = 'Resulted' AND LTRIM(RTRIM(PanelName)) <> ''
         GROUP BY LTRIM(RTRIM(PanelName)), BillYear, BillMonth;
     END
 
     -- ────────────────────────────────────────────────────────────────────
-    --  PMS  -  R, S, T, U, V, W, X, Y, Z, Z.1, Z.2, Z.3
+    --  PMS  -  R, S, T, U, V, V.1..Vn (BTWOSummary), W, X, Y, Z, Z.1, Z.2, Z.3
     -- ────────────────────────────────────────────────────────────────────
     ;WITH PMS AS
     (
         SELECT 'R' AS RowCode, 'Billed - Includes all Claims Billed in AMD' AS Description, BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN BillStatus='Billed' THEN ClaimID END) AS DECIMAL(18,2)) AS MetricValue
+               CAST(SUM(CASE WHEN BillStatus='Billed' THEN 1 ELSE 0 END) AS DECIMAL(18,2)) AS MetricValue
         FROM #Base GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'S', 'Billed Mismatches - Non Diagnose LIS Samples', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN BillStatus='Billed' AND ClaimStatus='Billed amount 0' THEN ClaimID END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN BillStatus='Billed' AND ClaimStatus='Billed amount 0' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Base GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'T', 'Unbilled - Entered to AMD - Yet to be released to Payer', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN BillStatus='UnBilled' THEN ClaimID END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN BillStatus='UnBilled' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Base GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'U', 'Fully Paid - Insurance Pay', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN ClaimStatus='Fully Paid' THEN ClaimID END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN ClaimStatus='Fully Paid' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Base GROUP BY BillYear, BillMonth
         UNION ALL
-        SELECT 'V', 'Fully Adjusted', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN ClaimStatus='Fully Adjusted' THEN ClaimID END) AS DECIMAL(18,2))
-        FROM #Base GROUP BY BillYear, BillMonth
+        -- V  Fully Adjusted – SUM(MatchingCount) from BTWOSummary so the parent
+        --    total equals the sum of its V.n sub-rows. Bucketed by
+        --    BTWOSummary.DateofService to avoid double-counting.
+        SELECT 'V', 'Fully Adjusted', p.BillYear, p.BillMonth,
+               CAST(ISNULL(SUM(ws.MatchingCount), 0) AS DECIMAL(18,2))
+        FROM (SELECT DISTINCT BillYear, BillMonth FROM #Base) p
+        LEFT JOIN (
+            SELECT
+                ws2.MatchingCount,
+                ISNULL(YEAR (TRY_CAST(ws2.DateofService AS DATE)), 0) AS WOYear,
+                ISNULL(MONTH(TRY_CAST(ws2.DateofService AS DATE)), 0) AS WOMonth
+            FROM dbo.BTWOSummary ws2
+            JOIN (SELECT DISTINCT LTRIM(RTRIM(CAST(ClaimID AS NVARCHAR(50)))) AS ClaimID FROM #Base) b
+                ON LTRIM(RTRIM(CAST(ws2.ClaimID AS NVARCHAR(50)))) = b.ClaimID
+            WHERE TRY_CAST(ws2.DateofService AS DATE) IS NOT NULL
+        ) ws ON p.BillYear = ws.WOYear AND p.BillMonth = ws.WOMonth
+        GROUP BY p.BillYear, p.BillMonth
+        UNION ALL
+        -- V.n  Fully Adjusted sub-rows – one per TransactionCodeCombined (A-Z order),
+        --      period bucketed from BTWOSummary.DateofService.
+        SELECT
+            'V.' + CAST(ROW_NUMBER() OVER (PARTITION BY sub.BillYear, sub.BillMonth
+                                           ORDER BY     sub.TransactionCodeCombined) AS NVARCHAR(10)),
+            '  ' + sub.TransactionCodeCombined,
+            sub.BillYear,
+            sub.BillMonth,
+            CAST(sub.MatchingCount AS DECIMAL(18,2))
+        FROM (
+            SELECT
+                p.BillYear,
+                p.BillMonth,
+                ws.TransactionCodeCombined,
+                SUM(ws.MatchingCount) AS MatchingCount
+            FROM (SELECT DISTINCT BillYear, BillMonth FROM #Base) p
+            JOIN (
+                SELECT
+                    ws2.ClaimID,
+                    ws2.TransactionCodeCombined,
+                    ws2.MatchingCount,
+                    ISNULL(YEAR (TRY_CAST(ws2.DateofService AS DATE)), 0) AS WOYear,
+                    ISNULL(MONTH(TRY_CAST(ws2.DateofService AS DATE)), 0) AS WOMonth
+                FROM dbo.BTWOSummary ws2
+                JOIN (SELECT DISTINCT LTRIM(RTRIM(CAST(ClaimID AS NVARCHAR(50)))) AS ClaimID FROM #Base) b
+                    ON LTRIM(RTRIM(CAST(ws2.ClaimID AS NVARCHAR(50)))) = b.ClaimID
+                WHERE ws2.TransactionCodeCombined IS NOT NULL
+                  AND TRY_CAST(ws2.DateofService AS DATE) IS NOT NULL
+            ) ws ON p.BillYear = ws.WOYear AND p.BillMonth = ws.WOMonth
+            GROUP BY p.BillYear, p.BillMonth, ws.TransactionCodeCombined
+        ) sub
         UNION ALL
         SELECT 'W', 'Patient Responsibility', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN ClaimStatus='Pat Responsibility' THEN ClaimID END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN ClaimStatus='Pat Responsibility' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Base GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'X', 'Partially Paid', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN ClaimStatus='Partial Paid' THEN ClaimID END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN ClaimStatus='Partial Paid' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Base GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'Y', 'Patient Payment', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN PatientPayment > 0 THEN ClaimID END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN PatientPayment > 0 THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Base GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'Z', 'Insurance Balance', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN ClaimStatus IN ('Fully Denied','No Response','Partially Denied') THEN ClaimID END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN ClaimStatus IN ('Fully Denied','No Response','Partially Denied') THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Base GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'Z.1', '  Fully Denied', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN ClaimStatus='Fully Denied' THEN ClaimID END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN ClaimStatus='Fully Denied' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Base GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'Z.2', '  No Response', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN ClaimStatus='No Response' THEN ClaimID END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN ClaimStatus='No Response' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Base GROUP BY BillYear, BillMonth
         UNION ALL
         SELECT 'Z.3', '  Partially Denied', BillYear, BillMonth,
-               CAST(COUNT(DISTINCT CASE WHEN ClaimStatus='Partially Denied' THEN ClaimID END) AS DECIMAL(18,2))
+               CAST(SUM(CASE WHEN ClaimStatus='Partially Denied' THEN 1 ELSE 0 END) AS DECIMAL(18,2))
         FROM #Base GROUP BY BillYear, BillMonth
     ),
     -- ────────────────────────────────────────────────────────────────────
@@ -630,25 +821,25 @@ BEGIN
     AvgRows AS
     (
         SELECT 'AK' AS RowCode, 'Average Payment ($) - Total Pay/Billed Claims' AS Description, BillYear, BillMonth,
-               CASE WHEN COUNT(DISTINCT CASE WHEN BillStatus='Billed' THEN ClaimID END) > 0
+               CASE WHEN SUM(CASE WHEN BillStatus='Billed' THEN 1 ELSE 0 END) > 0
                     THEN SUM(CASE WHEN BillStatus='Billed' THEN InsurancePayment+PatientPayment ELSE 0 END)
-                         / COUNT(DISTINCT CASE WHEN BillStatus='Billed' THEN ClaimID END)
+                         / SUM(CASE WHEN BillStatus='Billed' THEN 1 ELSE 0 END)
                     ELSE 0 END AS MetricValue
         FROM #Base GROUP BY BillYear, BillMonth
 
         UNION ALL
         SELECT 'AL', 'Average Payment ($) - Total Pay/Paid Claims', BillYear, BillMonth,
-               CASE WHEN COUNT(DISTINCT CASE WHEN ClaimStatus='Fully Paid' THEN ClaimID END) > 0
+               CASE WHEN SUM(CASE WHEN ClaimStatus='Fully Paid' THEN 1 ELSE 0 END) > 0
                     THEN SUM(CASE WHEN ClaimStatus='Fully Paid' THEN InsurancePayment+PatientPayment ELSE 0 END)
-                         / COUNT(DISTINCT CASE WHEN ClaimStatus='Fully Paid' THEN ClaimID END)
+                         / SUM(CASE WHEN ClaimStatus='Fully Paid' THEN 1 ELSE 0 END)
                     ELSE 0 END
         FROM #Base GROUP BY BillYear, BillMonth
 
         UNION ALL
         SELECT 'AM', 'Average Payment ($) - Total Pay/Adjudicated Claims', BillYear, BillMonth,
-               CASE WHEN COUNT(DISTINCT CASE WHEN ClaimStatus NOT IN ('Unbilled','Unbilled - PB') THEN ClaimID END) > 0
+               CASE WHEN SUM(CASE WHEN ClaimStatus NOT IN ('Unbilled','Unbilled - PB') THEN 1 ELSE 0 END) > 0
                     THEN SUM(CASE WHEN ClaimStatus NOT IN ('Unbilled','Unbilled - PB') THEN InsurancePayment+PatientPayment ELSE 0 END)
-                         / COUNT(DISTINCT CASE WHEN ClaimStatus NOT IN ('Unbilled','Unbilled - PB') THEN ClaimID END)
+                         / SUM(CASE WHEN ClaimStatus NOT IN ('Unbilled','Unbilled - PB') THEN 1 ELSE 0 END)
                     ELSE 0 END
         FROM #Base GROUP BY BillYear, BillMonth
     )

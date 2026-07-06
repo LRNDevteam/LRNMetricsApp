@@ -25,9 +25,11 @@
 --
 --   Certus_ES_PMS   - "Billable Samples - PMS Breakdown":
 --       F      No. of Billed Claims
+--         F.<PanelGroup>  Dynamic per-panel-group sub-rows (via dbo.PanelGroup, 'Other' fallback)
 --       G      Unbilled Claims
 --       H      Billed Mismatches - Other samples billed (PMS Billed - LIS Billed)
 --       I      No. of Fully Paid Claims
+--         I.<PanelGroup>  Dynamic per-panel-group sub-rows
 --       J      No. of Patient Responsibility Claims
 --       K      No. of Patient Paid Claims
 --       L      No. of Adjusted/Written Off Claims
@@ -36,7 +38,10 @@
 --       O      No. of Partially Paid Claims
 --       P      No. of Insurance Balance Claims
 --         P.1    No. of Fully Denied Claims
---         P.2    No. of No Response from Payor Claims
+--           P.1.<PanelGroup>  Dynamic per-panel-group sub-rows
+--         P.2    No. of Partially Denied Claims
+--         P.3    No. of No Response from Payor Claims
+--           P.3.<PanelGroup>  Dynamic per-panel-group sub-rows
 --
 --   Certus_ES_Cash  - "Cash Breakdown":
 --       Q      Total Billed ($)
