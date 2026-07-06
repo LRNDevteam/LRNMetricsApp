@@ -347,21 +347,43 @@ BEGIN
 
     -- ────────────────────────────────────────────────────────────────────
     --  Cove_ES_Avg  -  V, W, X
+    --  V and X now source their numerator/denominator from the already-inserted
+    --  Cove_ES_Cash / Cove_ES_PMS rows above (not re-derived independently from
+    --  #Base), per confirmed spec:
+    --    V = SUM(Cash P,R,T) / PMS F                   (Total Pay/Billed Claims)
+    --    X = SUM(Cash P,T)   / SUM(PMS H,J,L,N.1,N.2)   (Total Pay/Adjudicated Claims)
+    --  W (Total Pay/Paid Claims) is unchanged.
     -- ────────────────────────────────────────────────────────────────────
+    ;WITH CashV AS (
+        SELECT ESYear, ESMonth, SUM(ESMonthChargeAmount) AS PayTotal
+        FROM dbo.Cove_ES_Cash WHERE RoleID IN ('P','R','T') GROUP BY ESYear, ESMonth
+    ),
+    PMS_F AS (
+        SELECT ESYear, ESMonth, SUM(ESMonthClaimCount) AS ClaimCount
+        FROM dbo.Cove_ES_PMS WHERE RoleID = 'F' GROUP BY ESYear, ESMonth
+    ),
+    CashX AS (
+        SELECT ESYear, ESMonth, SUM(ESMonthChargeAmount) AS PayTotal
+        FROM dbo.Cove_ES_Cash WHERE RoleID IN ('P','T') GROUP BY ESYear, ESMonth
+    ),
+    PMS_Adjudicated AS (
+        SELECT ESYear, ESMonth, SUM(ESMonthClaimCount) AS ClaimCount
+        FROM dbo.Cove_ES_PMS WHERE RoleID IN ('H','J','L','N.1','N.2') GROUP BY ESYear, ESMonth
+    )
     INSERT INTO dbo.Cove_ES_Avg (RoleID, Description, ESYear, ESMonth, ESMonthClaimCount, ESMonthChargeAmount, RefreshedAt)
     SELECT RoleID, Description, ESYear, ESMonth, ClaimCount,
            CASE WHEN ClaimCount > 0 THEN PayTotal / ClaimCount ELSE 0 END, GETDATE()
     FROM
     (
-        -- V  Average Payment ($) - Total Pay / Billed Claims
+        -- V  Average Payment ($) - Total Pay / Billed Claims = SUM(P,R,T) / F
         SELECT p.ESYear, p.ESMonth, 'V' AS RoleID, 'Average Payment ($) - Total Pay/Billed Claims' AS Description,
-               COUNT(DISTINCT CASE WHEN b.BillStatus IN ('Billed','Billed-Client','Billed - Client') THEN b.AccessionNumber END) AS ClaimCount,
-               SUM(CASE WHEN b.BillStatus IN ('Billed','Billed-Client','Billed - Client') THEN b.InsurancePayment + b.PatientPayment ELSE 0 END) AS PayTotal
+               ISNULL(f.ClaimCount, 0) AS ClaimCount,
+               ISNULL(cv.PayTotal, 0)  AS PayTotal
         FROM #Periods p
-        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-        GROUP BY p.ESYear, p.ESMonth
+        LEFT JOIN CashV cv ON cv.ESYear = p.ESYear AND cv.ESMonth = p.ESMonth
+        LEFT JOIN PMS_F f  ON f.ESYear  = p.ESYear AND f.ESMonth  = p.ESMonth
 
-        -- W  Average Payment ($) - Total Pay / Paid Claims
+        -- W  Average Payment ($) - Total Pay / Paid Claims  (unchanged)
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'W', 'Average Payment ($) - Total Pay/Paid Claims',
                COUNT(DISTINCT CASE WHEN b.ClaimStatus IN ('Fully Paid','Paid-Client') THEN b.AccessionNumber END),
@@ -370,14 +392,14 @@ BEGIN
         LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
 
-        -- X  Average Payment ($) - Total Pay / Adjudicated Claims
+        -- X  Average Payment ($) - Total Pay / Adjudicated Claims = SUM(P,T) / SUM(H,J,L,N.1,N.2)
         UNION ALL
         SELECT p.ESYear, p.ESMonth, 'X', 'Average Payment ($) - Total Pay/Adjudicated Claims',
-               COUNT(DISTINCT CASE WHEN b.ClaimStatus NOT IN ('Unbilled','Unbilled - PB') THEN b.AccessionNumber END),
-               SUM(CASE WHEN b.ClaimStatus NOT IN ('Unbilled','Unbilled - PB') THEN b.InsurancePayment + b.PatientPayment ELSE 0 END)
+               ISNULL(adj.ClaimCount, 0),
+               ISNULL(cx.PayTotal, 0)
         FROM #Periods p
-        LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-        GROUP BY p.ESYear, p.ESMonth
+        LEFT JOIN CashX cx            ON cx.ESYear  = p.ESYear AND cx.ESMonth  = p.ESMonth
+        LEFT JOIN PMS_Adjudicated adj ON adj.ESYear = p.ESYear AND adj.ESMonth = p.ESMonth
     ) avgrows;
 
     DROP TABLE IF EXISTS #Base;

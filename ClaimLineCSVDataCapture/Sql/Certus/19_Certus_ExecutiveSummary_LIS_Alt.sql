@@ -8,28 +8,33 @@
 -- Sources from dbo.LIMSMaster using ReqCollectDate as the date column.
 --
 -- Certus LIS column mapping:
+--   IncorrectDOS  -> IncorrectDOS / IncorrectDos / Incorrect_DOS / BadDOS  (optional)
 --   BillTo        -> BillTo / BillCategory / Bill_Category / BilledorNot
 --   BillingStatus -> BillingStatus / NewStatus / Status / BillStatus
 --   FinalStatus   -> FinalStatus / SubStatus / Sub_Status / ClientStatus
 --   PanelName     -> PanelName / Panelname / PanelType / PanelCategory / ...
 --   ReqCollectDate -> ReqCollectDate (priority 0) / DateOfCollection / ...
 --
--- Row hierarchy:
---   A     Total Samples (all records)
---   B     Billable Samples (BillTo = 'Insurance Bill')
---     B1.<PanelName>  One per DISTINCT PanelName in LIMSMaster where BillTo='Insurance Bill'
+-- IncorrectDOS is applied as a base filter on #Lis (rows where IncorrectDOS is
+-- non-blank are excluded entirely), so every row below (A-E) is implicitly
+-- "Where IncorrectDOS = Blank" per the LIS Breakdown spec. If the column isn't
+-- found on LIMSMaster, no IncorrectDOS filtering is applied (graceful no-op).
+--
+-- Row hierarchy (B1.<PanelName>, D.<FinalStatus>, E.<BillTo> are all dynamic -
+-- one row per DISTINCT value actually present in the data, no fixed/hardcoded list):
+--   A     Total Samples          (IncorrectDOS = Blank)
+--   B     Billable Samples       (BillTo = 'Insurance Bill')
+--     B1.<PanelName>  One per DISTINCT PanelName where BillTo='Insurance Bill'
 --     C     Billed     (BillTo='Insurance Bill', BillingStatus='Billed')
 --     D     Unbilled   (BillTo='Insurance Bill', BillingStatus='Not Billed')
---       D.1   Claim Entered in Daqbilling
---       D.2   Resulted yet to be billed
---       D.3   D/L Isomer
+--       D.<FinalStatus>  One per DISTINCT FinalStatus where BillTo='Insurance Bill'
+--                        AND BillingStatus='Not Billed' (e.g. Claim Entered in
+--                        Daqbilling, Resulted yet to be billed, D/L Isomer - whatever
+--                        FinalStatus values are actually present, not a fixed list)
 --   E     Other Samples (BillTo <> 'Insurance Bill')
---     E.1   Duplicate
---     E.2   Client Bill
---     E.3   Yet to be Validated
---     E.4   Selfpay
---     E.5   Rejection
---     E.6   System Test
+--     E.<BillTo>  One per DISTINCT BillTo <> 'Insurance Bill' (e.g. Duplicate,
+--                 Client Bill, Selfpay, Yet to be Validated, Rejection, System
+--                 Test - whatever BillTo values are actually present)
 -- ============================================================
 SET NOCOUNT ON;
 GO
@@ -97,6 +102,14 @@ BEGIN
             WHEN 'Panel'           THEN 6 WHEN 'PanelDescription' THEN 7 WHEN 'TestName'        THEN 8
             WHEN 'Test_Panel'      THEN 9 WHEN 'TestPanelname'    THEN 10 ELSE 11 END);
 
+    -- IncorrectDOS: optional flag column. When present, rows where it is
+    -- non-blank are excluded from #Lis entirely (base filter for all of A-E).
+    DECLARE @IncorrectDOSCol SYSNAME = (
+        SELECT TOP 1 name FROM sys.columns
+        WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
+          AND name IN ('IncorrectDOS','IncorrectDos','Incorrect_DOS','BadDOS')
+        ORDER BY CASE name WHEN 'IncorrectDOS' THEN 0 WHEN 'IncorrectDos' THEN 1 WHEN 'Incorrect_DOS' THEN 2 WHEN 'BadDOS' THEN 3 ELSE 4 END);
+
     IF @AccCol IS NULL OR @DateCol IS NULL OR @BillToCol IS NULL OR @BillingStatusCol IS NULL OR @FinalStatusCol IS NULL
     BEGIN
         PRINT 'usp_RefreshCertus_ExecutiveSummary_LIS_Alt: required columns not found on dbo.LIMSMaster - skipping.';
@@ -132,7 +145,13 @@ BEGIN
             ' + @PanelExpr + N'
         FROM dbo.LIMSMaster
         WHERE TRY_CAST([' + @DateCol + N'] AS DATE) IS NOT NULL
-          AND NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(100), [' + @AccCol + N']))), '''') IS NOT NULL;';
+          AND NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(100), [' + @AccCol + N']))), '''') IS NOT NULL';
+    -- IncorrectDOS = Blank base filter (applies to every row A-E). No-op if the
+    -- column isn't present on this lab's LIMSMaster.
+    IF @IncorrectDOSCol IS NOT NULL
+        SET @LisSql += N'
+          AND NULLIF(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(50), [' + @IncorrectDOSCol + N']), ''''))), '''') IS NULL';
+    SET @LisSql += N';';
     EXEC sp_executesql @LisSql;
 
     -- LIS periods + grand-total sentinel
@@ -148,6 +167,29 @@ BEGIN
     FROM #Lis
     WHERE NULLIF(PanelName, '') IS NOT NULL
       AND BillTo = 'Insurance Bill';
+
+    -- Distinct FinalStatus values present where BillTo='Insurance Bill' AND
+    -- BillingStatus='Not Billed'. Drives the D.<FinalStatus> sub-row breakdowns
+    -- dynamically (e.g. Claim Entered in Daqbilling, Resulted yet to be billed,
+    -- D/L Isomer - whatever values are actually in the data, no fixed list).
+    DROP TABLE IF EXISTS #FinalStatuses;
+    SELECT DISTINCT FinalStatus
+    INTO #FinalStatuses
+    FROM #Lis
+    WHERE NULLIF(FinalStatus, '') IS NOT NULL
+      AND BillTo = 'Insurance Bill'
+      AND BillingStatus = 'Not Billed';
+
+    -- Distinct BillTo values present where BillTo <> 'Insurance Bill'. Drives
+    -- the E.<BillTo> sub-row breakdowns dynamically (e.g. Duplicate, Client
+    -- Bill, Selfpay, Yet to be Validated, Rejection, System Test - whatever
+    -- values are actually in the data, no fixed list).
+    DROP TABLE IF EXISTS #OtherBillTo;
+    SELECT DISTINCT BillTo
+    INTO #OtherBillTo
+    FROM #Lis
+    WHERE NULLIF(BillTo, '') IS NOT NULL
+      AND BillTo <> 'Insurance Bill';
 
     -- ────────────────────────────────────────────────────────────────────────
     --  Insert all LIS rows into Certus_ES_LIS
@@ -198,32 +240,17 @@ BEGIN
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
 
-        -- D.1  Claim Entered in Daqbilling
+        -- D.<FinalStatus>  Unbilled breakdown by FinalStatus - dynamic
         UNION ALL
-        SELECT p.ESYear, p.ESMonth, 'D.1', '    Claim Entered in Daqbilling',
+        SELECT p.ESYear, p.ESMonth,
+               N'D.' + fs.FinalStatus,
+               N'    ' + fs.FinalStatus,
                COUNT(DISTINCT CASE WHEN l.BillTo='Insurance Bill' AND l.BillingStatus='Not Billed'
-                                   AND l.FinalStatus='Claim Entered in Daqbilling' THEN l.Accession END)
+                                   AND l.FinalStatus = fs.FinalStatus THEN l.Accession END)
         FROM #LisPeriods p
+        CROSS JOIN #FinalStatuses fs
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
-        GROUP BY p.ESYear, p.ESMonth
-
-        -- D.2  Resulted yet to be billed
-        UNION ALL
-        SELECT p.ESYear, p.ESMonth, 'D.2', '    Resulted yet to be billed',
-               COUNT(DISTINCT CASE WHEN l.BillTo='Insurance Bill' AND l.BillingStatus='Not Billed'
-                                   AND l.FinalStatus='Resulted yet to be billed' THEN l.Accession END)
-        FROM #LisPeriods p
-        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
-        GROUP BY p.ESYear, p.ESMonth
-
-        -- D.3  D/L Isomer
-        UNION ALL
-        SELECT p.ESYear, p.ESMonth, 'D.3', '    D/L Isomer',
-               COUNT(DISTINCT CASE WHEN l.BillTo='Insurance Bill' AND l.BillingStatus='Not Billed'
-                                   AND l.FinalStatus='D/L Isomer' THEN l.Accession END)
-        FROM #LisPeriods p
-        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
-        GROUP BY p.ESYear, p.ESMonth
+        GROUP BY p.ESYear, p.ESMonth, fs.FinalStatus
 
         -- E  Other Samples (not Insurance Bill)
         UNION ALL
@@ -233,58 +260,23 @@ BEGIN
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
 
-        -- E.1  Duplicate
+        -- E.<BillTo>  Other Samples breakdown by BillTo - dynamic
         UNION ALL
-        SELECT p.ESYear, p.ESMonth, 'E.1', '  Duplicate',
-               COUNT(DISTINCT CASE WHEN l.BillTo='Duplicate' THEN l.Accession END)
+        SELECT p.ESYear, p.ESMonth,
+               N'E.' + ob.BillTo,
+               N'  ' + ob.BillTo,
+               COUNT(DISTINCT CASE WHEN l.BillTo = ob.BillTo THEN l.Accession END)
         FROM #LisPeriods p
+        CROSS JOIN #OtherBillTo ob
         LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
-        GROUP BY p.ESYear, p.ESMonth
-
-        -- E.2  Client Bill
-        UNION ALL
-        SELECT p.ESYear, p.ESMonth, 'E.2', '  Client Bill',
-               COUNT(DISTINCT CASE WHEN l.BillTo='Client Bill' THEN l.Accession END)
-        FROM #LisPeriods p
-        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
-        GROUP BY p.ESYear, p.ESMonth
-
-        -- E.3  Yet to be Validated
-        UNION ALL
-        SELECT p.ESYear, p.ESMonth, 'E.3', '  Yet to be Validated',
-               COUNT(DISTINCT CASE WHEN l.BillTo='Yet to be Validated' THEN l.Accession END)
-        FROM #LisPeriods p
-        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
-        GROUP BY p.ESYear, p.ESMonth
-
-        -- E.4  Selfpay
-        UNION ALL
-        SELECT p.ESYear, p.ESMonth, 'E.4', '  Selfpay',
-               COUNT(DISTINCT CASE WHEN l.BillTo='Selfpay' THEN l.Accession END)
-        FROM #LisPeriods p
-        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
-        GROUP BY p.ESYear, p.ESMonth
-
-        -- E.5  Rejection
-        UNION ALL
-        SELECT p.ESYear, p.ESMonth, 'E.5', '  Rejection',
-               COUNT(DISTINCT CASE WHEN l.BillTo='Rejection' THEN l.Accession END)
-        FROM #LisPeriods p
-        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
-        GROUP BY p.ESYear, p.ESMonth
-
-        -- E.6  System Test
-        UNION ALL
-        SELECT p.ESYear, p.ESMonth, 'E.6', '  System Test',
-               COUNT(DISTINCT CASE WHEN l.BillTo='System Test' THEN l.Accession END)
-        FROM #LisPeriods p
-        LEFT JOIN #Lis l ON (p.ESYear=0 OR (l.ESYear=p.ESYear AND l.ESMonth=p.ESMonth))
-        GROUP BY p.ESYear, p.ESMonth
+        GROUP BY p.ESYear, p.ESMonth, ob.BillTo
     ) lis_rows;
 
     DROP TABLE IF EXISTS #Lis;
     DROP TABLE IF EXISTS #LisPeriods;
     DROP TABLE IF EXISTS #PanelNames;
+    DROP TABLE IF EXISTS #FinalStatuses;
+    DROP TABLE IF EXISTS #OtherBillTo;
 
     PRINT 'usp_RefreshCertus_ExecutiveSummary_LIS_Alt completed.';
 END;

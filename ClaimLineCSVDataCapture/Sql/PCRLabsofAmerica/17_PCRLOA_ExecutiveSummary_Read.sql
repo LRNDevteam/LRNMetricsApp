@@ -143,11 +143,11 @@ BEGIN
 	-- ─────────────────────────────────────────────────────────────────────────
 	-- LIS DIMENSION FILTER  (Panel only; Clinic / Provider / Rep not available
 	-- in LIMSMaster for PCR Labs of America and are intentionally skipped).
-	-- Date parameters are ignored for LIMSMaster — LIS always buckets by
-	-- RequestCollectDate independently of the ClaimLevelData date filters.
+	-- Date parameters are applied to LIMSMaster using RequestCollectDate for LIS date filtering.
 	-- ─────────────────────────────────────────────────────────────────────────
 	DECLARE @HasLisFilter BIT =
-		CASE WHEN @HasPanelFilter = 1 THEN 1 ELSE 0 END;
+		CASE WHEN @HasPanelFilter = 1 OR @DosFrom IS NOT NULL OR @DosTo IS NOT NULL
+			 THEN 1 ELSE 0 END;
 
 	DROP TABLE IF EXISTS #LisBase;
 	CREATE TABLE #LisBase
@@ -214,10 +214,15 @@ BEGIN
 					' + @LisPanelExpr + N'
 				FROM dbo.LIMSMaster
 				WHERE TRY_CAST(RequestCollectDate AS DATE) IS NOT NULL
-				  AND NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(100), Accession))), '''') IS NOT NULL';
+					AND NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(100), Accession))), '''') IS NOT NULL';
 
-			-- Panel filter predicate (Date intentionally omitted for LIMSMaster).
-			IF @HasPanelFilter = 1
+				  -- DOS date predicates applied to LIMSMaster via RequestCollectDate.
+				  SET @LisBaseSql += N'
+					AND (@iDosFrom IS NULL OR TRY_CAST(RequestCollectDate AS DATE) >= @iDosFrom)
+					AND (@iDosTo   IS NULL OR TRY_CAST(RequestCollectDate AS DATE) <= @iDosTo)';
+
+				  -- Panel filter predicate.
+				  IF @HasPanelFilter = 1
 				SET @LisBaseSql += N'
 				  AND CHARINDEX(('','' + LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(300),[' + @LisPanelFilterCol + N']),''''))) + '','') COLLATE DATABASE_DEFAULT,
 				              ('','' + @iPanels + '','') COLLATE DATABASE_DEFAULT) > 0';
@@ -225,8 +230,8 @@ BEGIN
 			SET @LisBaseSql += N';';
 
 			EXEC sp_executesql @LisBaseSql,
-				N'@iPanels NVARCHAR(MAX)',
-				@iPanels = @Panels;
+				N'@iPanels NVARCHAR(MAX), @iDosFrom DATE, @iDosTo DATE',
+				@iPanels = @Panels, @iDosFrom = @DosFrom, @iDosTo = @DosTo;
 
 			SET @LisMasterFiltered = 1;
 		END

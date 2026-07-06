@@ -79,12 +79,18 @@ BEGIN
         ORDER BY CASE name WHEN 'DuplicatePayment' THEN 0 WHEN 'DuplicatePay' THEN 1 WHEN 'Duplicate_Payment' THEN 2 ELSE 3 END);
 
     -- Build the Billed expression for @BaseSql.
-    -- Use existing column if found; otherwise derive from date columns.
-    -- Output values are always 'Billed' / 'Unbilled' so all downstream b.Billed checks work unchanged.
+    -- NW: BilledStatus column exists but is NOT populated — skip it.
+    -- Derive 'Billed'/'Unbilled' from FirstBilledDate / EmedixSubmissionDate.
+    --   FirstBilledDate non-empty  → 'Billed'
+    --   EmedixSubmissionDate non-empty → 'Billed'
+    --   both empty/null            → 'Unbilled'
+    -- BilledStatus / BillStatus column kept only as last-resort fallback.
+    -- Output values are always 'Billed' or 'Unbilled'.
     DECLARE @BilledExpr NVARCHAR(MAX) =
         CASE
-            WHEN @BilledCol IS NOT NULL
-                THEN N'ISNULL(LTRIM(RTRIM([' + @BilledCol + N'])),'''')'
+            -- Priority 1: derive from date columns (BilledStatus is blank for NW)
+            --WHEN @BilledCol IS NOT NULL
+            --    THEN N'ISNULL(LTRIM(RTRIM([' + @BilledCol + N'])),'''')'
             WHEN @FirstBillDateCol IS NOT NULL OR @EmedixSubDateCol IS NOT NULL
                 THEN
                     N'CASE'
@@ -95,6 +101,9 @@ BEGIN
                            THEN N' WHEN NULLIF(LTRIM(RTRIM(ISNULL(CONVERT(NVARCHAR(50),[' + @EmedixSubDateCol + N']),''''))),'''') IS NOT NULL THEN ''Billed'''
                            ELSE N'' END
                     + N' ELSE ''Unbilled'' END'
+            -- Priority 2: BilledStatus / Billed column (only if no date columns found)
+            WHEN @BilledCol IS NOT NULL
+                THEN N'ISNULL(LTRIM(RTRIM([' + @BilledCol + N'])),'''')'
             ELSE NULL
         END;
 
@@ -114,6 +123,7 @@ BEGIN
         Billed            NVARCHAR(50)   NOT NULL,
         ClaimType         NVARCHAR(200)  NOT NULL,
         ClaimStatus       NVARCHAR(200)  NOT NULL,
+        FirstBilledDate   DATE           NULL,
         ChargeAmount      DECIMAL(18,2)  NOT NULL,
         InsurancePayment  DECIMAL(18,2)  NOT NULL,
         ActualPayment     DECIMAL(18,2)  NOT NULL,
@@ -132,6 +142,13 @@ BEGIN
         THEN N'ISNULL(TRY_CAST([' + @DupPayCol + N'] AS DECIMAL(18,2)),0)'
         ELSE N'0' END;
 
+    -- FirstBilledDate: needed for the ARIA "submitted/not submitted in the last
+    -- 30 days" rows below. Reuses the already-detected @FirstBillDateCol (same
+    -- column used to derive the Billed/Unbilled status above).
+    DECLARE @FBDExpr NVARCHAR(300) = CASE WHEN @FirstBillDateCol IS NOT NULL
+        THEN N'TRY_CAST([' + @FirstBillDateCol + N'] AS DATE)'
+        ELSE N'CAST(NULL AS DATE)' END;
+
     DECLARE @BaseSql NVARCHAR(MAX) = N'
         INSERT INTO #Base
         SELECT
@@ -141,6 +158,7 @@ BEGIN
             ' + @BilledExpr + N' AS Billed,
             ISNULL(LTRIM(RTRIM([' + @ClaimTypeCol + N'])),'''') AS ClaimType,
             ISNULL(LTRIM(RTRIM(ClaimStatus)),'''') AS ClaimStatus,
+            ' + @FBDExpr + N' AS FirstBilledDate,
             ISNULL(TRY_CAST(ChargeAmount         AS DECIMAL(18,2)),0),
             ISNULL(TRY_CAST(InsurancePayment     AS DECIMAL(18,2)),0),
             ' + @ActExpr + N',
@@ -159,6 +177,59 @@ BEGIN
     DROP TABLE IF EXISTS #Periods;
     SELECT DISTINCT ESYear, ESMonth INTO #Periods FROM #Base
     UNION ALL SELECT 0, 0;
+
+    -- ── ARIA "submitted / not submitted in the last 30 days" scalars ─────────
+    -- These are point-in-time snapshots (not period-bucketed), so the same
+    -- computed value is broadcast to every ESYear/ESMonth row below, replacing
+    -- the previous hardcoded 0 placeholders. Anchor = the most recent
+    -- FirstBilledDate that is not in the future; window = that date minus one
+    -- calendar month (e.g. anchor 12-Jun-2026 → window start 12-May-2026).
+    -- Each group mirrors its own parent row's existing WHERE conditions
+    -- (ClaimType exclusion, ClaimStatus, and for the AC.1/AC.3 dollar rows the
+    -- same Billed IN ('Billed','Billed - Client') condition used by AC.1/AC.3
+    -- themselves) with the FirstBilledDate window layered on top to split into
+    -- "submitted" (A1, within the window) vs "not submitted" (A2, outside it or
+    -- never billed). AP = A1 / A2, per spec.
+    DECLARE @AriaAnchor      DATE = (SELECT MAX(FirstBilledDate) FROM #Base WHERE FirstBilledDate <= CAST(GETDATE() AS DATE));
+    DECLARE @AriaWindowStart DATE = DATEADD(MONTH, -1, @AriaAnchor);
+
+    -- S.1 (PMS, Count of AccessionNumber, ClaimStatus = 'Fully Denied')
+    DECLARE @S1_A1 DECIMAL(18,2) = (SELECT COUNT(DISTINCT AccessionNumber) FROM #Base
+        WHERE ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='Fully Denied'
+          AND @AriaAnchor IS NOT NULL AND FirstBilledDate BETWEEN @AriaWindowStart AND @AriaAnchor);
+    DECLARE @S1_A2 DECIMAL(18,2) = (SELECT COUNT(DISTINCT AccessionNumber) FROM #Base
+        WHERE ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='Fully Denied'
+          AND (@AriaAnchor IS NULL OR FirstBilledDate IS NULL OR FirstBilledDate < @AriaWindowStart OR FirstBilledDate > @AriaAnchor));
+    DECLARE @S1_AP DECIMAL(18,2) = CASE WHEN ISNULL(@S1_A2,0) > 0 THEN @S1_A1 / @S1_A2 ELSE 0 END;
+
+    -- S.3 (PMS, Count of AccessionNumber, ClaimStatus = 'No Response')
+    DECLARE @S3_A1 DECIMAL(18,2) = (SELECT COUNT(DISTINCT AccessionNumber) FROM #Base
+        WHERE ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='No Response'
+          AND @AriaAnchor IS NOT NULL AND FirstBilledDate BETWEEN @AriaWindowStart AND @AriaAnchor);
+    DECLARE @S3_A2 DECIMAL(18,2) = (SELECT COUNT(DISTINCT AccessionNumber) FROM #Base
+        WHERE ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='No Response'
+          AND (@AriaAnchor IS NULL OR FirstBilledDate IS NULL OR FirstBilledDate < @AriaWindowStart OR FirstBilledDate > @AriaAnchor));
+    DECLARE @S3_AP DECIMAL(18,2) = CASE WHEN ISNULL(@S3_A2,0) > 0 THEN @S3_A1 / @S3_A2 ELSE 0 END;
+
+    -- AC.1 (Cash, SUM of InsuranceBalance, ClaimStatus = 'Fully Denied', mirrors
+    -- AC.1's own Billed IN ('Billed','Billed - Client') condition)
+    DECLARE @AC1_A1 DECIMAL(18,2) = (SELECT ISNULL(SUM(InsuranceBalance),0) FROM #Base
+        WHERE Billed IN ('Billed','Billed - Client') AND ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='Fully Denied'
+          AND @AriaAnchor IS NOT NULL AND FirstBilledDate BETWEEN @AriaWindowStart AND @AriaAnchor);
+    DECLARE @AC1_A2 DECIMAL(18,2) = (SELECT ISNULL(SUM(InsuranceBalance),0) FROM #Base
+        WHERE Billed IN ('Billed','Billed - Client') AND ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='Fully Denied'
+          AND (@AriaAnchor IS NULL OR FirstBilledDate IS NULL OR FirstBilledDate < @AriaWindowStart OR FirstBilledDate > @AriaAnchor));
+    DECLARE @AC1_AP DECIMAL(18,2) = CASE WHEN ISNULL(@AC1_A2,0) > 0 THEN @AC1_A1 / @AC1_A2 ELSE 0 END;
+
+    -- AC.3 (Cash, SUM of InsuranceBalance, ClaimStatus = 'No Response', mirrors
+    -- AC.3's own Billed IN ('Billed','Billed - Client') condition)
+    DECLARE @AC3_A1 DECIMAL(18,2) = (SELECT ISNULL(SUM(InsuranceBalance),0) FROM #Base
+        WHERE Billed IN ('Billed','Billed - Client') AND ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='No Response'
+          AND @AriaAnchor IS NOT NULL AND FirstBilledDate BETWEEN @AriaWindowStart AND @AriaAnchor);
+    DECLARE @AC3_A2 DECIMAL(18,2) = (SELECT ISNULL(SUM(InsuranceBalance),0) FROM #Base
+        WHERE Billed IN ('Billed','Billed - Client') AND ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='No Response'
+          AND (@AriaAnchor IS NULL OR FirstBilledDate IS NULL OR FirstBilledDate < @AriaWindowStart OR FirstBilledDate > @AriaAnchor));
+    DECLARE @AC3_AP DECIMAL(18,2) = CASE WHEN ISNULL(@AC3_A2,0) > 0 THEN @AC3_A1 / @AC3_A2 ELSE 0 END;
 
     -- ── #LisBilled : LIMSMaster billed count per period (for Row I) ──────────
     DROP TABLE IF EXISTS #LisBilled;
@@ -417,10 +488,10 @@ BEGIN
         LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
 
-        -- S.1.A1/A2/AP  ARIA placeholders
-        UNION ALL SELECT p.ESYear, p.ESMonth, 'S.1.A1', '    Aria Submitted in the last 30 Days', 0 FROM #Periods p GROUP BY p.ESYear, p.ESMonth
-        UNION ALL SELECT p.ESYear, p.ESMonth, 'S.1.A2', '    Aria not submitted in the last 30 Days', 0 FROM #Periods p GROUP BY p.ESYear, p.ESMonth
-        UNION ALL SELECT p.ESYear, p.ESMonth, 'S.1.AP', '    % of the claim submitted in the last 30 Days', 0 FROM #Periods p GROUP BY p.ESYear, p.ESMonth
+        -- S.1.A1/A2/AP  ARIA (Count of AccessionNumber, ClaimStatus='Fully Denied')
+        UNION ALL SELECT p.ESYear, p.ESMonth, 'S.1.A1', '    Aria Submitted in the last 30 Days', @S1_A1 FROM #Periods p GROUP BY p.ESYear, p.ESMonth
+        UNION ALL SELECT p.ESYear, p.ESMonth, 'S.1.A2', '    Aria not submitted in the last 30 Days', @S1_A2 FROM #Periods p GROUP BY p.ESYear, p.ESMonth
+        UNION ALL SELECT p.ESYear, p.ESMonth, 'S.1.AP', '    % of the claim submitted in the last 30 Days', @S1_AP FROM #Periods p GROUP BY p.ESYear, p.ESMonth
 
         -- S.2  No. of Partially Denied Claims
         UNION ALL
@@ -440,10 +511,10 @@ BEGIN
         LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
 
-        -- S.3.A1/A2/AP  ARIA placeholders
-        UNION ALL SELECT p.ESYear, p.ESMonth, 'S.3.A1', '    Claim filed by ARIA in the last 30 days', 0 FROM #Periods p GROUP BY p.ESYear, p.ESMonth
-        UNION ALL SELECT p.ESYear, p.ESMonth, 'S.3.A2', '    Claims not filed in the last 30 days', 0 FROM #Periods p GROUP BY p.ESYear, p.ESMonth
-        UNION ALL SELECT p.ESYear, p.ESMonth, 'S.3.AP', '    % of the claim submitted in the last 30 Days', 0 FROM #Periods p GROUP BY p.ESYear, p.ESMonth
+        -- S.3.A1/A2/AP  ARIA (Count of AccessionNumber, ClaimStatus='No Response')
+        UNION ALL SELECT p.ESYear, p.ESMonth, 'S.3.A1', '    Claim filed by ARIA in the last 30 days', @S3_A1 FROM #Periods p GROUP BY p.ESYear, p.ESMonth
+        UNION ALL SELECT p.ESYear, p.ESMonth, 'S.3.A2', '    Claims not filed in the last 30 days', @S3_A2 FROM #Periods p GROUP BY p.ESYear, p.ESMonth
+        UNION ALL SELECT p.ESYear, p.ESMonth, 'S.3.AP', '    % of the claim submitted in the last 30 Days', @S3_AP FROM #Periods p GROUP BY p.ESYear, p.ESMonth
     ) pms;
 
     -- ════════════════════════════════════════════════════════════════════════
@@ -648,10 +719,10 @@ BEGIN
         LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
 
-        -- AC.1 ARIA placeholders
-        UNION ALL SELECT p.ESYear, p.ESMonth, 'AC.1.A1', '    Claim filed by ARIA in the last 30 days', 0 FROM #Periods p GROUP BY p.ESYear, p.ESMonth
-        UNION ALL SELECT p.ESYear, p.ESMonth, 'AC.1.A2', '    Claims not filed in the last 30 days', 0 FROM #Periods p GROUP BY p.ESYear, p.ESMonth
-        UNION ALL SELECT p.ESYear, p.ESMonth, 'AC.1.AP', '    % of the claim submitted in the last 30 Days', 0 FROM #Periods p GROUP BY p.ESYear, p.ESMonth
+        -- AC.1 ARIA (SUM of InsuranceBalance, ClaimStatus='Fully Denied', mirrors AC.1's own Billed filter)
+        UNION ALL SELECT p.ESYear, p.ESMonth, 'AC.1.A1', '    Claim filed by ARIA in the last 30 days', @AC1_A1 FROM #Periods p GROUP BY p.ESYear, p.ESMonth
+        UNION ALL SELECT p.ESYear, p.ESMonth, 'AC.1.A2', '    Claims not filed in the last 30 days', @AC1_A2 FROM #Periods p GROUP BY p.ESYear, p.ESMonth
+        UNION ALL SELECT p.ESYear, p.ESMonth, 'AC.1.AP', '    % of the claim submitted in the last 30 Days', @AC1_AP FROM #Periods p GROUP BY p.ESYear, p.ESMonth
 
         -- AC.2  Partially Denied (placeholder - 0 per spec)
         UNION ALL SELECT p.ESYear, p.ESMonth, 'AC.2', '  Partially Denied', 0 FROM #Periods p GROUP BY p.ESYear, p.ESMonth
@@ -666,10 +737,10 @@ BEGIN
         LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
         GROUP BY p.ESYear, p.ESMonth
 
-        -- AC.3 ARIA placeholders
-        UNION ALL SELECT p.ESYear, p.ESMonth, 'AC.3.A1', '    Claim filed by ARIA in the last 30 days', 0 FROM #Periods p GROUP BY p.ESYear, p.ESMonth
-        UNION ALL SELECT p.ESYear, p.ESMonth, 'AC.3.A2', '    Claims not filed in the last 30 days', 0 FROM #Periods p GROUP BY p.ESYear, p.ESMonth
-        UNION ALL SELECT p.ESYear, p.ESMonth, 'AC.3.AP', '    % of the claim submitted in the last 30 Days', 0 FROM #Periods p GROUP BY p.ESYear, p.ESMonth
+        -- AC.3 ARIA (SUM of InsuranceBalance, ClaimStatus='No Response', mirrors AC.3's own Billed filter)
+        UNION ALL SELECT p.ESYear, p.ESMonth, 'AC.3.A1', '    Claim filed by ARIA in the last 30 days', @AC3_A1 FROM #Periods p GROUP BY p.ESYear, p.ESMonth
+        UNION ALL SELECT p.ESYear, p.ESMonth, 'AC.3.A2', '    Claims not filed in the last 30 days', @AC3_A2 FROM #Periods p GROUP BY p.ESYear, p.ESMonth
+        UNION ALL SELECT p.ESYear, p.ESMonth, 'AC.3.AP', '    % of the claim submitted in the last 30 Days', @AC3_AP FROM #Periods p GROUP BY p.ESYear, p.ESMonth
     ) cash;
 
     -- ════════════════════════════════════════════════════════════════════════

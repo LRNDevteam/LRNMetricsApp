@@ -664,10 +664,11 @@ public sealed class ClaimLineDbService
     }
 
     /// <summary>
-    /// Rebuilds <c>dbo.BTWOSummary</c> from the latest data in
-    /// <c>dbo.BTTransactionDetailData</c> and cross-matches with
-    /// <c>dbo.ClaimLevelData</c> to populate ClaimID, CdateofService,
-    /// UpdatedDateTime, and ClaimFileSourcename.
+    /// Rebuilds <c>dbo.BTWOSummary</c> by executing <c>dbo.usp_RefreshBT_WOSummary</c>.
+    /// The SP joins <c>dbo.BTTransactionDetailData</c> (VisitNumber) with
+    /// <c>dbo.ClaimLevelData</c> (ClaimID) on DateofService, groups by
+    /// TransactionCode / TransactionCodeDesc / DateofService, and inserts the
+    /// MatchingCount aggregates into <c>dbo.BTWOSummary</c>.
     /// Called after every new TransactionDetail Adjustment XLSX is imported.
     /// Returns (TotalRows, MatchedRows) from the SP's output row.
     /// </summary>

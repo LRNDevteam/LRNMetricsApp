@@ -36,6 +36,11 @@
 -- PanelName) auto-detected the same way as PhiLife/PCRLOA's file 20,
 -- falling back to '' if not present.
 --
+-- @DateCol priority: DateOfCollection (0) > RequestCollectDate (1) >
+--   CollectionDate (2) > DateofService (3) > ServiceDate (4) >
+--   AccessionDate (5).  Filter is always by the collection/service date
+--   that was used to bucket rows in file 19's aggregate.
+--
 -- @Year/@Month: 0 = all years / all months (matches the (0,0) grand-total
 -- sentinel period used by file 19).
 -- ============================================================
@@ -82,11 +87,15 @@ BEGIN
     DECLARE @DateCol SYSNAME = (
         SELECT TOP 1 name FROM sys.columns
         WHERE object_id = OBJECT_ID('dbo.LIMSMaster')
-          AND name IN ('DateOfCollection','DateofService','CollectionDate','ServiceDate','AccessionDate')
+          AND name IN ('DateOfCollection','RequestCollectDate','CollectionDate','DateofService','ServiceDate','AccessionDate')
         ORDER BY CASE name
-            WHEN 'DateOfCollection' THEN 0 WHEN 'DateofService' THEN 1
-            WHEN 'CollectionDate' THEN 2 WHEN 'ServiceDate' THEN 3
-            WHEN 'AccessionDate' THEN 4 ELSE 5 END);
+            WHEN 'DateOfCollection'   THEN 0
+            WHEN 'RequestCollectDate' THEN 1
+            WHEN 'CollectionDate'     THEN 2
+            WHEN 'DateofService'      THEN 3
+            WHEN 'ServiceDate'        THEN 4
+            WHEN 'AccessionDate'      THEN 5
+            ELSE 6 END);
 
     DECLARE @NewStatusCol SYSNAME = (
         SELECT TOP 1 name FROM sys.columns

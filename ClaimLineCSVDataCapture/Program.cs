@@ -547,6 +547,30 @@ foreach (var lab in labConfigs)
         }
     }
 
+    // ── Rebuild BTWOSummary when new ClaimLevel data arrived (BeechTree only) ──
+    // The TransactionDetail block already calls RefreshBTWOSummary when a new
+    // TransactionDetail file is loaded.  This block covers the case where only
+    // a new ClaimLevel file arrived — ClaimLevelData changed, so the join result
+    // in BTWOSummary (VisitNumber = ClaimID) must be rebuilt to stay accurate.
+    if (claimInserted
+        && (lab.LabName.Equals("Beech_Tree", StringComparison.OrdinalIgnoreCase) ||
+            lab.LabName.Equals("BeechTree",  StringComparison.OrdinalIgnoreCase)))
+    {
+        try
+        {
+            log.Info($"  [Claim Level] Refreshing BTWOSummary after new ClaimLevel data…");
+            var (totalRows, matchedRows, woError) = db.RefreshBTWOSummary();
+            if (woError is null)
+                log.Info($"  [Claim Level] BTWOSummary rebuilt — {totalRows} total row(s), {matchedRows} matched to ClaimLevelData.");
+            else
+                log.Error($"  [Claim Level] BTWOSummary refresh failed: {woError}");
+        }
+        catch (Exception ex)
+        {
+            log.Error($"  [Claim Level] BTWOSummary refresh unexpected error: {ex.Message}");
+        }
+    }
+
     // ── Clean decimal suffixes from integer columns after both inserts ────────
     if (claimInserted && lineInserted)
     {

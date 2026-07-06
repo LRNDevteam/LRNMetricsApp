@@ -60,10 +60,19 @@
     // (0,0) grand-total sentinel value instead of summing.
     decimal RowGrandTotal(ExecSummaryRow row)
     {
-        if (row.Category == "Avg")
+        // "Avg" rows are always a precomputed sentinel (never additive).
+        // Rows with NO monthly (Year!=0) buckets at all - i.e. the filtered/
+        // live-reaggregation path, which collapses everything into a single
+        // (BillYear=0, BillMonth=0) "filtered total" row - must also read the
+        // (0,0) sentinel directly, since there's nothing else to sum. Without
+        // this fallback, every LIS/PMS/Cash row's Grand Total came back 0
+        // whenever a date/dimension filter was applied, even though the SP
+        // returned the correct value in the (0,0) row.
+        bool hasMonthlyBuckets = row.ValuesByYearMonth.Keys.Any(k => k.Year != 0 && k.Month != 0);
+        if (row.Category == "Avg" || !hasMonthlyBuckets)
         {
-            row.ValuesByYearMonth.TryGetValue((0, 0), out var avgTotal);
-            return avgTotal;
+            row.ValuesByYearMonth.TryGetValue((0, 0), out var total);
+            return total;
         }
         return row.ValuesByYearMonth.Where(kv => kv.Key.Year != 0 && kv.Key.Month != 0).Sum(kv => kv.Value);
     }
@@ -265,6 +274,10 @@
     }
     .es-dd-btn:hover { border-color: #0e3460; }
     .es-dd-btn.active { border-color: #0e3460; box-shadow: 0 0 0 2px rgba(14,52,96,.12); }
+    .es-dd-btn:disabled, .es-dd-btn.es-dd-btn-disabled {
+        opacity: 0.5; cursor: not-allowed; pointer-events: none;
+        background: #f8f9fa; color: #adb5bd;
+    }
     .es-dd-btn .es-dd-count {
         background: #0e3460; color: #fff; border-radius: 10px;
         font-size: .6rem; padding: 1px 6px; margin-left: 4px; flex-shrink: 0;
@@ -319,9 +332,16 @@
 </style>
 
 @{
-    bool isCoveView = Model.AvailablePanels.Count > 0 || Model.AvailableClinics.Count > 0
-                   || Model.AvailableProviders.Count > 0 || Model.AvailableReps.Count > 0;
-    string ddPlaceholder = isCoveView ? "All" : "Cove lab only";
+    bool hasFilterOptions = Model.AvailablePanels.Count > 0 || Model.AvailableClinics.Count > 0
+                         || Model.AvailableProviders.Count > 0 || Model.AvailableReps.Count > 0;
+    string ddPlaceholder = hasFilterOptions ? "All" : "N/A";
+
+    // NorthWest LIMSMaster has no FirstBilledDate column — the "First Billed Date"
+    // range filter is meaningless for this lab, so its calendar controls are
+    // disabled here (server-rendered `disabled`) and re-asserted client-side.
+    bool isNorthWestLab = Model.SelectedLab.Equals("NorthWest", StringComparison.OrdinalIgnoreCase)
+                       || Model.SelectedLab.Equals("NWL", StringComparison.OrdinalIgnoreCase)
+                       || Model.SelectedLab.Equals("NorthWest_Labs", StringComparison.OrdinalIgnoreCase);
 }
 
 <div class="page-header mb-3">
@@ -384,32 +404,71 @@
 
             <!-- ── Section 1: Date Ranges ───────────────────────────── -->
             <div class="px-3 pt-2 pb-1">
-                <div class="es-filter-section-label">Date Ranges</div>
+                <div class="d-flex align-items-center justify-content-between">
+                    <div class="es-filter-section-label">Date Ranges</div>
+                    <button type="button" id="esResetDates" class="btn btn-sm btn-outline-secondary py-0 px-2"
+                            style="font-size:.7rem" title="Clear both date ranges">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>Reset Date Range
+                    </button>
+                </div>
+                <!-- DOS and First Billed Date are mutually exclusive: choosing one disables the other -->
                 <div class="row g-2">
-                    <div class="col-12 col-md-6 col-xl-3">
+                    <div class="col-12 col-md-6 col-xl-3" id="esDosGroup">
                         <label class="es-filter-label">DATE OF SERVICE</label>
                         <div class="d-flex gap-1 align-items-center">
-                            <input type="date" name="dosFrom" class="form-control form-control-sm es-date-input"
+                            <input type="date" name="dosFrom" class="form-control form-control-sm es-date-input es-dos-input"
                                    data-label="DOS From"
                                    value="@(Model.DosFrom?.ToString("yyyy-MM-dd"))" />
                             <span class="text-muted" style="font-size:.7rem">–</span>
-                            <input type="date" name="dosTo" class="form-control form-control-sm es-date-input"
+                            <input type="date" name="dosTo" class="form-control form-control-sm es-date-input es-dos-input"
                                    data-label="DOS To"
                                    value="@(Model.DosTo?.ToString("yyyy-MM-dd"))" />
                         </div>
                     </div>
-                    <div class="col-12 col-md-6 col-xl-3">
-                        <label class="es-filter-label">FIRST BILLED DATE</label>
+                    <div class="col-12 col-md-6 col-xl-3" id="esBilledGroup" data-permanently-disabled="@(isNorthWestLab ? "true" : "false")">
+                        <label class="es-filter-label">
+                            FIRST BILLED DATE
+                            @if (isNorthWestLab)
+                            {
+                                <span class="fw-normal text-muted" style="font-size:.62rem;letter-spacing:normal;text-transform:none;">(not available for NorthWest)</span>
+                            }
+                        </label>
                         <div class="d-flex gap-1 align-items-center">
-                            <input type="date" name="billedFrom" class="form-control form-control-sm es-date-input"
+                            <input type="date" name="billedFrom" class="form-control form-control-sm es-date-input es-billed-input"
                                    data-label="Billed From"
-                                   value="@(Model.BilledFrom?.ToString("yyyy-MM-dd"))" />
+                                   value="@(isNorthWestLab ? null : Model.BilledFrom?.ToString("yyyy-MM-dd"))"
+                                   disabled="@(isNorthWestLab ? "disabled" : null)" />
                             <span class="text-muted" style="font-size:.7rem">–</span>
-                            <input type="date" name="billedTo" class="form-control form-control-sm es-date-input"
+                            <input type="date" name="billedTo" class="form-control form-control-sm es-date-input es-billed-input"
                                    data-label="Billed To"
-                                   value="@(Model.BilledTo?.ToString("yyyy-MM-dd"))" />
+                                   value="@(isNorthWestLab ? null : Model.BilledTo?.ToString("yyyy-MM-dd"))"
+                                   disabled="@(isNorthWestLab ? "disabled" : null)" />
                         </div>
                     </div>
+                </div>
+                <!-- mutual-exclusivity static hint -->
+                @if (isNorthWestLab)
+                {
+                    <div class="mt-2" style="font-size:.75rem;color:#6c757d;">
+                        <i class="bi bi-info-circle me-1"></i>
+                        <strong>Note:</strong> NorthWest only supports <em>Date of Service</em> filtering —
+                        <em>First Billed Date</em> is not available for this lab.
+                    </div>
+                }
+                else
+                {
+                    <div class="mt-2" style="font-size:.75rem;color:#6c757d;">
+                        <i class="bi bi-info-circle me-1"></i>
+                        <strong>Note:</strong> Only <strong>one</strong> date range can be used at a time &mdash;
+                        either <em>Date of Service</em> <strong>or</strong> <em>First Billed Date</em>, not both.
+                        If both are filled, <em>Date of Service</em> takes priority.
+                    </div>
+                }
+                <!-- mutual-exclusivity conflict alert (shown by JS when both filled on load) -->
+                <div id="esDateConflictAlert" class="alert alert-warning py-1 px-2 mt-1 mb-0" style="font-size:.78rem;display:none;">
+                    <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                    Both date ranges were filled &mdash; <em>First Billed Date</em> has been cleared automatically.
+                    Use <strong>Reset Date Range</strong> to switch to First Billed Date instead.
                 </div>
             </div>
 
@@ -422,9 +481,10 @@
                     <div class="col-12 col-md-6 col-xl-3">
                         <label class="es-filter-label">PANEL</label>
                         <div class="position-relative es-dropdown-wrap">
-                            <button type="button" class="es-dd-btn" data-target="selPanels"
-                                    data-placeholder="@ddPlaceholder">
-                                <span class="es-dd-label es-dd-placeholder">@ddPlaceholder</span>
+                            <button type="button" class="es-dd-btn @(Model.AvailablePanels.Count == 0 ? "es-dd-btn-disabled" : "")"
+                                    data-target="selPanels" data-placeholder="All"
+                                    @(Model.AvailablePanels.Count == 0 ? "disabled title=\"No options available\"" : "")>
+                                <span class="es-dd-label es-dd-placeholder">@(Model.AvailablePanels.Count == 0 ? "N/A" : "All")</span>
                                 <i class="bi bi-chevron-down es-dd-caret"></i>
                             </button>
                             <div class="es-dd-menu" id="menuPanels">
@@ -432,36 +492,43 @@
                                 <div class="es-dd-list" id="listPanels">
                                     @if (Model.AvailablePanels.Count == 0)
                                     {
-                                        <div class="es-dd-empty">@(isCoveView ? "No options" : "Options load for Cove lab")</div>
+                                        <div class="es-dd-empty">No options available</div>
                                     }
-                                    @foreach (var p in Model.AvailablePanels)
-                                    {
-                                        bool chk = Model.SelectedPanels.Contains(p);
-                                        <label class="es-dd-item">
-                                            <input type="checkbox" value="@p" checked="@(chk ? "checked" : null)" />@p
-                                        </label>
-                                    }
-                                </div>
-                                <div class="es-dd-footer">
-                                    <button type="button" class="btn btn-xs btn-link text-muted es-dd-clear" style="font-size:.7rem">Clear</button>
-                                    <button type="button" class="btn btn-xs btn-primary es-dd-done" style="font-size:.7rem;padding:2px 10px">Done</button>
-                                </div>
-                            </div>
-                            <select name="panels" multiple class="es-hidden-select" id="selPanels">
-                                @foreach (var p in Model.AvailablePanels)
-                                {
-                                    bool chk = Model.SelectedPanels.Contains(p);
-                                    <option value="@p" selected="@(chk ? "selected" : null)">@p</option>
-                                }
-                            </select>
+                                             @foreach (var p in Model.AvailablePanels)
+                                             {
+                                                 bool chk = Model.SelectedPanels.Contains(p);
+                                                 <label class="es-dd-item">
+                                                     <input type="checkbox" value="@p" checked="@(chk ? "checked" : null)" />@p
+                                                 </label>
+                                             }
+                                        </div>
+                                        <div class="es-dd-footer">
+                                            <button type="button" class="btn btn-xs btn-link text-muted es-dd-clear" style="font-size:.7rem">Clear</button>
+                                            <button type="button" class="btn btn-xs btn-primary es-dd-done" style="font-size:.7rem;padding:2px 10px">Done</button>
+                                        </div>
+                                    </div>
+                                    <select name="panels" multiple class="es-hidden-select" id="selPanels">
+                                        @foreach (var p in Model.AvailablePanels)
+                                        {
+                                            if (Model.SelectedPanels.Contains(p))
+                                            {
+                                                <option value="@p" selected="selected">@p</option>
+                                            }
+                                            else
+                                            {
+                                                <option value="@p">@p</option>
+                                            }
+                                        }
+                                    </select>
                         </div>
                     </div>
                     <div class="col-12 col-md-6 col-xl-3">
                         <label class="es-filter-label">CLINICS</label>
                         <div class="position-relative es-dropdown-wrap">
-                            <button type="button" class="es-dd-btn" data-target="selClinics"
-                                    data-placeholder="@ddPlaceholder">
-                                <span class="es-dd-label es-dd-placeholder">@ddPlaceholder</span>
+                            <button type="button" class="es-dd-btn @(Model.AvailableClinics.Count == 0 ? "es-dd-btn-disabled" : "")"
+                                    data-target="selClinics" data-placeholder="All"
+                                    @(Model.AvailableClinics.Count == 0 ? "disabled title=\"No options available\"" : "")>
+                                <span class="es-dd-label es-dd-placeholder">@(Model.AvailableClinics.Count == 0 ? "N/A" : "All")</span>
                                 <i class="bi bi-chevron-down es-dd-caret"></i>
                             </button>
                             <div class="es-dd-menu" id="menuClinics">
@@ -469,36 +536,43 @@
                                 <div class="es-dd-list" id="listClinics">
                                     @if (Model.AvailableClinics.Count == 0)
                                     {
-                                        <div class="es-dd-empty">@(isCoveView ? "No options" : "Options load for Cove lab")</div>
+                                        <div class="es-dd-empty">No options available</div>
                                     }
-                                    @foreach (var c in Model.AvailableClinics)
-                                    {
-                                        bool chk = Model.SelectedClinics.Contains(c);
-                                        <label class="es-dd-item">
-                                            <input type="checkbox" value="@c" checked="@(chk ? "checked" : null)" />@c
-                                        </label>
-                                    }
-                                </div>
-                                <div class="es-dd-footer">
-                                    <button type="button" class="btn btn-xs btn-link text-muted es-dd-clear" style="font-size:.7rem">Clear</button>
-                                    <button type="button" class="btn btn-xs btn-primary es-dd-done" style="font-size:.7rem;padding:2px 10px">Done</button>
-                                </div>
-                            </div>
-                            <select name="clinics" multiple class="es-hidden-select" id="selClinics">
-                                @foreach (var c in Model.AvailableClinics)
-                                {
-                                    bool chk = Model.SelectedClinics.Contains(c);
-                                    <option value="@c" selected="@(chk ? "selected" : null)">@c</option>
-                                }
-                            </select>
+                                             @foreach (var c in Model.AvailableClinics)
+                                             {
+                                                 bool chk = Model.SelectedClinics.Contains(c);
+                                                 <label class="es-dd-item">
+                                                     <input type="checkbox" value="@c" checked="@(chk ? "checked" : null)" />@c
+                                                 </label>
+                                             }
+                                        </div>
+                                        <div class="es-dd-footer">
+                                            <button type="button" class="btn btn-xs btn-link text-muted es-dd-clear" style="font-size:.7rem">Clear</button>
+                                            <button type="button" class="btn btn-xs btn-primary es-dd-done" style="font-size:.7rem;padding:2px 10px">Done</button>
+                                        </div>
+                                    </div>
+                                    <select name="clinics" multiple class="es-hidden-select" id="selClinics">
+                                        @foreach (var c in Model.AvailableClinics)
+                                        {
+                                            if (Model.SelectedClinics.Contains(c))
+                                            {
+                                                <option value="@c" selected="selected">@c</option>
+                                            }
+                                            else
+                                            {
+                                                <option value="@c">@c</option>
+                                            }
+                                        }
+                                    </select>
                         </div>
                     </div>
                     <div class="col-12 col-md-6 col-xl-3">
                         <label class="es-filter-label">REFERRING PROVIDER</label>
                         <div class="position-relative es-dropdown-wrap">
-                            <button type="button" class="es-dd-btn" data-target="selProviders"
-                                    data-placeholder="@ddPlaceholder">
-                                <span class="es-dd-label es-dd-placeholder">@ddPlaceholder</span>
+                            <button type="button" class="es-dd-btn @(Model.AvailableProviders.Count == 0 ? "es-dd-btn-disabled" : "")"
+                                    data-target="selProviders" data-placeholder="All"
+                                    @(Model.AvailableProviders.Count == 0 ? "disabled title=\"No options available\"" : "")>
+                                <span class="es-dd-label es-dd-placeholder">@(Model.AvailableProviders.Count == 0 ? "N/A" : "All")</span>
                                 <i class="bi bi-chevron-down es-dd-caret"></i>
                             </button>
                             <div class="es-dd-menu" id="menuProviders">
@@ -506,36 +580,43 @@
                                 <div class="es-dd-list" id="listProviders">
                                     @if (Model.AvailableProviders.Count == 0)
                                     {
-                                        <div class="es-dd-empty">@(isCoveView ? "No options" : "Options load for Cove lab")</div>
+                                        <div class="es-dd-empty">No options available</div>
                                     }
-                                    @foreach (var p in Model.AvailableProviders)
-                                    {
-                                        bool chk = Model.SelectedProviders.Contains(p);
-                                        <label class="es-dd-item">
-                                            <input type="checkbox" value="@p" checked="@(chk ? "checked" : null)" />@p
-                                        </label>
-                                    }
-                                </div>
-                                <div class="es-dd-footer">
-                                    <button type="button" class="btn btn-xs btn-link text-muted es-dd-clear" style="font-size:.7rem">Clear</button>
-                                    <button type="button" class="btn btn-xs btn-primary es-dd-done" style="font-size:.7rem;padding:2px 10px">Done</button>
-                                </div>
-                            </div>
-                            <select name="providers" multiple class="es-hidden-select" id="selProviders">
-                                @foreach (var p in Model.AvailableProviders)
-                                {
-                                    bool chk = Model.SelectedProviders.Contains(p);
-                                    <option value="@p" selected="@(chk ? "selected" : null)">@p</option>
-                                }
-                            </select>
+                                             @foreach (var p in Model.AvailableProviders)
+                                             {
+                                                 bool chk = Model.SelectedProviders.Contains(p);
+                                                 <label class="es-dd-item">
+                                                     <input type="checkbox" value="@p" checked="@(chk ? "checked" : null)" />@p
+                                                 </label>
+                                             }
+                                        </div>
+                                        <div class="es-dd-footer">
+                                            <button type="button" class="btn btn-xs btn-link text-muted es-dd-clear" style="font-size:.7rem">Clear</button>
+                                            <button type="button" class="btn btn-xs btn-primary es-dd-done" style="font-size:.7rem;padding:2px 10px">Done</button>
+                                        </div>
+                                    </div>
+                                    <select name="providers" multiple class="es-hidden-select" id="selProviders">
+                                        @foreach (var p in Model.AvailableProviders)
+                                        {
+                                            if (Model.SelectedProviders.Contains(p))
+                                            {
+                                                <option value="@p" selected="selected">@p</option>
+                                            }
+                                            else
+                                            {
+                                                <option value="@p">@p</option>
+                                            }
+                                        }
+                                    </select>
                         </div>
                     </div>
                     <div class="col-12 col-md-6 col-xl-3">
                         <label class="es-filter-label">SALES REP</label>
                         <div class="position-relative es-dropdown-wrap">
-                            <button type="button" class="es-dd-btn" data-target="selReps"
-                                    data-placeholder="@ddPlaceholder">
-                                <span class="es-dd-label es-dd-placeholder">@ddPlaceholder</span>
+                            <button type="button" class="es-dd-btn @(Model.AvailableReps.Count == 0 ? "es-dd-btn-disabled" : "")"
+                                    data-target="selReps" data-placeholder="All"
+                                    @(Model.AvailableReps.Count == 0 ? "disabled title=\"No options available\"" : "")>
+                                <span class="es-dd-label es-dd-placeholder">@(Model.AvailableReps.Count == 0 ? "N/A" : "All")</span>
                                 <i class="bi bi-chevron-down es-dd-caret"></i>
                             </button>
                             <div class="es-dd-menu" id="menuReps">
@@ -543,28 +624,34 @@
                                 <div class="es-dd-list" id="listReps">
                                     @if (Model.AvailableReps.Count == 0)
                                     {
-                                        <div class="es-dd-empty">@(isCoveView ? "No options" : "Options load for Cove lab")</div>
+                                        <div class="es-dd-empty">No options available</div>
                                     }
-                                    @foreach (var r in Model.AvailableReps)
-                                    {
-                                        bool chk = Model.SelectedReps.Contains(r);
-                                        <label class="es-dd-item">
-                                            <input type="checkbox" value="@r" checked="@(chk ? "checked" : null)" />@r
-                                        </label>
-                                    }
-                                </div>
-                                <div class="es-dd-footer">
-                                    <button type="button" class="btn btn-xs btn-link text-muted es-dd-clear" style="font-size:.7rem">Clear</button>
-                                    <button type="button" class="btn btn-xs btn-primary es-dd-done" style="font-size:.7rem;padding:2px 10px">Done</button>
-                                </div>
-                            </div>
-                            <select name="reps" multiple class="es-hidden-select" id="selReps">
-                                @foreach (var r in Model.AvailableReps)
-                                {
-                                    bool chk = Model.SelectedReps.Contains(r);
-                                    <option value="@r" selected="@(chk ? "selected" : null)">@r</option>
-                                }
-                            </select>
+                                             @foreach (var r in Model.AvailableReps)
+                                             {
+                                                 bool chk = Model.SelectedReps.Contains(r);
+                                                 <label class="es-dd-item">
+                                                     <input type="checkbox" value="@r" checked="@(chk ? "checked" : null)" />@r
+                                                 </label>
+                                             }
+                                        </div>
+                                        <div class="es-dd-footer">
+                                            <button type="button" class="btn btn-xs btn-link text-muted es-dd-clear" style="font-size:.7rem">Clear</button>
+                                            <button type="button" class="btn btn-xs btn-primary es-dd-done" style="font-size:.7rem;padding:2px 10px">Done</button>
+                                        </div>
+                                    </div>
+                                    <select name="reps" multiple class="es-hidden-select" id="selReps">
+                                        @foreach (var r in Model.AvailableReps)
+                                        {
+                                            if (Model.SelectedReps.Contains(r))
+                                            {
+                                                <option value="@r" selected="selected">@r</option>
+                                            }
+                                            else
+                                            {
+                                                <option value="@r">@r</option>
+                                            }
+                                        }
+                                    </select>
                         </div>
                     </div>
                 </div>
@@ -609,14 +696,25 @@
                    class="btn btn-sm btn-outline-secondary">
                     <i class="bi bi-x-circle me-1"></i>Clear All
                 </a>
+                <button type="button" data-ni-open
+                        class="btn btn-sm btn-outline-primary ms-auto ni-btn-open"
+                        title="Open Notes &amp; Insights for this report">
+                    <i class="bi bi-journal-text me-1"></i>Notes &amp; Insights
+                </button>
                 <button type="submit" name="export" value="excel"
-                        class="btn btn-sm btn-outline-success ms-auto">
+                        class="btn btn-sm btn-outline-success"
+                        title="Export includes last 4 weeks of Notes in a separate sheet">
                     <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
                 </button>
             </div>
         </form>
     </div>
 </div>
+
+@* Notes & Insights callout (generic, report-agnostic component) *@
+<link rel="stylesheet" href="~/css/notes-insights.css" asp-append-version="true" />
+@await Html.PartialAsync("_NotesInsights", Model)
+<script src="~/js/notes-insights.js" asp-append-version="true" nonce="@Context.Items["CspNonce"]"></script>
 
 <div class="card">
     <div class="card-body p-0">
@@ -638,6 +736,11 @@
         {
             int totalDataCols = esYears.Sum(year => (esMonthsByYear.ContainsKey(year) ? esMonthsByYear[year].Count : 0) + 1);
             int totalCols = 1 + totalDataCols + 1; // description + (months + year-total) per year + grand total
+            // Header date basis: matches the SP's @UseBilledDate rule —
+            // FirstBilledDate when a Billed range is set and no DOS range is set; otherwise DOS.
+            bool esUseBilled = (Model.BilledFrom.HasValue || Model.BilledTo.HasValue)
+                               && !Model.DosFrom.HasValue && !Model.DosTo.HasValue;
+            string esDateBasis = esUseBilled ? "Billed Date" : "DOS";
             <div class="es-wrap m-2">
                 <div class="es-scroll">
                     <table class="es-table">
@@ -660,7 +763,7 @@
                                 @foreach (var year in esYears)
                                 {
                                     var mons = esMonthsByYear.ContainsKey(year) ? esMonthsByYear[year] : new List<int>();
-                                    <th colspan="@(mons.Count + 1)">Data Based on DOS &mdash; @year</th>
+                                    <th colspan="@(mons.Count + 1)">Data Based on @esDateBasis &mdash; @year</th>
                                 }
                                 <th rowspan="2" class="es-grand">Grand Total</th>
                             </tr>
@@ -780,7 +883,7 @@
     </div>
 </div>
 
-<script>
+<script nonce='@Context.Items["CspNonce"]'>
     // ── Collapsible rows (3-level hierarchy) ───────────────────────────
     // Level 1: es-cat-row  → collapses es-sub-row children
     //          (stops at next es-cat-row; skips es-sub-sub-row)
@@ -921,6 +1024,8 @@
             var clearBtn  = menu && menu.querySelector('.es-dd-clear');
             var doneBtn   = menu && menu.querySelector('.es-dd-done');
             if (!btn || !menu || !select) return;
+            // Skip disabled buttons — they have no items to interact with.
+            if (btn.disabled) return;
 
             var placeholder = btn.getAttribute('data-placeholder') || 'Select…';
 
@@ -944,7 +1049,8 @@
                     countEl.textContent = selected.length;
                     btn.classList.add('active');
                 }
-                refreshActiveChips();
+                // Only call refreshActiveChips once the date-exclusivity vars are set up.
+                if (typeof refreshActiveChips === 'function') refreshActiveChips();
             }
 
             // Sync hidden <select> from checkboxes
@@ -982,6 +1088,10 @@
                     Array.prototype.forEach.call(list.querySelectorAll('.es-dd-item'), function (item) {
                         item.style.display = (!q || item.textContent.toLowerCase().indexOf(q) > -1) ? '' : 'none';
                     });
+                });
+                // Prevent Enter inside the search box from submitting the outer form.
+                searchInp.addEventListener('keydown', function (e) {
+                    if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); }
                 });
             }
 
@@ -1046,6 +1156,8 @@
         }
 
         function refreshActiveChips() {
+            // Keep DOS/Billed enable-state in sync (covers chip "×" clears, presets, etc.)
+            if (typeof syncDateExclusivity === 'function') syncDateExclusivity();
             if (!chipsContainer) return;
             chipsContainer.innerHTML = '';
             var count = 0;
@@ -1091,13 +1203,108 @@
         // Trigger chip refresh when date inputs change
         document.querySelectorAll('.es-date-input').forEach(function (inp) { inp.addEventListener('change', refreshActiveChips); });
 
-        refreshActiveChips(); // initial pass for server-restored values
+        // ── DOS ⇄ First Billed Date mutual exclusivity ──────────────────
+        // NOTE: syncDateExclusivity() queries the DOM fresh on every call so
+        // refreshActiveChips() (called during dropdown init above) can safely
+        // invoke it before the variables below are assigned.
+        //
+        // Overlay strategy: an absolutely-positioned div is dynamically created
+        // on top of each date-input row.  When a group is locked the overlay is
+        // shown — it sits above the inputs (z-index:10) and intercepts every
+        // pointer event, preventing the browser-native calendar picker from
+        // opening even though the native picker button lives in the browser's
+        // shadow DOM and is not reachable via CSS pointer-events on the input.
+        function esAnyVal(nodeList) {
+            return Array.prototype.some.call(nodeList, function (i) { return !!i.value; });
+        }
 
-        // ── Quick preset buttons ────────────────────────────────────────
-        var now = new Date();
-        var thisYear  = now.getFullYear();
-        var thisMonth = now.getMonth() + 1; // 1-based
-        var monthNames = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        // Create (once) a transparent blocking overlay inside a date-input row.
+        function esEnsureOverlay(groupId) {
+            var wrap = document.querySelector('#' + groupId + ' .d-flex');
+            if (!wrap) return null;
+            var ov = wrap.querySelector('.es-date-overlay');
+            if (ov) return ov;
+            ov = document.createElement('div');
+            ov.className = 'es-date-overlay';
+            ov.style.cssText =
+                'display:none;position:absolute;top:0;left:0;right:0;bottom:0;' +
+                'z-index:10;cursor:not-allowed;border-radius:.375rem;' +
+                'background:rgba(248,250,252,0.60);';
+            // Absorb clicks so they never reach the inputs below.
+            ov.addEventListener('click',      function(e){ e.preventDefault(); e.stopPropagation(); });
+            ov.addEventListener('mousedown',  function(e){ e.preventDefault(); e.stopPropagation(); });
+            ov.addEventListener('touchstart', function(e){ e.preventDefault(); e.stopPropagation(); }, { passive: false });
+            wrap.style.position = 'relative';
+            wrap.appendChild(ov);
+            return ov;
+        }
+        var dosOverlay    = esEnsureOverlay('esDosGroup');
+        var billedOverlay = esEnsureOverlay('esBilledGroup');
 
+        function esSetDisabled(nodeList, groupEl, overlay, disabled, customTitle) {
+            Array.prototype.forEach.call(nodeList, function (i) {
+                // disabled attribute: prevents form submission AND blocks the
+                // native browser date picker reliably.
+                if (disabled) { i.setAttribute('disabled', ''); }
+                else          { i.removeAttribute('disabled'); }
+            });
+            if (groupEl) {
+                groupEl.style.opacity = disabled ? '0.42' : '';
+                groupEl.title = disabled
+                    ? (customTitle || 'Clear the other date range (Reset Date Range) to use this one') : '';
+            }
+            // Show/hide the overlay on top of the inputs.
+            if (overlay) overlay.style.display = disabled ? 'block' : 'none';
+        }
+        function esClearVals(nodeList) {
+            Array.prototype.forEach.call(nodeList, function (i) { i.value = ''; });
+        }
+        function syncDateExclusivity(showAlert) {
+            var dosI    = document.querySelectorAll('.es-dos-input');
+            var billedI = document.querySelectorAll('.es-billed-input');
+            var dosG    = document.getElementById('esDosGroup');
+            var billedG = document.getElementById('esBilledGroup');
+            var alertEl = document.getElementById('esDateConflictAlert');
+            // NorthWest: First Billed Date is permanently disabled (LIMSMaster has
+            // no FirstBilledDate column) — never re-enabled by the DOS/Billed
+            // mutual-exclusivity logic below, regardless of DOS state.
+            var billedPermanentlyDisabled = !!billedG && billedG.getAttribute('data-permanently-disabled') === 'true';
+            var dosActive    = esAnyVal(dosI);
+            var billedActive = billedPermanentlyDisabled ? false : esAnyVal(billedI);
+            var conflict = dosActive && billedActive;
+            // DOS takes precedence — clear Billed when both are active.
+            if (conflict) { esClearVals(billedI); billedActive = false; }
+            if (alertEl) alertEl.style.display = (conflict && showAlert) ? '' : 'none';
+            esSetDisabled(billedI, billedG, billedOverlay, dosActive || billedPermanentlyDisabled,
+                billedPermanentlyDisabled ? 'First Billed Date is not available for NorthWest' : undefined);
+            esSetDisabled(dosI,    dosG,    dosOverlay,    billedActive);
+        }
+
+        // Listen on both 'change' and 'input' — browsers differ on which fires for date pickers.
+        Array.prototype.forEach.call(
+            document.querySelectorAll('.es-dos-input, .es-billed-input'),
+            function (i) {
+                i.addEventListener('change', function () { syncDateExclusivity(false); refreshActiveChips(); });
+                i.addEventListener('input',  function () { syncDateExclusivity(false); refreshActiveChips(); });
+            });
+        syncDateExclusivity(true); // initial pass — show alert if server returned both
+
+        // ── Reset Date Range button: clears both ranges and re-enables both ──
+        var resetDatesBtn = document.getElementById('esResetDates');
+        if (resetDatesBtn) {
+            resetDatesBtn.addEventListener('click', function () {
+                var alertEl = document.getElementById('esDateConflictAlert');
+                if (alertEl) alertEl.style.display = 'none';
+                // Clear values only — syncDateExclusivity() below re-derives the
+                // disabled state for both groups, respecting any permanently
+                // disabled group (e.g. NorthWest's First Billed Date), so it is
+                // never accidentally re-enabled here.
+                Array.prototype.forEach.call(
+                    document.querySelectorAll('.es-dos-input, .es-billed-input'),
+                    function (i) { i.value = ''; });
+                syncDateExclusivity(false);
+                refreshActiveChips();
+            });
+        }
     });
 </script>

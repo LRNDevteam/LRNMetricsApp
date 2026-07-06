@@ -31,7 +31,13 @@ public sealed class ExecutiveSummaryExcelBuilder
         // Top metadata block; returns the first row for the data table header.
         int startRow = WriteInfoBlock(sheet, vm, grandCol);
 
-        BuildSheet(sheet, vm.Rows, vm.YearMonthColumns, startRow);
+        // Header date basis: matches the SP's @UseBilledDate rule — FirstBilledDate
+        // when a Billed range is set and no DOS range is set; otherwise DOS.
+        bool useBilled = (vm.BilledFrom.HasValue || vm.BilledTo.HasValue)
+                         && !vm.DosFrom.HasValue && !vm.DosTo.HasValue;
+        string dateBasis = useBilled ? "Billed Date" : "DOS";
+
+        BuildSheet(sheet, vm.Rows, vm.YearMonthColumns, startRow, dateBasis);
 
         using var stream = new MemoryStream();
         workbook.SaveAs(stream);
@@ -105,7 +111,7 @@ public sealed class ExecutiveSummaryExcelBuilder
     }
 
     private void BuildSheet(IXLWorksheet sheet, List<ExecSummaryRow> allRows,
-        List<(int Year, int Month)> columns, int startRow)
+        List<(int Year, int Month)> columns, int startRow, string dateBasis = "DOS")
     {
         var years = columns.Where(c => c.Year != 0).Select(c => c.Year).Distinct().OrderBy(y => y).ToList();
         var monthsByYear = columns.Where(c => c.Year != 0)
@@ -146,7 +152,7 @@ public sealed class ExecutiveSummaryExcelBuilder
         {
             var mons = monthsByYear[year];
             int span = mons.Count + 1;
-            sheet.Cell(hr1, colIdx).Value = $"Data Based on DOS — {year}";
+            sheet.Cell(hr1, colIdx).Value = $"Data Based on {dateBasis} — {year}";
             sheet.Range(hr1, colIdx, hr1, colIdx + span - 1).Merge();
             colIdx += span;
         }
