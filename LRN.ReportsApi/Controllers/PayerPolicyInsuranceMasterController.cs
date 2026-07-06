@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using LRN.ReportsApi.Models;
 using LRN.ReportsApi.Security;
 using LRN.ReportsApi.Services;
@@ -11,20 +10,27 @@ namespace LRN.ReportsApi.Controllers;
 public sealed class PayerPolicyInsuranceMasterController : ControllerBase
 {
     private readonly IMasterValuesRepository _repository;
+    private readonly IPayerMasterWorkflowService _workflow;
 
-    public PayerPolicyInsuranceMasterController(IMasterValuesRepository repository)
+    public PayerPolicyInsuranceMasterController(IMasterValuesRepository repository, IPayerMasterWorkflowService workflow)
     {
         _repository = repository;
+        _workflow = workflow;
     }
+
+    private bool CanView => PayerMasterRoles.CanViewPolicy(User) || PayerMasterRoles.CanViewLab(User); // Lab-side roles may look up policy payers for mapping (Spec §5.2)
+    private bool CanWrite => PayerMasterRoles.CanWritePolicy(User);
+    private bool RequiresApproval => PayerMasterRoles.PolicyRequiresApproval(User);
+    private string UserName() => PayerMasterRoles.UserName(User);
 
     [HttpGet]
     public async Task<ActionResult<PagedResult<PayerPolicyInsuranceMasterDto>>> List([FromQuery] PayerPolicyInsuranceMasterQuery query, CancellationToken ct)
-        => IsAdmin() ? Ok(await _repository.GetPolicyPayersAsync(query, ct)) : Denied();
+        => CanView ? Ok(await _repository.GetPolicyPayersAsync(query, ct)) : Denied();
 
     [HttpGet("{id:int}")]
     public async Task<ActionResult<PayerPolicyInsuranceMasterDto>> Get(int id, CancellationToken ct)
     {
-        if (!IsAdmin()) return Denied();
+        if (!CanView) return Denied();
         var row = await _repository.GetPolicyPayerAsync(id, ct);
         return row is null ? NotFound(new { message = "Payer policy insurance record was not found." }) : Ok(row);
     }
@@ -32,28 +38,51 @@ public sealed class PayerPolicyInsuranceMasterController : ControllerBase
     [HttpPost]
     public async Task<ActionResult> Create(PayerPolicyInsuranceMasterDto dto, CancellationToken ct)
     {
-        if (!IsAdmin()) return Denied();
-        try { return Ok(new { id = await _repository.CreatePolicyPayerAsync(dto, UserName(), ct), success = true }); }
+        if (!CanWrite) return Denied();
+        try
+        {
+            var result = await _workflow.CreatePolicyPayerAsync(dto, UserName(), RequiresApproval, ct);
+            return Ok(new { id = result.Id, success = result.Success, pendingApproval = result.PendingApproval, approvalRequestId = result.ApprovalRequestId });
+        }
         catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
     [HttpPut("{id:int}")]
     public async Task<ActionResult> Update(int id, PayerPolicyInsuranceMasterDto dto, CancellationToken ct)
     {
-        if (!IsAdmin()) return Denied();
-        try { return await _repository.UpdatePolicyPayerAsync(id, dto, UserName(), ct) ? Ok(new { success = true }) : NotFound(); }
+        if (!CanWrite) return Denied();
+        try
+        {
+            var result = await _workflow.UpdatePolicyPayerAsync(id, dto, UserName(), RequiresApproval, ct);
+            return result.Success
+                ? Ok(new { success = true, pendingApproval = result.PendingApproval, approvalRequestId = result.ApprovalRequestId })
+                : NotFound(new { message = result.Message });
+        }
         catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
     [HttpPatch("{id:int}/status")]
     public async Task<ActionResult> Status(int id, MasterValueStatusRequest request, CancellationToken ct)
-        => IsAdmin() ? await _repository.UpdatePolicyPayerStatusAsync(id, request.IsActive, UserName(), ct) ? Ok(new { success = true }) : NotFound() : Denied();
+    {
+        if (!CanWrite) return Denied();
+        // Spec §5.3: deactivated payers are never reactivated; re-adding creates a new record.
+        if (!string.Equals(request.IsActive, "Inactive", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { message = "Deactivated payers cannot be reactivated. Re-add the payer as a new record instead." });
+        try
+        {
+            var result = await _workflow.DeactivatePolicyPayerAsync(id, UserName(), RequiresApproval, ct);
+            return result.Success
+                ? Ok(new { success = true, pendingApproval = result.PendingApproval, approvalRequestId = result.ApprovalRequestId })
+                : NotFound(new { message = result.Message });
+        }
+        catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
+    }
 
     [HttpPost("import")]
     [RequestSizeLimit(100_000_000)]
     public async Task<ActionResult<ImportResultDto>> Import([FromForm] MasterValueImportRequest request, CancellationToken ct)
     {
-        if (!IsAdmin()) return Denied();
+        if (!CanWrite || RequiresApproval) return Denied(); // bulk upload direct path is admin-only (Spec §7.1)
         var uploadError = await FileUploadGuard.ValidateExcelAsync(request.File, 25 * 1024 * 1024, ct);
         if (uploadError != null) return BadRequest(new { message = uploadError });
         await using var stream = request.File.OpenReadStream();
@@ -63,12 +92,10 @@ public sealed class PayerPolicyInsuranceMasterController : ControllerBase
     [HttpGet("export")]
     public async Task<IActionResult> Export([FromQuery] PayerPolicyInsuranceMasterQuery query, CancellationToken ct)
     {
-        if (!IsAdmin()) return Denied();
+        if (!CanView) return Denied();
         var bytes = await _repository.ExportPolicyPayersAsync(query, ct);
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"PayerPolicyInsuranceMaster_{DateTime.UtcNow:yyyyMMddHHmmss}.xlsx");
     }
 
-    private ActionResult Denied() => StatusCode(StatusCodes.Status403Forbidden, new { message = "Access denied. Master Values is available only for Admin users." });
-    private bool IsAdmin() => User.Claims.Where(c => c.Type == ClaimTypes.Role || c.Type is "role" or "roles").Any(c => string.Equals(c.Value, "Admin", StringComparison.OrdinalIgnoreCase));
-    private string UserName() => User.Identity?.Name ?? User.Claims.FirstOrDefault(c => c.Type is "name" or "preferred_username" or "unique_name" or "upn")?.Value ?? "system";
+    private ActionResult Denied() => StatusCode(StatusCodes.Status403Forbidden, new { message = "Access denied. Your role does not permit this action on the Payer Policy Insurance Master." });
 }

@@ -24,7 +24,9 @@ public sealed class FileResolver
 			.OrderByDescending(Path.GetFileName)
 			.FirstOrDefault() ?? throw new InvalidOperationException("No week folder found.");
 
-		var payerFile = Directory.GetFiles(weekDir, "*_Payer_Policy_ValidationReport.xlsx")
+		// Payer policy can arrive as Excel or CSV; pick the newest matching file of either type.
+		var payerFile = new[] { "*_Payer_Policy_ValidationReport.xlsx", "*_Payer_Policy_ValidationReport.csv" }
+			.SelectMany(pattern => Directory.GetFiles(weekDir, pattern))
 			.OrderByDescending(File.GetCreationTimeUtc)
 			.FirstOrDefault() ?? throw new InvalidOperationException("No Payer Policy file found.");
 

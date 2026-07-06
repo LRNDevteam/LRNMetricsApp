@@ -33,6 +33,8 @@ builder.Services.AddScoped<IDenialCodeMasterExcelService, DenialCodeMasterExcelS
 builder.Services.AddScoped<IDenialActionChangeVerificationRepository, SqlDenialActionChangeVerificationRepository>();
 builder.Services.AddScoped<IDenialMapperRepository, SqlDenialMapperRepository>();
 builder.Services.AddScoped<IMasterValuesRepository, SqlMasterValuesRepository>();
+builder.Services.AddScoped<IPayerMasterWorkflowService, PayerMasterWorkflowService>();
+builder.Services.AddHostedService<PayerMasterSlaEscalationService>();
 builder.Services.AddScoped<IDenialWorkflowIssueNotifier, DenialWorkflowIssueNotifier>();
 builder.Services.AddScoped<IDenialWorkflowSupportService, DenialWorkflowSupportService>();
 builder.Services.AddSingleton<IDenialWorkflowExportJobService, DenialWorkflowExportJobService>();

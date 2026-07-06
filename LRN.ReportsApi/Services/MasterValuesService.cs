@@ -41,7 +41,7 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
     public async Task<PagedResult<InsurancePayerMasterDto>> GetInsurancePayersAsync(InsurancePayerMasterQuery query, CancellationToken ct)
     {
         query.Page = Math.Max(1, query.Page);
-        query.PageSize = Math.Clamp(query.PageSize <= 0 ? 25 : query.PageSize, 10, 200);
+        query.PageSize = Math.Clamp(query.PageSize <= 0 ? 25 : query.PageSize, 10, 1000);
         var where = BuildInsuranceWhere(query, out var parameters);
         var orderBy = BuildInsuranceOrderBy(query);
         var result = new PagedResult<InsurancePayerMasterDto> { Page = query.Page, PageSize = query.PageSize };
@@ -127,7 +127,8 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
             throw new ArgumentException("Payer Name Normalized and Global Payer ID combination already exists.");
         await using var cmd = new SqlCommand("""
             UPDATE dbo.LabInsuranceMaster
-            SET PayerNameNormalized=@PayerNameNormalized, GlobalPayerID=@GlobalPayerID, PayerGroupCode=@PayerGroupCode,
+            SET PayerCode=@PayerCode, PayerNameRaw=@PayerNameRaw,
+                PayerNameNormalized=@PayerNameNormalized, GlobalPayerID=@GlobalPayerID, PayerGroupCode=@PayerGroupCode,
                 PayerCommonCode=@PayerCommonCode, Parent=@Parent, PlanType=@PlanType, MCOType=@MCOType, PayerState=@PayerState,
                 IsActive=@IsActive, BenefitAdminCode=@BenefitAdminCode, BenefitAdministrator=@BenefitAdministrator, Remarks=@Remarks,
                 LabName=@LabName, LabId=@LabId, LabState=@LabState, LabStateCode=@LabStateCode, ModifiedBy=@ModifiedBy,
@@ -452,7 +453,7 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
     public async Task<PagedResult<PayerPolicyInsuranceMasterDto>> GetPolicyPayersAsync(PayerPolicyInsuranceMasterQuery query, CancellationToken ct)
     {
         query.Page = Math.Max(1, query.Page);
-        query.PageSize = Math.Clamp(query.PageSize <= 0 ? 25 : query.PageSize, 10, 200);
+        query.PageSize = Math.Clamp(query.PageSize <= 0 ? 25 : query.PageSize, 10, 1000);
         var where = BuildPolicyWhere(query, out var parameters);
         var orderBy = BuildPolicyOrderBy(query);
         var result = new PagedResult<PayerPolicyInsuranceMasterDto> { Page = query.Page, PageSize = query.PageSize };
@@ -508,8 +509,7 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         if (string.IsNullOrWhiteSpace(dto.PayerName)) throw new ArgumentException("PayerName is required.");
         await using var conn = Open();
         await conn.OpenAsync(ct);
-        if (await PolicyNormalizedGlobalExistsAsync(conn, dto.PayerNameNormalized, dto.GlobalPayerID, null, ct))
-            throw new ArgumentException("Payer Name Normalized and Global Payer ID combination already exists.");
+        await EnsurePolicyUniqueAsync(conn, dto, null, ct);
         await using var cmd = new SqlCommand("""
             INSERT INTO dbo.PayerPolicyInsuranceMaster
                 (PayerCode, PayerName, PayerNameNormalized, GlobalPayerID, PayerGroupCode, PayerCommonCode,
@@ -530,8 +530,7 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         if (string.IsNullOrWhiteSpace(dto.PayerName)) throw new ArgumentException("PayerName is required.");
         await using var conn = Open();
         await conn.OpenAsync(ct);
-        if (await PolicyNormalizedGlobalExistsAsync(conn, dto.PayerNameNormalized, dto.GlobalPayerID, id, ct))
-            throw new ArgumentException("Payer Name Normalized and Global Payer ID combination already exists.");
+        await EnsurePolicyUniqueAsync(conn, dto, id, ct);
         await using var cmd = new SqlCommand("""
             UPDATE dbo.PayerPolicyInsuranceMaster
             SET PayerCode=@PayerCode, PayerName=@PayerName, PayerNameNormalized=@PayerNameNormalized, GlobalPayerID=@GlobalPayerID,
@@ -694,9 +693,36 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         => await FindInsuranceByNormalizedGlobalAsync(conn, payerNameNormalized, globalPayerId, ct) is int existingId
            && (!excludeId.HasValue || existingId != excludeId.Value);
 
-    private static async Task<bool> PolicyNormalizedGlobalExistsAsync(SqlConnection conn, string? payerNameNormalized, int? globalPayerId, int? excludeId, CancellationToken ct)
-        => await FindPolicyByNormalizedGlobalAsync(conn, payerNameNormalized, globalPayerId, ct) is int existingId
-           && (!excludeId.HasValue || existingId != excludeId.Value);
+    /// <summary>
+    /// Payer Policy Insurance Master uniqueness: PayerNameNormalized and GlobalPayerID must each be
+    /// unique on their own. (The Lab Insurance Master intentionally allows the same GlobalPayerID on
+    /// multiple rows - one record per Payer + Lab combination all mapped to one policy payer.)
+    /// </summary>
+    private static async Task EnsurePolicyUniqueAsync(SqlConnection conn, PayerPolicyInsuranceMasterDto dto, int? excludeId, CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(dto.PayerNameNormalized))
+        {
+            await using var cmd = new SqlCommand("""
+                SELECT TOP (1) PayerPolicyInsuranceMasterId FROM dbo.PayerPolicyInsuranceMaster
+                WHERE PayerNameNormalized = @Value AND (@ExcludeId IS NULL OR PayerPolicyInsuranceMasterId <> @ExcludeId);
+                """, conn);
+            cmd.Parameters.AddWithValue("@Value", dto.PayerNameNormalized.Trim());
+            cmd.Parameters.AddWithValue("@ExcludeId", (object?)excludeId ?? DBNull.Value);
+            if (await cmd.ExecuteScalarAsync(ct) != null)
+                throw new ArgumentException($"Payer Name Normalized '{dto.PayerNameNormalized.Trim()}' already exists. Normalized payer names must be unique.");
+        }
+        if (dto.GlobalPayerID.HasValue)
+        {
+            await using var cmd = new SqlCommand("""
+                SELECT TOP (1) PayerPolicyInsuranceMasterId FROM dbo.PayerPolicyInsuranceMaster
+                WHERE GlobalPayerID = @Value AND (@ExcludeId IS NULL OR PayerPolicyInsuranceMasterId <> @ExcludeId);
+                """, conn);
+            cmd.Parameters.AddWithValue("@Value", dto.GlobalPayerID.Value);
+            cmd.Parameters.AddWithValue("@ExcludeId", (object?)excludeId ?? DBNull.Value);
+            if (await cmd.ExecuteScalarAsync(ct) != null)
+                throw new ArgumentException($"Global Payer ID {dto.GlobalPayerID.Value} already exists. Global Payer IDs must be unique.");
+        }
+    }
 
     private static async Task<int?> FindInsuranceByNormalizedGlobalAsync(SqlConnection conn, string? payerNameNormalized, int? globalPayerId, CancellationToken ct)
     {

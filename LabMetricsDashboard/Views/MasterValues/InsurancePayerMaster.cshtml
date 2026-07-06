@@ -1,6 +1,6 @@
 @model LabMetricsDashboard.Models.MasterValuesPageViewModel
 @{
-    ViewData["Title"] = "Insurance Payer Master";
+    ViewData["Title"] = "Lab Insurance Master";
 }
 
 <style>
@@ -13,22 +13,33 @@
     .mv-filter { padding: 1rem; }
     .mv-filter .form-label { margin-bottom: .25rem; font-size: .74rem; color: #475569; font-weight: 800; text-transform: uppercase; }
     .mv-filter .form-control, .mv-filter .form-select { min-height: 38px; font-size: .9rem; }
+    .mv-filter .btn { white-space: nowrap; min-height: 38px; }
+    .mv-perm-strip { font-size: .8rem; color: #64748b; background: #fff; border: 1px dashed #d9e2ef; border-radius: 8px; padding: .5rem .85rem; }
+    .mv-perm-strip b { color: #1F3B57; }
     .mv-grid-wrap { position: relative; }
-    .mv-grid-scroll { overflow: auto; max-height: calc(100vh - 295px); min-height: 315px; }
-    .mv-table { min-width: 1720px; font-size: .82rem; }
+    .mv-grid-scroll { overflow: auto; overflow-x: auto; max-height: calc(100vh - 315px); min-height: 315px; }
+    .mv-table { min-width: 2500px; font-size: .8rem; }
     .mv-table th, .mv-table td { border: 1px solid #d8e1ee; }
-    .mv-table thead th { position: sticky; top: 0; z-index: 2; background: #f8fafc; color: #0f172a; border-bottom: 1px solid #b8c5d6; vertical-align: bottom; white-space: nowrap; font-size: .75rem; text-transform: uppercase; letter-spacing: .02em; }
+    .mv-table thead th { position: sticky; top: 0; z-index: 2; background: #f8fafc; color: #0f172a; border-bottom: 1px solid #b8c5d6; white-space: nowrap; font-size: .74rem; text-transform: uppercase; letter-spacing: .02em; }
     .mv-table thead th.sortable { cursor: pointer; user-select: none; }
     .mv-table thead th.sortable:hover { background: #eef6ff; color: #0b5ed7; }
     .mv-sort { color: #64748b; font-size: .72rem; margin-left: .25rem; }
     .mv-table thead th.sorted .mv-sort { color: #0b5ed7; }
-    .mv-table tbody td { white-space: nowrap; max-width: 210px; overflow: hidden; text-overflow: ellipsis; }
-    .mv-table tbody tr:hover { background: #f8fbff; }
+    .mv-table tbody td { white-space: normal; word-break: break-word; vertical-align: top; min-width: 90px; }
+    .mv-table tbody tr:hover td { background: #f8fbff; }
+    .mv-table tbody tr.unmapped td { background: #FDF8ED; }
+    /* Actions column: only as wide as its buttons, pinned right while scrolling horizontally */
+    .mv-table th:last-child, .mv-table td:last-child { position: sticky; right: 0; width: 1%; min-width: 0; white-space: nowrap; box-shadow: -6px 0 8px -6px rgba(15, 23, 42, .18); }
+    .mv-table td:last-child { background: #fff; z-index: 1; vertical-align: middle; }
+    .mv-table thead th:last-child { z-index: 3; }
+    .mv-table tbody tr:hover td:last-child { background: #f8fbff; }
+    .mv-table tbody tr.unmapped td:last-child { background: #FDF8ED; }
     .mv-primary { font-weight: 800; color: #0f172a; }
-    .mv-muted { color: #64748b; }
     .mv-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: .15rem .5rem; font-size: .72rem; font-weight: 800; background: #eef2f7; color: #334155; }
     .mv-badge.on { background: #dcfce7; color: #166534; }
     .mv-badge.off { background: #fee2e2; color: #991b1b; }
+    .mv-badge.mapped { background: #E5EEF7; color: #2E5C8A; }
+    .mv-badge.unmapped { background: #FDF3E3; color: #B7791F; }
     .mv-loader { display: none; position: absolute; inset: 0; z-index: 5; align-items: center; justify-content: center; background: rgba(248, 250, 252, .74); backdrop-filter: blur(1px); }
     .mv-loader.active { display: flex; }
     .mv-loader-box { background: #0f172a; color: white; border-radius: 8px; padding: .75rem 1rem; display: inline-flex; gap: .7rem; align-items: center; box-shadow: 0 18px 40px rgba(15, 23, 42, .22); }
@@ -36,32 +47,59 @@
     .mv-import-map { max-height: 220px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; }
     .mv-import-map table { margin-bottom: 0; font-size: .8rem; }
     .mv-import-map th { background: #eef6ff; position: sticky; top: 0; }
-    .mv-footer { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .75rem 1rem; border-top: 1px solid #e2e8f0; }
+    .mv-footer { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .75rem 1rem; border-top: 1px solid #e2e8f0; flex-wrap: wrap; }
+    .mv-readonly-tag { background: #eef2f7; color: #64748b; font-size: .66rem; padding: 1px 6px; border-radius: 4px; margin-left: 6px; font-weight: 600; }
+    .mv-warning-banner { background: #FDF3E3; border: 1px solid #F0D9A8; color: #8A5A0B; padding: .55rem .75rem; border-radius: 6px; font-size: .8rem; margin-bottom: .85rem; }
+    .mv-info-banner { background: #E8F1F9; border: 1px solid #C6DCEE; color: #1F3B57; padding: .55rem .75rem; border-radius: 6px; font-size: .8rem; margin-bottom: .85rem; }
+    .mv-deactivated-note { color: #9AA5B1; font-size: .76rem; }
+    .mv-match-card { border: 1px solid #d9e2ef; border-radius: 8px; padding: .6rem .85rem; margin-bottom: .5rem; cursor: pointer; }
+    .mv-match-card:hover, .mv-match-card.selected { border-color: #2E5C8A; background: #E8F1F9; }
+    .mv-match-card .name { font-weight: 800; color: #1F3B57; font-size: .85rem; }
+    .mv-match-card .meta { font-size: .74rem; color: #64748b; margin-top: 2px; }
     @@media (max-width: 768px) { .mv-grid-scroll { max-height: none; } .mv-actions .btn { flex: 1 1 auto; } }
 </style>
 
 <div class="mv-shell">
     <div class="mv-header">
         <div class="mv-title">
-            <h2>Insurance Payer Master</h2>
-            <small>Maintain lab payer mappings, import aliases, and payer attributes.</small>
+            <h2>Lab Insurance Master</h2>
+            <small>Source: master files synced across labs &mdash; one record per Payer + Lab combination.</small>
         </div>
         <div class="mv-actions">
-            <button type="button" class="btn btn-primary" id="addBtn"><i class="bi bi-plus-lg"></i> Add New Payer</button>
-            <button type="button" class="btn btn-outline-primary" id="openImportBtn" data-bs-toggle="modal" data-bs-target="#importModal"><i class="bi bi-upload"></i> Import Excel</button>
+            @if (Model.CanWrite)
+            {
+                <button type="button" class="btn btn-primary" id="addBtn"><i class="bi bi-plus-lg"></i> Add Payer</button>
+            }
+            @if (Model.CanWrite && !Model.RequiresApproval)
+            {
+                <button type="button" class="btn btn-outline-primary" id="openImportBtn" data-bs-toggle="modal" data-bs-target="#importModal"><i class="bi bi-upload"></i> Bulk Upload</button>
+            }
             <button type="button" class="btn btn-outline-success" id="exportBtn"><i class="bi bi-file-earmark-excel"></i> Export Excel</button>
         </div>
     </div>
 
+    <div class="mv-perm-strip">
+        @if (Model.RequiresApproval)
+        {
+            <b>@Model.RoleLabel:</b> <text>add, edit, deactivate, and mapping confirmations are routed to LRN Admin / Reports Manager for approval before they take effect.</text>
+        }
+        else if (Model.IsViewOnly)
+        {
+            <b>@Model.RoleLabel:</b> <text>view-only access. Add, edit, deactivate, and mapping controls are hidden.</text>
+        }
+        else
+        {
+            <b>@Model.RoleLabel:</b> <text>add, edit, and deactivate are applied immediately, no approval required.</text>
+        }
+    </div>
+
     <div class="mv-card mv-filter">
         <form id="filterForm" class="row g-3 align-items-end">
-            <div class="col-lg-3 col-md-6"><label class="form-label">Search</label><input class="form-control" name="search" placeholder="Code, name, lab" /></div>
-            <div class="col-lg-2 col-md-6"><label class="form-label">Lab</label><select class="form-select" name="labId" id="labFilter"><option value="">All labs</option></select></div>
-            <div class="col-lg-2 col-md-6"><label class="form-label">Payer Code</label><input class="form-control" name="payerCode" /></div>
-            <div class="col-lg-2 col-md-6"><label class="form-label">Payer Name</label><input class="form-control" name="payerName" /></div>
-            <div class="col-lg-2 col-md-6"><label class="form-label">Global Payer ID</label><input class="form-control" name="globalPayerId" type="number" /></div>
-            <div class="col-lg-1 col-md-6"><label class="form-label">Active</label><select class="form-select" name="isActive"><option value="">All</option><option>Active</option><option>Inactive</option><option>Yes</option><option>No</option></select></div>
-            <div class="col-12 d-flex gap-2 justify-content-end">
+            <div class="col-lg-3 col-md-6"><label class="form-label">Search</label><input class="form-control" name="search" placeholder="Raw payer name, code, lab..." /></div>
+            <div class="col-lg-2 col-md-6"><label class="form-label">Mapping Status</label><select class="form-select" id="mappingFilter"><option value="">All Mapping Status</option><option value="Mapped">Mapped</option><option value="Unmapped">Unmapped</option></select></div>
+            <div class="col-lg-2 col-md-6"><label class="form-label">Lab</label><select class="form-select" name="labId" id="labFilter"><option value="">All Labs</option></select></div>
+            <div class="col-lg-2 col-md-6"><label class="form-label">Status</label><select class="form-select" name="isActive"><option value="">All Status</option><option>Active</option><option>Inactive</option></select></div>
+            <div class="col-lg-3 col-md-6 d-flex gap-2 justify-content-end align-items-end flex-nowrap">
                 <button class="btn btn-primary" type="submit" id="searchBtn"><i class="bi bi-search"></i> Search</button>
                 <button class="btn btn-outline-secondary" type="button" id="resetBtn"><i class="bi bi-arrow-counterclockwise"></i> Reset</button>
             </div>
@@ -72,58 +110,93 @@
         <div class="mv-loader" id="gridLoader"><div class="mv-loader-box"><span class="spinner-border spinner-border-sm"></span><span id="busyText">Loading records...</span></div></div>
         <div class="mv-grid-scroll">
             <table class="table table-sm table-hover table-bordered align-middle mv-table mb-0">
-                <thead>
-                    <tr>
-                        <th class="sortable" data-sort="payerCode">Payer Code <span class="mv-sort"></span></th><th class="sortable" data-sort="payerNameRaw">Payer Name Raw <span class="mv-sort"></span></th><th class="sortable" data-sort="payerNameNormalized">Normalized <span class="mv-sort"></span></th><th class="sortable" data-sort="globalPayerID">Global ID <span class="mv-sort"></span></th><th class="sortable" data-sort="payerGroupCode">Group <span class="mv-sort"></span></th><th class="sortable" data-sort="payerCommonCode">Common <span class="mv-sort"></span></th><th class="sortable" data-sort="parent">Parent <span class="mv-sort"></span></th><th class="sortable" data-sort="planType">Plan <span class="mv-sort"></span></th><th class="sortable" data-sort="mcoType">MCO <span class="mv-sort"></span></th><th class="sortable" data-sort="payerState">State <span class="mv-sort"></span></th><th class="sortable" data-sort="isActive">Active <span class="mv-sort"></span></th><th class="sortable" data-sort="benefitAdminCode">Benefit Code <span class="mv-sort"></span></th><th class="sortable" data-sort="benefitAdministrator">Benefit Admin <span class="mv-sort"></span></th><th class="sortable" data-sort="labName">Lab <span class="mv-sort"></span></th><th class="sortable" data-sort="labState">Lab State <span class="mv-sort"></span></th><th class="sortable" data-sort="labStateCode">State Code <span class="mv-sort"></span></th><th class="sortable" data-sort="remarks">Remarks <span class="mv-sort"></span></th><th class="text-end">Action</th>
-                    </tr>
-                </thead>
+                <thead><tr><th class="sortable" data-sort="payerCode">Payer Code <span class="mv-sort"></span></th><th class="sortable" data-sort="payerNameRaw">Payer Name (Raw) <span class="mv-sort"></span></th><th class="sortable" data-sort="payerNameNormalized">Normalized <span class="mv-sort"></span></th><th class="sortable" data-sort="globalPayerID">Global Payer ID <span class="mv-sort"></span></th><th>Mapping Status</th><th class="sortable" data-sort="payerGroupCode">Group Code <span class="mv-sort"></span></th><th class="sortable" data-sort="payerCommonCode">Common Code <span class="mv-sort"></span></th><th class="sortable" data-sort="parent">Parent <span class="mv-sort"></span></th><th class="sortable" data-sort="planType">Plan Type <span class="mv-sort"></span></th><th class="sortable" data-sort="mcoType">MCO Type <span class="mv-sort"></span></th><th class="sortable" data-sort="payerState">Payer State <span class="mv-sort"></span></th><th class="sortable" data-sort="isActive">Status <span class="mv-sort"></span></th><th class="sortable" data-sort="benefitAdminCode">Benefit Code <span class="mv-sort"></span></th><th class="sortable" data-sort="benefitAdministrator">Benefit Manager <span class="mv-sort"></span></th><th class="sortable" data-sort="labName">Lab <span class="mv-sort"></span></th><th class="sortable" data-sort="labState">Lab State <span class="mv-sort"></span></th><th class="sortable" data-sort="labStateCode">Lab State Code <span class="mv-sort"></span></th><th class="sortable" data-sort="remarks">Remarks <span class="mv-sort"></span></th><th class="text-end">Actions</th></tr></thead>
                 <tbody id="rows"></tbody>
             </table>
         </div>
         <div class="mv-footer">
             <small id="pageInfo" class="text-muted"></small>
-            <div class="btn-group"><button class="btn btn-outline-secondary btn-sm" id="prevBtn">Previous</button><button class="btn btn-outline-secondary btn-sm" id="nextBtn">Next</button></div>
+            <div class="d-flex align-items-center gap-2">
+                <label class="text-muted" style="font-size:.78rem;font-weight:700;">Page size</label>
+                <select id="pageSizeSel" class="form-select form-select-sm" style="width:auto;"><option>10</option><option selected>20</option><option>50</option><option>100</option><option>500</option><option>1000</option></select>
+                <div class="btn-group"><button class="btn btn-outline-secondary btn-sm" id="prevBtn">Previous</button><button class="btn btn-outline-secondary btn-sm" id="nextBtn">Next</button></div>
+            </div>
         </div>
     </div>
+    <p class="mv-deactivated-note mb-0">Each row represents a Payer + Lab combination &mdash; the same payer may have multiple rows if it appears in more than one lab's master file. Unmapped rows appear when a new payer is detected during sync and has no confirmed Global Payer ID yet. Deactivated payers cannot be reactivated &mdash; re-add as a new record.</p>
 </div>
 
+@if (Model.CanWrite)
+{
 <div class="modal fade" id="editModal" tabindex="-1">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
-            <div class="modal-header"><h5 class="modal-title" id="editTitle">Payer</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-header"><h5 class="modal-title" id="editTitle">Add Payer &mdash; Lab Insurance Master</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
             <div class="modal-body">
+                <div class="mv-warning-banner d-none" id="dupWarning"></div>
                 <form id="editForm" class="row g-3">
                     <input type="hidden" id="id" />
-                    <div class="col-md-3"><label class="form-label">Payer Code</label><input class="form-control" name="payerCode" /></div>
-                    <div class="col-md-3"><label class="form-label">Payer Name Raw</label><input class="form-control" name="payerNameRaw" required /></div>
-                    <div class="col-md-3"><label class="form-label">Normalized Name</label><input class="form-control" name="payerNameNormalized" /></div>
-                    <div class="col-md-3"><label class="form-label">Global Payer ID</label><input class="form-control" name="globalPayerID" type="number" /></div>
-                    <div class="col-md-3"><label class="form-label">Payer Group Code</label><input class="form-control" name="payerGroupCode" /></div>
-                    <div class="col-md-3"><label class="form-label">Payer Common Code</label><input class="form-control" name="payerCommonCode" /></div>
-                    <div class="col-md-3"><label class="form-label">Parent</label><input class="form-control" name="parent" /></div>
-                    <div class="col-md-3"><label class="form-label">Plan Type</label><input class="form-control" name="planType" /></div>
-                    <div class="col-md-3"><label class="form-label">MCO Type</label><input class="form-control" name="mcoType" /></div>
-                    <div class="col-md-3"><label class="form-label">Payer State</label><input class="form-control" name="payerState" /></div>
-                    <div class="col-md-3"><label class="form-label">Is Active</label><input class="form-control" name="isActive" /></div>
-                    <div class="col-md-3"><label class="form-label">Benefit Admin Code</label><input class="form-control" name="benefitAdminCode" /></div>
-                    <div class="col-md-3"><label class="form-label">Benefit Administrator</label><input class="form-control" name="benefitAdministrator" /></div>
-                    <div class="col-md-3"><label class="form-label">Lab</label><select class="form-select" name="labId" id="labEdit"><option value="">None</option></select></div>
-                    <div class="col-md-3"><label class="form-label">Lab Name</label><input class="form-control" name="labName" /></div>
-                    <div class="col-md-3"><label class="form-label">Lab State</label><input class="form-control" name="labState" /></div>
-                    <div class="col-md-3"><label class="form-label">Lab State Code</label><input class="form-control" name="labStateCode" /></div>
-                    <div class="col-md-12"><label class="form-label">Remarks</label><textarea class="form-control" name="remarks" rows="2"></textarea></div>
+                    <input type="hidden" name="parent" />
+                    <input type="hidden" name="mcoType" />
+                    <input type="hidden" name="benefitAdminCode" />
+                    <input type="hidden" name="benefitAdministrator" />
+                    <input type="hidden" name="labStateCode" />
+                    <input type="hidden" name="labName" />
+                    <div class="col-md-6"><label class="form-label">Payer Name (Raw) *</label><input class="form-control" name="payerNameRaw" required placeholder="As it appears in the lab master file" /></div>
+                    <div class="col-md-6"><label class="form-label">Payer Name Normalized <span class="mv-readonly-tag">Read-only, system-generated</span></label><input class="form-control" name="payerNameNormalized" readonly tabindex="-1" /></div>
+                    <div class="col-md-4"><label class="form-label">Payer Code <span class="mv-readonly-tag" id="payerCodeTag">Locked once assigned</span></label><input class="form-control" name="payerCode" placeholder="Optional" /></div>
+                    <div class="col-md-4"><label class="form-label">Lab *</label><select class="form-select" name="labId" id="labEdit" required><option value="">Select...</option></select></div>
+                    <div class="col-md-4"><label class="form-label">Lab State</label><select class="form-select" name="labState"><option value=""></option></select></div>
+                    <div class="col-md-4"><label class="form-label">Mapping Status <span class="mv-readonly-tag">System-managed</span></label><input class="form-control" id="mappingStatusDisplay" readonly tabindex="-1" value="Unmapped" /></div>
+                    <div class="col-md-4"><label class="form-label">Global Payer ID <span class="mv-readonly-tag">Set via Review Match</span></label><input class="form-control" name="globalPayerID" readonly tabindex="-1" placeholder="Blank until mapped" /></div>
+                    <div class="col-md-4"><label class="form-label">Payer Common Code</label><input class="form-control" name="payerCommonCode" placeholder="Optional" /></div>
+                    <div class="col-md-4"><label class="form-label">Payer Group Code</label><input class="form-control" name="payerGroupCode" placeholder="Optional" /></div>
+                    <div class="col-md-4"><label class="form-label">Plan Type *</label><select class="form-select" name="planType" required><option value="">Select...</option><option>Medicare</option><option>Medicaid</option><option>Commercial</option><option>Managed Care</option><option>Other</option></select></div>
+                    <div class="col-md-4"><label class="form-label">Payer State *</label><select class="form-select" name="payerState" required><option value="">Select...</option></select></div>
+                    <div class="col-md-4"><label class="form-label">Is Active <span class="mv-readonly-tag">System-managed</span></label><input class="form-control" name="isActive" readonly tabindex="-1" /></div>
+                    <div class="col-md-12"><label class="form-label">Remarks</label><textarea class="form-control" name="remarks" rows="2" placeholder="Optional notes"></textarea></div>
                 </form>
+                @if (Model.RequiresApproval)
+                {
+                    <div class="mv-info-banner mt-3 mb-0">You are submitting as <b>Reports Analyst</b>. This action will be routed to LRN Admin / Reports Manager for approval before it is saved.</div>
+                }
                 <div id="saveError" class="alert alert-danger mt-3 d-none"></div>
             </div>
-            <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" id="saveBtn">Save</button></div>
+            <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" id="saveBtn">Submit</button></div>
         </div>
     </div>
 </div>
 
+<div class="modal fade" id="matchModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title" id="matchTitle">Review Suggested Match</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <div class="mv-info-banner">The system compared the normalized payer name against the Payer Policy Insurance Master. Confirm the suggested match or search for a different payer &mdash; the mapping is saved only after manual confirmation.</div>
+                <div class="mb-3"><label class="form-label fw-bold">Raw Payer Name (Lab Insurance Master)</label><input class="form-control" id="matchRawName" readonly tabindex="-1" /></div>
+                <div class="mb-2 fw-bold">Suggested Match &mdash; Payer Policy Insurance Master</div>
+                <div id="matchResults"><div class="text-muted small">Searching...</div></div>
+                <div class="mt-3"><label class="form-label fw-bold">Or search a different payer</label><input class="form-control" id="matchSearch" placeholder="Search Payer Policy Insurance Master..." /></div>
+                @if (Model.RequiresApproval)
+                {
+                    <div class="mv-info-banner mt-3 mb-0">Mapping confirmations by <b>Reports Analyst</b> are subject to the standard approval workflow.</div>
+                }
+                <div id="matchError" class="alert alert-danger mt-3 d-none"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-bs-dismiss="modal">Not a Match</button>
+                <button class="btn btn-primary" id="confirmMatchBtn" disabled>Confirm Mapping</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (!Model.RequiresApproval)
+{
 <div class="modal fade" id="importModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
-            <div class="modal-header"><h5 class="modal-title">Import Insurance Payers</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-header"><h5 class="modal-title">Bulk Upload &mdash; Lab Insurance Master</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
             <div class="modal-body">
                 <div class="alert alert-info py-2">Upload Consolidated_Lab_Insurance Master Excel with sheet <strong>Lab_Ins_Master</strong>.</div>
                 <input class="form-control" type="file" id="importFile" accept=".xlsx" />
@@ -139,36 +212,219 @@
         </div>
     </div>
 </div>
+}
+}
 
 @section Scripts {
 <script nonce='@Context.Items["CspNonce"]'>
 (function(){
-let page=1,pageSize=25,totalPages=1,labs=[],sortColumn='',sortDirection='asc';
-const urls={data:'@Url.Action("InsurancePayersData","MasterValues")',get:'@Url.Action("InsurancePayer","MasterValues")',save:'@Url.Action("SaveInsurancePayer","MasterValues")',status:'@Url.Action("InsuranceStatus","MasterValues")',import:'@Url.Action("ImportInsurance","MasterValues")',export:'@Url.Action("ExportInsurance","MasterValues")',labs:'@Url.Action("Labs","MasterValues")'};
+const canWrite=@(Model.CanWrite ? "true" : "false"),requiresApproval=@(Model.RequiresApproval ? "true" : "false");
+let page=1,pageSize=20,totalPages=1,labs=[],sortColumn='',sortDirection='asc',dupConfirmed=false,currentItems=[];
+let matchRecordId=null,matchSelected=null,matchTimer=null;
+const urls={data:'@Url.Action("InsurancePayersData","MasterValues")',get:'@Url.Action("InsurancePayer","MasterValues")',save:'@Url.Action("SaveInsurancePayer","MasterValues")',status:'@Url.Action("InsuranceStatus","MasterValues")',import:'@Url.Action("ImportInsurance","MasterValues")',export:'@Url.Action("ExportInsurance","MasterValues")',labs:'@Url.Action("Labs","MasterValues")',lookup:'@Url.Action("PolicyPayerLookup","MasterValues")'};
 const aliases=[['1','Prism Molecular','Prism'],['2','InHealth','InHealth-DTR'],['4','Cove','Cove'],['5','Dylo','Dylo'],['6','PCRDx - AL','PCR AL'],['7','PCRDx - CO','PCR CO'],['10','BeechTree','Beech Tree'],['13','PCR Labs of America','PCR Labs of America'],['18','Certus','Certus'],['23','Northwest','NWL'],['24','Augustus_Labs','Augustus'],['16','Elixir','Elixir'],['12','Phi Life','Phi Life'],['9','Rising Tides','Rising Tides']];
-const editModal=new bootstrap.Modal(document.getElementById('editModal'));
+const US_STATES=['AL','AK','AZ','AR','CA','CO','CT','DE','DC','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'];
+const COLS=19;
+const editModal=canWrite?new bootstrap.Modal(document.getElementById('editModal')):null;
+const matchModal=canWrite?new bootstrap.Modal(document.getElementById('matchModal')):null;
 const loader=document.getElementById('gridLoader'),busyText=document.getElementById('busyText');
 function esc(v){return (v??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+function normalize(v){return (v||'').toString().toUpperCase().replace(/[^A-Z0-9]+/g,' ').replace(/\s+/g,' ').trim();}
+function normKey(v){return (v||'').toString().toUpperCase().replace(/[^A-Z0-9]/g,'');}
+// Resolve a record's lab: LabId when valid, otherwise match LabName against the lab list
+// and the accepted import lab references (aliases) used by the master file upload.
+function resolveLabId(x){
+  if(x&&x.labId!==null&&x.labId!==undefined&&x.labId!==''&&labs.some(l=>String(l.labId)===String(x.labId)))return String(x.labId);
+  const key=normKey(x&&x.labName);
+  if(!key)return '';
+  const byName=labs.find(l=>normKey(l.labName)===key);
+  if(byName)return String(byName.labId);
+  const alias=aliases.find(a=>normKey(a[2])===key||normKey(a[1])===key);
+  return alias?String(alias[0]):'';
+}
+function labNameFor(labId){
+  const lab=labs.find(l=>String(l.labId)===String(labId));
+  if(lab)return lab.labName;
+  const alias=aliases.find(a=>String(a[0])===String(labId));
+  return alias?alias[1]:null;
+}
+function isInactiveVal(v){return /inactive|^no$|^false$|^0$|^n$/i.test((v||'').toString().trim());}
+function isActiveVal(v){return !isInactiveVal(v);} // blank/unknown counts as active so rows are never left without actions
+function isMapped(x){return x.globalPayerID!==null&&x.globalPayerID!==undefined&&x.globalPayerID!=='';}
 function qs(){const fd=new FormData(document.getElementById('filterForm'));fd.set('page',page);fd.set('pageSize',pageSize);if(sortColumn){fd.set('sortColumn',sortColumn);fd.set('sortDirection',sortDirection);}return new URLSearchParams(fd).toString();}
 function updateSortHeaders(){document.querySelectorAll('th.sortable').forEach(th=>{const active=th.dataset.sort===sortColumn;th.classList.toggle('sorted',active);th.querySelector('.mv-sort').textContent=active?(sortDirection==='asc'?'▲':'▼'):'↕';});}
-function setBusy(on,text){busyText.textContent=text||'Working...';loader.classList.toggle('active',on);document.querySelectorAll('button,input,select,textarea').forEach(x=>{if(!x.closest('.modal.show'))x.disabled=on;});}
+function setBusy(on,text){busyText.textContent=text||'Working...';loader.classList.toggle('active',on);document.querySelectorAll('button,input,select,textarea').forEach(x=>{if(!x.closest('.modal.show')&&!x.closest('tr.mv-editing'))x.disabled=on;});}
 function setBtn(btn,on,text){btn.disabled=on;if(on){btn.dataset.old=btn.innerHTML;btn.innerHTML='<span class="spinner-border spinner-border-sm me-1"></span>'+text;}else if(btn.dataset.old){btn.innerHTML=btn.dataset.old;delete btn.dataset.old;}}
 async function errorText(r){try{const j=await r.json();return j.message||j.title||JSON.stringify(j);}catch{return await r.text();}}
-function activeBadge(v){const on=/active|yes|true|1/i.test(v||''),off=/inactive|no|false|0/i.test(v||'');return `<span class="mv-badge ${on?'on':off?'off':''}">${esc(v||'')}</span>`;}
-function renderRows(items){document.getElementById('rows').innerHTML=(items||[]).map(x=>`<tr><td class="mv-primary">${esc(x.payerCode)}</td><td class="mv-primary" title="${esc(x.payerNameRaw)}">${esc(x.payerNameRaw)}</td><td title="${esc(x.payerNameNormalized)}">${esc(x.payerNameNormalized)}</td><td>${esc(x.globalPayerID)}</td><td>${esc(x.payerGroupCode)}</td><td>${esc(x.payerCommonCode)}</td><td>${esc(x.parent)}</td><td>${esc(x.planType)}</td><td>${esc(x.mcoType)}</td><td>${esc(x.payerState)}</td><td>${activeBadge(x.isActive)}</td><td>${esc(x.benefitAdminCode)}</td><td title="${esc(x.benefitAdministrator)}">${esc(x.benefitAdministrator)}</td><td>${esc(x.labName)}</td><td>${esc(x.labState)}</td><td>${esc(x.labStateCode)}</td><td title="${esc(x.remarks)}">${esc(x.remarks)}</td><td class="text-end text-nowrap"><button class="btn btn-sm btn-outline-primary edit" data-id="${x.labInsuranceMasterId}" title="Edit"><i class="bi bi-pencil"></i></button> <button class="btn btn-sm btn-outline-secondary stat" data-id="${x.labInsuranceMasterId}" data-active="${esc(x.isActive)}" title="Activate/deactivate"><i class="bi bi-toggle-on"></i></button></td></tr>`).join('')||'<tr><td colspan="18"><div class="mv-empty"><div class="fw-bold">No records found</div><div>Adjust filters or import the master file.</div></div></td></tr>';}
-async function load(){updateSortHeaders();const query=qs();setBusy(true,'Loading records...');try{const r=await fetch(urls.data+'?'+query);const d=await r.json();totalPages=d.totalPages||1;document.getElementById('pageInfo').textContent=`Page ${d.page||1} of ${totalPages} - ${d.totalCount||0} records`;renderRows(d.items);}catch(e){document.getElementById('rows').innerHTML='<tr><td colspan="18"><div class="mv-empty text-danger">Unable to load records.</div></td></tr>';}finally{setBusy(false);}}
-async function loadLabs(){const r=await fetch(urls.labs);labs=await r.json();for(const id of ['labFilter','labEdit']){const s=document.getElementById(id);labs.forEach(l=>s.insertAdjacentHTML('beforeend',`<option value="${l.labId}">${esc(l.labName)}</option>`));}document.getElementById('aliasRows').innerHTML=aliases.map(x=>`<tr><td>${x[0]}</td><td>${esc(x[1])}</td><td class="fw-semibold">${esc(x[2])}</td></tr>`).join('');}
-function fill(x){const f=document.getElementById('editForm');f.reset();document.getElementById('id').value=x?.labInsuranceMasterId||'';for(const e of f.elements){if(e.name&&x&&x[e.name]!==undefined)e.value=x[e.name]??'';}f.elements.payerCode.readOnly=!!x;f.elements.payerNameRaw.readOnly=!!x;document.getElementById('saveError').classList.add('d-none');}
+function activeBadge(v){if(v===null||v===undefined||v==='')return '—';const off=isInactiveVal(v);return `<span class="mv-badge ${off?'off':'on'}">${esc(v)}</span>`;}
+function mappingBadge(x){return isMapped(x)?'<span class="mv-badge mapped">Mapped</span>':'<span class="mv-badge unmapped">Unmapped</span>';}
+function rowActions(x){
+  if(!canWrite)return '';
+  // Edit is always available; Deactivate only while the record is still active.
+  const match=!isMapped(x)?`<button class="btn btn-sm btn-warning matchBtn" data-id="${x.labInsuranceMasterId}" data-name="${esc(x.payerNameRaw)}" title="Review suggested Global Payer ID match">Match</button> `:'';
+  const deact=isActiveVal(x.isActive)?` <button class="btn btn-sm btn-outline-danger stat" data-id="${x.labInsuranceMasterId}" data-name="${esc(x.payerNameRaw)}" title="Deactivate"><i class="bi bi-slash-circle"></i></button>`:'';
+  return match+`<button class="btn btn-sm btn-outline-primary edit" data-id="${x.labInsuranceMasterId}" title="Edit"><i class="bi bi-pencil"></i> Edit</button>${deact}`;
+}
+function rowHtml(x){
+  return `<tr data-id="${x.labInsuranceMasterId}" class="${!isMapped(x)&&isActiveVal(x.isActive)?'unmapped':''}"><td class="mv-primary">${esc(x.payerCode)}</td><td class="mv-primary">${esc(x.payerNameRaw)}</td><td>${esc(x.payerNameNormalized)}</td><td>${esc(x.globalPayerID??'—')}</td><td>${mappingBadge(x)}</td><td>${esc(x.payerGroupCode)}</td><td>${esc(x.payerCommonCode)}</td><td>${esc(x.parent)}</td><td>${esc(x.planType)}</td><td>${esc(x.mcoType)}</td><td>${esc(x.payerState)}</td><td>${activeBadge(x.isActive)}</td><td>${esc(x.benefitAdminCode)}</td><td>${esc(x.benefitAdministrator)}</td><td>${esc(x.labName)}</td><td>${esc(x.labState)}</td><td>${esc(x.labStateCode)}</td><td>${esc(x.remarks)}</td><td class="text-end text-nowrap">${rowActions(x)}</td></tr>`;
+}
+function renderRows(items){
+  currentItems=items||[];
+  const mapFilter=document.getElementById('mappingFilter').value;
+  let list=currentItems;
+  if(mapFilter)list=list.filter(x=>mapFilter==='Mapped'?isMapped(x):!isMapped(x));
+  document.getElementById('rows').innerHTML=list.map(rowHtml).join('')||`<tr><td colspan="${COLS}"><div class="mv-empty"><div class="fw-bold">No records found</div><div>Adjust filters or import the master file.</div></div></td></tr>`;
+}
+async function load(){updateSortHeaders();const query=qs();setBusy(true,'Loading records...');try{const r=await fetch(urls.data+'?'+query);const d=await r.json();totalPages=d.totalPages||1;document.getElementById('pageInfo').textContent=`Page ${d.page||1} of ${totalPages} - ${d.totalCount||0} records`;renderRows(d.items);}catch(e){document.getElementById('rows').innerHTML=`<tr><td colspan="${COLS}"><div class="mv-empty text-danger">Unable to load records.</div></td></tr>`;}finally{setBusy(false);}}
+async function loadLabs(){const r=await fetch(urls.labs);labs=await r.json();const ids=canWrite?['labFilter','labEdit']:['labFilter'];for(const id of ids){const s=document.getElementById(id);if(s)labs.forEach(l=>s.insertAdjacentHTML('beforeend',`<option value="${l.labId}">${esc(l.labName)}</option>`));}const alias=document.getElementById('aliasRows');if(alias)alias.innerHTML=aliases.map(x=>`<tr><td>${x[0]}</td><td>${esc(x[1])}</td><td class="fw-semibold">${esc(x[2])}</td></tr>`).join('');}
 document.getElementById('filterForm').onsubmit=e=>{e.preventDefault();page=1;load();};
+document.getElementById('mappingFilter').onchange=()=>{page=1;load();};
 document.querySelectorAll('th.sortable').forEach(th=>th.addEventListener('click',()=>{const col=th.dataset.sort;if(sortColumn===col){sortDirection=sortDirection==='asc'?'desc':'asc';}else{sortColumn=col;sortDirection='asc';}page=1;load();}));
-document.getElementById('resetBtn').onclick=()=>{document.getElementById('filterForm').reset();page=1;load();};
+document.getElementById('resetBtn').onclick=()=>{document.getElementById('filterForm').reset();document.getElementById('mappingFilter').value='';page=1;load();};
 document.getElementById('prevBtn').onclick=()=>{if(page>1){page--;load();}};
 document.getElementById('nextBtn').onclick=()=>{if(page<totalPages){page++;load();}};
-document.getElementById('addBtn').onclick=()=>{fill(null);document.getElementById('editTitle').textContent='Add New Payer';editModal.show();};
-document.getElementById('rows').onclick=async e=>{const edit=e.target.closest('.edit'),stat=e.target.closest('.stat');if(edit){setBusy(true,'Opening record...');try{const r=await fetch(urls.get+'?id='+edit.dataset.id);fill(await r.json());document.getElementById('editTitle').textContent='Edit Payer';editModal.show();}finally{setBusy(false);}}if(stat){const next=/active|yes|true/i.test(stat.dataset.active)?'Inactive':'Active';setBusy(true,'Updating status...');try{await fetch(urls.status+`?id=${stat.dataset.id}&isActive=${encodeURIComponent(next)}`,{method:'POST'});await load();}finally{setBusy(false);}}};
-document.getElementById('saveBtn').onclick=async()=>{const btn=document.getElementById('saveBtn'),f=document.getElementById('editForm');if(!f.reportValidity())return;const data=Object.fromEntries(new FormData(f));data.globalPayerID=data.globalPayerID?Number(data.globalPayerID):null;data.labId=data.labId?Number(data.labId):null;const id=document.getElementById('id').value;setBtn(btn,true,'Saving...');try{const r=await fetch(urls.save+(id?'?id='+id:''),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});if(!r.ok){document.getElementById('saveError').textContent=await errorText(r);document.getElementById('saveError').classList.remove('d-none');return;}editModal.hide();await load();}finally{setBtn(btn,false);}};
-document.getElementById('importBtn').onclick=async()=>{const btn=document.getElementById('importBtn'),file=document.getElementById('importFile').files[0];if(!file)return;const fd=new FormData();fd.append('file',file);setBtn(btn,true,'Importing...');document.getElementById('importResult').innerHTML='<span class="text-muted">Import running. Please keep this window open.</span>';try{const r=await fetch(urls.import,{method:'POST',body:fd});const d=await r.json();document.getElementById('importResult').innerHTML=`<div class="alert alert-light border mb-0"><strong>Total:</strong> ${d.totalRows||0} &nbsp; <strong>Inserted:</strong> ${d.insertedRows||0} &nbsp; <strong>Updated:</strong> ${d.updatedRows||0} &nbsp; <strong>Skipped:</strong> ${d.skippedRows||0} &nbsp; <strong>Errors:</strong> ${d.errorRows||0}<div class="mt-2 text-warning">${(d.warnings||[]).map(esc).slice(0,8).join('<br>')}</div><div class="mt-2 text-danger">${(d.errors||[]).map(esc).slice(0,8).join('<br>')}</div></div>`;await load();}finally{setBtn(btn,false);}};
+document.getElementById('pageSizeSel').onchange=e=>{pageSize=Number(e.target.value);page=1;load();};
 document.getElementById('exportBtn').onclick=()=>{const btn=document.getElementById('exportBtn');setBtn(btn,true,'Exporting...');window.lmdExcelDownload(urls.export+'?'+qs());setTimeout(()=>setBtn(btn,false),1800);};
+
+if(canWrite){
+  const f=document.getElementById('editForm');
+  US_STATES.forEach(s=>{f.elements.payerState.insertAdjacentHTML('beforeend',`<option>${s}</option>`);f.elements.labState.insertAdjacentHTML('beforeend',`<option>${s}</option>`);});
+  function setSelect(sel,value){if(value&&![...sel.options].some(o=>o.value===String(value)))sel.insertAdjacentHTML('beforeend',`<option>${esc(value)}</option>`);sel.value=value??'';}
+  function hideDup(){document.getElementById('dupWarning').classList.add('d-none');dupConfirmed=false;document.getElementById('saveBtn').textContent='Submit';}
+  function fill(x){
+    f.reset();
+    document.getElementById('id').value=x?.labInsuranceMasterId||'';
+    for(const e of f.elements){if(e.name&&x&&x[e.name]!==undefined&&e.tagName!=='SELECT')e.value=x[e.name]??'';}
+    setSelect(f.elements.planType,x?.planType||'');
+    setSelect(f.elements.payerState,x?.payerState||'');
+    setSelect(f.elements.labState,x?.labState||'');
+    const labId=x?resolveLabId(x):'';
+    if(labId&&![...f.elements.labId.options].some(o=>o.value===labId))
+      f.elements.labId.insertAdjacentHTML('beforeend',`<option value="${labId}">${esc(labNameFor(labId)||x.labName||('Lab '+labId))}</option>`);
+    f.elements.labId.value=labId;
+    f.elements.payerNameNormalized.value=x?normalize(x.payerNameRaw):'';
+    f.elements.isActive.value=x?(x.isActive||'Active'):'Active';
+    f.elements.payerNameRaw.readOnly=!!x;
+    // Payer Code: read-only when the record already has one; editable when blank or adding new.
+    const hasCode=!!(x&&(x.payerCode||'').trim());
+    f.elements.payerCode.readOnly=hasCode;
+    f.elements.payerCode.tabIndex=hasCode?-1:0;
+    document.getElementById('payerCodeTag').style.display=hasCode?'':'none';
+    document.getElementById('mappingStatusDisplay').value=x&&isMapped(x)?'Mapped':'Unmapped';
+    hideDup();document.getElementById('saveError').classList.add('d-none');
+  }
+  f.elements.payerNameRaw.addEventListener('input',e=>{f.elements.payerNameNormalized.value=normalize(e.target.value);hideDup();});
+  async function findDuplicate(name,labId,currentId){
+    try{
+      const r=await fetch(urls.data+'?'+new URLSearchParams({search:name,page:1,pageSize:100}));
+      const d=await r.json();const norm=normalize(name);
+      return (d.items||[]).find(x=>normalize(x.payerNameRaw)===norm&&String(x.labId??'')===String(labId??'')&&isActiveVal(x.isActive)&&String(x.labInsuranceMasterId)!==String(currentId||''));
+    }catch{return null;}
+  }
+  document.getElementById('addBtn').onclick=()=>{fill(null);document.getElementById('editTitle').textContent='Add Payer — Lab Insurance Master';editModal.show();};
+  document.getElementById('rows').onclick=async e=>{
+    const edit=e.target.closest('.edit'),stat=e.target.closest('.stat'),match=e.target.closest('.matchBtn');
+    if(edit){setBusy(true,'Opening record...');try{const r=await fetch(urls.get+'?id='+edit.dataset.id);fill(await r.json());document.getElementById('editTitle').textContent='Edit Payer — Lab Insurance Master';editModal.show();}finally{setBusy(false);}}
+    if(match){openMatch(match.dataset.id,match.dataset.name);}
+    if(stat){
+      const msg=requiresApproval
+        ?`Deactivate "${stat.dataset.name}"?\n\nThis request will be routed to LRN Admin / Reports Manager for approval. Deactivated payers cannot be reactivated.`
+        :`Deactivate "${stat.dataset.name}"?\n\nDeactivated payers cannot be reactivated — re-adding requires a new record. The record is retained for audit history.`;
+      if(!confirm(msg))return;
+      setBusy(true,'Deactivating...');
+      try{const r=await fetch(urls.status+`?id=${stat.dataset.id}&isActive=Inactive`,{method:'POST'});if(!r.ok){alert(await errorText(r));}else{const resp=await r.json().catch(()=>({}));if(resp.pendingApproval)alert('Deactivation request submitted. It will take effect once approved by LRN Admin / Reports Manager.');}await load();}finally{setBusy(false);}
+    }
+  };
+  document.getElementById('saveBtn').onclick=async()=>{
+    const btn=document.getElementById('saveBtn');
+    if(!f.reportValidity())return;
+    const data=Object.fromEntries(new FormData(f));
+    data.payerNameNormalized=normalize(data.payerNameRaw);
+    data.globalPayerID=data.globalPayerID?Number(data.globalPayerID):null;
+    data.labId=data.labId?Number(data.labId):null;
+    if(data.labId){const name=labNameFor(data.labId);if(name)data.labName=name;}
+    const id=document.getElementById('id').value;
+    if(!dupConfirmed){
+      setBtn(btn,true,'Checking...');
+      const dup=await findDuplicate(data.payerNameRaw,data.labId,id);
+      setBtn(btn,false);
+      if(dup){
+        const w=document.getElementById('dupWarning');
+        w.innerHTML=`⚠ A payer with the same normalized name already exists for this lab ("${esc(dup.payerNameRaw)}" — ${esc(dup.labName||'')}). You may proceed if this is a distinct entity — click <b>Save Anyway</b> to override.`;
+        w.classList.remove('d-none');dupConfirmed=true;btn.textContent='Save Anyway';return;
+      }
+    }
+    setBtn(btn,true,'Saving...');
+    try{
+      const r=await fetch(urls.save+(id?'?id='+id:''),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+      if(!r.ok){document.getElementById('saveError').textContent=await errorText(r);document.getElementById('saveError').classList.remove('d-none');return;}
+      const resp=await r.json().catch(()=>({}));
+      editModal.hide();
+      if(resp.pendingApproval)alert('Your request was submitted and routed to LRN Admin / Reports Manager for approval. It will appear in the master once approved.');
+      await load();
+    }finally{setBtn(btn,false);}
+  };
+
+  // ── Review Match: suggest Global Payer ID from the Payer Policy Insurance Master ──
+  function renderMatches(items,note){
+    const box=document.getElementById('matchResults');
+    matchSelected=null;document.getElementById('confirmMatchBtn').disabled=true;
+    const list=(items||[]).filter(x=>x.globalPayerID!==null&&x.globalPayerID!==undefined&&isActiveVal(x.isActive));
+    if(!list.length){box.innerHTML=`<div class="text-muted small">${esc(note||'No candidate match found. Use the search below to look up the Payer Policy Insurance Master.')}</div>`;return;}
+    box.innerHTML=list.slice(0,8).map((x,i)=>`<div class="mv-match-card" data-i="${i}"><div class="name">${esc(x.payerName)} <span class="mv-badge mapped ms-1">Global Payer ID ${esc(x.globalPayerID)}</span></div><div class="meta">Plan Type: ${esc(x.planType||'—')} • State: ${esc(x.payerState||'—')} • Match basis: normalized name similarity</div></div>`).join('');
+    box.querySelectorAll('.mv-match-card').forEach(c=>c.addEventListener('click',()=>{
+      box.querySelectorAll('.mv-match-card').forEach(o=>o.classList.remove('selected'));
+      c.classList.add('selected');matchSelected=list[Number(c.dataset.i)];document.getElementById('confirmMatchBtn').disabled=false;
+    }));
+  }
+  async function searchPolicy(term){
+    try{const r=await fetch(urls.lookup+'?'+new URLSearchParams({search:term,page:1,pageSize:25}));const d=await r.json();return d.items||[];}catch{return [];}
+  }
+  async function openMatch(id,rawName){
+    matchRecordId=id;matchSelected=null;
+    document.getElementById('matchTitle').textContent='Review Suggested Match — '+rawName;
+    document.getElementById('matchRawName').value=rawName;
+    document.getElementById('matchSearch').value='';
+    document.getElementById('matchError').classList.add('d-none');
+    document.getElementById('confirmMatchBtn').disabled=true;
+    document.getElementById('matchResults').innerHTML='<div class="text-muted small">Searching...</div>';
+    matchModal.show();
+    const norm=normalize(rawName);
+    let items=await searchPolicy(norm);
+    if(!items.length){
+      const words=norm.split(' ').filter(w=>w.length>2);
+      if(words.length)items=await searchPolicy(words[0]);
+    }
+    renderMatches(items);
+  }
+  document.getElementById('matchSearch').addEventListener('input',e=>{
+    clearTimeout(matchTimer);
+    const term=e.target.value.trim();
+    if(!term)return;
+    matchTimer=setTimeout(async()=>{renderMatches(await searchPolicy(term),'No results for "'+term+'".');},350);
+  });
+  document.getElementById('confirmMatchBtn').onclick=async()=>{
+    if(!matchRecordId||!matchSelected)return;
+    const btn=document.getElementById('confirmMatchBtn');
+    setBtn(btn,true,'Saving...');
+    try{
+      const rec=await (await fetch(urls.get+'?id='+matchRecordId)).json();
+      rec.globalPayerID=matchSelected.globalPayerID;
+      if(!rec.payerCommonCode)rec.payerCommonCode=matchSelected.payerCommonCode||rec.payerCommonCode;
+      if(!rec.planType)rec.planType=matchSelected.planType||rec.planType;
+      if(!rec.payerState)rec.payerState=matchSelected.payerState||rec.payerState;
+      if(!rec.payerNameNormalized)rec.payerNameNormalized=normalize(rec.payerNameRaw);
+      const r=await fetch(urls.save+'?id='+matchRecordId,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(rec)});
+      if(!r.ok){const el=document.getElementById('matchError');el.textContent=await errorText(r);el.classList.remove('d-none');return;}
+      const resp=await r.json().catch(()=>({}));
+      matchModal.hide();
+      if(resp.pendingApproval)alert('Mapping confirmation submitted. It will take effect once approved by LRN Admin / Reports Manager.');
+      await load();
+    }finally{setBtn(btn,false);}
+  };
+  const importBtn=document.getElementById('importBtn');
+  if(importBtn)importBtn.onclick=async()=>{const btn=importBtn,file=document.getElementById('importFile').files[0];if(!file)return;const fd=new FormData();fd.append('file',file);setBtn(btn,true,'Importing...');document.getElementById('importResult').innerHTML='<span class="text-muted">Import running. Please keep this window open.</span>';try{const r=await fetch(urls.import,{method:'POST',body:fd});const d=await r.json();document.getElementById('importResult').innerHTML=`<div class="alert alert-light border mb-0"><strong>Total:</strong> ${d.totalRows||0} &nbsp; <strong>Inserted:</strong> ${d.insertedRows||0} &nbsp; <strong>Updated:</strong> ${d.updatedRows||0} &nbsp; <strong>Skipped:</strong> ${d.skippedRows||0} &nbsp; <strong>Errors:</strong> ${d.errorRows||0}<div class="mt-2 text-warning">${(d.warnings||[]).map(esc).slice(0,8).join('<br>')}</div><div class="mt-2 text-danger">${(d.errors||[]).map(esc).slice(0,8).join('<br>')}</div></div>`;await load();}finally{setBtn(btn,false);}};
+}
 loadLabs().then(load);
 })();
 </script>

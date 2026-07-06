@@ -25,6 +25,12 @@ public interface IMasterValuesApiClient
     Task<ImportResultDto> ImportPolicyAsync(IFormFile file, CancellationToken ct);
     Task<(byte[] Content, string FileName)> ExportPolicyAsync(IQueryCollection query, CancellationToken ct);
     Task<IReadOnlyList<MasterValueLabOption>> GetLabsAsync(CancellationToken ct);
+
+    Task<MasterPagedResult<PayerMasterApprovalRequestDto>> GetApprovalsAsync(IQueryCollection query, CancellationToken ct);
+    Task<PayerMasterApprovalDecisionResult> ApproveRequestsAsync(PayerMasterApprovalDecisionRequest request, CancellationToken ct);
+    Task<PayerMasterApprovalDecisionResult> RejectRequestsAsync(PayerMasterApprovalDecisionRequest request, CancellationToken ct);
+    Task<MasterPagedResult<PayerMasterAuditEntryDto>> GetAuditAsync(IQueryCollection query, CancellationToken ct);
+    Task<IReadOnlyList<PayerMasterNotificationDto>> GetNotificationsAsync(int take, CancellationToken ct);
 }
 
 public sealed class MasterValuesApiClient : IMasterValuesApiClient
@@ -85,6 +91,33 @@ public sealed class MasterValuesApiClient : IMasterValuesApiClient
 
     public async Task<IReadOnlyList<MasterValueLabOption>> GetLabsAsync(CancellationToken ct)
         => await GetAsync<List<MasterValueLabOption>>("api/master-values/insurance-payers/labs", ct) ?? [];
+
+    public async Task<MasterPagedResult<PayerMasterApprovalRequestDto>> GetApprovalsAsync(IQueryCollection query, CancellationToken ct)
+        => await GetAsync<MasterPagedResult<PayerMasterApprovalRequestDto>>("api/master-values/workflow/approvals" + Query(query), ct) ?? new();
+
+    public Task<PayerMasterApprovalDecisionResult> ApproveRequestsAsync(PayerMasterApprovalDecisionRequest request, CancellationToken ct)
+        => PostForResultAsync<PayerMasterApprovalDecisionRequest, PayerMasterApprovalDecisionResult>("api/master-values/workflow/approvals/approve", request, ct);
+
+    public Task<PayerMasterApprovalDecisionResult> RejectRequestsAsync(PayerMasterApprovalDecisionRequest request, CancellationToken ct)
+        => PostForResultAsync<PayerMasterApprovalDecisionRequest, PayerMasterApprovalDecisionResult>("api/master-values/workflow/approvals/reject", request, ct);
+
+    public async Task<MasterPagedResult<PayerMasterAuditEntryDto>> GetAuditAsync(IQueryCollection query, CancellationToken ct)
+        => await GetAsync<MasterPagedResult<PayerMasterAuditEntryDto>>("api/master-values/workflow/audit" + Query(query), ct) ?? new();
+
+    public async Task<IReadOnlyList<PayerMasterNotificationDto>> GetNotificationsAsync(int take, CancellationToken ct)
+        => await GetAsync<List<PayerMasterNotificationDto>>($"api/master-values/workflow/notifications?take={take}", ct) ?? [];
+
+    private async Task<TResult> PostForResultAsync<TPayload, TResult>(string url, TPayload payload, CancellationToken ct) where TResult : new()
+    {
+        await AuthorizeAsync(ct);
+        using var request = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+        };
+        using var response = await _http.SendAsync(request, ct);
+        await EnsureSuccessAsync(response, ct);
+        return await response.Content.ReadFromJsonAsync<TResult>(JsonOptions, ct) ?? new TResult();
+    }
 
     private async Task<T?> GetAsync<T>(string url, CancellationToken ct)
     {
