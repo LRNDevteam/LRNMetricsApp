@@ -78,7 +78,15 @@
         "Met" => "badge-soft-success",
         _ => "badge-soft-primary"
     };
-    string RecordsPageUrl(int page, string? tabOverride = null) => Url.Action("Index", "DenialDashboard", new
+    // "Hide the function, don't remove it" - flip these to true to bring the tab / CSV buttons back.
+    var denialInputTabEnabled = false;
+    var taskBoardCsvEnabled = false;
+
+    var recordsPageSizes = new[] { 50, 100, 250, 500 };
+    var insightPageSizes = new[] { 10, 25, 50, 100 };
+    var lineItemPageSizes = new[] { 25, 50, 100, 250 };
+
+    string DashboardUrl(string tab, int page, int pageSize, int insightPage, int insightPageSize, int lineItemPage, int lineItemPageSize) => Url.Action("Index", "DenialDashboard", new
     {
         lab = Model.CurrentLabName,
         LabId = Model.Filters.LabId,
@@ -99,74 +107,144 @@
         DateOfServiceTo = Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"),
         DenialDateFrom = Model.Filters.DenialDateFrom?.ToString("yyyy-MM-dd"),
         DenialDateTo = Model.Filters.DenialDateTo?.ToString("yyyy-MM-dd"),
-        ActiveTab = tabOverride ?? activeTab,
+        ActiveTab = tab,
         Page = page,
-        PageSize = Model.Filters.PageSize,
-        InsightPage = Model.Filters.InsightPage,
-        InsightPageSize = Model.Filters.InsightPageSize,
-        LineItemPage = Model.Filters.LineItemPage,
-        LineItemPageSize = Model.Filters.LineItemPageSize
+        PageSize = pageSize,
+        InsightPage = insightPage,
+        InsightPageSize = insightPageSize,
+        LineItemPage = lineItemPage,
+        LineItemPageSize = lineItemPageSize
     }) ?? "#";
 
-    string InsightPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
-    {
-        lab = Model.CurrentLabName,
-        LabId = Model.Filters.LabId,
-        Status = Model.Filters.Status,
-        Priority = Model.Filters.Priority,
-        ActionCategory = Model.Filters.ActionCategory,
-        Deadline = Model.Filters.Deadline,
-        Classification = Model.Filters.Classification,
-        SalesRepname = Model.Filters.SalesRepname,
-        ClinicName = Model.Filters.ClinicName,
-        ReferringProvider = Model.Filters.ReferringProvider,
-        PayerName = Model.Filters.PayerName,
-        PayerType = Model.Filters.PayerType,
-        PanelName = Model.Filters.PanelName,
-        FirstBilledDateFrom = Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"),
-        FirstBilledDateTo = Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"),
-        DateOfServiceFrom = Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"),
-        DateOfServiceTo = Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"),
-        DenialDateFrom = Model.Filters.DenialDateFrom?.ToString("yyyy-MM-dd"),
-        DenialDateTo = Model.Filters.DenialDateTo?.ToString("yyyy-MM-dd"),
-        ActiveTab = "denial-insight",
-        Page = Model.Filters.Page,
-        PageSize = Model.Filters.PageSize,
-        InsightPage = page,
-        InsightPageSize = Model.Filters.InsightPageSize,
-        LineItemPage = Model.Filters.LineItemPage,
-        LineItemPageSize = Model.Filters.LineItemPageSize
-    }) ?? "#";
+    string RecordsPageUrl(int page, string? tabOverride = null) => DashboardUrl(tabOverride ?? activeTab, page, Model.Filters.PageSize, Model.Filters.InsightPage, Model.Filters.InsightPageSize, Model.Filters.LineItemPage, Model.Filters.LineItemPageSize);
+    string RecordsPageSizeUrl(int pageSize) => DashboardUrl(activeTab, 1, pageSize, Model.Filters.InsightPage, Model.Filters.InsightPageSize, Model.Filters.LineItemPage, Model.Filters.LineItemPageSize);
 
-    string LineItemPageUrl(int page) => Url.Action("Index", "DenialDashboard", new
+    string InsightPageUrl(int page) => DashboardUrl("denial-insight", Model.Filters.Page, Model.Filters.PageSize, page, Model.Filters.InsightPageSize, Model.Filters.LineItemPage, Model.Filters.LineItemPageSize);
+    string InsightPageSizeUrl(int pageSize) => DashboardUrl("denial-insight", Model.Filters.Page, Model.Filters.PageSize, 1, pageSize, Model.Filters.LineItemPage, Model.Filters.LineItemPageSize);
+
+    string LineItemPageUrl(int page) => DashboardUrl("line-item", Model.Filters.Page, Model.Filters.PageSize, Model.Filters.InsightPage, Model.Filters.InsightPageSize, page, Model.Filters.LineItemPageSize);
+    string LineItemPageSizeUrl(int pageSize) => DashboardUrl("line-item", Model.Filters.Page, Model.Filters.PageSize, Model.Filters.InsightPage, Model.Filters.InsightPageSize, 1, pageSize);
+
+    // Cell formatters for the DenialLineItem grid.
+    const string Dash = "-";
+    string Txt(string? value) => string.IsNullOrWhiteSpace(value) ? Dash : value.Trim();
+    string Dt(DateTime? value) => value?.ToString("MM/dd/yyyy") ?? Dash;
+    string Cnt(int? value) => value?.ToString("N0", usd) ?? Dash;
+    string Amt(decimal? value) => value.HasValue ? value.Value.ToString("C2", usd) : Dash;
+    string Dec(decimal? value) => value?.ToString("N2", usd) ?? Dash;
+
+    // Every dbo.DenialLineItem column carried by DenialLineItemRecord, in table order.
+    // Css: lis-number-cell = right aligned + tabular, lis-date-cell = tabular, lis-wide-cell = clamped width.
+    var lineItemColumns = new (string Header, string Css, Func<DenialLineItemRecord, string> Value)[]
     {
-        lab = Model.CurrentLabName,
-        LabId = Model.Filters.LabId,
-        Status = Model.Filters.Status,
-        Priority = Model.Filters.Priority,
-        ActionCategory = Model.Filters.ActionCategory,
-        Deadline = Model.Filters.Deadline,
-        Classification = Model.Filters.Classification,
-        SalesRepname = Model.Filters.SalesRepname,
-        ClinicName = Model.Filters.ClinicName,
-        ReferringProvider = Model.Filters.ReferringProvider,
-        PayerName = Model.Filters.PayerName,
-        PayerType = Model.Filters.PayerType,
-        PanelName = Model.Filters.PanelName,
-        FirstBilledDateFrom = Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"),
-        FirstBilledDateTo = Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"),
-        DateOfServiceFrom = Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"),
-        DateOfServiceTo = Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"),
-        DenialDateFrom = Model.Filters.DenialDateFrom?.ToString("yyyy-MM-dd"),
-        DenialDateTo = Model.Filters.DenialDateTo?.ToString("yyyy-MM-dd"),
-        ActiveTab = "line-item",
-        Page = Model.Filters.Page,
-        PageSize = Model.Filters.PageSize,
-        InsightPage = Model.Filters.InsightPage,
-        InsightPageSize = Model.Filters.InsightPageSize,
-        LineItemPage = page,
-        LineItemPageSize = Model.Filters.LineItemPageSize
-    }) ?? "#";
+        ("Accession No", "fw-semibold", x => Txt(x.AccessionNo)),
+        ("Visit Number", "", x => Txt(x.VisitNumber)),
+        ("CPT Code", "", x => Txt(x.CptCode)),
+        // PatientDOB is deliberately not rendered - PHI, and it was never on this grid before.
+        ("Payer Code", "lis-number-cell", x => Cnt(x.PayerCode)),
+        ("Payer Name", "lis-wide-cell", x => Txt(x.PayerName)),
+        ("Payer Name Normalized", "lis-wide-cell", x => Txt(x.PayerNameNormalized)),
+        ("Payer Type", "", x => Txt(x.PayerType)),
+        ("Pay Status", "", x => Txt(x.PayStatus)),
+        ("Historical Payment", "", x => Txt(x.HistoricalPayment)),
+        ("Historical Paid Line Item Count", "lis-number-cell", x => Txt(x.HistoricalPaidLineItemCount)),
+        ("Historical Payment Confidence Score", "lis-number-cell", x => Txt(x.HistoricalPaymentConfidenceScore)),
+        ("Total Line Item Count", "lis-number-cell", x => Cnt(x.TotalLineItemCount)),
+        ("Paid Line Item Count", "lis-number-cell", x => Cnt(x.PaidLineItemCount)),
+        ("Paid Line Item Count %", "lis-number-cell", x => Dec(x.PaidLineItemCountPercent)),
+        ("Payer Found In Policy", "", x => Txt(x.PayerFoundInPolicy)),
+        ("Date of Service", "lis-date-cell", x => Dt(x.DateOfService)),
+        ("First Billed Date", "lis-date-cell", x => Dt(x.FirstBilledDate)),
+        ("Denial Date", "lis-date-cell", x => Dt(x.DenialDate)),
+        ("Panel Name", "lis-wide-cell", x => Txt(x.PanelName)),
+        ("LIS ICD10 Codes", "lis-wide-cell", x => Txt(x.LisIcd10Codes)),
+        ("CCW ICD10 Code", "lis-wide-cell", x => Txt(x.CcwIcd10Code)),
+        ("Units", "lis-number-cell", x => Cnt(x.Units)),
+        ("Modifier", "", x => Txt(x.Modifier)),
+        ("Referring Provider", "lis-wide-cell", x => Txt(x.ReferringProvider)),
+        ("Clinic Name", "lis-wide-cell", x => Txt(x.ClinicName)),
+        ("Sales Rep", "lis-wide-cell", x => Txt(x.SalesRepname)),
+        ("Denial Code Original", "", x => Txt(x.DenialCodeOriginal)),
+        ("Denial Code Normalized", "", x => Txt(x.DenialCodeNormalized)),
+        ("Denial Description", "lis-wide-cell", x => Txt(x.DenialDescription)),
+        ("Billed Amount", "lis-number-cell", x => Amt(x.BilledAmount)),
+        ("Allowed Amount", "lis-number-cell", x => Amt(x.AllowedAmount)),
+        ("Insurance Payment", "lis-number-cell", x => Amt(x.InsurancePayment)),
+        ("Insurance Adjustment", "lis-number-cell", x => Amt(x.InsuranceAdjustment)),
+        ("Patient Paid Amount", "lis-number-cell", x => Amt(x.PatientPaidAmount)),
+        ("Patient Adjustment", "lis-number-cell", x => Amt(x.PatientAdjustment)),
+        ("Insurance Balance", "lis-number-cell", x => Amt(x.InsuranceBalance)),
+        ("Patient Balance", "lis-number-cell", x => Amt(x.PatientBalance)),
+        ("Total Balance", "lis-number-cell", x => Amt(x.TotalBalance)),
+        ("Medicare Fee", "lis-number-cell", x => Amt(x.MedicareFee)),
+        ("Final Claim Status", "", x => Txt(x.FinalClaimStatus)),
+        ("Covered ICD10 Codes Billed", "lis-wide-cell", x => Txt(x.CoveredIcd10CodesBilled)),
+        ("Non Covered ICD10 Codes Billed", "lis-wide-cell", x => Txt(x.NonCoveredIcd10CodesBilled)),
+        ("Billed ICD Codes Not In Payer Policy", "lis-wide-cell", x => Txt(x.BilledIcdCodesNotAvailableInPayerPolicy)),
+        ("Coverage Status", "", x => Txt(x.CoverageStatus)),
+        ("Final Coverage Status", "", x => Txt(x.FinalCoverageStatus)),
+        ("Covered ICD10 Codes Per Payer Policy", "lis-wide-cell", x => Txt(x.CoveredIcd10CodesAsPerPayerPolicy)),
+        ("Non Covered ICD10 Codes Per Payer Policy", "lis-wide-cell", x => Txt(x.NonCoveredIcd10CodesAsPerPayerPolicy)),
+        ("Action Comment", "lis-wide-cell", x => Txt(x.ActionComment)),
+        ("Resolution", "", x => Txt(x.Resolution)),
+        ("Lab Name", "lis-wide-cell", x => Txt(x.LabName)),
+        ("Coding Validation", "", x => Txt(x.CodingValidation)),
+        ("Coding Validation Sub Status", "lis-wide-cell", x => Txt(x.CodingValidationSubStatus)),
+        ("ICD Compliance Status", "", x => Txt(x.IcdComplianceStatus)),
+        ("ICD Compliance Substatus", "lis-wide-cell", x => Txt(x.IcdComplianceSubstatus)),
+        ("ICD Primary Indicator Available", "", x => Txt(x.IcdPrimaryIndicatorAvailable)),
+        ("Covered ICD Presence", "", x => Txt(x.CoveredIcdPresence)),
+        ("ICD Validation Confidence", "", x => Txt(x.IcdValidationConfidence)),
+        ("Frequency Condition Met", "", x => Txt(x.FrequencyConditionMet)),
+        ("Gender Condition Met", "", x => Txt(x.GenderConditionMet)),
+        ("Payability", "", x => Txt(x.Payability)),
+        ("Forecasting Payability", "", x => Txt(x.ForecastingPayability)),
+        ("Policy Coverage Expectation", "lis-wide-cell", x => Txt(x.PolicyCoverageExpectation)),
+        ("Denial Validity", "", x => Txt(x.DenialValidity)),
+        ("Coverage Expectation Remarks", "lis-wide-cell", x => Txt(x.CoverageExpectationRemarks)),
+        ("Expected Average Allowed Amount", "lis-number-cell", x => Amt(x.ExpectedAverageAllowedAmount)),
+        ("Expected Average Insurance Payment", "lis-number-cell", x => Amt(x.ExpectedAverageInsurancePayment)),
+        ("Expected Allowed Amount Same Lab", "lis-number-cell", x => Amt(x.ExpectedAllowedAmountSameLab)),
+        ("Expected Insurance Payment Same Lab", "lis-number-cell", x => Amt(x.ExpectedInsurancePaymentSameLab)),
+        ("Mode Allowed Amount Same Lab", "lis-number-cell", x => Amt(x.ModeAllowedAmountSameLab)),
+        ("Mode Insurance Paid Same Lab", "lis-number-cell", x => Amt(x.ModeInsurancePaidSameLab)),
+        ("Mode Allowed Amount Peer", "lis-number-cell", x => Amt(x.ModeAllowedAmountPeer)),
+        ("Mode Insurance Paid Peer", "lis-number-cell", x => Amt(x.ModeInsurancePaidPeer)),
+        ("Median Allowed Amount Same Lab", "lis-number-cell", x => Amt(x.MedianAllowedAmountSameLab)),
+        ("Median Insurance Paid Same Lab", "lis-number-cell", x => Amt(x.MedianInsurancePaidSameLab)),
+        ("Median Allowed Amount Peer", "lis-number-cell", x => Amt(x.MedianAllowedAmountPeer)),
+        ("Median Insurance Paid Peer", "lis-number-cell", x => Amt(x.MedianInsurancePaidPeer)),
+        ("Mode Allowed Amount Difference", "lis-number-cell", x => Amt(x.ModeAllowedAmountDifference)),
+        ("Mode Insurance Paid Difference", "lis-number-cell", x => Amt(x.ModeInsurancePaidDifference)),
+        ("Median Allowed Amount Difference", "lis-number-cell", x => Amt(x.MedianAllowedAmountDifference)),
+        ("Median Insurance Paid Difference", "lis-number-cell", x => Amt(x.MedianInsurancePaidDifference)),
+        ("Denial Rate", "lis-number-cell", x => Dec(x.DenialRate)),
+        ("Adjustment Rate", "lis-number-cell", x => Dec(x.AdjustmentRate)),
+        ("Payment Days", "lis-number-cell", x => Cnt(x.PaymentDays)),
+        ("Expected Payment Date", "lis-date-cell", x => Dt(x.ExpectedPaymentDate)),
+        ("Expected Payment Month", "", x => Txt(x.ExpectedPaymentMonth)),
+        ("Billing Provider", "lis-wide-cell", x => Txt(x.BillingProvider)),
+        ("Denial Classification", "lis-wide-cell", x => Txt(x.CleanDenialClassification)),
+        ("Denial Type", "", x => Txt(x.DenialType)),
+        ("Action Category", "lis-wide-cell", x => Txt(x.CleanActionCategory)),
+        ("Action Code", "", x => Txt(x.ActionCode)),
+        ("Recommended Action", "lis-wide-cell", x => Txt(x.RecommendedAction)),
+        ("Task Guidance", "lis-wide-cell", x => Txt(x.TaskGuidance)),
+        ("Task Status", "", x => Txt(x.TaskStatus)),
+        ("Priority", "", x => Txt(x.CleanPriority)),
+        ("SLA Days", "lis-number-cell", x => Txt(x.SlaDays)),
+        ("Patient ID", "", x => Txt(x.PatientId)),
+        ("Charge Entered Date", "lis-date-cell", x => Dt(x.ChargeEnteredDate)),
+        ("POS", "", x => Txt(x.Pos)),
+        ("TOS", "", x => Txt(x.Tos)),
+        ("Check Date", "lis-date-cell", x => Dt(x.CheckDate)),
+        ("Days to DOS", "lis-number-cell", x => Cnt(x.DaystoDos)),
+        ("Rolling Days", "", x => Txt(x.RollingDays)),
+        ("Days to Bill", "lis-number-cell", x => Cnt(x.DaystoBill)),
+        ("Days to Post", "lis-number-cell", x => Cnt(x.DaystoPost)),
+        ("Run ID", "", x => Txt(x.RunId)),
+        ("Created On", "lis-date-cell", x => Dt(x.CreatedOn))
+    };
 }
 <style>
     .filter-shell {
@@ -751,7 +829,10 @@
         <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "weekly-breakdown" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#weekly-breakdown" type="button"><i class="bi bi-calendar-week me-2"></i>Weekly Breakdown</button></li>
         <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "monthly-breakdown" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#monthly-breakdown" type="button"><i class="bi bi-calendar-month me-2"></i>Monthly Breakdown</button></li>
         <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "filter-panel" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#filter-panel" type="button"><i class="bi bi-search me-2"></i>Filter Panel</button></li>
-        <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "denial-input" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#denial-input" type="button"><i class="bi bi-table me-2"></i>Denial Input</button></li>
+        @if (denialInputTabEnabled)
+        {
+            <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "denial-input" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#denial-input" type="button"><i class="bi bi-table me-2"></i>Denial Input</button></li>
+        }
         <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "task-board" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#task-board" type="button"><i class="bi bi-clipboard-data me-2"></i>Task Board</button></li>
         <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "sla-tracker" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#sla-tracker" type="button"><i class="bi bi-alarm me-2"></i>SLA Tracker</button></li>
         <li class="nav-item" role="presentation"><button class="nav-link @(activeTab == "denial-insight" ? "active" : "")" data-bs-toggle="pill" data-bs-target="#denial-insight" type="button"><i class="bi bi-lightbulb me-2"></i>Denial Insight</button></li>
@@ -926,6 +1007,8 @@
             </div>
         </div>
     </div>
+    @if (denialInputTabEnabled)
+    {
     <div class="tab-pane fade @(activeTab == "denial-input" ? "show active" : "")" id="denial-input" role="tabpanel">
         <div class="card border-0 shadow-sm table-card">
             <div class="card-body">
@@ -994,6 +1077,7 @@
             </div>
         </div>
     </div>
+    }
     <div class="tab-pane fade @(activeTab == "dashboard" ? "show active" : "")" id="dashboard" role="tabpanel">
         <div class="row g-3 mb-3">
             <div class="col-12 col-md-6 col-xl-3">
@@ -1056,15 +1140,15 @@
                 <div class="card border-0 shadow-sm">
                     <div class="card-body">
                         <div class="section-title mb-3">Status Summary</div>
-                        <div class="table-responsive table-frame">
-                            <table class="table table-sm align-middle app-table polished-table zebra-table sortable-table mb-0">
+                        <div class="lis-scroll">
+                            <table class="table table-sm align-middle lis-summary-grid sortable-table mb-0">
                                 <thead>
                                     <tr>
                                         <th>Status</th>
-                                        <th class="text-end">Count</th>
-                                        <th class="text-end">% Filtered</th>
-                                        <th class="text-end">SLA Breach</th>
-                                        <th class="text-end">Insurance Balance</th>
+                                        <th class="lis-number-cell">Count</th>
+                                        <th class="lis-number-cell">% Filtered</th>
+                                        <th class="lis-number-cell">SLA Breach</th>
+                                        <th class="lis-number-cell">Insurance Balance</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -1072,10 +1156,10 @@
                                     {
                                         <tr>
                                             <td>@item.Label</td>
-                                            <td class="text-end fw-semibold">@item.Count</td>
-                                            <td class="text-end">@item.Percentage.ToString("0.0")%</td>
-                                            <td class="text-end">@item.OverdueCount</td>
-                                            <td class="text-end">@Money(item.InsuranceBalanceSum)</td>
+                                            <td class="lis-number-cell fw-semibold">@item.Count.ToString("N0")</td>
+                                            <td class="lis-number-cell">@item.Percentage.ToString("0.0")%</td>
+                                            <td class="lis-number-cell">@item.OverdueCount.ToString("N0")</td>
+                                            <td class="lis-number-cell">@Money(item.InsuranceBalanceSum)</td>
                                         </tr>
                                     }
                                 </tbody>
@@ -1088,16 +1172,16 @@
                 <div class="card border-0 shadow-sm">
                     <div class="card-body">
                         <div class="section-title mb-3">Top Denial Classifications</div>
-                        <div class="table-responsive table-frame">
-                            <table class="table table-sm align-middle app-table polished-table zebra-table sortable-table mb-0">
+                        <div class="lis-scroll">
+                            <table class="table table-sm align-middle lis-summary-grid sortable-table mb-0">
                                 <thead>
                                     <tr>
                                         <th>Classification</th>
-                                        <th class="text-end">Count</th>
-                                        <th class="text-end">Open</th>
-                                        <th class="text-end">Completed</th>
-                                        <th class="text-end">High Priority</th>
-                                        <th class="text-end">Insurance Balance</th>
+                                        <th class="lis-number-cell">Count</th>
+                                        <th class="lis-number-cell">Open</th>
+                                        <th class="lis-number-cell">Completed</th>
+                                        <th class="lis-number-cell">High Priority</th>
+                                        <th class="lis-number-cell">Insurance Balance</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -1105,11 +1189,11 @@
                                     {
                                         <tr>
                                             <td>@item.Label</td>
-                                            <td class="text-end fw-semibold">@item.Count</td>
-                                            <td class="text-end">@item.OpenCount</td>
-                                            <td class="text-end">@item.CompletedCount</td>
-                                            <td class="text-end">@item.HighPriorityCount</td>
-                                            <td class="text-end">@Money(item.InsuranceBalanceSum)</td>
+                                            <td class="lis-number-cell fw-semibold">@item.Count.ToString("N0")</td>
+                                            <td class="lis-number-cell">@item.OpenCount.ToString("N0")</td>
+                                            <td class="lis-number-cell">@item.CompletedCount.ToString("N0")</td>
+                                            <td class="lis-number-cell">@item.HighPriorityCount.ToString("N0")</td>
+                                            <td class="lis-number-cell">@Money(item.InsuranceBalanceSum)</td>
                                         </tr>
                                     }
                                 </tbody>
@@ -1129,6 +1213,8 @@
                         <div class="section-subtitle">Operational work queue for denial follow-up.</div>
                     </div>
                     <div class="d-flex flex-wrap align-items-center gap-2 ms-auto">
+                        @if (taskBoardCsvEnabled)
+                        {
                         <a class="btn btn-outline-success rounded-pill px-3 js-loader-link" href="@Url.Action("DownloadTaskBoardCsv", "DenialDashboard", new { lab = Model.CurrentLabName, LabId = Model.Filters.LabId, Status = Model.Filters.Status, Priority = Model.Filters.Priority, ActionCategory = Model.Filters.ActionCategory, Deadline = Model.Filters.Deadline, Classification = Model.Filters.Classification, SalesRepname = Model.Filters.SalesRepname, ClinicName = Model.Filters.ClinicName, ReferringProvider = Model.Filters.ReferringProvider, PayerName = Model.Filters.PayerName, PayerType = Model.Filters.PayerType, PanelName = Model.Filters.PanelName, FirstBilledDateFrom = Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"), FirstBilledDateTo = Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"), DateOfServiceFrom = Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"), DateOfServiceTo = Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"), DenialDateFrom = Model.Filters.DenialDateFrom?.ToString("yyyy-MM-dd"), DenialDateTo = Model.Filters.DenialDateTo?.ToString("yyyy-MM-dd"), ActiveTab = "task-board", Page = Model.Filters.Page, PageSize = Model.Filters.PageSize, InsightPage = Model.Filters.InsightPage, InsightPageSize = Model.Filters.InsightPageSize, LineItemPage = Model.Filters.LineItemPage, LineItemPageSize = Model.Filters.LineItemPageSize })">
                             <i class="bi bi-download me-1"></i>Download CSV
                         </a>
@@ -1165,6 +1251,7 @@
                                 <i class="bi bi-upload me-1"></i>Upload CSV
                             </button>
                         </form>
+                        }
                         <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search this page..." data-target-table="taskBoardTable" /></div>
                     </div>
                 </div>
@@ -1177,7 +1264,7 @@
                         </button>
                     </div>
                 }
-                else
+                else if (taskBoardCsvEnabled)
                 {
                     <div class="small text-muted mb-3">Download the task list, update only <strong>Status</strong>, <strong>AssignedTo</strong>, and <strong>DateCompleted</strong> (or Closed Date), then upload the CSV back here.</div>
                 }
@@ -1212,29 +1299,48 @@
                     <input type="hidden" name="LineItemPage" value="@Model.Filters.LineItemPage" />
                     <input type="hidden" name="LineItemPageSize" value="@Model.Filters.LineItemPageSize" />
 
-                <div class="table-responsive table-frame">
-                    <table class="table table-hover align-middle app-table polished-table line-table zebra-table sortable-table" id="taskBoardTable">
+                <div class="lis-scroll">
+                    <table class="table table-hover align-middle lis-list-table sortable-table" id="taskBoardTable">
                         <thead>
                             <tr>
                                 <th>Task ID</th>
                                 <th>Claim ID</th>
+                                <th>Unique Track ID</th>
+                                <th>Patient / Acct #</th>
                                 <th>CPT Code</th>
                                 <th>Denial Code</th>
                                 <th class="wide-description-cell">Denial Description</th>
-                                <th>Patient / Acct #</th>
-                                <th class="wide-task-cell">Task</th>
+                                <th>Denial Classification</th>
+                                <th>Action Code</th>
+                                <th>Recommended Action</th>
                                 <th>Action Category</th>
-                                <th>Assigned To</th>
+                                <th class="wide-task-cell">Task</th>
                                 <th>Priority</th>
-                                <th>Insurance Balance</th>
+                                <th class="lis-number-cell">Insurance Balance</th>
+                                <th>Current Denial</th>
+                                <th class="lis-number-cell">SLA Days</th>
                                 <th class="status-edit-cell">Status</th>
                                 @if (Model.IsArReviewer && !Model.IsArManager)
                                 {
                                     <th class="reviewer-comment-cell">Reviewer Comments</th>
                                 }
-                                <th>Due Date</th>
-                                <th>Days Remaining</th>
+                                <th>Assigned To</th>
+                                <th class="lis-date-cell">Date Opened</th>
+                                <th class="lis-date-cell">Due Date</th>
+                                <th class="lis-date-cell">Date Completed</th>
+                                <th class="lis-number-cell">Days Remaining</th>
                                 <th>SLA Status</th>
+                                <th>Payer Name</th>
+                                <th>Payer Type</th>
+                                <th>Panel Name</th>
+                                <th>Clinic Name</th>
+                                <th>Referring Provider</th>
+                                <th>Sales Rep</th>
+                                <th class="lis-date-cell">First Billed Date</th>
+                                <th class="lis-date-cell">Date of Service</th>
+                                <th>Lab Name</th>
+                                <th>Run ID</th>
+                                <th class="lis-date-cell">Created On</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1249,15 +1355,20 @@
                                         }
                                     </td>
                                     <td>@item.ClaimId</td>
+                                    <td>@(string.IsNullOrWhiteSpace(item.UniqueTrackId) ? "-" : item.UniqueTrackId)</td>
+                                    <td>@item.PatientAccountNumber</td>
                                     <td>@item.CptCode</td>
                                     <td>@item.DenialCode</td>
                                     <td class="text-wrap wide-description-cell">@item.DenialDescription</td>
-                                    <td>@item.PatientAccountNumber</td>
+                                    <td class="lis-wide-cell">@item.DenialClassification</td>
+                                    <td>@item.ActionCode</td>
+                                    <td class="lis-wide-cell">@item.RecommendedAction</td>
+                                    <td class="lis-wide-cell">@item.EffectiveActionCategory</td>
                                     <td class="text-wrap wide-task-cell">@item.Task</td>
-                                    <td class="text-wrap narrow-cell">@item.EffectiveActionCategory</td>
-                                    <td>@(string.IsNullOrWhiteSpace(item.AssignedTo) ? "-" : item.AssignedTo)</td>
                                     <td><span class="badge @PriorityBadge(item.Priority)">@item.Priority</span></td>
-                                    <td class="text-end">@Money(item.InsuranceBalance)</td>
+                                    <td class="lis-number-cell">@Money(item.InsuranceBalance)</td>
+                                    <td>@(item.IsCurrentDenial ? "Yes" : "No")</td>
+                                    <td class="lis-number-cell">@item.SlaDays</td>
                                     <td class="status-edit-cell">
                                         @if (Model.IsArReviewer && !Model.IsArManager)
                                         {
@@ -1281,9 +1392,23 @@
                                             <textarea name="reviewerComments" class="form-control form-control-sm" placeholder="Add comments">@(string.IsNullOrWhiteSpace(item.Feedback) ? string.Empty : item.Feedback)</textarea>
                                         </td>
                                     }
-                                    <td>@item.DueDate.ToString("dd MMM yyyy")</td>
-                                    <td>@(item.DaysRemaining?.ToString() ?? "Done")</td>
+                                    <td>@(string.IsNullOrWhiteSpace(item.AssignedTo) ? "-" : item.AssignedTo)</td>
+                                    <td class="lis-date-cell">@item.DateOpened.ToString("dd MMM yyyy")</td>
+                                    <td class="lis-date-cell">@item.DueDate.ToString("dd MMM yyyy")</td>
+                                    <td class="lis-date-cell">@(item.DateCompleted?.ToString("dd MMM yyyy") ?? "-")</td>
+                                    <td class="lis-number-cell">@(item.DaysRemaining?.ToString() ?? "Done")</td>
                                     <td><span class="badge @SlaBadge(item.SlaStatus)">@item.SlaStatus</span></td>
+                                    <td class="lis-wide-cell">@(string.IsNullOrWhiteSpace(item.PayerNameNormalized) ? item.PayerName : item.PayerNameNormalized)</td>
+                                    <td>@item.PayerType</td>
+                                    <td class="lis-wide-cell">@item.PanelName</td>
+                                    <td class="lis-wide-cell">@item.ClinicName</td>
+                                    <td class="lis-wide-cell">@item.ReferringProvider</td>
+                                    <td class="lis-wide-cell">@item.SalesRepname</td>
+                                    <td class="lis-date-cell">@(item.FirstBilledDate?.ToString("dd MMM yyyy") ?? "-")</td>
+                                    <td class="lis-date-cell">@(item.DateOfService?.ToString("dd MMM yyyy") ?? "-")</td>
+                                    <td class="lis-wide-cell">@item.LabName</td>
+                                    <td>@item.RunId</td>
+                                    <td class="lis-date-cell">@(item.CreatedOn?.ToString("dd MMM yyyy") ?? "-")</td>
                                 </tr>
                             }
                         </tbody>
@@ -1291,7 +1416,7 @@
                 </div>
 
                 </form>
-                @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "task-board", Page = Model.RecordsPage, TotalPages = Model.RecordsTotalPages, TotalItems = Model.FilteredRecordCount, PageSize = Model.RecordsPageSize, ItemLabel = "rows", BuildUrl = RecordsPageUrl })
+                @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "task-board", Page = Model.RecordsPage, TotalPages = Model.RecordsTotalPages, TotalItems = Model.FilteredRecordCount, PageSize = Model.RecordsPageSize, ItemLabel = "rows", BuildUrl = RecordsPageUrl, PageSizeOptions = recordsPageSizes, BuildPageSizeUrl = RecordsPageSizeUrl })
             </div>
         </div>
     </div>
@@ -1508,7 +1633,7 @@
                         </table>
                     </div>
                 </form>
-                @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "denial-insight", Page = Model.InsightPage, TotalPages = Model.InsightTotalPages, TotalItems = Model.InsightCount, PageSize = Model.InsightPageSize, ItemLabel = "insight rows", BuildUrl = (page, _) => InsightPageUrl(page) })
+                @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "denial-insight", Page = Model.InsightPage, TotalPages = Model.InsightTotalPages, TotalItems = Model.InsightCount, PageSize = Model.InsightPageSize, ItemLabel = "insight rows", BuildUrl = (page, _) => InsightPageUrl(page), PageSizeOptions = insightPageSizes, BuildPageSizeUrl = InsightPageSizeUrl })
             </div>
         </div>
     </div>
@@ -1532,37 +1657,14 @@
                     <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search line items on this page..." data-target-table="lineItemTable" /></div>
                 </div>
 
-                <div class="table-responsive table-frame">
-                    <table class="table table-hover align-middle app-table polished-table line-table zebra-table sortable-table" id="lineItemTable">
+                <div class="lis-scroll">
+                    <table class="table table-hover align-middle lis-list-table sortable-table" id="lineItemTable">
                         <thead>
                             <tr>
-                                <th>Accession No</th>
-                                <th>Visit Number</th>
-                                <th>CPT</th>
-                                <th>DOS</th>
-                                <th>Panel</th>
-                                <th>Payer</th>
-                                <th>Denial Code</th>
-                                <th>Description</th>
-                                <th class="text-end">Billed</th>
-                                <th class="text-end">Allowed</th>
-                                <th class="text-end">Insurance Paid</th>
-                                <th class="text-end">Insurance Adj.</th>
-                                <th class="text-end">Insurance Balance</th>
-                                <th class="text-end">Total Balance</th>
-                                <th>FirstBill Date</th>
-                                <th>Denial Date</th>
-                                <th>Final Claim Status</th>
-                                <th>Coverage Status</th>
-                                <th>Classification</th>
-                                <th>Denial Type</th>
-                                <th>Action Category</th>
-                                <th>Action Code</th>
-                                <th>Recommended Action</th>
-                                <th>Task Guidance</th>
-                                <th>Task Status</th>
-                                <th>Priority</th>
-                                <th>SLA Days</th>
+                                @foreach (var column in lineItemColumns)
+                                {
+                                    <th class="@column.Css">@column.Header</th>
+                                }
                             </tr>
                         </thead>
                         <tbody>
@@ -1571,46 +1673,23 @@
                                 @foreach (var item in Model.PagedLineItems)
                                 {
                                     <tr>
-                                        <td class="fw-semibold">@item.AccessionNo</td>
-                                        <td>@item.VisitNumber</td>
-                                        <td>@item.CptCode</td>
-                                        <td>@(item.DateOfService?.ToString("MM/dd/yyyy") ?? "-")</td>
-                                        <td>@item.PanelName</td>
-                                        <td class="text-wrap narrow-cell">@item.PayerName</td>
-                                        <td>@(string.IsNullOrWhiteSpace(item.DenialCodeNormalized) ? item.DenialCodeOriginal : item.DenialCodeNormalized)</td>
-                                        <td class="text-wrap narrow-cell">@item.DenialDescription</td>
-                                        <td class="text-end">@Money(item.BilledAmount) </td>
-                                        <td class="text-end">@Money(item.AllowedAmount) </td>
-                                        <td class="text-end">@Money(item.InsurancePayment) </td>
-                                        <td class="text-end">@Money(item.InsuranceAdjustment) </td>
-                                        <td class="text-end">@Money(item.InsuranceBalance) </td>
-                                        <td class="text-end">@Money(item.TotalBalance) </td>
-                                        <td>@(item.FirstBilledDate?.ToString("MM/dd/yyyy") ?? "-")</td>
-                                        <td>@(item.DenialDate?.ToString("MM/dd/yyyy") ?? "-")</td>
-                                        <td>@item.FinalClaimStatus</td>
-                                        <td>@(string.IsNullOrWhiteSpace(item.FinalCoverageStatus) ? item.CoverageStatus : item.FinalCoverageStatus)</td>
-                                        <td>@item.CleanDenialClassification</td>
-                                        <td>@item.DenialType</td>
-                                        <td class="text-wrap narrow-cell">@item.CleanActionCategory</td>
-                                        <td>@item.ActionCode</td>
-                                        <td class="text-wrap narrow-cell">@item.RecommendedAction</td>
-                                        <td class="text-wrap narrow-cell">@item.TaskGuidance</td>
-                                        <td>@item.TaskStatus</td>
-                                        <td><span class="badge @PriorityBadge(item.CleanPriority)">@item.CleanPriority</span></td>
-                                        <td>@(string.IsNullOrWhiteSpace(item.SlaDays) ? "-" : item.SlaDays)</td>
+                                        @foreach (var column in lineItemColumns)
+                                        {
+                                            <td class="@column.Css">@column.Value(item)</td>
+                                        }
                                     </tr>
                                 }
                             }
                             else
                             {
                                 <tr>
-                                    <td colspan="25" class="text-center text-muted py-4">No line-item rows were found for the selected lab.</td>
+                                    <td colspan="@lineItemColumns.Length" class="text-center text-muted py-4">No line-item rows were found for the selected lab.</td>
                                 </tr>
                             }
                         </tbody>
                     </table>
                 </div>
-                @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "line-item", Page = Model.LineItemPage, TotalPages = Model.LineItemTotalPages, TotalItems = Model.LineItemCount, PageSize = Model.LineItemPageSize, ItemLabel = "line items", BuildUrl = (page, _) => LineItemPageUrl(page) })
+                @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "line-item", Page = Model.LineItemPage, TotalPages = Model.LineItemTotalPages, TotalItems = Model.LineItemCount, PageSize = Model.LineItemPageSize, ItemLabel = "line items", BuildUrl = (page, _) => LineItemPageUrl(page), PageSizeOptions = lineItemPageSizes, BuildPageSizeUrl = LineItemPageSizeUrl })
             </div>
         </div>
     </div>
@@ -1773,6 +1852,16 @@
             link.addEventListener('click', function () {
                 showLoader();
             });
+        });
+
+        document.addEventListener('change', function (event) {
+            const select = event.target.closest('[data-pager-size]');
+            if (!select || !select.value) {
+                return;
+            }
+
+            showLoader();
+            window.location.assign(select.value);
         });
 
         document.querySelectorAll('.js-loader-button').forEach(function (button) {

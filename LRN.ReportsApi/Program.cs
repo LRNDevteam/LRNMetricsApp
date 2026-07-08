@@ -33,6 +33,8 @@ builder.Services.AddScoped<IDenialCodeMasterExcelService, DenialCodeMasterExcelS
 builder.Services.AddScoped<IDenialActionChangeVerificationRepository, SqlDenialActionChangeVerificationRepository>();
 builder.Services.AddScoped<IDenialMapperRepository, SqlDenialMapperRepository>();
 builder.Services.AddScoped<IMasterValuesRepository, SqlMasterValuesRepository>();
+builder.Services.AddMemoryCache();
+builder.Services.AddScoped<IDenialDashboardRepository, SqlDenialDashboardRepository>();
 builder.Services.AddScoped<IPayerMasterWorkflowService, PayerMasterWorkflowService>();
 builder.Services.AddHostedService<PayerMasterSlaEscalationService>();
 builder.Services.AddScoped<IDenialWorkflowIssueNotifier, DenialWorkflowIssueNotifier>();
@@ -96,6 +98,7 @@ app.Use(async (context, next) =>
     var path = context.Request.Path;
     var isWorkflowApi = path.StartsWithSegments("/api/denialworkflow")
         || path.StartsWithSegments("/api/denial-workflow")
+        || path.StartsWithSegments("/api/denial-dashboard")
         || path.StartsWithSegments("/api/master-values");
 
     // client-logs exists to capture client-side errors, including ones caused by auth being
@@ -105,6 +108,7 @@ app.Use(async (context, next) =>
     if (!isWorkflowApi
         || path.StartsWithSegments("/api/denialworkflow/health")
         || path.StartsWithSegments("/api/denial-workflow/health")
+        || path.StartsWithSegments("/api/denial-dashboard/health")
         || path.StartsWithSegments("/api/denialworkflow/client-logs")
         || path.StartsWithSegments("/api/denial-workflow/client-logs"))
     {

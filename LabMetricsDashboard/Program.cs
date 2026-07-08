@@ -1,6 +1,7 @@
 using LabMetricsDashboard.Filters;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
+using LabMetricsDashboard.Services.DenialDashboard;
 using LabMetricsDashboard.Services.DenialWorkflow;
 using LabMetricsDashboard.Models.DenialWorkflow;
 using LabMetricsDashboard.Services.Security;
@@ -429,6 +430,11 @@ builder.Services.AddSingleton<HelpBotService>();
 
 builder.Services.Configure<DenialWorkflowOptions>(builder.Configuration.GetSection("DenialWorkflowApi"));
 builder.Services.AddHttpClient<IDenialWorkflowApiClient, DenialWorkflowApiClient>();
+// Denial Dashboard data now comes from LRN.ReportsApi. Long timeout because GetByLab returns
+// the full task-board set (can be tens of thousands of rows) for in-memory aggregation.
+builder.Services
+	.AddHttpClient<IDenialDashboardApiClient, DenialDashboardApiClient>()
+	.ConfigureHttpClient(client => client.Timeout = TimeSpan.FromMinutes(10));
 builder.Services
 	.AddHttpClient<IMasterValuesApiClient, MasterValuesApiClient>()
 	.ConfigureHttpClient(client => client.Timeout = TimeSpan.FromMinutes(10));

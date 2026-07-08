@@ -69,6 +69,9 @@ public class MockDenialRecordRepository : IDenialRecordRepository
             .ToList();
     }
 
+    public Task<IReadOnlyList<DenialInsightRecord>> GetInsightTableByLabAsync(int labId, CancellationToken cancellationToken = default)
+        => GetInsightsByLabAsync(labId, cancellationToken);
+
     public Task<IReadOnlyList<DenialLineItemRecord>> GetLineItemsByLabAsync(int labId, int page, int pageSize, DenialDashboardFilters filters, CancellationToken cancellationToken = default)
     {
         var records = ApplyLineItemFilters(BuildLineItems(), filters).ToList();
