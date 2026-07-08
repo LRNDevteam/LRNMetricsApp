@@ -212,6 +212,28 @@
         </div>
     </div>
 </div>
+
+<div class="modal fade" id="conflictModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title">Resolve Global Payer ID Conflicts</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <div class="mv-warning-banner">Payer Policy Global Payer ID differs from the import file for the following payers. These records were saved with a blank Global Payer ID. Choose which value to keep for each &mdash; unresolved rows stay blank and can be fixed later via edit.</div>
+                <div class="d-flex gap-3 align-items-center mb-2">
+                    <span class="fw-bold">Apply to all:</span>
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="allImportBtn">Use import value</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="allPolicyBtn">Use Payer Policy value</button>
+                </div>
+                <table class="table table-sm table-bordered align-middle">
+                    <thead><tr><th>Payer Name (Raw)</th><th>Lab</th><th>Import Global Payer ID</th><th>Payer Policy Global Payer ID</th><th style="min-width:220px;">Choice</th></tr></thead>
+                    <tbody id="conflictRows"></tbody>
+                </table>
+                <div id="conflictError" class="alert alert-danger mt-2 d-none"></div>
+            </div>
+            <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Dismiss (leave blank)</button><button class="btn btn-primary" id="applyConflictsBtn"><i class="bi bi-check2-circle"></i> Apply Choices</button></div>
+        </div>
+    </div>
+</div>
 }
 }
 
@@ -221,12 +243,15 @@
 const canWrite=@(Model.CanWrite ? "true" : "false"),requiresApproval=@(Model.RequiresApproval ? "true" : "false");
 let page=1,pageSize=20,totalPages=1,labs=[],sortColumn='',sortDirection='asc',dupConfirmed=false,currentItems=[];
 let matchRecordId=null,matchSelected=null,matchTimer=null;
-const urls={data:'@Url.Action("InsurancePayersData","MasterValues")',get:'@Url.Action("InsurancePayer","MasterValues")',save:'@Url.Action("SaveInsurancePayer","MasterValues")',status:'@Url.Action("InsuranceStatus","MasterValues")',import:'@Url.Action("ImportInsurance","MasterValues")',export:'@Url.Action("ExportInsurance","MasterValues")',labs:'@Url.Action("Labs","MasterValues")',lookup:'@Url.Action("PolicyPayerLookup","MasterValues")'};
+const urls={data:'@Url.Action("InsurancePayersData","MasterValues")',get:'@Url.Action("InsurancePayer","MasterValues")',save:'@Url.Action("SaveInsurancePayer","MasterValues")',status:'@Url.Action("InsuranceStatus","MasterValues")',import:'@Url.Action("ImportInsurance","MasterValues")',resolve:'@Url.Action("ResolveInsuranceConflicts","MasterValues")',export:'@Url.Action("ExportInsurance","MasterValues")',labs:'@Url.Action("Labs","MasterValues")',lookup:'@Url.Action("PolicyPayerLookup","MasterValues")'};
 const aliases=[['1','Prism Molecular','Prism'],['2','InHealth','InHealth-DTR'],['4','Cove','Cove'],['5','Dylo','Dylo'],['6','PCRDx - AL','PCR AL'],['7','PCRDx - CO','PCR CO'],['10','BeechTree','Beech Tree'],['13','PCR Labs of America','PCR Labs of America'],['18','Certus','Certus'],['23','Northwest','NWL'],['24','Augustus_Labs','Augustus'],['16','Elixir','Elixir'],['12','Phi Life','Phi Life'],['9','Rising Tides','Rising Tides']];
 const US_STATES=['AL','AK','AZ','AR','CA','CO','CT','DE','DC','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'];
 const COLS=19;
 const editModal=canWrite?new bootstrap.Modal(document.getElementById('editModal')):null;
 const matchModal=canWrite?new bootstrap.Modal(document.getElementById('matchModal')):null;
+const conflictModalEl=document.getElementById('conflictModal');
+const conflictModal=conflictModalEl?new bootstrap.Modal(conflictModalEl):null;
+let conflictList=[];
 const loader=document.getElementById('gridLoader'),busyText=document.getElementById('busyText');
 function esc(v){return (v??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
 function normalize(v){return (v||'').toString().toUpperCase().replace(/[^A-Z0-9]+/g,' ').replace(/\s+/g,' ').trim();}
@@ -422,8 +447,41 @@ if(canWrite){
       await load();
     }finally{setBtn(btn,false);}
   };
+  function renderImportSummary(d){
+    const conflictNote=(d.conflicts||[]).length?`<div class="mt-2 text-primary fw-bold">${d.conflicts.length} Global Payer ID conflict(s) need resolution — see the pop-up.</div>`:'';
+    document.getElementById('importResult').innerHTML=`<div class="alert alert-light border mb-0"><strong>Total:</strong> ${d.totalRows||0} &nbsp; <strong>Inserted:</strong> ${d.insertedRows||0} &nbsp; <strong>Updated:</strong> ${d.updatedRows||0} &nbsp; <strong>Skipped:</strong> ${d.skippedRows||0} &nbsp; <strong>Errors:</strong> ${d.errorRows||0}${conflictNote}<div class="mt-2 text-warning">${(d.warnings||[]).map(esc).slice(0,8).join('<br>')}</div><div class="mt-2 text-danger">${(d.errors||[]).map(esc).slice(0,8).join('<br>')}</div></div>`;
+  }
+  function conflictRowHtml(c,i){
+    return `<tr data-i="${i}"><td class="mv-primary">${esc(c.payerNameRaw)}</td><td>${esc(c.labName||'—')}</td><td>${esc(c.importGlobalPayerId??'—')}</td><td>${esc(c.policyGlobalPayerId??'—')}</td><td><select class="form-select form-select-sm conflict-choice"><option value="">Leave blank</option><option value="Import">Use import (${esc(c.importGlobalPayerId??'—')})</option><option value="Policy">Use Payer Policy (${esc(c.policyGlobalPayerId??'—')})</option></select></td></tr>`;
+  }
+  function showConflicts(list){
+    if(!conflictModal)return;
+    conflictList=list||[];
+    document.getElementById('conflictRows').innerHTML=conflictList.map(conflictRowHtml).join('');
+    document.getElementById('conflictError').classList.add('d-none');
+    conflictModal.show();
+  }
+  const allImportBtn=document.getElementById('allImportBtn'),allPolicyBtn=document.getElementById('allPolicyBtn'),applyConflictsBtn=document.getElementById('applyConflictsBtn');
+  function setAllChoices(v){document.querySelectorAll('#conflictRows .conflict-choice').forEach(s=>s.value=v);}
+  if(allImportBtn)allImportBtn.onclick=()=>setAllChoices('Import');
+  if(allPolicyBtn)allPolicyBtn.onclick=()=>setAllChoices('Policy');
+  if(applyConflictsBtn)applyConflictsBtn.onclick=async()=>{
+    const rows=[...document.querySelectorAll('#conflictRows tr')];
+    const resolutions=[];
+    rows.forEach(tr=>{const c=conflictList[Number(tr.dataset.i)];const src=tr.querySelector('.conflict-choice').value;if(src)resolutions.push({labInsuranceMasterId:c.labInsuranceMasterId,source:src,importGlobalPayerId:c.importGlobalPayerId,policyGlobalPayerId:c.policyGlobalPayerId});});
+    if(!resolutions.length){conflictModal.hide();return;}
+    setBtn(applyConflictsBtn,true,'Applying...');
+    try{
+      const r=await fetch(urls.resolve,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({resolutions})});
+      if(!r.ok){const err=document.getElementById('conflictError');err.textContent=await errorText(r);err.classList.remove('d-none');return;}
+      const res=await r.json().catch(()=>({}));
+      conflictModal.hide();
+      await load();
+      alert(`Resolved ${res.resolved||0} record(s).`+((res.failed||0)?` ${res.failed} failed.`:''));
+    }finally{setBtn(applyConflictsBtn,false);}
+  };
   const importBtn=document.getElementById('importBtn');
-  if(importBtn)importBtn.onclick=async()=>{const btn=importBtn,file=document.getElementById('importFile').files[0];if(!file)return;const fd=new FormData();fd.append('file',file);setBtn(btn,true,'Importing...');document.getElementById('importResult').innerHTML='<span class="text-muted">Import running. Please keep this window open.</span>';try{const r=await fetch(urls.import,{method:'POST',body:fd});const d=await r.json();document.getElementById('importResult').innerHTML=`<div class="alert alert-light border mb-0"><strong>Total:</strong> ${d.totalRows||0} &nbsp; <strong>Inserted:</strong> ${d.insertedRows||0} &nbsp; <strong>Updated:</strong> ${d.updatedRows||0} &nbsp; <strong>Skipped:</strong> ${d.skippedRows||0} &nbsp; <strong>Errors:</strong> ${d.errorRows||0}<div class="mt-2 text-warning">${(d.warnings||[]).map(esc).slice(0,8).join('<br>')}</div><div class="mt-2 text-danger">${(d.errors||[]).map(esc).slice(0,8).join('<br>')}</div></div>`;await load();}finally{setBtn(btn,false);}};
+  if(importBtn)importBtn.onclick=async()=>{const btn=importBtn,file=document.getElementById('importFile').files[0];if(!file)return;const fd=new FormData();fd.append('file',file);setBtn(btn,true,'Importing...');document.getElementById('importResult').innerHTML='<span class="text-muted">Import running. Please keep this window open.</span>';try{const r=await fetch(urls.import,{method:'POST',body:fd});const d=await r.json();renderImportSummary(d);await load();if((d.conflicts||[]).length)showConflicts(d.conflicts);}finally{setBtn(btn,false);}};
 }
 loadLabs().then(load);
 })();

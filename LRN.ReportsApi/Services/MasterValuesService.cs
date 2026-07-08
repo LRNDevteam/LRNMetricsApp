@@ -1,4 +1,5 @@
 using System.Data;
+using System.Globalization;
 using ClosedXML.Excel;
 using LRN.ReportsApi.Models;
 using Microsoft.Data.SqlClient;
@@ -14,6 +15,7 @@ public interface IMasterValuesRepository
     Task<bool> UpdateInsurancePayerAsync(int id, InsurancePayerMasterDto dto, string? userName, CancellationToken ct);
     Task<bool> UpdateInsurancePayerStatusAsync(int id, string? isActive, string? userName, CancellationToken ct);
     Task<ImportResultDto> ImportInsurancePayersAsync(Stream stream, string? userName, CancellationToken ct);
+    Task<GlobalPayerIdConflictResolutionResult> ResolveInsuranceGlobalPayerConflictsAsync(GlobalPayerIdConflictResolutionRequest request, string? userName, CancellationToken ct);
     Task<byte[]> ExportInsurancePayersAsync(InsurancePayerMasterQuery query, CancellationToken ct);
 
     Task<PagedResult<PayerPolicyInsuranceMasterDto>> GetPolicyPayersAsync(PayerPolicyInsuranceMasterQuery query, CancellationToken ct);
@@ -144,45 +146,56 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
     public Task<bool> UpdateInsurancePayerStatusAsync(int id, string? isActive, string? userName, CancellationToken ct)
         => UpdateStatusAsync("dbo.LabInsuranceMaster", "LabInsuranceMasterId", id, isActive, userName, ct);
 
+    // Excel column names expected in the Lab Insurance Master import file (LabId is resolved, not a column).
+    private static readonly string[] LabImportColumns =
+    {
+        "Payer_Code", "Global_Payer_ID", "Payer_Name_Raw", "Payer_Name_Normalized", "Payer_Group_Code",
+        "Payer_Common_Code", "Parent", "Plan_Type", "MCO_Type", "Payer_State", "Is_Active",
+        "Benefit Admin Code", "Benefit Administrator", "Remarks", "Lab Name", "Lab State", "Lab State Code"
+    };
+
     public async Task<ImportResultDto> ImportInsurancePayersAsync(Stream stream, string? userName, CancellationToken ct)
     {
         using var workbook = new XLWorkbook(stream);
         if (!workbook.Worksheets.TryGetWorksheet("Lab_Ins_Master", out var ws))
             return new ImportResultDto { ErrorRows = 1, Errors = { "Sheet Lab_Ins_Master was not found." } };
-        var header = HeaderMap(ws, allowDuplicateNames: false);
-        var required = new[] { "Payer_Code", "Payer_Name_Raw", "Payer_Name_Normalized", "Global_Payer_ID", "Payer_Group_Code", "Payer_Common_Code", "Parent", "Plan_Type", "MCO_Type", "Payer_State", "Is_Active", "Benefit Admin Code", "Benefit Administrator", "Remarks", "Lab Name", "Lab State", "Lab State Code" };
-        var missing = required.Where(x => !header.ContainsKey(x)).ToList();
-        if (missing.Count > 0) return new ImportResultDto { ErrorRows = missing.Count, Errors = { "Missing required columns: " + string.Join(", ", missing) } };
+        // NOT-NULL rule (Lab): only Payer_Name_Raw is required; every other column is optional.
+        if (!TryBuildHeaderMap(ws, LabImportColumns, new[] { "Payer_Name_Raw" }, out var header, out var headerErrors))
+            return new ImportResultDto { ErrorRows = headerErrors.Count, Errors = headerErrors };
 
         var result = new ImportResultDto();
         var lastRow = ws.LastRowUsed()?.RowNumber() ?? 1;
         var importRows = new List<(int RowNumber, InsurancePayerMasterDto Value)>();
+        // Rows whose imported Global Payer ID conflicts with the policy master (saved NULL, resolved later).
+        var pendingConflicts = new List<(InsurancePayerMasterDto Dto, int ImportGid, int PolicyGid)>();
 
         await using var conn = Open();
         await conn.OpenAsync(ct);
         var labs = await LabsByNameAsync(conn, ct);
+        var policyGlobals = await PolicyGlobalPayerIdsByRawNameAsync(conn, ct);
         for (var row = 2; row <= lastRow; row++)
         {
             result.TotalRows++;
+            var globalId = IntCellOpt(ws, row, header, "Global_Payer_ID", result, row, out var globalIdInvalid);
             var dto = new InsurancePayerMasterDto
             {
-                PayerCode = Cell(ws, row, header["Payer_Code"]),
-                PayerNameRaw = Cell(ws, row, header["Payer_Name_Raw"]) ?? string.Empty,
-                PayerNameNormalized = Cell(ws, row, header["Payer_Name_Normalized"]),
-                GlobalPayerID = IntCell(ws, row, header["Global_Payer_ID"], result, row),
-                PayerGroupCode = Cell(ws, row, header["Payer_Group_Code"]),
-                PayerCommonCode = Cell(ws, row, header["Payer_Common_Code"]),
-                Parent = Cell(ws, row, header["Parent"]),
-                PlanType = Cell(ws, row, header["Plan_Type"]),
-                MCOType = Cell(ws, row, header["MCO_Type"]),
-                PayerState = Cell(ws, row, header["Payer_State"]),
-                IsActive = Cell(ws, row, header["Is_Active"]),
-                BenefitAdminCode = Cell(ws, row, header["Benefit Admin Code"]),
-                BenefitAdministrator = Cell(ws, row, header["Benefit Administrator"]),
-                Remarks = Cell(ws, row, header["Remarks"]),
-                LabName = Cell(ws, row, header["Lab Name"]),
-                LabState = Cell(ws, row, header["Lab State"]),
-                LabStateCode = Cell(ws, row, header["Lab State Code"])
+                PayerCode = CellOpt(ws, row, header, "Payer_Code"),
+                PayerNameRaw = CellOpt(ws, row, header, "Payer_Name_Raw") ?? string.Empty,
+                PayerNameNormalized = CellOpt(ws, row, header, "Payer_Name_Normalized"),
+                GlobalPayerID = globalId,
+                PayerGroupCode = CellOpt(ws, row, header, "Payer_Group_Code"),
+                PayerCommonCode = CellOpt(ws, row, header, "Payer_Common_Code"),
+                Parent = CellOpt(ws, row, header, "Parent"),
+                PlanType = CellOpt(ws, row, header, "Plan_Type"),
+                MCOType = CellOpt(ws, row, header, "MCO_Type"),
+                PayerState = CellOpt(ws, row, header, "Payer_State"),
+                IsActive = CellOpt(ws, row, header, "Is_Active"),
+                BenefitAdminCode = CellOpt(ws, row, header, "Benefit Admin Code"),
+                BenefitAdministrator = CellOpt(ws, row, header, "Benefit Administrator"),
+                Remarks = CellOpt(ws, row, header, "Remarks"),
+                LabName = CellOpt(ws, row, header, "Lab Name"),
+                LabState = CellOpt(ws, row, header, "Lab State"),
+                LabStateCode = CellOpt(ws, row, header, "Lab State Code")
             };
             Trim(dto);
             if (string.IsNullOrWhiteSpace(dto.PayerNameRaw))
@@ -191,8 +204,30 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
                 result.Errors.Add($"Row {row}: Payer_Name_Raw is required.");
                 continue;
             }
+            if (globalIdInvalid)
+            {
+                result.SkippedRows++;
+                result.Errors.Add($"Row {row}: Global_Payer_ID is not a valid integer.");
+                continue;
+            }
             if (!string.IsNullOrWhiteSpace(dto.LabName) && labs.TryGetValue(Norm(dto.LabName), out var lab)) dto.LabId = lab.LabId;
             else if (!string.IsNullOrWhiteSpace(dto.LabName)) result.Warnings.Add($"Row {row}: Lab Name '{dto.LabName}' was not found; LabId left blank.");
+
+            // GlobalPayerID reconciliation against the Payer Policy master (matched on PayerNameRaw).
+            if (policyGlobals.TryGetValue(CiKey(dto.PayerNameRaw), out var policyGid))
+            {
+                if (!dto.GlobalPayerID.HasValue || dto.GlobalPayerID.Value == policyGid)
+                {
+                    dto.GlobalPayerID = policyGid; // cases 1 & 2: adopt the policy master value
+                }
+                else
+                {
+                    // case 3: values differ - store NULL now, collect for the resolution modal
+                    pendingConflicts.Add((dto, dto.GlobalPayerID.Value, policyGid));
+                    dto.GlobalPayerID = null;
+                }
+            }
+            // else: PayerNameRaw not in policy master - keep the import file's value as-is.
 
             importRows.Add((row, dto));
         }
@@ -207,7 +242,120 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
                 result.Warnings.Add($"{counts.DuplicateRows} duplicate import row(s) were superseded by the last matching row in the workbook.");
         }
 
+        // Resolve each conflict row's saved LabInsuranceMasterId so the modal can target it.
+        foreach (var (dto, importGid, policyGid) in pendingConflicts)
+        {
+            var id = await FindLabRecordIdByRawNameAndLabAsync(conn, dto.PayerNameRaw, dto.LabName, ct);
+            if (id.HasValue)
+                result.Conflicts.Add(new GlobalPayerIdConflictDto
+                {
+                    LabInsuranceMasterId = id.Value,
+                    PayerNameRaw = dto.PayerNameRaw,
+                    LabName = dto.LabName,
+                    ImportGlobalPayerId = importGid,
+                    PolicyGlobalPayerId = policyGid
+                });
+        }
+
         result.ErrorRows = result.Errors.Count;
+        return result;
+    }
+
+    /// <summary>Loads Payer Policy master Global Payer IDs keyed by normalized raw payer name for reconciliation.</summary>
+    private static async Task<Dictionary<string, int>> PolicyGlobalPayerIdsByRawNameAsync(SqlConnection conn, CancellationToken ct)
+    {
+        var map = new Dictionary<string, int>();
+        await using var cmd = new SqlCommand("""
+            SELECT PayerNameRaw, TRY_CONVERT(INT, GlobalPayerId) AS Gid
+            FROM dbo.PayerPolicyInsuranceMaster
+            WHERE NULLIF(LTRIM(RTRIM(PayerNameRaw)), '') IS NOT NULL
+              AND TRY_CONVERT(INT, GlobalPayerId) IS NOT NULL
+            ORDER BY PPInsuranceMasterId;
+            """, conn);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var raw = reader.GetString(0);
+            var key = CiKey(raw);
+            // First policy row wins for a given raw name (stable, matches ORDER BY).
+            if (!map.ContainsKey(key)) map[key] = reader.GetInt32(1);
+        }
+        return map;
+    }
+
+    private static async Task<int?> FindLabRecordIdByRawNameAndLabAsync(SqlConnection conn, string payerNameRaw, string? labName, CancellationToken ct)
+    {
+        await using var cmd = new SqlCommand("""
+            SELECT TOP (1) LabInsuranceMasterId
+            FROM dbo.LabInsuranceMaster
+            WHERE LTRIM(RTRIM(PayerNameRaw)) = @PayerNameRaw COLLATE Latin1_General_CI_AS
+              AND ISNULL(LTRIM(RTRIM(LabName)), '') = @LabName COLLATE Latin1_General_CI_AS
+            ORDER BY LabInsuranceMasterId DESC;
+            """, conn);
+        cmd.Parameters.AddWithValue("@PayerNameRaw", payerNameRaw.Trim());
+        cmd.Parameters.AddWithValue("@LabName", labName?.Trim() ?? string.Empty);
+        var id = await cmd.ExecuteScalarAsync(ct);
+        return id == null || id == DBNull.Value ? null : Convert.ToInt32(id);
+    }
+
+    public async Task<GlobalPayerIdConflictResolutionResult> ResolveInsuranceGlobalPayerConflictsAsync(
+        GlobalPayerIdConflictResolutionRequest request, string? userName, CancellationToken ct)
+    {
+        var result = new GlobalPayerIdConflictResolutionResult();
+        if (request.Resolutions.Count == 0) return result;
+
+        await using var conn = Open();
+        await conn.OpenAsync(ct);
+        await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(ct);
+        try
+        {
+            foreach (var r in request.Resolutions)
+            {
+                var useImport = string.Equals(r.Source, "Import", StringComparison.OrdinalIgnoreCase);
+                var usePolicy = string.Equals(r.Source, "Policy", StringComparison.OrdinalIgnoreCase);
+                if (!useImport && !usePolicy)
+                {
+                    result.Failed++;
+                    result.Errors.Add($"Record {r.LabInsuranceMasterId}: Source must be 'Import' or 'Policy'.");
+                    continue;
+                }
+                var chosen = useImport ? r.ImportGlobalPayerId : r.PolicyGlobalPayerId;
+                if (!chosen.HasValue)
+                {
+                    result.Failed++;
+                    result.Errors.Add($"Record {r.LabInsuranceMasterId}: chosen Global Payer ID is blank.");
+                    continue;
+                }
+
+                await using (var upd = new SqlCommand("""
+                    UPDATE dbo.LabInsuranceMaster
+                    SET GlobalPayerID = @Gid, ModifiedBy = @UserName, ModifiedOn = SYSUTCDATETIME()
+                    WHERE LabInsuranceMasterId = @Id;
+                    """, conn, tx))
+                {
+                    upd.Parameters.AddWithValue("@Gid", chosen.Value);
+                    upd.Parameters.AddWithValue("@UserName", DbValue(userName));
+                    upd.Parameters.AddWithValue("@Id", r.LabInsuranceMasterId);
+                    if (await upd.ExecuteNonQueryAsync(ct) == 0)
+                    {
+                        result.Failed++;
+                        result.Errors.Add($"Record {r.LabInsuranceMasterId}: not found.");
+                        continue;
+                    }
+                }
+
+                // Field-level audit for the resolution (OldValue = NULL per spec, NewValue = chosen value).
+                await WriteImportAuditAsync(conn, tx, "Lab", r.LabInsuranceMasterId, chosen, null, "GlobalPayerID",
+                    null, chosen.Value.ToString(CultureInfo.InvariantCulture), userName, ct);
+                result.Resolved++;
+            }
+            await tx.CommitAsync(ct);
+        }
+        catch
+        {
+            await tx.RollbackAsync(CancellationToken.None);
+            throw;
+        }
         return result;
     }
 
@@ -317,6 +465,15 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
                 INTO #EffectiveInsuranceImport
                 FROM #InsuranceImportStage s;
 
+                -- Record-level import audit rows are captured here (set-based, in the same transaction).
+                CREATE TABLE #LabImportAudit
+                (
+                    RecordId INT NOT NULL,
+                    GlobalPayerID INT NULL,
+                    PayerNameRaw NVARCHAR(250) NULL,
+                    ActionKind VARCHAR(10) NOT NULL
+                );
+
                 UPDATE target
                 SET PayerNameNormalized = source.PayerNameNormalized,
                     GlobalPayerID = source.GlobalPayerID,
@@ -336,6 +493,8 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
                     LabStateCode = source.LabStateCode,
                     ModifiedBy = @UserName,
                     ModifiedOn = SYSUTCDATETIME()
+                OUTPUT inserted.LabInsuranceMasterId, inserted.GlobalPayerID, inserted.PayerNameRaw, 'Update'
+                    INTO #LabImportAudit (RecordId, GlobalPayerID, PayerNameRaw, ActionKind)
                 FROM dbo.LabInsuranceMaster target
                 JOIN #EffectiveInsuranceImport source
                   ON source.ExistingId = target.LabInsuranceMasterId
@@ -346,6 +505,8 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
                     (PayerCode, PayerNameRaw, PayerNameNormalized, GlobalPayerID, PayerGroupCode,
                      PayerCommonCode, Parent, PlanType, MCOType, PayerState, IsActive, BenefitAdminCode,
                      BenefitAdministrator, Remarks, LabName, LabId, LabState, LabStateCode, CreatedBy)
+                OUTPUT inserted.LabInsuranceMasterId, inserted.GlobalPayerID, inserted.PayerNameRaw, 'Insert'
+                    INTO #LabImportAudit (RecordId, GlobalPayerID, PayerNameRaw, ActionKind)
                 SELECT PayerCode, PayerNameRaw, PayerNameNormalized, GlobalPayerID, PayerGroupCode,
                        PayerCommonCode, Parent, PlanType, MCOType, PayerState, IsActive, BenefitAdminCode,
                        BenefitAdministrator, Remarks, LabName, LabId, LabState, LabStateCode, @UserName
@@ -353,6 +514,15 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
                 WHERE ExistingId IS NULL
                   AND SourceRank = 1;
                 DECLARE @Inserted INT = @@ROWCOUNT;
+
+                -- One record-level audit row per inserted/updated Lab record (ActionType = 'Import').
+                IF OBJECT_ID('dbo.PayerMasterAuditTrail', 'U') IS NOT NULL
+                    INSERT dbo.PayerMasterAuditTrail
+                        (Master, RecordId, GlobalPayerID, PayerName, FieldName, OldValue, NewValue, ActionType, PerformedBy, ApprovalStatus)
+                    SELECT 'Lab', RecordId, GlobalPayerID, PayerNameRaw, '(record)', NULL,
+                           CASE WHEN ActionKind = 'Insert' THEN 'Inserted' ELSE 'Updated' END,
+                           'Import', @UserName, 'Applied directly'
+                    FROM #LabImportAudit;
 
                 SELECT Inserted = @Inserted,
                        Updated = @Updated,
@@ -465,9 +635,9 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
             result.TotalCount = Convert.ToInt32(await count.ExecuteScalarAsync(ct) ?? 0);
         }
         await using var cmd = new SqlCommand($"""
-            SELECT PayerPolicyInsuranceMasterId, PayerCode, PayerName, PayerNameNormalized, GlobalPayerID,
-                   PayerGroupCode, PayerCommonCode, PlanType, PayerState, IsActive, BenefitAdminCode,
-                   BenefitAdministrator, Remarks, IsMCO
+            SELECT PPInsuranceMasterId, GlobalPayerId, GlobalPayerCode, PayerGroupCode, BenefitAdminCode,
+                   BenefitAdministrator, PayerNameRaw, PayerNameNormalized, PayerShortCode, PlanType,
+                   PayerState, IsActive, Remarks
             FROM dbo.PayerPolicyInsuranceMaster
             WHERE {where}
             ORDER BY {orderBy}
@@ -493,10 +663,10 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         await using var conn = Open();
         await conn.OpenAsync(ct);
         await using var cmd = new SqlCommand("""
-            SELECT PayerPolicyInsuranceMasterId, PayerCode, PayerName, PayerNameNormalized, GlobalPayerID,
-                   PayerGroupCode, PayerCommonCode, PlanType, PayerState, IsActive, BenefitAdminCode,
-                   BenefitAdministrator, Remarks, IsMCO
-            FROM dbo.PayerPolicyInsuranceMaster WHERE PayerPolicyInsuranceMasterId = @Id;
+            SELECT PPInsuranceMasterId, GlobalPayerId, GlobalPayerCode, PayerGroupCode, BenefitAdminCode,
+                   BenefitAdministrator, PayerNameRaw, PayerNameNormalized, PayerShortCode, PlanType,
+                   PayerState, IsActive, Remarks
+            FROM dbo.PayerPolicyInsuranceMaster WHERE PPInsuranceMasterId = @Id;
             """, conn);
         cmd.Parameters.AddWithValue("@Id", id);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -506,18 +676,19 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
     public async Task<int> CreatePolicyPayerAsync(PayerPolicyInsuranceMasterDto dto, string? userName, CancellationToken ct)
     {
         Trim(dto);
-        if (string.IsNullOrWhiteSpace(dto.PayerName)) throw new ArgumentException("PayerName is required.");
+        if (string.IsNullOrWhiteSpace(dto.PayerNameRaw)) throw new ArgumentException("Payer Name is required.");
+        if (string.IsNullOrWhiteSpace(dto.GlobalPayerCode)) throw new ArgumentException("Global Payer Code is required.");
         await using var conn = Open();
         await conn.OpenAsync(ct);
         await EnsurePolicyUniqueAsync(conn, dto, null, ct);
         await using var cmd = new SqlCommand("""
             INSERT INTO dbo.PayerPolicyInsuranceMaster
-                (PayerCode, PayerName, PayerNameNormalized, GlobalPayerID, PayerGroupCode, PayerCommonCode,
-                 PlanType, PayerState, IsActive, BenefitAdminCode, BenefitAdministrator, Remarks, IsMCO, CreatedBy)
-            OUTPUT INSERTED.PayerPolicyInsuranceMasterId
+                (GlobalPayerId, GlobalPayerCode, PayerGroupCode, BenefitAdminCode, BenefitAdministrator,
+                 PayerNameRaw, PayerNameNormalized, PayerShortCode, PlanType, PayerState, IsActive, Remarks, CreatedBy)
+            OUTPUT INSERTED.PPInsuranceMasterId
             VALUES
-                (@PayerCode, @PayerName, @PayerNameNormalized, @GlobalPayerID, @PayerGroupCode, @PayerCommonCode,
-                 @PlanType, @PayerState, @IsActive, @BenefitAdminCode, @BenefitAdministrator, @Remarks, @IsMCO, @CreatedBy);
+                (@GlobalPayerId, @GlobalPayerCode, @PayerGroupCode, @BenefitAdminCode, @BenefitAdministrator,
+                 @PayerNameRaw, @PayerNameNormalized, @PayerShortCode, @PlanType, @PayerState, @IsActive, @Remarks, @CreatedBy);
             """, conn);
         AddPolicyParams(cmd, dto);
         cmd.Parameters.AddWithValue("@CreatedBy", DbValue(userName));
@@ -527,17 +698,19 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
     public async Task<bool> UpdatePolicyPayerAsync(int id, PayerPolicyInsuranceMasterDto dto, string? userName, CancellationToken ct)
     {
         Trim(dto);
-        if (string.IsNullOrWhiteSpace(dto.PayerName)) throw new ArgumentException("PayerName is required.");
+        if (string.IsNullOrWhiteSpace(dto.PayerNameRaw)) throw new ArgumentException("Payer Name is required.");
+        if (string.IsNullOrWhiteSpace(dto.GlobalPayerCode)) throw new ArgumentException("Global Payer Code is required.");
         await using var conn = Open();
         await conn.OpenAsync(ct);
         await EnsurePolicyUniqueAsync(conn, dto, id, ct);
         await using var cmd = new SqlCommand("""
             UPDATE dbo.PayerPolicyInsuranceMaster
-            SET PayerCode=@PayerCode, PayerName=@PayerName, PayerNameNormalized=@PayerNameNormalized, GlobalPayerID=@GlobalPayerID,
-                PayerGroupCode=@PayerGroupCode, PayerCommonCode=@PayerCommonCode, PlanType=@PlanType, PayerState=@PayerState,
-                IsActive=@IsActive, BenefitAdminCode=@BenefitAdminCode, BenefitAdministrator=@BenefitAdministrator, Remarks=@Remarks,
-                IsMCO=@IsMCO, ModifiedBy=@ModifiedBy, ModifiedOn=SYSUTCDATETIME()
-            WHERE PayerPolicyInsuranceMasterId=@Id;
+            SET GlobalPayerId=@GlobalPayerId, GlobalPayerCode=@GlobalPayerCode, PayerGroupCode=@PayerGroupCode,
+                BenefitAdminCode=@BenefitAdminCode, BenefitAdministrator=@BenefitAdministrator, PayerNameRaw=@PayerNameRaw,
+                PayerNameNormalized=@PayerNameNormalized, PayerShortCode=@PayerShortCode, PlanType=@PlanType,
+                PayerState=@PayerState, IsActive=@IsActive, Remarks=@Remarks,
+                ModifiedBy=@ModifiedBy, ModifiedOn=SYSUTCDATETIME()
+            WHERE PPInsuranceMasterId=@Id;
             """, conn);
         AddPolicyParams(cmd, dto);
         cmd.Parameters.AddWithValue("@Id", id);
@@ -546,60 +719,223 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
     }
 
     public Task<bool> UpdatePolicyPayerStatusAsync(int id, string? isActive, string? userName, CancellationToken ct)
-        => UpdateStatusAsync("dbo.PayerPolicyInsuranceMaster", "PayerPolicyInsuranceMasterId", id, isActive, userName, ct);
+        => UpdateStatusAsync("dbo.PayerPolicyInsuranceMaster", "PPInsuranceMasterId", id, isActive, userName, ct);
+
+    // Excel column names expected in the Payer Policy Insurance Master import file.
+    private static readonly string[] PolicyImportColumns =
+    {
+        "Global_Payer_ID", "Global_Payer_Code", "Payer_Group_Code", "Benefit Admin Code", "Benefit Administrator",
+        "Payer Name", "Payer_Name_Normalized", "Payer", "Plan_Type", "Payer_State", "Is_Active", "Remarks"
+    };
 
     public async Task<ImportResultDto> ImportPolicyPayersAsync(Stream stream, string? userName, CancellationToken ct)
     {
         using var workbook = new XLWorkbook(stream);
         if (!workbook.Worksheets.TryGetWorksheet("PP_Ins.Master", out var ws))
             return new ImportResultDto { ErrorRows = 1, Errors = { "Sheet PP_Ins.Master was not found." } };
-        var header = HeaderMap(ws, allowDuplicateNames: true);
-        var required = new[] { "Payer_Code", "Payer Name", "Payer_Name_Normalized", "Global_Payer_ID", "Payer_Group_Code", "Payer_Common_Code", "Plan_Type", "Payer_State", "Is_Active", "Benefit Admin Code", "Benefit Administrator", "Remarks", "Is_MCO" };
-        var missing = required.Where(x => !header.ContainsKey(x)).ToList();
-        if (missing.Count > 0) return new ImportResultDto { ErrorRows = missing.Count, Errors = { "Missing required columns: " + string.Join(", ", missing) } };
+        // NOT-NULL rule (Policy, "both required"): Global_Payer_ID, Global_Payer_Code, Payer Name, Payer_Name_Normalized.
+        var required = new[] { "Global_Payer_ID", "Global_Payer_Code", "Payer Name", "Payer_Name_Normalized" };
+        if (!TryBuildHeaderMap(ws, PolicyImportColumns, required, out var header, out var headerErrors))
+            return new ImportResultDto { ErrorRows = headerErrors.Count, Errors = headerErrors };
+
         var result = new ImportResultDto();
         var lastRow = ws.LastRowUsed()?.RowNumber() ?? 1;
+        var rows = new List<PayerPolicyInsuranceMasterDto>();
         for (var row = 2; row <= lastRow; row++)
         {
             result.TotalRows++;
+            var globalId = IntCellOpt(ws, row, header, "Global_Payer_ID", result, row, out var globalIdInvalid);
+            var payerGroup = IntCellOpt(ws, row, header, "Payer_Group_Code", result, row, out var payerGroupInvalid);
             var dto = new PayerPolicyInsuranceMasterDto
             {
-                PayerCode = Cell(ws, row, header["Payer_Code"]),
-                PayerName = Cell(ws, row, header["Payer Name"]) ?? string.Empty,
-                PayerNameNormalized = Cell(ws, row, header["Payer_Name_Normalized"]),
-                GlobalPayerID = IntCell(ws, row, header["Global_Payer_ID"], result, row),
-                PayerGroupCode = Cell(ws, row, header["Payer_Group_Code"]),
-                PayerCommonCode = Cell(ws, row, header["Payer_Common_Code"]),
-                PlanType = Cell(ws, row, header["Plan_Type"]),
-                PayerState = Cell(ws, row, header["Payer_State"]),
-                IsActive = Cell(ws, row, header["Is_Active"]),
-                BenefitAdminCode = Cell(ws, row, header["Benefit Admin Code"]),
-                BenefitAdministrator = Cell(ws, row, header["Benefit Administrator"]),
-                Remarks = Cell(ws, row, header["Remarks"]),
-                IsMCO = Cell(ws, row, header["Is_MCO"])
+                GlobalPayerId = globalId,
+                GlobalPayerCode = CellOpt(ws, row, header, "Global_Payer_Code") ?? string.Empty,
+                PayerGroupCode = payerGroup,
+                BenefitAdminCode = CellOpt(ws, row, header, "Benefit Admin Code"),
+                BenefitAdministrator = CellOpt(ws, row, header, "Benefit Administrator"),
+                PayerNameRaw = CellOpt(ws, row, header, "Payer Name") ?? string.Empty,
+                PayerNameNormalized = CellOpt(ws, row, header, "Payer_Name_Normalized"),
+                PayerShortCode = CellOpt(ws, row, header, "Payer"),
+                PlanType = CellOpt(ws, row, header, "Plan_Type"),
+                PayerState = CellOpt(ws, row, header, "Payer_State"),
+                IsActive = CellOpt(ws, row, header, "Is_Active"),
+                Remarks = CellOpt(ws, row, header, "Remarks")
             };
-            if (string.IsNullOrWhiteSpace(dto.PayerName))
+            Trim(dto);
+
+            var rowErrors = new List<string>();
+            if (globalIdInvalid) rowErrors.Add("Global_Payer_ID is not a valid integer");
+            else if (!dto.GlobalPayerId.HasValue) rowErrors.Add("Global_Payer_ID is required");
+            if (string.IsNullOrWhiteSpace(dto.GlobalPayerCode)) rowErrors.Add("Global_Payer_Code is required");
+            if (string.IsNullOrWhiteSpace(dto.PayerNameRaw)) rowErrors.Add("Payer Name is required");
+            if (string.IsNullOrWhiteSpace(dto.PayerNameNormalized)) rowErrors.Add("Payer_Name_Normalized is required");
+            if (rowErrors.Count > 0)
             {
                 result.SkippedRows++;
-                result.Errors.Add($"Row {row}: Payer Name is required.");
+                result.Errors.Add($"Row {row}: {string.Join("; ", rowErrors)}.");
                 continue;
             }
+            if (payerGroupInvalid)
+                result.Warnings.Add($"Row {row}: Payer_Group_Code is not an integer and was left blank.");
+
+            rows.Add(dto);
+        }
+
+        if (rows.Count > 0)
+        {
             await using var conn = Open();
             await conn.OpenAsync(ct);
-            var existingId = await FindPolicyImportMatchAsync(conn, dto, ct);
-            if (existingId.HasValue)
+            await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+            try
             {
-                await UpdatePolicyPayerAsync(existingId.Value, dto, userName, ct);
-                result.UpdatedRows++;
+                foreach (var dto in rows)
+                {
+                    var existingId = await FindPolicyImportMatchAsync(conn, tx, dto, ct);
+                    if (existingId.HasValue)
+                    {
+                        await UpsertPolicyRowAsync(conn, tx, existingId.Value, dto, userName, ct);
+                        result.UpdatedRows++;
+                    }
+                    else
+                    {
+                        var newId = await UpsertPolicyRowAsync(conn, tx, null, dto, userName, ct);
+                        result.InsertedRows++;
+                        existingId = newId;
+                    }
+                }
+
+                // Post-import sync: the policy master is the source of truth for GlobalPayerID on the
+                // Lab master. Overwrite every matching Lab record (matched on PayerNameNormalized).
+                var syncPairs = rows
+                    .Where(r => !string.IsNullOrWhiteSpace(r.PayerNameNormalized) && r.GlobalPayerId.HasValue)
+                    .GroupBy(r => CiKey(r.PayerNameNormalized!))
+                    .Select(g => (Normalized: g.Last().PayerNameNormalized!.Trim(), Gid: g.Last().GlobalPayerId!.Value))
+                    .ToList();
+                var synced = await SyncLabGlobalPayerIdsFromPolicyAsync(conn, tx, syncPairs, userName, ct);
+                if (synced > 0)
+                    result.Warnings.Add($"{synced} Lab Insurance Master record(s) had their Global Payer ID synced from the policy master.");
+
+                await tx.CommitAsync(ct);
             }
-            else
+            catch
             {
-                await CreatePolicyPayerAsync(dto, userName, ct);
-                result.InsertedRows++;
+                await tx.RollbackAsync(CancellationToken.None);
+                throw;
             }
         }
+
         result.ErrorRows = result.Errors.Count;
         return result;
+    }
+
+    /// <summary>Inserts or updates one Payer Policy row inside the import transaction and writes a record-level audit entry.</summary>
+    private static async Task<int> UpsertPolicyRowAsync(SqlConnection conn, SqlTransaction tx, int? existingId, PayerPolicyInsuranceMasterDto dto, string? userName, CancellationToken ct)
+    {
+        int recordId;
+        if (existingId.HasValue)
+        {
+            await using var cmd = new SqlCommand("""
+                UPDATE dbo.PayerPolicyInsuranceMaster
+                SET GlobalPayerId=@GlobalPayerId, GlobalPayerCode=@GlobalPayerCode, PayerGroupCode=@PayerGroupCode,
+                    BenefitAdminCode=@BenefitAdminCode, BenefitAdministrator=@BenefitAdministrator, PayerNameRaw=@PayerNameRaw,
+                    PayerNameNormalized=@PayerNameNormalized, PayerShortCode=@PayerShortCode, PlanType=@PlanType,
+                    PayerState=@PayerState, IsActive=@IsActive, Remarks=@Remarks,
+                    ModifiedBy=@ActionUser, ModifiedOn=SYSUTCDATETIME()
+                WHERE PPInsuranceMasterId=@Id;
+                """, conn, tx);
+            AddPolicyParams(cmd, dto);
+            cmd.Parameters.AddWithValue("@Id", existingId.Value);
+            cmd.Parameters.AddWithValue("@ActionUser", DbValue(userName));
+            await cmd.ExecuteNonQueryAsync(ct);
+            recordId = existingId.Value;
+        }
+        else
+        {
+            await using var cmd = new SqlCommand("""
+                INSERT INTO dbo.PayerPolicyInsuranceMaster
+                    (GlobalPayerId, GlobalPayerCode, PayerGroupCode, BenefitAdminCode, BenefitAdministrator,
+                     PayerNameRaw, PayerNameNormalized, PayerShortCode, PlanType, PayerState, IsActive, Remarks, CreatedBy)
+                OUTPUT INSERTED.PPInsuranceMasterId
+                VALUES
+                    (@GlobalPayerId, @GlobalPayerCode, @PayerGroupCode, @BenefitAdminCode, @BenefitAdministrator,
+                     @PayerNameRaw, @PayerNameNormalized, @PayerShortCode, @PlanType, @PayerState, @IsActive, @Remarks, @ActionUser);
+                """, conn, tx);
+            AddPolicyParams(cmd, dto);
+            cmd.Parameters.AddWithValue("@ActionUser", DbValue(userName));
+            recordId = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+        }
+
+        await WriteImportAuditAsync(conn, tx, "Policy", recordId, dto.GlobalPayerId, dto.PayerNameRaw, "(record)", null,
+            existingId.HasValue ? "Updated" : "Inserted", userName, ct);
+        return recordId;
+    }
+
+    /// <summary>Overwrites Lab master GlobalPayerID from the policy master (matched on PayerNameNormalized) and audits each change.</summary>
+    private static async Task<int> SyncLabGlobalPayerIdsFromPolicyAsync(SqlConnection conn, SqlTransaction tx,
+        IReadOnlyList<(string Normalized, int Gid)> pairs, string? userName, CancellationToken ct)
+    {
+        if (pairs.Count == 0) return 0;
+
+        await using (var create = new SqlCommand("CREATE TABLE #PolicySync (PayerNameNormalized NVARCHAR(250) NOT NULL, GlobalPayerId INT NOT NULL); CREATE TABLE #PolicySyncAudit (RecordId INT, OldGid INT, NewGid INT, PayerNameRaw NVARCHAR(250));", conn, tx))
+            await create.ExecuteNonQueryAsync(ct);
+
+        foreach (var (normalized, gid) in pairs)
+        {
+            await using var ins = new SqlCommand("INSERT INTO #PolicySync (PayerNameNormalized, GlobalPayerId) VALUES (@N, @G);", conn, tx);
+            ins.Parameters.AddWithValue("@N", normalized);
+            ins.Parameters.AddWithValue("@G", gid);
+            await ins.ExecuteNonQueryAsync(ct);
+        }
+
+        int changed;
+        await using (var upd = new SqlCommand("""
+            UPDATE lab
+            SET GlobalPayerID = s.GlobalPayerId,
+                ModifiedBy = @UserName,
+                ModifiedOn = SYSUTCDATETIME()
+            OUTPUT inserted.LabInsuranceMasterId, deleted.GlobalPayerID, inserted.GlobalPayerID, inserted.PayerNameRaw
+                INTO #PolicySyncAudit (RecordId, OldGid, NewGid, PayerNameRaw)
+            FROM dbo.LabInsuranceMaster lab
+            JOIN #PolicySync s
+              ON LTRIM(RTRIM(lab.PayerNameNormalized)) = s.PayerNameNormalized COLLATE Latin1_General_CI_AS
+            WHERE ISNULL(lab.GlobalPayerID, -2147483648) <> s.GlobalPayerId;
+            DECLARE @Changed INT = @@ROWCOUNT;
+
+            IF OBJECT_ID('dbo.PayerMasterAuditTrail', 'U') IS NOT NULL
+                INSERT dbo.PayerMasterAuditTrail
+                    (Master, RecordId, GlobalPayerID, PayerName, FieldName, OldValue, NewValue, ActionType, PerformedBy, ApprovalStatus)
+                SELECT 'Lab', RecordId, NewGid, PayerNameRaw, 'GlobalPayerID',
+                       CONVERT(NVARCHAR(50), OldGid), CONVERT(NVARCHAR(50), NewGid),
+                       'Import', @UserName, 'Applied directly'
+                FROM #PolicySyncAudit;
+
+            SELECT @Changed;
+            """, conn, tx))
+        {
+            upd.Parameters.Add("@UserName", SqlDbType.NVarChar, 100).Value = DbValue(userName);
+            changed = Convert.ToInt32(await upd.ExecuteScalarAsync(ct) ?? 0);
+        }
+        return changed;
+    }
+
+    private static async Task WriteImportAuditAsync(SqlConnection conn, SqlTransaction? tx, string master, int recordId,
+        int? globalPayerId, string? payerName, string fieldName, string? oldValue, string? newValue, string? userName, CancellationToken ct)
+    {
+        await using var cmd = new SqlCommand("""
+            IF OBJECT_ID('dbo.PayerMasterAuditTrail', 'U') IS NOT NULL
+                INSERT dbo.PayerMasterAuditTrail
+                    (Master, RecordId, GlobalPayerID, PayerName, FieldName, OldValue, NewValue, ActionType, PerformedBy, ApprovalStatus)
+                VALUES (@Master, @RecordId, @GlobalPayerID, @PayerName, @FieldName, @OldValue, @NewValue, 'Import', @PerformedBy, 'Applied directly');
+            """, conn, tx);
+        cmd.Parameters.AddWithValue("@Master", master);
+        cmd.Parameters.AddWithValue("@RecordId", recordId);
+        cmd.Parameters.AddWithValue("@GlobalPayerID", (object?)globalPayerId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@PayerName", (object?)payerName ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FieldName", fieldName);
+        cmd.Parameters.AddWithValue("@OldValue", (object?)oldValue ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@NewValue", (object?)newValue ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@PerformedBy", DbValue(userName));
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     public async Task<byte[]> ExportPolicyPayersAsync(PayerPolicyInsuranceMasterQuery query, CancellationToken ct)
@@ -607,12 +943,12 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         var rows = await GetPolicyPayersForExportAsync(query, ct);
         using var wb = new XLWorkbook();
         var ws = wb.Worksheets.Add("PP_Ins.Master");
-        var headers = new[] { "S.No", "Payer_Code", "Payer Name", "Payer_Name_Normalized", "Global_Payer_ID", "Payer_Group_Code", "Payer_Common_Code", "Plan_Type", "Payer_State", "Is_Active", "Benefit Admin Code", "Benefit Administrator", "Remarks", "Is_MCO" };
+        var headers = new[] { "S.No", "Global_Payer_ID", "Global_Payer_Code", "Payer_Group_Code", "Benefit Admin Code", "Benefit Administrator", "Payer Name", "Payer_Name_Normalized", "Payer", "Plan_Type", "Payer_State", "Is_Active", "Remarks" };
         WriteHeaders(ws, headers);
         for (var i = 0; i < rows.Count; i++)
         {
             var r = rows[i]; var row = i + 2;
-            ws.Cell(row, 1).Value = i + 1; ws.Cell(row, 2).Value = r.PayerCode; ws.Cell(row, 3).Value = r.PayerName; ws.Cell(row, 4).Value = r.PayerNameNormalized; ws.Cell(row, 5).Value = r.GlobalPayerID; ws.Cell(row, 6).Value = r.PayerGroupCode; ws.Cell(row, 7).Value = r.PayerCommonCode; ws.Cell(row, 8).Value = r.PlanType; ws.Cell(row, 9).Value = r.PayerState; ws.Cell(row, 10).Value = r.IsActive; ws.Cell(row, 11).Value = r.BenefitAdminCode; ws.Cell(row, 12).Value = r.BenefitAdministrator; ws.Cell(row, 13).Value = r.Remarks; ws.Cell(row, 14).Value = r.IsMCO;
+            ws.Cell(row, 1).Value = i + 1; ws.Cell(row, 2).Value = r.GlobalPayerId; ws.Cell(row, 3).Value = r.GlobalPayerCode; ws.Cell(row, 4).Value = r.PayerGroupCode; ws.Cell(row, 5).Value = r.BenefitAdminCode; ws.Cell(row, 6).Value = r.BenefitAdministrator; ws.Cell(row, 7).Value = r.PayerNameRaw; ws.Cell(row, 8).Value = r.PayerNameNormalized; ws.Cell(row, 9).Value = r.PayerShortCode; ws.Cell(row, 10).Value = r.PlanType; ws.Cell(row, 11).Value = r.PayerState; ws.Cell(row, 12).Value = r.IsActive; ws.Cell(row, 13).Value = r.Remarks;
         }
         ws.Columns().AdjustToContents();
         using var ms = new MemoryStream();
@@ -666,27 +1002,25 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         return null;
     }
 
-    private async Task<int?> FindPolicyImportMatchAsync(SqlConnection conn, PayerPolicyInsuranceMasterDto dto, CancellationToken ct)
+    /// <summary>
+    /// Payer Policy Insurance Master upsert key is (PayerNameRaw, PayerNameNormalized, GlobalPayerId),
+    /// all matched trim + case-insensitive. Returns the existing PPInsuranceMasterId when a row with
+    /// the same triple already exists, otherwise null (insert).
+    /// </summary>
+    private static async Task<int?> FindPolicyImportMatchAsync(SqlConnection conn, SqlTransaction? tx, PayerPolicyInsuranceMasterDto dto, CancellationToken ct)
     {
-        var normalizedMatch = await FindPolicyByNormalizedGlobalAsync(conn, dto.PayerNameNormalized, dto.GlobalPayerID, ct);
-        if (normalizedMatch.HasValue) return normalizedMatch;
-
-        if (!string.IsNullOrWhiteSpace(dto.PayerCode))
-        {
-            await using var cmd = new SqlCommand("SELECT TOP (1) PayerPolicyInsuranceMasterId FROM dbo.PayerPolicyInsuranceMaster WHERE PayerCode=@PayerCode;", conn);
-            cmd.Parameters.AddWithValue("@PayerCode", dto.PayerCode);
-            var id = await cmd.ExecuteScalarAsync(ct);
-            if (id != null) return Convert.ToInt32(id);
-        }
-        if (!string.IsNullOrWhiteSpace(dto.PayerName) && dto.GlobalPayerID.HasValue)
-        {
-            await using var cmd = new SqlCommand("SELECT TOP (1) PayerPolicyInsuranceMasterId FROM dbo.PayerPolicyInsuranceMaster WHERE PayerName=@PayerName AND GlobalPayerID=@GlobalPayerID;", conn);
-            cmd.Parameters.AddWithValue("@PayerName", dto.PayerName);
-            cmd.Parameters.AddWithValue("@GlobalPayerID", dto.GlobalPayerID.Value);
-            var id = await cmd.ExecuteScalarAsync(ct);
-            if (id != null) return Convert.ToInt32(id);
-        }
-        return null;
+        await using var cmd = new SqlCommand("""
+            SELECT TOP (1) PPInsuranceMasterId
+            FROM dbo.PayerPolicyInsuranceMaster WITH (UPDLOCK, HOLDLOCK)
+            WHERE LTRIM(RTRIM(PayerNameRaw)) = @PayerNameRaw COLLATE Latin1_General_CI_AS
+              AND ISNULL(LTRIM(RTRIM(PayerNameNormalized)), '') = @PayerNameNormalized COLLATE Latin1_General_CI_AS
+              AND ISNULL(TRY_CONVERT(INT, GlobalPayerId), -1) = @GlobalPayerId;
+            """, conn, tx);
+        cmd.Parameters.AddWithValue("@PayerNameRaw", dto.PayerNameRaw.Trim());
+        cmd.Parameters.AddWithValue("@PayerNameNormalized", dto.PayerNameNormalized?.Trim() ?? string.Empty);
+        cmd.Parameters.AddWithValue("@GlobalPayerId", dto.GlobalPayerId ?? -1);
+        var id = await cmd.ExecuteScalarAsync(ct);
+        return id == null || id == DBNull.Value ? null : Convert.ToInt32(id);
     }
 
     private static async Task<bool> InsuranceNormalizedGlobalExistsAsync(SqlConnection conn, string? payerNameNormalized, int? globalPayerId, int? excludeId, CancellationToken ct)
@@ -694,34 +1028,24 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
            && (!excludeId.HasValue || existingId != excludeId.Value);
 
     /// <summary>
-    /// Payer Policy Insurance Master uniqueness: PayerNameNormalized and GlobalPayerID must each be
-    /// unique on their own. (The Lab Insurance Master intentionally allows the same GlobalPayerID on
-    /// multiple rows - one record per Payer + Lab combination all mapped to one policy payer.)
+    /// Payer Policy Insurance Master uniqueness follows the natural key
+    /// (PayerNameRaw, PayerNameNormalized, GlobalPayerId). A second row with the same triple is rejected.
     /// </summary>
     private static async Task EnsurePolicyUniqueAsync(SqlConnection conn, PayerPolicyInsuranceMasterDto dto, int? excludeId, CancellationToken ct)
     {
-        if (!string.IsNullOrWhiteSpace(dto.PayerNameNormalized))
-        {
-            await using var cmd = new SqlCommand("""
-                SELECT TOP (1) PayerPolicyInsuranceMasterId FROM dbo.PayerPolicyInsuranceMaster
-                WHERE PayerNameNormalized = @Value AND (@ExcludeId IS NULL OR PayerPolicyInsuranceMasterId <> @ExcludeId);
-                """, conn);
-            cmd.Parameters.AddWithValue("@Value", dto.PayerNameNormalized.Trim());
-            cmd.Parameters.AddWithValue("@ExcludeId", (object?)excludeId ?? DBNull.Value);
-            if (await cmd.ExecuteScalarAsync(ct) != null)
-                throw new ArgumentException($"Payer Name Normalized '{dto.PayerNameNormalized.Trim()}' already exists. Normalized payer names must be unique.");
-        }
-        if (dto.GlobalPayerID.HasValue)
-        {
-            await using var cmd = new SqlCommand("""
-                SELECT TOP (1) PayerPolicyInsuranceMasterId FROM dbo.PayerPolicyInsuranceMaster
-                WHERE GlobalPayerID = @Value AND (@ExcludeId IS NULL OR PayerPolicyInsuranceMasterId <> @ExcludeId);
-                """, conn);
-            cmd.Parameters.AddWithValue("@Value", dto.GlobalPayerID.Value);
-            cmd.Parameters.AddWithValue("@ExcludeId", (object?)excludeId ?? DBNull.Value);
-            if (await cmd.ExecuteScalarAsync(ct) != null)
-                throw new ArgumentException($"Global Payer ID {dto.GlobalPayerID.Value} already exists. Global Payer IDs must be unique.");
-        }
+        await using var cmd = new SqlCommand("""
+            SELECT TOP (1) PPInsuranceMasterId FROM dbo.PayerPolicyInsuranceMaster
+            WHERE LTRIM(RTRIM(PayerNameRaw)) = @PayerNameRaw COLLATE Latin1_General_CI_AS
+              AND ISNULL(LTRIM(RTRIM(PayerNameNormalized)), '') = @PayerNameNormalized COLLATE Latin1_General_CI_AS
+              AND ISNULL(TRY_CONVERT(INT, GlobalPayerId), -1) = @GlobalPayerId
+              AND (@ExcludeId IS NULL OR PPInsuranceMasterId <> @ExcludeId);
+            """, conn);
+        cmd.Parameters.AddWithValue("@PayerNameRaw", dto.PayerNameRaw.Trim());
+        cmd.Parameters.AddWithValue("@PayerNameNormalized", dto.PayerNameNormalized?.Trim() ?? string.Empty);
+        cmd.Parameters.AddWithValue("@GlobalPayerId", dto.GlobalPayerId ?? -1);
+        cmd.Parameters.AddWithValue("@ExcludeId", (object?)excludeId ?? DBNull.Value);
+        if (await cmd.ExecuteScalarAsync(ct) != null)
+            throw new ArgumentException($"A Payer Policy record for '{dto.PayerNameRaw.Trim()}' with Global Payer ID {(dto.GlobalPayerId?.ToString() ?? "(blank)")} already exists.");
     }
 
     private static async Task<int?> FindInsuranceByNormalizedGlobalAsync(SqlConnection conn, string? payerNameNormalized, int? globalPayerId, CancellationToken ct)
@@ -739,19 +1063,22 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         return id == null ? null : Convert.ToInt32(id);
     }
 
-    private static async Task<int?> FindPolicyByNormalizedGlobalAsync(SqlConnection conn, string? payerNameNormalized, int? globalPayerId, CancellationToken ct)
+    /// <summary>
+    /// Reconciliation lookup for the Lab import: returns the Payer Policy master's Global Payer ID for a
+    /// given raw payer name (trim + case-insensitive), or null when the payer is not in the policy master.
+    /// </summary>
+    private static async Task<int?> FindPolicyGlobalPayerIdByRawNameAsync(SqlConnection conn, SqlTransaction? tx, string payerNameRaw, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(payerNameNormalized) || !globalPayerId.HasValue) return null;
         await using var cmd = new SqlCommand("""
-            SELECT TOP (1) PayerPolicyInsuranceMasterId
+            SELECT TOP (1) TRY_CONVERT(INT, GlobalPayerId)
             FROM dbo.PayerPolicyInsuranceMaster
-            WHERE PayerNameNormalized = @PayerNameNormalized
-              AND GlobalPayerID = @GlobalPayerID;
-            """, conn);
-        cmd.Parameters.AddWithValue("@PayerNameNormalized", payerNameNormalized.Trim());
-        cmd.Parameters.AddWithValue("@GlobalPayerID", globalPayerId.Value);
-        var id = await cmd.ExecuteScalarAsync(ct);
-        return id == null ? null : Convert.ToInt32(id);
+            WHERE LTRIM(RTRIM(PayerNameRaw)) = @PayerNameRaw COLLATE Latin1_General_CI_AS
+              AND TRY_CONVERT(INT, GlobalPayerId) IS NOT NULL
+            ORDER BY PPInsuranceMasterId;
+            """, conn, tx);
+        cmd.Parameters.AddWithValue("@PayerNameRaw", payerNameRaw.Trim());
+        var value = await cmd.ExecuteScalarAsync(ct);
+        return value == null || value == DBNull.Value ? null : Convert.ToInt32(value);
     }
 
     private static string BuildInsuranceWhere(InsurancePayerMasterQuery q, out List<SqlParameter> p)
@@ -775,16 +1102,21 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
     {
         var parts = new List<string> { "1=1" };
         p = new List<SqlParameter>();
-        AddLike(parts, p, "PayerCode", q.PayerCode);
-        AddLike(parts, p, "PayerName", q.PayerName);
-        AddEquals(parts, p, "GlobalPayerID", q.GlobalPayerId);
+        AddLike(parts, p, "GlobalPayerCode", q.GlobalPayerCode);
+        AddLike(parts, p, "PayerNameRaw", q.PayerName);
+        AddLike(parts, p, "PayerShortCode", q.PayerShortCode);
         AddLike(parts, p, "PlanType", q.PlanType);
         AddLike(parts, p, "PayerState", q.PayerState);
         AddLike(parts, p, "IsActive", q.IsActive);
-        AddLike(parts, p, "IsMCO", q.IsMCO);
+        if (q.GlobalPayerId.HasValue)
+        {
+            // GlobalPayerId is nvarchar(50); compare numerically via TRY_CONVERT.
+            parts.Add("TRY_CONVERT(INT, GlobalPayerId) = @GlobalPayerId");
+            p.Add(new SqlParameter("@GlobalPayerId", q.GlobalPayerId.Value));
+        }
         if (!string.IsNullOrWhiteSpace(q.Search))
         {
-            parts.Add("(PayerCode LIKE @Search ESCAPE '\\' OR PayerName LIKE @Search ESCAPE '\\' OR PayerNameNormalized LIKE @Search ESCAPE '\\')");
+            parts.Add("(GlobalPayerCode LIKE @Search ESCAPE '\\' OR PayerNameRaw LIKE @Search ESCAPE '\\' OR PayerNameNormalized LIKE @Search ESCAPE '\\' OR PayerShortCode LIKE @Search ESCAPE '\\')");
             p.Add(new SqlParameter("@Search", LikePattern(q.Search)));
         }
         return string.Join(" AND ", parts);
@@ -819,21 +1151,21 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
     {
         var columns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["payerCode"] = "PayerCode",
-            ["payerName"] = "PayerName",
-            ["payerNameNormalized"] = "PayerNameNormalized",
-            ["globalPayerID"] = "GlobalPayerID",
+            ["globalPayerId"] = "TRY_CONVERT(INT, GlobalPayerId)",
+            ["globalPayerCode"] = "GlobalPayerCode",
             ["payerGroupCode"] = "PayerGroupCode",
-            ["payerCommonCode"] = "PayerCommonCode",
+            ["benefitAdminCode"] = "BenefitAdminCode",
+            ["benefitAdministrator"] = "BenefitAdministrator",
+            ["payerNameRaw"] = "PayerNameRaw",
+            ["payerName"] = "PayerNameRaw",
+            ["payerNameNormalized"] = "PayerNameNormalized",
+            ["payerShortCode"] = "PayerShortCode",
             ["planType"] = "PlanType",
             ["payerState"] = "PayerState",
             ["isActive"] = "IsActive",
-            ["benefitAdminCode"] = "BenefitAdminCode",
-            ["benefitAdministrator"] = "BenefitAdministrator",
-            ["isMCO"] = "IsMCO",
             ["remarks"] = "Remarks"
         };
-        return BuildOrderBy(q.SortColumn, q.SortDirection, columns, "PayerPolicyInsuranceMasterId DESC");
+        return BuildOrderBy(q.SortColumn, q.SortDirection, columns, "PPInsuranceMasterId DESC");
     }
 
     private static string BuildOrderBy(string? requestedColumn, string? requestedDirection, IReadOnlyDictionary<string, string> columns, string fallback)
@@ -870,18 +1202,51 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
             .Replace("_", "\\_", StringComparison.Ordinal)
             .Replace("[", "\\[", StringComparison.Ordinal);
 
-    private static Dictionary<string, int> HeaderMap(IXLWorksheet ws, bool allowDuplicateNames)
+    /// <summary>
+    /// Shared file-structure validation for both master imports. Headers are trimmed and matched
+    /// case-insensitively against the expected column list (data casing is not mutated). Fails with a
+    /// clear error when the file contains a duplicated expected column, a column not in the expected
+    /// list, or is missing a NOT-NULL (required) column. Missing optional columns are allowed.
+    /// </summary>
+    private static bool TryBuildHeaderMap(IXLWorksheet ws, IReadOnlyList<string> expected, IReadOnlyList<string> required,
+        out Dictionary<string, int> map, out List<string> errors)
     {
-        var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        errors = new List<string>();
+        var expectedSet = new HashSet<string>(expected, StringComparer.OrdinalIgnoreCase);
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var duplicates = new List<string>();
+        var unexpected = new List<string>();
+
         var lastColumn = ws.LastColumnUsed()?.ColumnNumber() ?? 0;
         for (var col = 1; col <= lastColumn; col++)
         {
             var name = ws.Cell(1, col).GetString().Trim();
             if (name.Length == 0) continue;
-            if (allowDuplicateNames && map.ContainsKey(name)) continue;
-            map[name] = col;
+            if (!expectedSet.Contains(name)) { unexpected.Add(name); continue; }
+            var canonical = expected.First(e => string.Equals(e, name, StringComparison.OrdinalIgnoreCase));
+            if (counts.TryGetValue(canonical, out var c))
+            {
+                counts[canonical] = c + 1;
+                if (c == 1) duplicates.Add(canonical);
+            }
+            else
+            {
+                counts[canonical] = 1;
+                map[canonical] = col;
+            }
         }
-        return map;
+
+        if (duplicates.Count > 0)
+            errors.Add("Duplicate column(s): " + string.Join(", ", duplicates.Distinct()));
+        if (unexpected.Count > 0)
+            errors.Add("Unexpected column(s): " + string.Join(", ", unexpected.Distinct()));
+        var builtMap = map;
+        var missingRequired = required.Where(r => !builtMap.ContainsKey(r)).ToList();
+        if (missingRequired.Count > 0)
+            errors.Add("Missing required column(s): " + string.Join(", ", missingRequired));
+
+        return errors.Count == 0;
     }
 
     private static string? Cell(IXLWorksheet ws, int row, int col)
@@ -890,13 +1255,19 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         return string.IsNullOrWhiteSpace(value) ? null : value;
     }
 
-    private static int? IntCell(IXLWorksheet ws, int row, int col, ImportResultDto result, int sourceRow)
+    /// <summary>Reads a cell for an optional column that may be absent from the file.</summary>
+    private static string? CellOpt(IXLWorksheet ws, int row, IReadOnlyDictionary<string, int> header, string column)
+        => header.TryGetValue(column, out var col) ? Cell(ws, row, col) : null;
+
+    private static int? IntCellOpt(IXLWorksheet ws, int row, IReadOnlyDictionary<string, int> header, string column, ImportResultDto result, int sourceRow, out bool invalid)
     {
+        invalid = false;
+        if (!header.TryGetValue(column, out var col)) return null;
         var text = Cell(ws, row, col);
         if (string.IsNullOrWhiteSpace(text)) return null;
-        if (int.TryParse(text, out var value)) return value;
-        if (decimal.TryParse(text, out var dec)) return (int)dec;
-        result.Warnings.Add($"Row {sourceRow}: Global_Payer_ID '{text}' is not an integer and was left blank.");
+        if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)) return value;
+        if (decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var dec)) return (int)dec;
+        invalid = true;
         return null;
     }
 
@@ -967,6 +1338,8 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
     private static object DbValue(string? value) => string.IsNullOrWhiteSpace(value) ? DBNull.Value : value.Trim();
     private static object DbValue(int? value) => value.HasValue ? value.Value : DBNull.Value;
     private static string Norm(string value) => new(value.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+    // Trim + case-insensitive key for reconciliation matching (per spec: trim + case-insensitive, not alphanumeric-strip).
+    private static string CiKey(string value) => value.Trim().ToUpperInvariant();
     private static string? Str(SqlDataReader r, string c) => r.IsDBNull(r.GetOrdinal(c)) ? null : r.GetString(r.GetOrdinal(c));
     private static int? Int(SqlDataReader r, string c) => r.IsDBNull(r.GetOrdinal(c)) ? null : r.GetInt32(r.GetOrdinal(c));
 
@@ -995,20 +1368,20 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
 
     private static PayerPolicyInsuranceMasterDto MapPolicy(SqlDataReader r) => new()
     {
-        PayerPolicyInsuranceMasterId = r.GetInt32(r.GetOrdinal("PayerPolicyInsuranceMasterId")),
-        PayerCode = Str(r, "PayerCode"),
-        PayerName = Str(r, "PayerName") ?? string.Empty,
+        PPInsuranceMasterId = r.GetInt32(r.GetOrdinal("PPInsuranceMasterId")),
+        // GlobalPayerId is nvarchar(50) in the DB but always numeric; surface as int?.
+        GlobalPayerId = ParseInt(Str(r, "GlobalPayerId")),
+        GlobalPayerCode = Str(r, "GlobalPayerCode") ?? string.Empty,
+        PayerGroupCode = Int(r, "PayerGroupCode"),
+        BenefitAdminCode = Str(r, "BenefitAdminCode"),
+        BenefitAdministrator = Str(r, "BenefitAdministrator"),
+        PayerNameRaw = Str(r, "PayerNameRaw") ?? string.Empty,
         PayerNameNormalized = Str(r, "PayerNameNormalized"),
-        GlobalPayerID = Int(r, "GlobalPayerID"),
-        PayerGroupCode = Str(r, "PayerGroupCode"),
-        PayerCommonCode = Str(r, "PayerCommonCode"),
+        PayerShortCode = Str(r, "PayerShortCode"),
         PlanType = Str(r, "PlanType"),
         PayerState = Str(r, "PayerState"),
         IsActive = Str(r, "IsActive"),
-        BenefitAdminCode = Str(r, "BenefitAdminCode"),
-        BenefitAdministrator = Str(r, "BenefitAdministrator"),
-        Remarks = Str(r, "Remarks"),
-        IsMCO = Str(r, "IsMCO")
+        Remarks = Str(r, "Remarks")
     };
 
     private static void AddInsuranceParams(SqlCommand cmd, InsurancePayerMasterDto d)
@@ -1035,19 +1408,21 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
 
     private static void AddPolicyParams(SqlCommand cmd, PayerPolicyInsuranceMasterDto d)
     {
-        cmd.Parameters.AddWithValue("@PayerCode", DbValue(d.PayerCode));
-        cmd.Parameters.AddWithValue("@PayerName", d.PayerName.Trim());
-        cmd.Parameters.AddWithValue("@PayerNameNormalized", DbValue(d.PayerNameNormalized));
-        cmd.Parameters.AddWithValue("@GlobalPayerID", DbValue(d.GlobalPayerID));
+        // GlobalPayerId column is nvarchar(50); store the numeric value as its string form.
+        cmd.Parameters.AddWithValue("@GlobalPayerId", d.GlobalPayerId.HasValue
+            ? d.GlobalPayerId.Value.ToString(CultureInfo.InvariantCulture)
+            : DBNull.Value);
+        cmd.Parameters.AddWithValue("@GlobalPayerCode", d.GlobalPayerCode?.Trim() ?? string.Empty);
         cmd.Parameters.AddWithValue("@PayerGroupCode", DbValue(d.PayerGroupCode));
-        cmd.Parameters.AddWithValue("@PayerCommonCode", DbValue(d.PayerCommonCode));
+        cmd.Parameters.AddWithValue("@BenefitAdminCode", DbValue(d.BenefitAdminCode));
+        cmd.Parameters.AddWithValue("@BenefitAdministrator", DbValue(d.BenefitAdministrator));
+        cmd.Parameters.AddWithValue("@PayerNameRaw", d.PayerNameRaw.Trim());
+        cmd.Parameters.AddWithValue("@PayerNameNormalized", DbValue(d.PayerNameNormalized));
+        cmd.Parameters.AddWithValue("@PayerShortCode", DbValue(d.PayerShortCode));
         cmd.Parameters.AddWithValue("@PlanType", DbValue(d.PlanType));
         cmd.Parameters.AddWithValue("@PayerState", DbValue(d.PayerState));
         cmd.Parameters.AddWithValue("@IsActive", DbValue(d.IsActive));
-        cmd.Parameters.AddWithValue("@BenefitAdminCode", DbValue(d.BenefitAdminCode));
-        cmd.Parameters.AddWithValue("@BenefitAdministrator", DbValue(d.BenefitAdministrator));
         cmd.Parameters.AddWithValue("@Remarks", DbValue(d.Remarks));
-        cmd.Parameters.AddWithValue("@IsMCO", DbValue(d.IsMCO));
     }
 
     private static void Trim(InsurancePayerMasterDto d)
@@ -1057,6 +1432,9 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
 
     private static void Trim(PayerPolicyInsuranceMasterDto d)
     {
-        d.PayerCode = d.PayerCode?.Trim(); d.PayerName = d.PayerName.Trim(); d.PayerNameNormalized = d.PayerNameNormalized?.Trim(); d.PayerGroupCode = d.PayerGroupCode?.Trim(); d.PayerCommonCode = d.PayerCommonCode?.Trim(); d.PlanType = d.PlanType?.Trim(); d.PayerState = d.PayerState?.Trim(); d.IsActive = d.IsActive?.Trim(); d.BenefitAdminCode = d.BenefitAdminCode?.Trim(); d.BenefitAdministrator = d.BenefitAdministrator?.Trim(); d.Remarks = d.Remarks?.Trim(); d.IsMCO = d.IsMCO?.Trim();
+        d.GlobalPayerCode = d.GlobalPayerCode?.Trim() ?? string.Empty; d.PayerNameRaw = d.PayerNameRaw.Trim(); d.PayerNameNormalized = d.PayerNameNormalized?.Trim(); d.PayerShortCode = d.PayerShortCode?.Trim(); d.BenefitAdminCode = d.BenefitAdminCode?.Trim(); d.BenefitAdministrator = d.BenefitAdministrator?.Trim(); d.PlanType = d.PlanType?.Trim(); d.PayerState = d.PayerState?.Trim(); d.IsActive = d.IsActive?.Trim(); d.Remarks = d.Remarks?.Trim();
     }
+
+    private static int? ParseInt(string? value)
+        => int.TryParse(value?.Trim(), out var i) ? i : null;
 }

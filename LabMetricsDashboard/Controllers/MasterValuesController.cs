@@ -99,13 +99,14 @@ public sealed class MasterValuesController : Controller
         {
             items = result.Items.Select(x => new
             {
-                x.PayerPolicyInsuranceMasterId,
-                x.PayerName,
+                x.PPInsuranceMasterId,
+                x.PayerNameRaw,
                 x.PayerNameNormalized,
-                x.GlobalPayerID,
+                x.GlobalPayerId,
+                x.GlobalPayerCode,
                 x.PlanType,
                 x.PayerState,
-                x.PayerCommonCode,
+                x.PayerShortCode,
                 x.IsActive
             })
         });
@@ -193,6 +194,13 @@ public sealed class MasterValuesController : Controller
         var uploadError = await FileUploadGuard.ValidateExcelAsync(file, 25 * 1024 * 1024, ct);
         if (uploadError != null) return BadRequest(new { message = uploadError });
         return Json(await _api.ImportInsuranceAsync(file, ct));
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> ResolveInsuranceConflicts([FromBody] GlobalPayerIdConflictResolutionRequest request, CancellationToken ct)
+    {
+        if (!CanWriteLab || LabRequiresApproval) return Forbid();
+        return Json(await _api.ResolveInsuranceConflictsAsync(request, ct));
     }
 
     [HttpPost]

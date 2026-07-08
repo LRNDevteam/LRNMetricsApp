@@ -25,20 +25,22 @@ public sealed class InsurancePayerMasterDto
 
 public sealed class PayerPolicyInsuranceMasterDto
 {
-    public int PayerPolicyInsuranceMasterId { get; set; }
-    public string? PayerCode { get; set; }
-    public string PayerName { get; set; } = string.Empty;
+    // PK is PPInsuranceMasterId in the real dbo.PayerPolicyInsuranceMaster table.
+    public int PPInsuranceMasterId { get; set; }
+    // GlobalPayerId is stored as nvarchar(50) in the DB but is always numeric ("require numeric
+    // everywhere"), so it is surfaced as int? and mapped to/from the string column.
+    public int? GlobalPayerId { get; set; }
+    public string GlobalPayerCode { get; set; } = string.Empty; // NOT NULL in the DB
+    public int? PayerGroupCode { get; set; }                    // int column in the policy table
+    public string? BenefitAdminCode { get; set; }
+    public string? BenefitAdministrator { get; set; }
+    public string PayerNameRaw { get; set; } = string.Empty;
     public string? PayerNameNormalized { get; set; }
-    public int? GlobalPayerID { get; set; }
-    public string? PayerGroupCode { get; set; }
-    public string? PayerCommonCode { get; set; }
+    public string? PayerShortCode { get; set; }
     public string? PlanType { get; set; }
     public string? PayerState { get; set; }
     public string? IsActive { get; set; }
-    public string? BenefitAdminCode { get; set; }
-    public string? BenefitAdministrator { get; set; }
     public string? Remarks { get; set; }
-    public string? IsMCO { get; set; }
 }
 
 public sealed class InsurancePayerMasterQuery
@@ -58,13 +60,13 @@ public sealed class InsurancePayerMasterQuery
 public sealed class PayerPolicyInsuranceMasterQuery
 {
     public string? Search { get; set; }
-    public string? PayerCode { get; set; }
+    public string? GlobalPayerCode { get; set; }
     public string? PayerName { get; set; }
     public int? GlobalPayerId { get; set; }
+    public string? PayerShortCode { get; set; }
     public string? PlanType { get; set; }
     public string? PayerState { get; set; }
     public string? IsActive { get; set; }
-    public string? IsMCO { get; set; }
     public string? SortColumn { get; set; }
     public string? SortDirection { get; set; }
     public int Page { get; set; } = 1;
@@ -79,6 +81,44 @@ public sealed class ImportResultDto
     public int SkippedRows { get; set; }
     public int ErrorRows { get; set; }
     public List<string> Warnings { get; set; } = new();
+    public List<string> Errors { get; set; } = new();
+    // GlobalPayerID conflicts detected during a Lab import (import value != Payer Policy master value).
+    // The affected Lab records are saved with a NULL GlobalPayerID until the user resolves each one.
+    public List<GlobalPayerIdConflictDto> Conflicts { get; set; } = new();
+}
+
+/// <summary>
+/// A single Lab Insurance Master row whose imported Global Payer ID disagrees with the
+/// Payer Policy Insurance Master value for the same PayerNameRaw. Saved with GlobalPayerID = NULL
+/// until the user chooses which value to keep.
+/// </summary>
+public sealed class GlobalPayerIdConflictDto
+{
+    public int LabInsuranceMasterId { get; set; }
+    public string PayerNameRaw { get; set; } = string.Empty;
+    public string? LabName { get; set; }
+    public int? ImportGlobalPayerId { get; set; }
+    public int? PolicyGlobalPayerId { get; set; }
+}
+
+public sealed class GlobalPayerIdConflictResolutionRequest
+{
+    public List<GlobalPayerIdConflictResolution> Resolutions { get; set; } = new();
+}
+
+public sealed class GlobalPayerIdConflictResolution
+{
+    public int LabInsuranceMasterId { get; set; }
+    // "Import" => keep the import file value; "Policy" => keep the Payer Policy master value.
+    public string Source { get; set; } = string.Empty;
+    public int? ImportGlobalPayerId { get; set; }
+    public int? PolicyGlobalPayerId { get; set; }
+}
+
+public sealed class GlobalPayerIdConflictResolutionResult
+{
+    public int Resolved { get; set; }
+    public int Failed { get; set; }
     public List<string> Errors { get; set; } = new();
 }
 

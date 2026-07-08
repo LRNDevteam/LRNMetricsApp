@@ -73,14 +73,14 @@ public sealed class PayerMasterWorkflowService : IPayerMasterWorkflowService
     {
         await EnsureSchemaAsync(ct);
         if (requiresApproval)
-            return await SubmitApprovalAsync(PolicyMaster, "Add", null, dto.PayerName, JsonSerializer.Serialize(dto, JsonOptions), userName, ct);
+            return await SubmitApprovalAsync(PolicyMaster, "Add", null, dto.PayerNameRaw, JsonSerializer.Serialize(dto, JsonOptions), userName, ct);
 
-        if (!dto.GlobalPayerID.HasValue) dto.GlobalPayerID = await NextGlobalPayerIdAsync(ct);
+        if (!dto.GlobalPayerId.HasValue) dto.GlobalPayerId = await NextGlobalPayerIdAsync(ct);
         var id = await _repository.CreatePolicyPayerAsync(dto, userName, ct);
-        await WriteAuditAsync(PolicyMaster, id, dto.GlobalPayerID, dto.PayerName, Diff(null, PolicyFields(dto)), "Add", userName, "Applied directly", null, null, ct);
+        await WriteAuditAsync(PolicyMaster, id, dto.GlobalPayerId, dto.PayerNameRaw, Diff(null, PolicyFields(dto)), "Add", userName, "Applied directly", null, null, ct);
         await NotifyAsync(PolicyMaster, "NewPayer",
             "Review Lab Insurance Master – New Payer added to Payer Policy Insurance Master",
-            $"Payer: {dto.PayerName} • Global Payer ID: {dto.GlobalPayerID} • Added by {userName}",
+            $"Payer: {dto.PayerNameRaw} • Global Payer ID: {dto.GlobalPayerId} • Added by {userName}",
             PolicyChangeRoles, null, ct);
         return new PayerMasterWorkflowActionResult { Id = id };
     }
@@ -91,15 +91,15 @@ public sealed class PayerMasterWorkflowService : IPayerMasterWorkflowService
         var existing = await _repository.GetPolicyPayerAsync(id, ct)
             ?? throw new ArgumentException("Payer policy insurance record was not found.");
         if (requiresApproval)
-            return await SubmitApprovalAsync(PolicyMaster, "Edit", id, existing.PayerName, JsonSerializer.Serialize(dto, JsonOptions), userName, ct);
+            return await SubmitApprovalAsync(PolicyMaster, "Edit", id, existing.PayerNameRaw, JsonSerializer.Serialize(dto, JsonOptions), userName, ct);
 
         var changes = Diff(PolicyFields(existing), PolicyFields(dto));
         var ok = await _repository.UpdatePolicyPayerAsync(id, dto, userName, ct);
         if (!ok) return new PayerMasterWorkflowActionResult { Success = false, Message = "Record was not found." };
-        await WriteAuditAsync(PolicyMaster, id, dto.GlobalPayerID ?? existing.GlobalPayerID, dto.PayerName, changes, "Edit", userName, "Applied directly", null, null, ct);
+        await WriteAuditAsync(PolicyMaster, id, dto.GlobalPayerId ?? existing.GlobalPayerId, dto.PayerNameRaw, changes, "Edit", userName, "Applied directly", null, null, ct);
         await NotifyAsync(PolicyMaster, "PayerUpdated",
             "Review Lab Insurance Master – Payer record updated in Payer Policy Insurance Master",
-            $"Payer: {dto.PayerName} • Global Payer ID: {dto.GlobalPayerID ?? existing.GlobalPayerID} • Action: Edit by {userName}",
+            $"Payer: {dto.PayerNameRaw} • Global Payer ID: {dto.GlobalPayerId ?? existing.GlobalPayerId} • Action: Edit by {userName}",
             PolicyChangeRoles, null, ct);
         return new PayerMasterWorkflowActionResult { Id = id };
     }
@@ -110,15 +110,15 @@ public sealed class PayerMasterWorkflowService : IPayerMasterWorkflowService
         var existing = await _repository.GetPolicyPayerAsync(id, ct)
             ?? throw new ArgumentException("Payer policy insurance record was not found.");
         if (requiresApproval)
-            return await SubmitApprovalAsync(PolicyMaster, "Deactivate", id, existing.PayerName, null, userName, ct);
+            return await SubmitApprovalAsync(PolicyMaster, "Deactivate", id, existing.PayerNameRaw, null, userName, ct);
 
         var ok = await _repository.UpdatePolicyPayerStatusAsync(id, "Inactive", userName, ct);
         if (!ok) return new PayerMasterWorkflowActionResult { Success = false, Message = "Record was not found." };
-        await WriteAuditAsync(PolicyMaster, id, existing.GlobalPayerID, existing.PayerName,
+        await WriteAuditAsync(PolicyMaster, id, existing.GlobalPayerId, existing.PayerNameRaw,
             [("Is Active", existing.IsActive, "Inactive")], "Deactivate", userName, "Applied directly", null, null, ct);
         await NotifyAsync(PolicyMaster, "PayerDeactivated",
             "Payer deactivated – review Lab Insurance Master",
-            $"{existing.PayerName} (Global Payer ID {existing.GlobalPayerID}) was deactivated in the Payer Policy Insurance Master. Please review and deactivate linked Lab Insurance Master record(s) manually.",
+            $"{existing.PayerNameRaw} (Global Payer ID {existing.GlobalPayerId}) was deactivated in the Payer Policy Insurance Master. Please review and deactivate linked Lab Insurance Master record(s) manually.",
             PolicyDeactivationRoles, null, ct);
         return new PayerMasterWorkflowActionResult { Id = id };
     }
@@ -333,12 +333,12 @@ public sealed class PayerMasterWorkflowService : IPayerMasterWorkflowService
                 {
                     var dto = JsonSerializer.Deserialize<PayerPolicyInsuranceMasterDto>(req.PayloadJson ?? "{}", JsonOptions)
                         ?? throw new InvalidOperationException("Approval payload is empty.");
-                    if (!dto.GlobalPayerID.HasValue) dto.GlobalPayerID = await NextGlobalPayerIdAsync(ct);
+                    if (!dto.GlobalPayerId.HasValue) dto.GlobalPayerId = await NextGlobalPayerIdAsync(ct);
                     var id = await _repository.CreatePolicyPayerAsync(dto, req.SubmittedBy, ct);
-                    await WriteAuditAsync(PolicyMaster, id, dto.GlobalPayerID, dto.PayerName, Diff(null, PolicyFields(dto)), "Add", req.SubmittedBy, "Approved", approver, null, ct);
+                    await WriteAuditAsync(PolicyMaster, id, dto.GlobalPayerId, dto.PayerNameRaw, Diff(null, PolicyFields(dto)), "Add", req.SubmittedBy, "Approved", approver, null, ct);
                     await NotifyAsync(PolicyMaster, "NewPayer",
                         "Review Lab Insurance Master – New Payer added to Payer Policy Insurance Master",
-                        $"Payer: {dto.PayerName} • Global Payer ID: {dto.GlobalPayerID} • Submitted by {req.SubmittedBy}, approved by {approver}",
+                        $"Payer: {dto.PayerNameRaw} • Global Payer ID: {dto.GlobalPayerId} • Submitted by {req.SubmittedBy}, approved by {approver}",
                         PolicyChangeRoles, null, ct);
                     break;
                 }
@@ -351,10 +351,10 @@ public sealed class PayerMasterWorkflowService : IPayerMasterWorkflowService
                     var changes = Diff(PolicyFields(existing), PolicyFields(dto));
                     if (!await _repository.UpdatePolicyPayerAsync(req.TargetId.Value, dto, req.SubmittedBy, ct))
                         throw new InvalidOperationException("Target record no longer exists.");
-                    await WriteAuditAsync(PolicyMaster, req.TargetId, dto.GlobalPayerID ?? existing.GlobalPayerID, dto.PayerName, changes, "Edit", req.SubmittedBy, "Approved", approver, null, ct);
+                    await WriteAuditAsync(PolicyMaster, req.TargetId, dto.GlobalPayerId ?? existing.GlobalPayerId, dto.PayerNameRaw, changes, "Edit", req.SubmittedBy, "Approved", approver, null, ct);
                     await NotifyAsync(PolicyMaster, "PayerUpdated",
                         "Review Lab Insurance Master – Payer record updated in Payer Policy Insurance Master",
-                        $"Payer: {dto.PayerName} • Global Payer ID: {dto.GlobalPayerID ?? existing.GlobalPayerID} • Action: Edit by {req.SubmittedBy}, approved by {approver}",
+                        $"Payer: {dto.PayerNameRaw} • Global Payer ID: {dto.GlobalPayerId ?? existing.GlobalPayerId} • Action: Edit by {req.SubmittedBy}, approved by {approver}",
                         PolicyChangeRoles, null, ct);
                     break;
                 }
@@ -363,11 +363,11 @@ public sealed class PayerMasterWorkflowService : IPayerMasterWorkflowService
                     var existing = await _repository.GetPolicyPayerAsync(req.TargetId!.Value, ct)
                         ?? throw new InvalidOperationException("Target record no longer exists.");
                     await _repository.UpdatePolicyPayerStatusAsync(req.TargetId.Value, "Inactive", req.SubmittedBy, ct);
-                    await WriteAuditAsync(PolicyMaster, req.TargetId, existing.GlobalPayerID, existing.PayerName,
+                    await WriteAuditAsync(PolicyMaster, req.TargetId, existing.GlobalPayerId, existing.PayerNameRaw,
                         [("Is Active", existing.IsActive, "Inactive")], "Deactivate", req.SubmittedBy, "Approved", approver, null, ct);
                     await NotifyAsync(PolicyMaster, "PayerDeactivated",
                         "Payer deactivated – review Lab Insurance Master",
-                        $"{existing.PayerName} (Global Payer ID {existing.GlobalPayerID}) was deactivated in the Payer Policy Insurance Master. Please review and deactivate linked Lab Insurance Master record(s) manually.",
+                        $"{existing.PayerNameRaw} (Global Payer ID {existing.GlobalPayerId}) was deactivated in the Payer Policy Insurance Master. Please review and deactivate linked Lab Insurance Master record(s) manually.",
                         PolicyDeactivationRoles, null, ct);
                     break;
                 }
@@ -738,17 +738,17 @@ public sealed class PayerMasterWorkflowService : IPayerMasterWorkflowService
 
     private static Dictionary<string, string?> PolicyFields(PayerPolicyInsuranceMasterDto d) => new()
     {
-        ["Payer Name"] = d.PayerName,
+        ["Payer Name"] = d.PayerNameRaw,
         ["Payer Name Normalized"] = d.PayerNameNormalized,
-        ["Global Payer ID"] = d.GlobalPayerID?.ToString(),
-        ["Payer Common Code"] = d.PayerCommonCode,
-        ["Payer Group Code"] = d.PayerGroupCode,
+        ["Global Payer ID"] = d.GlobalPayerId?.ToString(),
+        ["Global Payer Code"] = d.GlobalPayerCode,
+        ["Payer Short Code"] = d.PayerShortCode,
+        ["Payer Group Code"] = d.PayerGroupCode?.ToString(),
         ["Plan Type"] = d.PlanType,
         ["Payer State"] = d.PayerState,
         ["Is Active"] = d.IsActive,
         ["Benefit Manager"] = d.BenefitAdministrator,
         ["Benefit Manager Code"] = d.BenefitAdminCode,
-        ["Is MCO"] = d.IsMCO,
         ["Remarks"] = d.Remarks
     };
 
@@ -887,7 +887,7 @@ public sealed class PayerMasterWorkflowService : IPayerMasterWorkflowService
         BEGIN
             DECLARE @MaxId INT = 1000;
             SELECT @MaxId = MAX(v) FROM (VALUES
-                (ISNULL((SELECT MAX(GlobalPayerID) FROM dbo.PayerPolicyInsuranceMaster), 1000)),
+                (ISNULL((SELECT MAX(TRY_CONVERT(INT, GlobalPayerId)) FROM dbo.PayerPolicyInsuranceMaster), 1000)),
                 (ISNULL((SELECT MAX(GlobalPayerID) FROM dbo.LabInsuranceMaster), 1000)),
                 (1000)) AS x(v);
             DECLARE @Sql NVARCHAR(400) =

@@ -16,6 +16,7 @@ public interface IMasterValuesApiClient
     Task SaveInsurancePayerAsync(int? id, InsurancePayerMasterDto dto, CancellationToken ct);
     Task UpdateInsuranceStatusAsync(int id, string? isActive, CancellationToken ct);
     Task<ImportResultDto> ImportInsuranceAsync(IFormFile file, CancellationToken ct);
+    Task<GlobalPayerIdConflictResolutionResult> ResolveInsuranceConflictsAsync(GlobalPayerIdConflictResolutionRequest request, CancellationToken ct);
     Task<(byte[] Content, string FileName)> ExportInsuranceAsync(IQueryCollection query, CancellationToken ct);
 
     Task<MasterPagedResult<PayerPolicyInsuranceMasterDto>> GetPolicyPayersAsync(IQueryCollection query, CancellationToken ct);
@@ -67,6 +68,9 @@ public sealed class MasterValuesApiClient : IMasterValuesApiClient
 
     public Task<ImportResultDto> ImportInsuranceAsync(IFormFile file, CancellationToken ct)
         => ImportAsync("api/master-values/insurance-payers/import", file, ct);
+
+    public Task<GlobalPayerIdConflictResolutionResult> ResolveInsuranceConflictsAsync(GlobalPayerIdConflictResolutionRequest request, CancellationToken ct)
+        => PostForResultAsync<GlobalPayerIdConflictResolutionRequest, GlobalPayerIdConflictResolutionResult>("api/master-values/insurance-payers/import/resolve-conflicts", request, ct);
 
     public Task<(byte[] Content, string FileName)> ExportInsuranceAsync(IQueryCollection query, CancellationToken ct)
         => ExportAsync("api/master-values/insurance-payers/export" + Query(query), "InsurancePayerMaster.xlsx", ct);

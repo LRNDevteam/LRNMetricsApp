@@ -99,6 +99,13 @@ public sealed class InsurancePayerMasterController : ControllerBase
         return Ok(await _repository.ImportInsurancePayersAsync(stream, UserName(), ct));
     }
 
+    [HttpPost("import/resolve-conflicts")]
+    public async Task<ActionResult<GlobalPayerIdConflictResolutionResult>> ResolveImportConflicts(GlobalPayerIdConflictResolutionRequest request, CancellationToken ct)
+    {
+        if (!CanWrite || RequiresApproval) return Denied(); // same authority as the bulk import (Spec §7.1)
+        return Ok(await _repository.ResolveInsuranceGlobalPayerConflictsAsync(request, UserName(), ct));
+    }
+
     [HttpGet("export")]
     public async Task<IActionResult> Export([FromQuery] InsurancePayerMasterQuery query, CancellationToken ct)
     {

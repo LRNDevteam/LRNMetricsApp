@@ -25,20 +25,19 @@ public sealed class InsurancePayerMasterDto
 
 public sealed class PayerPolicyInsuranceMasterDto
 {
-    public int PayerPolicyInsuranceMasterId { get; set; }
-    public string? PayerCode { get; set; }
-    public string PayerName { get; set; } = string.Empty;
+    public int PPInsuranceMasterId { get; set; }
+    public int? GlobalPayerId { get; set; }
+    public string GlobalPayerCode { get; set; } = string.Empty;
+    public int? PayerGroupCode { get; set; }
+    public string? BenefitAdminCode { get; set; }
+    public string? BenefitAdministrator { get; set; }
+    public string PayerNameRaw { get; set; } = string.Empty;
     public string? PayerNameNormalized { get; set; }
-    public int? GlobalPayerID { get; set; }
-    public string? PayerGroupCode { get; set; }
-    public string? PayerCommonCode { get; set; }
+    public string? PayerShortCode { get; set; }
     public string? PlanType { get; set; }
     public string? PayerState { get; set; }
     public string? IsActive { get; set; }
-    public string? BenefitAdminCode { get; set; }
-    public string? BenefitAdministrator { get; set; }
     public string? Remarks { get; set; }
-    public string? IsMCO { get; set; }
 }
 
 public sealed class MasterValuesPageViewModel
@@ -66,6 +65,36 @@ public sealed class ImportResultDto
     public int SkippedRows { get; set; }
     public int ErrorRows { get; set; }
     public List<string> Warnings { get; set; } = new();
+    public List<string> Errors { get; set; } = new();
+    public List<GlobalPayerIdConflictDto> Conflicts { get; set; } = new();
+}
+
+public sealed class GlobalPayerIdConflictDto
+{
+    public int LabInsuranceMasterId { get; set; }
+    public string PayerNameRaw { get; set; } = string.Empty;
+    public string? LabName { get; set; }
+    public int? ImportGlobalPayerId { get; set; }
+    public int? PolicyGlobalPayerId { get; set; }
+}
+
+public sealed class GlobalPayerIdConflictResolutionRequest
+{
+    public List<GlobalPayerIdConflictResolution> Resolutions { get; set; } = new();
+}
+
+public sealed class GlobalPayerIdConflictResolution
+{
+    public int LabInsuranceMasterId { get; set; }
+    public string Source { get; set; } = string.Empty;
+    public int? ImportGlobalPayerId { get; set; }
+    public int? PolicyGlobalPayerId { get; set; }
+}
+
+public sealed class GlobalPayerIdConflictResolutionResult
+{
+    public int Resolved { get; set; }
+    public int Failed { get; set; }
     public List<string> Errors { get; set; } = new();
 }
 
