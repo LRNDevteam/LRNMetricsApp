@@ -67,6 +67,31 @@ public sealed class ImportResultDto
     public List<string> Warnings { get; set; } = new();
     public List<string> Errors { get; set; } = new();
     public List<GlobalPayerIdConflictDto> Conflicts { get; set; } = new();
+    public List<ImportDuplicateDto> Duplicates { get; set; } = new();
+}
+
+public sealed class ImportDuplicateDto
+{
+    public int RowNumber { get; set; }
+    public int KeptRowNumber { get; set; }
+    public string? PayerCode { get; set; }
+    public string? PayerNameRaw { get; set; }
+    public string? PayerNameNormalized { get; set; }
+    public int? GlobalPayerID { get; set; }
+    public string? PayerGroupCode { get; set; }
+    public string? PayerCommonCode { get; set; }
+    public string? Parent { get; set; }
+    public string? PlanType { get; set; }
+    public string? MCOType { get; set; }
+    public string? PayerState { get; set; }
+    public string? IsActive { get; set; }
+    public string? BenefitAdminCode { get; set; }
+    public string? BenefitAdministrator { get; set; }
+    public string? Remarks { get; set; }
+    public string? LabName { get; set; }
+    public string? LabState { get; set; }
+    public string? LabStateCode { get; set; }
+    public string? Basis { get; set; }
 }
 
 public sealed class GlobalPayerIdConflictDto

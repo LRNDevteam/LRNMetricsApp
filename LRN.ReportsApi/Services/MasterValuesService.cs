@@ -237,9 +237,12 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
             var counts = await BulkUpsertInsurancePayersAsync(conn, importRows, userName, ct);
             result.InsertedRows = counts.Inserted;
             result.UpdatedRows = counts.Updated;
-            result.SkippedRows += counts.DuplicateRows;
-            if (counts.DuplicateRows > 0)
-                result.Warnings.Add($"{counts.DuplicateRows} duplicate import row(s) were superseded by the last matching row in the workbook.");
+            result.SkippedRows += counts.Duplicates.Count;
+            if (counts.Duplicates.Count > 0)
+            {
+                result.Duplicates = counts.Duplicates;
+                result.Warnings.Add($"{counts.Duplicates.Count} duplicate import row(s) were superseded by the last matching row in the workbook (see the duplicate list below).");
+            }
         }
 
         // Resolve each conflict row's saved LabInsuranceMasterId so the modal can target it.
@@ -359,7 +362,7 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         return result;
     }
 
-    private static async Task<(int Inserted, int Updated, int DuplicateRows)> BulkUpsertInsurancePayersAsync(
+    private static async Task<(int Inserted, int Updated, List<ImportDuplicateDto> Duplicates)> BulkUpsertInsurancePayersAsync(
         SqlConnection conn,
         IReadOnlyList<(int RowNumber, InsurancePayerMasterDto Value)> rows,
         string? userName,
@@ -413,8 +416,9 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
                 SET NOCOUNT ON;
                 SET XACT_ABORT ON;
 
-                -- Preserve the original row-by-row match precedence:
-                -- normalized name/global ID, then payer code/lab, then raw name/lab name.
+                -- A master record's identity is the Payer_Name_Raw + Lab Name combination
+                -- (one record per Payer + Lab), so both existing-record matching and the
+                -- in-file duplicate detection below key on that pair and nothing else.
                 UPDATE s
                 SET ExistingId = matched.LabInsuranceMasterId
                 FROM #InsuranceImportStage s
@@ -422,48 +426,22 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
                 (
                     SELECT TOP (1) m.LabInsuranceMasterId
                     FROM dbo.LabInsuranceMaster m WITH (UPDLOCK, HOLDLOCK)
-                    WHERE (NULLIF(s.PayerNameNormalized, '') IS NOT NULL
-                           AND s.GlobalPayerID IS NOT NULL
-                           AND m.PayerNameNormalized = s.PayerNameNormalized
-                           AND m.GlobalPayerID = s.GlobalPayerID)
-                       OR (NULLIF(s.PayerCode, '') IS NOT NULL
-                           AND s.LabId IS NOT NULL
-                           AND m.PayerCode = s.PayerCode
-                           AND m.LabId = s.LabId)
-                       OR (NULLIF(s.PayerNameRaw, '') IS NOT NULL
-                           AND NULLIF(s.LabName, '') IS NOT NULL
-                           AND m.PayerNameRaw = s.PayerNameRaw
-                           AND m.LabName = s.LabName)
-                    ORDER BY CASE
-                        WHEN NULLIF(s.PayerNameNormalized, '') IS NOT NULL
-                         AND s.GlobalPayerID IS NOT NULL
-                         AND m.PayerNameNormalized = s.PayerNameNormalized
-                         AND m.GlobalPayerID = s.GlobalPayerID THEN 1
-                        WHEN NULLIF(s.PayerCode, '') IS NOT NULL
-                         AND s.LabId IS NOT NULL
-                         AND m.PayerCode = s.PayerCode
-                         AND m.LabId = s.LabId THEN 2
-                        ELSE 3 END,
-                        m.LabInsuranceMasterId
+                    WHERE m.PayerNameRaw = s.PayerNameRaw
+                      AND ISNULL(m.LabName, '') = ISNULL(s.LabName, '')
+                    ORDER BY m.LabInsuranceMasterId
                 ) matched;
 
+                -- DupKey is the identity a row is deduplicated on (Payer_Name_Raw + Lab Name);
+                -- kept as a column so skipped duplicates can be reported back with the surviving row.
                 SELECT s.*,
-                       SourceRank = ROW_NUMBER() OVER
-                       (
-                           PARTITION BY CASE
-                               WHEN s.ExistingId IS NOT NULL THEN CONCAT('E|', s.ExistingId)
-                               WHEN NULLIF(s.PayerNameNormalized, '') IS NOT NULL AND s.GlobalPayerID IS NOT NULL
-                                   THEN CONCAT('N|', s.PayerNameNormalized, '|', s.GlobalPayerID)
-                               WHEN NULLIF(s.PayerCode, '') IS NOT NULL AND s.LabId IS NOT NULL
-                                   THEN CONCAT('P|', s.PayerCode, '|', s.LabId)
-                               WHEN NULLIF(s.PayerNameRaw, '') IS NOT NULL AND NULLIF(s.LabName, '') IS NOT NULL
-                                   THEN CONCAT('R|', s.PayerNameRaw, '|', s.LabName)
-                               ELSE CONCAT('ROW|', s.RowNumber)
-                           END
-                           ORDER BY s.RowNumber DESC
-                       )
-                INTO #EffectiveInsuranceImport
+                       DupKey = CONCAT(s.PayerNameRaw, N'|', ISNULL(s.LabName, N''))
+                INTO #KeyedInsuranceImport
                 FROM #InsuranceImportStage s;
+
+                SELECT k.*,
+                       SourceRank = ROW_NUMBER() OVER (PARTITION BY k.DupKey ORDER BY k.RowNumber DESC)
+                INTO #EffectiveInsuranceImport
+                FROM #KeyedInsuranceImport k;
 
                 -- Record-level import audit rows are captured here (set-based, in the same transaction).
                 CREATE TABLE #LabImportAudit
@@ -527,11 +505,23 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
                 SELECT Inserted = @Inserted,
                        Updated = @Updated,
                        DuplicateRows = (SELECT COUNT(1) FROM #EffectiveInsuranceImport WHERE SourceRank > 1);
+
+                -- Second result set: every skipped duplicate row (all import columns) and the row that won.
+                SELECT d.RowNumber,
+                       KeptRowNumber = w.RowNumber,
+                       d.PayerCode, d.PayerNameRaw, d.PayerNameNormalized, d.GlobalPayerID,
+                       d.PayerGroupCode, d.PayerCommonCode, d.Parent, d.PlanType, d.MCOType,
+                       d.PayerState, d.IsActive, d.BenefitAdminCode, d.BenefitAdministrator,
+                       d.Remarks, d.LabName, d.LabState, d.LabStateCode
+                FROM #EffectiveInsuranceImport d
+                JOIN #EffectiveInsuranceImport w ON w.DupKey = d.DupKey AND w.SourceRank = 1
+                WHERE d.SourceRank > 1
+                ORDER BY d.RowNumber;
                 """;
 
             int inserted;
             int updated;
-            int duplicateRows;
+            var duplicates = new List<ImportDuplicateDto>();
             await using (var upsert = new SqlCommand(upsertSql, conn, tx) { CommandTimeout = 300 })
             {
                 upsert.Parameters.Add("@UserName", SqlDbType.NVarChar, 100).Value = DbValue(userName);
@@ -539,11 +529,39 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
                 if (!await reader.ReadAsync(ct)) throw new InvalidOperationException("Insurance payer import did not return row counts.");
                 inserted = reader.GetInt32(reader.GetOrdinal("Inserted"));
                 updated = reader.GetInt32(reader.GetOrdinal("Updated"));
-                duplicateRows = reader.GetInt32(reader.GetOrdinal("DuplicateRows"));
+
+                if (await reader.NextResultAsync(ct))
+                {
+                    string? S(int i) => reader.IsDBNull(i) ? null : reader.GetString(i);
+                    while (await reader.ReadAsync(ct))
+                        duplicates.Add(new ImportDuplicateDto
+                        {
+                            RowNumber = reader.GetInt32(0),
+                            KeptRowNumber = reader.GetInt32(1),
+                            PayerCode = S(2),
+                            PayerNameRaw = S(3),
+                            PayerNameNormalized = S(4),
+                            GlobalPayerID = reader.IsDBNull(5) ? null : reader.GetInt32(5),
+                            PayerGroupCode = S(6),
+                            PayerCommonCode = S(7),
+                            Parent = S(8),
+                            PlanType = S(9),
+                            MCOType = S(10),
+                            PayerState = S(11),
+                            IsActive = S(12),
+                            BenefitAdminCode = S(13),
+                            BenefitAdministrator = S(14),
+                            Remarks = S(15),
+                            LabName = S(16),
+                            LabState = S(17),
+                            LabStateCode = S(18),
+                            Basis = "Same Payer_Name_Raw + Lab Name"
+                        });
+                }
             }
 
             await tx.CommitAsync(ct);
-            return (inserted, updated, duplicateRows);
+            return (inserted, updated, duplicates);
         }
         catch
         {
@@ -677,7 +695,7 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
     {
         Trim(dto);
         if (string.IsNullOrWhiteSpace(dto.PayerNameRaw)) throw new ArgumentException("Payer Name is required.");
-        if (string.IsNullOrWhiteSpace(dto.GlobalPayerCode)) throw new ArgumentException("Global Payer Code is required.");
+        if (!dto.GlobalPayerId.HasValue) throw new ArgumentException("Global Payer ID is required.");
         await using var conn = Open();
         await conn.OpenAsync(ct);
         await EnsurePolicyUniqueAsync(conn, dto, null, ct);
@@ -699,7 +717,7 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
     {
         Trim(dto);
         if (string.IsNullOrWhiteSpace(dto.PayerNameRaw)) throw new ArgumentException("Payer Name is required.");
-        if (string.IsNullOrWhiteSpace(dto.GlobalPayerCode)) throw new ArgumentException("Global Payer Code is required.");
+        if (!dto.GlobalPayerId.HasValue) throw new ArgumentException("Global Payer ID is required.");
         await using var conn = Open();
         await conn.OpenAsync(ct);
         await EnsurePolicyUniqueAsync(conn, dto, id, ct);
@@ -733,8 +751,9 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         using var workbook = new XLWorkbook(stream);
         if (!workbook.Worksheets.TryGetWorksheet("PP_Ins.Master", out var ws))
             return new ImportResultDto { ErrorRows = 1, Errors = { "Sheet PP_Ins.Master was not found." } };
-        // NOT-NULL rule (Policy, "both required"): Global_Payer_ID, Global_Payer_Code, Payer Name, Payer_Name_Normalized.
-        var required = new[] { "Global_Payer_ID", "Global_Payer_Code", "Payer Name", "Payer_Name_Normalized" };
+        // NOT-NULL rule (Policy): only the natural key Payer Name + Global_Payer_ID is required;
+        // every other column is optional and may be blank.
+        var required = new[] { "Global_Payer_ID", "Payer Name" };
         if (!TryBuildHeaderMap(ws, PolicyImportColumns, required, out var header, out var headerErrors))
             return new ImportResultDto { ErrorRows = headerErrors.Count, Errors = headerErrors };
 
@@ -766,9 +785,7 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
             var rowErrors = new List<string>();
             if (globalIdInvalid) rowErrors.Add("Global_Payer_ID is not a valid integer");
             else if (!dto.GlobalPayerId.HasValue) rowErrors.Add("Global_Payer_ID is required");
-            if (string.IsNullOrWhiteSpace(dto.GlobalPayerCode)) rowErrors.Add("Global_Payer_Code is required");
             if (string.IsNullOrWhiteSpace(dto.PayerNameRaw)) rowErrors.Add("Payer Name is required");
-            if (string.IsNullOrWhiteSpace(dto.PayerNameNormalized)) rowErrors.Add("Payer_Name_Normalized is required");
             if (rowErrors.Count > 0)
             {
                 result.SkippedRows++;
@@ -1013,11 +1030,10 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
             SELECT TOP (1) PPInsuranceMasterId
             FROM dbo.PayerPolicyInsuranceMaster WITH (UPDLOCK, HOLDLOCK)
             WHERE LTRIM(RTRIM(PayerNameRaw)) = @PayerNameRaw COLLATE Latin1_General_CI_AS
-              AND ISNULL(LTRIM(RTRIM(PayerNameNormalized)), '') = @PayerNameNormalized COLLATE Latin1_General_CI_AS
-              AND ISNULL(TRY_CONVERT(INT, GlobalPayerId), -1) = @GlobalPayerId;
+              AND ISNULL(TRY_CONVERT(INT, GlobalPayerId), -1) = @GlobalPayerId
+            ORDER BY PPInsuranceMasterId;
             """, conn, tx);
         cmd.Parameters.AddWithValue("@PayerNameRaw", dto.PayerNameRaw.Trim());
-        cmd.Parameters.AddWithValue("@PayerNameNormalized", dto.PayerNameNormalized?.Trim() ?? string.Empty);
         cmd.Parameters.AddWithValue("@GlobalPayerId", dto.GlobalPayerId ?? -1);
         var id = await cmd.ExecuteScalarAsync(ct);
         return id == null || id == DBNull.Value ? null : Convert.ToInt32(id);
@@ -1029,19 +1045,17 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
 
     /// <summary>
     /// Payer Policy Insurance Master uniqueness follows the natural key
-    /// (PayerNameRaw, PayerNameNormalized, GlobalPayerId). A second row with the same triple is rejected.
+    /// (PayerNameRaw, GlobalPayerId). A second row with the same pair is rejected.
     /// </summary>
     private static async Task EnsurePolicyUniqueAsync(SqlConnection conn, PayerPolicyInsuranceMasterDto dto, int? excludeId, CancellationToken ct)
     {
         await using var cmd = new SqlCommand("""
             SELECT TOP (1) PPInsuranceMasterId FROM dbo.PayerPolicyInsuranceMaster
             WHERE LTRIM(RTRIM(PayerNameRaw)) = @PayerNameRaw COLLATE Latin1_General_CI_AS
-              AND ISNULL(LTRIM(RTRIM(PayerNameNormalized)), '') = @PayerNameNormalized COLLATE Latin1_General_CI_AS
               AND ISNULL(TRY_CONVERT(INT, GlobalPayerId), -1) = @GlobalPayerId
               AND (@ExcludeId IS NULL OR PPInsuranceMasterId <> @ExcludeId);
             """, conn);
         cmd.Parameters.AddWithValue("@PayerNameRaw", dto.PayerNameRaw.Trim());
-        cmd.Parameters.AddWithValue("@PayerNameNormalized", dto.PayerNameNormalized?.Trim() ?? string.Empty);
         cmd.Parameters.AddWithValue("@GlobalPayerId", dto.GlobalPayerId ?? -1);
         cmd.Parameters.AddWithValue("@ExcludeId", (object?)excludeId ?? DBNull.Value);
         if (await cmd.ExecuteScalarAsync(ct) != null)
@@ -1205,8 +1219,9 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
     /// <summary>
     /// Shared file-structure validation for both master imports. Headers are trimmed and matched
     /// case-insensitively against the expected column list (data casing is not mutated). Fails with a
-    /// clear error when the file contains a duplicated expected column, a column not in the expected
-    /// list, or is missing a NOT-NULL (required) column. Missing optional columns are allowed.
+    /// clear error when the file contains a duplicated expected column or is missing a NOT-NULL
+    /// (required) column. Missing optional columns are allowed; columns not in the expected list
+    /// (e.g. S.No) are ignored so the file still imports.
     /// </summary>
     private static bool TryBuildHeaderMap(IXLWorksheet ws, IReadOnlyList<string> expected, IReadOnlyList<string> required,
         out Dictionary<string, int> map, out List<string> errors)
@@ -1216,14 +1231,13 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         var expectedSet = new HashSet<string>(expected, StringComparer.OrdinalIgnoreCase);
         var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var duplicates = new List<string>();
-        var unexpected = new List<string>();
 
         var lastColumn = ws.LastColumnUsed()?.ColumnNumber() ?? 0;
         for (var col = 1; col <= lastColumn; col++)
         {
             var name = ws.Cell(1, col).GetString().Trim();
             if (name.Length == 0) continue;
-            if (!expectedSet.Contains(name)) { unexpected.Add(name); continue; }
+            if (!expectedSet.Contains(name)) continue;
             var canonical = expected.First(e => string.Equals(e, name, StringComparison.OrdinalIgnoreCase));
             if (counts.TryGetValue(canonical, out var c))
             {
@@ -1239,8 +1253,6 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
 
         if (duplicates.Count > 0)
             errors.Add("Duplicate column(s): " + string.Join(", ", duplicates.Distinct()));
-        if (unexpected.Count > 0)
-            errors.Add("Unexpected column(s): " + string.Join(", ", unexpected.Distinct()));
         var builtMap = map;
         var missingRequired = required.Where(r => !builtMap.ContainsKey(r)).ToList();
         if (missingRequired.Count > 0)

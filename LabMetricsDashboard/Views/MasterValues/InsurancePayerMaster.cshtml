@@ -449,7 +449,30 @@ if(canWrite){
   };
   function renderImportSummary(d){
     const conflictNote=(d.conflicts||[]).length?`<div class="mt-2 text-primary fw-bold">${d.conflicts.length} Global Payer ID conflict(s) need resolution — see the pop-up.</div>`:'';
-    document.getElementById('importResult').innerHTML=`<div class="alert alert-light border mb-0"><strong>Total:</strong> ${d.totalRows||0} &nbsp; <strong>Inserted:</strong> ${d.insertedRows||0} &nbsp; <strong>Updated:</strong> ${d.updatedRows||0} &nbsp; <strong>Skipped:</strong> ${d.skippedRows||0} &nbsp; <strong>Errors:</strong> ${d.errorRows||0}${conflictNote}<div class="mt-2 text-warning">${(d.warnings||[]).map(esc).slice(0,8).join('<br>')}</div><div class="mt-2 text-danger">${(d.errors||[]).map(esc).slice(0,8).join('<br>')}</div></div>`;
+    const dups=d.duplicates||[];
+    const dupNote=dups.length?`<div class="mt-2"><strong>Duplicates:</strong> ${dups.length} row(s) skipped (same Payer_Name_Raw + Lab Name; the last matching row in the file was imported). <button type="button" id="dupDownloadBtn" class="btn btn-sm btn-outline-secondary ms-1">Download duplicates</button></div>`:'';
+    document.getElementById('importResult').innerHTML=`<div class="alert alert-light border mb-0"><strong>Total:</strong> ${d.totalRows||0} &nbsp; <strong>Inserted:</strong> ${d.insertedRows||0} &nbsp; <strong>Updated:</strong> ${d.updatedRows||0} &nbsp; <strong>Skipped:</strong> ${d.skippedRows||0} &nbsp; <strong>Errors:</strong> ${d.errorRows||0}${conflictNote}<div class="mt-2 text-warning">${(d.warnings||[]).map(esc).slice(0,8).join('<br>')}</div><div class="mt-2 text-danger">${(d.errors||[]).map(esc).slice(0,8).join('<br>')}</div>${dupNote}</div>`;
+    const dupBtn=document.getElementById('dupDownloadBtn');
+    if(dupBtn)dupBtn.onclick=()=>downloadDuplicates(dups);
+  }
+  function downloadDuplicates(dups){
+    // Same column set (and order) as the import file, plus row bookkeeping at the front.
+    const cols=[
+      ['Excel Row',x=>x.rowNumber],['Kept Row',x=>x.keptRowNumber],
+      ['Payer_Code',x=>x.payerCode],['Global_Payer_ID',x=>x.globalPayerID],['Payer_Name_Raw',x=>x.payerNameRaw],
+      ['Payer_Name_Normalized',x=>x.payerNameNormalized],['Payer_Group_Code',x=>x.payerGroupCode],
+      ['Payer_Common_Code',x=>x.payerCommonCode],['Parent',x=>x.parent],['Plan_Type',x=>x.planType],
+      ['MCO_Type',x=>x.mcoType],['Payer_State',x=>x.payerState],['Is_Active',x=>x.isActive],
+      ['Benefit Admin Code',x=>x.benefitAdminCode],['Benefit Administrator',x=>x.benefitAdministrator],
+      ['Remarks',x=>x.remarks],['Lab Name',x=>x.labName],['Lab State',x=>x.labState],['Lab State Code',x=>x.labStateCode]
+    ];
+    const cell=v=>{const s=(v===null||v===undefined)?'':String(v);return /[",\r\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;};
+    const csv='﻿'+[cols.map(c=>cell(c[0])).join(',')].concat(dups.map(x=>cols.map(c=>cell(c[1](x))).join(','))).join('\r\n');
+    const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));
+    const a=document.createElement('a');
+    a.href=url;a.download='LabInsuranceMaster_Duplicates.csv';
+    document.body.appendChild(a);a.click();a.remove();
+    URL.revokeObjectURL(url);
   }
   function conflictRowHtml(c,i){
     return `<tr data-i="${i}"><td class="mv-primary">${esc(c.payerNameRaw)}</td><td>${esc(c.labName||'—')}</td><td>${esc(c.importGlobalPayerId??'—')}</td><td>${esc(c.policyGlobalPayerId??'—')}</td><td><select class="form-select form-select-sm conflict-choice"><option value="">Leave blank</option><option value="Import">Use import (${esc(c.importGlobalPayerId??'—')})</option><option value="Policy">Use Payer Policy (${esc(c.policyGlobalPayerId??'—')})</option></select></td></tr>`;

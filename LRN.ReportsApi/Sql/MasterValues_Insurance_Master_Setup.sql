@@ -3,6 +3,10 @@
   Creates Admin Master Values insurance maintenance tables.
 */
 
+-- Required for creating/rebuilding filtered indexes (sqlcmd defaults it OFF).
+SET QUOTED_IDENTIFIER ON;
+GO
+
 IF OBJECT_ID('dbo.LabInsuranceMaster', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.LabInsuranceMaster
@@ -44,25 +48,29 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_LabInsuranceMaster_Glo
     CREATE INDEX IX_LabInsuranceMaster_GlobalPayerID ON dbo.LabInsuranceMaster (GlobalPayerID);
 GO
 
+-- The master holds one record per Payer + Lab combination, so the natural key is
+-- PayerNameRaw + LabName (the key the bulk import upserts on). The old lab-agnostic
+-- PayerNameNormalized + GlobalPayerID unique index is dropped: the same payer may
+-- legitimately appear once per lab.
+IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_LabInsuranceMaster_NormalizedName_GlobalPayerID' AND object_id = OBJECT_ID('dbo.LabInsuranceMaster'))
+    DROP INDEX UX_LabInsuranceMaster_NormalizedName_GlobalPayerID ON dbo.LabInsuranceMaster;
+GO
+
 IF EXISTS
 (
     SELECT 1
     FROM dbo.LabInsuranceMaster
-    WHERE PayerNameNormalized IS NOT NULL
-      AND LTRIM(RTRIM(PayerNameNormalized)) <> ''
-      AND GlobalPayerID IS NOT NULL
-    GROUP BY PayerNameNormalized, GlobalPayerID
+    GROUP BY PayerNameRaw, LabName
     HAVING COUNT(1) > 1
 )
 BEGIN
-    THROW 51001, 'Duplicate LabInsuranceMaster PayerNameNormalized + GlobalPayerID combinations exist. Clean duplicates before creating UX_LabInsuranceMaster_NormalizedName_GlobalPayerID.', 1;
+    THROW 51001, 'Duplicate LabInsuranceMaster PayerNameRaw + LabName combinations exist. Clean duplicates before creating UX_LabInsuranceMaster_PayerNameRaw_LabName.', 1;
 END;
 GO
 
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_LabInsuranceMaster_NormalizedName_GlobalPayerID' AND object_id = OBJECT_ID('dbo.LabInsuranceMaster'))
-    CREATE UNIQUE INDEX UX_LabInsuranceMaster_NormalizedName_GlobalPayerID
-        ON dbo.LabInsuranceMaster (PayerNameNormalized, GlobalPayerID)
-        WHERE PayerNameNormalized IS NOT NULL AND GlobalPayerID IS NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_LabInsuranceMaster_PayerNameRaw_LabName' AND object_id = OBJECT_ID('dbo.LabInsuranceMaster'))
+    CREATE UNIQUE INDEX UX_LabInsuranceMaster_PayerNameRaw_LabName
+        ON dbo.LabInsuranceMaster (PayerNameRaw, LabName);
 GO
 
 IF OBJECT_ID('dbo.PayerPolicyInsuranceMaster', 'U') IS NULL
@@ -78,7 +86,7 @@ BEGIN
         BenefitAdminCode NVARCHAR(250) NULL,
         BenefitAdministrator NVARCHAR(250) NULL,
         PayerNameRaw NVARCHAR(250) NULL,
-        PayerNameNormalized NVARCHAR(50) NULL,
+        PayerNameNormalized NVARCHAR(250) NULL,
         PayerShortCode NVARCHAR(50) NULL,
         PlanType NVARCHAR(250) NULL,
         PayerState NVARCHAR(250) NULL,
@@ -92,6 +100,25 @@ BEGIN
 END;
 GO
 
+-- Migration: PayerNameNormalized was originally NVARCHAR(50), which truncates long payer
+-- names (e.g. Highmark Blue Cross Blue Shield of Western New York). Widen to NVARCHAR(250)
+-- to match the Lab master; the covering index is dropped first and recreated below.
+IF EXISTS
+(
+    SELECT 1 FROM sys.columns
+    WHERE object_id = OBJECT_ID('dbo.PayerPolicyInsuranceMaster')
+      AND name = 'PayerNameNormalized'
+      AND max_length > 0 AND max_length < 500
+)
+BEGIN
+    IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_PayerPolicyInsuranceMaster_PayerNameNormalized' AND object_id = OBJECT_ID('dbo.PayerPolicyInsuranceMaster'))
+        DROP INDEX IX_PayerPolicyInsuranceMaster_PayerNameNormalized ON dbo.PayerPolicyInsuranceMaster;
+    IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_PayerPolicyInsuranceMaster_NaturalKey' AND object_id = OBJECT_ID('dbo.PayerPolicyInsuranceMaster'))
+        DROP INDEX UX_PayerPolicyInsuranceMaster_NaturalKey ON dbo.PayerPolicyInsuranceMaster;
+    ALTER TABLE dbo.PayerPolicyInsuranceMaster ALTER COLUMN PayerNameNormalized NVARCHAR(250) NULL;
+END;
+GO
+
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_PayerPolicyInsuranceMaster_GlobalPayerCode' AND object_id = OBJECT_ID('dbo.PayerPolicyInsuranceMaster'))
     CREATE INDEX IX_PayerPolicyInsuranceMaster_GlobalPayerCode ON dbo.PayerPolicyInsuranceMaster (GlobalPayerCode);
 GO
@@ -102,23 +129,29 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_PayerPolicyInsuranceMa
     CREATE INDEX IX_PayerPolicyInsuranceMaster_PayerNameRaw ON dbo.PayerPolicyInsuranceMaster (PayerNameRaw);
 GO
 
--- Natural key for the policy master upsert: (PayerNameRaw, PayerNameNormalized, GlobalPayerId).
+-- Natural key for the policy master upsert: (PayerNameRaw, GlobalPayerId). The previous
+-- triple key that included PayerNameNormalized is dropped; all columns other than the
+-- natural key are optional.
+IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_PayerPolicyInsuranceMaster_NaturalKey' AND object_id = OBJECT_ID('dbo.PayerPolicyInsuranceMaster'))
+    DROP INDEX UX_PayerPolicyInsuranceMaster_NaturalKey ON dbo.PayerPolicyInsuranceMaster;
+GO
+
 IF EXISTS
 (
     SELECT 1
     FROM dbo.PayerPolicyInsuranceMaster
     WHERE PayerNameRaw IS NOT NULL
       AND LTRIM(RTRIM(PayerNameRaw)) <> ''
-    GROUP BY PayerNameRaw, PayerNameNormalized, GlobalPayerId
+    GROUP BY PayerNameRaw, GlobalPayerId
     HAVING COUNT(1) > 1
 )
 BEGIN
-    THROW 51002, 'Duplicate PayerPolicyInsuranceMaster (PayerNameRaw, PayerNameNormalized, GlobalPayerId) combinations exist. Clean duplicates before creating UX_PayerPolicyInsuranceMaster_NaturalKey.', 1;
+    THROW 51002, 'Duplicate PayerPolicyInsuranceMaster (PayerNameRaw, GlobalPayerId) combinations exist. Clean duplicates before creating UX_PayerPolicyInsuranceMaster_PayerName_GlobalPayerId.', 1;
 END;
 GO
 
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_PayerPolicyInsuranceMaster_NaturalKey' AND object_id = OBJECT_ID('dbo.PayerPolicyInsuranceMaster'))
-    CREATE UNIQUE INDEX UX_PayerPolicyInsuranceMaster_NaturalKey
-        ON dbo.PayerPolicyInsuranceMaster (PayerNameRaw, PayerNameNormalized, GlobalPayerId)
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_PayerPolicyInsuranceMaster_PayerName_GlobalPayerId' AND object_id = OBJECT_ID('dbo.PayerPolicyInsuranceMaster'))
+    CREATE UNIQUE INDEX UX_PayerPolicyInsuranceMaster_PayerName_GlobalPayerId
+        ON dbo.PayerPolicyInsuranceMaster (PayerNameRaw, GlobalPayerId)
         WHERE PayerNameRaw IS NOT NULL;
 GO

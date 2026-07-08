@@ -85,6 +85,37 @@ public sealed class ImportResultDto
     // GlobalPayerID conflicts detected during a Lab import (import value != Payer Policy master value).
     // The affected Lab records are saved with a NULL GlobalPayerID until the user resolves each one.
     public List<GlobalPayerIdConflictDto> Conflicts { get; set; } = new();
+    // Import-file rows skipped as duplicates of another row in the same workbook (counted in SkippedRows).
+    public List<ImportDuplicateDto> Duplicates { get; set; } = new();
+}
+
+/// <summary>
+/// A workbook row skipped as a duplicate during import (same Payer_Name_Raw + Lab Name as the
+/// surviving row, KeptRowNumber; the last matching row in the file wins). Carries every import
+/// column so the full row can be downloaded from the import summary.
+/// </summary>
+public sealed class ImportDuplicateDto
+{
+    public int RowNumber { get; set; }
+    public int KeptRowNumber { get; set; }
+    public string? PayerCode { get; set; }
+    public string? PayerNameRaw { get; set; }
+    public string? PayerNameNormalized { get; set; }
+    public int? GlobalPayerID { get; set; }
+    public string? PayerGroupCode { get; set; }
+    public string? PayerCommonCode { get; set; }
+    public string? Parent { get; set; }
+    public string? PlanType { get; set; }
+    public string? MCOType { get; set; }
+    public string? PayerState { get; set; }
+    public string? IsActive { get; set; }
+    public string? BenefitAdminCode { get; set; }
+    public string? BenefitAdministrator { get; set; }
+    public string? Remarks { get; set; }
+    public string? LabName { get; set; }
+    public string? LabState { get; set; }
+    public string? LabStateCode { get; set; }
+    public string? Basis { get; set; }
 }
 
 /// <summary>
