@@ -6,7 +6,7 @@ namespace LabMetricsDashboard.Services;
 
 /// <summary>
 /// Reads PayerValidation report rows from the SQL PayerValidationReport table.
-/// The actual columns returned are controlled by usp_GetPayerValidationReport —
+/// The actual columns returned are controlled by usp_GetPayerValidationReport ï¿½
 /// add or remove columns there without changing this interface.
 /// </summary>
 public interface IPredictionDbRepository
@@ -91,7 +91,7 @@ public interface IPredictionDbRepository
     /// <summary>
     /// Returns the single summary-metrics row containing all bucket counts, all Ratio
     /// percentages, and all Prediction Accuracy percentages
-    /// (usp_GetPredictionSummaryMetrics — SP 12).
+    /// (usp_GetPredictionSummaryMetrics ï¿½ SP 12).
     /// Returns null when the SP returns no rows (empty dataset).
     /// </summary>
     Task<PredictionSummaryMetricsSpRow?> GetSummaryMetricsAsync(
@@ -112,7 +112,9 @@ public sealed record PredictionDbDiagnostic(
     long      RowCount,
     string?   LatestRunId,
     DateTime? LatestRunInsertedAt,
-    string?   ErrorMessage)
+    string?   ErrorMessage,
+    string?   WeekFolder     = null,
+    string?   SourceFileName = null)
 {
     /// <summary>True when the database is set up AND has at least one row.</summary>
     public bool IsReady => TableExists && ProcedureExists && RowCount > 0 && ErrorMessage is null;

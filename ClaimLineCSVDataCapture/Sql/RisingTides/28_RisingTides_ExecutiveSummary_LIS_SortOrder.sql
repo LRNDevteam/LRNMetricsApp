@@ -561,11 +561,13 @@ BEGIN
 			 AND b.BilledUnbilled='Unbilled'
 			GROUP BY p.ESYear,p.ESMonth
 
+		-- R = ClientPaidListData SpecimenID count, matched on BeginDOS year/month
 		UNION ALL SELECT p.ESYear,p.ESMonth,'R','Paid - Client',
-			COUNT(DISTINCT b.VisitNumber)
-			FROM #Periods p LEFT JOIN #Base b
-			  ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-			 AND b.ClaimStatus='Client Paid'
+			COUNT(DISTINCT LTRIM(RTRIM(c.SpecimenID)))
+			FROM #Periods p LEFT JOIN dbo.ClientPaidListData c
+			  ON NULLIF(LTRIM(RTRIM(c.SpecimenID)), '') IS NOT NULL
+			 AND (p.ESYear=0 OR (YEAR (TRY_CAST(c.BeginDOS AS DATE))=p.ESYear
+							 AND MONTH(TRY_CAST(c.BeginDOS AS DATE))=p.ESMonth))
 			GROUP BY p.ESYear,p.ESMonth
 
 		UNION ALL SELECT p.ESYear,p.ESMonth,'S','Fully Paid - Insurance Pay',

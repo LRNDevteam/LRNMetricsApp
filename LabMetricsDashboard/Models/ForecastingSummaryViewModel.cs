@@ -10,17 +10,27 @@ public sealed class ForecastingSummaryViewModel
     public List<string> AvailableLabs { get; init; } = [];
     public string SelectedLab { get; init; } = string.Empty;
 
-    /// <summary>False when the selected lab has DBEnabled=false � shows a "not available" banner.</summary>
+    /// <summary>False when the selected lab has DBEnabled=false � shows a "not available" banner.</summary>
     public bool PredictionAvailable { get; init; } = true;
 
     /// <summary>Error message to display when feature is disabled or unavailable.</summary>
     public string? ErrorMessage { get; init; }
 
-    /// <summary>Monday of the current week � the global filter cutoff date.</summary>
+    /// <summary>Monday of the current week � the global filter cutoff date.</summary>
     public DateOnly CurrentWeekStartDate { get; init; }
 
     /// <summary>Total records that fell within the 4-week window.</summary>
     public int TotalRecordsInRange { get; init; }
+
+    // ── Source run info (shown in the header info bar) ─────────────────
+    /// <summary>RunId of the run currently displayed (latest inserted run on DB path).</summary>
+    public string? RunId { get; init; }
+
+    /// <summary>Week folder the source file came from (e.g. "06.26.2026 - 07.03.2026").</summary>
+    public string? WeekFolder { get; init; }
+
+    /// <summary>When the run's rows were inserted into the database (DB path) or the file's last write time (file path).</summary>
+    public DateTime? DataInsertedAt { get; init; }
 
     // ?? All-data summaries ???????????????????????????????????????????
     public WeeklyForecastSummary MedianSummary { get; init; } = new();
@@ -59,3 +69,4 @@ public sealed class ForecastingSummaryViewModel
     /// </summary>
     public DateOnly? LatestDataDate { get; init; }
 }
+

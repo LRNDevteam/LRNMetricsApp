@@ -7,14 +7,27 @@ public sealed class PredictionAnalysisViewModel
     public string? ResolvedFilePath { get; init; }
     public bool FileFound => ResolvedFilePath is not null;
 
-    /// <summary>False when the selected lab has DBEnabled=false � shows a "not available" banner.</summary>
+    /// <summary>False when the selected lab has DBEnabled=false � shows a "not available" banner.</summary>
     public bool PredictionAvailable { get; init; } = true;
 
     /// <summary>Error message to display when feature is disabled or unavailable.</summary>
     public string? ErrorMessage { get; init; }
 
-    /// <summary>Monday of the current week � the global filter cutoff date.</summary>
+    /// <summary>Monday of the current week � the global filter cutoff date.</summary>
     public DateOnly CurrentWeekStartDate { get; init; }
+
+    // ── Source run info (shown in the page header) ─────────────────────────
+    /// <summary>RunId of the run currently displayed (latest inserted run on DB path).</summary>
+    public string? RunId { get; init; }
+
+    /// <summary>Week folder the source file came from (e.g. "06.26.2026 - 07.03.2026").</summary>
+    public string? WeekFolder { get; init; }
+
+    /// <summary>When the run's rows were inserted into the database (DB path) or the file's last write time (file path).</summary>
+    public DateTime? DataInsertedAt { get; init; }
+
+    /// <summary>Source file name of the displayed run, when known.</summary>
+    public string? SourceFileName { get; init; }
 
     // Active filters
     public string? FilterPayerName { get; init; }
@@ -57,7 +70,7 @@ public sealed class PredictionAnalysisViewModel
     // ?? Prediction Analysis Summary metrics (3 sections) ?????????????????
     public PredictionSummaryMetrics SummaryMetrics { get; init; } = new();
 
-    // ?? Last 4 Weeks Forecasting � Median & Mode summaries ??????????????? 
+    // ?? Last 4 Weeks Forecasting � Median & Mode summaries ??????????????? 
     public WeeklyForecastSummary MedianWeeklySummary { get; init; } = new();
     public WeeklyForecastSummary ModeWeeklySummary { get; init; } = new();
 
@@ -83,13 +96,13 @@ public sealed record PredictionBucketRow(
 
 /// <summary>
 /// Holds the three metric sections from the Prediction Analysis Summary sheet:
-/// Section 1 � Metrics (buckets with formula descriptions),
-/// Section 2 � Ratios,
-/// Section 3 � Prediction Accuracy.
+/// Section 1 � Metrics (buckets with formula descriptions),
+/// Section 2 � Ratios,
+/// Section 3 � Prediction Accuracy.
 /// </summary>
 public sealed class PredictionSummaryMetrics
 {
-    // Section 2 � Ratios
+    // Section 2 � Ratios
     public decimal? PaymentRatioClaim      { get; init; }
     public decimal? PaymentRatioAllowed    { get; init; }
     public decimal? PaymentRatioInsurance  { get; init; }
@@ -110,7 +123,7 @@ public sealed class PredictionSummaryMetrics
     public decimal? AdjustedPctAllowed    { get; init; }
     public decimal? AdjustedPctInsurance  { get; init; }
 
-    // Section 3 � Prediction Accuracy
+    // Section 3 � Prediction Accuracy
     public decimal? PredVsActualRatioClaim     { get; init; }
     public decimal? PredVsActualAllowedAmount  { get; init; }
     public decimal? PredVsActualInsPayment     { get; init; }
@@ -244,7 +257,7 @@ public sealed record NoResponsePayerRow(
     decimal TotalPredictedAllowed,
     decimal TotalPredictedInsurance,
     IReadOnlyDictionary<string, AgeBucketAmount> ByBucket,
-    /// <summary>Age bucket with the highest claim count � drives Priority Level.</summary>
+    /// <summary>Age bucket with the highest claim count � drives Priority Level.</summary>
     string  PriorityBucket);
 
 /// <summary>Full No Response breakdown table.</summary>
@@ -265,7 +278,7 @@ public sealed class NoResponseBreakdown
 /// </summary>
 public sealed class WeeklyForecastSummary
 {
-    /// <summary>Ordered list of the 4 week ranges (Mon�Sun).</summary>
+    /// <summary>Ordered list of the 4 week ranges (Mon�Sun).</summary>
     public IReadOnlyList<WeekRange> Weeks { get; init; } = [];
 
     /// <summary>Per-payer rows with weekly breakdown.</summary>

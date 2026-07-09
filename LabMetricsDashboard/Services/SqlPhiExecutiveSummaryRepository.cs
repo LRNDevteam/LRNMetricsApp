@@ -306,7 +306,7 @@ public sealed class SqlPhiExecutiveSummaryRepository
                     rowDict[rowKey] = row;
                 }
                 row.ValuesByYearMonth[(billYear, billMonth)] = metricValue;
-                if (billYear != 0)
+                if (billYear != 0 && billMonth != 0)
                 {
                     periodSet.Add((billYear, billMonth));
                     yearSet.Add(billYear);
@@ -317,6 +317,14 @@ public sealed class SqlPhiExecutiveSummaryRepository
                         yearlyTotals.TryGetValue(billYear, out var currentTotal);
                         yearlyTotals[billYear] = currentTotal + metricValue;
                     }
+                }
+                else if (billYear != 0)
+                {
+                    // Per-year sentinel row (BillYear=Y, BillMonth=0): currently the
+                    // "Avg" rows' weighted year averages. Keep the value in
+                    // ValuesByYearMonth so the year-total column can read it, but do
+                    // NOT register it as a month column or fold it into yearlyTotals.
+                    yearSet.Add(billYear);
                 }
             }
 

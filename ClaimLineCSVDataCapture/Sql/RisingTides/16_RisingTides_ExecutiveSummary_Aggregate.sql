@@ -27,7 +27,7 @@
 --        If dbo.LIMSMaster does not exist, the LIMSMaster count is 0 and P = O
 --        (guarded by OBJECT_ID('dbo.LIMSMaster','U')).
 --   Q  Unbilled - Entered in AMD       → BilledUnbilled='Unbilled'
---   R  Paid - Client                   → ClaimStatus='Client Paid'
+--   R  Paid - Client                   → ClientPaidListData SpecimenID count (BeginDOS period)
 --   S  Fully Paid - Insurance Pay      → ClaimStatus='Fully Paid'
 --   T  Fully Adjusted                  → ClaimStatus='Complete W/O'
 --   U  Patient Responsibility          → ClaimStatus='Patient Responsibility'
@@ -53,22 +53,24 @@
 --   AG2  Fully Denied ($)              → SUM(InsuranceBalance)    WHERE Billed AND ClaimStatus='Fully Denied'
 --   AG3  Partially Denied ($)          → SUM(InsuranceBalance)    WHERE Billed AND ClaimStatus='Partially Denied'
 --
--- AVERAGE PAYMENT PER CLAIM (RT_ES_Avg) – fully populated from dbo.ClaimLevelData
---   Numerator (all 3 rows) = SUM(InsurancePayment) WHERE Billed AND ClaimStatus IN ('Fully Paid','Partially Paid')
---                           + SUM(PatientPayment)   WHERE Billed
---                           (i.e. Cash rows Z + AA + AB combined)
+-- AVERAGE PAYMENT PER CLAIM (RT_ES_Avg) – derived from the already-computed
+-- RT_ES_PMS (claim counts) and RT_ES_Cash (dollar amounts) rows, so the averages
+-- always reconcile exactly with the PMS / Cash figures shown on the dashboard.
+--   Numerator (all 3 rows) = RT_ES_Cash  Z + AA + AB
+--                           (Insurance Payment (fully paid) $ + Partially Paid $
+--                            + Patient Payment $)
 --   AH   Average Payment ($) - Total Pay/Billed Claims
---          = Numerator / COUNT(DISTINCT VisitNumber) WHERE Billed
---            (same population as PMS row O)
+--          = Numerator / RT_ES_PMS O
 --   AI1  Average Payment ($) - Total Pay/Paid Claims
---          = Numerator / COUNT(DISTINCT VisitNumber) WHERE Billed
---            AND ClaimStatus IN ('Fully Paid','Partially Paid','Patient Payment')
---            (same population as PMS rows S+V+X)
+--          = Numerator / RT_ES_PMS (S + V + X)
+--            S=Fully Paid-Ins Pay, V=Partially Paid, X=Patient Payment
 --   AJ   Average Payment ($) - Total Pay/Adjudicated Claims
---          = Numerator / COUNT(DISTINCT VisitNumber) WHERE Billed
---            AND ClaimStatus IN ('Fully Paid','Complete W/O','Patient Responsibility',
---                                 'Partially Paid','Patient Payment','Fully Denied','Partially Denied')
---            (same population as PMS rows S+T+U+V+X+W1+W3)
+--          = Numerator / RT_ES_PMS (S + T + U + V + X + W1 + W3)
+--            S=Fully Paid-Ins Pay, T=Fully Adjusted, U=Patient Responsibility,
+--            V=Partially Paid, X=Patient Payment, W1=Fully Denied, W3=Partially Denied
+--   Year (Y,0) and Grand (0,0) totals: denominators are the SUM of the MONTHLY claim counts (not
+--   the COUNT(DISTINCT) (0,0) sentinel), so they tie out to the dashboard's
+--   monthly-summed PMS/Cash Grand Total column and the client's Excel.
 --   ESMonthClaimCount stores the denominator used; ESMonthChargeAmount stores the
 --   resulting average $ value (0 when the denominator is 0).
 --
@@ -210,12 +212,16 @@ BEGIN
 		GROUP BY p.ESYear, p.ESMonth
 
 		-- R  Paid - Client
+		--    Count of distinct SpecimenID from ClientPaidListData where the
+		--    BeginDOS year/month matches the period ((0,0) = grand total).
 		UNION ALL
 		SELECT p.ESYear, p.ESMonth, 'R', 'Paid - Client',
-			   COUNT(DISTINCT b.VisitNumber)
+			   COUNT(DISTINCT LTRIM(RTRIM(c.SpecimenID)))
 		FROM #Periods p
-		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-						  AND b.ClaimStatus='Client Paid'
+		LEFT JOIN dbo.ClientPaidListData c
+		  ON NULLIF(LTRIM(RTRIM(c.SpecimenID)), '') IS NOT NULL
+		 AND (p.ESYear=0 OR (YEAR (TRY_CAST(c.BeginDOS AS DATE))=p.ESYear
+						 AND MONTH(TRY_CAST(c.BeginDOS AS DATE))=p.ESMonth))
 		GROUP BY p.ESYear, p.ESMonth
 
 		-- S  Fully Paid - Insurance Pay
@@ -443,40 +449,80 @@ BEGIN
 	-- ───────────────────────────────────────────────────────────────────────
 	TRUNCATE TABLE dbo.RT_ES_Avg;
 
-	;WITH AvgBase AS
+	-- Numerator + denominators are read back from the RT_ES_Cash / RT_ES_PMS rows
+	-- populated in sections 2 and 3 above, so the averages always tie out to the
+	-- dashboard. Grand total (0,0) denominators = SUM of the MONTHLY counts (the
+	-- (0,0) PMS sentinel is a COUNT(DISTINCT) over the whole period and would
+	-- understate the count, e.g. 2,886 instead of the monthly-summed 2,896).
+	;WITH PayM AS          -- monthly numerator ($): RT_ES_Cash Z + AA + AB
 	(
-		SELECT
-			p.ESYear, p.ESMonth,
-			ISNULL(SUM(CASE WHEN b.BilledUnbilled='Billed' AND b.ClaimStatus IN ('Fully Paid','Partially Paid')
-							THEN b.InsurancePayment ELSE 0 END), 0)
-			  + ISNULL(SUM(CASE WHEN b.BilledUnbilled='Billed' THEN b.PatientPayment ELSE 0 END), 0) AS TotalPay,
-			COUNT(DISTINCT CASE WHEN b.BilledUnbilled='Billed'
-								 THEN b.VisitNumber END) AS BilledClaims,
-			COUNT(DISTINCT CASE WHEN b.BilledUnbilled='Billed'
-								  AND b.ClaimStatus IN ('Fully Paid','Partially Paid','Patient Payment')
-								 THEN b.VisitNumber END) AS PaidClaims,
-			COUNT(DISTINCT CASE WHEN b.BilledUnbilled='Billed'
-								  AND b.ClaimStatus IN ('Fully Paid','Complete W/O','Patient Responsibility',
-														 'Partially Paid','Patient Payment','Fully Denied','Partially Denied')
-								 THEN b.VisitNumber END) AS AdjudicatedClaims
-		FROM #Periods p
-		LEFT JOIN #Base b ON (p.ESYear=0 OR (b.ESYear=p.ESYear AND b.ESMonth=p.ESMonth))
-		GROUP BY p.ESYear, p.ESMonth
+		SELECT ESYear, ESMonth, SUM(ESMonthChargeAmount) AS TotalPay
+		FROM dbo.RT_ES_Cash
+		WHERE RoleID IN ('Z','AA','AB') AND ESYear <> 0
+		GROUP BY ESYear, ESMonth
+	),
+	BilledM AS             -- AH denominator (monthly): RT_ES_PMS O
+	(
+		SELECT ESYear, ESMonth, SUM(ESMonthClaimCount) AS Cnt
+		FROM dbo.RT_ES_PMS
+		WHERE RoleID = 'O' AND ESYear <> 0
+		GROUP BY ESYear, ESMonth
+	),
+	PaidM AS               -- AI1 denominator (monthly): RT_ES_PMS S + V + X
+	(
+		SELECT ESYear, ESMonth, SUM(ESMonthClaimCount) AS Cnt
+		FROM dbo.RT_ES_PMS
+		WHERE RoleID IN ('S','V','X') AND ESYear <> 0
+		GROUP BY ESYear, ESMonth
+	),
+	AdjM AS                -- AJ denominator (monthly): RT_ES_PMS S+T+U+V+X+W1+W3
+	(
+		SELECT ESYear, ESMonth, SUM(ESMonthClaimCount) AS Cnt
+		FROM dbo.RT_ES_PMS
+		WHERE RoleID IN ('S','T','U','V','X','W1','W3') AND ESYear <> 0
+		GROUP BY ESYear, ESMonth
+	),
+	-- Each set = its monthly rows, PLUS a per-YEAR (ESYear=Y, ESMonth=0) subtotal
+	-- and a GRAND (0,0) subtotal, both = SUM of that scope's monthly values.
+	-- The (Y,0) rows let the dashboard show a proper WEIGHTED year average for the
+	-- "Avg" rows (year pay / year claims) instead of summing monthly averages.
+	Pay AS (
+		SELECT ESYear, ESMonth, TotalPay FROM PayM
+		UNION ALL SELECT ESYear, 0, SUM(TotalPay) FROM PayM GROUP BY ESYear
+		UNION ALL SELECT 0, 0, SUM(TotalPay) FROM PayM
+	),
+	Billed AS (
+		SELECT ESYear, ESMonth, Cnt FROM BilledM
+		UNION ALL SELECT ESYear, 0, SUM(Cnt) FROM BilledM GROUP BY ESYear
+		UNION ALL SELECT 0, 0, SUM(Cnt) FROM BilledM
+	),
+	Paid AS (
+		SELECT ESYear, ESMonth, Cnt FROM PaidM
+		UNION ALL SELECT ESYear, 0, SUM(Cnt) FROM PaidM GROUP BY ESYear
+		UNION ALL SELECT 0, 0, SUM(Cnt) FROM PaidM
+	),
+	Adjudicated AS (
+		SELECT ESYear, ESMonth, Cnt FROM AdjM
+		UNION ALL SELECT ESYear, 0, SUM(Cnt) FROM AdjM GROUP BY ESYear
+		UNION ALL SELECT 0, 0, SUM(Cnt) FROM AdjM
 	)
 	INSERT INTO dbo.RT_ES_Avg (RoleID, Description, ESYear, ESMonth, ESMonthClaimCount, ESMonthChargeAmount, RefreshedAt)
-	SELECT 'AH', 'Average Payment ($) - Total Pay/Billed Claims', ESYear, ESMonth, BilledClaims,
-		   CASE WHEN BilledClaims = 0 THEN 0 ELSE TotalPay / BilledClaims END, GETDATE()
-	FROM AvgBase
+	SELECT 'AH', 'Average Payment ($) - Total Pay/Billed Claims',
+		   p.ESYear, p.ESMonth, ISNULL(d.Cnt, 0),
+		   CASE WHEN ISNULL(d.Cnt, 0) = 0 THEN 0 ELSE ISNULL(p.TotalPay, 0) / d.Cnt END, GETDATE()
+	FROM Pay p LEFT JOIN Billed d ON d.ESYear = p.ESYear AND d.ESMonth = p.ESMonth
 
 	UNION ALL
-	SELECT 'AI1', 'Average Payment ($) - Total Pay/Paid Claims', ESYear, ESMonth, PaidClaims,
-		   CASE WHEN PaidClaims = 0 THEN 0 ELSE TotalPay / PaidClaims END, GETDATE()
-	FROM AvgBase
+	SELECT 'AI1', 'Average Payment ($) - Total Pay/Paid Claims',
+		   p.ESYear, p.ESMonth, ISNULL(d.Cnt, 0),
+		   CASE WHEN ISNULL(d.Cnt, 0) = 0 THEN 0 ELSE ISNULL(p.TotalPay, 0) / d.Cnt END, GETDATE()
+	FROM Pay p LEFT JOIN Paid d ON d.ESYear = p.ESYear AND d.ESMonth = p.ESMonth
 
 	UNION ALL
-	SELECT 'AJ', 'Average Payment ($) - Total Pay/Adjudicated Claims', ESYear, ESMonth, AdjudicatedClaims,
-		   CASE WHEN AdjudicatedClaims = 0 THEN 0 ELSE TotalPay / AdjudicatedClaims END, GETDATE()
-	FROM AvgBase;
+	SELECT 'AJ', 'Average Payment ($) - Total Pay/Adjudicated Claims',
+		   p.ESYear, p.ESMonth, ISNULL(d.Cnt, 0),
+		   CASE WHEN ISNULL(d.Cnt, 0) = 0 THEN 0 ELSE ISNULL(p.TotalPay, 0) / d.Cnt END, GETDATE()
+	FROM Pay p LEFT JOIN Adjudicated d ON d.ESYear = p.ESYear AND d.ESMonth = p.ESMonth;
 
 	DROP TABLE IF EXISTS #Base;
 	DROP TABLE IF EXISTS #Periods;

@@ -1,7 +1,7 @@
 namespace LabMetricsDashboard.Models;
 
 /// <summary>
-/// Lightweight tile shown on the Home page — no CSV data loaded, file paths only.
+/// Lightweight tile shown on the Home page ï¿½ no CSV data loaded, file paths only.
 /// </summary>
 public sealed class LabTileViewModel
 {
@@ -48,6 +48,12 @@ public sealed class LabTileViewModel
     /// <summary>RunId extracted from the Prediction Analysis file name.</summary>
     public string? PredictionRunId { get; init; }
 
+    /// <summary>Latest RunId in the lab database's PayerValidationReport (DB-enabled labs only).</summary>
+    public string? PredictionDbRunId { get; init; }
+
+    /// <summary>When the latest run was inserted into the lab database (local time).</summary>
+    public DateTime? PredictionDbInsertedAt { get; init; }
+
     /// <summary>RunId extracted from the Coding Master file name.</summary>
     public string? CodingRunId { get; init; }
 
@@ -88,8 +94,13 @@ public sealed class LabTileViewModel
                                  && !string.IsNullOrEmpty(LineRunId)
                                  && !string.Equals(ClaimRunId, LineRunId, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>True when Prediction file exists but its RunId differs from the source (Claim) RunId.</summary>
-    public bool IsPredictionPending => HasPredictionFile
+    /// <summary>
+    /// True when the Prediction file exists but its RunId differs from the source (Claim) RunId.
+    /// DB-enabled labs read prediction data live from SQL, so a stale file left in the
+    /// folder must NOT flag them as pending â€” the DB run is the source of truth there.
+    /// </summary>
+    public bool IsPredictionPending => !DBEnabled
+                                      && HasPredictionFile
                                       && !string.IsNullOrEmpty(SourceRunId)
                                       && !string.IsNullOrEmpty(PredictionRunId)
                                       && !string.Equals(SourceRunId, PredictionRunId, StringComparison.OrdinalIgnoreCase);

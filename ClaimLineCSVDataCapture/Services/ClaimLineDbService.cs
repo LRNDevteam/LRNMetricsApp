@@ -702,6 +702,82 @@ public sealed class ClaimLineDbService
         }
     }
 
+    /// <summary>
+    /// Executes <c>dbo.usp_RefreshBT_ExecutiveSummary_OnNewFile</c>, which only
+    /// rebuilds <c>BTWOSummary</c> and the Executive Summary when a NEW
+    /// TransactionDetail Adjustment file (per <c>BTTransactionDetailFileLogs</c>)
+    /// has not yet been refreshed. Used in the TransactionDetail-only path when
+    /// the RunId gate skips Claim/Line processing.
+    /// </summary>
+    /// <param name="fileName">
+    /// Optional file name to gate on. When null, the SP auto-detects the newest
+    /// unprocessed TransactionDetail Adjustment file.
+    /// </param>
+    /// <returns>null on success; the error message on failure.</returns>
+    public string? RefreshBTExecutiveSummaryOnNewFile(string? fileName = null)
+    {
+        try
+        {
+            using var conn = new SqlConnection(_connectionString);
+            conn.Open();
+            using var cmd = new SqlCommand("dbo.usp_RefreshBT_ExecutiveSummary_OnNewFile", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 1800
+            };
+            if (string.IsNullOrWhiteSpace(fileName))
+                cmd.Parameters.AddWithValue("@FileName", DBNull.Value);
+            else
+                cmd.Parameters.AddWithValue("@FileName", fileName);
+
+            cmd.ExecuteNonQuery();
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Clears <c>dbo.BTTransactionDetailData</c> so a newly loaded TransactionDetail
+    /// Adjustment file fully REPLACES prior rows (the file is a full snapshot, not a
+    /// delta). Uses TRUNCATE for speed and falls back to DELETE if the login lacks
+    /// ALTER/TRUNCATE rights. The file-dedup log (<c>BTTransactionDetailFileLogs</c>)
+    /// is intentionally left intact so already-loaded files are still skipped.
+    /// </summary>
+    /// <returns>null on success; the error message on failure.</returns>
+    public string? ClearBTTransactionDetailData()
+    {
+        try
+        {
+            using var conn = new SqlConnection(_connectionString);
+            conn.Open();
+            try
+            {
+                using var t = new SqlCommand("TRUNCATE TABLE dbo.BTTransactionDetailData", conn)
+                {
+                    CommandTimeout = 600
+                };
+                t.ExecuteNonQuery();
+            }
+            catch
+            {
+                // Fallback when the login lacks ALTER/TRUNCATE rights on the table.
+                using var d = new SqlCommand("DELETE FROM dbo.BTTransactionDetailData", conn)
+                {
+                    CommandTimeout = 1200
+                };
+                d.ExecuteNonQuery();
+            }
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return ex.Message;
+        }
+    }
+
     /// <summary>Refreshes the Certus Collection Summary aggregates.</summary>
     public List<(string SpName, long ElapsedMs, string? Error)> RefreshCertusCollectionReports()
         => RunProductionReportSPs(BuildCollectionSummarySpList("Cert"));

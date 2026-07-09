@@ -8,7 +8,7 @@ namespace LabMetricsDashboard.Services;
 /// Resolves the latest Claim Level and Line Level CSV files for each lab
 /// by walking all sub-folders under ProductionMasterCsvPath.
 ///
-/// Folder layout is flexible — works with:
+/// Folder layout is flexible ï¿½ works with:
 ///   {root}\{year}\{month}\{week}\file.csv
 ///   {root}\{month}\{week}\file.csv
 ///   {root}\{week}\file.csv
@@ -94,9 +94,12 @@ public sealed class LabCsvFileResolver
                 return null;
             }
 
+            // Source may arrive as .xlsx or .csv (same gap as the PredictionAnalysisApp).
             var match = Directory
-                .EnumerateFiles(rootPath, "*.xlsx", SearchOption.AllDirectories)
-                .Where(f => Path.GetFileName(f).Contains(PredictionKeyword, StringComparison.OrdinalIgnoreCase))
+                .EnumerateFiles(rootPath, "*.*", SearchOption.AllDirectories)
+                .Where(f => (f.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase)
+                          || f.EndsWith(".csv",  StringComparison.OrdinalIgnoreCase))
+                         && Path.GetFileName(f).Contains(PredictionKeyword, StringComparison.OrdinalIgnoreCase))
                 .Select(f => new FileInfo(f))
                 .MaxBy(fi => fi.LastWriteTimeUtc)
                 ?.FullName;
@@ -189,7 +192,7 @@ public sealed class LabCsvFileResolver
             return CsvPathPair.Empty;
         }
 
-        // Single directory scan — classify each file into Claim or Line bucket.
+        // Single directory scan ï¿½ classify each file into Claim or Line bucket.
         FileInfo? bestClaim = null;
         FileInfo? bestLine  = null;
 
