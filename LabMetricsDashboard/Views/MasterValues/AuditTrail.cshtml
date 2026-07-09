@@ -1,0 +1,103 @@
+@model LabMetricsDashboard.Models.MasterValuesPageViewModel
+@{
+    ViewData["Title"] = "Payer Master Audit Trail";
+}
+
+<style>
+    .mv-shell { display: flex; flex-direction: column; gap: 1rem; }
+    .mv-title h2 { margin: 0; font-size: 1.45rem; font-weight: 800; color: #162033; }
+    .mv-title small { color: #64748b; font-weight: 600; }
+    .mv-card { background: #fff; border: 1px solid #d9e2ef; border-radius: 8px; box-shadow: 0 6px 18px rgba(15, 23, 42, .06); }
+    .mv-filter { padding: 1rem; }
+    .mv-filter .form-label { margin-bottom: .25rem; font-size: .74rem; color: #475569; font-weight: 800; text-transform: uppercase; }
+    .mv-grid-wrap { position: relative; }
+    .mv-grid-scroll { overflow: auto; max-height: calc(100vh - 300px); min-height: 280px; }
+    .mv-table { min-width: 1150px; font-size: .8rem; }
+    .mv-table th, .mv-table td { border: 1px solid #d8e1ee; }
+    .mv-table thead th { position: sticky; top: 0; z-index: 2; background: #f8fafc; color: #0f172a; white-space: nowrap; font-size: .74rem; text-transform: uppercase; letter-spacing: .02em; }
+    .mv-table tbody td { white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+    .mv-primary { font-weight: 800; color: #0f172a; }
+    .mv-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: .15rem .5rem; font-size: .7rem; font-weight: 800; background: #eef2f7; color: #334155; white-space: nowrap; }
+    .mv-badge.pending { background: #FDF3E3; color: #B7791F; }
+    .mv-badge.on { background: #dcfce7; color: #166534; }
+    .mv-badge.off { background: #fee2e2; color: #991b1b; }
+    .mv-old { color: #B3261E; text-decoration: line-through; }
+    .mv-new { color: #1E8E5A; font-weight: 700; }
+    .mv-loader { display: none; position: absolute; inset: 0; z-index: 5; align-items: center; justify-content: center; background: rgba(248, 250, 252, .74); }
+    .mv-loader.active { display: flex; }
+    .mv-loader-box { background: #0f172a; color: white; border-radius: 8px; padding: .75rem 1rem; display: inline-flex; gap: .7rem; align-items: center; }
+    .mv-empty { padding: 3.5rem 1rem; text-align: center; color: #64748b; }
+    .mv-footer { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .75rem 1rem; border-top: 1px solid #e2e8f0; }
+    .mv-note { font-size: .76rem; color: #9AA5B1; }
+</style>
+
+<div class="mv-shell">
+    <div class="mv-title">
+        <h2>Payer Master Audit Trail</h2>
+        <small>Field-level before/after history for every add, edit, map, deactivate, approve, and reject action across both masters. View-only.</small>
+    </div>
+
+    <div class="mv-card mv-filter">
+        <form id="filterForm" class="row g-3 align-items-end">
+            <div class="col-lg-3 col-md-6"><label class="form-label">Master</label><select class="form-select" name="master"><option value="">All Masters</option><option value="Policy">Payer Policy Insurance Master</option><option value="Lab">Lab Insurance Master</option></select></div>
+            <div class="col-lg-2 col-md-6"><label class="form-label">Action</label><select class="form-select" name="actionType"><option value="">All Actions</option><option>Add</option><option>Edit</option><option>Map</option><option>Deactivate</option><option>Reject</option></select></div>
+            <div class="col-lg-4 col-md-6"><label class="form-label">Search</label><input class="form-control" name="search" placeholder="Payer, user, or field..." /></div>
+            <div class="col-lg-3 col-md-6 d-flex gap-2 justify-content-end">
+                <button class="btn btn-primary" type="submit"><i class="bi bi-search"></i> Search</button>
+                <button class="btn btn-outline-secondary" type="button" id="resetBtn"><i class="bi bi-arrow-counterclockwise"></i> Reset</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="mv-card mv-grid-wrap">
+        <div class="mv-loader" id="gridLoader"><div class="mv-loader-box"><span class="spinner-border spinner-border-sm"></span><span>Loading...</span></div></div>
+        <div class="mv-grid-scroll">
+            <table class="table table-sm table-hover table-bordered align-middle mv-table mb-0">
+                <thead><tr><th>Timestamp (UTC)</th><th>Master</th><th>Payer / Global ID</th><th>Field</th><th>Old Value</th><th>New Value</th><th>Action</th><th>Performed By</th><th>Approval</th></tr></thead>
+                <tbody id="rows"></tbody>
+            </table>
+        </div>
+        <div class="mv-footer"><small id="pageInfo" class="text-muted"></small><div class="btn-group"><button class="btn btn-outline-secondary btn-sm" id="prevBtn">Previous</button><button class="btn btn-outline-secondary btn-sm" id="nextBtn">Next</button></div></div>
+    </div>
+    <p class="mv-note mb-0">Each audit entry records the master, record identifier (Global Payer ID), field changed, old/new values, action type, performer, timestamp, approval status, approver, and rejection reason where applicable.</p>
+</div>
+
+@section Scripts {
+<script nonce='@Context.Items["CspNonce"]'>
+(function(){
+let page=1,pageSize=50,totalPages=1;
+const urls={data:'@Url.Action("AuditData","MasterValues")'};
+const loader=document.getElementById('gridLoader');
+function esc(v){return (v??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+function setBusy(on){loader.classList.toggle('active',on);}
+function masterLabel(m){return m==='Policy'?'Payer Policy':'Lab Insurance';}
+function approvalBadge(x){
+  const s=(x.approvalStatus||'').toLowerCase();
+  if(s==='pending')return '<span class="mv-badge pending">Pending</span>';
+  if(s==='approved')return `<span class="mv-badge on">Approved${x.approver?' by '+esc(x.approver):''}</span>`;
+  if(s==='rejected')return `<span class="mv-badge off" title="${esc(x.rejectionReason||'')}">Rejected${x.approver?' by '+esc(x.approver):''}</span>`;
+  return `<span class="mv-badge on">${esc(x.approvalStatus||'Applied directly')}</span>`;
+}
+function renderRows(items){
+  document.getElementById('rows').innerHTML=(items||[]).map(x=>`<tr><td>${new Date(x.performedOn).toISOString().replace('T',' ').substring(0,16)}</td><td>${masterLabel(x.master)}</td><td class="mv-primary" title="${esc(x.payerName)}">${esc(x.payerName)}${x.globalPayerID?' / '+esc(x.globalPayerID):''}</td><td>${esc(x.fieldName)}</td><td class="mv-old" title="${esc(x.oldValue)}">${esc(x.oldValue??'—')}</td><td class="mv-new" title="${esc(x.newValue)}">${esc(x.newValue??'—')}</td><td>${esc(x.actionType)}</td><td>${esc(x.performedBy)}</td><td>${approvalBadge(x)}</td></tr>`).join('')||'<tr><td colspan="9"><div class="mv-empty"><div class="fw-bold">No audit entries found</div><div>Adjust the filters above.</div></div></td></tr>';
+}
+async function load(){
+  setBusy(true);
+  try{
+    const fd=new FormData(document.getElementById('filterForm'));fd.set('page',page);fd.set('pageSize',pageSize);
+    const r=await fetch(urls.data+'?'+new URLSearchParams(fd));
+    const d=await r.json();
+    totalPages=d.totalPages||1;
+    document.getElementById('pageInfo').textContent=`Page ${d.page||1} of ${totalPages} - ${d.totalCount||0} entries`;
+    renderRows(d.items);
+  }catch(e){document.getElementById('rows').innerHTML='<tr><td colspan="9"><div class="mv-empty text-danger">Unable to load the audit trail.</div></td></tr>';}
+  finally{setBusy(false);}
+}
+document.getElementById('filterForm').onsubmit=e=>{e.preventDefault();page=1;load();};
+document.getElementById('resetBtn').onclick=()=>{document.getElementById('filterForm').reset();page=1;load();};
+document.getElementById('prevBtn').onclick=()=>{if(page>1){page--;load();}};
+document.getElementById('nextBtn').onclick=()=>{if(page<totalPages){page++;load();}};
+load();
+})();
+</script>
+}

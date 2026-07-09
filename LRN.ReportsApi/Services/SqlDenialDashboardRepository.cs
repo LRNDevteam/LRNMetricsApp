@@ -1,12 +1,11 @@
 using System.Data;
-using LabMetricsDashboard.Models;
-using LabMetricsDashboard.ViewModels;
+using LRN.ReportsApi.Models;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Caching.Memory;
 
-namespace LabMetricsDashboard.Services;
+namespace LRN.ReportsApi.Services;
 
-public class SqlDenialRecordRepository : IDenialRecordRepository
+public class SqlDenialDashboardRepository : IDenialDashboardRepository
 {
 	private static readonly HashSet<int> BilledAmountInsuranceBalanceLabIds = new([18, 19, 20]);
 	private static readonly TimeSpan LabsCacheDuration = TimeSpan.FromMinutes(15);
@@ -19,7 +18,7 @@ public class SqlDenialRecordRepository : IDenialRecordRepository
 	private readonly IMemoryCache _cache;
 	private readonly string _masterConnectionString;
 
-	public SqlDenialRecordRepository(IConfiguration configuration, IMemoryCache cache)
+	public SqlDenialDashboardRepository(IConfiguration configuration, IMemoryCache cache)
 	{
 		_configuration = configuration;
 		_cache = cache;

@@ -1,0 +1,82 @@
+@model LabMetricsDashboard.Models.MasterValuesPageViewModel
+@{
+    ViewData["Title"] = "Payer Master Notifications";
+}
+
+<style>
+    .mv-shell { display: flex; flex-direction: column; gap: 1rem; max-width: 900px; }
+    .mv-title h2 { margin: 0; font-size: 1.45rem; font-weight: 800; color: #162033; }
+    .mv-title small { color: #64748b; font-weight: 600; }
+    .mv-card { background: #fff; border: 1px solid #d9e2ef; border-radius: 8px; box-shadow: 0 6px 18px rgba(15, 23, 42, .06); }
+    .notif-item { display: flex; gap: 12px; padding: 14px 16px; border-bottom: 1px solid #EEF1F4; }
+    .notif-item:last-child { border-bottom: none; }
+    .notif-icon { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; color: #fff; }
+    .notif-title { font-weight: 700; font-size: .86rem; color: #162033; }
+    .notif-msg { font-size: .78rem; color: #64748b; margin-top: 2px; }
+    .notif-meta { font-size: .72rem; color: #9AA5B1; margin-top: 4px; }
+    .chan-tag { font-size: .66rem; background: #F1F2F4; color: #6B7280; padding: 1px 7px; border-radius: 8px; margin-right: 4px; }
+    .mv-empty { padding: 3.5rem 1rem; text-align: center; color: #64748b; }
+</style>
+
+<div class="mv-shell">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <div class="mv-title">
+            <h2>Payer Master Notifications</h2>
+            <small>In-app + email alerts for your roles (@Model.RoleLabel) across both masters.</small>
+        </div>
+        <button type="button" class="btn btn-outline-primary btn-sm" id="refreshBtn"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+    </div>
+
+    <div class="mv-card">
+        <div id="notifList"><div class="mv-empty"><span class="spinner-border spinner-border-sm"></span> Loading notifications...</div></div>
+    </div>
+</div>
+
+@section Scripts {
+<script nonce='@Context.Items["CspNonce"]'>
+(function(){
+const url='@Url.Action("NotificationsData","MasterValues")';
+function esc(v){return (v??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+const styles={
+  NewPayer:{bg:'#2E5C8A',icon:'＋'},
+  NewUnmappedPayer:{bg:'#B7791F',icon:'🔍'},
+  PayerUpdated:{bg:'#2E5C8A',icon:'ℹ'},
+  PayerDeactivated:{bg:'#6B7280',icon:'⏻'},
+  ApprovalPending:{bg:'#B7791F',icon:'⏳'},
+  ApprovalOutcome:{bg:'#1E8E5A',icon:'✓'},
+  SlaEscalation:{bg:'#B3261E',icon:'⚠'}
+};
+function timeAgo(d){
+  const mins=Math.floor((Date.now()-new Date(d))/60000);
+  if(mins<1)return 'Just now';
+  if(mins<60)return mins+' minute(s) ago';
+  const hrs=Math.floor(mins/60);
+  if(hrs<24)return hrs+' hour(s) ago';
+  return Math.floor(hrs/24)+' day(s) ago';
+}
+async function load(){
+  const list=document.getElementById('notifList');
+  try{
+    const r=await fetch(url+'?take=50');
+    const items=await r.json();
+    if(!items.length){list.innerHTML='<div class="mv-empty"><div class="fw-bold">No notifications</div><div>You will be alerted here when payer records change or approvals need attention.</div></div>';return;}
+    list.innerHTML=items.map(x=>{
+      const s=styles[x.triggerType]||{bg:'#2E5C8A',icon:'ℹ'};
+      const outcome=x.triggerType==='ApprovalOutcome'&&/rejected/i.test(x.title)?{bg:'#B3261E',icon:'✕'}:s;
+      return `<div class="notif-item">
+        <div class="notif-icon" style="background:${outcome.bg};">${outcome.icon}</div>
+        <div>
+          <div class="notif-title">${esc(x.title)}</div>
+          ${x.message?`<div class="notif-msg">${esc(x.message)}</div>`:''}
+          <div class="notif-meta">${timeAgo(x.createdOn)} • ${x.master==='Policy'?'Payer Policy Insurance Master':'Lab Insurance Master'}${x.recipientRole?' • sent to '+esc(x.recipientRole):''}</div>
+          <div class="mt-1"><span class="chan-tag">In-app</span><span class="chan-tag">Email</span></div>
+        </div>
+      </div>`;
+    }).join('');
+  }catch(e){list.innerHTML='<div class="mv-empty text-danger">Unable to load notifications.</div>';}
+}
+document.getElementById('refreshBtn').onclick=load;
+load();
+})();
+</script>
+}

@@ -122,20 +122,33 @@
         const root = document.getElementById('@tableId');
         if (!root) return;
 
+        const thead = root.querySelector('.denial-pivot-freeze')?.tHead;
+
+        // Stack each sticky header row at its real layout position. offsetTop is an integer and is
+        // unaffected by scroll or by the sticky shift itself, so the bands stay flush with no
+        // sub-pixel seams (summing fractional row heights used to drift and shimmer while scrolling).
         const updateStickyHeaderOffsets = () => {
-            const rows = root.querySelectorAll('thead tr');
-            let top = 0;
+            if (!thead || !thead.rows.length) return;
+            const rows = Array.from(thead.rows);
+            const base = rows[0].offsetTop;
+            let headerBottom = 0;
             rows.forEach(row => {
-                row.querySelectorAll('th').forEach(cell => {
-                    cell.style.setProperty('--pivot-sticky-top', `${top}px`);
+                const offset = row.offsetTop - base;
+                Array.from(row.cells).forEach(cell => {
+                    cell.style.setProperty('--pivot-sticky-top', `${offset}px`);
                 });
-                top += row.getBoundingClientRect().height;
+                headerBottom = Math.max(headerBottom, offset + row.offsetHeight);
             });
-            root.style.setProperty('--pivot-header-height', `${top}px`);
+            root.style.setProperty('--pivot-header-height', `${headerBottom}px`);
         };
 
         requestAnimationFrame(updateStickyHeaderOffsets);
         window.addEventListener('resize', updateStickyHeaderOffsets, { passive: true });
+        window.addEventListener('load', updateStickyHeaderOffsets);
+        // Recompute once header row heights settle (web-font swap, late reflow).
+        if (window.ResizeObserver && thead) {
+            new ResizeObserver(() => updateStickyHeaderOffsets()).observe(thead);
+        }
 
         const toggleGroup = (groupKey, expanded) => {
             const childRows = root.querySelectorAll(`.pivot-child-row[data-parent-group="${groupKey}"]`);

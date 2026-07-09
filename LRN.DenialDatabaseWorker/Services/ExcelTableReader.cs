@@ -23,8 +23,20 @@ namespace DenialDatabaseProcessorWorker.Services
 			string? sheetName = null,
 			bool isPayerPolicy = false)
 		{
-			var rows = new List<Dictionary<string, string>>();
+			var ext = Path.GetExtension(filePath).ToLowerInvariant();
 
+			var table = ext == ".csv"
+				? LoadCsvAsTable(filePath)
+				: LoadExcelAsTable(filePath, sheetName);
+
+			if (table == null || table.Rows.Count == 0)
+				return new List<Dictionary<string, string>>();
+
+			return ExtractRows(table, isPayerPolicy);
+		}
+
+		private static DataTable? LoadExcelAsTable(string filePath, string? sheetName)
+		{
 			System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
 
 			using var stream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
@@ -39,23 +51,56 @@ namespace DenialDatabaseProcessorWorker.Services
 			});
 
 			if (result == null || result.Tables.Count == 0)
-				return rows;
-
-			DataTable table;
+				return null;
 
 			if (!string.IsNullOrWhiteSpace(sheetName))
 			{
-				table = result.Tables.Cast<DataTable>()
+				return result.Tables.Cast<DataTable>()
 					.FirstOrDefault(t => t.TableName.Equals(sheetName, StringComparison.OrdinalIgnoreCase))
 					?? throw new InvalidOperationException($"Sheet '{sheetName}' not found.");
 			}
-			else
+
+			return result.Tables[0];
+		}
+
+		private static DataTable LoadCsvAsTable(string filePath)
+		{
+			using var parser = new Microsoft.VisualBasic.FileIO.TextFieldParser(filePath)
 			{
-				table = result.Tables[0];
+				TextFieldType = Microsoft.VisualBasic.FileIO.FieldType.Delimited,
+				HasFieldsEnclosedInQuotes = true,
+				TrimWhiteSpace = false
+			};
+			parser.SetDelimiters(",");
+
+			var rawRows = new List<string[]>();
+			int maxCols = 0;
+
+			while (!parser.EndOfData)
+			{
+				var fields = parser.ReadFields() ?? Array.Empty<string>();
+				rawRows.Add(fields);
+				maxCols = Math.Max(maxCols, fields.Length);
 			}
 
-			if (table.Rows.Count == 0)
-				return rows;
+			var table = new DataTable();
+			for (int i = 0; i < maxCols; i++)
+				table.Columns.Add($"Column{i}", typeof(string));
+
+			foreach (var fields in rawRows)
+			{
+				var dr = table.NewRow();
+				for (int c = 0; c < fields.Length; c++)
+					dr[c] = fields[c];
+				table.Rows.Add(dr);
+			}
+
+			return table;
+		}
+
+		private List<Dictionary<string, string>> ExtractRows(DataTable table, bool isPayerPolicy)
+		{
+			var rows = new List<Dictionary<string, string>>();
 
 			int headerRowIndex = isPayerPolicy
 				? FindPayerPolicyHeaderRow(table)

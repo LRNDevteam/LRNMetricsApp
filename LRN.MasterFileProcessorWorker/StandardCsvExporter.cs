@@ -176,6 +176,11 @@ public static class StandardCsvExporter
 			finalOutputHeaders.Add("LRN Panel Type");
 		}
 
+		if (augmentation?.IsLineLevel == true)
+		{
+			finalOutputHeaders.Add("ClaimUID");
+		}
+
 		finalOutputHeaders.AddRange(extraSourceColumnIndexes.Select(i => header[i] ?? string.Empty));
 
 		using var sw = new StreamWriter(outputCsvPath, false, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
@@ -398,6 +403,11 @@ public static class StandardCsvExporter
 			if (augmentation?.IsNorthWest == true)
 			{
 				outFields.Add(Escape(ResolvePanelType(row, headerExact, headerNorm, augmentation)));
+			}
+
+			if (augmentation?.IsLineLevel == true)
+			{
+				outFields.Add(Escape(BuildClaimUid(extracted, dos)));
 			}
 
 			foreach (var extraIndex in extraSourceColumnIndexes)
@@ -1326,6 +1336,20 @@ public static class StandardCsvExporter
 	}
 
 
+	private static string BuildClaimUid(Dictionary<string, string> extracted, DateTime? dateOfService)
+	{
+		var claimId = (extracted.TryGetValue("ClaimID", out var ci) ? ci : "").Trim();
+		var accession = (extracted.TryGetValue("AccessionNumber", out var an) ? an : "").Trim();
+		var cpt = (extracted.TryGetValue("CPTCode", out var cc) ? cc : "").Trim();
+		var units = (extracted.TryGetValue("Units", out var un) ? un : "").Trim();
+		var icd = (extracted.TryGetValue("ICDCode", out var ic) ? ic : "").Trim();
+		var dos = dateOfService.HasValue
+			? dateOfService.Value.ToString("MMddyyyy", CultureInfo.InvariantCulture)
+			: "";
+
+		return string.Join("_", claimId, accession, cpt, units, icd, dos);
+	}
+
 	private static string GetFirstNonEmpty(Dictionary<string, string> extracted, params string[] keys)
 	{
 		foreach (var k in keys)
@@ -1969,6 +1993,7 @@ public static class StandardCsvExporter
 		{
 			IsAugustus = isAugustus,
 			IsNorthWest = isNorthWest,
+			IsLineLevel = isLineLevel,
 			IncludeEncounterPlusPaymentPostedDate = isAugustus && isLineLevel
 		};
 
@@ -2160,6 +2185,7 @@ public sealed class ExportAugmentationContext
 {
 	public bool IsAugustus { get; set; }
 	public bool IsNorthWest { get; set; }
+	public bool IsLineLevel { get; set; }
 
 	public bool IncludeEncounterPlusPaymentPostedDate { get; set; }
 

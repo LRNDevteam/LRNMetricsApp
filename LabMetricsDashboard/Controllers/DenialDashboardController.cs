@@ -4,6 +4,7 @@ using CsvHelper;
 using CsvHelper.Configuration;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
+using LabMetricsDashboard.Services.DenialDashboard;
 using LabMetricsDashboard.ViewModels;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
@@ -22,12 +23,12 @@ public class DenialDashboardController : Controller
 		"Due This Month"
 	];
 
-	private readonly IDenialRecordRepository _repository;
+	private readonly IDenialDashboardApiClient _dashboardApi;
 	private readonly IUserManagementRepository _userRepository;
 
-	public DenialDashboardController(IDenialRecordRepository repository, IUserManagementRepository userRepository)
+	public DenialDashboardController(IDenialDashboardApiClient dashboardApi, IUserManagementRepository userRepository)
 	{
-		_repository = repository;
+		_dashboardApi = dashboardApi;
 		_userRepository = userRepository;
 	}
 
@@ -39,7 +40,7 @@ public class DenialDashboardController : Controller
 	{
 		filters ??= new DenialDashboardFilters();
 
-		var labs = (await _repository.GetLabsAsync(cancellationToken))
+		var labs = (await _dashboardApi.GetLabsAsync(cancellationToken))
 			.OrderBy(x => x.LabName)
 			.ThenBy(x => x.LabId)
 			.ToList();
@@ -58,7 +59,7 @@ public class DenialDashboardController : Controller
 		var selectedLabId = currentLab.LabId;
 		filters.LabId = selectedLabId;
 		var normalizedFilters = Normalize(filters, selectedLabId);
-		var currentRunId = await _repository.GetCurrentRunIdAsync(selectedLabId, cancellationToken) ?? string.Empty;
+		var currentRunId = await _dashboardApi.GetCurrentRunIdAsync(selectedLabId, cancellationToken) ?? string.Empty;
 
 		var isArManager = HasAnyRole("AR Manager", "ARManager");
 		var isArReviewer = HasAnyRole("AR Reviewer", "ARReviewer", "AR Analyser", "ARAnalyser", "AR Analyzer", "ARAnalyzer");
@@ -72,7 +73,7 @@ public class DenialDashboardController : Controller
 			normalizedFilters.ActiveTab = "denial-insight";
 		}
 
-		var allRecords = (await _repository.GetByLabAsync(selectedLabId, cancellationToken))
+		var allRecords = (await _dashboardApi.GetByLabAsync(selectedLabId, cancellationToken))
 			.OrderBy(x => x.DueDate)
 			.ThenBy(x => x.TaskId)
 			.ToList();
@@ -95,7 +96,7 @@ public class DenialDashboardController : Controller
 		var recordsPage = Math.Clamp(normalizedFilters.Page <= 0 ? 1 : normalizedFilters.Page, 1, recordsTotalPages);
 		var pagedRecords = filteredRecords.Skip((recordsPage - 1) * recordsPageSize).Take(recordsPageSize).ToList();
 
-		var insights = BuildDerivedInsights(filteredRecords);
+		var insights = (await _dashboardApi.GetInsightTableByLabAsync(selectedLabId, cancellationToken)).ToList();
 		var insightPageSize = Math.Clamp(normalizedFilters.InsightPageSize <= 0 ? 25 : normalizedFilters.InsightPageSize, 10, 100);
 		var insightCount = insights.Count;
 		var insightTotalPages = Math.Max(1, (int)Math.Ceiling(insightCount / (double)insightPageSize));
@@ -103,12 +104,12 @@ public class DenialDashboardController : Controller
 		var pagedInsights = insights.Skip((insightPage - 1) * insightPageSize).Take(insightPageSize).ToList();
 
 		var lineItemPageSize = Math.Clamp(normalizedFilters.LineItemPageSize <= 0 ? 100 : normalizedFilters.LineItemPageSize, 25, 250);
-		var lineItemCount = await _repository.GetLineItemCountByLabAsync(selectedLabId, normalizedFilters, cancellationToken);
+		var lineItemCount = await _dashboardApi.GetLineItemCountByLabAsync(selectedLabId, normalizedFilters, cancellationToken);
 		var lineItemTotalPages = Math.Max(1, (int)Math.Ceiling(lineItemCount / (double)lineItemPageSize));
 		var lineItemPage = Math.Clamp(Math.Max(1, normalizedFilters.LineItemPage <= 0 ? 1 : normalizedFilters.LineItemPage), 1, lineItemTotalPages);
-		var pagedLineItems = (await _repository.GetLineItemsByLabAsync(selectedLabId, lineItemPage, lineItemPageSize, normalizedFilters, cancellationToken)).ToList();
+		var pagedLineItems = (await _dashboardApi.GetLineItemsByLabAsync(selectedLabId, lineItemPage, lineItemPageSize, normalizedFilters, cancellationToken)).ToList();
 
-		var breakdownSource = (await _repository.GetBreakdownSourceByLabAsync(selectedLabId, normalizedFilters, cancellationToken)).ToList();
+		var breakdownSource = (await _dashboardApi.GetBreakdownSourceByLabAsync(selectedLabId, normalizedFilters, cancellationToken)).ToList();
 		var weeklyBreakdowns = BuildTrendBreakdowns(breakdownSource, monthly: false);
 		var monthlyBreakdowns = BuildTrendBreakdowns(breakdownSource, monthly: true);
 		var weeklyPivot = BuildBreakdownPivot(breakdownSource, monthly: false);
@@ -179,10 +180,10 @@ public class DenialDashboardController : Controller
 	{
 		if (labId <= 0) return BadRequest("Lab is required.");
 
-		var labs = await _repository.GetLabsAsync(cancellationToken);
+		var labs = await _dashboardApi.GetLabsAsync(cancellationToken);
 		if (labs.All(x => x.LabId != labId)) return NotFound();
 
-		var payload = await _repository.GetFilterAutocompleteOptionsAsync(labId, cancellationToken);
+		var payload = await _dashboardApi.GetFilterAutocompleteOptionsAsync(labId, cancellationToken);
 		return Json(payload);
 	}
 
@@ -194,7 +195,7 @@ public class DenialDashboardController : Controller
 	{
 		filters ??= new DenialDashboardFilters();
 
-		var labs = (await _repository.GetLabsAsync(cancellationToken))
+		var labs = (await _dashboardApi.GetLabsAsync(cancellationToken))
 			.OrderBy(x => x.LabName)
 			.ThenBy(x => x.LabId)
 			.ToList();
@@ -209,37 +210,18 @@ public class DenialDashboardController : Controller
 		filters.LabId = selectedLab.LabId;
 		var normalizedFilters = Normalize(filters, selectedLab.LabId);
 
-		if (HasNoAdditionalFilters(normalizedFilters))
-		{
-			var filePath = await _repository.GetLatestExportFilePathForLabAsync(selectedLab.LabId, cancellationToken);
-			if (string.IsNullOrWhiteSpace(filePath) || !System.IO.File.Exists(filePath))
-			{
-				TempData["DenialDashboardError"] = "No exported workbook was found for the selected lab.";
-				return RedirectToAction(nameof(Index), BuildIndexRouteValues(normalizedFilters, selectedLab.LabId, selectedLab.LabName));
-			}
-
-			var fileName = Path.GetFileName(filePath);
-			var extension = Path.GetExtension(filePath).ToLowerInvariant();
-			var contentType = extension switch
-			{
-				".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-				".xls" => "application/vnd.ms-excel",
-				".csv" => "text/csv",
-				_ => "application/octet-stream"
-			};
-
-			return PhysicalFile(filePath, contentType, fileName);
-		}
-
-		var filteredRecords = ApplyFilters(await _repository.GetByLabAsync(selectedLab.LabId, cancellationToken), normalizedFilters)
+		// The workbook is always rebuilt from data fetched through the API. The previous
+		// "serve the latest pre-built .xlsx off the report server's disk" shortcut was removed
+		// when the Denial Dashboard data access moved into LRN.ReportsApi.
+		var filteredRecords = ApplyFilters(await _dashboardApi.GetByLabAsync(selectedLab.LabId, cancellationToken), normalizedFilters)
 			.OrderBy(x => x.DueDate)
 			.ThenBy(x => x.TaskId)
 			.ToList();
-		var lineItems = (await _repository.GetLineItemsForExportByLabAsync(selectedLab.LabId, normalizedFilters, cancellationToken)).ToList();
-		var breakdownSource = (await _repository.GetBreakdownSourceByLabAsync(selectedLab.LabId, normalizedFilters, cancellationToken)).ToList();
+		var lineItems = (await _dashboardApi.GetLineItemsForExportByLabAsync(selectedLab.LabId, normalizedFilters, cancellationToken)).ToList();
+		var breakdownSource = (await _dashboardApi.GetBreakdownSourceByLabAsync(selectedLab.LabId, normalizedFilters, cancellationToken)).ToList();
 		var weeklyPivot = BuildBreakdownPivot(breakdownSource, monthly: false);
 		var monthlyPivot = BuildBreakdownPivot(breakdownSource, monthly: true);
-		var currentRunId = await _repository.GetCurrentRunIdAsync(selectedLab.LabId, cancellationToken) ?? string.Empty;
+		var currentRunId = await _dashboardApi.GetCurrentRunIdAsync(selectedLab.LabId, cancellationToken) ?? string.Empty;
 
 		using var workbook = DenialDashboardExcelExportBuilder.CreateWorkbook(lineItems, filteredRecords, weeklyPivot, monthlyPivot);
 
@@ -297,7 +279,7 @@ public class DenialDashboardController : Controller
 
 			selectedRows++;
 			assignedUsers.Add(reviewerUserName);
-			totalUpdated += await _repository.AssignReviewerByInsightAsync(labId, denialCode, payerName, reviewerUserName, runId, cancellationToken);
+			totalUpdated += await _dashboardApi.AssignReviewerByInsightAsync(labId, denialCode, payerName, reviewerUserName, runId, cancellationToken);
 		}
 
 		if (selectedRows == 0)
@@ -338,7 +320,7 @@ public class DenialDashboardController : Controller
 		}
 
 		var reviewerUserName = User.Identity?.Name?.Trim() ?? string.Empty;
-		var updated = await _repository.UpdateReviewerTaskAsync(labId, taskId, status, reviewerComments ?? string.Empty, reviewerUserName, runId, cancellationToken);
+		var updated = await _dashboardApi.UpdateReviewerTaskAsync(labId, taskId, status, reviewerComments ?? string.Empty, reviewerUserName, runId, cancellationToken);
 		TempData[updated > 0 ? "DenialDashboardSuccess" : "DenialDashboardError"] =
 			updated > 0 ? "Task updated successfully." : "Task update failed. Please confirm the task is assigned to you.";
 
@@ -379,7 +361,7 @@ public class DenialDashboardController : Controller
 			var status = i < statuses.Length ? statuses[i] : string.Empty;
 			var comments = i < reviewerComments.Length ? reviewerComments[i] : string.Empty;
 			submitted++;
-			updated += await _repository.UpdateReviewerTaskAsync(labId, taskId, status, comments ?? string.Empty, reviewerUserName, runId, cancellationToken);
+			updated += await _dashboardApi.UpdateReviewerTaskAsync(labId, taskId, status, comments ?? string.Empty, reviewerUserName, runId, cancellationToken);
 		}
 
 		TempData[updated > 0 ? "DenialDashboardSuccess" : "DenialDashboardError"] =
@@ -397,7 +379,7 @@ public class DenialDashboardController : Controller
 		CancellationToken cancellationToken)
 	{
 		filters ??= new DenialDashboardFilters();
-		var labs = (await _repository.GetLabsAsync(cancellationToken)).OrderBy(x => x.LabName).ThenBy(x => x.LabId).ToList();
+		var labs = (await _dashboardApi.GetLabsAsync(cancellationToken)).OrderBy(x => x.LabName).ThenBy(x => x.LabId).ToList();
 		if (labs.Count == 0)
 		{
 			TempData["DenialDashboardError"] = "No labs were found for task-board export.";
@@ -409,7 +391,7 @@ public class DenialDashboardController : Controller
 		filters.LabId = selectedLabId;
 		var normalizedFilters = Normalize(filters, selectedLabId);
 
-		var records = ApplyFilters(await _repository.GetByLabAsync(selectedLabId, cancellationToken), normalizedFilters)
+		var records = ApplyFilters(await _dashboardApi.GetByLabAsync(selectedLabId, cancellationToken), normalizedFilters)
 			.OrderBy(x => x.DueDate)
 			.ThenBy(x => x.TaskId)
 			.ToList();
@@ -514,7 +496,7 @@ public class DenialDashboardController : Controller
 			return RedirectToAction(nameof(Index), BuildIndexRouteValues(filters, labId, lab));
 		}
 
-		var result = await _repository.UpdateTaskBoardAsync(labId.Value, updates, cancellationToken);
+		var result = await _dashboardApi.UpdateTaskBoardAsync(labId.Value, updates, cancellationToken);
 		var message = $"Task-board upload completed. Updated {result.UpdatedRows} row(s)";
 		if (result.SkippedRows > 0) message += $", skipped {result.SkippedRows} row(s)";
 		if (result.Errors.Count > 0)
@@ -687,6 +669,8 @@ public class DenialDashboardController : Controller
 	{
 		var activeTab = string.IsNullOrWhiteSpace(filters.ActiveTab) ? "dashboard" : filters.ActiveTab.Trim();
 		if (activeTab.Equals("claim-view", StringComparison.OrdinalIgnoreCase)) activeTab = "line-item";
+		// The Denial Input tab is hidden; its pane no longer renders, so send old links to the dashboard.
+		if (activeTab.Equals("denial-input", StringComparison.OrdinalIgnoreCase)) activeTab = "dashboard";
 
 		return new DenialDashboardFilters
 		{
@@ -769,6 +753,16 @@ public class DenialDashboardController : Controller
 
 	private static bool EqualsIgnoreCase(string? left, string right) => string.Equals(left?.Trim(), right?.Trim(), StringComparison.OrdinalIgnoreCase);
 
+	/// <summary>
+	/// Statuses that take a task out of the open queue. Anything else - including the loader's
+	/// default "New" and blank - counts as open, so the dashboard tiles never all read zero.
+	/// </summary>
+	private static readonly string[] NonOpenStatuses = ["In Progress", "On Hold", "Escalated", "Completed", "Closed"];
+
+	private static bool IsOpenStatus(string? status) => !NonOpenStatuses.Any(x => EqualsIgnoreCase(status, x));
+
+	private static bool IsCompletedStatus(string? status) => EqualsIgnoreCase(status, "Completed") || EqualsIgnoreCase(status, "Closed");
+
 	private static bool IsInDeadlineBucket(DenialRecord record, string bucket)
 	{
 		if (record.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase)) return false;
@@ -789,9 +783,9 @@ public class DenialDashboardController : Controller
 		return new DashboardSummary
 		{
 			TotalTasks = records.Count,
-			OpenTasks = records.Count(x => EqualsIgnoreCase(x.Status, "Open")),
+			OpenTasks = records.Count(x => IsOpenStatus(x.Status)),
 			InProgressTasks = records.Count(x => EqualsIgnoreCase(x.Status, "In Progress")),
-			CompletedTasks = records.Count(x => EqualsIgnoreCase(x.Status, "Completed")),
+			CompletedTasks = records.Count(x => IsCompletedStatus(x.Status)),
 			OverdueTasks = records.Count(x => !x.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase) && x.DueDate.Date < today),
 			DueInThreeDays = records.Count(x => !x.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase) && x.DueDate.Date >= today && x.DueDate.Date <= today.AddDays(3)),
 			HighPriorityTasks = records.Count(x => EqualsIgnoreCase(x.Priority, "High")),
@@ -809,8 +803,8 @@ public class DenialDashboardController : Controller
 				Label = string.IsNullOrWhiteSpace(group.Key) ? "(Blank)" : group.Key,
 				Count = group.Count(),
 				Percentage = total == 0 ? 0 : decimal.Round((decimal)group.Count() / total * 100m, 1),
-				OpenCount = group.Count(x => EqualsIgnoreCase(x.Status, "Open")),
-				CompletedCount = group.Count(x => EqualsIgnoreCase(x.Status, "Completed") || EqualsIgnoreCase(x.Status, "Closed")),
+				OpenCount = group.Count(x => IsOpenStatus(x.Status)),
+				CompletedCount = group.Count(x => IsCompletedStatus(x.Status)),
 				OverdueCount = group.Count(x => !x.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase) && x.DueDate.Date < DateTime.Today),
 				HighPriorityCount = group.Count(x => EqualsIgnoreCase(x.Priority, "High")),
 				InsuranceBalanceSum = decimal.Round(group.Sum(x => x.InsuranceBalance), 2),
@@ -829,8 +823,8 @@ public class DenialDashboardController : Controller
 			Label = bucket,
 			Count = records.Count(x => IsInDeadlineBucket(x, bucket)),
 			Percentage = records.Count == 0 ? 0 : decimal.Round((decimal)records.Count(x => IsInDeadlineBucket(x, bucket)) / records.Count * 100m, 1),
-			OpenCount = records.Count(x => IsInDeadlineBucket(x, bucket) && EqualsIgnoreCase(x.Status, "Open")),
-			CompletedCount = records.Count(x => IsInDeadlineBucket(x, bucket) && EqualsIgnoreCase(x.Status, "Completed")),
+			OpenCount = records.Count(x => IsInDeadlineBucket(x, bucket) && IsOpenStatus(x.Status)),
+			CompletedCount = records.Count(x => IsInDeadlineBucket(x, bucket) && IsCompletedStatus(x.Status)),
 			OverdueCount = records.Count(x => IsInDeadlineBucket(x, bucket)),
 			HighPriorityCount = records.Count(x => IsInDeadlineBucket(x, bucket) && EqualsIgnoreCase(x.Priority, "High")),
 			InsuranceBalanceSum = decimal.Round(records.Where(x => IsInDeadlineBucket(x, bucket)).Sum(x => x.InsuranceBalance), 2),
@@ -839,73 +833,6 @@ public class DenialDashboardController : Controller
 	}
 
 	private static List<string> BuildOptions(IEnumerable<string> values) => ["(All)", .. values.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToList()];
-
-	private static List<DenialInsightRecord> BuildDerivedInsights(IEnumerable<DenialRecord> records)
-	{
-		return records.Where(x => !string.IsNullOrWhiteSpace(x.DenialCode))
-			.GroupBy(x => new
-			{
-				DenialCode = string.IsNullOrWhiteSpace(x.DenialCode) ? "(Blank)" : x.DenialCode.Trim(),
-				Description = string.IsNullOrWhiteSpace(x.DenialDescription) ? string.Empty : x.DenialDescription.Trim(),
-				ActionCategory = string.IsNullOrWhiteSpace(x.EffectiveActionCategory) ? string.Empty : x.EffectiveActionCategory.Trim(),
-				ActionCode = string.IsNullOrWhiteSpace(x.ActionCode) ? string.Empty : x.ActionCode.Trim(),
-				Action = string.IsNullOrWhiteSpace(x.RecommendedAction) ? string.Empty : x.RecommendedAction.Trim(),
-				Task = string.IsNullOrWhiteSpace(x.Task) ? string.Empty : x.Task.Trim()
-			})
-			.Select(group =>
-			{
-				var totalBalance = decimal.Round(group.Sum(x => x.EffectiveTotalBalance), 2);
-				var topPayer = group.GroupBy(x => !string.IsNullOrWhiteSpace(x.PayerNameNormalized) ? x.PayerNameNormalized.Trim() : (string.IsNullOrWhiteSpace(x.PayerName) ? "(Blank)" : x.PayerName.Trim()), StringComparer.OrdinalIgnoreCase)
-					.Select(g => new { PayerName = g.Key, Balance = decimal.Round(g.Sum(r => r.InsuranceBalance), 2) })
-					.OrderByDescending(x => x.Balance).ThenBy(x => x.PayerName).FirstOrDefault();
-				var highImpactInsuranceBalance = topPayer?.Balance ?? 0m;
-				return new DenialInsightRecord
-				{
-					DenialCodes = group.Key.DenialCode,
-					Descriptions = group.Key.Description,
-					NoOfDenialCount = group.Count(),
-					NoOfClaimsCount = group.Select(x => x.ClaimId).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
-					TotalBalance = totalBalance,
-					HighImpactInsurance = topPayer?.PayerName ?? string.Empty,
-					InsuranceBalance = highImpactInsuranceBalance,
-					ImpactPercentage = totalBalance == 0 ? 0 : decimal.Round((highImpactInsuranceBalance / totalBalance) * 100m, 2),
-					ActionCategory = group.Key.ActionCategory,
-					ActionCode = group.Key.ActionCode,
-					Action = group.Key.Action,
-					Task = group.Key.Task,
-					Feedback = group.Select(x => x.Feedback).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)) ?? string.Empty,
-					Responsibility = group.Select(x => x.Responsibility).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)) ?? string.Empty,
-					DiscussionDate = group.Select(x => x.DiscussionDate).FirstOrDefault(x => x.HasValue),
-					ETA = group.Select(x => x.ETA).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)) ?? string.Empty,
-					LabId = group.Select(x => x.LabId).FirstOrDefault(),
-					LabName = group.Select(x => x.LabName).FirstOrDefault() ?? string.Empty,
-					RunId = group.Select(x => x.RunId).FirstOrDefault() ?? string.Empty,
-					CreatedOn = group.Max(x => x.CreatedOn)
-				};
-			})
-			.OrderByDescending(x => x.TotalBalance).ThenByDescending(x => x.InsuranceBalance).ThenBy(x => x.DenialCodes).ToList();
-	}
-
-	private static bool HasNoAdditionalFilters(DenialDashboardFilters filters)
-	{
-		return ParseSelectedValues(filters.Status, true).Count == 0
-			&& ParseSelectedValues(filters.Priority, true).Count == 0
-			&& ParseSelectedValues(filters.ActionCategory, true).Count == 0
-			&& ParseSelectedValues(filters.Deadline, true).Count == 0
-			&& ParseSelectedValues(filters.Classification, true).Count == 0
-			&& ParseSelectedValues(filters.SalesRepname).Count == 0
-			&& ParseSelectedValues(filters.ClinicName).Count == 0
-			&& ParseSelectedValues(filters.ReferringProvider).Count == 0
-			&& ParseSelectedValues(filters.PayerName).Count == 0
-			&& ParseSelectedValues(filters.PayerType).Count == 0
-			&& ParseSelectedValues(filters.PanelName).Count == 0
-			&& !filters.FirstBilledDateFrom.HasValue
-			&& !filters.FirstBilledDateTo.HasValue
-			&& !filters.DateOfServiceFrom.HasValue
-			&& !filters.DateOfServiceTo.HasValue
-			&& !filters.DenialDateFrom.HasValue
-			&& !filters.DenialDateTo.HasValue;
-	}
 
 	private static List<TrendBreakdownItem> BuildTrendBreakdowns(IEnumerable<DenialBreakdownSourceRecord> rows, bool monthly)
 	{

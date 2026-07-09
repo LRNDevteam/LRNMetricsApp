@@ -1,9 +1,10 @@
-using LabMetricsDashboard.Models;
-using LabMetricsDashboard.ViewModels;
+using LRN.ReportsApi.Models;
 
-namespace LabMetricsDashboard.Services;
+namespace LRN.ReportsApi.Services;
 
-public interface IDenialRecordRepository
+// Denial Dashboard data access, moved out of LabMetricsDashboard. The web app now calls the
+// matching api/denial-dashboard/* endpoints instead of touching SQL directly.
+public interface IDenialDashboardRepository
 {
     Task<IReadOnlyList<LabOption>> GetLabsAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<DenialRecord>> GetByLabAsync(int labId, CancellationToken cancellationToken = default);
@@ -22,4 +23,3 @@ public interface IDenialRecordRepository
     Task<int> AssignReviewerByInsightAsync(int labId, string denialCode, string payerName, string reviewerUserName, string? runId, CancellationToken cancellationToken = default);
     Task<int> UpdateReviewerTaskAsync(int labId, string taskId, string status, string comments, string reviewerUserName, string? runId, CancellationToken cancellationToken = default);
 }
-

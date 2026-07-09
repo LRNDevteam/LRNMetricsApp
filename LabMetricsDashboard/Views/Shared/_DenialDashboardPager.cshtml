@@ -4,9 +4,20 @@
     var endItem = Math.Min(Model.Page * Model.PageSize, Model.TotalItems);
 }
 <div class="pager-shell">
-    <div>
+    <div class="pager-info">
         <div class="pager-meta">Showing @startItem-@endItem of @Model.TotalItems.ToString("N0") @Model.ItemLabel</div>
-        @* <div class="page-note">Large labs are paged to keep the dashboard responsive.</div> *@
+        @if (Model.ShowPageSizeSelector)
+        {
+            <label class="pager-size">
+                <span class="pager-size-label">Rows per page</span>
+                <select class="form-select form-select-sm pager-size-select" data-pager-size aria-label="Rows per page">
+                    @foreach (var size in Model.PageSizeOptions)
+                    {
+                        <option value="@Model.BuildPageSizeUrl!(size)" selected="@(size == Model.PageSize)">@size</option>
+                    }
+                </select>
+            </label>
+        }
     </div>
     <div class="pager-actions">
         <a class="pager-btn js-loader-link @(Model.Page <= 1 ? "disabled" : string.Empty)" href="@(Model.Page <= 1 ? "#" : Model.BuildUrl(1, Model.TabName))">First</a>

@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(dotnet build \"c:\\\\Users\\\\abdul\\\\source\\\\repos\\\\LRNDevteam\\\\LRNMetricsApp\\\\LRN.MasterFileProcessorWorker\\\\LRN.MasterFileProcessorWorker.csproj\" --nologo -v q)"
+    ]
+  }
+}

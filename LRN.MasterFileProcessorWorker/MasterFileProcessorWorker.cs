@@ -453,6 +453,68 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 
 				await DownloadSharePointFileWithRetryAsync(selected.DriveId, selected.ItemId, stagingPath, ct);
 
+				// SharePoint bumps eTag/LastModified even when a user just opens and closes
+				// the file without changing anything. Compare the downloaded content hash
+				// against previously PROCESSED files and skip when nothing really changed.
+				var contentHash = ComputeFileSha256(stagingPath);
+
+				if (await _status.IsContentProcessedAsync(lab.LabId, contentHash, ct))
+				{
+					const string unchangedMsg = "content unchanged (only SharePoint modified date/etag changed, e.g. file opened and closed); skipped reprocessing";
+
+					_logger.LogInformation("Lab {LabId}: {Msg}: {File}", lab.LabId, unchangedMsg, selected.Name);
+					_fileLog.Info($"Lab {lab.LabId}: {unchangedMsg}: {selected.Name}");
+
+					step20.EndTimeIST = _processLog.NowIST();
+					step20.Status = "SKIPPED";
+					step20.ErrorMessage = unchangedMsg;
+					await _processLog.StepEndAsync(runCtx, step20, ct);
+					activeStep = null;
+
+					// Mark this new eTag as PROCESSED so future runs skip it on the cheap eTag check.
+					await _status.UpsertStatusAsync(
+						selected.LabId, selected.DriveId, selected.ItemId, selected.ETagKey,
+						selected.Name, selected.SharePointPath, selected.LastModifiedUtc,
+						status: "PROCESSED",
+						statusMessage: unchangedMsg,
+						processedAtUtc: DateTimeOffset.UtcNow,
+						ct: ct,
+						contentHash: contentHash);
+
+					runRow.OverallStatus = "SKIPPED";
+					runRow.Notes = unchangedMsg;
+					await _processLog.CompleteRunAsync(runCtx, runRow, ct);
+
+					MasterProcessorLogCsv.Append(
+						folder: masterLogFolder,
+						localNow: runLocalNow,
+						labId: lab.LabId,
+						labName: lab.LabName,
+						sourceFileName: selected.Name,
+						sourceFileLocation: selected.SharePointPath,
+						status: "Skipped",
+						message: unchangedMsg,
+						claimOutput: "",
+						lineOutput: "");
+
+					await TryWriteAndUploadFileStatusLogAsync(
+						lab,
+						selected,
+						siteDriveId,
+						status: "Skipped",
+						outputLocation: "",
+						logMessage: unchangedMsg,
+						ct: ct);
+
+					// Same as the already-processed path: still sync sibling LIMS and client-paid files.
+					if (ParseBool(GetLabConfigValue(lab, "LimsSqlImportEnabled"), false))
+						await TryDownloadSiblingRawMasterAsync(lab, selected, rawMasterFolder, runCtx.RunId, ct);
+
+					await TrySyncClientPaidFileAsync(lab, selected, processedOutFolder, runCtx.RunId, ct);
+
+					continue;
+				}
+
 				File.Copy(stagingPath, productionRawMasterPath, overwrite: true);
 
 				_logger.LogInformation(
@@ -922,7 +984,8 @@ public sealed class MasterFileProcessorWorker : BackgroundService
 					selected.Name, selected.SharePointPath, selected.LastModifiedUtc,
 					status: "PROCESSED",
 statusMessage: $"Saved LineLevel='{lineOutPath}', ClaimLevel='{claimOutPath}', ModeMedian='{modeMedianOutPath}'. OutputUpload={outputUploadResult.Summary}.", processedAtUtc: DateTimeOffset.UtcNow,
-					ct: ct);
+					ct: ct,
+					contentHash: contentHash);
 
 				step110.EndTimeIST = _processLog.NowIST();
 				step110.Status = "SUCCESS";
@@ -1592,11 +1655,18 @@ message: $"imported; ModeMedian='{modeMedianOutPath}'; {outputUploadResult.Summa
 		$"⚠️ No recent file found for the {lab.LabName} lab.",
 		$"📁 Latest month folder: {monthFolder ?? "Unknown"}",
 		$"📂 Latest week folder: {weekFolder ?? "Unknown"}",
-		"No earlier week folders were checked."
+		"Earlier week folders were also checked; no matching file was found."
 	};
 
 		await TrySendTeamNotificationAsync(title, string.Join(Environment.NewLine + Environment.NewLine, lines), ct);
 	}
+	private static string ComputeFileSha256(string path)
+	{
+		using var sha = System.Security.Cryptography.SHA256.Create();
+		using var fs = File.OpenRead(path);
+		return Convert.ToHexString(sha.ComputeHash(fs));
+	}
+
 	private static string CombineSpPath(params string[] parts)
 	{
 		var clean = parts
