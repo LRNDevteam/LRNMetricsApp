@@ -364,6 +364,44 @@ public class PredictionController : Controller
         var currentPage  = Math.Max(1, page);
         var pagedRecords = dataset.Skip((currentPage - 1) * PageSize).Take(PageSize).ToList();
 
+        // ── Source run info for the page header ────────────────────────────────
+        // DB path: latest RunId / WeekFolder / InsertedDateTime via run-stats SP.
+        // File path: derived from the resolved report file itself.
+        string?   runInfoRunId      = null;
+        string?   runInfoWeekFolder = null;
+        DateTime? runInfoInsertedAt = null;
+        string?   runInfoFileName   = null;
+
+        if (usingDb)
+        {
+            try
+            {
+                var runDiag = await _dbRepo.ProbeAsync(
+                    labConfig!.DbConnectionString ?? string.Empty, HttpContext.RequestAborted);
+                runInfoRunId      = runDiag.LatestRunId;
+                runInfoWeekFolder = runDiag.WeekFolder;
+                // InsertedDateTime is stored as SYSUTCDATETIME() — convert to local for display.
+                runInfoInsertedAt = runDiag.LatestRunInsertedAt is { } utc
+                    ? DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime()
+                    : null;
+                runInfoFileName   = runDiag.SourceFileName;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[{Lab}] Could not load run info for header — continuing without it.", selectedLab);
+            }
+        }
+        else if (filePath is not null)
+        {
+            var fi = new FileInfo(filePath);
+            runInfoFileName   = fi.Name;
+            runInfoInsertedAt = fi.Exists ? fi.LastWriteTime : null;
+            runInfoWeekFolder = fi.Directory?.Name;
+            var baseName      = Path.GetFileNameWithoutExtension(fi.Name);
+            var us            = baseName.IndexOf('_');
+            runInfoRunId      = us > 0 ? baseName[..us] : null;
+        }
+
         var vm = new PredictionAnalysisViewModel
         {
             AvailableLabs             = availableLabs,
@@ -371,6 +409,11 @@ public class PredictionController : Controller
             PredictionAvailable       = true,
             ResolvedFilePath          = usingDb ? $"[DB] {selectedLab}" : filePath,
             CurrentWeekStartDate      = weekStart,
+
+            RunId          = runInfoRunId,
+            WeekFolder     = runInfoWeekFolder,
+            DataInsertedAt = runInfoInsertedAt,
+            SourceFileName = runInfoFileName,
 
             FilterPayerName           = filterPayerName,
             FilterPayerType           = filterPayerType,
@@ -419,6 +462,7 @@ public class PredictionController : Controller
         string? filterPayerType,
         string? filterPanelName,
         string? filterCPTCode,
+        string? tab = null,
         int page = 1)
     {
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
@@ -571,6 +615,40 @@ public class PredictionController : Controller
         var currentPage  = Math.Max(1, page);
         var pagedRecords = filteredList.Skip((currentPage - 1) * PageSize).Take(PageSize).ToList();
 
+        // ── Source run info for the header info bar ─────────────────────────────
+        string?   runInfoRunId      = null;
+        string?   runInfoWeekFolder = null;
+        DateTime? runInfoInsertedAt = null;
+
+        if (usingDb)
+        {
+            try
+            {
+                var runDiag = await _dbRepo.ProbeAsync(
+                    labConfig!.DbConnectionString ?? string.Empty, HttpContext.RequestAborted);
+                runInfoRunId      = runDiag.LatestRunId;
+                runInfoWeekFolder = runDiag.WeekFolder;
+                // InsertedDateTime is stored as SYSUTCDATETIME() — convert to local for display.
+                runInfoInsertedAt = runDiag.LatestRunInsertedAt is { } utc
+                    ? DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime()
+                    : null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[{Lab}] Could not load run info for Forecasting header — continuing without it.", selectedLab);
+            }
+        }
+        else if (!string.IsNullOrEmpty(selectedLab)
+                 && _resolver.ResolvePredictionValidationReport(selectedLab) is { } srcPath)
+        {
+            var fi = new FileInfo(srcPath);
+            runInfoInsertedAt = fi.Exists ? fi.LastWriteTime : null;
+            runInfoWeekFolder = fi.Directory?.Name;
+            var baseName      = Path.GetFileNameWithoutExtension(fi.Name);
+            var us            = baseName.IndexOf('_');
+            runInfoRunId      = us > 0 ? baseName[..us] : null;
+        }
+
         var vm = new ForecastingSummaryViewModel
         {
             AvailableLabs        = availableLabs,
@@ -580,6 +658,10 @@ public class PredictionController : Controller
             LatestDataDate       = latestDataDate,
             CurrentWeekStartDate = weekStart,
             TotalRecordsInRange  = inRangeRecords.Count,
+
+            RunId          = runInfoRunId,
+            WeekFolder     = runInfoWeekFolder,
+            DataInsertedAt = runInfoInsertedAt,
             MedianSummary        = medianSummary,
             ModeSummary          = modeSummary,
 
@@ -598,7 +680,11 @@ public class PredictionController : Controller
             PanelNames = panelNames,
             CPTCodes   = cptCodes,
 
-            ActiveTab = hasActiveFilters ? "filtered" : "median",
+            // Explicit ?tab= wins (keeps the Filtered Data tab active across
+            // paging links); otherwise default by filter presence.
+            ActiveTab = tab?.ToLowerInvariant() is "median" or "mode" or "filtered"
+                ? tab!.ToLowerInvariant()
+                : (hasActiveFilters ? "filtered" : "median"),
         };
 
         return View(vm);
@@ -864,10 +950,17 @@ public class PredictionController : Controller
     }
 
     /// <summary>
-    /// Downloads the current Forecasting Summary data as a formatted Excel file.
-    /// Accepts the same filter parameters as <see cref="ForecastingSummary"/>.
+    /// Downloads the Forecasting Summary as a formatted Excel file.
+    /// The Data sheet contains ALL PayerValidationReport rows of the displayed
+    /// run when no filter is applied; when dimension filters are supplied they
+    /// are pushed down to dbo.usp_GetPayerValidationReport (SP-only policy).
     /// </summary>
-    public async Task<IActionResult> ExportForecastingExcel(string? lab)
+    public async Task<IActionResult> ExportForecastingExcel(
+        string? lab,
+        string? filterPayerName,
+        string? filterPayerType,
+        string? filterPanelName,
+        string? filterCPTCode)
     {
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
@@ -883,7 +976,48 @@ public class PredictionController : Controller
         {
             var vm = await BuildForecastingViewModelAsync(selectedLab, labConfig);
 
-            using var workbook = ForecastingExcelExportBuilder.CreateWorkbook(vm, selectedLab);
+            // ── Full line-item detail for the Data sheet ─────────────────────
+            // No date-window trimming: every row of the latest run is exported.
+            // Filters (when present) are applied inside the SP on the DB path,
+            // or in memory on the file path.
+            List<PredictionRecord> exportRecords;
+            if (labConfig?.DBEnabled == true)
+            {
+                exportRecords = await _dbRepo.GetRecordsAsync(
+                    labConfig.DbConnectionString ?? string.Empty,
+                    filterPayerName: filterPayerName,
+                    filterPayerType: filterPayerType,
+                    filterPanelName: filterPanelName,
+                    filterCPTCode:   filterCPTCode,
+                    cancellationToken: HttpContext.RequestAborted);
+            }
+            else
+            {
+                var srcPath = string.IsNullOrEmpty(selectedLab)
+                    ? null
+                    : _resolver.ResolvePredictionValidationReport(selectedLab);
+                var all = srcPath is not null ? _parser.Parse(srcPath) : new List<PredictionRecord>();
+
+                var q = all.AsEnumerable();
+                if (!string.IsNullOrWhiteSpace(filterPayerName))
+                    q = q.Where(r => r.PayerNameNormalized.Equals(filterPayerName, StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrWhiteSpace(filterPayerType))
+                    q = q.Where(r => r.PayerType.Equals(filterPayerType, StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrWhiteSpace(filterPanelName))
+                    q = q.Where(r => r.PanelName.Equals(filterPanelName, StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrWhiteSpace(filterCPTCode))
+                    q = q.Where(r => r.CPTCode.Equals(filterCPTCode, StringComparison.OrdinalIgnoreCase));
+                exportRecords = q.ToList();
+            }
+
+            var activeFilters = new List<(string Label, string? Value)>();
+            if (!string.IsNullOrWhiteSpace(filterPayerName)) activeFilters.Add(("Payer Name", filterPayerName));
+            if (!string.IsNullOrWhiteSpace(filterPayerType)) activeFilters.Add(("Payer Type", filterPayerType));
+            if (!string.IsNullOrWhiteSpace(filterPanelName)) activeFilters.Add(("Panel", filterPanelName));
+            if (!string.IsNullOrWhiteSpace(filterCPTCode))   activeFilters.Add(("CPT Code", filterCPTCode));
+
+            using var workbook = ForecastingExcelExportBuilder.CreateWorkbook(
+                vm, selectedLab, activeFilters.Count > 0 ? activeFilters : null, exportRecords);
 
             await using var stream = new MemoryStream();
             workbook.SaveAs(stream);

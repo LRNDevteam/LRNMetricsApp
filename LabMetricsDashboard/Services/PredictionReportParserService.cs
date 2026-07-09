@@ -9,7 +9,7 @@ namespace LabMetricsDashboard.Services;
 
 /// <summary>
 /// Reads the "output" sheet from a Payer Policy Validation Report XLSX file
-/// using OpenXml SAX streaming � the worksheet XML is parsed as a forward-only
+/// using OpenXml SAX streaming � the worksheet XML is parsed as a forward-only
 /// stream so the entire object tree is never loaded into RAM at once.
 /// <para>Register as <b>Scoped</b> so the service is disposed after every request.</para>
 /// </summary>
@@ -57,7 +57,7 @@ public sealed class PredictionReportParserService
     /// Applies the same global filters used by <see cref="ParseFiltered"/> to an
     /// already-loaded list of records (e.g. from the database).
     /// Keeps only rows where:
-    ///   ForecastingPayability IN (Payable / Potentially Payable / Payable � Need Action)
+    ///   ForecastingPayability IN (Payable / Potentially Payable / Payable � Need Action)
     ///   AND ExpectedPaymentDate &lt; <paramref name="weekStartCutoff"/>.
     /// </summary>
     public static List<PredictionRecord> ApplyGlobalFilter(
@@ -117,9 +117,13 @@ public sealed class PredictionReportParserService
             return [];
         }
 
+        // CSV source files use the same header mapping + row filter via ParseCsvCore.
+        if (filePath.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+            return ParseCsvCore(filePath, weekStartCutoff);
+
         try
         {
-            // Open read-only � minimum lock and memory footprint
+            // Open read-only � minimum lock and memory footprint
             using var doc = SpreadsheetDocument.Open(filePath, isEditable: false);
 
             var wbPart = doc.WorkbookPart
@@ -142,13 +146,13 @@ public sealed class PredictionReportParserService
 
             var wsPart = (WorksheetPart)wbPart.GetPartById(sheetRelId);
 
-            // Build shared strings lookup once � O(1) per cell resolution
+            // Build shared strings lookup once � O(1) per cell resolution
             var sstArray = BuildSharedStrings(
                 wbPart.SharedStringTablePart?.SharedStringTable);
 
             var records = new List<PredictionRecord>();
 
-            // Forward-only SAX reader � O(1) peak memory regardless of file size
+            // Forward-only SAX reader � O(1) peak memory regardless of file size
             using var reader = OpenXmlReader.Create(wsPart);
 
             Dictionary<string, int>? headerMap = null;
@@ -178,7 +182,7 @@ public sealed class PredictionReportParserService
 
                     if (currentRowIndex == 1)
                     {
-                        // First row = header � build the column-name ? 1-based-col map
+                        // First row = header � build the column-name ? 1-based-col map
                         headerMap = BuildHeaderMap(currentRowCells);
 
                         // Resolve the two gate-column 0-based indices up front
@@ -258,6 +262,109 @@ public sealed class PredictionReportParserService
         {
             _logger.LogError(ex, "Failed to parse prediction report: {FilePath}", filePath);
             return [];
+        }
+    }
+
+    // ── CSV support ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// CSV twin of the XLSX SAX path: streams the file row by row, reuses the
+    /// same <see cref="BuildHeaderMap"/> / <see cref="MapRow"/> mapping and the
+    /// same global gate (ForecastingPayability + ExpectedPaymentDate cutoff).
+    /// </summary>
+    private List<PredictionRecord> ParseCsvCore(string filePath, DateOnly? weekStartCutoff)
+    {
+        try
+        {
+            var records = new List<PredictionRecord>();
+
+            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream, detectEncodingFromByteOrderMarks: true);
+
+            Dictionary<string, int>? headerMap = null;
+            int forecastCol = -1, dateCol = -1;
+
+            foreach (var row in ReadCsvRows(reader))
+            {
+                if (headerMap is null)
+                {
+                    headerMap   = BuildHeaderMap(row);
+                    forecastCol = ColIndex(headerMap, "Forecasting Payability");
+                    dateCol     = ColIndex(headerMap, "Expected Payment Date");
+                    continue;
+                }
+
+                if (row.All(string.IsNullOrWhiteSpace)) continue;
+
+                if (weekStartCutoff.HasValue)
+                {
+                    if (forecastCol >= 0 && forecastCol < row.Length)
+                    {
+                        var fv = Normalise(row[forecastCol] ?? "");
+                        if (!ForecastPayableValues.Contains(fv)) continue;
+                    }
+                    if (dateCol >= 0 && dateCol < row.Length)
+                    {
+                        var dv = OADateOrRaw(row[dateCol] ?? "");
+                        if (!TryParseDate(dv, out var d) || d >= weekStartCutoff.Value)
+                            continue;
+                    }
+                }
+
+                var record = MapRow(row, headerMap);
+                if (record is not null) records.Add(record);
+            }
+
+            _logger.LogInformation(
+                "CSV parse (filtered={F}): {Count} records from '{File}'.",
+                weekStartCutoff.HasValue, records.Count, filePath);
+
+            return records;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to parse prediction CSV report: {FilePath}", filePath);
+            return [];
+        }
+    }
+
+    /// <summary>RFC 4180 streaming reader: yields one string?[] per record, handling quoted fields with embedded commas/quotes/newlines.</summary>
+    private static IEnumerable<string?[]> ReadCsvRows(TextReader reader)
+    {
+        var fields  = new List<string?>();
+        var sb      = new System.Text.StringBuilder();
+        bool inQuotes = false;
+        int ch;
+
+        while ((ch = reader.Read()) != -1)
+        {
+            char c = (char)ch;
+
+            if (inQuotes)
+            {
+                if (c == '"')
+                {
+                    if (reader.Peek() == '"') { sb.Append('"'); reader.Read(); }
+                    else inQuotes = false;
+                }
+                else sb.Append(c);
+            }
+            else if (c == '"') inQuotes = true;
+            else if (c == ',') { fields.Add(sb.ToString()); sb.Clear(); }
+            else if (c == '\r' || c == '\n')
+            {
+                if (c == '\r' && reader.Peek() == '\n') reader.Read();
+                fields.Add(sb.ToString()); sb.Clear();
+                yield return fields.ToArray();
+                fields.Clear();
+            }
+            else sb.Append(c);
+        }
+
+        if (sb.Length > 0 || fields.Count > 0)
+        {
+            fields.Add(sb.ToString());
+            yield return fields.ToArray();
         }
     }
 

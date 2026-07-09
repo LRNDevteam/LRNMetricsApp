@@ -1,14 +1,14 @@
 @model LabMetricsDashboard.Models.ForecastingSummaryViewModel
 @{
-    ViewData["Title"]       = $"Forecasting Summary – {Model.SelectedLab}";
+    ViewData["Title"]       = $"Forecasting Summary - {Model.SelectedLab}";
     ViewData["SelectedLab"] = Model.SelectedLab;
     ViewData["PageLabel"]   = "Forecasting Summary";
 
     var weeks       = Model.MedianSummary.Weeks;
     var displayWeeks = weeks.Where(w => !w.IncludeBeforeStart).ToList();
     var rangeLabel  = displayWeeks.Count >= 2
-        ? $"{displayWeeks[0].Start:MM/dd/yyyy} – {displayWeeks[^1].End:MM/dd/yyyy}"
-        : "—";
+        ? $"{displayWeeks[0].Start:MM/dd/yyyy} - {displayWeeks[^1].End:MM/dd/yyyy}"
+        : "-";
 
     bool isMedian   = Model.ActiveTab == "median";
     bool isMode     = Model.ActiveTab == "mode";
@@ -27,6 +27,7 @@
         ["filterPayerType"] = Model.FilterPayerType,
         ["filterPanelName"] = Model.FilterPanelName,
         ["filterCPTCode"]   = Model.FilterCPTCode,
+        ["tab"]             = "filtered",   // paging links live on the Filtered Data tab â€” stay on it after navigation
     };
 }
 
@@ -131,7 +132,13 @@
                     var btn = document.getElementById('exportForecastingExcelBtn');
                     if (btn) {
                         btn.addEventListener('click', function () {
-                            lmdExcelDownload('@Url.Action("ExportForecastingExcel", "Prediction", new { lab = Model.SelectedLab })');
+                            lmdExcelDownload('@Url.Action("ExportForecastingExcel", "Prediction", new {
+                                lab             = Model.SelectedLab,
+                                filterPayerName = Model.FilterPayerName,
+                                filterPayerType = Model.FilterPayerType,
+                                filterPanelName = Model.FilterPanelName,
+                                filterCPTCode   = Model.FilterCPTCode
+                            })');
                         });
                     }
                 }());
@@ -145,6 +152,18 @@
             <span>Period:<strong>@rangeLabel</strong></span>
             <span>Records:<strong>@Model.TotalRecordsInRange.ToString("N0")</strong></span>
             <span>Payers:<strong>@Model.MedianSummary.PayerRows.Count.ToString("N0")</strong></span>
+            @if (Model.RunId is not null)
+            {
+                <span>Run ID:<strong>@Model.RunId</strong></span>
+            }
+            @if (!string.IsNullOrWhiteSpace(Model.WeekFolder))
+            {
+                <span>Week:<strong>@Model.WeekFolder</strong></span>
+            }
+            @if (Model.DataInsertedAt is not null)
+            {
+                <span>Data loaded:<strong>@Model.DataInsertedAt.Value.ToString("MMM dd, yyyy hh:mm tt")</strong></span>
+            }
         </div>
     }
     @if (Model.PredictionAvailable)
@@ -243,10 +262,7 @@ else
                 data-bs-target="#topFilteredPane" type="button" role="tab"
                 aria-controls="topFilteredPane" aria-selected="@(isFiltered ? "true" : "false")">
             <i class="bi bi-funnel me-1"></i> Filtered Data
-            @if (Model.HasActiveFilters)
-            {
-                <span class="badge bg-warning text-dark tab-cnt">@Model.FilteredTotalInRange.ToString("N0")</span>
-            }
+            <span class="badge @(Model.HasActiveFilters ? "bg-warning text-dark" : "bg-secondary") tab-cnt">@Model.FilteredTotalInRange.ToString("N0")</span>
         </button>
     </li>
 </ul>
@@ -280,6 +296,7 @@ else
                 <div class="fc-filter-panel mb-3">
                     <form method="get" asp-controller="Prediction" asp-action="ForecastingSummary">
                         <input type="hidden" name="lab" value="@Model.SelectedLab" />
+                        <input type="hidden" name="tab" value="filtered" />
                         <div class="row g-2 align-items-end">
                             <div class="col-sm-6 col-lg-3">
                                 <label for="fcFilterPayer">Payer Name</label>
@@ -343,7 +360,7 @@ else
                                 <span class="fc-filter-badge">@f</span>
                             }
                             <span class="ms-1 text-muted">
-                                — @Model.FilteredTotalInRange.ToString("N0") of @Model.TotalRecordsInRange.ToString("N0") records
+                                &bull; @Model.FilteredTotalInRange.ToString("N0") of @Model.TotalRecordsInRange.ToString("N0") records
                             </span>
                         </div>
                     }
@@ -377,7 +394,7 @@ else
                 {
                     <div class="d-flex justify-content-between align-items-center mb-2 fc-paging">
                         <span class="text-muted">
-                            Showing @pg.FirstItem–@pg.LastItem of @pg.TotalFiltered.ToString("N0") records
+                            Showing @pg.FirstItem&ndash;@pg.LastItem of @pg.TotalFiltered.ToString("N0") records
                         </span>
                     </div>
 
@@ -413,9 +430,9 @@ else
                                         <td>@r.AccessionNo</td>
                                         <td>@r.VisitNumber</td>
                                         <td><strong>@r.CPTCode</strong></td>
-                                        <td title="@r.PayerNameNormalized">@(r.PayerNameNormalized.Length > 22 ? r.PayerNameNormalized[..22] + "…" : r.PayerNameNormalized)</td>
+                                        <td title="@r.PayerNameNormalized">@(r.PayerNameNormalized.Length > 22 ? r.PayerNameNormalized[..22] + "..." : r.PayerNameNormalized)</td>
                                         <td>@r.PayerType</td>
-                                        <td title="@r.PanelName">@(r.PanelName.Length > 20 ? r.PanelName[..20] + "…" : r.PanelName)</td>
+                                        <td title="@r.PanelName">@(r.PanelName.Length > 20 ? r.PanelName[..20] + "..." : r.PanelName)</td>
                                         <td><span class="badge bg-success" style="font-size:.64rem">@r.ForecastingPayability</span></td>
                                         <td>@r.ExpectedPaymentDate</td>
                                         <td class="amt">$@r.BilledAmount.ToString("N2")</td>
@@ -443,7 +460,7 @@ else
                                         <a class="page-link"
                                            asp-controller="Prediction" asp-action="ForecastingSummary"
                                            asp-all-route-data="filterRouteValues"
-                                           asp-route-page="@(pg.CurrentPage - 1)">‹ Prev</a>
+                                           asp-route-page="@(pg.CurrentPage - 1)">&laquo; Prev</a>
                                     </li>
                                 }
                                 @for (var p = pgStart; p <= pgEnd; p++)
@@ -461,7 +478,7 @@ else
                                         <a class="page-link"
                                            asp-controller="Prediction" asp-action="ForecastingSummary"
                                            asp-all-route-data="filterRouteValues"
-                                           asp-route-page="@(pg.CurrentPage + 1)">Next ›</a>
+                                           asp-route-page="@(pg.CurrentPage + 1)">Next &raquo;</a>
                                     </li>
                                 }
                             </ul>

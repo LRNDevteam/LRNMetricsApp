@@ -399,7 +399,7 @@ BEGIN
 
     IF @RunId IS NULL OR LTRIM(RTRIM(@RunId)) = ''
     BEGIN
-        RAISERROR('usp_RefreshAllPredictionAggregates: no RunId found in PayerValidationReport — nothing to refresh.', 16, 1);
+        RAISERROR('usp_RefreshAllPredictionAggregates: no RunId found in PayerValidationReport ï¿½ nothing to refresh.', 16, 1);
         RETURN;
     END
 
@@ -425,6 +425,21 @@ BEGIN
 
     BEGIN TRY EXEC dbo.usp_RefreshPV_SummaryMetrics        @RunId, @WeekStartDate; END TRY
     BEGIN CATCH SET @FirstError = ISNULL(@FirstError, 'SummaryMetrics: '        + ERROR_MESSAGE()); END CATCH
+
+    -- RETENTION: keep only the current run's snapshots.
+    -- The dashboard read SPs (usp_PV_Read*) always resolve the newest RunId,
+    -- so snapshots from older runs are never read. Purge them here so the
+    -- PV_* tables hold exactly one run.
+    BEGIN TRY
+        DELETE FROM dbo.PV_SummaryBuckets       WHERE RunId <> @RunId;
+        DELETE FROM dbo.PV_ValidationByPayer    WHERE RunId <> @RunId;
+        DELETE FROM dbo.PV_ValidationByPanel    WHERE RunId <> @RunId;
+        DELETE FROM dbo.PV_ValidationByCPT      WHERE RunId <> @RunId;
+        DELETE FROM dbo.PV_DenialBreakdown      WHERE RunId <> @RunId;
+        DELETE FROM dbo.PV_NoResponseBreakdown  WHERE RunId <> @RunId;
+        DELETE FROM dbo.PV_SummaryMetrics       WHERE RunId <> @RunId;
+    END TRY
+    BEGIN CATCH SET @FirstError = ISNULL(@FirstError, 'PurgeOldRuns: ' + ERROR_MESSAGE()); END CATCH
 
     IF @FirstError IS NOT NULL
         RAISERROR(@FirstError, 16, 1);

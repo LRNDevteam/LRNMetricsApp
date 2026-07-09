@@ -49,9 +49,17 @@
         .GroupBy(c => c.Year)
         .ToDictionary(g => g.Key, g => g.Select(c => c.Month).OrderBy(m => m).ToList());
 
-    // Per-row total for a single year (sum of that row's monthly values in the year).
-    decimal RowYearTotal(ExecSummaryRow row, int year) =>
-        row.ValuesByYearMonth.Where(kv => kv.Key.Year == year && kv.Key.Month != 0).Sum(kv => kv.Value);
+    // Per-row total for a single year.
+    // "Avg" rows are weighted averages, not additive — summing the monthly
+    // averages produces a meaningless number. Prefer the SP's per-year
+    // (year, 0) sentinel when present; otherwise (additive rows, or labs whose
+    // SP does not yet emit the sentinel) fall back to summing the months.
+    decimal RowYearTotal(ExecSummaryRow row, int year)
+    {
+        if (row.Category == "Avg" && row.ValuesByYearMonth.TryGetValue((year, 0), out var yearSentinel))
+            return yearSentinel;
+        return row.ValuesByYearMonth.Where(kv => kv.Key.Year == year && kv.Key.Month != 0).Sum(kv => kv.Value);
+    }
 
     // Per-row grand total across all years/months.
     // "Avg" rows (AJ/AK/AL) are averages, not additive — summing the monthly

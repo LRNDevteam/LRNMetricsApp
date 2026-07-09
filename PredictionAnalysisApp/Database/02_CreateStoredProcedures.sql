@@ -14,7 +14,7 @@ IF EXISTS (SELECT 1 FROM sys.table_types WHERE name = 'TVP_PayerValidationReport
     DROP TYPE dbo.TVP_PayerValidationReport;
 GO
 
--- Step 3: recreate TVP — all text columns use NVARCHAR(MAX)
+-- Step 3: recreate TVP ï¿½ all text columns use NVARCHAR(MAX)
 --         so no truncation regardless of data length.
 CREATE TYPE dbo.TVP_PayerValidationReport AS TABLE
 (
@@ -122,7 +122,7 @@ GO
 
 -- ------------------------------------------------------------
 -- SP 1 : usp_SavePayerValidationFileLog
--- RunId and WeekFolder are nullable — files without a standard
+-- RunId and WeekFolder are nullable ï¿½ files without a standard
 -- naming pattern will insert NULL for these fields.
 -- ------------------------------------------------------------
 CREATE OR ALTER PROCEDURE dbo.usp_SavePayerValidationFileLog
@@ -149,10 +149,67 @@ END
 GO
 
 -- ------------------------------------------------------------
+-- SP 1B : usp_TruncatePayerValidationLab
+-- RETENTION POLICY: keep only the incoming run per lab.
+-- Called ONCE by the ingestion app before the chunked inserts
+-- of a new file begin. Deletes ALL existing rows for the lab
+-- (the dashboard only ever reads the latest RunId, so older
+-- runs are dead weight). PayerValidationFileLog is untouched -
+-- it remains the permanent dedupe/history log.
+-- ------------------------------------------------------------
+CREATE OR ALTER PROCEDURE dbo.usp_TruncatePayerValidationLab
+(
+    @LabName     NVARCHAR(255),
+    @DeletedRows INT OUTPUT
+)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DELETE FROM dbo.PayerValidationReport
+    WHERE  LabName = @LabName;
+
+    SET @DeletedRows = @@ROWCOUNT;
+END
+GO
+
+-- ------------------------------------------------------------
+-- SP 1C : usp_DeletePayerValidationFileEntry
+-- DataRefresh support: removes the FileLog entry and all its
+-- associated report rows for one source file path so the file
+-- can be re-inserted from scratch on the same run.
+-- ------------------------------------------------------------
+CREATE OR ALTER PROCEDURE dbo.usp_DeletePayerValidationFileEntry
+(
+    @SourceFullPath     NVARCHAR(1000),
+    @DeletedReportRows  INT OUTPUT,
+    @DeletedFileLogRows INT OUTPUT
+)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Delete report rows first (FK child), then the file-log row (parent).
+    DELETE r
+    FROM   dbo.PayerValidationReport r
+    INNER  JOIN dbo.PayerValidationFileLog f ON r.FileLogId = f.FileLogId
+    WHERE  f.SourceFullPath = @SourceFullPath;
+
+    SET @DeletedReportRows = @@ROWCOUNT;
+
+    DELETE FROM dbo.PayerValidationFileLog
+    WHERE  SourceFullPath = @SourceFullPath;
+
+    SET @DeletedFileLogRows = @@ROWCOUNT;
+END
+GO
+
+-- ------------------------------------------------------------
 -- SP 2 : usp_BulkInsertPayerValidationReport
--- Deletes existing rows for the RunId+LabName combo (idempotent).
--- When RunId is NULL, matches by LabName only to avoid deleting
--- unrelated NULL-RunId rows from other files.
+-- Pure insert. The SP is called once per chunk of the same run,
+-- so it must NOT delete - a per-chunk delete would wipe rows
+-- inserted by earlier chunks of the same file. All cleanup is
+-- done up-front by usp_TruncatePayerValidationLab.
 -- ------------------------------------------------------------
 CREATE OR ALTER PROCEDURE dbo.usp_BulkInsertPayerValidationReport
 (
@@ -161,19 +218,6 @@ CREATE OR ALTER PROCEDURE dbo.usp_BulkInsertPayerValidationReport
 AS
 BEGIN
     SET NOCOUNT ON;
-
-    -- Delete existing rows for the same lab+run so re-runs are idempotent.
-    -- When RunId IS NULL, scope deletion to FileLogId to avoid over-deleting.
-    DELETE r
-    FROM dbo.PayerValidationReport r
-    WHERE r.LabName IN (SELECT DISTINCT LabName FROM @Rows)
-      AND (
-            -- Normal case: RunId present — match on RunId + LabName
-            (r.RunId IS NOT NULL AND r.RunId IN (SELECT DISTINCT RunId FROM @Rows WHERE RunId IS NOT NULL))
-            OR
-            -- Null RunId case: match on FileLogId to scope tightly
-            (r.RunId IS NULL AND r.FileLogId IN (SELECT DISTINCT FileLogId FROM @Rows WHERE RunId IS NULL))
-          );
 
     INSERT INTO dbo.PayerValidationReport
     (
@@ -257,7 +301,7 @@ GO
 -- SP 3 : usp_GetPayerValidationReport
 -- Returns PayerValidationReport rows for a given lab.
 -- Supports optional filters: RunId, PayStatus, ForecastingPayability.
--- The caller controls which columns are returned — add or remove
+-- The caller controls which columns are returned ï¿½ add or remove
 -- columns from the SELECT without changing C# by adjusting this SP.
 -- ============================================================
   
@@ -265,7 +309,7 @@ GO
 -- SP 3 : usp_GetPayerValidationReport  
 -- Returns PayerValidationReport rows for a given lab.  
 -- Supports optional filters: RunId, PayStatus, ForecastingPayability.  
--- The caller controls which columns are returned — add or remove  
+-- The caller controls which columns are returned ï¿½ add or remove  
 -- columns from the SELECT without changing C# by adjusting this SP.  
 -- ============================================================  
 CREATE or alter  PROCEDURE dbo.usp_GetPayerValidationReport  
@@ -436,8 +480,8 @@ GO
 -- SP 4 : usp_ProbePredictionDb
 -- Returns a single row that the dashboard uses to decide whether
 -- the Prediction Analysis page is ready to display.
---   TableExists  BIT  – 1 when dbo.PayerValidationReport exists
---   ProcExists   BIT  – 1 when dbo.usp_GetPayerValidationReport exists
+--   TableExists  BIT  ï¿½ 1 when dbo.PayerValidationReport exists
+--   ProcExists   BIT  ï¿½ 1 when dbo.usp_GetPayerValidationReport exists
 -- No parameters required; safe to call on any database.
 -- ============================================================
 CREATE OR ALTER PROCEDURE dbo.usp_ProbePredictionDb
@@ -464,12 +508,19 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
+    -- Extra columns (WeekFolder, FileName) are appended AFTER TotalRows so
+    -- existing ordinal-based readers keep working.
     SELECT TOP 1
-        RunId,
-        InsertedDateTime,
-        (SELECT COUNT_BIG(*) FROM dbo.PayerValidationReport) AS TotalRows
-    FROM   dbo.PayerValidationReport
-    WHERE  RunId IS NOT NULL
-    ORDER  BY InsertedDateTime DESC;
+        r.RunId,
+        r.InsertedDateTime,
+        (SELECT COUNT_BIG(*) FROM dbo.PayerValidationReport) AS TotalRows,
+        r.WeekFolder,
+        (SELECT TOP 1 f.FileName
+         FROM   dbo.PayerValidationFileLog f
+         WHERE  f.RunId = r.RunId
+         ORDER  BY f.FileLogId DESC) AS FileName
+    FROM   dbo.PayerValidationReport r
+    WHERE  r.RunId IS NOT NULL
+    ORDER  BY r.InsertedDateTime DESC;
 END
 GO

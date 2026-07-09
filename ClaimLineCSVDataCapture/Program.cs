@@ -136,18 +136,35 @@ foreach (var lab in labConfigs)
     var db = new ClaimLineDbService(lab.DbConnectionString);
     var claimInserted = false;
     var lineInserted = false;
+    // Set true when a NEW TransactionDetail Adjustment file is loaded this run.
+    // Used to gate the Executive Summary refresh so it only runs when data
+    // actually changed (see the Executive Summary Refresh block below).
+    var tdFileLoaded = false;
 
     // ── Gate: validate latest input file's RunId against latest completed RunId ──
     // Before processing the latest files, fetch the latest successfully completed
     // RunId (sp_GetRecentSuccessRunByLab on LRNMaster) and compare it with the RunId
     // prefix of the latest input file. Processing (including ClaimLineRefresh=true)
     // only continues when both RunIds match.
-    if (!RunIdGatePassed(lab, masterConnectionString, log))
+    // Scenario 1 (gate passes): a new Claim & Line file set aligned with the
+    //   latest completed RunId — process Claim/Line/ClientPaidList, then
+    //   TransactionDetail, then the Executive Summary SPs.
+    // Scenario 2 (gate fails): no new/matching Claim & Line files, so their
+    //   processing is skipped — BUT a new TransactionDetail Adjustment file may
+    //   still have arrived. It is processed below and the Executive Summary is
+    //   refreshed via usp_RefreshBT_ExecutiveSummary_OnNewFile.
+    var runIdGatePassed = RunIdGatePassed(lab, masterConnectionString, log);
+    if (!runIdGatePassed)
     {
         labsSkipped++;
-        continue;
+        log.Warn($"  [RunId Gate] Claim/Line processing skipped for {lab.LabName}; still checking for a new TransactionDetail Adjustment file.");
     }
 
+    // ── Claim/Line/ClientPaidList processing runs only when the RunId gate passed
+    //    (Scenario 1). Scenario 2 (gate failed) falls straight through to the
+    //    TransactionDetail block below. ──────────────────────────────────────
+    if (runIdGatePassed)
+    {
     // ── Refresh mode: purge existing lab data so the latest file re-inserts cleanly ──
     if (lab.ClaimLineRefresh)
     {
@@ -419,7 +436,12 @@ foreach (var lab in labConfigs)
         }
     }
 
+    }  // ── end if (runIdGatePassed) — Claim/Line/ClientPaidList processing ──
+
     // ── Process TransactionDetail Adjustment .xlsx (BeechTree only) ──────────
+    // Runs in BOTH scenarios (gate pass and gate fail). The internal
+    // IsBTTransactionDetailFileAlreadyLoaded check ensures the same file is
+    // never re-imported.
     // Triggered when lab config Paths.TransactionDetailAdjustmentKeyword is set.
     // The file name contains that keyword (e.g. "TransactionDetail Adjustment").
     // No RunId dedup — SP always inserts; BTWOSummary is truncated and rebuilt
@@ -496,6 +518,17 @@ foreach (var lab in labConfigs)
                         log.Error($"  [TransactionDetail] Failed to open/peek workbook headers: {peekEx.Message}");
                     }
 
+                    // ── Replace, don't append: clear prior BTTransactionDetailData so
+                    //    the table holds ONLY this file's rows. Abort the load if the
+                    //    clear fails, to avoid mixing new rows onto stale data. ──────
+                    log.Info($"  [TransactionDetail] Clearing dbo.BTTransactionDetailData before loading new file…");
+                    var tdClearErr = db.ClearBTTransactionDetailData();
+                    if (tdClearErr is not null)
+                    {
+                        log.Error($"  [TransactionDetail] Clear failed — skipping load to avoid appending onto old data: {tdClearErr}");
+                        goto tdDone;
+                    }
+
                     log.Info($"  [TransactionDetail] Streaming XLSX in batches of {XlsxFileReader.DefaultBatchSize}…");
                     var tdBatches = XlsxFileReader.ReadXlsxBatches(
                         tdWorkingPath, lab.LabName, tdWeekFolder, tdRunId,
@@ -521,12 +554,27 @@ foreach (var lab in labConfigs)
                     // ── Rebuild BTWOSummary ───────────────────────────────────
                     if (tdInserted > 0)
                     {
-                        log.Info($"  [TransactionDetail] Refreshing BTWOSummary…");
-                        var (totalRows, matchedRows, woError) = db.RefreshBTWOSummary();
-                        if (woError is null)
-                            log.Info($"  [TransactionDetail] BTWOSummary rebuilt — {totalRows} total row(s), {matchedRows} matched to ClaimLevelData.");
+                        // New TransactionDetail Adjustment file loaded — flag it so the
+                        // Executive Summary (Complete W/O rows) is refreshed this run.
+                        tdFileLoaded = true;
+
+                        if (runIdGatePassed)
+                        {
+                            // Scenario 1: refresh BTWOSummary now; the Executive Summary
+                            // prefix SPs run later in this iteration.
+                            log.Info($"  [TransactionDetail] Refreshing BTWOSummary…");
+                            var (totalRows, matchedRows, woError) = db.RefreshBTWOSummary();
+                            if (woError is null)
+                                log.Info($"  [TransactionDetail] BTWOSummary rebuilt — {totalRows} total row(s), {matchedRows} matched to ClaimLevelData.");
+                            else
+                                log.Error($"  [TransactionDetail] BTWOSummary refresh failed: {woError}");
+                        }
                         else
-                            log.Error($"  [TransactionDetail] BTWOSummary refresh failed: {woError}");
+                        {
+                            // Scenario 2: BTWOSummary + Executive Summary are rebuilt together
+                            // by usp_RefreshBT_ExecutiveSummary_OnNewFile (see ES block below).
+                            log.Info($"  [TransactionDetail] Gate skipped — deferring BTWOSummary + Executive Summary to usp_RefreshBT_ExecutiveSummary_OnNewFile.");
+                        }
                     }
                 }
                 finally
@@ -545,6 +593,29 @@ foreach (var lab in labConfigs)
             log.Error($"  [TransactionDetail] {ex.Message}");
             labsFailed++;
         }
+    }
+
+    // ── Scenario 2: RunId gate skipped Claim/Line, but the TransactionDetail
+    //    block above still ran. Refresh BTWOSummary + Executive Summary via the
+    //    gated wrapper SP, then skip all Claim/Line-driven reports for this lab. ─
+    if (!runIdGatePassed)
+    {
+        if (tdFileLoaded)
+        {
+            log.Header($"Executive Summary Refresh (OnNewFile) — {lab.LabName}");
+            log.Info($"  [ES] New TransactionDetail file — running usp_RefreshBT_ExecutiveSummary_OnNewFile…");
+            var onNewFileErr = db.RefreshBTExecutiveSummaryOnNewFile();
+            if (onNewFileErr is null)
+                log.Info($"  [ES] usp_RefreshBT_ExecutiveSummary_OnNewFile — OK.");
+            else
+                log.Error($"  [ES] usp_RefreshBT_ExecutiveSummary_OnNewFile — FAILED: {onNewFileErr}");
+        }
+        else
+        {
+            log.Info($"  [{lab.LabName}] Gate skipped and no new TransactionDetail file — nothing to refresh.");
+        }
+        log.Info($"  [{lab.LabName}] TransactionDetail-only run complete — Claim/Line reports skipped.");
+        continue;
     }
 
     // ── Rebuild BTWOSummary when new ClaimLevel data arrived (BeechTree only) ──
@@ -974,7 +1045,19 @@ foreach (var lab in labConfigs)
         // silently skipped (no error) if not yet deployed for this lab — onboarding
         // a new lab's Executive Summary requires only deploying the SQL scripts
         // named per this convention; no further changes here are needed.
-        if (ClaimLineDbService.LabPrefixMap.TryGetValue(lab.LabName, out var esPrefix))
+        //
+        // GATE: only refresh when NEW data actually loaded this run (a new
+        // ClaimLevel, LineLevel, or TransactionDetail Adjustment file). This
+        // avoids re-running the heavy Executive Summary SPs on every run when
+        // nothing changed. The Executive Summary is built from ClaimLevelData +
+        // BTWOSummary, so any of these inserts is a valid trigger.
+        // Only scenario 1 (gate passed) reaches here; scenario 2 already continued.
+        var esDataChanged = claimInserted || lineInserted || tdFileLoaded;
+        if (!esDataChanged)
+        {
+            log.Info($"  [ES] No new ClaimLevel / LineLevel / TransactionDetail file this run — Executive Summary refresh skipped.");
+        }
+        else if (ClaimLineDbService.LabPrefixMap.TryGetValue(lab.LabName, out var esPrefix))
         {
             log.Header($"Executive Summary Refresh — {lab.LabName}");
             log.Info($"  [ES] Refreshing Executive Summary aggregates for prefix '{esPrefix}'…");

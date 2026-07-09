@@ -248,10 +248,16 @@ public sealed class ExecutiveSummaryExcelBuilder
                         SetNumberFormat(cell, row.Category);
                         colIdx++;
                     }
-                    // Year total
-                    var ytVal = row.ValuesByYearMonth
-                        .Where(kv => kv.Key.Year == year && kv.Key.Month != 0)
-                        .Sum(kv => kv.Value);
+                    // Year total. "Avg" rows are weighted averages, not additive —
+                    // prefer the SP's per-year (year, 0) sentinel when present;
+                    // otherwise fall back to summing the monthly values.
+                    decimal ytVal;
+                    if (row.Category == "Avg" && row.ValuesByYearMonth.TryGetValue((year, 0), out var ytSentinel))
+                        ytVal = ytSentinel;
+                    else
+                        ytVal = row.ValuesByYearMonth
+                            .Where(kv => kv.Key.Year == year && kv.Key.Month != 0)
+                            .Sum(kv => kv.Value);
                     var ytCell = sheet.Cell(rowIdx, colIdx);
                     if (ytVal != 0) ytCell.Value = (double)ytVal;
                     SetNumberFormat(ytCell, row.Category);
@@ -260,10 +266,21 @@ public sealed class ExecutiveSummaryExcelBuilder
                     colIdx++;
                 }
 
-                // Grand total
-                var grandVal = row.ValuesByYearMonth
-                    .Where(kv => kv.Key.Year != 0 && kv.Key.Month != 0)
-                    .Sum(kv => kv.Value);
+                // Grand total.
+                // Mirror the web view's RowGrandTotal: "Avg" rows are averages,
+                // NOT additive — summing the monthly averages produced inflated
+                // totals (e.g. ~$600) that disagreed with the web. Use the SP's
+                // precomputed (0,0) weighted-average sentinel instead. Rows that
+                // carry only a (0,0) filtered total (no monthly buckets) also use
+                // the sentinel.
+                bool hasMonthlyBuckets = row.ValuesByYearMonth.Keys.Any(k => k.Year != 0 && k.Month != 0);
+                decimal grandVal;
+                if (row.Category == "Avg" || !hasMonthlyBuckets)
+                    row.ValuesByYearMonth.TryGetValue((0, 0), out grandVal);
+                else
+                    grandVal = row.ValuesByYearMonth
+                        .Where(kv => kv.Key.Year != 0 && kv.Key.Month != 0)
+                        .Sum(kv => kv.Value);
                 var grandCell = sheet.Cell(rowIdx, grandCol);
                 if (grandVal != 0) grandCell.Value = (double)grandVal;
                 SetNumberFormat(grandCell, row.Category);

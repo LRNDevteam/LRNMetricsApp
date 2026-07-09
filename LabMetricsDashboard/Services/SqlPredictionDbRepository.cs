@@ -30,7 +30,7 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
     {
         if (string.IsNullOrWhiteSpace(connectionString))
         {
-            _logger.LogWarning("DbConnectionString is empty — returning empty dataset.");
+            _logger.LogWarning("DbConnectionString is empty ï¿½ returning empty dataset.");
             return [];
         }
 
@@ -54,7 +54,7 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         cmd.Parameters.AddWithValue("@FilterCPTCode",             (object?)filterCPTCode            ?? DBNull.Value);
 
         // NOTE: exceptions are intentionally NOT swallowed here. The caller (controller)
-        // catches them and surfaces an actionable error message via the view-model —
+        // catches them and surfaces an actionable error message via the view-model ï¿½
         // hiding errors here was the root cause of the silent "all fields empty" bug.
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -78,7 +78,7 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(cancellationToken);
 
-            // SP 4: usp_ProbePredictionDb — checks table + SP existence
+            // SP 4: usp_ProbePredictionDb ï¿½ checks table + SP existence
             bool tableExists, procExists;
             await using (var cmd = new SqlCommand("dbo.usp_ProbePredictionDb", conn)
                          {
@@ -104,7 +104,7 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
                     "Stored procedure dbo.usp_GetPayerValidationReport is missing. " +
                     "Run PredictionAnalysisApp/Database/02_CreateStoredProcedures.sql against this lab's database.");
 
-            // SP 5: usp_GetPayerValidationRunStats — latest RunId + total row count
+            // SP 5: usp_GetPayerValidationRunStats ï¿½ latest RunId + total row count
             await using (var cmd = new SqlCommand("dbo.usp_GetPayerValidationRunStats", conn)
                          {
                              CommandType    = CommandType.StoredProcedure,
@@ -122,7 +122,15 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
                 var runId    = r.IsDBNull(0) ? null : r.GetString(0);
                 var inserted = r.IsDBNull(1) ? (DateTime?)null : r.GetDateTime(1);
                 var rows     = r.IsDBNull(2) ? 0L : r.GetInt64(2);
-                return new PredictionDbDiagnostic(true, true, rows, runId, inserted, null);
+
+                // WeekFolder + FileName were appended to the SP later â€” read them
+                // defensively so labs still on the old SP version keep working.
+                string? weekFolder = null, fileName = null;
+                if (r.FieldCount > 3 && !r.IsDBNull(3)) weekFolder = r.GetString(3);
+                if (r.FieldCount > 4 && !r.IsDBNull(4)) fileName   = r.GetString(4);
+
+                return new PredictionDbDiagnostic(true, true, rows, runId, inserted, null,
+                    weekFolder, fileName);
             }
         }
         catch (SqlException ex)
@@ -272,7 +280,7 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
     {
         var ord = r.GetOrdinal(col);
         if (r.IsDBNull(ord)) return 0;
-        // Column is NVARCHAR(MAX) in DB — parse string to int
+        // Column is NVARCHAR(MAX) in DB ï¿½ parse string to int
         return int.TryParse(r.GetString(ord), out var v) ? v : 0;
     }
 
@@ -280,7 +288,7 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
     {
         var ord = r.GetOrdinal(col);
         if (r.IsDBNull(ord)) return 0m;
-        // Column is NVARCHAR(MAX) in DB — parse string to decimal
+        // Column is NVARCHAR(MAX) in DB ï¿½ parse string to decimal
         return decimal.TryParse(r.GetString(ord),
             System.Globalization.NumberStyles.Any,
             System.Globalization.CultureInfo.InvariantCulture,
@@ -701,7 +709,7 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
             return null;
         }
 
-        // Null-safe helpers — defend against any NULL the SP might still return
+        // Null-safe helpers ï¿½ defend against any NULL the SP might still return
         // (e.g. when a bucket has no matching rows and ISNULL was not applied in an
         // older SP version already deployed to a lab database).
         int     SafeInt(string col) { var o = r.GetOrdinal(col); return r.IsDBNull(o) ? 0    : r.GetInt32  (o); }
@@ -709,7 +717,7 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         decimal? NullDec(string col) { var o = r.GetOrdinal(col); return r.IsDBNull(o) ? null : r.GetDecimal(o); }
 
         var result = new PredictionSummaryMetricsSpRow(
-            // Section 1 – raw bucket values (never null after SP fix; SafeInt/SafeDec as belt-and-braces)
+            // Section 1 ï¿½ raw bucket values (never null after SP fix; SafeInt/SafeDec as belt-and-braces)
             ToPay_LineItems:     SafeInt("ToPay_LineItems"),
             ToPay_ModeAllowed:   SafeDec("ToPay_ModeAllowed"),
             ToPay_ModeIns:       SafeDec("ToPay_ModeIns"),
@@ -731,7 +739,7 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
             Adj_ModeAllowed:     SafeDec("Adj_ModeAllowed"),
             Adj_ModeIns:         SafeDec("Adj_ModeIns"),
 
-            // Section 2 – Ratios (legitimately nullable when denominator = 0)
+            // Section 2 ï¿½ Ratios (legitimately nullable when denominator = 0)
             PaymentRatio_Claim:       NullDec("PaymentRatio_Claim"),
             PaymentRatio_Allowed:     NullDec("PaymentRatio_Allowed"),
             PaymentRatio_Insurance:   NullDec("PaymentRatio_Insurance"),
@@ -748,7 +756,7 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
             AdjustedPct_Allowed:      NullDec("AdjustedPct_Allowed"),
             AdjustedPct_Insurance:    NullDec("AdjustedPct_Insurance"),
 
-            // Section 3 – Prediction Accuracy (legitimately nullable when denominator = 0)
+            // Section 3 ï¿½ Prediction Accuracy (legitimately nullable when denominator = 0)
             PredAccuracy_Claim:            NullDec("PredAccuracy_Claim"),
             PredAccuracy_AllowedAmount:    NullDec("PredAccuracy_AllowedAmount"),
             PredAccuracy_InsurancePayment: NullDec("PredAccuracy_InsurancePayment"));

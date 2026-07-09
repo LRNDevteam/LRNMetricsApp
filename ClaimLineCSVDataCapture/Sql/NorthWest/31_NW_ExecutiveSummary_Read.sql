@@ -786,6 +786,24 @@ BEGIN
     FROM #Base b GROUP BY b.ESYear, b.ESMonth
 
     UNION ALL
+    -- AE  Average Payment Per Claim (Total Pay / Paid Claims)
+    SELECT 'AE','Avg','Average Payment Per Claim',b.ESYear,b.ESMonth,
+           CASE WHEN COUNT(CASE WHEN b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND b.ClaimStatus IN ('Fully Paid','Partially Paid','Patient Paid') THEN b.AccessionNumber END)>0
+                THEN SUM(CASE WHEN b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND b.ClaimStatus IN ('Fully Paid','Partially Paid','Patient Paid') THEN b.InsurancePayment+b.PatientPayment ELSE 0 END)
+                   / COUNT(CASE WHEN b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND b.ClaimStatus IN ('Fully Paid','Partially Paid','Patient Paid') THEN b.AccessionNumber END)
+                ELSE 0 END
+    FROM #Base b GROUP BY b.ESYear, b.ESMonth
+
+    UNION ALL
+    -- AF  Average Payment ($) - Total Pay/Adjudicated Claims
+    SELECT 'AF','Avg','Average Payment ($) - Total Pay/Adjudicated Claims',b.ESYear,b.ESMonth,
+           CASE WHEN COUNT(CASE WHEN b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND b.ClaimStatus IN ('Fully Paid','Fully Adjusted','Fully Denied','Partially Denied') THEN b.AccessionNumber END)>0
+                THEN SUM(CASE WHEN b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND b.ClaimStatus IN ('Fully Paid','Partially Paid') THEN b.InsurancePayment ELSE 0 END)
+                   / COUNT(CASE WHEN b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND b.ClaimStatus IN ('Fully Paid','Fully Adjusted','Fully Denied','Partially Denied') THEN b.AccessionNumber END)
+                ELSE 0 END
+    FROM #Base b GROUP BY b.ESYear, b.ESMonth
+
+    UNION ALL
     -- S.1 / S.3 / AC.1 / AC.3 ARIA rows (mirrors file 30's aggregate refresh)
     SELECT 'S.1.A1','PMS','    Aria Submitted in the last 30 Days',p.ESYear,p.ESMonth,@S1_A1 FROM #Periods p
     UNION ALL

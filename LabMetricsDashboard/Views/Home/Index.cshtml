@@ -531,8 +531,8 @@
     {
         <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
             <div class="view-tabs" style="margin-bottom:0">
-                <button class="view-tab active" id="btnGridView" onclick="switchView('grid')">Grid view</button>
-                <button class="view-tab" id="btnTableView" onclick="switchView('table')">Worklist (table)</button>
+                <button class="view-tab active" id="btnGridView">Grid view</button>
+                <button class="view-tab" id="btnTableView">Worklist (table)</button>
             </div>
             <div class="view-tabs" style="margin-bottom:0">
                 <a class="view-tab @(Model.Sort == "latest" ? "active" : "")" asp-controller="Home" asp-action="Index" asp-route-sort="latest">&#128337; Latest</a>
@@ -621,13 +621,21 @@
                             <span class="file-dot" style="background:@(tile.PredictionEnabled ? "#3b82f6" : "#e2e8f0")"></span>
                             <div class="file-content">
                                 <div class="file-section">Prediction Analysis</div>
-                                @if (tile.HasPredictionFile)
+                                @if (tile.DBEnabled)
+                                {
+                                    @* DB labs read prediction data live from SQL — show the DB run, not a (possibly stale) folder file. *@
+                                    <div class="file-name" style="color:#3b82f6"
+                                         title="@(tile.PredictionDbInsertedAt is not null ? $"Loaded {tile.PredictionDbInsertedAt:MMM dd, yyyy hh:mm tt}" : "Live database source")">
+                                        Database@(string.IsNullOrEmpty(tile.PredictionDbRunId) ? "" : $" — {tile.PredictionDbRunId}")
+                                        @if (tile.PredictionDbInsertedAt is not null)
+                                        {
+                                            <span style="color:#94a3b8">(@tile.PredictionDbInsertedAt.Value.ToString("MM/dd/yyyy"))</span>
+                                        }
+                                    </div>
+                                }
+                                else if (tile.HasPredictionFile)
                                 {
                                     <div class="file-name" title="@tile.PredictionFilePath">@tile.PredictionFileName</div>
-                                }
-                                else if (tile.DBEnabled)
-                                {
-                                    <div class="file-name" style="color:#3b82f6">Database</div>
                                 }
                                 else
                                 {
@@ -735,7 +743,7 @@
 
         <div id="tableView" style="display:none">
         <div class="wl-search-bar">
-            <input type="text" class="wl-search-input" id="wlSearchInput" placeholder="Search labs…" oninput="filterWorklistRows()" />
+            <input type="text" class="wl-search-input" id="wlSearchInput" placeholder="Search labs…" />
         </div>
 
         <!-- Card list -->
@@ -956,11 +964,25 @@ function filterWorklistRows() {
 document.addEventListener('click', function() {});
 
 document.addEventListener('DOMContentLoaded', function() {
+    // Attach click handlers to view buttons
+    var btnGrid = document.getElementById('btnGridView');
+    var btnTbl  = document.getElementById('btnTableView');
+    if (btnGrid) btnGrid.addEventListener('click', function() { switchView('grid'); });
+    if (btnTbl)  btnTbl.addEventListener('click', function() { switchView('table'); });
+
+    // Attach input handler to search box
+    var searchInput = document.getElementById('wlSearchInput');
+    if (searchInput) searchInput.addEventListener('input', filterWorklistRows);
+
+    // Restore saved view preference
     try {
         var saved = localStorage.getItem('homeView');
         if (saved === 'table') switchView('table');
     } catch(e) {}
 });
 </script>
+
+@* end of file *@
+pt>
 
 @* end of file *@

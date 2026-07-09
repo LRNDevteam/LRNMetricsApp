@@ -125,10 +125,12 @@ try
             }
 
             // ════════════════════════════════════════════════════════════════════
-            // STEP 1B — Pick latest .xlsx from WeekFolder
+            // STEP 1B — Pick latest source file (.xlsx or .csv) from WeekFolder
             // ════════════════════════════════════════════════════════════════════
             var allInputFiles = Directory
-                .GetFiles(weekFolderPath, "*.xlsx", SearchOption.TopDirectoryOnly)
+                .GetFiles(weekFolderPath, "*.*", SearchOption.TopDirectoryOnly)
+                .Where(f => Path.GetExtension(f).Equals(".xlsx", StringComparison.OrdinalIgnoreCase)
+                         || Path.GetExtension(f).Equals(".csv",  StringComparison.OrdinalIgnoreCase))
                 .Select(f => new FileInfo(f))
                 .Where(f => !f.Name.Contains(outputMarker, StringComparison.OrdinalIgnoreCase)
                          && !Path.GetFileNameWithoutExtension(f.Name)
@@ -138,7 +140,7 @@ try
 
             if (allInputFiles.Count == 0)
             {
-                Console.WriteLine($"[Step 1] No source .xlsx files found in: {weekFolderPath}");
+                Console.WriteLine($"[Step 1] No source .xlsx/.csv files found in: {weekFolderPath}");
                 // Teams alert only when a new file is processed.
                 labFailed++;
                 continue;
@@ -166,6 +168,42 @@ try
 
             if (lab.DataRefresh)
                 Console.WriteLine($"[Step 1] DataRefresh=true — bypassing LastProcessedFile check, file will be re-processed: {latestInputFile.Name}");
+
+            // ════════════════════════════════════════════════════════════════════
+            // STEP 1D — DB-level dedupe (second layer).
+            //           LastProcessedFile can be out of sync (config replaced, path
+            //           changed, previous run failed after the DB insert). If the
+            //           exact file is already in PayerValidationFileLog AND the last
+            //           generated report still exists on disk, the lab is fully done:
+            //           skip it and heal the JSON so the next run skips at Step 1C.
+            // ════════════════════════════════════════════════════════════════════
+            if (!lab.DataRefresh
+                && lab.EnableDatabaseInsert
+                && !string.IsNullOrWhiteSpace(lab.DbConnectionString))
+            {
+                var dedupeSvc = new PredictionDbService(lab.DbConnectionString, lab.DbInsertChunkSize);
+
+                if (dedupeSvc.FileAlreadyLogged(latestInputFile.FullName, lab.LabName)
+                    && !string.IsNullOrWhiteSpace(lab.LastOutputFilePath)
+                    && File.Exists(lab.LastOutputFilePath))
+                {
+                    Console.WriteLine($"[Step 1] SKIP — file already in PayerValidationFileLog and report exists:");
+                    Console.WriteLine($"[Step 1]        Source : {latestInputFile.Name}");
+                    Console.WriteLine($"[Step 1]        Report : {lab.LastOutputFilePath}");
+
+                    // Heal the JSON so the next run skips cheaply at Step 1C.
+                    if (!string.Equals(lab.LastProcessedFile, latestInputFile.FullName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        lab.LastProcessedFile = latestInputFile.FullName;
+                        LabConfigLoader.SaveLastProcessed(configFilePath, lab);
+                        Console.WriteLine($"[Step 1]        LastProcessedFile updated in {Path.GetFileName(configFilePath)}.");
+                    }
+
+                    AppLogger.LogWarn($"[Lab {labIndex}/{labs.Count}] SKIPPED : {lab.LabName} | Already in FileLog + report exists | File: {latestInputFile.Name}");
+                    labSkipped++;
+                    continue;
+                }
+            }
 
             // ── Relative sub-path — derived from ResolveLatestFolder result ───────
             // weekFolderPath = Input\2026\02. February\02.25.2026 - 03.03.2026
@@ -238,6 +276,7 @@ try
             }
 
             Console.WriteLine($"[Step 3] Records loaded: {allRecords.Count}");
+            AppLogger.Log($"[{lab.LabName}] Step 3: {allRecords.Count:N0} records loaded from {latestInputFile.Name}");
 
             // ════════════════════════════════════════════════════════════════════
             // STEP 3B — Persist source rows to DB (exceptions do NOT stop analysis)
@@ -306,6 +345,8 @@ try
             // STEP 4 — Write report directly into ProcessingFolderPath
             // ════════════════════════════════════════════════════════════════════
             Console.WriteLine("\n[Step 4] Generating report into Processing folder...");
+            AppLogger.Log($"[{lab.LabName}] Step 4: analysis done — generating Excel report ({allRecords.Count:N0} rows, this can take a while for large labs)...");
+            var reportSw = System.Diagnostics.Stopwatch.StartNew();
 
             var reportInProcessing = new ReportWriterService().WriteReport(
                 lab.ProcessingFolderPath,
@@ -314,11 +355,15 @@ try
                 runId, lab.LabName, weekFolderName,
                 readMe, labSettings, denialCodeAnalysis);
 
+            reportSw.Stop();
+            AppLogger.Log($"[{lab.LabName}] Step 4: report generated in {reportSw.Elapsed.TotalMinutes:F1} min → {Path.GetFileName(reportInProcessing)}");
+
             // ════════════════════════════════════════════════════════════════════
             // STEP 5 — Move report  Processing → Output\Year\Month\WeekFolder
             //          Then delete the source copy from ProcessingFolderPath
             // ════════════════════════════════════════════════════════════════════
             Console.WriteLine("\n[Step 5] Moving report to Output folder...");
+            AppLogger.Log($"[{lab.LabName}] Step 5: moving report to Output folder...");
 
             var outputSubFolder = Path.Combine(lab.OutputFolderPath, relativeSub);
             Directory.CreateDirectory(outputSubFolder);
@@ -351,6 +396,7 @@ try
                 {
                     Console.WriteLine($"[Step 5] [WARN] Move failed — file locked (attempt {attempt}/{maxRetries}): {ioEx.Message}");
                     Console.WriteLine($"[Step 5] Retrying in {retryDelayMs / 1000}s...");
+                    AppLogger.LogWarn($"[{lab.LabName}] Step 5: move failed — file locked (attempt {attempt}/{maxRetries}): {ioEx.Message}. Retrying in {retryDelayMs / 1000}s...");
                     await Task.Delay(retryDelayMs);
                 }
                 catch (IOException ioEx)

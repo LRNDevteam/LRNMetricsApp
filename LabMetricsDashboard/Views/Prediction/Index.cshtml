@@ -1,6 +1,6 @@
 @model LabMetricsDashboard.Models.PredictionAnalysisViewModel
 @{
-    ViewData["Title"]       = $"Prediction Analysis – {Model.SelectedLab}";
+    ViewData["Title"]       = $"Prediction Analysis - {Model.SelectedLab}";
     ViewData["SelectedLab"] = Model.SelectedLab;
     ViewData["PageLabel"]   = "Prediction Analysis";
 
@@ -39,13 +39,13 @@
 
     // Bucket row styling: top-level rows bold, sub-rows indented
     static bool IsSummaryBucket(string name) =>
-        name is "Predicted To Pay" or "Predicted – Paid" or "Predicted – Unpaid";
+        name is "Predicted To Pay" or "Predicted â€“ Paid" or "Predicted â€“ Unpaid";
 
     static string VarianceClass(decimal? v) =>
         v is null ? "" : v >= 0 ? "text-success" : "text-danger";
 
-    static string FmtPct(decimal? v) => v.HasValue ? $"{v.Value:N2}%" : "—";
-    static string FmtAmt(decimal? v) => v.HasValue ? $"${v.Value:N2}" : "—";
+    static string FmtPct(decimal? v) => v.HasValue ? $"{v.Value:N2}%" : "â€”";
+    static string FmtAmt(decimal? v) => v.HasValue ? $"${v.Value:N2}" : "â€”";
 
     var sm = Model.SummaryMetrics;
     var db = Model.DenialBreakdown;
@@ -332,7 +332,31 @@
 </style>
 
 <!-- Header -->
-<h2 class="mb-3 fw-bold">&#128202; Prediction Analysis <span class="badge bg-primary bg-gradient fw-semibold" style="font-size:.45em;vertical-align:middle;border-radius:20px;padding:.35em .85em">@Model.SelectedLab</span></h2>
+<h2 class="mb-1 fw-bold">&#128202; Prediction Analysis <span class="badge bg-primary bg-gradient fw-semibold" style="font-size:.45em;vertical-align:middle;border-radius:20px;padding:.35em .85em">@Model.SelectedLab</span></h2>
+
+@if (Model.RunId is not null || Model.WeekFolder is not null || Model.DataInsertedAt is not null)
+{
+    <div class="mb-3 d-flex flex-wrap align-items-center gap-2" style="font-size:.78rem;color:#475569;">
+        @if (Model.RunId is not null)
+        {
+            <span class="badge" style="background:#eef2ff;color:#3730a3;font-weight:600;border-radius:12px;padding:.35em .8em;">
+                &#127991;&#65039; Run ID: @Model.RunId
+            </span>
+        }
+        @if (!string.IsNullOrWhiteSpace(Model.WeekFolder))
+        {
+            <span class="badge" style="background:#ecfdf5;color:#065f46;font-weight:600;border-radius:12px;padding:.35em .8em;">
+                &#128197; Week: @Model.WeekFolder
+            </span>
+        }
+        @if (Model.DataInsertedAt is not null)
+        {
+            <span class="badge" style="background:#fff7ed;color:#9a3412;font-weight:600;border-radius:12px;padding:.35em .8em;">
+                &#128337; Data loaded: @Model.DataInsertedAt.Value.ToString("MMM dd, yyyy hh:mm tt")
+            </span>
+        }
+    </div>
+}
 
 @if (!string.IsNullOrEmpty(Model.SelectedLab))
 {
@@ -672,15 +696,15 @@
                             <td class="text-end val-cell">@(toPay?.ClaimCount.ToString("N0") ?? "\u2014")</td>
                             <td class="text-end val-cell">@FmtAmt(toPay?.PredictedAllowed)</td>
                             <td class="text-end val-cell">@FmtAmt(toPay?.PredictedInsurance)</td>
-                            <td class="text-end na-cell">—</td>
-                            <td class="text-end na-cell">—</td>
-                            <td class="text-end na-cell">—</td>
-                            <td class="text-end na-cell">—</td>
+                            <td class="text-end na-cell">&mdash;</td>
+                            <td class="text-end na-cell">&mdash;</td>
+                            <td class="text-end na-cell">&mdash;</td>
+                            <td class="text-end na-cell">&mdash;</td>
                         </tr>
 
-                        <!-- Predicted – Paid -->
+                        <!-- Predicted - Paid -->
                         <tr class="row-summary">
-                            <td><strong>Predicted – Paid</strong></td>
+                            <td><strong>Predicted &ndash; Paid</strong></td>
                             <td class="text-end val-cell">@(paid?.ClaimCount.ToString("N0") ?? "\u2014")</td>
                             <td class="text-end val-cell">@FmtAmt(paid?.PredictedAllowed)</td>
                             <td class="text-end val-cell">@FmtAmt(paid?.PredictedInsurance)</td>
@@ -694,9 +718,9 @@
                             </td>
                         </tr>
 
-                        <!-- Predicted – Unpaid -->
+                        <!-- Predicted - Unpaid -->
                         <tr class="row-sub">
-                            <td>Predicted – Unpaid</td>
+                            <td>Predicted &ndash; Unpaid</td>
                             <td class="text-end val-cell">@(unpaid?.ClaimCount.ToString("N0") ?? "\u2014")</td>
                             <td class="text-end val-cell">@FmtAmt(unpaid?.PredictedAllowed)</td>
                             <td class="text-end val-cell">@FmtAmt(unpaid?.PredictedInsurance)</td>
@@ -710,9 +734,9 @@
                             </td>
                         </tr>
 
-                        <!-- Unpaid – Denied -->
+                        <!-- Unpaid - Denied -->
                         <tr class="row-sub-2">
-                            <td>Unpaid – Denied</td>
+                            <td>Unpaid &ndash; Denied</td>
                             <td class="text-end val-cell">@(denied?.ClaimCount.ToString("N0") ?? "\u2014")</td>
                             <td class="text-end val-cell">@FmtAmt(denied?.PredictedAllowed)</td>
                             <td class="text-end val-cell">@FmtAmt(denied?.PredictedInsurance)</td>
@@ -726,9 +750,9 @@
                             </td>
                         </tr>
 
-                        <!-- Unpaid – No Response -->
+                        <!-- Unpaid - No Response -->
                         <tr class="row-sub-2">
-                            <td>Unpaid – No Response</td>
+                            <td>Unpaid &ndash; No Response</td>
                             <td class="text-end val-cell">@(noresp?.ClaimCount.ToString("N0") ?? "\u2014")</td>
                             <td class="text-end val-cell">@FmtAmt(noresp?.PredictedAllowed)</td>
                             <td class="text-end val-cell">@FmtAmt(noresp?.PredictedInsurance)</td>
@@ -742,9 +766,9 @@
                             </td>
                         </tr>
 
-                        <!-- Unpaid – Adjusted -->
+                        <!-- Unpaid - Adjusted -->
                         <tr class="row-sub-2">
-                            <td>Unpaid – Adjusted</td>
+                            <td>Unpaid &ndash; Adjusted</td>
                             <td class="text-end val-cell">@(adj?.ClaimCount.ToString("N0") ?? "\u2014")</td>
                             <td class="text-end val-cell">@FmtAmt(adj?.PredictedAllowed)</td>
                             <td class="text-end val-cell">@FmtAmt(adj?.PredictedInsurance)</td>
@@ -844,7 +868,7 @@
                         <div style="font-size:2rem;font-weight:800;color:#2e7d32;line-height:1;margin-bottom:.2rem">
                             @FmtPct(sm.PredVsActualAllowedAmount)
                         </div>
-                        <div style="font-size:.68rem;color:#64748b">Predicted vs Actuals – Allowed Amount</div>
+                        <div style="font-size:.68rem;color:#64748b">Predicted vs Actuals &ndash; Allowed Amount</div>
                     </div>
 
                     <!-- Insurance Payment % tile -->
@@ -858,7 +882,7 @@
                         <div style="font-size:2rem;font-weight:800;color:#6a1b9a;line-height:1;margin-bottom:.2rem">
                             @FmtPct(sm.PredVsActualInsPayment)
                         </div>
-                        <div style="font-size:.68rem;color:#64748b">Predicted vs Actuals – Insurance Payment</div>
+                        <div style="font-size:.68rem;color:#64748b">Predicted vs Actuals &ndash; Insurance Payment</div>
                     </div>
 
                 </div>
@@ -1024,7 +1048,7 @@
                                         <td class="text-end vt-adj">@r.Adjusted</td>
                                         <td class="text-end vt-unpaid fw-bold">@r.Unpaid</td>
                                         <td class="text-end fw-semibold" style="color:@(r.PaymentRatePct >= 50 ? "#2e7d32" : "#c0392b")">
-                                            @(r.PaymentRatePct.HasValue ? $"{r.PaymentRatePct:N1}%" : "—")
+                                            @(r.PaymentRatePct.HasValue ? $"{r.PaymentRatePct:N1}%" : "â€”")
                                         </td>
                                         <td class="text-end">@(r.PredictedAllowed == 0 ? "" : $"${r.PredictedAllowed:N2}")</td>
                                         <td class="text-end">@(r.PredictedInsurance == 0 ? "" : $"${r.PredictedInsurance:N2}")</td>
@@ -1142,7 +1166,7 @@
                                         <td class="text-end vt-adj">@r.Adjusted</td>
                                         <td class="text-end vt-unpaid fw-bold">@r.Unpaid</td>
                                         <td class="text-end fw-semibold" style="color:@(r.PaymentRatePct >= 50 ? "#2e7d32" : "#c0392b")">
-                                            @(r.PaymentRatePct.HasValue ? $"{r.PaymentRatePct:N1}%" : "—")
+                                            @(r.PaymentRatePct.HasValue ? $"{r.PaymentRatePct:N1}%" : "â€”")
                                         </td>
                                         <td class="text-end">@(r.PredictedAllowed == 0 ? "" : $"${r.PredictedAllowed:N2}")</td>
                                         <td class="text-end">@(r.PredictedInsurance == 0 ? "" : $"${r.PredictedInsurance:N2}")</td>
@@ -1222,7 +1246,7 @@
                                     {
                                         <tr class="denial-row-payer">
                                             <td title="@payer.PayerName">
-                                                @(payer.PayerName.Length > 38 ? payer.PayerName[..38] + "…" : payer.PayerName)
+                                                @(payer.PayerName.Length > 38 ? payer.PayerName[..38] + "..." : payer.PayerName)
                                             </td>
                                             @foreach (var mo in db.Months)
                                             {
@@ -1243,7 +1267,7 @@
                                                     @if (!string.IsNullOrWhiteSpace(dc.DenialDescription))
                                                     {
                                                         <span class="text-muted" style="font-weight:400">
-                                                            &mdash; @(dc.DenialDescription.Length > 40 ? dc.DenialDescription[..40] + "…" : dc.DenialDescription)
+                                                            &mdash; @(dc.DenialDescription.Length > 40 ? dc.DenialDescription[..40] + "..." : dc.DenialDescription)
                                                         </span>
                                                     }
                                                 </td>
@@ -1325,7 +1349,7 @@
                                     {
                                         <tr class="nr-row-payer">
                                             <td title="@payer.PayerName">
-                                                @(payer.PayerName.Length > 38 ? payer.PayerName[..38] + "…" : payer.PayerName)
+                                                @(payer.PayerName.Length > 38 ? payer.PayerName[..38] + "..." : payer.PayerName)
                                             </td>
                                             @foreach (var bkt in AgeBuckets.All)
                                             {
@@ -1374,7 +1398,7 @@
             <div>
                 <div class="fw-bold" style="font-size:.95rem">&#128196; Line Item Detail</div>
                 <div class="text-muted" style="font-size:.8rem">
-                    @Model.Paging.TotalFiltered.ToString("N0") records (after global filter) — view on a dedicated page with filters and paging.
+                    @Model.Paging.TotalFiltered.ToString("N0") records (after global filter) &mdash; view on a dedicated page with filters and paging.
                 </div>
             </div>
             <a asp-controller="Prediction" asp-action="LineDetail"
@@ -1397,7 +1421,7 @@
             <div>
                 <div class="fw-bold" style="font-size:.95rem">&#128197; Forecasting Summary</div>
                 <div class="text-muted" style="font-size:.8rem">
-                    Last 4 weeks Median &amp; Mode weekly breakdown by payer — view on a dedicated page.
+                    Last 4 weeks Median &amp; Mode weekly breakdown by payer &mdash; view on a dedicated page.
                 </div>
             </div>
             <a asp-controller="Prediction" asp-action="ForecastingSummary"

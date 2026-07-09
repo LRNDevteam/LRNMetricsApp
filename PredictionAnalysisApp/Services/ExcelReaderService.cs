@@ -36,14 +36,15 @@ public class ExcelReaderService
         Console.WriteLine($"[Step 1] Target folder     : {targetFolder}");
         Console.WriteLine($"[Step 1] Week folder name  : {weekFolderName}");
 
-        // ── Build candidate file list ─────────────────────────────────────────
+        // ── Build candidate file list (.xlsx and .csv) ────────────────────────
         // Exclusions:
         //   1. Previously generated output files  → contain "_Prediction_vs_NonPayment_Analysis_"
         //   2. Temporary files                    → name ends with "_temp" (before extension)
         const string outputMarker = "_Prediction_vs_NonPayment_Analysis_";
         const string tempSuffix   = "_temp";
 
-        var files = Directory.GetFiles(targetFolder, "*.xlsx")
+        var files = Directory.GetFiles(targetFolder)
+            .Where(IsSourceExtension)
             .Select(f => new FileInfo(f))
             .Where(f => !f.Name.Contains(outputMarker, StringComparison.OrdinalIgnoreCase)
                      && !Path.GetFileNameWithoutExtension(f.Name)
@@ -53,7 +54,7 @@ public class ExcelReaderService
 
         if (files.Count == 0)
             throw new FileNotFoundException(
-                $"No source .xlsx files found in: {targetFolder}  " +
+                $"No source .xlsx/.csv files found in: {targetFolder}  " +
                 $"(temp and generated output files are excluded)");
 
         // ── Try each candidate in order until one opens successfully ─────────
@@ -61,6 +62,7 @@ public class ExcelReaderService
         FileInfo?      latestFile = null;
         XLWorkbook?    workbook   = null;
         IXLWorksheet?  sheet      = null;
+        CsvTable?      csvTable   = null;
 
         foreach (var candidate in files)
         {
@@ -77,6 +79,16 @@ public class ExcelReaderService
             {
                 Console.WriteLine($"[Step 1] Trying file       : {candidate.FullName}");
                 Console.WriteLine($"[Step 1] File created      : {candidate.CreationTime:yyyy-MM-dd HH:mm:ss}");
+
+                if (candidate.Extension.Equals(".csv", StringComparison.OrdinalIgnoreCase))
+                {
+                    var table = CsvTable.Load(candidate.FullName);
+                    Console.WriteLine($"[Step 1] CSV parsed        : {table.Rows.Count} data rows | {table.Headers.Count} columns.");
+
+                    latestFile = candidate;
+                    csvTable   = table;
+                    break; // successfully parsed — stop trying
+                }
 
                 var wb = new XLWorkbook(candidate.FullName);
 
@@ -104,9 +116,9 @@ public class ExcelReaderService
             }
         }
 
-        if (latestFile is null || workbook is null || sheet is null)
+        if (latestFile is null || (csvTable is null && (workbook is null || sheet is null)))
             throw new FileNotFoundException(
-                $"All candidate .xlsx files in '{targetFolder}' failed to open. Check logs above.");
+                $"All candidate .xlsx/.csv files in '{targetFolder}' failed to open. Check logs above.");
 
         Console.WriteLine($"[Step 1] Using report      : {latestFile.FullName}");
 
@@ -115,6 +127,18 @@ public class ExcelReaderService
         var underscoreIdx = fileNameOnly.IndexOf('_');
         var runId         = underscoreIdx > 0 ? fileNameOnly[..underscoreIdx] : fileNameOnly;
         Console.WriteLine($"[Step 1] RunId extracted   : {runId}  (source: '{latestFile.Name}')");
+
+        // ── CSV path ──────────────────────────────────────────────────────────
+        if (csvTable is not null)
+        {
+            var csvRecords = BuildRecordsFromCsv(csvTable, settings);
+            return (csvRecords, latestFile.FullName, runId, weekFolderName);
+        }
+
+        // ── XLSX path (unchanged) ─────────────────────────────────────────────
+        if (workbook is null || sheet is null)
+            throw new InvalidOperationException(
+                "Internal error: workbook/sheet not initialised for xlsx source.");
 
         using (workbook)
         {
@@ -253,11 +277,12 @@ public class ExcelReaderService
     {
         const string outputMarker = "_Prediction_vs_NonPayment_Analysis_";
 
-        // Find the most recently WRITTEN source .xlsx file anywhere under rootFolder.
+        // Find the most recently WRITTEN source .xlsx/.csv file anywhere under rootFolder.
         // Using LastWriteTimeUtc is reliable regardless of how/when the folder was created
         // or copied — it always reflects when the file content was last changed.
         var newestFile = Directory
-            .EnumerateFiles(rootFolder, "*.xlsx", SearchOption.AllDirectories)
+            .EnumerateFiles(rootFolder, "*.*", SearchOption.AllDirectories)
+            .Where(IsSourceExtension)
             .Where(f => !Path.GetFileName(f)
                             .Contains(outputMarker, StringComparison.OrdinalIgnoreCase))
             .Select(f => new FileInfo(f))
@@ -268,10 +293,10 @@ public class ExcelReaderService
         {
             var dir = newestFile.DirectoryName!;
             return (dir, Path.GetFileName(dir),
-                $"Fallback: newest source .xlsx by LastWriteTime → {newestFile.FullName}");
+                $"Fallback: newest source file by LastWriteTime → {newestFile.FullName}");
         }
 
-        throw new FileNotFoundException($"No source .xlsx files found anywhere under: {rootFolder}");
+        throw new FileNotFoundException($"No source .xlsx/.csv files found anywhere under: {rootFolder}");
     }
 
     // ── Folder sort helpers ───────────────────────────────────────────────────
@@ -310,6 +335,239 @@ public class ExcelReaderService
         return DateTime.MinValue;
     }
 
+    // ── Source file extension helper ──────────────────────────────────────────
+
+    /// <summary>Accepted source file extensions: .xlsx and .csv.</summary>
+    private static bool IsSourceExtension(string path)
+    {
+        var ext = Path.GetExtension(path);
+        return ext.Equals(".xlsx", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".csv",  StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ── CSV support ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// In-memory CSV table: header list, header→index map, and data rows.
+    /// Parsed with RFC 4180 rules (quoted fields, embedded commas/quotes/newlines).
+    /// </summary>
+    private sealed class CsvTable
+    {
+        public List<string>            Headers { get; }
+        public Dictionary<string, int> ColMap  { get; }
+        public List<string[]>          Rows    { get; }
+
+        private CsvTable(List<string> headers, Dictionary<string, int> colMap, List<string[]> rows)
+        {
+            Headers = headers;
+            ColMap  = colMap;
+            Rows    = rows;
+        }
+
+        public static CsvTable Load(string path)
+        {
+            // FileShare.ReadWrite: tolerate the file being open in Excel.
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream, detectEncodingFromByteOrderMarks: true);
+
+            var allRows = ParseCsv(reader);
+
+            if (allRows.Count == 0)
+                throw new InvalidDataException($"CSV file is empty: {path}");
+
+            var headers = allRows[0]
+                .Select(h => h.Trim())
+                .ToList();
+
+            if (headers.All(string.IsNullOrEmpty))
+                throw new InvalidDataException($"CSV header row is blank: {path}");
+
+            var colMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < headers.Count; i++)
+            {
+                if (!string.IsNullOrEmpty(headers[i]) && !colMap.ContainsKey(headers[i]))
+                    colMap[headers[i]] = i;
+            }
+
+            // Data rows: skip completely blank lines.
+            var rows = allRows
+                .Skip(1)
+                .Where(r => r.Any(v => !string.IsNullOrWhiteSpace(v)))
+                .ToList();
+
+            return new CsvTable(headers, colMap, rows);
+        }
+
+        /// <summary>RFC 4180 character-level parser: handles quoted fields containing commas, quotes ("" escape) and newlines.</summary>
+        private static List<string[]> ParseCsv(TextReader reader)
+        {
+            var rows     = new List<string[]>();
+            var fields   = new List<string>();
+            var sb       = new System.Text.StringBuilder();
+            bool inQuotes = false;
+            int ch;
+
+            while ((ch = reader.Read()) != -1)
+            {
+                char c = (char)ch;
+
+                if (inQuotes)
+                {
+                    if (c == '"')
+                    {
+                        if (reader.Peek() == '"') { sb.Append('"'); reader.Read(); }
+                        else inQuotes = false;
+                    }
+                    else sb.Append(c);
+                }
+                else if (c == '"')
+                {
+                    inQuotes = true;
+                }
+                else if (c == ',')
+                {
+                    fields.Add(sb.ToString()); sb.Clear();
+                }
+                else if (c == '\r' || c == '\n')
+                {
+                    if (c == '\r' && reader.Peek() == '\n') reader.Read();
+                    fields.Add(sb.ToString()); sb.Clear();
+                    rows.Add(fields.ToArray()); fields.Clear();
+                }
+                else sb.Append(c);
+            }
+
+            if (sb.Length > 0 || fields.Count > 0)
+            {
+                fields.Add(sb.ToString());
+                rows.Add(fields.ToArray());
+            }
+
+            return rows;
+        }
+    }
+
+    /// <summary>
+    /// Builds ClaimRecords from a parsed CSV table using the same configured
+    /// column mapping and diagnostics as the xlsx path.
+    /// </summary>
+    private static List<ClaimRecord> BuildRecordsFromCsv(CsvTable table, AnalysisSettings settings)
+    {
+        var colMap = table.ColMap;
+
+        var orderedHeaders = colMap
+            .OrderBy(kv => kv.Value)
+            .Select(kv => kv.Key)
+            .ToList();
+
+        Console.WriteLine($"\n[Diag] Columns found in CSV ({orderedHeaders.Count} total):");
+        foreach (var kv in colMap.OrderBy(k => k.Value))
+            Console.WriteLine($"         Col {kv.Value + 1,3}: {kv.Key}");
+
+        Console.WriteLine("\n[Diag] Analysis column mapping check:");
+        CheckColumn(colMap, settings.Columns.AccessionNumber,     nameof(settings.Columns.AccessionNumber));
+        CheckColumn(colMap, settings.Columns.VisitNumber,         nameof(settings.Columns.VisitNumber));
+        CheckColumn(colMap, settings.Columns.PayerName,           nameof(settings.Columns.PayerName));
+        CheckColumn(colMap, settings.Columns.PanelName,           nameof(settings.Columns.PanelName));
+        CheckColumn(colMap, settings.Columns.ForecastingP,        nameof(settings.Columns.ForecastingP));
+        CheckColumn(colMap, settings.Columns.PayStatus,           nameof(settings.Columns.PayStatus));
+        CheckColumn(colMap, settings.Columns.DenialCode,          nameof(settings.Columns.DenialCode));
+        CheckColumn(colMap, settings.Columns.DenialDescription,   nameof(settings.Columns.DenialDescription));
+        CheckColumn(colMap, settings.Columns.ExpectedPaymentDate, nameof(settings.Columns.ExpectedPaymentDate));
+        CheckColumn(colMap, settings.Columns.FirstBilledDate,     nameof(settings.Columns.FirstBilledDate));
+        CheckColumn(colMap, settings.Columns.ModeAllowedAmount,   nameof(settings.Columns.ModeAllowedAmount));
+        CheckColumn(colMap, settings.Columns.ModeInsurancePaid,   nameof(settings.Columns.ModeInsurancePaid));
+        CheckColumn(colMap, settings.Columns.AllowedAmount,       nameof(settings.Columns.AllowedAmount));
+        CheckColumn(colMap, settings.Columns.InsurancePayment,    nameof(settings.Columns.InsurancePayment));
+        Console.WriteLine();
+
+        var records = new List<ClaimRecord>(table.Rows.Count);
+
+        foreach (var row in table.Rows)
+        {
+            var rawColumns = new Dictionary<string, string>(orderedHeaders.Count,
+                StringComparer.OrdinalIgnoreCase);
+            foreach (var header in orderedHeaders)
+                rawColumns[header] = GetCsvCell(row, colMap, header);
+
+            var record = new ClaimRecord
+            {
+                AccessionNumber     = GetCsvCell(row, colMap, settings.Columns.AccessionNumber),
+                VisitNumber         = GetCsvCell(row, colMap, settings.Columns.VisitNumber),
+                PayerName           = GetCsvCell(row, colMap, settings.Columns.PayerName),
+                PanelName           = GetCsvCell(row, colMap, settings.Columns.PanelName),
+                ForecastingP        = GetCsvCell(row, colMap, settings.Columns.ForecastingP),
+                PayStatus           = GetCsvCell(row, colMap, settings.Columns.PayStatus),
+                DenialCode          = GetCsvCell(row, colMap, settings.Columns.DenialCode),
+                DenialDescription   = GetCsvCell(row, colMap, settings.Columns.DenialDescription),
+                ExpectedPaymentDate = ParseCsvDate(row, colMap, settings.Columns.ExpectedPaymentDate),
+                FirstBilledDate     = ParseCsvDate(row, colMap, settings.Columns.FirstBilledDate),
+                ModeAllowedAmount   = ParseCsvDecimal(row, colMap, settings.Columns.ModeAllowedAmount),
+                ModeInsurancePaid   = ParseCsvDecimal(row, colMap, settings.Columns.ModeInsurancePaid),
+                AllowedAmount       = ParseCsvDecimal(row, colMap, settings.Columns.AllowedAmount),
+                InsurancePayment    = ParseCsvDecimal(row, colMap, settings.Columns.InsurancePayment),
+                RawColumns          = rawColumns,
+                SourceHeaders       = []
+            };
+
+            records.Add(record);
+        }
+
+        // Propagate SourceHeaders to all records (mirrors xlsx path behaviour)
+        foreach (var r in records)
+            r.SourceHeaders = orderedHeaders;
+
+        Console.WriteLine($"[Step 1] Loaded {records.Count} rows | {orderedHeaders.Count} columns per row. (CSV source)");
+        PrintDistinctSample(records, "ForecastingP", r => r.ForecastingP);
+        PrintDistinctSample(records, "PayStatus",    r => r.PayStatus);
+        PrintDistinctSample(records, "ExpectedPaymentDate (null?)",
+            r => r.ExpectedPaymentDate.HasValue ? "has value" : "NULL");
+
+        return records;
+    }
+
+    private static string GetCsvCell(string[] row, Dictionary<string, int> colMap, string colName)
+    {
+        if (string.IsNullOrWhiteSpace(colName)) return string.Empty;
+        if (!colMap.TryGetValue(colName, out int col)) return string.Empty;
+        return col < row.Length ? row[col].Trim() : string.Empty;
+    }
+
+    private static DateTime? ParseCsvDate(string[] row, Dictionary<string, int> colMap, string colName)
+    {
+        var value = GetCsvCell(row, colMap, colName);
+        if (string.IsNullOrWhiteSpace(value)) return null;
+
+        if (DateTime.TryParse(value, out var parsed)) return parsed;
+
+        // Excel serial date number exported as raw value (e.g. "46107")
+        if (double.TryParse(value, System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var oa)
+            && oa is > 20000 and < 80000)
+        {
+            try { return DateTime.FromOADate(oa); } catch { /* fall through */ }
+        }
+
+        return null;
+    }
+
+    private static decimal ParseCsvDecimal(string[] row, Dictionary<string, int> colMap, string colName)
+    {
+        var value = GetCsvCell(row, colMap, colName);
+        if (string.IsNullOrWhiteSpace(value)) return 0m;
+
+        // Tolerate currency formatting: "$1,234.56", "(123.45)" for negatives
+        var cleaned  = value.Replace("$", "").Replace(",", "").Trim();
+        bool negative = cleaned.StartsWith('(') && cleaned.EndsWith(')');
+        if (negative) cleaned = cleaned[1..^1];
+
+        if (decimal.TryParse(cleaned, System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+            return negative ? -parsed : parsed;
+
+        return 0m;
+    }
+
     // ── Column / cell helpers ─────────────────────────────────────────────────
 
     private static void CheckColumn(Dictionary<string, int> colMap, string configuredName, string fieldName)
@@ -333,8 +591,8 @@ public class ExcelReaderService
                 .ToList();
 
             var hint = closest.Count > 0
-                ? $" — closest match(es): [{string.Join(", ", closest.Select(h => $"'{h}'"))}]"
-                : " — no similar header found in sheet";
+                ? $" - closest match(es): [{string.Join(", ", closest.Select(h => $"'{h}'"))}]"
+                : " - no similar header found in sheet";
 
             Console.WriteLine($"         [MISSING] {fieldName} => '{configuredName}'{hint}");
         }

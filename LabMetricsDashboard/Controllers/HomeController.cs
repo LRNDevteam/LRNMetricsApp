@@ -3,26 +3,35 @@ using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace LabMetricsDashboard.Controllers;
 
 public class HomeController : Controller
 {
+    private static readonly TimeSpan RunInfoCacheDuration = TimeSpan.FromMinutes(5);
+
     private readonly ILogger<HomeController> _logger;
     private readonly LabSettings _labSettings;
     private readonly LabCsvFileResolver _resolver;
+    private readonly IPredictionDbRepository _predictionRepo;
+    private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache _cache;
 
     public HomeController(
         ILogger<HomeController> logger,
         LabSettings labSettings,
-        LabCsvFileResolver resolver)
+        LabCsvFileResolver resolver,
+        IPredictionDbRepository predictionRepo,
+        Microsoft.Extensions.Caching.Memory.IMemoryCache cache)
     {
         _logger = logger;
         _labSettings = labSettings;
         _resolver = resolver;
+        _predictionRepo = predictionRepo;
+        _cache = cache;
     }
 
-    public IActionResult Index(string? sort)
+    public async Task<IActionResult> Index(string? sort)
     {
         // Non-admin users should never see the Home landing (lab tiles).
         // Send them straight to the Revenue Dashboard.
@@ -32,6 +41,18 @@ public class HomeController : Controller
         }
 
         var resolvedSort = string.IsNullOrWhiteSpace(sort) ? "latest" : sort;
+
+        // ── Live DB run info for DB-enabled labs (SP: usp_GetPayerValidationRunStats
+        //    via ProbeAsync). Fetched in parallel, cached 5 min, failures → null so a
+        //    slow/unreachable lab DB can never break or stall the Home page.
+        var runInfoTasks = _labSettings.Labs
+            .Where(kv => kv.Value.DBEnabled && !string.IsNullOrWhiteSpace(kv.Value.DbConnectionString))
+            .ToDictionary(
+                kv => kv.Key,
+                kv => GetPredictionRunInfoCachedAsync(kv.Key, kv.Value.DbConnectionString!),
+                StringComparer.OrdinalIgnoreCase);
+
+        await Task.WhenAll(runInfoTasks.Values);
 
         var tiles = _labSettings.Labs.Keys
             .OrderBy(name => name)
@@ -45,6 +66,8 @@ public class HomeController : Controller
                 var labConfig  = _labSettings.Labs.TryGetValue(labName, out var cfg) ? cfg : null;
                 var dbEnabled  = labConfig?.DBEnabled == true;
                 var lineClaimEnabled = labConfig?.LineClaimEnable == true;
+
+                var runInfo = runInfoTasks.TryGetValue(labName, out var t) ? t.Result : null;
 
                 return new LabTileViewModel
                 {
@@ -65,6 +88,10 @@ public class HomeController : Controller
                     LineRunId             = ExtractRunId(linePath),
                     PredictionRunId       = ExtractRunId(predictionPath),
                     CodingRunId           = ExtractRunId(codingMasterPath),
+                    PredictionDbRunId     = runInfo?.LatestRunId,
+                    PredictionDbInsertedAt = runInfo?.LatestRunInsertedAt is { } utc
+                        ? DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime()
+                        : null,
                     WeekRange             = ExtractWeekRange(claimPath),
                     ClaimFileAgeHours     = GetFileAgeHours(claimPath),
                     LineFileAgeHours      = GetFileAgeHours(linePath),
@@ -86,6 +113,30 @@ public class HomeController : Controller
 
     [Microsoft.AspNetCore.Authorization.AllowAnonymous]
     public IActionResult Privacy() => View();
+
+    /// <summary>
+    /// Returns the lab's latest prediction run info (RunId + inserted timestamp),
+    /// cached for <see cref="RunInfoCacheDuration"/>. Never throws — any DB error
+    /// is logged and cached as null so one bad lab DB cannot slow the Home page
+    /// on every request.
+    /// </summary>
+    private Task<PredictionDbDiagnostic?> GetPredictionRunInfoCachedAsync(string labName, string connectionString)
+    {
+        return _cache.GetOrCreateAsync<PredictionDbDiagnostic?>($"HomeTile_PredRunInfo_{labName}", async entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = RunInfoCacheDuration;
+            try
+            {
+                var diag = await _predictionRepo.ProbeAsync(connectionString, HttpContext.RequestAborted);
+                return diag.IsReady ? diag : null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Home tile: prediction run info lookup failed for lab '{LabName}'.", labName);
+                return null;
+            }
+        });
+    }
 
     /// <summary>
     /// Extracts RunId from a file path by taking the prefix before the first underscore.

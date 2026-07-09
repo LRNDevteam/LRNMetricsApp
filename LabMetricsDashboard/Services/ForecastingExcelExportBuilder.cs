@@ -6,18 +6,24 @@ namespace LabMetricsDashboard.Services;
 /// <summary>
 /// Builds a formatted Excel workbook from Forecasting Summary data
 /// using the client's green-themed branding via <see cref="ExcelTheme"/>.
-/// Produces sheets: Median Summary and Mode Summary (weekly by payer).
+/// Produces sheets: Median Summary, Mode Summary (weekly by payer) and,
+/// when records are supplied, a Data sheet with the full line-item detail
+/// (all PayerValidationReport rows of the displayed run, after any filters).
 /// </summary>
 public static class ForecastingExcelExportBuilder
 {
     /// <summary>Creates the workbook from the Forecasting Summary view model.</summary>
     public static XLWorkbook CreateWorkbook(ForecastingSummaryViewModel vm, string labName,
-        IReadOnlyList<(string Label, string? Value)>? activeFilters = null)
+        IReadOnlyList<(string Label, string? Value)>? activeFilters = null,
+        IReadOnlyList<PredictionRecord>? records = null)
     {
         var wb = new XLWorkbook();
 
         BuildWeeklySheet(wb, "Median Summary", vm.MedianSummary, labName);
         BuildWeeklySheet(wb, "Mode Summary", vm.ModeSummary, labName);
+
+        if (records is not null)
+            BuildDataSheet(wb, records, labName, hasFilters: activeFilters is { Count: > 0 });
 
         if (activeFilters is { Count: > 0 })
         {
@@ -27,6 +33,77 @@ public static class ForecastingExcelExportBuilder
         }
 
         return wb;
+    }
+
+    /// <summary>
+    /// Full line-item detail sheet. Contains every row passed in â€” all
+    /// PayerValidationReport rows for the run when no filter is applied,
+    /// or the filtered subset when dimension filters are active.
+    /// </summary>
+    private static void BuildDataSheet(XLWorkbook wb, IReadOnlyList<PredictionRecord> records,
+        string labName, bool hasFilters)
+    {
+        var ws = wb.AddWorksheet("Data");
+        ws.TabColor = ExcelTheme.TabGreen;
+        ExcelTheme.ApplyDefaults(ws);
+
+        string[] headers =
+        [
+            "Accession #", "Visit #", "CPT", "Payer Name", "Payer Type", "Panel",
+            "Forecasting Payability", "Pay Status", "Payability", "Final Coverage",
+            "Expected Pmt Date", "First Billed Date", "Date Of Service",
+            "Billed Amt", "Allowed Amt", "Ins Payment",
+            "Median Allowed (Same Lab)", "Median Ins Paid (Same Lab)",
+            "Mode Allowed (Same Lab)", "Mode Ins Paid (Same Lab)",
+            "Denial Code", "Denial Description"
+        ];
+        int colCount = headers.Length;
+
+        var scope = hasFilters ? "Filtered" : "All records";
+        ExcelTheme.WriteTitleBar(ws, 1, colCount, $"Line Item Detail â€” {scope} | {labName} | {records.Count:N0} rows");
+        ExcelTheme.WriteHeaderRow(ws, 2, 1, headers);
+
+        int row = 3;
+        for (int i = 0; i < records.Count; i++)
+        {
+            var r  = records[i];
+            var bg = ExcelTheme.GetRowBg(i);
+
+            ws.Cell(row,  1).Value = r.AccessionNo;
+            ws.Cell(row,  2).Value = r.VisitNumber;
+            ws.Cell(row,  3).Value = r.CPTCode;
+            ws.Cell(row,  4).Value = string.IsNullOrWhiteSpace(r.PayerNameNormalized) ? r.PayerName : r.PayerNameNormalized;
+            ws.Cell(row,  5).Value = r.PayerType;
+            ws.Cell(row,  6).Value = r.PanelName;
+            ws.Cell(row,  7).Value = r.ForecastingPayability;
+            ws.Cell(row,  8).Value = r.PayStatus;
+            ws.Cell(row,  9).Value = r.Payability;
+            ws.Cell(row, 10).Value = r.FinalCoverageStatus;
+            ws.Cell(row, 11).Value = r.ExpectedPaymentDate;
+            ws.Cell(row, 12).Value = r.FirstBilledDate;
+            ws.Cell(row, 13).Value = r.DateOfService;
+            ws.Cell(row, 14).Value = r.BilledAmount;
+            ws.Cell(row, 15).Value = r.AllowedAmount;
+            ws.Cell(row, 16).Value = r.InsurancePayment;
+            ws.Cell(row, 17).Value = r.MedianAllowedAmountSameLab;
+            ws.Cell(row, 18).Value = r.MedianInsurancePaidSameLab;
+            ws.Cell(row, 19).Value = r.ModeAllowedAmountSameLab;
+            ws.Cell(row, 20).Value = r.ModeInsurancePaidSameLab;
+            ws.Cell(row, 21).Value = r.DenialCode;
+            ws.Cell(row, 22).Value = r.DenialDescription;
+
+            for (int c = 1; c <= colCount; c++)
+                ExcelTheme.StyleDataCell(ws.Cell(row, c), bg);
+            row++;
+        }
+
+        // Money columns
+        foreach (var c in new[] { 14, 15, 16, 17, 18, 19, 20 })
+            ws.Column(c).Style.NumberFormat.Format = "$#,##0.00";
+
+        ws.SheetView.FreezeRows(2);
+        ws.Range(2, 1, 2, colCount).SetAutoFilter();
+        ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 12, firstColMinWidth: 16);
     }
 
     private static void BuildWeeklySheet(XLWorkbook wb, string sheetName,
@@ -43,9 +120,9 @@ public static class ForecastingExcelExportBuilder
         int totalCols = 2;
         int colCount = fixedCols + weekCols + totalCols;
 
-        ExcelTheme.WriteTitleBar(ws, 1, colCount, $"{sheetName} — Last 4 Weeks | {labName}");
+        ExcelTheme.WriteTitleBar(ws, 1, colCount, $"{sheetName} ï¿½ Last 4 Weeks | {labName}");
 
-        // Header row 1 — Payer + week ranges merged + Total
+        // Header row 1 ï¿½ Payer + week ranges merged + Total
         ws.Cell(2, 1).Value = "Payer";
         ws.Cell(2, 1).Style.Font.Bold = true;
         ws.Cell(2, 1).Style.Font.FontColor = XLColor.White;

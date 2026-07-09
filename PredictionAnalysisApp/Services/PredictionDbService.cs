@@ -128,7 +128,7 @@ public class PredictionDbService
 
     /// <summary>
     /// Returns true when <paramref name="sourceFilePath"/> already has an entry
-    /// in <c>dbo.PayerValidationFileLog</c> — used to skip re-insertion for a
+    /// in <c>dbo.PayerValidationFileLog</c> ï¿½ used to skip re-insertion for a
     /// file that was already processed in a previous run.
     /// Returns false on any DB error so the caller falls through to insert.
     /// </summary>
@@ -150,14 +150,14 @@ public class PredictionDbService
             var isLogged = result is bool b && b;
             if (isLogged)
             {
-                AppLogger.LogDb($"[{labName}] File already in PayerValidationFileLog — skipping DB insert: {Path.GetFileName(sourceFilePath)}");
+                AppLogger.LogDb($"[{labName}] File already in PayerValidationFileLog ï¿½ skipping DB insert: {Path.GetFileName(sourceFilePath)}");
                 return true;
             }
             return false;
         }
         catch (Exception ex)
         {
-            AppLogger.LogDbWarn($"[{labName}] FileAlreadyLogged check failed — will proceed with insert. {ex.Message}");
+            AppLogger.LogDbWarn($"[{labName}] FileAlreadyLogged check failed ï¿½ will proceed with insert. {ex.Message}");
             return false;
         }
     }
@@ -173,35 +173,30 @@ public class PredictionDbService
     {
         try
         {
-            AppLogger.LogDb($"[{labName}] DataRefresh=true — deleting existing FileLog + Report rows for: {Path.GetFileName(sourceFilePath)}");
+            AppLogger.LogDb($"[{labName}] DataRefresh=true ï¿½ deleting existing FileLog + Report rows for: {Path.GetFileName(sourceFilePath)}");
 
             using var conn = new SqlConnection(_connectionString);
             conn.Open();
 
-            // Delete report rows first (FK child), then the file-log row (parent).
-            using (var cmd = new SqlCommand(
-                "DELETE r FROM dbo.PayerValidationReport r " +
-                "INNER JOIN dbo.PayerValidationFileLog f ON r.FileLogId = f.FileLogId " +
-                "WHERE f.SourceFullPath = @SourceFullPath", conn)
-            { CommandTimeout = 300 })
+            // SP-only policy: deletes run inside dbo.usp_DeletePayerValidationFileEntry.
+            using var cmd = new SqlCommand("dbo.usp_DeletePayerValidationFileEntry", conn)
             {
-                cmd.Parameters.AddWithValue("@SourceFullPath", sourceFilePath);
-                var deleted = cmd.ExecuteNonQuery();
-                AppLogger.LogDb($"[{labName}]   Deleted {deleted:N0} rows from PayerValidationReport.");
-            }
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 300
+            };
+            cmd.Parameters.AddWithValue("@SourceFullPath", sourceFilePath);
+            var reportRowsParam  = new SqlParameter("@DeletedReportRows",  SqlDbType.Int) { Direction = ParameterDirection.Output };
+            var fileLogRowsParam = new SqlParameter("@DeletedFileLogRows", SqlDbType.Int) { Direction = ParameterDirection.Output };
+            cmd.Parameters.Add(reportRowsParam);
+            cmd.Parameters.Add(fileLogRowsParam);
+            cmd.ExecuteNonQuery();
 
-            using (var cmd = new SqlCommand(
-                "DELETE FROM dbo.PayerValidationFileLog WHERE SourceFullPath = @SourceFullPath", conn)
-            { CommandTimeout = 30 })
-            {
-                cmd.Parameters.AddWithValue("@SourceFullPath", sourceFilePath);
-                var deleted = cmd.ExecuteNonQuery();
-                AppLogger.LogDb($"[{labName}]   Deleted {deleted:N0} row(s) from PayerValidationFileLog.");
-            }
+            AppLogger.LogDb($"[{labName}]   Deleted {(int)(reportRowsParam.Value  ?? 0):N0} rows from PayerValidationReport.");
+            AppLogger.LogDb($"[{labName}]   Deleted {(int)(fileLogRowsParam.Value ?? 0):N0} row(s) from PayerValidationFileLog.");
         }
         catch (Exception ex)
         {
-            AppLogger.LogDbError($"[{labName}] DeleteFileLogEntry failed — will still attempt re-insert", ex);
+            AppLogger.LogDbError($"[{labName}] DeleteFileLogEntry failed ï¿½ will still attempt re-insert", ex);
         }
     }
 
@@ -219,23 +214,23 @@ public class PredictionDbService
     {
         try
         {
-            // Treat blank runId / weekFolder as NULL — file may not follow standard naming.
+            // Treat blank runId / weekFolder as NULL ï¿½ file may not follow standard naming.
             var effectiveRunId      = string.IsNullOrWhiteSpace(runId)      ? null : runId;
             var effectiveWeekFolder = string.IsNullOrWhiteSpace(weekFolder) ? null : weekFolder;
 
             if (effectiveRunId is null)
-                AppLogger.LogDbWarn($"[{labName}] RunId is blank — will insert NULL in DB.");
+                AppLogger.LogDbWarn($"[{labName}] RunId is blank ï¿½ will insert NULL in DB.");
             if (effectiveWeekFolder is null)
-                AppLogger.LogDbWarn($"[{labName}] WeekFolder is blank — will insert NULL in DB.");
+                AppLogger.LogDbWarn($"[{labName}] WeekFolder is blank ï¿½ will insert NULL in DB.");
 
-            AppLogger.LogDb($"[{labName}] Starting DB insert — {records.Count} records, RunId={effectiveRunId ?? "NULL"}");
+            AppLogger.LogDb($"[{labName}] Starting DB insert ï¿½ {records.Count} records, RunId={effectiveRunId ?? "NULL"}");
 
             var fileInfo  = new FileInfo(sourceFilePath);
             int fileLogId = InsertFileLog(effectiveRunId, effectiveWeekFolder, labName,
                                           sourceFilePath, fileInfo.Name,
                                           fileInfo.Exists ? fileInfo.CreationTime : DateTime.UtcNow);
 
-            AppLogger.LogDb($"[{labName}] FileLog inserted — FileLogId={fileLogId}");
+            AppLogger.LogDb($"[{labName}] FileLog inserted ï¿½ FileLogId={fileLogId}");
 
             BulkInsertRows(records, fileLogId, effectiveRunId, effectiveWeekFolder, labName, sourceFilePath);
 
@@ -243,7 +238,7 @@ public class PredictionDbService
         }
         catch (Exception ex)
         {
-            AppLogger.LogDbError($"[{labName}] DB insert failed — prediction will continue", ex);
+            AppLogger.LogDbError($"[{labName}] DB insert failed ï¿½ prediction will continue", ex);
         }
     }
 
@@ -312,6 +307,37 @@ public class PredictionDbService
         // Reuse one open connection across chunks; one SP call per chunk.
         using var conn = new SqlConnection(_connectionString);
         conn.Open();
+
+        // â”€â”€ RETENTION: purge ALL previous rows for this lab ONCE, up-front â”€â”€â”€â”€
+        // Must happen exactly once per file (not per chunk) â€” a per-chunk delete
+        // would wipe rows inserted by earlier chunks of the same run.
+        // The dashboard only reads the latest RunId, so old runs are dead weight.
+        try
+        {
+            using var truncCmd = new SqlCommand("dbo.usp_TruncatePayerValidationLab", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 300
+            };
+            truncCmd.Parameters.AddWithValue("@LabName", labName);
+            var deletedParam = new SqlParameter("@DeletedRows", SqlDbType.Int)
+            {
+                Direction = ParameterDirection.Output
+            };
+            truncCmd.Parameters.Add(deletedParam);
+            truncCmd.ExecuteNonQuery();
+
+            AppLogger.LogDb(
+                $"[{labName}] Retention purge: {(int)(deletedParam.Value ?? 0):N0} previous rows deleted from PayerValidationReport.");
+        }
+        catch (SqlException ex) when (ex.Number == 2812) // SP not deployed yet
+        {
+            // SP-only policy: no inline SQL fallback. Old rows are also cleaned up by
+            // the retention delete inside the deployed SPs on the next run.
+            throw new InvalidOperationException(
+                $"[{labName}] dbo.usp_TruncatePayerValidationLab is missing â€” " +
+                "run the updated 02_CreateStoredProcedures.sql against this lab's database before inserting.", ex);
+        }
 
         for (int offset = 0; offset < records.Count; offset += _chunkSize)
         {
@@ -446,7 +472,7 @@ public class PredictionDbService
 
         if (unmappedSourceHeaders.Count > 0)
         {
-            AppLogger.LogDbWarn($"[{labName}] {unmappedSourceHeaders.Count} source column(s) have no DB mapping — skipped:");
+            AppLogger.LogDbWarn($"[{labName}] {unmappedSourceHeaders.Count} source column(s) have no DB mapping ï¿½ skipped:");
             foreach (var h in unmappedSourceHeaders)
                 AppLogger.LogDbWarn($"[{labName}]   (no mapping) \"{h}\"");
         }
@@ -458,7 +484,7 @@ public class PredictionDbService
 
         if (missingMappedHeaders.Count > 0)
         {
-            AppLogger.LogDbWarn($"[{labName}] {missingMappedHeaders.Count} expected column(s) not found in source file — will insert NULL:");
+            AppLogger.LogDbWarn($"[{labName}] {missingMappedHeaders.Count} expected column(s) not found in source file ï¿½ will insert NULL:");
             foreach (var h in missingMappedHeaders)
                 AppLogger.LogDbWarn($"[{labName}]   (not in file) ? {HeaderToColumn[h]}: \"{h}\"");
         }

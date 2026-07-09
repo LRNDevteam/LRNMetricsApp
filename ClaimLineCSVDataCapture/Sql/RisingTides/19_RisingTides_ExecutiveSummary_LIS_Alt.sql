@@ -561,7 +561,7 @@ BEGIN
     DELETE FROM dbo.RT_ES_LIS_Panel WHERE RoleID LIKE 'L\_B.%' ESCAPE '\';
 
     INSERT INTO dbo.RT_ES_LIS_Panel (RoleID, PanelName, Description, ESYear, ESMonth, ESMonthClaimCount, ESMonthChargeAmount, RefreshedAt, SortOrder)
-    SELECT 'L_A.' + pn.PanelName, pn.PanelName, '    ' + pn.PanelName,
+    SELECT 'L_A.' + pn.PanelName, pn.PanelName, '  ' + pn.PanelName,
            p.ESYear, p.ESMonth, COUNT(DISTINCT l.Accession), 0, GETDATE(), pn.PanelSortOrder
     FROM #LisPanels2 pn
     CROSS JOIN #LisPeriods2 p
