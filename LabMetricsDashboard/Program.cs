@@ -438,6 +438,17 @@ builder.Services
 builder.Services
 	.AddHttpClient<IMasterValuesApiClient, MasterValuesApiClient>()
 	.ConfigureHttpClient(client => client.Timeout = TimeSpan.FromMinutes(10));
+// Analytics reference lists (Modes / Meridian) served by LRN.ReportsApi.
+builder.Services
+	.AddHttpClient<ILabAnalyticsApiClient, LabAnalyticsApiClient>()
+	.ConfigureHttpClient(client => client.Timeout = TimeSpan.FromMinutes(2));
+
+// Dynamic role-based navbar (Menu Master + Role Menu Mapping via LRN.ReportsApi)
+builder.Services
+	.AddHttpClient<IMenuApiClient, MenuApiClient>()
+	.ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddScoped<IMenuService, MenuService>();
+builder.Services.AddScoped<MenuAccessFilter>();
 
 // Allow local Vite React dev server to call MVC AuthToken endpoint with cookies.
 // Production stays same-origin, but these origins are useful while debugging React locally.
@@ -486,6 +497,9 @@ builder.Services.AddRateLimiter(options =>
 builder.Services.AddControllersWithViews(options =>
 {
 	options.Filters.AddService<AppUsageAuditFilter>();
+	// Server-side menu enforcement (FR-9): blocks direct URLs to menu-managed
+	// routes the user's role has no mapping for. Non-managed routes pass through.
+	options.Filters.AddService<MenuAccessFilter>();
 	// Require authenticated user for every action by default.
 	// Use [AllowAnonymous] on Account/Login etc.
 	var policy = new AuthorizationPolicyBuilder()

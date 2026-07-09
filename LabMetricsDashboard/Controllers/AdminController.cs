@@ -1,5 +1,7 @@
 using LabMetricsDashboard.Models;
+using LabMetricsDashboard.Models.Menu;
 using LabMetricsDashboard.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace LabMetricsDashboard.Controllers;
@@ -9,11 +11,16 @@ public class AdminController : Controller
     private static readonly SemaphoreSlim CreateUserGate = new(1, 1);
     private readonly IUserManagementRepository _repo;
     private readonly IPasswordHasher _hasher;
+    private readonly IMenuApiClient _menuApi;
+    private readonly IMenuService _menuService;
 
-    public AdminController(IUserManagementRepository repo, IPasswordHasher hasher)
+    public AdminController(IUserManagementRepository repo, IPasswordHasher hasher,
+        IMenuApiClient menuApi, IMenuService menuService)
     {
         _repo = repo;
         _hasher = hasher;
+        _menuApi = menuApi;
+        _menuService = menuService;
     }
 
     [HttpGet]
@@ -535,5 +542,120 @@ public class AdminController : Controller
         await _repo.UpdateLabAsync(lab);
         TempData["LabSuccess"] = $"Lab '{lab.LabName}' updated successfully.";
         return RedirectToAction(nameof(ManageLabs));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Dynamic menu management (Menu Master + Role Menu Mapping).
+    // Screens proxy to LRN.ReportsApi (api/menu) and invalidate the navbar
+    // cache after every save.
+    // ─────────────────────────────────────────────────────────────────────
+
+    [HttpGet]
+    [Authorize(Roles = "Admin")]
+    public IActionResult MenuMaster() => View();
+
+    [HttpGet]
+    [Authorize(Roles = "Admin")]
+    public IActionResult RoleMenuMapping() => View();
+
+    [HttpGet]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> MenuItems(CancellationToken ct)
+    {
+        try { return Json(await _menuApi.GetMenuItemsAsync(ct)); }
+        catch (InvalidOperationException ex) { return MenuError(ex); }
+    }
+
+    [HttpPost]
+    [Authorize(Roles = "Admin")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> SaveMenuItem(int? id, [FromBody] MenuItemSaveRequest request, CancellationToken ct)
+    {
+        try
+        {
+            if (id.HasValue && id.Value > 0)
+            {
+                await _menuApi.UpdateMenuItemAsync(id.Value, request, ct);
+            }
+            else
+            {
+                id = await _menuApi.CreateMenuItemAsync(request, ct);
+            }
+            _menuService.InvalidateCache();
+            return Json(new { success = true, id });
+        }
+        catch (InvalidOperationException ex) { return MenuError(ex); }
+    }
+
+    [HttpPost]
+    [Authorize(Roles = "Admin")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> SetMenuDisabled([FromBody] MenuDisabledDto dto, CancellationToken ct)
+    {
+        try
+        {
+            await _menuApi.SetMenuItemDisabledAsync(dto.MenuItemId, dto.IsDisabled, ct);
+            _menuService.InvalidateCache();
+            return Json(new { success = true });
+        }
+        catch (InvalidOperationException ex) { return MenuError(ex); }
+    }
+
+    [HttpPost]
+    [Authorize(Roles = "Admin")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> DeleteMenuItem([FromBody] MenuDeleteDto dto, CancellationToken ct)
+    {
+        try
+        {
+            await _menuApi.DeleteMenuItemAsync(dto.MenuItemId, ct);
+            _menuService.InvalidateCache();
+            return Json(new { success = true });
+        }
+        catch (InvalidOperationException ex) { return MenuError(ex); }
+    }
+
+    [HttpGet]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> MenuRoles(CancellationToken ct)
+    {
+        try { return Json(await _menuApi.GetRolesAsync(ct)); }
+        catch (InvalidOperationException ex) { return MenuError(ex); }
+    }
+
+    [HttpGet]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> RoleMenus(int roleId, CancellationToken ct)
+    {
+        try { return Json(await _menuApi.GetRoleMenuIdsAsync(roleId, ct)); }
+        catch (InvalidOperationException ex) { return MenuError(ex); }
+    }
+
+    [HttpPost]
+    [Authorize(Roles = "Admin")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> SaveRoleMenus([FromBody] RoleMenuSaveDto dto, CancellationToken ct)
+    {
+        if (dto.RoleId <= 0) return BadRequest(new { message = "Select a role first." });
+        try
+        {
+            await _menuApi.SaveRoleMenusAsync(dto.RoleId, dto.MenuIds ?? new List<int>(), ct);
+            _menuService.InvalidateCache();
+            return Json(new { success = true });
+        }
+        catch (InvalidOperationException ex) { return MenuError(ex); }
+    }
+
+    /// <summary>Surface the Reports API error body (JSON {message}) as a 400 the screens can toast.</summary>
+    private IActionResult MenuError(InvalidOperationException ex)
+    {
+        var message = ex.Message;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(message);
+            if (doc.RootElement.TryGetProperty("message", out var m)) message = m.GetString() ?? message;
+        }
+        catch (System.Text.Json.JsonException) { /* not JSON - use raw text */ }
+        return BadRequest(new { message });
     }
 }

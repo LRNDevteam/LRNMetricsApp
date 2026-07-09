@@ -1,0 +1,85 @@
+@using LabMetricsDashboard.Models.Menu
+@model List<MenuItemVm>
+@inject IConfiguration Configuration
+@{
+    // Denial Workflow is not yet managed by the dynamic menu (later phase).
+    // Keep the static React link, placed right after Denial Dashboard.
+    var denialReactUrl = Configuration["DenialWorkflowReactUrl"] ?? "https://localhost:5173";
+    var denialReactAgingUrl = denialReactUrl.Contains('#') ? denialReactUrl : $"{denialReactUrl}#aging";
+    var denialWorkflowRendered = false;
+}
+@if (Model == null || Model.Count == 0)
+{
+    @* Menu system unavailable or user has no mappings yet - legacy static navbar *@
+    @await Html.PartialAsync("_StaticMenuFallback")
+}
+else
+{
+    foreach (var menu in Model)
+    {
+        if (menu.Children.Any())
+        {
+            <li class="nav-item dropdown">
+                <a class="nav-link dropdown-toggle @(menu.IsDisabled ? "disabled text-muted" : "")"
+                   href="#" role="button"
+                   data-bs-toggle="@(menu.IsDisabled ? null : "dropdown")"
+                   aria-disabled="@menu.IsDisabled.ToString().ToLower()">
+                    <i class="bi @menu.IconClass"></i> @menu.MenuName
+                </a>
+                @if (!menu.IsDisabled)
+                {
+                    <ul class="dropdown-menu">
+                        @foreach (var child in menu.Children)
+                        {
+                            <li>
+                                @if (child.IsDisabled || !child.HasLink)
+                                {
+                                    <span class="dropdown-item disabled" title="This menu is currently disabled">
+                                        <i class="bi @child.IconClass"></i> @child.MenuName
+                                    </span>
+                                }
+                                else
+                                {
+                                    <a class="dropdown-item"
+                                       href="@Url.Action(child.ActionName, child.ControllerName, new { area = child.AreaName ?? string.Empty })">
+                                        <i class="bi @child.IconClass"></i> @child.MenuName
+                                    </a>
+                                }
+                            </li>
+                        }
+                    </ul>
+                }
+            </li>
+        }
+        else
+        {
+            <li class="nav-item">
+                @if (menu.IsDisabled || !menu.HasLink)
+                {
+                    <span class="nav-link disabled text-muted" title="This menu is currently disabled">
+                        <i class="bi @menu.IconClass"></i> @menu.MenuName
+                    </span>
+                }
+                else
+                {
+                    <a class="nav-link"
+                       href="@Url.Action(menu.ActionName, menu.ControllerName, new { area = menu.AreaName ?? string.Empty })">
+                        <i class="bi @menu.IconClass"></i> @menu.MenuName
+                    </a>
+                }
+            </li>
+        }
+
+        @* Static Denial Workflow link right after Denial Dashboard (not yet menu-managed) *@
+        if (!denialWorkflowRendered
+            && string.Equals(menu.ControllerName, "DenialDashboard", StringComparison.OrdinalIgnoreCase))
+        {
+            denialWorkflowRendered = true;
+            <li class="nav-item">
+                <a class="nav-link" href="@denialReactAgingUrl" target="_blank" rel="noopener">
+                    <i class="bi bi-kanban-fill"></i> Denial Workflow
+                </a>
+            </li>
+        }
+    }
+}

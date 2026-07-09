@@ -1,0 +1,191 @@
+@{
+    ViewData["Title"] = "Role Menu Mapping";
+}
+
+<div class="container py-3" style="max-width: 760px">
+    <h3 class="fw-bold">Role Menu Mapping</h3>
+    <p class="text-secondary">
+        Choose which menus each role can see. Checking a submenu automatically includes its parent.
+        Menu items are managed in <a asp-controller="Admin" asp-action="MenuMaster">Menu Master</a>.
+    </p>
+
+    <div id="mapAlert" class="alert d-none" role="alert"></div>
+
+    <div class="row g-2 align-items-end mb-3">
+        <div class="col-md-6">
+            <label class="form-label small fw-semibold">ROLE</label>
+            <select id="ddlRole" class="form-select">
+                <option value="">Select a role…</option>
+            </select>
+        </div>
+        <div class="col-md-6 text-end">
+            <button class="btn btn-link btn-sm" type="button" id="btnCheckAll">Select all</button>
+            <button class="btn btn-link btn-sm" type="button" id="btnClearAll">Clear all</button>
+        </div>
+    </div>
+
+    <div id="menuTree" class="list-group mb-3">
+        <div class="list-group-item text-secondary">Select a role to load its menu access.</div>
+    </div>
+
+    <button class="btn btn-primary" type="button" id="btnSaveMapping" disabled>
+        <i class="bi bi-save me-1"></i>Save mapping
+    </button>
+</div>
+
+@Html.AntiForgeryToken()
+
+@section Scripts {
+<script nonce='@Context.Items["CspNonce"]'>
+(function () {
+    'use strict';
+
+    const urls = {
+        roles: '@Url.Action("MenuRoles", "Admin")',
+        items: '@Url.Action("MenuItems", "Admin")',
+        roleMenus: '@Url.Action("RoleMenus", "Admin")',
+        save: '@Url.Action("SaveRoleMenus", "Admin")'
+    };
+    const antiForgery = () => document.querySelector('input[name="__RequestVerificationToken"]').value;
+
+    let allItems = [];
+
+    function showAlert(message, isError) {
+        const el = document.getElementById('mapAlert');
+        el.className = 'alert ' + (isError ? 'alert-danger' : 'alert-success');
+        el.textContent = message;
+        el.classList.remove('d-none');
+        window.clearTimeout(el._t);
+        el._t = window.setTimeout(() => el.classList.add('d-none'), 4000);
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text == null ? '' : String(text);
+        return div.innerHTML;
+    }
+
+    async function getJson(url) {
+        const resp = await fetch(url, { credentials: 'same-origin' });
+        if (!resp.ok) {
+            let message = 'Request failed (' + resp.status + ')';
+            try { const data = await resp.json(); if (data && data.message) message = data.message; } catch (e) { /* ignore */ }
+            throw new Error(message);
+        }
+        return resp.json();
+    }
+
+    async function init() {
+        try {
+            const [roles, items] = await Promise.all([getJson(urls.roles), getJson(urls.items)]);
+            allItems = items;
+            document.getElementById('ddlRole').innerHTML =
+                '<option value="">Select a role…</option>' +
+                roles.map(r => '<option value="' + r.roleId + '">' + escapeHtml(r.roleName) + '</option>').join('');
+        } catch (err) {
+            showAlert(err.message, true);
+        }
+    }
+
+    function renderTree(checkedIds) {
+        const checked = new Set(checkedIds || []);
+        const parents = allItems.filter(i => !i.parentMenuItemId)
+            .sort((a, b) => a.menuOrder - b.menuOrder || a.menuName.localeCompare(b.menuName));
+        let html = '';
+        for (const parent of parents) {
+            html +=
+                '<label class="list-group-item d-flex align-items-center gap-2 fw-semibold">' +
+                    '<input class="form-check-input mt-0 parent-chk" type="checkbox" data-id="' + parent.menuItemId + '"' +
+                        (checked.has(parent.menuItemId) ? ' checked' : '') + '>' +
+                    '<i class="bi ' + escapeHtml(parent.iconClass || 'bi-app') + '"></i> ' + escapeHtml(parent.menuName) +
+                '</label>';
+            const children = allItems.filter(i => i.parentMenuItemId === parent.menuItemId)
+                .sort((a, b) => a.menuOrder - b.menuOrder || a.menuName.localeCompare(b.menuName));
+            for (const child of children) {
+                html +=
+                    '<label class="list-group-item d-flex align-items-center gap-2 ps-5">' +
+                        '<input class="form-check-input mt-0 child-chk" type="checkbox" data-id="' + child.menuItemId + '" data-parent="' + parent.menuItemId + '"' +
+                            (checked.has(child.menuItemId) ? ' checked' : '') + '>' +
+                        '<i class="bi ' + escapeHtml(child.iconClass || 'bi-app') + '"></i> ' + escapeHtml(child.menuName) +
+                    '</label>';
+            }
+        }
+        document.getElementById('menuTree').innerHTML =
+            html || '<div class="list-group-item text-secondary">No menu items defined yet.</div>';
+    }
+
+    async function loadRoleMenus(roleId) {
+        const saveBtn = document.getElementById('btnSaveMapping');
+        if (!roleId) {
+            saveBtn.disabled = true;
+            document.getElementById('menuTree').innerHTML =
+                '<div class="list-group-item text-secondary">Select a role to load its menu access.</div>';
+            return;
+        }
+        try {
+            const ids = await getJson(urls.roleMenus + '?roleId=' + roleId);
+            renderTree(ids);
+            saveBtn.disabled = false;
+        } catch (err) {
+            showAlert(err.message, true);
+        }
+    }
+
+    async function saveMapping() {
+        const roleId = +document.getElementById('ddlRole').value;
+        if (!roleId) return showAlert('Select a role first.', true);
+        const menuIds = Array.from(document.querySelectorAll('#menuTree input:checked')).map(c => +c.dataset.id);
+
+        const btn = document.getElementById('btnSaveMapping');
+        btn.disabled = true;
+        try {
+            const resp = await fetch(urls.save, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'RequestVerificationToken': antiForgery()
+                },
+                body: JSON.stringify({ roleId: roleId, menuIds: menuIds })
+            });
+            if (!resp.ok) {
+                let message = 'Save failed (' + resp.status + ')';
+                try { const data = await resp.json(); if (data && data.message) message = data.message; } catch (e) { /* ignore */ }
+                throw new Error(message);
+            }
+            showAlert('Mapping saved. Users see the change on their next page load.', false);
+        } catch (err) {
+            showAlert(err.message, true);
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        init();
+
+        document.getElementById('ddlRole').addEventListener('change', e => loadRoleMenus(e.target.value));
+        document.getElementById('btnSaveMapping').addEventListener('click', saveMapping);
+
+        document.getElementById('btnCheckAll').addEventListener('click', () =>
+            document.querySelectorAll('#menuTree input[type="checkbox"]').forEach(c => { c.checked = true; }));
+        document.getElementById('btnClearAll').addEventListener('click', () =>
+            document.querySelectorAll('#menuTree input[type="checkbox"]').forEach(c => { c.checked = false; }));
+
+        // Parent/child checkbox rules:
+        //  - checking a child auto-checks its parent
+        //  - unchecking a parent unchecks all its children
+        document.getElementById('menuTree').addEventListener('change', e => {
+            if (e.target.matches('.child-chk') && e.target.checked) {
+                const parent = document.querySelector('.parent-chk[data-id="' + e.target.dataset.parent + '"]');
+                if (parent) parent.checked = true;
+            }
+            if (e.target.matches('.parent-chk') && !e.target.checked) {
+                document.querySelectorAll('.child-chk[data-parent="' + e.target.dataset.id + '"]')
+                    .forEach(c => { c.checked = false; });
+            }
+        });
+    });
+})();
+</script>
+}
