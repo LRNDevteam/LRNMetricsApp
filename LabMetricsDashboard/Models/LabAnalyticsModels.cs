@@ -1,6 +1,6 @@
 namespace LabMetricsDashboard.Models;
 
-// ── Analytics: Lab Modes / Meridian (LabMedians) view-only list pages ────────
+// ── Analytics: Lab Modes / Median (LabMedians) view-only list pages ──────────
 
 public sealed class LabModeDto
 {

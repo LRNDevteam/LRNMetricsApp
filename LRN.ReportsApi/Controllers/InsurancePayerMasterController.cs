@@ -11,11 +11,13 @@ public sealed class InsurancePayerMasterController : ControllerBase
 {
     private readonly IMasterValuesRepository _repository;
     private readonly IPayerMasterWorkflowService _workflow;
+    private readonly IPayerMappingService _mapping;
 
-    public InsurancePayerMasterController(IMasterValuesRepository repository, IPayerMasterWorkflowService workflow)
+    public InsurancePayerMasterController(IMasterValuesRepository repository, IPayerMasterWorkflowService workflow, IPayerMappingService mapping)
     {
         _repository = repository;
         _workflow = workflow;
+        _mapping = mapping;
     }
 
     private bool CanView => PayerMasterRoles.CanViewLab(User);
@@ -96,7 +98,13 @@ public sealed class InsurancePayerMasterController : ControllerBase
         var uploadError = await FileUploadGuard.ValidateExcelAsync(request.File, 25 * 1024 * 1024, ct);
         if (uploadError != null) return BadRequest(new { message = uploadError });
         await using var stream = request.File.OpenReadStream();
-        return Ok(await _repository.ImportInsurancePayersAsync(stream, UserName(), ct));
+        var result = await _repository.ImportInsurancePayersAsync(stream, UserName(), ct);
+        // Upload hook: run the payer matching pipeline synchronously over the just-imported rows that
+        // have no GlobalPayerID (conflict rows excluded - they wait for the user's choice) and surface
+        // the auto-map / review / no-match outcome counts in the import summary.
+        if (result.UnmappedRecordIds.Count > 0)
+            result.Mapping = await _mapping.EvaluateRowsAsync(result.UnmappedRecordIds, ct);
+        return Ok(result);
     }
 
     [HttpPost("import/resolve-conflicts")]

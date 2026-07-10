@@ -11,4 +11,7 @@
     <PackageReference Include="Azure.Identity" Version="1.11.4" />
     <PackageReference Include="Microsoft.NETCore.Platforms" Version="1.1.0" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LRN.PayerPolicyMapper.Core\LRN.PayerPolicyMapper.Core.csproj" />
+  </ItemGroup>
 </Project>

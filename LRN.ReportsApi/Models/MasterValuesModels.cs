@@ -21,6 +21,9 @@ public sealed class InsurancePayerMasterDto
     public int? LabId { get; set; }
     public string? LabState { get; set; }
     public string? LabStateCode { get; set; }
+    // System-managed by the payer mapping pipeline (read-only for edits; never written by save paths).
+    public string? MappingStatus { get; set; }
+    public string? MappedBy { get; set; }
 }
 
 public sealed class PayerPolicyInsuranceMasterDto
@@ -41,6 +44,10 @@ public sealed class PayerPolicyInsuranceMasterDto
     public string? PayerState { get; set; }
     public string? IsActive { get; set; }
     public string? Remarks { get; set; }
+    // Brand-family classification used by the payer mapping pipeline (Step 6 candidate blocking).
+    // Populated by the classified import file; a null on save preserves the stored value.
+    public string? PayerFamily { get; set; }
+    public string? PayerFamilySource { get; set; }
 }
 
 public sealed class InsurancePayerMasterQuery
@@ -87,6 +94,10 @@ public sealed class ImportResultDto
     public List<GlobalPayerIdConflictDto> Conflicts { get; set; } = new();
     // Import-file rows skipped as duplicates of another row in the same workbook (counted in SkippedRows).
     public List<ImportDuplicateDto> Duplicates { get; set; } = new();
+    // Lab import only: ids of imported rows left without a GlobalPayerID - the upload hook runs the
+    // matching pipeline over exactly these and fills Mapping with the outcome counts.
+    public List<int> UnmappedRecordIds { get; set; } = new();
+    public MappingEvaluationSummaryDto? Mapping { get; set; }
 }
 
 /// <summary>
