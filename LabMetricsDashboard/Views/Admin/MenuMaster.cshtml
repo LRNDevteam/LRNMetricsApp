@@ -1,0 +1,458 @@
+@{
+    ViewData["Title"] = "Menu Master";
+}
+
+<div class="container-fluid py-3">
+    <div class="d-flex justify-content-between align-items-center mb-1">
+        <h3 class="fw-bold mb-0">Menu Master</h3>
+        <button class="btn btn-primary" id="btnAddMenu" type="button">
+            <i class="bi bi-plus-lg me-1"></i>Add Menu
+        </button>
+    </div>
+    <p class="text-secondary mb-3">
+        Define navigation items, links, icons, order, and active dates.
+        Access per role is set in <a asp-controller="Admin" asp-action="RoleMenuMapping">Role Menu Mapping</a>.
+    </p>
+
+    <div id="menuAlert" class="alert d-none" role="alert"></div>
+
+    <!-- Filters -->
+    <div class="row g-2 mb-3">
+        <div class="col-md-4">
+            <label class="form-label small fw-semibold">SEARCH</label>
+            <input id="fltSearch" class="form-control" placeholder="Menu name…" autocomplete="off">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small fw-semibold">PARENT MENU</label>
+            <select id="fltParent" class="form-select"><option value="">All</option></select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small fw-semibold">STATUS</label>
+            <select id="fltStatus" class="form-select">
+                <option value="">All</option>
+                <option>Active</option>
+                <option>Disabled</option>
+                <option>Scheduled</option>
+                <option>Expired</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-hover align-middle" id="tblMenus">
+            <thead class="table-light">
+                <tr>
+                    <th style="width:70px">Order</th>
+                    <th style="width:60px">Icon</th>
+                    <th>Menu Name</th>
+                    <th>Controller / Action</th>
+                    <th>Active From</th>
+                    <th>Active To</th>
+                    <th>Status</th>
+                    <th style="width:150px">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td colspan="8" class="text-center text-secondary py-4">Loading menus…</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Add / Edit modal -->
+<div class="modal fade" id="menuModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="menuModalTitle">Add Menu</h5>
+                <button class="btn-close" type="button" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="MenuItemId">
+                <div id="modalError" class="alert alert-danger d-none"></div>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Menu Name <span class="text-danger">*</span></label>
+                        <input id="MenuName" class="form-control" maxlength="100" required>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Parent Menu</label>
+                        <select id="ParentMenuItemId" class="form-select">
+                            <option value="">None — this is a top-level menu</option>
+                        </select>
+                    </div>
+
+                    <div class="col-md-4">
+                        <label class="form-label">Controller Name</label>
+                        <input id="ControllerName" class="form-control" placeholder="e.g. Dashboard">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Action Name</label>
+                        <input id="ActionName" class="form-control" placeholder="e.g. ClinicSummary">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Menu Order <span class="text-danger">*</span></label>
+                        <input id="MenuOrder" type="number" min="0" class="form-control" value="0">
+                        <div class="form-text">Order among siblings at the same level.</div>
+                    </div>
+
+                    <div class="col-md-8">
+                        <label class="form-label">Icon</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i id="iconPreview" class="bi bi-app"></i></span>
+                            <input id="IconClass" class="form-control" placeholder="bi-graph-up-arrow" readonly>
+                            <button type="button" class="btn btn-outline-secondary" id="btnPickIcon">Choose icon</button>
+                        </div>
+                        <div class="form-text">Bootstrap Icons class — pick from the searchable list.</div>
+                    </div>
+
+                    <div class="col-md-2">
+                        <label class="form-label">Active From</label>
+                        <input id="ActiveFrom" type="date" class="form-control">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Active To</label>
+                        <input id="ActiveTo" type="date" class="form-control">
+                        <div class="form-text">Both blank = forever.</div>
+                    </div>
+
+                    <div class="col-12">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="IsDisabled">
+                            <label class="form-check-label" for="IsDisabled">
+                                Disabled — show greyed in the menu, not clickable
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Cancel</button>
+                <button class="btn btn-primary" type="button" id="btnSaveMenu">
+                    <i class="bi bi-save me-1"></i>Save menu
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Icon picker: searchable grid of Bootstrap Icons -->
+<div class="modal fade" id="iconPickerModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <input id="iconSearch" class="form-control" placeholder="Search icons… e.g. chart, people, shield" autocomplete="off">
+            </div>
+            <div class="modal-body">
+                <div id="iconGrid" class="d-flex flex-wrap gap-2"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@Html.AntiForgeryToken()
+
+@section Scripts {
+<script nonce='@Context.Items["CspNonce"]'>
+(function () {
+    'use strict';
+
+    const urls = {
+        list: '@Url.Action("MenuItems", "Admin")',
+        save: '@Url.Action("SaveMenuItem", "Admin")',
+        disable: '@Url.Action("SetMenuDisabled", "Admin")',
+        remove: '@Url.Action("DeleteMenuItem", "Admin")'
+    };
+    const antiForgery = () => document.querySelector('input[name="__RequestVerificationToken"]').value;
+
+    let allItems = [];
+    let menuModal, iconPickerModal;
+
+    // Curated Bootstrap Icons list for the picker (searchable).
+    const ICONS = [
+        'bi-house-fill','bi-house-door-fill','bi-speedometer2','bi-speedometer','bi-graph-up','bi-graph-up-arrow',
+        'bi-graph-down','bi-bar-chart-fill','bi-bar-chart-steps','bi-pie-chart-fill','bi-activity','bi-calculator',
+        'bi-file-bar-graph','bi-file-earmark-bar-graph','bi-file-text','bi-file-earmark-text','bi-file-earmark-medical',
+        'bi-clipboard2-pulse-fill','bi-clipboard-check','bi-clipboard-data','bi-list-ul','bi-list-ol','bi-list-nested',
+        'bi-list-check','bi-table','bi-grid-fill','bi-grid-3x3-gap-fill','bi-kanban-fill','bi-columns-gap',
+        'bi-exclamation-triangle-fill','bi-exclamation-circle-fill','bi-check-circle-fill','bi-check2-square',
+        'bi-x-circle-fill','bi-slash-circle','bi-shield-check','bi-shield-lock','bi-shield-fill-check','bi-lock-fill',
+        'bi-unlock-fill','bi-key-fill','bi-person-fill','bi-person-badge','bi-person-gear','bi-person-check-fill',
+        'bi-people','bi-people-fill','bi-person-plus-fill','bi-building','bi-buildings','bi-building-check',
+        'bi-hospital','bi-hospital-fill','bi-heart-pulse-fill','bi-capsule','bi-prescription2','bi-thermometer-half',
+        'bi-cash-stack','bi-cash-coin','bi-currency-dollar','bi-credit-card-fill','bi-wallet-fill','bi-receipt',
+        'bi-database-fill','bi-database-gear','bi-database-check','bi-server','bi-hdd-stack-fill','bi-cloud-fill',
+        'bi-cloud-arrow-up-fill','bi-cloud-arrow-down-fill','bi-arrow-repeat','bi-arrow-clockwise','bi-clock-fill',
+        'bi-clock-history','bi-calendar3','bi-calendar-check','bi-calendar-event','bi-calendar-range','bi-bell',
+        'bi-bell-fill','bi-envelope-fill','bi-chat-dots-fill','bi-megaphone-fill','bi-flag-fill','bi-bookmark-fill',
+        'bi-star-fill','bi-lightning-fill','bi-lightbulb-fill','bi-gear-fill','bi-sliders','bi-tools','bi-wrench',
+        'bi-pencil-square','bi-pencil-fill','bi-eraser-fill','bi-trash-fill','bi-archive-fill','bi-box-seam',
+        'bi-folder-fill','bi-folder2-open','bi-search','bi-funnel-fill','bi-filter-square-fill','bi-sort-down',
+        'bi-eye-fill','bi-eye-slash-fill','bi-printer-fill','bi-download','bi-upload','bi-box-arrow-up-right',
+        'bi-link-45deg','bi-globe2','bi-geo-alt-fill','bi-map-fill','bi-compass-fill','bi-diagram-3-fill',
+        'bi-journal-text','bi-journal-check','bi-book-fill','bi-mortarboard-fill','bi-briefcase-fill','bi-tag-fill',
+        'bi-tags-fill','bi-ticket-perforated-fill','bi-upc-scan','bi-qr-code','bi-truck','bi-send-fill',
+        'bi-inbox-fill','bi-collection-fill','bi-layers-fill','bi-stack','bi-window-sidebar','bi-menu-button-wide-fill',
+        'bi-app','bi-app-indicator','bi-award-fill','bi-trophy-fill','bi-bullseye','bi-crosshair','bi-cpu-fill',
+        'bi-robot','bi-magic','bi-stars','bi-droplet-fill','bi-thermometer','bi-virus','bi-bandaid-fill',
+        'bi-clipboard2-check-fill','bi-clipboard2-x-fill','bi-cart-fill','bi-basket-fill','bi-bag-fill','bi-gift-fill'
+    ];
+
+    // ── helpers ──────────────────────────────────────────────────────────
+    function showAlert(message, isError) {
+        const el = document.getElementById('menuAlert');
+        el.className = 'alert ' + (isError ? 'alert-danger' : 'alert-success');
+        el.textContent = message;
+        el.classList.remove('d-none');
+        window.clearTimeout(el._t);
+        el._t = window.setTimeout(() => el.classList.add('d-none'), 4000);
+    }
+
+    function fmtDate(value) {
+        return value ? String(value).substring(0, 10) : '';
+    }
+
+    function statusOf(item) {
+        const today = new Date().toISOString().substring(0, 10);
+        if (item.isDisabled) return 'Disabled';
+        if (item.activeFrom && fmtDate(item.activeFrom) > today) return 'Scheduled';
+        if (item.activeTo && fmtDate(item.activeTo) < today) return 'Expired';
+        return 'Active';
+    }
+
+    const STATUS_BADGE = {
+        Active: 'text-bg-success',
+        Disabled: 'text-bg-secondary',
+        Scheduled: 'text-bg-info',
+        Expired: 'text-bg-warning'
+    };
+
+    async function apiPost(url, body) {
+        const resp = await fetch(url, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': antiForgery()
+            },
+            body: JSON.stringify(body)
+        });
+        if (!resp.ok) {
+            let message = 'Request failed (' + resp.status + ')';
+            try { const data = await resp.json(); if (data && data.message) message = data.message; } catch (e) { /* ignore */ }
+            throw new Error(message);
+        }
+        return resp.json();
+    }
+
+    // ── grid ─────────────────────────────────────────────────────────────
+    async function loadMenus() {
+        const resp = await fetch(urls.list, { credentials: 'same-origin' });
+        if (!resp.ok) {
+            document.querySelector('#tblMenus tbody').innerHTML =
+                '<tr><td colspan="8" class="text-center text-danger py-4">Failed to load menus. Is the Reports API running and the menu tables deployed?</td></tr>';
+            return;
+        }
+        allItems = await resp.json();
+        fillParentFilters();
+        renderGrid();
+    }
+
+    function fillParentFilters() {
+        const parents = allItems.filter(i => !i.parentMenuItemId);
+        const options = parents.map(p => '<option value="' + p.menuItemId + '">' + escapeHtml(p.menuName) + '</option>').join('');
+        document.getElementById('fltParent').innerHTML = '<option value="">All</option>' + options;
+        document.getElementById('ParentMenuItemId').innerHTML =
+            '<option value="">None — this is a top-level menu</option>' + options;
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text == null ? '' : String(text);
+        return div.innerHTML;
+    }
+
+    function matchesFilters(item) {
+        const search = document.getElementById('fltSearch').value.trim().toLowerCase();
+        const parent = document.getElementById('fltParent').value;
+        const status = document.getElementById('fltStatus').value;
+        if (search && item.menuName.toLowerCase().indexOf(search) === -1) return false;
+        if (parent && String(item.parentMenuItemId || item.menuItemId) !== parent) return false;
+        if (status && statusOf(item) !== status) return false;
+        return true;
+    }
+
+    function rowHtml(item, isChild) {
+        const status = statusOf(item);
+        const link = item.controllerName
+            ? '<code>' + escapeHtml(item.controllerName) + '/' + escapeHtml(item.actionName) + '</code>'
+            : '<span class="text-secondary">— (group)</span>';
+        const nameCell = isChild
+            ? '<td class="ps-4' + (item.isDisabled ? ' text-muted' : '') + '">&#8627; ' + escapeHtml(item.menuName) + '</td>'
+            : '<td class="fw-semibold' + (item.isDisabled ? ' text-muted' : '') + '">' + escapeHtml(item.menuName) + '</td>';
+        const toggleBtn = item.isDisabled
+            ? '<button class="btn btn-sm btn-outline-success" data-act="enable" data-id="' + item.menuItemId + '" title="Enable"><i class="bi bi-check-circle"></i></button>'
+            : '<button class="btn btn-sm btn-outline-warning" data-act="disable" data-id="' + item.menuItemId + '" title="Disable"><i class="bi bi-slash-circle"></i></button>';
+        return '<tr>' +
+            '<td>' + item.menuOrder + '</td>' +
+            '<td><i class="bi ' + escapeHtml(item.iconClass || 'bi-app') + ' fs-5' + (item.isDisabled ? ' text-muted' : '') + '"></i></td>' +
+            nameCell +
+            '<td>' + link + '</td>' +
+            '<td>' + (fmtDate(item.activeFrom) || '—') + '</td>' +
+            '<td>' + (fmtDate(item.activeTo) || '—') + '</td>' +
+            '<td><span class="badge ' + STATUS_BADGE[status] + '">' + status + '</span></td>' +
+            '<td>' +
+                '<button class="btn btn-sm btn-outline-primary" data-act="edit" data-id="' + item.menuItemId + '" title="Edit"><i class="bi bi-pencil"></i></button> ' +
+                toggleBtn + ' ' +
+                '<button class="btn btn-sm btn-outline-danger" data-act="delete" data-id="' + item.menuItemId + '" title="Delete"><i class="bi bi-trash"></i></button>' +
+            '</td>' +
+        '</tr>';
+    }
+
+    function renderGrid() {
+        const tbody = document.querySelector('#tblMenus tbody');
+        const parents = allItems.filter(i => !i.parentMenuItemId)
+            .sort((a, b) => a.menuOrder - b.menuOrder || a.menuName.localeCompare(b.menuName));
+        let html = '';
+        for (const parent of parents) {
+            const children = allItems.filter(i => i.parentMenuItemId === parent.menuItemId)
+                .sort((a, b) => a.menuOrder - b.menuOrder || a.menuName.localeCompare(b.menuName));
+            const visibleChildren = children.filter(matchesFilters);
+            const parentVisible = matchesFilters(parent);
+            if (!parentVisible && visibleChildren.length === 0) continue;
+            if (parentVisible) html += rowHtml(parent, false);
+            for (const child of visibleChildren) html += rowHtml(child, true);
+        }
+        tbody.innerHTML = html || '<tr><td colspan="8" class="text-center text-secondary py-4">No menus match the filters.</td></tr>';
+    }
+
+    // ── modal ────────────────────────────────────────────────────────────
+    function openMenuModal(item) {
+        document.getElementById('modalError').classList.add('d-none');
+        document.getElementById('menuModalTitle').textContent = item ? 'Edit Menu' : 'Add Menu';
+        document.getElementById('MenuItemId').value = item ? item.menuItemId : '';
+        document.getElementById('MenuName').value = item ? item.menuName : '';
+        document.getElementById('ParentMenuItemId').value = item && item.parentMenuItemId ? String(item.parentMenuItemId) : '';
+        document.getElementById('ControllerName').value = item ? (item.controllerName || '') : '';
+        document.getElementById('ActionName').value = item ? (item.actionName || '') : '';
+        document.getElementById('MenuOrder').value = item ? item.menuOrder : 0;
+        document.getElementById('IconClass').value = item ? (item.iconClass || '') : '';
+        document.getElementById('iconPreview').className = 'bi ' + ((item && item.iconClass) || 'bi-app');
+        document.getElementById('ActiveFrom').value = item ? fmtDate(item.activeFrom) : '';
+        document.getElementById('ActiveTo').value = item ? fmtDate(item.activeTo) : '';
+        document.getElementById('IsDisabled').checked = !!(item && item.isDisabled);
+
+        // An item that has children must stay top-level (2-level limit): hide the parent picker option of itself.
+        const parentSelect = document.getElementById('ParentMenuItemId');
+        for (const option of parentSelect.options) {
+            option.disabled = item && option.value === String(item.menuItemId);
+        }
+        menuModal.show();
+    }
+
+    function modalError(message) {
+        const el = document.getElementById('modalError');
+        el.textContent = message;
+        el.classList.remove('d-none');
+    }
+
+    async function saveMenu() {
+        const name = document.getElementById('MenuName').value.trim();
+        const controller = document.getElementById('ControllerName').value.trim();
+        const action = document.getElementById('ActionName').value.trim();
+        const from = document.getElementById('ActiveFrom').value;
+        const to = document.getElementById('ActiveTo').value;
+
+        if (!name) return modalError('Menu name is required.');
+        if ((controller && !action) || (!controller && action))
+            return modalError('Controller and Action must be provided together (both or neither).');
+        if (from && to && from > to) return modalError('Active From must be on or before Active To.');
+
+        const id = document.getElementById('MenuItemId').value;
+        const payload = {
+            parentMenuItemId: document.getElementById('ParentMenuItemId').value ? +document.getElementById('ParentMenuItemId').value : null,
+            menuName: name,
+            controllerName: controller || null,
+            actionName: action || null,
+            iconClass: document.getElementById('IconClass').value.trim() || null,
+            menuOrder: +document.getElementById('MenuOrder').value || 0,
+            activeFrom: from || null,
+            activeTo: to || null,
+            isDisabled: document.getElementById('IsDisabled').checked
+        };
+
+        try {
+            await apiPost(urls.save + (id ? '?id=' + id : ''), payload);
+            menuModal.hide();
+            showAlert('Menu saved.', false);
+            await loadMenus();
+        } catch (err) {
+            modalError(err.message);
+        }
+    }
+
+    // ── icon picker ──────────────────────────────────────────────────────
+    function renderIcons(filter) {
+        const grid = document.getElementById('iconGrid');
+        const query = (filter || '').trim().toLowerCase();
+        grid.innerHTML = ICONS
+            .filter(icon => !query || icon.indexOf(query) !== -1)
+            .map(icon => '<button type="button" class="btn btn-outline-secondary icon-cell" data-icon="' + icon + '" title="' + icon + '">' +
+                '<i class="bi ' + icon + ' fs-4"></i></button>')
+            .join('');
+    }
+
+    // ── events ───────────────────────────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', function () {
+        menuModal = new bootstrap.Modal(document.getElementById('menuModal'));
+        iconPickerModal = new bootstrap.Modal(document.getElementById('iconPickerModal'));
+
+        document.getElementById('btnAddMenu').addEventListener('click', () => openMenuModal(null));
+        document.getElementById('btnSaveMenu').addEventListener('click', saveMenu);
+        document.getElementById('btnPickIcon').addEventListener('click', () => {
+            document.getElementById('iconSearch').value = '';
+            renderIcons('');
+            iconPickerModal.show();
+        });
+        document.getElementById('iconSearch').addEventListener('input', e => renderIcons(e.target.value));
+        document.getElementById('iconGrid').addEventListener('click', e => {
+            const btn = e.target.closest('button[data-icon]');
+            if (!btn) return;
+            document.getElementById('IconClass').value = btn.dataset.icon;
+            document.getElementById('iconPreview').className = 'bi ' + btn.dataset.icon;
+            iconPickerModal.hide();
+        });
+
+        ['fltSearch', 'fltParent', 'fltStatus'].forEach(id =>
+            document.getElementById(id).addEventListener('input', renderGrid));
+
+        document.querySelector('#tblMenus tbody').addEventListener('click', async e => {
+            const btn = e.target.closest('button[data-act]');
+            if (!btn) return;
+            const id = +btn.dataset.id;
+            const item = allItems.find(i => i.menuItemId === id);
+            if (!item) return;
+
+            try {
+                if (btn.dataset.act === 'edit') {
+                    openMenuModal(item);
+                } else if (btn.dataset.act === 'disable' || btn.dataset.act === 'enable') {
+                    await apiPost(urls.disable, { menuItemId: id, isDisabled: btn.dataset.act === 'disable' });
+                    showAlert(btn.dataset.act === 'disable' ? 'Menu disabled.' : 'Menu enabled.', false);
+                    await loadMenus();
+                } else if (btn.dataset.act === 'delete') {
+                    if (!window.confirm('Delete menu "' + item.menuName + '"? It will be removed from the navbar for every role.')) return;
+                    await apiPost(urls.remove, { menuItemId: id });
+                    showAlert('Menu deleted.', false);
+                    await loadMenus();
+                }
+            } catch (err) {
+                showAlert(err.message, true);
+            }
+        });
+
+        loadMenus();
+    });
+})();
+</script>
+}

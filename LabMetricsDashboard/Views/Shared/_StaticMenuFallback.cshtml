@@ -1,0 +1,286 @@
+@using LabMetricsDashboard.Models
+@inject LabSettings LabSettingsInstance
+@inject IConfiguration Configuration
+@{
+    // Legacy hard-coded navbar. Rendered only when the dynamic (database-driven)
+    // menu is unavailable (Reports API down / menu tables not deployed) or the
+    // user's roles have no menu mappings yet.
+    var denialReactUrl = Configuration["DenialWorkflowReactUrl"] ?? "https://localhost:5173";
+    var denialReactAgingUrl = denialReactUrl.Contains('#') ? denialReactUrl : $"{denialReactUrl}#aging";
+
+    var isAdmin = User?.IsInRole("Admin") ?? false;
+    var isLrnAdmin = isAdmin || (User?.IsInRole("LRN Admin") ?? false) || (User?.IsInRole("LRNAdmin") ?? false);
+    var isPayerPolicyAdmin = (User?.IsInRole("Payer Policy Admin") ?? false) || (User?.IsInRole("PayerPolicyAdmin") ?? false);
+    var isReportsAnalyst = (User?.IsInRole("Reports Analyst") ?? false) || (User?.IsInRole("ReportsAnalyst") ?? false);
+    var isReportsManager = (User?.IsInRole("Reports Manager") ?? false) || (User?.IsInRole("ReportsManager") ?? false);
+    var isEtl = (User?.IsInRole("ETL") ?? false) || (User?.IsInRole("Etl") ?? false);
+    var canSeePolicyMaster = isLrnAdmin || isPayerPolicyAdmin || isReportsAnalyst || isEtl;
+    var canSeeLabMaster = isLrnAdmin || isReportsManager || isReportsAnalyst || isEtl;
+
+    // Resolve the active lab the same way _Layout does, to honor per-lab feature toggles.
+    var allLabKeys = LabSettingsInstance.Labs.Keys.OrderBy(x => x).ToList();
+    var userLabClaims = User?.Claims?
+        .Where(c => c.Type == "LabName")
+        .Select(c => c.Value)
+        .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var availableLabs = isAdmin ? allLabKeys : allLabKeys.Where(l => userLabClaims.Contains(l)).ToList();
+
+    var activeLab = ViewData["SelectedLab"] as string;
+    if (string.IsNullOrEmpty(activeLab))
+    {
+        var queryLab = Context.Request.Query["lab"].ToString();
+        if (!string.IsNullOrWhiteSpace(queryLab) && availableLabs.Contains(queryLab, StringComparer.OrdinalIgnoreCase))
+        {
+            activeLab = queryLab;
+        }
+        else
+        {
+            Context.Request.Cookies.TryGetValue("lmd_selected_lab", out var cookieLab);
+            activeLab = !string.IsNullOrWhiteSpace(cookieLab) && availableLabs.Contains(cookieLab, StringComparer.OrdinalIgnoreCase)
+                ? cookieLab
+                : availableLabs.FirstOrDefault();
+        }
+    }
+
+    LabCsvConfig? labConfig = null;
+    if (!string.IsNullOrEmpty(activeLab) && LabSettingsInstance.Labs.ContainsKey(activeLab))
+    {
+        labConfig = LabSettingsInstance.Labs[activeLab];
+    }
+}
+
+@if (isAdmin)
+{
+    <li class="nav-item">
+        <a class="nav-link" asp-controller="Home" asp-action="Index">
+            <i class="bi bi-house-door-fill"></i> Home
+        </a>
+    </li>
+}
+
+<li class="nav-item">
+    <a class="nav-link" asp-controller="Dashboard" asp-action="Index">
+        <i class="bi bi-speedometer2"></i> Revenue Dashboard
+    </a>
+</li>
+
+<li class="nav-item dropdown">
+    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+        <i class="bi bi-file-earmark-bar-graph"></i> Standard Reports
+    </a>
+    <ul class="dropdown-menu">
+        <li>
+            <a class="dropdown-item" asp-controller="LisSummary" asp-action="Index">
+                <i class="bi bi-clipboard2-pulse-fill"></i> LIS Summary
+            </a>
+        </li>
+
+        @if (labConfig?.EnableProductionSummaryReport ?? false)
+        {
+            <li>
+                <a class="dropdown-item" asp-controller="Dashboard" asp-action="ProductionSummaryReport">
+                    <i class="bi bi-bar-chart-steps"></i> Production Summary Report
+                </a>
+            </li>
+        }
+
+        @if (labConfig?.EnableCollectionReport ?? true)
+        {
+            <li>
+                <a class="dropdown-item" asp-controller="CollectionSummary" asp-action="Index" data-lab-link="Collection Summary">
+                    <i class="bi bi-cash-stack"></i> Collection Summary
+                </a>
+            </li>
+        }
+        else
+        {
+            <li>
+                <span class="dropdown-item disabled" title="This feature is not enabled for the selected lab">
+                    <i class="bi bi-cash-stack"></i> Collection Summary
+                </span>
+            </li>
+        }
+
+        <li>
+            <a class="dropdown-item" asp-controller="ExecutiveSummary" asp-action="Index" data-lab-link="Executive Summary">
+                <i class="bi bi-table"></i> Executive Summary
+            </a>
+        </li>
+
+        <li><hr class="dropdown-divider" /></li>
+        <li>
+            <a class="dropdown-item" asp-controller="Dashboard" asp-action="ClaimLevel">
+                <i class="bi bi-file-text"></i> Claim Level Details
+            </a>
+        </li>
+        <li>
+            <a class="dropdown-item" asp-controller="Dashboard" asp-action="LineLevel">
+                <i class="bi bi-list-ul"></i> Line Level Details
+            </a>
+        </li>
+    </ul>
+</li>
+
+<li class="nav-item">
+    <a class="nav-link" asp-controller="DenialDashboard" asp-action="Index">
+        <i class="bi bi-exclamation-triangle-fill"></i> Denial Dashboard
+    </a>
+</li>
+
+<li class="nav-item">
+    <a class="nav-link" href="@denialReactAgingUrl" target="_blank" rel="noopener">
+        <i class="bi bi-kanban-fill"></i> Denial Workflow
+    </a>
+</li>
+
+<li class="nav-item dropdown">
+    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+        <i class="bi bi-graph-up-arrow"></i> Analytics
+    </a>
+    <ul class="dropdown-menu">
+        @if (labConfig?.EnablePrediction == true)
+        {
+            <li>
+                <a class="dropdown-item" asp-controller="Prediction" asp-action="Index">
+                    <i class="bi bi-activity"></i> Prediction Analysis
+                </a>
+            </li>
+        }
+        else
+        {
+            <li>
+                <span class="dropdown-item disabled" title="This feature is not enabled for the selected lab">
+                    <i class="bi bi-activity"></i> Prediction Analysis
+                </span>
+            </li>
+        }
+
+        @if (labConfig?.EnableForcast == true)
+        {
+            <li>
+                <a class="dropdown-item" asp-controller="Prediction" asp-action="ForecastingSummary">
+                    <i class="bi bi-calendar3"></i> Forecasting Summary
+                </a>
+            </li>
+        }
+        else
+        {
+            <li>
+                <span class="dropdown-item disabled" title="This feature is not enabled for the selected lab">
+                    <i class="bi bi-calendar3"></i> Forecasting Summary
+                </span>
+            </li>
+        }
+
+        <li><hr class="dropdown-divider" /></li>
+
+        @if (labConfig?.EnableCoding ?? true)
+        {
+            <li>
+                <a class="dropdown-item" asp-controller="Coding" asp-action="Summary">
+                    <i class="bi bi-pencil-square"></i> Coding Summary
+                </a>
+            </li>
+        }
+        else
+        {
+            <li>
+                <span class="dropdown-item disabled" title="This feature is not enabled for the selected lab">
+                    <i class="bi bi-pencil-square"></i> Coding Summary
+                </span>
+            </li>
+        }
+
+        @if (labConfig?.EnableClinicsummary ?? true)
+        {
+            <li>
+                <a class="dropdown-item" asp-controller="Dashboard" asp-action="ClinicSummary">
+                    <i class="bi bi-hospital"></i> Clinic Summary
+                </a>
+            </li>
+        }
+        else
+        {
+            <li>
+                <span class="dropdown-item disabled" title="This feature is not enabled for the selected lab">
+                    <i class="bi bi-hospital"></i> Clinic Summary
+                </span>
+            </li>
+        }
+
+        @if (labConfig?.EnableSalesRepsummary ?? true)
+        {
+            <li>
+                <a class="dropdown-item" asp-controller="Dashboard" asp-action="SalesRepSummary">
+                    <i class="bi bi-people-fill"></i> Sales Rep Summary
+                </a>
+            </li>
+        }
+        else
+        {
+            <li>
+                <span class="dropdown-item disabled" title="This feature is not enabled for the selected lab">
+                    <i class="bi bi-people-fill"></i> Sales Rep Summary
+                </span>
+            </li>
+        }
+
+        <li><hr class="dropdown-divider" /></li>
+
+        <li>
+            <a class="dropdown-item" asp-controller="Analytics" asp-action="Modes">
+                <i class="bi bi-bar-chart-line"></i> Modes
+            </a>
+        </li>
+        <li>
+            <a class="dropdown-item" asp-controller="Analytics" asp-action="Meridian">
+                <i class="bi bi-graph-up"></i> Meridian
+            </a>
+        </li>
+    </ul>
+</li>
+
+@if (canSeeLabMaster || canSeePolicyMaster)
+{
+    <li class="nav-item dropdown">
+        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+            <i class="bi bi-database-gear"></i> Master Values
+        </a>
+        <ul class="dropdown-menu">
+            @if (canSeeLabMaster)
+            {
+                <li><a class="dropdown-item" asp-controller="MasterValues" asp-action="InsurancePayerMaster"><i class="bi bi-building-check"></i> Lab Insurance Master</a></li>
+            }
+            @if (canSeePolicyMaster)
+            {
+                <li><a class="dropdown-item" asp-controller="MasterValues" asp-action="PayerPolicyInsuranceMaster"><i class="bi bi-file-earmark-medical"></i> Payer Policy Insurance Master</a></li>
+            }
+            <li><hr class="dropdown-divider" /></li>
+            @if (isLrnAdmin || isPayerPolicyAdmin || isReportsManager || isReportsAnalyst)
+            {
+                <li><a class="dropdown-item" asp-controller="MasterValues" asp-action="ApprovalQueue"><i class="bi bi-check2-square"></i> Approval Queue</a></li>
+            }
+            <li><a class="dropdown-item" asp-controller="MasterValues" asp-action="AuditTrail"><i class="bi bi-clock-history"></i> Audit Trail</a></li>
+            <li><a class="dropdown-item" asp-controller="MasterValues" asp-action="PayerMasterNotifications"><i class="bi bi-bell"></i> Notifications</a></li>
+        </ul>
+    </li>
+}
+
+@if (isAdmin)
+{
+    <li class="nav-item dropdown">
+        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+            <i class="bi bi-shield-lock"></i> Admin
+        </a>
+        <ul class="dropdown-menu">
+            <li><a class="dropdown-item" asp-controller="Admin" asp-action="ListUsers"><i class="bi bi-people"></i> Manage Users</a></li>
+            <li><a class="dropdown-item" asp-controller="Admin" asp-action="AssignUserRole"><i class="bi bi-person-badge"></i> Assign User Role</a></li>
+            <li><a class="dropdown-item" asp-controller="Admin" asp-action="AssignUserLabs"><i class="bi bi-building"></i> Assign User Labs</a></li>
+            <li><a class="dropdown-item" asp-controller="Admin" asp-action="Roles"><i class="bi bi-shield-check"></i> Roles</a></li>
+            <li><a class="dropdown-item" asp-controller="Admin" asp-action="ManageLabs"><i class="bi bi-buildings"></i> Manage Labs</a></li>
+            <li><hr class="dropdown-divider" /></li>
+            <li><a class="dropdown-item" asp-controller="Admin" asp-action="MenuMaster"><i class="bi bi-list-nested"></i> Menu Master</a></li>
+            <li><a class="dropdown-item" asp-controller="Admin" asp-action="RoleMenuMapping"><i class="bi bi-person-gear"></i> Role Menu Mapping</a></li>
+        </ul>
+    </li>
+}
