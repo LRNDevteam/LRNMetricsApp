@@ -53,12 +53,7 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
                 ISNULL(ExpectedCPTCode,    ''),
                 ISNULL(ActualCPTCode,      ''),
                 ISNULL(MissingCPTCodes,    ''),
-                ISNULL(AdditionalCPTCodes, ''),
-                TRY_CAST(TotalCharge                 AS DECIMAL(18,2)),
-                TRY_CAST(MissingCPT_Charges          AS DECIMAL(18,2)),
-                TRY_CAST(MissingCPT_AvgPaidAmount    AS DECIMAL(18,2)),
-                TRY_CAST(AdditionalCPT_Charges       AS DECIMAL(18,2)),
-                TRY_CAST(AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2))
+                ISNULL(AdditionalCPTCodes, '')
             ORDER BY
                 ServiceYear DESC,
                 PanelName,
@@ -229,12 +224,7 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
                 ISNULL(ExpectedCPTCode,    ''),
                 ISNULL(ActualCPTCode,      ''),
                 ISNULL(MissingCPTCodes,    ''),
-                ISNULL(AdditionalCPTCodes, ''),
-                TRY_CAST(TotalCharge                 AS DECIMAL(18,2)),
-                TRY_CAST(MissingCPT_Charges          AS DECIMAL(18,2)),
-                TRY_CAST(MissingCPT_AvgPaidAmount    AS DECIMAL(18,2)),
-                TRY_CAST(AdditionalCPT_Charges       AS DECIMAL(18,2)),
-                TRY_CAST(AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2))
+                ISNULL(AdditionalCPTCodes, '')
             ORDER BY
                 WeekFolder DESC,
                 PanelName,

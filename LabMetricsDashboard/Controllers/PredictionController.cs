@@ -1,6 +1,7 @@
 using System.Globalization;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
+using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
 
 namespace LabMetricsDashboard.Controllers;
@@ -607,11 +608,29 @@ public class PredictionController : Controller
             _logger.LogInformation("[{Lab}] No data in 4-week window. Latest date in data: {LatestDate}", selectedLab, latestDataDate);
         }
 
-        // All-data summaries
-        var medianSummary = BuildWeeklySummary(summaryRecords, summaryWeeks,
-            r => r.MedianAllowedAmountSameLab, r => r.MedianInsurancePaidSameLab);
-        var modeSummary = BuildWeeklySummary(summaryRecords, summaryWeeks,
-            r => r.ModeAllowedAmountSameLab, r => r.ModeInsurancePaidSameLab);
+        // All-data summaries — prefer SQL aggregation for large DB-backed labs.
+        WeeklyForecastSummary medianSummary;
+        WeeklyForecastSummary modeSummary;
+        if (usingDb)
+        {
+            var spSummary = await _dbRepo.TryGetForecastingSummaryAsync(
+                labConfig!.DbConnectionString ?? string.Empty,
+                cancellationToken: HttpContext.RequestAborted);
+
+            if (spSummary is not null)
+            {
+                medianSummary = spSummary.MedianSummary;
+                modeSummary   = spSummary.ModeSummary;
+            }
+            else
+            {
+                (medianSummary, modeSummary) = BuildWeeklySummaries(summaryRecords, summaryWeeks);
+            }
+        }
+        else
+        {
+            (medianSummary, modeSummary) = BuildWeeklySummaries(summaryRecords, summaryWeeks);
+        }
 
         // Filter option lists (from in-range records)
         var payerNames = inRangeRecords.Select(r => r.PayerNameNormalized).Where(v => !string.IsNullOrWhiteSpace(v)).Distinct().OrderBy(v => v).ToList();
@@ -650,6 +669,7 @@ public class PredictionController : Controller
             LatestDataDate       = latestDataDate,
             CurrentWeekStartDate = weekStart,
             TotalRecordsInRange  = inRangeRecords.Count,
+            TotalForecastRecords = rawRecords.Count,
 
             RunId          = runInfoRunId,
             WeekFolder     = runInfoWeekFolder,
@@ -947,6 +967,7 @@ public class PredictionController : Controller
     /// (fetched via the slim dbo.usp_GetForecastingRecords for performance);
     /// dimension filters, when supplied, are applied in memory.
     /// </summary>
+    [RequestTimeout(milliseconds: 900_000)] // 15 min — large labs can take several minutes
     public async Task<IActionResult> ExportForecastingExcel(
         string? lab,
         string? filterPayerName,
@@ -1001,7 +1022,9 @@ public class PredictionController : Controller
                     : _resolver.ResolvePredictionValidationReport(selectedLab);
                 var all = srcPath is not null ? _parser.Parse(srcPath) : new List<PredictionRecord>();
 
-                var q = all.AsEnumerable();
+                var q = all.Where(r =>
+                    PredictionReportParserService.IsForecastSummaryRow(
+                        r.ForecastingPayability, r.PayStatus));
                 if (!string.IsNullOrWhiteSpace(filterPayerName))
                     q = q.Where(r => r.PayerNameNormalized.Equals(filterPayerName, StringComparison.OrdinalIgnoreCase));
                 if (!string.IsNullOrWhiteSpace(filterPayerType))
@@ -1013,6 +1036,10 @@ public class PredictionController : Controller
                 exportRecords = q.ToList();
             }
 
+            _logger.LogInformation(
+                "[{Lab}] Forecasting Excel export: {ExportRows:N0} detail rows.",
+                selectedLab, exportRecords.Count);
+
             var activeFilters = new List<(string Label, string? Value)>();
             if (!string.IsNullOrWhiteSpace(filterPayerName)) activeFilters.Add(("Payer Name", filterPayerName));
             if (!string.IsNullOrWhiteSpace(filterPayerType)) activeFilters.Add(("Payer Type", filterPayerType));
@@ -1022,23 +1049,28 @@ public class PredictionController : Controller
             using var workbook = ForecastingExcelExportBuilder.CreateWorkbook(
                 vm, selectedLab, activeFilters.Count > 0 ? activeFilters : null, exportRecords);
 
-            await using var stream = new MemoryStream();
+            var saveSw = System.Diagnostics.Stopwatch.StartNew();
+            using var stream = new MemoryStream();
             workbook.SaveAs(stream);
-            stream.Position = 0;
+            var bytes = stream.ToArray();
+            saveSw.Stop();
+
+            _logger.LogInformation(
+                "[{Lab}] Forecasting Excel saved in {Ms}ms — {Rows:N0} detail rows, {Bytes:N0} bytes ({Mb:N1} MB).",
+                selectedLab, saveSw.ElapsedMilliseconds, exportRecords.Count, bytes.Length, bytes.Length / 1_048_576.0);
 
             var safeLabName = string.Join("_", selectedLab.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)).Trim('_');
             var fileName = $"{safeLabName}_ForecastingSummary_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
 
             return File(
-                stream.ToArray(),
+                bytes,
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 fileName);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Forecasting Excel export failed for lab '{LabName}'.", selectedLab);
-            TempData["ExportError"] = $"Export failed: {ex.Message}";
-            return RedirectToAction(nameof(ForecastingSummary), new { lab });
+            return StatusCode(500, $"Export failed: {ex.Message}");
         }
     }
 
@@ -1211,6 +1243,20 @@ public class PredictionController : Controller
                 rawRecords, rangeStart, rangeEnd.AddDays(1));
             summaryRecords = PredictionReportParserService.ApplyForecastDateRangeFilter(
                 rawRecords, DateOnly.MinValue, rangeEnd.AddDays(1));
+
+            if (inRangeRecords.Count == 0 && rawRecords.Count > 0)
+            {
+                var forecastOnly = rawRecords
+                    .Where(r => PredictionReportParserService.IsForecastSummaryRow(
+                        r.ForecastingPayability, r.PayStatus))
+                    .ToList();
+
+                if (forecastOnly.Count > 0)
+                {
+                    inRangeRecords = forecastOnly;
+                    summaryRecords = forecastOnly;
+                }
+            }
         }
         else
         {
@@ -1224,16 +1270,37 @@ public class PredictionController : Controller
                 allParsed, DateOnly.MinValue, rangeEnd.AddDays(1));
         }
 
+        WeeklyForecastSummary medianSummary;
+        WeeklyForecastSummary modeSummary;
+        if (usingDb)
+        {
+            var spSummary = await _dbRepo.TryGetForecastingSummaryAsync(
+                labConfig!.DbConnectionString ?? string.Empty,
+                cancellationToken: HttpContext.RequestAborted);
+
+            if (spSummary is not null)
+            {
+                medianSummary = spSummary.MedianSummary;
+                modeSummary   = spSummary.ModeSummary;
+            }
+            else
+            {
+                (medianSummary, modeSummary) = BuildWeeklySummaries(summaryRecords, summaryWeeks);
+            }
+        }
+        else
+        {
+            (medianSummary, modeSummary) = BuildWeeklySummaries(summaryRecords, summaryWeeks);
+        }
+
         return new ForecastingSummaryViewModel
         {
             SelectedLab          = selectedLab,
             PredictionAvailable  = true,
             CurrentWeekStartDate = weekStart,
             TotalRecordsInRange  = inRangeRecords.Count,
-            MedianSummary = BuildWeeklySummary(summaryRecords, summaryWeeks,
-                r => r.MedianAllowedAmountSameLab, r => r.MedianInsurancePaidSameLab),
-            ModeSummary = BuildWeeklySummary(summaryRecords, summaryWeeks,
-                r => r.ModeAllowedAmountSameLab, r => r.ModeInsurancePaidSameLab),
+            MedianSummary = medianSummary,
+            ModeSummary = modeSummary,
         };
     }
 
@@ -1445,90 +1512,212 @@ public class PredictionController : Controller
             || DateOnly.TryParse(value, CultureInfo.InvariantCulture, out date);
     }
 
-    private static WeeklyForecastSummary BuildWeeklySummary(
+    private static (WeeklyForecastSummary Median, WeeklyForecastSummary Mode) BuildWeeklySummaries(
         IReadOnlyList<PredictionRecord> records,
-        IReadOnlyList<WeekRange> weeks,
-        Func<PredictionRecord, decimal> allowedSelector,
-        Func<PredictionRecord, decimal> paidSelector)
+        IReadOnlyList<WeekRange> weeks)
     {
-        // Assign each record to its week bin. A synthetic prior bucket, when present,
-        // captures all records before the first real week.
-        var recordsWithWeek = new List<(PredictionRecord Rec, DateOnly WeekStart)>();
         var priorBucket = weeks.FirstOrDefault(w => w.IncludeBeforeStart);
         var normalWeeks = weeks.Where(w => !w.IncludeBeforeStart).ToList();
         var firstNormalWeekStart = normalWeeks.Count > 0 ? normalWeeks[0].Start : (DateOnly?)null;
+
+        var medianByPayer = new Dictionary<string, Dictionary<DateOnly, (decimal Allowed, decimal Paid)>>(
+            StringComparer.OrdinalIgnoreCase);
+        var modeByPayer = new Dictionary<string, Dictionary<DateOnly, (decimal Allowed, decimal Paid)>>(
+            StringComparer.OrdinalIgnoreCase);
+        var medianTotals = weeks.ToDictionary(w => w.Start, _ => (Allowed: 0m, Paid: 0m));
+        var modeTotals = weeks.ToDictionary(w => w.Start, _ => (Allowed: 0m, Paid: 0m));
 
         foreach (var r in records)
         {
             if (!PredictionReportParserService.TryParseDate(r.ExpectedPaymentDate, out var pmtDate))
                 continue;
 
+            DateOnly? weekKey = null;
             if (priorBucket is not null && firstNormalWeekStart.HasValue && pmtDate < firstNormalWeekStart.Value)
+                weekKey = priorBucket.Start;
+            else
             {
-                recordsWithWeek.Add((r, priorBucket.Start));
-                continue;
-            }
-
-            foreach (var wk in normalWeeks)
-            {
-                if (pmtDate >= wk.Start && pmtDate <= wk.End)
+                foreach (var wk in normalWeeks)
                 {
-                    recordsWithWeek.Add((r, wk.Start));
-                    break;
+                    if (pmtDate >= wk.Start && pmtDate <= wk.End)
+                    {
+                        weekKey = wk.Start;
+                        break;
+                    }
                 }
             }
+
+            if (weekKey is null)
+                continue;
+
+            var payer = string.IsNullOrWhiteSpace(r.PayerNameNormalized)
+                ? r.PayerName
+                : r.PayerNameNormalized;
+
+            var medianAllowed = r.MedianAllowedAmountSameLab;
+            var medianPaid    = r.MedianInsurancePaidSameLab;
+            var modeAllowed   = r.ModeAllowedAmountSameLab;
+            var modePaid      = r.ModeInsurancePaidSameLab;
+
+            if (!medianByPayer.TryGetValue(payer, out var medianWeeks))
+            {
+                medianWeeks = new Dictionary<DateOnly, (decimal, decimal)>();
+                medianByPayer[payer] = medianWeeks;
+            }
+            medianWeeks.TryGetValue(weekKey.Value, out var medianExisting);
+            medianWeeks[weekKey.Value] = (
+                medianExisting.Allowed + medianAllowed,
+                medianExisting.Paid + medianPaid);
+
+            if (!modeByPayer.TryGetValue(payer, out var modeWeeks))
+            {
+                modeWeeks = new Dictionary<DateOnly, (decimal, decimal)>();
+                modeByPayer[payer] = modeWeeks;
+            }
+            modeWeeks.TryGetValue(weekKey.Value, out var modeExisting);
+            modeWeeks[weekKey.Value] = (
+                modeExisting.Allowed + modeAllowed,
+                modeExisting.Paid + modePaid);
+
+            var mt = medianTotals[weekKey.Value];
+            medianTotals[weekKey.Value] = (mt.Allowed + medianAllowed, mt.Paid + medianPaid);
+            var mot = modeTotals[weekKey.Value];
+            modeTotals[weekKey.Value] = (mot.Allowed + modeAllowed, mot.Paid + modePaid);
         }
 
-        // Group by payer ? week
-        var byPayer = recordsWithWeek
-            .GroupBy(x => string.IsNullOrWhiteSpace(x.Rec.PayerNameNormalized)
-                ? x.Rec.PayerName : x.Rec.PayerNameNormalized,
-                StringComparer.OrdinalIgnoreCase)
-            .OrderBy(g => g.Key)
+        var medianPayers = medianByPayer
+            .OrderBy(kv => kv.Key)
+            .Select(kv => new WeeklyPayerRow(kv.Key)
+            {
+                WeekAmounts = kv.Value.ToDictionary(
+                    wk => wk.Key,
+                    wk => new WeeklyAmounts(wk.Value.Allowed, wk.Value.Paid)),
+                TotalAllowed = kv.Value.Values.Sum(v => v.Allowed),
+                TotalPaid    = kv.Value.Values.Sum(v => v.Paid),
+            })
             .ToList();
 
-        var payerRows = new List<WeeklyPayerRow>();
+        var modePayers = modeByPayer
+            .OrderBy(kv => kv.Key)
+            .Select(kv => new WeeklyPayerRow(kv.Key)
+            {
+                WeekAmounts = kv.Value.ToDictionary(
+                    wk => wk.Key,
+                    wk => new WeeklyAmounts(wk.Value.Allowed, wk.Value.Paid)),
+                TotalAllowed = kv.Value.Values.Sum(v => v.Allowed),
+                TotalPaid    = kv.Value.Values.Sum(v => v.Paid),
+            })
+            .ToList();
+
+        return (
+            new WeeklyForecastSummary
+            {
+                Weeks = weeks,
+                PayerRows = medianPayers,
+                Totals = new WeeklyPayerRow("Total")
+                {
+                    WeekAmounts = medianTotals.ToDictionary(
+                        kv => kv.Key,
+                        kv => new WeeklyAmounts(kv.Value.Allowed, kv.Value.Paid)),
+                    TotalAllowed = medianTotals.Values.Sum(v => v.Allowed),
+                    TotalPaid    = medianTotals.Values.Sum(v => v.Paid),
+                },
+            },
+            new WeeklyForecastSummary
+            {
+                Weeks = weeks,
+                PayerRows = modePayers,
+                Totals = new WeeklyPayerRow("Total")
+                {
+                    WeekAmounts = modeTotals.ToDictionary(
+                        kv => kv.Key,
+                        kv => new WeeklyAmounts(kv.Value.Allowed, kv.Value.Paid)),
+                    TotalAllowed = modeTotals.Values.Sum(v => v.Allowed),
+                    TotalPaid    = modeTotals.Values.Sum(v => v.Paid),
+                },
+            });
+    }
+
+    private static WeeklyForecastSummary BuildWeeklySummary(
+        IReadOnlyList<PredictionRecord> records,
+        IReadOnlyList<WeekRange> weeks,
+        Func<PredictionRecord, decimal> allowedSelector,
+        Func<PredictionRecord, decimal> paidSelector)
+    {
+        var priorBucket = weeks.FirstOrDefault(w => w.IncludeBeforeStart);
+        var normalWeeks = weeks.Where(w => !w.IncludeBeforeStart).ToList();
+        var firstNormalWeekStart = normalWeeks.Count > 0 ? normalWeeks[0].Start : (DateOnly?)null;
+
+        var byPayer = new Dictionary<string, Dictionary<DateOnly, (decimal Allowed, decimal Paid)>>(
+            StringComparer.OrdinalIgnoreCase);
         var totalWeekAmounts = weeks.ToDictionary(w => w.Start, _ => (Allowed: 0m, Paid: 0m));
 
-        foreach (var payerGroup in byPayer)
+        foreach (var r in records)
         {
-            var weekAmounts = new Dictionary<DateOnly, WeeklyAmounts>();
-            decimal payerTotalAllowed = 0m, payerTotalPaid = 0m;
+            if (!PredictionReportParserService.TryParseDate(r.ExpectedPaymentDate, out var pmtDate))
+                continue;
 
-            foreach (var wk in weeks)
+            DateOnly? weekKey = null;
+            if (priorBucket is not null && firstNormalWeekStart.HasValue && pmtDate < firstNormalWeekStart.Value)
+                weekKey = priorBucket.Start;
+            else
             {
-                var weekRecords = payerGroup.Where(x => x.WeekStart == wk.Start).ToList();
-                var allowed = weekRecords.Sum(x => allowedSelector(x.Rec));
-                var paid    = weekRecords.Sum(x => paidSelector(x.Rec));
-
-                weekAmounts[wk.Start] = new WeeklyAmounts(allowed, paid);
-                payerTotalAllowed += allowed;
-                payerTotalPaid    += paid;
-
-                var t = totalWeekAmounts[wk.Start];
-                totalWeekAmounts[wk.Start] = (t.Allowed + allowed, t.Paid + paid);
+                foreach (var wk in normalWeeks)
+                {
+                    if (pmtDate >= wk.Start && pmtDate <= wk.End)
+                    {
+                        weekKey = wk.Start;
+                        break;
+                    }
+                }
             }
 
-            payerRows.Add(new WeeklyPayerRow(payerGroup.Key)
+            if (weekKey is null)
+                continue;
+
+            var payer = string.IsNullOrWhiteSpace(r.PayerNameNormalized)
+                ? r.PayerName
+                : r.PayerNameNormalized;
+            var allowed = allowedSelector(r);
+            var paid    = paidSelector(r);
+
+            if (!byPayer.TryGetValue(payer, out var weekAmounts))
             {
-                WeekAmounts  = weekAmounts,
-                TotalAllowed = payerTotalAllowed,
-                TotalPaid    = payerTotalPaid,
-            });
+                weekAmounts = new Dictionary<DateOnly, (decimal, decimal)>();
+                byPayer[payer] = weekAmounts;
+            }
+
+            weekAmounts.TryGetValue(weekKey.Value, out var existing);
+            weekAmounts[weekKey.Value] = (existing.Allowed + allowed, existing.Paid + paid);
+
+            var t = totalWeekAmounts[weekKey.Value];
+            totalWeekAmounts[weekKey.Value] = (t.Allowed + allowed, t.Paid + paid);
         }
 
-        var totalsRow = new WeeklyPayerRow("Total")
-        {
-            WeekAmounts  = totalWeekAmounts.ToDictionary(kv => kv.Key, kv => new WeeklyAmounts(kv.Value.Allowed, kv.Value.Paid)),
-            TotalAllowed = totalWeekAmounts.Values.Sum(v => v.Allowed),
-            TotalPaid    = totalWeekAmounts.Values.Sum(v => v.Paid),
-        };
+        var payerRows = byPayer
+            .OrderBy(kv => kv.Key)
+            .Select(kv => new WeeklyPayerRow(kv.Key)
+            {
+                WeekAmounts = kv.Value.ToDictionary(
+                    wk => wk.Key,
+                    wk => new WeeklyAmounts(wk.Value.Allowed, wk.Value.Paid)),
+                TotalAllowed = kv.Value.Values.Sum(v => v.Allowed),
+                TotalPaid    = kv.Value.Values.Sum(v => v.Paid),
+            })
+            .ToList();
 
         return new WeeklyForecastSummary
         {
-            Weeks     = weeks,
+            Weeks = weeks,
             PayerRows = payerRows,
-            Totals    = totalsRow,
+            Totals = new WeeklyPayerRow("Total")
+            {
+                WeekAmounts = totalWeekAmounts.ToDictionary(
+                    kv => kv.Key,
+                    kv => new WeeklyAmounts(kv.Value.Allowed, kv.Value.Paid)),
+                TotalAllowed = totalWeekAmounts.Values.Sum(v => v.Allowed),
+                TotalPaid    = totalWeekAmounts.Values.Sum(v => v.Paid),
+            },
         };
     }
 

@@ -130,17 +130,71 @@
             <script nonce='@Context.Items["CspNonce"]'>
                 (function () {
                     var btn = document.getElementById('exportForecastingExcelBtn');
-                    if (btn) {
-                        btn.addEventListener('click', function () {
-                            lmdExcelDownload('@Url.Action("ExportForecastingExcel", "Prediction", new {
-                                lab             = Model.SelectedLab,
-                                filterPayerName = Model.FilterPayerName,
-                                filterPayerType = Model.FilterPayerType,
-                                filterPanelName = Model.FilterPanelName,
-                                filterCPTCode   = Model.FilterCPTCode
-                            })');
-                        });
-                    }
+                    if (!btn) return;
+
+                    var exportUrl = '@Url.Action("ExportForecastingExcel", "Prediction", new {
+                        lab             = Model.SelectedLab,
+                        filterPayerName = Model.FilterPayerName,
+                        filterPayerType = Model.FilterPayerType,
+                        filterPanelName = Model.FilterPanelName,
+                        filterCPTCode   = Model.FilterCPTCode
+                    })';
+                    var largeExport = @Model.TotalForecastRecords > 300000;
+
+                    btn.addEventListener('click', function () {
+                        var loader = document.getElementById('lmd-loader');
+                        var text = document.getElementById('lmd-loader-text');
+                        var tick = null;
+
+                        if (largeExport && text) {
+                            var msgs = [
+                                'Generating Excel\u2026',
+                                'Large dataset \u2014 still processing\u2026',
+                                'Writing data sheets\u2026',
+                                'Almost done, please wait\u2026'
+                            ];
+                            var start = Date.now();
+                            tick = setInterval(function () {
+                                text.textContent = msgs[Math.floor((Date.now() - start) / 5000) % msgs.length];
+                            }, 5000);
+                        }
+
+                        fetch(exportUrl, { credentials: 'same-origin' })
+                            .then(function (resp) {
+                                var ct = (resp.headers.get('content-type') || '').toLowerCase();
+                                if (!resp.ok) {
+                                    return resp.text().then(function (body) {
+                                        throw new Error(body || ('Export failed (' + resp.status + ')'));
+                                    });
+                                }
+                                if (ct.indexOf('spreadsheet') === -1 && ct.indexOf('octet-stream') === -1) {
+                                    throw new Error('Server did not return an Excel file. Please try again.');
+                                }
+                                var cd = resp.headers.get('content-disposition') || '';
+                                var match = cd.match(/filename[^;=\n]*=(['"]?)([^'"\n;]+)\1/);
+                                var filename = match ? match[2] : 'export.xlsx';
+                                return resp.blob().then(function (blob) { return { blob: blob, filename: filename }; });
+                            })
+                            .then(function (result) {
+                                var a = document.createElement('a');
+                                a.href = URL.createObjectURL(result.blob);
+                                a.download = result.filename;
+                                document.body.appendChild(a);
+                                a.click();
+                                setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 100);
+                            })
+                            .catch(function (err) {
+                                console.error('Excel download error:', err);
+                                alert(err.message || 'Excel export failed. Please try again.');
+                            })
+                            .finally(function () {
+                                if (tick) clearInterval(tick);
+                                if (loader) loader.classList.remove('active');
+                            });
+
+                        if (text) text.textContent = 'Generating Excel\u2026';
+                        if (loader) loader.classList.add('active');
+                    });
                 }());
             </script>
         </div>

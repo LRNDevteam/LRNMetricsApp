@@ -40,6 +40,17 @@ public interface IPredictionDbRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Returns pre-aggregated Median/Mode weekly summaries via
+    /// dbo.usp_GetForecastingSummaryByWeekRange. Returns null when the SP is
+    /// missing or cannot parse the run WeekFolder — caller should fall back to
+    /// in-memory aggregation.
+    /// </summary>
+    Task<ForecastingSummaryFromDb?> TryGetForecastingSummaryAsync(
+        string  connectionString,
+        string? runId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Probes the target database for Prediction-Analysis readiness. Returns a
     /// short diagnostic record describing why the report is empty (table missing,
     /// SP missing, no rows, schema mismatch, etc.) so the controller can surface

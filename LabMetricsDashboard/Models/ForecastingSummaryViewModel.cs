@@ -32,6 +32,9 @@ public sealed class ForecastingSummaryViewModel
     /// <summary>When the run's rows were inserted into the database (DB path) or the file's last write time (file path).</summary>
     public DateTime? DataInsertedAt { get; init; }
 
+    /// <summary>Total forecast-payable rows loaded for this run (used for export sizing).</summary>
+    public int TotalForecastRecords { get; init; }
+
     // ?? All-data summaries ???????????????????????????????????????????
     public WeeklyForecastSummary MedianSummary { get; init; } = new();
     public WeeklyForecastSummary ModeSummary { get; init; } = new();

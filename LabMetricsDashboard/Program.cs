@@ -9,6 +9,7 @@ using LRN.ProductionReports.Services;
 using LRN.ProductionReports.Services;
 using LRN.ProductionReports.Services;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Configuration.Json;
@@ -315,11 +316,6 @@ builder.Services
 	.PersistKeysToFileSystem(dpKeysDir)
 	.SetApplicationName("LRNMetricsDashboard");
 
-// ── Anti-forgery ─────────────────────────────────────────────────────────────
-// SameAsRequest means: Secure flag is set only when the request itself is HTTPS.
-// This works correctly on both HTTP (intranet IIS) and HTTPS deployments.
-// Using Always on an HTTP-only server caused Chrome to silently drop the cookie,
-// making the login form return 400 or loop back to the login page.
 builder.Services.AddAntiforgery(options =>
 {
 	//<<<<<<< HEAD
@@ -507,6 +503,8 @@ builder.Services.AddControllersWithViews(options =>
 		.Build();
 	options.Filters.Add(new AuthorizeFilter(policy));
 });
+
+builder.Services.AddRequestTimeouts();
 
 // ── Cookie authentication ─────────────────────────────────────────
 builder.Services
@@ -733,6 +731,7 @@ if (app.Environment.IsDevelopment())
 }
 app.UseStaticFiles();
 app.UseRouting();
+app.UseRequestTimeouts();
 app.UseRateLimiter();
 
 // Must be after UseRouting and before UseAuthentication so preflight/AuthToken

@@ -84,7 +84,7 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         await using var cmd = new SqlCommand("dbo.usp_GetForecastingRecords", conn)
         {
             CommandType    = CommandType.StoredProcedure,
-            CommandTimeout = 120
+            CommandTimeout = 600
         };
         cmd.Parameters.AddWithValue("@RunId", (object?)runId ?? DBNull.Value);
 
@@ -94,6 +94,176 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
 
         _logger.LogInformation("usp_GetForecastingRecords returned {Count} rows.", records.Count);
         return records;
+    }
+
+    /// <inheritdoc/>
+    public async Task<ForecastingSummaryFromDb?> TryGetForecastingSummaryAsync(
+        string  connectionString,
+        string? runId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+            return null;
+
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(cancellationToken);
+
+            await using var cmd = new SqlCommand("dbo.usp_GetForecastingSummaryByWeekRange", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 600
+            };
+            cmd.Parameters.AddWithValue("@RunId", (object?)runId ?? DBNull.Value);
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+
+            var buckets = new List<ForecastingBucketSpRow>();
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                buckets.Add(new ForecastingBucketSpRow(
+                    SortOrder:   reader.GetInt32(reader.GetOrdinal("SortOrder")),
+                    BucketKey:   reader.GetString(reader.GetOrdinal("BucketKey")),
+                    WeekStart:   ReadDateOnly(reader, "WeekStart"),
+                    WeekEnd:     ReadDateOnly(reader, "WeekEnd"),
+                    BucketLabel: reader.GetString(reader.GetOrdinal("BucketLabel"))));
+            }
+
+            if (!await reader.NextResultAsync(cancellationToken))
+                return null;
+
+            var payerRows = new List<ForecastingPayerBucketSpRow>();
+            while (await reader.ReadAsync(cancellationToken))
+                payerRows.Add(MapForecastingPayerBucketRow(reader));
+
+            if (!await reader.NextResultAsync(cancellationToken))
+                return null;
+
+            var totalRows = new List<ForecastingPayerBucketSpRow>();
+            while (await reader.ReadAsync(cancellationToken))
+                totalRows.Add(MapForecastingPayerBucketRow(reader));
+
+            var summary = MapForecastingSummaryFromSp(buckets, payerRows, totalRows);
+            _logger.LogInformation(
+                "usp_GetForecastingSummaryByWeekRange returned {Payers} payers across {Weeks} buckets.",
+                summary.MedianSummary.PayerRows.Count,
+                summary.MedianSummary.Weeks.Count);
+            return summary;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "usp_GetForecastingSummaryByWeekRange unavailable — falling back to in-memory summary.");
+            return null;
+        }
+    }
+
+    private static ForecastingPayerBucketSpRow MapForecastingPayerBucketRow(SqlDataReader reader) =>
+        new(
+            PayerName:          reader.GetString(reader.GetOrdinal("PayerName")),
+            SortOrder:          reader.GetInt32(reader.GetOrdinal("SortOrder")),
+            BucketKey:          reader.GetString(reader.GetOrdinal("BucketKey")),
+            BucketLabel:        reader.GetString(reader.GetOrdinal("BucketLabel")),
+            WeekStart:          ReadDateOnly(reader, "WeekStart"),
+            WeekEnd:            ReadDateOnly(reader, "WeekEnd"),
+            ClaimLineCount:     ReadInt64(reader, "ClaimLineCount"),
+            MedianAllowedTotal: reader.GetDecimal(reader.GetOrdinal("MedianAllowedTotal")),
+            MedianPaidTotal:    reader.GetDecimal(reader.GetOrdinal("MedianPaidTotal")),
+            ModeAllowedTotal:   reader.GetDecimal(reader.GetOrdinal("ModeAllowedTotal")),
+            ModePaidTotal:      reader.GetDecimal(reader.GetOrdinal("ModePaidTotal")));
+
+    private static DateOnly? ReadDateOnly(SqlDataReader reader, string column)
+    {
+        var ord = reader.GetOrdinal(column);
+        if (reader.IsDBNull(ord)) return null;
+        return DateOnly.FromDateTime(reader.GetDateTime(ord));
+    }
+
+    /// <summary>COUNT(*) and similar aggregates return INT in SQL Server — use Convert for safety.</summary>
+    private static long ReadInt64(SqlDataReader reader, string column)
+    {
+        var ord = reader.GetOrdinal(column);
+        if (reader.IsDBNull(ord)) return 0L;
+        return Convert.ToInt64(reader.GetValue(ord), System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static ForecastingSummaryFromDb MapForecastingSummaryFromSp(
+        IReadOnlyList<ForecastingBucketSpRow> buckets,
+        IReadOnlyList<ForecastingPayerBucketSpRow> payerRows,
+        IReadOnlyList<ForecastingPayerBucketSpRow> totalRows)
+    {
+        // Match the dashboard date window: YTD + Weeks 1–5 only (exclude BEYOND).
+        const int maxBucket = 5;
+
+        var weeks = buckets
+            .Where(b => b.SortOrder <= maxBucket)
+            .OrderBy(b => b.SortOrder)
+            .Select(b => b.SortOrder == 0
+                ? new WeekRange(
+                    DateOnly.MinValue,
+                    b.WeekEnd ?? DateOnly.MinValue,
+                    b.BucketLabel,
+                    IncludeBeforeStart: true)
+                : new WeekRange(
+                    b.WeekStart ?? DateOnly.MinValue,
+                    b.WeekEnd ?? DateOnly.MinValue,
+                    b.BucketLabel))
+            .ToList();
+
+        static DateOnly WeekKey(ForecastingPayerBucketSpRow row) =>
+            row.WeekStart ?? DateOnly.MinValue;
+
+        var filteredPayerRows = payerRows.Where(r => r.SortOrder <= maxBucket).ToList();
+        var filteredTotalRows = totalRows.Where(r => r.SortOrder <= maxBucket).ToList();
+
+        var medianPayers = filteredPayerRows
+            .GroupBy(r => r.PayerName, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => g.Key)
+            .Select(g => new WeeklyPayerRow(g.Key)
+            {
+                WeekAmounts = g.ToDictionary(
+                    WeekKey,
+                    r => new WeeklyAmounts(r.MedianAllowedTotal, r.MedianPaidTotal)),
+                TotalAllowed = g.Sum(r => r.MedianAllowedTotal),
+                TotalPaid    = g.Sum(r => r.MedianPaidTotal),
+            })
+            .ToList();
+
+        var modePayers = filteredPayerRows
+            .GroupBy(r => r.PayerName, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => g.Key)
+            .Select(g => new WeeklyPayerRow(g.Key)
+            {
+                WeekAmounts = g.ToDictionary(
+                    WeekKey,
+                    r => new WeeklyAmounts(r.ModeAllowedTotal, r.ModePaidTotal)),
+                TotalAllowed = g.Sum(r => r.ModeAllowedTotal),
+                TotalPaid    = g.Sum(r => r.ModePaidTotal),
+            })
+            .ToList();
+
+        var medianTotals = new WeeklyPayerRow("Total")
+        {
+            WeekAmounts = filteredTotalRows.ToDictionary(
+                WeekKey,
+                r => new WeeklyAmounts(r.MedianAllowedTotal, r.MedianPaidTotal)),
+            TotalAllowed = filteredTotalRows.Sum(r => r.MedianAllowedTotal),
+            TotalPaid    = filteredTotalRows.Sum(r => r.MedianPaidTotal),
+        };
+
+        var modeTotals = new WeeklyPayerRow("Total")
+        {
+            WeekAmounts = filteredTotalRows.ToDictionary(
+                WeekKey,
+                r => new WeeklyAmounts(r.ModeAllowedTotal, r.ModePaidTotal)),
+            TotalAllowed = filteredTotalRows.Sum(r => r.ModeAllowedTotal),
+            TotalPaid    = filteredTotalRows.Sum(r => r.ModePaidTotal),
+        };
+
+        return new ForecastingSummaryFromDb(
+            new WeeklyForecastSummary { Weeks = weeks, PayerRows = medianPayers, Totals = medianTotals },
+            new WeeklyForecastSummary { Weeks = weeks, PayerRows = modePayers, Totals = modeTotals });
     }
 
     // Maps the slim column set returned by usp_GetForecastingRecords.
