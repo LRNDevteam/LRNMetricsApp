@@ -348,6 +348,7 @@ try
             AppLogger.Log($"[{lab.LabName}] Step 4: analysis done — generating Excel report ({allRecords.Count:N0} rows, this can take a while for large labs)...");
             var reportSw = System.Diagnostics.Stopwatch.StartNew();
 
+
             var reportInProcessing = new ReportWriterService().WriteReport(
                 lab.ProcessingFolderPath,
                 summary, denialSum, denialPivot, aging,

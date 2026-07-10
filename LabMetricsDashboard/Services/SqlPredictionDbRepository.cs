@@ -65,6 +65,68 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
     }
 
     /// <inheritdoc/>
+    public async Task<List<PredictionRecord>> GetForecastRecordsAsync(
+        string  connectionString,
+        string? runId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            _logger.LogWarning("DbConnectionString is empty — returning empty forecast dataset.");
+            return [];
+        }
+
+        var records = new List<PredictionRecord>();
+
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        await using var cmd = new SqlCommand("dbo.usp_GetForecastingRecords", conn)
+        {
+            CommandType    = CommandType.StoredProcedure,
+            CommandTimeout = 120
+        };
+        cmd.Parameters.AddWithValue("@RunId", (object?)runId ?? DBNull.Value);
+
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            records.Add(MapForecastRow(reader));
+
+        _logger.LogInformation("usp_GetForecastingRecords returned {Count} rows.", records.Count);
+        return records;
+    }
+
+    // Maps the slim column set returned by usp_GetForecastingRecords.
+    // All other PredictionRecord fields keep their defaults — the Forecasting
+    // Summary page and its Excel export never read them.
+    private static PredictionRecord MapForecastRow(SqlDataReader r) => new()
+    {
+        AccessionNo                = Str(r, "AccessionNo"),
+        VisitNumber                = Str(r, "VisitNumber"),
+        CPTCode                    = Str(r, "CPTCode"),
+        PayerName                  = Str(r, "PayerName"),
+        PayerNameNormalized        = Str(r, "PayerNameNormalized"),
+        PayerType                  = Str(r, "PayerType"),
+        PayStatus                  = Str(r, "PayStatus"),
+        PanelName                  = Str(r, "PanelName"),
+        DateOfService              = DateStr(r, "DateOfService"),
+        FirstBilledDate            = DateStr(r, "FirstBilledDate"),
+        DenialCode                 = Str(r, "DenialCode"),
+        DenialDescription          = Str(r, "DenialDescription"),
+        BilledAmount               = Dec(r, "BilledAmount"),
+        AllowedAmount              = Dec(r, "AllowedAmount"),
+        InsurancePayment           = Dec(r, "InsurancePayment"),
+        Payability                 = Str(r, "Payability"),
+        ForecastingPayability      = Str(r, "ForecastingPayability"),
+        FinalCoverageStatus        = Str(r, "FinalCoverageStatus"),
+        ExpectedPaymentDate        = DateStr(r, "ExpectedPaymentDate"),
+        MedianAllowedAmountSameLab = Dec(r, "MedianAllowedAmountSameLab"),
+        MedianInsurancePaidSameLab = Dec(r, "MedianInsurancePaidSameLab"),
+        ModeAllowedAmountSameLab   = Dec(r, "ModeAllowedAmountSameLab"),
+        ModeInsurancePaidSameLab   = Dec(r, "ModeInsurancePaidSameLab"),
+    };
+
+    /// <inheritdoc/>
     public async Task<PredictionDbDiagnostic> ProbeAsync(
         string connectionString,
         CancellationToken cancellationToken = default)

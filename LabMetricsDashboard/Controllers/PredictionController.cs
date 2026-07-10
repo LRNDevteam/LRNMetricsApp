@@ -483,19 +483,55 @@ public class PredictionController : Controller
             });
         }
 
-        var today          = DateOnly.FromDateTime(DateTime.Today);
-        var daysFromMonday = ((int)today.DayOfWeek + 6) % 7;
-        var weekStart      = today.AddDays(-daysFromMonday);
+        bool usingDb = labConfig?.DBEnabled == true;
 
-        // Build 4 week ranges first – needed for both the filter and the summaries
-        var weeks = new List<WeekRange>();
-        for (int w = 4; w >= 1; w--)
+        // ── Source run info (resolved EARLY: the forecast weeks are anchored
+        //    to the source file's WeekFolder, not to today's date) ─────────────
+        string?   runInfoRunId      = null;
+        string?   runInfoWeekFolder = null;
+        DateTime? runInfoInsertedAt = null;
+
+        if (usingDb)
         {
-            var wkStart = weekStart.AddDays(-7 * w);
-            weeks.Add(new WeekRange(wkStart, wkStart.AddDays(6)));
+            try
+            {
+                var runDiag = await _dbRepo.ProbeAsync(
+                    labConfig!.DbConnectionString ?? string.Empty, HttpContext.RequestAborted);
+                runInfoRunId      = runDiag.LatestRunId;
+                runInfoWeekFolder = runDiag.WeekFolder;
+                // InsertedDateTime is stored as SYSUTCDATETIME() — convert to local for display.
+                runInfoInsertedAt = runDiag.LatestRunInsertedAt is { } utc
+                    ? DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime()
+                    : null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[{Lab}] Could not load run info — falling back to today-based weeks.", selectedLab);
+            }
+        }
+        else if (!string.IsNullOrEmpty(selectedLab)
+                 && _resolver.ResolvePredictionValidationReport(selectedLab) is { } srcPath)
+        {
+            var fi = new FileInfo(srcPath);
+            runInfoInsertedAt = fi.Exists ? fi.LastWriteTime : null;
+            runInfoWeekFolder = fi.Directory?.Name;
+            var baseName      = Path.GetFileNameWithoutExtension(fi.Name);
+            var us            = baseName.IndexOf('_');
+            runInfoRunId      = us > 0 ? baseName[..us] : null;
         }
 
-        var summaryWeeks = BuildForecastWeeksWithPrior(weeks);
+        // ── Build forecast weeks anchored to the WeekFolder ──────────────────
+        // Weeks 1–4 = the 4 weeks AFTER the WeekFolder end date, each a 7-day
+        // block so the weekday span always matches the WeekFolder's own range.
+        // Everything earlier lands in the YTD bucket "Prior to <weekfolder>".
+        // Falls back to today-based weeks when WeekFolder cannot be parsed.
+        var (weeks, priorLabel, weekStart) = BuildWeekFolderAnchoredWeeks(runInfoWeekFolder);
+
+        _logger.LogInformation(
+            "[{Lab}] Forecast weeks anchored to WeekFolder '{WeekFolder}': {First} – {Last} (prior = '{Prior}')",
+            selectedLab, runInfoWeekFolder, weeks[0].Label, weeks[^1].Label, priorLabel ?? "(today-based fallback)");
+
+        var summaryWeeks = BuildForecastWeeksWithPrior(weeks, priorLabel);
 
         var rangeStart = weeks[0].Start;
         var rangeEnd   = weeks[^1].End;
@@ -503,11 +539,13 @@ public class PredictionController : Controller
         // Load records and filter to the 4-week window with ForecastingPayability check
         List<PredictionRecord> inRangeRecords;
         List<PredictionRecord> summaryRecords;
-        bool usingDb = labConfig?.DBEnabled == true;
+        List<PredictionRecord> rawRecords;
 
         if (usingDb)
         {
-            var rawRecords = await _dbRepo.GetRecordsAsync(
+            // Slim SP: only the forecasting columns, pre-filtered in SQL to
+            // forecast-payable rows — much faster for large labs (CERTUS etc.)
+            rawRecords = await _dbRepo.GetForecastRecordsAsync(
                 labConfig!.DbConnectionString ?? string.Empty,
                 cancellationToken: HttpContext.RequestAborted);
 
@@ -520,13 +558,13 @@ public class PredictionController : Controller
             summaryRecords = PredictionReportParserService.ApplyForecastDateRangeFilter(
                 rawRecords, DateOnly.MinValue, rangeEnd.AddDays(1));
 
-        _logger.LogInformation("[{Lab}] ForecastingSummary in-range rows ({Start}–{End}): {Count}",
+            _logger.LogInformation("[{Lab}] ForecastingSummary in-range rows ({Start}–{End}): {Count}",
                 selectedLab, rangeStart, rangeEnd, inRangeRecords.Count);
 
             if (inRangeRecords.Count == 0 && rawRecords.Count > 0)
             {
                 var forecastOnly = rawRecords
-                    .Where(r => PredictionReportParserService.IsForecastPayable(r.ForecastingPayability))
+                    .Where(r => PredictionReportParserService.IsForecastSummaryRow(r.ForecastingPayability, r.PayStatus))
                     .ToList();
 
                 _logger.LogWarning(
@@ -544,11 +582,11 @@ public class PredictionController : Controller
                 ? null
                 : _resolver.ResolvePredictionValidationReport(selectedLab);
 
-            var allParsed = filePath is not null ? _parser.Parse(filePath) : new List<PredictionRecord>();
+            rawRecords = filePath is not null ? _parser.Parse(filePath) : new List<PredictionRecord>();
             inRangeRecords = PredictionReportParserService.ApplyForecastDateRangeFilter(
-                allParsed, rangeStart, rangeEnd.AddDays(1));
+                rawRecords, rangeStart, rangeEnd.AddDays(1));
             summaryRecords = PredictionReportParserService.ApplyForecastDateRangeFilter(
-                allParsed, DateOnly.MinValue, rangeEnd.AddDays(1));
+                rawRecords, DateOnly.MinValue, rangeEnd.AddDays(1));
         }
 
         // Detect when there is no data in the 4-week window
@@ -557,23 +595,9 @@ public class PredictionController : Controller
 
         if (noDataForRange)
         {
-            // Load raw records again to find the most recent ExpectedPaymentDate
-            List<PredictionRecord> allForLatest;
-            if (usingDb)
-            {
-                allForLatest = await _dbRepo.GetRecordsAsync(
-                    labConfig!.DbConnectionString ?? string.Empty,
-                    cancellationToken: HttpContext.RequestAborted);
-            }
-            else
-            {
-                var fp = string.IsNullOrEmpty(selectedLab)
-                    ? null
-                    : _resolver.ResolvePredictionValidationReport(selectedLab);
-                allForLatest = fp is not null ? _parser.Parse(fp) : [];
-            }
-
-            latestDataDate = allForLatest
+            // Reuse the already-loaded records to find the most recent
+            // ExpectedPaymentDate — no second round-trip to the database.
+            latestDataDate = rawRecords
                 .Select(r => PredictionReportParserService.TryParseDate(r.ExpectedPaymentDate, out var d) ? d : (DateOnly?)null)
                 .Where(d => d.HasValue)
                 .Select(d => d!.Value)
@@ -615,39 +639,7 @@ public class PredictionController : Controller
         var currentPage  = Math.Max(1, page);
         var pagedRecords = filteredList.Skip((currentPage - 1) * PageSize).Take(PageSize).ToList();
 
-        // ── Source run info for the header info bar ─────────────────────────────
-        string?   runInfoRunId      = null;
-        string?   runInfoWeekFolder = null;
-        DateTime? runInfoInsertedAt = null;
-
-        if (usingDb)
-        {
-            try
-            {
-                var runDiag = await _dbRepo.ProbeAsync(
-                    labConfig!.DbConnectionString ?? string.Empty, HttpContext.RequestAborted);
-                runInfoRunId      = runDiag.LatestRunId;
-                runInfoWeekFolder = runDiag.WeekFolder;
-                // InsertedDateTime is stored as SYSUTCDATETIME() — convert to local for display.
-                runInfoInsertedAt = runDiag.LatestRunInsertedAt is { } utc
-                    ? DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime()
-                    : null;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "[{Lab}] Could not load run info for Forecasting header — continuing without it.", selectedLab);
-            }
-        }
-        else if (!string.IsNullOrEmpty(selectedLab)
-                 && _resolver.ResolvePredictionValidationReport(selectedLab) is { } srcPath)
-        {
-            var fi = new FileInfo(srcPath);
-            runInfoInsertedAt = fi.Exists ? fi.LastWriteTime : null;
-            runInfoWeekFolder = fi.Directory?.Name;
-            var baseName      = Path.GetFileNameWithoutExtension(fi.Name);
-            var us            = baseName.IndexOf('_');
-            runInfoRunId      = us > 0 ? baseName[..us] : null;
-        }
+        // (Run info for the header bar was resolved earlier — see top of action.)
 
         var vm = new ForecastingSummaryViewModel
         {
@@ -951,9 +943,9 @@ public class PredictionController : Controller
 
     /// <summary>
     /// Downloads the Forecasting Summary as a formatted Excel file.
-    /// The Data sheet contains ALL PayerValidationReport rows of the displayed
-    /// run when no filter is applied; when dimension filters are supplied they
-    /// are pushed down to dbo.usp_GetPayerValidationReport (SP-only policy).
+    /// The Data sheet contains the forecast-payable rows of the displayed run
+    /// (fetched via the slim dbo.usp_GetForecastingRecords for performance);
+    /// dimension filters, when supplied, are applied in memory.
     /// </summary>
     public async Task<IActionResult> ExportForecastingExcel(
         string? lab,
@@ -974,22 +966,33 @@ public class PredictionController : Controller
 
         try
         {
-            var vm = await BuildForecastingViewModelAsync(selectedLab, labConfig);
-
-            // ── Full line-item detail for the Data sheet ─────────────────────
-            // No date-window trimming: every row of the latest run is exported.
-            // Filters (when present) are applied inside the SP on the DB path,
-            // or in memory on the file path.
-            List<PredictionRecord> exportRecords;
+            // ── Single slim fetch shared by the summary sheets AND the Data
+            //    sheet (previously fetched twice — doubled the export time).
+            List<PredictionRecord>? slimRecords = null;
             if (labConfig?.DBEnabled == true)
             {
-                exportRecords = await _dbRepo.GetRecordsAsync(
+                slimRecords = await _dbRepo.GetForecastRecordsAsync(
                     labConfig.DbConnectionString ?? string.Empty,
-                    filterPayerName: filterPayerName,
-                    filterPayerType: filterPayerType,
-                    filterPanelName: filterPanelName,
-                    filterCPTCode:   filterCPTCode,
                     cancellationToken: HttpContext.RequestAborted);
+            }
+
+            var vm = await BuildForecastingViewModelAsync(selectedLab, labConfig, slimRecords);
+
+            // ── Line-item detail for the Data sheet ──────────────────────────
+            // Dimension filters are applied in memory on the shared dataset.
+            List<PredictionRecord> exportRecords;
+            if (slimRecords is not null)
+            {
+                var q = slimRecords.AsEnumerable();
+                if (!string.IsNullOrWhiteSpace(filterPayerName))
+                    q = q.Where(r => r.PayerNameNormalized.Equals(filterPayerName, StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrWhiteSpace(filterPayerType))
+                    q = q.Where(r => r.PayerType.Equals(filterPayerType, StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrWhiteSpace(filterPanelName))
+                    q = q.Where(r => r.PanelName.Equals(filterPanelName, StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrWhiteSpace(filterCPTCode))
+                    q = q.Where(r => r.CPTCode.Equals(filterCPTCode, StringComparison.OrdinalIgnoreCase));
+                exportRecords = q.ToList();
             }
             else
             {
@@ -1162,20 +1165,33 @@ public class PredictionController : Controller
 
     /// <summary>Builds the Forecasting Summary view model (shared by ForecastingSummary and ExportForecastingExcel).</summary>
     private async Task<ForecastingSummaryViewModel> BuildForecastingViewModelAsync(
-        string selectedLab, LabCsvConfig? labConfig)
+        string selectedLab, LabCsvConfig? labConfig,
+        List<PredictionRecord>? preloadedRecords = null)
     {
-        var today          = DateOnly.FromDateTime(DateTime.Today);
-        var daysFromMonday = ((int)today.DayOfWeek + 6) % 7;
-        var weekStart      = today.AddDays(-daysFromMonday);
-
-        var weeks = new List<WeekRange>();
-        for (int w = 4; w >= 1; w--)
+        // Resolve the WeekFolder so the Excel export uses the same
+        // WeekFolder-anchored weeks as the Forecasting Summary page.
+        string? weekFolder = null;
+        if (labConfig?.DBEnabled == true)
         {
-            var wkStart = weekStart.AddDays(-7 * w);
-            weeks.Add(new WeekRange(wkStart, wkStart.AddDays(6)));
+            try
+            {
+                var runDiag = await _dbRepo.ProbeAsync(
+                    labConfig.DbConnectionString ?? string.Empty, HttpContext.RequestAborted);
+                weekFolder = runDiag.WeekFolder;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[{Lab}] Export: could not load WeekFolder — falling back to today-based weeks.", selectedLab);
+            }
+        }
+        else if (!string.IsNullOrEmpty(selectedLab)
+                 && _resolver.ResolvePredictionValidationReport(selectedLab) is { } srcPath)
+        {
+            weekFolder = new FileInfo(srcPath).Directory?.Name;
         }
 
-        var summaryWeeks = BuildForecastWeeksWithPrior(weeks);
+        var (weeks, priorLabel, weekStart) = BuildWeekFolderAnchoredWeeks(weekFolder);
+        var summaryWeeks = BuildForecastWeeksWithPrior(weeks, priorLabel);
 
         var rangeStart = weeks[0].Start;
         var rangeEnd   = weeks[^1].End;
@@ -1186,7 +1202,9 @@ public class PredictionController : Controller
 
         if (usingDb)
         {
-            var rawRecords = await _dbRepo.GetRecordsAsync(
+            // Slim SP — same fast path as the Forecasting Summary page.
+            // Reuses the caller's already-fetched dataset when supplied.
+            var rawRecords = preloadedRecords ?? await _dbRepo.GetForecastRecordsAsync(
                 labConfig!.DbConnectionString ?? string.Empty,
                 cancellationToken: HttpContext.RequestAborted);
             inRangeRecords = PredictionReportParserService.ApplyForecastDateRangeFilter(
@@ -1344,7 +1362,8 @@ public class PredictionController : Controller
     /// Builds a weekly forecast summary (Median or Mode) by assigning each record
     /// to a week bin based on its ExpectedPaymentDate and grouping by payer.
     /// </summary>
-    private static IReadOnlyList<WeekRange> BuildForecastWeeksWithPrior(IReadOnlyList<WeekRange> weeks)
+    private static IReadOnlyList<WeekRange> BuildForecastWeeksWithPrior(
+        IReadOnlyList<WeekRange> weeks, string? priorLabel = null)
     {
         if (weeks.Count == 0) return weeks;
 
@@ -1354,11 +1373,76 @@ public class PredictionController : Controller
             new(
                 DateOnly.MinValue,
                 firstWeek.Start.AddDays(-1),
-                $"Prior to {firstWeek.Label}",
+                priorLabel ?? $"Prior to {firstWeek.Label}",
                 IncludeBeforeStart: true)
         };
         result.AddRange(weeks);
         return result;
+    }
+
+    /// <summary>
+    /// Builds the 5 forecast weeks anchored to the source WeekFolder
+    /// (e.g. "06.29.2026 - 07.05.2026" or "06.29.2026 to 07.05.2026").
+    /// Week 1 is the WeekFolder week ITSELF; Weeks 2–5 are the next 4 weeks
+    /// (5 weeks total). Each is a 7-day block so the weekday span always
+    /// matches the WeekFolder's range (Thu–Wed stays Thu–Wed, etc.).
+    /// The YTD/prior bucket is labelled "Prior to &lt;weekfolder range&gt;".
+    /// Falls back to the legacy today-based Monday weeks when parsing fails.
+    /// </summary>
+    private static (List<WeekRange> Weeks, string? PriorLabel, DateOnly WeekStart)
+        BuildWeekFolderAnchoredWeeks(string? weekFolder)
+    {
+        if (TryParseWeekFolderRange(weekFolder, out var wfStart, out var wfEnd))
+        {
+            var weeks = new List<WeekRange>(5);
+            for (int w = 0; w < 5; w++)
+                weeks.Add(new WeekRange(wfStart.AddDays(7 * w), wfEnd.AddDays(7 * w)));
+
+            var priorLabel = $"Prior to {wfStart:MM/dd/yyyy} - {wfEnd:MM/dd/yyyy}";
+            return (weeks, priorLabel, wfStart);
+        }
+
+        // Fallback: last 4 completed Monday-based weeks (legacy behaviour).
+        var today          = DateOnly.FromDateTime(DateTime.Today);
+        var daysFromMonday = ((int)today.DayOfWeek + 6) % 7;
+        var weekStart      = today.AddDays(-daysFromMonday);
+
+        var fallback = new List<WeekRange>(4);
+        for (int w = 4; w >= 1; w--)
+        {
+            var wkStart = weekStart.AddDays(-7 * w);
+            fallback.Add(new WeekRange(wkStart, wkStart.AddDays(6)));
+        }
+        return (fallback, null, weekStart);
+    }
+
+    /// <summary>Parses WeekFolder names like "06.25.2026 - 07.01.2026" or "06.25.2026 to 07.01.2026".</summary>
+    private static bool TryParseWeekFolderRange(string? weekFolder, out DateOnly start, out DateOnly end)
+    {
+        start = default;
+        end   = default;
+        if (string.IsNullOrWhiteSpace(weekFolder)) return false;
+
+        var normalized = weekFolder
+            .Replace(" to ", "-", StringComparison.OrdinalIgnoreCase)
+            .Replace('–', '-')   // en dash
+            .Replace('—', '-');  // em dash
+
+        var parts = normalized.Split('-', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length != 2) return false;
+
+        return TryParseWeekFolderDate(parts[0], out start)
+            && TryParseWeekFolderDate(parts[1], out end)
+            && end >= start;
+    }
+
+    private static bool TryParseWeekFolderDate(string value, out DateOnly date)
+    {
+        date  = default;
+        value = value.Trim().Replace('.', '/');
+        return DateOnly.TryParseExact(value, "MM/dd/yyyy",
+                   CultureInfo.InvariantCulture, DateTimeStyles.None, out date)
+            || DateOnly.TryParse(value, CultureInfo.InvariantCulture, out date);
     }
 
     private static WeeklyForecastSummary BuildWeeklySummary(

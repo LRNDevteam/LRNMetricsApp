@@ -35,10 +35,19 @@ public static class ForecastingExcelExportBuilder
         return wb;
     }
 
+    /// <summary>Max rows written to the Data sheet — keeps generation time and
+    /// file size sane for very large labs; the title notes when truncated.</summary>
+    private const int MaxDataSheetRows = 100_000;
+
+    /// <summary>Above this row count, per-row banding and AutoFit are skipped —
+    /// both are O(rows × cols) in ClosedXML and dominated export time.</summary>
+    private const int FullStylingMaxRows = 10_000;
+
     /// <summary>
     /// Full line-item detail sheet. Contains every row passed in — all
     /// PayerValidationReport rows for the run when no filter is applied,
     /// or the filtered subset when dimension filters are active.
+    /// Written via bulk InsertData + range-level styling for performance.
     /// </summary>
     private static void BuildDataSheet(XLWorkbook wb, IReadOnlyList<PredictionRecord> records,
         string labName, bool hasFilters)
@@ -59,42 +68,55 @@ public static class ForecastingExcelExportBuilder
         ];
         int colCount = headers.Length;
 
+        int  totalCount = records.Count;
+        bool truncated  = totalCount > MaxDataSheetRows;
+        if (truncated)
+            records = records.Take(MaxDataSheetRows).ToList();
+
         var scope = hasFilters ? "Filtered" : "All records";
-        ExcelTheme.WriteTitleBar(ws, 1, colCount, $"Line Item Detail — {scope} | {labName} | {records.Count:N0} rows");
+        var title = truncated
+            ? $"Line Item Detail — {scope} | {labName} | first {MaxDataSheetRows:N0} of {totalCount:N0} rows"
+            : $"Line Item Detail — {scope} | {labName} | {totalCount:N0} rows";
+        ExcelTheme.WriteTitleBar(ws, 1, colCount, title);
         ExcelTheme.WriteHeaderRow(ws, 2, 1, headers);
 
-        int row = 3;
-        for (int i = 0; i < records.Count; i++)
+        // ── Bulk insert: single InsertData call instead of rows × 22 cell writes ──
+        var data = records.Select(r => new object[]
         {
-            var r  = records[i];
-            var bg = ExcelTheme.GetRowBg(i);
+            r.AccessionNo,
+            r.VisitNumber,
+            r.CPTCode,
+            string.IsNullOrWhiteSpace(r.PayerNameNormalized) ? r.PayerName : r.PayerNameNormalized,
+            r.PayerType,
+            r.PanelName,
+            r.ForecastingPayability,
+            r.PayStatus,
+            r.Payability,
+            r.FinalCoverageStatus,
+            r.ExpectedPaymentDate,
+            r.FirstBilledDate,
+            r.DateOfService,
+            r.BilledAmount,
+            r.AllowedAmount,
+            r.InsurancePayment,
+            r.MedianAllowedAmountSameLab,
+            r.MedianInsurancePaidSameLab,
+            r.ModeAllowedAmountSameLab,
+            r.ModeInsurancePaidSameLab,
+            r.DenialCode,
+            r.DenialDescription
+        });
+        ws.Cell(3, 1).InsertData(data);
 
-            ws.Cell(row,  1).Value = r.AccessionNo;
-            ws.Cell(row,  2).Value = r.VisitNumber;
-            ws.Cell(row,  3).Value = r.CPTCode;
-            ws.Cell(row,  4).Value = string.IsNullOrWhiteSpace(r.PayerNameNormalized) ? r.PayerName : r.PayerNameNormalized;
-            ws.Cell(row,  5).Value = r.PayerType;
-            ws.Cell(row,  6).Value = r.PanelName;
-            ws.Cell(row,  7).Value = r.ForecastingPayability;
-            ws.Cell(row,  8).Value = r.PayStatus;
-            ws.Cell(row,  9).Value = r.Payability;
-            ws.Cell(row, 10).Value = r.FinalCoverageStatus;
-            ws.Cell(row, 11).Value = r.ExpectedPaymentDate;
-            ws.Cell(row, 12).Value = r.FirstBilledDate;
-            ws.Cell(row, 13).Value = r.DateOfService;
-            ws.Cell(row, 14).Value = r.BilledAmount;
-            ws.Cell(row, 15).Value = r.AllowedAmount;
-            ws.Cell(row, 16).Value = r.InsurancePayment;
-            ws.Cell(row, 17).Value = r.MedianAllowedAmountSameLab;
-            ws.Cell(row, 18).Value = r.MedianInsurancePaidSameLab;
-            ws.Cell(row, 19).Value = r.ModeAllowedAmountSameLab;
-            ws.Cell(row, 20).Value = r.ModeInsurancePaidSameLab;
-            ws.Cell(row, 21).Value = r.DenialCode;
-            ws.Cell(row, 22).Value = r.DenialDescription;
-
-            for (int c = 1; c <= colCount; c++)
-                ExcelTheme.StyleDataCell(ws.Cell(row, c), bg);
-            row++;
+        if (records.Count > 0 && records.Count <= FullStylingMaxRows)
+        {
+            // Banded rows: one range-style per row (cheap at this size).
+            for (int i = 0; i < records.Count; i++)
+            {
+                var bg = ExcelTheme.GetRowBg(i);
+                if (bg != XLColor.White)
+                    ws.Range(3 + i, 1, 3 + i, colCount).Style.Fill.BackgroundColor = bg;
+            }
         }
 
         // Money columns
@@ -103,7 +125,23 @@ public static class ForecastingExcelExportBuilder
 
         ws.SheetView.FreezeRows(2);
         ws.Range(2, 1, 2, colCount).SetAutoFilter();
-        ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 12, firstColMinWidth: 16);
+
+        if (records.Count <= FullStylingMaxRows)
+        {
+            ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 12, firstColMinWidth: 16);
+        }
+        else
+        {
+            // AutoFit measures every cell — far too slow here. Fixed widths instead.
+            double[] widths =
+            [
+                16, 14, 10, 30, 14, 18, 20, 14, 14, 18,
+                16, 16, 16, 12, 12, 12, 15, 15, 15, 15,
+                12, 40
+            ];
+            for (int c = 1; c <= colCount; c++)
+                ws.Column(c).Width = widths[c - 1];
+        }
     }
 
     private static void BuildWeeklySheet(XLWorkbook wb, string sheetName,
@@ -120,7 +158,7 @@ public static class ForecastingExcelExportBuilder
         int totalCols = 2;
         int colCount = fixedCols + weekCols + totalCols;
 
-        ExcelTheme.WriteTitleBar(ws, 1, colCount, $"{sheetName} � Last 4 Weeks | {labName}");
+        ExcelTheme.WriteTitleBar(ws, 1, colCount, $"{sheetName} - 5-Week Forecast | {labName}");
 
         // Header row 1 � Payer + week ranges merged + Total
         ws.Cell(2, 1).Value = "Payer";
@@ -153,7 +191,7 @@ public static class ForecastingExcelExportBuilder
         ws.Cell(2, totalStartCol).Style.Fill.BackgroundColor = ExcelTheme.HeaderBg;
         ws.Cell(2, totalStartCol).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
 
-        // Header row 2 � sub-headers (Allowed / Paid)
+        // Header row 2 � sub-headers (Allowed / Paid)
         ws.Cell(3, 1).Value = "";
         ws.Cell(3, 1).Style.Fill.BackgroundColor = ExcelTheme.HeaderBg;
         for (int w = 0; w < weeks.Count; w++)

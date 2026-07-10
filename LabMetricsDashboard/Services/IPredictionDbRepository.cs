@@ -29,6 +29,17 @@ public interface IPredictionDbRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Lightweight fetch for the Forecasting Summary page via
+    /// dbo.usp_GetForecastingRecords: only the ~16 columns the page needs,
+    /// pre-filtered in SQL to forecast-payable rows. Dramatically faster than
+    /// <see cref="GetRecordsAsync"/> for large labs (CERTUS etc.).
+    /// </summary>
+    Task<List<PredictionRecord>> GetForecastRecordsAsync(
+        string  connectionString,
+        string? runId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Probes the target database for Prediction-Analysis readiness. Returns a
     /// short diagnostic record describing why the report is empty (table missing,
     /// SP missing, no rows, schema mismatch, etc.) so the controller can surface

@@ -31,6 +31,24 @@ public sealed class PredictionReportParserService
             "Payable - Need Action"
         };
 
+    // ── Forecasting Summary page business rule ────────────────────────────
+    // Only unresolved claims are forecast: 'Payable - Need Action' is
+    // EXCLUDED, and PayStatus must be Denied or No Response.
+    // (Matches usp_GetForecastingSummaryByWeekRange / usp_GetForecastingRecords.)
+    private static readonly HashSet<string> ForecastSummaryPayableValues =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Payable",
+            "Potentially Payable"
+        };
+
+    private static readonly HashSet<string> ForecastSummaryPayStatusValues =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Denied",
+            "No Response"
+        };
+
     private readonly ILogger<PredictionReportParserService> _logger;
 
     public PredictionReportParserService(ILogger<PredictionReportParserService> logger)
@@ -82,8 +100,10 @@ public sealed class PredictionReportParserService
     }
 
     /// <summary>
-    /// Filters records by ForecastingPayability and an inclusive date range
-    /// on ExpectedPaymentDate. Used for the last-4-weeks weekly summaries.
+    /// Filters records for the Forecasting Summary page:
+    ///   ForecastingPayability IN (Payable / Potentially Payable)   — no 'Need Action'
+    ///   AND PayStatus IN (Denied / No Response)                    — unresolved claims only
+    ///   AND ExpectedPaymentDate within the inclusive date range.
     /// </summary>
     public static List<PredictionRecord> ApplyForecastDateRangeFilter(
         IEnumerable<PredictionRecord> records,
@@ -93,7 +113,7 @@ public sealed class PredictionReportParserService
         var result = new List<PredictionRecord>();
         foreach (var r in records)
         {
-            if (!IsForecastPayable(r.ForecastingPayability))
+            if (!IsForecastSummaryRow(r.ForecastingPayability, r.PayStatus))
                 continue;
 
             if (!TryParseDate(r.ExpectedPaymentDate, out var pmtDate))
@@ -575,12 +595,20 @@ public sealed class PredictionReportParserService
     internal static string Normalise(string s)
     {
         if (string.IsNullOrEmpty(s)) return s;
-        var collapsed = WhitespaceRun.Replace(s.Trim().Replace('�', '-').Replace('�', '-'), " ");
+        var collapsed = WhitespaceRun.Replace(s.Trim().Replace('�', '-').Replace('�', '-'), " ");
         return DashSpacing.Replace(collapsed, " - ");
     }
 
     internal static bool IsForecastPayable(string value) =>
         ForecastPayableValues.Contains(Normalise(value));
+
+    /// <summary>
+    /// Forecasting Summary page rule: Payable / Potentially Payable
+    /// (no 'Payable - Need Action') AND PayStatus Denied / No Response.
+    /// </summary>
+    internal static bool IsForecastSummaryRow(string forecastingPayability, string payStatus) =>
+        ForecastSummaryPayableValues.Contains(Normalise(forecastingPayability))
+        && ForecastSummaryPayStatusValues.Contains(Normalise(payStatus));
 
     internal static bool TryParseDate(string value, out DateOnly date)
     {

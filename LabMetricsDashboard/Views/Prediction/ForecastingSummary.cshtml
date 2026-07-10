@@ -121,7 +121,7 @@
         <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
             <div>
                 <h2><i class="bi bi-calendar3-week me-1"></i> Forecasting Summary <span class="badge bg-light text-primary fw-semibold" style="font-size:.45em;vertical-align:middle;border-radius:20px;padding:.35em .85em">@Model.SelectedLab</span></h2>
-                <div class="sub">Last 4 Weeks &nbsp;|&nbsp; Weekly Breakdown by Payer</div>
+                <div class="sub">5-Week Forecast &nbsp;|&nbsp; Weekly Breakdown by Payer</div>
             </div>
             <button type="button" id="exportForecastingExcelBtn"
                     class="btn btn-sm btn-outline-light ms-2" style="font-size:.76rem">
@@ -216,7 +216,7 @@ else if (Model.NoDataForRange)
     <div class="d-flex flex-column align-items-center justify-content-center py-5 my-3"
          style="background:#fff;border-radius:16px;box-shadow:0 2px 14px rgba(0,0,0,.08);min-height:320px">
         <div style="font-size:3.5rem;line-height:1">&#128197;</div>
-        <h4 class="fw-bold mt-3 mb-1" style="color:#e65100">No Data for the Last 4 Weeks</h4>
+        <h4 class="fw-bold mt-3 mb-1" style="color:#e65100">No Data for the Forecast Weeks</h4>
         <p class="text-muted mb-2" style="font-size:.92rem;max-width:480px;text-align:center">
             There are no forecast records available for <strong>@Model.SelectedLab</strong>
             in the period <strong>@rangeLabel</strong>.
@@ -226,7 +226,7 @@ else if (Model.NoDataForRange)
             <p class="mb-3" style="font-size:.88rem;text-align:center">
                 The most recent data available for this lab is from
                 <strong style="color:#1565c0">@Model.LatestDataDate.Value.ToString("MMMM d, yyyy")</strong>.
-                <br/><span class="text-muted">New data has not yet been processed for the current 4-week window.</span>
+                <br/><span class="text-muted">New data has not yet been processed for the current forecast window.</span>
             </p>
         }
         else
