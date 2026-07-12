@@ -18,6 +18,7 @@ public interface IPayerMappingService
     Task<PayerMappingActionResult> ApproveAsync(int labInsuranceMasterId, int ppInsuranceMasterId, string userName, CancellationToken ct);
     Task<PayerMappingActionResult> ManualMapAsync(int labInsuranceMasterId, int ppInsuranceMasterId, string userName, CancellationToken ct);
     Task<PayerMappingActionResult> RejectAsync(int labInsuranceMasterId, string userName, CancellationToken ct);
+    Task<MappingStatusSummaryDto> GetMappingSummaryAsync(CancellationToken ct);
 }
 
 public sealed class PayerMappingService : IPayerMappingService
@@ -219,7 +220,7 @@ public sealed class PayerMappingService : IPayerMappingService
         var evaluation = _pipeline.Evaluate(row, index);
         var context = evaluation.Context;
 
-        var ok = await _labRepository.ApplyUserMappingAsync(labInsuranceMasterId, record.GlobalPayerId.Value, mappedBy, userName, ct);
+        var ok = await _labRepository.ApplyUserMappingAsync(labInsuranceMasterId, record, mappedBy, userName, ct);
         if (!ok) return new PayerMappingActionResult { Success = false, Message = "Lab insurance record was not found." };
 
         await _auditRepository.UpsertAliasAsync(context.CanonicalName, context.ResolvedStateCode,
@@ -242,6 +243,21 @@ public sealed class PayerMappingService : IPayerMappingService
         }, ct);
 
         return new PayerMappingActionResult { Success = true, GlobalPayerId = record.GlobalPayerId, MappingStatus = "Mapped" };
+    }
+
+    public async Task<MappingStatusSummaryDto> GetMappingSummaryAsync(CancellationToken ct)
+    {
+        var counts = await _labRepository.GetMappingStatusCountsAsync(ct);
+        int Of(string status) => counts.TryGetValue(status, out var n) ? n : 0;
+        var summary = new MappingStatusSummaryDto
+        {
+            Mapped = Of("Mapped"),
+            Unmapped = Of("Unmapped"),
+            PendingReview = Of("Unmapped - Pending Review"),
+            NoMatch = Of("No Match Found"),
+            Total = counts.Values.Sum()
+        };
+        return summary;
     }
 
     /// <summary>Reject: audit only - no data change, the row stays 'Unmapped - Pending Review'.</summary>

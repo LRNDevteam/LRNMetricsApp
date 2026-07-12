@@ -33,6 +33,7 @@ public interface IMasterValuesApiClient
     Task<PayerMappingActionResult> ApproveMappingAsync(int labInsuranceMasterId, PayerMappingActionRequest request, CancellationToken ct);
     Task<PayerMappingActionResult> ManualMapAsync(int labInsuranceMasterId, PayerMappingActionRequest request, CancellationToken ct);
     Task<PayerMappingActionResult> RejectMappingAsync(int labInsuranceMasterId, CancellationToken ct);
+    Task<MappingStatusSummaryDto> GetMappingSummaryAsync(CancellationToken ct);
 
     Task<MasterPagedResult<PayerMasterApprovalRequestDto>> GetApprovalsAsync(IQueryCollection query, CancellationToken ct);
     Task<PayerMasterApprovalDecisionResult> ApproveRequestsAsync(PayerMasterApprovalDecisionRequest request, CancellationToken ct);
@@ -117,6 +118,9 @@ public sealed class MasterValuesApiClient : IMasterValuesApiClient
 
     public Task<PayerMappingActionResult> RejectMappingAsync(int labInsuranceMasterId, CancellationToken ct)
         => PostForResultAsync<object, PayerMappingActionResult>($"api/master-values/insurance-payers/{labInsuranceMasterId}/mapping/reject", new { }, ct);
+
+    public async Task<MappingStatusSummaryDto> GetMappingSummaryAsync(CancellationToken ct)
+        => await GetAsync<MappingStatusSummaryDto>("api/master-values/insurance-payers/mapping-summary", ct) ?? new();
 
     public async Task<MasterPagedResult<PayerMasterApprovalRequestDto>> GetApprovalsAsync(IQueryCollection query, CancellationToken ct)
         => await GetAsync<MasterPagedResult<PayerMasterApprovalRequestDto>>("api/master-values/workflow/approvals" + Query(query), ct) ?? new();

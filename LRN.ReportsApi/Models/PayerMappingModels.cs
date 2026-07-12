@@ -64,6 +64,16 @@ public sealed class PayerPolicySearchResultDto
     public bool MissingGlobalPayerId { get; set; }
 }
 
+/// <summary>MappingStatus row counts for the notification bell / dashboards.</summary>
+public sealed class MappingStatusSummaryDto
+{
+    public int Mapped { get; set; }
+    public int Unmapped { get; set; }
+    public int PendingReview { get; set; }
+    public int NoMatch { get; set; }
+    public int Total { get; set; }
+}
+
 /// <summary>Approve (system-proposed) or Manual Map (typeahead-picked) request.</summary>
 public sealed class PayerMappingActionRequest
 {

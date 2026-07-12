@@ -137,6 +137,16 @@ public sealed class PayerMappingActionRequest
     public int PPInsuranceMasterId { get; set; }
 }
 
+/// <summary>MappingStatus row counts for the navbar notification bell.</summary>
+public sealed class MappingStatusSummaryDto
+{
+    public int Mapped { get; set; }
+    public int Unmapped { get; set; }
+    public int PendingReview { get; set; }
+    public int NoMatch { get; set; }
+    public int Total { get; set; }
+}
+
 public sealed class PayerMappingActionResult
 {
     public bool Success { get; set; }

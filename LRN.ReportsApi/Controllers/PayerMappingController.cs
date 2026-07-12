@@ -26,6 +26,14 @@ public sealed class PayerMappingController : ControllerBase
     private bool CanMap => PayerMasterRoles.CanWriteLab(User) && !PayerMasterRoles.LabRequiresApproval(User);
     private string UserName() => PayerMasterRoles.UserName(User);
 
+    /// <summary>MappingStatus counts for the notification bell (Mapped / Unmapped / Pending Review / No Match).</summary>
+    [HttpGet("insurance-payers/mapping-summary")]
+    public async Task<ActionResult<MappingStatusSummaryDto>> MappingSummary(CancellationToken ct)
+    {
+        if (!CanView) return Denied();
+        return Ok(await _mapping.GetMappingSummaryAsync(ct));
+    }
+
     [HttpGet("insurance-payers/{id:int}/suggestions")]
     public async Task<ActionResult<PayerMappingSuggestionsResponse>> Suggestions(int id, CancellationToken ct)
     {

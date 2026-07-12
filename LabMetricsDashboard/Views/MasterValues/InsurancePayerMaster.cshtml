@@ -96,7 +96,7 @@
     <div class="mv-card mv-filter">
         <form id="filterForm" class="row g-3 align-items-end">
             <div class="col-lg-3 col-md-6"><label class="form-label">Search</label><input class="form-control" name="search" placeholder="Raw payer name, code, lab..." /></div>
-            <div class="col-lg-2 col-md-6"><label class="form-label">Mapping Status</label><select class="form-select" id="mappingFilter"><option value="">All Mapping Status</option><option value="Mapped">Mapped</option><option value="Unmapped">Unmapped (any)</option><option value="Unmapped - Pending Review">Pending Review</option><option value="No Match Found">No Match Found</option></select></div>
+            <div class="col-lg-2 col-md-6"><label class="form-label">Mapping Status</label><select class="form-select" id="mappingFilter" name="mappingStatus"><option value="">All Mapping Status</option><option value="Mapped">Mapped</option><option value="Unmapped">Unmapped</option><option value="Unmapped - Pending Review">Pending Review</option><option value="No Match Found">No Match Found</option></select></div>
             <div class="col-lg-2 col-md-6"><label class="form-label">Lab</label><select class="form-select" name="labId" id="labFilter"><option value="">All Labs</option></select></div>
             <div class="col-lg-2 col-md-6"><label class="form-label">Status</label><select class="form-select" name="isActive"><option value="">All Status</option><option>Active</option><option>Inactive</option></select></div>
             <div class="col-lg-3 col-md-6 d-flex gap-2 justify-content-end align-items-end flex-nowrap">
@@ -305,13 +305,10 @@ function rowHtml(x){
   return `<tr data-id="${x.labInsuranceMasterId}" class="${!isMapped(x)&&isActiveVal(x.isActive)?'unmapped':''}"><td class="mv-primary">${esc(x.payerCode)}</td><td class="mv-primary">${esc(x.payerNameRaw)}</td><td>${esc(x.payerNameNormalized)}</td><td>${esc(x.globalPayerID??'—')}</td><td>${mappingBadge(x)}</td><td>${esc(x.payerGroupCode)}</td><td>${esc(x.payerCommonCode)}</td><td>${esc(x.parent)}</td><td>${esc(x.planType)}</td><td>${esc(x.mcoType)}</td><td>${esc(x.payerState)}</td><td>${activeBadge(x.isActive)}</td><td>${esc(x.benefitAdminCode)}</td><td>${esc(x.benefitAdministrator)}</td><td>${esc(x.labName)}</td><td>${esc(x.labState)}</td><td>${esc(x.labStateCode)}</td><td>${esc(x.remarks)}</td><td class="text-end text-nowrap">${rowActions(x)}</td></tr>`;
 }
 function renderRows(items){
+  // Mapping status is filtered server-side (the select posts as 'mappingStatus' via qs()),
+  // so paging and total counts line up with the notification bell numbers.
   currentItems=items||[];
-  const mapFilter=document.getElementById('mappingFilter').value;
-  let list=currentItems;
-  if(mapFilter==='Mapped')list=list.filter(isMapped);
-  else if(mapFilter==='Unmapped')list=list.filter(x=>!isMapped(x));
-  else if(mapFilter)list=list.filter(x=>(x.mappingStatus||'')===mapFilter);
-  document.getElementById('rows').innerHTML=list.map(rowHtml).join('')||`<tr><td colspan="${COLS}"><div class="mv-empty"><div class="fw-bold">No records found</div><div>Adjust filters or import the master file.</div></div></td></tr>`;
+  document.getElementById('rows').innerHTML=currentItems.map(rowHtml).join('')||`<tr><td colspan="${COLS}"><div class="mv-empty"><div class="fw-bold">No records found</div><div>Adjust filters or import the master file.</div></div></td></tr>`;
 }
 async function load(){updateSortHeaders();const query=qs();setBusy(true,'Loading records...');try{const r=await fetch(urls.data+'?'+query);const d=await r.json();totalPages=d.totalPages||1;document.getElementById('pageInfo').textContent=`Page ${d.page||1} of ${totalPages} - ${d.totalCount||0} records`;renderRows(d.items);}catch(e){document.getElementById('rows').innerHTML=`<tr><td colspan="${COLS}"><div class="mv-empty text-danger">Unable to load records.</div></td></tr>`;}finally{setBusy(false);}}
 async function loadLabs(){const r=await fetch(urls.labs);labs=await r.json();const ids=canWrite?['labFilter','labEdit']:['labFilter'];for(const id of ids){const s=document.getElementById(id);if(s)labs.forEach(l=>s.insertAdjacentHTML('beforeend',`<option value="${l.labId}">${esc(l.labName)}</option>`));}const alias=document.getElementById('aliasRows');if(alias)alias.innerHTML=aliases.map(x=>`<tr><td>${x[0]}</td><td>${esc(x[1])}</td><td class="fw-semibold">${esc(x[2])}</td></tr>`).join('');}
@@ -611,6 +608,10 @@ if(canWrite){
   const importBtn=document.getElementById('importBtn');
   if(importBtn)importBtn.onclick=async()=>{const btn=importBtn,file=document.getElementById('importFile').files[0];if(!file)return;const fd=new FormData();fd.append('file',file);setBtn(btn,true,'Importing...');document.getElementById('importResult').innerHTML='<span class="text-muted">Import running. Please keep this window open.</span>';try{const r=await fetch(urls.import,{method:'POST',body:fd});const d=await r.json();renderImportSummary(d);await load();if((d.conflicts||[]).length)showConflicts(d.conflicts);}finally{setBtn(btn,false);}};
 }
+// Deep link from the notification bell: preset the mapping-status filter from the query string.
+const presetStatus=new URLSearchParams(location.search).get('mappingStatus');
+if(presetStatus&&[...document.getElementById('mappingFilter').options].some(o=>o.value===presetStatus))
+  document.getElementById('mappingFilter').value=presetStatus;
 loadLabs().then(load);
 })();
 </script>

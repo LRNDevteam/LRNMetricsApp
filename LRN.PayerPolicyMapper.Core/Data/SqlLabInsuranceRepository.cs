@@ -142,21 +142,43 @@ public sealed class SqlLabInsuranceRepository : ILabInsuranceRepository
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task<bool> ApplyUserMappingAsync(int labInsuranceMasterId, int globalPayerId, string mappedBy, string userName, CancellationToken ct)
+    public async Task<bool> ApplyUserMappingAsync(int labInsuranceMasterId, PayerPolicyRecord policyRecord, string mappedBy, string userName, CancellationToken ct)
     {
+        if (policyRecord.GlobalPayerId is null)
+            throw new ArgumentException("Policy record has no parseable Global Payer ID and cannot be mapped.", nameof(policyRecord));
+
         await using var conn = Open();
         await conn.OpenAsync(ct);
+        // The matched policy record is the reference source: carry its columns over to the Lab
+        // record wherever the policy side has a value (COALESCE keeps existing Lab values where
+        // the policy side is blank). Payer Common Code carries the policy Global Payer Code per
+        // requirements spec 4.4.
         await using var cmd = new SqlCommand("""
             UPDATE dbo.LabInsuranceMaster
             SET GlobalPayerID = @Gid, MappingStatus = 'Mapped', MappedBy = @MappedBy,
+                PayerNameNormalized = COALESCE(@PayerNameNormalized, PayerNameNormalized),
+                PayerCommonCode = COALESCE(@GlobalPayerCode, PayerCommonCode),
+                PayerGroupCode = COALESCE(@PayerGroupCode, PayerGroupCode),
+                PlanType = COALESCE(@PlanType, PlanType),
+                PayerState = COALESCE(@PayerState, PayerState),
+                BenefitAdminCode = COALESCE(@BenefitAdminCode, BenefitAdminCode),
+                BenefitAdministrator = COALESCE(@BenefitAdministrator, BenefitAdministrator),
                 ModifiedBy = @UserName, ModifiedOn = SYSUTCDATETIME(), LastEvaluatedOn = SYSUTCDATETIME()
             WHERE LabInsuranceMasterId = @Id;
             DELETE FROM dbo.PendingMatchCandidates WHERE LabInsuranceMasterId = @Id;
             """, conn);
         cmd.Parameters.AddWithValue("@Id", labInsuranceMasterId);
-        cmd.Parameters.AddWithValue("@Gid", globalPayerId);
+        cmd.Parameters.AddWithValue("@Gid", policyRecord.GlobalPayerId.Value);
         cmd.Parameters.AddWithValue("@MappedBy", mappedBy);
         cmd.Parameters.AddWithValue("@UserName", userName);
+        cmd.Parameters.AddWithValue("@PayerNameNormalized", (object?)policyRecord.PayerNameNormalized ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@GlobalPayerCode", (object?)policyRecord.GlobalPayerCode ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@PayerGroupCode", (object?)policyRecord.PayerGroupCode?.ToString() ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@PlanType", (object?)policyRecord.PlanType ?? DBNull.Value);
+        // Prefer the resolved 2-letter code (the Lab column is a state-code dropdown), else the raw value.
+        cmd.Parameters.AddWithValue("@PayerState", (object?)(policyRecord.StateCode ?? policyRecord.PayerState) ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@BenefitAdminCode", (object?)policyRecord.BenefitAdminCode ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@BenefitAdministrator", (object?)policyRecord.BenefitAdministrator ?? DBNull.Value);
         return await cmd.ExecuteNonQueryAsync(ct) > 0;
     }
 
@@ -179,6 +201,24 @@ public sealed class SqlLabInsuranceRepository : ILabInsuranceRepository
                 r.IsDBNull(3) ? 0m : r.GetDecimal(3), r.IsDBNull(4) ? (byte)0 : r.GetByte(4),
                 r.IsDBNull(5) ? 0m : r.GetDecimal(5), r.IsDBNull(6) ? 0 : r.GetInt32(6), r.IsDBNull(7) ? 0 : r.GetInt32(7)));
         return rows;
+    }
+
+    public async Task<IReadOnlyDictionary<string, int>> GetMappingStatusCountsAsync(CancellationToken ct)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        await using var conn = Open();
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand("""
+            SELECT ISNULL(NULLIF(LTRIM(RTRIM(MappingStatus)), ''),
+                          CASE WHEN GlobalPayerID IS NOT NULL THEN 'Mapped' ELSE 'Unmapped' END) AS Status,
+                   COUNT(1)
+            FROM dbo.LabInsuranceMaster
+            GROUP BY ISNULL(NULLIF(LTRIM(RTRIM(MappingStatus)), ''),
+                            CASE WHEN GlobalPayerID IS NOT NULL THEN 'Mapped' ELSE 'Unmapped' END);
+            """, conn);
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct)) counts[r.GetString(0)] = r.GetInt32(1);
+        return counts;
     }
 
     private SqlConnection Open() => new(_connectionString);

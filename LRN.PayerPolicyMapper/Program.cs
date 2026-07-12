@@ -11,6 +11,23 @@ var host = Host.CreateDefaultBuilder(args)
         logging.ClearProviders();
         logging.AddConsole();
         if (OperatingSystem.IsWindows()) logging.AddEventLog();
+
+        // Rolling daily file log (mapper-yyyy-MM-dd.log) configured via Logging:File, same
+        // convention as LRN.ReportsApi. Never fail service startup because of the file logger.
+        var fileSection = context.Configuration.GetSection("Logging:File");
+        try
+        {
+            logging.AddProvider(new FileLoggerProvider(new FileLoggerOptions
+            {
+                LogDirectory = fileSection["LogDirectory"] ?? "Logs",
+                MinLevel = Enum.TryParse<LogLevel>(fileSection["LogLevel"], true, out var fileLevel) ? fileLevel : LogLevel.Information,
+                RetainDays = int.TryParse(fileSection["RetainDays"], out var retainDays) ? retainDays : 30
+            }));
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Payer mapper file logger initialization failed: {ex}");
+        }
     })
     .ConfigureServices((context, services) =>
     {

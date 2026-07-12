@@ -47,6 +47,12 @@ public sealed class Worker : BackgroundService
         _logger.LogInformation("LRN Payer Policy Mapper starting: poll {Poll}s, batch {Batch}, nightly rescan {Hour:00}:00 UTC",
             _options.PollIntervalSeconds, _options.BatchSize, _options.NightlyHourUtc);
 
+        // A restart is not a nightly boundary: starting after the configured hour must NOT trigger
+        // a full rescan, or every restart resets LastEvaluatedOn for all unmapped rows and the
+        // worker keeps re-processing the head of the queue instead of advancing through it.
+        if (DateTime.UtcNow.Hour >= _options.NightlyHourUtc)
+            _lastNightlyRunDateUtc = DateOnly.FromDateTime(DateTime.UtcNow);
+
         // Baseline index build (its first-build result is not treated as a rules change).
         try { await _indexProvider.RefreshIfChangedAsync(stoppingToken); }
         catch (Exception ex) when (ex is not OperationCanceledException)

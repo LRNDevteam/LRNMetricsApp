@@ -17,6 +17,13 @@ public sealed class PayerPolicyRecord
     public string? PayerFamily { get; init; }
     public string? PlanType { get; init; }
     public string? PayerState { get; init; }
+    // Carried over to the Lab Insurance Master record when a user confirms a mapping
+    // (requirements §4.4: Payer Common Code etc. are "carried over from the mapped
+    // Payer Policy Insurance Master record").
+    public string? GlobalPayerCode { get; init; }
+    public int? PayerGroupCode { get; init; }
+    public string? BenefitAdminCode { get; init; }
+    public string? BenefitAdministrator { get; init; }
 
     // Precomputed at index build time (Step 0).
     public string CanonicalRawName { get; internal set; } = string.Empty;

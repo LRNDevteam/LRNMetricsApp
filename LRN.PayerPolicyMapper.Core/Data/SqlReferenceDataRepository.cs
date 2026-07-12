@@ -52,7 +52,8 @@ public sealed class SqlReferenceDataRepository : IReferenceDataRepository
         // stores an unanticipated spelling, which kills suggestions and search everywhere.
         await using (var cmd = new SqlCommand("""
             SELECT PPInsuranceMasterId, TRY_CONVERT(INT, GlobalPayerId) AS GlobalPayerIdInt,
-                   PayerNameRaw, PayerNameNormalized, PayerFamily, PlanType, PayerState
+                   PayerNameRaw, PayerNameNormalized, PayerFamily, PlanType, PayerState,
+                   GlobalPayerCode, PayerGroupCode, BenefitAdminCode, BenefitAdministrator
             FROM dbo.PayerPolicyInsuranceMaster
             WHERE NULLIF(LTRIM(RTRIM(PayerNameRaw)), '') IS NOT NULL
               AND (IsActive IS NULL
@@ -68,7 +69,11 @@ public sealed class SqlReferenceDataRepository : IReferenceDataRepository
                     PayerNameNormalized = r.IsDBNull(3) ? null : r.GetString(3),
                     PayerFamily = r.IsDBNull(4) ? null : r.GetString(4),
                     PlanType = r.IsDBNull(5) ? null : r.GetString(5),
-                    PayerState = r.IsDBNull(6) ? null : r.GetString(6)
+                    PayerState = r.IsDBNull(6) ? null : r.GetString(6),
+                    GlobalPayerCode = r.IsDBNull(7) ? null : r.GetString(7),
+                    PayerGroupCode = r.IsDBNull(8) ? null : r.GetInt32(8),
+                    BenefitAdminCode = r.IsDBNull(9) ? null : r.GetString(9),
+                    BenefitAdministrator = r.IsDBNull(10) ? null : r.GetString(10)
                 });
 
         return data;

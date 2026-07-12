@@ -58,6 +58,9 @@ public sealed class InsurancePayerMasterQuery
     public string? PayerName { get; set; }
     public int? GlobalPayerId { get; set; }
     public string? IsActive { get; set; }
+    // Server-side MappingStatus filter ('Mapped' / 'Unmapped' / 'Unmapped - Pending Review' /
+    // 'No Match Found') so paging and totals line up with the notification bell counts.
+    public string? MappingStatus { get; set; }
     public string? SortColumn { get; set; }
     public string? SortDirection { get; set; }
     public int Page { get; set; } = 1;

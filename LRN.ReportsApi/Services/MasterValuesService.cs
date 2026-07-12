@@ -1153,6 +1153,16 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         AddEquals(parts, p, "LabId", q.LabId);
         AddEquals(parts, p, "GlobalPayerID", q.GlobalPayerId);
         AddLike(parts, p, "IsActive", q.IsActive);
+        if (!string.IsNullOrWhiteSpace(q.MappingStatus))
+        {
+            // Same computed expression as the bell's mapping-summary counts, so a count deep-link
+            // always finds exactly that many rows (blank status falls back to the GlobalPayerID state).
+            parts.Add("""
+                ISNULL(NULLIF(LTRIM(RTRIM(MappingStatus)), ''),
+                       CASE WHEN GlobalPayerID IS NOT NULL THEN 'Mapped' ELSE 'Unmapped' END) = @MappingStatus
+                """);
+            p.Add(new SqlParameter("@MappingStatus", q.MappingStatus.Trim()));
+        }
         if (!string.IsNullOrWhiteSpace(q.Search))
         {
             parts.Add("(PayerCode LIKE @Search ESCAPE '\\' OR PayerNameRaw LIKE @Search ESCAPE '\\' OR PayerNameNormalized LIKE @Search ESCAPE '\\' OR LabName LIKE @Search ESCAPE '\\')");

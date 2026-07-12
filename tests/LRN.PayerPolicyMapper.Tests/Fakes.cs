@@ -95,15 +95,24 @@ public sealed class InMemoryLabRepository : ILabInsuranceRepository
         return Task.CompletedTask;
     }
 
-    public Task<bool> ApplyUserMappingAsync(int id, int globalPayerId, string mappedBy, string userName, CancellationToken ct)
+    public Task<bool> ApplyUserMappingAsync(int id, PayerPolicyRecord policyRecord, string mappedBy, string userName, CancellationToken ct)
     {
         if (!Rows.TryGetValue(id, out var s)) return Task.FromResult(false);
-        s.GlobalPayerId = globalPayerId;
+        s.GlobalPayerId = policyRecord.GlobalPayerId;
+        s.PayerNameNormalized = policyRecord.PayerNameNormalized ?? s.PayerNameNormalized;
         s.MappingStatus = "Mapped";
         s.MappedBy = mappedBy;
         s.LastEvaluatedOn = DateTime.UtcNow;
         PendingCandidates.Remove(id);
         return Task.FromResult(true);
+    }
+
+    public Task<IReadOnlyDictionary<string, int>> GetMappingStatusCountsAsync(CancellationToken ct)
+    {
+        IReadOnlyDictionary<string, int> counts = Rows.Values
+            .GroupBy(s => s.MappingStatus ?? (s.GlobalPayerId.HasValue ? "Mapped" : "Unmapped"))
+            .ToDictionary(g => g.Key, g => g.Count());
+        return Task.FromResult(counts);
     }
 
     public Task<IReadOnlyList<PendingCandidateRow>> GetPendingCandidatesAsync(int id, CancellationToken ct)

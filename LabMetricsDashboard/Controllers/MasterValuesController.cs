@@ -93,6 +93,14 @@ public sealed class MasterValuesController : Controller
     // Confirm Mapping flow which goes through the approval queue.
     private bool CanMapDirect => CanWriteLab && !LabRequiresApproval;
 
+    /// <summary>Counts for the navbar notification bell (Mapped / Pending Review / No Match / Unmapped).</summary>
+    [HttpGet]
+    public async Task<IActionResult> MappingSummary(CancellationToken ct)
+    {
+        if (!CanViewLab) return Forbid();
+        return Json(await _api.GetMappingSummaryAsync(ct));
+    }
+
     [HttpGet]
     public async Task<IActionResult> MappingSuggestions(int id, CancellationToken ct)
     {
