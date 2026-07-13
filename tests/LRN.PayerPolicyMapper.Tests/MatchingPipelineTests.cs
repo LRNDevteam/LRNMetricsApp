@@ -227,12 +227,12 @@ public sealed class MatchingPipelineTests
         for (var i = 1; i <= 100; i++) lab.Add(Row(i, $"Payer {i}"));
 
         var claims = await Task.WhenAll(
-            Enumerable.Range(0, 4).Select(_ => Task.Run(() => lab.ClaimUnmappedBatchAsync(30, CancellationToken.None))));
+            Enumerable.Range(0, 4).Select(_ => Task.Run(() => lab.ClaimUnmappedBatchAsync(30, RunScope.AllUnmapped, CancellationToken.None))));
 
         var all = claims.SelectMany(c => c.Select(r => r.LabInsuranceMasterId)).ToList();
         Assert.Equal(all.Count, all.Distinct().Count()); // no id claimed twice
         Assert.Equal(100, all.Count);                    // and nothing left behind
-        Assert.Empty(await lab.ClaimUnmappedBatchAsync(30, CancellationToken.None));
+        Assert.Empty(await lab.ClaimUnmappedBatchAsync(30, RunScope.AllUnmapped, CancellationToken.None));
     }
 
     // 12. Re-running AutoMap for the same (CanonicalName, state) is idempotent - exactly one PayerAlias row

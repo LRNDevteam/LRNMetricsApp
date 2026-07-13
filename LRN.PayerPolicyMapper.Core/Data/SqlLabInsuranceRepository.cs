@@ -15,7 +15,7 @@ public sealed class SqlLabInsuranceRepository : ILabInsuranceRepository
         await using var conn = Open();
         await conn.OpenAsync(ct);
         await using var cmd = new SqlCommand("""
-            SELECT LabInsuranceMasterId, PayerNameRaw, PlanType, LabState, LabStateCode, Remarks
+            SELECT LabInsuranceMasterId, PayerNameRaw, PlanType, LabState, LabStateCode, Remarks, GlobalPayerID
             FROM dbo.LabInsuranceMaster WHERE LabInsuranceMasterId = @Id;
             """, conn);
         cmd.Parameters.AddWithValue("@Id", labInsuranceMasterId);
@@ -23,20 +23,33 @@ public sealed class SqlLabInsuranceRepository : ILabInsuranceRepository
         return await r.ReadAsync(ct) ? Map(r) : null;
     }
 
-    public async Task<IReadOnlyList<LabInsuranceRow>> ClaimUnmappedBatchAsync(int batchSize, CancellationToken ct)
+    // Which rows a scope covers (shared by claim + reset). UnmappedPending excludes
+    // 'No Match Found' so scheduled hourly runs don't re-grind them; AllUnmapped includes them
+    // (rules-change / nightly rescue); All covers every record regardless of mapping.
+    private static string ScopeWhere(RunScope scope) => scope switch
+    {
+        RunScope.UnmappedPending => """
+            lab.GlobalPayerID IS NULL
+            AND (lab.MappingStatus IS NULL OR LTRIM(RTRIM(lab.MappingStatus)) IN ('', 'Unmapped', 'Unmapped - Pending Review'))
+            """,
+        RunScope.AllUnmapped => "lab.GlobalPayerID IS NULL",
+        _ => "1 = 1"
+    };
+
+    public async Task<IReadOnlyList<LabInsuranceRow>> ClaimUnmappedBatchAsync(int batchSize, RunScope scope, CancellationToken ct)
     {
         var rows = new List<LabInsuranceRow>();
         await using var conn = Open();
         await conn.OpenAsync(ct);
         // READPAST + UPDLOCK: multiple worker instances skip each other's locked rows, so a
         // LabInsuranceMasterId is never claimed twice. Stamping LastEvaluatedOn IS the claim.
-        await using var cmd = new SqlCommand("""
+        await using var cmd = new SqlCommand($"""
             UPDATE TOP (@BatchSize) lab
             SET LastEvaluatedOn = SYSUTCDATETIME()
             OUTPUT inserted.LabInsuranceMasterId, inserted.PayerNameRaw, inserted.PlanType,
-                   inserted.LabState, inserted.LabStateCode, inserted.Remarks
+                   inserted.LabState, inserted.LabStateCode, inserted.Remarks, inserted.GlobalPayerID
             FROM dbo.LabInsuranceMaster lab WITH (ROWLOCK, READPAST, UPDLOCK)
-            WHERE lab.GlobalPayerID IS NULL
+            WHERE {ScopeWhere(scope)}
               AND lab.LastEvaluatedOn IS NULL
               AND NULLIF(LTRIM(RTRIM(lab.PayerNameRaw)), '') IS NOT NULL;
             """, conn);
@@ -46,14 +59,24 @@ public sealed class SqlLabInsuranceRepository : ILabInsuranceRepository
         return rows;
     }
 
-    public async Task<int> ResetUnmappedEvaluationsAsync(CancellationToken ct)
+    public async Task<int> ResetEvaluationsAsync(RunScope scope, CancellationToken ct)
     {
         await using var conn = Open();
         await conn.OpenAsync(ct);
         await using var cmd = new SqlCommand(
-            "UPDATE dbo.LabInsuranceMaster SET LastEvaluatedOn = NULL WHERE GlobalPayerID IS NULL;", conn)
-        { CommandTimeout = 120 };
+            $"UPDATE lab SET LastEvaluatedOn = NULL FROM dbo.LabInsuranceMaster lab WHERE {ScopeWhere(scope)};", conn)
+        { CommandTimeout = 300 };
         return await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task StampEvaluatedAsync(int labInsuranceMasterId, CancellationToken ct)
+    {
+        await using var conn = Open();
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(
+            "UPDATE dbo.LabInsuranceMaster SET LastEvaluatedOn = SYSUTCDATETIME() WHERE LabInsuranceMasterId = @Id;", conn);
+        cmd.Parameters.AddWithValue("@Id", labInsuranceMasterId);
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     public async Task ApplyAutoMapAsync(int labInsuranceMasterId, int globalPayerId, string payerNameNormalized, string mappedBy, CancellationToken ct)
@@ -230,6 +253,7 @@ public sealed class SqlLabInsuranceRepository : ILabInsuranceRepository
         PlanType = r.IsDBNull(2) ? null : r.GetString(2),
         LabState = r.IsDBNull(3) ? null : r.GetString(3),
         LabStateCode = r.IsDBNull(4) ? null : r.GetString(4),
-        Remarks = r.IsDBNull(5) ? null : r.GetString(5)
+        Remarks = r.IsDBNull(5) ? null : r.GetString(5),
+        GlobalPayerId = r.IsDBNull(6) ? null : r.GetInt32(6)
     };
 }

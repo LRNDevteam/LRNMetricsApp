@@ -56,6 +56,8 @@ builder.Services.AddSingleton<LRN.PayerPolicyMapper.Core.Abstractions.ILabInsura
     new LRN.PayerPolicyMapper.Core.Data.SqlLabInsuranceRepository(builder.Configuration.GetConnectionString("DefaultConnection")!));
 builder.Services.AddSingleton<LRN.PayerPolicyMapper.Core.Abstractions.IAuditRepository>(sp =>
     new LRN.PayerPolicyMapper.Core.Data.SqlAuditRepository(builder.Configuration.GetConnectionString("DefaultConnection")!));
+builder.Services.AddSingleton<LRN.PayerPolicyMapper.Core.Abstractions.IPayerMapperRunRepository>(sp =>
+    new LRN.PayerPolicyMapper.Core.Data.SqlPayerMapperRunRepository(builder.Configuration.GetConnectionString("DefaultConnection")!));
 builder.Services.AddSingleton<LRN.PayerPolicyMapper.Core.Abstractions.INotificationService>(sp =>
     new LRN.PayerPolicyMapper.Core.Data.PayerMasterNotificationService(
         builder.Configuration.GetConnectionString("DefaultConnection")!,

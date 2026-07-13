@@ -141,6 +141,45 @@ public sealed class MasterValuesController : Controller
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
+    // ── Payer Service Audit: worker run history + manual trigger ─────────────
+
+    [HttpGet]
+    public IActionResult PayerServiceAudit()
+    {
+        if (!CanViewLab) return Forbid();
+        ViewData["PageLabel"] = "Payer Service Audit";
+        return View(new MasterValuesPageViewModel
+        {
+            Title = "Payer Service Audit",
+            RoleLabel = RoleLabel,
+            CanWrite = CanWriteLab && !LabRequiresApproval // gates the Run Service button
+        });
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> PayerServiceRuns(int page = 1, int pageSize = 25, CancellationToken ct = default)
+    {
+        if (!CanViewLab) return Forbid();
+        return Json(await _api.GetPayerServiceRunsAsync(page, pageSize, ct));
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> PayerServiceRunDetails(Guid id, CancellationToken ct)
+    {
+        if (!CanViewLab) return Forbid();
+        var response = await _api.GetPayerServiceRunAsync(id, ct);
+        return response is null ? NotFound() : Json(response);
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> TriggerPayerService(string? scope, CancellationToken ct)
+    {
+        if (!CanMapDirect) return Forbid();
+        var effectiveScope = string.Equals(scope, "All", StringComparison.OrdinalIgnoreCase) ? "All" : "UnmappedPending";
+        try { return Json(await _api.TriggerPayerServiceRunAsync(effectiveScope, ct)); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+    }
+
     // Lightweight lookup used by the Lab Insurance Master "Review Match" flow.
     // Reports Manager has no access to the Payer Policy master screen, but per spec §5.2
     // may still confirm Global Payer ID mappings, so this is gated on either master.

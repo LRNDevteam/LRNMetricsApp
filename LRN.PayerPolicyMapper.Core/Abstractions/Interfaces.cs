@@ -27,13 +27,16 @@ public interface ILabInsuranceRepository
 
     /// <summary>
     /// Worker claim: atomically stamps LastEvaluatedOn on up to batchSize rows where
-    /// GlobalPayerID IS NULL AND LastEvaluatedOn IS NULL (UPDATE TOP ... OUTPUT with READPAST)
-    /// so concurrent workers never double-process a row.
+    /// LastEvaluatedOn IS NULL and the row falls inside the scope (UPDATE TOP ... OUTPUT with
+    /// READPAST) so concurrent workers never double-process a row.
     /// </summary>
-    Task<IReadOnlyList<LabInsuranceRow>> ClaimUnmappedBatchAsync(int batchSize, CancellationToken ct);
+    Task<IReadOnlyList<LabInsuranceRow>> ClaimUnmappedBatchAsync(int batchSize, RunScope scope, CancellationToken ct);
 
-    /// <summary>Clears LastEvaluatedOn for every unmapped row so the next poll cycles re-evaluate them.</summary>
-    Task<int> ResetUnmappedEvaluationsAsync(CancellationToken ct);
+    /// <summary>Clears LastEvaluatedOn for every row inside the scope so the run (re-)evaluates them.</summary>
+    Task<int> ResetEvaluationsAsync(RunScope scope, CancellationToken ct);
+
+    /// <summary>Stamps LastEvaluatedOn only (used after audit-only revalidation of a mapped row).</summary>
+    Task StampEvaluatedAsync(int labInsuranceMasterId, CancellationToken ct);
 
     Task ApplyAutoMapAsync(int labInsuranceMasterId, int globalPayerId, string payerNameNormalized, string mappedBy, CancellationToken ct);
     Task ApplyManualReviewAsync(int labInsuranceMasterId, string payerNameNormalized, IReadOnlyList<MatchCandidate> candidates, CancellationToken ct);
@@ -67,8 +70,55 @@ public interface IAuditRepository
         int globalPayerId, string confirmedBy, string sourceAction, string? exampleRawName, CancellationToken ct);
 }
 
+/// <summary>
+/// Service run audit: one dbo.PayerMapperRun row per worker run (hourly scheduled, manual
+/// trigger from the Payer Service Audit page, rules-change, nightly rescan). The rows a run
+/// updated are the dbo.PayerMatchAudit rows carrying its RunId.
+/// </summary>
+public interface IPayerMapperRunRepository
+{
+    /// <summary>Web trigger: queues a run (Status='Requested') with its scope; the worker claims it within one poll cycle.</summary>
+    Task<Guid> RequestRunAsync(string requestedBy, RunScope scope, CancellationToken ct);
+    /// <summary>Worker: starts its own run immediately (Status='InProgress').</summary>
+    Task<Guid> CreateRunAsync(string triggerType, RunScope scope, CancellationToken ct);
+    /// <summary>Worker: atomically claims the oldest 'Requested' run (READPAST - never double-claimed).</summary>
+    Task<RequestedRun?> ClaimRequestedRunAsync(CancellationToken ct);
+    Task CompleteRunAsync(Guid runId, string status, int total, int autoMapped, int pendingReview, int noMatch, int failedRows, string? errorMessage, CancellationToken ct);
+    Task<(IReadOnlyList<PayerMapperRunInfo> Runs, int TotalCount)> GetRunsAsync(int page, int pageSize, CancellationToken ct);
+    Task<PayerMapperRunInfo?> GetRunAsync(Guid runId, CancellationToken ct);
+    /// <summary>The PayerMatchAudit rows written under this run (the payers the run updated).</summary>
+    Task<IReadOnlyList<PayerMapperRunDetailRow>> GetRunDetailsAsync(Guid runId, CancellationToken ct);
+}
+
+public sealed record RequestedRun(Guid RunId, RunScope Scope);
+
+public sealed class PayerMapperRunInfo
+{
+    public Guid RunId { get; init; }
+    public string TriggerType { get; init; } = string.Empty;
+    public string? Scope { get; init; }
+    public string? RequestedBy { get; init; }
+    public string Status { get; init; } = string.Empty;
+    public DateTime CreatedOn { get; init; }
+    public DateTime? StartedOn { get; init; }
+    public DateTime? CompletedOn { get; init; }
+    public int TotalProcessed { get; init; }
+    public int AutoMapped { get; init; }
+    public int PendingReview { get; init; }
+    public int NoMatch { get; init; }
+    public int FailedRows { get; init; }
+    public string? ErrorMessage { get; init; }
+}
+
+public sealed record PayerMapperRunDetailRow(
+    long AuditId, int? LabInsuranceMasterId, string? PayerNameRaw, string? CanonicalName,
+    string? Decision, decimal? ConfidenceScore, int? SelectedGlobalPayerId,
+    string? MappingStatus, string? ActionType, DateTime PerformedOn);
+
 public sealed class PayerMatchAuditEntry
 {
+    /// <summary>Service run this evaluation belongs to (null for web-request evaluations and user actions).</summary>
+    public Guid? RunId { get; init; }
     public int? LabInsuranceMasterId { get; init; }
     public string? PayerNameRaw { get; init; }
     public string? CanonicalName { get; init; }

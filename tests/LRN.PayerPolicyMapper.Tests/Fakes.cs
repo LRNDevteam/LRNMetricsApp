@@ -38,12 +38,20 @@ public sealed class InMemoryLabRepository : ILabInsuranceRepository
     public Task<LabInsuranceRow?> GetRowAsync(int id, CancellationToken ct)
         => Task.FromResult(Rows.TryGetValue(id, out var s) ? s.Row : null);
 
-    public Task<IReadOnlyList<LabInsuranceRow>> ClaimUnmappedBatchAsync(int batchSize, CancellationToken ct)
+    private bool InScope(State s, RunScope scope) => scope switch
+    {
+        RunScope.UnmappedPending => s.GlobalPayerId is null
+            && (s.MappingStatus is null or "" or "Unmapped" or "Unmapped - Pending Review"),
+        RunScope.AllUnmapped => s.GlobalPayerId is null,
+        _ => true
+    };
+
+    public Task<IReadOnlyList<LabInsuranceRow>> ClaimUnmappedBatchAsync(int batchSize, RunScope scope, CancellationToken ct)
     {
         lock (_lock)
         {
             var claimed = Rows.Values
-                .Where(s => s.GlobalPayerId is null && s.LastEvaluatedOn is null)
+                .Where(s => InScope(s, scope) && s.LastEvaluatedOn is null)
                 .OrderBy(s => s.Row.LabInsuranceMasterId)
                 .Take(batchSize)
                 .ToList();
@@ -52,14 +60,20 @@ public sealed class InMemoryLabRepository : ILabInsuranceRepository
         }
     }
 
-    public Task<int> ResetUnmappedEvaluationsAsync(CancellationToken ct)
+    public Task<int> ResetEvaluationsAsync(RunScope scope, CancellationToken ct)
     {
         lock (_lock)
         {
             var n = 0;
-            foreach (var s in Rows.Values.Where(s => s.GlobalPayerId is null)) { s.LastEvaluatedOn = null; n++; }
+            foreach (var s in Rows.Values.Where(s => InScope(s, scope))) { s.LastEvaluatedOn = null; n++; }
             return Task.FromResult(n);
         }
+    }
+
+    public Task StampEvaluatedAsync(int id, CancellationToken ct)
+    {
+        if (Rows.TryGetValue(id, out var s)) s.LastEvaluatedOn = DateTime.UtcNow;
+        return Task.CompletedTask;
     }
 
     public Task ApplyAutoMapAsync(int id, int globalPayerId, string normalized, string mappedBy, CancellationToken ct)

@@ -137,6 +137,61 @@ public sealed class PayerMappingActionRequest
     public int PPInsuranceMasterId { get; set; }
 }
 
+// ── Payer Service Audit (worker run history + manual trigger) ────────────────
+
+public sealed class PayerMapperRunDto
+{
+    public Guid RunId { get; set; }
+    public string TriggerType { get; set; } = string.Empty;
+    public string? Scope { get; set; }
+    public string? RequestedBy { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public DateTime CreatedOn { get; set; }
+    public DateTime? StartedOn { get; set; }
+    public DateTime? CompletedOn { get; set; }
+    public int TotalProcessed { get; set; }
+    public int AutoMapped { get; set; }
+    public int PendingReview { get; set; }
+    public int NoMatch { get; set; }
+    public int FailedRows { get; set; }
+    public string? ErrorMessage { get; set; }
+}
+
+public sealed class PayerMapperRunListResponse
+{
+    public List<PayerMapperRunDto> Items { get; set; } = new();
+    public int TotalCount { get; set; }
+    public int Page { get; set; }
+    public int PageSize { get; set; }
+}
+
+public sealed class PayerMapperRunDetailDto
+{
+    public long AuditId { get; set; }
+    public int? LabInsuranceMasterId { get; set; }
+    public string? PayerNameRaw { get; set; }
+    public string? CanonicalName { get; set; }
+    public string? Decision { get; set; }
+    public decimal? ConfidenceScore { get; set; }
+    public int? SelectedGlobalPayerId { get; set; }
+    public string? MappingStatus { get; set; }
+    public string? ActionType { get; set; }
+    public DateTime PerformedOn { get; set; }
+}
+
+public sealed class PayerMapperRunDetailsResponse
+{
+    public PayerMapperRunDto? Run { get; set; }
+    public List<PayerMapperRunDetailDto> Details { get; set; } = new();
+}
+
+public sealed class PayerMapperTriggerResult
+{
+    public Guid RunId { get; set; }
+    public string? Status { get; set; }
+    public string? Message { get; set; }
+}
+
 /// <summary>MappingStatus row counts for the navbar notification bell.</summary>
 public sealed class MappingStatusSummaryDto
 {

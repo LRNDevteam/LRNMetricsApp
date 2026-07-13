@@ -18,12 +18,13 @@ public sealed class SqlAuditRepository : IAuditRepository
             INSERT INTO dbo.PayerMatchAudit
                 (LabInsuranceMasterId, PayerNameRaw, CanonicalName, ResolvedStateCode, StateSignalSource,
                  ResolvedProgramType, CandidateFamily, Decision, ConfidenceScore, SelectedGlobalPayerId,
-                 CandidatesJson, AliasHit, ActionType, PerformedBy)
+                 CandidatesJson, AliasHit, ActionType, PerformedBy, RunId)
             VALUES
                 (@LabId, @PayerNameRaw, @CanonicalName, @StateCode, @StateSource,
                  @Program, @Family, @Decision, @Confidence, @SelectedGid,
-                 @CandidatesJson, @AliasHit, @ActionType, @PerformedBy);
+                 @CandidatesJson, @AliasHit, @ActionType, @PerformedBy, @RunId);
             """, conn);
+        cmd.Parameters.AddWithValue("@RunId", (object?)e.RunId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@LabId", (object?)e.LabInsuranceMasterId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@PayerNameRaw", (object?)e.PayerNameRaw ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@CanonicalName", (object?)e.CanonicalName ?? DBNull.Value);

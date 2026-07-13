@@ -261,6 +261,10 @@
                 <li><a class="dropdown-item" asp-controller="MasterValues" asp-action="ApprovalQueue"><i class="bi bi-check2-square"></i> Approval Queue</a></li>
             }
             <li><a class="dropdown-item" asp-controller="MasterValues" asp-action="AuditTrail"><i class="bi bi-clock-history"></i> Audit Trail</a></li>
+            @if (canSeeLabMaster)
+            {
+                <li><a class="dropdown-item" asp-controller="MasterValues" asp-action="PayerServiceAudit"><i class="bi bi-gear-wide-connected"></i> Payer Service Audit</a></li>
+            }
             <li><a class="dropdown-item" asp-controller="MasterValues" asp-action="PayerMasterNotifications"><i class="bi bi-bell"></i> Notifications</a></li>
         </ul>
     </li>

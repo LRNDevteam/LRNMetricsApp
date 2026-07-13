@@ -35,6 +35,11 @@ public interface IMasterValuesApiClient
     Task<PayerMappingActionResult> RejectMappingAsync(int labInsuranceMasterId, CancellationToken ct);
     Task<MappingStatusSummaryDto> GetMappingSummaryAsync(CancellationToken ct);
 
+    // Payer Service Audit (worker run history + manual trigger)
+    Task<PayerMapperRunListResponse> GetPayerServiceRunsAsync(int page, int pageSize, CancellationToken ct);
+    Task<PayerMapperRunDetailsResponse?> GetPayerServiceRunAsync(Guid runId, CancellationToken ct);
+    Task<PayerMapperTriggerResult> TriggerPayerServiceRunAsync(string scope, CancellationToken ct);
+
     Task<MasterPagedResult<PayerMasterApprovalRequestDto>> GetApprovalsAsync(IQueryCollection query, CancellationToken ct);
     Task<PayerMasterApprovalDecisionResult> ApproveRequestsAsync(PayerMasterApprovalDecisionRequest request, CancellationToken ct);
     Task<PayerMasterApprovalDecisionResult> RejectRequestsAsync(PayerMasterApprovalDecisionRequest request, CancellationToken ct);
@@ -121,6 +126,15 @@ public sealed class MasterValuesApiClient : IMasterValuesApiClient
 
     public async Task<MappingStatusSummaryDto> GetMappingSummaryAsync(CancellationToken ct)
         => await GetAsync<MappingStatusSummaryDto>("api/master-values/insurance-payers/mapping-summary", ct) ?? new();
+
+    public async Task<PayerMapperRunListResponse> GetPayerServiceRunsAsync(int page, int pageSize, CancellationToken ct)
+        => await GetAsync<PayerMapperRunListResponse>($"api/master-values/payer-mapper/runs?page={page}&pageSize={pageSize}", ct) ?? new();
+
+    public Task<PayerMapperRunDetailsResponse?> GetPayerServiceRunAsync(Guid runId, CancellationToken ct)
+        => GetAsync<PayerMapperRunDetailsResponse>($"api/master-values/payer-mapper/runs/{runId}", ct);
+
+    public Task<PayerMapperTriggerResult> TriggerPayerServiceRunAsync(string scope, CancellationToken ct)
+        => PostForResultAsync<object, PayerMapperTriggerResult>("api/master-values/payer-mapper/runs/trigger", new { scope }, ct);
 
     public async Task<MasterPagedResult<PayerMasterApprovalRequestDto>> GetApprovalsAsync(IQueryCollection query, CancellationToken ct)
         => await GetAsync<MasterPagedResult<PayerMasterApprovalRequestDto>>("api/master-values/workflow/approvals" + Query(query), ct) ?? new();

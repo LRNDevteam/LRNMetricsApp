@@ -80,18 +80,19 @@ public sealed class MatchingPipeline
 
     /// <summary>
     /// Steps 1A-9. actionType is "Evaluate" for upload/poll runs or "NightlyRescan" for the safety-net pass;
-    /// auto-mapped Evaluate runs are audited as "AutoMap".
+    /// auto-mapped Evaluate runs are audited as "AutoMap". runId links the audit row to a
+    /// dbo.PayerMapperRun service run (null for web-request evaluations).
     /// </summary>
-    public async Task<MatchResult> EvaluateAndPersistAsync(LabInsuranceRow row, string actionType, CancellationToken ct)
+    public async Task<MatchResult> EvaluateAndPersistAsync(LabInsuranceRow row, string actionType, CancellationToken ct, Guid? runId = null)
     {
         var index = await _indexProvider.GetAsync(ct);
         var result = Evaluate(row, index);
-        await PersistAsync(row, result, actionType, ct);
+        await PersistAsync(row, result, actionType, ct, runId);
         return result;
     }
 
     /// <summary>Step 9 - persist one evaluation outcome. ALL paths stamp LastEvaluatedOn.</summary>
-    public async Task PersistAsync(LabInsuranceRow row, MatchResult result, string actionType, CancellationToken ct)
+    public async Task PersistAsync(LabInsuranceRow row, MatchResult result, string actionType, CancellationToken ct, Guid? runId = null)
     {
         var context = result.Context;
         switch (result.Decision)
@@ -117,11 +118,12 @@ public sealed class MatchingPipeline
 
         await _auditRepository.WriteAsync(BuildAuditEntry(row, result,
             result.Decision == MatchDecision.AutoMap && actionType == "Evaluate" ? "AutoMap" : actionType,
-            SystemAutoMatch), ct);
+            SystemAutoMatch, runId), ct);
     }
 
-    public static PayerMatchAuditEntry BuildAuditEntry(LabInsuranceRow row, MatchResult result, string actionType, string performedBy) => new()
+    public static PayerMatchAuditEntry BuildAuditEntry(LabInsuranceRow row, MatchResult result, string actionType, string performedBy, Guid? runId = null) => new()
     {
+        RunId = runId,
         LabInsuranceMasterId = row.LabInsuranceMasterId,
         PayerNameRaw = row.PayerNameRaw,
         CanonicalName = result.Context.CanonicalName,

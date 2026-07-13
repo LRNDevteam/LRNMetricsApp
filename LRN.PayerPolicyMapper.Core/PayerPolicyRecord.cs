@@ -45,4 +45,7 @@ public sealed class LabInsuranceRow
     public string? LabState { get; init; }
     public string? LabStateCode { get; init; }
     public string? Remarks { get; init; }
+    /// <summary>Existing mapping, when the row is already mapped. A full-scan run revalidates
+    /// such rows in the audit only - it never overwrites a confirmed mapping.</summary>
+    public int? GlobalPayerId { get; init; }
 }

@@ -40,6 +40,7 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddSingleton<IReferenceDataRepository>(_ => new SqlReferenceDataRepository(connectionString));
         services.AddSingleton<ILabInsuranceRepository>(_ => new SqlLabInsuranceRepository(connectionString));
         services.AddSingleton<IAuditRepository>(_ => new SqlAuditRepository(connectionString));
+        services.AddSingleton<IPayerMapperRunRepository>(_ => new SqlPayerMapperRunRepository(connectionString));
         services.AddSingleton<INotificationService>(sp => new PayerMasterNotificationService(
             connectionString, sp.GetRequiredService<ILogger<PayerMasterNotificationService>>()));
         services.AddSingleton<IPayerPolicyIndexProvider, CachedPayerPolicyIndexProvider>();

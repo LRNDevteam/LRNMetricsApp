@@ -81,6 +81,12 @@ public sealed class PayerMappingActionRequest
     public int PPInsuranceMasterId { get; set; }
 }
 
+/// <summary>Manual service-run trigger. Scope: 'All' (entire data) or 'UnmappedPending' (default).</summary>
+public sealed class TriggerRunRequest
+{
+    public string? Scope { get; set; }
+}
+
 public sealed class PayerMappingActionResult
 {
     public bool Success { get; set; }
