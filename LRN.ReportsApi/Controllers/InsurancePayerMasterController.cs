@@ -1,3 +1,5 @@
+using LRN.PayerPolicyMapper.Core;
+using LRN.PayerPolicyMapper.Core.Abstractions;
 using LRN.ReportsApi.Models;
 using LRN.ReportsApi.Security;
 using LRN.ReportsApi.Services;
@@ -12,12 +14,20 @@ public sealed class InsurancePayerMasterController : ControllerBase
     private readonly IMasterValuesRepository _repository;
     private readonly IPayerMasterWorkflowService _workflow;
     private readonly IPayerMappingService _mapping;
+    private readonly IPayerMapperRunRepository _runs;
+    // Above this many unmapped rows, the import hands mapping to the background service instead of
+    // evaluating inside the HTTP request (each row costs fuzzy scoring + several DB writes; a large
+    // file would otherwise hold the request for many minutes and hit the client's timeout).
+    private readonly int _syncEvaluationLimit;
 
-    public InsurancePayerMasterController(IMasterValuesRepository repository, IPayerMasterWorkflowService workflow, IPayerMappingService mapping)
+    public InsurancePayerMasterController(IMasterValuesRepository repository, IPayerMasterWorkflowService workflow,
+        IPayerMappingService mapping, IPayerMapperRunRepository runs, IConfiguration configuration)
     {
         _repository = repository;
         _workflow = workflow;
         _mapping = mapping;
+        _runs = runs;
+        _syncEvaluationLimit = int.TryParse(configuration["PayerMatching:SyncEvaluationLimit"], out var limit) ? limit : 100;
     }
 
     private bool CanView => PayerMasterRoles.CanViewLab(User);
@@ -99,11 +109,23 @@ public sealed class InsurancePayerMasterController : ControllerBase
         if (uploadError != null) return BadRequest(new { message = uploadError });
         await using var stream = request.File.OpenReadStream();
         var result = await _repository.ImportInsurancePayersAsync(stream, UserName(), ct);
-        // Upload hook: run the payer matching pipeline synchronously over the just-imported rows that
-        // have no GlobalPayerID (conflict rows excluded - they wait for the user's choice) and surface
-        // the auto-map / review / no-match outcome counts in the import summary.
+        // Upload hook: small batches are evaluated synchronously so the summary shows the outcome
+        // counts immediately; large batches are queued as a background service run (the worker claims
+        // it within one poll cycle) so the import request returns in seconds instead of minutes.
         if (result.UnmappedRecordIds.Count > 0)
-            result.Mapping = await _mapping.EvaluateRowsAsync(result.UnmappedRecordIds, ct);
+        {
+            if (result.UnmappedRecordIds.Count <= _syncEvaluationLimit)
+            {
+                result.Mapping = await _mapping.EvaluateRowsAsync(result.UnmappedRecordIds, ct);
+            }
+            else
+            {
+                var runId = await _runs.RequestRunAsync(UserName(), RunScope.UnmappedPending, ct);
+                result.Warnings.Add(
+                    $"{result.UnmappedRecordIds.Count} imported row(s) were queued for background mapping (run {runId}). " +
+                    "The Payer Policy Mapper service will process them within one poll cycle - track progress under Master Values > Payer Service Audit.");
+            }
+        }
         return Ok(result);
     }
 
