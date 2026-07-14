@@ -1576,6 +1576,24 @@ footer {
 .insight-stat.stat-red { border-left-color: var(--red); }
 .insight-stat.stat-orange { border-left-color: #e08a1e; }
 
+/* Dashboard tab: keep the tiles and the summary-table content on a solid white panel.
+   The summary tables can be empty (no rows), which would otherwise collapse to just the
+   dark header and show the page background beneath - give them a white body with a
+   minimum height so the content area always reads as a white card. */
+#dashboard .insight-stat { background: #fff; }
+#dashboard .lis-scroll {
+	background: #fff;
+	min-height: 160px;
+}
+#dashboard .lis-summary-grid { width: 100%; background: #fff; }
+#dashboard .lis-summary-grid tbody:empty::after {
+	content: "No data for the current filters.";
+	display: block;
+	padding: 1rem .75rem;
+	color: var(--muted);
+	font-size: .8rem;
+}
+
 .insight-code-filter {
 	min-width: 260px;
 	max-width: 440px;

@@ -27,6 +27,9 @@ public sealed class PayerMappingController : ControllerBase
     // Mapping confirmations write directly (Global Payer ID + alias + audit), so they follow the
     // same authority as other direct Lab writes; approval-routed roles use the legacy confirm flow.
     private bool CanMap => PayerMasterRoles.CanWriteLab(User) && !PayerMasterRoles.LabRequiresApproval(User);
+    // The resolve-or-create policy API mints Payer Policy records, so it needs policy-write authority
+    // (LRN Admin / Payer Policy Admin / Reports Analyst) or direct Lab-map authority.
+    private bool CanResolvePolicy => PayerMasterRoles.CanWritePolicy(User) || CanMap;
     private string UserName() => PayerMasterRoles.UserName(User);
 
     /// <summary>MappingStatus counts for the notification bell (Mapped / Unmapped / Pending Review / No Match).</summary>
@@ -35,6 +38,34 @@ public sealed class PayerMappingController : ControllerBase
     {
         if (!CanView) return Denied();
         return Ok(await _mapping.GetMappingSummaryAsync(ct));
+    }
+
+    /// <summary>
+    /// Lab Insurance resolve API: runs the full matching workflow (Steps 1A-8) for a raw payer name
+    /// plus its lab context (Lab Name + Lab State) and returns the resolved Payer Policy detail -
+    /// Global Payer ID, Payer Code, normalized name, family, program type, plus ranked candidates.
+    /// Read-only; nothing is persisted.
+    /// </summary>
+    [HttpPost("payer-mapper/resolve-lab-payer")]
+    public async Task<ActionResult<ResolveLabPayerResponse>> ResolveLabPayer(ResolveLabPayerRequest request, CancellationToken ct)
+    {
+        if (!CanView) return Denied();
+        if (string.IsNullOrWhiteSpace(request?.PayerNameRaw)) return BadRequest(new { message = "PayerNameRaw is required." });
+        return Ok(await _mapping.ResolveLabPayerAsync(request, ct));
+    }
+
+    /// <summary>
+    /// Payer Policy resolve-or-create API: runs the same workflow for a raw payer name + State
+    /// (the State plays the lab-state fallback role since there is no lab). Returns the matched
+    /// Global Payer ID when a confident match exists; otherwise mints a brand-new unique Global
+    /// Payer ID in the Payer Policy Insurance Master and returns it (Created = true).
+    /// </summary>
+    [HttpPost("payer-mapper/resolve-payer-policy")]
+    public async Task<ActionResult<ResolvePayerPolicyResponse>> ResolvePayerPolicy(ResolvePayerPolicyRequest request, CancellationToken ct)
+    {
+        if (!CanResolvePolicy) return Denied();
+        if (string.IsNullOrWhiteSpace(request?.PayerNameRaw)) return BadRequest(new { message = "PayerNameRaw is required." });
+        return Ok(await _mapping.ResolvePolicyPayerAsync(request, UserName(), ct));
     }
 
     [HttpGet("insurance-payers/{id:int}/suggestions")]

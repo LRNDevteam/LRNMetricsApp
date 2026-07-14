@@ -80,7 +80,23 @@ builder.Services.Configure<GzipCompressionProviderOptions>(options =>
     options.Level = CompressionLevel.Fastest;
 });
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+{
+    // Schema ids default to the short type name, which collides when two types share a name
+    // across namespaces (e.g. Models.AssignInsightRequest vs a controller-nested AssignInsightRequest),
+    // making /swagger/v1/swagger.json fail with 500. Qualify ids with the namespace; keep the
+    // readable "OfT" form for generics so refs stay valid.
+    options.CustomSchemaIds(SwaggerSchemaId);
+});
+
+static string SwaggerSchemaId(Type type)
+{
+    if (!type.IsGenericType)
+        return (type.FullName ?? type.Name).Replace('+', '.');
+    var name = type.Name[..type.Name.IndexOf('`')];
+    var args = string.Join("And", type.GetGenericArguments().Select(SwaggerSchemaId));
+    return $"{type.Namespace}.{name}Of{args}".Replace('+', '.');
+}
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("MetricsWeb", policy => policy

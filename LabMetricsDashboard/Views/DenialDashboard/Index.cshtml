@@ -122,8 +122,6 @@
 
     string InsightPageUrl(int page) => DashboardUrl("denial-insight", Model.Filters.Page, Model.Filters.PageSize, page, Model.Filters.InsightPageSize, Model.Filters.LineItemPage, Model.Filters.LineItemPageSize);
     string InsightPageSizeUrl(int pageSize) => DashboardUrl("denial-insight", Model.Filters.Page, Model.Filters.PageSize, 1, pageSize, Model.Filters.LineItemPage, Model.Filters.LineItemPageSize);
-    // Selecting a denial code reloads the insight tab filtered to that code (resets to page 1); empty = all.
-    string InsightCodeUrl(string code) => DashboardUrl("denial-insight", Model.Filters.Page, Model.Filters.PageSize, 1, Model.Filters.InsightPageSize, Model.Filters.LineItemPage, Model.Filters.LineItemPageSize, code);
 
     string LineItemPageUrl(int page) => DashboardUrl("line-item", Model.Filters.Page, Model.Filters.PageSize, Model.Filters.InsightPage, Model.Filters.InsightPageSize, page, Model.Filters.LineItemPageSize);
     string LineItemPageSizeUrl(int pageSize) => DashboardUrl("line-item", Model.Filters.Page, Model.Filters.PageSize, Model.Filters.InsightPage, Model.Filters.InsightPageSize, 1, pageSize);
@@ -756,6 +754,17 @@
                 <div class="col-12 col-md-6 col-xl-3">
                     <label class="form-label">Sales Rep</label>
                     <div class="multi-select-filter remote-multi-select" data-name="SalesRepname" data-placeholder="Select sales reps" data-remote-key="salesRepnames" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.SalesRepname)))'></div>
+                </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label">Denial Code</label>
+                    <select class="form-select filter-select" name="DenialCode" aria-label="Filter by denial code">
+                        <option value="" selected="@string.IsNullOrWhiteSpace(Model.Filters.DenialCode)">All denial codes</option>
+                        @foreach (var opt in Model.InsightDenialCodeOptions)
+                        {
+                            var codeLabel = string.IsNullOrWhiteSpace(opt.Description) ? opt.Code : $"{opt.Code} — {opt.Description}";
+                            <option value="@opt.Code" selected="@string.Equals(opt.Code, Model.Filters.DenialCode, StringComparison.OrdinalIgnoreCase)" title="@codeLabel">@codeLabel</option>
+                        }
+                    </select>
                 </div>
 
                 <div class="col-12 col-md-6 col-xl-3">
@@ -1479,17 +1488,13 @@
 
                     <div class="insight-toolbar d-flex flex-wrap justify-content-between align-items-end gap-3 mb-3">
                         <div class="insight-code-filter">
-                            <label class="form-label mb-1" for="insightDenialCodeFilter">Denial Code</label>
-                            <select id="insightDenialCodeFilter" class="form-select form-select-sm" onchange="if(this.value)window.location.href=this.value;" aria-label="Filter denial insights by denial code">
-                                <option value="@InsightCodeUrl(string.Empty)" selected="@string.IsNullOrWhiteSpace(Model.Filters.DenialCode)">All denial codes</option>
-                                @foreach (var opt in Model.InsightDenialCodeOptions)
-                                {
-                                    var label = string.IsNullOrWhiteSpace(opt.Description) ? opt.Code : $"{opt.Code} — {opt.Description}";
-                                    <option value="@InsightCodeUrl(opt.Code)" selected="@string.Equals(opt.Code, Model.Filters.DenialCode, StringComparison.OrdinalIgnoreCase)" title="@label">@label</option>
-                                }
-                            </select>
+                            @* Denial Code filtering moved to the common dashboard filters above (applies via Apply Filters). *@
                             <div class="section-subtitle mt-1">
                                 $ Impact (%) = <code>(InsuranceBalance / TotalBalance) * 100</code>.
+                                @if (!string.IsNullOrWhiteSpace(Model.Filters.DenialCode))
+                                {
+                                    <span class="ms-1">Filtered by denial code <strong>@Model.Filters.DenialCode</strong> (set in the dashboard filters).</span>
+                                }
                                 @if (Model.IsArManager)
                                 {
                                     <span class="ms-1">Pick AR Reviewers across rows, then submit once to assign all matching tasks.</span>
@@ -1887,9 +1892,11 @@
         });
 
         // Fullscreen toggle for the main data tables. Each scroll pane is wrapped in a .fs-host and
-        // gets a .fs-bar toolbar ABOVE it (so the button is always visible, incl. on the wide
-        // weekly/monthly pivots). Fullscreen expands the pane to a full-viewport overlay and reveals
-        // a filter box that hides non-matching rows. Small summary tables opt out via .no-fs.
+        // gets a .fs-bar toolbar ABOVE it. Fullscreen expands the pane to a full-viewport overlay
+        // and reveals a filter box that hides non-matching rows.
+        // Included: the Weekly/Monthly Breakdown pivots (.breakdown-pivot-frame) plus the main
+        // data tables. Opted out: the Filter Panel's small summary tables (.panel-table-wrap)
+        // and anything marked .no-fs.
         (function setupTableFullscreen() {
             const panes = document.querySelectorAll('.tab-content .table-responsive, .tab-content .lis-scroll, .tab-content .breakdown-pivot-frame');
             let activeHost = null;
@@ -1921,7 +1928,7 @@
                 }
             }
             panes.forEach(function (pane) {
-                if (pane.closest('.fs-host') || pane.classList.contains('no-fs')) return;
+                if (pane.closest('.fs-host') || pane.classList.contains('no-fs') || pane.classList.contains('panel-table-wrap')) return;
                 const host = document.createElement('div');
                 host.className = 'fs-host';
                 pane.parentNode.insertBefore(host, pane);

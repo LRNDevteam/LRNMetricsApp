@@ -22,6 +22,9 @@ public interface IMasterValuesRepository
     Task<IReadOnlyList<PayerPolicyInsuranceMasterDto>> GetPolicyPayersForExportAsync(PayerPolicyInsuranceMasterQuery query, CancellationToken ct);
     Task<PayerPolicyInsuranceMasterDto?> GetPolicyPayerAsync(int id, CancellationToken ct);
     Task<int> CreatePolicyPayerAsync(PayerPolicyInsuranceMasterDto dto, string? userName, CancellationToken ct);
+    /// <summary>Inserts a new Payer Policy record with the next sequential Global Payer ID (atomic) and returns it.</summary>
+    Task<(int PPInsuranceMasterId, int GlobalPayerId, string GlobalPayerCode)> MintPolicyPayerAsync(
+        string payerNameRaw, string? payerNameNormalized, string? state, string? userName, CancellationToken ct);
     Task<bool> UpdatePolicyPayerAsync(int id, PayerPolicyInsuranceMasterDto dto, string? userName, CancellationToken ct);
     Task<bool> UpdatePolicyPayerStatusAsync(int id, string? isActive, string? userName, CancellationToken ct);
     Task<ImportResultDto> ImportPolicyPayersAsync(Stream stream, string? userName, CancellationToken ct);
@@ -695,7 +698,7 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         await using var cmd = new SqlCommand($"""
             SELECT PPInsuranceMasterId, GlobalPayerId, GlobalPayerCode, PayerGroupCode, BenefitAdminCode,
                    BenefitAdministrator, PayerNameRaw, PayerNameNormalized, PayerShortCode, PlanType,
-                   PayerState, IsActive, Remarks
+                   PayerState, IsActive, Remarks, PayerFamily, PayerFamilySource
             FROM dbo.PayerPolicyInsuranceMaster
             WHERE {where}
             ORDER BY {orderBy}
@@ -723,7 +726,7 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         await using var cmd = new SqlCommand("""
             SELECT PPInsuranceMasterId, GlobalPayerId, GlobalPayerCode, PayerGroupCode, BenefitAdminCode,
                    BenefitAdministrator, PayerNameRaw, PayerNameNormalized, PayerShortCode, PlanType,
-                   PayerState, IsActive, Remarks
+                   PayerState, IsActive, Remarks, PayerFamily, PayerFamilySource
             FROM dbo.PayerPolicyInsuranceMaster WHERE PPInsuranceMasterId = @Id;
             """, conn);
         cmd.Parameters.AddWithValue("@Id", id);
@@ -753,6 +756,63 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         AddPolicyParams(cmd, dto);
         cmd.Parameters.AddWithValue("@CreatedBy", DbValue(userName));
         return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+    }
+
+    public async Task<(int PPInsuranceMasterId, int GlobalPayerId, string GlobalPayerCode)> MintPolicyPayerAsync(
+        string payerNameRaw, string? payerNameNormalized, string? state, string? userName, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(payerNameRaw)) throw new ArgumentException("Payer Name is required.");
+        await using var conn = Open();
+        await conn.OpenAsync(ct);
+        // Serializable + UPDLOCK/HOLDLOCK so two concurrent mints can never take the same next id.
+        await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        try
+        {
+            int newId;
+            await using (var idCmd = new SqlCommand(
+                "SELECT ISNULL(MAX(TRY_CONVERT(INT, GlobalPayerId)), 1000) + 1 FROM dbo.PayerPolicyInsuranceMaster WITH (UPDLOCK, HOLDLOCK);", conn, tx))
+                newId = Convert.ToInt32(await idCmd.ExecuteScalarAsync(ct));
+            var code = newId.ToString(CultureInfo.InvariantCulture);
+
+            int ppId;
+            await using (var ins = new SqlCommand("""
+                INSERT INTO dbo.PayerPolicyInsuranceMaster
+                    (GlobalPayerId, GlobalPayerCode, PayerNameRaw, PayerNameNormalized, PayerState, IsActive, CreatedBy)
+                OUTPUT INSERTED.PPInsuranceMasterId
+                VALUES (@Gid, @Code, @Raw, @Norm, @State, 'Y', @User);
+                """, conn, tx))
+            {
+                ins.Parameters.AddWithValue("@Gid", code);   // GlobalPayerId is nvarchar(50); store the numeric string
+                ins.Parameters.AddWithValue("@Code", code);  // GlobalPayerCode is NOT NULL - seed it with the id
+                ins.Parameters.AddWithValue("@Raw", payerNameRaw.Trim());
+                ins.Parameters.AddWithValue("@Norm", DbValue(payerNameNormalized));
+                ins.Parameters.AddWithValue("@State", DbValue(state));
+                ins.Parameters.AddWithValue("@User", DbValue(userName));
+                ppId = Convert.ToInt32(await ins.ExecuteScalarAsync(ct));
+            }
+
+            await using (var aud = new SqlCommand("""
+                IF OBJECT_ID('dbo.PayerMasterAuditTrail', 'U') IS NOT NULL
+                    INSERT dbo.PayerMasterAuditTrail
+                        (Master, RecordId, GlobalPayerID, PayerName, FieldName, OldValue, NewValue, ActionType, PerformedBy, ApprovalStatus)
+                    VALUES ('Policy', @Rec, @GidInt, @Raw, '(record)', NULL, 'Created via resolve API', 'ApiMint', @User, 'Applied directly');
+                """, conn, tx))
+            {
+                aud.Parameters.AddWithValue("@Rec", ppId);
+                aud.Parameters.AddWithValue("@GidInt", newId);
+                aud.Parameters.AddWithValue("@Raw", payerNameRaw.Trim());
+                aud.Parameters.AddWithValue("@User", DbValue(userName));
+                await aud.ExecuteNonQueryAsync(ct);
+            }
+
+            await tx.CommitAsync(ct);
+            return (ppId, newId, code);
+        }
+        catch
+        {
+            await tx.RollbackAsync(CancellationToken.None);
+            throw;
+        }
     }
 
     public async Task<bool> UpdatePolicyPayerAsync(int id, PayerPolicyInsuranceMasterDto dto, string? userName, CancellationToken ct)
@@ -1236,7 +1296,9 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
             ["planType"] = "PlanType",
             ["payerState"] = "PayerState",
             ["isActive"] = "IsActive",
-            ["remarks"] = "Remarks"
+            ["remarks"] = "Remarks",
+            ["payerFamily"] = "PayerFamily",
+            ["payerFamilySource"] = "PayerFamilySource"
         };
         return BuildOrderBy(q.SortColumn, q.SortDirection, columns, "PPInsuranceMasterId DESC");
     }
@@ -1454,7 +1516,9 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         PlanType = Str(r, "PlanType"),
         PayerState = Str(r, "PayerState"),
         IsActive = Str(r, "IsActive"),
-        Remarks = Str(r, "Remarks")
+        Remarks = Str(r, "Remarks"),
+        PayerFamily = Str(r, "PayerFamily"),
+        PayerFamilySource = Str(r, "PayerFamilySource")
     };
 
     private static void AddInsuranceParams(SqlCommand cmd, InsurancePayerMasterDto d)

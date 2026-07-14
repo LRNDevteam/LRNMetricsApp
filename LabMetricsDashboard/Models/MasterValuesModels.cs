@@ -41,6 +41,9 @@ public sealed class PayerPolicyInsuranceMasterDto
     public string? PayerState { get; set; }
     public string? IsActive { get; set; }
     public string? Remarks { get; set; }
+    // Brand-family classification (from the classified import); shown read-only in the listing.
+    public string? PayerFamily { get; set; }
+    public string? PayerFamilySource { get; set; }
 }
 
 public sealed class MasterValuesPageViewModel

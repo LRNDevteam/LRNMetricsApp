@@ -19,6 +19,11 @@ public interface IPayerMappingService
     Task<PayerMappingActionResult> ManualMapAsync(int labInsuranceMasterId, int ppInsuranceMasterId, string userName, CancellationToken ct);
     Task<PayerMappingActionResult> RejectAsync(int labInsuranceMasterId, string userName, CancellationToken ct);
     Task<MappingStatusSummaryDto> GetMappingSummaryAsync(CancellationToken ct);
+
+    /// <summary>Lab Insurance resolve API: runs the full workflow for a raw name + lab context (read-only).</summary>
+    Task<ResolveLabPayerResponse> ResolveLabPayerAsync(ResolveLabPayerRequest request, CancellationToken ct);
+    /// <summary>Payer Policy resolve-or-create API: returns the matched Global Payer ID, or mints a new one.</summary>
+    Task<ResolvePayerPolicyResponse> ResolvePolicyPayerAsync(ResolvePayerPolicyRequest request, string userName, CancellationToken ct);
 }
 
 public sealed class PayerMappingService : IPayerMappingService
@@ -27,15 +32,18 @@ public sealed class PayerMappingService : IPayerMappingService
     private readonly IPayerPolicyIndexProvider _indexProvider;
     private readonly ILabInsuranceRepository _labRepository;
     private readonly IAuditRepository _auditRepository;
+    private readonly IMasterValuesRepository _masterValues;
     private readonly ILogger<PayerMappingService> _logger;
 
     public PayerMappingService(MatchingPipeline pipeline, IPayerPolicyIndexProvider indexProvider,
-        ILabInsuranceRepository labRepository, IAuditRepository auditRepository, ILogger<PayerMappingService> logger)
+        ILabInsuranceRepository labRepository, IAuditRepository auditRepository,
+        IMasterValuesRepository masterValues, ILogger<PayerMappingService> logger)
     {
         _pipeline = pipeline;
         _indexProvider = indexProvider;
         _labRepository = labRepository;
         _auditRepository = auditRepository;
+        _masterValues = masterValues;
         _logger = logger;
     }
 
@@ -283,4 +291,122 @@ public sealed class PayerMappingService : IPayerMappingService
         }, ct);
         return new PayerMappingActionResult { Success = true };
     }
+
+    // ── External resolve APIs ────────────────────────────────────────────────
+
+    public async Task<ResolveLabPayerResponse> ResolveLabPayerAsync(ResolveLabPayerRequest request, CancellationToken ct)
+    {
+        var index = await _indexProvider.GetAsync(ct);
+        var row = new LabInsuranceRow
+        {
+            LabInsuranceMasterId = 0,
+            PayerNameRaw = request.PayerNameRaw?.Trim() ?? string.Empty,
+            LabState = request.LabState,
+            PlanType = request.PlanType
+        };
+        var result = _pipeline.Evaluate(row, index);
+        var c = result.Context;
+
+        var response = new ResolveLabPayerResponse
+        {
+            PayerNameRaw = row.PayerNameRaw,
+            CanonicalName = c.CanonicalName,
+            PayerNameNormalized = c.CanonicalName,
+            ResolvedStateCode = c.ResolvedStateCode,
+            StateSignalSource = c.StateSignalSource.ToString(),
+            ResolvedProgramType = c.ResolvedProgramType,
+            CandidateFamily = c.CandidateFamily,
+            AliasHit = c.AliasHit,
+            Decision = result.Decision.ToString(),
+            ConfidenceScore = result.ConfidenceScore,
+            Matched = result.Decision == MatchDecision.AutoMap,
+            Candidates = result.Candidates.Select(ToSuggestion).ToList()
+        };
+
+        // The matched/best Payer Policy detail: alias hit resolves by Global Payer ID; otherwise the top candidate.
+        PayerPolicyRecord? matchedRecord = c.AliasHit
+            ? index.PolicyRecords.FirstOrDefault(r => r.GlobalPayerId == c.AliasGlobalPayerId)
+            : result.Candidates.Count > 0 ? result.Candidates[0].Record : null;
+        if (matchedRecord is not null)
+            response.PayerPolicy = ToDetail(matchedRecord, c.AliasHit ? 100m : result.Candidates[0].Score);
+        return response;
+    }
+
+    public async Task<ResolvePayerPolicyResponse> ResolvePolicyPayerAsync(ResolvePayerPolicyRequest request, string userName, CancellationToken ct)
+    {
+        var index = await _indexProvider.GetAsync(ct);
+        var payerNameRaw = request.PayerNameRaw?.Trim() ?? string.Empty;
+        // There is no lab here - the caller's State plays the Step 2 fallback role.
+        var row = new LabInsuranceRow { LabInsuranceMasterId = 0, PayerNameRaw = payerNameRaw, LabState = request.State };
+        var result = _pipeline.Evaluate(row, index);
+        var c = result.Context;
+
+        var response = new ResolvePayerPolicyResponse
+        {
+            PayerNameRaw = payerNameRaw,
+            PayerNameNormalized = c.CanonicalName,
+            ResolvedStateCode = c.ResolvedStateCode,
+            StateSignalSource = c.StateSignalSource.ToString(),
+            ResolvedProgramType = c.ResolvedProgramType,
+            CandidateFamily = c.CandidateFamily,
+            Decision = result.Decision.ToString(),
+            ConfidenceScore = result.ConfidenceScore
+        };
+
+        // "Exists" = the workflow produced a confident auto-map (alias hit or >= AutoMapThreshold with a
+        // parseable Global Payer ID; the tie-guard and missing-id cap already keep unsafe matches out).
+        if (result.Decision == MatchDecision.AutoMap && result.SelectedGlobalPayerId is int existingGid)
+        {
+            var record = index.PolicyRecords.FirstOrDefault(r => r.GlobalPayerId == existingGid);
+            response.GlobalPayerId = existingGid;
+            response.GlobalPayerCode = record?.GlobalPayerCode ?? existingGid.ToString();
+            response.PPInsuranceMasterId = record?.PPInsuranceMasterId;
+            response.Created = false;
+            return response;
+        }
+
+        // No confident match - mint a brand-new unique Global Payer ID in the Payer Policy master.
+        var (ppId, newGid, code) = await _masterValues.MintPolicyPayerAsync(payerNameRaw, c.CanonicalName, c.ResolvedStateCode, userName, ct);
+        response.GlobalPayerId = newGid;
+        response.GlobalPayerCode = code;
+        response.PPInsuranceMasterId = ppId;
+        response.Created = true;
+        _logger.LogInformation("Resolve API minted new Global Payer ID {Gid} for '{Raw}' (state {State}) by {User}",
+            newGid, payerNameRaw, c.ResolvedStateCode ?? "-", userName);
+        return response;
+    }
+
+    private static PayerMappingSuggestionDto ToSuggestion(MatchCandidate c) => new()
+    {
+        Rank = c.Rank,
+        PPInsuranceMasterId = c.Record.PPInsuranceMasterId,
+        GlobalPayerId = c.Record.GlobalPayerId,
+        PayerName = c.Record.PayerNameRaw,
+        PayerNameNormalized = c.Record.PayerNameNormalized,
+        PayerFamily = c.Record.PayerFamily,
+        State = c.Record.StateCode,
+        ProgramType = c.Record.ProgramType,
+        Score = c.Score,
+        BaseNameScore = c.BaseNameScore,
+        StateAdjustment = c.StateAdjustment,
+        ProgramAdjustment = c.ProgramAdjustment,
+        MissingGlobalPayerId = c.MissingGlobalPayerId
+    };
+
+    private static PayerPolicyDetailDto ToDetail(PayerPolicyRecord r, decimal? score) => new()
+    {
+        PPInsuranceMasterId = r.PPInsuranceMasterId,
+        GlobalPayerId = r.GlobalPayerId,
+        GlobalPayerCode = r.GlobalPayerCode,
+        PayerNameRaw = r.PayerNameRaw,
+        PayerNameNormalized = r.PayerNameNormalized,
+        PayerFamily = r.PayerFamily,
+        PayerGroupCode = r.PayerGroupCode,
+        PlanType = r.PlanType,
+        PayerState = r.StateCode ?? r.PayerState,
+        BenefitAdminCode = r.BenefitAdminCode,
+        BenefitAdministrator = r.BenefitAdministrator,
+        MatchScore = score,
+        MissingGlobalPayerId = r.GlobalPayerId is null
+    };
 }
