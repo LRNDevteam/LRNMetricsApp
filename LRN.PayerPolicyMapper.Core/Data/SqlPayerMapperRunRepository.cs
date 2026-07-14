@@ -79,6 +79,29 @@ public sealed class SqlPayerMapperRunRepository : IPayerMapperRunRepository
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
+    // Only runs that actually did (or are still doing) something are worth showing: a
+    // user-initiated (Manual) run, a run that is still Requested/InProgress, a run that touched at
+    // least one row, or a run that took measurable time. Scheduled/nightly/rules-change heartbeats
+    // that processed nothing in zero time never appear - they mean the service simply had no work.
+    private const string VisibleRunFilter = """
+        (
+            r.TriggerType = 'Manual'
+            OR r.Status IN ('Requested', 'InProgress')
+            OR r.TotalProcessed > 0 OR r.AutoMapped > 0 OR r.PendingReview > 0
+            OR r.NoMatch > 0 OR r.FailedRows > 0
+            OR (r.StartedOn IS NOT NULL AND r.CompletedOn IS NOT NULL AND DATEDIFF(SECOND, r.StartedOn, r.CompletedOn) > 0)
+        )
+        """;
+
+    public async Task DeleteRunAsync(Guid runId, CancellationToken ct)
+    {
+        await using var conn = Open();
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand("DELETE FROM dbo.PayerMapperRun WHERE RunId = @RunId;", conn);
+        cmd.Parameters.AddWithValue("@RunId", runId);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
     public async Task<(IReadOnlyList<PayerMapperRunInfo> Runs, int TotalCount)> GetRunsAsync(int page, int pageSize, CancellationToken ct)
     {
         page = Math.Max(1, page);
@@ -87,13 +110,14 @@ public sealed class SqlPayerMapperRunRepository : IPayerMapperRunRepository
         await using var conn = Open();
         await conn.OpenAsync(ct);
         int total;
-        await using (var count = new SqlCommand("SELECT COUNT(1) FROM dbo.PayerMapperRun;", conn))
+        await using (var count = new SqlCommand($"SELECT COUNT(1) FROM dbo.PayerMapperRun r WHERE {VisibleRunFilter};", conn))
             total = Convert.ToInt32(await count.ExecuteScalarAsync(ct) ?? 0);
         await using var cmd = new SqlCommand($"""
-            SELECT RunId, TriggerType, RequestedBy, Status, CreatedOn, StartedOn, CompletedOn,
-                   TotalProcessed, AutoMapped, PendingReview, NoMatch, FailedRows, ErrorMessage, Scope
-            FROM dbo.PayerMapperRun
-            ORDER BY CreatedOn DESC
+            SELECT r.RunId, r.TriggerType, r.RequestedBy, r.Status, r.CreatedOn, r.StartedOn, r.CompletedOn,
+                   r.TotalProcessed, r.AutoMapped, r.PendingReview, r.NoMatch, r.FailedRows, r.ErrorMessage, r.Scope
+            FROM dbo.PayerMapperRun r
+            WHERE {VisibleRunFilter}
+            ORDER BY r.CreatedOn DESC
             OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
             """, conn);
         cmd.Parameters.AddWithValue("@Offset", (page - 1) * pageSize);
@@ -125,7 +149,8 @@ public sealed class SqlPayerMapperRunRepository : IPayerMapperRunRepository
         await using var cmd = new SqlCommand("""
             SELECT a.AuditId, a.LabInsuranceMasterId, a.PayerNameRaw, a.CanonicalName,
                    a.Decision, a.ConfidenceScore, a.SelectedGlobalPayerId,
-                   m.MappingStatus, a.ActionType, a.PerformedOn
+                   m.MappingStatus, a.ActionType, a.PerformedOn,
+                   m.LabName, m.LabState, m.PayerState
             FROM dbo.PayerMatchAudit a
             LEFT JOIN dbo.LabInsuranceMaster m ON m.LabInsuranceMasterId = a.LabInsuranceMasterId
             WHERE a.RunId = @RunId
@@ -144,7 +169,10 @@ public sealed class SqlPayerMapperRunRepository : IPayerMapperRunRepository
                 r.IsDBNull(6) ? null : r.GetInt32(6),
                 r.IsDBNull(7) ? null : r.GetString(7),
                 r.IsDBNull(8) ? null : r.GetString(8),
-                r.GetDateTime(9)));
+                r.GetDateTime(9),
+                r.IsDBNull(10) ? null : r.GetString(10),
+                r.IsDBNull(11) ? null : r.GetString(11),
+                r.IsDBNull(12) ? null : r.GetString(12)));
         return rows;
     }
 

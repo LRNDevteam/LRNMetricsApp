@@ -84,6 +84,12 @@ public interface IPayerMapperRunRepository
     /// <summary>Worker: atomically claims the oldest 'Requested' run (READPAST - never double-claimed).</summary>
     Task<RequestedRun?> ClaimRequestedRunAsync(CancellationToken ct);
     Task CompleteRunAsync(Guid runId, string status, int total, int autoMapped, int pendingReview, int noMatch, int failedRows, string? errorMessage, CancellationToken ct);
+    /// <summary>
+    /// Removes a run header that never actually did anything (a scheduled/nightly/rules-change
+    /// heartbeat that processed nothing), so the audit page is not littered with empty rows.
+    /// User-initiated (Manual) runs are always kept, even when they process nothing.
+    /// </summary>
+    Task DeleteRunAsync(Guid runId, CancellationToken ct);
     Task<(IReadOnlyList<PayerMapperRunInfo> Runs, int TotalCount)> GetRunsAsync(int page, int pageSize, CancellationToken ct);
     Task<PayerMapperRunInfo?> GetRunAsync(Guid runId, CancellationToken ct);
     /// <summary>The PayerMatchAudit rows written under this run (the payers the run updated).</summary>
@@ -113,7 +119,8 @@ public sealed class PayerMapperRunInfo
 public sealed record PayerMapperRunDetailRow(
     long AuditId, int? LabInsuranceMasterId, string? PayerNameRaw, string? CanonicalName,
     string? Decision, decimal? ConfidenceScore, int? SelectedGlobalPayerId,
-    string? MappingStatus, string? ActionType, DateTime PerformedOn);
+    string? MappingStatus, string? ActionType, DateTime PerformedOn,
+    string? LabName, string? LabState, string? PayerState);
 
 public sealed class PayerMatchAuditEntry
 {

@@ -96,7 +96,27 @@ public class DenialDashboardController : Controller
 		var recordsPage = Math.Clamp(normalizedFilters.Page <= 0 ? 1 : normalizedFilters.Page, 1, recordsTotalPages);
 		var pagedRecords = filteredRecords.Skip((recordsPage - 1) * recordsPageSize).Take(recordsPageSize).ToList();
 
-		var insights = (await _dashboardApi.GetInsightTableByLabAsync(selectedLabId, cancellationToken)).ToList();
+		var allInsights = (await _dashboardApi.GetInsightTableByLabAsync(selectedLabId, cancellationToken)).ToList();
+		// Distinct code + description list drives the Denial Code filter dropdown (always shows every code,
+		// regardless of the current selection).
+		var insightDenialCodeOptions = allInsights
+			.Where(x => !string.IsNullOrWhiteSpace(x.DenialCodes))
+			.GroupBy(x => x.DenialCodes.Trim(), StringComparer.OrdinalIgnoreCase)
+			.Select(g => new DenialCodeOption(g.Key, g.Select(x => x.Descriptions).FirstOrDefault(d => !string.IsNullOrWhiteSpace(d))?.Trim() ?? string.Empty))
+			.OrderBy(x => x.Code, StringComparer.OrdinalIgnoreCase)
+			.ToList();
+
+		// Denial Code filter is applied in-memory (the insight table is a small pre-aggregated set),
+		// so the table, totals, and summary strip all reflect the selected code.
+		var insights = allInsights;
+		if (!string.IsNullOrWhiteSpace(normalizedFilters.DenialCode))
+		{
+			var selectedCode = normalizedFilters.DenialCode.Trim();
+			insights = allInsights
+				.Where(x => string.Equals(x.DenialCodes?.Trim(), selectedCode, StringComparison.OrdinalIgnoreCase))
+				.ToList();
+		}
+
 		var insightPageSize = Math.Clamp(normalizedFilters.InsightPageSize <= 0 ? 25 : normalizedFilters.InsightPageSize, 10, 100);
 		var insightCount = insights.Count;
 		var insightTotalPages = Math.Max(1, (int)Math.Ceiling(insightCount / (double)insightPageSize));
@@ -143,6 +163,7 @@ public class DenialDashboardController : Controller
 			ClassificationOptions = BuildOptions(allRecords.Select(x => x.DenialClassification)),
 			DeadlineOptions = ["(All)", .. DeadlineBuckets],
 			PagedInsights = pagedInsights,
+			InsightDenialCodeOptions = insightDenialCodeOptions,
 			InsightCount = insightCount,
 			InsightPage = insightPage,
 			InsightPageSize = insightPageSize,
@@ -529,6 +550,7 @@ public class DenialDashboardController : Controller
 	{
 		["lab"] = labName,
 		["LabId"] = labId ?? filters.LabId,
+		["DenialCode"] = filters.DenialCode,
 		["Status"] = filters.Status,
 		["Priority"] = filters.Priority,
 		["ActionCategory"] = filters.ActionCategory,
@@ -675,6 +697,7 @@ public class DenialDashboardController : Controller
 		return new DenialDashboardFilters
 		{
 			LabId = selectedLabId,
+			DenialCode = string.IsNullOrWhiteSpace(filters.DenialCode) ? string.Empty : filters.DenialCode.Trim(),
 			Status = NormalizeMultiChoice(filters.Status, allowAll: true),
 			Priority = NormalizeMultiChoice(filters.Priority, allowAll: true),
 			ActionCategory = NormalizeMultiChoice(filters.ActionCategory, allowAll: true),

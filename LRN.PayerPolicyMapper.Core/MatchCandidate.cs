@@ -25,6 +25,12 @@ public sealed class MatchResult
     public decimal? ConfidenceScore { get; init; }
     /// <summary>Global Payer ID written on AutoMap (alias id or top candidate id).</summary>
     public int? SelectedGlobalPayerId { get; init; }
+    /// <summary>
+    /// PayerNameNormalized of the matched Payer Policy Insurance Master record (alias target or top
+    /// candidate). Written to LabInsuranceMaster.PayerNameNormalized on AutoMap instead of the
+    /// canonicalized lab name, so the mapped row carries the policy master's normalized name.
+    /// </summary>
+    public string? SelectedPayerNameNormalized { get; init; }
     /// <summary>True when Step 8's tie-guard forced ManualReview despite an auto-map score.</summary>
     public bool TieGuardTriggered { get; init; }
 }

@@ -4,6 +4,9 @@ public class DenialDashboardFilters
 {
     public int? LabId { get; set; }
 
+    /// <summary>Denial code to filter the Denial Insight tab by (empty = all codes).</summary>
+    public string DenialCode { get; set; } = string.Empty;
+
     public string Status { get; set; } = "(All)";
     public string Priority { get; set; } = "(All)";
     public string ActionCategory { get; set; } = "(All)";

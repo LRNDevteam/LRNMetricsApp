@@ -16,6 +16,8 @@
     .notif-meta { font-size: .72rem; color: #9AA5B1; margin-top: 4px; }
     .chan-tag { font-size: .66rem; background: #F1F2F4; color: #6B7280; padding: 1px 7px; border-radius: 8px; margin-right: 4px; }
     .mv-empty { padding: 3.5rem 1rem; text-align: center; color: #64748b; }
+    .notif-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .7rem 1rem; border-top: 1px solid #EEF1F4; flex-wrap: wrap; }
+    .notif-foot small { color: #64748b; }
 </style>
 
 <div class="mv-shell">
@@ -29,6 +31,19 @@
 
     <div class="mv-card">
         <div id="notifList"><div class="mv-empty"><span class="spinner-border spinner-border-sm"></span> Loading notifications...</div></div>
+        <div class="notif-foot" id="notifFoot" style="display:none;">
+            <small id="notifPageInfo"></small>
+            <div class="d-flex align-items-center gap-2">
+                <label class="mb-0" style="font-size:.72rem;color:#64748b;font-weight:700;">Per page</label>
+                <select class="form-select form-select-sm" id="notifPageSize" style="width:auto;">
+                    <option>10</option><option>25</option><option>50</option>
+                </select>
+                <div class="btn-group">
+                    <button class="btn btn-outline-secondary btn-sm" id="notifPrev">Previous</button>
+                    <button class="btn btn-outline-secondary btn-sm" id="notifNext">Next</button>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -54,27 +69,56 @@ function timeAgo(d){
   if(hrs<24)return hrs+' hour(s) ago';
   return Math.floor(hrs/24)+' day(s) ago';
 }
-async function load(){
-  const list=document.getElementById('notifList');
-  try{
-    const r=await fetch(url+'?take=50');
-    const items=await r.json();
-    if(!items.length){list.innerHTML='<div class="mv-empty"><div class="fw-bold">No notifications</div><div>You will be alerted here when payer records change or approvals need attention.</div></div>';return;}
-    list.innerHTML=items.map(x=>{
-      const s=styles[x.triggerType]||{bg:'#2E5C8A',icon:'ℹ'};
-      const outcome=x.triggerType==='ApprovalOutcome'&&/rejected/i.test(x.title)?{bg:'#B3261E',icon:'✕'}:s;
-      return `<div class="notif-item">
-        <div class="notif-icon" style="background:${outcome.bg};">${outcome.icon}</div>
-        <div>
-          <div class="notif-title">${esc(x.title)}</div>
-          ${x.message?`<div class="notif-msg">${esc(x.message)}</div>`:''}
-          <div class="notif-meta">${timeAgo(x.createdOn)} • ${x.master==='Policy'?'Payer Policy Insurance Master':'Lab Insurance Master'}${x.recipientRole?' • sent to '+esc(x.recipientRole):''}</div>
-          <div class="mt-1"><span class="chan-tag">In-app</span><span class="chan-tag">Email</span></div>
-        </div>
-      </div>`;
-    }).join('');
-  }catch(e){list.innerHTML='<div class="mv-empty text-danger">Unable to load notifications.</div>';}
+const list=document.getElementById('notifList');
+const foot=document.getElementById('notifFoot');
+const pageInfo=document.getElementById('notifPageInfo');
+const prevBtn=document.getElementById('notifPrev');
+const nextBtn=document.getElementById('notifNext');
+const pageSizeSel=document.getElementById('notifPageSize');
+let items=[],page=1,pageSize=10;
+function itemHtml(x){
+  const s=styles[x.triggerType]||{bg:'#2E5C8A',icon:'ℹ'};
+  const outcome=x.triggerType==='ApprovalOutcome'&&/rejected/i.test(x.title)?{bg:'#B3261E',icon:'✕'}:s;
+  return `<div class="notif-item">
+      <div class="notif-icon" style="background:${outcome.bg};">${outcome.icon}</div>
+      <div>
+        <div class="notif-title">${esc(x.title)}</div>
+        ${x.message?`<div class="notif-msg">${esc(x.message)}</div>`:''}
+        <div class="notif-meta">${timeAgo(x.createdOn)} • ${x.master==='Policy'?'Payer Policy Insurance Master':'Lab Insurance Master'}${x.recipientRole?' • sent to '+esc(x.recipientRole):''}</div>
+        <div class="mt-1"><span class="chan-tag">In-app</span><span class="chan-tag">Email</span></div>
+      </div>
+    </div>`;
 }
+function render(){
+  if(!items.length){
+    foot.style.display='none';
+    list.innerHTML='<div class="mv-empty"><div class="fw-bold">No notifications</div><div>You will be alerted here when payer records change or approvals need attention.</div></div>';
+    return;
+  }
+  const totalPages=Math.max(1,Math.ceil(items.length/pageSize));
+  if(page>totalPages)page=totalPages;
+  const start=(page-1)*pageSize;
+  const slice=items.slice(start,start+pageSize);
+  list.innerHTML=slice.map(itemHtml).join('');
+  pageInfo.textContent=`Showing ${start+1}–${start+slice.length} of ${items.length} notification(s) • Page ${page} of ${totalPages}`;
+  prevBtn.disabled=page<=1;
+  nextBtn.disabled=page>=totalPages;
+  foot.style.display='';
+  list.scrollIntoView({block:'nearest'});
+}
+async function load(){
+  foot.style.display='none';
+  list.innerHTML='<div class="mv-empty"><span class="spinner-border spinner-border-sm"></span> Loading notifications...</div>';
+  try{
+    const r=await fetch(url+'?take=200');
+    items=await r.json()||[];
+    page=1;
+    render();
+  }catch(e){items=[];foot.style.display='none';list.innerHTML='<div class="mv-empty text-danger">Unable to load notifications.</div>';}
+}
+prevBtn.onclick=()=>{if(page>1){page--;render();}};
+nextBtn.onclick=()=>{page++;render();};
+pageSizeSel.onchange=e=>{pageSize=Number(e.target.value)||10;page=1;render();};
 document.getElementById('refreshBtn').onclick=load;
 load();
 })();

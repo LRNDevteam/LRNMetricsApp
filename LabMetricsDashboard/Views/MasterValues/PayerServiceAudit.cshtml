@@ -20,6 +20,11 @@
     .mv-badge.bad { background: #fee2e2; color: #991b1b; }
     .mv-badge.busy { background: #e0ecff; color: #1d4ed8; }
     .mv-badge.wait { background: #FDF3E3; color: #B7791F; }
+    /* Mapping-status badges: each state is a distinct colour so scanning the run is easy. */
+    .mv-badge.mapped { background: #E5EEF7; color: #2E5C8A; }
+    .mv-badge.pending { background: #FDF3E3; color: #B7791F; }
+    .mv-badge.unmapped { background: #EEF2F7; color: #475569; }
+    .mv-badge.nomatch { background: #FBEAE9; color: #B3261E; }
     .mv-runid { font-family: Consolas, monospace; font-size: .74rem; color: #2E5C8A; cursor: pointer; text-decoration: underline dotted; }
     .mv-runid:hover { color: #0b5ed7; }
     .mv-table thead th.sortable { cursor: pointer; user-select: none; }
@@ -130,8 +135,11 @@
                     <table class="table table-sm table-bordered align-middle mv-table">
                         <thead><tr id="detailHead">
                             <th class="sortable" data-sort="labInsuranceMasterId">Lab Record <span class="mv-sort"></span></th>
+                            <th class="sortable" data-sort="labName">Lab Name <span class="mv-sort"></span></th>
+                            <th class="sortable" data-sort="labState">Lab State <span class="mv-sort"></span></th>
                             <th class="sortable" data-sort="payerNameRaw">Payer Name (Raw) <span class="mv-sort"></span></th>
                             <th class="sortable" data-sort="canonicalName">Canonical <span class="mv-sort"></span></th>
+                            <th class="sortable" data-sort="payerState">Insurance State <span class="mv-sort"></span></th>
                             <th class="sortable" data-sort="decision">Decision <span class="mv-sort"></span></th>
                             <th class="num sortable" data-sort="confidenceScore">Score <span class="mv-sort"></span></th>
                             <th class="num sortable" data-sort="selectedGlobalPayerId">Global Payer ID <span class="mv-sort"></span></th>
@@ -192,6 +200,14 @@ function statusBadge(s){
   return `<span class="mv-badge ${cls}">${esc(s)}</span>`;
 }
 function scopeLabel(s){return s==='All'?'Entire data':s==='UnmappedPending'?'Unmapped + Pending':s==='AllUnmapped'?'All unmapped':(s||'—');}
+// Distinct colour per mapping status so Mapped / Pending Review / Unmapped / No Match Found are
+// each instantly recognisable. Falls back to a neutral pill for anything unexpected.
+function mapStatusBadge(s){
+  if(!s)return '—';
+  const l=s.toLowerCase();
+  const cls=l==='mapped'?'mapped':l.includes('pending')?'pending':l.includes('no match')?'nomatch':l.includes('unmapped')?'unmapped':'';
+  return `<span class="mv-badge ${cls}">${esc(s)}</span>`;
+}
 function rowHtml(x){
   return `<tr><td><span class="mv-runid" data-id="${x.runId}" title="View payers processed in this run">${esc(x.runId)}</span></td>`+
     `<td>${esc(x.triggerType)}</td><td>${esc(scopeLabel(x.scope))}</td><td>${esc(x.requestedBy||'—')}</td>`+
@@ -239,10 +255,11 @@ function renderDetails(){
     ?`${list.length} of ${detailItems.length} payer(s)`
     :`${detailItems.length} payer(s)`;
   document.getElementById('detailRows').innerHTML=list.map(x=>
-    `<tr><td>${x.labInsuranceMasterId??'—'}</td><td>${esc(x.payerNameRaw)}</td><td>${esc(x.canonicalName)}</td>`+
+    `<tr><td>${x.labInsuranceMasterId??'—'}</td><td>${esc(x.labName||'—')}</td><td>${esc(x.labState||'—')}</td>`+
+    `<td>${esc(x.payerNameRaw)}</td><td>${esc(x.canonicalName)}</td><td>${esc(x.payerState||'—')}</td>`+
     `<td>${esc(x.decision||'—')}</td><td class="num">${x.confidenceScore??'—'}</td><td class="num">${x.selectedGlobalPayerId??'—'}</td>`+
-    `<td>${esc(x.mappingStatus||'—')}</td><td>${esc(x.actionType||'—')}</td><td>${fmtDate(x.performedOn)} ${fmtTime(x.performedOn)}</td></tr>`).join('')
-    ||`<tr><td colspan="9" class="text-center text-muted py-3">${term?'No payers match "'+esc(term)+'".':'No rows were processed in this run.'}</td></tr>`;
+    `<td>${mapStatusBadge(x.mappingStatus)}</td><td>${esc(x.actionType||'—')}</td><td>${fmtDate(x.performedOn)} ${fmtTime(x.performedOn)}</td></tr>`).join('')
+    ||`<tr><td colspan="12" class="text-center text-muted py-3">${term?'No payers match "'+esc(term)+'".':'No rows were processed in this run.'}</td></tr>`;
 }
 document.getElementById('detailSearch').addEventListener('input',()=>{
   clearTimeout(detailFilterTimer);

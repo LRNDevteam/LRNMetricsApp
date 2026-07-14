@@ -59,7 +59,12 @@ public sealed class MatchingPipeline
                 Context = context,
                 Decision = MatchDecision.AutoMap,
                 ConfidenceScore = 100m,
-                SelectedGlobalPayerId = context.AliasGlobalPayerId
+                SelectedGlobalPayerId = context.AliasGlobalPayerId,
+                // The alias only stores the Global Payer ID; resolve the policy master's normalized
+                // name from the index so the auto-mapped Lab row carries the policy name, not the
+                // canonicalized lab name.
+                SelectedPayerNameNormalized = index.PolicyRecords
+                    .FirstOrDefault(r => r.GlobalPayerId == context.AliasGlobalPayerId)?.PayerNameNormalized
             };
         }
 
@@ -74,6 +79,7 @@ public sealed class MatchingPipeline
             Candidates = candidates,
             ConfidenceScore = candidates.Count > 0 ? candidates[0].Score : null,
             SelectedGlobalPayerId = decision == MatchDecision.AutoMap ? candidates[0].Record.GlobalPayerId : null,
+            SelectedPayerNameNormalized = decision == MatchDecision.AutoMap ? candidates[0].Record.PayerNameNormalized : null,
             TieGuardTriggered = tieGuard
         };
     }
@@ -98,8 +104,11 @@ public sealed class MatchingPipeline
         switch (result.Decision)
         {
             case MatchDecision.AutoMap:
+                // Carry the matched Payer Policy Insurance Master's PayerNameNormalized onto the Lab
+                // row; fall back to the canonicalized lab name only if the policy row has none.
                 await _labRepository.ApplyAutoMapAsync(row.LabInsuranceMasterId, result.SelectedGlobalPayerId!.Value,
-                    context.CanonicalName, SystemAutoMatch, ct);
+                    string.IsNullOrWhiteSpace(result.SelectedPayerNameNormalized) ? context.CanonicalName : result.SelectedPayerNameNormalized!,
+                    SystemAutoMatch, ct);
                 await _auditRepository.UpsertAliasAsync(context.CanonicalName, context.ResolvedStateCode,
                     context.StateSignalSource == StateSignalSource.None ? null : context.StateSignalSource.ToString(),
                     result.SelectedGlobalPayerId.Value, SystemAutoMatch, "AutoMap", row.PayerNameRaw, ct);

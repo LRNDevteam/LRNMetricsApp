@@ -177,6 +177,9 @@ public sealed class PayerMapperRunDetailDto
     public string? MappingStatus { get; set; }
     public string? ActionType { get; set; }
     public DateTime PerformedOn { get; set; }
+    public string? LabName { get; set; }
+    public string? LabState { get; set; }
+    public string? PayerState { get; set; }
 }
 
 public sealed class PayerMapperRunDetailsResponse

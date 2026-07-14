@@ -178,6 +178,16 @@ public sealed class Worker : BackgroundService
                 }
             }
 
+            // A scheduled / nightly / rules-change heartbeat that found no work leaves no trace:
+            // drop its run header so the Payer Service Audit page only lists runs that did something.
+            // User-initiated (Manual) runs are always kept, even when they process nothing.
+            if (existingRunId is null && triggerType != "Manual" && total == 0 && failed == 0)
+            {
+                await _runs.DeleteRunAsync(runId, ct);
+                _logger.LogDebug("Run {RunId} ({Trigger}) had no work - run header discarded", runId, triggerType);
+                return;
+            }
+
             var status = total > 0 && failed == total ? "Fail" : "Success";
             await _runs.CompleteRunAsync(runId, status, total, autoMapped, review, noMatch, failed, null, ct);
             _logger.LogInformation("Run {RunId} ({Trigger}) {Status}: {Total} processed - {Auto} auto-mapped, {Review} pending review, {NoMatch} no match{Failed}",
