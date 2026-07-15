@@ -1,238 +1,301 @@
 -- ============================================================
 -- 04_PredictionAggregateTables.sql
--- Snapshot tables for the Prediction Analysis dashboard.
---
--- These tables hold pre-computed aggregate results so the
--- LabMetricsDashboard does not have to scan PayerValidationReport
--- (which can hold 500K+ rows for NorthWest) on every page load.
---
--- They are populated by PredictionAnalysisApp after each successful
--- data ingestion via dbo.usp_RefreshAllPredictionAggregates, which
--- runs the seven usp_GetPrediction* SPs and INSERTs their results
--- here keyed by (RunId, WeekStartDate).
---
--- Mirrors the snapshot pattern already used for Collection Summary
--- in ClaimLineCSVDataCapture.
---
--- Run once against every lab database that holds PayerValidationReport.
+-- PV_* snapshot tables ? one run per lab, refreshed by
+-- usp_RefreshAllPredictionAggregates after each ingestion.
 -- ============================================================
 SET ANSI_NULLS ON;
 SET QUOTED_IDENTIFIER ON;
 GO
 
--- ------------------------------------------------------------
--- Table : PV_SummaryBuckets   (mirrors SP 6 result set)
--- ------------------------------------------------------------
-IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'PV_SummaryBuckets')
+IF OBJECT_ID('dbo.PV_SummaryBuckets', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.PV_SummaryBuckets
     (
-        SnapshotId          BIGINT          IDENTITY(1,1) NOT NULL CONSTRAINT PK_PV_SummaryBuckets PRIMARY KEY,
-        RunId               NVARCHAR(100)   NOT NULL,
-        WeekStartDate       DATE            NULL,
-        RefreshedAt         DATETIME2       NOT NULL CONSTRAINT DF_PV_SummaryBuckets_RefreshedAt DEFAULT SYSUTCDATETIME(),
-        BucketName          NVARCHAR(100)   NOT NULL,
-        SortOrder           INT             NOT NULL,
-        LineItemCount       INT             NOT NULL,
-        PredictedAllowed    DECIMAL(18,4)   NOT NULL,
-        PredictedInsurance  DECIMAL(18,4)   NOT NULL,
-        ActualAllowed       DECIMAL(18,4)   NULL,
-        ActualInsurance     DECIMAL(18,4)   NULL
+        Id                 BIGINT         IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        RunId              NVARCHAR(100)  NOT NULL,
+        WeekStartDate      DATE           NULL,
+        GroupName          NVARCHAR(100)  NOT NULL,
+        BucketName         NVARCHAR(100)  NOT NULL,
+        PayStatus          NVARCHAR(100)  NULL,
+        IsGroupTotal       BIT            NOT NULL DEFAULT 0,
+        SortOrder          INT            NOT NULL,
+        LineItemCount      INT            NOT NULL DEFAULT 0,
+        PredictedAllowed   DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        PredictedInsurance DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        ActualAllowed      DECIMAL(18,4)  NULL,
+        ActualInsurance    DECIMAL(18,4)  NULL,
+        VarianceAllowed    DECIMAL(18,4)  NULL,
+        VariancePaid       DECIMAL(18,4)  NULL,
+        RefreshedAt        DATETIME2      NOT NULL DEFAULT SYSUTCDATETIME()
     );
-
-    CREATE INDEX IX_PV_SummaryBuckets_Lookup
-        ON dbo.PV_SummaryBuckets (RunId, WeekStartDate, SortOrder);
+    CREATE INDEX IX_PV_SummaryBuckets_Run ON dbo.PV_SummaryBuckets (RunId, WeekStartDate);
 END
 GO
 
--- ------------------------------------------------------------
--- Table : PV_ValidationByPayer   (mirrors SP 7)
--- ------------------------------------------------------------
-IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'PV_ValidationByPayer')
+-- Add new columns to existing PV_SummaryBuckets
+IF COL_LENGTH('dbo.PV_SummaryBuckets', 'GroupName') IS NULL
+    ALTER TABLE dbo.PV_SummaryBuckets ADD GroupName NVARCHAR(100) NOT NULL CONSTRAINT DF_PV_SB_Group DEFAULT '';
+IF COL_LENGTH('dbo.PV_SummaryBuckets', 'PayStatus') IS NULL
+    ALTER TABLE dbo.PV_SummaryBuckets ADD PayStatus NVARCHAR(100) NULL;
+IF COL_LENGTH('dbo.PV_SummaryBuckets', 'IsGroupTotal') IS NULL
+    ALTER TABLE dbo.PV_SummaryBuckets ADD IsGroupTotal BIT NOT NULL CONSTRAINT DF_PV_SB_IsGroup DEFAULT 0;
+IF COL_LENGTH('dbo.PV_SummaryBuckets', 'VarianceAllowed') IS NULL
+    ALTER TABLE dbo.PV_SummaryBuckets ADD VarianceAllowed DECIMAL(18,4) NULL;
+IF COL_LENGTH('dbo.PV_SummaryBuckets', 'VariancePaid') IS NULL
+    ALTER TABLE dbo.PV_SummaryBuckets ADD VariancePaid DECIMAL(18,4) NULL;
+GO
+
+IF OBJECT_ID('dbo.PV_ValidationByPayer', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.PV_ValidationByPayer
     (
-        SnapshotId          BIGINT          IDENTITY(1,1) NOT NULL CONSTRAINT PK_PV_ValidationByPayer PRIMARY KEY,
-        RunId               NVARCHAR(100)   NOT NULL,
-        WeekStartDate       DATE            NULL,
-        RefreshedAt         DATETIME2       NOT NULL CONSTRAINT DF_PV_ValidationByPayer_RefreshedAt DEFAULT SYSUTCDATETIME(),
-        PayerName           NVARCHAR(255)   NOT NULL,
-        PayerType           NVARCHAR(100)   NOT NULL,
-        TotalLineItems      INT             NOT NULL,
-        PaidCount           INT             NOT NULL,
-        DeniedCount         INT             NOT NULL,
-        NoResponseCount     INT             NOT NULL,
-        AdjustedCount       INT             NOT NULL,
-        UnpaidCount         INT             NOT NULL,
-        PredictedAllowed    DECIMAL(18,4)   NOT NULL,
-        PredictedInsurance  DECIMAL(18,4)   NOT NULL,
-        ActualAllowed       DECIMAL(18,4)   NOT NULL,
-        ActualInsurance     DECIMAL(18,4)   NOT NULL
+        Id                 BIGINT         IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        RunId              NVARCHAR(100)  NOT NULL,
+        WeekStartDate      DATE           NULL,
+        PayerName          NVARCHAR(255)  NOT NULL,
+        PayerType          NVARCHAR(100)  NULL,
+        TotalLineItems     INT            NOT NULL DEFAULT 0,
+        PredictedAllowed   DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        PredictedInsurance DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        ActualAllowed      DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        ActualInsurance    DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        VarianceAllowed    DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        VariancePaid       DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        RefreshedAt        DATETIME2      NOT NULL DEFAULT SYSUTCDATETIME()
     );
-
-    CREATE INDEX IX_PV_ValidationByPayer_Lookup
-        ON dbo.PV_ValidationByPayer (RunId, WeekStartDate, TotalLineItems DESC);
+    CREATE INDEX IX_PV_ValidationByPayer_Run ON dbo.PV_ValidationByPayer (RunId, WeekStartDate);
 END
 GO
 
--- ------------------------------------------------------------
--- Table : PV_ValidationByPanel   (mirrors SP 8)
--- ------------------------------------------------------------
-IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'PV_ValidationByPanel')
+IF COL_LENGTH('dbo.PV_ValidationByPayer', 'VarianceAllowed') IS NULL
+    ALTER TABLE dbo.PV_ValidationByPayer ADD VarianceAllowed DECIMAL(18,4) NOT NULL CONSTRAINT DF_PV_VBP_VarAllow DEFAULT 0;
+IF COL_LENGTH('dbo.PV_ValidationByPayer', 'VariancePaid') IS NULL
+    ALTER TABLE dbo.PV_ValidationByPayer ADD VariancePaid DECIMAL(18,4) NOT NULL CONSTRAINT DF_PV_VBP_VarPaid DEFAULT 0;
+
+-- Legacy pay-status count columns (older PV_ValidationByPayer deployments)
+IF COL_LENGTH('dbo.PV_ValidationByPayer', 'PaidCount') IS NOT NULL
+   AND NOT EXISTS (
+       SELECT 1 FROM sys.default_constraints dc
+       INNER JOIN sys.columns c ON c.default_object_id = dc.object_id
+       WHERE c.object_id = OBJECT_ID('dbo.PV_ValidationByPayer') AND c.name = 'PaidCount')
+    ALTER TABLE dbo.PV_ValidationByPayer ADD CONSTRAINT DF_PV_VBP_PaidCount DEFAULT 0 FOR PaidCount;
+IF COL_LENGTH('dbo.PV_ValidationByPayer', 'DeniedCount') IS NOT NULL
+   AND NOT EXISTS (
+       SELECT 1 FROM sys.default_constraints dc
+       INNER JOIN sys.columns c ON c.default_object_id = dc.object_id
+       WHERE c.object_id = OBJECT_ID('dbo.PV_ValidationByPayer') AND c.name = 'DeniedCount')
+    ALTER TABLE dbo.PV_ValidationByPayer ADD CONSTRAINT DF_PV_VBP_DeniedCount DEFAULT 0 FOR DeniedCount;
+IF COL_LENGTH('dbo.PV_ValidationByPayer', 'NoResponseCount') IS NOT NULL
+   AND NOT EXISTS (
+       SELECT 1 FROM sys.default_constraints dc
+       INNER JOIN sys.columns c ON c.default_object_id = dc.object_id
+       WHERE c.object_id = OBJECT_ID('dbo.PV_ValidationByPayer') AND c.name = 'NoResponseCount')
+    ALTER TABLE dbo.PV_ValidationByPayer ADD CONSTRAINT DF_PV_VBP_NoResponseCount DEFAULT 0 FOR NoResponseCount;
+IF COL_LENGTH('dbo.PV_ValidationByPayer', 'AdjustedCount') IS NOT NULL
+   AND NOT EXISTS (
+       SELECT 1 FROM sys.default_constraints dc
+       INNER JOIN sys.columns c ON c.default_object_id = dc.object_id
+       WHERE c.object_id = OBJECT_ID('dbo.PV_ValidationByPayer') AND c.name = 'AdjustedCount')
+    ALTER TABLE dbo.PV_ValidationByPayer ADD CONSTRAINT DF_PV_VBP_AdjustedCount DEFAULT 0 FOR AdjustedCount;
+IF COL_LENGTH('dbo.PV_ValidationByPayer', 'UnpaidCount') IS NOT NULL
+   AND NOT EXISTS (
+       SELECT 1 FROM sys.default_constraints dc
+       INNER JOIN sys.columns c ON c.default_object_id = dc.object_id
+       WHERE c.object_id = OBJECT_ID('dbo.PV_ValidationByPayer') AND c.name = 'UnpaidCount')
+    ALTER TABLE dbo.PV_ValidationByPayer ADD CONSTRAINT DF_PV_VBP_UnpaidCount DEFAULT 0 FOR UnpaidCount;
+GO
+
+IF OBJECT_ID('dbo.PV_PayerPayStatusBreakdown', 'U') IS NULL
 BEGIN
-    CREATE TABLE dbo.PV_ValidationByPanel
+    CREATE TABLE dbo.PV_PayerPayStatusBreakdown
     (
-        SnapshotId          BIGINT          IDENTITY(1,1) NOT NULL CONSTRAINT PK_PV_ValidationByPanel PRIMARY KEY,
-        RunId               NVARCHAR(100)   NOT NULL,
-        WeekStartDate       DATE            NULL,
-        RefreshedAt         DATETIME2       NOT NULL CONSTRAINT DF_PV_ValidationByPanel_RefreshedAt DEFAULT SYSUTCDATETIME(),
-        PanelName           NVARCHAR(255)   NOT NULL,
-        TotalLineItems      INT             NOT NULL,
-        PaidCount           INT             NOT NULL,
-        DeniedCount         INT             NOT NULL,
-        NoResponseCount     INT             NOT NULL,
-        AdjustedCount       INT             NOT NULL,
-        UnpaidCount         INT             NOT NULL,
-        PredictedAllowed    DECIMAL(18,4)   NOT NULL,
-        PredictedInsurance  DECIMAL(18,4)   NOT NULL,
-        ActualAllowed       DECIMAL(18,4)   NOT NULL,
-        ActualInsurance     DECIMAL(18,4)   NOT NULL
+        Id                 BIGINT         IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        RunId              NVARCHAR(100)  NOT NULL,
+        WeekStartDate      DATE           NULL,
+        PayerName          NVARCHAR(255)  NOT NULL,
+        PayStatus          NVARCHAR(100)  NOT NULL,
+        LineItemCount      INT            NOT NULL DEFAULT 0,
+        PredictedAllowed   DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        PredictedInsurance DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        ActualAllowed      DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        ActualInsurance    DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        VarianceAllowed    DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        VariancePaid       DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        RefreshedAt        DATETIME2      NOT NULL DEFAULT SYSUTCDATETIME()
     );
-
-    CREATE INDEX IX_PV_ValidationByPanel_Lookup
-        ON dbo.PV_ValidationByPanel (RunId, WeekStartDate, TotalLineItems DESC);
+    CREATE INDEX IX_PV_PayerPayStatus_Run ON dbo.PV_PayerPayStatusBreakdown (RunId, WeekStartDate);
 END
 GO
 
--- ------------------------------------------------------------
--- Table : PV_ValidationByCPT   (mirrors SP 9)
--- ------------------------------------------------------------
-IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'PV_ValidationByCPT')
-BEGIN
-    CREATE TABLE dbo.PV_ValidationByCPT
-    (
-        SnapshotId          BIGINT          IDENTITY(1,1) NOT NULL CONSTRAINT PK_PV_ValidationByCPT PRIMARY KEY,
-        RunId               NVARCHAR(100)   NOT NULL,
-        WeekStartDate       DATE            NULL,
-        RefreshedAt         DATETIME2       NOT NULL CONSTRAINT DF_PV_ValidationByCPT_RefreshedAt DEFAULT SYSUTCDATETIME(),
-        CPTCode             NVARCHAR(50)    NOT NULL,
-        LineItemCount       INT             NOT NULL,
-        BilledAmount        DECIMAL(18,4)   NOT NULL,
-        PredictedAllowed    DECIMAL(18,4)   NOT NULL,
-        PredictedInsurance  DECIMAL(18,4)   NOT NULL
-    );
-
-    CREATE INDEX IX_PV_ValidationByCPT_Lookup
-        ON dbo.PV_ValidationByCPT (RunId, WeekStartDate, PredictedInsurance DESC);
-END
-GO
-
--- ------------------------------------------------------------
--- Table : PV_DenialBreakdown   (mirrors SP 10)
--- ------------------------------------------------------------
-IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'PV_DenialBreakdown')
+IF OBJECT_ID('dbo.PV_DenialBreakdown', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.PV_DenialBreakdown
     (
-        SnapshotId           BIGINT          IDENTITY(1,1) NOT NULL CONSTRAINT PK_PV_DenialBreakdown PRIMARY KEY,
-        RunId                NVARCHAR(100)   NOT NULL,
-        WeekStartDate        DATE            NULL,
-        RefreshedAt          DATETIME2       NOT NULL CONSTRAINT DF_PV_DenialBreakdown_RefreshedAt DEFAULT SYSUTCDATETIME(),
-        PayerName            NVARCHAR(255)   NOT NULL,
-        DenialCode           NVARCHAR(100)   NOT NULL,
-        DenialDescription    NVARCHAR(1000)  NOT NULL,
-        ExpectedPaymentMonth NVARCHAR(100)   NOT NULL,
-        LineItemCount        INT             NOT NULL,
-        PredictedAllowed     DECIMAL(18,4)   NOT NULL,
-        PredictedInsurance   DECIMAL(18,4)   NOT NULL
+        Id                 BIGINT         IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        RunId              NVARCHAR(100)  NOT NULL,
+        WeekStartDate      DATE           NULL,
+        PayerName          NVARCHAR(255)  NOT NULL,
+        DenialCode         NVARCHAR(100)  NULL,
+        DenialDescription  NVARCHAR(1000) NULL,
+        LineItemCount      INT            NOT NULL DEFAULT 0,
+        PredictedAllowed   DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        PredictedInsurance DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        ActualAllowed      DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        ActualInsurance    DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        VarianceAllowed    DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        VariancePaid       DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        RefreshedAt        DATETIME2      NOT NULL DEFAULT SYSUTCDATETIME()
     );
-
-    CREATE INDEX IX_PV_DenialBreakdown_Lookup
-        ON dbo.PV_DenialBreakdown (RunId, WeekStartDate, PayerName, DenialCode);
+    CREATE INDEX IX_PV_DenialBreakdown_Run ON dbo.PV_DenialBreakdown (RunId, WeekStartDate);
 END
 GO
 
--- ------------------------------------------------------------
--- Table : PV_NoResponseBreakdown   (mirrors SP 11)
--- ------------------------------------------------------------
-IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'PV_NoResponseBreakdown')
+IF COL_LENGTH('dbo.PV_DenialBreakdown', 'ActualAllowed') IS NULL
+    ALTER TABLE dbo.PV_DenialBreakdown ADD ActualAllowed DECIMAL(18,4) NOT NULL CONSTRAINT DF_PV_DB_ActAllow DEFAULT 0;
+IF COL_LENGTH('dbo.PV_DenialBreakdown', 'ActualInsurance') IS NULL
+    ALTER TABLE dbo.PV_DenialBreakdown ADD ActualInsurance DECIMAL(18,4) NOT NULL CONSTRAINT DF_PV_DB_ActIns DEFAULT 0;
+IF COL_LENGTH('dbo.PV_DenialBreakdown', 'VarianceAllowed') IS NULL
+    ALTER TABLE dbo.PV_DenialBreakdown ADD VarianceAllowed DECIMAL(18,4) NOT NULL CONSTRAINT DF_PV_DB_VarAllow DEFAULT 0;
+IF COL_LENGTH('dbo.PV_DenialBreakdown', 'VariancePaid') IS NULL
+    ALTER TABLE dbo.PV_DenialBreakdown ADD VariancePaid DECIMAL(18,4) NOT NULL CONSTRAINT DF_PV_DB_VarPaid DEFAULT 0;
+
+-- Legacy versions stored ExpectedPaymentMonth as NOT NULL. The current
+-- denial snapshot is grouped by payer/code and no longer persists a month,
+-- so inserts must be allowed to omit this legacy column.
+IF COL_LENGTH('dbo.PV_DenialBreakdown', 'ExpectedPaymentMonth') IS NOT NULL
+    ALTER TABLE dbo.PV_DenialBreakdown ALTER COLUMN ExpectedPaymentMonth NVARCHAR(100) NULL;
+GO
+
+IF OBJECT_ID('dbo.PV_NoResponseBreakdown', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.PV_NoResponseBreakdown
     (
-        SnapshotId          BIGINT          IDENTITY(1,1) NOT NULL CONSTRAINT PK_PV_NoResponseBreakdown PRIMARY KEY,
-        RunId               NVARCHAR(100)   NOT NULL,
-        WeekStartDate       DATE            NULL,
-        RefreshedAt         DATETIME2       NOT NULL CONSTRAINT DF_PV_NoResponseBreakdown_RefreshedAt DEFAULT SYSUTCDATETIME(),
-        PayerName           NVARCHAR(255)   NOT NULL,
-        AgeBucket           NVARCHAR(50)    NOT NULL,
-        LineItemCount       INT             NOT NULL,
-        PredictedAllowed    DECIMAL(18,4)   NOT NULL,
-        PredictedInsurance  DECIMAL(18,4)   NOT NULL
+        Id                 BIGINT         IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        RunId              NVARCHAR(100)  NOT NULL,
+        WeekStartDate      DATE           NULL,
+        PayerName          NVARCHAR(255)  NOT NULL,
+        AgeBucket          NVARCHAR(50)   NOT NULL,
+        LineItemCount      INT            NOT NULL DEFAULT 0,
+        VarianceAllowed    DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        VariancePaid       DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        PctVarianceAllowed DECIMAL(10,2)  NULL,
+        PctVariancePaid    DECIMAL(10,2)  NULL,
+        RefreshedAt        DATETIME2      NOT NULL DEFAULT SYSUTCDATETIME()
     );
-
-    CREATE INDEX IX_PV_NoResponseBreakdown_Lookup
-        ON dbo.PV_NoResponseBreakdown (RunId, WeekStartDate, PayerName);
+    CREATE INDEX IX_PV_NoResponseBreakdown_Run ON dbo.PV_NoResponseBreakdown (RunId, WeekStartDate);
 END
 GO
 
--- ------------------------------------------------------------
--- Table : PV_SummaryMetrics   (mirrors SP 12 – single row per snapshot)
--- ------------------------------------------------------------
-IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'PV_SummaryMetrics')
+-- Migrate existing PV_NoResponseBreakdown (older schema used PredictedAllowed/PredictedInsurance)
+IF OBJECT_ID('dbo.PV_NoResponseBreakdown', 'U') IS NOT NULL
+BEGIN
+    IF COL_LENGTH('dbo.PV_NoResponseBreakdown', 'VarianceAllowed') IS NULL
+        ALTER TABLE dbo.PV_NoResponseBreakdown ADD VarianceAllowed DECIMAL(18,4) NOT NULL
+            CONSTRAINT DF_PV_NR_VarAllow DEFAULT 0;
+    IF COL_LENGTH('dbo.PV_NoResponseBreakdown', 'VariancePaid') IS NULL
+        ALTER TABLE dbo.PV_NoResponseBreakdown ADD VariancePaid DECIMAL(18,4) NOT NULL
+            CONSTRAINT DF_PV_NR_VarPaid DEFAULT 0;
+    IF COL_LENGTH('dbo.PV_NoResponseBreakdown', 'PctVarianceAllowed') IS NULL
+        ALTER TABLE dbo.PV_NoResponseBreakdown ADD PctVarianceAllowed DECIMAL(10,2) NULL;
+    IF COL_LENGTH('dbo.PV_NoResponseBreakdown', 'PctVariancePaid') IS NULL
+        ALTER TABLE dbo.PV_NoResponseBreakdown ADD PctVariancePaid DECIMAL(10,2) NULL;
+
+    -- Legacy amount columns: ensure DEFAULT 0 so inserts that omit them do not fail
+    IF COL_LENGTH('dbo.PV_NoResponseBreakdown', 'PredictedAllowed') IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1 FROM sys.default_constraints dc
+           INNER JOIN sys.columns c ON c.default_object_id = dc.object_id
+           WHERE c.object_id = OBJECT_ID('dbo.PV_NoResponseBreakdown') AND c.name = 'PredictedAllowed')
+        ALTER TABLE dbo.PV_NoResponseBreakdown ADD CONSTRAINT DF_PV_NR_PredAllow DEFAULT 0 FOR PredictedAllowed;
+    IF COL_LENGTH('dbo.PV_NoResponseBreakdown', 'PredictedInsurance') IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1 FROM sys.default_constraints dc
+           INNER JOIN sys.columns c ON c.default_object_id = dc.object_id
+           WHERE c.object_id = OBJECT_ID('dbo.PV_NoResponseBreakdown') AND c.name = 'PredictedInsurance')
+        ALTER TABLE dbo.PV_NoResponseBreakdown ADD CONSTRAINT DF_PV_NR_PredIns DEFAULT 0 FOR PredictedInsurance;
+    IF COL_LENGTH('dbo.PV_NoResponseBreakdown', 'ActualAllowed') IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1 FROM sys.default_constraints dc
+           INNER JOIN sys.columns c ON c.default_object_id = dc.object_id
+           WHERE c.object_id = OBJECT_ID('dbo.PV_NoResponseBreakdown') AND c.name = 'ActualAllowed')
+        ALTER TABLE dbo.PV_NoResponseBreakdown ADD CONSTRAINT DF_PV_NR_ActAllow DEFAULT 0 FOR ActualAllowed;
+    IF COL_LENGTH('dbo.PV_NoResponseBreakdown', 'ActualInsurance') IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1 FROM sys.default_constraints dc
+           INNER JOIN sys.columns c ON c.default_object_id = dc.object_id
+           WHERE c.object_id = OBJECT_ID('dbo.PV_NoResponseBreakdown') AND c.name = 'ActualInsurance')
+        ALTER TABLE dbo.PV_NoResponseBreakdown ADD CONSTRAINT DF_PV_NR_ActIns DEFAULT 0 FOR ActualInsurance;
+END
+GO
+
+IF OBJECT_ID('dbo.PV_AdjustedByPayer', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.PV_AdjustedByPayer
+    (
+        Id                 BIGINT         IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        RunId              NVARCHAR(100)  NOT NULL,
+        WeekStartDate      DATE           NULL,
+        PayerName          NVARCHAR(255)  NOT NULL,
+        LineItemCount      INT            NOT NULL DEFAULT 0,
+        PredictedAllowed   DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        PredictedInsurance DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        ActualAllowed      DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        ActualInsurance    DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        VarianceAllowed    DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        VariancePaid       DECIMAL(18,4)  NOT NULL DEFAULT 0,
+        RefreshedAt        DATETIME2      NOT NULL DEFAULT SYSUTCDATETIME()
+    );
+    CREATE INDEX IX_PV_AdjustedByPayer_Run ON dbo.PV_AdjustedByPayer (RunId, WeekStartDate);
+END
+GO
+
+IF OBJECT_ID('dbo.PV_SummaryMetrics', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.PV_SummaryMetrics
     (
-        SnapshotId                    BIGINT          IDENTITY(1,1) NOT NULL CONSTRAINT PK_PV_SummaryMetrics PRIMARY KEY,
-        RunId                         NVARCHAR(100)   NOT NULL,
-        WeekStartDate                 DATE            NULL,
-        RefreshedAt                   DATETIME2       NOT NULL CONSTRAINT DF_PV_SummaryMetrics_RefreshedAt DEFAULT SYSUTCDATETIME(),
-
-        -- Section 1: raw bucket values
-        ToPay_LineItems               INT             NOT NULL,
-        ToPay_ModeAllowed             DECIMAL(18,4)   NOT NULL,
-        ToPay_ModeIns                 DECIMAL(18,4)   NOT NULL,
-        Paid_LineItems                INT             NOT NULL,
-        Paid_ModeAllowed              DECIMAL(18,4)   NOT NULL,
-        Paid_ModeIns                  DECIMAL(18,4)   NOT NULL,
-        Paid_ActAllowed               DECIMAL(18,4)   NOT NULL,
-        Paid_ActIns                   DECIMAL(18,4)   NOT NULL,
-        Unpaid_LineItems              INT             NOT NULL,
-        Unpaid_ModeAllowed            DECIMAL(18,4)   NOT NULL,
-        Unpaid_ModeIns                DECIMAL(18,4)   NOT NULL,
-        Denied_LineItems              INT             NOT NULL,
-        Denied_ModeAllowed            DECIMAL(18,4)   NOT NULL,
-        Denied_ModeIns                DECIMAL(18,4)   NOT NULL,
-        NoResp_LineItems              INT             NOT NULL,
-        NoResp_ModeAllowed            DECIMAL(18,4)   NOT NULL,
-        NoResp_ModeIns                DECIMAL(18,4)   NOT NULL,
-        Adj_LineItems                 INT             NOT NULL,
-        Adj_ModeAllowed               DECIMAL(18,4)   NOT NULL,
-        Adj_ModeIns                   DECIMAL(18,4)   NOT NULL,
-
-        -- Section 2: Ratios
-        PaymentRatio_Claim            DECIMAL(10,2)   NULL,
-        PaymentRatio_Allowed          DECIMAL(10,2)   NULL,
-        PaymentRatio_Insurance        DECIMAL(10,2)   NULL,
-        NonPaymentRate_Claim          DECIMAL(10,2)   NULL,
-        NonPaymentRate_Allowed        DECIMAL(10,2)   NULL,
-        NonPaymentRate_Insurance      DECIMAL(10,2)   NULL,
-        DeniedPct_Claim               DECIMAL(10,2)   NULL,
-        DeniedPct_Allowed             DECIMAL(10,2)   NULL,
-        DeniedPct_Insurance           DECIMAL(10,2)   NULL,
-        NoResponsePct_Claim           DECIMAL(10,2)   NULL,
-        NoResponsePct_Allowed         DECIMAL(10,2)   NULL,
-        NoResponsePct_Insurance       DECIMAL(10,2)   NULL,
-        AdjustedPct_Claim             DECIMAL(10,2)   NULL,
-        AdjustedPct_Allowed           DECIMAL(10,2)   NULL,
-        AdjustedPct_Insurance         DECIMAL(10,2)   NULL,
-
-        -- Section 3: Prediction Accuracy
-        PredAccuracy_Claim            DECIMAL(10,2)   NULL,
-        PredAccuracy_AllowedAmount    DECIMAL(10,2)   NULL,
-        PredAccuracy_InsurancePayment DECIMAL(10,2)   NULL
+        Id                            BIGINT        IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        RunId                         NVARCHAR(100) NOT NULL,
+        WeekStartDate                 DATE          NULL,
+        ToPay_LineItems               INT           NOT NULL DEFAULT 0,
+        ToPay_ModeAllowed             DECIMAL(18,4) NOT NULL DEFAULT 0,
+        ToPay_ModeIns                 DECIMAL(18,4) NOT NULL DEFAULT 0,
+        Paid_LineItems                INT           NOT NULL DEFAULT 0,
+        Paid_ModeAllowed              DECIMAL(18,4) NOT NULL DEFAULT 0,
+        Paid_ModeIns                  DECIMAL(18,4) NOT NULL DEFAULT 0,
+        Paid_ActAllowed               DECIMAL(18,4) NOT NULL DEFAULT 0,
+        Paid_ActIns                   DECIMAL(18,4) NOT NULL DEFAULT 0,
+        Unpaid_LineItems              INT           NOT NULL DEFAULT 0,
+        Unpaid_ModeAllowed            DECIMAL(18,4) NOT NULL DEFAULT 0,
+        Unpaid_ModeIns                DECIMAL(18,4) NOT NULL DEFAULT 0,
+        Denied_LineItems              INT           NOT NULL DEFAULT 0,
+        Denied_ModeAllowed            DECIMAL(18,4) NOT NULL DEFAULT 0,
+        Denied_ModeIns                DECIMAL(18,4) NOT NULL DEFAULT 0,
+        NoResp_LineItems              INT           NOT NULL DEFAULT 0,
+        NoResp_ModeAllowed            DECIMAL(18,4) NOT NULL DEFAULT 0,
+        NoResp_ModeIns                DECIMAL(18,4) NOT NULL DEFAULT 0,
+        Adj_LineItems                 INT           NOT NULL DEFAULT 0,
+        Adj_ModeAllowed               DECIMAL(18,4) NOT NULL DEFAULT 0,
+        Adj_ModeIns                   DECIMAL(18,4) NOT NULL DEFAULT 0,
+        PaymentRatio_Claim            DECIMAL(10,2) NULL,
+        PaymentRatio_Allowed          DECIMAL(10,2) NULL,
+        PaymentRatio_Insurance        DECIMAL(10,2) NULL,
+        NonPaymentRate_Claim            DECIMAL(10,2) NULL,
+        NonPaymentRate_Allowed          DECIMAL(10,2) NULL,
+        NonPaymentRate_Insurance        DECIMAL(10,2) NULL,
+        DeniedPct_Claim               DECIMAL(10,2) NULL,
+        DeniedPct_Allowed             DECIMAL(10,2) NULL,
+        DeniedPct_Insurance           DECIMAL(10,2) NULL,
+        NoResponsePct_Claim           DECIMAL(10,2) NULL,
+        NoResponsePct_Allowed         DECIMAL(10,2) NULL,
+        NoResponsePct_Insurance       DECIMAL(10,2) NULL,
+        AdjustedPct_Claim             DECIMAL(10,2) NULL,
+        AdjustedPct_Allowed           DECIMAL(10,2) NULL,
+        AdjustedPct_Insurance         DECIMAL(10,2) NULL,
+        PredAccuracy_Claim            DECIMAL(10,2) NULL,
+        PredAccuracy_AllowedAmount      DECIMAL(10,2) NULL,
+        PredAccuracy_InsurancePayment   DECIMAL(10,2) NULL,
+        RefreshedAt                   DATETIME2     NOT NULL DEFAULT SYSUTCDATETIME()
     );
-
-    CREATE UNIQUE INDEX IX_PV_SummaryMetrics_Lookup
-        ON dbo.PV_SummaryMetrics (RunId, WeekStartDate);
+    CREATE INDEX IX_PV_SummaryMetrics_Run ON dbo.PV_SummaryMetrics (RunId, WeekStartDate);
 END
 GO

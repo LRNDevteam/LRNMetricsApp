@@ -87,4 +87,8 @@ public sealed class PredictionRecord
     public string PaymentDays { get; init; } = string.Empty;
     public string ExpectedPaymentDate { get; init; } = string.Empty;
     public string ExpectedPaymentMonth { get; init; } = string.Empty;
+    public string ForecastingPayabilitySubstatus { get; init; } = string.Empty;
+    public string PredictionStatus { get; init; } = string.Empty;
+    public decimal Variance_AllowedAmount { get; init; }
+    public decimal Variance_PaidAmount { get; init; }
 }

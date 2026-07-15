@@ -67,7 +67,7 @@ public sealed class ForecastingSummaryViewModel
     public bool NoDataForRange { get; init; }
 
     /// <summary>
-    /// The most recent ExpectedPaymentDate found in the lab’s data.
+    /// The most recent ExpectedPaymentDate found in the labï¿½s data.
     /// Shown in the empty-range message so users know when data was last available.
     /// </summary>
     public DateOnly? LatestDataDate { get; init; }

@@ -60,16 +60,13 @@ public sealed class PredictionReportParserService
 
     /// <summary>Parses every data row. For the Diagnostics endpoint only.</summary>
     public List<PredictionRecord> Parse(string filePath) =>
-        ParseCore(filePath, weekStartCutoff: null);
+        ParseCore(filePath, applyForecastPayabilityFilter: false);
 
     /// <summary>
-    /// Streams and parses only rows that pass the global bucket filter:
-    /// ForecastingPayability IN (Payable / Potentially Payable / Payable - Need Action)
-    /// AND ExpectedPaymentDate &lt; <paramref name="weekStartCutoff"/>.
-    /// Non-qualifying rows are skipped before a PredictionRecord is ever allocated.
+    /// Streams and parses only rows that pass the forecast-payability filter.
     /// </summary>
-    public List<PredictionRecord> ParseFiltered(string filePath, DateOnly weekStartCutoff) =>
-        ParseCore(filePath, weekStartCutoff);
+    public List<PredictionRecord> ParseFiltered(string filePath) =>
+        ParseCore(filePath, applyForecastPayabilityFilter: true);
 
     /// <summary>
     /// Applies the same global filters used by <see cref="ParseFiltered"/> to an
@@ -78,20 +75,12 @@ public sealed class PredictionReportParserService
     ///   ForecastingPayability IN (Payable / Potentially Payable / Payable � Need Action)
     ///   AND ExpectedPaymentDate &lt; <paramref name="weekStartCutoff"/>.
     /// </summary>
-    public static List<PredictionRecord> ApplyGlobalFilter(
-        IEnumerable<PredictionRecord> records,
-        DateOnly weekStartCutoff)
+    public static List<PredictionRecord> ApplyGlobalFilter(IEnumerable<PredictionRecord> records)
     {
         var result = new List<PredictionRecord>();
         foreach (var r in records)
         {
             if (!IsForecastPayable(r.ForecastingPayability))
-                continue;
-
-            if (!TryParseDate(r.ExpectedPaymentDate, out var pmtDate))
-                continue;
-
-            if (pmtDate >= weekStartCutoff)
                 continue;
 
             result.Add(r);
@@ -129,7 +118,7 @@ public sealed class PredictionReportParserService
 
     // ?? Core SAX implementation ???????????????????????????????????????????????
 
-    private List<PredictionRecord> ParseCore(string filePath, DateOnly? weekStartCutoff)
+    private List<PredictionRecord> ParseCore(string filePath, bool applyForecastPayabilityFilter = false)
     {
         if (!File.Exists(filePath))
         {
@@ -139,7 +128,7 @@ public sealed class PredictionReportParserService
 
         // CSV source files use the same header mapping + row filter via ParseCsvCore.
         if (filePath.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
-            return ParseCsvCore(filePath, weekStartCutoff);
+            return ParseCsvCore(filePath, applyForecastPayabilityFilter);
 
         try
         {
@@ -217,19 +206,13 @@ public sealed class PredictionReportParserService
 
                     if (headerMap is null) continue;
 
-                    // Apply global filter before allocating a record object
-                    if (weekStartCutoff.HasValue)
+                    // Apply forecast-payability filter before allocating a record object
+                    if (applyForecastPayabilityFilter)
                     {
                         if (forecastCol >= 0 && forecastCol < currentRowCells.Length)
                         {
                             var fv = Normalise(currentRowCells[forecastCol] ?? "");
                             if (!ForecastPayableValues.Contains(fv)) continue;
-                        }
-                        if (dateCol >= 0 && dateCol < currentRowCells.Length)
-                        {
-                            var dv = OADateOrRaw(currentRowCells[dateCol] ?? "");
-                            if (!TryParseDate(dv, out var d) || d >= weekStartCutoff.Value)
-                                continue;
                         }
                     }
 
@@ -273,8 +256,8 @@ public sealed class PredictionReportParserService
             }
 
             _logger.LogInformation(
-                "SAX parse (filtered={F}): {Count} records from '{File}'.",
-                weekStartCutoff.HasValue, records.Count, filePath);
+                "SAX parse (forecastFilter={F}): {Count} records from '{File}'.",
+                applyForecastPayabilityFilter, records.Count, filePath);
 
             return records;
         }
@@ -290,9 +273,9 @@ public sealed class PredictionReportParserService
     /// <summary>
     /// CSV twin of the XLSX SAX path: streams the file row by row, reuses the
     /// same <see cref="BuildHeaderMap"/> / <see cref="MapRow"/> mapping and the
-    /// same global gate (ForecastingPayability + ExpectedPaymentDate cutoff).
+    /// same forecast-payability gate when enabled.
     /// </summary>
-    private List<PredictionRecord> ParseCsvCore(string filePath, DateOnly? weekStartCutoff)
+    private List<PredictionRecord> ParseCsvCore(string filePath, bool applyForecastPayabilityFilter)
     {
         try
         {
@@ -302,7 +285,7 @@ public sealed class PredictionReportParserService
             using var reader = new StreamReader(stream, detectEncodingFromByteOrderMarks: true);
 
             Dictionary<string, int>? headerMap = null;
-            int forecastCol = -1, dateCol = -1;
+            int forecastCol = -1;
 
             foreach (var row in ReadCsvRows(reader))
             {
@@ -310,24 +293,17 @@ public sealed class PredictionReportParserService
                 {
                     headerMap   = BuildHeaderMap(row);
                     forecastCol = ColIndex(headerMap, "Forecasting Payability");
-                    dateCol     = ColIndex(headerMap, "Expected Payment Date");
                     continue;
                 }
 
                 if (row.All(string.IsNullOrWhiteSpace)) continue;
 
-                if (weekStartCutoff.HasValue)
+                if (applyForecastPayabilityFilter)
                 {
                     if (forecastCol >= 0 && forecastCol < row.Length)
                     {
                         var fv = Normalise(row[forecastCol] ?? "");
                         if (!ForecastPayableValues.Contains(fv)) continue;
-                    }
-                    if (dateCol >= 0 && dateCol < row.Length)
-                    {
-                        var dv = OADateOrRaw(row[dateCol] ?? "");
-                        if (!TryParseDate(dv, out var d) || d >= weekStartCutoff.Value)
-                            continue;
                     }
                 }
 
@@ -336,8 +312,8 @@ public sealed class PredictionReportParserService
             }
 
             _logger.LogInformation(
-                "CSV parse (filtered={F}): {Count} records from '{File}'.",
-                weekStartCutoff.HasValue, records.Count, filePath);
+                "CSV parse (forecastFilter={F}): {Count} records from '{File}'.",
+                applyForecastPayabilityFilter, records.Count, filePath);
 
             return records;
         }

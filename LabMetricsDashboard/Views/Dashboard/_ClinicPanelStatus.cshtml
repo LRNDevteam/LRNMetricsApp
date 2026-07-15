@@ -53,7 +53,7 @@
 }
 .cps-table tbody tr:hover td:first-child { background: #f0f4ff; }
 
-/* Clinic row (parent — bold, shaded) */
+/* Clinic row (parent ï¿½ bold, shaded) */
 .cps-clinic-row td {
     background: #f1f5f9; font-weight: 700; color: #0f172a;
     border-bottom: 2px solid #cbd5e1;
@@ -69,7 +69,9 @@
 }
 .cps-clinic-row.collapsed td:first-child .cps-toggle { transform: rotate(-90deg); }
 
-/* Panel row (child — indented) */
+/* Panel row (child ï¿½ indented); hidden unless clinic is expanded */
+.cps-panel-row { display: none; }
+.cps-panel-row.cps-open { display: table-row; }
 .cps-panel-row td:first-child {
     padding-left: 2.2rem; font-weight: 500; color: #475569;
 }
@@ -110,7 +112,7 @@
             {
                 var cid = $"cps-c{clinicIdx}";
                 <!-- Clinic row -->
-                <tr class="cps-clinic-row" data-cps-toggle="@cid" onclick="cpsToggle('@cid')">
+                <tr class="cps-clinic-row collapsed" data-cps-toggle="@cid">
                     <td>
                         <span class="cps-toggle"><i class="bi bi-chevron-down"></i></span>
                         @clinic.ClinicName
@@ -118,7 +120,7 @@
                     @foreach (var status in Model.Statuses)
                     {
                         var cnt = clinic.StatusCounts.GetValueOrDefault(status);
-                        <td>@(cnt > 0 ? cnt.ToString("N0") : "–")</td>
+                        <td>@(cnt > 0 ? cnt.ToString("N0") : "ï¿½")</td>
                     }
                     <td class="cps-gt">@clinic.GrandTotal.ToString("N0")</td>
                 </tr>
@@ -130,7 +132,7 @@
                         @foreach (var status in Model.Statuses)
                         {
                             var cnt = panel.StatusCounts.GetValueOrDefault(status);
-                            <td>@(cnt > 0 ? cnt.ToString("N0") : "–")</td>
+                            <td>@(cnt > 0 ? cnt.ToString("N0") : "ï¿½")</td>
                         }
                         <td class="cps-gt">@panel.GrandTotal.ToString("N0")</td>
                     </tr>
@@ -144,7 +146,7 @@
                 @foreach (var status in Model.Statuses)
                 {
                     var cnt = Model.GrandTotals.GetValueOrDefault(status);
-                    <td>@(cnt > 0 ? cnt.ToString("N0") : "–")</td>
+                    <td>@(cnt > 0 ? cnt.ToString("N0") : "ï¿½")</td>
                 }
                 <td class="cps-gt">@Model.GrandTotalAll.ToString("N0")</td>
             </tr>
@@ -153,11 +155,25 @@
 </div>
 
 <script nonce='@Context.Items["CspNonce"]'>
-function cpsToggle(groupId) {
-    var rows = document.querySelectorAll('tr[data-cps-group="' + groupId + '"]');
-    var parent = document.querySelector('tr[data-cps-toggle="' + groupId + '"]');
-    var hidden = rows.length > 0 && rows[0].style.display === 'none';
-    rows.forEach(function (r) { r.style.display = hidden ? '' : 'none'; });
-    if (parent) parent.classList.toggle('collapsed', !hidden);
-}
+(function () {
+    'use strict';
+
+    // Toggle clinic panel drill-down on click
+    document.querySelectorAll('.cps-clinic-row[data-cps-toggle]').forEach(function (parentRow) {
+        parentRow.addEventListener('click', function () {
+            var groupId = parentRow.getAttribute('data-cps-toggle');
+            var childRows = document.querySelectorAll('tr.cps-panel-row[data-cps-group="' + groupId + '"]');
+            var isExpanded = parentRow.classList.contains('cps-expanded');
+
+            // Toggle parent row state
+            parentRow.classList.toggle('cps-expanded', !isExpanded);
+            parentRow.classList.toggle('collapsed', isExpanded);
+
+            // Show/hide child rows using CSS class
+            childRows.forEach(function (row) {
+                row.classList.toggle('cps-open', !isExpanded);
+            });
+        });
+    });
+})();
 </script>

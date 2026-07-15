@@ -288,7 +288,12 @@ try
             {
                 if (!string.IsNullOrWhiteSpace(lab.DbConnectionString))
                 {
-                    var labDbService = new PredictionDbService(lab.DbConnectionString, lab.DbInsertChunkSize);
+                    var labDbService = new PredictionDbService(
+                        lab.DbConnectionString,
+                        lab.DbInsertChunkSize,
+                        lab.DbAggregateChunkSize,
+                        lab.DbAggregateRefreshTimeoutSeconds,
+                        lab.DbAggregateLargeLabRowThreshold);
 
                     if (lab.DataRefresh)
                     {
@@ -310,7 +315,8 @@ try
                     // the insert step (whether rows were just inserted or the file was a re-run).
                     // The dashboard reads these snapshots so the user does not pay the cost of
                     // scanning PayerValidationReport on every page load.
-                    labDbService.RefreshAggregatesForRun(lab.LabName, runId);
+                    labDbService.RefreshAggregatesForRun(
+                        lab.LabName, runId, weekStartDate: null, lab.MasterDbConnectionString);
 
                     // Reset DataRefresh flag so the next scheduled run is not re-processed.
                     if (lab.DataRefresh)

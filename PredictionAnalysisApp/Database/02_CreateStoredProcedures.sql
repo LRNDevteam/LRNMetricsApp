@@ -460,6 +460,10 @@ BEGIN
         DaysToBill,  
         DaysToPost,  
   
+        ForecastingPayabilitySubstatus,
+        PredictionStatus,
+        Variance_AllowedAmount,
+        Variance_PaidAmount,
         InsertedDateTime  
   
     FROM dbo.PayerValidationReport  

@@ -17,6 +17,20 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
     public SqlPredictionDbRepository(ILogger<SqlPredictionDbRepository> logger)
         => _logger = logger;
 
+    /// <summary>SQL COUNT/ROW_NUMBER often return BIGINT; convert safely to int.</summary>
+    private static int ReadInt32(SqlDataReader r, int ordinal) =>
+        r.IsDBNull(ordinal) ? 0 : Convert.ToInt32(r.GetValue(ordinal));
+
+    private static int ReadInt32(SqlDataReader r, string column) =>
+        ReadInt32(r, r.GetOrdinal(column));
+
+    /// <summary>DECIMAL columns may arrive as INT/FLOAT from literals or aggregates.</summary>
+    private static decimal ReadDecimal(SqlDataReader r, int ordinal) =>
+        r.IsDBNull(ordinal) ? 0m : Convert.ToDecimal(r.GetValue(ordinal));
+
+    private static decimal? ReadNullableDecimal(SqlDataReader r, int ordinal) =>
+        r.IsDBNull(ordinal) ? null : Convert.ToDecimal(r.GetValue(ordinal));
+
     public async Task<List<PredictionRecord>> GetRecordsAsync(
         string  connectionString,
         string? runId                     = null,
@@ -123,7 +137,7 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
             while (await reader.ReadAsync(cancellationToken))
             {
                 buckets.Add(new ForecastingBucketSpRow(
-                    SortOrder:   reader.GetInt32(reader.GetOrdinal("SortOrder")),
+                    SortOrder:   ReadInt32(reader, reader.GetOrdinal("SortOrder")),
                     BucketKey:   reader.GetString(reader.GetOrdinal("BucketKey")),
                     WeekStart:   ReadDateOnly(reader, "WeekStart"),
                     WeekEnd:     ReadDateOnly(reader, "WeekEnd"),
@@ -162,7 +176,7 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
     private static ForecastingPayerBucketSpRow MapForecastingPayerBucketRow(SqlDataReader reader) =>
         new(
             PayerName:          reader.GetString(reader.GetOrdinal("PayerName")),
-            SortOrder:          reader.GetInt32(reader.GetOrdinal("SortOrder")),
+            SortOrder:          ReadInt32(reader, reader.GetOrdinal("SortOrder")),
             BucketKey:          reader.GetString(reader.GetOrdinal("BucketKey")),
             BucketLabel:        reader.GetString(reader.GetOrdinal("BucketLabel")),
             WeekStart:          ReadDateOnly(reader, "WeekStart"),
@@ -466,6 +480,10 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         PaymentDays                          = Str(r, "PaymentDays"),
         ExpectedPaymentDate                  = DateStr(r, "ExpectedPaymentDate"),
         ExpectedPaymentMonth                 = Str(r, "ExpectedPaymentMonth"),
+        ForecastingPayabilitySubstatus       = Str(r, "ForecastingPayabilitySubstatus"),
+        PredictionStatus                     = Str(r, "PredictionStatus"),
+        Variance_AllowedAmount               = Dec(r, "Variance_AllowedAmount"),
+        Variance_PaidAmount                  = Dec(r, "Variance_PaidAmount"),
     };
 
     // ?? Safe reader helpers ???????????????????????????????????????????????????
@@ -539,9 +557,13 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         string?    filterPanelName,
         string?    filterFinalCoverageStatus,
         string?    filterPayability,
-        string?    filterCPTCode)
+        string?    filterCPTCode,
+        string?    filterForecastingPayability = null,
+        string?    filterPayStatus = null,
+        string?    filterForecastingPayabilitySubstatus = null,
+        string?    filterPredictionStatus = null)
     {
-        cmd.Parameters.AddWithValue("@WeekStartDate",             (object?)weekStartDate.ToDateTime(TimeOnly.MinValue).Date ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@WeekStartDate",             weekStartDate.ToDateTime(TimeOnly.MinValue).Date);
         cmd.Parameters.AddWithValue("@RunId",                     (object?)runId                     ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@FilterPayerName",           (object?)filterPayerName           ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@FilterPayerType",           (object?)filterPayerType           ?? DBNull.Value);
@@ -549,6 +571,10 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         cmd.Parameters.AddWithValue("@FilterFinalCoverageStatus", (object?)filterFinalCoverageStatus ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@FilterPayability",          (object?)filterPayability          ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@FilterCPTCode",             (object?)filterCPTCode             ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterForecastingPayability",         (object?)filterForecastingPayability         ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterPayStatus",                     (object?)filterPayStatus                     ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterForecastingPayabilitySubstatus", (object?)filterForecastingPayabilitySubstatus ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterPredictionStatus",              (object?)filterPredictionStatus              ?? DBNull.Value);
     }
 
     private static SqlConnection OpenConnection(string connectionString)
@@ -596,6 +622,8 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
         string? filterPanelName = null, string? filterFinalCoverageStatus = null,
         string? filterPayability = null, string? filterCPTCode = null,
+        string? filterForecastingPayability = null, string? filterPayStatus = null,
+        string? filterForecastingPayabilitySubstatus = null, string? filterPredictionStatus = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(connectionString)) return [];
@@ -621,19 +649,25 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         await using var cmd = new SqlCommand("dbo.usp_GetPredictionSummaryBuckets", conn)
             { CommandType = System.Data.CommandType.StoredProcedure, CommandTimeout = 120 };
         AddAggregateParams(cmd, weekStartDate, runId, filterPayerName, filterPayerType,
-            filterPanelName, filterFinalCoverageStatus, filterPayability, filterCPTCode);
+            filterPanelName, filterFinalCoverageStatus, filterPayability, filterCPTCode,
+            filterForecastingPayability, filterPayStatus, filterForecastingPayabilitySubstatus, filterPredictionStatus);
 
         await using var r = await cmd.ExecuteReaderAsync(cancellationToken);
         while (await r.ReadAsync(cancellationToken))
         {
             rows.Add(new PredictionBucketSpRow(
+                GroupName:            r.GetString  (r.GetOrdinal("GroupName")),
                 BucketName:           r.GetString  (r.GetOrdinal("BucketName")),
-                SortOrder:            r.GetInt32   (r.GetOrdinal("SortOrder")),
-                LineItemCount:        r.GetInt32   (r.GetOrdinal("LineItemCount")),
+                PayStatus:            r.IsDBNull   (r.GetOrdinal("PayStatus")) ? null : r.GetString(r.GetOrdinal("PayStatus")),
+                IsGroupTotal:         r.GetBoolean (r.GetOrdinal("IsGroupTotal")),
+                SortOrder:            ReadInt32(r, r.GetOrdinal("SortOrder")),
+                LineItemCount:        ReadInt32(r, r.GetOrdinal("LineItemCount")),
                 PredictedAllowed:     r.GetDecimal (r.GetOrdinal("PredictedAllowed")),
                 PredictedInsurance:   r.GetDecimal (r.GetOrdinal("PredictedInsurance")),
                 ActualAllowed:        r.IsDBNull   (r.GetOrdinal("ActualAllowed"))    ? null : r.GetDecimal(r.GetOrdinal("ActualAllowed")),
-                ActualInsurance:      r.IsDBNull   (r.GetOrdinal("ActualInsurance"))  ? null : r.GetDecimal(r.GetOrdinal("ActualInsurance"))));
+                ActualInsurance:      r.IsDBNull   (r.GetOrdinal("ActualInsurance"))  ? null : r.GetDecimal(r.GetOrdinal("ActualInsurance")),
+                VarianceAllowed:      r.IsDBNull   (r.GetOrdinal("VarianceAllowed"))  ? null : r.GetDecimal(r.GetOrdinal("VarianceAllowed")),
+                VariancePaid:         r.IsDBNull   (r.GetOrdinal("VariancePaid"))     ? null : r.GetDecimal(r.GetOrdinal("VariancePaid"))));
         }
 
         _logger.LogInformation("usp_GetPredictionSummaryBuckets returned {Count} rows.", rows.Count);
@@ -647,6 +681,8 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
         string? filterPanelName = null, string? filterFinalCoverageStatus = null,
         string? filterPayability = null, string? filterCPTCode = null,
+        string? filterForecastingPayability = null, string? filterPayStatus = null,
+        string? filterForecastingPayabilitySubstatus = null, string? filterPredictionStatus = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(connectionString)) return [];
@@ -676,7 +712,8 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         await using var cmd = new SqlCommand("dbo.usp_GetPredictionValidationByPayer", conn)
             { CommandType = System.Data.CommandType.StoredProcedure, CommandTimeout = 120 };
         AddAggregateParams(cmd, weekStartDate, runId, filterPayerName, filterPayerType,
-            filterPanelName, filterFinalCoverageStatus, filterPayability, filterCPTCode);
+            filterPanelName, filterFinalCoverageStatus, filterPayability, filterCPTCode,
+            filterForecastingPayability, filterPayStatus, filterForecastingPayabilitySubstatus, filterPredictionStatus);
 
         await using var r = await cmd.ExecuteReaderAsync(cancellationToken);
         while (await r.ReadAsync(cancellationToken))
@@ -684,16 +721,18 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
             rows.Add(new PredictionPayerSpRow(
                 PayerName:          r.GetString (r.GetOrdinal("PayerName")),
                 PayerType:          r.GetString (r.GetOrdinal("PayerType")),
-                TotalLineItems:     r.GetInt32  (r.GetOrdinal("TotalLineItems")),
-                PaidCount:          r.GetInt32  (r.GetOrdinal("PaidCount")),
-                DeniedCount:        r.GetInt32  (r.GetOrdinal("DeniedCount")),
-                NoResponseCount:    r.GetInt32  (r.GetOrdinal("NoResponseCount")),
-                AdjustedCount:      r.GetInt32  (r.GetOrdinal("AdjustedCount")),
-                UnpaidCount:        r.GetInt32  (r.GetOrdinal("UnpaidCount")),
+                TotalLineItems:     ReadInt32(r, r.GetOrdinal("TotalLineItems")),
+                PaidCount:          ReadInt32(r, r.GetOrdinal("PaidCount")),
+                DeniedCount:        ReadInt32(r, r.GetOrdinal("DeniedCount")),
+                NoResponseCount:    ReadInt32(r, r.GetOrdinal("NoResponseCount")),
+                AdjustedCount:      ReadInt32(r, r.GetOrdinal("AdjustedCount")),
+                UnpaidCount:        ReadInt32(r, r.GetOrdinal("UnpaidCount")),
                 PredictedAllowed:   r.GetDecimal(r.GetOrdinal("PredictedAllowed")),
                 PredictedInsurance: r.GetDecimal(r.GetOrdinal("PredictedInsurance")),
                 ActualAllowed:      r.GetDecimal(r.GetOrdinal("ActualAllowed")),
-                ActualInsurance:    r.GetDecimal(r.GetOrdinal("ActualInsurance"))));
+                ActualInsurance:    r.GetDecimal(r.GetOrdinal("ActualInsurance")),
+                VarianceAllowed:    r.FieldCount > 12 ? r.GetDecimal(r.GetOrdinal("VarianceAllowed")) : r.GetDecimal(r.GetOrdinal("ActualAllowed")) - r.GetDecimal(r.GetOrdinal("PredictedAllowed")),
+                VariancePaid:       r.FieldCount > 13 ? r.GetDecimal(r.GetOrdinal("VariancePaid")) : r.GetDecimal(r.GetOrdinal("ActualInsurance")) - r.GetDecimal(r.GetOrdinal("PredictedInsurance"))));
         }
 
         _logger.LogInformation("usp_GetPredictionValidationByPayer returned {Count} rows.", rows.Count);
@@ -735,12 +774,12 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         {
             rows.Add(new PredictionPanelSpRow(
                 PanelName:          r.GetString (r.GetOrdinal("PanelName")),
-                TotalLineItems:     r.GetInt32  (r.GetOrdinal("TotalLineItems")),
-                PaidCount:          r.GetInt32  (r.GetOrdinal("PaidCount")),
-                DeniedCount:        r.GetInt32  (r.GetOrdinal("DeniedCount")),
-                NoResponseCount:    r.GetInt32  (r.GetOrdinal("NoResponseCount")),
-                AdjustedCount:      r.GetInt32  (r.GetOrdinal("AdjustedCount")),
-                UnpaidCount:        r.GetInt32  (r.GetOrdinal("UnpaidCount")),
+                TotalLineItems:     ReadInt32(r, r.GetOrdinal("TotalLineItems")),
+                PaidCount:          ReadInt32(r, r.GetOrdinal("PaidCount")),
+                DeniedCount:        ReadInt32(r, r.GetOrdinal("DeniedCount")),
+                NoResponseCount:    ReadInt32(r, r.GetOrdinal("NoResponseCount")),
+                AdjustedCount:      ReadInt32(r, r.GetOrdinal("AdjustedCount")),
+                UnpaidCount:        ReadInt32(r, r.GetOrdinal("UnpaidCount")),
                 PredictedAllowed:   r.GetDecimal(r.GetOrdinal("PredictedAllowed")),
                 PredictedInsurance: r.GetDecimal(r.GetOrdinal("PredictedInsurance")),
                 ActualAllowed:      r.GetDecimal(r.GetOrdinal("ActualAllowed")),
@@ -786,7 +825,7 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         {
             rows.Add(new PredictionCptSpRow(
                 CPTCode:            r.GetString (r.GetOrdinal("CPTCode")),
-                LineItemCount:      r.GetInt32  (r.GetOrdinal("LineItemCount")),
+                LineItemCount:      ReadInt32(r, r.GetOrdinal("LineItemCount")),
                 BilledAmount:       r.GetDecimal(r.GetOrdinal("BilledAmount")),
                 PredictedAllowed:   r.GetDecimal(r.GetOrdinal("PredictedAllowed")),
                 PredictedInsurance: r.GetDecimal(r.GetOrdinal("PredictedInsurance"))));
@@ -803,6 +842,8 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
         string? filterPanelName = null, string? filterFinalCoverageStatus = null,
         string? filterPayability = null, string? filterCPTCode = null,
+        string? filterForecastingPayability = null, string? filterPayStatus = null,
+        string? filterForecastingPayabilitySubstatus = null, string? filterPredictionStatus = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(connectionString)) return [];
@@ -831,19 +872,24 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         await using var cmd = new SqlCommand("dbo.usp_GetPredictionDenialBreakdown", conn)
             { CommandType = System.Data.CommandType.StoredProcedure, CommandTimeout = 120 };
         AddAggregateParams(cmd, weekStartDate, runId, filterPayerName, filterPayerType,
-            filterPanelName, filterFinalCoverageStatus, filterPayability, filterCPTCode);
+            filterPanelName, filterFinalCoverageStatus, filterPayability, filterCPTCode,
+            filterForecastingPayability, filterPayStatus, filterForecastingPayabilitySubstatus, filterPredictionStatus);
 
         await using var r = await cmd.ExecuteReaderAsync(cancellationToken);
         while (await r.ReadAsync(cancellationToken))
         {
             rows.Add(new DenialBreakdownSpRow(
-                PayerName:            r.GetString (r.GetOrdinal("PayerName")),
-                DenialCode:           r.GetString (r.GetOrdinal("DenialCode")),
-                DenialDescription:    r.GetString (r.GetOrdinal("DenialDescription")),
-                ExpectedPaymentMonth: r.GetString (r.GetOrdinal("ExpectedPaymentMonth")),
-                LineItemCount:        r.GetInt32  (r.GetOrdinal("LineItemCount")),
+                PayerName:            Str(r, "PayerName"),
+                DenialCode:           Str(r, "DenialCode"),
+                DenialDescription:    Str(r, "DenialDescription"),
+                ExpectedPaymentMonth: Str(r, "ExpectedPaymentMonth"),
+                LineItemCount:        ReadInt32(r, r.GetOrdinal("LineItemCount")),
                 PredictedAllowed:     r.GetDecimal(r.GetOrdinal("PredictedAllowed")),
-                PredictedInsurance:   r.GetDecimal(r.GetOrdinal("PredictedInsurance"))));
+                PredictedInsurance:   r.GetDecimal(r.GetOrdinal("PredictedInsurance")),
+                ActualAllowed:        r.GetDecimal(r.GetOrdinal("ActualAllowed")),
+                ActualInsurance:      r.GetDecimal(r.GetOrdinal("ActualInsurance")),
+                VarianceAllowed:      r.GetDecimal(r.GetOrdinal("VarianceAllowed")),
+                VariancePaid:         r.GetDecimal(r.GetOrdinal("VariancePaid"))));
         }
 
         _logger.LogInformation("usp_GetPredictionDenialBreakdown returned {Count} rows.", rows.Count);
@@ -857,6 +903,8 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
         string? filterPanelName = null, string? filterFinalCoverageStatus = null,
         string? filterPayability = null, string? filterCPTCode = null,
+        string? filterForecastingPayability = null, string? filterPayStatus = null,
+        string? filterForecastingPayabilitySubstatus = null, string? filterPredictionStatus = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(connectionString)) return [];
@@ -885,17 +933,22 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         await using var cmd = new SqlCommand("dbo.usp_GetPredictionNoResponseBreakdown", conn)
             { CommandType = System.Data.CommandType.StoredProcedure, CommandTimeout = 120 };
         AddAggregateParams(cmd, weekStartDate, runId, filterPayerName, filterPayerType,
-            filterPanelName, filterFinalCoverageStatus, filterPayability, filterCPTCode);
+            filterPanelName, filterFinalCoverageStatus, filterPayability, filterCPTCode,
+            filterForecastingPayability, filterPayStatus, filterForecastingPayabilitySubstatus, filterPredictionStatus);
 
         await using var r = await cmd.ExecuteReaderAsync(cancellationToken);
         while (await r.ReadAsync(cancellationToken))
         {
             rows.Add(new NoResponseBreakdownSpRow(
-                PayerName:          r.GetString (r.GetOrdinal("PayerName")),
-                AgeBucket:          r.GetString (r.GetOrdinal("AgeBucket")),
-                LineItemCount:      r.GetInt32  (r.GetOrdinal("LineItemCount")),
-                PredictedAllowed:   r.GetDecimal(r.GetOrdinal("PredictedAllowed")),
-                PredictedInsurance: r.GetDecimal(r.GetOrdinal("PredictedInsurance"))));
+                PayerName:            r.GetString (r.GetOrdinal("PayerName")),
+                AgeBucket:            r.GetString (r.GetOrdinal("AgeBucket")),
+                LineItemCount:        ReadInt32(r, r.GetOrdinal("LineItemCount")),
+                VarianceAllowed:      r.GetDecimal(r.GetOrdinal("VarianceAllowed")),
+                VariancePaid:         r.GetDecimal(r.GetOrdinal("VariancePaid")),
+                PctVarianceAllowed:   r.IsDBNull(r.GetOrdinal("PctVarianceAllowed")) ? null : r.GetDecimal(r.GetOrdinal("PctVarianceAllowed")),
+                PctVariancePaid:      r.IsDBNull(r.GetOrdinal("PctVariancePaid")) ? null : r.GetDecimal(r.GetOrdinal("PctVariancePaid")),
+                TotalVarianceAllowed: r.GetDecimal(r.GetOrdinal("TotalVarianceAllowed")),
+                TotalVariancePaid:    r.GetDecimal(r.GetOrdinal("TotalVariancePaid"))));
         }
 
         _logger.LogInformation("usp_GetPredictionNoResponseBreakdown returned {Count} rows.", rows.Count);
@@ -909,6 +962,8 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
         string? filterPanelName = null, string? filterFinalCoverageStatus = null,
         string? filterPayability = null, string? filterCPTCode = null,
+        string? filterForecastingPayability = null, string? filterPayStatus = null,
+        string? filterForecastingPayabilitySubstatus = null, string? filterPredictionStatus = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(connectionString)) return null;
@@ -932,7 +987,8 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         await using var cmd = new SqlCommand("dbo.usp_GetPredictionSummaryMetrics", conn)
             { CommandType = System.Data.CommandType.StoredProcedure, CommandTimeout = 120 };
         AddAggregateParams(cmd, weekStartDate, runId, filterPayerName, filterPayerType,
-            filterPanelName, filterFinalCoverageStatus, filterPayability, filterCPTCode);
+            filterPanelName, filterFinalCoverageStatus, filterPayability, filterCPTCode,
+            filterForecastingPayability, filterPayStatus, filterForecastingPayabilitySubstatus, filterPredictionStatus);
 
         await using var r = await cmd.ExecuteReaderAsync(cancellationToken);
         if (!await r.ReadAsync(cancellationToken))
@@ -944,7 +1000,7 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         // Null-safe helpers � defend against any NULL the SP might still return
         // (e.g. when a bucket has no matching rows and ISNULL was not applied in an
         // older SP version already deployed to a lab database).
-        int     SafeInt(string col) { var o = r.GetOrdinal(col); return r.IsDBNull(o) ? 0    : r.GetInt32  (o); }
+        int SafeInt(string col) { var o = r.GetOrdinal(col); return ReadInt32(r, o); }
         decimal SafeDec(string col) { var o = r.GetOrdinal(col); return r.IsDBNull(o) ? 0m   : r.GetDecimal(o); }
         decimal? NullDec(string col) { var o = r.GetOrdinal(col); return r.IsDBNull(o) ? null : r.GetDecimal(o); }
 
@@ -1026,13 +1082,18 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
             while (await r.ReadAsync(ct))
             {
                 rows.Add(new PredictionBucketSpRow(
-                    BucketName:         r.GetString(0),
-                    SortOrder:          r.GetInt32(1),
-                    LineItemCount:      r.GetInt32(2),
-                    PredictedAllowed:   r.GetDecimal(3),
-                    PredictedInsurance: r.GetDecimal(4),
-                    ActualAllowed:      r.IsDBNull(5) ? null : r.GetDecimal(5),
-                    ActualInsurance:    r.IsDBNull(6) ? null : r.GetDecimal(6)));
+                    GroupName:          r.GetString(0),
+                    BucketName:         r.GetString(1),
+                    PayStatus:          r.IsDBNull(2) ? null : r.GetString(2),
+                    IsGroupTotal:       r.GetBoolean(3),
+                    SortOrder:          ReadInt32(r,4),
+                    LineItemCount:      ReadInt32(r,5),
+                    PredictedAllowed:   r.GetDecimal(6),
+                    PredictedInsurance: r.GetDecimal(7),
+                    ActualAllowed:      r.IsDBNull(8) ? null : r.GetDecimal(8),
+                    ActualInsurance:    r.IsDBNull(9) ? null : r.GetDecimal(9),
+                    VarianceAllowed:    r.IsDBNull(10) ? null : r.GetDecimal(10),
+                    VariancePaid:       r.IsDBNull(11) ? null : r.GetDecimal(11)));
             }
             return rows.Count > 0;
         }
@@ -1061,22 +1122,24 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
             while (await r.ReadAsync(ct))
             {
                 rows.Add(new PredictionPayerSpRow(
-                    PayerName:          r.GetString(0),
-                    PayerType:          r.GetString(1),
-                    TotalLineItems:     r.GetInt32(2),
-                    PaidCount:          r.GetInt32(3),
-                    DeniedCount:        r.GetInt32(4),
-                    NoResponseCount:    r.GetInt32(5),
-                    AdjustedCount:      r.GetInt32(6),
-                    UnpaidCount:        r.GetInt32(7),
-                    PredictedAllowed:   r.GetDecimal(8),
-                    PredictedInsurance: r.GetDecimal(9),
-                    ActualAllowed:      r.GetDecimal(10),
-                    ActualInsurance:    r.GetDecimal(11)));
+                    PayerName:          r.GetString(r.GetOrdinal("PayerName")),
+                    PayerType:          r.GetString(r.GetOrdinal("PayerType")),
+                    TotalLineItems:     ReadInt32(r, r.GetOrdinal("TotalLineItems")),
+                    PaidCount:          ReadInt32(r, r.GetOrdinal("PaidCount")),
+                    DeniedCount:        ReadInt32(r, r.GetOrdinal("DeniedCount")),
+                    NoResponseCount:    ReadInt32(r, r.GetOrdinal("NoResponseCount")),
+                    AdjustedCount:      ReadInt32(r, r.GetOrdinal("AdjustedCount")),
+                    UnpaidCount:        ReadInt32(r, r.GetOrdinal("UnpaidCount")),
+                    PredictedAllowed:   ReadDecimal(r, r.GetOrdinal("PredictedAllowed")),
+                    PredictedInsurance: ReadDecimal(r, r.GetOrdinal("PredictedInsurance")),
+                    ActualAllowed:      ReadDecimal(r, r.GetOrdinal("ActualAllowed")),
+                    ActualInsurance:    ReadDecimal(r, r.GetOrdinal("ActualInsurance")),
+                    VarianceAllowed:    ReadDecimal(r, r.GetOrdinal("VarianceAllowed")),
+                    VariancePaid:       ReadDecimal(r, r.GetOrdinal("VariancePaid"))));
             }
             return rows.Count > 0;
         }
-        catch (SqlException ex)
+        catch (Exception ex) when (ex is SqlException or InvalidCastException)
         {
             _logger.LogDebug(ex, "PV_ValidationByPayer snapshot unavailable; falling through to live SP.");
             return false;
@@ -1101,12 +1164,12 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
             {
                 rows.Add(new PredictionPanelSpRow(
                     PanelName:          r.GetString(0),
-                    TotalLineItems:     r.GetInt32(1),
-                    PaidCount:          r.GetInt32(2),
-                    DeniedCount:        r.GetInt32(3),
-                    NoResponseCount:    r.GetInt32(4),
-                    AdjustedCount:      r.GetInt32(5),
-                    UnpaidCount:        r.GetInt32(6),
+                    TotalLineItems:     ReadInt32(r,1),
+                    PaidCount:          ReadInt32(r,2),
+                    DeniedCount:        ReadInt32(r,3),
+                    NoResponseCount:    ReadInt32(r,4),
+                    AdjustedCount:      ReadInt32(r,5),
+                    UnpaidCount:        ReadInt32(r,6),
                     PredictedAllowed:   r.GetDecimal(7),
                     PredictedInsurance: r.GetDecimal(8),
                     ActualAllowed:      r.GetDecimal(9),
@@ -1139,7 +1202,7 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
             {
                 rows.Add(new PredictionCptSpRow(
                     CPTCode:            r.GetString(0),
-                    LineItemCount:      r.GetInt32(1),
+                    LineItemCount:      ReadInt32(r,1),
                     BilledAmount:       r.GetDecimal(2),
                     PredictedAllowed:   r.GetDecimal(3),
                     PredictedInsurance: r.GetDecimal(4)));
@@ -1171,17 +1234,21 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
             while (await r.ReadAsync(ct))
             {
                 rows.Add(new DenialBreakdownSpRow(
-                    PayerName:            r.GetString(0),
-                    DenialCode:           r.GetString(1),
-                    DenialDescription:    r.GetString(2),
-                    ExpectedPaymentMonth: r.GetString(3),
-                    LineItemCount:        r.GetInt32(4),
+                    PayerName:            r.IsDBNull(0) ? string.Empty : r.GetString(0),
+                    DenialCode:           r.IsDBNull(1) ? string.Empty : r.GetString(1),
+                    DenialDescription:    r.IsDBNull(2) ? string.Empty : r.GetString(2),
+                    ExpectedPaymentMonth: r.IsDBNull(3) ? string.Empty : r.GetString(3),
+                    LineItemCount:        ReadInt32(r,4),
                     PredictedAllowed:     r.GetDecimal(5),
-                    PredictedInsurance:   r.GetDecimal(6)));
+                    PredictedInsurance:   r.GetDecimal(6),
+                    ActualAllowed:        r.FieldCount > 7 ? r.GetDecimal(7) : 0,
+                    ActualInsurance:      r.FieldCount > 8 ? r.GetDecimal(8) : 0,
+                    VarianceAllowed:      r.FieldCount > 9 ? r.GetDecimal(9) : 0,
+                    VariancePaid:         r.FieldCount > 10 ? r.GetDecimal(10) : 0));
             }
             return rows.Count > 0;
         }
-        catch (SqlException ex)
+        catch (Exception ex) when (ex is SqlException or InvalidCastException or IndexOutOfRangeException)
         {
             _logger.LogDebug(ex, "PV_DenialBreakdown snapshot unavailable; falling through to live SP.");
             return false;
@@ -1206,17 +1273,98 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
             while (await r.ReadAsync(ct))
             {
                 rows.Add(new NoResponseBreakdownSpRow(
-                    PayerName:          r.GetString(0),
-                    AgeBucket:          r.GetString(1),
-                    LineItemCount:      r.GetInt32(2),
-                    PredictedAllowed:   r.GetDecimal(3),
-                    PredictedInsurance: r.GetDecimal(4)));
+                    PayerName:            r.GetString(r.GetOrdinal("PayerName")),
+                    AgeBucket:            r.GetString(r.GetOrdinal("AgeBucket")),
+                    LineItemCount:        ReadInt32(r, r.GetOrdinal("LineItemCount")),
+                    VarianceAllowed:      ReadDecimal(r, r.GetOrdinal("VarianceAllowed")),
+                    VariancePaid:         ReadDecimal(r, r.GetOrdinal("VariancePaid")),
+                    PctVarianceAllowed:   ReadNullableDecimal(r, r.GetOrdinal("PctVarianceAllowed")),
+                    PctVariancePaid:      ReadNullableDecimal(r, r.GetOrdinal("PctVariancePaid")),
+                    TotalVarianceAllowed: ReadDecimal(r, r.GetOrdinal("TotalVarianceAllowed")),
+                    TotalVariancePaid:    ReadDecimal(r, r.GetOrdinal("TotalVariancePaid"))));
             }
             return rows.Count > 0;
         }
-        catch (SqlException ex)
+        catch (Exception ex) when (ex is SqlException or InvalidCastException)
         {
             _logger.LogDebug(ex, "PV_NoResponseBreakdown snapshot unavailable; falling through to live SP.");
+            return false;
+        }
+    }
+
+    private async Task<bool> TryReadPayerPayStatusBreakdownSnapshotAsync(
+        SqlConnection conn, DateOnly weekStartDate, string? filterPayerName,
+        List<PayerPayStatusSpRow> rows, CancellationToken ct)
+    {
+        try
+        {
+            await using var cmd = new SqlCommand("dbo.usp_PV_ReadPayerPayStatusBreakdown", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 30
+            };
+            AddSnapshotParams(cmd, weekStartDate);
+            AddPayerNameFilter(cmd, filterPayerName);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                rows.Add(new PayerPayStatusSpRow(
+                    r.GetString(r.GetOrdinal("PayerName")),
+                    r.GetString(r.GetOrdinal("PayStatus")),
+                    ReadInt32(r, r.GetOrdinal("LineItemCount")),
+                    ReadDecimal(r, r.GetOrdinal("PredictedAllowed")),
+                    ReadDecimal(r, r.GetOrdinal("PredictedInsurance")),
+                    ReadDecimal(r, r.GetOrdinal("ActualAllowed")),
+                    ReadDecimal(r, r.GetOrdinal("ActualInsurance")),
+                    ReadDecimal(r, r.GetOrdinal("VarianceAllowed")),
+                    ReadDecimal(r, r.GetOrdinal("VariancePaid"))));
+            }
+            return rows.Count > 0;
+        }
+        catch (Exception ex) when (ex is SqlException or InvalidCastException)
+        {
+            _logger.LogDebug(ex, "PV_PayerPayStatusBreakdown snapshot unavailable; falling through to live SP.");
+            return false;
+        }
+    }
+
+    private async Task<bool> TryReadAdjustedByPayerSnapshotAsync(
+        SqlConnection conn, DateOnly weekStartDate, string? filterPayerName,
+        List<AdjustedByPayerSpRow> rows, CancellationToken ct)
+    {
+        try
+        {
+            await using var cmd = new SqlCommand("dbo.usp_PV_ReadAdjustedByPayer", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 30
+            };
+            AddSnapshotParams(cmd, weekStartDate);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                var payer = r.GetString(r.GetOrdinal("PayerName"));
+                if (!string.IsNullOrWhiteSpace(filterPayerName)
+                    && !payer.Equals(filterPayerName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                rows.Add(new AdjustedByPayerSpRow(
+                    payer,
+                    ReadInt32(r, r.GetOrdinal("LineItemCount")),
+                    ReadDecimal(r, r.GetOrdinal("PredictedAllowed")),
+                    ReadDecimal(r, r.GetOrdinal("PredictedInsurance")),
+                    ReadDecimal(r, r.GetOrdinal("ActualAllowed")),
+                    ReadDecimal(r, r.GetOrdinal("ActualInsurance")),
+                    ReadDecimal(r, r.GetOrdinal("VarianceAllowed")),
+                    ReadDecimal(r, r.GetOrdinal("VariancePaid"))));
+            }
+            return rows.Count > 0;
+        }
+        catch (Exception ex) when (ex is SqlException or InvalidCastException)
+        {
+            _logger.LogDebug(ex, "PV_AdjustedByPayer snapshot unavailable; falling through to live SP.");
             return false;
         }
     }
@@ -1236,9 +1384,9 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
             await using var r = await cmd.ExecuteReaderAsync(ct);
             if (!await r.ReadAsync(ct)) return null;
 
-            int     I(int o) => r.IsDBNull(o) ? 0  : r.GetInt32(o);
-            decimal D(int o) => r.IsDBNull(o) ? 0m : r.GetDecimal(o);
-            decimal? N(int o) => r.IsDBNull(o) ? (decimal?)null : r.GetDecimal(o);
+            int     I(int o) => r.IsDBNull(o) ? 0  : ReadInt32(r,o);
+            decimal D(int o) => ReadDecimal(r, o);
+            decimal? N(int o) => ReadNullableDecimal(r, o);
 
             return new PredictionSummaryMetricsSpRow(
                 ToPay_LineItems:               I(0),
@@ -1280,9 +1428,221 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
                 PredAccuracy_AllowedAmount:    N(36),
                 PredAccuracy_InsurancePayment: N(37));
         }
-        catch (SqlException ex)
+        catch (Exception ex) when (ex is SqlException or InvalidCastException)
         {
             _logger.LogDebug(ex, "PV_SummaryMetrics snapshot unavailable; falling through to live SP.");
+            return null;
+        }
+    }
+
+    public async Task<List<PayerPayStatusSpRow>> GetPayerPayStatusBreakdownAsync(
+        string connectionString, DateOnly weekStartDate,
+        string? runId = null, string? filterPayerName = null,
+        string? filterForecastingPayability = null, string? filterPayStatus = null,
+        string? filterForecastingPayabilitySubstatus = null, string? filterPredictionStatus = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString)) return [];
+
+        var rows = new List<PayerPayStatusSpRow>();
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        var snapshotSafe = string.IsNullOrWhiteSpace(filterForecastingPayability)
+            && string.IsNullOrWhiteSpace(filterPayStatus)
+            && string.IsNullOrWhiteSpace(filterForecastingPayabilitySubstatus)
+            && string.IsNullOrWhiteSpace(filterPredictionStatus);
+
+        if (snapshotSafe
+            && await TryReadPayerPayStatusBreakdownSnapshotAsync(
+                   conn, weekStartDate, filterPayerName, rows, cancellationToken))
+        {
+            _logger.LogInformation(
+                "PV_PayerPayStatusBreakdown snapshot hit ({Count} rows).", rows.Count);
+            return rows;
+        }
+
+        await using var cmd = new SqlCommand("dbo.usp_GetPredictionPayerPayStatusBreakdown", conn)
+            { CommandType = CommandType.StoredProcedure, CommandTimeout = 120 };
+        cmd.Parameters.AddWithValue("@WeekStartDate", weekStartDate.ToDateTime(TimeOnly.MinValue).Date);
+        cmd.Parameters.AddWithValue("@RunId", (object?)runId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterPayerName", (object?)filterPayerName ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterForecastingPayability", (object?)filterForecastingPayability ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterPayStatus", (object?)filterPayStatus ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterForecastingPayabilitySubstatus", (object?)filterForecastingPayabilitySubstatus ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterPredictionStatus", (object?)filterPredictionStatus ?? DBNull.Value);
+        await using var r = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await r.ReadAsync(cancellationToken))
+            rows.Add(new PayerPayStatusSpRow(
+                r.GetString(r.GetOrdinal("PayerName")), r.GetString(r.GetOrdinal("PayStatus")),
+                ReadInt32(r,r.GetOrdinal("LineItemCount")),
+                r.GetDecimal(r.GetOrdinal("PredictedAllowed")), r.GetDecimal(r.GetOrdinal("PredictedInsurance")),
+                r.GetDecimal(r.GetOrdinal("ActualAllowed")), r.GetDecimal(r.GetOrdinal("ActualInsurance")),
+                r.GetDecimal(r.GetOrdinal("VarianceAllowed")), r.GetDecimal(r.GetOrdinal("VariancePaid"))));
+        return rows;
+    }
+
+    public async Task<List<AdjustedByPayerSpRow>> GetAdjustedByPayerAsync(
+        string connectionString, DateOnly weekStartDate,
+        string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
+        string? filterPanelName = null, string? filterFinalCoverageStatus = null,
+        string? filterPayability = null, string? filterCPTCode = null,
+        string? filterForecastingPayability = null, string? filterPayStatus = null,
+        string? filterForecastingPayabilitySubstatus = null, string? filterPredictionStatus = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString)) return [];
+
+        var rows = new List<AdjustedByPayerSpRow>();
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        var onlyPayerFilter = string.IsNullOrWhiteSpace(filterPayerType)
+            && string.IsNullOrWhiteSpace(filterPanelName)
+            && string.IsNullOrWhiteSpace(filterFinalCoverageStatus)
+            && string.IsNullOrWhiteSpace(filterPayability)
+            && string.IsNullOrWhiteSpace(filterCPTCode)
+            && string.IsNullOrWhiteSpace(filterForecastingPayability)
+            && string.IsNullOrWhiteSpace(filterPayStatus)
+            && string.IsNullOrWhiteSpace(filterForecastingPayabilitySubstatus)
+            && string.IsNullOrWhiteSpace(filterPredictionStatus);
+
+        if (onlyPayerFilter
+            && await TryReadAdjustedByPayerSnapshotAsync(
+                   conn, weekStartDate, filterPayerName, rows, cancellationToken))
+        {
+            _logger.LogInformation(
+                "PV_AdjustedByPayer snapshot hit ({Count} rows).", rows.Count);
+            return rows;
+        }
+
+        await using var cmd = new SqlCommand("dbo.usp_GetPredictionAdjustedByPayer", conn)
+            { CommandType = CommandType.StoredProcedure, CommandTimeout = 120 };
+        AddAggregateParams(cmd, weekStartDate, runId, filterPayerName, filterPayerType,
+            filterPanelName, filterFinalCoverageStatus, filterPayability, filterCPTCode,
+            filterForecastingPayability, filterPayStatus, filterForecastingPayabilitySubstatus, filterPredictionStatus);
+        await using var r = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await r.ReadAsync(cancellationToken))
+            rows.Add(new AdjustedByPayerSpRow(
+                r.GetString(r.GetOrdinal("PayerName")), ReadInt32(r,r.GetOrdinal("LineItemCount")),
+                r.GetDecimal(r.GetOrdinal("PredictedAllowed")), r.GetDecimal(r.GetOrdinal("PredictedInsurance")),
+                r.GetDecimal(r.GetOrdinal("ActualAllowed")), r.GetDecimal(r.GetOrdinal("ActualInsurance")),
+                r.GetDecimal(r.GetOrdinal("VarianceAllowed")), r.GetDecimal(r.GetOrdinal("VariancePaid"))));
+        return rows;
+    }
+
+    public async Task<PredictionFilterOptions> GetFilterOptionsAsync(
+        string connectionString, string? runId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var empty = new PredictionFilterOptions([], [], [], [], [], [], [], [], [], []);
+        if (string.IsNullOrWhiteSpace(connectionString)) return empty;
+
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        // Fast path: PV_FilterOptions snapshot (built during usp_RefreshAllPredictionAggregates)
+        var fromSnap = await TryReadFilterOptionsFromSnapshotAsync(conn, cancellationToken);
+        if (fromSnap is not null)
+        {
+            _logger.LogInformation(
+                "Prediction filter options served from PV_FilterOptions ({PayerCount} payers).",
+                fromSnap.PayerNames.Count);
+            return fromSnap;
+        }
+
+        await using var cmd = new SqlCommand("dbo.usp_GetPredictionFilterOptions", conn)
+            { CommandType = CommandType.StoredProcedure, CommandTimeout = 180 };
+        cmd.Parameters.AddWithValue("@RunId", (object?)runId ?? DBNull.Value);
+        await using var r = await cmd.ExecuteReaderAsync(cancellationToken);
+
+        static async Task<List<string>> ReadList(SqlDataReader reader, CancellationToken ct)
+        {
+            var list = new List<string>();
+            while (await reader.ReadAsync(ct))
+                if (!reader.IsDBNull(0)) list.Add(reader.GetString(0));
+            return list;
+        }
+
+        var payers = await ReadList(r, cancellationToken);
+        if (!await r.NextResultAsync(cancellationToken))
+            return empty with { PayerNames = payers };
+        var forecast = await ReadList(r, cancellationToken);
+        if (!await r.NextResultAsync(cancellationToken))
+            return empty with { PayerNames = payers, ForecastingPayabilities = forecast };
+        var payStatus = await ReadList(r, cancellationToken);
+        if (!await r.NextResultAsync(cancellationToken))
+            return empty with { PayerNames = payers, ForecastingPayabilities = forecast, PayStatuses = payStatus };
+        var substatus = await ReadList(r, cancellationToken);
+        if (!await r.NextResultAsync(cancellationToken))
+            return empty with { PayerNames = payers, ForecastingPayabilities = forecast, PayStatuses = payStatus, ForecastingPayabilitySubstatuses = substatus };
+        var predStatus = await ReadList(r, cancellationToken);
+        if (!await r.NextResultAsync(cancellationToken))
+            return new PredictionFilterOptions(payers, forecast, payStatus, substatus, predStatus, [], [], [], [], []);
+        var payerTypes = await ReadList(r, cancellationToken);
+        if (!await r.NextResultAsync(cancellationToken))
+            return new PredictionFilterOptions(payers, forecast, payStatus, substatus, predStatus, payerTypes, [], [], [], []);
+        var panels = await ReadList(r, cancellationToken);
+        if (!await r.NextResultAsync(cancellationToken))
+            return new PredictionFilterOptions(payers, forecast, payStatus, substatus, predStatus, payerTypes, panels, [], [], []);
+        var coverage = await ReadList(r, cancellationToken);
+        if (!await r.NextResultAsync(cancellationToken))
+            return new PredictionFilterOptions(payers, forecast, payStatus, substatus, predStatus, payerTypes, panels, coverage, [], []);
+        var payability = await ReadList(r, cancellationToken);
+        if (!await r.NextResultAsync(cancellationToken))
+            return new PredictionFilterOptions(payers, forecast, payStatus, substatus, predStatus, payerTypes, panels, coverage, payability, []);
+        var cpt = await ReadList(r, cancellationToken);
+        return new PredictionFilterOptions(payers, forecast, payStatus, substatus, predStatus, payerTypes, panels, coverage, payability, cpt);
+    }
+
+    private async Task<PredictionFilterOptions?> TryReadFilterOptionsFromSnapshotAsync(
+        SqlConnection conn, CancellationToken ct)
+    {
+        try
+        {
+            await using (var probe = new SqlCommand("""
+                SELECT CASE WHEN OBJECT_ID('dbo.PV_FilterOptions','U') IS NOT NULL
+                              AND EXISTS (SELECT 1 FROM dbo.PV_FilterOptions)
+                             THEN 1 ELSE 0 END
+                """, conn) { CommandTimeout = 15 })
+            {
+                if (Convert.ToInt32(await probe.ExecuteScalarAsync(ct)) != 1)
+                    return null;
+            }
+
+            static async Task<List<string>> LoadType(SqlConnection c, string filterType, CancellationToken token)
+            {
+                var list = new List<string>();
+                await using var cmd = new SqlCommand("""
+                    SELECT FilterValue FROM dbo.PV_FilterOptions
+                    WHERE FilterType = @Type
+                    ORDER BY FilterValue
+                    """, c) { CommandTimeout = 30 };
+                cmd.Parameters.AddWithValue("@Type", filterType);
+                await using var r = await cmd.ExecuteReaderAsync(token);
+                while (await r.ReadAsync(token))
+                    if (!r.IsDBNull(0)) list.Add(r.GetString(0));
+                return list;
+            }
+
+            var payers = await LoadType(conn, "PayerName", ct);
+            if (payers.Count == 0) return null;
+
+            return new PredictionFilterOptions(
+                payers,
+                await LoadType(conn, "ForecastingPayability", ct),
+                await LoadType(conn, "PayStatus", ct),
+                await LoadType(conn, "ForecastingPayabilitySubstatus", ct),
+                await LoadType(conn, "PredictionStatus", ct),
+                await LoadType(conn, "PayerType", ct),
+                await LoadType(conn, "PanelName", ct),
+                await LoadType(conn, "FinalCoverageStatus", ct),
+                await LoadType(conn, "Payability", ct),
+                await LoadType(conn, "CPTCode", ct));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "PV_FilterOptions snapshot unavailable.");
             return null;
         }
     }

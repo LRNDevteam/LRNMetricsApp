@@ -1,68 +1,56 @@
 namespace PredictionAnalysis.Models;
 
 /// <summary>
-/// Represents one lab's I/O paths loaded from {LabConfigFolder}\{LabName}.json.
-/// Runtime fields are written back after every successful run.
+/// Per-lab runtime configuration loaded from {LabConfigFolder}\{LabName}.json.
 /// </summary>
-public class LabConfig
+public sealed class LabConfig
 {
-    public string  LabName               { get; set; } = string.Empty;
+    public string LabName { get; set; } = string.Empty;
 
-    /// <summary>Root input folder. Source files live under Year\Month\WeekFolder subfolders.</summary>
-    public string  InputFolderPath       { get; set; } = string.Empty;
+    public string InputFolderPath { get; set; } = string.Empty;
 
-    /// <summary>Flat staging folder. Source file is COPIED here before processing.</summary>
-    public string  ProcessingFolderPath  { get; set; } = string.Empty;
+    public string ProcessingFolderPath { get; set; } = string.Empty;
 
-    /// <summary>Root output folder. Report is written to Year\Month\WeekFolder mirror.</summary>
-    public string  OutputFolderPath      { get; set; } = string.Empty;
+    public string OutputFolderPath { get; set; } = string.Empty;
 
-    // ?? Database settings (per-lab) ???????????????????????????????????????????
+    public bool EnableDatabaseInsert { get; set; }
 
-    /// <summary>
-    /// Set to true to persist PayerValidation source rows to SQL Server before
-    /// the prediction analysis runs.  Requires <see cref="DbConnectionString"/>
-    /// to be populated.  Defaults to false — DB insert is opt-in per lab.
-    /// </summary>
-    public bool    EnableDatabaseInsert  { get; set; } = false;
+    /// <summary>Connection string for this lab's LRN database (e.g. CoveLRN).</summary>
+    public string? DbConnectionString { get; set; }
 
     /// <summary>
-    /// SQL Server connection string for this lab's database.
-    /// Each lab can target a different database / server.
-    /// Ignored when <see cref="EnableDatabaseInsert"/> is false.
+    /// Connection string for LRNMaster ï¿½ used to look up
+    /// <c>DenialMapperSuperMaster.DenialDescription</c> when enriching denial aggregates.
     /// </summary>
-    public string? DbConnectionString    { get; set; }
+    public string? MasterDbConnectionString { get; set; }
+
+    public int DbInsertChunkSize { get; set; } = 25_000;
 
     /// <summary>
-    /// Number of rows sent per chunk to <c>dbo.usp_BulkInsertPayerValidationReport</c>.
-    /// Large input files (NorthWest can have 500K+ rows) are split into chunks so each
-    /// TVP call stays within reasonable memory/transaction limits.
-    /// Defaults to 25,000; values &lt;= 0 fall back to the default.
+    /// Optional override for ReportId window size used by chunked aggregate refresh.
+    /// 0 = auto: when PayerValidationReport rows for the run are &gt;=
+    /// <see cref="DbAggregateLargeLabRowThreshold"/> (default 7 lakh), use 100000.
+    /// Chunking never changes COUNT(DISTINCT VisitNumber) / SUM results.
     /// </summary>
-    public int     DbInsertChunkSize     { get; set; } = 25_000;
+    public int DbAggregateChunkSize { get; set; }
 
     /// <summary>
-    /// When <c>true</c> the app treats the current file as new regardless of
-    /// <see cref="LastProcessedFile"/>: the existing FileLog entry is removed,
-    /// rows are re-inserted, and the PV_* aggregate snapshots are refreshed.
-    /// The flag is automatically reset to <c>false</c> and written back to the
-    /// lab JSON file after the re-insert so the next normal run is unaffected.
-    /// Set this to <c>true</c> in the per-lab JSON when a source file is
-    /// corrected and needs to be reloaded without renaming it.
+    /// Optional CommandTimeout (seconds) for aggregate refresh.
+    /// 0 = auto: 3600s when row count &gt;= large-lab threshold, else 600s.
     /// </summary>
-    public bool    DataRefresh           { get; set; } = false;
+    public int DbAggregateRefreshTimeoutSeconds { get; set; }
 
-    // ?? Runtime fields (written back after every successful run) ?????????????
+    /// <summary>
+    /// Row-count threshold for auto chunk + long timeout (any lab, not only NorthWest).
+    /// Default 700000 (7 lakh).
+    /// </summary>
+    public int DbAggregateLargeLabRowThreshold { get; set; } = 700_000;
 
-    /// <summary>Full path of the last successfully processed INPUT source file.
-    /// Compared on next run — matching path causes the lab to be skipped.</summary>
-    public string? LastProcessedFile          { get; set; }
+    public bool DataRefresh { get; set; }
 
-    /// <summary>Relative sub-folder of the last run (e.g. "2026\02. February\02.25.2026 - 03.03.2026").
-    /// Mirrors the Input structure under OutputFolderPath.</summary>
-    public string? LastProcessedRelativePath  { get; set; }
+    public string? LastProcessedFile { get; set; }
 
-    /// <summary>Full path of the generated report from the last successful run.
-    /// Used by the SharePoint importer to open the file directly.</summary>
-    public string? LastOutputFilePath         { get; set; }
+    public string? LastProcessedRelativePath { get; set; }
+
+    public string? LastOutputFilePath { get; set; }
 }

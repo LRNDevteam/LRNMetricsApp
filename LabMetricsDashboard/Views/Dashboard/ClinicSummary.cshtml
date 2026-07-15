@@ -853,6 +853,9 @@ else
     var dollarAnalysisLoaded = false;
     var dosCountLoaded = false;
 
+    // Store the current page's nonce for reuse in AJAX-loaded scripts
+    var pageNonce = '@Context.Items["CspNonce"]';
+
     function getFilterParams() {
         var form = document.getElementById('csFilterForm');
         if (!form) return 'lab=@(Uri.EscapeDataString(Model.SelectedLab ?? ""))';
@@ -863,14 +866,32 @@ else
         fetch(url)
             .then(function (r) { return r.text(); })
             .then(function (html) {
-                document.getElementById(containerId).innerHTML = html;
-                if (execScripts) {
-                    document.getElementById(containerId).querySelectorAll('script').forEach(function (s) {
-                        var ns = document.createElement('script');
-                        ns.textContent = s.textContent;
-                        document.body.appendChild(ns);
-                    });
+                var container = document.getElementById(containerId);
+                if (!container) return;
+
+                if (!execScripts) {
+                    container.innerHTML = html;
+                    return;
                 }
+
+                // innerHTML strips/does not run <script> tags — use a template
+                // to parse markup, inject content, then execute scripts with CSP nonce.
+                var tpl = document.createElement('template');
+                tpl.innerHTML = html;
+                var scripts = Array.from(tpl.content.querySelectorAll('script'));
+                scripts.forEach(function (s) { s.remove(); });
+
+                container.innerHTML = '';
+                while (tpl.content.firstChild) {
+                    container.appendChild(tpl.content.firstChild);
+                }
+
+                scripts.forEach(function (s) {
+                    var ns = document.createElement('script');
+                    ns.setAttribute('nonce', pageNonce);
+                    ns.textContent = s.textContent;
+                    document.body.appendChild(ns);
+                });
             })
             .catch(function (err) {
                 document.getElementById(containerId).innerHTML =
@@ -899,7 +920,7 @@ else
 
             if (target === 'tabPanelStatus' && !panelStatusLoaded) {
                 panelStatusLoaded = true;
-                loadAndInject('@Url.Action("ClinicPanelStatus", "Dashboard")' + '?' + getFilterParams(), 'cpsPanelContent', false);
+                loadAndInject('@Url.Action("ClinicPanelStatus", "Dashboard")' + '?' + getFilterParams(), 'cpsPanelContent', true);
             }
         });
     });

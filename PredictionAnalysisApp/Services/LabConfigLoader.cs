@@ -150,6 +150,11 @@ public static class LabConfigLoader
             else
                 Console.WriteLine($"            DB Insert         : Disabled");
 
+            if (!string.IsNullOrWhiteSpace(config.MasterDbConnectionString))
+                Console.WriteLine($"            Master DB (LRN)   : configured (DenialDescription enrichment)");
+            else
+                Console.WriteLine($"            Master DB (LRN)   : (not set)");
+
             results.Add((config, configFile));
         }
 

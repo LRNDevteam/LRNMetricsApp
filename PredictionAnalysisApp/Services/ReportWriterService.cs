@@ -1,4 +1,4 @@
-﻿using ClosedXML.Excel;
+using ClosedXML.Excel;
 using PredictionAnalysis.Models;
 
 namespace PredictionAnalysis.Services;
@@ -212,7 +212,7 @@ public class ReportWriterService
         ws.Row(1).Height = 22;
 
         // ── Row 2: Cutoff note ────────────────────────────────────────────────
-        ws.Cell(2, 1).Value = $"Disclaimer : Analysis cutoff - Expected Payment Date < {weekStart:MM/dd/yyyy} (start of current week)";
+        ws.Cell(2, 1).Value = "Disclaimer : All predicted-payable claims in the run (no Expected Payment Date cutoff).";
         ws.Cell(2, 1).Style.Font.Italic = true;
         ws.Range(2, 1, 2, totalMetricCols).Merge();
 
@@ -853,7 +853,7 @@ public class ReportWriterService
         ws.Cell(3, 1).Value = "Source File";
         ws.Cell(3, 2).Value = sourceFilePath;
         ws.Cell(4, 1).Value = "Analysis Date Cutoff";
-        ws.Cell(4, 2).Value = $"Expected Payment Date < {weekStart:MM/dd/yyyy} (Monday of current week)";
+        ws.Cell(4, 2).Value = "No Expected Payment Date cutoff — all rows in run included.";
         ws.Cell(5, 1).Value = "Run By (Analyst Name)";
         ws.Cell(5, 2).Value = string.Empty;
         ws.Cell(6, 1).Value = "Observations / Notes";

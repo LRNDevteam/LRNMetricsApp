@@ -334,11 +334,14 @@ builder.Services.AddAntiforgery(options =>
 	//>>>>>>> 23cf9fdcfbffecee7d6826a98b7baa4821a4bc13
 
 	options.Cookie.Name = "LRN.Antiforgery";
-	options.Cookie.SameSite = builder.Environment.IsDevelopment() ? SameSiteMode.Lax : SameSiteMode.None;
-		options.Cookie.Path = "/";
-	options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
-		? CookieSecurePolicy.SameAsRequest
-		: CookieSecurePolicy.Always;
+	// Lax works for same-site forms on local IIS (http://localhost/LRNMetrics) and
+	// HTTPS production. SameSite=None requires a Secure cookie and breaks plain HTTP.
+	options.Cookie.SameSite = SameSiteMode.Lax;
+	options.Cookie.Path = "/";
+	// SameAsRequest: do not require SSL to render antiforgery tokens.
+	// CookieSecurePolicy.Always throws InvalidOperationException on Login when the
+	// site is published as Production but opened over HTTP (local IIS).
+	options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
 	options.Cookie.HttpOnly = true;
 });
 
@@ -375,6 +378,7 @@ builder.Services.AddSingleton<PredictionInsightLoader>();
 builder.Services.AddSingleton<RcmJsonWriterService>();
 builder.Services.AddScoped<PredictionReportParserService>();
 builder.Services.AddScoped<IPredictionDbRepository, SqlPredictionDbRepository>();
+builder.Services.AddScoped<DenialDescriptionMasterLookup>();
 builder.Services.AddScoped<ICodingValidationRepository, SqlCodingValidationRepository>();
 builder.Services.AddScoped<IClinicSummaryRepository, SqlClinicSummaryRepository>();
 builder.Services.AddScoped<ISalesRepSummaryRepository, SqlSalesRepSummaryRepository>();
@@ -404,6 +408,7 @@ builder.Services.AddScoped<IClaimLineRepository, SqlClaimLineRepository>();
 builder.Services.AddScoped<ICptSearchRepository, SqlCptSearchRepository>();
 builder.Services.AddScoped<ICollectionSummaryRepository, SqlCollectionSummaryRepository>();
 builder.Services.AddScoped<AllLabsCollectionExcelBuilder>();
+builder.Services.AddScoped<PayerPolicyValidationService>();
 builder.Services.AddScoped<ILisSummaryRepository, SqlLisSummaryRepository>();
 builder.Services.AddScoped<SqlPhiExecutiveSummaryRepository>();
 builder.Services.AddScoped<INotesRepository, SqlNotesRepository>();
@@ -542,7 +547,9 @@ builder.Services
 		// from https://localhost:5173 to https://localhost:44350, causing login loops.
 		options.Cookie.SecurePolicy = useWorkflowCrossOriginCookie
 			? CookieSecurePolicy.Always
-			: (builder.Environment.IsDevelopment() ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always);
+			// SameAsRequest for normal same-site host: works on HTTPS prod and HTTP local IIS.
+			// Always on HTTP local Production drops the auth cookie after login (Chrome).
+			: CookieSecurePolicy.SameAsRequest;
 
 		// ── ReturnUrl loop guard ──────────────────────────────────────────────
 		// Prevent the error and login pages from being embedded as a ReturnUrl.

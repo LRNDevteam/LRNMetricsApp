@@ -29,8 +29,122 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
 
     // ?? Filter Options ????????????????????????????????????????????????????????
     /// <inheritdoc/>
+    /// Prefers pre-aggregated <c>NW_PayerBreakdown</c> / <c>NW_PayerByPanel</c>
+    /// (and falls back to <c>DashboardFilterLookup</c>) so Production Summary can open
+    /// without scanning the full ClaimLevelData table. Live DISTINCT is last resort.
     public async Task<(List<string> PayerNames, List<string> PanelNames)> GetFilterOptionsAsync(
         string connectionString, CancellationToken ct = default)
+    {
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+
+            var fromAggregates = await TryGetFilterOptionsFromAggregatesAsync(conn, ct);
+            if (fromAggregates is { PayerNames.Count: > 0 } or { PanelNames.Count: > 0 })
+            {
+                _logger.LogInformation(
+                    "NW GetFilterOptionsAsync: using aggregates (payers={P}, panels={N}).",
+                    fromAggregates.Value.PayerNames.Count, fromAggregates.Value.PanelNames.Count);
+                return fromAggregates.Value;
+            }
+
+            _logger.LogWarning("NW GetFilterOptionsAsync: aggregates empty ? falling back to live ClaimLevelData DISTINCT.");
+            return await GetFilterOptionsFromLiveAsync(conn, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "NW GetFilterOptionsAsync failed.");
+            return ([], []);
+        }
+    }
+
+    private static async Task<(List<string> PayerNames, List<string> PanelNames)?> TryGetFilterOptionsFromAggregatesAsync(
+        SqlConnection conn, CancellationToken ct)
+    {
+        // 1) Production snapshot tables (populated by usp_RefreshNW_Payer*)
+        try
+        {
+            await using (var probe = new SqlCommand("""
+                SELECT CASE WHEN OBJECT_ID('dbo.NW_PayerBreakdown','U') IS NOT NULL
+                              AND EXISTS (SELECT 1 FROM dbo.NW_PayerBreakdown)
+                             THEN 1 ELSE 0 END
+                """, conn)
+            { CommandTimeout = 15 })
+            {
+                var ok = Convert.ToInt32(await probe.ExecuteScalarAsync(ct)) == 1;
+                if (ok)
+                {
+                    var payers = await ReadDistinctAsync(conn, """
+                        SELECT DISTINCT LTRIM(RTRIM(PayerName))
+                        FROM dbo.NW_PayerBreakdown
+                        WHERE NULLIF(LTRIM(RTRIM(PayerName)), '') IS NOT NULL
+                        ORDER BY 1
+                        """, ct);
+                    var panels = await ReadDistinctAsync(conn, """
+                        SELECT DISTINCT LTRIM(RTRIM(PanelType))
+                        FROM dbo.NW_PayerByPanel
+                        WHERE NULLIF(LTRIM(RTRIM(PanelType)), '') IS NOT NULL
+                        ORDER BY 1
+                        """, ct);
+                    if (payers.Count > 0 || panels.Count > 0)
+                        return (payers, panels);
+                }
+            }
+        }
+        catch
+        {
+            // fall through
+        }
+
+        // 2) Dashboard filter lookup (populated by usp_RefreshDashboard)
+        try
+        {
+            await using var probe = new SqlCommand("""
+                SELECT CASE WHEN OBJECT_ID('dbo.DashboardFilterLookup','U') IS NOT NULL
+                              AND EXISTS (SELECT 1 FROM dbo.DashboardFilterLookup)
+                             THEN 1 ELSE 0 END
+                """, conn)
+            { CommandTimeout = 15 };
+            var ok = Convert.ToInt32(await probe.ExecuteScalarAsync(ct)) == 1;
+            if (!ok) return null;
+
+            var payers = await ReadDistinctAsync(conn, """
+                SELECT FilterValue FROM dbo.DashboardFilterLookup
+                WHERE FilterType IN (N'PayerName', N'PayerName_Raw')
+                  AND NULLIF(LTRIM(RTRIM(FilterValue)), '') IS NOT NULL
+                ORDER BY FilterValue
+                """, ct);
+            var panels = await ReadDistinctAsync(conn, """
+                SELECT FilterValue FROM dbo.DashboardFilterLookup
+                WHERE FilterType IN (N'PanelType', N'PanelName')
+                  AND NULLIF(LTRIM(RTRIM(FilterValue)), '') IS NOT NULL
+                ORDER BY FilterValue
+                """, ct);
+            if (payers.Count > 0 || panels.Count > 0)
+                return (payers, panels);
+        }
+        catch
+        {
+            // fall through
+        }
+
+        return null;
+    }
+
+    private static async Task<List<string>> ReadDistinctAsync(
+        SqlConnection conn, string sql, CancellationToken ct)
+    {
+        var list = new List<string>();
+        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 30 };
+        await using var rdr = await cmd.ExecuteReaderAsync(ct);
+        while (await rdr.ReadAsync(ct))
+            if (!rdr.IsDBNull(0)) list.Add(rdr.GetString(0));
+        return list;
+    }
+
+    private static async Task<(List<string> PayerNames, List<string> PanelNames)> GetFilterOptionsFromLiveAsync(
+        SqlConnection conn, CancellationToken ct)
     {
         const string sql = """
             SELECT DISTINCT LTRIM(RTRIM(PayerName_Raw))
@@ -51,25 +165,18 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
                        'Billed amount 0')
             ORDER BY 1;
             """;
-        try
-        {
-            await using var conn = new SqlConnection(connectionString);
-            await conn.OpenAsync(ct);
-            await using var cmd  = new SqlCommand(sql, conn) { CommandTimeout = 60 };
-            await using var rdr  = await cmd.ExecuteReaderAsync(ct);
 
-            var payers = new List<string>();
-            while (await rdr.ReadAsync(ct)) payers.Add(rdr.GetString(0));
-            await rdr.NextResultAsync(ct);
-            var panels = new List<string>();
-            while (await rdr.ReadAsync(ct)) panels.Add(rdr.GetString(0));
-            return (payers, panels);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "NW GetFilterOptionsAsync failed.");
-            return ([], []);
-        }
+        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 180 };
+        await using var rdr = await cmd.ExecuteReaderAsync(ct);
+
+        var payers = new List<string>();
+        while (await rdr.ReadAsync(ct))
+            if (!rdr.IsDBNull(0)) payers.Add(rdr.GetString(0));
+        await rdr.NextResultAsync(ct);
+        var panels = new List<string>();
+        while (await rdr.ReadAsync(ct))
+            if (!rdr.IsDBNull(0)) panels.Add(rdr.GetString(0));
+        return (payers, panels);
     }
 
     // ?? Monthly Claim Volume ??????????????????????????????????????????????????
@@ -472,7 +579,7 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
         }
     }
 
-    // ?? Payer × Panel ?????????????????????????????????????????????????????????
+    // ?? Payer ? Panel ?????????????????????????????????????????????????????????
     /// <inheritdoc/>
     public async Task<SharedPayerPanelResult> GetPayerByPanelAsync(
         string connectionString,
@@ -548,7 +655,7 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
         }
     }
 
-    // ?? Unbilled × Aging ?????????????????????????????????????????????????????
+    // ?? Unbilled ? Aging ?????????????????????????????????????????????????????
     /// <inheritdoc/>
     public async Task<SharedUnbilledAgingResult> GetUnbilledAgingAsync(
         string connectionString,
@@ -1012,7 +1119,7 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
         }
 
         _logger.LogInformation(
-            "[ProdExcelExportSplit] NW SQL period count START Sheet={Sheet} — grouping by year/month in one pass",
+            "[ProdExcelExportSplit] NW SQL period count START Sheet={Sheet} ? grouping by year/month in one pass",
             baseSheetName);
 
         var segments = new List<SharedRawDataSegment>();

@@ -174,6 +174,25 @@
 
         <li><hr class="dropdown-divider" /></li>
 
+        @if (labConfig?.EnablePrediction == true)
+        {
+            <li>
+                <a class="dropdown-item" asp-controller="PayerPolicyValidation" asp-action="Index" asp-route-lab="@activeLab">
+                    <i class="bi bi-shield-check"></i> Payer Policy Validation
+                </a>
+            </li>
+        }
+        else
+        {
+            <li>
+                <span class="dropdown-item disabled" title="This feature is not enabled for the selected lab">
+                    <i class="bi bi-shield-check"></i> Payer Policy Validation
+                </span>
+            </li>
+        }
+
+        <li><hr class="dropdown-divider" /></li>
+
         @if (labConfig?.EnableCoding ?? true)
         {
             <li>

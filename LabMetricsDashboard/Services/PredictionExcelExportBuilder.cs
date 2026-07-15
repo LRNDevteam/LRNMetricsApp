@@ -4,113 +4,236 @@ using LabMetricsDashboard.Models;
 namespace LabMetricsDashboard.Services;
 
 /// <summary>
-/// Builds a formatted Excel workbook from Prediction Analysis data
-/// using the client's green-themed branding via <see cref="ExcelTheme"/>.
-/// Produces sheets: Prediction Buckets, Summary Metrics, Payer Insights,
-/// Panel Insights, CPT Insights, Denial Breakdown, and No Response Breakdown.
+/// Builds a formatted Excel workbook from Prediction Analysis data.
+/// Sheet layout mirrors the dashboard UI tabs and column structure.
 /// </summary>
 public static class PredictionExcelExportBuilder
 {
+    private static readonly string[] VarianceHeaders =
+    [
+        "Predicted – Allowed Amount",
+        "Predicted – Insurance Payment",
+        "Actual – Allowed Amount",
+        "Actual – Insurance Payment",
+        "Variance – Allowed Amount",
+        "Variance – Paid Amount"
+    ];
+
     /// <summary>Creates the workbook from the Prediction Analysis view model.</summary>
     public static XLWorkbook CreateWorkbook(PredictionAnalysisViewModel vm, string labName,
         IReadOnlyList<(string Label, string? Value)>? activeFilters = null)
     {
         var wb = new XLWorkbook();
 
-        BuildBucketsSheet(wb, vm, labName);
-        BuildSummaryMetricsSheet(wb, vm.SummaryMetrics);
-        BuildPayerInsightsSheet(wb, vm.TopPayerInsights);
-        BuildPanelInsightsSheet(wb, vm.TopPanelInsights);
-        BuildCptInsightsSheet(wb, vm.TopCptInsights);
-        BuildBreakdownSheet(wb, vm);
+        BuildSummarySheet(wb, vm, labName);
+
+        if (vm.Insight is { Sections.Count: > 0 })
+            BuildInsightsSheet(wb, vm.Insight);
+
+        BuildPayerVarianceSheet(wb, vm.TopPayerInsights, vm.PayerPayStatusBreakdown);
 
         if (vm.DenialBreakdown.PayerRows.Count > 0)
-            BuildDenialBreakdownSheet(wb, vm.DenialBreakdown);
+            BuildDeniedSheet(wb, vm.DenialBreakdown);
 
         if (vm.NoResponseBreakdown.PayerRows.Count > 0)
             BuildNoResponseSheet(wb, vm.NoResponseBreakdown);
+
+        if (vm.AdjustedByPayer.Count > 0)
+            BuildAdjustedSheet(wb, vm.AdjustedByPayer);
+
+        // After sheets exist: hyperlink Summary variance cells → Denied / No Response / Adjusted
+        var summaryWs = wb.Worksheets.FirstOrDefault(s => s.Name == "Summary");
+        if (summaryWs is not null)
+            TryLinkSummaryVarianceToSheets(summaryWs);
 
         if (activeFilters is { Count: > 0 })
         {
             var ws = wb.Worksheets.First();
             int lastRow = ws.LastRowUsed()?.RowNumber() ?? 1;
-            ExcelTheme.WriteFilterSummary(ws, lastRow + 1, 7, activeFilters);
+            ExcelTheme.WriteFilterSummary(ws, lastRow + 1, 8, activeFilters);
         }
 
         return wb;
     }
 
-    // ?? Prediction Buckets sheet ????????????????????????????????????????
+    // ── Summary tab: Section A buckets + ratios + prediction accuracy ────────
 
-    private static void BuildBucketsSheet(XLWorkbook wb, PredictionAnalysisViewModel vm, string labName)
+    private static string DisplayGroupName(string groupName) =>
+        groupName == "Not Predicted" ? "Not Predicted to Pay" : groupName;
+
+    private static decimal SortVarInsurance(decimal? v) => v ?? decimal.MinValue;
+
+    private static XLColor BucketGroupBackground(string groupName) =>
+        groupName == "Predicted To Pay"
+            ? XLColor.FromHtml("#E8F2FC")
+            : XLColor.FromHtml("#FFF4E6");
+
+    private static void BuildSummarySheet(XLWorkbook wb, PredictionAnalysisViewModel vm, string labName)
     {
-        var ws = wb.AddWorksheet("Prediction Buckets");
+        var ws = wb.AddWorksheet("Summary");
         ws.TabColor = ExcelTheme.TabGreen;
         ExcelTheme.ApplyDefaults(ws);
+        ws.Outline.SummaryVLocation = XLOutlineSummaryVLocation.Top;
 
-        string[] headers = ["Bucket", "Claim Count", "Predicted Allowed", "Predicted Insurance",
-                            "Actual Allowed", "Actual Insurance", "Variance"];
-        int colCount = headers.Length;
+        string[] bucketHeaders =
+        [
+            "Metrics", "Claim Count (#)", "Predicted Allowed ($)", "Predicted Insurance Payment ($)",
+            "Actual Allowed Amount ($)", "Actual Insurance Payment ($)",
+            "Variance - Allowed Amount ($)", "Variance - Insurance Payment ($)"
+        ];
+        int colCount = bucketHeaders.Length;
 
-        ExcelTheme.WriteTitleBar(ws, 1, colCount, $"Prediction Buckets | {labName}");
-        ExcelTheme.WriteHeaderRow(ws, 2, 1, headers);
+        ExcelTheme.WriteTitleBar(ws, 1, colCount, $"Prediction vs Non-Payment Summary | {labName}");
+        ExcelTheme.WriteHeaderRow(ws, 2, 1, bucketHeaders);
 
-        for (int r = 0; r < vm.Buckets.Count; r++)
+        var summaryGroups = vm.Buckets
+            .Where(b => b.IsGroupTotal)
+            .Select(g => new
+            {
+                Total = g,
+                Children = vm.Buckets
+                    .Where(c => !c.IsGroupTotal && c.GroupName == g.GroupName)
+                    .OrderByDescending(c => SortVarInsurance(c.VariancePaid))
+                    .ToList()
+            })
+            .OrderBy(g => g.Total.GroupName == "Predicted To Pay" ? 0 : 1)
+            .ToList();
+
+        int row = 3;
+        foreach (var grp in summaryGroups)
         {
-            int rowNum = r + 3;
-            var bg = ExcelTheme.GetRowBg(r);
-            var b = vm.Buckets[r];
-
-            ws.Cell(rowNum, 1).Value = b.BucketName;
-            ws.Cell(rowNum, 2).Value = b.ClaimCount;
-            ws.Cell(rowNum, 3).Value = b.PredictedAllowed;
-            ws.Cell(rowNum, 4).Value = b.PredictedInsurance;
-
-            if (b.ActualAllowed.HasValue) ws.Cell(rowNum, 5).Value = b.ActualAllowed.Value;
-            if (b.ActualInsurance.HasValue) ws.Cell(rowNum, 6).Value = b.ActualInsurance.Value;
-            if (b.Variance.HasValue) ws.Cell(rowNum, 7).Value = b.Variance.Value;
-
-            for (int c = 1; c <= colCount; c++)
-                ExcelTheme.StyleDataCell(ws.Cell(rowNum, c), bg);
+            WriteBucketRow(ws, row++, grp.Total, isParent: true);
+            foreach (var child in grp.Children)
+                WriteBucketRow(ws, row++, child, isParent: false);
         }
 
         ws.Column(2).Style.NumberFormat.Format = "#,##0";
-        for (int c = 3; c <= 7; c++)
-            ws.Column(c).Style.NumberFormat.Format = "$#,##0";
+        for (int c = 3; c <= colCount; c++)
+            ws.Column(c).Style.NumberFormat.Format = "$#,##0.00";
+
+        row += 2;
+        row = WriteRatiosSection(ws, row, vm.SummaryMetrics);
+        row += 2;
+        WritePredictionAccuracySection(ws, row, vm.SummaryMetrics);
 
         ws.SheetView.FreezeRows(2);
         ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 18, firstColMinWidth: 28);
     }
 
-    // ?? Summary Metrics sheet ???????????????????????????????????????????
-
-    private static void BuildSummaryMetricsSheet(XLWorkbook wb, PredictionSummaryMetrics sm)
+    /// <summary>
+    /// Adds blue hyperlinks on Variance Allowed / Insurance columns for
+    /// Denied, No Response, Adjusted under Predicted To Pay → matching sheets.
+    /// </summary>
+    private static void TryLinkSummaryVarianceToSheets(IXLWorksheet summaryWs)
     {
-        var ws = wb.AddWorksheet("Summary Metrics");
-        ws.TabColor = ExcelTheme.TabGreen;
-        ExcelTheme.ApplyDefaults(ws);
+        var wb = summaryWs.Workbook;
+        var last = summaryWs.LastRowUsed()?.RowNumber() ?? 3;
+        string? currentGroup = null;
+        for (int r = 3; r <= last; r++)
+        {
+            var label = (summaryWs.Cell(r, 1).GetFormattedString() ?? "").Trim();
+            if (string.IsNullOrEmpty(label)) continue;
 
+            // Stop once we leave the bucket table (ratios / accuracy sections follow).
+            if (label.Equals("Ratios", StringComparison.OrdinalIgnoreCase)
+                || label.Equals("Prediction Accuracy", StringComparison.OrdinalIgnoreCase)
+                || label.StartsWith("Metric", StringComparison.OrdinalIgnoreCase))
+                break;
+
+            if (label is "Predicted To Pay" or "Not Predicted to Pay" or "Not Predicted")
+            {
+                currentGroup = label == "Not Predicted to Pay" ? "Not Predicted" : label;
+                continue;
+            }
+
+            if (!string.Equals(currentGroup, "Predicted To Pay", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string? sheetName = label switch
+            {
+                _ when label.Equals("Denied", StringComparison.OrdinalIgnoreCase) => "Denied",
+                _ when label.Equals("No Response", StringComparison.OrdinalIgnoreCase) => "No Response",
+                _ when label.Equals("Adjusted", StringComparison.OrdinalIgnoreCase) => "Adjusted",
+                _ => null
+            };
+            if (sheetName is null) continue;
+            if (wb.Worksheets.All(s => !string.Equals(s.Name, sheetName, StringComparison.OrdinalIgnoreCase)))
+                continue;
+
+            ApplySheetHyperlink(summaryWs.Cell(r, 7), sheetName);
+            ApplySheetHyperlink(summaryWs.Cell(r, 8), sheetName);
+        }
+    }
+
+    private static void ApplySheetHyperlink(IXLCell cell, string sheetName)
+    {
+        var existing = cell.Value;
+        cell.SetHyperlink(new XLHyperlink($"'{sheetName}'!A1"));
+        cell.Value = existing;
+        cell.Style.Font.FontColor = XLColor.FromHtml("#1d4ed8");
+        cell.Style.Font.Underline = XLFontUnderlineValues.Single;
+    }
+
+    private static void WriteBucketRow(IXLWorksheet ws, int row, PredictionBucketRow b, bool isParent)
+    {
+        const int colCount = 8;
+        var bg = isParent ? BucketGroupBackground(b.GroupName) : ExcelTheme.GetRowBg(row);
+
+        var labelCell = ws.Cell(row, 1);
+        labelCell.Value = isParent ? DisplayGroupName(b.GroupName) : b.BucketName;
+        if (isParent)
+        {
+            labelCell.Style.Font.Bold = true;
+            ws.Row(row).OutlineLevel = 1;
+        }
+        else
+        {
+            labelCell.Style.Alignment.Indent = 1;
+            labelCell.Style.Font.FontColor = b.GroupName == "Predicted To Pay"
+                ? XLColor.FromHtml("#1565C0")
+                : XLColor.FromHtml("#C05621");
+            ws.Row(row).OutlineLevel = 2;
+        }
+
+        ws.Cell(row, 2).Value = b.ClaimCount;
+        ws.Cell(row, 3).Value = b.PredictedAllowed;
+        ws.Cell(row, 4).Value = b.PredictedInsurance;
+        if (b.ActualAllowed.HasValue) ws.Cell(row, 5).Value = b.ActualAllowed.Value;
+        if (b.ActualInsurance.HasValue) ws.Cell(row, 6).Value = b.ActualInsurance.Value;
+        if (b.VarianceAllowed.HasValue) ws.Cell(row, 7).Value = b.VarianceAllowed.Value;
+        if (b.VariancePaid.HasValue) ws.Cell(row, 8).Value = b.VariancePaid.Value;
+
+        for (int c = 1; c <= colCount; c++)
+            ExcelTheme.StyleDataCell(ws.Cell(row, c), bg);
+    }
+
+    private static int WriteRatiosSection(IXLWorksheet ws, int startRow, PredictionSummaryMetrics sm)
+    {
         string[] headers = ["Metric", "Claim %", "Allowed %", "Insurance %"];
         int colCount = headers.Length;
 
-        ExcelTheme.WriteTitleBar(ws, 1, colCount, "Summary Metrics � Ratios & Accuracy");
-        ExcelTheme.WriteSectionTitle(ws, 2, 1, colCount, "Ratios");
-        ExcelTheme.WriteHeaderRow(ws, 3, 1, headers);
+        ExcelTheme.WriteSectionTitle(ws, startRow, 1, colCount, "Ratios");
+        ExcelTheme.WriteHeaderRow(ws, startRow + 1, 1, headers);
 
-        int row = 4;
+        int row = startRow + 2;
         WriteMetricRow(ws, row++, "Payment Ratio", sm.PaymentRatioClaim, sm.PaymentRatioAllowed, sm.PaymentRatioInsurance, 0);
         WriteMetricRow(ws, row++, "Non-Payment Rate", sm.NonPaymentRateClaim, sm.NonPaymentRateAllowed, sm.NonPaymentRateInsurance, 1);
         WriteMetricRow(ws, row++, "Denied %", sm.DeniedPctClaim, sm.DeniedPctAllowed, sm.DeniedPctInsurance, 2);
         WriteMetricRow(ws, row++, "No Response %", sm.NoResponsePctClaim, sm.NoResponsePctAllowed, sm.NoResponsePctInsurance, 3);
         WriteMetricRow(ws, row++, "Adjusted %", sm.AdjustedPctClaim, sm.AdjustedPctAllowed, sm.AdjustedPctInsurance, 4);
 
-        row++;
-        ExcelTheme.WriteSectionTitle(ws, row, 1, colCount, "Prediction Accuracy");
-        ExcelTheme.WriteHeaderRow(ws, row + 1, 1, headers);
-        WriteMetricRow(ws, row + 2, "Pred vs Actual", sm.PredVsActualRatioClaim, sm.PredVsActualAllowedAmount, sm.PredVsActualInsPayment, 0);
+        return row;
+    }
 
-        ws.SheetView.FreezeRows(3);
-        ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 16, firstColMinWidth: 24);
+    private static void WritePredictionAccuracySection(IXLWorksheet ws, int startRow, PredictionSummaryMetrics sm)
+    {
+        string[] headers = ["Metric", "Claim %", "Allowed %", "Insurance %"];
+        int colCount = headers.Length;
+
+        ExcelTheme.WriteSectionTitle(ws, startRow, 1, colCount, "Prediction Accuracy");
+        ExcelTheme.WriteHeaderRow(ws, startRow + 1, 1, headers);
+        WriteMetricRow(ws, startRow + 2, "Pred vs Actual",
+            sm.PredVsActualRatioClaim, sm.PredVsActualAllowedAmount, sm.PredVsActualInsPayment, 0);
     }
 
     private static void WriteMetricRow(IXLWorksheet ws, int row, string label,
@@ -127,423 +250,376 @@ public static class PredictionExcelExportBuilder
             ExcelTheme.StyleDataCell(ws.Cell(row, c), bg);
     }
 
-    // ?? Payer Insights sheet ????????????????????????????????????????????
+    // ── Insights tab (optional AI content) ───────────────────────────────────
 
-    private static void BuildPayerInsightsSheet(XLWorkbook wb, IReadOnlyList<PredictionPayerRow> rows)
+    private static void BuildInsightsSheet(XLWorkbook wb, PredictionInsight insight)
     {
-        var ws = wb.AddWorksheet("Payer Insights");
-        ws.TabColor = ExcelTheme.TabGreen;
+        var ws = wb.AddWorksheet("Insights");
+        ws.TabColor = ExcelTheme.TabBlue;
         ExcelTheme.ApplyDefaults(ws);
 
-        string[] headers = ["Payer Name", "Payer Type", "Total Claims", "Paid", "Denied",
-                            "No Response", "Adjusted", "Unpaid", "Payment Rate %",
-                            "Pred Allowed", "Pred Insurance", "Actual Allowed", "Actual Insurance", "Variance"];
-        int colCount = headers.Length;
+        ExcelTheme.WriteTitleBar(ws, 1, 2, insight.ReportTitle);
+        ws.Cell(2, 1).Value = "Report Period";
+        ws.Cell(2, 1).Style.Font.Bold = true;
+        ws.Cell(2, 2).Value = insight.ReportPeriod;
+        ws.Cell(3, 1).Value = "Source";
+        ws.Cell(3, 1).Style.Font.Bold = true;
+        ws.Cell(3, 2).Value = insight.SourceFileName;
 
-        ExcelTheme.WriteTitleBar(ws, 1, colCount, "Prediction Validation by Payer");
-        ExcelTheme.WriteHeaderRow(ws, 2, 1, headers);
-
-        for (int r = 0; r < rows.Count; r++)
+        int row = 5;
+        foreach (var sec in insight.Sections)
         {
-            int rowNum = r + 3;
-            var bg = ExcelTheme.GetRowBg(r);
-            var p = rows[r];
-
-            ws.Cell(rowNum, 1).Value = p.PayerName;
-            ws.Cell(rowNum, 2).Value = p.PayerType;
-            ws.Cell(rowNum, 3).Value = p.TotalClaims;
-            ws.Cell(rowNum, 4).Value = p.Paid;
-            ws.Cell(rowNum, 5).Value = p.Denied;
-            ws.Cell(rowNum, 6).Value = p.NoResponse;
-            ws.Cell(rowNum, 7).Value = p.Adjusted;
-            ws.Cell(rowNum, 8).Value = p.Unpaid;
-            if (p.PaymentRatePct.HasValue) ws.Cell(rowNum, 9).Value = p.PaymentRatePct.Value;
-            ws.Cell(rowNum, 10).Value = p.PredictedAllowed;
-            ws.Cell(rowNum, 11).Value = p.PredictedInsurance;
-            ws.Cell(rowNum, 12).Value = p.ActualAllowed;
-            ws.Cell(rowNum, 13).Value = p.ActualInsurance;
-            ws.Cell(rowNum, 14).Value = p.Variance;
-
-            for (int c = 1; c <= colCount; c++)
-                ExcelTheme.StyleDataCell(ws.Cell(rowNum, c), bg);
-        }
-
-        for (int c = 3; c <= 8; c++) ws.Column(c).Style.NumberFormat.Format = "#,##0";
-        ws.Column(9).Style.NumberFormat.Format = "0.0\"%\"";
-        for (int c = 10; c <= 14; c++) ws.Column(c).Style.NumberFormat.Format = "$#,##0";
-
-        ws.SheetView.FreezeRows(2);
-        ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 14, firstColMinWidth: 28);
-    }
-
-    // ?? Panel Insights sheet ????????????????????????????????????????????
-
-    private static void BuildPanelInsightsSheet(XLWorkbook wb, IReadOnlyList<PredictionPanelRow> rows)
-    {
-        var ws = wb.AddWorksheet("Panel Insights");
-        ws.TabColor = ExcelTheme.TabGreen;
-        ExcelTheme.ApplyDefaults(ws);
-
-        string[] headers = ["Panel Name", "Total Claims", "Paid", "Denied",
-                            "No Response", "Adjusted", "Unpaid", "Payment Rate %",
-                            "Pred Allowed", "Pred Insurance", "Actual Allowed", "Actual Insurance", "Variance"];
-        int colCount = headers.Length;
-
-        ExcelTheme.WriteTitleBar(ws, 1, colCount, "Prediction Validation by Panel");
-        ExcelTheme.WriteHeaderRow(ws, 2, 1, headers);
-
-        for (int r = 0; r < rows.Count; r++)
-        {
-            int rowNum = r + 3;
-            var bg = ExcelTheme.GetRowBg(r);
-            var p = rows[r];
-
-            ws.Cell(rowNum, 1).Value = p.PanelName;
-            ws.Cell(rowNum, 2).Value = p.TotalClaims;
-            ws.Cell(rowNum, 3).Value = p.Paid;
-            ws.Cell(rowNum, 4).Value = p.Denied;
-            ws.Cell(rowNum, 5).Value = p.NoResponse;
-            ws.Cell(rowNum, 6).Value = p.Adjusted;
-            ws.Cell(rowNum, 7).Value = p.Unpaid;
-            if (p.PaymentRatePct.HasValue) ws.Cell(rowNum, 8).Value = p.PaymentRatePct.Value;
-            ws.Cell(rowNum, 9).Value = p.PredictedAllowed;
-            ws.Cell(rowNum, 10).Value = p.PredictedInsurance;
-            ws.Cell(rowNum, 11).Value = p.ActualAllowed;
-            ws.Cell(rowNum, 12).Value = p.ActualInsurance;
-            ws.Cell(rowNum, 13).Value = p.Variance;
-
-            for (int c = 1; c <= colCount; c++)
-                ExcelTheme.StyleDataCell(ws.Cell(rowNum, c), bg);
-        }
-
-        for (int c = 2; c <= 7; c++) ws.Column(c).Style.NumberFormat.Format = "#,##0";
-        ws.Column(8).Style.NumberFormat.Format = "0.0\"%\"";
-        for (int c = 9; c <= 13; c++) ws.Column(c).Style.NumberFormat.Format = "$#,##0";
-
-        ws.SheetView.FreezeRows(2);
-        ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 14, firstColMinWidth: 28);
-    }
-
-    // ?? CPT Insights sheet ??????????????????????????????????????????????
-
-    private static void BuildCptInsightsSheet(XLWorkbook wb, IReadOnlyList<PredictionCptRow> rows)
-    {
-        var ws = wb.AddWorksheet("CPT Insights");
-        ws.TabColor = ExcelTheme.TabGreen;
-        ExcelTheme.ApplyDefaults(ws);
-
-        string[] headers = ["CPT Code", "Line Items", "Billed Amount", "Predicted Allowed", "Predicted Insurance"];
-        int colCount = headers.Length;
-
-        ExcelTheme.WriteTitleBar(ws, 1, colCount, "Prediction Insights by CPT Code");
-        ExcelTheme.WriteHeaderRow(ws, 2, 1, headers);
-
-        for (int r = 0; r < rows.Count; r++)
-        {
-            int rowNum = r + 3;
-            var bg = ExcelTheme.GetRowBg(r);
-            var c = rows[r];
-
-            ws.Cell(rowNum, 1).Value = c.CPTCode;
-            ws.Cell(rowNum, 2).Value = c.LineItems;
-            ws.Cell(rowNum, 3).Value = c.BilledAmount;
-            ws.Cell(rowNum, 4).Value = c.PredictedAllowed;
-            ws.Cell(rowNum, 5).Value = c.PredictedInsurance;
-
-            for (int col = 1; col <= colCount; col++)
-                ExcelTheme.StyleDataCell(ws.Cell(rowNum, col), bg);
-        }
-
-        ws.Column(2).Style.NumberFormat.Format = "#,##0";
-        for (int c = 3; c <= 5; c++) ws.Column(c).Style.NumberFormat.Format = "$#,##0";
-
-        ws.SheetView.FreezeRows(2);
-        ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 16, firstColMinWidth: 18);
-    }
-
-    // ?? Breakdown Charts sheet ??????????????????????????????????????????
-
-    private static void BuildBreakdownSheet(XLWorkbook wb, PredictionAnalysisViewModel vm)
-    {
-        var ws = wb.AddWorksheet("Breakdowns");
-        ws.TabColor = ExcelTheme.TabGreen;
-        ExcelTheme.ApplyDefaults(ws);
-
-        ExcelTheme.WriteTitleBar(ws, 1, 3, "Distribution Breakdowns");
-
-        int row = 2;
-        row = WriteBreakdownSection(ws, row, "Payability", vm.PayabilityBreakdown);
-        row = WriteBreakdownSection(ws, row, "Final Coverage Status", vm.FinalCoverageStatusBreakdown);
-        row = WriteBreakdownSection(ws, row, "Forecasting Payability", vm.ForecastingPayabilityBreakdown);
-        row = WriteBreakdownSection(ws, row, "ICD Compliance", vm.ICDComplianceBreakdown);
-        WriteBreakdownSection(ws, row, "Payer Type", vm.PayerTypeBreakdown);
-
-        ws.SheetView.FreezeRows(1);
-        ExcelTheme.AutoFitColumns(ws, 3, minWidth: 14, firstColMinWidth: 34);
-    }
-
-    private static int WriteBreakdownSection(IXLWorksheet ws, int startRow,
-        string title, IReadOnlyDictionary<string, int> data)
-    {
-        ExcelTheme.WriteSectionTitle(ws, startRow, 1, 3, title);
-        ExcelTheme.WriteHeaderRow(ws, startRow + 1, 1, ["Category", "Count", "% of Total"]);
-
-        var total = data.Values.Sum();
-        int r = startRow + 2;
-        int idx = 0;
-        foreach (var kvp in data.OrderByDescending(x => x.Value))
-        {
-            var bg = ExcelTheme.GetRowBg(idx++);
-            ws.Cell(r, 1).Value = kvp.Key;
-            ws.Cell(r, 2).Value = kvp.Value;
-            ws.Cell(r, 2).Style.NumberFormat.Format = "#,##0";
-            ws.Cell(r, 3).Value = total > 0 ? Math.Round((decimal)kvp.Value / total * 100, 1) : 0;
-            ws.Cell(r, 3).Style.NumberFormat.Format = "0.0\"%\"";
-            for (int c = 1; c <= 3; c++)
-                ExcelTheme.StyleDataCell(ws.Cell(r, c), bg);
-            r++;
-        }
-
-        return r + 1;
-    }
-
-    // ?? Denial Breakdown sheet ??????????????????????????????????????????
-
-    private static void BuildDenialBreakdownSheet(XLWorkbook wb, DenialBreakdown db)
-    {
-        var ws = wb.AddWorksheet("Denial Breakdown");
-        ws.TabColor = ExcelTheme.TabRed;
-        ExcelTheme.ApplyDefaults(ws);
-
-        // Dynamic columns: Payer | Total Claims | Total Pred Allowed | Total Pred Insurance | <months�>
-        var months = db.Months;
-        int fixedCols = 4;
-        int colCount = fixedCols + months.Count * 3;
-
-        ExcelTheme.WriteTitleBar(ws, 1, colCount, "Predicted to Pay vs Denial Breakdown");
-
-        // Header row 1 � fixed + month group headers
-        string[] fixedHeaders = ["Payer / Denial Code", "Total Claims", "Pred Allowed", "Pred Insurance"];
-        ExcelTheme.WriteHeaderRow(ws, 2, 1, fixedHeaders);
-
-        for (int m = 0; m < months.Count; m++)
-        {
-            int startCol = fixedCols + m * 3 + 1;
-            var range = ws.Range(2, startCol, 2, startCol + 2);
-            range.Merge();
-            var cell = ws.Cell(2, startCol);
-            cell.Value = months[m];
-            cell.Style.Font.Bold = true;
-            cell.Style.Font.FontColor = XLColor.White;
-            cell.Style.Fill.BackgroundColor = ExcelTheme.SubHeaderBg;
-            cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-        }
-
-        // Header row 2 � sub-headers for each month
-        string[] subHeaders = ["Claims", "Allowed", "Insurance"];
-        ExcelTheme.WriteHeaderRow(ws, 3, 1, ["", "", "", ""]);
-        for (int m = 0; m < months.Count; m++)
-        {
-            int startCol = fixedCols + m * 3 + 1;
-            ExcelTheme.WriteHeaderRow(ws, 3, startCol, subHeaders);
-        }
-
-        int row = 4;
-        foreach (var payer in db.PayerRows)
-        {
-            // Payer header row (bold)
-            var grpBg = ExcelTheme.GroupRowBg;
-            ws.Cell(row, 1).Value = payer.PayerName;
-            ws.Cell(row, 1).Style.Font.Bold = true;
-            ws.Cell(row, 2).Value = payer.TotalClaims;
-            ws.Cell(row, 3).Value = payer.TotalPredictedAllowed;
-            ws.Cell(row, 4).Value = payer.TotalPredictedInsurance;
-
-            for (int m = 0; m < months.Count; m++)
-            {
-                int sc = fixedCols + m * 3 + 1;
-                if (payer.ByMonth.TryGetValue(months[m], out var ma))
-                {
-                    ws.Cell(row, sc).Value = ma.ClaimCount;
-                    ws.Cell(row, sc + 1).Value = ma.PredictedAllowed;
-                    ws.Cell(row, sc + 2).Value = ma.PredictedInsurance;
-                }
-            }
-
-            for (int c = 1; c <= colCount; c++)
-                ExcelTheme.StyleDataCell(ws.Cell(row, c), grpBg);
-            ws.Cell(row, 1).Style.Font.Bold = true;
+            ExcelTheme.WriteSectionTitle(ws, row, 1, 2, $"{sec.SectionNumber}. {sec.Title}");
             row++;
 
-            // Denial code sub-rows
-            foreach (var dc in payer.TopDenialCodes)
+            foreach (var sub in sec.Subsections)
             {
-                var bg = ExcelTheme.GetRowBg(row);
-                ws.Cell(row, 1).Value = $"  {dc.DenialCode} � {dc.DenialDescription}";
-                ws.Cell(row, 2).Value = dc.TotalClaims;
-                ws.Cell(row, 3).Value = dc.TotalPredictedAllowed;
-                ws.Cell(row, 4).Value = dc.TotalPredictedInsurance;
+                ws.Cell(row, 1).Value = sub.Title;
+                ws.Cell(row, 1).Style.Font.Bold = true;
+                ws.Cell(row, 1).Style.Font.FontColor = ExcelTheme.TitleBg;
+                row++;
 
-                for (int m = 0; m < months.Count; m++)
+                foreach (var bullet in sub.Bullets)
                 {
-                    int sc = fixedCols + m * 3 + 1;
-                    if (dc.ByMonth.TryGetValue(months[m], out var ma))
-                    {
-                        ws.Cell(row, sc).Value = ma.ClaimCount;
-                        ws.Cell(row, sc + 1).Value = ma.PredictedAllowed;
-                        ws.Cell(row, sc + 2).Value = ma.PredictedInsurance;
-                    }
+                    ws.Cell(row, 1).Value = $"• {bullet}";
+                    ws.Range(row, 1, row, 2).Merge();
+                    ws.Cell(row, 1).Style.Alignment.WrapText = true;
+                    row++;
                 }
 
-                for (int c = 1; c <= colCount; c++)
-                    ExcelTheme.StyleDataCell(ws.Cell(row, c), bg);
                 row++;
             }
         }
 
-        // Grand Total row
-        ExcelTheme.StyleTotalRow(ws, row, 1, colCount);
-        ws.Cell(row, 1).Value = "Grand Total";
-        ws.Cell(row, 2).Value = db.TotalClaims;
-        ws.Cell(row, 3).Value = db.TotalPredictedAllowed;
-        ws.Cell(row, 4).Value = db.TotalPredictedInsurance;
-        for (int m = 0; m < months.Count; m++)
+        ExcelTheme.AutoFitColumns(ws, 2, minWidth: 20, firstColMinWidth: 24);
+    }
+
+    // ── Section B: Prediction vs Actual By Payer (with PayStatus drill-down) ─
+
+    private static void BuildPayerVarianceSheet(XLWorkbook wb,
+        IReadOnlyList<PredictionPayerRow> rows,
+        IReadOnlyList<PredictionPayerPayStatusRow> payStatusRows)
+    {
+        var ws = wb.AddWorksheet("By Payer");
+        ws.TabColor = ExcelTheme.TabGreen;
+        ExcelTheme.ApplyDefaults(ws);
+        ws.Outline.SummaryVLocation = XLOutlineSummaryVLocation.Top;
+
+        int colCount = 1 + VarianceHeaders.Length;
+        ExcelTheme.WriteTitleBar(ws, 1, colCount, "Prediction vs Actual By Payer");
+        WriteVarianceHeaderRow(ws, 2, "Payer Name / PayStatus");
+
+        var payStatusByPayer = payStatusRows
+            .GroupBy(r => r.PayerName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(x => x.VarianceAllowed).ToList(),
+                StringComparer.OrdinalIgnoreCase);
+
+        int row = 3;
+        foreach (var r in rows)
         {
-            int sc = fixedCols + m * 3 + 1;
-            if (db.TotalByMonth.TryGetValue(months[m], out var ma))
+            WriteVarianceDataRow(ws, row++, r.PayerName, r.PredictedAllowed, r.PredictedInsurance,
+                r.ActualAllowed, r.ActualInsurance, r.VarianceAllowed, r.VariancePaid,
+                ExcelTheme.GroupRowBg, bold: true, outlineLevel: 1);
+
+            if (payStatusByPayer.TryGetValue(r.PayerName, out var psList))
             {
-                ws.Cell(row, sc).Value = ma.ClaimCount;
-                ws.Cell(row, sc + 1).Value = ma.PredictedAllowed;
-                ws.Cell(row, sc + 2).Value = ma.PredictedInsurance;
+                foreach (var ps in psList)
+                {
+                    WriteVarianceDataRow(ws, row++, ps.PayStatus,
+                        ps.PredictedAllowed, ps.PredictedInsurance,
+                        ps.ActualAllowed, ps.ActualInsurance,
+                        ps.VarianceAllowed, ps.VariancePaid,
+                        XLColor.White, indent: 1, outlineLevel: 2);
+                }
             }
         }
 
-        ws.Column(2).Style.NumberFormat.Format = "#,##0";
-        ws.Column(3).Style.NumberFormat.Format = "$#,##0";
-        ws.Column(4).Style.NumberFormat.Format = "$#,##0";
-        for (int m = 0; m < months.Count; m++)
-        {
-            int sc = fixedCols + m * 3 + 1;
-            ws.Column(sc).Style.NumberFormat.Format = "#,##0";
-            ws.Column(sc + 1).Style.NumberFormat.Format = "$#,##0";
-            ws.Column(sc + 2).Style.NumberFormat.Format = "$#,##0";
-        }
+        WriteVarianceTotalRow(ws, row, "Grand Total",
+            rows.Sum(r => r.PredictedAllowed),
+            rows.Sum(r => r.PredictedInsurance),
+            rows.Sum(r => r.ActualAllowed),
+            rows.Sum(r => r.ActualInsurance),
+            rows.Sum(r => r.VarianceAllowed),
+            rows.Sum(r => r.VariancePaid));
 
-        ws.SheetView.FreezeRows(3);
-        ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 12, firstColMinWidth: 34);
+        FormatVarianceColumns(ws, colCount);
+        ws.SheetView.FreezeRows(2);
+        ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 16, firstColMinWidth: 32);
     }
 
-    // ?? No Response Breakdown sheet ?????????????????????????????????????
+    // ── Section C: Predicted to Pay – Denied ─────────────────────────────────
+
+    private static void BuildDeniedSheet(XLWorkbook wb, DenialBreakdown db)
+    {
+        var ws = wb.AddWorksheet("Denied");
+        ws.TabColor = ExcelTheme.TabRed;
+        ExcelTheme.ApplyDefaults(ws);
+        ws.Outline.SummaryVLocation = XLOutlineSummaryVLocation.Top;
+
+        // Main grid matches UI: Payer + amounts only. Denial Code / Description live on
+        // outline detail rows (Excel "open panel" equivalent — expand group rows).
+        int colCount = 1 + VarianceHeaders.Length;
+        ExcelTheme.WriteTitleBar(ws, 1, colCount, "Predicted to Pay – Denied");
+        WriteVarianceHeaderRow(ws, 2, "Payer Name");
+
+        int row = 3;
+        int idx = 0;
+        foreach (var payer in db.PayerRows)
+        {
+            WriteVarianceDataRow(ws, row++, payer.PayerName,
+                payer.TotalPredictedAllowed, payer.TotalPredictedInsurance,
+                payer.ActualAllowed, payer.ActualInsurance,
+                payer.VarianceAllowed, payer.VariancePaid,
+                ExcelTheme.GroupRowBg, bold: true, outlineLevel: 1);
+
+            foreach (var dc in payer.TopDenialCodes)
+            {
+                var detailLabel = string.IsNullOrWhiteSpace(dc.DenialDescription)
+                    ? $"Denial Code: {dc.DenialCode}"
+                    : $"Denial Code: {dc.DenialCode} — {dc.DenialDescription}";
+                WriteVarianceDataRow(ws, row++, detailLabel,
+                    dc.TotalPredictedAllowed, dc.TotalPredictedInsurance,
+                    dc.ActualAllowed, dc.ActualInsurance,
+                    dc.VarianceAllowed, dc.VariancePaid,
+                    ExcelTheme.GetRowBg(idx++), indent: 1, outlineLevel: 2);
+            }
+        }
+
+        WriteVarianceTotalRow(ws, row, "Grand Total",
+            db.TotalPredictedAllowed, db.TotalPredictedInsurance,
+            db.TotalActualAllowed, db.TotalActualInsurance,
+            db.TotalVarianceAllowed, db.TotalVariancePaid);
+
+        FormatVarianceColumns(ws, colCount);
+        ws.SheetView.FreezeRows(2);
+        ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 16, firstColMinWidth: 36);
+    }
+
+    // ── Section D: Predicted to Pay – No Response (aging matrix) ─────────────
 
     private static void BuildNoResponseSheet(XLWorkbook wb, NoResponseBreakdown nr)
     {
-        var ws = wb.AddWorksheet("No Response Breakdown");
+        var ws = wb.AddWorksheet("No Response");
         ws.TabColor = ExcelTheme.TabGold;
         ExcelTheme.ApplyDefaults(ws);
 
-        // Columns: Payer | Total Claims | Pred Allowed | Pred Insurance | <age buckets�> | Priority
         var buckets = AgeBuckets.All;
-        int fixedCols = 4;
-        int colCount = fixedCols + buckets.Count * 3 + 1;
+        int fixedCols = 1;
+        int bucketCols = buckets.Count * 4;
+        int totalCols = 2;
+        int colCount = fixedCols + bucketCols + totalCols;
 
-        ExcelTheme.WriteTitleBar(ws, 1, colCount, "Predicted to Pay vs No Response Breakdown");
+        ExcelTheme.WriteTitleBar(ws, 1, colCount, "Predicted to Pay – No Response (Aging by Days To DOS)");
 
-        string[] fixedHeaders = ["Payer", "Total Claims", "Pred Allowed", "Pred Insurance"];
-        ExcelTheme.WriteHeaderRow(ws, 2, 1, fixedHeaders);
+        ws.Cell(2, 1).Value = "Payer";
+        ws.Cell(2, 1).Style.Font.Bold = true;
+        ws.Cell(2, 1).Style.Font.FontColor = XLColor.White;
+        ws.Cell(2, 1).Style.Fill.BackgroundColor = ExcelTheme.HeaderBg;
+        ws.Cell(2, 1).Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        ws.Range(2, 1, 3, 1).Merge();
 
-        for (int b = 0; b < buckets.Count; b++)
+        int col = 2;
+        foreach (var bkt in buckets)
         {
-            int startCol = fixedCols + b * 3 + 1;
-            var range = ws.Range(2, startCol, 2, startCol + 2);
+            var range = ws.Range(2, col, 2, col + 3);
             range.Merge();
-            var cell = ws.Cell(2, startCol);
-            cell.Value = buckets[b];
+            var cell = ws.Cell(2, col);
+            cell.Value = AgeBuckets.DisplayLabel(bkt);
             cell.Style.Font.Bold = true;
             cell.Style.Font.FontColor = XLColor.White;
             cell.Style.Fill.BackgroundColor = ExcelTheme.SubHeaderBg;
             cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+            string[] sub = ["Sum Var – Allowed", "Sum Var – Paid", "% Var – Allowed", "% Var – Ins. Pmt"];
+            for (int i = 0; i < sub.Length; i++)
+            {
+                var sc = ws.Cell(3, col + i);
+                sc.Value = sub[i];
+                sc.Style.Font.Bold = true;
+                sc.Style.Font.FontColor = XLColor.White;
+                sc.Style.Fill.BackgroundColor = ExcelTheme.HeaderBg;
+                sc.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                sc.Style.Alignment.WrapText = true;
+            }
+            col += 4;
         }
 
-        // Priority header
-        int priCol = colCount;
-        ws.Cell(2, priCol).Value = "Priority";
-        ws.Cell(2, priCol).Style.Font.Bold = true;
-        ws.Cell(2, priCol).Style.Font.FontColor = XLColor.White;
-        ws.Cell(2, priCol).Style.Fill.BackgroundColor = ExcelTheme.HeaderBg;
-        ws.Cell(2, priCol).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        var totalRange = ws.Range(2, col, 2, col + 1);
+        totalRange.Merge();
+        ws.Cell(2, col).Value = "Total";
+        ws.Cell(2, col).Style.Font.Bold = true;
+        ws.Cell(2, col).Style.Font.FontColor = XLColor.White;
+        ws.Cell(2, col).Style.Fill.BackgroundColor = ExcelTheme.TitleBg;
+        ws.Cell(2, col).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
 
-        // Sub-headers
-        string[] subHeaders = ["Claims", "Allowed", "Insurance"];
-        ExcelTheme.WriteHeaderRow(ws, 3, 1, ["", "", "", ""]);
-        for (int b = 0; b < buckets.Count; b++)
-        {
-            int startCol = fixedCols + b * 3 + 1;
-            ExcelTheme.WriteHeaderRow(ws, 3, startCol, subHeaders);
-        }
-        ws.Cell(3, priCol).Value = "Level";
-        ws.Cell(3, priCol).Style.Font.Bold = true;
-        ws.Cell(3, priCol).Style.Font.FontColor = XLColor.White;
-        ws.Cell(3, priCol).Style.Fill.BackgroundColor = ExcelTheme.HeaderBg;
-        ws.Cell(3, priCol).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        ws.Cell(3, col).Value = "Total Var – Allowed";
+        ws.Cell(3, col).Style.Font.Bold = true;
+        ws.Cell(3, col).Style.Font.FontColor = XLColor.White;
+        ws.Cell(3, col).Style.Fill.BackgroundColor = ExcelTheme.TitleBg;
+        ws.Cell(3, col + 1).Value = "Total Var – Paid";
+        ws.Cell(3, col + 1).Style.Font.Bold = true;
+        ws.Cell(3, col + 1).Style.Font.FontColor = XLColor.White;
+        ws.Cell(3, col + 1).Style.Fill.BackgroundColor = ExcelTheme.TitleBg;
 
         int row = 4;
         for (int i = 0; i < nr.PayerRows.Count; i++)
         {
             var p = nr.PayerRows[i];
             var bg = ExcelTheme.GetRowBg(i);
-
             ws.Cell(row, 1).Value = p.PayerName;
-            ws.Cell(row, 2).Value = p.TotalClaims;
-            ws.Cell(row, 3).Value = p.TotalPredictedAllowed;
-            ws.Cell(row, 4).Value = p.TotalPredictedInsurance;
 
-            for (int b = 0; b < buckets.Count; b++)
+            col = 2;
+            foreach (var bkt in buckets)
             {
-                int sc = fixedCols + b * 3 + 1;
-                if (p.ByBucket.TryGetValue(buckets[b], out var ba))
-                {
-                    ws.Cell(row, sc).Value = ba.ClaimCount;
-                    ws.Cell(row, sc + 1).Value = ba.PredictedAllowed;
-                    ws.Cell(row, sc + 2).Value = ba.PredictedInsurance;
-                }
+                var ba = p.ByBucket.GetValueOrDefault(bkt);
+                WriteNullableCurrency(ws.Cell(row, col), ba?.VarianceAllowed);
+                WriteNullableCurrency(ws.Cell(row, col + 1), ba?.VariancePaid);
+                WriteNullablePercent(ws.Cell(row, col + 2), ba?.PctVarianceAllowed);
+                WriteNullablePercent(ws.Cell(row, col + 3), ba?.PctVariancePaid);
+                col += 4;
             }
 
-            ws.Cell(row, priCol).Value = p.PriorityBucket;
+            WriteCurrency(ws.Cell(row, col), p.TotalVarianceAllowed);
+            WriteCurrency(ws.Cell(row, col + 1), p.TotalVariancePaid);
 
             for (int c = 1; c <= colCount; c++)
                 ExcelTheme.StyleDataCell(ws.Cell(row, c), bg);
             row++;
         }
 
-        // Grand Total
         ExcelTheme.StyleTotalRow(ws, row, 1, colCount);
         ws.Cell(row, 1).Value = "Grand Total";
-        ws.Cell(row, 2).Value = nr.TotalClaims;
-        ws.Cell(row, 3).Value = nr.TotalPredictedAllowed;
-        ws.Cell(row, 4).Value = nr.TotalPredictedInsurance;
-        for (int b = 0; b < buckets.Count; b++)
+        col = 2;
+        foreach (var bkt in buckets)
         {
-            int sc = fixedCols + b * 3 + 1;
-            if (nr.TotalByBucket.TryGetValue(buckets[b], out var ba))
-            {
-                ws.Cell(row, sc).Value = ba.ClaimCount;
-                ws.Cell(row, sc + 1).Value = ba.PredictedAllowed;
-                ws.Cell(row, sc + 2).Value = ba.PredictedInsurance;
-            }
+            var tba = nr.TotalByBucket.GetValueOrDefault(bkt);
+            WriteNullableCurrency(ws.Cell(row, col), tba?.VarianceAllowed);
+            WriteNullableCurrency(ws.Cell(row, col + 1), tba?.VariancePaid);
+            col += 4;
         }
+        WriteCurrency(ws.Cell(row, col), nr.TotalVarianceAllowed);
+        WriteCurrency(ws.Cell(row, col + 1), nr.TotalVariancePaid);
 
-        ws.Column(2).Style.NumberFormat.Format = "#,##0";
-        ws.Column(3).Style.NumberFormat.Format = "$#,##0";
-        ws.Column(4).Style.NumberFormat.Format = "$#,##0";
-        for (int b = 0; b < buckets.Count; b++)
+        ws.Column(1).Style.NumberFormat.Format = "@";
+        for (int c = 2; c <= colCount; c++)
         {
-            int sc = fixedCols + b * 3 + 1;
-            ws.Column(sc).Style.NumberFormat.Format = "#,##0";
-            ws.Column(sc + 1).Style.NumberFormat.Format = "$#,##0";
-            ws.Column(sc + 2).Style.NumberFormat.Format = "$#,##0";
+            if ((c - 2) % 4 is 2 or 3)
+                ws.Column(c).Style.NumberFormat.Format = "0.00\"%\"";
+            else
+                ws.Column(c).Style.NumberFormat.Format = "$#,##0.00";
         }
 
         ws.SheetView.FreezeRows(3);
-        ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 11, firstColMinWidth: 28);
+        ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 12, firstColMinWidth: 28);
+    }
+
+    // ── Section E: Predicted to Pay – Adjusted ───────────────────────────────
+
+    private static void BuildAdjustedSheet(XLWorkbook wb, IReadOnlyList<PredictionAdjustedPayerRow> rows)
+    {
+        var ws = wb.AddWorksheet("Adjusted");
+        ws.TabColor = ExcelTheme.TabGreen;
+        ExcelTheme.ApplyDefaults(ws);
+
+        int colCount = 1 + VarianceHeaders.Length;
+        ExcelTheme.WriteTitleBar(ws, 1, colCount, "Predicted to Pay – Adjusted");
+        WriteVarianceHeaderRow(ws, 2);
+
+        int row = 3;
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var r = rows[i];
+            WriteVarianceDataRow(ws, row++, r.PayerName,
+                r.PredictedAllowed, r.PredictedInsurance,
+                r.ActualAllowed, r.ActualInsurance,
+                r.VarianceAllowed, r.VariancePaid,
+                ExcelTheme.GetRowBg(i), bold: true);
+        }
+
+        WriteVarianceTotalRow(ws, row, "Grand Total",
+            rows.Sum(r => r.PredictedAllowed),
+            rows.Sum(r => r.PredictedInsurance),
+            rows.Sum(r => r.ActualAllowed),
+            rows.Sum(r => r.ActualInsurance),
+            rows.Sum(r => r.VarianceAllowed),
+            rows.Sum(r => r.VariancePaid));
+
+        FormatVarianceColumns(ws, colCount);
+        ws.SheetView.FreezeRows(2);
+        ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 16, firstColMinWidth: 28);
+    }
+
+    // ── Shared variance-table helpers ────────────────────────────────────────
+
+    private static void WriteVarianceHeaderRow(IXLWorksheet ws, int row, string? firstCol = null)
+    {
+        var headers = new[] { firstCol ?? "Payer Name" }.Concat(VarianceHeaders).ToArray();
+        ExcelTheme.WriteHeaderRow(ws, row, 1, headers);
+    }
+
+    private static void WriteVarianceDataRow(IXLWorksheet ws, int row, string label,
+        decimal predAllowed, decimal predIns, decimal actAllowed, decimal actIns,
+        decimal varAllowed, decimal varPaid, XLColor bg,
+        bool bold = false, int indent = 0, int outlineLevel = 0)
+    {
+        if (outlineLevel > 0)
+            ws.Row(row).OutlineLevel = outlineLevel;
+
+        ws.Cell(row, 1).Value = label;
+        if (bold) ws.Cell(row, 1).Style.Font.Bold = true;
+        if (indent > 0) ws.Cell(row, 1).Style.Alignment.Indent = indent;
+
+        ws.Cell(row, 2).Value = predAllowed;
+        ws.Cell(row, 3).Value = predIns;
+        ws.Cell(row, 4).Value = actAllowed;
+        ws.Cell(row, 5).Value = actIns;
+        ws.Cell(row, 6).Value = varAllowed;
+        ws.Cell(row, 7).Value = varPaid;
+
+        for (int c = 1; c <= 7; c++)
+            ExcelTheme.StyleDataCell(ws.Cell(row, c), bg);
+    }
+
+    private static void WriteVarianceTotalRow(IXLWorksheet ws, int row, string label,
+        decimal predAllowed, decimal predIns, decimal actAllowed, decimal actIns,
+        decimal varAllowed, decimal varPaid)
+    {
+        ExcelTheme.StyleTotalRow(ws, row, 1, 7);
+        ws.Cell(row, 1).Value = label;
+        ws.Cell(row, 2).Value = predAllowed;
+        ws.Cell(row, 3).Value = predIns;
+        ws.Cell(row, 4).Value = actAllowed;
+        ws.Cell(row, 5).Value = actIns;
+        ws.Cell(row, 6).Value = varAllowed;
+        ws.Cell(row, 7).Value = varPaid;
+    }
+
+    private static void FormatVarianceColumns(IXLWorksheet ws, int colCount, int firstDataCol = 2)
+    {
+        for (int c = firstDataCol; c <= colCount; c++)
+            ws.Column(c).Style.NumberFormat.Format = "$#,##0.00";
+    }
+
+    private static void WriteCurrency(IXLCell cell, decimal value)
+    {
+        cell.Value = value;
+        cell.Style.NumberFormat.Format = "$#,##0.00";
+    }
+
+    private static void WriteNullableCurrency(IXLCell cell, decimal? value)
+    {
+        if (value.HasValue)
+            WriteCurrency(cell, value.Value);
+    }
+
+    private static void WriteNullablePercent(IXLCell cell, decimal? value)
+    {
+        if (value.HasValue)
+        {
+            cell.Value = value.Value;
+            cell.Style.NumberFormat.Format = "0.00\"%\"";
+        }
     }
 }

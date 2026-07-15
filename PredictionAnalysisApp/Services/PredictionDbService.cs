@@ -13,9 +13,26 @@ public class PredictionDbService
 {
     private readonly string _connectionString;
     private readonly int    _chunkSize;
+    /// <summary>0 = auto from row count / defaults.</summary>
+    private readonly int    _configuredAggregateChunkSize;
+    /// <summary>0 = auto from row count / defaults.</summary>
+    private readonly int    _configuredAggregateRefreshTimeoutSeconds;
+    private readonly int    _largeLabRowThreshold;
 
     /// <summary>Fallback chunk size when caller passes 0 / negative.</summary>
     public const int DefaultChunkSize = 25_000;
+
+    /// <summary>Default SP CommandTimeout for aggregate refresh (seconds) on normal labs.</summary>
+    public const int DefaultAggregateRefreshTimeoutSeconds = 600;
+
+    /// <summary>Timeout for labs at/above large-lab row threshold.</summary>
+    public const int LargeLabAggregateRefreshTimeoutSeconds = 3600;
+
+    /// <summary>ReportId window used when chunking (any lab over threshold).</summary>
+    public const int DefaultAggregateChunkSize = 100_000;
+
+    /// <summary>7 lakh — auto-enable long timeout + explicit chunk size.</summary>
+    public const int DefaultLargeLabRowThreshold = 700_000;
 
     // Maps each source Excel header (exact text) to its TVP column name.
     // Keys are case-insensitive; unknown headers are silently ignored.
@@ -118,10 +135,22 @@ public class PredictionDbService
             ["DaystoPost"]                                      = "DaysToPost",
         };
 
-    public PredictionDbService(string connectionString, int chunkSize = DefaultChunkSize)
+    public PredictionDbService(
+        string connectionString,
+        int chunkSize = DefaultChunkSize,
+        int aggregateChunkSize = 0,
+        int aggregateRefreshTimeoutSeconds = 0,
+        int largeLabRowThreshold = 0)
     {
         _connectionString = connectionString;
         _chunkSize        = chunkSize > 0 ? chunkSize : DefaultChunkSize;
+        _configuredAggregateChunkSize = aggregateChunkSize > 0 ? aggregateChunkSize : 0;
+        _configuredAggregateRefreshTimeoutSeconds = aggregateRefreshTimeoutSeconds > 0
+            ? aggregateRefreshTimeoutSeconds
+            : 0;
+        _largeLabRowThreshold = largeLabRowThreshold > 0
+            ? largeLabRowThreshold
+            : DefaultLargeLabRowThreshold;
     }
 
     // ?? Public entry point ????????????????????????????????????????????????????
@@ -233,6 +262,8 @@ public class PredictionDbService
             AppLogger.LogDb($"[{labName}] FileLog inserted � FileLogId={fileLogId}");
 
             BulkInsertRows(records, fileLogId, effectiveRunId, effectiveWeekFolder, labName, sourceFilePath);
+
+            UpdatePredictionFields(labName, effectiveRunId);
 
             AppLogger.LogDb($"[{labName}] Saved {records.Count} rows successfully");
         }
@@ -374,16 +405,62 @@ public class PredictionDbService
     }
 
     /// <summary>
-    /// Runs <c>dbo.usp_RefreshAllPredictionAggregates</c> to populate the PV_* snapshot
-    /// tables that the LabMetricsDashboard reads from. Safe to call even when the
-    /// snapshot tables / SP are not yet deployed ? failures are caught and logged
-    /// so the prediction pipeline is never blocked.
+    /// Updates ForecastingPayabilitySubstatus, PredictionStatus, and variance columns
+    /// on all rows for the run. Called once after bulk insert completes.
     /// </summary>
-    public void RefreshAggregatesForRun(string labName, string? runId, DateTime? weekStartDate = null)
+    public void UpdatePredictionFields(string labName, string? runId)
+    {
+        if (string.IsNullOrWhiteSpace(runId)) return;
+
+        try
+        {
+            using var conn = new SqlConnection(_connectionString);
+            conn.Open();
+            var (chunkSize, timeoutSeconds, rowCount, isLarge) = ResolveAggregateSettings(conn, runId, labName);
+
+            using var cmd = new SqlCommand("dbo.usp_UpdatePayerValidationPredictionFields", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = timeoutSeconds
+            };
+            cmd.Parameters.AddWithValue("@RunId",   runId);
+            cmd.Parameters.AddWithValue("@LabName", labName);
+            // Chunked UPDATE only when SP supports @ChunkSize (10_*). Pass for large labs /
+            // when JSON override is set. Same formulas — counts unchanged.
+            if (isLarge || _configuredAggregateChunkSize > 0)
+                cmd.Parameters.AddWithValue("@ChunkSize", chunkSize);
+
+            cmd.ExecuteNonQuery();
+            AppLogger.LogDb(
+                $"[{labName}] Prediction fields updated for RunId={runId} " +
+                $"(rows≈{rowCount:N0}, largeLab={isLarge}, chunk={chunkSize}).");
+        }
+        catch (Exception ex)
+        {
+            AppLogger.LogDbError($"[{labName}] UpdatePredictionFields failed", ex);
+        }
+    }
+
+    /// <summary>
+    /// Runs <c>dbo.usp_RefreshAllPredictionAggregates</c> to populate the PV_* snapshot
+    /// tables that the LabMetricsDashboard reads from. After refresh, automatically
+    /// enriches blank DenialDescription from LRNMaster (SQL SP when same-server, then
+    /// C# enricher when <paramref name="masterDbConnectionString"/> is set).
+    /// <para>
+    /// Any lab with PayerValidationReport rows &gt;= 7 lakh (or JSON override) uses
+    /// ReportId chunking into PV_WorkingBase. Formulas match live Get SPs —
+    /// COUNT(DISTINCT VisitNumber) / SUMs do not change.
+    /// </para>
+    /// </summary>
+    public void RefreshAggregatesForRun(
+        string labName,
+        string? runId,
+        DateTime? weekStartDate = null,
+        string? masterDbConnectionString = null)
     {
         if (string.IsNullOrWhiteSpace(runId))
         {
-            AppLogger.LogDbWarn($"[{labName}] Aggregate refresh skipped ? RunId is blank.");
+            AppLogger.LogDbWarn($"[{labName}] Aggregate refresh skipped — RunId is blank.");
             return;
         }
 
@@ -395,18 +472,50 @@ public class PredictionDbService
             using var conn = new SqlConnection(_connectionString);
             conn.Open();
 
-            using var cmd = new SqlCommand("dbo.usp_RefreshAllPredictionAggregates", conn)
+            var (chunkSize, timeoutSeconds, rowCount, isLarge) = ResolveAggregateSettings(conn, runId, labName);
+
+            using (var cmd = new SqlCommand("dbo.usp_RefreshAllPredictionAggregates", conn)
             {
                 CommandType    = CommandType.StoredProcedure,
-                CommandTimeout = 600
-            };
-            cmd.Parameters.AddWithValue("@RunId", runId);
-            cmd.Parameters.AddWithValue("@WeekStartDate",
-                (object?)weekStartDate?.Date ?? DBNull.Value);
+                CommandTimeout = timeoutSeconds
+            })
+            {
+                cmd.Parameters.AddWithValue("@RunId", runId);
+                cmd.Parameters.AddWithValue("@WeekStartDate",
+                    (object?)weekStartDate?.Date ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@LabName", labName);
+                cmd.Parameters.AddWithValue("@ChunkSize", chunkSize);
+                AppLogger.LogDb(
+                    $"[{labName}] Aggregate refresh rows≈{rowCount:N0}, largeLab={isLarge} " +
+                    $"(threshold={_largeLabRowThreshold:N0}), ChunkSize={chunkSize}, Timeout={timeoutSeconds}s. " +
+                    "Chunking loads WorkingBase only — aggregate counts/results identical to single-pass.");
+                cmd.ExecuteNonQuery();
+            }
 
-            cmd.ExecuteNonQuery();
+            // Always attempt SP enrich after aggregates (idempotent; no-op if LRNMaster unreachable).
+            try
+            {
+                using var enrichCmd = new SqlCommand("dbo.usp_EnrichPV_DenialDescriptionFromMaster", conn)
+                {
+                    CommandType    = CommandType.StoredProcedure,
+                    CommandTimeout = 300
+                };
+                enrichCmd.ExecuteNonQuery();
+                AppLogger.LogDb($"[{labName}] usp_EnrichPV_DenialDescriptionFromMaster completed.");
+            }
+            catch (SqlException sqlEx) when (
+                sqlEx.Number is 2812 or 208 or 229 or 4060) // missing SP / object / permission / DB
+            {
+                AppLogger.LogDbWarn(
+                    $"[{labName}] usp_EnrichPV_DenialDescriptionFromMaster skipped: {sqlEx.Message}");
+            }
+            catch (Exception enrichSpEx)
+            {
+                AppLogger.LogDbWarn(
+                    $"[{labName}] usp_EnrichPV_DenialDescriptionFromMaster failed (non-fatal): {enrichSpEx.Message}");
+            }
+
             sw.Stop();
-
             AppLogger.LogDb(
                 $"[{labName}] Aggregate snapshot refresh complete in {sw.Elapsed.TotalSeconds:F1}s.");
         }
@@ -416,6 +525,67 @@ public class PredictionDbService
             AppLogger.LogDbError(
                 $"[{labName}] Aggregate snapshot refresh failed (dashboard will fall back to live SPs)", ex);
         }
+
+        // Cross-server enrich (lab DB + LRNMaster may differ) — requires MasterDbConnectionString.
+        if (!string.IsNullOrWhiteSpace(masterDbConnectionString)
+            && !string.IsNullOrWhiteSpace(_connectionString))
+        {
+            try
+            {
+                DenialDescriptionEnricher.EnrichLabAggregates(
+                    _connectionString, masterDbConnectionString, labName);
+            }
+            catch (Exception enrichEx)
+            {
+                AppLogger.LogDbWarn(
+                    $"[{labName}] DenialDescription C# enrich from LRNMaster failed: {enrichEx.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Resolves chunk size + timeout. Large labs (any name) with row count &gt;= threshold
+    /// get ChunkSize 100k + 1h timeout unless JSON overrides. Math is unchanged either way.
+    /// </summary>
+    private (int ChunkSize, int TimeoutSeconds, long RowCount, bool IsLargeLab) ResolveAggregateSettings(
+        SqlConnection conn,
+        string runId,
+        string labName)
+    {
+        long rowCount = 0;
+        try
+        {
+            using var countCmd = new SqlCommand(
+                """
+                SELECT COUNT_BIG(1)
+                FROM dbo.PayerValidationReport
+                WHERE CONVERT(NVARCHAR(100), RunId) = @RunId
+                  AND (@LabName IS NULL OR @LabName = N'' OR LabName = @LabName)
+                """,
+                conn)
+            {
+                CommandTimeout = 120
+            };
+            countCmd.Parameters.AddWithValue("@RunId", runId);
+            countCmd.Parameters.AddWithValue("@LabName", (object?)labName ?? DBNull.Value);
+            var scalar = countCmd.ExecuteScalar();
+            if (scalar is not null and not DBNull)
+                rowCount = Convert.ToInt64(scalar);
+        }
+        catch (Exception ex)
+        {
+            AppLogger.LogDbWarn($"[{labName}] Row-count probe failed (will use defaults): {ex.Message}");
+        }
+
+        var isLarge = rowCount >= _largeLabRowThreshold;
+        var chunkSize = _configuredAggregateChunkSize > 0
+            ? _configuredAggregateChunkSize
+            : DefaultAggregateChunkSize; // same WorkingBase path for all labs once 10_* is deployed
+        var timeout = _configuredAggregateRefreshTimeoutSeconds > 0
+            ? _configuredAggregateRefreshTimeoutSeconds
+            : (isLarge ? LargeLabAggregateRefreshTimeoutSeconds : DefaultAggregateRefreshTimeoutSeconds);
+
+        return (chunkSize, timeout, rowCount, isLarge);
     }
 
     private static DataTable BuildTvp(

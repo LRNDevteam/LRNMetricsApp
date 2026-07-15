@@ -1,7 +1,5 @@
 using LabMetricsDashboard.Models;
 
-using LabMetricsDashboard.Models;
-
 namespace LabMetricsDashboard.Services;
 
 /// <summary>
@@ -68,6 +66,8 @@ public interface IPredictionDbRepository
         string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
         string? filterPanelName = null, string? filterFinalCoverageStatus = null,
         string? filterPayability = null, string? filterCPTCode = null,
+        string? filterForecastingPayability = null, string? filterPayStatus = null,
+        string? filterForecastingPayabilitySubstatus = null, string? filterPredictionStatus = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>Returns payer-level validation rows (usp_GetPredictionValidationByPayer).</summary>
@@ -76,6 +76,8 @@ public interface IPredictionDbRepository
         string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
         string? filterPanelName = null, string? filterFinalCoverageStatus = null,
         string? filterPayability = null, string? filterCPTCode = null,
+        string? filterForecastingPayability = null, string? filterPayStatus = null,
+        string? filterForecastingPayabilitySubstatus = null, string? filterPredictionStatus = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>Returns panel-level validation rows (usp_GetPredictionValidationByPanel).</summary>
@@ -100,6 +102,8 @@ public interface IPredictionDbRepository
         string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
         string? filterPanelName = null, string? filterFinalCoverageStatus = null,
         string? filterPayability = null, string? filterCPTCode = null,
+        string? filterForecastingPayability = null, string? filterPayStatus = null,
+        string? filterForecastingPayabilitySubstatus = null, string? filterPredictionStatus = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>Returns flat no-response breakdown rows (usp_GetPredictionNoResponseBreakdown).</summary>
@@ -108,6 +112,8 @@ public interface IPredictionDbRepository
         string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
         string? filterPanelName = null, string? filterFinalCoverageStatus = null,
         string? filterPayability = null, string? filterCPTCode = null,
+        string? filterForecastingPayability = null, string? filterPayStatus = null,
+        string? filterForecastingPayabilitySubstatus = null, string? filterPredictionStatus = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -121,6 +127,31 @@ public interface IPredictionDbRepository
         string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
         string? filterPanelName = null, string? filterFinalCoverageStatus = null,
         string? filterPayability = null, string? filterCPTCode = null,
+        string? filterForecastingPayability = null, string? filterPayStatus = null,
+        string? filterForecastingPayabilitySubstatus = null, string? filterPredictionStatus = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Payer x PayStatus drill-down for Section B modal.</summary>
+    Task<List<PayerPayStatusSpRow>> GetPayerPayStatusBreakdownAsync(
+        string connectionString, DateOnly weekStartDate,
+        string? runId = null, string? filterPayerName = null,
+        string? filterForecastingPayability = null, string? filterPayStatus = null,
+        string? filterForecastingPayabilitySubstatus = null, string? filterPredictionStatus = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Section E — Predicted to Pay Adjusted by payer.</summary>
+    Task<List<AdjustedByPayerSpRow>> GetAdjustedByPayerAsync(
+        string connectionString, DateOnly weekStartDate,
+        string? runId = null, string? filterPayerName = null, string? filterPayerType = null,
+        string? filterPanelName = null, string? filterFinalCoverageStatus = null,
+        string? filterPayability = null, string? filterCPTCode = null,
+        string? filterForecastingPayability = null, string? filterPayStatus = null,
+        string? filterForecastingPayabilitySubstatus = null, string? filterPredictionStatus = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Distinct filter dropdown values from PayerValidationReport.</summary>
+    Task<PredictionFilterOptions> GetFilterOptionsAsync(
+        string connectionString, string? runId = null,
         CancellationToken cancellationToken = default);
 }
 

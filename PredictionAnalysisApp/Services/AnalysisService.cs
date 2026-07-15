@@ -1,4 +1,4 @@
-﻿using PredictionAnalysis.Models;
+using PredictionAnalysis.Models;
 
 namespace PredictionAnalysis.Services;
 
@@ -17,13 +17,8 @@ public class AnalysisService
 
     public List<ClaimRecord> BuildWorkingDataset(List<ClaimRecord> all)
     {
-        var weekStart = GetCurrentWeekStart();
-
-        var step2 = all
-            .Where(r => r.ExpectedPaymentDate.HasValue
-                     && r.ExpectedPaymentDate.Value.Date < weekStart)
-            .ToList();
-        Console.WriteLine($"[Step 2] Cutoff < {weekStart:yyyy-MM-dd}. Rows remaining: {step2.Count}");
+        var step2 = all.ToList();
+        Console.WriteLine($"[Step 2] All rows (no Expected Payment Date cutoff). Rows: {step2.Count}");
 
         var step3 = step2
             .Where(r => _settings.ForecastingPIncludeValues
@@ -65,10 +60,7 @@ public class AnalysisService
 
     public List<ClaimRecord> BuildPredictedPayableDataset(List<ClaimRecord> all)
     {
-        var weekStart = GetCurrentWeekStart();
         return all
-            .Where(r => r.ExpectedPaymentDate.HasValue
-                     && r.ExpectedPaymentDate.Value.Date < weekStart)
             .Where(r => _settings.ForecastingPIncludeValues
                 .Contains(r.ForecastingP.Trim(), StringComparer.OrdinalIgnoreCase))
             .ToList();
@@ -82,9 +74,7 @@ public class AnalysisService
         static decimal Pct(decimal num, decimal denom)
             => denom == 0 ? 0m : Math.Round(num / denom * 100, 2);
 
-        // ── Aggregate helper: count, predAllowed, predInsurance, actAllowed, actInsurance ──
-        // Group by VisitNumber and take Max per visit to avoid double-counting
-        // when a single visit has multiple line items.
+        // ── Aggregate helper: distinct Visit# counts; dollar totals summed per visit (max per visit) ──
         static (int cnt, decimal predAllowed, decimal predIns, decimal actAllowed, decimal actIns)
             Agg(List<ClaimRecord> rows)
         {

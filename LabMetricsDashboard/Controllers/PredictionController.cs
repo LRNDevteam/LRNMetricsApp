@@ -15,6 +15,7 @@ public class PredictionController : Controller
     private readonly PredictionReportParserService _parser;
     private readonly IPredictionDbRepository _dbRepo;
     private readonly PredictionInsightLoader _insightLoader;
+    private readonly DenialDescriptionMasterLookup _denialDescLookup;
     private readonly ILogger<PredictionController> _logger;
 
     public PredictionController(
@@ -23,14 +24,16 @@ public class PredictionController : Controller
         PredictionReportParserService parser,
         IPredictionDbRepository dbRepo,
         PredictionInsightLoader insightLoader,
+        DenialDescriptionMasterLookup denialDescLookup,
         ILogger<PredictionController> logger)
     {
-        _labSettings   = labSettings;
-        _resolver      = resolver;
-        _parser        = parser;
-        _dbRepo        = dbRepo;
-        _insightLoader = insightLoader;
-        _logger        = logger;
+        _labSettings      = labSettings;
+        _resolver         = resolver;
+        _parser           = parser;
+        _dbRepo           = dbRepo;
+        _insightLoader    = insightLoader;
+        _denialDescLookup = denialDescLookup;
+        _logger           = logger;
     }
 
     /// <summary>
@@ -49,6 +52,10 @@ public class PredictionController : Controller
         string? filterFinalCoverageStatus,
         string? filterPayability,
         string? filterCPTCode,
+        string? filterForecastingPayability,
+        string? filterPayStatus,
+        string? filterForecastingPayabilitySubstatus,
+        string? filterPredictionStatus,
         int page = 1)
     {
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
@@ -70,7 +77,7 @@ public class PredictionController : Controller
             });
         }
 
-        // Week-start cutoff (Monday of current ISO week) – needed for both paths
+        // Week-start (Monday) — used for trend charts and display only, not for data filtering
         var today          = DateOnly.FromDateTime(DateTime.Today);
         var daysFromMonday = ((int)today.DayOfWeek + 6) % 7;
         var weekStart      = today.AddDays(-daysFromMonday);
@@ -79,79 +86,57 @@ public class PredictionController : Controller
         List<PredictionRecord> baseDataset;
         string? filePath = null;
         bool    usingDb  = labConfig?.DBEnabled == true;
+        PredictionDbDiagnostic? dbProbe = null;
 
         if (usingDb)
         {
             try
             {
-                var rawRecords = await _dbRepo.GetRecordsAsync(
+                dbProbe = await _dbRepo.ProbeAsync(
                     labConfig!.DbConnectionString ?? string.Empty,
-                    cancellationToken: HttpContext.RequestAborted);
+                    HttpContext.RequestAborted);
 
-                _logger.LogInformation("[{Lab}] DB source returned {Count} raw records before global filter.", selectedLab, rawRecords.Count);
-
-                baseDataset = PredictionReportParserService.ApplyGlobalFilter(rawRecords, weekStart);
-
-                _logger.LogInformation("[{Lab}] After global filter (ForecastPayability + ExpPmtDate < {WeekStart}): {Count} records.",
-                    selectedLab, weekStart, baseDataset.Count);
-
-                if (baseDataset.Count == 0 && rawRecords.Count > 0)
+                if (!dbProbe.IsReady)
                 {
-                    var forecastOnly = rawRecords
-                        .Where(r => PredictionReportParserService.IsForecastPayable(r.ForecastingPayability))
-                        .ToList();
-
-                    var parseableDates = forecastOnly.Count == 0
-                        ? 0
-                        : forecastOnly.Count(r => PredictionReportParserService.TryParseDate(r.ExpectedPaymentDate, out _));
-
                     _logger.LogWarning(
-                        "[{Lab}] DB returned {RawCount} rows but strict Prediction filter returned 0. " +
-                        "Forecast-only rows={ForecastCount}; parseable ExpectedPaymentDate rows={ParseableDates}. " +
-                        "Falling back to forecast-only rows so the UI can display available prediction data. " +
-                        "Sample ForecastingPayability=[{ForecastSamples}], ExpectedPaymentDate=[{DateSamples}]",
-                        selectedLab,
-                        rawRecords.Count,
-                        forecastOnly.Count,
-                        parseableDates,
-                        string.Join(" | ", rawRecords.Select(r => r.ForecastingPayability).Where(v => !string.IsNullOrWhiteSpace(v)).Distinct().Take(8)),
-                        string.Join(" | ", rawRecords.Select(r => r.ExpectedPaymentDate).Where(v => !string.IsNullOrWhiteSpace(v)).Distinct().Take(8)));
-
-                    baseDataset = forecastOnly.Count > 0 ? forecastOnly : rawRecords;
-                }
-
-                // If the SP returned 0 rows, run a diagnostic probe so the page can
-                // explain *why* the dataset is empty (table missing, SP missing,
-                // never populated for this lab, etc.) instead of rendering blanks.
-                if (rawRecords.Count == 0)
-                {
-                    var diag = await _dbRepo.ProbeAsync(labConfig.DbConnectionString ?? string.Empty, HttpContext.RequestAborted);
-                    if (!diag.IsReady)
+                        "[{Lab}] Prediction DB probe: TableExists={T}, ProcExists={P}, Rows={N}, LatestRunId={R}, LastRun={D}, Error={E}",
+                        selectedLab, dbProbe.TableExists, dbProbe.ProcedureExists, dbProbe.RowCount,
+                        dbProbe.LatestRunId, dbProbe.LatestRunInsertedAt, dbProbe.ErrorMessage);
+                    return View(new PredictionAnalysisViewModel
                     {
-                        _logger.LogWarning("[{Lab}] Prediction DB probe: TableExists={T}, ProcExists={P}, Rows={N}, LatestRunId={R}, LastRun={D}, Error={E}",
-                            selectedLab, diag.TableExists, diag.ProcedureExists, diag.RowCount, diag.LatestRunId, diag.LatestRunInsertedAt, diag.ErrorMessage);
-                        return View(new PredictionAnalysisViewModel
-                        {
-                            AvailableLabs        = availableLabs,
-                            SelectedLab          = selectedLab,
-                            PredictionAvailable  = false,
-                            ErrorMessage         = $"Prediction Analysis is not yet available for {selectedLab}. {diag.ErrorMessage}",
-                            CurrentWeekStartDate = weekStart,
-                        });
-                    }
+                        AvailableLabs        = availableLabs,
+                        SelectedLab          = selectedLab,
+                        PredictionAvailable  = false,
+                        ErrorMessage         = $"Prediction Analysis is not yet available for {selectedLab}. {dbProbe.ErrorMessage}",
+                        CurrentWeekStartDate = weekStart,
+                    });
                 }
+
+                baseDataset = [];
+                _logger.LogInformation(
+                    "[{Lab}] DB index: skipping full line load ({RowCount} rows in source table); aggregates from PV_* snapshots / SPs.",
+                    selectedLab, dbProbe.RowCount);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[{Lab}] Prediction DB read failed; running diagnostic probe.", selectedLab);
-                var diag = await _dbRepo.ProbeAsync(labConfig!.DbConnectionString ?? string.Empty, HttpContext.RequestAborted);
-                var detail = diag.ErrorMessage ?? ex.Message;
+                _logger.LogError(ex, "[{Lab}] Prediction DB probe failed.", selectedLab);
+                PredictionDbDiagnostic diag;
+                try
+                {
+                    diag = await _dbRepo.ProbeAsync(
+                        labConfig!.DbConnectionString ?? string.Empty, HttpContext.RequestAborted);
+                }
+                catch
+                {
+                    diag = new PredictionDbDiagnostic(false, false, 0, null, null, ex.Message);
+                }
+
                 return View(new PredictionAnalysisViewModel
                 {
                     AvailableLabs        = availableLabs,
                     SelectedLab          = selectedLab,
                     PredictionAvailable  = false,
-                    ErrorMessage         = $"Failed to load Prediction Analysis for {selectedLab}: {detail}",
+                    ErrorMessage         = $"Failed to load Prediction Analysis for {selectedLab}: {diag.ErrorMessage ?? ex.Message}",
                     CurrentWeekStartDate = weekStart,
                 });
             }
@@ -163,12 +148,12 @@ public class PredictionController : Controller
                 : _resolver.ResolvePredictionValidationReport(selectedLab);
 
             baseDataset = filePath is not null
-                ? _parser.ParseFiltered(filePath, weekStart)
+                ? _parser.ParseFiltered(filePath)
                 : [];
 
             _logger.LogInformation(
-                "[{Lab}] File source returned {Count} records. WeekStart={WeekStart}",
-                selectedLab, baseDataset.Count, weekStart);
+                "[{Lab}] File source returned {Count} records.",
+                selectedLab, baseDataset.Count);
         }
 
         // Filter-option lists (always from the full base dataset)
@@ -194,8 +179,16 @@ public class PredictionController : Controller
             filtered = filtered.Where(r => r.Payability.Equals(filterPayability, StringComparison.OrdinalIgnoreCase));
         if (!string.IsNullOrWhiteSpace(filterCPTCode))
             filtered = filtered.Where(r => r.CPTCode.Equals(filterCPTCode, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(filterForecastingPayability))
+            filtered = filtered.Where(r => r.ForecastingPayability.Equals(filterForecastingPayability, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(filterPayStatus))
+            filtered = filtered.Where(r => (string.IsNullOrWhiteSpace(r.PayStatus) ? "(Blank)" : r.PayStatus).Equals(filterPayStatus, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(filterForecastingPayabilitySubstatus))
+            filtered = filtered.Where(r => r.ForecastingPayabilitySubstatus.Equals(filterForecastingPayabilitySubstatus, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(filterPredictionStatus))
+            filtered = filtered.Where(r => r.PredictionStatus.Equals(filterPredictionStatus, StringComparison.OrdinalIgnoreCase));
 
-        // Single materialisation – used for paged detail, weekly forecast, and filter options
+        // Single materialisation
         var dataset = filtered.ToList();
 
         // ── DB path: all displayed aggregates come from SPs ────────────────────
@@ -204,79 +197,90 @@ public class PredictionController : Controller
         List<PredictionPayerRow>           topPayers;
         List<PredictionPanelRow>           topPanels;
         List<PredictionCptRow>             topCpt;
+        List<PredictionPayerPayStatusRow>    payerPayStatusRows;
+        List<PredictionAdjustedPayerRow>   adjustedByPayer;
         DenialBreakdown                    denialBreakdown;
         NoResponseBreakdown                noResponseBreakdown;
-        PredictionSummaryMetricsSpRow?     spMetrics = null; // populated by SP 12 on DB path
+        PredictionSummaryMetricsSpRow?     spMetrics = null;
+        List<string> forecastingPayabilities;
+        List<string> payStatuses;
+        List<string> substatuses;
+        List<string> predStatuses;
 
         if (usingDb)
         {
             var connStr = labConfig!.DbConnectionString ?? string.Empty;
             var ct      = HttpContext.RequestAborted;
 
-            // Fire all 7 SP calls in parallel – they each open their own connection
-            var bucketTask       = _dbRepo.GetSummaryBucketsAsync      (connStr, weekStart, filterPayerName: filterPayerName, filterPayerType: filterPayerType, filterPanelName: filterPanelName, filterFinalCoverageStatus: filterFinalCoverageStatus, filterPayability: filterPayability, filterCPTCode: filterCPTCode, cancellationToken: ct);
-            var metricsTask      = _dbRepo.GetSummaryMetricsAsync      (connStr, weekStart, filterPayerName: filterPayerName, filterPayerType: filterPayerType, filterPanelName: filterPanelName, filterFinalCoverageStatus: filterFinalCoverageStatus, filterPayability: filterPayability, filterCPTCode: filterCPTCode, cancellationToken: ct);
-            var payerTask        = _dbRepo.GetValidationByPayerAsync    (connStr, weekStart, filterPayerName: filterPayerName, filterPayerType: filterPayerType, filterPanelName: filterPanelName, filterFinalCoverageStatus: filterFinalCoverageStatus, filterPayability: filterPayability, filterCPTCode: filterCPTCode, cancellationToken: ct);
-            var panelTask        = _dbRepo.GetValidationByPanelAsync    (connStr, weekStart, filterPayerName: filterPayerName, filterPayerType: filterPayerType, filterPanelName: filterPanelName, filterFinalCoverageStatus: filterFinalCoverageStatus, filterPayability: filterPayability, filterCPTCode: filterCPTCode, cancellationToken: ct);
-            var cptTask          = _dbRepo.GetValidationByCptAsync      (connStr, weekStart, filterPayerName: filterPayerName, filterPayerType: filterPayerType, filterPanelName: filterPanelName, filterFinalCoverageStatus: filterFinalCoverageStatus, filterPayability: filterPayability, filterCPTCode: filterCPTCode, cancellationToken: ct);
-            var denialTask       = _dbRepo.GetDenialBreakdownAsync      (connStr, weekStart, filterPayerName: filterPayerName, filterPayerType: filterPayerType, filterPanelName: filterPanelName, filterFinalCoverageStatus: filterFinalCoverageStatus, filterPayability: filterPayability, filterCPTCode: filterCPTCode, cancellationToken: ct);
-            var noRespTask       = _dbRepo.GetNoResponseBreakdownAsync  (connStr, weekStart, filterPayerName: filterPayerName, filterPayerType: filterPayerType, filterPanelName: filterPanelName, filterFinalCoverageStatus: filterFinalCoverageStatus, filterPayability: filterPayability, filterCPTCode: filterCPTCode, cancellationToken: ct);
+            var filterOptsTask   = _dbRepo.GetFilterOptionsAsync(connStr, cancellationToken: ct);
+            var bucketTask       = _dbRepo.GetSummaryBucketsAsync      (connStr, weekStart, filterPayerName: filterPayerName, filterPayerType: filterPayerType, filterPanelName: filterPanelName, filterFinalCoverageStatus: filterFinalCoverageStatus, filterPayability: filterPayability, filterCPTCode: filterCPTCode, filterForecastingPayability: filterForecastingPayability, filterPayStatus: filterPayStatus, filterForecastingPayabilitySubstatus: filterForecastingPayabilitySubstatus, filterPredictionStatus: filterPredictionStatus, cancellationToken: ct);
+            var metricsTask      = _dbRepo.GetSummaryMetricsAsync      (connStr, weekStart, filterPayerName: filterPayerName, filterPayerType: filterPayerType, filterPanelName: filterPanelName, filterFinalCoverageStatus: filterFinalCoverageStatus, filterPayability: filterPayability, filterCPTCode: filterCPTCode, filterForecastingPayability: filterForecastingPayability, filterPayStatus: filterPayStatus, filterForecastingPayabilitySubstatus: filterForecastingPayabilitySubstatus, filterPredictionStatus: filterPredictionStatus, cancellationToken: ct);
+            var payerTask        = _dbRepo.GetValidationByPayerAsync    (connStr, weekStart, filterPayerName: filterPayerName, filterPayerType: filterPayerType, filterPanelName: filterPanelName, filterFinalCoverageStatus: filterFinalCoverageStatus, filterPayability: filterPayability, filterCPTCode: filterCPTCode, filterForecastingPayability: filterForecastingPayability, filterPayStatus: filterPayStatus, filterForecastingPayabilitySubstatus: filterForecastingPayabilitySubstatus, filterPredictionStatus: filterPredictionStatus, cancellationToken: ct);
+            var payStatusTask    = _dbRepo.GetPayerPayStatusBreakdownAsync(connStr, weekStart, filterPayerName: filterPayerName, filterForecastingPayability: filterForecastingPayability, filterPayStatus: filterPayStatus, filterForecastingPayabilitySubstatus: filterForecastingPayabilitySubstatus, filterPredictionStatus: filterPredictionStatus, cancellationToken: ct);
+            var adjustedTask     = _dbRepo.GetAdjustedByPayerAsync     (connStr, weekStart, filterPayerName: filterPayerName, filterPayerType: filterPayerType, filterPanelName: filterPanelName, filterFinalCoverageStatus: filterFinalCoverageStatus, filterPayability: filterPayability, filterCPTCode: filterCPTCode, filterForecastingPayability: filterForecastingPayability, filterPayStatus: filterPayStatus, filterForecastingPayabilitySubstatus: filterForecastingPayabilitySubstatus, filterPredictionStatus: filterPredictionStatus, cancellationToken: ct);
+            var denialTask       = _dbRepo.GetDenialBreakdownAsync      (connStr, weekStart, filterPayerName: filterPayerName, filterPayerType: filterPayerType, filterPanelName: filterPanelName, filterFinalCoverageStatus: filterFinalCoverageStatus, filterPayability: filterPayability, filterCPTCode: filterCPTCode, filterForecastingPayability: filterForecastingPayability, filterPayStatus: filterPayStatus, filterForecastingPayabilitySubstatus: filterForecastingPayabilitySubstatus, filterPredictionStatus: filterPredictionStatus, cancellationToken: ct);
+            var noRespTask       = _dbRepo.GetNoResponseBreakdownAsync  (connStr, weekStart, filterPayerName: filterPayerName, filterPayerType: filterPayerType, filterPanelName: filterPanelName, filterFinalCoverageStatus: filterFinalCoverageStatus, filterPayability: filterPayability, filterCPTCode: filterCPTCode, filterForecastingPayability: filterForecastingPayability, filterPayStatus: filterPayStatus, filterForecastingPayabilitySubstatus: filterForecastingPayabilitySubstatus, filterPredictionStatus: filterPredictionStatus, cancellationToken: ct);
 
-            await Task.WhenAll(bucketTask, metricsTask, payerTask, panelTask, cptTask, denialTask, noRespTask);
+            await Task.WhenAll(filterOptsTask, bucketTask, metricsTask, payerTask, payStatusTask, adjustedTask, denialTask, noRespTask);
 
-            // Map SP bucket rows → PredictionBucketRow (existing view model type)
+            var filterOpts = filterOptsTask.Result;
             buckets = MapSpBuckets(bucketTask.Result);
 
-            // Map SP payer rows → PredictionPayerRow
             topPayers = payerTask.Result
-                .Select(r =>
-                {
-                    decimal? payRate = r.TotalLineItems > 0
-                        ? Math.Round((decimal)r.PaidCount / r.TotalLineItems * 100, 1)
-                        : null;
-                    return new PredictionPayerRow(
-                        r.PayerName, r.PayerType,
-                        r.TotalLineItems, r.PaidCount, r.DeniedCount, r.NoResponseCount, r.AdjustedCount, r.UnpaidCount,
-                        payRate, r.PredictedAllowed, r.PredictedInsurance, r.ActualAllowed, r.ActualInsurance,
-                        r.ActualAllowed - r.PredictedAllowed);
-                })
+                .Select(r => new PredictionPayerRow(
+                    r.PayerName, r.PayerType,
+                    r.TotalLineItems, r.PaidCount, r.DeniedCount, r.NoResponseCount, r.AdjustedCount, r.UnpaidCount,
+                    r.TotalLineItems > 0 ? Math.Round((decimal)r.PaidCount / r.TotalLineItems * 100, 1) : null,
+                    r.PredictedAllowed, r.PredictedInsurance, r.ActualAllowed, r.ActualInsurance,
+                    r.VarianceAllowed, r.VariancePaid))
+                .OrderByDescending(r => r.VarianceAllowed)
                 .ToList();
 
-            // Map SP panel rows → PredictionPanelRow
-            topPanels = panelTask.Result
-                .Select(r =>
-                {
-                    decimal? payRate = r.TotalLineItems > 0
-                        ? Math.Round((decimal)r.PaidCount / r.TotalLineItems * 100, 1)
-                        : null;
-                    return new PredictionPanelRow(
-                        r.PanelName,
-                        r.TotalLineItems, r.PaidCount, r.DeniedCount, r.NoResponseCount, r.AdjustedCount, r.UnpaidCount,
-                        payRate, r.PredictedAllowed, r.PredictedInsurance, r.ActualAllowed, r.ActualInsurance,
-                        r.ActualAllowed - r.PredictedAllowed);
-                })
+            topPanels = [];
+            topCpt    = [];
+
+            payerPayStatusRows = payStatusTask.Result
+                .Select(r => new PredictionPayerPayStatusRow(
+                    r.PayerName, r.PayStatus, r.LineItemCount,
+                    r.PredictedAllowed, r.PredictedInsurance, r.ActualAllowed, r.ActualInsurance,
+                    r.VarianceAllowed, r.VariancePaid))
                 .ToList();
 
-            // Map SP CPT rows → PredictionCptRow
-            topCpt = cptTask.Result
-                .Select(r => new PredictionCptRow(r.CPTCode, r.LineItemCount, r.BilledAmount, r.PredictedAllowed, r.PredictedInsurance))
+            adjustedByPayer = adjustedTask.Result
+                .Select(r => new PredictionAdjustedPayerRow(
+                    r.PayerName, r.LineItemCount,
+                    r.PredictedAllowed, r.PredictedInsurance, r.ActualAllowed, r.ActualInsurance,
+                    r.VarianceAllowed, r.VariancePaid))
                 .ToList();
 
-            // Assemble DenialBreakdown from flat SP rows
-            denialBreakdown   = AssembleDenialBreakdown(denialTask.Result);
+            var denialRows = await _denialDescLookup.EnrichAsync(
+                connStr,
+                labConfig.MasterDbConnectionString,
+                denialTask.Result,
+                ct);
+            denialBreakdown     = AssembleDenialBreakdownV2(denialRows);
+            noResponseBreakdown = AssembleNoResponseBreakdownV2(noRespTask.Result);
+            spMetrics           = metricsTask.Result;
 
-            // Assemble NoResponseBreakdown from flat SP rows
-            noResponseBreakdown = AssembleNoResponseBreakdown(noRespTask.Result);
-
-            _logger.LogInformation("[{Lab}] SP aggregates loaded: buckets={B}, payers={P}, panels={Pan}, cpt={C}, denial={D}, noResp={N}",
-                selectedLab, buckets.Count, topPayers.Count, topPanels.Count, topCpt.Count,
-                denialTask.Result.Count, noRespTask.Result.Count);
-
-            // Capture SP 12 result – used below to build summaryMetrics
-            spMetrics = metricsTask.Result;
+            payerNames              = filterOpts.PayerNames;
+            payerTypes              = filterOpts.PayerTypes;
+            panelNames              = filterOpts.PanelNames;
+            coverageStatuses        = filterOpts.FinalCoverageStatuses;
+            payabilityOpts          = filterOpts.Payabilities;
+            cptCodes                = filterOpts.CPTCodes;
+            forecastingPayabilities = filterOpts.ForecastingPayabilities;
+            payStatuses             = filterOpts.PayStatuses;
+            substatuses             = filterOpts.ForecastingPayabilitySubstatuses;
+            predStatuses            = filterOpts.PredictionStatuses;
         }
         else
         {
+            payerPayStatusRows      = [];
+            adjustedByPayer         = [];
+            forecastingPayabilities = baseDataset.Select(r => r.ForecastingPayability).Where(v => !string.IsNullOrWhiteSpace(v)).Distinct().OrderBy(v => v).ToList();
+            payStatuses             = baseDataset.Select(r => string.IsNullOrWhiteSpace(r.PayStatus) ? "(Blank)" : r.PayStatus).Distinct().OrderBy(v => v).ToList();
+            substatuses             = baseDataset.Select(r => r.ForecastingPayabilitySubstatus).Where(v => !string.IsNullOrWhiteSpace(v)).Distinct().OrderBy(v => v).ToList();
+            predStatuses            = baseDataset.Select(r => r.PredictionStatus).Where(v => !string.IsNullOrWhiteSpace(v)).Distinct().OrderBy(v => v).ToList();
             // File path: original in-memory aggregation
             var forecastPayable = dataset
                 .Where(r => PredictionReportParserService.IsForecastPayable(r.ForecastingPayability))
@@ -289,11 +293,13 @@ public class PredictionController : Controller
             _logger.LogInformation("[{Lab}] ForecastPayable rows={FP}; PayStatus breakdown: {Values}",
                 selectedLab, forecastPayable.Count, string.Join(", ", byPayStatus.Keys.Select(k => $"'{k}'")));
 
-            var paidRows     = GetRows(byPayStatus, "Paid");
+            var paidRows     = GetRows(byPayStatus, "Paid")
+                .Concat(GetRows(byPayStatus, "Patient Responsibility"))
+                .ToList();
             var deniedRows   = GetRows(byPayStatus, "Denied");
             var noRespRows   = GetRows(byPayStatus, "No Response");
-            var adjustedRows = GetRows(byPayStatus, "Adjusted");
-            var unpaidRows   = deniedRows.Concat(noRespRows).Concat(adjustedRows).ToList();
+            var adjustedPayRows  = GetRows(byPayStatus, "Adjusted");
+            var unpaidRows       = deniedRows.Concat(noRespRows).Concat(adjustedPayRows).ToList();
 
             buckets = new List<PredictionBucketRow>
             {
@@ -302,7 +308,7 @@ public class PredictionController : Controller
                 BuildBucket("Predicted \u2013 Unpaid",   unpaidRows,      includeActuals: true),
                 BuildBucket("Unpaid \u2013 Denied",      deniedRows,      includeActuals: true),
                 BuildBucket("Unpaid \u2013 No Response", noRespRows,      includeActuals: true),
-                BuildBucket("Unpaid \u2013 Adjusted",    adjustedRows,    includeActuals: true),
+                BuildBucket("Unpaid \u2013 Adjusted",    adjustedPayRows,    includeActuals: true),
             };
 
             topPayers           = BuildPayerValidationRows(dataset);
@@ -373,7 +379,16 @@ public class PredictionController : Controller
         DateTime? runInfoInsertedAt = null;
         string?   runInfoFileName   = null;
 
-        if (usingDb)
+        if (usingDb && dbProbe is not null)
+        {
+            runInfoRunId      = dbProbe.LatestRunId;
+            runInfoWeekFolder = dbProbe.WeekFolder;
+            runInfoInsertedAt = dbProbe.LatestRunInsertedAt is { } utc
+                ? DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime()
+                : null;
+            runInfoFileName   = dbProbe.SourceFileName;
+        }
+        else if (usingDb)
         {
             try
             {
@@ -381,7 +396,6 @@ public class PredictionController : Controller
                     labConfig!.DbConnectionString ?? string.Empty, HttpContext.RequestAborted);
                 runInfoRunId      = runDiag.LatestRunId;
                 runInfoWeekFolder = runDiag.WeekFolder;
-                // InsertedDateTime is stored as SYSUTCDATETIME() — convert to local for display.
                 runInfoInsertedAt = runDiag.LatestRunInsertedAt is { } utc
                     ? DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime()
                     : null;
@@ -403,6 +417,9 @@ public class PredictionController : Controller
             runInfoRunId      = us > 0 ? baseName[..us] : null;
         }
 
+        var totalAll      = usingDb ? (int)(dbProbe?.RowCount ?? 0) : baseDataset.Count;
+        var totalFiltered = usingDb ? totalAll : dataset.Count;
+
         var vm = new PredictionAnalysisViewModel
         {
             AvailableLabs             = availableLabs,
@@ -422,6 +439,10 @@ public class PredictionController : Controller
             FilterFinalCoverageStatus = filterFinalCoverageStatus,
             FilterPayability          = filterPayability,
             FilterCPTCode             = filterCPTCode,
+            FilterForecastingPayability         = filterForecastingPayability,
+            FilterPayStatus                     = filterPayStatus,
+            FilterForecastingPayabilitySubstatus = filterForecastingPayabilitySubstatus,
+            FilterPredictionStatus              = filterPredictionStatus,
 
             PayerNames            = payerNames,
             PayerTypes            = payerTypes,
@@ -429,6 +450,10 @@ public class PredictionController : Controller
             FinalCoverageStatuses = coverageStatuses,
             PayabilityOptions     = payabilityOpts,
             CPTCodes              = cptCodes,
+            ForecastingPayabilities          = forecastingPayabilities,
+            PayStatuses                      = payStatuses,
+            ForecastingPayabilitySubstatuses = substatuses,
+            PredictionStatuses               = predStatuses,
 
             Buckets                        = buckets,
             SummaryMetrics                 = summaryMetrics,
@@ -446,10 +471,12 @@ public class PredictionController : Controller
             ExpectedPaymentByMonth = paymentByMonth,
 
             Records = pagedRecords,
-            Paging  = new PageInfo(currentPage, PageSize, dataset.Count, baseDataset.Count),
-            DenialBreakdown     = denialBreakdown,
-            NoResponseBreakdown = noResponseBreakdown,
-            Insight             = _insightLoader.Load(labConfig?.InsightPath, selectedLab),
+            Paging  = new PageInfo(currentPage, PageSize, totalFiltered, totalAll),
+            DenialBreakdown         = denialBreakdown,
+            NoResponseBreakdown     = noResponseBreakdown,
+            AdjustedByPayer         = adjustedByPayer,
+            PayerPayStatusBreakdown = payerPayStatusRows,
+            Insight                 = _insightLoader.Load(labConfig?.InsightPath, selectedLab),
         };
 
         return View(vm);
@@ -738,7 +765,7 @@ public class PredictionController : Controller
                 labConfig!.DbConnectionString ?? string.Empty,
                 cancellationToken: HttpContext.RequestAborted);
 
-            baseDataset = PredictionReportParserService.ApplyGlobalFilter(rawRecords, weekStart);
+            baseDataset = PredictionReportParserService.ApplyGlobalFilter(rawRecords);
         }
         else
         {
@@ -746,7 +773,7 @@ public class PredictionController : Controller
                 ? null
                 : _resolver.ResolvePredictionValidationReport(selectedLab);
 
-            baseDataset = filePath is not null ? _parser.ParseFiltered(filePath, weekStart) : [];
+            baseDataset = filePath is not null ? _parser.ParseFiltered(filePath) : [];
         }
 
         var filtered = baseDataset.AsEnumerable();
@@ -839,21 +866,18 @@ public class PredictionController : Controller
         }
 
         // Build filter-step counts
-        int afterForecast = 0, afterBoth = 0;
+        int afterForecast = 0;
         if (usingDb)
         {
-            afterForecast = PredictionReportParserService.ApplyGlobalFilter(allRecords, DateOnly.MaxValue).Count;
-            afterBoth     = PredictionReportParserService.ApplyGlobalFilter(allRecords, weekStart).Count;
+            afterForecast = PredictionReportParserService.ApplyGlobalFilter(allRecords).Count;
         }
         else
         {
             var filePath = string.IsNullOrEmpty(selectedLab) ? null : _resolver.ResolvePredictionValidationReport(selectedLab);
             if (filePath is not null)
-            {
-                afterForecast = _parser.ParseFiltered(filePath, DateOnly.MaxValue).Count;
-                afterBoth     = _parser.ParseFiltered(filePath, weekStart).Count;
-            }
+                afterForecast = _parser.ParseFiltered(filePath).Count;
         }
+        var afterBoth = afterForecast;
 
         var vm = new PredictionDiagnosticsViewModel
         {
@@ -911,7 +935,11 @@ public class PredictionController : Controller
         string? filterPanelName,
         string? filterFinalCoverageStatus,
         string? filterPayability,
-        string? filterCPTCode)
+        string? filterCPTCode,
+        string? filterForecastingPayability,
+        string? filterPayStatus,
+        string? filterForecastingPayabilitySubstatus,
+        string? filterPredictionStatus)
     {
         var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
@@ -928,7 +956,9 @@ public class PredictionController : Controller
             // Reuse the same data-load + filter logic as Index
             var vm = await BuildPredictionViewModelAsync(selectedLab, labConfig,
                 filterPayerName, filterPayerType, filterPanelName,
-                filterFinalCoverageStatus, filterPayability, filterCPTCode);
+                filterFinalCoverageStatus, filterPayability, filterCPTCode,
+                filterForecastingPayability, filterPayStatus,
+                filterForecastingPayabilitySubstatus, filterPredictionStatus);
 
             using var workbook = PredictionExcelExportBuilder.CreateWorkbook(vm, selectedLab,
                 activeFilters: new List<(string, string?)>
@@ -939,6 +969,10 @@ public class PredictionController : Controller
                     ("Final Coverage Status", filterFinalCoverageStatus),
                     ("Payability", filterPayability),
                     ("CPT Code", filterCPTCode),
+                    ("Forecasting Payability", filterForecastingPayability),
+                    ("Pay Status", filterPayStatus),
+                    ("Forecasting Payability Substatus", filterForecastingPayabilitySubstatus),
+                    ("Prediction Status", filterPredictionStatus),
                 });
 
             await using var stream = new MemoryStream();
@@ -1080,118 +1114,156 @@ public class PredictionController : Controller
     private async Task<PredictionAnalysisViewModel> BuildPredictionViewModelAsync(
         string selectedLab, LabCsvConfig? labConfig,
         string? filterPayerName, string? filterPayerType, string? filterPanelName,
-        string? filterFinalCoverageStatus, string? filterPayability, string? filterCPTCode)
+        string? filterFinalCoverageStatus, string? filterPayability, string? filterCPTCode,
+        string? filterForecastingPayability = null,
+        string? filterPayStatus = null,
+        string? filterForecastingPayabilitySubstatus = null,
+        string? filterPredictionStatus = null)
     {
         var today          = DateOnly.FromDateTime(DateTime.Today);
         var daysFromMonday = ((int)today.DayOfWeek + 6) % 7;
         var weekStart      = today.AddDays(-daysFromMonday);
+        bool usingDb       = labConfig?.DBEnabled == true;
 
-        List<PredictionRecord> baseDataset;
+        List<PredictionBucketRow>          buckets;
+        PredictionSummaryMetrics         summaryMetrics;
+        List<PredictionPayerRow>           topPayers;
+        List<PredictionPayerPayStatusRow>    payerPayStatusRows;
+        List<PredictionAdjustedPayerRow>   adjustedByPayer;
+        DenialBreakdown                    denialBreakdown;
+        NoResponseBreakdown                noResponseBreakdown;
         string? filePath = null;
-        bool usingDb = labConfig?.DBEnabled == true;
 
         if (usingDb)
         {
-            var rawRecords = await _dbRepo.GetRecordsAsync(
-                labConfig!.DbConnectionString ?? string.Empty,
-                cancellationToken: HttpContext.RequestAborted);
-            baseDataset = PredictionReportParserService.ApplyGlobalFilter(rawRecords, weekStart);
+            var connStr = labConfig!.DbConnectionString ?? string.Empty;
+            var ct      = HttpContext.RequestAborted;
+
+            var bucketTask    = _dbRepo.GetSummaryBucketsAsync(connStr, weekStart, filterPayerName: filterPayerName, filterPayerType: filterPayerType, filterPanelName: filterPanelName, filterFinalCoverageStatus: filterFinalCoverageStatus, filterPayability: filterPayability, filterCPTCode: filterCPTCode, filterForecastingPayability: filterForecastingPayability, filterPayStatus: filterPayStatus, filterForecastingPayabilitySubstatus: filterForecastingPayabilitySubstatus, filterPredictionStatus: filterPredictionStatus, cancellationToken: ct);
+            var metricsTask   = _dbRepo.GetSummaryMetricsAsync(connStr, weekStart, filterPayerName: filterPayerName, filterPayerType: filterPayerType, filterPanelName: filterPanelName, filterFinalCoverageStatus: filterFinalCoverageStatus, filterPayability: filterPayability, filterCPTCode: filterCPTCode, filterForecastingPayability: filterForecastingPayability, filterPayStatus: filterPayStatus, filterForecastingPayabilitySubstatus: filterForecastingPayabilitySubstatus, filterPredictionStatus: filterPredictionStatus, cancellationToken: ct);
+            var payerTask     = _dbRepo.GetValidationByPayerAsync(connStr, weekStart, filterPayerName: filterPayerName, filterPayerType: filterPayerType, filterPanelName: filterPanelName, filterFinalCoverageStatus: filterFinalCoverageStatus, filterPayability: filterPayability, filterCPTCode: filterCPTCode, filterForecastingPayability: filterForecastingPayability, filterPayStatus: filterPayStatus, filterForecastingPayabilitySubstatus: filterForecastingPayabilitySubstatus, filterPredictionStatus: filterPredictionStatus, cancellationToken: ct);
+            var payStatusTask = _dbRepo.GetPayerPayStatusBreakdownAsync(connStr, weekStart, filterPayerName: filterPayerName, filterForecastingPayability: filterForecastingPayability, filterPayStatus: filterPayStatus, filterForecastingPayabilitySubstatus: filterForecastingPayabilitySubstatus, filterPredictionStatus: filterPredictionStatus, cancellationToken: ct);
+            var adjustedTask  = _dbRepo.GetAdjustedByPayerAsync(connStr, weekStart, filterPayerName: filterPayerName, filterPayerType: filterPayerType, filterPanelName: filterPanelName, filterFinalCoverageStatus: filterFinalCoverageStatus, filterPayability: filterPayability, filterCPTCode: filterCPTCode, filterForecastingPayability: filterForecastingPayability, filterPayStatus: filterPayStatus, filterForecastingPayabilitySubstatus: filterForecastingPayabilitySubstatus, filterPredictionStatus: filterPredictionStatus, cancellationToken: ct);
+            var denialTask    = _dbRepo.GetDenialBreakdownAsync(connStr, weekStart, filterPayerName: filterPayerName, filterPayerType: filterPayerType, filterPanelName: filterPanelName, filterFinalCoverageStatus: filterFinalCoverageStatus, filterPayability: filterPayability, filterCPTCode: filterCPTCode, filterForecastingPayability: filterForecastingPayability, filterPayStatus: filterPayStatus, filterForecastingPayabilitySubstatus: filterForecastingPayabilitySubstatus, filterPredictionStatus: filterPredictionStatus, cancellationToken: ct);
+            var noRespTask    = _dbRepo.GetNoResponseBreakdownAsync(connStr, weekStart, filterPayerName: filterPayerName, filterPayerType: filterPayerType, filterPanelName: filterPanelName, filterFinalCoverageStatus: filterFinalCoverageStatus, filterPayability: filterPayability, filterCPTCode: filterCPTCode, filterForecastingPayability: filterForecastingPayability, filterPayStatus: filterPayStatus, filterForecastingPayabilitySubstatus: filterForecastingPayabilitySubstatus, filterPredictionStatus: filterPredictionStatus, cancellationToken: ct);
+
+            await Task.WhenAll(bucketTask, metricsTask, payerTask, payStatusTask, adjustedTask, denialTask, noRespTask);
+
+            buckets = MapSpBuckets(bucketTask.Result);
+            summaryMetrics = metricsTask.Result is { } spMetrics
+                ? MapSpMetrics(spMetrics)
+                : new PredictionSummaryMetrics();
+
+            topPayers = payerTask.Result
+                .Select(r => new PredictionPayerRow(
+                    r.PayerName, r.PayerType,
+                    r.TotalLineItems, r.PaidCount, r.DeniedCount, r.NoResponseCount, r.AdjustedCount, r.UnpaidCount,
+                    r.TotalLineItems > 0 ? Math.Round((decimal)r.PaidCount / r.TotalLineItems * 100, 1) : null,
+                    r.PredictedAllowed, r.PredictedInsurance, r.ActualAllowed, r.ActualInsurance,
+                    r.VarianceAllowed, r.VariancePaid))
+                .OrderByDescending(r => r.VarianceAllowed)
+                .ToList();
+
+            payerPayStatusRows = payStatusTask.Result
+                .Select(r => new PredictionPayerPayStatusRow(
+                    r.PayerName, r.PayStatus, r.LineItemCount,
+                    r.PredictedAllowed, r.PredictedInsurance, r.ActualAllowed, r.ActualInsurance,
+                    r.VarianceAllowed, r.VariancePaid))
+                .ToList();
+
+            adjustedByPayer = adjustedTask.Result
+                .Select(r => new PredictionAdjustedPayerRow(
+                    r.PayerName, r.LineItemCount,
+                    r.PredictedAllowed, r.PredictedInsurance, r.ActualAllowed, r.ActualInsurance,
+                    r.VarianceAllowed, r.VariancePaid))
+                .ToList();
+
+            var denialRows = await _denialDescLookup.EnrichAsync(
+                connStr,
+                labConfig.MasterDbConnectionString,
+                denialTask.Result,
+                ct);
+            denialBreakdown     = AssembleDenialBreakdownV2(denialRows);
+            noResponseBreakdown = AssembleNoResponseBreakdownV2(noRespTask.Result);
         }
         else
         {
             filePath = string.IsNullOrEmpty(selectedLab)
                 ? null
                 : _resolver.ResolvePredictionValidationReport(selectedLab);
-            baseDataset = filePath is not null
-                ? _parser.ParseFiltered(filePath, weekStart)
+            var baseDataset = filePath is not null
+                ? _parser.ParseFiltered(filePath)
                 : [];
-        }
 
-        var filtered = baseDataset.AsEnumerable();
-        if (!string.IsNullOrWhiteSpace(filterPayerName))
-            filtered = filtered.Where(r => r.PayerNameNormalized.Equals(filterPayerName, StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrWhiteSpace(filterPayerType))
-            filtered = filtered.Where(r => r.PayerType.Equals(filterPayerType, StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrWhiteSpace(filterPanelName))
-            filtered = filtered.Where(r => r.PanelName.Equals(filterPanelName, StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrWhiteSpace(filterFinalCoverageStatus))
-            filtered = filtered.Where(r => r.FinalCoverageStatus.Equals(filterFinalCoverageStatus, StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrWhiteSpace(filterPayability))
-            filtered = filtered.Where(r => r.Payability.Equals(filterPayability, StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrWhiteSpace(filterCPTCode))
-            filtered = filtered.Where(r => r.CPTCode.Equals(filterCPTCode, StringComparison.OrdinalIgnoreCase));
+            var filtered = baseDataset.AsEnumerable();
+            if (!string.IsNullOrWhiteSpace(filterPayerName))
+                filtered = filtered.Where(r => r.PayerNameNormalized.Equals(filterPayerName, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(filterPayerType))
+                filtered = filtered.Where(r => r.PayerType.Equals(filterPayerType, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(filterPanelName))
+                filtered = filtered.Where(r => r.PanelName.Equals(filterPanelName, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(filterFinalCoverageStatus))
+                filtered = filtered.Where(r => r.FinalCoverageStatus.Equals(filterFinalCoverageStatus, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(filterPayability))
+                filtered = filtered.Where(r => r.Payability.Equals(filterPayability, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(filterCPTCode))
+                filtered = filtered.Where(r => r.CPTCode.Equals(filterCPTCode, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(filterForecastingPayability))
+                filtered = filtered.Where(r => r.ForecastingPayability.Equals(filterForecastingPayability, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(filterPayStatus))
+                filtered = filtered.Where(r => (string.IsNullOrWhiteSpace(r.PayStatus) ? "(Blank)" : r.PayStatus).Equals(filterPayStatus, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(filterForecastingPayabilitySubstatus))
+                filtered = filtered.Where(r => r.ForecastingPayabilitySubstatus.Equals(filterForecastingPayabilitySubstatus, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(filterPredictionStatus))
+                filtered = filtered.Where(r => r.PredictionStatus.Equals(filterPredictionStatus, StringComparison.OrdinalIgnoreCase));
 
-        var dataset = filtered.ToList();
+            var dataset = filtered.ToList();
+            var forecastPayable = dataset
+                .Where(r => PredictionReportParserService.IsForecastPayable(r.ForecastingPayability))
+                .ToList();
 
-        var byPayStatus = dataset
-            .GroupBy(r => PredictionReportParserService.Normalise(r.PayStatus), StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+            var byPayStatus = forecastPayable
+                .GroupBy(r => PredictionReportParserService.Normalise(r.PayStatus), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
 
-        var paidRows     = GetRows(byPayStatus, "Paid");
-        var deniedRows   = GetRows(byPayStatus, "Denied");
-        var noRespRows   = GetRows(byPayStatus, "No Response");
-        var adjustedRows = GetRows(byPayStatus, "Adjusted");
-        var unpaidRows   = deniedRows.Concat(noRespRows).Concat(adjustedRows).ToList();
+            var paidRows     = GetRows(byPayStatus, "Paid")
+                .Concat(GetRows(byPayStatus, "Patient Responsibility"))
+                .ToList();
+            var deniedRows   = GetRows(byPayStatus, "Denied");
+            var noRespRows   = GetRows(byPayStatus, "No Response");
+            var adjustedRows = GetRows(byPayStatus, "Adjusted");
+            var unpaidRows   = deniedRows.Concat(noRespRows).Concat(adjustedRows).ToList();
 
-        var buckets = new List<PredictionBucketRow>
-        {
-            BuildBucket("Predicted To Pay",     dataset,      includeActuals: false),
-            BuildBucket("Predicted \u2013 Paid",     paidRows,     includeActuals: true),
-            BuildBucket("Predicted \u2013 Unpaid",   unpaidRows,   includeActuals: true),
-            BuildBucket("Unpaid \u2013 Denied",      deniedRows,   includeActuals: true),
-            BuildBucket("Unpaid \u2013 No Response", noRespRows,   includeActuals: true),
-            BuildBucket("Unpaid \u2013 Adjusted",    adjustedRows, includeActuals: true),
-        };
-
-        var weeks = new List<WeekRange>();
-        for (int w = 4; w >= 1; w--)
-        {
-            var wkStart = weekStart.AddDays(-7 * w);
-            weeks.Add(new WeekRange(wkStart, wkStart.AddDays(6)));
+            buckets = new List<PredictionBucketRow>
+            {
+                BuildBucket("Predicted To Pay",     forecastPayable, includeActuals: false),
+                BuildBucket("Predicted \u2013 Paid",     paidRows,        includeActuals: true),
+                BuildBucket("Predicted \u2013 Unpaid",   unpaidRows,      includeActuals: true),
+                BuildBucket("Unpaid \u2013 Denied",      deniedRows,      includeActuals: true),
+                BuildBucket("Unpaid \u2013 No Response", noRespRows,      includeActuals: true),
+                BuildBucket("Unpaid \u2013 Adjusted",    adjustedRows,    includeActuals: true),
+            };
+            summaryMetrics = BuildSummaryMetrics(buckets);
+            topPayers = BuildPayerValidationRows(dataset);
+            payerPayStatusRows = BuildPayerPayStatusBreakdown(forecastPayable);
+            adjustedByPayer = BuildAdjustedByPayer(adjustedRows);
+            denialBreakdown = BuildDenialBreakdown(deniedRows);
+            noResponseBreakdown = BuildNoResponseBreakdown(noRespRows);
         }
 
         return new PredictionAnalysisViewModel
         {
-            SelectedLab          = selectedLab,
-            PredictionAvailable  = true,
-            ResolvedFilePath     = usingDb ? $"[DB] {selectedLab}" : filePath,
-            CurrentWeekStartDate = weekStart,
-            Buckets              = buckets,
-            SummaryMetrics       = BuildSummaryMetrics(buckets),
-            TopPayerInsights     = BuildPayerValidationRows(dataset),
-            TopPanelInsights     = BuildPanelValidationRows(dataset),
-            TopCptInsights = dataset
-                .GroupBy(r => string.IsNullOrWhiteSpace(r.CPTCode) ? "Unknown" : r.CPTCode)
-                .Select(g => new PredictionCptRow(
-                    g.Key,
-                    g.Select(r => r.VisitNumber).Where(v => !string.IsNullOrWhiteSpace(v)).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
-                    g.Sum(r => r.BilledAmount),
-                    g.Sum(r => r.ModeAllowedAmountSameLab),
-                    g.Sum(r => r.ModeInsurancePaidSameLab)))
-                .OrderByDescending(x => x.PredictedInsurance)
-                .Take(15)
-                .ToList(),
-            PayabilityBreakdown = dataset
-                .GroupBy(r => string.IsNullOrWhiteSpace(r.Payability) ? "Unknown" : r.Payability)
-                .ToDictionary(g => g.Key, g => g.Count()),
-            FinalCoverageStatusBreakdown = dataset
-                .GroupBy(r => string.IsNullOrWhiteSpace(r.FinalCoverageStatus) ? "Unknown" : r.FinalCoverageStatus)
-                .ToDictionary(g => g.Key, g => g.Count()),
-            ForecastingPayabilityBreakdown = dataset
-                .GroupBy(r => string.IsNullOrWhiteSpace(r.ForecastingPayability) ? "Unknown" : r.ForecastingPayability)
-                .ToDictionary(g => g.Key, g => g.Count()),
-            ICDComplianceBreakdown = dataset
-                .GroupBy(r => string.IsNullOrWhiteSpace(r.ICDComplianceStatus) ? "Unknown" : r.ICDComplianceStatus)
-                .ToDictionary(g => g.Key, g => g.Count()),
-            PayerTypeBreakdown = dataset
-                .GroupBy(r => string.IsNullOrWhiteSpace(r.PayerType) ? "Unknown" : r.PayerType)
-                .ToDictionary(g => g.Key, g => g.Count()),
-            DenialBreakdown     = BuildDenialBreakdown(deniedRows),
-            NoResponseBreakdown = BuildNoResponseBreakdown(noRespRows),
-            MedianWeeklySummary = BuildWeeklySummary(dataset, weeks,
-                r => r.MedianAllowedAmountSameLab, r => r.MedianInsurancePaidSameLab),
-            ModeWeeklySummary = BuildWeeklySummary(dataset, weeks,
-                r => r.ModeAllowedAmountSameLab, r => r.ModeInsurancePaidSameLab),
+            SelectedLab              = selectedLab,
+            PredictionAvailable      = true,
+            ResolvedFilePath         = usingDb ? $"[DB] {selectedLab}" : filePath,
+            CurrentWeekStartDate     = weekStart,
+            Buckets                  = buckets,
+            SummaryMetrics           = summaryMetrics,
+            TopPayerInsights         = topPayers,
+            PayerPayStatusBreakdown  = payerPayStatusRows,
+            AdjustedByPayer          = adjustedByPayer,
+            DenialBreakdown          = denialBreakdown,
+            NoResponseBreakdown      = noResponseBreakdown,
         };
     }
 
@@ -1318,6 +1390,13 @@ public class PredictionController : Controller
     private static PredictionSummaryMetrics MapSpMetrics(PredictionSummaryMetricsSpRow sp) =>
         new()
         {
+            ToPayBasis      = new(sp.ToPay_LineItems, sp.ToPay_ModeAllowed, sp.ToPay_ModeIns),
+            PaidBasis       = new(sp.Paid_LineItems, sp.Paid_ModeAllowed, sp.Paid_ModeIns),
+            UnpaidBasis     = new(sp.Unpaid_LineItems, sp.Unpaid_ModeAllowed, sp.Unpaid_ModeIns),
+            DeniedBasis     = new(sp.Denied_LineItems, sp.Denied_ModeAllowed, sp.Denied_ModeIns),
+            NoResponseBasis = new(sp.NoResp_LineItems, sp.NoResp_ModeAllowed, sp.NoResp_ModeIns),
+            AdjustedBasis   = new(sp.Adj_LineItems, sp.Adj_ModeAllowed, sp.Adj_ModeIns),
+
             // Section 2 – Ratios
             PaymentRatioClaim       = sp.PaymentRatio_Claim,
             PaymentRatioAllowed     = sp.PaymentRatio_Allowed,
@@ -1343,6 +1422,12 @@ public class PredictionController : Controller
             PredVsActualRatioClaim    = sp.PredAccuracy_Claim,
             PredVsActualAllowedAmount = sp.PredAccuracy_AllowedAmount,
             PredVsActualInsPayment    = sp.PredAccuracy_InsurancePayment,
+            PredAccuracyClaimNumerator       = sp.Paid_LineItems,
+            PredAccuracyClaimDenominator     = sp.ToPay_LineItems,
+            PredAccuracyAllowedNumerator     = sp.Paid_ActAllowed,
+            PredAccuracyAllowedDenominator   = sp.ToPay_ModeAllowed,
+            PredAccuracyInsuranceNumerator   = sp.Paid_ActIns,
+            PredAccuracyInsuranceDenominator = sp.ToPay_ModeIns,
         };
 
     private static PredictionBucketRow BuildBucket(
@@ -1350,22 +1435,29 @@ public class PredictionController : Controller
         IReadOnlyList<PredictionRecord> rows,
         bool includeActuals)
     {
-        // Rule: metrics are based on LINE ITEMS (row count), not distinct visits.
-        var claimCount = rows.Count;
-
+        // Only the displayed Claim Count uses unique claims. All amount
+        // columns continue to sum every line item.
+        var claimCount = rows
+            .Select(r => r.VisitNumber?.Trim())
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
         var predictedAllowed = rows.Sum(r => r.ModeAllowedAmountSameLab);
         var predictedIns     = rows.Sum(r => r.ModeInsurancePaidSameLab);
+        var varAllowed       = rows.Sum(r => r.Variance_AllowedAmount);
+        var varPaid          = rows.Sum(r => r.Variance_PaidAmount);
 
         if (!includeActuals)
-            return new PredictionBucketRow(name, claimCount, predictedAllowed, predictedIns,
-                                           null, null, null);
+            return new PredictionBucketRow("Predicted To Pay", name, null, true, claimCount,
+                predictedAllowed, predictedIns,
+                rows.Sum(r => r.AllowedAmount), rows.Sum(r => r.InsurancePayment),
+                varAllowed, varPaid);
 
         var actualAllowed = rows.Sum(r => r.AllowedAmount);
         var actualIns     = rows.Sum(r => r.InsurancePayment);
-        var variance      = actualAllowed - predictedAllowed;
 
-        return new PredictionBucketRow(name, claimCount, predictedAllowed, predictedIns,
-                                       actualAllowed, actualIns, variance);
+        return new PredictionBucketRow("Predicted To Pay", name, null, name.StartsWith("Predicted", StringComparison.Ordinal),
+            claimCount, predictedAllowed, predictedIns, actualAllowed, actualIns, varAllowed, varPaid);
     }
 
     private static PredictionSummaryMetrics BuildSummaryMetrics(IReadOnlyList<PredictionBucketRow> buckets)
@@ -1377,9 +1469,9 @@ public class PredictionController : Controller
         //   denied = ForecastPayable AND PayStatus = Denied
         //   noResp = ForecastPayable AND PayStatus = No Response
         //   adj    = ForecastPayable AND PayStatus = Adjusted
-        var toPay   = buckets.FirstOrDefault(b => b.BucketName == "Predicted To Pay");
-        var paid    = buckets.FirstOrDefault(b => b.BucketName == "Predicted \u2013 Paid");
-        var unpaid  = buckets.FirstOrDefault(b => b.BucketName == "Predicted \u2013 Unpaid");
+        var toPay   = buckets.FirstOrDefault(b => b.IsGroupTotal && b.GroupName == "Predicted To Pay");
+        var paid    = buckets.FirstOrDefault(b => b.BucketName == "Predicted \u2013 Paid" || b.BucketName == "Predicted - Paid");
+        var unpaid  = buckets.FirstOrDefault(b => b.BucketName == "Predicted \u2013 Unpaid" || b.BucketName == "Predicted - Unpaid");
         var denied  = buckets.FirstOrDefault(b => b.BucketName == "Unpaid \u2013 Denied");
         var noResp  = buckets.FirstOrDefault(b => b.BucketName == "Unpaid \u2013 No Response");
         var adj     = buckets.FirstOrDefault(b => b.BucketName == "Unpaid \u2013 Adjusted");
@@ -1389,6 +1481,31 @@ public class PredictionController : Controller
 
         return new PredictionSummaryMetrics
         {
+            ToPayBasis = new(
+                toPay?.ClaimCount ?? 0,
+                toPay?.PredictedAllowed ?? 0,
+                toPay?.PredictedInsurance ?? 0),
+            PaidBasis = new(
+                paid?.ClaimCount ?? 0,
+                paid?.PredictedAllowed ?? 0,
+                paid?.PredictedInsurance ?? 0),
+            UnpaidBasis = new(
+                unpaid?.ClaimCount ?? 0,
+                unpaid?.PredictedAllowed ?? 0,
+                unpaid?.PredictedInsurance ?? 0),
+            DeniedBasis = new(
+                denied?.ClaimCount ?? 0,
+                denied?.PredictedAllowed ?? 0,
+                denied?.PredictedInsurance ?? 0),
+            NoResponseBasis = new(
+                noResp?.ClaimCount ?? 0,
+                noResp?.PredictedAllowed ?? 0,
+                noResp?.PredictedInsurance ?? 0),
+            AdjustedBasis = new(
+                adj?.ClaimCount ?? 0,
+                adj?.PredictedAllowed ?? 0,
+                adj?.PredictedInsurance ?? 0),
+
             // Payment Ratio (%) = Predicted Paid / Predicted To Pay * 100
             PaymentRatioClaim     = Pct(paid?.ClaimCount,          toPay?.ClaimCount),
             PaymentRatioAllowed   = Pct(paid?.PredictedAllowed,    toPay?.PredictedAllowed),
@@ -1416,12 +1533,18 @@ public class PredictionController : Controller
 
             // Prediction Accuracy: Paid Claim count / Total Predicted To Pay * 100
             PredVsActualRatioClaim    = Pct(paid?.ClaimCount, toPay?.ClaimCount),
-            // Prediction Accuracy: Actual Allowed / Mode-Predicted Allowed (paid rows only) * 100
-            PredVsActualAllowedAmount = paid?.ActualAllowed.HasValue == true && paid.PredictedAllowed != 0
-                ? Math.Round(paid.ActualAllowed!.Value / paid.PredictedAllowed * 100, 2) : null,
-            // Prediction Accuracy: Actual Insurance Payment / Mode-Predicted Insurance (paid rows only) * 100
-            PredVsActualInsPayment    = paid?.ActualInsurance.HasValue == true && paid.PredictedInsurance != 0
-                ? Math.Round(paid.ActualInsurance!.Value / paid.PredictedInsurance * 100, 2) : null,
+            // Prediction Accuracy amounts use the complete Predicted To Pay
+            // group: actual sum / mode-predicted sum.
+            PredVsActualAllowedAmount = toPay?.ActualAllowed.HasValue == true && toPay.PredictedAllowed != 0
+                ? Math.Round(toPay.ActualAllowed!.Value / toPay.PredictedAllowed * 100, 2) : null,
+            PredVsActualInsPayment    = toPay?.ActualInsurance.HasValue == true && toPay.PredictedInsurance != 0
+                ? Math.Round(toPay.ActualInsurance!.Value / toPay.PredictedInsurance * 100, 2) : null,
+            PredAccuracyClaimNumerator       = paid?.ClaimCount,
+            PredAccuracyClaimDenominator     = toPay?.ClaimCount,
+            PredAccuracyAllowedNumerator     = toPay?.ActualAllowed,
+            PredAccuracyAllowedDenominator   = toPay?.PredictedAllowed,
+            PredAccuracyInsuranceNumerator   = toPay?.ActualInsurance,
+            PredAccuracyInsuranceDenominator = toPay?.PredictedInsurance,
         };
     }
 
@@ -1790,6 +1913,10 @@ public class PredictionController : Controller
                             dgClaims,
                             dgList.Sum(r => r.ModeAllowedAmountSameLab),
                             dgList.Sum(r => r.ModeInsurancePaidSameLab),
+                            dgList.Sum(r => r.AllowedAmount),
+                            dgList.Sum(r => r.InsurancePayment),
+                            dgList.Sum(r => r.Variance_AllowedAmount),
+                            dgList.Sum(r => r.Variance_PaidAmount),
                             ByMonth(dgList));
                     })
                     .OrderByDescending(d => d.TotalClaims)
@@ -1801,6 +1928,10 @@ public class PredictionController : Controller
                     totalClaims,
                     pgList.Sum(r => r.ModeAllowedAmountSameLab),
                     pgList.Sum(r => r.ModeInsurancePaidSameLab),
+                    pgList.Sum(r => r.AllowedAmount),
+                    pgList.Sum(r => r.InsurancePayment),
+                    pgList.Sum(r => r.Variance_AllowedAmount),
+                    pgList.Sum(r => r.Variance_PaidAmount),
                     ByMonth(pgList),
                     topDenials);
             })
@@ -1820,6 +1951,10 @@ public class PredictionController : Controller
                                                 .Distinct(StringComparer.OrdinalIgnoreCase).Count(),
             TotalPredictedAllowed   = deniedRows.Sum(r => r.ModeAllowedAmountSameLab),
             TotalPredictedInsurance = deniedRows.Sum(r => r.ModeInsurancePaidSameLab),
+            TotalActualAllowed      = deniedRows.Sum(r => r.AllowedAmount),
+            TotalActualInsurance    = deniedRows.Sum(r => r.InsurancePayment),
+            TotalVarianceAllowed    = deniedRows.Sum(r => r.Variance_AllowedAmount),
+            TotalVariancePaid       = deniedRows.Sum(r => r.Variance_PaidAmount),
             TotalByMonth            = grandByMonth,
         };
     }
@@ -1852,12 +1987,12 @@ public class PredictionController : Controller
         AgeBucketAmount AggregateBucket(IEnumerable<(PredictionRecord Record, string Bucket)> items)
         {
             var list = items.ToList();
-            return new AgeBucketAmount(
-                list.Select(x => x.Record.VisitNumber)
-                    .Where(v => !string.IsNullOrWhiteSpace(v))
-                    .Distinct(StringComparer.OrdinalIgnoreCase).Count(),
-                list.Sum(x => x.Record.ModeAllowedAmountSameLab),
-                list.Sum(x => x.Record.ModeInsurancePaidSameLab));
+            var lineItems = list.Select(x => x.Record.VisitNumber)
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .Distinct(StringComparer.OrdinalIgnoreCase).Count();
+            var varAllowed = list.Sum(x => x.Record.Variance_AllowedAmount);
+            var varPaid    = list.Sum(x => x.Record.Variance_PaidAmount);
+            return new AgeBucketAmount(lineItems, varAllowed, varPaid, null, null);
         }
 
         IReadOnlyDictionary<string, AgeBucketAmount> ByBucket(
@@ -1887,40 +2022,80 @@ public class PredictionController : Controller
 
                 // Priority bucket = bucket with highest claim count
                 var priorityBucket = AgeBuckets.All
-                    .OrderByDescending(b => byBucket[b].ClaimCount)
+                    .OrderByDescending(b => byBucket[b].LineItemCount)
                     .First();
 
                 return new NoResponsePayerRow(
                     pg.Key,
-                    totalClaims,
-                    pgItems.Sum(x => x.Record.ModeAllowedAmountSameLab),
-                    pgItems.Sum(x => x.Record.ModeInsurancePaidSameLab),
+                    pgItems.Count,
+                    pgItems.Sum(x => x.Record.Variance_AllowedAmount),
+                    pgItems.Sum(x => x.Record.Variance_PaidAmount),
                     byBucket,
                     priorityBucket);
             })
-            .OrderByDescending(p => p.TotalClaims)
+            .OrderByDescending(p => p.TotalVarianceAllowed)
             .ToList();
 
-        // Grand total footer
         var totalByBucket = ByBucket(classified);
 
         return new NoResponseBreakdown
         {
-            PayerRows               = payerRows,
-            TotalClaims             = classified
-                .Select(x => x.Record.VisitNumber)
-                .Where(v => !string.IsNullOrWhiteSpace(v))
-                .Distinct(StringComparer.OrdinalIgnoreCase).Count(),
-            TotalPredictedAllowed   = noRespRows.Sum(r => r.ModeAllowedAmountSameLab),
-            TotalPredictedInsurance = noRespRows.Sum(r => r.ModeInsurancePaidSameLab),
-            TotalByBucket           = totalByBucket,
+            PayerRows            = payerRows,
+            TotalLineItems         = noRespRows.Count,
+            TotalVarianceAllowed   = noRespRows.Sum(r => r.Variance_AllowedAmount),
+            TotalVariancePaid      = noRespRows.Sum(r => r.Variance_PaidAmount),
+            TotalByBucket          = totalByBucket,
         };
     }
+
+    /// <summary>Builds payer x pay-status breakdown rows for Excel/file-path export.</summary>
+    private static List<PredictionPayerPayStatusRow> BuildPayerPayStatusBreakdown(
+        IReadOnlyList<PredictionRecord> forecastPayable) =>
+        forecastPayable
+            .GroupBy(r => new
+            {
+                Payer = string.IsNullOrWhiteSpace(r.PayerNameNormalized) ? r.PayerName : r.PayerNameNormalized,
+                PayStatus = string.IsNullOrWhiteSpace(r.PayStatus) ? "(Blank)" : r.PayStatus
+            })
+            .Select(g =>
+            {
+                var rows = g.ToList();
+                return new PredictionPayerPayStatusRow(
+                    g.Key.Payer, g.Key.PayStatus, rows.Count,
+                    rows.Sum(r => r.ModeAllowedAmountSameLab),
+                    rows.Sum(r => r.ModeInsurancePaidSameLab),
+                    rows.Sum(r => r.AllowedAmount),
+                    rows.Sum(r => r.InsurancePayment),
+                    rows.Sum(r => r.Variance_AllowedAmount),
+                    rows.Sum(r => r.Variance_PaidAmount));
+            })
+            .ToList();
+
+    /// <summary>Builds adjusted-by-payer rows for Excel/file-path export.</summary>
+    private static List<PredictionAdjustedPayerRow> BuildAdjustedByPayer(
+        IReadOnlyList<PredictionRecord> adjustedRows) =>
+        adjustedRows
+            .GroupBy(r => string.IsNullOrWhiteSpace(r.PayerNameNormalized) ? r.PayerName : r.PayerNameNormalized,
+                     StringComparer.OrdinalIgnoreCase)
+            .Select(g =>
+            {
+                var rows = g.ToList();
+                return new PredictionAdjustedPayerRow(
+                    g.Key, rows.Count,
+                    rows.Sum(r => r.ModeAllowedAmountSameLab),
+                    rows.Sum(r => r.ModeInsurancePaidSameLab),
+                    rows.Sum(r => r.AllowedAmount),
+                    rows.Sum(r => r.InsurancePayment),
+                    rows.Sum(r => r.Variance_AllowedAmount),
+                    rows.Sum(r => r.Variance_PaidAmount));
+            })
+            .OrderByDescending(r => r.VarianceAllowed)
+            .ToList();
 
     /// <summary>Builds Prediction Validation by Payer rows sorted by Total Claims descending.</summary>
     private static List<PredictionPayerRow> BuildPayerValidationRows(List<PredictionRecord> dataset)
     {
-        static int DistinctClaims(IEnumerable<PredictionRecord> rows) =>
+        static int DistinctClaimCount(IEnumerable<PredictionRecord> rows) =>
             rows.Select(r => r.VisitNumber)
                 .Where(v => !string.IsNullOrWhiteSpace(v))
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count();
@@ -1941,12 +2116,12 @@ public class PredictionController : Controller
                 var adjusted   = rows.Where(r => norm(r.PayStatus).Equals("Adjusted",    StringComparison.OrdinalIgnoreCase)).ToList();
                 var unpaid     = denied.Concat(noResp).Concat(adjusted).ToList();
 
-                int paidCnt    = DistinctClaims(paid);
-                int deniedCnt  = DistinctClaims(denied);
-                int noRespCnt  = DistinctClaims(noResp);
-                int adjCnt     = DistinctClaims(adjusted);
-                int unpaidCnt  = DistinctClaims(unpaid);
-                int total      = DistinctClaims(rows);
+                int paidCnt    = DistinctClaimCount(paid);
+                int deniedCnt  = DistinctClaimCount(denied);
+                int noRespCnt  = DistinctClaimCount(noResp);
+                int adjCnt     = DistinctClaimCount(adjusted);
+                int unpaidCnt  = DistinctClaimCount(unpaid);
+                int total      = DistinctClaimCount(rows);
 
                 decimal predAllowed   = rows.Sum(r => r.ModeAllowedAmountSameLab);
                 decimal predIns       = rows.Sum(r => r.ModeInsurancePaidSameLab);
@@ -1958,7 +2133,7 @@ public class PredictionController : Controller
                     g.Key.Payer, g.Key.PayerType,
                     total, paidCnt, deniedCnt, noRespCnt, adjCnt, unpaidCnt,
                     payRate, predAllowed, predIns, actAllowed, actIns,
-                    actAllowed - predAllowed);
+                    rows.Sum(r => r.Variance_AllowedAmount), rows.Sum(r => r.Variance_PaidAmount));
             })
             .OrderByDescending(r => r.TotalClaims)
             .ToList();
@@ -1967,7 +2142,7 @@ public class PredictionController : Controller
     /// <summary>Builds Prediction Validation by Panel rows sorted by Total Claims descending.</summary>
     private static List<PredictionPanelRow> BuildPanelValidationRows(List<PredictionRecord> dataset)
     {
-        static int DistinctClaims(IEnumerable<PredictionRecord> rows) =>
+        static int DistinctClaimCount(IEnumerable<PredictionRecord> rows) =>
             rows.Select(r => r.VisitNumber)
                 .Where(v => !string.IsNullOrWhiteSpace(v))
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count();
@@ -1984,12 +2159,12 @@ public class PredictionController : Controller
                 var adjusted   = rows.Where(r => norm(r.PayStatus).Equals("Adjusted",    StringComparison.OrdinalIgnoreCase)).ToList();
                 var unpaid     = denied.Concat(noResp).Concat(adjusted).ToList();
 
-                int paidCnt    = DistinctClaims(paid);
-                int deniedCnt  = DistinctClaims(denied);
-                int noRespCnt  = DistinctClaims(noResp);
-                int adjCnt     = DistinctClaims(adjusted);
-                int unpaidCnt  = DistinctClaims(unpaid);
-                int total      = DistinctClaims(rows);
+                int paidCnt    = DistinctClaimCount(paid);
+                int deniedCnt  = DistinctClaimCount(denied);
+                int noRespCnt  = DistinctClaimCount(noResp);
+                int adjCnt     = DistinctClaimCount(adjusted);
+                int unpaidCnt  = DistinctClaimCount(unpaid);
+                int total      = DistinctClaimCount(rows);
 
                 decimal predAllowed   = rows.Sum(r => r.ModeAllowedAmountSameLab);
                 decimal predIns       = rows.Sum(r => r.ModeInsurancePaidSameLab);
@@ -2013,7 +2188,7 @@ public class PredictionController : Controller
             .GroupBy(r => string.IsNullOrWhiteSpace(r.CPTCode) ? "Unknown" : r.CPTCode)
             .Select(g => new PredictionCptRow(
                 g.Key,
-                g.Count(),
+                g.Select(r => r.VisitNumber).Where(v => !string.IsNullOrWhiteSpace(v)).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
                 g.Sum(r => r.BilledAmount),
                 g.Sum(r => r.ModeAllowedAmountSameLab),
                 g.Sum(r => r.ModeInsurancePaidSameLab)))
@@ -2023,34 +2198,111 @@ public class PredictionController : Controller
 
     // ── SP result assemblers ────────────────────────────────────────────────
 
-    /// <summary>Maps SP 6 rows to the existing PredictionBucketRow view-model type.</summary>
-    private static List<PredictionBucketRow> MapSpBuckets(List<PredictionBucketSpRow> spRows)
-    {
-        // SP returns "Predicted To Pay", "Predicted - Paid" etc. (hyphen, not en-dash).
-        // Map to the display names used by BuildSummaryMetrics (en-dash).
-        static string DisplayName(string sp) => sp switch
-        {
-            "Predicted To Pay"   => "Predicted To Pay",
-            "Predicted - Paid"   => "Predicted \u2013 Paid",
-            "Predicted - Unpaid" => "Predicted \u2013 Unpaid",
-            "Unpaid - Denied"    => "Unpaid \u2013 Denied",
-            "Unpaid - No Response" => "Unpaid \u2013 No Response",
-            "Unpaid - Adjusted"  => "Unpaid \u2013 Adjusted",
-            _                    => sp
-        };
-
-        return spRows
-            .OrderBy(r => r.SortOrder)
+    private static List<PredictionBucketRow> MapSpBuckets(List<PredictionBucketSpRow> spRows) =>
+        spRows.OrderBy(r => r.SortOrder)
             .Select(r => new PredictionBucketRow(
-                DisplayName(r.BucketName),
+                r.GroupName,
+                r.IsGroupTotal ? r.GroupName : (r.PayStatus ?? r.BucketName),
+                r.PayStatus,
+                r.IsGroupTotal,
                 r.LineItemCount,
                 r.PredictedAllowed,
                 r.PredictedInsurance,
                 r.ActualAllowed,
                 r.ActualInsurance,
-                r.ActualAllowed.HasValue && r.ActualAllowed != 0
-                    ? r.ActualAllowed - r.PredictedAllowed : null))
+                r.VarianceAllowed,
+                r.VariancePaid))
             .ToList();
+
+    private static DenialBreakdown AssembleDenialBreakdownV2(List<DenialBreakdownSpRow> spRows)
+    {
+        if (spRows.Count == 0) return new DenialBreakdown();
+        var payerGroups = spRows.GroupBy(r => r.PayerName, StringComparer.OrdinalIgnoreCase)
+            .Select(pg =>
+            {
+                var list = pg.ToList();
+                // Group by denial code only; prefer a non-blank description from LRNMaster enrichment.
+                var topDenials = list.GroupBy(r => r.DenialCode, StringComparer.OrdinalIgnoreCase)
+                    .Select(dg =>
+                    {
+                        var desc = dg.Select(x => x.DenialDescription)
+                            .FirstOrDefault(d => !string.IsNullOrWhiteSpace(d)) ?? string.Empty;
+                        return new DenialCodeRow(
+                            dg.Key, desc,
+                            dg.Sum(x => x.LineItemCount),
+                            dg.Sum(x => x.PredictedAllowed), dg.Sum(x => x.PredictedInsurance),
+                            dg.Sum(x => x.ActualAllowed), dg.Sum(x => x.ActualInsurance),
+                            dg.Sum(x => x.VarianceAllowed), dg.Sum(x => x.VariancePaid),
+                            new Dictionary<string, DenialMonthAmount>());
+                    })
+                    .OrderByDescending(d => d.VarianceAllowed).ToList();
+                return new DenialPayerRow(pg.Key, list.Sum(x => x.LineItemCount),
+                    list.Sum(x => x.PredictedAllowed), list.Sum(x => x.PredictedInsurance),
+                    list.Sum(x => x.ActualAllowed), list.Sum(x => x.ActualInsurance),
+                    list.Sum(x => x.VarianceAllowed), list.Sum(x => x.VariancePaid),
+                    new Dictionary<string, DenialMonthAmount>(), topDenials);
+            }).OrderByDescending(p => p.VarianceAllowed).ToList();
+        return new DenialBreakdown
+        {
+            PayerRows = payerGroups,
+            TotalClaims = spRows.Sum(r => r.LineItemCount),
+            TotalPredictedAllowed = spRows.Sum(r => r.PredictedAllowed),
+            TotalPredictedInsurance = spRows.Sum(r => r.PredictedInsurance),
+            TotalActualAllowed = spRows.Sum(r => r.ActualAllowed),
+            TotalActualInsurance = spRows.Sum(r => r.ActualInsurance),
+            TotalVarianceAllowed = spRows.Sum(r => r.VarianceAllowed),
+            TotalVariancePaid = spRows.Sum(r => r.VariancePaid),
+        };
+    }
+
+    private static NoResponseBreakdown AssembleNoResponseBreakdownV2(List<NoResponseBreakdownSpRow> spRows)
+    {
+        if (spRows.Count == 0) return new NoResponseBreakdown();
+        static string MapBucket(string b) => b switch
+        {
+            "Current" => AgeBuckets.B0_30,
+            "30+" => AgeBuckets.B31_60,
+            "60+" => AgeBuckets.B61_90,
+            "90+" => AgeBuckets.B91_120,
+            _ => AgeBuckets.B120P
+        };
+        var payerRows = spRows.GroupBy(r => r.PayerName, StringComparer.OrdinalIgnoreCase)
+            .Select(pg =>
+            {
+                var list = pg.ToList();
+                var byBucket = list.ToDictionary(
+                    x => MapBucket(x.AgeBucket),
+                    x => new AgeBucketAmount(
+                        x.LineItemCount, x.VarianceAllowed, x.VariancePaid,
+                        x.PctVarianceAllowed, x.PctVariancePaid));
+                var priority = byBucket.OrderByDescending(kv => kv.Value.LineItemCount).First().Key;
+                return new NoResponsePayerRow(pg.Key, list.Sum(x => x.LineItemCount),
+                    list.Sum(x => x.VarianceAllowed), list.Sum(x => x.VariancePaid),
+                    byBucket, priority);
+            }).OrderByDescending(p => p.TotalVarianceAllowed).ToList();
+
+        var totalByBucket = AgeBuckets.All.ToDictionary(
+            b => b,
+            b =>
+            {
+                var rows = spRows.Where(r => MapBucket(r.AgeBucket) == b).ToList();
+                if (rows.Count == 0)
+                    return new AgeBucketAmount(0, 0, 0, null, null);
+                return new AgeBucketAmount(
+                    rows.Sum(r => r.LineItemCount),
+                    rows.Sum(r => r.VarianceAllowed),
+                    rows.Sum(r => r.VariancePaid),
+                    null, null);
+            });
+
+        return new NoResponseBreakdown
+        {
+            PayerRows = payerRows,
+            TotalLineItems = spRows.Sum(r => r.LineItemCount),
+            TotalVarianceAllowed = spRows.GroupBy(r => r.PayerName).Select(g => g.First().TotalVarianceAllowed).Sum(),
+            TotalVariancePaid = spRows.GroupBy(r => r.PayerName).Select(g => g.First().TotalVariancePaid).Sum(),
+            TotalByBucket = totalByBucket,
+        };
     }
 
     /// <summary>Assembles a DenialBreakdown from the flat SP 10 rows.</summary>
@@ -2094,6 +2346,10 @@ public class PredictionController : Controller
                             dgList.Sum(r => r.LineItemCount),
                             dgList.Sum(r => r.PredictedAllowed),
                             dgList.Sum(r => r.PredictedInsurance),
+                            dgList.Sum(r => r.ActualAllowed),
+                            dgList.Sum(r => r.ActualInsurance),
+                            dgList.Sum(r => r.VarianceAllowed),
+                            dgList.Sum(r => r.VariancePaid),
                             months.ToDictionary(m => m, m => MonthAmount(dgList, m)));
                     })
                     .OrderByDescending(d => d.TotalClaims)
@@ -2104,6 +2360,10 @@ public class PredictionController : Controller
                     pg.Key, totalClaims,
                     pgList.Sum(r => r.PredictedAllowed),
                     pgList.Sum(r => r.PredictedInsurance),
+                    pgList.Sum(r => r.ActualAllowed),
+                    pgList.Sum(r => r.ActualInsurance),
+                    pgList.Sum(r => r.VarianceAllowed),
+                    pgList.Sum(r => r.VariancePaid),
                     byMonth, topDenials);
             })
             .OrderByDescending(p => p.TotalClaims)
@@ -2120,6 +2380,10 @@ public class PredictionController : Controller
             TotalClaims             = spRows.Sum(r => r.LineItemCount),
             TotalPredictedAllowed   = spRows.Sum(r => r.PredictedAllowed),
             TotalPredictedInsurance = spRows.Sum(r => r.PredictedInsurance),
+            TotalActualAllowed      = spRows.Sum(r => r.ActualAllowed),
+            TotalActualInsurance    = spRows.Sum(r => r.ActualInsurance),
+            TotalVarianceAllowed    = spRows.Sum(r => r.VarianceAllowed),
+            TotalVariancePaid       = spRows.Sum(r => r.VariancePaid),
             TotalByMonth            = grandByMonth,
         };
     }
@@ -2134,8 +2398,10 @@ public class PredictionController : Controller
             var list = rows.Where(r => r.AgeBucket == bucket).ToList();
             return new AgeBucketAmount(
                 list.Sum(r => r.LineItemCount),
-                list.Sum(r => r.PredictedAllowed),
-                list.Sum(r => r.PredictedInsurance));
+                list.Sum(r => r.VarianceAllowed),
+                list.Sum(r => r.VariancePaid),
+                list.Count > 0 ? list.Average(r => r.PctVarianceAllowed ?? 0) : null,
+                list.Count > 0 ? list.Average(r => r.PctVariancePaid ?? 0) : null);
         }
 
         var payerRows = spRows
@@ -2143,23 +2409,23 @@ public class PredictionController : Controller
             .Select(pg =>
             {
                 var pgList      = pg.ToList();
-                var totalClaims = pgList.Sum(r => r.LineItemCount);
+                var totalItems  = pgList.Sum(r => r.LineItemCount);
 
                 var byBucket = AgeBuckets.All.ToDictionary(
                     b => b,
                     b => BucketAmount(pgList, b));
 
                 var priorityBucket = AgeBuckets.All
-                    .OrderByDescending(b => byBucket[b].ClaimCount)
+                    .OrderByDescending(b => byBucket[b].LineItemCount)
                     .First();
 
                 return new NoResponsePayerRow(
-                    pg.Key, totalClaims,
-                    pgList.Sum(r => r.PredictedAllowed),
-                    pgList.Sum(r => r.PredictedInsurance),
+                    pg.Key, totalItems,
+                    pgList.First().TotalVarianceAllowed,
+                    pgList.First().TotalVariancePaid,
                     byBucket, priorityBucket);
             })
-            .OrderByDescending(p => p.TotalClaims)
+            .OrderByDescending(p => p.TotalVarianceAllowed)
             .ToList();
 
         var totalByBucket = AgeBuckets.All.ToDictionary(
@@ -2168,11 +2434,11 @@ public class PredictionController : Controller
 
         return new NoResponseBreakdown
         {
-            PayerRows               = payerRows,
-            TotalClaims             = spRows.Sum(r => r.LineItemCount),
-            TotalPredictedAllowed   = spRows.Sum(r => r.PredictedAllowed),
-            TotalPredictedInsurance = spRows.Sum(r => r.PredictedInsurance),
-            TotalByBucket           = totalByBucket,
+            PayerRows            = payerRows,
+            TotalLineItems         = spRows.Sum(r => r.LineItemCount),
+            TotalVarianceAllowed   = spRows.GroupBy(r => r.PayerName).Select(g => g.First().TotalVarianceAllowed).Sum(),
+            TotalVariancePaid      = spRows.GroupBy(r => r.PayerName).Select(g => g.First().TotalVariancePaid).Sum(),
+            TotalByBucket          = totalByBucket,
         };
     }
 }

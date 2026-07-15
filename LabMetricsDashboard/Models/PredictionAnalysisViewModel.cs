@@ -36,6 +36,10 @@ public sealed class PredictionAnalysisViewModel
     public string? FilterFinalCoverageStatus { get; init; }
     public string? FilterPayability { get; init; }
     public string? FilterCPTCode { get; init; }
+    public string? FilterForecastingPayability { get; init; }
+    public string? FilterPayStatus { get; init; }
+    public string? FilterForecastingPayabilitySubstatus { get; init; }
+    public string? FilterPredictionStatus { get; init; }
 
     // Filter option lists
     public List<string> PayerNames { get; init; } = [];
@@ -44,6 +48,10 @@ public sealed class PredictionAnalysisViewModel
     public List<string> FinalCoverageStatuses { get; init; } = [];
     public List<string> PayabilityOptions { get; init; } = [];
     public List<string> CPTCodes { get; init; } = [];
+    public List<string> ForecastingPayabilities { get; init; } = [];
+    public List<string> PayStatuses { get; init; } = [];
+    public List<string> ForecastingPayabilitySubstatuses { get; init; } = [];
+    public List<string> PredictionStatuses { get; init; } = [];
 
     // ?? Prediction buckets (primary metric table) ?????????????????????????
     public IReadOnlyList<PredictionBucketRow> Buckets { get; init; } = [];
@@ -80,19 +88,29 @@ public sealed class PredictionAnalysisViewModel
     // ?? Predicted to Pay vs No Response Breakdown ?????????????????
     public NoResponseBreakdown NoResponseBreakdown { get; init; } = new();
 
+    // Section E — Adjusted by payer
+    public IReadOnlyList<PredictionAdjustedPayerRow> AdjustedByPayer { get; init; } = [];
+
+    // Section B modal data — payer x pay status
+    public IReadOnlyList<PredictionPayerPayStatusRow> PayerPayStatusBreakdown { get; init; } = [];
+
     // ?? AI-generated prediction insight (optional) ????????????????
     public PredictionInsight? Insight { get; init; }
 }
 
 /// <summary>One row in the Prediction Analysis bucket summary table.</summary>
 public sealed record PredictionBucketRow(
+    string GroupName,
     string BucketName,
+    string? PayStatus,
+    bool IsGroupTotal,
     int ClaimCount,
     decimal PredictedAllowed,
     decimal PredictedInsurance,
     decimal? ActualAllowed,
     decimal? ActualInsurance,
-    decimal? Variance);
+    decimal? VarianceAllowed,
+    decimal? VariancePaid);
 
 /// <summary>
 /// Holds the three metric sections from the Prediction Analysis Summary sheet:
@@ -102,6 +120,13 @@ public sealed record PredictionBucketRow(
 /// </summary>
 public sealed class PredictionSummaryMetrics
 {
+    public PredictionMetricBasis ToPayBasis      { get; init; } = new(0, 0, 0);
+    public PredictionMetricBasis PaidBasis       { get; init; } = new(0, 0, 0);
+    public PredictionMetricBasis UnpaidBasis     { get; init; } = new(0, 0, 0);
+    public PredictionMetricBasis DeniedBasis     { get; init; } = new(0, 0, 0);
+    public PredictionMetricBasis NoResponseBasis { get; init; } = new(0, 0, 0);
+    public PredictionMetricBasis AdjustedBasis   { get; init; } = new(0, 0, 0);
+
     // Section 2 � Ratios
     public decimal? PaymentRatioClaim      { get; init; }
     public decimal? PaymentRatioAllowed    { get; init; }
@@ -127,7 +152,21 @@ public sealed class PredictionSummaryMetrics
     public decimal? PredVsActualRatioClaim     { get; init; }
     public decimal? PredVsActualAllowedAmount  { get; init; }
     public decimal? PredVsActualInsPayment     { get; init; }
+
+    // Raw numerator/denominator values displayed in accuracy tooltips.
+    public int?     PredAccuracyClaimNumerator        { get; init; }
+    public int?     PredAccuracyClaimDenominator      { get; init; }
+    public decimal? PredAccuracyAllowedNumerator      { get; init; }
+    public decimal? PredAccuracyAllowedDenominator    { get; init; }
+    public decimal? PredAccuracyInsuranceNumerator    { get; init; }
+    public decimal? PredAccuracyInsuranceDenominator  { get; init; }
 }
+
+/// <summary>Raw numerator/denominator values used by summary ratio tooltips.</summary>
+public sealed record PredictionMetricBasis(
+    int ClaimCount,
+    decimal AllowedAmount,
+    decimal InsuranceAmount);
 
 /// <summary>Payer-level prediction validation row (Claim Level).</summary>
 public sealed record PredictionPayerRow(
@@ -144,7 +183,31 @@ public sealed record PredictionPayerRow(
     decimal PredictedInsurance,
     decimal ActualAllowed,
     decimal ActualInsurance,
-    decimal Variance);
+    decimal VarianceAllowed,
+    decimal VariancePaid);
+
+/// <summary>Section E — Adjusted by payer row.</summary>
+public sealed record PredictionAdjustedPayerRow(
+    string  PayerName,
+    int     LineItems,
+    decimal PredictedAllowed,
+    decimal PredictedInsurance,
+    decimal ActualAllowed,
+    decimal ActualInsurance,
+    decimal VarianceAllowed,
+    decimal VariancePaid);
+
+/// <summary>Section B modal — payer x pay status drill-down.</summary>
+public sealed record PredictionPayerPayStatusRow(
+    string  PayerName,
+    string  PayStatus,
+    int     LineItems,
+    decimal PredictedAllowed,
+    decimal PredictedInsurance,
+    decimal ActualAllowed,
+    decimal ActualInsurance,
+    decimal VarianceAllowed,
+    decimal VariancePaid);
 
 /// <summary>CPT-level prediction insight row.</summary>
 public sealed record PredictionCptRow(
@@ -190,16 +253,24 @@ public sealed record DenialCodeRow(
     int    TotalClaims,
     decimal TotalPredictedAllowed,
     decimal TotalPredictedInsurance,
+    decimal ActualAllowed,
+    decimal ActualInsurance,
+    decimal VarianceAllowed,
+    decimal VariancePaid,
     IReadOnlyDictionary<string, DenialMonthAmount> ByMonth);
 
 /// <summary>
-/// One payer header-row (top-1 by total claim count) with its top-5 denial sub-rows.
+/// One payer header-row with denial-code sub-rows (Section C).
 /// </summary>
 public sealed record DenialPayerRow(
     string PayerName,
     int    TotalClaims,
     decimal TotalPredictedAllowed,
     decimal TotalPredictedInsurance,
+    decimal ActualAllowed,
+    decimal ActualInsurance,
+    decimal VarianceAllowed,
+    decimal VariancePaid,
     IReadOnlyDictionary<string, DenialMonthAmount> ByMonth,
     IReadOnlyList<DenialCodeRow> TopDenialCodes);
 
@@ -211,10 +282,13 @@ public sealed class DenialBreakdown
     public IReadOnlyList<string>          Months     { get; init; } = [];
     public IReadOnlyList<DenialPayerRow>  PayerRows  { get; init; } = [];
 
-    // Grand-total footer row
     public int     TotalClaims              { get; init; }
     public decimal TotalPredictedAllowed    { get; init; }
     public decimal TotalPredictedInsurance  { get; init; }
+    public decimal TotalActualAllowed       { get; init; }
+    public decimal TotalActualInsurance     { get; init; }
+    public decimal TotalVarianceAllowed     { get; init; }
+    public decimal TotalVariancePaid        { get; init; }
     public IReadOnlyDictionary<string, DenialMonthAmount> TotalByMonth { get; init; }
         = new Dictionary<string, DenialMonthAmount>();
 }
@@ -233,6 +307,16 @@ public static class AgeBuckets
     public static readonly IReadOnlyList<string> All =
         [B0_30, B31_60, B61_90, B91_120, B120P];
 
+    public static string DisplayLabel(string bucket) => bucket switch
+    {
+        B0_30   => "Current",
+        B31_60  => "30+",
+        B61_90  => "60+",
+        B91_120 => "90+",
+        B120P   => "120+",
+        _       => bucket
+    };
+
     /// <summary>Assigns a record to its age bucket using FirstBilledDate days-to-today.</summary>
     public static string Classify(int ageDays) => ageDays switch
     {
@@ -246,16 +330,18 @@ public static class AgeBuckets
 
 /// <summary>Counts + amounts for one age bucket cell.</summary>
 public sealed record AgeBucketAmount(
-    int     ClaimCount,
-    decimal PredictedAllowed,
-    decimal PredictedInsurance);
+    int      LineItemCount,
+    decimal  VarianceAllowed,
+    decimal  VariancePaid,
+    decimal? PctVarianceAllowed,
+    decimal? PctVariancePaid);
 
 /// <summary>One payer row in the No Response breakdown, sorted by total claim count.</summary>
 public sealed record NoResponsePayerRow(
     string  PayerName,
-    int     TotalClaims,
-    decimal TotalPredictedAllowed,
-    decimal TotalPredictedInsurance,
+    int     TotalLineItems,
+    decimal TotalVarianceAllowed,
+    decimal TotalVariancePaid,
     IReadOnlyDictionary<string, AgeBucketAmount> ByBucket,
     /// <summary>Age bucket with the highest claim count � drives Priority Level.</summary>
     string  PriorityBucket);
@@ -265,9 +351,9 @@ public sealed class NoResponseBreakdown
 {
     public IReadOnlyList<NoResponsePayerRow> PayerRows { get; init; } = [];
 
-    public int     TotalClaims             { get; init; }
-    public decimal TotalPredictedAllowed   { get; init; }
-    public decimal TotalPredictedInsurance { get; init; }
+    public int     TotalLineItems          { get; init; }
+    public decimal TotalVarianceAllowed    { get; init; }
+    public decimal TotalVariancePaid       { get; init; }
     public IReadOnlyDictionary<string, AgeBucketAmount> TotalByBucket { get; init; }
         = new Dictionary<string, AgeBucketAmount>();
 }

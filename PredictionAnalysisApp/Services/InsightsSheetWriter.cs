@@ -4,7 +4,7 @@ using PredictionAnalysis.Models;
 namespace PredictionAnalysis.Services;
 
 /// <summary>
-/// Writes the "Prediction Insights" sheet — 7 analyst sections built entirely
+/// Writes the "Prediction Insights" sheet ï¿½ 7 analyst sections built entirely
 /// from data already computed by AnalysisService.
 ///
 /// To DISABLE: comment out the single call in ReportWriterService.WriteReport:
@@ -27,7 +27,7 @@ public static class InsightsSheetWriter
     private static readonly XLColor MetricValue  = XLColor.FromArgb(0x1A, 0x3C, 0x52);
     private static readonly XLColor NoteText     = XLColor.FromArgb(0x70, 0x70, 0x70);
 
-    private const int SpanCols = 7;  // A–G
+    private const int SpanCols = 7;  // Aï¿½G
 
     // ?? Entry point ???????????????????????????????????????????????????????????
 
@@ -69,12 +69,12 @@ public static class InsightsSheetWriter
     private static int WriteTitleBlock(IXLWorksheet ws, string labName,
         string weekFolderName, DateTime weekStart)
     {
-        // Row 1 — main title
+        // Row 1 ï¿½ main title
         MergeStyle(ws, 1, 1, 1, SpanCols, TitleBg, White, 15, bold: true,
-            $"{labName} — Prediction vs. Actuals Insights");
+            $"{labName} ï¿½ Prediction vs. Actuals Insights");
         ws.Row(1).Height = 30;
 
-        // Row 2 — subtitle
+        // Row 2 ï¿½ subtitle
         var cutoffStr = weekStart.ToString("MM/dd/yyyy");
         MergeStyle(ws, 2, 1, 2, SpanCols, TitleBg, SubtitleFg, 10, bold: false,
             $"Period: {weekFolderName}   |   Cutoff: {cutoffStr}   |   Source: {labName}");
@@ -84,7 +84,7 @@ public static class InsightsSheetWriter
         return 3;
     }
 
-    // ?? Section 1 — Overall Prediction Performance ????????????????????????????
+    // ?? Section 1 ï¿½ Overall Prediction Performance ????????????????????????????
 
     private static int WriteSection1_OverallPerformance(IXLWorksheet ws, SummaryResult s, int row)
     {
@@ -96,7 +96,7 @@ public static class InsightsSheetWriter
 
         string narrative =
             $"Of the {s.TotalPredictedClaims:N0} claims predicted to pay, only {s.TotalPaidClaims:N0} were actually paid " +
-            $"— a {payRate:N1}% payment rate against an {nonPayRate:N1}% non-payment rate. " +
+            $"ï¿½ a {payRate:N1}% payment rate against an {nonPayRate:N1}% non-payment rate. " +
             $"The {s.TotalPredictedAllowed:C0} in predicted allowed amounts converted to only " +
             $"{s.TotalPaidActualInsurance:C0} in actual insurance payments, leaving roughly " +
             $"{revenueAtRisk:C0} at risk.";
@@ -110,7 +110,7 @@ public static class InsightsSheetWriter
         return Spacer(ws, row);
     }
 
-    // ?? Section 2 — Forecasting Payability Accuracy Gap ??????????????????????
+    // ?? Section 2 ï¿½ Forecasting Payability Accuracy Gap ??????????????????????
 
     private static int WriteSection2_ForecastingAccuracyGap(
         IXLWorksheet ws, SummaryResult s, List<ClaimRecord> working, int row)
@@ -122,7 +122,7 @@ public static class InsightsSheetWriter
             .GroupBy(r => r.ForecastingP.Trim(), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
 
-        // Use all records to compute paid by ForecastingP — working only has unpaid
+        // Use all records to compute paid by ForecastingP ï¿½ working only has unpaid
         // Use summary ratios as proxy
         var payableRate       = s.PaymentRatioCount;
         var potPayableRate    = s.PredVsActualRatioCount;
@@ -130,8 +130,8 @@ public static class InsightsSheetWriter
         string narrative =
             "The two prediction statuses performed very differently. " +
             $"Claims flagged as Potentially Payable achieved a {potPayableRate:N1}% payment rate " +
-            $"— a reasonable prediction outcome. However, claims flagged as Payable — the higher-confidence tier " +
-            $"— converted at just {payableRate:N1}%. " +
+            $"ï¿½ a reasonable prediction outcome. However, claims flagged as Payable ï¿½ the higher-confidence tier " +
+            $"ï¿½ converted at just {payableRate:N1}%. " +
             "This is a critical discrepancy and suggests the Payable classification is significantly " +
             "over-predicting payer willingness to pay.";
 
@@ -141,7 +141,7 @@ public static class InsightsSheetWriter
         return Spacer(ws, row);
     }
 
-    // ?? Section 3 — No Response Is the Dominant Unpaid Driver ????????????????
+    // ?? Section 3 ï¿½ No Response Is the Dominant Unpaid Driver ????????????????
 
     private static int WriteSection3_NoResponse(
         IXLWorksheet ws, SummaryResult s, List<ClaimRecord> working, int row)
@@ -164,7 +164,7 @@ public static class InsightsSheetWriter
         string narrative =
             $"No Response accounts for {noRespPct:N1}% of all unpaid claims " +
             $"({s.NoResponseClaims:N0} of {s.TotalUnpaidClaims:N0}), carrying " +
-            $"{s.NoResponsePredAllowed:C0} in allowed amounts. This is not a denial — payers have " +
+            $"{s.NoResponsePredAllowed:C0} in allowed amounts. This is not a denial ï¿½ payers have " +
             $"simply not responded within the expected payment window. {topName} alone accounts for " +
             $"{topCount:N0} of these {s.NoResponseClaims:N0} No Response claims, making it the single " +
             $"largest risk concentration in the portfolio.\n\n" +
@@ -180,7 +180,7 @@ public static class InsightsSheetWriter
         return Spacer(ws, row);
     }
 
-    // ?? Section 4 — Denial Concentration ?????????????????????????????????????
+    // ?? Section 4 ï¿½ Denial Concentration ?????????????????????????????????????
 
     private static int WriteSection4_DenialConcentration(
         IXLWorksheet ws, SummaryResult s, List<DenialSummaryRow> denialSummary,
@@ -217,14 +217,14 @@ public static class InsightsSheetWriter
         return Spacer(ws, row);
     }
 
-    // ?? Section 5 — Panel-Level Variance ?????????????????????????????????????
+    // ?? Section 5 ï¿½ Panel-Level Variance ?????????????????????????????????????
 
     private static int WriteSection5_PanelVariance(
         IXLWorksheet ws, SummaryResult s, List<ClaimRecord> working, int row)
     {
         row = WriteSectionHeader(ws, row, "5. Panel-Level Variance Highlights Coding Risk");
 
-        // Variance by payer — payers with highest average allowed amount vs lowest
+        // Variance by payer ï¿½ payers with highest average allowed amount vs lowest
         var payerStats = working
             .GroupBy(r => r.PayerName.Trim(), StringComparer.OrdinalIgnoreCase)
             .Select(g => (
@@ -243,7 +243,7 @@ public static class InsightsSheetWriter
         string narrative =
             "Average allowed amounts vary significantly across payers, indicating panel-level coding risk. " +
             $"The highest average allowed amount per claim is {highest.AvgAmt:C0} ({highest.Payer}) " +
-            $"versus {lowest.AvgAmt:C0} ({lowest.Payer}) — a spread of {variance:C0}. " +
+            $"versus {lowest.AvgAmt:C0} ({lowest.Payer}) ï¿½ a spread of {variance:C0}. " +
             "Wide variance across payers may indicate inconsistent coding or payer-specific contract rates " +
             "that should be reviewed in the next coding audit.";
 
@@ -256,7 +256,7 @@ public static class InsightsSheetWriter
         return Spacer(ws, row);
     }
 
-    // ?? Section 6 — Payer Type Performance ???????????????????????????????????
+    // ?? Section 6 ï¿½ Payer Type Performance ???????????????????????????????????
 
     private static int WriteSection6_PayerTypePerformance(
         IXLWorksheet ws, SummaryResult s, List<ClaimRecord> working, int row)
@@ -301,7 +301,7 @@ public static class InsightsSheetWriter
         return Spacer(ws, row);
     }
 
-    // ?? Section 7 — Key Actions & Recommendations ?????????????????????????????
+    // ?? Section 7 ï¿½ Key Actions & Recommendations ?????????????????????????????
 
     private static int WriteSection7_KeyActions(
         IXLWorksheet ws, SummaryResult s,
@@ -322,7 +322,7 @@ public static class InsightsSheetWriter
         var actions = new[]
         {
             ($"AR Follow-Up: {topNoRespPayer?.Key ?? "Top Payer"}",
-             $"Work {s.NoResponseClaims:N0} No Response claims immediately — {s.NoResponsePredAllowed:C0} recoverable.",
+             $"Work {s.NoResponseClaims:N0} No Response claims immediately ï¿½ {s.NoResponsePredAllowed:C0} recoverable.",
              GoodBg),
             ("Appeal Denied Claims",
              $"File appeals for {s.DeniedClaims:N0} denied claims. Focus on top code: {topDenialCode?.Key ?? "N/A"}.",
@@ -392,14 +392,14 @@ public static class InsightsSheetWriter
         ws.Cell(row, 3).Style.Font.FontColor = XLColor.FromArgb(0x2E, 0x7D, 0x32);
         ws.Cell(row, 3).Style.Font.FontSize  = 7;
 
-        // Label — col A
+        // Label ï¿½ col A
         var lbl = ws.Cell(row, 1);
         lbl.Value = label;
         lbl.Style.Font.Bold      = true;
         lbl.Style.Font.FontSize  = 10;
         lbl.Style.Font.FontColor = BodyText;
 
-        // Value — col D
+        // Value ï¿½ col D
         if (!string.IsNullOrEmpty(value))
         {
             var val = ws.Cell(row, 4);
@@ -410,7 +410,7 @@ public static class InsightsSheetWriter
             val.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
         }
 
-        // Note — col F
+        // Note ï¿½ col F
         if (!string.IsNullOrEmpty(note))
         {
             var n = ws.Cell(row, 6);

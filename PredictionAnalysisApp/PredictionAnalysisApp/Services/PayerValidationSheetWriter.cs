@@ -4,7 +4,7 @@ using PredictionAnalysis.Models;
 namespace PredictionAnalysis.Services;
 
 /// <summary>
-/// Writes the "Payer Breakdown" sheet — a payer-level claim breakdown table
+/// Writes the "Payer Breakdown" sheet ï¿½ a payer-level claim breakdown table
 /// matching the "Prediction Validation by Payer (Claim Level)" layout.
 ///
 /// Columns: Payer Name | Payer Type | Total Claims | Paid | Denied |
@@ -16,7 +16,7 @@ public static class PayerValidationSheetWriter
 {
     // ?? Professional colour palette ???????????????????????????????????????????
 
-    // Chrome — slate-charcoal family
+    // Chrome ï¿½ slate-charcoal family
     private static readonly XLColor TitleBg       = XLColor.FromArgb(0x1C, 0x28, 0x33);  // charcoal slate
     private static readonly XLColor TitleAccent   = XLColor.FromArgb(0x2E, 0x40, 0x57);  // steel-blue stripe
     private static readonly XLColor SubtitleFg    = XLColor.FromArgb(0xAE, 0xC6, 0xCF);  // muted powder blue
@@ -24,25 +24,25 @@ public static class PayerValidationSheetWriter
     private static readonly XLColor HeaderBg2     = XLColor.FromArgb(0x2C, 0x3E, 0x50);  // deeper graphite-blue ($ cols)
     private static readonly XLColor TotalRowBg    = XLColor.FromArgb(0x1C, 0x28, 0x33);  // matches title
     private static readonly XLColor White         = XLColor.White;
-    private static readonly XLColor BodyText      = XLColor.FromArgb(0x2C, 0x2C, 0x2C);  // near-black — readable
+    private static readonly XLColor BodyText      = XLColor.FromArgb(0x2C, 0x2C, 0x2C);  // near-black ï¿½ readable
     private static readonly XLColor AltRowBg      = XLColor.FromArgb(0xF4, 0xF6, 0xF7);  // very light warm grey
 
-    // Data row backgrounds — subtle, not loud
-    private static readonly XLColor BadBg         = XLColor.FromArgb(0xFD, 0xEE, 0xEE);  // faint blush     — 0 %
-    private static readonly XLColor WarnBg        = XLColor.FromArgb(0xFE, 0xF9, 0xEE);  // faint warm cream — 1–49 %
-    private static readonly XLColor GoodBg        = XLColor.FromArgb(0xEE, 0xF7, 0xEE);  // faint sage       — 50 %+
-    private static readonly XLColor NeutralBg     = XLColor.FromArgb(0xF4, 0xF6, 0xF7);  // light grey       — no data
+    // Data row backgrounds ï¿½ subtle, not loud
+    private static readonly XLColor BadBg         = XLColor.FromArgb(0xFD, 0xEE, 0xEE);  // faint blush     ï¿½ 0 %
+    private static readonly XLColor WarnBg        = XLColor.FromArgb(0xFE, 0xF9, 0xEE);  // faint warm cream ï¿½ 1ï¿½49 %
+    private static readonly XLColor GoodBg        = XLColor.FromArgb(0xEE, 0xF7, 0xEE);  // faint sage       ï¿½ 50 %+
+    private static readonly XLColor NeutralBg     = XLColor.FromArgb(0xF4, 0xF6, 0xF7);  // light grey       ï¿½ no data
 
-    // Status text colours — applied to cells only, no heavy bg
+    // Status text colours ï¿½ applied to cells only, no heavy bg
     private static readonly XLColor BadRate       = XLColor.FromArgb(0xC0, 0x39, 0x2B);  // professional crimson
     private static readonly XLColor WarnRate      = XLColor.FromArgb(0xD3, 0x54, 0x00);  // burnt orange
     private static readonly XLColor GoodRate      = XLColor.FromArgb(0x1E, 0x6F, 0x3E);  // professional dark green
 
-    // Variance sign colours — text only
+    // Variance sign colours ï¿½ text only
     private static readonly XLColor PositiveVar   = XLColor.FromArgb(0x1E, 0x6F, 0x3E);  // dark green
     private static readonly XLColor NegativeVar   = XLColor.FromArgb(0xC0, 0x39, 0x2B);  // professional crimson
 
-    // Payer-type badge — understated tones
+    // Payer-type badge ï¿½ understated tones
     private static readonly XLColor MedicareBg    = XLColor.FromArgb(0xEB, 0xF0, 0xF7);  // pale periwinkle
     private static readonly XLColor MedicaidBg    = XLColor.FromArgb(0xF6, 0xEB, 0xF3);  // pale mauve
     private static readonly XLColor CommercialBg  = XLColor.FromArgb(0xEB, 0xF5, 0xF3);  // pale mint
@@ -116,7 +116,7 @@ public static class PayerValidationSheetWriter
     private static int WriteTitleBlock(IXLWorksheet ws, string labName,
         string weekFolderName, DateTime weekStart)
     {
-        // Row 1 — deep navy main title
+        // Row 1 ï¿½ deep navy main title
         ws.Range(1, 1, 1, ColCount).Merge().Style.Fill.BackgroundColor = TitleBg;
         var titleCell = ws.Cell(1, 1);
         titleCell.Value = $"{labName} \u2014 Prediction Validation by Payer (Claim Level)";
@@ -127,7 +127,7 @@ public static class PayerValidationSheetWriter
         titleCell.Style.Alignment.Vertical    = XLAlignmentVerticalValues.Center;
         ws.Row(1).Height = 34;
 
-        // Row 2 — accent-stripe subtitle
+        // Row 2 ï¿½ accent-stripe subtitle
         ws.Range(2, 1, 2, ColCount).Merge().Style.Fill.BackgroundColor = TitleAccent;
         var subCell = ws.Cell(2, 1);
         var weekEnd = weekStart.AddDays(6);
@@ -203,7 +203,7 @@ public static class PayerValidationSheetWriter
         nameCell.Style.Font.FontSize          = 10;
         nameCell.Style.Font.FontColor         = BodyText;
 
-        // ?? Payer Type — understated badge ????????????????????????????????????
+        // ?? Payer Type ï¿½ understated badge ????????????????????????????????????
         var typeCell = ws.Cell(row, ColPayerType);
         typeCell.Value                        = pr.PayerType;
         typeCell.Style.Font.Bold              = false;
@@ -225,7 +225,7 @@ public static class PayerValidationSheetWriter
         SetInt(ws, row, ColUnpaid,      pr.Unpaid,      bold: true,
                                                         color: pr.Unpaid     > 0 ? BadRate  : BodyText);
 
-        // ?? Payment Rate — clean coloured text, no cell fill ?????????????????
+        // ?? Payment Rate ï¿½ clean coloured text, no cell fill ?????????????????
         var rateCell = ws.Cell(row, ColPayRate);
         rateCell.Value                        = $"{pr.PaymentRate:N1}%";
         rateCell.Style.Font.Bold              = true;
@@ -240,7 +240,7 @@ public static class PayerValidationSheetWriter
         SetMoney(ws, row, ColActAllowed,  pr.ActualAllowed);
         SetMoney(ws, row, ColActIns,      pr.ActualInsurance);
 
-        // ?? Variance — muted sign colouring on text only ??????????????????????
+        // ?? Variance ï¿½ muted sign colouring on text only ??????????????????????
         if (pr.Variance != 0m)
         {
             var varCell = ws.Cell(row, ColVariance);

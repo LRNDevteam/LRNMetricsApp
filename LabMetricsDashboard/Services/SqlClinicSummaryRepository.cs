@@ -73,8 +73,26 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
             ORDER BY BilledClaimCount DESC
             """;
 
-        // Query for distinct filter option lists (unfiltered)
-        const string optionsSql = """
+        // Query for distinct filter option lists (prefer DashboardFilterLookup when present)
+        const string optionsFromLookupSql = """
+            SELECT FilterValue FROM dbo.DashboardFilterLookup
+            WHERE FilterType = N'ClinicName' AND NULLIF(LTRIM(RTRIM(FilterValue)), '') IS NOT NULL
+            ORDER BY FilterValue;
+
+            SELECT FilterValue FROM dbo.DashboardFilterLookup
+            WHERE FilterType IN (N'SalesRepName', N'SalesRep') AND NULLIF(LTRIM(RTRIM(FilterValue)), '') IS NOT NULL
+            ORDER BY FilterValue;
+
+            SELECT FilterValue FROM dbo.DashboardFilterLookup
+            WHERE FilterType IN (N'PayerName', N'PayerName_Raw') AND NULLIF(LTRIM(RTRIM(FilterValue)), '') IS NOT NULL
+            ORDER BY FilterValue;
+
+            SELECT FilterValue FROM dbo.DashboardFilterLookup
+            WHERE FilterType IN (N'PanelName', N'PanelType') AND NULLIF(LTRIM(RTRIM(FilterValue)), '') IS NOT NULL
+            ORDER BY FilterValue;
+            """;
+
+        const string optionsFromLiveSql = """
             SELECT DISTINCT ClinicName   FROM dbo.ClaimLevelData WHERE ClinicName   IS NOT NULL AND ClinicName   <> '' ORDER BY ClinicName;
             SELECT DISTINCT SalesRepName FROM dbo.ClaimLevelData WHERE SalesRepName IS NOT NULL AND SalesRepName <> '' ORDER BY SalesRepName;
             SELECT DISTINCT PayerName    FROM dbo.ClaimLevelData WHERE PayerName    IS NOT NULL AND PayerName    <> '' ORDER BY PayerName;
@@ -112,29 +130,85 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
 
-            // 1. Fetch filter option lists
-            await using (var optCmd = new SqlCommand(optionsSql, conn) { CommandTimeout = 60 })
+            // 1. Fetch filter option lists — prefer DashboardFilterLookup (filled by usp_RefreshDashboard)
+            var usedLookup = false;
+            try
             {
+                await using var probe = new SqlCommand("""
+                    SELECT CASE WHEN OBJECT_ID('dbo.DashboardFilterLookup','U') IS NOT NULL
+                                  AND EXISTS (SELECT 1 FROM dbo.DashboardFilterLookup WHERE FilterType = N'ClinicName')
+                                 THEN 1 ELSE 0 END
+                    """, conn) { CommandTimeout = 15 };
+                usedLookup = Convert.ToInt32(await probe.ExecuteScalarAsync(ct)) == 1;
+            }
+            catch { usedLookup = false; }
+
+            await using (var optCmd = new SqlCommand(usedLookup ? optionsFromLookupSql : optionsFromLiveSql, conn)
+            {
+                CommandTimeout = usedLookup ? 30 : 180
+            })
+            {
+                if (usedLookup)
+                    _logger.LogInformation("ClinicSummary: filter options from DashboardFilterLookup.");
+                else
+                    _logger.LogWarning("ClinicSummary: DashboardFilterLookup missing — live ClaimLevelData DISTINCT (slow on large labs).");
+
                 await using var optReader = await optCmd.ExecuteReaderAsync(ct);
 
                 while (await optReader.ReadAsync(ct))
-                    clinicNames.Add(optReader.GetString(0));
+                    if (!optReader.IsDBNull(0)) clinicNames.Add(optReader.GetString(0));
 
                 await optReader.NextResultAsync(ct);
                 while (await optReader.ReadAsync(ct))
-                    salesRepNames.Add(optReader.GetString(0));
+                    if (!optReader.IsDBNull(0)) salesRepNames.Add(optReader.GetString(0));
+
+                // SalesRep may be absent from DashboardFilterLookup — fill from CS aggregate or live if empty
+                if (salesRepNames.Count == 0)
+                {
+                    // continue reading remaining result sets first then backfill
+                }
 
                 await optReader.NextResultAsync(ct);
                 while (await optReader.ReadAsync(ct))
-                    payerNames.Add(optReader.GetString(0));
+                    if (!optReader.IsDBNull(0)) payerNames.Add(optReader.GetString(0));
 
                 await optReader.NextResultAsync(ct);
                 while (await optReader.ReadAsync(ct))
-                    panelNames.Add(optReader.GetString(0));
+                    if (!optReader.IsDBNull(0)) panelNames.Add(optReader.GetString(0));
+            }
+
+            if (salesRepNames.Count == 0)
+            {
+                try
+                {
+                    await using (var probe = new SqlCommand("""
+                        SELECT CASE WHEN OBJECT_ID('dbo.NW_CS_RepVsPayment','U') IS NOT NULL
+                                      AND EXISTS (SELECT 1 FROM dbo.NW_CS_RepVsPayment)
+                                     THEN 1 ELSE 0 END
+                        """, conn) { CommandTimeout = 15 })
+                    {
+                        if (Convert.ToInt32(await probe.ExecuteScalarAsync(ct)) == 1)
+                        {
+                            await using var repCmd = new SqlCommand("""
+                                SELECT DISTINCT LTRIM(RTRIM(SalesRepName))
+                                FROM dbo.NW_CS_RepVsPayment
+                                WHERE NULLIF(LTRIM(RTRIM(SalesRepName)), '') IS NOT NULL
+                                ORDER BY 1
+                                """, conn) { CommandTimeout = 30 };
+                            await using var rr = await repCmd.ExecuteReaderAsync(ct);
+                            while (await rr.ReadAsync(ct))
+                                if (!rr.IsDBNull(0)) salesRepNames.Add(rr.GetString(0));
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "ClinicSummary: sales-rep filter option backfill failed.");
+                }
             }
 
             // 2. Fetch aggregated rows
-            await using (var cmd = new SqlCommand(sql, conn) { CommandTimeout = 120 })
+            await using (var cmd = new SqlCommand(sql, conn) { CommandTimeout = 300 })
             {
                 cmd.Parameters.AddRange(parameters.ToArray());
 

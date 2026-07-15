@@ -1,196 +1,150 @@
 -- ============================================================
 -- 01_CreateTables.sql
--- Creates staging tables for PayerValidation source data.
--- Run once against your target database.
+-- Core Prediction Analysis tables for per-lab databases.
+-- Safe to re-run: uses IF NOT EXISTS / conditional ALTER.
 -- ============================================================
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+GO
 
--- ------------------------------------------------------------
--- Table 1 : PayerValidationFileLog
--- One row per source file processed by the Prediction app.
--- ------------------------------------------------------------
-IF NOT EXISTS (
-    SELECT 1 FROM sys.tables WHERE name = 'PayerValidationFileLog'
-)
+-- ?? File log ????????????????????????????????????????????????????????????????
+IF OBJECT_ID('dbo.PayerValidationFileLog', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.PayerValidationFileLog
     (
-        FileLogId           INT             NOT NULL IDENTITY(1,1) CONSTRAINT PK_PayerValidationFileLog PRIMARY KEY,
-        RunId               NVARCHAR(100)   NULL,
-        WeekFolder          NVARCHAR(255)   NULL,
-        LabName             NVARCHAR(255)   NOT NULL,
-        SourceFullPath      NVARCHAR(1000)  NOT NULL,
-        FileName            NVARCHAR(500)   NOT NULL,
-        FileCreatedDateTime DATETIME2       NULL,
-        InsertedDateTime    DATETIME2       NOT NULL CONSTRAINT DF_PayerValidationFileLog_InsertedDateTime DEFAULT SYSUTCDATETIME()
+        FileLogId           INT            IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        RunId               NVARCHAR(100)  NULL,
+        WeekFolder          NVARCHAR(255)  NULL,
+        LabName             NVARCHAR(255)  NOT NULL,
+        SourceFullPath      NVARCHAR(1000) NOT NULL,
+        FileName            NVARCHAR(500)  NOT NULL,
+        FileCreatedDateTime DATETIME2      NULL,
+        InsertedDateTime    DATETIME2      NOT NULL CONSTRAINT DF_PayerValidationFileLog_Inserted DEFAULT SYSUTCDATETIME()
     );
 END
 GO
 
--- ------------------------------------------------------------
--- Table 2 : PayerValidationReport
--- One row per claim line read from the PayerValidation Excel.
--- All 90+ source columns are persisted here.
--- ------------------------------------------------------------
-IF NOT EXISTS (
-    SELECT 1 FROM sys.tables WHERE name = 'PayerValidationReport'
-)
+-- ?? Main report table (per-lab prediction source data) ???????????????????????
+IF OBJECT_ID('dbo.PayerValidationReport', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.PayerValidationReport
     (
-        ReportId                             INT             NOT NULL IDENTITY(1,1) CONSTRAINT PK_PayerValidationReport PRIMARY KEY,
-        FileLogId                            INT             NOT NULL CONSTRAINT FK_PayerValidationReport_FileLog FOREIGN KEY REFERENCES dbo.PayerValidationFileLog(FileLogId),
-        RunId                                NVARCHAR(100)   NULL,
-        WeekFolder                           NVARCHAR(255)   NULL,
-        LabName                              NVARCHAR(255)   NULL,
-        SourceFullPath                       NVARCHAR(1000)  NULL,
-
-        -- ?? Core identifiers ?????????????????????????????????????????????????
-        AccessionNo                          NVARCHAR(100)   NULL,
-        VisitNumber                          NVARCHAR(100)   NULL,
-        CPTCode                              NVARCHAR(50)    NULL,
-        PatientDOB                           NVARCHAR(50)    NULL,
-        PayerCode                            NVARCHAR(100)   NULL,
-        PayerName                            NVARCHAR(255)   NULL,
-        PayerNameNormalized                  NVARCHAR(255)   NULL,
-
-        -- ?? Pay / claim status ????????????????????????????????????????????????
-        PayStatus                            NVARCHAR(100)   NULL,
-        HistoricalPayment                    NVARCHAR(100)   NULL,
-        HistoricalPaidLineItemCount          NVARCHAR(50)    NULL,
-        HistoricalPaymentConfidenceScore     NVARCHAR(50)    NULL,
-        TotalLineItemCount                   NVARCHAR(50)    NULL,
-        PaidLineItemCount                    NVARCHAR(50)    NULL,
-        PctPaidLineItemCount                 NVARCHAR(50)    NULL,
-        PayerType                            NVARCHAR(100)   NULL,
-        PayerFoundInPolicy                   NVARCHAR(50)    NULL,
-
-        -- ?? Dates ?????????????????????????????????????????????????????????????
-        DateOfService                        NVARCHAR(50)    NULL,
-        FirstBilledDate                      NVARCHAR(50)    NULL,
-
-        -- ?? Panel / ICD / procedure ????????????????????????????????????????????
-        PanelName                            NVARCHAR(255)   NULL,
-        LISIcd10Codes                        NVARCHAR(500)   NULL,
-        CCWIcd10Code                         NVARCHAR(500)   NULL,
-        Units                                NVARCHAR(50)    NULL,
-        Modifier                             NVARCHAR(50)    NULL,
-        DenialCode                           NVARCHAR(100)   NULL,
-        DenialDescription                    NVARCHAR(500)   NULL,
-
-        -- ?? Financials ????????????????????????????????????????????????????????
-        BilledAmount                         NVARCHAR(50)    NULL,
-        AllowedAmount                        NVARCHAR(50)    NULL,
-        InsurancePayment                     NVARCHAR(50)    NULL,
-        InsuranceAdjustment                  NVARCHAR(50)    NULL,
-        PatientPaidAmount                    NVARCHAR(50)    NULL,
-        PatientAdjustment                    NVARCHAR(50)    NULL,
-        InsuranceBalance                     NVARCHAR(50)    NULL,
-        PatientBalance                       NVARCHAR(50)    NULL,
-        TotalBalance                         NVARCHAR(50)    NULL,
-        MedicareFee                          NVARCHAR(50)    NULL,
-
-        -- ?? Claim / coverage status ????????????????????????????????????????????
-        FinalClaimStatus                     NVARCHAR(100)   NULL,
-        CoveredIcd10CodesBilled              NVARCHAR(MAX)   NULL,
-        NonCoveredIcd10CodesBilled           NVARCHAR(MAX)   NULL,
-        BilledIcdCodesNotAvailableInPolicy   NVARCHAR(MAX)   NULL,
-        CoverageStatus                       NVARCHAR(MAX)   NULL,
-        FinalCoverageStatus                  NVARCHAR(MAX)   NULL,
-        CoveredIcd10CodesAsPerPayerPolicy    NVARCHAR(MAX)   NULL,
-        NonCoveredIcd10CodesAsPerPayerPolicy NVARCHAR(MAX)   NULL,
-
-        -- ?? Action / resolution ????????????????????????????????????????????????
-        ActionComment                        NVARCHAR(MAX)  NULL,
-        Resolution                           NVARCHAR(MAX)   NULL,
-        LabName2                             NVARCHAR(255)   NULL,
-
-        -- ?? Coding / ICD validation ????????????????????????????????????????????
-        CodingValidation                     NVARCHAR(MAX)   NULL,
-        CodingValidationSubStatus            NVARCHAR(MAX)   NULL,
-        ICDComplianceStatus                  NVARCHAR(MAX)   NULL,
-        ICDComplianceSubstatus              NVARCHAR(MAX)  NULL,
-        ICDPrimaryIndicatorAvailable        NVARCHAR(MAX)   NULL,
-        CoveredICDPresence                   NVARCHAR(MAX)    NULL,
-        ICDValidationConfidence             NVARCHAR(MAX)    NULL,
-
-        -- ?? Policy / payability ????????????????????????????????????????????????
-        FrequencyConditionMet                NVARCHAR(500)    NULL,
-        GenderConditionMet                   NVARCHAR(500)    NULL,
-        Payability                           NVARCHAR(100)   NULL,
-        ForecastingPayability                NVARCHAR(100)   NULL,
-        PolicyCoverageExpectation            NVARCHAR(100)   NULL,
-        DenialValidity                       NVARCHAR(100)   NULL,
-        CoverageExpectationRemarks           NVARCHAR(MAX)   NULL,
-
-        -- ?? Expected payment amounts ??????????????????????????????????????????
-        ExpectedAverageAllowedAmount         NVARCHAR(50)    NULL,
-        ExpectedAverageInsurancePayment      NVARCHAR(50)    NULL,
-        ExpectedAllowedAmountSameLab         NVARCHAR(50)    NULL,
-        ExpectedInsurancePaymentSameLab      NVARCHAR(50)    NULL,
-        ModeAllowedAmountSameLab             NVARCHAR(50)    NULL,
-        ModeInsurancePaidSameLab             NVARCHAR(50)    NULL,
-        ModeAllowedAmountPeer                NVARCHAR(50)    NULL,
-        ModeInsurancePaidPeer                NVARCHAR(50)    NULL,
-        MedianAllowedAmountSameLab           NVARCHAR(50)    NULL,
-        MedianInsurancePaidSameLab           NVARCHAR(50)    NULL,
-        MedianAllowedAmountPeer              NVARCHAR(50)    NULL,
-        MedianInsurancePaidPeer              NVARCHAR(50)    NULL,
-        ModeAllowedAmountDifference          NVARCHAR(50)    NULL,
-        ModeInsurancePaidDifference          NVARCHAR(50)    NULL,
-        MedianAllowedAmountDifference        NVARCHAR(50)    NULL,
-        MedianInsurancePaidDifference        NVARCHAR(50)    NULL,
-
-        -- ?? Denial / adjustment rates ?????????????????????????????????????????
-        DenialRate                           NVARCHAR(50)    NULL,
-        AdjustmentRate                       NVARCHAR(50)    NULL,
-        PaymentDays                          NVARCHAR(50)    NULL,
-        ExpectedPaymentDate                  NVARCHAR(50)    NULL,
-        ExpectedPaymentMonth                 NVARCHAR(50)    NULL,
-
-        -- ?? Provider / clinic ?????????????????????????????????????????????????
-        BillingProvider                      NVARCHAR(255)   NULL,
-        ReferringProvider                    NVARCHAR(255)   NULL,
-        ClinicName                           NVARCHAR(255)   NULL,
-        SalesRepName                         NVARCHAR(255)   NULL,
-
-        -- ?? Additional billing fields ?????????????????????????????????????????
-        PatientID                            NVARCHAR(100)   NULL,
-        ChargeEnteredDate                    NVARCHAR(50)    NULL,
-        POS                                  NVARCHAR(50)    NULL,
-        TOS                                  NVARCHAR(50)    NULL,
-        CheckDate                            NVARCHAR(50)    NULL,
-        DaysToDOS                            NVARCHAR(50)    NULL,
-        RollingDays                          NVARCHAR(50)    NULL,
-        DaysToBill                           NVARCHAR(50)    NULL,
-        DaysToPost                           NVARCHAR(50)    NULL,
-
-        InsertedDateTime                     DATETIME2       NOT NULL CONSTRAINT DF_PayerValidationReport_InsertedDateTime DEFAULT SYSUTCDATETIME()
+        ReportId                         BIGINT         IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        FileLogId                        INT            NULL,
+        RunId                            NVARCHAR(MAX)  NULL,
+        WeekFolder                       NVARCHAR(MAX)  NULL,
+        LabName                          NVARCHAR(MAX)  NULL,
+        SourceFullPath                   NVARCHAR(MAX)  NULL,
+        AccessionNo                      NVARCHAR(MAX)  NULL,
+        VisitNumber                      NVARCHAR(MAX)  NULL,
+        CPTCode                          NVARCHAR(MAX)  NULL,
+        PatientDOB                       NVARCHAR(MAX)  NULL,
+        PayerCode                        NVARCHAR(MAX)  NULL,
+        PayerName                        NVARCHAR(MAX)  NULL,
+        PayerNameNormalized              NVARCHAR(MAX)  NULL,
+        PayStatus                        NVARCHAR(MAX)  NULL,
+        HistoricalPayment                NVARCHAR(MAX)  NULL,
+        HistoricalPaidLineItemCount      NVARCHAR(MAX)  NULL,
+        HistoricalPaymentConfidenceScore NVARCHAR(MAX)  NULL,
+        TotalLineItemCount               NVARCHAR(MAX)  NULL,
+        PaidLineItemCount                NVARCHAR(MAX)  NULL,
+        PctPaidLineItemCount             NVARCHAR(MAX)  NULL,
+        PayerType                        NVARCHAR(MAX)  NULL,
+        PayerFoundInPolicy               NVARCHAR(MAX)  NULL,
+        DateOfService                    NVARCHAR(MAX)  NULL,
+        FirstBilledDate                  NVARCHAR(MAX)  NULL,
+        PanelName                        NVARCHAR(MAX)  NULL,
+        LISIcd10Codes                    NVARCHAR(MAX)  NULL,
+        CCWIcd10Code                     NVARCHAR(MAX)  NULL,
+        Units                            NVARCHAR(MAX)  NULL,
+        Modifier                         NVARCHAR(MAX)  NULL,
+        DenialCode                       NVARCHAR(MAX)  NULL,
+        DenialDescription                NVARCHAR(MAX)  NULL,
+        BilledAmount                     NVARCHAR(MAX)  NULL,
+        AllowedAmount                    NVARCHAR(MAX)  NULL,
+        InsurancePayment                 NVARCHAR(MAX)  NULL,
+        InsuranceAdjustment              NVARCHAR(MAX)  NULL,
+        PatientPaidAmount                NVARCHAR(MAX)  NULL,
+        PatientAdjustment                NVARCHAR(MAX)  NULL,
+        InsuranceBalance                 NVARCHAR(MAX)  NULL,
+        PatientBalance                   NVARCHAR(MAX)  NULL,
+        TotalBalance                     NVARCHAR(MAX)  NULL,
+        MedicareFee                      NVARCHAR(MAX)  NULL,
+        FinalClaimStatus                 NVARCHAR(MAX)  NULL,
+        CoveredIcd10CodesBilled          NVARCHAR(MAX)  NULL,
+        NonCoveredIcd10CodesBilled       NVARCHAR(MAX)  NULL,
+        BilledIcdCodesNotAvailableInPolicy NVARCHAR(MAX) NULL,
+        CoverageStatus                   NVARCHAR(MAX)  NULL,
+        FinalCoverageStatus              NVARCHAR(MAX)  NULL,
+        CoveredIcd10CodesAsPerPayerPolicy NVARCHAR(MAX) NULL,
+        NonCoveredIcd10CodesAsPerPayerPolicy NVARCHAR(MAX) NULL,
+        ActionComment                    NVARCHAR(MAX)  NULL,
+        Resolution                       NVARCHAR(MAX)  NULL,
+        LabName2                         NVARCHAR(MAX)  NULL,
+        CodingValidation                 NVARCHAR(MAX)  NULL,
+        CodingValidationSubStatus        NVARCHAR(MAX)  NULL,
+        ICDComplianceStatus              NVARCHAR(MAX)  NULL,
+        ICDComplianceSubstatus           NVARCHAR(MAX)  NULL,
+        ICDPrimaryIndicatorAvailable     NVARCHAR(MAX)  NULL,
+        CoveredICDPresence               NVARCHAR(MAX)  NULL,
+        ICDValidationConfidence          NVARCHAR(MAX)  NULL,
+        FrequencyConditionMet            NVARCHAR(MAX)  NULL,
+        GenderConditionMet               NVARCHAR(MAX)  NULL,
+        Payability                       NVARCHAR(MAX)  NULL,
+        ForecastingPayability            NVARCHAR(MAX)  NULL,
+        PolicyCoverageExpectation        NVARCHAR(MAX)  NULL,
+        DenialValidity                   NVARCHAR(MAX)  NULL,
+        CoverageExpectationRemarks       NVARCHAR(MAX)  NULL,
+        ExpectedAverageAllowedAmount     NVARCHAR(MAX)  NULL,
+        ExpectedAverageInsurancePayment  NVARCHAR(MAX)  NULL,
+        ExpectedAllowedAmountSameLab     NVARCHAR(MAX)  NULL,
+        ExpectedInsurancePaymentSameLab  NVARCHAR(MAX)  NULL,
+        ModeAllowedAmountSameLab         NVARCHAR(MAX)  NULL,
+        ModeInsurancePaidSameLab         NVARCHAR(MAX)  NULL,
+        ModeAllowedAmountPeer            NVARCHAR(MAX)  NULL,
+        ModeInsurancePaidPeer            NVARCHAR(MAX)  NULL,
+        MedianAllowedAmountSameLab       NVARCHAR(MAX)  NULL,
+        MedianInsurancePaidSameLab       NVARCHAR(MAX)  NULL,
+        MedianAllowedAmountPeer          NVARCHAR(MAX)  NULL,
+        MedianInsurancePaidPeer          NVARCHAR(MAX)  NULL,
+        ModeAllowedAmountDifference      NVARCHAR(MAX)  NULL,
+        ModeInsurancePaidDifference      NVARCHAR(MAX)  NULL,
+        MedianAllowedAmountDifference    NVARCHAR(MAX)  NULL,
+        MedianInsurancePaidDifference    NVARCHAR(MAX)  NULL,
+        DenialRate                       NVARCHAR(MAX)  NULL,
+        AdjustmentRate                   NVARCHAR(MAX)  NULL,
+        PaymentDays                      NVARCHAR(MAX)  NULL,
+        ExpectedPaymentDate              NVARCHAR(MAX)  NULL,
+        ExpectedPaymentMonth             NVARCHAR(MAX)  NULL,
+        BillingProvider                  NVARCHAR(MAX)  NULL,
+        ReferringProvider                NVARCHAR(MAX)  NULL,
+        ClinicName                       NVARCHAR(MAX)  NULL,
+        SalesRepName                     NVARCHAR(MAX)  NULL,
+        PatientID                        NVARCHAR(MAX)  NULL,
+        ChargeEnteredDate                NVARCHAR(MAX)  NULL,
+        POS                              NVARCHAR(MAX)  NULL,
+        TOS                              NVARCHAR(MAX)  NULL,
+        CheckDate                        NVARCHAR(MAX)  NULL,
+        DaysToDOS                        NVARCHAR(MAX)  NULL,
+        RollingDays                      NVARCHAR(MAX)  NULL,
+        DaysToBill                       NVARCHAR(MAX)  NULL,
+        DaysToPost                       NVARCHAR(MAX)  NULL,
+        ForecastingPayabilitySubstatus   NVARCHAR(100)  NULL,
+        PredictionStatus                 NVARCHAR(100)  NULL,
+        Variance_AllowedAmount           NVARCHAR(50)   NULL,
+        Variance_PaidAmount              NVARCHAR(50)   NULL,
+        InsertedDateTime                 DATETIME2      NOT NULL CONSTRAINT DF_PayerValidationReport_Inserted DEFAULT SYSUTCDATETIME()
     );
-
-    CREATE NONCLUSTERED INDEX IX_PayerValidationReport_FileLogId
-        ON dbo.PayerValidationReport (FileLogId);
-
-    CREATE NONCLUSTERED INDEX IX_PayerValidationReport_RunId
-        ON dbo.PayerValidationReport (RunId);
 END
 GO
 
--- ------------------------------------------------------------
--- Patch script — run once on an already-created database.
--- Makes RunId / WeekFolder nullable in PayerValidationFileLog
--- so files without a standard naming pattern insert NULL.
--- ------------------------------------------------------------
-IF EXISTS (
-    SELECT 1
-    FROM   sys.columns c
-    JOIN   sys.tables  t ON c.object_id = t.object_id
-    WHERE  t.name   = 'PayerValidationFileLog'
-      AND  c.name   = 'RunId'
-      AND  c.is_nullable = 0
-)
-BEGIN
-    ALTER TABLE dbo.PayerValidationFileLog ALTER COLUMN RunId      NVARCHAR(100) NULL;
-    ALTER TABLE dbo.PayerValidationFileLog ALTER COLUMN WeekFolder NVARCHAR(255) NULL;
-    PRINT 'PayerValidationFileLog: RunId and WeekFolder set to NULL-able.';
-END
+-- Add prediction-derived columns to existing deployments
+IF COL_LENGTH('dbo.PayerValidationReport', 'ForecastingPayabilitySubstatus') IS NULL
+    ALTER TABLE dbo.PayerValidationReport ADD ForecastingPayabilitySubstatus NVARCHAR(100) NULL;
+IF COL_LENGTH('dbo.PayerValidationReport', 'PredictionStatus') IS NULL
+    ALTER TABLE dbo.PayerValidationReport ADD PredictionStatus NVARCHAR(100) NULL;
+IF COL_LENGTH('dbo.PayerValidationReport', 'Variance_AllowedAmount') IS NULL
+    ALTER TABLE dbo.PayerValidationReport ADD Variance_AllowedAmount NVARCHAR(50) NULL;
+IF COL_LENGTH('dbo.PayerValidationReport', 'Variance_PaidAmount') IS NULL
+    ALTER TABLE dbo.PayerValidationReport ADD Variance_PaidAmount NVARCHAR(50) NULL;
 GO

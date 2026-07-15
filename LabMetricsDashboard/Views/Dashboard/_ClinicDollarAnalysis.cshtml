@@ -128,6 +128,9 @@
 
 <script nonce='@Context.Items["CspNonce"]'>
 (function () {
+    'use strict';
+
+    // Toggle clinic drill-down on click
     document.querySelectorAll('.cda-clinic-row[data-cda-toggle]').forEach(function (row) {
         row.addEventListener('click', function () {
             var id = row.getAttribute('data-cda-toggle');

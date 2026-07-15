@@ -37,6 +37,13 @@ public sealed class LabCsvConfig
     public string? DbConnectionString { get; init; }
 
     /// <summary>
+    /// Connection string for LRNMaster — used to look up
+    /// <c>DenialMapperSuperMaster.DenialDescription</c> for the
+    /// Predicted to Pay – Denied breakdown when the lab source data has blank descriptions.
+    /// </summary>
+    public string? MasterDbConnectionString { get; init; }
+
+    /// <summary>
     /// The lab name as stored in the database's <c>PayerValidationReport.LabName</c> column.
     /// Use this when the PredictionAnalysisApp inserts data with a different lab name
     /// than the dashboard config key (e.g. DB has "PCRCO" but dashboard key is "PCR_Dx_CO").

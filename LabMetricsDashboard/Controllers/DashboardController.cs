@@ -2333,8 +2333,8 @@ public class DashboardController : Controller
             || fbFrom   != default || fbTo   != default
             || fbldFrom != default || fbldTo != default;
 
-        // Always load filter option lists from live table so dropdowns are populated
-        // regardless of whether the user is viewing aggregate or filtered data.
+        // Prefer aggregate/snapshot tables for filter dropdowns (NW_* / DashboardFilterLookup).
+        // Live ClaimLevelData DISTINCT is only used as a last resort for large labs like NorthWest.
         var isAugustusLab   = selectedLab.Equals("Augustus_Labs", StringComparison.OrdinalIgnoreCase)
                            || selectedLab.Equals("Augustus",      StringComparison.OrdinalIgnoreCase);
         var isNorthWestLab  = selectedLab.Equals("NorthWest",     StringComparison.OrdinalIgnoreCase);

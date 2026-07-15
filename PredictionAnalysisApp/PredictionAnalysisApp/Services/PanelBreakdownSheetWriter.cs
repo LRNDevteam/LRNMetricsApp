@@ -4,7 +4,7 @@ using PredictionAnalysis.Models;
 namespace PredictionAnalysis.Services;
 
 /// <summary>
-/// Writes the "Panel Breakdown" sheet — claim breakdown grouped by
+/// Writes the "Panel Breakdown" sheet ï¿½ claim breakdown grouped by
 /// Forecasting Payability panel (Payable / Potentially Payable / etc.).
 ///
 /// Same colour scheme and column layout as PayerValidationSheetWriter;
@@ -17,7 +17,7 @@ namespace PredictionAnalysis.Services;
 /// </summary>
 public static class PanelBreakdownSheetWriter
 {
-    // ?? Professional colour palette — matches Payer Breakdown ????????????????
+    // ?? Professional colour palette ï¿½ matches Payer Breakdown ????????????????
 
     private static readonly XLColor TitleBg       = XLColor.FromArgb(0x1C, 0x28, 0x33);
     private static readonly XLColor TitleAccent   = XLColor.FromArgb(0x2E, 0x40, 0x57);
@@ -41,7 +41,7 @@ public static class PanelBreakdownSheetWriter
     private static readonly XLColor PositiveVar   = XLColor.FromArgb(0x1E, 0x6F, 0x3E);
     private static readonly XLColor NegativeVar   = XLColor.FromArgb(0xC0, 0x39, 0x2B);
 
-    // Panel-type badge — understated tones
+    // Panel-type badge ï¿½ understated tones
     private static readonly XLColor PayableBg     = XLColor.FromArgb(0xEB, 0xF5, 0xF3);
     private static readonly XLColor PayableFg     = XLColor.FromArgb(0x0E, 0x5E, 0x4A);
     private static readonly XLColor PotPayableBg  = XLColor.FromArgb(0xFE, 0xF5, 0xE7);
@@ -183,7 +183,7 @@ public static class PanelBreakdownSheetWriter
         ws.Range(row, 1, row, ColCount).Style.Border.BottomBorder      = XLBorderStyleValues.Thin;
         ws.Range(row, 1, row, ColCount).Style.Border.BottomBorderColor = XLColor.FromArgb(0xDC, 0xDC, 0xDC);
 
-        // ?? Panel Name — understated badge ????????????????????????????????????
+        // ?? Panel Name ï¿½ understated badge ????????????????????????????????????
         var nameCell = ws.Cell(row, ColPanelName);
         nameCell.Value                        = pr.PanelName;
         nameCell.Style.Font.Bold              = true;
