@@ -87,6 +87,99 @@ public sealed class MasterValuesController : Controller
         return Json(await _api.GetPolicyPayersAsync(Request.Query, ct));
     }
 
+    // ── Payer mapping intelligence (pipeline suggestions / typeahead / explicit actions) ──
+    // Mapping confirmations write directly (Global Payer ID + PayerAlias + audit), so the three
+    // actions follow the same authority as bulk import; approval-routed roles keep the legacy
+    // Confirm Mapping flow which goes through the approval queue.
+    private bool CanMapDirect => CanWriteLab && !LabRequiresApproval;
+
+    /// <summary>Counts for the navbar notification bell (Mapped / Pending Review / No Match / Unmapped).</summary>
+    [HttpGet]
+    public async Task<IActionResult> MappingSummary(CancellationToken ct)
+    {
+        if (!CanViewLab) return Forbid();
+        return Json(await _api.GetMappingSummaryAsync(ct));
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> MappingSuggestions(int id, CancellationToken ct)
+    {
+        if (!CanViewLab) return Forbid();
+        var response = await _api.GetMappingSuggestionsAsync(id, ct);
+        return response is null ? NotFound() : Json(response);
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> MappingSearch(string? q, CancellationToken ct)
+    {
+        if (!CanViewLab) return Forbid();
+        if (string.IsNullOrWhiteSpace(q)) return Json(Array.Empty<PayerPolicySearchResultDto>());
+        return Json(await _api.SearchPolicyPayersRankedAsync(q, ct));
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> ApproveMapping(int id, [FromBody] PayerMappingActionRequest request, CancellationToken ct)
+    {
+        if (!CanMapDirect) return Forbid();
+        try { return Json(await _api.ApproveMappingAsync(id, request, ct)); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> ManualMapping(int id, [FromBody] PayerMappingActionRequest request, CancellationToken ct)
+    {
+        if (!CanMapDirect) return Forbid();
+        try { return Json(await _api.ManualMapAsync(id, request, ct)); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> RejectMapping(int id, CancellationToken ct)
+    {
+        if (!CanMapDirect) return Forbid();
+        try { return Json(await _api.RejectMappingAsync(id, ct)); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+    }
+
+    // ── Payer Service Audit: worker run history + manual trigger ─────────────
+
+    [HttpGet]
+    public IActionResult PayerServiceAudit()
+    {
+        if (!CanViewLab) return Forbid();
+        ViewData["PageLabel"] = "Payer Service Audit";
+        return View(new MasterValuesPageViewModel
+        {
+            Title = "Payer Service Audit",
+            RoleLabel = RoleLabel,
+            CanWrite = CanWriteLab && !LabRequiresApproval // gates the Run Service button
+        });
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> PayerServiceRuns(int page = 1, int pageSize = 25, CancellationToken ct = default)
+    {
+        if (!CanViewLab) return Forbid();
+        return Json(await _api.GetPayerServiceRunsAsync(page, pageSize, ct));
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> PayerServiceRunDetails(Guid id, CancellationToken ct)
+    {
+        if (!CanViewLab) return Forbid();
+        var response = await _api.GetPayerServiceRunAsync(id, ct);
+        return response is null ? NotFound() : Json(response);
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> TriggerPayerService(string? scope, CancellationToken ct)
+    {
+        if (!CanMapDirect) return Forbid();
+        var effectiveScope = string.Equals(scope, "All", StringComparison.OrdinalIgnoreCase) ? "All" : "UnmappedPending";
+        try { return Json(await _api.TriggerPayerServiceRunAsync(effectiveScope, ct)); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+    }
+
     // Lightweight lookup used by the Lab Insurance Master "Review Match" flow.
     // Reports Manager has no access to the Payer Policy master screen, but per spec §5.2
     // may still confirm Global Payer ID mappings, so this is gated on either master.

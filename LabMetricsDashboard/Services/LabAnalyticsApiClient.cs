@@ -20,7 +20,7 @@ public interface ILabAnalyticsApiClient
 }
 
 /// <summary>
-/// Proxy to the LRN.ReportsApi analytics endpoints (Lab Modes / Meridian).
+/// Proxy to the LRN.ReportsApi analytics endpoints (Lab Modes / Median).
 /// Same base URL and workflow JWT handshake as the Master Values client.
 /// </summary>
 public sealed class LabAnalyticsApiClient : ILabAnalyticsApiClient

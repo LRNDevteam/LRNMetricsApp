@@ -21,6 +21,9 @@ public sealed class InsurancePayerMasterDto
     public int? LabId { get; set; }
     public string? LabState { get; set; }
     public string? LabStateCode { get; set; }
+    // System-managed by the payer mapping pipeline.
+    public string? MappingStatus { get; set; }
+    public string? MappedBy { get; set; }
 }
 
 public sealed class PayerPolicyInsuranceMasterDto
@@ -38,6 +41,9 @@ public sealed class PayerPolicyInsuranceMasterDto
     public string? PayerState { get; set; }
     public string? IsActive { get; set; }
     public string? Remarks { get; set; }
+    // Brand-family classification (from the classified import); shown read-only in the listing.
+    public string? PayerFamily { get; set; }
+    public string? PayerFamilySource { get; set; }
 }
 
 public sealed class MasterValuesPageViewModel
@@ -68,6 +74,146 @@ public sealed class ImportResultDto
     public List<string> Errors { get; set; } = new();
     public List<GlobalPayerIdConflictDto> Conflicts { get; set; } = new();
     public List<ImportDuplicateDto> Duplicates { get; set; } = new();
+    // Outcome counts of the payer matching pipeline run over the just-imported unmapped rows.
+    public MappingEvaluationSummaryDto? Mapping { get; set; }
+}
+
+// ── Payer mapping intelligence (suggestions / typeahead / Approve-ManualMap-Reject) ──
+
+public sealed class MappingEvaluationSummaryDto
+{
+    public int Evaluated { get; set; }
+    public int AutoMapped { get; set; }
+    public int PendingReview { get; set; }
+    public int NoMatch { get; set; }
+    public int Failed { get; set; }
+}
+
+public sealed class PayerMappingSuggestionDto
+{
+    public int Rank { get; set; }
+    public int PPInsuranceMasterId { get; set; }
+    public int? GlobalPayerId { get; set; }
+    public string PayerName { get; set; } = string.Empty;
+    public string? PayerNameNormalized { get; set; }
+    public string? PayerFamily { get; set; }
+    public string? State { get; set; }
+    public string? ProgramType { get; set; }
+    public decimal Score { get; set; }
+    public decimal BaseNameScore { get; set; }
+    public int StateAdjustment { get; set; }
+    public int ProgramAdjustment { get; set; }
+    public bool MissingGlobalPayerId { get; set; }
+}
+
+public sealed class PayerMappingSuggestionsResponse
+{
+    public int LabInsuranceMasterId { get; set; }
+    public string PayerNameRaw { get; set; } = string.Empty;
+    public string CanonicalName { get; set; } = string.Empty;
+    public string? ResolvedStateCode { get; set; }
+    public string StateSignalSource { get; set; } = "None";
+    public string? ResolvedProgramType { get; set; }
+    public string? CandidateFamily { get; set; }
+    public string? Decision { get; set; }
+    public bool AliasHit { get; set; }
+    public int? AliasGlobalPayerId { get; set; }
+    public bool FromStoredCandidates { get; set; }
+    public List<PayerMappingSuggestionDto> Suggestions { get; set; } = new();
+}
+
+public sealed class PayerPolicySearchResultDto
+{
+    public int PPInsuranceMasterId { get; set; }
+    public int? GlobalPayerId { get; set; }
+    public string PayerName { get; set; } = string.Empty;
+    public string? PayerNameNormalized { get; set; }
+    public string? PayerFamily { get; set; }
+    public string? State { get; set; }
+    public string? ProgramType { get; set; }
+    public decimal Score { get; set; }
+    public bool MissingGlobalPayerId { get; set; }
+}
+
+public sealed class PayerMappingActionRequest
+{
+    public int PPInsuranceMasterId { get; set; }
+}
+
+// ── Payer Service Audit (worker run history + manual trigger) ────────────────
+
+public sealed class PayerMapperRunDto
+{
+    public Guid RunId { get; set; }
+    public string TriggerType { get; set; } = string.Empty;
+    public string? Scope { get; set; }
+    public string? RequestedBy { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public DateTime CreatedOn { get; set; }
+    public DateTime? StartedOn { get; set; }
+    public DateTime? CompletedOn { get; set; }
+    public int TotalProcessed { get; set; }
+    public int AutoMapped { get; set; }
+    public int PendingReview { get; set; }
+    public int NoMatch { get; set; }
+    public int FailedRows { get; set; }
+    public string? ErrorMessage { get; set; }
+}
+
+public sealed class PayerMapperRunListResponse
+{
+    public List<PayerMapperRunDto> Items { get; set; } = new();
+    public int TotalCount { get; set; }
+    public int Page { get; set; }
+    public int PageSize { get; set; }
+}
+
+public sealed class PayerMapperRunDetailDto
+{
+    public long AuditId { get; set; }
+    public int? LabInsuranceMasterId { get; set; }
+    public string? PayerNameRaw { get; set; }
+    public string? CanonicalName { get; set; }
+    public string? Decision { get; set; }
+    public decimal? ConfidenceScore { get; set; }
+    public int? SelectedGlobalPayerId { get; set; }
+    public string? MappingStatus { get; set; }
+    public string? ActionType { get; set; }
+    public DateTime PerformedOn { get; set; }
+    public string? LabName { get; set; }
+    public string? LabState { get; set; }
+    public string? PayerState { get; set; }
+}
+
+public sealed class PayerMapperRunDetailsResponse
+{
+    public PayerMapperRunDto? Run { get; set; }
+    public List<PayerMapperRunDetailDto> Details { get; set; } = new();
+}
+
+public sealed class PayerMapperTriggerResult
+{
+    public Guid RunId { get; set; }
+    public string? Status { get; set; }
+    public string? Message { get; set; }
+}
+
+/// <summary>MappingStatus row counts for the navbar notification bell.</summary>
+public sealed class MappingStatusSummaryDto
+{
+    public int Mapped { get; set; }
+    public int Unmapped { get; set; }
+    public int PendingReview { get; set; }
+    public int NoMatch { get; set; }
+    public int Total { get; set; }
+}
+
+public sealed class PayerMappingActionResult
+{
+    public bool Success { get; set; }
+    public string? Message { get; set; }
+    public int? GlobalPayerId { get; set; }
+    public string? MappingStatus { get; set; }
 }
 
 public sealed class ImportDuplicateDto

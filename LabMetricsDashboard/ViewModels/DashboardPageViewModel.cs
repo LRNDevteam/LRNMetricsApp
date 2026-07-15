@@ -32,6 +32,8 @@ public class DashboardPageViewModel
     public List<string> DeadlineOptions { get; set; } = new();
 
     public List<DenialInsightRecord> PagedInsights { get; set; } = new();
+    /// <summary>Distinct denial codes (with description) present in this lab's insight table, for the Denial Code filter.</summary>
+    public List<DenialCodeOption> InsightDenialCodeOptions { get; set; } = new();
     public int InsightCount { get; set; }
     public int InsightPage { get; set; } = 1;
     public int InsightPageSize { get; set; } = 25;
@@ -57,4 +59,7 @@ public class DashboardPageViewModel
     public bool IsArReviewer { get; set; }
     public List<ReviewerOption> ReviewerOptions { get; set; } = new();
 }
+
+/// <summary>A denial code plus its description, used to populate the Denial Insight code filter.</summary>
+public sealed record DenialCodeOption(string Code, string Description);
 

@@ -361,6 +361,29 @@
         border-color: rgba(255,255,255,.3);
         }
 
+        /* ── Notification bell (payer mapping) ───────────────────── */
+        .nav-bell-wrap { position: relative; display: inline-flex; align-items: center; }
+        .nav-bell-btn { position: relative; color: #E8EEF5; cursor: pointer; padding: 6px 10px; border-radius: 6px; font-size: 1.05rem; }
+        .nav-bell-btn:hover { background: rgba(255,255,255,.12); }
+        .nav-bell-badge { position: absolute; top: 0; right: 0; background: #E4572E; color: #fff; border-radius: 999px; font-size: .62rem; font-weight: 800; padding: 1px 5px; line-height: 1.2; }
+        .nav-bell-panel { display: none; position: absolute; right: 0; top: calc(100% + 8px); width: 340px; background: #fff; color: #1F2937; border: 1px solid #d9e2ef; border-radius: 10px; box-shadow: 0 18px 40px rgba(15,23,42,.25); z-index: 1060; overflow: hidden; }
+        .nav-bell-panel .nb-title { font-size: .68rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: #64748b; padding: 10px 12px 4px; }
+        .nav-bell-panel .nb-counts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 4px 12px 10px; border-bottom: 1px solid #eef2f7; }
+        .nav-bell-panel .nb-count { display: block; text-decoration: none; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px 8px; font-size: .78rem; color: #334155; }
+        .nav-bell-panel .nb-count b { font-size: .95rem; margin-right: 4px; }
+        .nav-bell-panel .nb-count:hover { background: #f8fbff; border-color: #b6cdea; }
+        .nav-bell-panel .nb-count.nb-ok b { color: #166534; }
+        .nav-bell-panel .nb-count.nb-warn b { color: #B7791F; }
+        .nav-bell-panel .nb-count.nb-bad b { color: #991b1b; }
+        .nav-bell-panel .nb-count.nb-muted b { color: #475569; }
+        .nav-bell-panel .nb-list { max-height: 240px; overflow: auto; }
+        .nav-bell-panel .nb-item { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; }
+        .nav-bell-panel .nb-item-title { font-size: .78rem; font-weight: 700; color: #1F3B57; }
+        .nav-bell-panel .nb-item-msg { font-size: .72rem; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .nav-bell-panel .nb-empty { padding: 12px; font-size: .78rem; color: #94a3b8; }
+        .nav-bell-panel .nb-footer { display: block; text-align: center; padding: 8px; font-size: .76rem; font-weight: 700; color: #2E5C8A; text-decoration: none; background: #f8fafc; }
+        .nav-bell-panel .nb-footer:hover { background: #eef6ff; }
+
         /* ── User chip + dropdown ────────────────────────────────── */
         .lmd-userchip {
         display: inline-flex;
@@ -628,6 +651,22 @@
                         </div>
                     </span>
                 }
+                @if ((User?.Identity?.IsAuthenticated ?? false) && canSeeLabMaster)
+                {
+                    <span class="nav-bell-wrap" id="navBellWrap">
+                        <span class="nav-bell-btn" id="navBellBtn" tabindex="0" title="Payer mapping notifications">
+                            <i class="bi bi-bell"></i>
+                            <span class="nav-bell-badge" id="navBellBadge" style="display:none;">0</span>
+                        </span>
+                        <div class="nav-bell-panel" id="navBellPanel">
+                            <div class="nb-title">Payer Mapping</div>
+                            <div class="nb-counts" id="navBellCounts"><span class="text-muted">Loading…</span></div>
+                            <div class="nb-title">Recent notifications</div>
+                            <div class="nb-list" id="navBellList"></div>
+                            <a class="nb-footer" href="@Url.Action("PayerMasterNotifications", "MasterValues")">View all notifications</a>
+                        </div>
+                    </span>
+                }
                 @if (User?.Identity?.IsAuthenticated ?? false)
                 {
                     var fullName = User.Claims.FirstOrDefault(c => c.Type == "FullName")?.Value;
@@ -739,6 +778,59 @@
     <script nonce='@Context.Items["CspNonce"]' src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
     <script nonce='@Context.Items["CspNonce"]' src="~/lib/chart.js/chart.umd.js"></script>
     <script nonce='@Context.Items["CspNonce"]' src="~/js/site.js" asp-append-version="true"></script>
+    <script nonce='@Context.Items["CspNonce"]'>
+        // Payer mapping notification bell: MappingStatus counts + recent Payer Master notifications.
+        (function () {
+            var wrap = document.getElementById('navBellWrap');
+            if (!wrap) return;
+            var btn = document.getElementById('navBellBtn'),
+                panel = document.getElementById('navBellPanel'),
+                badge = document.getElementById('navBellBadge');
+            var urls = {
+                summary: '@Url.Action("MappingSummary", "MasterValues")',
+                notes: '@Url.Action("NotificationsData", "MasterValues")',
+                master: '@Url.Action("InsurancePayerMaster", "MasterValues")'
+            };
+            function esc(v) { return (v == null ? '' : String(v)).replace(/[&<>"']/g, function (m) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m]; }); }
+            function countItem(label, n, filter, cls) {
+                return '<a class="nb-count ' + cls + '" href="' + urls.master + '?mappingStatus=' + encodeURIComponent(filter) + '"><b>' + (n || 0) + '</b>' + label + '</a>';
+            }
+            async function refresh() {
+                try {
+                    var r = await fetch(urls.summary); if (!r.ok) return;
+                    var s = await r.json();
+                    var pending = s.pendingReview || 0;
+                    badge.textContent = pending > 99 ? '99+' : String(pending);
+                    badge.style.display = pending > 0 ? '' : 'none';
+                    document.getElementById('navBellCounts').innerHTML =
+                        countItem('Mapped', s.mapped, 'Mapped', 'nb-ok') +
+                        countItem('Pending review', s.pendingReview, 'Unmapped - Pending Review', 'nb-warn') +
+                        countItem('No match', s.noMatch, 'No Match Found', 'nb-bad') +
+                        countItem('Unmapped', s.unmapped, 'Unmapped', 'nb-muted');
+                } catch (e) { /* bell is best-effort; never break the page */ }
+            }
+            async function loadNotes() {
+                try {
+                    var r = await fetch(urls.notes + '?take=8'); if (!r.ok) return;
+                    var list = await r.json();
+                    document.getElementById('navBellList').innerHTML = (list && list.length)
+                        ? list.map(function (x) {
+                            return '<div class="nb-item"><div class="nb-item-title">' + esc(x.title) + '</div><div class="nb-item-msg" title="' + esc(x.message || '') + '">' + esc(x.message || '') + '</div></div>';
+                        }).join('')
+                        : '<div class="nb-empty">No notifications</div>';
+                } catch (e) { }
+            }
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                var open = panel.style.display === 'block';
+                panel.style.display = open ? 'none' : 'block';
+                if (!open) { refresh(); loadNotes(); }
+            });
+            document.addEventListener('click', function (e) { if (!wrap.contains(e.target)) panel.style.display = 'none'; });
+            refresh();
+            setInterval(refresh, 60000);
+        })();
+    </script>
 
     <script nonce='@Context.Items["CspNonce"]'>
         // Show the loader whenever a lab-selector dropdown changes.

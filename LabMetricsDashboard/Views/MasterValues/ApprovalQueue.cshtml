@@ -127,13 +127,32 @@ function statusBadge(x){
   if(x.status==='Approved')return `<span class="mv-badge on">Approved by ${esc(x.decidedBy||'')}</span>`;
   return `<span class="mv-badge off" title="${esc(x.rejectionReason||'')}">Rejected by ${esc(x.decidedBy||'')}</span>`;
 }
+// A blank grid on this page is normal, not a fault: it only fills when a Reports Analyst submits
+// an add/edit/deactivate that needs sign-off. Spell that out so an empty queue reads as "nothing
+// to approve right now" rather than "something is broken".
+function emptyStateHtml(cols){
+  const status=(document.querySelector('[name=status]').value||'Pending').toLowerCase();
+  const master=document.querySelector('[name=master]').value;
+  const scope=master==='Policy'?' on the Payer Policy Insurance Master':master==='Lab'?' on the Lab Insurance Master':' across both Payer Master screens';
+  const lead=status==='pending'
+    ? `Nothing is waiting for approval right now${scope}.`
+    : `No ${status} requests${scope}.`;
+  const why=canAct
+    ? `This queue lists change requests (add, edit, deactivate, or mapping confirmations) submitted by a <b>Reports Analyst</b>, who cannot write to the masters directly. When one submits a change it appears here for an approver to Approve or Reject — approval by any one eligible approver is enough. Until then, there is simply nothing to action.`
+    : `Changes you submit as ${esc('@Model.RoleLabel')} appear here with their approval status. Submit an add, edit, or deactivate on a Payer Master screen and it will show up in this queue.`;
+  return `<tr><td colspan="${cols}"><div class="mv-empty">
+      <div style="font-size:1.6rem;line-height:1;margin-bottom:.4rem;">🗂️</div>
+      <div class="fw-bold" style="font-size:.95rem;color:#0f172a;">${esc(lead)}</div>
+      <div style="max-width:560px;margin:.5rem auto 0;">${why}</div>
+    </div></td></tr>`;
+}
 function renderRows(items){
   const cols=canAct?9:7;
   document.getElementById('rows').innerHTML=(items||[]).map(x=>{
     const cb=canAct?`<td style="text-align:center;">${x.status==='Pending'?`<input type="checkbox" class="rowCheck" value="${x.approvalRequestId}">`:''}</td>`:'';
     const act=canAct?`<td class="text-end text-nowrap">${x.status==='Pending'?`<button class="btn btn-sm btn-success approve" data-id="${x.approvalRequestId}">Approve</button> <button class="btn btn-sm btn-outline-danger reject" data-id="${x.approvalRequestId}" data-name="${esc(x.payerName)}">Reject</button>`:''}</td>`:'';
     return `<tr>${cb}<td>${masterLabel(x.master)}</td><td>${esc(x.actionType)}</td><td class="mv-primary">${esc(x.payerName)}</td><td>${esc(x.submittedBy)}<div class="text-muted" style="font-size:.72rem;">${new Date(x.submittedOn).toLocaleString()}</div></td><td class="mv-diff">${esc(x.changeSummary||'—')}</td><td>${slaBadge(x)}</td><td>${statusBadge(x)}</td>${act}</tr>`;
-  }).join('')||`<tr><td colspan="${cols}"><div class="mv-empty"><div class="fw-bold">No requests found</div><div>There are no ${document.querySelector('[name=status]').value.toLowerCase()} requests for the selected filter.</div></div></td></tr>`;
+  }).join('')||emptyStateHtml(cols);
   const selectAll=document.getElementById('selectAll');if(selectAll)selectAll.checked=false;
 }
 async function load(){

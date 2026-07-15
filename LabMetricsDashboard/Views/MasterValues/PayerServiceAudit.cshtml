@@ -1,0 +1,323 @@
+@model LabMetricsDashboard.Models.MasterValuesPageViewModel
+@{
+    ViewData["Title"] = "Payer Service Audit";
+}
+
+<style>
+    .mv-shell { display: flex; flex-direction: column; gap: 1rem; }
+    .mv-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+    .mv-title h2 { margin: 0; font-size: 1.45rem; font-weight: 800; color: #162033; }
+    .mv-title small { color: #64748b; font-weight: 600; }
+    .mv-card { background: #fff; border: 1px solid #d9e2ef; border-radius: 8px; box-shadow: 0 6px 18px rgba(15, 23, 42, .06); }
+    .mv-grid-wrap { position: relative; }
+    .mv-grid-scroll { overflow: auto; max-height: calc(100vh - 260px); min-height: 300px; }
+    .mv-table { font-size: .8rem; }
+    .mv-table th, .mv-table td { border: 1px solid #d8e1ee; }
+    .mv-table thead th { position: sticky; top: 0; z-index: 2; background: #f8fafc; color: #0f172a; white-space: nowrap; font-size: .74rem; text-transform: uppercase; letter-spacing: .02em; }
+    .mv-table tbody tr:hover td { background: #f8fbff; }
+    .mv-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: .15rem .5rem; font-size: .72rem; font-weight: 800; background: #eef2f7; color: #334155; }
+    .mv-badge.ok { background: #dcfce7; color: #166534; }
+    .mv-badge.bad { background: #fee2e2; color: #991b1b; }
+    .mv-badge.busy { background: #e0ecff; color: #1d4ed8; }
+    .mv-badge.wait { background: #FDF3E3; color: #B7791F; }
+    /* Mapping-status badges: each state is a distinct colour so scanning the run is easy. */
+    .mv-badge.mapped { background: #E5EEF7; color: #2E5C8A; }
+    .mv-badge.pending { background: #FDF3E3; color: #B7791F; }
+    .mv-badge.unmapped { background: #EEF2F7; color: #475569; }
+    .mv-badge.nomatch { background: #FBEAE9; color: #B3261E; }
+    .mv-runid { font-family: Consolas, monospace; font-size: .74rem; color: #2E5C8A; cursor: pointer; text-decoration: underline dotted; }
+    .mv-runid:hover { color: #0b5ed7; }
+    .mv-table thead th.sortable { cursor: pointer; user-select: none; }
+    .mv-table thead th.sortable:hover { background: #eef6ff; color: #0b5ed7; }
+    .mv-sort { color: #64748b; font-size: .72rem; margin-left: .25rem; }
+    .mv-table thead th.sorted .mv-sort { color: #0b5ed7; }
+    /* Detail table scrolls in its own container so the sticky header pins to the table, not the modal. */
+    .mv-detail-scroll { overflow: auto; max-height: 55vh; border: 1px solid #d8e1ee; border-radius: 6px; }
+    .mv-detail-scroll .mv-table { margin-bottom: 0; }
+    .mv-detail-scroll .mv-table thead th { z-index: 3; }
+    .mv-footer { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .75rem 1rem; border-top: 1px solid #e2e8f0; flex-wrap: wrap; }
+    .mv-loader { display: none; position: absolute; inset: 0; z-index: 5; align-items: center; justify-content: center; background: rgba(248, 250, 252, .74); }
+    .mv-loader.active { display: flex; }
+    .mv-loader-box { background: #0f172a; color: #fff; border-radius: 8px; padding: .75rem 1rem; display: inline-flex; gap: .7rem; align-items: center; }
+    .mv-info-banner { background: #E8F1F9; border: 1px solid #C6DCEE; color: #1F3B57; padding: .55rem .75rem; border-radius: 6px; font-size: .8rem; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+</style>
+
+<div class="mv-shell">
+    <div class="mv-header">
+        <div class="mv-title">
+            <h2>Payer Service Audit</h2>
+            <small>Every Payer Policy Mapper service run &mdash; scheduled (hourly), manual, rules-change, and nightly rescans. Click a Run ID to see the payers processed in that run.</small>
+        </div>
+        <div class="mv-actions d-flex gap-2">
+            @if (Model.CanWrite)
+            {
+                <button type="button" class="btn btn-primary" id="triggerBtn"><i class="bi bi-play-circle"></i> Run the Service</button>
+            }
+            <button type="button" class="btn btn-outline-secondary" id="refreshBtn"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+        </div>
+    </div>
+
+    <div class="mv-info-banner" id="triggerNote" style="display:none;"></div>
+
+    <div class="mv-card mv-grid-wrap">
+        <div class="mv-loader" id="gridLoader"><div class="mv-loader-box"><span class="spinner-border spinner-border-sm"></span><span>Loading runs...</span></div></div>
+        <div class="mv-grid-scroll">
+            <table class="table table-sm table-hover table-bordered align-middle mv-table mb-0">
+                <thead><tr id="runsHead">
+                    <th class="sortable" data-sort="runId">Run ID <span class="mv-sort"></span></th>
+                    <th class="sortable" data-sort="triggerType">Trigger <span class="mv-sort"></span></th>
+                    <th class="sortable" data-sort="scope">Scope <span class="mv-sort"></span></th>
+                    <th class="sortable" data-sort="requestedBy">Requested By <span class="mv-sort"></span></th>
+                    <th class="sortable" data-sort="startedOn">Run Date <span class="mv-sort"></span></th>
+                    <th class="sortable" data-sort="startedOn">Run Time <span class="mv-sort"></span></th>
+                    <th class="sortable" data-sort="status">Status <span class="mv-sort"></span></th>
+                    <th class="num sortable" data-sort="totalProcessed">Total Processed <span class="mv-sort"></span></th>
+                    <th class="num sortable" data-sort="autoMapped">Auto-Mapped <span class="mv-sort"></span></th>
+                    <th class="num sortable" data-sort="pendingReview">Pending Review <span class="mv-sort"></span></th>
+                    <th class="num sortable" data-sort="noMatch">No Match <span class="mv-sort"></span></th>
+                    <th class="num sortable" data-sort="failedRows">Failed <span class="mv-sort"></span></th>
+                    <th>Duration</th>
+                </tr></thead>
+                <tbody id="rows"></tbody>
+            </table>
+        </div>
+        <div class="mv-footer">
+            <small id="pageInfo" class="text-muted"></small>
+            <div class="btn-group">
+                <button class="btn btn-outline-secondary btn-sm" id="prevBtn">Previous</button>
+                <button class="btn btn-outline-secondary btn-sm" id="nextBtn">Next</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (Model.CanWrite)
+{
+<div class="modal fade" id="runConfirmModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title"><i class="bi bi-play-circle text-primary"></i> Run the Payer Policy Mapper Service</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <div class="mv-info-banner mb-3">
+                    Choose the scope for this run. <b>Entire data</b> will initiate a scan of ALL Lab Insurance Master
+                    records — mapped and unmapped. Already-mapped payers are <b>revalidated in the audit only</b>;
+                    their confirmed mappings are never changed automatically.
+                </div>
+                <div class="d-grid gap-2">
+                    <button type="button" class="btn btn-outline-primary text-start" id="runScopeAll">
+                        <b><i class="bi bi-collection"></i> Run for entire data</b>
+                        <div class="small text-muted">Re-evaluates every record irrespective of status. Unmapped rows are (re)mapped; mapped rows are revalidated (audit only).</div>
+                    </button>
+                    <button type="button" class="btn btn-outline-primary text-start" id="runScopeUnmapped">
+                        <b><i class="bi bi-funnel"></i> Only Unmapped &amp; Pending Review</b>
+                        <div class="small text-muted">Re-evaluates only 'Unmapped' and 'Unmapped - Pending Review' records.</div>
+                    </button>
+                </div>
+            </div>
+            <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button></div>
+        </div>
+    </div>
+</div>
+}
+
+<div class="modal fade" id="detailModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title" id="detailTitle">Run Details</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <div class="mv-info-banner mb-3" id="detailSummary"></div>
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <input type="text" class="form-control form-control-sm" id="detailSearch" placeholder="Search payer name (raw)…" style="max-width:320px;" />
+                    <small class="text-muted" id="detailCount"></small>
+                </div>
+                <div class="mv-detail-scroll">
+                    <table class="table table-sm table-bordered align-middle mv-table">
+                        <thead><tr id="detailHead">
+                            <th class="sortable" data-sort="labInsuranceMasterId">Lab Record <span class="mv-sort"></span></th>
+                            <th class="sortable" data-sort="labName">Lab Name <span class="mv-sort"></span></th>
+                            <th class="sortable" data-sort="labState">Lab State <span class="mv-sort"></span></th>
+                            <th class="sortable" data-sort="payerNameRaw">Payer Name (Raw) <span class="mv-sort"></span></th>
+                            <th class="sortable" data-sort="canonicalName">Canonical <span class="mv-sort"></span></th>
+                            <th class="sortable" data-sort="payerState">Insurance State <span class="mv-sort"></span></th>
+                            <th class="sortable" data-sort="decision">Decision <span class="mv-sort"></span></th>
+                            <th class="num sortable" data-sort="confidenceScore">Score <span class="mv-sort"></span></th>
+                            <th class="num sortable" data-sort="selectedGlobalPayerId">Global Payer ID <span class="mv-sort"></span></th>
+                            <th class="sortable" data-sort="mappingStatus">Mapping Status <span class="mv-sort"></span></th>
+                            <th class="sortable" data-sort="actionType">Action <span class="mv-sort"></span></th>
+                            <th class="sortable" data-sort="performedOn">Processed On <span class="mv-sort"></span></th>
+                        </tr></thead>
+                        <tbody id="detailRows"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script nonce='@Context.Items["CspNonce"]'>
+(function(){
+const canWrite=@(Model.CanWrite ? "true" : "false");
+const urls={runs:'@Url.Action("PayerServiceRuns","MasterValues")',details:'@Url.Action("PayerServiceRunDetails","MasterValues")',trigger:'@Url.Action("TriggerPayerService","MasterValues")'};
+let page=1,pageSize=25,totalPages=1,autoTimer=null;
+let runsItems=[],runsSortCol='',runsSortDir='desc';
+let detailItems=[],detailSortCol='',detailSortDir='asc',detailFilterTimer=null;
+const detailModal=new bootstrap.Modal(document.getElementById('detailModal'));
+// Generic client-side sorter: numbers/dates compared naturally, strings case-insensitively, nulls last.
+function sortBy(list,col,dir){
+  const mul=dir==='desc'?-1:1;
+  return [...list].sort((a,b)=>{
+    let x=a[col],y=b[col];
+    if(x==null&&y==null)return 0; if(x==null)return 1; if(y==null)return -1;
+    if(typeof x==='string'&&typeof y==='string'&&!/^\d{4}-\d\d-\d\d/.test(x)){x=x.toLowerCase();y=y.toLowerCase();}
+    return x<y?-mul:x>y?mul:0;
+  });
+}
+function paintSortHeaders(headId,col,dir){
+  document.querySelectorAll('#'+headId+' th.sortable').forEach(th=>{
+    const active=th.dataset.sort===col;
+    th.classList.toggle('sorted',active);
+    th.querySelector('.mv-sort').textContent=active?(dir==='asc'?'▲':'▼'):'↕';
+  });
+}
+function esc(v){return (v??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+// Timestamps are stored UTC (SYSUTCDATETIME) - parse as UTC, display local.
+function asDate(s){if(!s)return null;return new Date(/Z|[+-]\d\d:\d\d$/.test(s)?s:s+'Z');}
+function fmtDate(s){const d=asDate(s);return d?d.toLocaleDateString():'—';}
+function fmtTime(s){const d=asDate(s);return d?d.toLocaleTimeString():'—';}
+function duration(x){
+  const a=asDate(x.startedOn),b=asDate(x.completedOn);
+  if(!a)return '—';
+  const end=b||new Date();
+  const secs=Math.max(0,Math.round((end-a)/1000));
+  const t=secs<60?secs+'s':Math.floor(secs/60)+'m '+(secs%60)+'s';
+  return b?t:t+'…';
+}
+function statusBadge(s){
+  const cls=s==='Success'?'ok':s==='Fail'?'bad':s==='InProgress'?'busy':'wait';
+  return `<span class="mv-badge ${cls}">${esc(s)}</span>`;
+}
+function scopeLabel(s){return s==='All'?'Entire data':s==='UnmappedPending'?'Unmapped + Pending':s==='AllUnmapped'?'All unmapped':(s||'—');}
+// Distinct colour per mapping status so Mapped / Pending Review / Unmapped / No Match Found are
+// each instantly recognisable. Falls back to a neutral pill for anything unexpected.
+function mapStatusBadge(s){
+  if(!s)return '—';
+  const l=s.toLowerCase();
+  const cls=l==='mapped'?'mapped':l.includes('pending')?'pending':l.includes('no match')?'nomatch':l.includes('unmapped')?'unmapped':'';
+  return `<span class="mv-badge ${cls}">${esc(s)}</span>`;
+}
+function rowHtml(x){
+  return `<tr><td><span class="mv-runid" data-id="${x.runId}" title="View payers processed in this run">${esc(x.runId)}</span></td>`+
+    `<td>${esc(x.triggerType)}</td><td>${esc(scopeLabel(x.scope))}</td><td>${esc(x.requestedBy||'—')}</td>`+
+    `<td>${fmtDate(x.startedOn||x.createdOn)}</td><td>${fmtTime(x.startedOn||x.createdOn)}</td>`+
+    `<td>${statusBadge(x.status)}</td><td class="num">${x.totalProcessed}</td><td class="num">${x.autoMapped}</td>`+
+    `<td class="num">${x.pendingReview}</td><td class="num">${x.noMatch}</td><td class="num">${x.failedRows}</td>`+
+    `<td>${duration(x)}${x.errorMessage?` <i class="bi bi-exclamation-triangle text-danger" title="${esc(x.errorMessage)}"></i>`:''}</td></tr>`;
+}
+function renderRuns(){
+  let list=runsItems;
+  if(runsSortCol)list=sortBy(list,runsSortCol,runsSortDir);
+  paintSortHeaders('runsHead',runsSortCol,runsSortDir);
+  document.getElementById('rows').innerHTML=list.map(rowHtml).join('')||'<tr><td colspan="13" class="text-center text-muted py-4">No runs yet. The service logs a run every hour, on rules changes, nightly, and on manual trigger.</td></tr>';
+}
+async function load(showLoader){
+  if(showLoader)document.getElementById('gridLoader').classList.add('active');
+  try{
+    const r=await fetch(urls.runs+'?page='+page+'&pageSize='+pageSize);
+    if(!r.ok)throw 0;
+    const d=await r.json();
+    totalPages=Math.max(1,Math.ceil((d.totalCount||0)/pageSize));
+    document.getElementById('pageInfo').textContent=`Page ${page} of ${totalPages} - ${d.totalCount||0} run(s)`;
+    runsItems=d.items||[];
+    renderRuns();
+    // Auto-refresh while anything is queued or running so the page follows a run live.
+    const active=runsItems.some(x=>x.status==='InProgress'||x.status==='Requested');
+    clearTimeout(autoTimer);
+    if(active)autoTimer=setTimeout(()=>load(false),10000);
+  }catch(e){document.getElementById('rows').innerHTML='<tr><td colspan="13" class="text-center text-danger py-4">Unable to load runs.</td></tr>';}
+  finally{document.getElementById('gridLoader').classList.remove('active');}
+}
+document.querySelectorAll('#runsHead th.sortable').forEach(th=>th.addEventListener('click',()=>{
+  const col=th.dataset.sort;
+  if(runsSortCol===col)runsSortDir=runsSortDir==='asc'?'desc':'asc';
+  else{runsSortCol=col;runsSortDir='asc';}
+  renderRuns();
+}));
+function renderDetails(){
+  const term=document.getElementById('detailSearch').value.trim().toLowerCase();
+  let list=detailItems;
+  if(term)list=list.filter(x=>((x.payerNameRaw||'')+' '+(x.canonicalName||'')).toLowerCase().includes(term));
+  if(detailSortCol)list=sortBy(list,detailSortCol,detailSortDir);
+  paintSortHeaders('detailHead',detailSortCol,detailSortDir);
+  document.getElementById('detailCount').textContent=term
+    ?`${list.length} of ${detailItems.length} payer(s)`
+    :`${detailItems.length} payer(s)`;
+  document.getElementById('detailRows').innerHTML=list.map(x=>
+    `<tr><td>${x.labInsuranceMasterId??'—'}</td><td>${esc(x.labName||'—')}</td><td>${esc(x.labState||'—')}</td>`+
+    `<td>${esc(x.payerNameRaw)}</td><td>${esc(x.canonicalName)}</td><td>${esc(x.payerState||'—')}</td>`+
+    `<td>${esc(x.decision||'—')}</td><td class="num">${x.confidenceScore??'—'}</td><td class="num">${x.selectedGlobalPayerId??'—'}</td>`+
+    `<td>${mapStatusBadge(x.mappingStatus)}</td><td>${esc(x.actionType||'—')}</td><td>${fmtDate(x.performedOn)} ${fmtTime(x.performedOn)}</td></tr>`).join('')
+    ||`<tr><td colspan="12" class="text-center text-muted py-3">${term?'No payers match "'+esc(term)+'".':'No rows were processed in this run.'}</td></tr>`;
+}
+document.getElementById('detailSearch').addEventListener('input',()=>{
+  clearTimeout(detailFilterTimer);
+  detailFilterTimer=setTimeout(renderDetails,200);
+});
+document.querySelectorAll('#detailHead th.sortable').forEach(th=>th.addEventListener('click',()=>{
+  const col=th.dataset.sort;
+  if(detailSortCol===col)detailSortDir=detailSortDir==='asc'?'desc':'asc';
+  else{detailSortCol=col;detailSortDir='asc';}
+  renderDetails();
+}));
+document.getElementById('rows').addEventListener('click',async e=>{
+  const el=e.target.closest('.mv-runid'); if(!el)return;
+  document.getElementById('detailTitle').textContent='Run '+el.dataset.id;
+  document.getElementById('detailSummary').textContent='Loading...';
+  document.getElementById('detailRows').innerHTML='';
+  document.getElementById('detailSearch').value='';
+  document.getElementById('detailCount').textContent='';
+  detailItems=[];detailSortCol='';detailSortDir='asc';
+  detailModal.show();
+  try{
+    const r=await fetch(urls.details+'?id='+el.dataset.id);
+    if(!r.ok)throw 0;
+    const d=await r.json();
+    const run=d.run||{};
+    document.getElementById('detailSummary').innerHTML=
+      `${statusBadge(run.status)} &nbsp; Trigger: <b>${esc(run.triggerType)}</b>${run.requestedBy?` by <b>${esc(run.requestedBy)}</b>`:''}`+
+      ` • Started: <b>${fmtDate(run.startedOn)} ${fmtTime(run.startedOn)}</b> • Duration: <b>${duration(run)}</b>`+
+      ` • Processed: <b>${run.totalProcessed}</b> (auto-mapped ${run.autoMapped}, pending review ${run.pendingReview}, no match ${run.noMatch}, failed ${run.failedRows})`+
+      `${run.errorMessage?`<div class="text-danger mt-1">${esc(run.errorMessage)}</div>`:''}`;
+    detailItems=d.details||[];
+    renderDetails();
+  }catch(e){document.getElementById('detailSummary').textContent='Unable to load run details.';}
+});
+const triggerBtn=document.getElementById('triggerBtn');
+const runConfirmEl=document.getElementById('runConfirmModal');
+const runConfirmModal=runConfirmEl?new bootstrap.Modal(runConfirmEl):null;
+async function queueRun(scope){
+  if(runConfirmModal)runConfirmModal.hide();
+  triggerBtn.disabled=true;
+  try{
+    const r=await fetch(urls.trigger+'?scope='+encodeURIComponent(scope),{method:'POST',headers:{'Content-Type':'application/json'}});
+    const d=await r.json().catch(()=>({}));
+    const note=document.getElementById('triggerNote');
+    if(!r.ok){note.textContent=d.message||'Could not queue the run.';}
+    else{note.innerHTML=`Run <b>${esc(d.runId)}</b> queued (${scope==='All'?'entire data — mapped rows are revalidated in the audit only':'only Unmapped &amp; Pending Review'}). The Payer Policy Mapper service will pick it up on its next poll cycle.`;}
+    note.style.display='';
+    page=1;await load(true);
+  }finally{triggerBtn.disabled=false;}
+}
+if(triggerBtn)triggerBtn.onclick=()=>{if(runConfirmModal)runConfirmModal.show();};
+const scopeAllBtn=document.getElementById('runScopeAll'),scopeUnmappedBtn=document.getElementById('runScopeUnmapped');
+if(scopeAllBtn)scopeAllBtn.onclick=()=>queueRun('All');
+if(scopeUnmappedBtn)scopeUnmappedBtn.onclick=()=>queueRun('UnmappedPending');
+document.getElementById('refreshBtn').onclick=()=>load(true);
+document.getElementById('prevBtn').onclick=()=>{if(page>1){page--;load(true);}};
+document.getElementById('nextBtn').onclick=()=>{if(page<totalPages){page++;load(true);}};
+load(true);
+})();
+</script>
+}

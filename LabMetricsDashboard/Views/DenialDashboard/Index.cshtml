@@ -86,10 +86,11 @@
     var insightPageSizes = new[] { 10, 25, 50, 100 };
     var lineItemPageSizes = new[] { 25, 50, 100, 250 };
 
-    string DashboardUrl(string tab, int page, int pageSize, int insightPage, int insightPageSize, int lineItemPage, int lineItemPageSize) => Url.Action("Index", "DenialDashboard", new
+    string DashboardUrl(string tab, int page, int pageSize, int insightPage, int insightPageSize, int lineItemPage, int lineItemPageSize, string? denialCode = null) => Url.Action("Index", "DenialDashboard", new
     {
         lab = Model.CurrentLabName,
         LabId = Model.Filters.LabId,
+        DenialCode = denialCode ?? Model.Filters.DenialCode,
         Status = Model.Filters.Status,
         Priority = Model.Filters.Priority,
         ActionCategory = Model.Filters.ActionCategory,
@@ -675,6 +676,7 @@
                 <input type="hidden" name="PageSize" value="@Model.Filters.PageSize" />
                 <input type="hidden" name="InsightPageSize" value="@Model.Filters.InsightPageSize" />
                 <input type="hidden" name="LineItemPageSize" value="@Model.Filters.LineItemPageSize" />
+                <input type="hidden" name="DenialCode" value="@Model.Filters.DenialCode" />
 
                 <input type="hidden" id="labIdHidden" name="LabId" value="@Model.Filters.LabId" />
 
@@ -752,6 +754,17 @@
                 <div class="col-12 col-md-6 col-xl-3">
                     <label class="form-label">Sales Rep</label>
                     <div class="multi-select-filter remote-multi-select" data-name="SalesRepname" data-placeholder="Select sales reps" data-remote-key="salesRepnames" data-options='[]' data-selected='@Html.Raw(JsonSerializer.Serialize(SelectedValues(Model.Filters.SalesRepname)))'></div>
+                </div>
+                <div class="col-12 col-md-6 col-xl-3">
+                    <label class="form-label">Denial Code</label>
+                    <select class="form-select filter-select" name="DenialCode" aria-label="Filter by denial code">
+                        <option value="" selected="@string.IsNullOrWhiteSpace(Model.Filters.DenialCode)">All denial codes</option>
+                        @foreach (var opt in Model.InsightDenialCodeOptions)
+                        {
+                            var codeLabel = string.IsNullOrWhiteSpace(opt.Description) ? opt.Code : $"{opt.Code} — {opt.Description}";
+                            <option value="@opt.Code" selected="@string.Equals(opt.Code, Model.Filters.DenialCode, StringComparison.OrdinalIgnoreCase)" title="@codeLabel">@codeLabel</option>
+                        }
+                    </select>
                 </div>
 
                 <div class="col-12 col-md-6 col-xl-3">
@@ -1079,68 +1092,25 @@
     </div>
     }
     <div class="tab-pane fade @(activeTab == "dashboard" ? "show active" : "")" id="dashboard" role="tabpanel">
-        <div class="row g-3 mb-3">
-            <div class="col-12 col-md-6 col-xl-3">
-                <div class="metric-hero hero-blue">
-                    <div class="metric-title">Total Tasks</div>
-                    <div class="metric-value">@Model.Summary.TotalTasks.ToString("N0")</div>
-                </div>
-            </div>
-            <div class="col-12 col-md-6 col-xl-3">
-                <div class="metric-hero hero-purple">
-                    <div class="metric-title">Open</div>
-                    <div class="metric-value">@Model.Summary.OpenTasks.ToString("N0")</div>
-                </div>
-            </div>
-            <div class="col-12 col-md-6 col-xl-3">
-                <div class="metric-hero hero-green">
-                    <div class="metric-title">In Progress</div>
-                    <div class="metric-value">@Model.Summary.InProgressTasks.ToString("N0")</div>
-                </div>
-            </div>
-            <div class="col-12 col-md-6 col-xl-3">
-                <div class="metric-hero hero-red">
-                    <div class="metric-title">Completed</div>
-                    <div class="metric-value">@Model.Summary.CompletedTasks.ToString("N0")</div>
-                </div>
-            </div>
+        @* Compact summary strips (matches the Denial Insight tab) - the tables below get the spotlight. *@
+        <div class="insight-summary-strip mb-2">
+            <div class="insight-stat stat-blue"><span class="insight-stat-label">Total Tasks</span><span class="insight-stat-value">@Model.Summary.TotalTasks.ToString("N0")</span></div>
+            <div class="insight-stat stat-purple"><span class="insight-stat-label">Open</span><span class="insight-stat-value">@Model.Summary.OpenTasks.ToString("N0")</span></div>
+            <div class="insight-stat stat-green"><span class="insight-stat-label">In Progress</span><span class="insight-stat-value">@Model.Summary.InProgressTasks.ToString("N0")</span></div>
+            <div class="insight-stat stat-red"><span class="insight-stat-label">Completed</span><span class="insight-stat-value">@Model.Summary.CompletedTasks.ToString("N0")</span></div>
         </div>
-        <div class="row g-3 mb-4">
-            <div class="col-12 col-md-6 col-xl-3">
-                <div class="metric-mini-card metric-mini-blue">
-                    <div class="metric-mini-top"><span class="metric-mini-icon"><i class="bi bi-exclamation-circle-fill"></i></span><span class="metric-mini-label">Overdue</span><span class="metric-mini-pill">@Model.Summary.OverdueTasks.ToString("N0")</span></div>
-                    <div class="metric-mini-track"></div>
-                    <div class="metric-mini-foot"><span>SLA breach queue</span><strong>@Model.Summary.OverdueTasks.ToString("N0")</strong></div>
-                </div>
-            </div>
-            <div class="col-12 col-md-6 col-xl-3">
-                <div class="metric-mini-card metric-mini-purple">
-                    <div class="metric-mini-top"><span class="metric-mini-icon"><i class="bi bi-clock-fill"></i></span><span class="metric-mini-label">Due in 3 Days</span><span class="metric-mini-pill">@Model.Summary.DueInThreeDays.ToString("N0")</span></div>
-                    <div class="metric-mini-track"></div>
-                    <div class="metric-mini-foot"><span>Upcoming attention</span><strong>@Model.Summary.DueInThreeDays.ToString("N0")</strong></div>
-                </div>
-            </div>
-            <div class="col-12 col-md-6 col-xl-3">
-                <div class="metric-mini-card metric-mini-green">
-                    <div class="metric-mini-top"><span class="metric-mini-icon"><i class="bi bi-flag-fill"></i></span><span class="metric-mini-label">High Priority</span><span class="metric-mini-pill">@Model.Summary.HighPriorityTasks.ToString("N0")</span></div>
-                    <div class="metric-mini-track"></div>
-                    <div class="metric-mini-foot"><span>Priority focus items</span><strong>@Model.Summary.HighPriorityTasks.ToString("N0")</strong></div>
-                </div>
-            </div>
-            <div class="col-12 col-md-6 col-xl-3">
-                <div class="metric-mini-card metric-mini-orange">
-                    <div class="metric-mini-top"><span class="metric-mini-icon"><i class="bi bi-cash-stack"></i></span><span class="metric-mini-label">Insurance Balance</span><span class="metric-mini-pill">Total</span></div>
-                    <div class="metric-mini-track"></div>
-                    <div class="metric-mini-foot"><span>Outstanding balance</span><strong>@Money(Model.Summary.TotalInsuranceBalance)</strong></div>
-                </div>
-            </div>
+        <div class="insight-summary-strip mb-4">
+            <div class="insight-stat stat-red"><span class="insight-stat-label">Overdue</span><span class="insight-stat-value">@Model.Summary.OverdueTasks.ToString("N0")</span></div>
+            <div class="insight-stat stat-purple"><span class="insight-stat-label">Due in 3 Days</span><span class="insight-stat-value">@Model.Summary.DueInThreeDays.ToString("N0")</span></div>
+            <div class="insight-stat stat-green"><span class="insight-stat-label">High Priority</span><span class="insight-stat-value">@Model.Summary.HighPriorityTasks.ToString("N0")</span></div>
+            <div class="insight-stat stat-orange"><span class="insight-stat-label">Insurance Balance</span><span class="insight-stat-value">@Money(Model.Summary.TotalInsuranceBalance)</span></div>
         </div>
         <div class="row g-4">
             <div class="col-12 col-xl-6">
                 <div class="card border-0 shadow-sm">
                     <div class="card-body">
                         <div class="section-title mb-3">Status Summary</div>
-                        <div class="lis-scroll">
+                        <div class="lis-scroll no-fs">
                             <table class="table table-sm align-middle lis-summary-grid sortable-table mb-0">
                                 <thead>
                                     <tr>
@@ -1172,7 +1142,7 @@
                 <div class="card border-0 shadow-sm">
                     <div class="card-body">
                         <div class="section-title mb-3">Top Denial Classifications</div>
-                        <div class="lis-scroll">
+                        <div class="lis-scroll no-fs">
                             <table class="table table-sm align-middle lis-summary-grid sortable-table mb-0">
                                 <thead>
                                     <tr>
@@ -1497,31 +1467,12 @@
                     </div>
                 </div>
 
-                <div class="row g-3 mb-4">
-                    <div class="col-12 col-md-6 col-xl-3">
-                        <div class="metric-hero hero-blue">
-                            <div class="metric-title">Total Denials</div>
-                            <div class="metric-value">@Model.InsightTotalDenials.ToString("N0")</div>
-                        </div>
-                    </div>
-                    <div class="col-12 col-md-6 col-xl-3">
-                        <div class="metric-hero hero-purple">
-                            <div class="metric-title">Total Claims</div>
-                            <div class="metric-value">@Model.InsightTotalClaims.ToString("N0")</div>
-                        </div>
-                    </div>
-                    <div class="col-12 col-md-6 col-xl-3">
-                        <div class="metric-hero hero-green">
-                            <div class="metric-title">Total Balance</div>
-                            <div class="metric-value">@Money(Model.InsightTotalBalance)</div>
-                        </div>
-                    </div>
-                    <div class="col-12 col-md-6 col-xl-3">
-                        <div class="metric-hero hero-red">
-                            <div class="metric-title">Insurance Balance</div>
-                            <div class="metric-value">@Money(Model.InsightTotalInsuranceBalance)</div>
-                        </div>
-                    </div>
+                @* Compact summary strip - keeps the totals visible but hands the vertical space to the table below. *@
+                <div class="insight-summary-strip mb-3">
+                    <div class="insight-stat stat-blue"><span class="insight-stat-label">Total Denials</span><span class="insight-stat-value">@Model.InsightTotalDenials.ToString("N0")</span></div>
+                    <div class="insight-stat stat-purple"><span class="insight-stat-label">Total Claims</span><span class="insight-stat-value">@Model.InsightTotalClaims.ToString("N0")</span></div>
+                    <div class="insight-stat stat-green"><span class="insight-stat-label">Total Balance</span><span class="insight-stat-value">@Money(Model.InsightTotalBalance)</span></div>
+                    <div class="insight-stat stat-red"><span class="insight-stat-label">Insurance Balance</span><span class="insight-stat-value">@Money(Model.InsightTotalInsuranceBalance)</span></div>
                 </div>
 
                 <form asp-action="AssignInsightReviewersOverall" asp-controller="DenialDashboard" method="post" id="denialInsightAssignmentForm">
@@ -1533,14 +1484,20 @@
                     <input type="hidden" name="InsightPage" value="@Model.InsightPage" />
                     <input type="hidden" name="InsightPageSize" value="@Model.InsightPageSize" />
 
-                    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-                        <div>
-                            <div class="mini-panel-title insight-summary-title mb-1">Insight Summary Rows</div>
-                            <div class="section-subtitle">
-                                $ Impact (%) is calculated as <code>(InsuranceBalance / TotalBalance) * 100</code>.
+                    <input type="hidden" name="DenialCode" value="@Model.Filters.DenialCode" />
+
+                    <div class="insight-toolbar d-flex flex-wrap justify-content-between align-items-end gap-3 mb-3">
+                        <div class="insight-code-filter">
+                            @* Denial Code filtering moved to the common dashboard filters above (applies via Apply Filters). *@
+                            <div class="section-subtitle mt-1">
+                                $ Impact (%) = <code>(InsuranceBalance / TotalBalance) * 100</code>.
+                                @if (!string.IsNullOrWhiteSpace(Model.Filters.DenialCode))
+                                {
+                                    <span class="ms-1">Filtered by denial code <strong>@Model.Filters.DenialCode</strong> (set in the dashboard filters).</span>
+                                }
                                 @if (Model.IsArManager)
                                 {
-                                    <span class="ms-2">Select AR Reviewers in multiple rows, then submit once to assign all matching denial tasks.</span>
+                                    <span class="ms-1">Pick AR Reviewers across rows, then submit once to assign all matching tasks.</span>
                                 }
                             </div>
                         </div>
@@ -1551,7 +1508,7 @@
                                     <i class="bi bi-check2-circle me-1"></i> Submit Reviewer Assignments
                                 </button>
                             }
-                            <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search denial insights on this page..." data-target-table="denialInsightTable" /></div>
+                            <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search by denial code, description, insurance…" data-target-table="denialInsightTable" /></div>
                         </div>
                     </div>
 
@@ -1933,6 +1890,73 @@
                 });
             });
         });
+
+        // Fullscreen toggle for the main data tables. Each scroll pane is wrapped in a .fs-host and
+        // gets a .fs-bar toolbar ABOVE it. Fullscreen expands the pane to a full-viewport overlay
+        // and reveals a filter box that hides non-matching rows.
+        // Included: the Weekly/Monthly Breakdown pivots (.breakdown-pivot-frame) plus the main
+        // data tables. Opted out: the Filter Panel's small summary tables (.panel-table-wrap)
+        // and anything marked .no-fs.
+        (function setupTableFullscreen() {
+            const panes = document.querySelectorAll('.tab-content .table-responsive, .tab-content .lis-scroll, .tab-content .breakdown-pivot-frame');
+            let activeHost = null;
+            function label(btn, on) {
+                btn.innerHTML = on
+                    ? '<i class="bi bi-fullscreen-exit"></i><span class="fs-label">Exit fullscreen</span>'
+                    : '<i class="bi bi-arrows-fullscreen"></i><span class="fs-label">Fullscreen</span>';
+                btn.setAttribute('title', on ? 'Exit fullscreen (Esc)' : 'View this table in fullscreen');
+            }
+            function applyFilter(pane, term) {
+                const text = (term || '').trim().toLowerCase();
+                pane.querySelectorAll('tbody tr').forEach(function (row) {
+                    row.style.display = (!text || (row.innerText || '').toLowerCase().includes(text)) ? '' : 'none';
+                });
+            }
+            function toggle(host) {
+                const btn = host.querySelector('.fs-btn');
+                const filter = host.querySelector('.fs-filter');
+                const pane = host.querySelector('.table-responsive, .lis-scroll, .breakdown-pivot-frame');
+                const on = host.classList.toggle('is-fs');
+                document.body.classList.toggle('fs-lock', on);
+                activeHost = on ? host : null;
+                label(btn, on);
+                if (on) {
+                    filter.value = '';
+                    setTimeout(function () { filter.focus(); }, 50);
+                } else if (pane) {
+                    applyFilter(pane, ''); // restore all rows on exit
+                }
+            }
+            panes.forEach(function (pane) {
+                if (pane.closest('.fs-host') || pane.classList.contains('no-fs') || pane.classList.contains('panel-table-wrap')) return;
+                const host = document.createElement('div');
+                host.className = 'fs-host';
+                pane.parentNode.insertBefore(host, pane);
+
+                const bar = document.createElement('div');
+                bar.className = 'fs-bar';
+                const filter = document.createElement('input');
+                filter.type = 'text';
+                filter.className = 'fs-filter';
+                filter.placeholder = 'Filter rows in fullscreen…';
+                filter.addEventListener('input', function () { applyFilter(pane, filter.value); });
+                // The insight table's pane sits inside a form - don't let Enter submit it.
+                filter.addEventListener('keydown', function (e) { if (e.key === 'Enter') e.preventDefault(); });
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'fs-btn';
+                label(btn, false);
+                btn.addEventListener('click', function () { toggle(host); });
+                bar.appendChild(filter);
+                bar.appendChild(btn);
+
+                host.appendChild(bar);
+                host.appendChild(pane);
+            });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && activeHost) toggle(activeHost);
+            });
+        })();
 
         document.querySelectorAll('.accordion-search-input').forEach(function (input) {
             input.addEventListener('input', function () {

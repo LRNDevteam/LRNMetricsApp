@@ -7,7 +7,7 @@ namespace LabMetricsDashboard.Controllers;
 
 /// <summary>
 /// Analytics reference lists backed by LRN.ReportsApi: Modes (dbo.LabModes)
-/// and Meridian (dbo.LabMedians). View-only — no add/edit/delete.
+/// and Median (dbo.LabMedians). View-only — no add/edit/delete.
 /// </summary>
 [Authorize]
 public sealed class AnalyticsController : Controller
@@ -53,17 +53,17 @@ public sealed class AnalyticsController : Controller
     }
 
     [HttpGet]
-    public IActionResult Meridian()
+    public IActionResult Median()
     {
-        ViewData["PageLabel"] = "Meridian";
+        ViewData["PageLabel"] = "Median";
         return View("LabRates", new LabRatePageViewModel
         {
-            Title = "Meridian",
+            Title = "Median",
             Subtitle = "Median allowed and insurance payment amounts by payer, panel, and CPT code. View-only.",
-            DataUrl = Url.Action(nameof(MeridianData)) ?? string.Empty,
+            DataUrl = Url.Action(nameof(MedianData)) ?? string.Empty,
             LabsUrl = Url.Action(nameof(RateLabs)) ?? string.Empty,
-            ExportUrl = Url.Action(nameof(ExportMeridian)) ?? string.Empty,
-            OptionsUrl = Url.Action(nameof(MeridianOptions)) ?? string.Empty,
+            ExportUrl = Url.Action(nameof(ExportMedian)) ?? string.Empty,
+            OptionsUrl = Url.Action(nameof(MedianOptions)) ?? string.Empty,
             Columns = SharedLeadColumns.Concat(new[]
             {
                 new LabRateColumn("medianAllowedAmount", "Median Allowed Amount", "money"),
@@ -80,7 +80,7 @@ public sealed class AnalyticsController : Controller
         => Json(await _api.GetModesAsync(Request.Query, ct));
 
     [HttpGet]
-    public async Task<IActionResult> MeridianData(CancellationToken ct)
+    public async Task<IActionResult> MedianData(CancellationToken ct)
         => Json(await _api.GetMediansAsync(Request.Query, ct));
 
     [HttpGet]
@@ -92,7 +92,7 @@ public sealed class AnalyticsController : Controller
         => Json(await _api.GetModeOptionsAsync(Request.Query, ct));
 
     [HttpGet]
-    public async Task<IActionResult> MeridianOptions(CancellationToken ct)
+    public async Task<IActionResult> MedianOptions(CancellationToken ct)
         => Json(await _api.GetMedianOptionsAsync(Request.Query, ct));
 
     [HttpGet]
@@ -103,7 +103,7 @@ public sealed class AnalyticsController : Controller
     }
 
     [HttpGet]
-    public async Task<IActionResult> ExportMeridian(CancellationToken ct)
+    public async Task<IActionResult> ExportMedian(CancellationToken ct)
     {
         var result = await _api.ExportMediansAsync(Request.Query, ct);
         return File(result.Content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", result.FileName);
