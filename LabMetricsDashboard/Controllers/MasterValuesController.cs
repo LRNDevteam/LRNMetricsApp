@@ -231,6 +231,14 @@ public sealed class MasterValuesController : Controller
         return row is null ? NotFound() : Json(row);
     }
 
+    // Next Global Payer ID a new Payer Policy record would take (MAX + 1) - pre-fills the add form.
+    [HttpGet]
+    public async Task<IActionResult> PolicyNextGlobalPayerId(CancellationToken ct)
+    {
+        if (!CanWritePolicy) return Forbid();
+        return Json(new { nextGlobalPayerId = await _api.GetPolicyNextGlobalPayerIdAsync(ct) });
+    }
+
     [HttpPost]
     public async Task<IActionResult> SaveInsurancePayer([FromBody] InsurancePayerMasterDto dto, int? id, CancellationToken ct)
     {

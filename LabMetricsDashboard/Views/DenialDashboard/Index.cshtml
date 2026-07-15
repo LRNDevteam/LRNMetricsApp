@@ -126,6 +126,35 @@
     string LineItemPageUrl(int page) => DashboardUrl("line-item", Model.Filters.Page, Model.Filters.PageSize, Model.Filters.InsightPage, Model.Filters.InsightPageSize, page, Model.Filters.LineItemPageSize);
     string LineItemPageSizeUrl(int pageSize) => DashboardUrl("line-item", Model.Filters.Page, Model.Filters.PageSize, Model.Filters.InsightPage, Model.Filters.InsightPageSize, 1, pageSize);
 
+    // Base URLs for the AJAX-swappable grids: carry the current global filters; the client appends
+    // page / page-size / per-column filter params (ColumnFilters[Col]=value) before fetching.
+    object GridRouteValues(string tab) => new
+    {
+        lab = Model.CurrentLabName,
+        LabId = Model.Filters.LabId,
+        DenialCode = Model.Filters.DenialCode,
+        Status = Model.Filters.Status,
+        Priority = Model.Filters.Priority,
+        ActionCategory = Model.Filters.ActionCategory,
+        Deadline = Model.Filters.Deadline,
+        Classification = Model.Filters.Classification,
+        SalesRepname = Model.Filters.SalesRepname,
+        ClinicName = Model.Filters.ClinicName,
+        ReferringProvider = Model.Filters.ReferringProvider,
+        PayerName = Model.Filters.PayerName,
+        PayerType = Model.Filters.PayerType,
+        PanelName = Model.Filters.PanelName,
+        FirstBilledDateFrom = Model.Filters.FirstBilledDateFrom?.ToString("yyyy-MM-dd"),
+        FirstBilledDateTo = Model.Filters.FirstBilledDateTo?.ToString("yyyy-MM-dd"),
+        DateOfServiceFrom = Model.Filters.DateOfServiceFrom?.ToString("yyyy-MM-dd"),
+        DateOfServiceTo = Model.Filters.DateOfServiceTo?.ToString("yyyy-MM-dd"),
+        DenialDateFrom = Model.Filters.DenialDateFrom?.ToString("yyyy-MM-dd"),
+        DenialDateTo = Model.Filters.DenialDateTo?.ToString("yyyy-MM-dd"),
+        ActiveTab = tab
+    };
+    string LineItemGridUrl() => Url.Action("LineItemGrid", "DenialDashboard", GridRouteValues("line-item")) ?? "#";
+    string InsightGridUrl() => Url.Action("InsightGrid", "DenialDashboard", GridRouteValues("denial-insight")) ?? "#";
+
     // Cell formatters for the DenialLineItem grid.
     const string Dash = "-";
     string Txt(string? value) => string.IsNullOrWhiteSpace(value) ? Dash : value.Trim();
@@ -1309,8 +1338,14 @@
                                 <th class="lis-date-cell">First Billed Date</th>
                                 <th class="lis-date-cell">Date of Service</th>
                                 <th>Lab Name</th>
+                                <th class="lis-number-cell">Lab ID</th>
                                 <th>Run ID</th>
                                 <th class="lis-date-cell">Created On</th>
+                                <th class="lis-number-cell">Total Balance</th>
+                                <th>Payer Name Normalized</th>
+                                <th>Responsibility</th>
+                                <th class="lis-date-cell">Discussion Date</th>
+                                <th>ETA</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1377,8 +1412,14 @@
                                     <td class="lis-date-cell">@(item.FirstBilledDate?.ToString("dd MMM yyyy") ?? "-")</td>
                                     <td class="lis-date-cell">@(item.DateOfService?.ToString("dd MMM yyyy") ?? "-")</td>
                                     <td class="lis-wide-cell">@item.LabName</td>
+                                    <td class="lis-number-cell">@item.LabId</td>
                                     <td>@item.RunId</td>
                                     <td class="lis-date-cell">@(item.CreatedOn?.ToString("dd MMM yyyy") ?? "-")</td>
+                                    <td class="lis-number-cell">@Money(item.TotalBalance)</td>
+                                    <td class="lis-wide-cell">@(string.IsNullOrWhiteSpace(item.PayerNameNormalized) ? "-" : item.PayerNameNormalized)</td>
+                                    <td>@(string.IsNullOrWhiteSpace(item.Responsibility) ? "-" : item.Responsibility)</td>
+                                    <td class="lis-date-cell">@(item.DiscussionDate?.ToString("dd MMM yyyy") ?? "-")</td>
+                                    <td>@(string.IsNullOrWhiteSpace(item.ETA) ? "-" : item.ETA)</td>
                                 </tr>
                             }
                         </tbody>
@@ -1456,23 +1497,14 @@
     <div class="tab-pane fade @(activeTab == "denial-insight" ? "show active" : "")" id="denial-insight" role="tabpanel">
         <div class="card border-0 shadow-sm table-card">
             <div class="card-body">
-                <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+                <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
                     <div>
                         <div class="section-title">Denial Insight &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
-                        @* <div class="section-subtitle">Derived from <code>dbo.DenialTaskBoard</code> for the selected lab and latest available run.</div> *@
+                        <div class="section-subtitle">Excel-style grid — filter any column, page through every insight row. $ Impact (%) = <code>(InsuranceBalance / TotalBalance) * 100</code>.</div>
                     </div>
                     <div class="d-flex flex-wrap gap-2">
-
-                        <span class="chip">Rows: @Model.InsightCount.ToString("N0")</span>
+                        <span class="chip">Rows: @Model.InsightGrid.InsightCount.ToString("N0")</span>
                     </div>
-                </div>
-
-                @* Compact summary strip - keeps the totals visible but hands the vertical space to the table below. *@
-                <div class="insight-summary-strip mb-3">
-                    <div class="insight-stat stat-blue"><span class="insight-stat-label">Total Denials</span><span class="insight-stat-value">@Model.InsightTotalDenials.ToString("N0")</span></div>
-                    <div class="insight-stat stat-purple"><span class="insight-stat-label">Total Claims</span><span class="insight-stat-value">@Model.InsightTotalClaims.ToString("N0")</span></div>
-                    <div class="insight-stat stat-green"><span class="insight-stat-label">Total Balance</span><span class="insight-stat-value">@Money(Model.InsightTotalBalance)</span></div>
-                    <div class="insight-stat stat-red"><span class="insight-stat-label">Insurance Balance</span><span class="insight-stat-value">@Money(Model.InsightTotalInsuranceBalance)</span></div>
                 </div>
 
                 <form asp-action="AssignInsightReviewersOverall" asp-controller="DenialDashboard" method="post" id="denialInsightAssignmentForm">
@@ -1481,19 +1513,16 @@
                     <input type="hidden" name="lab" value="@Model.CurrentLabName" />
                     <input type="hidden" name="runId" value="@Model.CurrentRunId" />
                     <input type="hidden" name="ActiveTab" value="denial-insight" />
-                    <input type="hidden" name="InsightPage" value="@Model.InsightPage" />
-                    <input type="hidden" name="InsightPageSize" value="@Model.InsightPageSize" />
-
+                    <input type="hidden" name="InsightPage" value="@Model.InsightGrid.InsightPage" />
+                    <input type="hidden" name="InsightPageSize" value="@Model.InsightGrid.InsightPageSize" />
                     <input type="hidden" name="DenialCode" value="@Model.Filters.DenialCode" />
 
                     <div class="insight-toolbar d-flex flex-wrap justify-content-between align-items-end gap-3 mb-3">
                         <div class="insight-code-filter">
-                            @* Denial Code filtering moved to the common dashboard filters above (applies via Apply Filters). *@
                             <div class="section-subtitle mt-1">
-                                $ Impact (%) = <code>(InsuranceBalance / TotalBalance) * 100</code>.
                                 @if (!string.IsNullOrWhiteSpace(Model.Filters.DenialCode))
                                 {
-                                    <span class="ms-1">Filtered by denial code <strong>@Model.Filters.DenialCode</strong> (set in the dashboard filters).</span>
+                                    <span>Filtered by denial code <strong>@Model.Filters.DenialCode</strong> (set in the dashboard filters).</span>
                                 }
                                 @if (Model.IsArManager)
                                 {
@@ -1508,89 +1537,21 @@
                                     <i class="bi bi-check2-circle me-1"></i> Submit Reviewer Assignments
                                 </button>
                             }
-                            <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search by denial code, description, insurance…" data-target-table="denialInsightTable" /></div>
+                            <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Quick search loaded rows…" data-target-table="denialInsightTable" /></div>
                         </div>
                     </div>
 
-                    <div class="table-responsive table-frame table-frame-bordered">
-                        <table class="table table-hover align-middle app-table polished-table bordered-grid-table zebra-table sortable-table" id="denialInsightTable">
-                            <thead>
-                                <tr>
-                                    <th>Denial Codes</th>
-                                    <th>Description</th>
-                                    <th class="text-end"># of Denial</th>
-                                    <th class="text-end"># of Claims</th>
-                                    <th class="text-end">Total Balance</th>
-                                    <th>High Impact Insurance</th>
-                                    <th class="text-end">Insurance Balance</th>
-                                    <th class="text-end">$ Impact (%)</th>
-                                    <th>Action Category</th>
-                                    <th>Action Code</th>
-                                    <th>Action</th>
-                                    <th>Task</th>
-                                    <th>Feedback</th>
-                                    <th>Responsibility</th>
-                                    <th>Responsibility Reviewer</th>
-                                    <th>Discussion Date</th>
-                                    <th>ETA</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @if (Model.PagedInsights.Any())
-                                {
-                                    @foreach (var item in Model.PagedInsights)
-                                    {
-                                        <tr>
-                                            <td class="fw-semibold">@item.DenialCodes</td>
-                                            <td class="text-wrap narrow-cell">@item.Descriptions</td>
-                                            <td class="text-end">@item.NoOfDenialCount.ToString("N0")</td>
-                                            <td class="text-end">@item.NoOfClaimsCount.ToString("N0")</td>
-                                            <td class="text-end">@Money(item.TotalBalance)</td>
-                                            <td class="text-wrap narrow-cell">@item.HighImpactInsurance</td>
-                                            <td class="text-end">@Money(item.InsuranceBalance)</td>
-                                            <td class="text-end">@item.ImpactPercentageDisplay</td>
-                                            <td class="text-wrap narrow-cell">@item.ActionCategory</td>
-                                            <td>@item.ActionCode</td>
-                                            <td class="text-wrap narrow-cell">@item.Action</td>
-                                            <td class="text-wrap narrow-cell">@item.Task</td>
-                                            <td class="text-wrap narrow-cell">@(string.IsNullOrWhiteSpace(item.Feedback) ? "-" : item.Feedback)</td>
-                                            <td>@(string.IsNullOrWhiteSpace(item.Responsibility) ? "-" : item.Responsibility)</td>
-                                            <td>
-                                                @if (Model.IsArManager)
-                                                {
-                                                    <div class="min-w-260">
-                                                        <input type="hidden" name="denialCodes" value="@item.DenialCodes" />
-                                                        <input type="hidden" name="payerNames" value="@item.HighImpactInsurance" />
-                                                        <select name="reviewerUserNames" class="form-select form-select-sm denial-reviewer-select">
-                                                            <option value="">Select Reviewer</option>
-                                                            @foreach (var reviewer in Model.ReviewerOptions)
-                                                            {
-                                                                <option value="@reviewer.UserName" selected="@(string.Equals(item.ResponsibilityReviewer, reviewer.UserName, StringComparison.OrdinalIgnoreCase))">@reviewer.DisplayName</option>
-                                                            }
-                                                        </select>
-                                                    </div>
-                                                }
-                                                else
-                                                {
-                                                    @(string.IsNullOrWhiteSpace(item.ResponsibilityReviewer) ? "-" : item.ResponsibilityReviewer)
-                                                }
-                                            </td>
-                                            <td>@(item.DiscussionDate?.ToString("dd MMM yyyy") ?? "-")</td>
-                                            <td>@(string.IsNullOrWhiteSpace(item.ETA) ? "-" : item.ETA)</td>
-                                        </tr>
-                                    }
-                                }
-                                else
-                                {
-                                    <tr>
-                                        <td colspan="17" class="text-center text-muted py-4">No denial insight rows were found for the selected lab.</td>
-                                    </tr>
-                                }
-                            </tbody>
-                        </table>
+                    <div class="ajax-grid" id="insightGrid" data-grid-base="@InsightGridUrl()" data-page-param="InsightPage" data-size-param="InsightPageSize">
+                        <div class="grid-toolbar">
+                            <span class="grid-hint"><i class="bi bi-funnel me-1"></i>Type in any column header to filter across all rows.</span>
+                            <button type="button" class="fs-btn grid-fs-btn"><i class="bi bi-arrows-fullscreen"></i><span class="fs-label">Fullscreen</span></button>
+                        </div>
+                        <div class="grid-content">
+                            @await Html.PartialAsync("_DenialInsightGrid", Model.InsightGrid)
+                        </div>
+                        <div class="grid-loading" hidden><div class="page-loader-spinner"></div></div>
                     </div>
                 </form>
-                @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "denial-insight", Page = Model.InsightPage, TotalPages = Model.InsightTotalPages, TotalItems = Model.InsightCount, PageSize = Model.InsightPageSize, ItemLabel = "insight rows", BuildUrl = (page, _) => InsightPageUrl(page), PageSizeOptions = insightPageSizes, BuildPageSizeUrl = InsightPageSizeUrl })
             </div>
         </div>
     </div>
@@ -1601,52 +1562,24 @@
                 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
                     <div>
                         <div class="section-title">Line Item &nbsp;&nbsp;<span class="chip chip-muted">Run Id: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span></div>
-                        @* <div class="section-subtitle">Filtered denial line-item rows from <code>dbo.DenialLineItem</code> for the selected lab and latest available run.</div> *@
+                        <div class="section-subtitle">Excel-style grid — filter any column, page through every line item.</div>
                     </div>
                     <div class="d-flex flex-wrap gap-2">
-
-                        <span class="chip">Rows: @Model.LineItemCount.ToString("N0")</span>
+                        <span class="chip">Rows: @Model.LineItemGrid.LineItemCount.ToString("N0")</span>
                     </div>
                 </div>
 
-                <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-                    @* <div class="section-subtitle">This tab replaces Claim View and shows the filtered line-item level denial details for the selected lab and latest run.</div> *@
-                    <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Search line items on this page..." data-target-table="lineItemTable" /></div>
+                <div class="ajax-grid" id="lineItemGrid" data-grid-base="@LineItemGridUrl()" data-page-param="LineItemPage" data-size-param="LineItemPageSize">
+                    <div class="grid-toolbar">
+                        <div class="table-search"><i class="bi bi-search"></i><input class="form-control form-control-sm table-search-input" type="text" placeholder="Quick search loaded rows…" data-target-table="lineItemTable" /></div>
+                        <span class="grid-hint"><i class="bi bi-funnel me-1"></i>Type in any column header to filter across all rows.</span>
+                        <button type="button" class="fs-btn grid-fs-btn"><i class="bi bi-arrows-fullscreen"></i><span class="fs-label">Fullscreen</span></button>
+                    </div>
+                    <div class="grid-content">
+                        @await Html.PartialAsync("_DenialLineItemGrid", Model.LineItemGrid)
+                    </div>
+                    <div class="grid-loading" hidden><div class="page-loader-spinner"></div></div>
                 </div>
-
-                <div class="lis-scroll">
-                    <table class="table table-hover align-middle lis-list-table sortable-table" id="lineItemTable">
-                        <thead>
-                            <tr>
-                                @foreach (var column in lineItemColumns)
-                                {
-                                    <th class="@column.Css">@column.Header</th>
-                                }
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @if (Model.PagedLineItems.Any())
-                            {
-                                @foreach (var item in Model.PagedLineItems)
-                                {
-                                    <tr>
-                                        @foreach (var column in lineItemColumns)
-                                        {
-                                            <td class="@column.Css">@column.Value(item)</td>
-                                        }
-                                    </tr>
-                                }
-                            }
-                            else
-                            {
-                                <tr>
-                                    <td colspan="@lineItemColumns.Length" class="text-center text-muted py-4">No line-item rows were found for the selected lab.</td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
-                @await Html.PartialAsync("_DenialDashboardPager", new RecordsPagerViewModel { TabName = "line-item", Page = Model.LineItemPage, TotalPages = Model.LineItemTotalPages, TotalItems = Model.LineItemCount, PageSize = Model.LineItemPageSize, ItemLabel = "line items", BuildUrl = (page, _) => LineItemPageUrl(page), PageSizeOptions = lineItemPageSizes, BuildPageSizeUrl = LineItemPageSizeUrl })
             </div>
         </div>
     </div>
@@ -1899,6 +1832,9 @@
         // and anything marked .no-fs.
         (function setupTableFullscreen() {
             const panes = document.querySelectorAll('.tab-content .table-responsive, .tab-content .lis-scroll, .tab-content .breakdown-pivot-frame');
+            // One-shot flag: paging inside fullscreen reloads the page, so we stash
+            // which table was expanded and re-open it once the new page arrives.
+            const RESTORE_KEY = 'denial-dashboard:fs-restore';
             let activeHost = null;
             function label(btn, on) {
                 btn.innerHTML = on
@@ -1912,19 +1848,47 @@
                     row.style.display = (!text || (row.innerText || '').toLowerCase().includes(text)) ? '' : 'none';
                 });
             }
+            // Finds the pager that belongs to a pane: the first .pager-shell that follows the pane
+            // in document order, whether it's a direct sibling or sits after the pane's wrapping form.
+            function findPagerFor(pane) {
+                function nextPagerSibling(node) {
+                    let sib = node ? node.nextElementSibling : null;
+                    while (sib) {
+                        if (sib.classList && sib.classList.contains('pager-shell')) return sib;
+                        sib = sib.nextElementSibling;
+                    }
+                    return null;
+                }
+                return nextPagerSibling(pane) || nextPagerSibling(pane.closest('form'));
+            }
+            // Identifies a host across a page reload by the id of the table it wraps.
+            function paneKey(host) {
+                const table = host.querySelector('table[id]');
+                return table ? table.id : '';
+            }
+            function rememberForRestore(host) {
+                const key = paneKey(host);
+                if (!key) return;
+                try { sessionStorage.setItem(RESTORE_KEY, key); } catch (_) { /* storage disabled */ }
+            }
             function toggle(host) {
                 const btn = host.querySelector('.fs-btn');
                 const filter = host.querySelector('.fs-filter');
                 const pane = host.querySelector('.table-responsive, .lis-scroll, .breakdown-pivot-frame');
+                const pager = host._pager;
                 const on = host.classList.toggle('is-fs');
                 document.body.classList.toggle('fs-lock', on);
                 activeHost = on ? host : null;
                 label(btn, on);
                 if (on) {
+                    // Pull the server-rendered pager into the overlay so paging stays reachable.
+                    if (pager) host.appendChild(pager);
                     filter.value = '';
                     setTimeout(function () { filter.focus(); }, 50);
-                } else if (pane) {
-                    applyFilter(pane, ''); // restore all rows on exit
+                } else {
+                    // Put the pager back exactly where it was rendered (may be outside the host's form).
+                    if (pager && host._pagerHome) host._pagerHome.parent.insertBefore(pager, host._pagerHome.next);
+                    if (pane) applyFilter(pane, ''); // restore all rows on exit
                 }
             }
             panes.forEach(function (pane) {
@@ -1932,6 +1896,15 @@
                 const host = document.createElement('div');
                 host.className = 'fs-host';
                 pane.parentNode.insertBefore(host, pane);
+
+                // A server-rendered pager follows the pane (directly, or after the form the pane
+                // is wrapped in - e.g. the Task Board). Keep a handle plus its exact original spot
+                // so fullscreen can host it and we can put it back precisely on exit.
+                const maybePager = findPagerFor(pane);
+                if (maybePager) {
+                    host._pager = maybePager;
+                    host._pagerHome = { parent: maybePager.parentNode, next: maybePager.nextSibling };
+                }
 
                 const bar = document.createElement('div');
                 bar.className = 'fs-bar';
@@ -1952,9 +1925,178 @@
 
                 host.appendChild(bar);
                 host.appendChild(pane);
+
+                // Paging from inside the overlay navigates away; flag a re-open first.
+                if (host._pager) {
+                    host._pager.addEventListener('click', function (e) {
+                        const link = e.target.closest('a.pager-btn');
+                        if (!link || link.classList.contains('disabled') || !host.classList.contains('is-fs')) return;
+                        rememberForRestore(host);
+                    });
+                    host._pager.addEventListener('change', function (e) {
+                        if (!e.target.closest('[data-pager-size]') || !host.classList.contains('is-fs')) return;
+                        rememberForRestore(host);
+                    });
+                }
             });
             document.addEventListener('keydown', function (e) {
                 if (e.key === 'Escape' && activeHost) toggle(activeHost);
+            });
+
+            // Re-enter fullscreen when a paging reload asked us to.
+            let restoreKey = null;
+            try { restoreKey = sessionStorage.getItem(RESTORE_KEY); } catch (_) { /* storage disabled */ }
+            if (restoreKey) {
+                try { sessionStorage.removeItem(RESTORE_KEY); } catch (_) { /* storage disabled */ }
+                const target = Array.prototype.find.call(document.querySelectorAll('.fs-host'), function (host) {
+                    return paneKey(host) === restoreKey;
+                });
+                if (target) toggle(target);
+            }
+        })();
+
+        // Excel-style AJAX grids (Line Item + Denial Insight): server-side paging and per-column
+        // filtering that swap only the grid body, with a loading overlay and a persistent fullscreen
+        // shell so paging/filtering never drops you out of fullscreen.
+        (function setupAjaxGrids() {
+            document.querySelectorAll('.ajax-grid').forEach(function (grid) {
+                const base = grid.getAttribute('data-grid-base');
+                const pageParam = grid.getAttribute('data-page-param');
+                const sizeParam = grid.getAttribute('data-size-param');
+                const content = grid.querySelector('.grid-content');
+                const loading = grid.querySelector('.grid-loading');
+                const fsBtn = grid.querySelector('.grid-fs-btn');
+                if (!base || !content) return;
+
+                let debounceTimer = null;
+                let pendingFocusCol = null;
+                let pendingCaret = null;
+
+                function collectColumnFilters() {
+                    const parts = [];
+                    grid.querySelectorAll('.col-filter').forEach(function (input) {
+                        const value = (input.value || '').trim();
+                        if (value) {
+                            const col = input.getAttribute('data-col');
+                            parts.push('ColumnFilters[' + encodeURIComponent(col) + ']=' + encodeURIComponent(value));
+                        }
+                    });
+                    return parts;
+                }
+
+                function currentSize() {
+                    const select = grid.querySelector('[data-grid-size]');
+                    return select ? select.value : null;
+                }
+
+                function buildUrl(page, size) {
+                    const parts = [];
+                    if (page != null) parts.push(encodeURIComponent(pageParam) + '=' + encodeURIComponent(page));
+                    if (size != null) parts.push(encodeURIComponent(sizeParam) + '=' + encodeURIComponent(size));
+                    collectColumnFilters().forEach(function (p) { parts.push(p); });
+                    if (!parts.length) return base;
+                    return base + (base.indexOf('?') >= 0 ? '&' : '?') + parts.join('&');
+                }
+
+                function reapplyQuickSearch() {
+                    // Re-run the loaded-rows quick search against the freshly swapped table.
+                    const container = grid.closest('.card-body') || document;
+                    container.querySelectorAll('.table-search-input').forEach(function (input) {
+                        if (input.value) input.dispatchEvent(new Event('input', { bubbles: true }));
+                    });
+                }
+
+                function restoreFocus() {
+                    if (!pendingFocusCol) return;
+                    const selector = '.col-filter[data-col="' + pendingFocusCol.replace(/"/g, '\\"') + '"]';
+                    const input = grid.querySelector(selector);
+                    if (input) {
+                        input.focus();
+                        const caret = pendingCaret == null ? input.value.length : pendingCaret;
+                        try { input.setSelectionRange(caret, caret); } catch (e) { }
+                    }
+                    pendingFocusCol = null;
+                    pendingCaret = null;
+                }
+
+                async function load(page, size) {
+                    const url = buildUrl(page, size != null ? size : currentSize());
+                    if (loading) loading.hidden = false;
+                    grid.classList.add('is-loading');
+                    try {
+                        const response = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' }, credentials: 'same-origin' });
+                        if (!response.ok) throw new Error('Grid load failed: ' + response.status);
+                        content.innerHTML = await response.text();
+                        restoreFocus();
+                        reapplyQuickSearch();
+                    } catch (err) {
+                        console.error(err);
+                    } finally {
+                        if (loading) loading.hidden = true;
+                        grid.classList.remove('is-loading');
+                    }
+                }
+
+                grid.addEventListener('click', function (e) {
+                    const btn = e.target.closest('.grid-page-btn');
+                    if (!btn || btn.disabled || btn.classList.contains('disabled')) return;
+                    e.preventDefault();
+                    const page = parseInt(btn.getAttribute('data-page'), 10);
+                    if (!isNaN(page)) load(page, null);
+                });
+
+                grid.addEventListener('change', function (e) {
+                    const select = e.target.closest('[data-grid-size]');
+                    if (!select) return;
+                    e.preventDefault();
+                    load(1, select.value);
+                });
+
+                grid.addEventListener('input', function (e) {
+                    const input = e.target.closest('.col-filter');
+                    if (!input) return;
+                    pendingFocusCol = input.getAttribute('data-col');
+                    pendingCaret = input.selectionStart;
+                    clearTimeout(debounceTimer);
+                    debounceTimer = setTimeout(function () { load(1, null); }, 450);
+                });
+
+                grid.addEventListener('keydown', function (e) {
+                    if (e.key !== 'Enter') return;
+                    const input = e.target.closest('.col-filter');
+                    if (!input) return;
+                    e.preventDefault();
+                    pendingFocusCol = input.getAttribute('data-col');
+                    pendingCaret = input.selectionStart;
+                    clearTimeout(debounceTimer);
+                    load(1, null);
+                });
+
+                function setFsLabel(on) {
+                    if (!fsBtn) return;
+                    fsBtn.innerHTML = on
+                        ? '<i class="bi bi-fullscreen-exit"></i><span class="fs-label">Exit fullscreen</span>'
+                        : '<i class="bi bi-arrows-fullscreen"></i><span class="fs-label">Fullscreen</span>';
+                    fsBtn.setAttribute('title', on ? 'Exit fullscreen (Esc)' : 'View this grid in fullscreen');
+                }
+
+                if (fsBtn) {
+                    fsBtn.addEventListener('click', function () {
+                        const on = grid.classList.toggle('is-grid-fs');
+                        setFsLabel(on);
+                        document.body.classList.toggle('fs-lock', on || document.querySelector('.fs-host.is-fs') != null);
+                    });
+                }
+            });
+
+            document.addEventListener('keydown', function (e) {
+                if (e.key !== 'Escape') return;
+                const open = document.querySelector('.ajax-grid.is-grid-fs');
+                if (!open) return;
+                open.classList.remove('is-grid-fs');
+                const btn = open.querySelector('.grid-fs-btn');
+                if (btn) btn.innerHTML = '<i class="bi bi-arrows-fullscreen"></i><span class="fs-label">Fullscreen</span>';
+                if (!document.querySelector('.fs-host.is-fs')) document.body.classList.remove('fs-lock');
             });
         })();
 

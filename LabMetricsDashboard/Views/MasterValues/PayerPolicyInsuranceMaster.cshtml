@@ -45,6 +45,14 @@
     .mv-warning-banner { background: #FDF3E3; border: 1px solid #F0D9A8; color: #8A5A0B; padding: .55rem .75rem; border-radius: 6px; font-size: .8rem; margin-bottom: .85rem; }
     .mv-info-banner { background: #E8F1F9; border: 1px solid #C6DCEE; color: #1F3B57; padding: .55rem .75rem; border-radius: 6px; font-size: .8rem; margin-bottom: .85rem; }
     .mv-deactivated-note { color: #9AA5B1; font-size: .76rem; }
+    .mv-combo { position: relative; }
+    /* Rendered as a fixed overlay (moved to the page body) so the scrollable modal never clips it. */
+    .mv-combo-results { position: fixed; z-index: 2000; max-height: 240px; overflow: auto; background: #fff; border: 1px solid #cfdcec; border-radius: 6px; box-shadow: 0 12px 26px rgba(15, 23, 42, .16); }
+    .mv-combo-item { padding: .4rem .6rem; cursor: pointer; font-size: .82rem; border-bottom: 1px solid #eef2f7; }
+    .mv-combo-item:last-child { border-bottom: none; }
+    .mv-combo-item:hover, .mv-combo-item.active { background: #eef6ff; }
+    .mv-combo-item .gid { font-weight: 800; color: #2E5C8A; }
+    .mv-combo-item .muted { color: #64748b; }
 </style>
 
 <div class="mv-shell">
@@ -124,10 +132,10 @@
                 <div class="mv-warning-banner d-none" id="dupWarning"></div>
                 <form id="editForm" class="row g-3">
                     <input type="hidden" id="id" />
-                    <div class="col-md-6"><label class="form-label">Payer Name *</label><input class="form-control" name="payerNameRaw" required placeholder="e.g., AETNA" /></div>
-                    <div class="col-md-6"><label class="form-label">Payer Name Normalized <span class="mv-readonly-tag">Read-only, system-generated</span></label><input class="form-control" name="payerNameNormalized" readonly tabindex="-1" /></div>
+                    <div class="col-md-6"><label class="form-label">Payer Name *</label><input class="form-control" name="payerNameRaw" required placeholder="e.g., AETNA" autocomplete="off" /></div>
+                    <div class="col-md-6 mv-combo"><label class="form-label">Payer Name Normalized *</label><input class="form-control" name="payerNameNormalized" id="normPicker" autocomplete="off" required placeholder="Pick an existing group or type a new one" /><div class="mv-combo-results d-none" id="normResults"></div><div class="form-text" id="normalizedHint">Select an existing normalized name to reuse its Global Payer ID and group details, or type a new one to mint the next Global Payer ID.</div></div>
                     <div class="col-md-4"><label class="form-label">Global Payer Code *</label><input class="form-control" name="globalPayerCode" required placeholder="e.g., GPC-AETNA" /></div>
-                    <div class="col-md-4"><label class="form-label">Global Payer ID <span class="mv-readonly-tag">Auto-assigned on approval</span></label><input class="form-control" name="globalPayerId" readonly tabindex="-1" placeholder="Assigned after approval" /></div>
+                    <div class="col-md-4"><label class="form-label">Global Payer ID <span class="mv-readonly-tag" id="gidTag">Auto (max + 1)</span></label><input class="form-control" name="globalPayerId" readonly tabindex="-1" placeholder="Loading…" /></div>
                     <div class="col-md-4"><label class="form-label">Payer Short Code</label><input class="form-control" name="payerShortCode" placeholder="Optional" /></div>
                     <div class="col-md-4"><label class="form-label">Payer Group Code</label><input class="form-control" name="payerGroupCode" type="number" placeholder="Optional (numeric)" /></div>
                     <div class="col-md-4"><label class="form-label">Plan Type *</label><select class="form-select" name="planType" required><option value="">Select...</option><option>Medicare</option><option>Medicaid</option><option>Commercial</option><option>Managed Care</option><option>Other</option></select></div>
@@ -171,7 +179,10 @@
 (function(){
 const canWrite=@(Model.CanWrite ? "true" : "false"),requiresApproval=@(Model.RequiresApproval ? "true" : "false");
 let page=1,pageSize=20,totalPages=1,sortColumn='',sortDirection='asc',currentItems=[];
-const urls={data:'@Url.Action("PolicyPayersData","MasterValues")',get:'@Url.Action("PolicyPayer","MasterValues")',save:'@Url.Action("SavePolicyPayer","MasterValues")',status:'@Url.Action("PolicyStatus","MasterValues")',import:'@Url.Action("ImportPolicy","MasterValues")',export:'@Url.Action("ExportPolicy","MasterValues")'};
+const urls={data:'@Url.Action("PolicyPayersData","MasterValues")',get:'@Url.Action("PolicyPayer","MasterValues")',save:'@Url.Action("SavePolicyPayer","MasterValues")',status:'@Url.Action("PolicyStatus","MasterValues")',import:'@Url.Action("ImportPolicy","MasterValues")',export:'@Url.Action("ExportPolicy","MasterValues")',nextGid:'@Url.Action("PolicyNextGlobalPayerId","MasterValues")'};
+let nextGid=null;                 // MAX(GlobalPayerId)+1, fetched when the Add modal opens
+const normalizedMap={};           // normalized (UPPER) -> a policy record sharing that group
+let normTimer=null;
 const US_STATES=['AL','AK','AZ','AR','CA','CO','CT','DE','DC','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'];
 const COLS=15;
 const editModal=canWrite?new bootstrap.Modal(document.getElementById('editModal')):null;
@@ -210,6 +221,7 @@ if(canWrite){
   US_STATES.forEach(s=>stateSelect.insertAdjacentHTML('beforeend',`<option>${s}</option>`));
   function setSelect(sel,value){if(value&&![...sel.options].some(o=>o.value===value))sel.insertAdjacentHTML('beforeend',`<option>${esc(value)}</option>`);sel.value=value||'';}
   function hideDup(){document.getElementById('dupWarning').classList.add('d-none');}
+  const gidTag=document.getElementById('gidTag');
   function fill(x){
     const f=document.getElementById('editForm');f.reset();
     document.getElementById('id').value=x?.ppInsuranceMasterId||'';
@@ -217,12 +229,75 @@ if(canWrite){
     setSelect(f.elements.planType,x?.planType||'');
     setSelect(f.elements.payerState,x?.payerState||'');
     setSelect(f.elements.benefitAdministrator,x?.benefitAdministrator||'');
-    f.elements.payerNameNormalized.value=x?normalize(x.payerNameRaw):'';
+    // Normalized is now user-editable (autocomplete): keep the stored value on edit, blank on add.
+    f.elements.payerNameNormalized.value=x?(x.payerNameNormalized||''):'';
     f.elements.isActive.value=x?(x.isActive||'Active'):'Active';
-    if(!x)f.elements.globalPayerId.value='';
+    f.elements.globalPayerId.value=x?(x.globalPayerId??''):'';
+    if(gidTag)gidTag.textContent=x?'System-managed':'Auto (max + 1)';
+    document.getElementById('normalizedHint').style.display=x?'none':'';
     hideDup();document.getElementById('saveError').classList.add('d-none');
   }
-  document.querySelector('#editForm [name=payerNameRaw]').addEventListener('input',e=>{document.querySelector('#editForm [name=payerNameNormalized]').value=normalize(e.target.value);hideDup();});
+  // Copy the group-level attributes from an existing Payer Policy record when its normalized name is reused.
+  function loadGroupFields(rec){
+    const f=document.getElementById('editForm');
+    f.elements.globalPayerId.value=rec.globalPayerId??'';
+    f.elements.globalPayerCode.value=rec.globalPayerCode||'';
+    f.elements.payerGroupCode.value=rec.payerGroupCode??'';
+    f.elements.payerShortCode.value=rec.payerShortCode||'';
+    f.elements.benefitAdminCode.value=rec.benefitAdminCode||'';
+    setSelect(f.elements.planType,rec.planType||'');
+    setSelect(f.elements.payerState,rec.payerState||'');
+    setSelect(f.elements.benefitAdministrator,rec.benefitAdministrator||'');
+    if(gidTag)gidTag.textContent='From existing group';
+  }
+  // ── Payer Name Normalized combobox: pick an existing group (reuse its Global Payer ID + details),
+  //    or type a brand-new name (mints MAX + 1). New names are allowed here (unlike the Lab master).
+  const normInput=document.getElementById('normPicker'),normResults=document.getElementById('normResults');
+  function newGroupId(){
+    const f=document.getElementById('editForm');
+    f.elements.globalPayerId.value=nextGid??'';
+    if(gidTag)gidTag.textContent='Auto (max + 1) — new group';
+  }
+  if(normResults)document.body.appendChild(normResults); // lift out of the scrollable modal
+  function positionNorm(){const r=normInput.getBoundingClientRect();normResults.style.top=r.bottom+'px';normResults.style.left=r.left+'px';normResults.style.width=r.width+'px';}
+  function hideNorm(){normResults.classList.add('d-none');}
+  async function searchNorm(term){
+    try{const r=await fetch(urls.data+'?'+new URLSearchParams({search:term,page:1,pageSize:25}));const d=await r.json();
+      const seen=new Set(),list=[];
+      (d.items||[]).forEach(it=>{const n=(it.payerNameNormalized||'').trim();if(!n)return;const k=n.toUpperCase();if(!normalizedMap[k])normalizedMap[k]=it;if(!seen.has(k)){seen.add(k);list.push(it);}});
+      return list;
+    }catch{return [];}
+  }
+  function renderNorm(list){
+    if(!list.length){normResults.innerHTML='<div class="mv-combo-item muted">No existing group — this will be added as a new normalized name.</div>';}
+    else{
+      normResults.innerHTML=list.map((x,i)=>`<div class="mv-combo-item" data-i="${i}"><span class="gid">${esc(x.payerNameNormalized)}</span> <span class="muted">— GID ${esc(x.globalPayerId??'—')} • ${esc(x.payerNameRaw)} • ${esc(x.payerState||'—')} • ${esc(x.planType||'—')}</span></div>`).join('');
+      normResults.querySelectorAll('.mv-combo-item[data-i]').forEach(el=>el.addEventListener('mousedown',ev=>{ev.preventDefault();const rec=list[Number(el.dataset.i)];normInput.value=rec.payerNameNormalized||'';loadGroupFields(rec);hideNorm();}));
+    }
+    positionNorm();normResults.classList.remove('d-none');
+  }
+  // Decide the Global Payer ID for the typed value: reuse an existing group's id, else MAX + 1.
+  async function resolveNormalized(){
+    const f=document.getElementById('editForm');
+    if(document.getElementById('id').value)return; // edit: leave the existing id alone
+    const val=(f.elements.payerNameNormalized.value||'').trim();
+    if(!val){f.elements.globalPayerId.value=nextGid??'';if(gidTag)gidTag.textContent='Auto (max + 1)';return;}
+    const key=val.toUpperCase();
+    let rec=normalizedMap[key];
+    if(!rec){try{const r=await fetch(urls.data+'?'+new URLSearchParams({search:val,page:1,pageSize:25}));const d=await r.json();rec=(d.items||[]).find(it=>(it.payerNameNormalized||'').trim().toUpperCase()===key);if(rec)normalizedMap[key]=rec;}catch{}}
+    if(rec)loadGroupFields(rec); else newGroupId();
+  }
+  normInput.addEventListener('input',()=>{
+    hideDup();
+    if(!document.getElementById('id').value)newGroupId(); // typing = a new group until an existing one is picked
+    clearTimeout(normTimer);
+    const term=normInput.value.trim();
+    if(term.length<1){hideNorm();return;}
+    normTimer=setTimeout(async()=>{renderNorm(await searchNorm(term));},250);
+  });
+  normInput.addEventListener('blur',()=>{setTimeout(()=>{hideNorm();resolveNormalized();},150);});
+  document.addEventListener('scroll',()=>{if(normResults&&!normResults.classList.contains('d-none'))positionNorm();},true);
+  window.addEventListener('resize',hideNorm);
   async function findDuplicate(name,currentId){
     try{
       const r=await fetch(urls.data+'?'+new URLSearchParams({search:name,page:1,pageSize:100}));
@@ -230,7 +305,13 @@ if(canWrite){
       return (d.items||[]).find(x=>normalize(x.payerNameRaw)===norm&&isActiveVal(x.isActive)&&String(x.ppInsuranceMasterId)!==String(currentId||''));
     }catch{return null;}
   }
-  document.getElementById('addBtn').onclick=()=>{fill(null);document.getElementById('editTitle').textContent='Add Payer — Payer Policy Insurance Master';editModal.show();};
+  document.getElementById('addBtn').onclick=async()=>{
+    fill(null);document.getElementById('editTitle').textContent='Add Payer — Payer Policy Insurance Master';
+    document.getElementById('normResults').classList.add('d-none');
+    editModal.show();
+    // Pre-fill the Global Payer ID with MAX + 1 for a brand-new normalized group.
+    try{const r=await fetch(urls.nextGid);const d=await r.json();nextGid=d.nextGlobalPayerId;const f=document.getElementById('editForm');if(!document.getElementById('id').value&&!(f.elements.payerNameNormalized.value||'').trim())f.elements.globalPayerId.value=nextGid;}catch{}
+  };
   document.getElementById('rows').onclick=async e=>{
     const edit=e.target.closest('.edit'),stat=e.target.closest('.stat');
     if(edit){setBusy(true,'Opening record...');try{const r=await fetch(urls.get+'?id='+edit.dataset.id);fill(await r.json());document.getElementById('editTitle').textContent='Edit Payer — Payer Policy Insurance Master';editModal.show();}finally{setBusy(false);}}
@@ -247,18 +328,12 @@ if(canWrite){
     const btn=document.getElementById('saveBtn'),f=document.getElementById('editForm');
     if(!f.reportValidity())return;
     const data=Object.fromEntries(new FormData(f));
-    data.payerNameNormalized=normalize(data.payerNameRaw);
+    // Normalized is user-entered (autocomplete) - keep it as typed/selected; do NOT re-derive from raw.
+    data.payerNameNormalized=(data.payerNameNormalized||'').trim();
     data.globalPayerId=data.globalPayerId?Number(data.globalPayerId):null;
     data.payerGroupCode=data.payerGroupCode?Number(data.payerGroupCode):null;
     const id=document.getElementById('id').value;
-    setBtn(btn,true,'Checking...');
-    const dup=await findDuplicate(data.payerNameRaw,id);
-    setBtn(btn,false);
-    if(dup){
-      const w=document.getElementById('dupWarning');
-      w.innerHTML=`⚠ A payer with the same normalized name already exists ("${esc(dup.payerNameRaw)}"${dup.globalPayerId?', Global Payer ID '+esc(dup.globalPayerId):''}). Review before continuing.`;
-      w.classList.remove('d-none');return;
-    }
+    // Payer Name (raw) must be unique - the server enforces this and returns a clear message on save.
     setBtn(btn,true,'Saving...');
     try{
       const r=await fetch(urls.save+(id?'?id='+id:''),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});

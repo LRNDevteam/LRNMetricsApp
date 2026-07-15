@@ -34,4 +34,11 @@ public class DenialDashboardFilters
     public int InsightPageSize { get; set; } = 25;
     public int LineItemPage { get; set; } = 1;
     public int LineItemPageSize { get; set; } = 100;
+
+    /// <summary>
+    /// Excel-style per-column "contains" filters keyed by the grid column key
+    /// (DB column name for line items; a stable field key for insights). Applied
+    /// server-side across the whole dataset, on top of the global filters above.
+    /// </summary>
+    public Dictionary<string, string> ColumnFilters { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }

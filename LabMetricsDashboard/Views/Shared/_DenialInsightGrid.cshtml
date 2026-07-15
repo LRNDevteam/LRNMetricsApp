@@ -1,0 +1,144 @@
+@using System.Globalization
+@model LabMetricsDashboard.ViewModels.InsightGridViewModel
+@{
+    var usd = CultureInfo.GetCultureInfo("en-US");
+    string Money(decimal? amount) => (amount ?? 0m).ToString("C2", usd);
+
+    var pageSizes = new[] { 50, 100, 250, 500, 1000 };
+    var columnFilters = Model.Filters.ColumnFilters ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    string ColFilter(string key) => columnFilters.TryGetValue(key, out var v) ? v : string.Empty;
+
+    var startItem = Model.InsightCount == 0 ? 0 : ((Model.InsightPage - 1) * Model.InsightPageSize) + 1;
+    var endItem = Math.Min(Model.InsightPage * Model.InsightPageSize, Model.InsightCount);
+    var activeColumnFilters = columnFilters.Count(kv => !string.IsNullOrWhiteSpace(kv.Value));
+
+    // Header text, css, and the server-side filter key (null = no per-column filter for that column).
+    var insightColumns = new (string Header, string Css, string? Key)[]
+    {
+        ("Denial Codes", "", "DenialCodes"),
+        ("Description", "", "Descriptions"),
+        ("# of Denial", "text-end", "NoOfDenialCount"),
+        ("# of Claims", "text-end", "NoOfClaimsCount"),
+        ("Total Balance", "text-end", "TotalBalance"),
+        ("High Impact Insurance", "", "HighImpactInsurance"),
+        ("Insurance Balance", "text-end", "InsuranceBalance"),
+        ("$ Impact (%)", "text-end", "ImpactPercentage"),
+        ("Action Category", "", "ActionCategory"),
+        ("Action Code", "", "ActionCode"),
+        ("Action", "", "Action"),
+        ("Task", "", "Task"),
+        ("Feedback", "", "Feedback"),
+        ("Responsibility", "", "Responsibility"),
+        ("Responsibility Reviewer", "", "ResponsibilityReviewer"),
+        ("Discussion Date", "", null),
+        ("ETA", "", "ETA")
+    };
+}
+<div class="ajax-grid-body" data-grid-page="@Model.InsightPage" data-grid-total-pages="@Model.InsightTotalPages">
+    <div class="insight-summary-strip mb-3">
+        <div class="insight-stat stat-blue"><span class="insight-stat-label">Total Denials</span><span class="insight-stat-value">@Model.InsightTotalDenials.ToString("N0")</span></div>
+        <div class="insight-stat stat-purple"><span class="insight-stat-label">Total Claims</span><span class="insight-stat-value">@Model.InsightTotalClaims.ToString("N0")</span></div>
+        <div class="insight-stat stat-green"><span class="insight-stat-label">Total Balance</span><span class="insight-stat-value">@Money(Model.InsightTotalBalance)</span></div>
+        <div class="insight-stat stat-red"><span class="insight-stat-label">Insurance Balance</span><span class="insight-stat-value">@Money(Model.InsightTotalInsuranceBalance)</span></div>
+    </div>
+
+    <div class="table-responsive table-frame table-frame-bordered no-fs" data-grid-pane>
+        <table class="table table-hover align-middle app-table polished-table bordered-grid-table zebra-table sortable-table excel-grid" id="denialInsightTable">
+            <thead>
+                <tr class="grid-head-row">
+                    @foreach (var column in insightColumns)
+                    {
+                        <th class="@column.Css">@column.Header</th>
+                    }
+                </tr>
+                <tr class="grid-filter-row">
+                    @foreach (var column in insightColumns)
+                    {
+                        <th class="@column.Css">
+                            @if (column.Key is not null)
+                            {
+                                <input type="text" class="col-filter" data-col="@column.Key" value="@ColFilter(column.Key)" placeholder="Filter" aria-label="Filter @column.Header" autocomplete="off" />
+                            }
+                        </th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @if (Model.PagedInsights.Any())
+                {
+                    @foreach (var item in Model.PagedInsights)
+                    {
+                        <tr>
+                            <td class="fw-semibold">@item.DenialCodes</td>
+                            <td class="text-wrap narrow-cell">@item.Descriptions</td>
+                            <td class="text-end">@item.NoOfDenialCount.ToString("N0")</td>
+                            <td class="text-end">@item.NoOfClaimsCount.ToString("N0")</td>
+                            <td class="text-end">@Money(item.TotalBalance)</td>
+                            <td class="text-wrap narrow-cell">@item.HighImpactInsurance</td>
+                            <td class="text-end">@Money(item.InsuranceBalance)</td>
+                            <td class="text-end">@item.ImpactPercentageDisplay</td>
+                            <td class="text-wrap narrow-cell">@item.ActionCategory</td>
+                            <td>@item.ActionCode</td>
+                            <td class="text-wrap narrow-cell">@item.Action</td>
+                            <td class="text-wrap narrow-cell">@item.Task</td>
+                            <td class="text-wrap narrow-cell">@(string.IsNullOrWhiteSpace(item.Feedback) ? "-" : item.Feedback)</td>
+                            <td>@(string.IsNullOrWhiteSpace(item.Responsibility) ? "-" : item.Responsibility)</td>
+                            <td>
+                                @if (Model.IsArManager)
+                                {
+                                    <div class="min-w-260">
+                                        <input type="hidden" name="denialCodes" value="@item.DenialCodes" />
+                                        <input type="hidden" name="payerNames" value="@item.HighImpactInsurance" />
+                                        <select name="reviewerUserNames" class="form-select form-select-sm denial-reviewer-select">
+                                            <option value="">Select Reviewer</option>
+                                            @foreach (var reviewer in Model.ReviewerOptions)
+                                            {
+                                                <option value="@reviewer.UserName" selected="@(string.Equals(item.ResponsibilityReviewer, reviewer.UserName, StringComparison.OrdinalIgnoreCase))">@reviewer.DisplayName</option>
+                                            }
+                                        </select>
+                                    </div>
+                                }
+                                else
+                                {
+                                    @(string.IsNullOrWhiteSpace(item.ResponsibilityReviewer) ? "-" : item.ResponsibilityReviewer)
+                                }
+                            </td>
+                            <td>@(item.DiscussionDate?.ToString("dd MMM yyyy") ?? "-")</td>
+                            <td>@(string.IsNullOrWhiteSpace(item.ETA) ? "-" : item.ETA)</td>
+                        </tr>
+                    }
+                }
+                else
+                {
+                    <tr>
+                        <td colspan="@insightColumns.Length" class="text-center text-muted py-4">
+                            @(activeColumnFilters > 0 ? "No denial insight rows match the current column filters." : "No denial insight rows were found for the selected lab.")
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <div class="pager-shell grid-pager">
+        <div class="pager-info">
+            <div class="pager-meta">Showing @startItem-@endItem of @Model.InsightCount.ToString("N0") insight rows@(activeColumnFilters > 0 ? $" (filtered by {activeColumnFilters} column{(activeColumnFilters == 1 ? "" : "s")})" : "")</div>
+            <label class="pager-size">
+                <span class="pager-size-label">Rows per page</span>
+                <select class="form-select form-select-sm grid-page-size" data-grid-size aria-label="Rows per page">
+                    @foreach (var size in pageSizes)
+                    {
+                        <option value="@size" selected="@(size == Model.InsightPageSize)">@size</option>
+                    }
+                </select>
+            </label>
+        </div>
+        <div class="pager-actions">
+            <button type="button" class="pager-btn grid-page-btn @(Model.InsightPage <= 1 ? "disabled" : string.Empty)" data-page="1" @(Model.InsightPage <= 1 ? "disabled" : string.Empty)>First</button>
+            <button type="button" class="pager-btn grid-page-btn @(Model.InsightPage <= 1 ? "disabled" : string.Empty)" data-page="@(Model.InsightPage - 1)" @(Model.InsightPage <= 1 ? "disabled" : string.Empty)>Prev</button>
+            <span class="pager-btn active">@Model.InsightPage / @Model.InsightTotalPages</span>
+            <button type="button" class="pager-btn grid-page-btn @(Model.InsightPage >= Model.InsightTotalPages ? "disabled" : string.Empty)" data-page="@(Model.InsightPage + 1)" @(Model.InsightPage >= Model.InsightTotalPages ? "disabled" : string.Empty)>Next</button>
+            <button type="button" class="pager-btn grid-page-btn @(Model.InsightPage >= Model.InsightTotalPages ? "disabled" : string.Empty)" data-page="@Model.InsightTotalPages" @(Model.InsightPage >= Model.InsightTotalPages ? "disabled" : string.Empty)>Last</button>
+        </div>
+    </div>
+</div>

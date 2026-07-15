@@ -22,6 +22,7 @@ public interface IMasterValuesApiClient
     Task<MasterPagedResult<PayerPolicyInsuranceMasterDto>> GetPolicyPayersAsync(IQueryCollection query, CancellationToken ct);
     Task<PayerPolicyInsuranceMasterDto?> GetPolicyPayerAsync(int id, CancellationToken ct);
     Task SavePolicyPayerAsync(int? id, PayerPolicyInsuranceMasterDto dto, CancellationToken ct);
+    Task<int> GetPolicyNextGlobalPayerIdAsync(CancellationToken ct);
     Task UpdatePolicyStatusAsync(int id, string? isActive, CancellationToken ct);
     Task<ImportResultDto> ImportPolicyAsync(IFormFile file, CancellationToken ct);
     Task<(byte[] Content, string FileName)> ExportPolicyAsync(IQueryCollection query, CancellationToken ct);
@@ -96,6 +97,11 @@ public sealed class MasterValuesApiClient : IMasterValuesApiClient
 
     public Task SavePolicyPayerAsync(int? id, PayerPolicyInsuranceMasterDto dto, CancellationToken ct)
         => SendJsonAsync(id.HasValue ? HttpMethod.Put : HttpMethod.Post, id.HasValue ? $"api/master-values/payer-policy-insurance/{id}" : "api/master-values/payer-policy-insurance", dto, ct);
+
+    public async Task<int> GetPolicyNextGlobalPayerIdAsync(CancellationToken ct)
+        => (await GetAsync<NextGlobalIdResponse>("api/master-values/payer-policy-insurance/next-global-id", ct))?.NextGlobalPayerId ?? 0;
+
+    private sealed record NextGlobalIdResponse(int NextGlobalPayerId);
 
     public Task UpdatePolicyStatusAsync(int id, string? isActive, CancellationToken ct)
         => SendJsonAsync(HttpMethod.Patch, $"api/master-values/payer-policy-insurance/{id}/status", new { isActive }, ct);

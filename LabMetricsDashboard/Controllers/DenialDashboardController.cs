@@ -108,26 +108,20 @@ public class DenialDashboardController : Controller
 
 		// Denial Code filter is applied in-memory (the insight table is a small pre-aggregated set),
 		// so the table, totals, and summary strip all reflect the selected code.
-		var insights = allInsights;
-		if (!string.IsNullOrWhiteSpace(normalizedFilters.DenialCode))
-		{
-			var selectedCode = normalizedFilters.DenialCode.Trim();
-			insights = allInsights
-				.Where(x => string.Equals(x.DenialCodes?.Trim(), selectedCode, StringComparison.OrdinalIgnoreCase))
-				.ToList();
-		}
+		var insights = FilterInsights(allInsights, normalizedFilters);
 
-		var insightPageSize = Math.Clamp(normalizedFilters.InsightPageSize <= 0 ? 25 : normalizedFilters.InsightPageSize, 10, 100);
+		var insightPageSize = ClampInsightPageSize(normalizedFilters.InsightPageSize);
 		var insightCount = insights.Count;
 		var insightTotalPages = Math.Max(1, (int)Math.Ceiling(insightCount / (double)insightPageSize));
 		var insightPage = Math.Clamp(normalizedFilters.InsightPage <= 0 ? 1 : normalizedFilters.InsightPage, 1, insightTotalPages);
 		var pagedInsights = insights.Skip((insightPage - 1) * insightPageSize).Take(insightPageSize).ToList();
 
-		var lineItemPageSize = Math.Clamp(normalizedFilters.LineItemPageSize <= 0 ? 100 : normalizedFilters.LineItemPageSize, 25, 250);
-		var lineItemCount = await _dashboardApi.GetLineItemCountByLabAsync(selectedLabId, normalizedFilters, cancellationToken);
-		var lineItemTotalPages = Math.Max(1, (int)Math.Ceiling(lineItemCount / (double)lineItemPageSize));
-		var lineItemPage = Math.Clamp(Math.Max(1, normalizedFilters.LineItemPage <= 0 ? 1 : normalizedFilters.LineItemPage), 1, lineItemTotalPages);
-		var pagedLineItems = (await _dashboardApi.GetLineItemsByLabAsync(selectedLabId, lineItemPage, lineItemPageSize, normalizedFilters, cancellationToken)).ToList();
+		var lineItemGrid = await BuildLineItemGridAsync(currentLab, normalizedFilters, currentRunId, cancellationToken);
+		var lineItemPageSize = lineItemGrid.LineItemPageSize;
+		var lineItemCount = lineItemGrid.LineItemCount;
+		var lineItemTotalPages = lineItemGrid.LineItemTotalPages;
+		var lineItemPage = lineItemGrid.LineItemPage;
+		var pagedLineItems = lineItemGrid.PagedLineItems.ToList();
 
 		var breakdownSource = (await _dashboardApi.GetBreakdownSourceByLabAsync(selectedLabId, normalizedFilters, cancellationToken)).ToList();
 		var weeklyBreakdowns = BuildTrendBreakdowns(breakdownSource, monthly: false);
@@ -193,8 +187,172 @@ public class DenialDashboardController : Controller
 		viewModel.Filters.LineItemPage = lineItemPage;
 		viewModel.Filters.LineItemPageSize = lineItemPageSize;
 
+		viewModel.LineItemGrid = lineItemGrid;
+		viewModel.InsightGrid = BuildInsightGrid(pagedInsights, insights, insightPage, insightPageSize, insightTotalPages, insightCount, normalizedFilters, currentLab.LabName, currentRunId, isArManager, reviewerOptions);
+
 		return View(viewModel);
 	}
+
+	// Excel-style grid page sizes (shared by both the Line Item and Denial Insight grids).
+	public const int MinGridPageSize = 50;
+	public const int MaxGridPageSize = 1000;
+	public static readonly int[] GridPageSizes = { 50, 100, 250, 500, 1000 };
+
+	private static int ClampInsightPageSize(int value) => Math.Clamp(value <= 0 ? MinGridPageSize : value, MinGridPageSize, MaxGridPageSize);
+	private static int ClampLineItemPageSize(int value) => Math.Clamp(value <= 0 ? 100 : value, MinGridPageSize, MaxGridPageSize);
+
+	// AJAX endpoint: renders just the Line Item grid partial for paging / per-column filtering
+	// without a full page reload.
+	[HttpGet]
+	public async Task<IActionResult> LineItemGrid([FromQuery] DenialDashboardFilters filters, [FromQuery] string? lab, CancellationToken cancellationToken)
+	{
+		filters ??= new DenialDashboardFilters();
+		var labs = (await _dashboardApi.GetLabsAsync(cancellationToken)).OrderBy(x => x.LabName).ThenBy(x => x.LabId).ToList();
+		if (labs.Count == 0) return PartialView("_DenialLineItemGrid", new LineItemGridViewModel());
+
+		var currentLab = ResolveSelectedLab(HttpContext, labs, filters.LabId, lab);
+		filters.LabId = currentLab.LabId;
+		var normalized = Normalize(filters, currentLab.LabId);
+		var currentRunId = await _dashboardApi.GetCurrentRunIdAsync(currentLab.LabId, cancellationToken) ?? string.Empty;
+		var grid = await BuildLineItemGridAsync(currentLab, normalized, currentRunId, cancellationToken);
+		return PartialView("_DenialLineItemGrid", grid);
+	}
+
+	// AJAX endpoint: renders just the Denial Insight grid partial for paging / per-column filtering.
+	[HttpGet]
+	public async Task<IActionResult> InsightGrid([FromQuery] DenialDashboardFilters filters, [FromQuery] string? lab, CancellationToken cancellationToken)
+	{
+		filters ??= new DenialDashboardFilters();
+		var labs = (await _dashboardApi.GetLabsAsync(cancellationToken)).OrderBy(x => x.LabName).ThenBy(x => x.LabId).ToList();
+		if (labs.Count == 0) return PartialView("_DenialInsightGrid", new InsightGridViewModel());
+
+		var currentLab = ResolveSelectedLab(HttpContext, labs, filters.LabId, lab);
+		filters.LabId = currentLab.LabId;
+		var normalized = Normalize(filters, currentLab.LabId);
+		var currentRunId = await _dashboardApi.GetCurrentRunIdAsync(currentLab.LabId, cancellationToken) ?? string.Empty;
+
+		var isArManager = HasAnyRole("AR Manager", "ARManager");
+		var allInsights = (await _dashboardApi.GetInsightTableByLabAsync(currentLab.LabId, cancellationToken)).ToList();
+		var insights = FilterInsights(allInsights, normalized);
+
+		var pageSize = ClampInsightPageSize(normalized.InsightPageSize);
+		var count = insights.Count;
+		var totalPages = Math.Max(1, (int)Math.Ceiling(count / (double)pageSize));
+		var page = Math.Clamp(normalized.InsightPage <= 0 ? 1 : normalized.InsightPage, 1, totalPages);
+		var paged = insights.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+
+		var reviewerOptions = isArManager
+			? (await _userRepository.GetUsersByRoleNamesAsync(new[] { "AR Reviewer", "ARReviewer", "AR Analyser", "ARAnalyser", "AR Analyzer", "ARAnalyzer" })).ToList()
+			: new List<ReviewerOption>();
+
+		var grid = BuildInsightGrid(paged, insights, page, pageSize, totalPages, count, normalized, currentLab.LabName, currentRunId, isArManager, reviewerOptions);
+		return PartialView("_DenialInsightGrid", grid);
+	}
+
+	private async Task<LineItemGridViewModel> BuildLineItemGridAsync(LabOption currentLab, DenialDashboardFilters filters, string currentRunId, CancellationToken cancellationToken)
+	{
+		var pageSize = ClampLineItemPageSize(filters.LineItemPageSize);
+		var count = await _dashboardApi.GetLineItemCountByLabAsync(currentLab.LabId, filters, cancellationToken);
+		var totalPages = Math.Max(1, (int)Math.Ceiling(count / (double)pageSize));
+		var page = Math.Clamp(filters.LineItemPage <= 0 ? 1 : filters.LineItemPage, 1, totalPages);
+		var items = (await _dashboardApi.GetLineItemsByLabAsync(currentLab.LabId, page, pageSize, filters, cancellationToken)).ToList();
+
+		filters.LineItemPage = page;
+		filters.LineItemPageSize = pageSize;
+
+		return new LineItemGridViewModel
+		{
+			PagedLineItems = items,
+			LineItemPage = page,
+			LineItemPageSize = pageSize,
+			LineItemTotalPages = totalPages,
+			LineItemCount = count,
+			Filters = filters,
+			CurrentLabName = currentLab.LabName,
+			CurrentRunId = currentRunId
+		};
+	}
+
+	private static InsightGridViewModel BuildInsightGrid(
+		List<DenialInsightRecord> pagedInsights,
+		List<DenialInsightRecord> filteredInsights,
+		int page,
+		int pageSize,
+		int totalPages,
+		int count,
+		DenialDashboardFilters filters,
+		string currentLabName,
+		string currentRunId,
+		bool isArManager,
+		List<ReviewerOption> reviewerOptions)
+	{
+		filters.InsightPage = page;
+		filters.InsightPageSize = pageSize;
+
+		return new InsightGridViewModel
+		{
+			PagedInsights = pagedInsights,
+			InsightPage = page,
+			InsightPageSize = pageSize,
+			InsightTotalPages = totalPages,
+			InsightCount = count,
+			InsightTotalDenials = filteredInsights.Sum(x => x.NoOfDenialCount),
+			InsightTotalClaims = filteredInsights.Sum(x => x.NoOfClaimsCount),
+			InsightTotalBalance = decimal.Round(filteredInsights.Sum(x => x.TotalBalance), 2),
+			InsightTotalInsuranceBalance = decimal.Round(filteredInsights.Sum(x => x.InsuranceBalance), 2),
+			Filters = filters,
+			CurrentLabName = currentLabName,
+			CurrentRunId = currentRunId,
+			IsArManager = isArManager,
+			ReviewerOptions = reviewerOptions
+		};
+	}
+
+	// Applies the Denial Code filter plus any Excel-style per-column filters to the (small,
+	// pre-aggregated) insight set in memory.
+	private static List<DenialInsightRecord> FilterInsights(List<DenialInsightRecord> allInsights, DenialDashboardFilters filters)
+	{
+		IEnumerable<DenialInsightRecord> query = allInsights;
+
+		if (!string.IsNullOrWhiteSpace(filters.DenialCode))
+		{
+			var selectedCode = filters.DenialCode.Trim();
+			query = query.Where(x => string.Equals(x.DenialCodes?.Trim(), selectedCode, StringComparison.OrdinalIgnoreCase));
+		}
+
+		if (filters.ColumnFilters is { Count: > 0 })
+		{
+			foreach (var pair in filters.ColumnFilters)
+			{
+				if (!InsightColumnAccessors.TryGetValue(pair.Key, out var accessor)) continue;
+				var term = pair.Value?.Trim();
+				if (string.IsNullOrWhiteSpace(term)) continue;
+				query = query.Where(x => (accessor(x) ?? string.Empty).Contains(term, StringComparison.OrdinalIgnoreCase));
+			}
+		}
+
+		return query.ToList();
+	}
+
+	private static readonly Dictionary<string, Func<DenialInsightRecord, string>> InsightColumnAccessors = new(StringComparer.OrdinalIgnoreCase)
+	{
+		["DenialCodes"] = x => x.DenialCodes ?? string.Empty,
+		["Descriptions"] = x => x.Descriptions ?? string.Empty,
+		["NoOfDenialCount"] = x => x.NoOfDenialCount.ToString(CultureInfo.InvariantCulture),
+		["NoOfClaimsCount"] = x => x.NoOfClaimsCount.ToString(CultureInfo.InvariantCulture),
+		["TotalBalance"] = x => x.TotalBalance.ToString(CultureInfo.InvariantCulture),
+		["HighImpactInsurance"] = x => x.HighImpactInsurance ?? string.Empty,
+		["InsuranceBalance"] = x => x.InsuranceBalance.ToString(CultureInfo.InvariantCulture),
+		["ImpactPercentage"] = x => x.ImpactPercentage.ToString(CultureInfo.InvariantCulture),
+		["ActionCategory"] = x => x.ActionCategory ?? string.Empty,
+		["ActionCode"] = x => x.ActionCode ?? string.Empty,
+		["Action"] = x => x.Action ?? string.Empty,
+		["Task"] = x => x.Task ?? string.Empty,
+		["Feedback"] = x => x.Feedback ?? string.Empty,
+		["Responsibility"] = x => x.Responsibility ?? string.Empty,
+		["ResponsibilityReviewer"] = x => x.ResponsibilityReviewer ?? string.Empty,
+		["ETA"] = x => x.ETA ?? string.Empty
+	};
 
 	[HttpGet]
 	public async Task<IActionResult> GetFilterAutocompleteOptions(int labId, CancellationToken cancellationToken)
@@ -721,8 +879,21 @@ public class DenialDashboardController : Controller
 			InsightPage = filters.InsightPage <= 0 ? 1 : filters.InsightPage,
 			InsightPageSize = filters.InsightPageSize <= 0 ? 25 : filters.InsightPageSize,
 			LineItemPage = filters.LineItemPage <= 0 ? 1 : filters.LineItemPage,
-			LineItemPageSize = filters.LineItemPageSize <= 0 ? 100 : filters.LineItemPageSize
+			LineItemPageSize = filters.LineItemPageSize <= 0 ? 100 : filters.LineItemPageSize,
+			ColumnFilters = NormalizeColumnFilters(filters.ColumnFilters)
 		};
+	}
+
+	private static Dictionary<string, string> NormalizeColumnFilters(Dictionary<string, string>? columnFilters)
+	{
+		var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+		if (columnFilters is null) return result;
+		foreach (var pair in columnFilters)
+		{
+			if (string.IsNullOrWhiteSpace(pair.Key) || string.IsNullOrWhiteSpace(pair.Value)) continue;
+			result[pair.Key.Trim()] = pair.Value.Trim();
+		}
+		return result;
 	}
 
 	private static string NormalizeMultiChoice(string? value, bool allowAll = false)

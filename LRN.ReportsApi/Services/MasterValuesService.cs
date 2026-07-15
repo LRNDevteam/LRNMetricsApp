@@ -22,6 +22,8 @@ public interface IMasterValuesRepository
     Task<IReadOnlyList<PayerPolicyInsuranceMasterDto>> GetPolicyPayersForExportAsync(PayerPolicyInsuranceMasterQuery query, CancellationToken ct);
     Task<PayerPolicyInsuranceMasterDto?> GetPolicyPayerAsync(int id, CancellationToken ct);
     Task<int> CreatePolicyPayerAsync(PayerPolicyInsuranceMasterDto dto, string? userName, CancellationToken ct);
+    /// <summary>The next Global Payer ID a new Payer Policy record would take (MAX numeric id + 1), for pre-filling the add form.</summary>
+    Task<int> GetNextPolicyGlobalPayerIdAsync(CancellationToken ct);
     /// <summary>Inserts a new Payer Policy record with the next sequential Global Payer ID (atomic) and returns it.</summary>
     Task<(int PPInsuranceMasterId, int GlobalPayerId, string GlobalPayerCode)> MintPolicyPayerAsync(
         string payerNameRaw, string? payerNameNormalized, string? state, string? userName, CancellationToken ct);
@@ -741,6 +743,9 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         if (!dto.GlobalPayerId.HasValue) throw new ArgumentException("Global Payer ID is required.");
         await using var conn = Open();
         await conn.OpenAsync(ct);
+        // Payer Name must be unique in the master (a new payer under an existing normalized group still
+        // needs its own distinct raw name).
+        await EnsurePolicyRawNameAvailableAsync(conn, dto.PayerNameRaw, null, ct);
         await EnsurePolicyUniqueAsync(conn, dto, null, ct);
         await using var cmd = new SqlCommand("""
             INSERT INTO dbo.PayerPolicyInsuranceMaster
@@ -755,6 +760,15 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
             """, conn);
         AddPolicyParams(cmd, dto);
         cmd.Parameters.AddWithValue("@CreatedBy", DbValue(userName));
+        return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+    }
+
+    public async Task<int> GetNextPolicyGlobalPayerIdAsync(CancellationToken ct)
+    {
+        await using var conn = Open();
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(
+            "SELECT ISNULL(MAX(TRY_CONVERT(INT, GlobalPayerId)), 1000) + 1 FROM dbo.PayerPolicyInsuranceMaster;", conn);
         return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
     }
 
@@ -1169,6 +1183,21 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         cmd.Parameters.AddWithValue("@ExcludeId", (object?)excludeId ?? DBNull.Value);
         if (await cmd.ExecuteScalarAsync(ct) != null)
             throw new ArgumentException($"A Payer Policy record for '{dto.PayerNameRaw.Trim()}' with Global Payer ID {(dto.GlobalPayerId?.ToString() ?? "(blank)")} already exists.");
+    }
+
+    private static async Task EnsurePolicyRawNameAvailableAsync(SqlConnection conn, string? payerNameRaw, int? excludeId, CancellationToken ct)
+    {
+        var raw = (payerNameRaw ?? string.Empty).Trim();
+        if (raw.Length == 0) return;
+        await using var cmd = new SqlCommand("""
+            SELECT TOP (1) PPInsuranceMasterId FROM dbo.PayerPolicyInsuranceMaster
+            WHERE LTRIM(RTRIM(PayerNameRaw)) = @Raw COLLATE Latin1_General_CI_AS
+              AND (@ExcludeId IS NULL OR PPInsuranceMasterId <> @ExcludeId);
+            """, conn);
+        cmd.Parameters.AddWithValue("@Raw", raw);
+        cmd.Parameters.AddWithValue("@ExcludeId", (object?)excludeId ?? DBNull.Value);
+        if (await cmd.ExecuteScalarAsync(ct) != null)
+            throw new ArgumentException($"A Payer Policy record with the Payer Name '{raw}' already exists. Enter a different Payer Name.");
     }
 
     private static async Task<int?> FindInsuranceByNormalizedGlobalAsync(SqlConnection conn, string? payerNameNormalized, int? globalPayerId, CancellationToken ct)

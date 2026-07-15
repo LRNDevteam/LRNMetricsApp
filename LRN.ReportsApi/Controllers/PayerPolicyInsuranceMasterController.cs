@@ -27,6 +27,11 @@ public sealed class PayerPolicyInsuranceMasterController : ControllerBase
     public async Task<ActionResult<PagedResult<PayerPolicyInsuranceMasterDto>>> List([FromQuery] PayerPolicyInsuranceMasterQuery query, CancellationToken ct)
         => CanView ? Ok(await _repository.GetPolicyPayersAsync(query, ct)) : Denied();
 
+    /// <summary>The Global Payer ID a brand-new record would take (MAX + 1); used to pre-fill the add form.</summary>
+    [HttpGet("next-global-id")]
+    public async Task<ActionResult> NextGlobalId(CancellationToken ct)
+        => CanWrite ? Ok(new { nextGlobalPayerId = await _repository.GetNextPolicyGlobalPayerIdAsync(ct) }) : Denied();
+
     [HttpGet("{id:int}")]
     public async Task<ActionResult<PayerPolicyInsuranceMasterDto>> Get(int id, CancellationToken ct)
     {

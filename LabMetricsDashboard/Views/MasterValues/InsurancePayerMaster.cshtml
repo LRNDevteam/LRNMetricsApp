@@ -42,6 +42,14 @@
     .mv-badge.pending { background: #FDF3E3; color: #B7791F; }
     .mv-badge.unmapped { background: #EEF2F7; color: #475569; }
     .mv-badge.nomatch { background: #FBEAE9; color: #B3261E; }
+    .mv-combo { position: relative; }
+    /* Rendered as a fixed overlay (moved to the page body) so the scrollable modal never clips it. */
+    .mv-combo-results { position: fixed; z-index: 2000; max-height: 240px; overflow: auto; background: #fff; border: 1px solid #cfdcec; border-radius: 6px; box-shadow: 0 12px 26px rgba(15, 23, 42, .16); }
+    .mv-combo-item { padding: .4rem .6rem; cursor: pointer; font-size: .82rem; border-bottom: 1px solid #eef2f7; }
+    .mv-combo-item:last-child { border-bottom: none; }
+    .mv-combo-item:hover, .mv-combo-item.active { background: #eef6ff; }
+    .mv-combo-item .gid { font-weight: 800; color: #2E5C8A; }
+    .mv-combo-item .muted { color: #64748b; }
     .mv-loader { display: none; position: absolute; inset: 0; z-index: 5; align-items: center; justify-content: center; background: rgba(248, 250, 252, .74); backdrop-filter: blur(1px); }
     .mv-loader.active { display: flex; }
     .mv-loader-box { background: #0f172a; color: white; border-radius: 8px; padding: .75rem 1rem; display: inline-flex; gap: .7rem; align-items: center; box-shadow: 0 18px 40px rgba(15, 23, 42, .22); }
@@ -145,12 +153,12 @@
                     <input type="hidden" name="labStateCode" />
                     <input type="hidden" name="labName" />
                     <div class="col-md-6"><label class="form-label">Payer Name (Raw) *</label><input class="form-control" name="payerNameRaw" required placeholder="As it appears in the lab master file" /></div>
-                    <div class="col-md-6"><label class="form-label">Payer Name Normalized <span class="mv-readonly-tag">Read-only, system-generated</span></label><input class="form-control" name="payerNameNormalized" readonly tabindex="-1" /></div>
+                    <div class="col-md-6 mv-combo"><label class="form-label">Payer Name Normalized <span class="mv-readonly-tag">Pick from Payer Policy</span></label><input class="form-control" name="payerNameNormalized" id="normPicker" autocomplete="off" placeholder="Search Payer Policy normalized name…" /><div class="mv-combo-results d-none" id="normResults"></div></div>
                     <div class="col-md-4"><label class="form-label">Payer Code <span class="mv-readonly-tag" id="payerCodeTag">Locked once assigned</span></label><input class="form-control" name="payerCode" placeholder="Optional" /></div>
                     <div class="col-md-4"><label class="form-label">Lab *</label><select class="form-select" name="labId" id="labEdit" required><option value="">Select...</option></select></div>
                     <div class="col-md-4"><label class="form-label">Lab State</label><select class="form-select" name="labState"><option value=""></option></select></div>
                     <div class="col-md-4"><label class="form-label">Mapping Status <span class="mv-readonly-tag">System-managed</span></label><input class="form-control" id="mappingStatusDisplay" readonly tabindex="-1" value="Unmapped" /></div>
-                    <div class="col-md-4"><label class="form-label">Global Payer ID <span class="mv-readonly-tag">Set via Review Match</span></label><input class="form-control" name="globalPayerID" readonly tabindex="-1" placeholder="Blank until mapped" /></div>
+                    <div class="col-md-4"><label class="form-label">Global Payer ID <span class="mv-readonly-tag">Loaded from Payer Policy</span></label><input type="hidden" name="globalPayerID" /><input class="form-control" id="gpidDisplay" readonly tabindex="-1" placeholder="From selected normalized" /></div>
                     <div class="col-md-4"><label class="form-label">Payer Common Code</label><input class="form-control" name="payerCommonCode" placeholder="Optional" /></div>
                     <div class="col-md-4"><label class="form-label">Payer Group Code</label><input class="form-control" name="payerGroupCode" placeholder="Optional" /></div>
                     <div class="col-md-4"><label class="form-label">Plan Type *</label><select class="form-select" name="planType" required><option value="">Select...</option><option>Medicare</option><option>Medicaid</option><option>Commercial</option><option>Managed Care</option><option>Other</option></select></div>
@@ -334,9 +342,12 @@ document.getElementById('exportBtn').onclick=()=>{const btn=document.getElementB
 
 if(canWrite){
   const f=document.getElementById('editForm');
+  let policySelected=false,normTimer=null,selectedNormalized='';
   US_STATES.forEach(s=>{f.elements.payerState.insertAdjacentHTML('beforeend',`<option>${s}</option>`);f.elements.labState.insertAdjacentHTML('beforeend',`<option>${s}</option>`);});
   function setSelect(sel,value){if(value&&![...sel.options].some(o=>o.value===String(value)))sel.insertAdjacentHTML('beforeend',`<option>${esc(value)}</option>`);sel.value=value??'';}
   function hideDup(){document.getElementById('dupWarning').classList.add('d-none');dupConfirmed=false;document.getElementById('saveBtn').textContent='Submit';}
+  // Payer Name Normalized is a Payer Policy picker; Global Payer ID is a read-only mirror of the pick.
+  const normPicker=document.getElementById('normPicker'),normResults=document.getElementById('normResults'),gpidDisplay=document.getElementById('gpidDisplay');
   function fill(x){
     f.reset();
     document.getElementById('id').value=x?.labInsuranceMasterId||'';
@@ -348,9 +359,14 @@ if(canWrite){
     if(labId&&![...f.elements.labId.options].some(o=>o.value===labId))
       f.elements.labId.insertAdjacentHTML('beforeend',`<option value="${labId}">${esc(labNameFor(labId)||x.labName||('Lab '+labId))}</option>`);
     f.elements.labId.value=labId;
-    f.elements.payerNameNormalized.value=x?normalize(x.payerNameRaw):'';
+    // Normalized + Global Payer ID come only from the Payer Policy master (never typed here).
+    selectedNormalized=x?(x.payerNameNormalized||''):'';
+    f.elements.payerNameNormalized.value=selectedNormalized;
     f.elements.isActive.value=x?(x.isActive||'Active'):'Active';
     f.elements.payerNameRaw.readOnly=!!x;
+    policySelected=!!(x&&isMapped(x));
+    if(normResults)normResults.classList.add('d-none');
+    if(gpidDisplay)gpidDisplay.value=x&&x.globalPayerID!=null?String(x.globalPayerID):'';
     // Payer Code: read-only when the record already has one; editable when blank or adding new.
     const hasCode=!!(x&&(x.payerCode||'').trim());
     f.elements.payerCode.readOnly=hasCode;
@@ -359,7 +375,61 @@ if(canWrite){
     document.getElementById('mappingStatusDisplay').value=x&&isMapped(x)?'Mapped':'Unmapped';
     hideDup();document.getElementById('saveError').classList.add('d-none');
   }
-  f.elements.payerNameRaw.addEventListener('input',e=>{f.elements.payerNameNormalized.value=normalize(e.target.value);hideDup();});
+  f.elements.payerNameRaw.addEventListener('input',()=>{hideDup();});
+
+  // ── Payer Name Normalized picker: choose a Payer Policy record; Global Payer ID + related fields load from it.
+  //    New normalized names / Global Payer IDs cannot be typed here - they only come from the Payer Policy master.
+  function clearPolicySelection(){policySelected=false;selectedNormalized='';f.elements.globalPayerID.value='';if(gpidDisplay)gpidDisplay.value='';document.getElementById('mappingStatusDisplay').value='Unmapped';}
+  function applyPolicy(rec){
+    policySelected=true;
+    selectedNormalized=rec.payerNameNormalized||'';
+    normPicker.value=selectedNormalized;
+    f.elements.globalPayerID.value=rec.globalPayerId??'';
+    if(gpidDisplay)gpidDisplay.value=rec.globalPayerId??'';
+    if(rec.payerState)setSelect(f.elements.payerState,rec.payerState);
+    if(rec.planType)setSelect(f.elements.planType,rec.planType);
+    if(rec.globalPayerCode)f.elements.payerCommonCode.value=rec.globalPayerCode;
+    if(rec.payerGroupCode!==null&&rec.payerGroupCode!==undefined&&rec.payerGroupCode!=='')f.elements.payerGroupCode.value=rec.payerGroupCode;
+    if(rec.benefitAdminCode)f.elements.benefitAdminCode.value=rec.benefitAdminCode;
+    if(rec.benefitAdministrator)f.elements.benefitAdministrator.value=rec.benefitAdministrator;
+    document.getElementById('mappingStatusDisplay').value='Mapped';
+    normResults.classList.add('d-none');
+  }
+  async function searchNorm(term){
+    try{const r=await fetch(urls.lookup+'?'+new URLSearchParams({search:term,page:1,pageSize:25}));const d=await r.json();return (d.items||[]).filter(x=>x.globalPayerId!==null&&x.globalPayerId!==undefined&&x.payerNameNormalized&&isActiveVal(x.isActive));}catch{return [];}
+  }
+  // Lift the results panel out of the scrollable modal so its overflow can never clip the dropdown.
+  if(normResults)document.body.appendChild(normResults);
+  function positionNorm(){
+    if(!normPicker)return;
+    const r=normPicker.getBoundingClientRect();
+    normResults.style.top=r.bottom+'px';
+    normResults.style.left=r.left+'px';
+    normResults.style.width=r.width+'px';
+  }
+  function hideNorm(){normResults.classList.add('d-none');}
+  function renderNorm(list){
+    if(!list.length){normResults.innerHTML='<div class="mv-combo-item muted">No Payer Policy match. Leave blank to add as Unmapped.</div>';}
+    else{
+      normResults.innerHTML=list.map((x,i)=>`<div class="mv-combo-item" data-i="${i}"><span class="gid">${esc(x.payerNameNormalized)}</span> <span class="muted">— GID ${esc(x.globalPayerId)} • ${esc(x.payerNameRaw)} • ${esc(x.payerState||'—')} • ${esc(x.planType||'—')}</span></div>`).join('');
+      normResults.querySelectorAll('.mv-combo-item[data-i]').forEach(el=>el.addEventListener('mousedown',ev=>{ev.preventDefault();applyPolicy(list[Number(el.dataset.i)]);}));
+    }
+    positionNorm();
+    normResults.classList.remove('d-none');
+  }
+  if(normPicker){
+    normPicker.addEventListener('input',()=>{
+      const term=normPicker.value.trim();
+      if(policySelected)clearPolicySelection(); // editing the field drops the prior selection
+      clearTimeout(normTimer);
+      if(term.length<1){hideNorm();return;}
+      normTimer=setTimeout(async()=>{renderNorm(await searchNorm(term));},250);
+    });
+    // Free text that was not chosen from the list is not accepted - revert to the last selection (or blank).
+    normPicker.addEventListener('blur',()=>{setTimeout(()=>{hideNorm();if(normPicker.value.trim()!==selectedNormalized){normPicker.value=selectedNormalized;if(!selectedNormalized)clearPolicySelection();}},150);});
+    document.addEventListener('scroll',()=>{if(!normResults.classList.contains('d-none'))positionNorm();},true);
+    window.addEventListener('resize',hideNorm);
+  }
   async function findDuplicate(name,labId,currentId){
     try{
       const r=await fetch(urls.data+'?'+new URLSearchParams({search:name,page:1,pageSize:100}));
@@ -385,7 +455,9 @@ if(canWrite){
     const btn=document.getElementById('saveBtn');
     if(!f.reportValidity())return;
     const data=Object.fromEntries(new FormData(f));
-    data.payerNameNormalized=normalize(data.payerNameRaw);
+    // Payer Name Normalized + Global Payer ID come only from the picked Payer Policy record (never typed).
+    // selectedNormalized is the last confirmed pick (seeded from the record on edit), so free text never leaks in.
+    data.payerNameNormalized=selectedNormalized||'';
     data.globalPayerID=data.globalPayerID?Number(data.globalPayerID):null;
     data.labId=data.labId?Number(data.labId):null;
     if(data.labId){const name=labNameFor(data.labId);if(name)data.labName=name;}

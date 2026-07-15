@@ -42,6 +42,13 @@ public class DenialDashboardFilters
     public int InsightPageSize { get; set; } = 25;
     public int LineItemPage { get; set; } = 1;
     public int LineItemPageSize { get; set; } = 100;
+
+    /// <summary>
+    /// Excel-style per-column "contains" filters keyed by DB column name. Applied
+    /// server-side (whitelisted against the table's real columns) on top of the
+    /// global filters above.
+    /// </summary>
+    public Dictionary<string, string> ColumnFilters { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 public class DenialRecord
