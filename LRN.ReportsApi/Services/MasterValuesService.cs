@@ -63,7 +63,7 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
             SELECT LabInsuranceMasterId, PayerCode, PayerNameRaw, PayerNameNormalized, GlobalPayerID,
                    PayerGroupCode, PayerCommonCode, Parent, PlanType, MCOType, PayerState, IsActive,
                    BenefitAdminCode, BenefitAdministrator, Remarks, LabName, LabId, LabState, LabStateCode,
-                   MappingStatus, MappedBy
+                   MappingStatus, MappedBy, MappedSource, MappedOn
             FROM dbo.LabInsuranceMaster
             WHERE {where}
             ORDER BY {orderBy}
@@ -92,7 +92,7 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
             SELECT LabInsuranceMasterId, PayerCode, PayerNameRaw, PayerNameNormalized, GlobalPayerID,
                    PayerGroupCode, PayerCommonCode, Parent, PlanType, MCOType, PayerState, IsActive,
                    BenefitAdminCode, BenefitAdministrator, Remarks, LabName, LabId, LabState, LabStateCode,
-                   MappingStatus, MappedBy
+                   MappingStatus, MappedBy, MappedSource, MappedOn
             FROM dbo.LabInsuranceMaster WHERE LabInsuranceMasterId = @Id;
             """, conn);
         cmd.Parameters.AddWithValue("@Id", id);
@@ -1304,7 +1304,11 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
             ["labName"] = "LabName",
             ["labState"] = "LabState",
             ["labStateCode"] = "LabStateCode",
-            ["remarks"] = "Remarks"
+            ["remarks"] = "Remarks",
+            ["mappingStatus"] = "MappingStatus",
+            ["mappedSource"] = "MappedSource",
+            ["mappedBy"] = "MappedBy",
+            ["mappedOn"] = "MappedOn"
         };
         return BuildOrderBy(q.SortColumn, q.SortDirection, columns, "LabInsuranceMasterId DESC");
     }
@@ -1504,6 +1508,7 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
     private static string CiKey(string value) => value.Trim().ToUpperInvariant();
     private static string? Str(SqlDataReader r, string c) => r.IsDBNull(r.GetOrdinal(c)) ? null : r.GetString(r.GetOrdinal(c));
     private static int? Int(SqlDataReader r, string c) => r.IsDBNull(r.GetOrdinal(c)) ? null : r.GetInt32(r.GetOrdinal(c));
+    private static DateTime? Date(SqlDataReader r, string c) => r.IsDBNull(r.GetOrdinal(c)) ? null : r.GetDateTime(r.GetOrdinal(c));
 
     private static InsurancePayerMasterDto MapInsurance(SqlDataReader r) => new()
     {
@@ -1527,7 +1532,9 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         LabState = Str(r, "LabState"),
         LabStateCode = Str(r, "LabStateCode"),
         MappingStatus = Str(r, "MappingStatus"),
-        MappedBy = Str(r, "MappedBy")
+        MappedBy = Str(r, "MappedBy"),
+        MappedSource = Str(r, "MappedSource"),
+        MappedOn = Date(r, "MappedOn")
     };
 
     private static PayerPolicyInsuranceMasterDto MapPolicy(SqlDataReader r) => new()

@@ -24,6 +24,8 @@ public sealed class InsurancePayerMasterDto
     // System-managed by the payer mapping pipeline.
     public string? MappingStatus { get; set; }
     public string? MappedBy { get; set; }
+    public string? MappedSource { get; set; }
+    public DateTime? MappedOn { get; set; }
 }
 
 public sealed class PayerPolicyInsuranceMasterDto

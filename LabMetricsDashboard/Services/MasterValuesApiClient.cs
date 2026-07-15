@@ -34,6 +34,7 @@ public interface IMasterValuesApiClient
     Task<PayerMappingActionResult> ApproveMappingAsync(int labInsuranceMasterId, PayerMappingActionRequest request, CancellationToken ct);
     Task<PayerMappingActionResult> ManualMapAsync(int labInsuranceMasterId, PayerMappingActionRequest request, CancellationToken ct);
     Task<PayerMappingActionResult> RejectMappingAsync(int labInsuranceMasterId, CancellationToken ct);
+    Task<PayerMappingActionResult> UnmapMappingAsync(int labInsuranceMasterId, CancellationToken ct);
     Task<MappingStatusSummaryDto> GetMappingSummaryAsync(CancellationToken ct);
 
     // Payer Service Audit (worker run history + manual trigger)
@@ -129,6 +130,9 @@ public sealed class MasterValuesApiClient : IMasterValuesApiClient
 
     public Task<PayerMappingActionResult> RejectMappingAsync(int labInsuranceMasterId, CancellationToken ct)
         => PostForResultAsync<object, PayerMappingActionResult>($"api/master-values/insurance-payers/{labInsuranceMasterId}/mapping/reject", new { }, ct);
+
+    public Task<PayerMappingActionResult> UnmapMappingAsync(int labInsuranceMasterId, CancellationToken ct)
+        => PostForResultAsync<object, PayerMappingActionResult>($"api/master-values/insurance-payers/{labInsuranceMasterId}/mapping/unmap", new { }, ct);
 
     public async Task<MappingStatusSummaryDto> GetMappingSummaryAsync(CancellationToken ct)
         => await GetAsync<MappingStatusSummaryDto>("api/master-values/insurance-payers/mapping-summary", ct) ?? new();

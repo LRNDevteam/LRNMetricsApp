@@ -18,6 +18,8 @@ public interface IPayerMappingService
     Task<PayerMappingActionResult> ApproveAsync(int labInsuranceMasterId, int ppInsuranceMasterId, string userName, CancellationToken ct);
     Task<PayerMappingActionResult> ManualMapAsync(int labInsuranceMasterId, int ppInsuranceMasterId, string userName, CancellationToken ct);
     Task<PayerMappingActionResult> RejectAsync(int labInsuranceMasterId, string userName, CancellationToken ct);
+    /// <summary>Unmap a mapped payer so the user can remap it (recommendation #1).</summary>
+    Task<PayerMappingActionResult> UnmapAsync(int labInsuranceMasterId, string userName, CancellationToken ct);
     Task<MappingStatusSummaryDto> GetMappingSummaryAsync(CancellationToken ct);
 
     /// <summary>Lab Insurance resolve API: runs the full workflow for a raw name + lab context (read-only).</summary>
@@ -290,6 +292,34 @@ public sealed class PayerMappingService : IPayerMappingService
             PerformedBy = userName
         }, ct);
         return new PayerMappingActionResult { Success = true };
+    }
+
+    /// <summary>Unmap a mapped payer (recommendation #1): clears the mapping + audit; user then remaps.</summary>
+    public async Task<PayerMappingActionResult> UnmapAsync(int labInsuranceMasterId, string userName, CancellationToken ct)
+    {
+        var row = await _labRepository.GetRowAsync(labInsuranceMasterId, ct);
+        if (row is null) return new PayerMappingActionResult { Success = false, Message = "Lab insurance record was not found." };
+
+        var index = await _indexProvider.GetAsync(ct);
+        var context = _pipeline.Evaluate(row, index).Context;
+        var ok = await _labRepository.UnmapAsync(labInsuranceMasterId, userName, ct);
+        if (!ok) return new PayerMappingActionResult { Success = false, Message = "Lab insurance record was not found." };
+
+        await _auditRepository.WriteAsync(new PayerMatchAuditEntry
+        {
+            LabInsuranceMasterId = labInsuranceMasterId,
+            PayerNameRaw = row.PayerNameRaw,
+            CanonicalName = context.CanonicalName,
+            ResolvedStateCode = context.ResolvedStateCode,
+            StateSignalSource = context.StateSignalSource.ToString(),
+            ResolvedProgramType = context.ResolvedProgramType,
+            CandidateFamily = context.CandidateFamily,
+            SelectedGlobalPayerId = row.GlobalPayerId,
+            AliasHit = context.AliasHit,
+            ActionType = "Unmap",
+            PerformedBy = userName
+        }, ct);
+        return new PayerMappingActionResult { Success = true, MappingStatus = "Unmapped" };
     }
 
     // ── External resolve APIs ────────────────────────────────────────────────

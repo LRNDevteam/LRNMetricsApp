@@ -109,6 +109,15 @@ public sealed class PayerMappingController : ControllerBase
         return result.Success ? Ok(result) : BadRequest(new { message = result.Message });
     }
 
+    /// <summary>Unmap a mapped payer so the user can remap it (recommendation #1).</summary>
+    [HttpPost("insurance-payers/{id:int}/mapping/unmap")]
+    public async Task<ActionResult<PayerMappingActionResult>> Unmap(int id, CancellationToken ct)
+    {
+        if (!CanMap) return Denied();
+        var result = await _mapping.UnmapAsync(id, UserName(), ct);
+        return result.Success ? Ok(result) : BadRequest(new { message = result.Message });
+    }
+
     // ── Payer Service Audit: worker run history + manual trigger ──────────────
 
     /// <summary>Paged list of service runs (guid, trigger, status, timings, outcome counts).</summary>

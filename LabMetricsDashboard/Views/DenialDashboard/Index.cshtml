@@ -2029,6 +2029,8 @@
                         content.innerHTML = await response.text();
                         restoreFocus();
                         reapplyQuickSearch();
+                        // The swapped-in grid table is a fresh element - re-wire column sorting on it.
+                        if (window.initSortableTables) window.initSortableTables(content);
                     } catch (err) {
                         console.error(err);
                     } finally {
@@ -2355,55 +2357,68 @@
             return raw.toLowerCase();
         }
 
-        document.querySelectorAll('table.sortable-table').forEach(function (table) {
-            const headers = table.querySelectorAll('thead th');
-            const tbody = table.querySelector('tbody');
-            if (!tbody) return;
+        // Client-side column sorting for every .sortable-table. Reusable + idempotent so it can be
+        // re-run after an AJAX grid swap (Line Item) without double-binding. Sorts the current page's
+        // rows. Only the column-HEADER row is wired - a secondary column-filter row (excel grids like
+        // Line Item render filter inputs in a second <thead> row) is skipped.
+        function initSortableTables(root) {
+            (root || document).querySelectorAll('table.sortable-table').forEach(function (table) {
+                if (table.dataset.sortableInit === '1') return;
+                const tbody = table.querySelector('tbody');
+                if (!tbody) return;
+                const headRow = table.querySelector('thead tr.grid-head-row') || table.querySelector('thead tr');
+                if (!headRow) return;
+                table.dataset.sortableInit = '1';
 
-            headers.forEach(function (header, index) {
-                header.classList.add('sortable-header');
-                header.setAttribute('role', 'button');
-                header.setAttribute('tabindex', '0');
-                header.setAttribute('title', 'Sort');
+                const headers = Array.from(headRow.children).filter(function (el) { return el.tagName === 'TH'; });
+                headers.forEach(function (header) {
+                    const index = header.cellIndex; // column position -> matching <td> index in each row
+                    header.classList.add('sortable-header');
+                    header.setAttribute('role', 'button');
+                    header.setAttribute('tabindex', '0');
+                    header.setAttribute('title', 'Sort');
 
-                function sortTable() {
-                    const currentDirection = header.getAttribute('data-sort-direction') === 'asc' ? 'asc' : 'desc';
-                    const nextDirection = currentDirection === 'asc' ? 'desc' : 'asc';
-                    headers.forEach(function (th) {
-                        th.removeAttribute('data-sort-direction');
-                        th.classList.remove('sorted-asc', 'sorted-desc');
-                    });
-                    header.setAttribute('data-sort-direction', nextDirection);
-                    header.classList.add(nextDirection === 'asc' ? 'sorted-asc' : 'sorted-desc');
+                    function sortTable() {
+                        const currentDirection = header.getAttribute('data-sort-direction') === 'asc' ? 'asc' : 'desc';
+                        const nextDirection = currentDirection === 'asc' ? 'desc' : 'asc';
+                        headers.forEach(function (th) {
+                            th.removeAttribute('data-sort-direction');
+                            th.classList.remove('sorted-asc', 'sorted-desc');
+                        });
+                        header.setAttribute('data-sort-direction', nextDirection);
+                        header.classList.add(nextDirection === 'asc' ? 'sorted-asc' : 'sorted-desc');
 
-                    const rows = Array.from(tbody.querySelectorAll('tr')).filter(function (row) {
-                        return !row.querySelector('td[colspan]');
-                    });
+                        const rows = Array.from(tbody.querySelectorAll('tr')).filter(function (row) {
+                            return !row.querySelector('td[colspan]');
+                        });
 
-                    rows.sort(function (a, b) {
-                        const aText = a.children[index] ? a.children[index].innerText : '';
-                        const bText = b.children[index] ? b.children[index].innerText : '';
-                        const aValue = parseSortableValue(aText);
-                        const bValue = parseSortableValue(bText);
+                        rows.sort(function (a, b) {
+                            const aText = a.children[index] ? a.children[index].innerText : '';
+                            const bText = b.children[index] ? b.children[index].innerText : '';
+                            const aValue = parseSortableValue(aText);
+                            const bValue = parseSortableValue(bText);
 
-                        if (aValue < bValue) return nextDirection === 'asc' ? -1 : 1;
-                        if (aValue > bValue) return nextDirection === 'asc' ? 1 : -1;
-                        return 0;
-                    });
+                            if (aValue < bValue) return nextDirection === 'asc' ? -1 : 1;
+                            if (aValue > bValue) return nextDirection === 'asc' ? 1 : -1;
+                            return 0;
+                        });
 
-                    rows.forEach(function (row) {
-                        tbody.appendChild(row);
-                    });
-                }
-
-                header.addEventListener('click', sortTable);
-                header.addEventListener('keydown', function (event) {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        sortTable();
+                        rows.forEach(function (row) {
+                            tbody.appendChild(row);
+                        });
                     }
+
+                    header.addEventListener('click', sortTable);
+                    header.addEventListener('keydown', function (event) {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            sortTable();
+                        }
+                    });
                 });
             });
-        });
+        }
+        window.initSortableTables = initSortableTables;
+        initSortableTables(document);
     });
 </script>

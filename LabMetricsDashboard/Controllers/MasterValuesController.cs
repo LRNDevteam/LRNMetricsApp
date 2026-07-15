@@ -141,6 +141,14 @@ public sealed class MasterValuesController : Controller
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
+    [HttpPost]
+    public async Task<IActionResult> UnmapMapping(int id, CancellationToken ct)
+    {
+        if (!CanMapDirect) return Forbid();
+        try { return Json(await _api.UnmapMappingAsync(id, ct)); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+    }
+
     // ── Payer Service Audit: worker run history + manual trigger ─────────────
 
     [HttpGet]

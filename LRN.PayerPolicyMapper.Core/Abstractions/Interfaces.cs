@@ -38,6 +38,11 @@ public interface ILabInsuranceRepository
     /// <summary>Stamps LastEvaluatedOn only (used after audit-only revalidation of a mapped row).</summary>
     Task StampEvaluatedAsync(int labInsuranceMasterId, CancellationToken ct);
 
+    /// <summary>
+    /// System auto-map. payerNameNormalized is the matched policy record's normalized name when the
+    /// caller resolved one, else the canonical name (requirement: mapped payers take their normalized
+    /// name from the Payer Policy master). Stamps MappedSource='System', MappedBy, MappedOn.
+    /// </summary>
     Task ApplyAutoMapAsync(int labInsuranceMasterId, int globalPayerId, string payerNameNormalized, string mappedBy, CancellationToken ct);
     Task ApplyManualReviewAsync(int labInsuranceMasterId, string payerNameNormalized, IReadOnlyList<MatchCandidate> candidates, CancellationToken ct);
     Task ApplyNoMatchAsync(int labInsuranceMasterId, string payerNameNormalized, string remarksNote, CancellationToken ct);
@@ -45,10 +50,18 @@ public interface ILabInsuranceRepository
     /// <summary>
     /// User-confirmed mapping (Approve / Manual Map): writes GlobalPayerID + status, carries the
     /// matched policy record's reference columns (normalized name, Global Payer Code, group code,
-    /// plan type, state, benefit admin) over to the Lab record where the policy has a value, and
-    /// clears PendingMatchCandidates.
+    /// plan type, state, benefit admin) over to the Lab record where the policy has a value, stamps
+    /// MappedSource='User' / MappedBy / MappedOn, and clears PendingMatchCandidates.
     /// </summary>
     Task<bool> ApplyUserMappingAsync(int labInsuranceMasterId, PayerPolicyRecord policyRecord, string mappedBy, string userName, CancellationToken ct);
+
+    /// <summary>
+    /// Removes a mapping so the user can remap it (test-team recommendation #1): clears
+    /// GlobalPayerID, resets MappingStatus to 'Unmapped', clears the mapped-by/source/on audit
+    /// fields, and stamps LastEvaluatedOn so the background worker does not immediately re-apply the
+    /// same (incorrect) system mapping - the user re-maps it manually.
+    /// </summary>
+    Task<bool> UnmapAsync(int labInsuranceMasterId, string userName, CancellationToken ct);
 
     Task<IReadOnlyList<PendingCandidateRow>> GetPendingCandidatesAsync(int labInsuranceMasterId, CancellationToken ct);
 
