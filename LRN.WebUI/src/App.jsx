@@ -189,6 +189,21 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authReady]);
 
+  // TC-002: deep-linking via the URL hash only worked on a fresh page load (the initial `view`
+  // is seeded from the hash). Editing `#dashboard` etc. in the address bar of an already-open app
+  // did nothing because nothing listened for hashchange. Route those through setView (which applies
+  // the same role/permission validation) so hash edits navigate correctly and stay in sync.
+  useEffect(() => {
+    if (!authReady) return;
+    function onHashChange() {
+      const hashView = getStoredView();
+      if (hashView && hashView !== view) setView(hashView, { closeSidebar: false, preserveFilters: true });
+    }
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authReady, view]);
+
   useEffect(() => {
     if (!denialMapperAdmin || (view !== 'denialmapper' && view !== 'denialactionverification')) return;
     let cancelled = false;

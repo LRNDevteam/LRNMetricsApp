@@ -64,6 +64,7 @@ builder.Services.AddSingleton<LRN.PayerPolicyMapper.Core.Abstractions.INotificat
         sp.GetRequiredService<ILogger<LRN.PayerPolicyMapper.Core.Data.PayerMasterNotificationService>>()));
 builder.Services.AddSingleton<LRN.PayerPolicyMapper.Core.MatchingPipeline>();
 builder.Services.AddScoped<IPayerMappingService, PayerMappingService>();
+builder.Services.AddScoped<IPayerRulesAdminService, PayerRulesAdminService>();
 builder.Services.AddScoped<IDenialWorkflowIssueNotifier, DenialWorkflowIssueNotifier>();
 builder.Services.AddScoped<IDenialWorkflowSupportService, DenialWorkflowSupportService>();
 builder.Services.AddSingleton<IDenialWorkflowExportJobService, DenialWorkflowExportJobService>();

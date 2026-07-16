@@ -28,6 +28,11 @@ public interface IMasterValuesApiClient
     Task<(byte[] Content, string FileName)> ExportPolicyAsync(IQueryCollection query, CancellationToken ct);
     Task<IReadOnlyList<MasterValueLabOption>> GetLabsAsync(CancellationToken ct);
 
+    // Payer mapping rules admin (single-page CRUD over the 6 rule tables) - raw JSON passthrough,
+    // the API is the single source of truth for the table metadata and validation.
+    Task<string> GetPayerRulesRawAsync(string path, CancellationToken ct);
+    Task<string> SendPayerRulesRawAsync(HttpMethod method, string path, string jsonBody, CancellationToken ct);
+
     // Payer mapping intelligence (LRN.PayerPolicyMapper pipeline endpoints)
     Task<PayerMappingSuggestionsResponse?> GetMappingSuggestionsAsync(int labInsuranceMasterId, CancellationToken ct);
     Task<IReadOnlyList<PayerPolicySearchResultDto>> SearchPolicyPayersRankedAsync(string query, CancellationToken ct);
@@ -160,6 +165,26 @@ public sealed class MasterValuesApiClient : IMasterValuesApiClient
 
     public async Task<IReadOnlyList<PayerMasterNotificationDto>> GetNotificationsAsync(int take, CancellationToken ct)
         => await GetAsync<List<PayerMasterNotificationDto>>($"api/master-values/workflow/notifications?take={take}", ct) ?? [];
+
+    public async Task<string> GetPayerRulesRawAsync(string path, CancellationToken ct)
+    {
+        await AuthorizeAsync(ct);
+        using var response = await _http.GetAsync("api/master-values/payer-rules/" + path, ct);
+        await EnsureSuccessAsync(response, ct);
+        return await response.Content.ReadAsStringAsync(ct);
+    }
+
+    public async Task<string> SendPayerRulesRawAsync(HttpMethod method, string path, string jsonBody, CancellationToken ct)
+    {
+        await AuthorizeAsync(ct);
+        using var request = new HttpRequestMessage(method, "api/master-values/payer-rules/" + path)
+        {
+            Content = new StringContent(string.IsNullOrWhiteSpace(jsonBody) ? "{}" : jsonBody, Encoding.UTF8, "application/json")
+        };
+        using var response = await _http.SendAsync(request, ct);
+        await EnsureSuccessAsync(response, ct);
+        return await response.Content.ReadAsStringAsync(ct);
+    }
 
     private async Task<TResult> PostForResultAsync<TPayload, TResult>(string url, TPayload payload, CancellationToken ct) where TResult : new()
     {

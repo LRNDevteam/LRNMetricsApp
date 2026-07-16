@@ -236,6 +236,19 @@ public sealed class DenialWorkflowController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        // UAT TC-170: ClosedXML throws ArgumentException for a missing worksheet and other
+        // exception types for unreadable workbooks. Those escaped the InvalidDataException
+        // catch above and surfaced as a raw 500 ("Issue happened. Please contact admin
+        // support") instead of telling the reviewer what is wrong with the file.
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Denial worklist upload file could not be parsed ({FileName}).", file.FileName);
+            return BadRequest(new { message = $"The upload file could not be read: {ex.Message} Please re-download the upload template and try again." });
+        }
 
         var errors = new List<string>();
         var actionableRows = rows
@@ -337,7 +350,7 @@ public sealed class DenialWorkflowController : ControllerBase
                 var noteTask = claimTasks[0];
                 await _service.SaveNoteAsync(new SaveDenialNoteRequest
                 {
-                    LabId = labId, ClaimId = item.ClaimId,
+                    LabId = labId, ClaimId = item.ClaimId, TaskId = item.TaskId,
                     NoteLevel = !string.IsNullOrWhiteSpace(item.TaskId) ? "Task" : "Claim",
                     NoteText = notes, Status = NormalizeWorkflowStatus(noteTask.Status), CreatedBy = userName
                 }, ct);
@@ -1047,6 +1060,11 @@ public sealed class DenialWorkflowController : ControllerBase
         "Payer follow-up guidance needed",
         "Documentation requirement unclear",
         "EOB / payer response clarification",
+        // Spec-reconciled wordings the React popup and the upload template use (the two lists
+        // had drifted, so template escalation rows were rejected as "not a valid EscalationReason").
+        "Documentation required",
+        "Coding / CPT clarification",
+        "ICD / diagnosis clarification",
         "Other"
     };
 
@@ -1120,7 +1138,10 @@ public sealed class DenialWorkflowController : ControllerBase
     private static bool CsvHasClaimAction(IReadOnlyDictionary<string, string> row)
         => new[]
         {
-            "UpdateStatus", "NewStatus", "Comments", "ReviewerComments", "Comment",
+            // UAT TC-170: "Notes" is an editable template column with its own save branch, but it
+            // was missing here, so a row where the reviewer filled in only Notes was silently
+            // dropped as "no action" and nothing was imported.
+            "UpdateStatus", "NewStatus", "Comments", "ReviewerComments", "Comment", "Notes",
             "EscalationReason", "OtherEscalationReason", "EscalationComment",
             "EscalationExpectedResponseDate", "EscalationResponse",
             "RecommendedNextAction", "EscalationResponseComment", "ResponseComment"
@@ -1213,8 +1234,11 @@ public sealed class DenialWorkflowController : ControllerBase
         // Must match the worksheet name WriteClaimUploadTemplateAsync actually creates
         // (workbook.Worksheets.Add("Task Upload")) — these had drifted apart, so every
         // downloaded template failed to re-upload with "There isn't a worksheet named
-        // 'Claim Upload'".
-        var sheet = workbook.Worksheet("Task Upload");
+        // 'Claim Upload'". UAT TC-170: reviewers also re-save/rename the sheet, so fall back
+        // to the first visible worksheet rather than hard-failing on the name.
+        if (!workbook.Worksheets.TryGetWorksheet("Task Upload", out var sheet))
+            sheet = workbook.Worksheets.FirstOrDefault(x => x.Visibility == ClosedXML.Excel.XLWorksheetVisibility.Visible)
+                ?? throw new InvalidDataException("The workbook has no visible worksheet. Please re-download the upload template.");
         var used = sheet.RangeUsed() ?? throw new InvalidDataException("The Task Upload worksheet is empty.");
         var headerRow = used.FirstRow();
         var headers = headerRow.Cells().Select(x => x.GetString().Trim()).ToArray();

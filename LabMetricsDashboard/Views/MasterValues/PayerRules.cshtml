@@ -1,0 +1,241 @@
+@model LabMetricsDashboard.Models.MasterValuesPageViewModel
+@{
+    ViewData["Title"] = "Payer Mapping Rules";
+}
+
+<style>
+    .mv-shell { display: flex; flex-direction: column; gap: 1rem; }
+    .mv-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+    .mv-title h2 { margin: 0; font-size: 1.45rem; font-weight: 800; color: #162033; }
+    .mv-title small { color: #64748b; font-weight: 600; }
+    .mv-card { background: #fff; border: 1px solid #d9e2ef; border-radius: 8px; box-shadow: 0 6px 18px rgba(15, 23, 42, .06); }
+    .mv-perm-strip { font-size: .8rem; color: #64748b; background: #fff; border: 1px dashed #d9e2ef; border-radius: 8px; padding: .5rem .85rem; }
+    .mv-perm-strip b { color: #1F3B57; }
+    .rules-tabs { display: flex; gap: .4rem; flex-wrap: wrap; padding: .75rem; border-bottom: 1px solid #e2e8f0; }
+    .rules-tab { border: 1px solid #cfdcec; background: #f8fafc; color: #1F3B57; border-radius: 999px; padding: .35rem .85rem; font-size: .8rem; font-weight: 700; cursor: pointer; }
+    .rules-tab.active { background: #1F3B57; border-color: #1F3B57; color: #fff; }
+    .rules-desc { padding: .6rem .85rem; font-size: .8rem; color: #475569; background: #E8F1F9; border-bottom: 1px solid #d9e2ef; }
+    .rules-toolbar { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .75rem; flex-wrap: wrap; }
+    .rules-toolbar input { max-width: 340px; }
+    .mv-grid-wrap { position: relative; }
+    .mv-grid-scroll { overflow: auto; max-height: calc(100vh - 400px); min-height: 280px; }
+    .mv-table { font-size: .8rem; }
+    .mv-table th, .mv-table td { border: 1px solid #d8e1ee; }
+    .mv-table thead th { position: sticky; top: 0; z-index: 2; background: #f8fafc; color: #0f172a; white-space: nowrap; font-size: .74rem; text-transform: uppercase; letter-spacing: .02em; }
+    .mv-table tbody td { white-space: normal; word-break: break-word; vertical-align: top; }
+    .mv-table tbody tr:hover td { background: #f8fbff; }
+    .mv-table th:last-child, .mv-table td:last-child { position: sticky; right: 0; width: 1%; white-space: nowrap; background: #fff; box-shadow: -6px 0 8px -6px rgba(15, 23, 42, .18); }
+    .mv-table thead th:last-child { z-index: 3; background: #f8fafc; }
+    .mv-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: .15rem .5rem; font-size: .72rem; font-weight: 800; background: #eef2f7; color: #334155; }
+    .mv-badge.on { background: #dcfce7; color: #166534; }
+    .mv-badge.off { background: #fee2e2; color: #991b1b; }
+    .mv-loader { display: none; position: absolute; inset: 0; z-index: 5; align-items: center; justify-content: center; background: rgba(248, 250, 252, .74); }
+    .mv-loader.active { display: flex; }
+    .mv-loader-box { background: #0f172a; color: white; border-radius: 8px; padding: .75rem 1rem; display: inline-flex; gap: .7rem; align-items: center; }
+    .mv-empty { padding: 3rem 1rem; text-align: center; color: #64748b; }
+    .rules-pattern { font-family: Consolas, Menlo, monospace; font-size: .76rem; color: #4c1d95; }
+    .rules-rebuild-note { font-size: .76rem; color: #64748b; }
+    .rules-toast { position: fixed; right: 18px; bottom: 18px; z-index: 3000; background: #0f172a; color: #fff; border-radius: 8px; padding: .7rem 1rem; font-size: .84rem; box-shadow: 0 18px 40px rgba(15, 23, 42, .3); display: none; }
+    .rules-toast.error { background: #991b1b; }
+</style>
+
+<div class="mv-shell">
+    <div class="mv-header">
+        <div class="mv-title">
+            <h2>Payer Mapping Rules</h2>
+            <small>Rule tables driving the payer-mapping engine (family grouping, state resolution, program &amp; product classification). The matching index rebuilds automatically after every save.</small>
+        </div>
+        <div class="mv-actions">
+            @if (Model.CanWrite)
+            {
+                <button type="button" class="btn btn-primary" id="addBtn"><i class="bi bi-plus-lg"></i> Add Rule</button>
+            }
+        </div>
+    </div>
+
+    <div class="mv-perm-strip">
+        @if (Model.CanWrite)
+        {
+            <b>@Model.RoleLabel:</b> <text>rule changes apply immediately and re-run against future mapping evaluations. Deactivate instead of deleting &mdash; deactivated rules are skipped by the engine but stay auditable.</text>
+        }
+        else
+        {
+            <b>@Model.RoleLabel:</b> <text>view-only access. Rule edits are limited to LRN Admin / Payer Policy Admin.</text>
+        }
+    </div>
+
+    <div class="mv-card">
+        <div class="rules-tabs" id="ruleTabs"></div>
+        <div class="rules-desc" id="ruleDesc"></div>
+        <div class="rules-toolbar">
+            <input class="form-control form-control-sm" id="searchBox" placeholder="Filter rows..." autocomplete="off" />
+            <span class="rules-rebuild-note" id="rowCount"></span>
+        </div>
+        <div class="mv-grid-wrap">
+            <div class="mv-loader" id="gridLoader"><div class="mv-loader-box"><span class="spinner-border spinner-border-sm"></span><span>Loading rules...</span></div></div>
+            <div class="mv-grid-scroll">
+                <table class="table table-sm table-hover table-bordered align-middle mv-table mb-0">
+                    <thead><tr id="headRow"></tr></thead>
+                    <tbody id="rows"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (Model.CanWrite)
+{
+<div class="modal fade" id="editModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title" id="editTitle">Add Rule</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <form id="editForm" class="row g-3"></form>
+                <div id="saveError" class="alert alert-danger mt-3 d-none"></div>
+            </div>
+            <div class="modal-footer">
+                <span class="rules-rebuild-note me-auto"><i class="bi bi-arrow-repeat"></i> Saving rebuilds the matching index.</span>
+                <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button class="btn btn-primary" id="saveBtn">Save Rule</button>
+            </div>
+        </div>
+    </div>
+</div>
+}
+
+<div class="rules-toast" id="toast"></div>
+
+@section Scripts {
+<script nonce='@Context.Items["CspNonce"]'>
+(function(){
+const canWrite=@(Model.CanWrite ? "true" : "false");
+const urls={tables:'@Url.Action("PayerRulesTables","MasterValues")',data:'@Url.Action("PayerRulesData","MasterValues")',save:'@Url.Action("SavePayerRule","MasterValues")',status:'@Url.Action("PayerRuleStatus","MasterValues")'};
+let tables=[],current=null,rows=[],states=[],editingId=null;
+const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const $=id=>document.getElementById(id);
+const loader=on=>$('gridLoader').classList.toggle('active',!!on);
+let toastTimer=null;
+function toast(text,isError){const t=$('toast');t.textContent=text;t.classList.toggle('error',!!isError);t.style.display='block';clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.style.display='none',isError?6000:3500);}
+async function getJson(url){const r=await fetch(url,{headers:{'Accept':'application/json'}});if(!r.ok)throw new Error((await r.json().catch(()=>({}))).message||('Request failed ('+r.status+')'));return r.json();}
+async function postJson(url,body){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(body||{})});const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.message||('Request failed ('+r.status+')'));return data;}
+
+function renderTabs(){
+  $('ruleTabs').innerHTML=tables.map(t=>`<button type="button" class="rules-tab${current&&current.key===t.key?' active':''}" data-key="${esc(t.key)}">${esc(t.title)}</button>`).join('');
+  $('ruleTabs').querySelectorAll('.rules-tab').forEach(b=>b.onclick=()=>selectTable(b.dataset.key));
+}
+function displayColumns(){
+  const cols=current.columns.slice();
+  return cols;
+}
+function renderHead(){
+  const cols=displayColumns();
+  let html=cols.map(c=>`<th>${esc(c.label)}</th>`).join('')+'<th>Status</th>';
+  if(current.columns.some(()=>true)&&rows.length&&rows[0].CreatedBy!==undefined)html+='<th>Created</th>';
+  html+='<th class="text-end">Actions</th>';
+  $('headRow').innerHTML=html;
+}
+function rowValue(row,name){for(const k in row){if(k.toLowerCase()===name.toLowerCase())return row[k];}return null;}
+function renderRows(){
+  const cols=displayColumns();
+  const q=($('searchBox').value||'').toLowerCase();
+  const filtered=q?rows.filter(r=>Object.values(r).some(v=>String(v==null?'':v).toLowerCase().includes(q))):rows;
+  $('rowCount').textContent=filtered.length+' of '+rows.length+' row(s)';
+  if(!filtered.length){$('rows').innerHTML=`<tr><td colspan="${cols.length+3}"><div class="mv-empty">No rules found.</div></td></tr>`;return;}
+  $('rows').innerHTML=filtered.map(r=>{
+    const id=rowValue(r,current.idColumn);
+    const active=rowValue(r,'IsActive')===true||rowValue(r,'IsActive')===1;
+    const cells=cols.map(c=>{
+      const v=rowValue(r,c.name);
+      const text=v==null?'':String(v);
+      return c.kind==='regex'?`<td><span class="rules-pattern">${esc(text)}</span></td>`:`<td>${esc(text)}</td>`;
+    }).join('');
+    const created=r.CreatedBy!==undefined?`<td><small>${esc(r.CreatedBy||'')}<br/>${esc(r.CreatedDate||'')}</small></td>`:'';
+    const actions=canWrite
+      ?`<td class="text-end"><div class="btn-group btn-group-sm"><button class="btn btn-outline-primary" data-act="edit" data-id="${esc(id)}"><i class="bi bi-pencil"></i></button><button class="btn btn-outline-${active?'danger':'success'}" data-act="toggle" data-id="${esc(id)}" title="${active?'Deactivate':'Activate'}"><i class="bi bi-${active?'slash-circle':'check-circle'}"></i></button></div></td>`
+      :'<td></td>';
+    return `<tr>${cells}<td><span class="mv-badge ${active?'on':'off'}">${active?'Active':'Inactive'}</span></td>${created}${actions}</tr>`;
+  }).join('');
+  if(canWrite){
+    $('rows').querySelectorAll('button[data-act="edit"]').forEach(b=>b.onclick=()=>openEdit(b.dataset.id));
+    $('rows').querySelectorAll('button[data-act="toggle"]').forEach(b=>b.onclick=()=>toggleActive(b.dataset.id));
+  }
+}
+async function selectTable(key){
+  current=tables.find(t=>t.key===key)||tables[0];
+  renderTabs();
+  $('ruleDesc').textContent=current.description;
+  $('searchBox').value='';
+  loader(true);
+  try{rows=await getJson(urls.data+'?table='+encodeURIComponent(current.key));renderHead();renderRows();}
+  catch(e){rows=[];renderHead();$('rows').innerHTML=`<tr><td colspan="99"><div class="mv-empty">${esc(e.message)}</div></td></tr>`;}
+  finally{loader(false);}
+}
+async function ensureStates(){
+  if(states.length)return states;
+  try{const data=await getJson(urls.data+'?table=us-state');states=data.filter(s=>s.IsActive!==false).map(s=>({code:s.StateCode,name:s.StateName}));}
+  catch(e){states=[];}
+  return states;
+}
+function fieldHtml(c,value){
+  const v=value==null?'':String(value);
+  const req=c.required?' <span class="text-danger">*</span>':'';
+  const dis=(editingId!=null&&c.readOnlyOnEdit)?' readonly':'';
+  if(c.kind==='state'){
+    const opts=['<option value=""></option>'].concat(states.map(s=>`<option value="${esc(s.code)}"${s.code===v?' selected':''}>${esc(s.code)} - ${esc(s.name)}</option>`)).join('');
+    return `<div class="col-md-6"><label class="form-label">${esc(c.label)}${req}</label><select class="form-select" name="${esc(c.name)}"${c.required?' required':''}>${opts}</select></div>`;
+  }
+  if(c.kind==='int')
+    return `<div class="col-md-6"><label class="form-label">${esc(c.label)}${req}</label><input class="form-control" type="number" name="${esc(c.name)}" value="${esc(v)}"${c.required?' required':''}${dis}/></div>`;
+  if(c.kind==='regex')
+    return `<div class="col-md-12"><label class="form-label">${esc(c.label)}${req}</label><input class="form-control rules-pattern" name="${esc(c.name)}" value="${esc(v)}"${c.required?' required':''} spellcheck="false"/><div class="form-text">Alternation with | (e.g. <code>MERIDIAN|MERIDAN</code>); \\b marks a word boundary. Validated as a regular expression on save.</div></div>`;
+  if(c.name.toLowerCase()==='notes')
+    return `<div class="col-md-12"><label class="form-label">${esc(c.label)}</label><textarea class="form-control" rows="2" name="${esc(c.name)}" maxlength="${c.maxLength||500}">${esc(v)}</textarea></div>`;
+  return `<div class="col-md-6"><label class="form-label">${esc(c.label)}${req}</label><input class="form-control" name="${esc(c.name)}" value="${esc(v)}"${c.maxLength>0?` maxlength="${c.maxLength}"`:''}${c.required?' required':''}${dis}/></div>`;
+}
+async function openEdit(id){
+  editingId=id==null?null:id;
+  const row=editingId!=null?rows.find(r=>String(rowValue(r,current.idColumn))===String(editingId)):null;
+  if(current.columns.some(c=>c.kind==='state'))await ensureStates();
+  $('editTitle').textContent=(editingId!=null?'Edit':'Add')+' — '+current.title;
+  $('editForm').innerHTML=current.columns.map(c=>fieldHtml(c,row?rowValue(row,c.name):'')).join('');
+  $('saveError').classList.add('d-none');
+  bootstrap.Modal.getOrCreateInstance($('editModal')).show();
+}
+async function saveRule(){
+  const f=$('editForm');
+  if(!f.reportValidity())return;
+  const data={};
+  current.columns.forEach(c=>{const el=f.elements[c.name];if(el)data[c.name]=el.value;});
+  const btn=$('saveBtn');btn.disabled=true;
+  try{
+    const result=await postJson(urls.save+'?table='+encodeURIComponent(current.key)+(editingId!=null?'&id='+encodeURIComponent(editingId):''),data);
+    bootstrap.Modal.getOrCreateInstance($('editModal')).hide();
+    toast(result.indexRebuilt===false?'Rule saved. Index rebuild pending (retries automatically).':'Rule saved — matching index rebuilt.');
+    await selectTable(current.key);
+  }catch(e){$('saveError').textContent=e.message;$('saveError').classList.remove('d-none');}
+  finally{btn.disabled=false;}
+}
+async function toggleActive(id){
+  const row=rows.find(r=>String(rowValue(r,current.idColumn))===String(id));
+  const active=row&&(rowValue(row,'IsActive')===true||rowValue(row,'IsActive')===1);
+  if(!confirm((active?'Deactivate':'Activate')+' this rule? The matching index rebuilds immediately.'))return;
+  try{
+    await postJson(urls.status+'?table='+encodeURIComponent(current.key)+'&id='+encodeURIComponent(id),{isActive:!active});
+    toast('Rule '+(active?'deactivated':'activated')+' — matching index rebuilt.');
+    await selectTable(current.key);
+  }catch(e){toast(e.message,true);}
+}
+async function init(){
+  loader(true);
+  try{
+    tables=await getJson(urls.tables);
+    if(canWrite)$('addBtn').onclick=()=>openEdit(null);
+    if(canWrite)$('saveBtn').onclick=saveRule;
+    $('searchBox').oninput=()=>renderRows();
+    await selectTable(tables[0].key);
+  }catch(e){$('ruleDesc').textContent=e.message;loader(false);}
+}
+init();
+})();
+</script>
+}

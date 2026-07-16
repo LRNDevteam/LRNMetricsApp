@@ -512,7 +512,12 @@ SELECT
     q.OpenTaskCount,
     q.AssignedActiveTaskCount,
     q.SpecializedTaskCount,
-    IsAssigned = CASE WHEN q.AssignedActiveTaskCount > 0 AND q.SpecializedTaskCount = 0 THEN 1 ELSE 0 END
+    -- UAT TC-008/TC-131: must match the canonical AR Manager rule in GetClaimSubMenuCountsAsync
+    -- (AssignedReviewerCount > 0) that drives the KPI cards and queue badges. The old extra
+    -- AND SpecializedTaskCount = 0 clause zeroed a claim out of the classification/workload
+    -- Assigned columns the moment any of its tasks sat in a specialized queue, so the three
+    -- dashboard widgets disagreed on the same assignment event.
+    IsAssigned = CASE WHEN q.AssignedActiveTaskCount > 0 THEN 1 ELSE 0 END
 INTO #ClaimQueueState
 FROM
 (
@@ -718,7 +723,11 @@ DROP TABLE #TaskBoardBase;";
         // "off by 4, reproducible"). Converge these onto the same menuCounts source too so every
         // KPI tile on this dashboard is internally consistent by construction.
         result.TotalClaims = menuCounts.TotalClaims;
-        result.PendingClaims = menuCounts.Unassigned;
+        // UAT TC-010/TC-106: the 'Unassigned' precedence bucket only holds claims older than 48h
+        // (younger unassigned claims sit in 'New'), so on a fresh import the Unassigned Claims KPI
+        // read 0 while the New tab showed the full population. The KPI means "open claims with no
+        // reviewer", which is the New + Unassigned buckets combined.
+        result.PendingClaims = menuCounts.New + menuCounts.Unassigned;
         result.ClosedClaims = menuCounts.Closed;
         result.OpenClaims = Math.Max(menuCounts.TotalClaims - menuCounts.Closed, 0);
 
@@ -1468,8 +1477,12 @@ SELECT VerificationPending = COUNT(1) FROM dbo.DenialVerificationTask WHERE {Lab
         var closedLabScope = LabScopeSql("dc.LabId");
         var normalizedStatusSql = NormalizedTaskStatusSql("t");
         var queueCaseSql = ClaimQueueCaseSql("r");
+        // UAT TC-008/TC-131: AssignedTaskCount (assigned AND not closed), not AssignedReviewerCount.
+        // The reviewer count spans closed tasks too, so a fully-closed claim that still carried an
+        // AssignedTo kept counting toward the Assigned KPI/badge while the classification and
+        // workload tables (and the Closed precedence bucket) correctly treated it as Closed.
         var assignedCountSql = NormalizeRoleToken(filter.Role).Contains("ARMANAGER")
-            ? "SUM(CASE WHEN ISNULL(tca.AssignedReviewerCount, 0) > 0 THEN 1 ELSE 0 END)"
+            ? "SUM(CASE WHEN ISNULL(tca.AssignedTaskCount, 0) > 0 THEN 1 ELSE 0 END)"
             : "SUM(CASE WHEN ISNULL(tca.[Status], '') = 'Assigned' THEN 1 ELSE 0 END)";
         var sql = $@"
 IF OBJECT_ID('tempdb..#TaskClaimAgg') IS NOT NULL DROP TABLE #TaskClaimAgg;
@@ -1728,8 +1741,11 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
         var normalizedStatusSql = NormalizedTaskStatusSql("t");
         var queueCaseSql = ClaimQueueCaseSql("r");
         var claimStatusCaseSql = ClaimStatusCaseSql("r");
+        // UAT TC-008/TC-131: keep the Assigned tab's membership rule identical to the badge/KPI rule
+        // in GetClaimSubMenuCountsAsync (AssignedTaskCount = assigned AND not closed), so a
+        // fully-closed claim no longer lingers in the AR Manager's Assigned tab.
         var claimStatusWhere = claimView == "assigned" && NormalizeRoleToken(filter.Role).Contains("ARMANAGER")
-            ? "ISNULL(tca.AssignedReviewerCount, 0) > 0"
+            ? "ISNULL(tca.AssignedTaskCount, 0) > 0"
             : ClaimQueueWhereSql(claimView);
 
         var sql = $@"
@@ -3212,10 +3228,15 @@ ORDER BY {string.Join(", ", orderByParts)};";
             "CoveredICD10CodesBilled","CoveredICDPresence","LISICD10Codes",
             "NonCoveredICD10CodesAsPerPayerPolicy","NonCoveredICD10CodesBilled"
         };
+        // UAT TC-171/TC-172: the editable columns mirror the AR Reviewer status-update popup
+        // (New Line Status, Expected Response Date, Action Completed, Actual Outcome,
+        // Documentation Type, Follow-up Reason, Closure Reason, Comments) plus the reviewer
+        // escalation and manager escalation-response fields the upload endpoint accepts.
         var editableHeaders = new[]
         {
             "UpdateStatus","ExpectedResponseDate","ActionCompleted","ActualOutcome",
             "DocumentationType","FollowUpReason","ClosureReason","ValidationStatus","Comments",
+            "EscalationReason","OtherEscalationReason","EscalationComment","EscalationExpectedResponseDate",
             "EscalationResponse","EscalationResponseComment","Notes"
         };
         var headers = readOnlyHeaders.Concat(editableHeaders).ToArray();
@@ -3269,12 +3290,15 @@ ORDER BY {string.Join(", ", orderByParts)};";
             lookupColumn++;
         }
 
-        AddDropdown("UpdateStatus", ["Assigned", "Payer Follow-up Required", "Pending Payer Response", "Pending Documentation", "Write-Off Pending Approval", "Escalated to AR Manager", "Closed"]);
+        // Matches the popup status lists: reviewers see the first seven (AnalystSelectableStatuses);
+        // Rework is manager-only and the upload endpoint rejects it for reviewer uploads.
+        AddDropdown("UpdateStatus", ["Assigned", "Payer Follow-up Required", "Pending Payer Response", "Pending Documentation", "Write-Off Pending Approval", "Escalated to AR Manager", "Rework", "Closed"]);
         AddDropdown("ActionCompleted", ["Yes", "No"]);
         AddDropdown("ActualOutcome", ["Appeal Submitted", "Documentation Uploaded", "Rebill Submitted", "Corrected Claim Submitted", "Write-Off Recommended", "Payer Call Completed", "Claim Paid", "Claim Reprocessed", "Closed No Recovery", "Other"]);
         AddDropdown("DocumentationType", ["Medical Records Required", "Clinical Notes Required", "Authorization Reference Required", "Updated Insurance Required", "Requisition / Order Required", "Provider Information Required", "Diagnosis / ICD Clarification Required", "Patient Demographics Required", "EOB / Payer Correspondence Required", "Client Confirmation Required", "Other Documentation Required"]);
         AddDropdown("FollowUpReason", ["Denial unclear", "Action uncertain", "Payer policy conflict", "Need filing instructions", "Claim status check", "Timely filing confirmation", "Other"]);
         AddDropdown("ClosureReason", ["Paid/Recovered", "Written Off", "Denial Upheld", "No Further Action", "Invalid Denial", "Timely Filing Expired", "Duplicate", "Client Approved Closure"]);
+        AddDropdown("EscalationReason", ["Denial reason unclear", "Action clarification required", "Denial-action mapping unclear", "Payer policy conflict", "Appeal eligibility unclear", "Rebill eligibility unclear", "Write-off decision required", "Payer follow-up guidance needed", "Documentation required", "Coding / CPT clarification", "ICD / diagnosis clarification", "Other"]);
         AddDropdown("EscalationResponse", ["Proceed with Appeal", "Proceed with Rebill", "Proceed with Write-Off Request", "Perform Payer Follow-up", "Request Documentation", "Additional Information Needed", "No Further Action Required", "Close Claim / Line", "Other"]);
 
         for (var col = 1; col <= readOnlyCount; col++)

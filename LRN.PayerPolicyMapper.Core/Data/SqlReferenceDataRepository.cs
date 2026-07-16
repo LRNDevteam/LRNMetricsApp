@@ -81,14 +81,18 @@ public sealed class SqlReferenceDataRepository : IReferenceDataRepository
 
     public async Task<string> GetRulesVersionAsync(CancellationToken ct)
     {
-        // PlanNetworkTypeCode has no audit dates, so counts + max ids stand in for it (and guard deletes elsewhere).
+        // Per-table BINARY_CHECKSUM aggregates so ANY in-place column edit (e.g. changing a rule's
+        // Pattern from the rules admin screen) changes the version. The earlier count+MAX(CreatedDate)
+        // scheme missed pure updates because those change neither the row count nor CreatedDate.
+        // USStateCode is included for the same reason (state edits feed Step 2 resolution).
         const string sql = """
             SELECT CONCAT(
                 'pp:',  (SELECT CONCAT(COUNT(1), '|', CONVERT(VARCHAR(33), MAX(x.d), 126)) FROM (SELECT CreatedOn AS d FROM dbo.PayerPolicyInsuranceMaster UNION ALL SELECT ModifiedOn FROM dbo.PayerPolicyInsuranceMaster) x),
-                ';fam:', (SELECT CONCAT(COUNT(1), '|', CONVERT(VARCHAR(33), MAX(CreatedDate), 126), '|', SUM(CASE WHEN IsActive = 1 THEN 1 ELSE 0 END)) FROM dbo.PayerFamilyRule),
-                ';sbm:', (SELECT CONCAT(COUNT(1), '|', CONVERT(VARCHAR(33), MAX(CreatedDate), 126), '|', SUM(CASE WHEN IsActive = 1 THEN 1 ELSE 0 END)) FROM dbo.StateBrandMapping),
-                ';ptr:', (SELECT CONCAT(COUNT(1), '|', CONVERT(VARCHAR(33), MAX(CreatedDate), 126), '|', SUM(CASE WHEN IsActive = 1 THEN 1 ELSE 0 END)) FROM dbo.ProgramTypeRule),
-                ';pnt:', (SELECT CONCAT(COUNT(1), '|', MAX(CodeId), '|', SUM(CASE WHEN IsActive = 1 THEN 1 ELSE 0 END)) FROM dbo.PlanNetworkTypeCode),
+                ';fam:', (SELECT CONCAT(COUNT(1), '|', ISNULL(CHECKSUM_AGG(BINARY_CHECKSUM(RuleId, Family, Pattern, Priority, IsActive)), 0)) FROM dbo.PayerFamilyRule),
+                ';sbm:', (SELECT CONCAT(COUNT(1), '|', ISNULL(CHECKSUM_AGG(BINARY_CHECKSUM(MappingId, BrandKeyword, StateCode, IsActive)), 0)) FROM dbo.StateBrandMapping),
+                ';ptr:', (SELECT CONCAT(COUNT(1), '|', ISNULL(CHECKSUM_AGG(BINARY_CHECKSUM(RuleId, ProgramType, Pattern, Priority, IsActive)), 0)) FROM dbo.ProgramTypeRule),
+                ';pnt:', (SELECT CONCAT(COUNT(1), '|', ISNULL(CHECKSUM_AGG(BINARY_CHECKSUM(CodeId, Code, IsActive)), 0)) FROM dbo.PlanNetworkTypeCode),
+                ';usc:', (SELECT CONCAT(COUNT(1), '|', ISNULL(CHECKSUM_AGG(BINARY_CHECKSUM(StateCode, StateName, IsActive)), 0)) FROM dbo.USStateCode),
                 ';ali:', (SELECT CONCAT(COUNT(1), '|', CONVERT(VARCHAR(33), MAX(ConfirmedDate), 126)) FROM dbo.PayerAlias));
             """;
         await using var conn = new SqlConnection(_connectionString);

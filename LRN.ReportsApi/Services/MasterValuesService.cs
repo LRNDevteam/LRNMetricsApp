@@ -837,6 +837,27 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         await using var conn = Open();
         await conn.OpenAsync(ct);
         await EnsurePolicyUniqueAsync(conn, dto, id, ct);
+
+        // Mapped Lab Insurance rows carry this policy record's normalized name (copied at map
+        // time), so a rename here must follow through to them or the two masters drift apart.
+        string? oldNormalized = null;
+        int? oldGlobalPayerId = null;
+        await using (var old = new SqlCommand(
+            "SELECT PayerNameNormalized, GlobalPayerId FROM dbo.PayerPolicyInsuranceMaster WHERE PPInsuranceMasterId=@Id;", conn))
+        {
+            old.Parameters.AddWithValue("@Id", id);
+            await using var rd = await old.ExecuteReaderAsync(ct);
+            if (await rd.ReadAsync(ct))
+            {
+                oldNormalized = rd.IsDBNull(0) ? null : rd.GetString(0);
+                // PayerPolicyInsuranceMaster.GlobalPayerId is nvarchar(50) (LabInsuranceMaster's
+                // GlobalPayerID is int) - parse rather than cast, and skip the lab-side
+                // propagation when the stored value is not numeric (such records cannot be mapped).
+                var oldGidRaw = rd.IsDBNull(1) ? null : rd.GetValue(1)?.ToString();
+                if (int.TryParse((oldGidRaw ?? string.Empty).Trim(), out var parsedGid)) oldGlobalPayerId = parsedGid;
+            }
+        }
+
         await using var cmd = new SqlCommand("""
             UPDATE dbo.PayerPolicyInsuranceMaster
             SET GlobalPayerId=@GlobalPayerId, GlobalPayerCode=@GlobalPayerCode, PayerGroupCode=@PayerGroupCode,
@@ -850,7 +871,29 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         AddPolicyParams(cmd, dto);
         cmd.Parameters.AddWithValue("@Id", id);
         cmd.Parameters.AddWithValue("@ModifiedBy", DbValue(userName));
-        return await cmd.ExecuteNonQueryAsync(ct) > 0;
+        var updated = await cmd.ExecuteNonQueryAsync(ct) > 0;
+
+        if (updated
+            && oldGlobalPayerId.HasValue
+            && !string.IsNullOrWhiteSpace(dto.PayerNameNormalized)
+            && !string.IsNullOrWhiteSpace(oldNormalized)
+            && !string.Equals(oldNormalized, dto.PayerNameNormalized, StringComparison.Ordinal))
+        {
+            // Only rows mapped to this policy's group AND still carrying the old normalized name;
+            // rows a user hand-corrected on the lab side keep their value.
+            await using var sync = new SqlCommand("""
+                UPDATE dbo.LabInsuranceMaster
+                SET PayerNameNormalized=@NewNormalized, ModifiedBy=@ModifiedBy, ModifiedOn=SYSUTCDATETIME()
+                WHERE MappingStatus='Mapped' AND GlobalPayerID=@OldGid AND PayerNameNormalized=@OldNormalized;
+                """, conn);
+            sync.Parameters.AddWithValue("@NewNormalized", dto.PayerNameNormalized!.Trim());
+            sync.Parameters.AddWithValue("@OldNormalized", oldNormalized);
+            sync.Parameters.AddWithValue("@OldGid", oldGlobalPayerId.Value);
+            sync.Parameters.AddWithValue("@ModifiedBy", DbValue(userName));
+            await sync.ExecuteNonQueryAsync(ct);
+        }
+
+        return updated;
     }
 
     public Task<bool> UpdatePolicyPayerStatusAsync(int id, string? isActive, string? userName, CancellationToken ct)
