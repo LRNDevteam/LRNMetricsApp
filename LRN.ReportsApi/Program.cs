@@ -8,6 +8,12 @@ using Microsoft.Data.SqlClient;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Secrets (connection strings, JWT signing key, import API key, webhook URLs) live in
+// appsettings.Local.json, which is gitignored and machine/environment specific. The tracked
+// appsettings*.json files must never contain credentials. Environment variables can also be
+// used (e.g. ConnectionStrings__DefaultConnection).
+builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+
 var apiFileLogSection = builder.Configuration.GetSection("Logging:File");
 try
 {
@@ -98,18 +104,30 @@ static string SwaggerSchemaId(Type type)
     var args = string.Join("And", type.GetGenericArguments().Select(SwaggerSchemaId));
     return $"{type.Namespace}.{name}Of{args}".Replace('+', '.');
 }
+// Localhost origins are for local Vite/React debugging only. Allowing them in production
+// with AllowCredentials would let any process listening on a user's localhost call the API
+// with that user's credentials.
+var corsOrigins = new List<string>
+{
+    "https://www.lrnanalytics.com",
+    "https://lrnanalytics.com"
+};
+if (builder.Environment.IsDevelopment())
+{
+    corsOrigins.AddRange(new[]
+    {
+        "http://localhost:5173",
+        "https://localhost:5173",
+        "http://localhost:5174",
+        "https://localhost:5174",
+        "http://localhost:3000",
+        "https://localhost:3000"
+    });
+}
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("MetricsWeb", policy => policy
-        .WithOrigins(
-            "https://www.lrnanalytics.com",
-            "https://lrnanalytics.com",
-            "http://localhost:5173",
-            "https://localhost:5173",
-            "http://localhost:5174",
-            "https://localhost:5174",
-            "http://localhost:3000",
-            "https://localhost:3000")
+        .WithOrigins(corsOrigins.ToArray())
         .AllowAnyHeader()
         .AllowAnyMethod()
         .AllowCredentials());
@@ -177,7 +195,14 @@ app.Use(async (context, next) =>
         var isPublicResolveEndpoint = path.StartsWithSegments("/api/master-values/payer-mapper/resolve-lab-payer")
             || path.StartsWithSegments("/api/master-values/payer-mapper/resolve-payer-policy");
 
-        if (isImportEndpoint && !string.IsNullOrWhiteSpace(importKey) && string.Equals(importKey, suppliedImportKey, StringComparison.Ordinal))
+        // Constant-time comparison so response timing cannot be used to guess the key.
+        var importKeyMatches = !string.IsNullOrWhiteSpace(importKey)
+            && !string.IsNullOrEmpty(suppliedImportKey)
+            && System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+                System.Text.Encoding.UTF8.GetBytes(importKey),
+                System.Text.Encoding.UTF8.GetBytes(suppliedImportKey));
+
+        if (isImportEndpoint && importKeyMatches)
         {
             var identity = new ClaimsIdentity(new[]
             {

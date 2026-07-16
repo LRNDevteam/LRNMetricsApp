@@ -48,7 +48,11 @@ public sealed class DenialWorkflowController : ControllerBase
         });
     }
 
+    // This endpoint is reachable without a JWT (see Program.cs carve-out), so it must be
+    // hardened against abuse: cap the request size and every field, and keep header-line
+    // fields on a single line so a caller cannot forge log entries with CR/LF injection.
     [HttpPost("client-logs")]
+    [RequestSizeLimit(64 * 1024)]
     public IActionResult SaveReactClientLog([FromBody] ReactClientLogRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Message)) return BadRequest(new { message = "Log message is required." });
@@ -56,10 +60,25 @@ public sealed class DenialWorkflowController : ControllerBase
         var folder = Path.IsPathRooted(configured) ? configured : Path.Combine(AppContext.BaseDirectory, configured);
         Directory.CreateDirectory(folder);
         var path = Path.Combine(folder, $"react-{DateTime.UtcNow:yyyy-MM-dd}.log");
-        var userName = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "anonymous";
-        var entry = $"[{DateTime.UtcNow:O}] [{request.Level}] User={userName} URL={request.Url}{Environment.NewLine}Message={request.Message}{Environment.NewLine}Context={request.Context}{Environment.NewLine}UserAgent={request.UserAgent}{Environment.NewLine}Stack={request.Stack}{Environment.NewLine}{new string('-', 100)}{Environment.NewLine}";
+        var userName = OneLine(FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "anonymous", 128);
+        var level = OneLine(request.Level, 16);
+        var url = OneLine(request.Url, 2048);
+        var userAgent = OneLine(request.UserAgent, 512);
+        var message = Truncate(request.Message, 8000);
+        var context = Truncate(request.Context, 8000);
+        var stack = Truncate(request.Stack, 8000);
+        var entry = $"[{DateTime.UtcNow:O}] [{level}] User={userName} URL={url}{Environment.NewLine}Message={message}{Environment.NewLine}Context={context}{Environment.NewLine}UserAgent={userAgent}{Environment.NewLine}Stack={stack}{Environment.NewLine}{new string('-', 100)}{Environment.NewLine}";
         lock (ReactLogLock) System.IO.File.AppendAllText(path, entry, Encoding.UTF8);
         return Accepted();
+    }
+
+    private static string OneLine(string? value, int maxLength)
+        => Truncate((value ?? string.Empty).Replace('\r', ' ').Replace('\n', ' '), maxLength);
+
+    private static string Truncate(string? value, int maxLength)
+    {
+        value ??= string.Empty;
+        return value.Length <= maxLength ? value : value[..maxLength];
     }
 
     [HttpGet("support-contacts")]
@@ -750,7 +769,10 @@ public sealed class DenialWorkflowController : ControllerBase
     private static string SafePath(string value)
     {
         foreach (var c in Path.GetInvalidFileNameChars()) value = value.Replace(c, '_');
-        return value.Trim();
+        value = value.Trim();
+        // "." and ".." survive the invalid-char replacement but change the resolved
+        // directory (path traversal). Map any dots-only segment to a harmless name.
+        return value.Trim('.').Length == 0 ? "_" : value;
     }
 
 
