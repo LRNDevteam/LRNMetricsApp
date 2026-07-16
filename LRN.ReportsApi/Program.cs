@@ -170,6 +170,12 @@ app.Use(async (context, next) =>
         var suppliedImportKey = context.Request.Headers["X-LRN-Workflow-Key"].ToString();
         var isImportEndpoint = path.StartsWithSegments("/api/denialworkflow/import")
             || path.StartsWithSegments("/api/denial-workflow/import");
+        // The two payer-mapper resolve APIs are deliberately public for external integrations
+        // (no JWT). They run under a marked "public" identity with no roles - PayerMappingController
+        // recognizes the LRNPublicResolve authentication type for exactly these two actions, so the
+        // carve-out grants nothing else under /api/master-values.
+        var isPublicResolveEndpoint = path.StartsWithSegments("/api/master-values/payer-mapper/resolve-lab-payer")
+            || path.StartsWithSegments("/api/master-values/payer-mapper/resolve-payer-policy");
 
         if (isImportEndpoint && !string.IsNullOrWhiteSpace(importKey) && string.Equals(importKey, suppliedImportKey, StringComparison.Ordinal))
         {
@@ -178,6 +184,14 @@ app.Use(async (context, next) =>
                 new Claim(ClaimTypes.Name, "DenialWorker"),
                 new Claim(ClaimTypes.Role, "Admin")
             }, "LRNWorkflowImportKey");
+            principal = new ClaimsPrincipal(identity);
+        }
+        else if (isPublicResolveEndpoint)
+        {
+            var identity = new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.Name, "PublicApiClient")
+            }, "LRNPublicResolve");
             principal = new ClaimsPrincipal(identity);
         }
         else
