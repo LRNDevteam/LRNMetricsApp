@@ -38,6 +38,7 @@
       <CopyLocalSatelliteAssemblies>true</CopyLocalSatelliteAssemblies>
       <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
     </ProjectReference>
+    <ProjectReference Include="..\LRN.ReportQueue.Shared\LRN.ReportQueue.Shared.csproj" />
   </ItemGroup>
 
   <ItemGroup>

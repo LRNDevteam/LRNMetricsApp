@@ -99,17 +99,25 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
             SELECT DISTINCT PanelName    FROM dbo.ClaimLevelData WHERE PanelName    IS NOT NULL AND PanelName    <> '' ORDER BY PanelName;
             """;
 
-        // Top collected breakdown queries (top 10 by InsurancePayment, grouped by each dimension)
+        // Top collected breakdown queries (top 10 by Collection %, grouped by each dimension)
         var topCollectedSql = BuildTopCollectedSql("ClinicName", whereClause)
             + BuildTopCollectedSql("SalesRepName", whereClause)
             + BuildTopCollectedSql("PayerName", whereClause)
             + BuildTopCollectedSql("PanelName", whereClause);
 
-        // Top denied breakdown queries (top 10 by denied InsuranceBalance, grouped by each dimension)
+        // Top denied breakdown queries (top 10 by Denial %, grouped by each dimension)
         var topDeniedSql = BuildTopDeniedSql("ClinicName", whereClause)
             + BuildTopDeniedSql("SalesRepName", whereClause)
             + BuildTopDeniedSql("PayerName", whereClause)
             + BuildTopDeniedSql("PanelName", whereClause);
+
+        // Top 10 child rows within every clinic for the three grouped drilldown tabs.
+        var collectedByClinicSql = BuildCollectedByClinicSql("SalesRepName", whereClause)
+            + BuildCollectedByClinicSql("PayerName", whereClause)
+            + BuildCollectedByClinicSql("PanelName", whereClause);
+        var deniedByClinicSql = BuildDeniedByClinicSql("SalesRepName", whereClause)
+            + BuildDeniedByClinicSql("PayerName", whereClause)
+            + BuildDeniedByClinicSql("PanelName", whereClause);
 
         var rows = new List<ClinicSummaryRow>();
         var clinicNames = new List<string>();
@@ -124,6 +132,12 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
         var topDeniedSalesReps = new List<TopDeniedItem>();
         var topDeniedPayers = new List<TopDeniedItem>();
         var topDeniedPanels = new List<TopDeniedItem>();
+        var collectedSalesRepsByClinic = new List<ClinicCollectedBreakdownGroup>();
+        var collectedPayersByClinic = new List<ClinicCollectedBreakdownGroup>();
+        var collectedPanelsByClinic = new List<ClinicCollectedBreakdownGroup>();
+        var deniedSalesRepsByClinic = new List<ClinicDeniedBreakdownGroup>();
+        var deniedPayersByClinic = new List<ClinicDeniedBreakdownGroup>();
+        var deniedPanelsByClinic = new List<ClinicDeniedBreakdownGroup>();
 
         try
         {
@@ -264,6 +278,29 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
                 await denReader.NextResultAsync(ct);
                 ReadTopDeniedItems(denReader, topDeniedPanels);
             }
+
+            // 5. Fetch grouped clinic drilldowns for Sales Rep, Payer, and Panel.
+            await using (var groupedCmd = new SqlCommand(collectedByClinicSql, conn) { CommandTimeout = 180 })
+            {
+                groupedCmd.Parameters.AddRange(CloneParameters(parameters));
+                await using var groupedReader = await groupedCmd.ExecuteReaderAsync(ct);
+                ReadCollectedByClinic(groupedReader, collectedSalesRepsByClinic);
+                await groupedReader.NextResultAsync(ct);
+                ReadCollectedByClinic(groupedReader, collectedPayersByClinic);
+                await groupedReader.NextResultAsync(ct);
+                ReadCollectedByClinic(groupedReader, collectedPanelsByClinic);
+            }
+
+            await using (var groupedCmd = new SqlCommand(deniedByClinicSql, conn) { CommandTimeout = 180 })
+            {
+                groupedCmd.Parameters.AddRange(CloneParameters(parameters));
+                await using var groupedReader = await groupedCmd.ExecuteReaderAsync(ct);
+                ReadDeniedByClinic(groupedReader, deniedSalesRepsByClinic);
+                await groupedReader.NextResultAsync(ct);
+                ReadDeniedByClinic(groupedReader, deniedPayersByClinic);
+                await groupedReader.NextResultAsync(ct);
+                ReadDeniedByClinic(groupedReader, deniedPanelsByClinic);
+            }
         }
         catch (Exception ex)
         {
@@ -274,7 +311,9 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
         return new ClinicSummaryResult(
             rows, clinicNames, salesRepNames, payerNames, panelNames,
             topCollectedClinics, topCollectedSalesReps, topCollectedPayers, topCollectedPanels,
-            topDeniedClinics, topDeniedSalesReps, topDeniedPayers, topDeniedPanels);
+            topDeniedClinics, topDeniedSalesReps, topDeniedPayers, topDeniedPanels,
+            collectedSalesRepsByClinic, collectedPayersByClinic, collectedPanelsByClinic,
+            deniedSalesRepsByClinic, deniedPayersByClinic, deniedPanelsByClinic);
     }
 
     private static decimal GetDecimalSafe(SqlDataReader reader, string column)
@@ -301,7 +340,13 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
             FROM dbo.ClaimLevelData
             WHERE {whereClause} AND {groupColumn} IS NOT NULL AND {groupColumn} <> ''
             GROUP BY {groupColumn}
-            ORDER BY TotalInsurancePaid DESC;
+            ORDER BY
+                CASE
+                    WHEN ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0) = 0 THEN 0
+                    ELSE ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)
+                         / NULLIF(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0)
+                END DESC,
+                TotalInsurancePaid DESC;
             """;
     }
 
@@ -320,7 +365,115 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
             WHERE {whereClause} AND {groupColumn} IS NOT NULL AND {groupColumn} <> ''
             GROUP BY {groupColumn}
             HAVING SUM(CASE WHEN ClaimStatus IN ('Fully Denied','Partially Denied') THEN 1 ELSE 0 END) > 0
-            ORDER BY TotalDeniedCharges DESC;
+            ORDER BY
+                CASE
+                    WHEN ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0) = 0 THEN 0
+                    ELSE ISNULL(SUM(CASE WHEN ClaimStatus IN ('Fully Denied','Partially Denied')
+                              THEN TRY_CAST(InsuranceBalance AS DECIMAL(18,2)) ELSE 0 END), 0)
+                         / NULLIF(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0)
+                END DESC,
+                TotalDeniedCharges DESC;
+            """;
+    }
+
+    private static string BuildCollectedByClinicSql(string groupColumn, string whereClause)
+    {
+        return $"""
+
+            ;WITH ClinicTotals AS
+            (
+                SELECT ClinicName,
+                       COUNT(*) AS ClinicClaimCount,
+                       ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0) AS ClinicBilled,
+                       ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0) AS ClinicPaid
+                FROM dbo.ClaimLevelData
+                WHERE {whereClause}
+                GROUP BY ClinicName
+            ),
+            ChildTotals AS
+            (
+                SELECT ClinicName, {groupColumn} AS Name,
+                       COUNT(*) AS ClaimCount,
+                       ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0) AS TotalBilledCharges,
+                       ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0) AS TotalInsurancePaid
+                FROM dbo.ClaimLevelData
+                WHERE {whereClause}
+                  AND {groupColumn} IS NOT NULL AND {groupColumn} <> ''
+                GROUP BY ClinicName, {groupColumn}
+            ),
+            Ranked AS
+            (
+                SELECT *,
+                       ROW_NUMBER() OVER
+                       (
+                           PARTITION BY ClinicName
+                           ORDER BY CASE WHEN TotalBilledCharges = 0 THEN 0
+                                         ELSE TotalInsurancePaid / NULLIF(TotalBilledCharges, 0) END DESC,
+                                    TotalInsurancePaid DESC
+                       ) AS ItemRank
+                FROM ChildTotals
+            )
+            SELECT r.ClinicName, r.Name, r.ClaimCount, r.TotalBilledCharges, r.TotalInsurancePaid,
+                   c.ClinicClaimCount, c.ClinicBilled, c.ClinicPaid
+            FROM Ranked r
+            INNER JOIN ClinicTotals c ON c.ClinicName = r.ClinicName
+            WHERE r.ItemRank <= 10
+            ORDER BY CASE WHEN c.ClinicBilled = 0 THEN 0
+                          ELSE c.ClinicPaid / NULLIF(c.ClinicBilled, 0) END DESC,
+                     r.ClinicName, r.ItemRank;
+            """;
+    }
+
+    private static string BuildDeniedByClinicSql(string groupColumn, string whereClause)
+    {
+        return $"""
+
+            ;WITH ClinicTotals AS
+            (
+                SELECT ClinicName,
+                       SUM(CASE WHEN ClaimStatus IN ('Fully Denied','Partially Denied')
+                                THEN 1 ELSE 0 END) AS ClinicDeniedClaimCount,
+                       ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0) AS ClinicBilled,
+                       ISNULL(SUM(CASE WHEN ClaimStatus IN ('Fully Denied','Partially Denied')
+                                      THEN TRY_CAST(InsuranceBalance AS DECIMAL(18,2)) ELSE 0 END), 0) AS ClinicDenied
+                FROM dbo.ClaimLevelData
+                WHERE {whereClause}
+                GROUP BY ClinicName
+            ),
+            ChildTotals AS
+            (
+                SELECT ClinicName, {groupColumn} AS Name,
+                       SUM(CASE WHEN ClaimStatus IN ('Fully Denied','Partially Denied')
+                                THEN 1 ELSE 0 END) AS DeniedClaimCount,
+                       ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0) AS TotalBilledCharges,
+                       ISNULL(SUM(CASE WHEN ClaimStatus IN ('Fully Denied','Partially Denied')
+                                      THEN TRY_CAST(InsuranceBalance AS DECIMAL(18,2)) ELSE 0 END), 0) AS TotalDeniedCharges
+                FROM dbo.ClaimLevelData
+                WHERE {whereClause}
+                  AND {groupColumn} IS NOT NULL AND {groupColumn} <> ''
+                GROUP BY ClinicName, {groupColumn}
+                HAVING SUM(CASE WHEN ClaimStatus IN ('Fully Denied','Partially Denied') THEN 1 ELSE 0 END) > 0
+            ),
+            Ranked AS
+            (
+                SELECT *,
+                       ROW_NUMBER() OVER
+                       (
+                           PARTITION BY ClinicName
+                           ORDER BY CASE WHEN TotalBilledCharges = 0 THEN 0
+                                         ELSE TotalDeniedCharges / NULLIF(TotalBilledCharges, 0) END DESC,
+                                    TotalDeniedCharges DESC
+                       ) AS ItemRank
+                FROM ChildTotals
+            )
+            SELECT r.ClinicName, r.Name, r.DeniedClaimCount, r.TotalBilledCharges, r.TotalDeniedCharges,
+                   c.ClinicDeniedClaimCount, c.ClinicBilled, c.ClinicDenied
+            FROM Ranked r
+            INNER JOIN ClinicTotals c ON c.ClinicName = r.ClinicName
+            WHERE r.ItemRank <= 10 AND c.ClinicDeniedClaimCount > 0
+            ORDER BY CASE WHEN c.ClinicBilled = 0 THEN 0
+                          ELSE c.ClinicDenied / NULLIF(c.ClinicBilled, 0) END DESC,
+                     r.ClinicName, r.ItemRank;
             """;
     }
 
@@ -356,6 +509,86 @@ public sealed class SqlClinicSummaryRepository : IClinicSummaryRepository
                 TotalBilledCharges = billed,
                 TotalDeniedCharges = denied,
                 DenialPct = billed == 0 ? 0 : Math.Round(denied / billed * 100, 1),
+            });
+        }
+    }
+
+    private static void ReadCollectedByClinic(
+        SqlDataReader reader,
+        List<ClinicCollectedBreakdownGroup> groups)
+    {
+        var byClinic = new Dictionary<string, ClinicCollectedBreakdownGroup>(StringComparer.OrdinalIgnoreCase);
+        while (reader.Read())
+        {
+            var clinicName = reader.GetString("ClinicName");
+            if (!byClinic.TryGetValue(clinicName, out var group))
+            {
+                var billed = GetDecimalSafe(reader, "ClinicBilled");
+                var paid = GetDecimalSafe(reader, "ClinicPaid");
+                group = new ClinicCollectedBreakdownGroup
+                {
+                    Clinic = new TopCollectedItem
+                    {
+                        Name = clinicName,
+                        ClaimCount = GetInt32Safe(reader, "ClinicClaimCount"),
+                        TotalBilledCharges = billed,
+                        TotalInsurancePaid = paid,
+                        CollectionPct = billed == 0 ? 0 : Math.Round(paid / billed * 100, 1),
+                    },
+                };
+                byClinic.Add(clinicName, group);
+                groups.Add(group);
+            }
+
+            var childBilled = GetDecimalSafe(reader, "TotalBilledCharges");
+            var childPaid = GetDecimalSafe(reader, "TotalInsurancePaid");
+            group.Items.Add(new TopCollectedItem
+            {
+                Name = reader.GetString("Name"),
+                ClaimCount = GetInt32Safe(reader, "ClaimCount"),
+                TotalBilledCharges = childBilled,
+                TotalInsurancePaid = childPaid,
+                CollectionPct = childBilled == 0 ? 0 : Math.Round(childPaid / childBilled * 100, 1),
+            });
+        }
+    }
+
+    private static void ReadDeniedByClinic(
+        SqlDataReader reader,
+        List<ClinicDeniedBreakdownGroup> groups)
+    {
+        var byClinic = new Dictionary<string, ClinicDeniedBreakdownGroup>(StringComparer.OrdinalIgnoreCase);
+        while (reader.Read())
+        {
+            var clinicName = reader.GetString("ClinicName");
+            if (!byClinic.TryGetValue(clinicName, out var group))
+            {
+                var billed = GetDecimalSafe(reader, "ClinicBilled");
+                var denied = GetDecimalSafe(reader, "ClinicDenied");
+                group = new ClinicDeniedBreakdownGroup
+                {
+                    Clinic = new TopDeniedItem
+                    {
+                        Name = clinicName,
+                        DeniedClaimCount = GetInt32Safe(reader, "ClinicDeniedClaimCount"),
+                        TotalBilledCharges = billed,
+                        TotalDeniedCharges = denied,
+                        DenialPct = billed == 0 ? 0 : Math.Round(denied / billed * 100, 1),
+                    },
+                };
+                byClinic.Add(clinicName, group);
+                groups.Add(group);
+            }
+
+            var childBilled = GetDecimalSafe(reader, "TotalBilledCharges");
+            var childDenied = GetDecimalSafe(reader, "TotalDeniedCharges");
+            group.Items.Add(new TopDeniedItem
+            {
+                Name = reader.GetString("Name"),
+                DeniedClaimCount = GetInt32Safe(reader, "DeniedClaimCount"),
+                TotalBilledCharges = childBilled,
+                TotalDeniedCharges = childDenied,
+                DenialPct = childBilled == 0 ? 0 : Math.Round(childDenied / childBilled * 100, 1),
             });
         }
     }

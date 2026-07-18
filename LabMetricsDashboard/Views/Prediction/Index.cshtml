@@ -508,7 +508,7 @@
         border: 1px solid #fecaca;
         border-radius: 8px;
         background: #fffafa;
-        overflow: hidden;
+        overflow: visible;
     }
     .denial-detail-panel .denial-panel-title {
         font-size: .7rem;
@@ -523,6 +523,8 @@
     .denial-detail-panel table {
         margin: 0;
         font-size: .78rem;
+        table-layout: auto;
+        width: 100%;
     }
     .denial-detail-panel thead th {
         background: #fee2e2 !important;
@@ -539,11 +541,15 @@
     .denial-detail-panel .denial-code-cell {
         color: #b91c1c;
         font-weight: 700;
-        white-space: nowrap;
+        white-space: normal;
+        word-break: break-word;
+        min-width: 140px;
+        max-width: 280px;
     }
     .denial-detail-panel .denial-desc-cell {
         white-space: normal;
-        max-width: 360px;
+        word-break: break-word;
+        max-width: 420px;
         color: #334155;
     }
     .prediction-accuracy-tile {
@@ -1831,8 +1837,8 @@
                                                                     @foreach (var dc in payer.TopDenialCodes)
                                                                     {
                                                                         <tr class="denial-row-code">
-                                                                            <td class="denial-code-cell">@dc.DenialCode</td>
-                                                                            <td class="denial-desc-cell">
+                                                                            <td class="denial-code-cell" title="@dc.DenialCode">@dc.DenialCode</td>
+                                                                            <td class="denial-desc-cell" title="@(string.IsNullOrWhiteSpace(dc.DenialDescription) ? null : dc.DenialDescription)">
                                                                                 @(string.IsNullOrWhiteSpace(dc.DenialDescription) ? "—" : dc.DenialDescription)
                                                                             </td>
                                                                             <td class="text-end">@FmtAmt(dc.TotalPredictedAllowed)</td>
@@ -1939,8 +1945,8 @@
                                             var tba = nr.TotalByBucket.GetValueOrDefault(bkt);
                                             <td class="amt nr-bucket-group text-end@(nrFootBktIdx == 0 ? " pred-freeze-2" : "")">@FmtAmt(tba?.VarianceAllowed)</td>
                                             <td class="amt text-end">@FmtAmt(tba?.VariancePaid)</td>
-                                            <td></td>
-                                            <td></td>
+                                            <td class="text-end">@FmtPct(tba?.PctVarianceAllowed)</td>
+                                            <td class="text-end">@FmtPct(tba?.PctVariancePaid)</td>
                                             nrFootBktIdx++;
                                         }
                                         <td class="amt text-end">@FmtAmt(nr.TotalVarianceAllowed)</td>
@@ -2141,12 +2147,64 @@
     document.addEventListener('DOMContentLoaded', function () {
         var exportBtn = document.getElementById('exportPredictionExcelBtn');
         if (exportBtn) {
+            // Async export (preferred): queue → LRN.ReportWorker generates → 📄 Reports
+            // badge notifies. Falls back to the legacy synchronous download when the
+            // lab has no queue table (not database-enabled).
             exportBtn.addEventListener('click', function () {
                 var form = exportBtn.closest('form');
                 if (!form) return;
-                var params = new URLSearchParams(new FormData(form));
-                var url = '@Url.Action("ExportPredictionExcel", "Prediction")' + '?' + params.toString();
-                lmdExcelDownload(url);
+                var fd = new FormData(form);
+                var val = function (n) { return (fd.get(n) || '').toString().trim() || null; };
+
+                function legacyDownload() {
+                    var params = new URLSearchParams(fd);
+                    var url = '@Url.Action("ExportPredictionExcel", "Prediction")' + '?' + params.toString();
+                    lmdExcelDownload(url);
+                }
+
+                var filters = {
+                    PayerName:                      val('filterPayerName'),
+                    PayerType:                      val('filterPayerType'),
+                    PanelName:                      val('filterPanelName'),
+                    FinalCoverageStatus:            val('filterFinalCoverageStatus'),
+                    Payability:                     val('filterPayability'),
+                    CPTCode:                        val('filterCPTCode'),
+                    ForecastingPayability:          val('filterForecastingPayability'),
+                    PayStatus:                      val('filterPayStatus'),
+                    ForecastingPayabilitySubstatus: val('filterForecastingPayabilitySubstatus'),
+                    PredictionStatus:               val('filterPredictionStatus')
+                };
+
+                var body = new FormData();
+                body.append('lab', '@Model.SelectedLab');
+                body.append('reportType', 'PredictionAnalysis');
+                body.append('filterDetails', JSON.stringify(filters));
+                var af = document.querySelector('#lrnReportsAf input[name="__RequestVerificationToken"]');
+                if (af) body.append('__RequestVerificationToken', af.value);
+
+                var original = exportBtn.innerHTML;
+                exportBtn.disabled = true;
+                exportBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Queuing…';
+
+                fetch('@Url.Action("Queue", "UserReports")', { method: 'POST', body: body })
+                    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+                    .then(function (res) {
+                        if (res.ok) {
+                            exportBtn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating — watch Reports 📄';
+                            if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
+                            setTimeout(function () { exportBtn.disabled = false; exportBtn.innerHTML = original; }, 8000);
+                        } else if (res.status === 400) {
+                            exportBtn.disabled = false; exportBtn.innerHTML = original;
+                            legacyDownload();
+                        } else {
+                            exportBtn.disabled = false; exportBtn.innerHTML = original;
+                            alert(res.j && res.j.message ? res.j.message : 'Could not queue the report.');
+                        }
+                    })
+                    .catch(function () {
+                        exportBtn.disabled = false; exportBtn.innerHTML = original;
+                        legacyDownload();
+                    });
             });
         }
 

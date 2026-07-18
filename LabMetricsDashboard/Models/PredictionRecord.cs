@@ -6,6 +6,8 @@ namespace LabMetricsDashboard.Models;
 /// </summary>
 public sealed class PredictionRecord
 {
+    public string RunId { get; init; } = string.Empty;
+    public string WeekFolder { get; init; } = string.Empty;
     public string AccessionNo { get; init; } = string.Empty;
     public string VisitNumber { get; init; } = string.Empty;
     public string CPTCode { get; init; } = string.Empty;
@@ -87,6 +89,20 @@ public sealed class PredictionRecord
     public string PaymentDays { get; init; } = string.Empty;
     public string ExpectedPaymentDate { get; init; } = string.Empty;
     public string ExpectedPaymentMonth { get; init; } = string.Empty;
+    public string BillingProvider { get; init; } = string.Empty;
+    public string ReferringProvider { get; init; } = string.Empty;
+    public string ClinicName { get; init; } = string.Empty;
+    public string SalesRepName { get; init; } = string.Empty;
+    public string PatientID { get; init; } = string.Empty;
+    public string ChargeEnteredDate { get; init; } = string.Empty;
+    public string POS { get; init; } = string.Empty;
+    public string TOS { get; init; } = string.Empty;
+    public string CheckDate { get; init; } = string.Empty;
+    public string DaysToDOS { get; init; } = string.Empty;
+    public string RollingDays { get; init; } = string.Empty;
+    public string DaysToBill { get; init; } = string.Empty;
+    public string DaysToPost { get; init; } = string.Empty;
+    public string InsertedDateTime { get; init; } = string.Empty;
     public string ForecastingPayabilitySubstatus { get; init; } = string.Empty;
     public string PredictionStatus { get; init; } = string.Empty;
     public decimal Variance_AllowedAmount { get; init; }

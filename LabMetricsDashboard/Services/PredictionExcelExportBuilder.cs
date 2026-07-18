@@ -6,6 +6,9 @@ namespace LabMetricsDashboard.Services;
 /// <summary>
 /// Builds a formatted Excel workbook from Prediction Analysis data.
 /// Sheet layout mirrors the dashboard UI tabs and column structure.
+/// Colors/fonts match Denial Dashboard Excel via shared <see cref="ExcelTheme"/>
+/// (same constants used by DenialDashboardExcelExportBuilder — Calibri 10,
+/// green title/header/banded rows).
 /// </summary>
 public static class PredictionExcelExportBuilder
 {
@@ -65,8 +68,8 @@ public static class PredictionExcelExportBuilder
 
     private static XLColor BucketGroupBackground(string groupName) =>
         groupName == "Predicted To Pay"
-            ? XLColor.FromHtml("#E8F2FC")
-            : XLColor.FromHtml("#FFF4E6");
+            ? ExcelTheme.BlueGroupRowBg
+            : ExcelTheme.GroupRowBg;
 
     private static void BuildSummarySheet(XLWorkbook wb, PredictionAnalysisViewModel vm, string labName)
     {
@@ -115,6 +118,9 @@ public static class PredictionExcelExportBuilder
         row = WriteRatiosSection(ws, row, vm.SummaryMetrics);
         row += 2;
         WritePredictionAccuracySection(ws, row, vm.SummaryMetrics);
+
+        // Detail rows are outlined under each group parent — collapse by default
+        ws.CollapseRows();
 
         ws.SheetView.FreezeRows(2);
         ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 18, firstColMinWidth: 28);
@@ -170,7 +176,8 @@ public static class PredictionExcelExportBuilder
         var existing = cell.Value;
         cell.SetHyperlink(new XLHyperlink($"'{sheetName}'!A1"));
         cell.Value = existing;
-        cell.Style.Font.FontColor = XLColor.FromHtml("#1d4ed8");
+        // Same link style as DenialDashboardExcelExportBuilder (Insights "Data" links)
+        cell.Style.Font.FontColor = XLColor.Blue;
         cell.Style.Font.Underline = XLFontUnderlineValues.Single;
     }
 
@@ -183,16 +190,18 @@ public static class PredictionExcelExportBuilder
         labelCell.Value = isParent ? DisplayGroupName(b.GroupName) : b.BucketName;
         if (isParent)
         {
+            // Parent stays at outline level 0 so it remains visible when groups are collapsed.
             labelCell.Style.Font.Bold = true;
-            ws.Row(row).OutlineLevel = 1;
+            labelCell.Style.Font.FontSize = ExcelTheme.FontSizeHeader;
+            ws.Row(row).OutlineLevel = 0;
         }
         else
         {
             labelCell.Style.Alignment.Indent = 1;
             labelCell.Style.Font.FontColor = b.GroupName == "Predicted To Pay"
-                ? XLColor.FromHtml("#1565C0")
-                : XLColor.FromHtml("#C05621");
-            ws.Row(row).OutlineLevel = 2;
+                ? ExcelTheme.BlueHeaderBg
+                : ExcelTheme.AmberHeaderBg;
+            ws.Row(row).OutlineLevel = 1;
         }
 
         ws.Cell(row, 2).Value = b.ClaimCount;
@@ -321,7 +330,7 @@ public static class PredictionExcelExportBuilder
         {
             WriteVarianceDataRow(ws, row++, r.PayerName, r.PredictedAllowed, r.PredictedInsurance,
                 r.ActualAllowed, r.ActualInsurance, r.VarianceAllowed, r.VariancePaid,
-                ExcelTheme.GroupRowBg, bold: true, outlineLevel: 1);
+                ExcelTheme.GroupRowBg, bold: true, outlineLevel: 0);
 
             if (payStatusByPayer.TryGetValue(r.PayerName, out var psList))
             {
@@ -331,7 +340,7 @@ public static class PredictionExcelExportBuilder
                         ps.PredictedAllowed, ps.PredictedInsurance,
                         ps.ActualAllowed, ps.ActualInsurance,
                         ps.VarianceAllowed, ps.VariancePaid,
-                        XLColor.White, indent: 1, outlineLevel: 2);
+                        XLColor.White, indent: 1, outlineLevel: 1);
                 }
             }
         }
@@ -343,6 +352,8 @@ public static class PredictionExcelExportBuilder
             rows.Sum(r => r.ActualInsurance),
             rows.Sum(r => r.VarianceAllowed),
             rows.Sum(r => r.VariancePaid));
+
+        ws.CollapseRows();
 
         FormatVarianceColumns(ws, colCount);
         ws.SheetView.FreezeRows(2);
@@ -358,43 +369,99 @@ public static class PredictionExcelExportBuilder
         ExcelTheme.ApplyDefaults(ws);
         ws.Outline.SummaryVLocation = XLOutlineSummaryVLocation.Top;
 
-        // Main grid matches UI: Payer + amounts only. Denial Code / Description live on
-        // outline detail rows (Excel "open panel" equivalent — expand group rows).
-        int colCount = 1 + VarianceHeaders.Length;
+        // Payer rows + detail rows with separate Denial Code / Denial Description columns
+        string[] headers =
+        [
+            "Payer Name",
+            "Denial Code",
+            "Denial Description",
+            .. VarianceHeaders
+        ];
+        int colCount = headers.Length;
         ExcelTheme.WriteTitleBar(ws, 1, colCount, "Predicted to Pay – Denied");
-        WriteVarianceHeaderRow(ws, 2, "Payer Name");
+        ExcelTheme.WriteHeaderRow(ws, 2, 1, headers);
 
         int row = 3;
         int idx = 0;
         foreach (var payer in db.PayerRows)
         {
-            WriteVarianceDataRow(ws, row++, payer.PayerName,
+            // Payer summary (blank code/description)
+            WriteDeniedDetailRow(ws, row++, payer.PayerName, null, null,
                 payer.TotalPredictedAllowed, payer.TotalPredictedInsurance,
                 payer.ActualAllowed, payer.ActualInsurance,
                 payer.VarianceAllowed, payer.VariancePaid,
-                ExcelTheme.GroupRowBg, bold: true, outlineLevel: 1);
+                ExcelTheme.GroupRowBg, bold: true, outlineLevel: 0);
 
             foreach (var dc in payer.TopDenialCodes)
             {
-                var detailLabel = string.IsNullOrWhiteSpace(dc.DenialDescription)
-                    ? $"Denial Code: {dc.DenialCode}"
-                    : $"Denial Code: {dc.DenialCode} — {dc.DenialDescription}";
-                WriteVarianceDataRow(ws, row++, detailLabel,
+                WriteDeniedDetailRow(ws, row++, null, dc.DenialCode, dc.DenialDescription,
                     dc.TotalPredictedAllowed, dc.TotalPredictedInsurance,
                     dc.ActualAllowed, dc.ActualInsurance,
                     dc.VarianceAllowed, dc.VariancePaid,
-                    ExcelTheme.GetRowBg(idx++), indent: 1, outlineLevel: 2);
+                    ExcelTheme.GetRowBg(idx++), indent: 1, outlineLevel: 1);
             }
         }
 
-        WriteVarianceTotalRow(ws, row, "Grand Total",
-            db.TotalPredictedAllowed, db.TotalPredictedInsurance,
-            db.TotalActualAllowed, db.TotalActualInsurance,
-            db.TotalVarianceAllowed, db.TotalVariancePaid);
+        ExcelTheme.StyleTotalRow(ws, row, 1, colCount);
+        ws.Cell(row, 1).Value = "Grand Total";
+        ws.Cell(row, 4).Value = db.TotalPredictedAllowed;
+        ws.Cell(row, 5).Value = db.TotalPredictedInsurance;
+        ws.Cell(row, 6).Value = db.TotalActualAllowed;
+        ws.Cell(row, 7).Value = db.TotalActualInsurance;
+        ws.Cell(row, 8).Value = db.TotalVarianceAllowed;
+        ws.Cell(row, 9).Value = db.TotalVariancePaid;
 
-        FormatVarianceColumns(ws, colCount);
+        ws.CollapseRows();
+
+        FormatVarianceColumns(ws, colCount, firstDataCol: 4);
         ws.SheetView.FreezeRows(2);
-        ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 16, firstColMinWidth: 36);
+        ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 14, firstColMinWidth: 28);
+        // Match Denial Dashboard wrap/width for description text
+        ws.Column(2).Width = Math.Max(ws.Column(2).Width, 18);
+        ws.Column(3).Style.Alignment.WrapText = true;
+        ws.Column(3).Width = Math.Max(ws.Column(3).Width, 40);
+    }
+
+    private static void WriteDeniedDetailRow(IXLWorksheet ws, int row,
+        string? payerName, string? denialCode, string? denialDescription,
+        decimal predAllowed, decimal predIns, decimal actAllowed, decimal actIns,
+        decimal varAllowed, decimal varPaid, XLColor bg,
+        bool bold = false, int indent = 0, int outlineLevel = 0)
+    {
+        if (outlineLevel > 0)
+            ws.Row(row).OutlineLevel = outlineLevel;
+
+        if (!string.IsNullOrWhiteSpace(payerName))
+        {
+            ws.Cell(row, 1).Value = payerName;
+            if (bold)
+            {
+                ws.Cell(row, 1).Style.Font.Bold = true;
+                ws.Cell(row, 1).Style.Font.FontSize = ExcelTheme.FontSizeHeader;
+            }
+        }
+        else if (indent > 0)
+        {
+            ws.Cell(row, 1).Style.Alignment.Indent = indent;
+        }
+
+        if (!string.IsNullOrWhiteSpace(denialCode))
+            ws.Cell(row, 2).Value = denialCode.Trim(); // keep multi-codes as-is e.g. "CO-11, CO-242"
+        if (!string.IsNullOrWhiteSpace(denialDescription))
+        {
+            ws.Cell(row, 3).Value = denialDescription;
+            ws.Cell(row, 3).Style.Alignment.WrapText = true;
+        }
+
+        ws.Cell(row, 4).Value = predAllowed;
+        ws.Cell(row, 5).Value = predIns;
+        ws.Cell(row, 6).Value = actAllowed;
+        ws.Cell(row, 7).Value = actIns;
+        ws.Cell(row, 8).Value = varAllowed;
+        ws.Cell(row, 9).Value = varPaid;
+
+        for (int c = 1; c <= 9; c++)
+            ExcelTheme.StyleDataCell(ws.Cell(row, c), bg);
     }
 
     // ── Section D: Predicted to Pay – No Response (aging matrix) ─────────────
@@ -497,6 +564,8 @@ public static class PredictionExcelExportBuilder
             var tba = nr.TotalByBucket.GetValueOrDefault(bkt);
             WriteNullableCurrency(ws.Cell(row, col), tba?.VarianceAllowed);
             WriteNullableCurrency(ws.Cell(row, col + 1), tba?.VariancePaid);
+            WriteNullablePercent(ws.Cell(row, col + 2), tba?.PctVarianceAllowed);
+            WriteNullablePercent(ws.Cell(row, col + 3), tba?.PctVariancePaid);
             col += 4;
         }
         WriteCurrency(ws.Cell(row, col), nr.TotalVarianceAllowed);

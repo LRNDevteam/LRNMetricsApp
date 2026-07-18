@@ -1,4 +1,5 @@
 using LabMetricsDashboard.Models;
+using Microsoft.Data.SqlClient;
 
 namespace LabMetricsDashboard.Services;
 
@@ -281,6 +282,26 @@ public interface ICollectionSummaryRepository
         DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
         DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// SQL + parameters for the ClaimLevelData export SELECT (same query
+    /// GetClaimLevelDataExportAsync runs) — lets LRN.ReportWorker stream the rows
+    /// through a SqlDataReader in chunks instead of materializing them all.
+    /// </summary>
+    (string Sql, List<SqlParameter> Parameters) BuildClaimLevelExportQuery(
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
+        DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
+        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null);
+
+    /// <summary>Streaming counterpart of GetLineLevelDataExportAsync (see BuildClaimLevelExportQuery).</summary>
+    (string Sql, List<SqlParameter> Parameters) BuildLineLevelExportQuery(
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
+        DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
+        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null);
 
     /// <summary>
     /// Returns Status Summary data: three groupings of ClaimLevelData (all records).

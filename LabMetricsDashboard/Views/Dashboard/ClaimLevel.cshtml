@@ -1,6 +1,6 @@
 @model ClaimLevelViewModel
 @{
-    ViewData["Title"]       = $"Claim Level ñ {Model.SelectedLab}";
+    ViewData["Title"]       = $"Claim Level ù {Model.SelectedLab}";
     ViewData["SelectedLab"] = Model.SelectedLab;
     ViewData["PageLabel"]   = "Claim Level Details";
 
@@ -114,7 +114,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search payer namesÖ" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search payer namesù" autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var pn in Model.PayerNames)
                                 {
@@ -138,7 +138,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search panelsÖ" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search panelsù" autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var pl in Model.PanelNames)
                                 {
@@ -162,7 +162,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search payer typesÖ" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search payer typesù" autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var pt in Model.PayerTypes)
                                 {
@@ -182,7 +182,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search statusesÖ" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search statusesù" autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var cs in Model.ClaimStatuses)
                                 {
@@ -202,7 +202,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search clinicsÖ" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search clinicsù" autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var cn in Model.ClinicNames)
                                 {
@@ -222,7 +222,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search bucketsÖ" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search bucketsù" autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var ab in Model.AgingBuckets)
                                 {
@@ -239,7 +239,7 @@
                 <div class="col-sm-6 col-md-3">
                     <label class="form-label fw-semibold mb-1" style="font-size:.75rem">DENIAL CODE</label>
                     <input type="text" name="filterDenialCode" value="@Model.FilterDenialCode"
-                           class="form-control form-control-sm" placeholder="SearchÖ" />
+                           class="form-control form-control-sm" placeholder="Searchù" />
                     <label class="form-check-label mt-1" style="font-size:.7rem">
                         <input type="checkbox" name="filterDenialCodeExcludeBlank" value="true" class="form-check-input"
                                @(Model.FilterDenialCodeExcludeBlank ? "checked" : "") style="width:.85em;height:.85em" /> Exclude Blank
@@ -303,6 +303,9 @@
                 <button type="submit" class="btn btn-primary btn-sm">Apply Filters</button>
                 <a asp-controller="Dashboard" asp-action="ClaimLevel" asp-route-lab="@Model.SelectedLab"
                    class="btn btn-outline-secondary btn-sm">Clear</a>
+                <button type="button" id="claimExportExcelBtn" class="btn btn-sm btn-outline-success ms-auto">
+                    <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
+                </button>
             </div>
         </form>
     </div>
@@ -357,7 +360,7 @@ else
                     <th>First Billed</th>
                     <th>Charge Entered</th>
                     <th>Panel</th>
-                    <th>CPT◊Units◊Modifier</th>
+                    <th>CPTùUnitsùModifier</th>
                     <th>Payer Name</th>
                     <th>Payer Type</th>
                     <th>Clinic</th>
@@ -499,4 +502,76 @@ else
             });
         });
     });
+</script>
+
+<script nonce='@Context.Items["CspNonce"]'>
+(function () {
+    var btn = document.getElementById('claimExportExcelBtn');
+    var form = document.getElementById('claimFilterForm');
+    if (!btn || !form) return;
+
+    btn.addEventListener('click', function () {
+        var fd = new FormData(form);
+        var val = function (n) { return (fd.get(n) || '').toString().trim() || null; };
+        var all = function (n) {
+            var v = fd.getAll(n).map(function (x) { return x.toString().trim(); })
+                     .filter(function (x) { return x.length > 0; });
+            return v.length > 0 ? v : null;
+        };
+        var on = function (n) { return fd.getAll(n).some(function (x) { return x === 'true' || x === 'on'; }); };
+
+        var filters = {
+            PayerName: val('filterPayerName'),
+            PayerTypes: all('filterPayerTypes'),
+            ClaimStatuses: all('filterClaimStatuses'),
+            ClinicNames: all('filterClinicNames'),
+            DenialCode: val('filterDenialCode'),
+            DenialCodeExcludeBlank: on('filterDenialCodeExcludeBlank'),
+            PayerNames: all('filterPayerNames'),
+            PayerExcludeBlank: on('filterPayerExcludeBlank'),
+            PanelNames: all('filterPanelNames'),
+            PanelExcludeBlank: on('filterPanelExcludeBlank'),
+            AgingBuckets: all('filterAgingBuckets'),
+            FirstBillFrom: val('filterFirstBillFrom'),
+            FirstBillTo: val('filterFirstBillTo'),
+            FirstBillNull: on('filterFirstBillNull'),
+            FirstBillExcludeBlank: on('filterFirstBillExcludeBlank'),
+            ChargeEnteredFrom: val('filterChargeEnteredFrom'),
+            ChargeEnteredTo: val('filterChargeEnteredTo'),
+            ChargeEnteredNull: on('filterChargeEnteredNull'),
+            ChargeEnteredExcludeBlank: on('filterChargeEnteredExcludeBlank'),
+            DosFrom: val('filterDosFrom'),
+            DosTo: val('filterDosTo'),
+            DosNull: on('filterDosNull')
+        };
+
+        var body = new FormData();
+        body.append('lab', '@Model.SelectedLab');
+        body.append('reportType', 'ClaimLevelDetails');
+        body.append('filterDetails', JSON.stringify(filters));
+        var af = document.querySelector('#lrnReportsAf input[name="__RequestVerificationToken"]');
+        if (af) body.append('__RequestVerificationToken', af.value);
+
+        var original = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>QueuingÖ';
+
+        fetch('@Url.Action("Queue", "UserReports")', { method: 'POST', body: body })
+            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+            .then(function (res) {
+                if (res.ok) {
+                    btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating ó watch Reports ??';
+                    if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
+                    setTimeout(function () { btn.disabled = false; btn.innerHTML = original; }, 8000);
+                } else {
+                    btn.disabled = false; btn.innerHTML = original;
+                    alert(res.j && res.j.message ? res.j.message : 'Could not queue the report.');
+                }
+            })
+            .catch(function () {
+                btn.disabled = false; btn.innerHTML = original;
+                alert('Could not queue the report.');
+            });
+    });
+})();
 </script>

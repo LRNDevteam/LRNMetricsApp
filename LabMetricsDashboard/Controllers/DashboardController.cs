@@ -1177,6 +1177,12 @@ public class DashboardController : Controller
                 TopDeniedSalesReps    = result.TopDeniedSalesReps,
                 TopDeniedPayers       = result.TopDeniedPayers,
                 TopDeniedPanels       = result.TopDeniedPanels,
+                CollectedSalesRepsByClinic = result.CollectedSalesRepsByClinic,
+                CollectedPayersByClinic    = result.CollectedPayersByClinic,
+                CollectedPanelsByClinic    = result.CollectedPanelsByClinic,
+                DeniedSalesRepsByClinic    = result.DeniedSalesRepsByClinic,
+                DeniedPayersByClinic       = result.DeniedPayersByClinic,
+                DeniedPanelsByClinic       = result.DeniedPanelsByClinic,
             });
         }
         catch (Exception ex)

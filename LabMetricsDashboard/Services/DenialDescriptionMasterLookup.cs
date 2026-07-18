@@ -61,9 +61,14 @@ public sealed class DenialDescriptionMasterLookup
                                          && !string.IsNullOrWhiteSpace(r.DenialCode)
                                          && !r.DenialCode.Equals("(Blank)", StringComparison.OrdinalIgnoreCase));
 
-        if (blankCount == 0)
+        // Also resolve multi-code rows so joined master descriptions overwrite a single/wrong source desc.
+        var multiCodeCount = rows.Count(r =>
+            !string.IsNullOrWhiteSpace(r.DenialCode)
+            && DenialCodeHelper.SplitCodes(r.DenialCode).Length > 1);
+
+        if (blankCount == 0 && multiCodeCount == 0)
         {
-            _logger.LogDebug("DenialDescription enrichment: no blank descriptions to fill.");
+            _logger.LogDebug("DenialDescription enrichment: no blank/multi-code descriptions to fill.");
             return rows;
         }
 
@@ -88,10 +93,12 @@ public sealed class DenialDescriptionMasterLookup
 
         var matched = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var code in rows
-                     .Where(r => string.IsNullOrWhiteSpace(r.DenialDescription))
+                     .Where(r =>
+                         !string.IsNullOrWhiteSpace(r.DenialCode)
+                         && !r.DenialCode.Equals("(Blank)", StringComparison.OrdinalIgnoreCase)
+                         && (string.IsNullOrWhiteSpace(r.DenialDescription)
+                             || DenialCodeHelper.SplitCodes(r.DenialCode).Length > 1))
                      .Select(r => r.DenialCode)
-                     .Where(c => !string.IsNullOrWhiteSpace(c)
-                                 && !c.Equals("(Blank)", StringComparison.OrdinalIgnoreCase))
                      .Distinct(StringComparer.OrdinalIgnoreCase))
         {
             if (TryResolve(code, masterByNorm, out var desc))
@@ -99,8 +106,8 @@ public sealed class DenialDescriptionMasterLookup
         }
 
         _logger.LogInformation(
-            "DenialDescription enrichment: {Blank} blank row-codes, {Matched} matched from SuperMaster ({MasterCount} master codes).",
-            blankCount, matched.Count, masterByNorm.Count);
+            "DenialDescription enrichment: {Blank} blank + {Multi} multi-code row-codes, {Matched} matched from SuperMaster ({MasterCount} master codes).",
+            blankCount, multiCodeCount, matched.Count, masterByNorm.Count);
 
         if (matched.Count == 0)
             return rows;
@@ -120,13 +127,95 @@ public sealed class DenialDescriptionMasterLookup
 
         return rows.Select(r =>
         {
-            if (!string.IsNullOrWhiteSpace(r.DenialDescription))
+            if (!matched.TryGetValue(r.DenialCode, out var desc))
                 return r;
-            if (!matched.TryGetValue(r.DenialCode, out var desc)
-                && !TryResolve(r.DenialCode, masterByNorm, out desc))
+            // Always apply joined multi-code master text; single-code only when blank.
+            var isMulti = DenialCodeHelper.SplitCodes(r.DenialCode).Length > 1;
+            if (!isMulti && !string.IsNullOrWhiteSpace(r.DenialDescription))
                 return r;
             return r with { DenialDescription = desc };
         }).ToList();
+    }
+
+    /// <summary>
+    /// Fills blank descriptions on already-assembled denial code rows (after multi-code split).
+    /// </summary>
+    public async Task<DenialBreakdown> EnrichBreakdownAsync(
+        DenialBreakdown breakdown,
+        string? masterDbConnectionString,
+        CancellationToken ct = default)
+    {
+        if (breakdown.PayerRows.Count == 0)
+            return breakdown;
+
+        var needsLookup = breakdown.PayerRows
+            .SelectMany(p => p.TopDenialCodes)
+            .Any(c =>
+                !string.IsNullOrWhiteSpace(c.DenialCode)
+                && !c.DenialCode.Equals("(Blank)", StringComparison.OrdinalIgnoreCase)
+                && !c.DenialCode.Equals("(No Code)", StringComparison.OrdinalIgnoreCase)
+                && (string.IsNullOrWhiteSpace(c.DenialDescription)
+                    || DenialCodeHelper.SplitCodes(c.DenialCode).Length > 1));
+
+        if (!needsLookup)
+            return breakdown;
+
+        var masterConn = ResolveMasterConnection(masterDbConnectionString);
+        if (string.IsNullOrWhiteSpace(masterConn))
+            return breakdown;
+
+        Dictionary<string, string> masterByNorm;
+        try
+        {
+            masterByNorm = await LoadMasterMapAsync(masterConn, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "EnrichBreakdownAsync: failed to load DenialMapperSuperMaster.");
+            return breakdown;
+        }
+
+        if (masterByNorm.Count == 0)
+            return breakdown;
+
+        var updatedPayers = new List<DenialPayerRow>(breakdown.PayerRows.Count);
+        var filled = 0;
+        foreach (var payer in breakdown.PayerRows)
+        {
+            var codes = payer.TopDenialCodes.Select(c =>
+            {
+                var isMulti = DenialCodeHelper.SplitCodes(c.DenialCode).Length > 1;
+                if (!isMulti && !string.IsNullOrWhiteSpace(c.DenialDescription))
+                    return c;
+
+                if (TryResolve(c.DenialCode, masterByNorm, out var resolved)
+                    && !string.IsNullOrWhiteSpace(resolved))
+                {
+                    filled++;
+                    return c with { DenialDescription = resolved };
+                }
+
+                return c;
+            }).ToList();
+
+            updatedPayers.Add(payer with { TopDenialCodes = codes });
+        }
+
+        _logger.LogInformation("EnrichBreakdownAsync: filled {Filled} denial-code description(s).", filled);
+
+        return new DenialBreakdown
+        {
+            Months = breakdown.Months,
+            PayerRows = updatedPayers,
+            TotalClaims = breakdown.TotalClaims,
+            TotalPredictedAllowed = breakdown.TotalPredictedAllowed,
+            TotalPredictedInsurance = breakdown.TotalPredictedInsurance,
+            TotalActualAllowed = breakdown.TotalActualAllowed,
+            TotalActualInsurance = breakdown.TotalActualInsurance,
+            TotalVarianceAllowed = breakdown.TotalVarianceAllowed,
+            TotalVariancePaid = breakdown.TotalVariancePaid,
+            TotalByMonth = breakdown.TotalByMonth
+        };
     }
 
     private string? ResolveMasterConnection(string? labMaster) =>
@@ -168,6 +257,41 @@ public sealed class DenialDescriptionMasterLookup
         out string description)
     {
         description = string.Empty;
+        if (string.IsNullOrWhiteSpace(rawCode))
+            return false;
+
+        // Multi-code: "CO-16,CO-109" / "CO-16;CO-109" → resolve each, join with ", "
+        var parts = DenialCodeHelper.SplitCodes(rawCode);
+        if (parts.Length > 1)
+        {
+            var descs = new List<string>(parts.Length);
+            var any = false;
+            foreach (var part in parts)
+            {
+                if (TryResolveSingle(part, masterByNorm, out var partDesc)
+                    && !string.IsNullOrWhiteSpace(partDesc))
+                {
+                    descs.Add(partDesc);
+                    any = true;
+                }
+            }
+
+            if (!any)
+                return false;
+
+            description = DenialCodeHelper.JoinDescriptions(descs);
+            return !string.IsNullOrWhiteSpace(description);
+        }
+
+        return TryResolveSingle(rawCode, masterByNorm, out description);
+    }
+
+    private static bool TryResolveSingle(
+        string rawCode,
+        IReadOnlyDictionary<string, string> masterByNorm,
+        out string description)
+    {
+        description = string.Empty;
         foreach (var candidate in CandidateKeys(rawCode))
         {
             if (masterByNorm.TryGetValue(candidate, out var desc)
@@ -187,7 +311,7 @@ public sealed class DenialDescriptionMasterLookup
         yield return NormalizeCode(trimmed);
 
         // "CO16: something" / "CO16 | text" → take leading token (do not split on hyphen — CO-16)
-        var token = trimmed.Split([':', ';', '|'], 2, StringSplitOptions.TrimEntries)[0];
+        var token = trimmed.Split([':', '|'], 2, StringSplitOptions.TrimEntries)[0];
         if (!string.IsNullOrWhiteSpace(token) && !token.Equals(trimmed, StringComparison.OrdinalIgnoreCase))
             yield return NormalizeCode(token);
 
@@ -214,7 +338,12 @@ public sealed class DenialDescriptionMasterLookup
                 UPDATE dbo.PV_DenialBreakdown
                 SET DenialDescription = @Desc
                 WHERE LTRIM(RTRIM(DenialCode)) = @Code
-                  AND NULLIF(LTRIM(RTRIM(DenialDescription)), '') IS NULL;
+                  AND (
+                        NULLIF(LTRIM(RTRIM(DenialDescription)), '') IS NULL
+                     OR @Code LIKE '%,%'
+                     OR @Code LIKE '%;%'
+                     OR @Code LIKE '%|%'
+                  );
                 """, lab)
             {
                 CommandTimeout = 120

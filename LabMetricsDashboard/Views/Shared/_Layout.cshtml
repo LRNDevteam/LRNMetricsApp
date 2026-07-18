@@ -365,6 +365,8 @@
         .nav-bell-wrap { position: relative; display: inline-flex; align-items: center; }
         .nav-bell-btn { position: relative; color: #E8EEF5; cursor: pointer; padding: 6px 10px; border-radius: 6px; font-size: 1.05rem; }
         .nav-bell-btn:hover { background: rgba(255,255,255,.12); }
+        #rptBtn { color: #FBBF24; }
+        #rptBtn:hover { background: rgba(251,191,36,.16); }
         .nav-bell-badge { position: absolute; top: 0; right: 0; background: #E4572E; color: #fff; border-radius: 999px; font-size: .62rem; font-weight: 800; padding: 1px 5px; line-height: 1.2; }
         .nav-bell-panel { display: none; position: absolute; right: 0; top: calc(100% + 8px); width: 340px; background: #fff; color: #1F2937; border: 1px solid #d9e2ef; border-radius: 10px; box-shadow: 0 18px 40px rgba(15,23,42,.25); z-index: 1060; overflow: hidden; }
         .nav-bell-panel .nb-title { font-size: .68rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: #64748b; padding: 10px 12px 4px; }
@@ -383,6 +385,47 @@
         .nav-bell-panel .nb-empty { padding: 12px; font-size: .78rem; color: #94a3b8; }
         .nav-bell-panel .nb-footer { display: block; text-align: center; padding: 8px; font-size: .76rem; font-weight: 700; color: #2E5C8A; text-decoration: none; background: #f8fafc; }
         .nav-bell-panel .nb-footer:hover { background: #eef6ff; }
+
+        /* ── Reports badge (async report downloads) — separate from the bell ── */
+        .rpt-panel { width: 400px; }
+        #rptBadge.rpt-ready { background: #2E7D32; }
+        .rpt-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #f1f5f9; }
+        .rpt-item-main { flex: 1 1 auto; min-width: 0; }
+        .rpt-item-title { font-size: .78rem; font-weight: 700; color: #1F3B57; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .rpt-item-sub { font-size: .7rem; color: #64748b; }
+        .rpt-item-err { font-size: .7rem; color: #991b1b; margin-top: 2px; white-space: normal; word-break: break-word; }
+        .rpt-status { font-size: .66rem; font-weight: 800; border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
+        .rpt-status-ready { background: #dcfce7; color: #166534; }
+        .rpt-status-processing { background: #fef9c3; color: #854d0e; min-width: 92px; text-align: center; }
+        .rpt-status-failed { background: #fee2e2; color: #991b1b; }
+        .rpt-status-queued { background: #e2e8f0; color: #475569; }
+        .rpt-progress { width: 92px; flex-shrink: 0; }
+        .rpt-progress-label { display: flex; justify-content: space-between; color: #854d0e; font-size: .65rem; font-weight: 800; }
+        .rpt-progress-track { height: 5px; margin-top: 3px; overflow: hidden; border-radius: 999px; background: #fde68a; }
+        .rpt-progress-bar { height: 100%; border-radius: inherit; background: linear-gradient(90deg,#f59e0b,#facc15); transition: width .35s ease; }
+        .rpt-progress-bar.indeterminate { width: 42%; animation: rpt-progress-slide 1.1s ease-in-out infinite; }
+
+        /* ── Report-type breakdown pills (Recent Reports panel) ── */
+        .rpt-types { display: flex; flex-wrap: wrap; gap: 3px; padding: 4px 12px 10px; border-bottom: 1px solid #eef2f7; }
+        .rpt-type-pill { display: inline-flex; align-items: center; gap: 3px; border-radius: 999px; padding: 2px 7px; font-size: .56rem; font-weight: 600; white-space: nowrap; }
+        .rpt-type-pill b { font-size: .6rem; font-weight: 800; }
+        .rpt-type-c1 { background: #e0edff; color: #1d4ed8; }
+        .rpt-type-c2 { background: #ede9fe; color: #6d28d9; }
+        .rpt-type-c3 { background: #ccfbf1; color: #0f766e; }
+        .rpt-type-c4 { background: #fef3c7; color: #b45309; }
+        .rpt-type-c5 { background: #dcfce7; color: #15803d; }
+        .rpt-type-c6 { background: #fce7f3; color: #be185d; }
+        @@keyframes rpt-progress-slide {
+            0% { transform: translateX(-110%); }
+            100% { transform: translateX(250%); }
+        }
+        .rpt-actions { display: flex; gap: 4px; flex-shrink: 0; }
+        .rpt-actions a, .rpt-actions button { border: 1px solid #e2e8f0; background: #fff; border-radius: 6px; padding: 3px 7px; font-size: .72rem; line-height: 1; color: #334155; cursor: pointer; text-decoration: none; }
+        .rpt-actions a:hover, .rpt-actions button:hover { background: #f8fbff; border-color: #b6cdea; }
+        .rpt-actions .rpt-cancel { color: #b91c1c; border-color: #fecaca; }
+        .rpt-actions .rpt-cancel:hover { background: #fef2f2; border-color: #f87171; }
+        .rpt-actions .rpt-dl { color: #166534; border-color: #bbe5c8; font-weight: 700; }
+        .rpt-actions .rpt-del:hover { color: #991b1b; border-color: #fecaca; }
 
         /* ── User chip + dropdown ────────────────────────────────── */
         .lmd-userchip {
@@ -669,6 +712,24 @@
                 }
                 @if (User?.Identity?.IsAuthenticated ?? false)
                 {
+                    @* 📄 Reports badge — async report downloads. Independent of the
+                       existing notification bell above (which is NOT modified). *@
+                    <span class="nav-bell-wrap" id="rptWrap">
+                        <span id="lrnReportsAf" hidden>@Html.AntiForgeryToken()</span>
+                        <span class="nav-bell-btn" id="rptBtn" tabindex="0" title="My generated reports">
+                            <i class="bi bi-file-earmark-arrow-down"></i>
+                            <span class="nav-bell-badge" id="rptBadge" style="display:none;">0</span>
+                        </span>
+                        <div class="nav-bell-panel rpt-panel" id="rptPanel">
+                            <div class="rpt-types" id="rptTypes"></div>
+                            <div class="nb-title">Recent Reports <span class="text-muted fw-normal">(latest 15)</span></div>
+                            <div class="nb-list" id="rptList"><div class="nb-empty">Loading…</div></div>
+                            <a class="nb-footer" href="@Url.Action("Index", "UserReports")">View all reports</a>
+                        </div>
+                    </span>
+                }
+                @if (User?.Identity?.IsAuthenticated ?? false)
+                {
                     var fullName = User.Claims.FirstOrDefault(c => c.Type == "FullName")?.Value;
                     if (string.IsNullOrWhiteSpace(fullName)) fullName = User.Identity!.Name;
                     var initials = string.IsNullOrWhiteSpace(fullName) ? "U"
@@ -829,6 +890,149 @@
             document.addEventListener('click', function (e) { if (!wrap.contains(e.target)) panel.style.display = 'none'; });
             refresh();
             setInterval(refresh, 60000);
+        })();
+    </script>
+
+    <script nonce='@Context.Items["CspNonce"]'>
+        // 📄 Reports badge: async report queue (UserReqReports). Polls a lightweight
+        // summary; polls faster while a report is generating so "Ready" appears quickly.
+        (function () {
+            var wrap = document.getElementById('rptWrap');
+            if (!wrap) return;
+            var btn = document.getElementById('rptBtn'),
+                panel = document.getElementById('rptPanel'),
+                badge = document.getElementById('rptBadge'),
+                list = document.getElementById('rptList');
+            var summaryUrl = '@Url.Action("Summary", "UserReports")',
+                deleteUrl = '@Url.Action("Delete", "UserReports")',
+                retryUrl = '@Url.Action("Retry", "UserReports")',
+                cancelUrl = '@Url.Action("Cancel", "UserReports")';
+            var IDLE_MS = 30000, BUSY_MS = 10000, timer = null;
+
+            function esc(v) { return (v == null ? '' : String(v)).replace(/[&<>"']/g, function (m) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m]; }); }
+            function afToken() {
+                var i = document.querySelector('#lrnReportsAf input[name="__RequestVerificationToken"]');
+                return i ? i.value : '';
+            }
+            function statusChip(s, progress) {
+                var cls = s === 'Ready' ? 'rpt-status-ready'
+                        : s === 'Processing' ? 'rpt-status-processing'
+                        : s === 'Failed' ? 'rpt-status-failed' : 'rpt-status-queued';
+                if (s === 'Processing') {
+                    var known = progress != null;
+                    var pct = known ? Math.max(0, Math.min(100, Number(progress))) : null;
+                    return '<div class="rpt-progress" role="progressbar"'
+                        + (known ? ' aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100"' : '')
+                        + '><div class="rpt-progress-label"><span>Processing</span><span>'
+                        + (known ? pct + '%' : '…')
+                        + '</span></div><div class="rpt-progress-track"><div class="rpt-progress-bar'
+                        + (known ? '' : ' indeterminate')
+                        + '" style="' + (known ? 'width:' + pct + '%' : '') + '"></div></div></div>';
+                }
+                var label = s;
+                return '<span class="rpt-status ' + cls + '">' + esc(label) + '</span>';
+            }
+            var TYPE_LABELS = {
+                PayerPolicyValidation: 'Payer Policy Validation',
+                PredictionAnalysis: 'Prediction Analysis',
+                ForecastingSummary: 'Forecasting Summary',
+                CollectionReport: 'Collection Report',
+                ClaimLevelDetails: 'Claim Level Details',
+                LineLevelDetails: 'Line Level Details',
+                ExecutiveSummary: 'Executive Summary',
+                ProductionReport: 'Production Report',
+                RevenueDashboard: 'Revenue Dashboard',
+                ClinicSummary: 'Clinic Summary',
+                SalesRepSummary: 'Sales Rep Summary',
+                LisSummary: 'LIS Summary'
+            };
+            var TYPE_COLORS = ['rpt-type-c1', 'rpt-type-c2', 'rpt-type-c3', 'rpt-type-c4', 'rpt-type-c5', 'rpt-type-c6'];
+            function typeLabel(t) {
+                return TYPE_LABELS[t] || String(t || '').replace(/([a-z])([A-Z])/g, '$1 $2');
+            }
+            function renderTypes(byType) {
+                var typesEl = document.getElementById('rptTypes');
+                if (!typesEl) return;
+                var items = byType || [];
+                typesEl.innerHTML = items.length ? items.map(function (t, i) {
+                    return '<span class="rpt-type-pill ' + TYPE_COLORS[i % TYPE_COLORS.length] + '">'
+                        + '<b>' + (t.count || 0) + '</b>' + esc(typeLabel(t.type)) + '</span>';
+                }).join('') : '';
+                typesEl.style.display = items.length ? '' : 'none';
+            }
+            function render(data) {
+                var ready = data.ready || 0, busy = data.inProgress || 0;
+                var count = ready + busy;
+                badge.textContent = count > 99 ? '99+' : String(count);
+                badge.style.display = count > 0 ? '' : 'none';
+                badge.classList.toggle('rpt-ready', ready > 0);
+                renderTypes(data.byType);
+
+                var rows = data.reports || [];
+                list.innerHTML = rows.length ? rows.map(function (r) {
+                    var sub = esc(r.lab) + ' · ' + esc(r.requestedDate)
+                            + (r.rowCount ? ' · ' + Number(r.rowCount).toLocaleString() + ' rows' : '')
+                            + (r.fileSizeMb ? ' · ' + r.fileSizeMb + ' MB' : '')
+                            + (r.expiryDate ? ' · expires ' + esc(r.expiryDate) : '');
+                    var actions = '';
+                    if (r.downloadUrl) actions += '<a class="rpt-dl" href="' + r.downloadUrl + '" title="Download"><i class="bi bi-download"></i></a>';
+                    if (r.status === 'Failed') actions += '<button class="rpt-retry" data-lab="' + esc(r.lab) + '" data-id="' + r.reportId + '" title="Retry"><i class="bi bi-arrow-clockwise"></i></button>';
+                    if (r.status === 'Queued' || r.status === 'Processing')
+                        actions += '<button class="rpt-cancel" data-lab="' + esc(r.lab) + '" data-id="' + r.reportId + '" title="Cancel / kill report"><i class="bi bi-x-octagon"></i></button>';
+                    if (r.status !== 'Queued' && r.status !== 'Processing')
+                        actions += '<button class="rpt-del" data-lab="' + esc(r.lab) + '" data-id="' + r.reportId + '" title="Delete"><i class="bi bi-trash"></i></button>';
+                    var err = (r.status === 'Failed' && r.error)
+                        ? '<div class="rpt-item-err"><i class="bi bi-exclamation-triangle-fill me-1"></i>' + esc(r.error) + '</div>'
+                        : '';
+                    return '<div class="rpt-item">'
+                        + '<div class="rpt-item-main">'
+                        + '<div class="rpt-item-title" title="' + esc(r.fileName || '') + '">' + esc(r.reportType) + '</div>'
+                        + '<div class="rpt-item-sub">' + sub + '</div>'
+                        + err
+                        + '</div>'
+                        + statusChip(r.status, r.progress)
+                        + '<div class="rpt-actions">' + actions + '</div>'
+                        + '</div>';
+                }).join('') : '<div class="nb-empty">No reports yet. Use Download Report on a report page.</div>';
+
+                schedule(busy > 0 ? BUSY_MS : IDLE_MS);
+            }
+            async function refresh() {
+                try {
+                    var r = await fetch(summaryUrl); if (!r.ok) { schedule(IDLE_MS); return; }
+                    render(await r.json());
+                } catch (e) { schedule(IDLE_MS); }
+            }
+            function schedule(ms) {
+                if (timer) clearTimeout(timer);
+                timer = setTimeout(refresh, ms);
+            }
+            async function post(url, lab, id) {
+                var body = new FormData();
+                body.append('lab', lab); body.append('id', id);
+                body.append('__RequestVerificationToken', afToken());
+                try { await fetch(url, { method: 'POST', body: body }); } catch (e) { }
+                refresh();
+            }
+            list.addEventListener('click', function (e) {
+                var b = e.target.closest('button');
+                if (!b) return;
+                if (b.classList.contains('rpt-del')) post(deleteUrl, b.getAttribute('data-lab'), b.getAttribute('data-id'));
+                if (b.classList.contains('rpt-retry')) post(retryUrl, b.getAttribute('data-lab'), b.getAttribute('data-id'));
+                if (b.classList.contains('rpt-cancel')) {
+                    if (confirm('Cancel this report? Generation will stop.'))
+                        post(cancelUrl, b.getAttribute('data-lab'), b.getAttribute('data-id'));
+                }
+            });
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                var open = panel.style.display === 'block';
+                panel.style.display = open ? 'none' : 'block';
+                if (!open) refresh();
+            });
+            document.addEventListener('click', function (e) { if (!wrap.contains(e.target)) panel.style.display = 'none'; });
+            window.lrnReportsBadgeRefresh = refresh;
+            refresh();
         })();
     </script>
 

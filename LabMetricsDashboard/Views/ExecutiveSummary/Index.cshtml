@@ -709,7 +709,7 @@
                         title="Open Notes &amp; Insights for this report">
                     <i class="bi bi-journal-text me-1"></i>Notes &amp; Insights
                 </button>
-                <button type="submit" name="export" value="excel"
+                <button type="button" id="esExportExcelBtn"
                         class="btn btn-sm btn-outline-success"
                         title="Export includes last 4 weeks of Notes in a separate sheet">
                     <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
@@ -723,6 +723,87 @@
 <link rel="stylesheet" href="~/css/notes-insights.css" asp-append-version="true" />
 @await Html.PartialAsync("_NotesInsights", Model)
 <script src="~/js/notes-insights.js" asp-append-version="true" nonce="@Context.Items["CspNonce"]"></script>
+
+<script nonce='@Context.Items["CspNonce"]'>
+// ── Async Excel export (preferred): queue via UserReqReports; LRN.ReportWorker
+// generates the workbook in the background and the 📄 Reports badge notifies when
+// ready. Falls back to the legacy synchronous ?export=excel download when the lab
+// has no queue table (400) or the queue call fails.
+(function () {
+    var btn = document.getElementById('esExportExcelBtn');
+    var form = document.getElementById('esFilterForm');
+    if (!btn || !form) return;
+
+    function legacyDownload() {
+        var hidden = form.querySelector('input[name="export"]');
+        if (!hidden) {
+            hidden = document.createElement('input');
+            hidden.type = 'hidden';
+            hidden.name = 'export';
+            form.appendChild(hidden);
+        }
+        hidden.value = 'excel';
+        form.submit();
+        setTimeout(function () { hidden.value = ''; }, 1000);
+    }
+
+    btn.addEventListener('click', function () {
+        var fd = new FormData(form);
+        var val = function (n) { return (fd.get(n) || '').toString().trim() || null; };
+        var num = function (n) { var v = val(n); return v != null && !isNaN(v) ? parseInt(v, 10) : null; };
+        var all = function (n) {
+            var v = fd.getAll(n).map(function (x) { return x.toString().trim(); })
+                     .filter(function (x) { return x.length > 0; });
+            return v.length > 0 ? v : null;
+        };
+        var filters = {
+            YearFrom:   num('yearFrom'),
+            YearTo:     num('yearTo'),
+            MonthFrom:  num('monthFrom'),
+            MonthTo:    num('monthTo'),
+            DosFrom:    val('dosFrom'),
+            DosTo:      val('dosTo'),
+            BilledFrom: val('billedFrom'),
+            BilledTo:   val('billedTo'),
+            Panels:     all('panels'),
+            Clinics:    all('clinics'),
+            Providers:  all('providers'),
+            Reps:       all('reps')
+        };
+
+        var body = new FormData();
+        body.append('lab', '@Model.SelectedLab');
+        body.append('reportType', 'ExecutiveSummary');
+        body.append('filterDetails', JSON.stringify(filters));
+        var af = document.querySelector('#lrnReportsAf input[name="__RequestVerificationToken"]');
+        if (af) body.append('__RequestVerificationToken', af.value);
+
+        var original = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Queuing…';
+
+        fetch('@Url.Action("Queue", "UserReports")', { method: 'POST', body: body })
+            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+            .then(function (res) {
+                if (res.ok) {
+                    btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating — watch Reports 📄';
+                    if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
+                    setTimeout(function () { btn.disabled = false; btn.innerHTML = original; }, 8000);
+                } else if (res.status === 400) {
+                    btn.disabled = false; btn.innerHTML = original;
+                    legacyDownload();
+                } else {
+                    btn.disabled = false; btn.innerHTML = original;
+                    alert(res.j && res.j.message ? res.j.message : 'Could not queue the report.');
+                }
+            })
+            .catch(function () {
+                btn.disabled = false; btn.innerHTML = original;
+                legacyDownload();
+            });
+    });
+})();
+</script>
 
 <div class="card">
     <div class="card-body p-0">

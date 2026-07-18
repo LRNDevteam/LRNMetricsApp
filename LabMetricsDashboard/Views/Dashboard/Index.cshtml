@@ -18,7 +18,7 @@
         || Model.TotalPayments > 0
         || Model.TotalBalance > 0;
 
-    // Rate cards — defined here (top-level block) so they are available inside @if
+    // Rate cards ï¿½ defined here (top-level block) so they are available inside @if
     var rates = new []
     {
         new {
@@ -173,17 +173,17 @@
                 @if (Model.IsAggregateMode)
                 {
                     <i class="bi bi-lightning-fill"
-                       title="Pre-computed Snapshot — data summarised by a scheduled stored procedure."
+                       title="Pre-computed Snapshot ï¿½ data summarised by a scheduled stored procedure."
                        data-bs-toggle="tooltip" data-bs-placement="left"
-                       data-bs-title="Pre-computed Snapshot — data summarised by a scheduled stored procedure."
+                       data-bs-title="Pre-computed Snapshot ï¿½ data summarised by a scheduled stored procedure."
                        style="font-size:1.15rem; color:#3b82f6; cursor:default;"></i>
                 }
                 else if (hasFilters)
                 {
                     <i class="bi bi-lightning-charge-fill"
-                       title="Live Query — filters applied, reading ClaimLevelData in real-time."
+                       title="Live Query ï¿½ filters applied, reading ClaimLevelData in real-time."
                        data-bs-toggle="tooltip" data-bs-placement="left"
-                       data-bs-title="Live Query — filters applied, reading ClaimLevelData in real-time."
+                       data-bs-title="Live Query ï¿½ filters applied, reading ClaimLevelData in real-time."
                        style="font-size:1.15rem; color:#f59e0b; cursor:default;"></i>
                 }
                 <button id="filterToggleBtn"
@@ -421,15 +421,74 @@
     <script nonce='@Context.Items["CspNonce"]'>
         (function () {
             var exportBtn = document.getElementById('exportExcelBtn');
-            if (exportBtn) {
-                exportBtn.addEventListener('click', function () {
-                    var form = document.getElementById('dashFilterForm');
-                    if (!form) return;
-                    var params = new URLSearchParams(new FormData(form));
-                    var url = '@Url.Action("ExportDashboardExcel", "Dashboard")' + '?' + params.toString();
-                    lmdExcelDownload(url);
-                });
+            if (!exportBtn) return;
+
+            // Legacy synchronous download (fallback for labs without the report queue).
+            function legacyDownload() {
+                var form = document.getElementById('dashFilterForm');
+                if (!form) return;
+                var params = new URLSearchParams(new FormData(form));
+                var url = '@Url.Action("ExportDashboardExcel", "Dashboard")' + '?' + params.toString();
+                lmdExcelDownload(url);
             }
+
+            // â”€â”€ Async export (preferred): queue via UserReqReports; LRN.ReportWorker
+            // generates the workbook in the background and the ðŸ“„ Reports badge
+            // notifies when ready.
+            exportBtn.addEventListener('click', function () {
+                var form = document.getElementById('dashFilterForm');
+                if (!form) { return; }
+
+                var fd = new FormData(form);
+                var val = function (n) { return (fd.get(n) || '').toString().trim() || null; };
+                var all = function (n) {
+                    var v = fd.getAll(n).map(function (x) { return x.toString().trim(); })
+                             .filter(function (x) { return x.length > 0; });
+                    return v.length > 0 ? v : null;
+                };
+                var filters = {
+                    PayerNames:        all('filterPayerName'),
+                    PayerType:         val('filterPayerType'),
+                    PanelNames:        all('filterPanelName'),
+                    ClinicName:        val('filterClinicName'),
+                    ReferringProvider: val('filterReferringProvider'),
+                    DosFrom:           val('filterDosFrom'),
+                    DosTo:             val('filterDosTo'),
+                    FirstBillFrom:     val('filterFirstBillFrom'),
+                    FirstBillTo:       val('filterFirstBillTo')
+                };
+
+                var body = new FormData();
+                body.append('lab', '@Model.SelectedLab');
+                body.append('reportType', 'RevenueDashboard');
+                body.append('filterDetails', JSON.stringify(filters));
+                var af = document.querySelector('#lrnReportsAf input[name="__RequestVerificationToken"]');
+                if (af) body.append('__RequestVerificationToken', af.value);
+
+                var original = exportBtn.innerHTML;
+                exportBtn.disabled = true;
+                exportBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Queuingâ€¦';
+
+                fetch('@Url.Action("Queue", "UserReports")', { method: 'POST', body: body })
+                    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+                    .then(function (res) {
+                        if (res.ok) {
+                            exportBtn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating â€” watch Reports ðŸ“„';
+                            if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
+                            setTimeout(function () { exportBtn.disabled = false; exportBtn.innerHTML = original; }, 8000);
+                        } else if (res.status === 400) {
+                            exportBtn.disabled = false; exportBtn.innerHTML = original;
+                            legacyDownload();
+                        } else {
+                            exportBtn.disabled = false; exportBtn.innerHTML = original;
+                            alert(res.j && res.j.message ? res.j.message : 'Could not queue the report.');
+                        }
+                    })
+                    .catch(function () {
+                        exportBtn.disabled = false; exportBtn.innerHTML = original;
+                        legacyDownload();
+                    });
+            });
         })();
     </script>
 

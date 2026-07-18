@@ -15,13 +15,17 @@ public sealed class ExecSummaryDetailExcelBuilder
     {
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add(SheetName(vm));
+        sheet.TabColor = ExcelTheme.TabGreen;
+        ExcelTheme.ApplyDefaults(sheet);
 
-        var darkBlue = XLColor.FromHtml("#0e3460");
+        // Green (Accent 6) theme — same as the Executive Summary / Prediction exports.
+        var headerGreen = ExcelTheme.HeaderBg;
 
         // ── Title / meta rows ───────────────────────────────────────
         sheet.Cell(1, 1).Value = vm.Description.Trim();
         sheet.Cell(1, 1).Style.Font.Bold = true;
         sheet.Cell(1, 1).Style.Font.FontSize = 13;
+        sheet.Cell(1, 1).Style.Font.FontColor = ExcelTheme.TitleBg;
 
         sheet.Cell(2, 1).Value = $"Category: {vm.Category}    Period: {vm.MonthLabel}" +
             (vm.SelectedValue.HasValue ? $"    Value: {vm.SelectedValueFormatted}" : "") +
@@ -38,7 +42,7 @@ public sealed class ExecSummaryDetailExcelBuilder
             cell.Value = vm.Columns[c];
             cell.Style.Font.Bold = true;
             cell.Style.Font.FontColor = XLColor.White;
-            cell.Style.Fill.BackgroundColor = darkBlue;
+            cell.Style.Fill.BackgroundColor = headerGreen;
             cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
         }
 

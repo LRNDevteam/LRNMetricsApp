@@ -141,7 +141,53 @@
                     })';
                     var largeExport = @Model.TotalForecastRecords > 300000;
 
-                    btn.addEventListener('click', function () {
+                    // ── Async export (preferred): queue the request, LRN.ReportWorker
+                    // generates it, the 📄 Reports badge notifies when ready.
+                    // Falls back to the legacy synchronous download when the lab
+                    // has no queue table (not database-enabled).
+                    var queueUrl = '@Url.Action("Queue", "UserReports")';
+                    var filters = {
+                        PayerName: '@Model.FilterPayerName' || null,
+                        PayerType: '@Model.FilterPayerType' || null,
+                        PanelName: '@Model.FilterPanelName' || null,
+                        CPTCode:   '@Model.FilterCPTCode'   || null
+                    };
+
+                    function queueAsyncExport() {
+                        var body = new FormData();
+                        body.append('lab', '@Model.SelectedLab');
+                        body.append('reportType', 'ForecastingSummary');
+                        body.append('filterDetails', JSON.stringify(filters));
+                        var af = document.querySelector('#lrnReportsAf input[name="__RequestVerificationToken"]');
+                        if (af) body.append('__RequestVerificationToken', af.value);
+
+                        var original = btn.innerHTML;
+                        btn.disabled = true;
+                        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Queuing…';
+
+                        fetch(queueUrl, { method: 'POST', body: body })
+                            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+                            .then(function (res) {
+                                if (res.ok) {
+                                    btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating — watch Reports 📄';
+                                    if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
+                                    setTimeout(function () { btn.disabled = false; btn.innerHTML = original; }, 8000);
+                                } else if (res.status === 400) {
+                                    // Lab not DB-enabled — use the legacy synchronous download.
+                                    btn.disabled = false; btn.innerHTML = original;
+                                    legacyDownload();
+                                } else {
+                                    btn.disabled = false; btn.innerHTML = original;
+                                    alert(res.j && res.j.message ? res.j.message : 'Could not queue the report.');
+                                }
+                            })
+                            .catch(function () {
+                                btn.disabled = false; btn.innerHTML = original;
+                                legacyDownload();
+                            });
+                    }
+
+                    function legacyDownload() {
                         var loader = document.getElementById('lmd-loader');
                         var text = document.getElementById('lmd-loader-text');
                         var tick = null;
@@ -194,7 +240,9 @@
 
                         if (text) text.textContent = 'Generating Excel\u2026';
                         if (loader) loader.classList.add('active');
-                    });
+                    }
+
+                    btn.addEventListener('click', queueAsyncExport);
                 }());
             </script>
         </div>

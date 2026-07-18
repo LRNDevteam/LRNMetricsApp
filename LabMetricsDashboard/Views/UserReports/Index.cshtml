@@ -1,0 +1,394 @@
+@using LRN.ReportQueue.Shared
+@model List<UserReportRow>
+@{
+    ViewData["Title"] = "My Reports";
+    var reportTypes = ViewBag.ReportTypes as List<string> ?? [];
+    var selectedReportType = ViewBag.SelectedReportType as string ?? string.Empty;
+    var labs = ViewBag.Labs as List<string> ?? [];
+    var selectedLab = ViewBag.SelectedLab as string ?? string.Empty;
+    var search = ViewBag.Search as string ?? string.Empty;
+    var sort = ViewBag.Sort as string ?? "newest";
+    var hasFilters = !string.IsNullOrWhiteSpace(selectedReportType)
+        || !string.IsNullOrWhiteSpace(selectedLab)
+        || !string.IsNullOrWhiteSpace(search);
+    var hasActive = ViewBag.HasActive as bool? ?? Model.Any(r => r.Status.IsActive());
+    var currentPage = ViewBag.Page is int p ? p : 1;
+    var pageSize = ViewBag.PageSize is int ps ? ps : 20;
+    var totalResults = ViewBag.TotalResults is int tr ? tr : Model.Count;
+    var totalPages = ViewBag.TotalPages is int tp ? tp : 1;
+    var firstResult = totalResults == 0 ? 0 : ((currentPage - 1) * pageSize) + 1;
+    var lastResult = Math.Min(currentPage * pageSize, totalResults);
+    var firstPageLink = Math.Max(1, currentPage - 2);
+    var lastPageLink = Math.Min(totalPages, firstPageLink + 4);
+    firstPageLink = Math.Max(1, lastPageLink - 4);
+
+    static (string Cls, string Icon) StatusStyle(ReportStatus s) => s switch
+    {
+        ReportStatus.Completed  => ("ur-ready",      "bi-check-circle-fill"),
+        ReportStatus.Downloaded => ("ur-downloaded", "bi-check2-all"),
+        ReportStatus.Processing => ("ur-processing", "bi-arrow-repeat"),
+        ReportStatus.Queued     => ("ur-queued",     "bi-hourglass-split"),
+        ReportStatus.Failed     => ("ur-failed",     "bi-x-circle-fill"),
+        _                       => ("ur-queued",     "bi-dash-circle"),
+    };
+
+    static string Meta(UserReportRow r)
+    {
+        var parts = new List<string> { r.RequestedDate.ToString("MMM d, yyyy h:mm tt") };
+        if (r.ReportRowCount is > 0) parts.Add($"{r.ReportRowCount:N0} rows");
+        if (r.FileSizeBytes is > 0)  parts.Add($"{r.FileSizeBytes.Value / 1048576.0:N1} MB");
+        if (r.ExpiryDate is not null) parts.Add($"expires {r.ExpiryDate:MMM d}");
+        return string.Join("  ·  ", parts);
+    }
+}
+
+<style nonce='@Context.Items["CspNonce"]'>
+    .ur-wrap { max-width: 980px; margin: 0 auto; }
+    .ur-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(15,23,42,.06); }
+    .ur-row { display: flex; align-items: center; gap: 14px; padding: 14px 18px; border-bottom: 1px solid #f1f5f9; }
+    .ur-row:last-child { border-bottom: 0; }
+    .ur-row:hover { background: #f8fafc; }
+    .ur-icon { width: 42px; height: 42px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.25rem; flex-shrink: 0; background: #ecf5ee; color: #2E7D32; }
+    .ur-main { flex: 1 1 auto; min-width: 0; }
+    .ur-title { font-weight: 700; color: #1F3B57; font-size: .95rem; }
+    .ur-lab { display: inline-block; font-size: .68rem; font-weight: 700; background: #eef2ff; color: #3730a3; border-radius: 999px; padding: 1px 9px; margin-left: 8px; vertical-align: 2px; }
+    .ur-meta { font-size: .78rem; color: #64748b; margin-top: 2px; }
+    .ur-file { font-size: .72rem; color: #94a3b8; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ur-err { font-size: .78rem; color: #991b1b; margin-top: 4px; }
+    .ur-status { font-size: .72rem; font-weight: 800; border-radius: 999px; padding: 4px 12px; white-space: nowrap; flex-shrink: 0; }
+    .ur-status i { margin-right: 4px; }
+    .ur-ready      { background: #dcfce7; color: #166534; }
+    .ur-downloaded { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+    .ur-processing { background: #fef9c3; color: #854d0e; }
+    .ur-queued     { background: #e2e8f0; color: #475569; }
+    .ur-failed     { background: #fee2e2; color: #991b1b; }
+    .ur-progress { width: 150px; flex-shrink: 0; }
+    .ur-progress-label { display: flex; justify-content: space-between; color: #854d0e; font-size: .72rem; font-weight: 800; }
+    .ur-progress-track { height: 7px; margin-top: 4px; overflow: hidden; border-radius: 999px; background: #fde68a; }
+    .ur-progress-bar { height: 100%; border-radius: inherit; background: linear-gradient(90deg,#f59e0b,#facc15); transition: width .35s ease; }
+    .ur-progress-bar.indeterminate { width: 42%; animation: ur-progress-slide 1.1s ease-in-out infinite; }
+    @@keyframes ur-progress-slide {
+        0% { transform: translateX(-110%); }
+        100% { transform: translateX(250%); }
+    }
+    .ur-actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .ur-empty { text-align: center; padding: 64px 16px; color: #94a3b8; }
+    .ur-toolbar {
+        display: grid; grid-template-columns: minmax(200px, 1fr) 180px 170px 190px auto;
+        gap: 10px; align-items: end; padding: 14px 16px; margin-bottom: 14px;
+        background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+        box-shadow: 0 1px 3px rgba(15,23,42,.05);
+    }
+    .ur-field label {
+        display: block; margin-bottom: 4px; color: #475569; font-size: .7rem;
+        font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
+    }
+    .ur-search-wrap { position: relative; }
+    .ur-search-wrap > i {
+        position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+        color: #94a3b8; pointer-events: none;
+    }
+    .ur-search-wrap input { padding-left: 34px; }
+    .ur-toolbar-actions { display: flex; gap: 7px; }
+    .ur-results { color: #64748b; font-size: .76rem; margin: -4px 2px 9px; }
+    .ur-pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+    .ur-pager-info { color: #64748b; font-size: .76rem; }
+    .ur-pages { display: flex; align-items: center; gap: 4px; }
+    .ur-page {
+        min-width: 32px; height: 32px; padding: 0 9px; display: inline-flex;
+        align-items: center; justify-content: center; border: 1px solid #dbe3ec;
+        border-radius: 7px; background: #fff; color: #334155; font-size: .78rem;
+        font-weight: 700; text-decoration: none;
+    }
+    .ur-page:hover { background: #f0fdf4; border-color: #86c98b; color: #166534; }
+    .ur-page.active { background: #2E7D32; border-color: #2E7D32; color: #fff; pointer-events: none; }
+    .ur-page.disabled { color: #cbd5e1; background: #f8fafc; pointer-events: none; }
+    @@media (max-width: 1050px) {
+        .ur-toolbar { grid-template-columns: 1fr 1fr; }
+        .ur-field-search { grid-column: 1 / -1; }
+    }
+    @@media (max-width: 560px) {
+        .ur-toolbar { grid-template-columns: 1fr; }
+        .ur-field-search { grid-column: auto; }
+        .ur-row { align-items: flex-start; flex-wrap: wrap; }
+        .ur-main { min-width: calc(100% - 60px); }
+    }
+</style>
+
+<div class="container-fluid px-4 py-4">
+    <div class="ur-wrap">
+        <div class="d-flex align-items-center justify-content-between mb-3">
+            <h4 class="mb-0"><i class="bi bi-file-earmark-arrow-down me-2"></i>My Reports</h4>
+            <span class="text-muted small">Kept for 7 days after generation</span>
+        </div>
+
+        <span id="urAf" hidden>@Html.AntiForgeryToken()</span>
+
+        <form method="get" action="@Url.Action("Index", "UserReports")" class="ur-toolbar" id="urFilterForm">
+            <div class="ur-field ur-field-search">
+                <label for="urSearch">Search report names</label>
+                <div class="ur-search-wrap">
+                    <i class="bi bi-search"></i>
+                    <input id="urSearch" name="search" value="@search" class="form-control form-control-sm"
+                           type="search" placeholder="Report type, file name, or lab…" autocomplete="off" />
+                </div>
+            </div>
+            <div class="ur-field">
+                <label for="urReportType">Report Type</label>
+                <select id="urReportType" name="reportType" class="form-select form-select-sm ur-auto-submit">
+                    @if (string.IsNullOrWhiteSpace(selectedReportType))
+                    {
+                        <option value="" selected>All report types</option>
+                    }
+                    else
+                    {
+                        <option value="">All report types</option>
+                    }
+                    @foreach (var type in reportTypes)
+                    {
+                        if (string.Equals(type, selectedReportType, StringComparison.OrdinalIgnoreCase))
+                        {
+                            <option value="@type" selected>@type</option>
+                        }
+                        else
+                        {
+                            <option value="@type">@type</option>
+                        }
+                    }
+                </select>
+            </div>
+            <div class="ur-field">
+                <label for="urLab">Lab</label>
+                <select id="urLab" name="lab" class="form-select form-select-sm ur-auto-submit">
+                    @if (string.IsNullOrWhiteSpace(selectedLab))
+                    {
+                        <option value="" selected>All labs</option>
+                    }
+                    else
+                    {
+                        <option value="">All labs</option>
+                    }
+                    @foreach (var labName in labs)
+                    {
+                        if (string.Equals(labName, selectedLab, StringComparison.OrdinalIgnoreCase))
+                        {
+                            <option value="@labName" selected>@labName</option>
+                        }
+                        else
+                        {
+                            <option value="@labName">@labName</option>
+                        }
+                    }
+                </select>
+            </div>
+            <div class="ur-field">
+                <label for="urSort">Sort By</label>
+                <select id="urSort" name="sort" class="form-select form-select-sm ur-auto-submit">
+                    @foreach (var (value, label) in new (string, string)[] {
+                        ("newest", "Newest first"),
+                        ("oldest", "Oldest first"),
+                        ("name-asc", "Report name A–Z"),
+                        ("name-desc", "Report name Z–A"),
+                        ("lab", "Lab name A–Z"),
+                        ("status", "Status"),
+                    })
+                    {
+                        if (sort == value)
+                        {
+                            <option value="@value" selected>@label</option>
+                        }
+                        else
+                        {
+                            <option value="@value">@label</option>
+                        }
+                    }
+                </select>
+            </div>
+            <div class="ur-toolbar-actions">
+                <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-funnel me-1"></i>Apply</button>
+                @if (hasFilters || sort != "newest")
+                {
+                    <a class="btn btn-sm btn-outline-secondary" href="@Url.Action("Index", "UserReports")" title="Clear filters">
+                        <i class="bi bi-x-lg"></i>
+                    </a>
+                }
+            </div>
+        </form>
+
+        <div class="ur-results">
+            Showing <strong>@firstResult–@lastResult</strong> of <strong>@totalResults</strong>
+            report@(totalResults == 1 ? "" : "s")
+            @if (hasFilters)
+            {
+                <span> matching the selected filters</span>
+            }
+        </div>
+
+        @if (Model.Count == 0)
+        {
+            <div class="ur-card">
+                <div class="ur-empty">
+                    <i class="bi @(hasFilters ? "bi-search" : "bi-inbox") fs-1 opacity-50 d-block mb-2"></i>
+                    <div class="fw-semibold text-secondary">@(hasFilters ? "No matching reports" : "No reports yet")</div>
+                    <div class="small">
+                        @if (hasFilters)
+                        {
+                            <span>Try changing or clearing the filters above.</span>
+                        }
+                        else
+                        {
+                            <span>Use <em>Download Excel</em> on a report page to generate one in the background.</span>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="ur-card">
+                @foreach (var r in Model)
+                {
+                    var (cls, icon) = StatusStyle(r.Status);
+                    var statusText = r.Status == ReportStatus.Processing && r.ProgressPercent is not null
+                        ? $"{r.Status.DisplayName()} {r.ProgressPercent}%"
+                        : r.Status.DisplayName();
+
+                    <div class="ur-row">
+                        <div class="ur-icon"><i class="bi bi-file-earmark-excel"></i></div>
+                        <div class="ur-main">
+                            <div class="ur-title">@r.ReportType<span class="ur-lab">@r.LabName</span></div>
+                            <div class="ur-meta">@Meta(r)</div>
+                            @if (!string.IsNullOrWhiteSpace(r.FileName))
+                            {
+                                <div class="ur-file" title="@r.FileName">@r.FileName</div>
+                            }
+                            @if (r.Status == ReportStatus.Failed && !string.IsNullOrWhiteSpace(r.ErrorMessage))
+                            {
+                                <div class="ur-err"><i class="bi bi-exclamation-triangle-fill me-1"></i>@r.ErrorMessage</div>
+                            }
+                        </div>
+                        @if (r.Status == ReportStatus.Processing)
+                        {
+                            var knownProgress = r.ProgressPercent is not null;
+                            var progress = Math.Clamp(r.ProgressPercent ?? 0, (byte)0, (byte)100);
+                            <div class="ur-progress" role="progressbar"
+                                 aria-label="Report generation progress"
+                                 aria-valuemin="0" aria-valuemax="100"
+                                 aria-valuenow="@(knownProgress ? progress : null)">
+                                <div class="ur-progress-label">
+                                    <span><i class="bi bi-arrow-repeat me-1"></i>Processing</span>
+                                    <span>@(knownProgress ? $"{progress}%" : "…")</span>
+                                </div>
+                                <div class="ur-progress-track">
+                                    <div class="ur-progress-bar @(knownProgress ? "" : "indeterminate")"
+                                         style="@(knownProgress ? $"width:{progress}%" : "")"></div>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <span class="ur-status @cls"><i class="bi @icon"></i>@statusText</span>
+                        }
+                        <div class="ur-actions">
+                            @if (r.Status.IsDownloadable())
+                            {
+                                <a class="btn btn-sm btn-success"
+                                   href="@Url.Action("Download", "UserReports", new { lab = r.LabName, id = r.ReportId, token = r.DownloadToken })">
+                                    <i class="bi bi-download"></i>
+                                </a>
+                            }
+                            @if (r.Status == ReportStatus.Failed)
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-primary ur-retry"
+                                        data-lab="@r.LabName" data-id="@r.ReportId" title="Retry">
+                                    <i class="bi bi-arrow-clockwise"></i>
+                                </button>
+                            }
+                            @if (r.Status.IsActive())
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-danger ur-cancel"
+                                        data-lab="@r.LabName" data-id="@r.ReportId" title="Cancel / kill report">
+                                    <i class="bi bi-x-octagon"></i>
+                                </button>
+                            }
+                            @if (!r.Status.IsActive())
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-danger ur-delete"
+                                        data-lab="@r.LabName" data-id="@r.ReportId" title="Delete">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+
+        @if (totalPages > 1)
+        {
+            <nav class="ur-pager" aria-label="Reports pagination">
+                <span class="ur-pager-info">Page @currentPage of @totalPages</span>
+                <div class="ur-pages">
+                    <a class="ur-page @(currentPage == 1 ? "disabled" : "")"
+                       href="@Url.Action("Index", "UserReports", new { reportType = selectedReportType, lab = selectedLab, search, sort, page = currentPage - 1 })"
+                       aria-label="Previous page"><i class="bi bi-chevron-left"></i></a>
+
+                    @for (var pageNumber = firstPageLink; pageNumber <= lastPageLink; pageNumber++)
+                    {
+                        <a class="ur-page @(pageNumber == currentPage ? "active" : "")"
+                           href="@Url.Action("Index", "UserReports", new { reportType = selectedReportType, lab = selectedLab, search, sort, page = pageNumber })">@pageNumber</a>
+                    }
+
+                    <a class="ur-page @(currentPage == totalPages ? "disabled" : "")"
+                       href="@Url.Action("Index", "UserReports", new { reportType = selectedReportType, lab = selectedLab, search, sort, page = currentPage + 1 })"
+                       aria-label="Next page"><i class="bi bi-chevron-right"></i></a>
+                </div>
+            </nav>
+        }
+    </div>
+</div>
+
+@section Scripts {
+<script nonce='@Context.Items["CspNonce"]'>
+(function () {
+    var deleteUrl = '@Url.Action("Delete", "UserReports")',
+        retryUrl  = '@Url.Action("Retry", "UserReports")',
+        cancelUrl = '@Url.Action("Cancel", "UserReports")';
+
+    function afToken() {
+        var i = document.querySelector('#urAf input[name="__RequestVerificationToken"]');
+        return i ? i.value : '';
+    }
+    async function post(url, lab, id) {
+        var body = new FormData();
+        body.append('lab', lab);
+        body.append('id', id);
+        body.append('__RequestVerificationToken', afToken());
+        try { await fetch(url, { method: 'POST', body: body }); } catch (e) { }
+        window.location.reload();
+    }
+    document.addEventListener('click', function (e) {
+        var b = e.target.closest('button');
+        if (!b) return;
+        if (b.classList.contains('ur-delete')) {
+            if (confirm('Delete this report?')) post(deleteUrl, b.getAttribute('data-lab'), b.getAttribute('data-id'));
+        }
+        if (b.classList.contains('ur-retry')) post(retryUrl, b.getAttribute('data-lab'), b.getAttribute('data-id'));
+        if (b.classList.contains('ur-cancel')) {
+            if (confirm('Cancel this report? Generation will stop.'))
+                post(cancelUrl, b.getAttribute('data-lab'), b.getAttribute('data-id'));
+        }
+    });
+
+    document.querySelectorAll('.ur-auto-submit').forEach(function (control) {
+        control.addEventListener('change', function () {
+            document.getElementById('urFilterForm').submit();
+        });
+    });
+
+    // Auto-refresh while anything is queued/processing (including items hidden by filters).
+    var hasActive = @(hasActive ? "true" : "false");
+    if (hasActive) setTimeout(function () { window.location.reload(); }, 10000);
+})();
+</script>
+}

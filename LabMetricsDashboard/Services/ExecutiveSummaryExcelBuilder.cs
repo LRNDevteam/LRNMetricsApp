@@ -9,6 +9,9 @@ namespace LabMetricsDashboard.Services;
 /// A metadata block (analysis / week range + applied filters) is written at
 /// the top, followed by all categories (LIS, PMS, Cash, Avg) on a single
 /// sheet, each preceded by a coloured section-heading row.
+/// Uses the Office 2013–2022 green (Accent 6) palette with gold (Accent 4)
+/// year/grand-total highlights — same theme and Calibri fonts as the
+/// Prediction summary export (ExcelTheme green family).
 /// </summary>
 public sealed class ExecutiveSummaryExcelBuilder
 {
@@ -18,6 +21,8 @@ public sealed class ExecutiveSummaryExcelBuilder
     {
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add("Executive Summary");
+        sheet.TabColor = ExcelTheme.TabGreen;
+        ExcelTheme.ApplyDefaults(sheet);
 
         // Work out how wide the table is so the info block can span it.
         var columns = vm.YearMonthColumns;
@@ -51,7 +56,7 @@ public sealed class ExecutiveSummaryExcelBuilder
     /// </summary>
     private int WriteInfoBlock(IXLWorksheet sheet, PhiExecutiveSummaryViewModel vm, int grandCol)
     {
-        var darkBlue = XLColor.FromHtml("#0e3460");
+        var darkGreen = ExcelTheme.TitleBg; // Accent 6 Darker 50% — matches Prediction summary
         int lastCol  = Math.Max(grandCol, 2);
         int r = 1;
 
@@ -64,12 +69,12 @@ public sealed class ExecutiveSummaryExcelBuilder
             cell.Style.Alignment.Vertical   = XLAlignmentVerticalValues.Center;
             if (title)
             {
-                cell.Style.Font.FontSize  = 14;
-                cell.Style.Font.FontColor = darkBlue;
+                cell.Style.Font.FontSize  = ExcelTheme.FontSizeTitle;
+                cell.Style.Font.FontColor = darkGreen;
             }
             if (sectionHead)
             {
-                cell.Style.Font.FontColor = darkBlue;
+                cell.Style.Font.FontColor = darkGreen;
                 cell.Style.Font.FontSize  = 11;
             }
             sheet.Range(r, 1, r, lastCol).Merge();
@@ -126,21 +131,17 @@ public sealed class ExecutiveSummaryExcelBuilder
         int hr1 = startRow;
         int hr2 = startRow + 1;
 
-        var darkBlue  = XLColor.FromHtml("#0e3460");
-        var gold      = XLColor.FromHtml("#a16207");
-        var grandBrown= XLColor.FromHtml("#92400e");
-        var yearTint  = XLColor.FromHtml("#fefce8");
-        var grandTint = XLColor.FromHtml("#fef3c7");
-        var catGreen  = XLColor.FromHtml("#f0fdf4");
+        // Green (Accent 6) theme with gold (Accent 4) totals — same palette as the
+        // Prediction summary / Production Report exports (ExcelTheme green family).
+        var headerGreen = ExcelTheme.HeaderBg;      // #548235 — header rows
+        var monthGreen  = ExcelTheme.SubHeaderBg;   // #70AD47 — month header cells
+        var gold        = ExcelTheme.GoldAccent;    // #FFC000 — year/grand total headers (black text)
+        var yearTint    = XLColor.FromHtml("#FFF2CC");  // Accent 4 Lighter 80% — year total data cells
+        var grandTint   = XLColor.FromHtml("#FFE699");  // Accent 4 Lighter 60% — grand total data cells
+        var catGreen    = ExcelTheme.BandedRowBg;   // #E2EFDA — parent/category rows
 
-        // Section heading colours (one per category, in order)
-        var sectionColors = new Dictionary<string, XLColor>
-        {
-            ["LIS"]  = XLColor.FromHtml("#1e3a5f"),
-            ["PMS"]  = XLColor.FromHtml("#1a4731"),
-            ["Cash"] = XLColor.FromHtml("#4a1942"),
-            ["Avg"]  = XLColor.FromHtml("#7c2d12"),
-        };
+        // Section heading rows — dark green across every section (single-theme workbook).
+        var sectionHeadingBg = ExcelTheme.TitleBg;  // #385723
 
         // ── Header rows (written once at the top of the table) ───────────────
 
@@ -171,7 +172,7 @@ public sealed class ExecutiveSummaryExcelBuilder
             var yt = sheet.Cell(hr2, colIdx);
             yt.Value = $"{year} Total";
             yt.Style.Fill.BackgroundColor = gold;
-            yt.Style.Font.FontColor = XLColor.White;
+            yt.Style.Font.FontColor = XLColor.Black;
             colIdx++;
         }
 
@@ -183,21 +184,21 @@ public sealed class ExecutiveSummaryExcelBuilder
 
         for (int r = hr1; r <= hr2; r++)
         {
-            sheet.Cell(r, 1).Style.Fill.BackgroundColor = darkBlue;
+            sheet.Cell(r, 1).Style.Fill.BackgroundColor = headerGreen;
             sheet.Cell(r, 1).Style.Font.FontColor       = XLColor.White;
-            sheet.Cell(r, grandCol).Style.Fill.BackgroundColor = grandBrown;
-            sheet.Cell(r, grandCol).Style.Font.FontColor       = XLColor.White;
+            sheet.Cell(r, grandCol).Style.Fill.BackgroundColor = gold;
+            sheet.Cell(r, grandCol).Style.Font.FontColor       = XLColor.Black;
         }
         colIdx = 2;
         foreach (var year in years)
         {
             var mons = monthsByYear[year];
             int span = mons.Count + 1;
-            sheet.Cell(hr1, colIdx).Style.Fill.BackgroundColor = darkBlue;
+            sheet.Cell(hr1, colIdx).Style.Fill.BackgroundColor = headerGreen;
             sheet.Cell(hr1, colIdx).Style.Font.FontColor       = XLColor.White;
             for (int i = 0; i < mons.Count; i++)
             {
-                sheet.Cell(hr2, colIdx + i).Style.Fill.BackgroundColor = darkBlue;
+                sheet.Cell(hr2, colIdx + i).Style.Fill.BackgroundColor = monthGreen;
                 sheet.Cell(hr2, colIdx + i).Style.Font.FontColor       = XLColor.White;
             }
             colIdx += span;
@@ -216,10 +217,9 @@ public sealed class ExecutiveSummaryExcelBuilder
             if (rows.Count == 0) continue;
 
             // Section heading row (spans all columns)
-            var headingColor = sectionColors.GetValueOrDefault(section, darkBlue);
             var headingCell  = sheet.Cell(rowIdx, 1);
             headingCell.Value = SectionLabel(section);
-            headingCell.Style.Fill.BackgroundColor = headingColor;
+            headingCell.Style.Fill.BackgroundColor = sectionHeadingBg;
             headingCell.Style.Font.FontColor       = XLColor.White;
             headingCell.Style.Font.Bold            = true;
             headingCell.Style.Font.FontSize        = 12;
@@ -306,8 +306,6 @@ public sealed class ExecutiveSummaryExcelBuilder
                 rowIdx++;
         }
 
-        sheet.SheetView.FreezeRows(hr2);
-        sheet.SheetView.FreezeColumns(1);
         sheet.Columns().AdjustToContents();
 
         // Keep the Description column from being over-widened by the long

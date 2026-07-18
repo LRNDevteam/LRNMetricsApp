@@ -1,6 +1,6 @@
 @model LabMetricsDashboard.Models.SalesRepSummaryViewModel
 @{
-    ViewData["Title"]       = $"Sales Rep Summary – {Model.SelectedLab}";
+    ViewData["Title"]       = $"Sales Rep Summary ï¿½ {Model.SelectedLab}";
     ViewData["SelectedLab"] = Model.SelectedLab;
     ViewData["PageLabel"]   = "Sales Rep Summary";
 }
@@ -81,7 +81,7 @@
     }
     .cs-cnt { color: #334155; font-weight: 600; }
 
-    /* Flag circle indicators — Red (<30) / Orange (30–80) / Green (>80) */
+    /* Flag circle indicators ï¿½ Red (<30) / Orange (30ï¿½80) / Green (>80) */
     .cs-flag {
         display: inline-flex; align-items: center; justify-content: center;
         width: 22px; height: 22px; border-radius: 50%;
@@ -92,26 +92,26 @@
     .cs-flag-caution { background: #ff8c00; color: #fff; }
     .cs-flag-low     { background: #8b0000; color: #fff; }
 
-    /* Column group backgrounds — Pantone palette */
-    /* Group 1: Counts — Peacoat (#2B2D42) tints */
+    /* Column group backgrounds ï¿½ Pantone palette */
+    /* Group 1: Counts ï¿½ Peacoat (#2B2D42) tints */
     .col-grp-count { background-color: #e8e9ee; }
     .cs-table thead th.col-grp-count { background: linear-gradient(135deg, #1a1e36 0%, #2B2D42 100%); color: rgba(255,255,255,.92); }
     .cs-table tbody tr:hover td.col-grp-count { background: #c0c2d0; }
     .cs-table tfoot td.col-grp-count { background: #cfd0da; }
 
-    /* Group 2: Dollar Totals — Shopping Bag (#594539) tints */
+    /* Group 2: Dollar Totals ï¿½ Shopping Bag (#594539) tints */
     .col-grp-money { background-color: #efece9; }
     .cs-table thead th.col-grp-money { background: linear-gradient(135deg, #3a2c20 0%, #594539 100%); color: rgba(255,255,255,.92); }
     .cs-table tbody tr:hover td.col-grp-money { background: #cfc6be; }
     .cs-table tfoot td.col-grp-money { background: #ddd6d0; }
 
-    /* Group 3: Averages — City Skyline (#7B8B8E) tints */
+    /* Group 3: Averages ï¿½ City Skyline (#7B8B8E) tints */
     .col-grp-avg { background-color: #edf0f0; }
     .cs-table thead th.col-grp-avg { background: linear-gradient(135deg, #4a5c60 0%, #7B8B8E 100%); color: rgba(255,255,255,.92); }
     .cs-table tbody tr:hover td.col-grp-avg { background: #c6cfcf; }
     .cs-table tfoot td.col-grp-avg { background: #d6dcdd; }
 
-    /* Group 4: Percentages — Pantone 19-0913 TCX Hot Fudge (#3C2415) */
+    /* Group 4: Percentages ï¿½ Pantone 19-0913 TCX Hot Fudge (#3C2415) */
     .col-grp-pct { background-color: #eceae6; }
     .cs-table thead th.col-grp-pct { background: linear-gradient(135deg, #2a1608 0%, #3C2415 100%); color: rgba(255,255,255,.92); }
     .cs-table thead th.col-grp-pct .th-icon-pct { color: #d4c8a8; }
@@ -120,7 +120,7 @@
 
     .cs-scroll { max-height: 72vh; overflow: auto; }
 
-    /* KPI stat ribbon — Peacoat background */
+    /* KPI stat ribbon ï¿½ Peacoat background */
     .cs-stats-card {
         background: #2B2D42; border: 1px solid #1e1f32; border-radius: 10px;
         box-shadow: 0 2px 8px rgba(0,0,0,.18); margin-bottom: 1rem;
@@ -287,7 +287,7 @@
             : "<span class='cs-flag cs-flag-low'>&#9873;</span>";
 
     // Inverse flag for "lower is better" columns (Denied / Outstanding)
-    // Green when < 30, Orange when 30–80, Red when > 80
+    // Green when < 30, Orange when 30ï¿½80, Red when > 80
     string InversePctFlag(decimal pct) => pct < 30
         ? "<span class='cs-flag cs-flag-good'>&#9873;</span>"
         : pct <= 80
@@ -337,7 +337,7 @@
                                 <span class="cs-ms-count" style="display:none">0</span>
                             </div>
                             <div class="cs-ms-panel">
-                                <input type="text" class="cs-ms-search" placeholder="Search sales reps…" autocomplete="off" />
+                                <input type="text" class="cs-ms-search" placeholder="Search sales repsï¿½" autocomplete="off" />
                                 <div class="cs-ms-list">
                                     @foreach (var sr in Model.SalesRepNames)
                                     {
@@ -358,7 +358,7 @@
                                 <span class="cs-ms-count" style="display:none">0</span>
                             </div>
                             <div class="cs-ms-panel">
-                                <input type="text" class="cs-ms-search" placeholder="Search clinics…" autocomplete="off" />
+                                <input type="text" class="cs-ms-search" placeholder="Search clinicsï¿½" autocomplete="off" />
                                 <div class="cs-ms-list">
                                     @foreach (var cn in Model.ClinicNames)
                                     {
@@ -379,7 +379,7 @@
                                 <span class="cs-ms-count" style="display:none">0</span>
                             </div>
                             <div class="cs-ms-panel">
-                                <input type="text" class="cs-ms-search" placeholder="Search payers…" autocomplete="off" />
+                                <input type="text" class="cs-ms-search" placeholder="Search payersï¿½" autocomplete="off" />
                                 <div class="cs-ms-list">
                                     @foreach (var pn in Model.PayerNames)
                                     {
@@ -400,7 +400,7 @@
                                 <span class="cs-ms-count" style="display:none">0</span>
                             </div>
                             <div class="cs-ms-panel">
-                                <input type="text" class="cs-ms-search" placeholder="Search panels…" autocomplete="off" />
+                                <input type="text" class="cs-ms-search" placeholder="Search panelsï¿½" autocomplete="off" />
                                 <div class="cs-ms-list">
                                     @foreach (var pl in Model.PanelNames)
                                     {
@@ -639,7 +639,7 @@
         </ul>
 
         <div class="tab-content">
-            <!-- ??? Highly Collected pane — Drilldown ??? -->
+            <!-- ??? Highly Collected pane ï¿½ Drilldown ??? -->
             <div class="tab-pane fade show active" id="pane-collected" role="tabpanel">
                 @if (Model.DrilldownCollectedSalesReps.Count > 0)
                 {
@@ -779,7 +779,7 @@
                 }
             </div>
 
-            <!-- ??? Highly Denied pane — Drilldown ??? -->
+            <!-- ??? Highly Denied pane ï¿½ Drilldown ??? -->
             <div class="tab-pane fade" id="pane-denied" role="tabpanel">
                 @if (Model.DrilldownDeniedSalesReps.Count > 0)
                 {
@@ -1022,15 +1022,71 @@ else
             });
         });
 
-        // Export Excel — reuse filter form values to build a download URL
+        // Export Excel â€” async queue first; legacy synchronous download as fallback.
         var exportBtn = document.getElementById('exportExcelBtn');
         if (exportBtn) {
-            exportBtn.addEventListener('click', function () {
+            // Legacy synchronous download (fallback for labs without the report queue).
+            var srLegacyDownload = function () {
                 var form = document.getElementById('srFilterForm');
                 if (!form) return;
                 var params = new URLSearchParams(new FormData(form));
                 var url = '@Url.Action("ExportSalesRepSummaryExcel", "Dashboard")' + '?' + params.toString();
                 lmdExcelDownload(url);
+            };
+
+            // Async export (preferred): queue via UserReqReports; LRN.ReportWorker
+            // generates the workbook and the ðŸ“„ Reports badge notifies when ready.
+            exportBtn.addEventListener('click', function () {
+                var form = document.getElementById('srFilterForm');
+                if (!form) return;
+                var fd = new FormData(form);
+                var val = function (n) { return (fd.get(n) || '').toString().trim() || null; };
+                var all = function (n) {
+                    var v = fd.getAll(n).map(function (x) { return x.toString().trim(); })
+                             .filter(function (x) { return x.length > 0; });
+                    return v.length > 0 ? v : null;
+                };
+                var filters = {
+                    SalesRepNames: all('filterSalesRepNames'),
+                    ClinicNames:   all('filterClinicNames'),
+                    PayerNames:    all('filterPayerNames'),
+                    PanelNames:    all('filterPanelNames'),
+                    DosFrom:       val('filterDosFrom'),
+                    DosTo:         val('filterDosTo'),
+                    FirstBillFrom: val('filterFirstBillFrom'),
+                    FirstBillTo:   val('filterFirstBillTo')
+                };
+
+                var body = new FormData();
+                body.append('lab', '@Model.SelectedLab');
+                body.append('reportType', 'SalesRepSummary');
+                body.append('filterDetails', JSON.stringify(filters));
+                var af = document.querySelector('#lrnReportsAf input[name="__RequestVerificationToken"]');
+                if (af) body.append('__RequestVerificationToken', af.value);
+
+                var original = exportBtn.innerHTML;
+                exportBtn.disabled = true;
+                exportBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Queuingâ€¦';
+
+                fetch('@Url.Action("Queue", "UserReports")', { method: 'POST', body: body })
+                    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+                    .then(function (res) {
+                        if (res.ok) {
+                            exportBtn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating â€” watch Reports ðŸ“„';
+                            if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
+                            setTimeout(function () { exportBtn.disabled = false; exportBtn.innerHTML = original; }, 8000);
+                        } else if (res.status === 400) {
+                            exportBtn.disabled = false; exportBtn.innerHTML = original;
+                            srLegacyDownload();
+                        } else {
+                            exportBtn.disabled = false; exportBtn.innerHTML = original;
+                            alert(res.j && res.j.message ? res.j.message : 'Could not queue the report.');
+                        }
+                    })
+                    .catch(function () {
+                        exportBtn.disabled = false; exportBtn.innerHTML = original;
+                        srLegacyDownload();
+                    });
             });
         }
     });

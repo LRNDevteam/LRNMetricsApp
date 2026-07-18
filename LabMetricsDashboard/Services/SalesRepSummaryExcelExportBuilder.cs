@@ -5,7 +5,8 @@ namespace LabMetricsDashboard.Services;
 
 /// <summary>
 /// Builds a formatted Excel workbook from Sales Rep Summary filtered data
-/// using the client's green-themed branding via <see cref="ExcelTheme"/>.
+/// using the same green palette and Calibri typography as Prediction Summary
+/// via <see cref="ExcelTheme"/>.
 /// Produces three sheets: Sales Rep Summary, Highly Collected, and Highly Denied.
 /// </summary>
 public static class SalesRepSummaryExcelExportBuilder
@@ -231,7 +232,7 @@ public static class SalesRepSummaryExcelExportBuilder
         IReadOnlyList<TopDeniedItem> panels)
     {
         var ws = wb.AddWorksheet("Highly Denied");
-        ws.TabColor = ExcelTheme.TabRed;
+        ws.TabColor = ExcelTheme.TabGreen;
         ExcelTheme.ApplyDefaults(ws);
 
         int currentRow = 1;
@@ -249,7 +250,7 @@ public static class SalesRepSummaryExcelExportBuilder
     private static int WriteDeniedSection(IXLWorksheet ws, int startRow, string title,
         IReadOnlyList<TopDeniedItem> items)
     {
-        ExcelTheme.WriteSectionTitle(ws, startRow, 1, 5, title, ExcelTheme.TabRed);
+        ExcelTheme.WriteSectionTitle(ws, startRow, 1, 5, title);
 
         int headerRow = startRow + 1;
         ExcelTheme.WriteHeaderRow(ws, headerRow, 1,

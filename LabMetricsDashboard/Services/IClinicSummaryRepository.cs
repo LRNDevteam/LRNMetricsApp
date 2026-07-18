@@ -90,4 +90,10 @@ public sealed record ClinicSummaryResult(
     List<TopDeniedItem> TopDeniedClinics,
     List<TopDeniedItem> TopDeniedSalesReps,
     List<TopDeniedItem> TopDeniedPayers,
-    List<TopDeniedItem> TopDeniedPanels);
+    List<TopDeniedItem> TopDeniedPanels,
+    List<ClinicCollectedBreakdownGroup> CollectedSalesRepsByClinic,
+    List<ClinicCollectedBreakdownGroup> CollectedPayersByClinic,
+    List<ClinicCollectedBreakdownGroup> CollectedPanelsByClinic,
+    List<ClinicDeniedBreakdownGroup> DeniedSalesRepsByClinic,
+    List<ClinicDeniedBreakdownGroup> DeniedPayersByClinic,
+    List<ClinicDeniedBreakdownGroup> DeniedPanelsByClinic);

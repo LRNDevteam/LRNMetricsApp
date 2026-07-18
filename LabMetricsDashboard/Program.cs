@@ -409,6 +409,12 @@ builder.Services.AddScoped<ICptSearchRepository, SqlCptSearchRepository>();
 builder.Services.AddScoped<ICollectionSummaryRepository, SqlCollectionSummaryRepository>();
 builder.Services.AddScoped<AllLabsCollectionExcelBuilder>();
 builder.Services.AddScoped<PayerPolicyValidationService>();
+
+// Async report queue (UserReqReports per lab DB; generation runs in LRN.ReportWorker)
+builder.Services.AddSingleton<LRN.ReportQueue.Shared.IReportRequestRepository,
+	LRN.ReportQueue.Shared.SqlReportRequestRepository>();
+builder.Services.AddScoped<UserReportService>();
+
 builder.Services.AddScoped<ILisSummaryRepository, SqlLisSummaryRepository>();
 builder.Services.AddScoped<SqlPhiExecutiveSummaryRepository>();
 builder.Services.AddScoped<INotesRepository, SqlNotesRepository>();
@@ -423,7 +429,12 @@ builder.Services.AddSingleton<IPasswordHasher, PasswordHasher>();
 // Add services to the container.
 builder.Services.AddMemoryCache();
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddScoped<IAppUsageAuditService, SqlAppUsageAuditService>();
+// Usage audit: requests only enqueue; a background writer performs the SQL INSERTs
+// so a slow/remote audit database never adds latency to page loads.
+builder.Services.AddSingleton<AppUsageAuditQueue>();
+builder.Services.AddHostedService<AppUsageAuditBackgroundWriter>();
+builder.Services.AddScoped<SqlAppUsageAuditService>();
+builder.Services.AddScoped<IAppUsageAuditService>(sp => sp.GetRequiredService<SqlAppUsageAuditService>());
 builder.Services.AddScoped<AppUsageAuditFilter>();
 
 // In-app Help Bot (singleton - loads topic file once at startup)
@@ -444,10 +455,14 @@ builder.Services
 	.AddHttpClient<ILabAnalyticsApiClient, LabAnalyticsApiClient>()
 	.ConfigureHttpClient(client => client.Timeout = TimeSpan.FromMinutes(2));
 
-// Dynamic role-based navbar (Menu Master + Role Menu Mapping via LRN.ReportsApi)
+// Dynamic role-based navbar (Menu Master + Role Menu Mapping via LRN.ReportsApi).
+// Short timeout: this client sits on the hot path of EVERY page (navbar + MenuAccessFilter).
+// A slow/unreachable Reports API must fail fast so pages keep rendering (menu falls back
+// to the static navbar and access checks fail open).
 builder.Services
 	.AddHttpClient<IMenuApiClient, MenuApiClient>()
-	.ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(30));
+	.ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(
+		builder.Configuration.GetValue<int?>("DenialWorkflowApi:MenuTimeoutSeconds") ?? 5));
 builder.Services.AddScoped<IMenuService, MenuService>();
 builder.Services.AddScoped<MenuAccessFilter>();
 

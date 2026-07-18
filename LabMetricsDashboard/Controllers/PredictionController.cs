@@ -259,6 +259,13 @@ public class PredictionController : Controller
                 denialTask.Result,
                 ct);
             denialBreakdown     = AssembleDenialBreakdownV2(denialRows);
+            denialBreakdown     = await _denialDescLookup.EnrichBreakdownAsync(
+                denialBreakdown, labConfig.MasterDbConnectionString, ct);
+            _logger.LogInformation(
+                "[{Lab}] Denial assemble: {SpRows} SP/snapshot row(s) → {CodeRows} denial-code row(s) across {Payers} payer(s).",
+                selectedLab, denialRows.Count,
+                denialBreakdown.PayerRows.Sum(p => p.TopDenialCodes.Count),
+                denialBreakdown.PayerRows.Count);
             noResponseBreakdown = AssembleNoResponseBreakdownV2(noRespTask.Result);
             spMetrics           = metricsTask.Result;
 
@@ -315,6 +322,8 @@ public class PredictionController : Controller
             topPanels           = BuildPanelValidationRows(dataset);
             topCpt              = BuildCptRows(dataset);
             denialBreakdown     = BuildDenialBreakdown(deniedRows);
+            denialBreakdown     = await _denialDescLookup.EnrichBreakdownAsync(
+                denialBreakdown, labConfig?.MasterDbConnectionString, HttpContext.RequestAborted);
             noResponseBreakdown = BuildNoResponseBreakdown(noRespRows);
         }
 
@@ -1110,8 +1119,12 @@ public class PredictionController : Controller
 
     // ?? Private helpers ?????????????????????????????????????????????????
 
-    /// <summary>Builds the Prediction Analysis view model (shared by Index and ExportPredictionExcel).</summary>
-    private async Task<PredictionAnalysisViewModel> BuildPredictionViewModelAsync(
+    /// <summary>
+    /// Builds the Prediction Analysis view model (shared by Index and ExportPredictionExcel).
+    /// PUBLIC: also called by LRN.ReportWorker's PredictionAnalysisReportGenerator so the
+    /// async export reuses the exact same stored procedures and aggregation logic.
+    /// </summary>
+    public async Task<PredictionAnalysisViewModel> BuildPredictionViewModelAsync(
         string selectedLab, LabCsvConfig? labConfig,
         string? filterPayerName, string? filterPayerType, string? filterPanelName,
         string? filterFinalCoverageStatus, string? filterPayability, string? filterCPTCode,
@@ -1184,6 +1197,13 @@ public class PredictionController : Controller
                 denialTask.Result,
                 ct);
             denialBreakdown     = AssembleDenialBreakdownV2(denialRows);
+            denialBreakdown     = await _denialDescLookup.EnrichBreakdownAsync(
+                denialBreakdown, labConfig.MasterDbConnectionString, ct);
+            _logger.LogInformation(
+                "[{Lab}] Denial assemble (export): {SpRows} SP/snapshot row(s) → {CodeRows} denial-code row(s) across {Payers} payer(s).",
+                selectedLab, denialRows.Count,
+                denialBreakdown.PayerRows.Sum(p => p.TopDenialCodes.Count),
+                denialBreakdown.PayerRows.Count);
             noResponseBreakdown = AssembleNoResponseBreakdownV2(noRespTask.Result);
         }
         else
@@ -1248,6 +1268,8 @@ public class PredictionController : Controller
             payerPayStatusRows = BuildPayerPayStatusBreakdown(forecastPayable);
             adjustedByPayer = BuildAdjustedByPayer(adjustedRows);
             denialBreakdown = BuildDenialBreakdown(deniedRows);
+            denialBreakdown = await _denialDescLookup.EnrichBreakdownAsync(
+                denialBreakdown, labConfig?.MasterDbConnectionString, HttpContext.RequestAborted);
             noResponseBreakdown = BuildNoResponseBreakdown(noRespRows);
         }
 
@@ -1267,8 +1289,11 @@ public class PredictionController : Controller
         };
     }
 
-    /// <summary>Builds the Forecasting Summary view model (shared by ForecastingSummary and ExportForecastingExcel).</summary>
-    private async Task<ForecastingSummaryViewModel> BuildForecastingViewModelAsync(
+    /// <summary>
+    /// Builds the Forecasting Summary view model (shared by ForecastingSummary and ExportForecastingExcel).
+    /// PUBLIC: also called by LRN.ReportWorker's ForecastingSummaryReportGenerator.
+    /// </summary>
+    public async Task<ForecastingSummaryViewModel> BuildForecastingViewModelAsync(
         string selectedLab, LabCsvConfig? labConfig,
         List<PredictionRecord>? preloadedRecords = null)
     {
@@ -1894,30 +1919,32 @@ public class PredictionController : Controller
                     .Select(r => r.VisitNumber).Where(v => !string.IsNullOrWhiteSpace(v))
                     .Distinct(StringComparer.OrdinalIgnoreCase).Count();
 
-                // Top-5 denial codes for this payer by claim count
+                // One UI row per DenialCode value (keep "CO-18, CO-204" together).
+                // Description is joined from DenialMapperSuperMaster (SP / EnrichBreakdown).
                 var topDenials = pgList
-                    .GroupBy(r => new
-                    {
-                        Code = string.IsNullOrWhiteSpace(r.DenialCode) ? "(No Code)" : r.DenialCode,
-                        Desc = string.IsNullOrWhiteSpace(r.DenialDescription) ? string.Empty : r.DenialDescription
-                    })
+                    .GroupBy(
+                        r => string.IsNullOrWhiteSpace(r.DenialCode) ? "(No Code)" : r.DenialCode.Trim(),
+                        StringComparer.OrdinalIgnoreCase)
                     .Select(dg =>
                     {
-                        var dgList = dg.ToList();
-                        var dgClaims = dgList
+                        var dgRecords = dg.ToList();
+                        var dgClaims = dgRecords
                             .Select(r => r.VisitNumber).Where(v => !string.IsNullOrWhiteSpace(v))
                             .Distinct(StringComparer.OrdinalIgnoreCase).Count();
+                        var desc = dgRecords
+                            .Select(r => r.DenialDescription)
+                            .FirstOrDefault(d => !string.IsNullOrWhiteSpace(d)) ?? string.Empty;
                         return new DenialCodeRow(
-                            dg.Key.Code,
-                            dg.Key.Desc,
+                            dg.Key,
+                            desc,
                             dgClaims,
-                            dgList.Sum(r => r.ModeAllowedAmountSameLab),
-                            dgList.Sum(r => r.ModeInsurancePaidSameLab),
-                            dgList.Sum(r => r.AllowedAmount),
-                            dgList.Sum(r => r.InsurancePayment),
-                            dgList.Sum(r => r.Variance_AllowedAmount),
-                            dgList.Sum(r => r.Variance_PaidAmount),
-                            ByMonth(dgList));
+                            dgRecords.Sum(r => r.ModeAllowedAmountSameLab),
+                            dgRecords.Sum(r => r.ModeInsurancePaidSameLab),
+                            dgRecords.Sum(r => r.AllowedAmount),
+                            dgRecords.Sum(r => r.InsurancePayment),
+                            dgRecords.Sum(r => r.Variance_AllowedAmount),
+                            dgRecords.Sum(r => r.Variance_PaidAmount),
+                            ByMonth(dgRecords));
                     })
                     .OrderByDescending(d => d.TotalClaims)
                     .Take(5)
@@ -1992,6 +2019,7 @@ public class PredictionController : Controller
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count();
             var varAllowed = list.Sum(x => x.Record.Variance_AllowedAmount);
             var varPaid    = list.Sum(x => x.Record.Variance_PaidAmount);
+            // File path has no SP — leave % null (DB path uses SP PctVariance* only)
             return new AgeBucketAmount(lineItems, varAllowed, varPaid, null, null);
         }
 
@@ -2221,11 +2249,15 @@ public class PredictionController : Controller
             .Select(pg =>
             {
                 var list = pg.ToList();
-                // Group by denial code only; prefer a non-blank description from LRNMaster enrichment.
-                var topDenials = list.GroupBy(r => r.DenialCode, StringComparer.OrdinalIgnoreCase)
+                // Keep multi-codes as one row ("CO-18, CO-204"); SP/Enrich joins master descriptions.
+                var topDenials = list
+                    .GroupBy(
+                        r => string.IsNullOrWhiteSpace(r.DenialCode) ? "(Blank)" : r.DenialCode.Trim(),
+                        StringComparer.OrdinalIgnoreCase)
                     .Select(dg =>
                     {
-                        var desc = dg.Select(x => x.DenialDescription)
+                        var desc = dg
+                            .Select(x => x.DenialDescription)
                             .FirstOrDefault(d => !string.IsNullOrWhiteSpace(d)) ?? string.Empty;
                         return new DenialCodeRow(
                             dg.Key, desc,
@@ -2266,6 +2298,8 @@ public class PredictionController : Controller
             "90+" => AgeBuckets.B91_120,
             _ => AgeBuckets.B120P
         };
+
+        // Percentages come only from SP (Sum Var / Total Var × 100) — no C# recalculation.
         var payerRows = spRows.GroupBy(r => r.PayerName, StringComparer.OrdinalIgnoreCase)
             .Select(pg =>
             {
@@ -2276,8 +2310,10 @@ public class PredictionController : Controller
                         x.LineItemCount, x.VarianceAllowed, x.VariancePaid,
                         x.PctVarianceAllowed, x.PctVariancePaid));
                 var priority = byBucket.OrderByDescending(kv => kv.Value.LineItemCount).First().Key;
+                var totalVarA = list[0].TotalVarianceAllowed;
+                var totalVarP = list[0].TotalVariancePaid;
                 return new NoResponsePayerRow(pg.Key, list.Sum(x => x.LineItemCount),
-                    list.Sum(x => x.VarianceAllowed), list.Sum(x => x.VariancePaid),
+                    totalVarA, totalVarP,
                     byBucket, priority);
             }).OrderByDescending(p => p.TotalVarianceAllowed).ToList();
 
@@ -2292,15 +2328,15 @@ public class PredictionController : Controller
                     rows.Sum(r => r.LineItemCount),
                     rows.Sum(r => r.VarianceAllowed),
                     rows.Sum(r => r.VariancePaid),
-                    null, null);
+                    null, null); // grand-total % not provided by per-payer SP rows
             });
 
         return new NoResponseBreakdown
         {
             PayerRows = payerRows,
             TotalLineItems = spRows.Sum(r => r.LineItemCount),
-            TotalVarianceAllowed = spRows.GroupBy(r => r.PayerName).Select(g => g.First().TotalVarianceAllowed).Sum(),
-            TotalVariancePaid = spRows.GroupBy(r => r.PayerName).Select(g => g.First().TotalVariancePaid).Sum(),
+            TotalVarianceAllowed = payerRows.Sum(p => p.TotalVarianceAllowed),
+            TotalVariancePaid = payerRows.Sum(p => p.TotalVariancePaid),
             TotalByBucket = totalByBucket,
         };
     }
@@ -2338,11 +2374,17 @@ public class PredictionController : Controller
                     m => MonthAmount(pgList, m));
 
                 var topDenials = pgList
-                    .GroupBy(r => new { r.DenialCode, r.DenialDescription }, (k, g) =>
+                    .GroupBy(
+                        r => string.IsNullOrWhiteSpace(r.DenialCode) ? "(Blank)" : r.DenialCode.Trim(),
+                        StringComparer.OrdinalIgnoreCase)
+                    .Select(dg =>
                     {
-                        var dgList = g.ToList();
+                        var dgList = dg.ToList();
+                        var desc = dgList
+                            .Select(r => r.DenialDescription)
+                            .FirstOrDefault(d => !string.IsNullOrWhiteSpace(d)) ?? string.Empty;
                         return new DenialCodeRow(
-                            k.DenialCode, k.DenialDescription,
+                            dg.Key, desc,
                             dgList.Sum(r => r.LineItemCount),
                             dgList.Sum(r => r.PredictedAllowed),
                             dgList.Sum(r => r.PredictedInsurance),
@@ -2396,12 +2438,15 @@ public class PredictionController : Controller
         AgeBucketAmount BucketAmount(IEnumerable<NoResponseBreakdownSpRow> rows, string bucket)
         {
             var list = rows.Where(r => r.AgeBucket == bucket).ToList();
+            if (list.Count == 0)
+                return new AgeBucketAmount(0, 0, 0, null, null);
+            // Use SP-provided percentages as-is (no averaging / recalculation)
             return new AgeBucketAmount(
                 list.Sum(r => r.LineItemCount),
                 list.Sum(r => r.VarianceAllowed),
                 list.Sum(r => r.VariancePaid),
-                list.Count > 0 ? list.Average(r => r.PctVarianceAllowed ?? 0) : null,
-                list.Count > 0 ? list.Average(r => r.PctVariancePaid ?? 0) : null);
+                list[0].PctVarianceAllowed,
+                list[0].PctVariancePaid);
         }
 
         var payerRows = spRows

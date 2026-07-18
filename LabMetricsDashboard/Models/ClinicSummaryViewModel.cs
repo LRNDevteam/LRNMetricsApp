@@ -45,21 +45,41 @@ public sealed class ClinicSummaryViewModel
         || !string.IsNullOrWhiteSpace(FilterFirstBillFrom)
         || !string.IsNullOrWhiteSpace(FilterFirstBillTo);
 
-    // Top collected breakdowns (Top 10 by InsurancePaidAmount)
+    // Top collected breakdowns (Top 10 by Collection %)
     public List<TopCollectedItem> TopCollectedClinics { get; init; } = [];
     public List<TopCollectedItem> TopCollectedSalesReps { get; init; } = [];
     public List<TopCollectedItem> TopCollectedPayers { get; init; } = [];
     public List<TopCollectedItem> TopCollectedPanels { get; init; } = [];
 
-    // Top denied breakdowns (Top 10 by DeniedCharges)
+    // Top denied breakdowns (Top 10 by Denial %)
     public List<TopDeniedItem> TopDeniedClinics { get; init; } = [];
     public List<TopDeniedItem> TopDeniedSalesReps { get; init; } = [];
     public List<TopDeniedItem> TopDeniedPayers { get; init; } = [];
     public List<TopDeniedItem> TopDeniedPanels { get; init; } = [];
+
+    // Clinic-parent drilldowns used by the Sales Rep, Payer, and Panel tabs.
+    public List<ClinicCollectedBreakdownGroup> CollectedSalesRepsByClinic { get; init; } = [];
+    public List<ClinicCollectedBreakdownGroup> CollectedPayersByClinic { get; init; } = [];
+    public List<ClinicCollectedBreakdownGroup> CollectedPanelsByClinic { get; init; } = [];
+    public List<ClinicDeniedBreakdownGroup> DeniedSalesRepsByClinic { get; init; } = [];
+    public List<ClinicDeniedBreakdownGroup> DeniedPayersByClinic { get; init; } = [];
+    public List<ClinicDeniedBreakdownGroup> DeniedPanelsByClinic { get; init; } = [];
+}
+
+public sealed record ClinicCollectedBreakdownGroup
+{
+    public TopCollectedItem Clinic { get; init; } = new();
+    public List<TopCollectedItem> Items { get; init; } = [];
+}
+
+public sealed record ClinicDeniedBreakdownGroup
+{
+    public TopDeniedItem Clinic { get; init; } = new();
+    public List<TopDeniedItem> Items { get; init; } = [];
 }
 
 /// <summary>
-/// One row of the Clinic Summary table ó aggregated from Claim Level records for a single clinic.
+/// One row of the Clinic Summary table ù aggregated from Claim Level records for a single clinic.
 /// </summary>
 public sealed record ClinicSummaryRow
 {
@@ -84,7 +104,7 @@ public sealed record ClinicSummaryRow
     public decimal AverageAllowedAmount { get; init; }
     public decimal AverageInsurancePaidAmount { get; init; }
 
-    // Percentages (0ñ100, rounded to nearest int)
+    // Percentages (0ù100, rounded to nearest int)
     public decimal PaidClaimPct => BilledClaimCount == 0 ? 0
         : Math.Round((decimal)PaidClaimCount / BilledClaimCount * 100, 0);
 

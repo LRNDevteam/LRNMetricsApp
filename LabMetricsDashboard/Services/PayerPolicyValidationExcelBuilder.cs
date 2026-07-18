@@ -4,8 +4,10 @@ using LabMetricsDashboard.Models;
 namespace LabMetricsDashboard.Services;
 
 /// <summary>
-/// Builds an Excel workbook of Payer Policy Validation line items for one lab,
-/// including Mode and Median Same Lab columns.
+/// Builds an Excel workbook of Payer Policy Validation line items for one lab.
+/// Exports the full dbo.PayerValidationReport column set (see
+/// <see cref="PayerPolicyValidationColumns"/>) using the shared green
+/// <see cref="ExcelTheme"/> — same styling family as the Prediction exports.
 /// </summary>
 public static class PayerPolicyValidationExcelBuilder
 {
@@ -13,15 +15,14 @@ public static class PayerPolicyValidationExcelBuilder
     private const int FullStylingMaxRows = 10_000;
 
     private static readonly string[] Headers =
-    [
-        "Accession #", "Visit #", "CPT", "Payer Name", "Payer Type", "Panel",
-        "Forecasting Payability", "Pay Status", "Payability", "Final Coverage",
-        "Expected Pmt Date", "First Billed Date", "Date Of Service",
-        "Billed Amt", "Allowed Amt", "Ins Payment",
-        "Median Allowed (Same Lab)", "Median Ins Paid (Same Lab)",
-        "Mode Allowed (Same Lab)", "Mode Ins Paid (Same Lab)",
-        "Denial Code", "Denial Description"
-    ];
+        PayerPolicyValidationColumns.All.Select(c => c.Header).ToArray();
+
+    private static readonly int[] MoneyColumnNumbers =
+        PayerPolicyValidationColumns.All
+            .Select((c, i) => (c.IsMoney, Col: i + 1))
+            .Where(x => x.IsMoney)
+            .Select(x => x.Col)
+            .ToArray();
 
     public static byte[] CreateWorkbook(
         string labName,
@@ -92,7 +93,7 @@ public static class PayerPolicyValidationExcelBuilder
         var data = rows.Select(MapRow);
         ws.Cell(3, 1).InsertData(data);
 
-        foreach (var c in new[] { 14, 15, 16, 17, 18, 19, 20 })
+        foreach (var c in MoneyColumnNumbers)
             ws.Column(c).Style.NumberFormat.Format = "$#,##0.00";
 
         ws.SheetView.FreezeRows(2);
@@ -100,41 +101,13 @@ public static class PayerPolicyValidationExcelBuilder
             ws.Range(2, 1, 2, colCount).SetAutoFilter();
         else
         {
-            double[] widths =
-            [
-                16, 14, 10, 30, 14, 18, 20, 14, 14, 18,
-                16, 16, 16, 12, 12, 12, 15, 15, 15, 15, 12, 40
-            ];
             for (int c = 1; c <= colCount; c++)
-                ws.Column(c).Width = widths[c - 1];
+                ws.Column(c).Width = 16;
         }
     }
 
     private static object[] MapRow(PredictionRecord r) =>
-    [
-        r.AccessionNo,
-        r.VisitNumber,
-        r.CPTCode,
-        string.IsNullOrWhiteSpace(r.PayerNameNormalized) ? r.PayerName : r.PayerNameNormalized,
-        r.PayerType,
-        r.PanelName,
-        r.ForecastingPayability,
-        r.PayStatus,
-        r.Payability,
-        r.FinalCoverageStatus,
-        r.ExpectedPaymentDate,
-        r.FirstBilledDate,
-        r.DateOfService,
-        r.BilledAmount,
-        r.AllowedAmount,
-        r.InsurancePayment,
-        r.MedianAllowedAmountSameLab,
-        r.MedianInsurancePaidSameLab,
-        r.ModeAllowedAmountSameLab,
-        r.ModeInsurancePaidSameLab,
-        r.DenialCode,
-        r.DenialDescription
-    ];
+        PayerPolicyValidationColumns.All.Select(c => c.Value(r) ?? string.Empty).ToArray();
 
     private static string TruncateSheetName(string name) =>
         name.Length <= 31 ? name : name[..31];

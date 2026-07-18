@@ -263,7 +263,7 @@ public class AnalysisService
         foreach (var r in denied)
         {
             var codes = r.DenialCode
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             if (codes.Length == 0) codes = [string.Empty];
 
             foreach (var code in codes)

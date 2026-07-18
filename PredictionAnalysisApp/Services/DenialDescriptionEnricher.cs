@@ -40,7 +40,12 @@ public static class DenialDescriptionEnricher
                 FROM dbo.PV_DenialBreakdown
                 WHERE NULLIF(LTRIM(RTRIM(DenialCode)), '') IS NOT NULL
                   AND DenialCode <> N'(Blank)'
-                  AND NULLIF(LTRIM(RTRIM(DenialDescription)), '') IS NULL;
+                  AND (
+                        NULLIF(LTRIM(RTRIM(DenialDescription)), '') IS NULL
+                     OR DenialCode LIKE N'%,%'
+                     OR DenialCode LIKE N'%;%'
+                     OR DenialCode LIKE N'%|%'
+                  );
                 """, labConn)
             {
                 CommandTimeout = 120
@@ -83,7 +88,12 @@ public static class DenialDescriptionEnricher
                     UPDATE dbo.PV_DenialBreakdown
                     SET DenialDescription = @Desc
                     WHERE LTRIM(RTRIM(DenialCode)) = @Code
-                      AND NULLIF(LTRIM(RTRIM(DenialDescription)), '') IS NULL;
+                      AND (
+                            NULLIF(LTRIM(RTRIM(DenialDescription)), '') IS NULL
+                         OR @Code LIKE '%,%'
+                         OR @Code LIKE '%;%'
+                         OR @Code LIKE '%|%'
+                      );
                     """, labConn)
                 {
                     CommandTimeout = 120
@@ -96,8 +106,13 @@ public static class DenialDescriptionEnricher
                     UPDATE dbo.PayerValidationReport
                     SET DenialDescription = @Desc
                     WHERE LTRIM(RTRIM(DenialCode)) = @Code
-                      AND NULLIF(LTRIM(RTRIM(DenialDescription)), '') IS NULL
-                      AND LTRIM(RTRIM(ISNULL(PayStatus, N''))) = N'Denied';
+                      AND LTRIM(RTRIM(ISNULL(PayStatus, N''))) = N'Denied'
+                      AND (
+                            NULLIF(LTRIM(RTRIM(DenialDescription)), '') IS NULL
+                         OR @Code LIKE '%,%'
+                         OR @Code LIKE '%;%'
+                         OR @Code LIKE '%|%'
+                      );
                     """, labConn)
                 {
                     CommandTimeout = 300
@@ -144,6 +159,46 @@ public static class DenialDescriptionEnricher
         out string description)
     {
         description = string.Empty;
+        if (string.IsNullOrWhiteSpace(rawCode))
+            return false;
+
+        // Multi-code: "CO-16,CO-109" / "CO-16;CO-109" → resolve each, join with ", "
+        var parts = rawCode
+            .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (parts.Length > 1)
+        {
+            var descs = new List<string>(parts.Length);
+            var any = false;
+            foreach (var part in parts)
+            {
+                if (TryResolveSingle(part, masterByNorm, out var partDesc)
+                    && !string.IsNullOrWhiteSpace(partDesc))
+                {
+                    descs.Add(partDesc);
+                    any = true;
+                }
+            }
+
+            if (!any)
+                return false;
+
+            description = string.Join(", ", descs);
+            return true;
+        }
+
+        return TryResolveSingle(rawCode, masterByNorm, out description);
+    }
+
+    private static bool TryResolveSingle(
+        string rawCode,
+        IReadOnlyDictionary<string, string> masterByNorm,
+        out string description)
+    {
+        description = string.Empty;
         foreach (var candidate in CandidateKeys(rawCode))
         {
             if (masterByNorm.TryGetValue(candidate, out var desc)
@@ -161,7 +216,7 @@ public static class DenialDescriptionEnricher
         var trimmed = rawCode.Trim();
         yield return NormalizeCode(trimmed);
 
-        var token = trimmed.Split([':', ';', '|'], 2, StringSplitOptions.TrimEntries)[0];
+        var token = trimmed.Split([':', '|'], 2, StringSplitOptions.TrimEntries)[0];
         if (!string.IsNullOrWhiteSpace(token) && !token.Equals(trimmed, StringComparison.OrdinalIgnoreCase))
             yield return NormalizeCode(token);
 

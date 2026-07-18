@@ -24,6 +24,11 @@ public sealed class MenuService : IMenuService
 {
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(30);
 
+    // When the Reports API is down/slow, cache the empty result briefly so we retry
+    // soon — but do NOT hit the failing API on every single request in the meantime.
+    // Without this, an unreachable menu API stalled every page for the full HTTP timeout.
+    private static readonly TimeSpan FailureCacheDuration = TimeSpan.FromMinutes(1);
+
     private readonly IMemoryCache _cache;
     private readonly IMenuApiClient _api;
     private readonly ILogger<MenuService> _logger;
@@ -47,9 +52,18 @@ public sealed class MenuService : IMenuService
         var key = $"menu:v{Volatile.Read(ref _cacheVersion)}:roles:{RoleKey(user)}";
         var cached = await _cache.GetOrCreateAsync(key, async entry =>
         {
-            entry.AbsoluteExpirationRelativeToNow = CacheDuration;
-            var flat = await _api.GetMyMenusAsync(ct);
-            return BuildTree(flat);
+            try
+            {
+                var flat = await _api.GetMyMenusAsync(ct);
+                entry.AbsoluteExpirationRelativeToNow = CacheDuration;
+                return BuildTree(flat);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Menu API unavailable; using empty menu for {Duration}.", FailureCacheDuration);
+                entry.AbsoluteExpirationRelativeToNow = FailureCacheDuration;
+                return new List<MenuItemVm>(); // view falls back to the static navbar
+            }
         });
         return cached ?? new List<MenuItemVm>();
     }
@@ -81,11 +95,20 @@ public sealed class MenuService : IMenuService
         var key = $"menu:v{Volatile.Read(ref _cacheVersion)}:routes";
         var set = await _cache.GetOrCreateAsync(key, async entry =>
         {
-            entry.AbsoluteExpirationRelativeToNow = CacheDuration;
-            var routes = await _api.GetManagedRoutesAsync(ct);
-            return routes
-                .Select(r => RouteKey(r.AreaName, r.ControllerName, r.ActionName))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var routes = await _api.GetManagedRoutesAsync(ct);
+                entry.AbsoluteExpirationRelativeToNow = CacheDuration;
+                return routes
+                    .Select(r => RouteKey(r.AreaName, r.ControllerName, r.ActionName))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Menu routes API unavailable; enforcement disabled for {Duration}.", FailureCacheDuration);
+                entry.AbsoluteExpirationRelativeToNow = FailureCacheDuration;
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase); // empty => fail open
+            }
         });
         return set ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     }

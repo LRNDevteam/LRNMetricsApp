@@ -1606,7 +1606,66 @@ th.pr-month-data, td.pr-month-data {
                 if (iframe && iframe.parentNode) document.body.removeChild(iframe);
             }
 
+            // ── Async export (preferred): queue via UserReqReports; LRN.ReportWorker
+            // generates the workbook in the background and the 📄 Reports badge
+            // notifies when ready. Falls back to the legacy synchronous download
+            // when the lab has no queue table (400) or the queue call fails.
             exportBtn.addEventListener('click', function () {
+                var form = document.getElementById('prFilterForm');
+                if (!form) return;
+
+                var fd = new FormData(form);
+                var val = function (n) { return (fd.get(n) || '').toString().trim() || null; };
+                var all = function (n) {
+                    var v = fd.getAll(n).map(function (x) { return x.toString().trim(); })
+                             .filter(function (x) { return x.length > 0; });
+                    return v.length > 0 ? v : null;
+                };
+                var filters = {
+                    PayerNames:      all('filterPayerNames'),
+                    PanelNames:      all('filterPanelNames'),
+                    DosFrom:         val('filterDosFrom'),
+                    DosTo:           val('filterDosTo'),
+                    FirstBillFrom:   val('filterFirstBillFrom'),
+                    FirstBillTo:     val('filterFirstBillTo'),
+                    FirstBilledFrom: val('filterFirstBilledFrom'),
+                    FirstBilledTo:   val('filterFirstBilledTo')
+                };
+
+                var body = new FormData();
+                body.append('lab', '@Model.SelectedLab');
+                body.append('reportType', 'ProductionReport');
+                body.append('filterDetails', JSON.stringify(filters));
+                var af = document.querySelector('#lrnReportsAf input[name="__RequestVerificationToken"]');
+                if (af) body.append('__RequestVerificationToken', af.value);
+
+                var original = exportBtn.innerHTML;
+                exportBtn.disabled = true;
+                exportBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Queuing…';
+
+                fetch('@Url.Action("Queue", "UserReports")', { method: 'POST', body: body })
+                    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+                    .then(function (res) {
+                        if (res.ok) {
+                            exportBtn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating — watch Reports 📄';
+                            if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
+                            setTimeout(function () { exportBtn.disabled = false; exportBtn.innerHTML = original; }, 8000);
+                        } else if (res.status === 400) {
+                            exportBtn.disabled = false; exportBtn.innerHTML = original;
+                            legacySyncExport();
+                        } else {
+                            exportBtn.disabled = false; exportBtn.innerHTML = original;
+                            alert(res.j && res.j.message ? res.j.message : 'Could not queue the report.');
+                        }
+                    })
+                    .catch(function () {
+                        exportBtn.disabled = false; exportBtn.innerHTML = original;
+                        legacySyncExport();
+                    });
+            });
+
+            // Legacy synchronous export with the fake-progress overlay (fallback path).
+            function legacySyncExport() {
                 var form = document.getElementById('prFilterForm');
                 if (!form) return;
 
@@ -1684,7 +1743,7 @@ th.pr-month-data, td.pr-month-data {
                     prCleanup(pollTimer, creepTimer, stepTimer, iframe);
                     overlay.style.display = 'none';
                 }, 600000);
-            });
+            }
         }
     });
 </script>

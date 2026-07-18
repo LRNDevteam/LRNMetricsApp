@@ -20,10 +20,16 @@ public sealed class SqlAppUsageAuditService : IAppUsageAuditService
     /// <summary>Max back-off duration (5 minutes).</summary>
     private static readonly TimeSpan MaxBackoff = TimeSpan.FromMinutes(5);
 
-    public SqlAppUsageAuditService(IConfiguration configuration, ILogger<SqlAppUsageAuditService> logger)
+    private readonly AppUsageAuditQueue _queue;
+
+    public SqlAppUsageAuditService(
+        IConfiguration configuration,
+        ILogger<SqlAppUsageAuditService> logger,
+        AppUsageAuditQueue queue)
     {
         _masterConnectionString = configuration.GetConnectionString("DefaultConnection") ?? string.Empty;
         _logger = logger;
+        _queue = queue;
     }
 
     /// <summary>Returns true if the circuit is open (should skip SQL calls).</summary>
@@ -59,7 +65,45 @@ public sealed class SqlAppUsageAuditService : IAppUsageAuditService
         // failures > 4: silent back-off, no log spam
     }
 
-    public async Task LogPageVisitAsync(HttpContext httpContext, string pageName, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Captures the page visit from the current request and enqueues it for the
+    /// background writer. This method performs NO database I/O — a remote/slow audit
+    /// database must never add latency to page loads (it previously cost one
+    /// connection + INSERT round trip on every GET request).
+    /// </summary>
+    public Task LogPageVisitAsync(HttpContext httpContext, string pageName, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(_masterConnectionString))
+        {
+            return Task.CompletedTask;
+        }
+
+        try
+        {
+            // GetOrCreateBrowserId may append a Set-Cookie header, so it must run
+            // here, while the response has not started — not in the background.
+            var entry = new PageVisitAuditEntry(
+                UserName:    ResolveUserName(httpContext),
+                BrowserId:   GetOrCreateBrowserId(httpContext),
+                TabId:       httpContext.Request.Headers["X-Lmd-TabId"].ToString(),
+                PageName:    pageName,
+                Path:        httpContext.Request.Path.Value ?? string.Empty,
+                QueryString: httpContext.Request.QueryString.HasValue ? httpContext.Request.QueryString.Value ?? string.Empty : string.Empty,
+                IpAddress:   ResolveIpAddress(httpContext),
+                UserAgent:   httpContext.Request.Headers.UserAgent.ToString());
+
+            _queue.TryEnqueue(entry);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to capture page visit for audit queue.");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Writes one queued page visit. Called only by <see cref="AppUsageAuditBackgroundWriter"/>.</summary>
+    public async Task WritePageVisitAsync(PageVisitAuditEntry entry, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(_masterConnectionString) || IsCircuitOpen())
         {
@@ -69,13 +113,6 @@ public sealed class SqlAppUsageAuditService : IAppUsageAuditService
         try
         {
             await EnsureTablesAsync(cancellationToken);
-
-            var browserId = GetOrCreateBrowserId(httpContext);
-            var userName = ResolveUserName(httpContext);
-            var ipAddress = ResolveIpAddress(httpContext);
-            var path = httpContext.Request.Path.Value ?? string.Empty;
-            var queryString = httpContext.Request.QueryString.HasValue ? httpContext.Request.QueryString.Value ?? string.Empty : string.Empty;
-            var userAgent = httpContext.Request.Headers.UserAgent.ToString();
 
             await using var connection = new SqlConnection(_masterConnectionString);
             await connection.OpenAsync(cancellationToken);
@@ -96,14 +133,14 @@ VALUES
                 CommandTimeout = 30
             };
 
-            command.Parameters.AddWithValue("@UserName", DbString(userName));
-            command.Parameters.AddWithValue("@BrowserId", browserId);
-            command.Parameters.AddWithValue("@TabId", DbString(httpContext.Request.Headers["X-Lmd-TabId"].ToString()));
-            command.Parameters.AddWithValue("@PageName", DbString(pageName));
-            command.Parameters.AddWithValue("@Path", DbString(path));
-            command.Parameters.AddWithValue("@QueryString", DbString(queryString));
-            command.Parameters.AddWithValue("@IpAddress", DbString(ipAddress));
-            command.Parameters.AddWithValue("@UserAgent", DbString(userAgent));
+            command.Parameters.AddWithValue("@UserName", DbString(entry.UserName));
+            command.Parameters.AddWithValue("@BrowserId", entry.BrowserId);
+            command.Parameters.AddWithValue("@TabId", DbString(entry.TabId));
+            command.Parameters.AddWithValue("@PageName", DbString(entry.PageName));
+            command.Parameters.AddWithValue("@Path", DbString(entry.Path));
+            command.Parameters.AddWithValue("@QueryString", DbString(entry.QueryString));
+            command.Parameters.AddWithValue("@IpAddress", DbString(entry.IpAddress));
+            command.Parameters.AddWithValue("@UserAgent", DbString(entry.UserAgent));
 
             await command.ExecuteNonQueryAsync(cancellationToken);
             RecordSuccess();

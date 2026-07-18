@@ -153,7 +153,33 @@ public interface IPredictionDbRepository
     Task<PredictionFilterOptions> GetFilterOptionsAsync(
         string connectionString, string? runId = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Server-side paged read via dbo.usp_GetPayerValidationReportPaged — filters and
+    /// OFFSET/FETCH run in SQL so only one page crosses the network, instead of the
+    /// entire PayerValidationReport table. <paramref name="pageSize"/> null/&lt;=0
+    /// returns all filtered rows (Excel export).
+    /// </summary>
+    Task<PagedPredictionRecords> GetRecordsPagedAsync(
+        string  connectionString,
+        string? runId                                = null,
+        string? filterPayerName                      = null,
+        string? filterPanelName                      = null,
+        string? filterFinalCoverageStatus            = null,
+        string? filterCPTCode                        = null,
+        string? filterForecastingPayabilitySubstatus = null,
+        string? filterPredictionStatus               = null,
+        string? filterPayStatus                      = null,
+        int     pageNumber                           = 1,
+        int?    pageSize                             = 50,
+        CancellationToken cancellationToken = default);
 }
+
+/// <summary>One page of PayerValidationReport rows plus the counts the pager needs.</summary>
+public sealed record PagedPredictionRecords(
+    List<PredictionRecord> Rows,
+    int TotalFiltered,
+    int TotalAll);
 
 /// <summary>
 /// Lightweight diagnostic returned by <see cref="IPredictionDbRepository.ProbeAsync"/>.

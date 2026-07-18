@@ -1,6 +1,6 @@
 @model LineLevelViewModel
 @{
-    ViewData["Title"]       = $"Line Level ñ {Model.SelectedLab}";
+    ViewData["Title"]       = $"Line Level ù {Model.SelectedLab}";
     ViewData["SelectedLab"] = Model.SelectedLab;
     ViewData["PageLabel"]   = "Line Level Details";
 
@@ -94,7 +94,7 @@
                 <div class="col-sm-6 col-md-2">
                     <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PAYER NAME</label>
                     <input type="text" name="filterPayerName" value="@Model.FilterPayerName"
-                           class="form-control form-control-sm" placeholder="SearchÖ" />
+                           class="form-control form-control-sm" placeholder="Searchù" />
                 </div>
                 <!-- Payer Type -->
                 <div class="col-sm-6 col-md-2">
@@ -105,7 +105,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search payer typesÖ" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search payer typesù" autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var pt in Model.PayerTypes)
                                 {
@@ -125,7 +125,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search CPT codesÖ" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search CPT codesù" autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var cpt in Model.CPTCodes)
                                 {
@@ -145,7 +145,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search statusesÖ" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search statusesù" autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var cs in Model.ClaimStatuses)
                                 {
@@ -165,7 +165,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="SearchÖ" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Searchù" autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var ps in Model.PayStatuses)
                                 {
@@ -185,7 +185,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search clinicsÖ" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search clinicsù" autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var cn in Model.ClinicNames)
                                 {
@@ -200,13 +200,16 @@
                 <div class="col-sm-6 col-md-1">
                     <label class="form-label fw-semibold mb-1" style="font-size:.75rem">DENIAL CODE</label>
                     <input type="text" name="filterDenialCode" value="@Model.FilterDenialCode"
-                           class="form-control form-control-sm" placeholder="SearchÖ" />
+                           class="form-control form-control-sm" placeholder="Searchù" />
                 </div>
             </div>
             <div class="d-flex gap-2">
                 <button type="submit" class="btn btn-primary btn-sm">Apply Filters</button>
                 <a asp-controller="Dashboard" asp-action="LineLevel" asp-route-lab="@Model.SelectedLab"
                    class="btn btn-outline-secondary btn-sm">Clear</a>
+                <button type="button" id="lineExportExcelBtn" class="btn btn-sm btn-outline-success ms-auto">
+                    <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
+                </button>
             </div>
         </form>
     </div>
@@ -419,4 +422,60 @@ else
             });
         });
     });
+</script>
+
+<script nonce='@Context.Items["CspNonce"]'>
+(function () {
+    var btn = document.getElementById('lineExportExcelBtn');
+    var form = document.getElementById('lineFilterForm');
+    if (!btn || !form) return;
+
+    btn.addEventListener('click', function () {
+        var fd = new FormData(form);
+        var val = function (n) { return (fd.get(n) || '').toString().trim() || null; };
+        var all = function (n) {
+            var v = fd.getAll(n).map(function (x) { return x.toString().trim(); })
+                     .filter(function (x) { return x.length > 0; });
+            return v.length > 0 ? v : null;
+        };
+
+        var filters = {
+            PayerName: val('filterPayerName'),
+            PayerTypes: all('filterPayerTypes'),
+            ClaimStatuses: all('filterClaimStatuses'),
+            PayStatuses: all('filterPayStatuses'),
+            CPTCodes: all('filterCPTCodes'),
+            ClinicNames: all('filterClinicNames'),
+            DenialCode: val('filterDenialCode')
+        };
+
+        var body = new FormData();
+        body.append('lab', '@Model.SelectedLab');
+        body.append('reportType', 'LineLevelDetails');
+        body.append('filterDetails', JSON.stringify(filters));
+        var af = document.querySelector('#lrnReportsAf input[name="__RequestVerificationToken"]');
+        if (af) body.append('__RequestVerificationToken', af.value);
+
+        var original = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>QueuingÖ';
+
+        fetch('@Url.Action("Queue", "UserReports")', { method: 'POST', body: body })
+            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+            .then(function (res) {
+                if (res.ok) {
+                    btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating ó watch Reports ??';
+                    if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
+                    setTimeout(function () { btn.disabled = false; btn.innerHTML = original; }, 8000);
+                } else {
+                    btn.disabled = false; btn.innerHTML = original;
+                    alert(res.j && res.j.message ? res.j.message : 'Could not queue the report.');
+                }
+            })
+            .catch(function () {
+                btn.disabled = false; btn.innerHTML = original;
+                alert('Could not queue the report.');
+            });
+    });
+})();
 </script>

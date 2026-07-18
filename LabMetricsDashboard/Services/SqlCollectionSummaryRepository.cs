@@ -102,6 +102,43 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         ];
     }
 
+    /// <summary>
+    /// Tries each Collection Summary prefix candidate (e.g. Cert then CERT for Certus).
+    /// Rethrows the last missing-object error so callers/soft-fail can handle it.
+    /// </summary>
+    private async Task<T> ExecuteWithCollectionPrefixFallbackAsync<T>(
+        string? labName,
+        Func<string, Task<T>> execute,
+        CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var candidates = LabCollectionPrefix.GetPrefixCandidates(labName);
+        if (candidates.Count == 0)
+            throw new InvalidOperationException(
+                $"No Collection Summary SP prefix mapped for lab '{labName}'. Use Certus or CERT.");
+
+        SqlException? lastMissing = null;
+        foreach (var prefix in candidates)
+        {
+            try
+            {
+                return await execute(prefix).ConfigureAwait(false);
+            }
+            catch (SqlException ex) when (ex.Number is 2812 or 208)
+            {
+                lastMissing = ex;
+                _logger.LogWarning(
+                    "Collection SP/table missing for prefix {Prefix} (lab {Lab}): {Message}",
+                    prefix, labName, ex.Message);
+            }
+        }
+
+        if (lastMissing is not null)
+            throw lastMissing;
+
+        throw new InvalidOperationException($"Collection Summary SPs not found for lab '{labName}'.");
+    }
+
     private async Task<CollectionMonthlyVolumeResult> GetCollectionMonthlyVolumeViaSpAsync(
         string connectionString,
         string prefix,
@@ -745,39 +782,25 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
-
-        // NorthWest, Augustus, and Phi_Life all route through their own read SPs
-        // (usp_GetNW_CS_MonthlyClaimVolume / usp_GetAug_CS_MonthlyClaimVolume / usp_GetPhi_CS_MonthlyClaimVolume).
-        // The SP receives the 8 filter params + @HasFilter and decides internally
-        // whether to return the snapshot or run the live query.
-        var monthLabPrefix = LabCollectionPrefix.GetPrefix(rule);
-        if (string.Equals(monthLabPrefix, "NW",  StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(monthLabPrefix, "Aug", StringComparison.OrdinalIgnoreCase))
-            //||
-            //string.Equals(monthLabPrefix, "Phi", StringComparison.OrdinalIgnoreCase))
-        {
-            return await GetCollectionMonthlyVolumeViaSpAsync(
-                connectionString, monthLabPrefix,
-                filterPayerNames, filterPanelNames,
-                filterFirstBillFrom, filterFirstBillTo,
-                filterDosFrom, filterDosTo,
-                filterCheckDateFrom, filterCheckDateTo,
-                ct).ConfigureAwait(false);
-        }
-        else
-        {
-            
-            return await GetCollectionMonthlyVolumeViaSpAsync(
-                connectionString, monthLabPrefix,
-                filterPayerNames, filterPanelNames,
-                filterFirstBillFrom, filterFirstBillTo,
-                filterDosFrom, filterDosTo,
-                filterCheckDateFrom, filterCheckDateTo,
-                ct).ConfigureAwait(false);
-        }
-
         _ = useLineEncounters;
 
+        // All Collection Summary labs route through usp_Get{prefix}_CS_MonthlyClaimVolume.
+        // Certus accepts Cert / CERT prefixes (GetPrefixCandidates).
+        return await ExecuteWithCollectionPrefixFallbackAsync(
+            rule,
+            prefix => GetCollectionMonthlyVolumeViaSpAsync(
+                connectionString, prefix,
+                filterPayerNames, filterPanelNames,
+                filterFirstBillFrom, filterFirstBillTo,
+                filterDosFrom, filterDosTo,
+                filterCheckDateFrom, filterCheckDateTo,
+                ct),
+            ct).ConfigureAwait(false);
+    }
+
+    // Legacy live-query Monthly Claim Volume path retained below for reference / emergency rollback.
+    // Re-enable by removing the early return above if an SP is unavailable and live SQL is preferred.
+#if false
         // Data based on Posted Date (CheckDate)
         const string dateColumn = "CheckDate";
 
@@ -1089,6 +1112,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             grandEncounters,
             grandPaid);
     }
+#endif
 
     private sealed record CollectionRawPivotRow(
         string PanelName,
@@ -1114,36 +1138,23 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+        _ = useLineEncounters;
 
-        // NorthWest and Augustus both route through their own read SPs
-        // (usp_GetNW_CS_WeeklyClaimVolume / usp_GetAug_CS_WeeklyClaimVolume).
-        // The SP receives the same 8 filter params + @HasFilter and decides
-        // internally whether to return the snapshot or run the live query.
-        // This keeps the anchor-date and week-bucket logic entirely inside the SP,
-        // avoiding any C#/SP drift (e.g. Augustus anchors on PostingDate, not CheckDate).
-        var labPrefix = LabCollectionPrefix.GetPrefix(weeklyRule);
-        if (string.Equals(labPrefix, "NW",  StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(labPrefix, "Aug", StringComparison.OrdinalIgnoreCase))
-        {
-            return await GetCollectionWeeklyVolumeViaSpAsync(
-                connectionString, labPrefix,
+        // All Collection Summary labs route through usp_Get{prefix}_CS_WeeklyClaimVolume.
+        // Certus accepts Cert / CERT prefixes (GetPrefixCandidates).
+        return await ExecuteWithCollectionPrefixFallbackAsync(
+            weeklyRule,
+            prefix => GetCollectionWeeklyVolumeViaSpAsync(
+                connectionString, prefix,
                 filterPayerNames, filterPanelNames,
                 filterFirstBillFrom, filterFirstBillTo,
                 filterDosFrom, filterDosTo,
                 filterCheckDateFrom, filterCheckDateTo,
-                ct).ConfigureAwait(false);
-        }
-        else
-        {
-            return await GetCollectionWeeklyVolumeViaSpAsync(
-               connectionString, labPrefix,
-               filterPayerNames, filterPanelNames,
-               filterFirstBillFrom, filterFirstBillTo,
-               filterDosFrom, filterDosTo,
-               filterCheckDateFrom, filterCheckDateTo,
-               ct).ConfigureAwait(false);
-        }
+                ct),
+            ct).ConfigureAwait(false);
+    }
 
+#if false
         var payerSelectExpr = "LTRIM(RTRIM(PayerName))";
 
         // Open the connection here so we can query MAX(CheckDate) before building
@@ -1414,6 +1425,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             grandByWeek.ToDictionary(kv => kv.Key, kv => new CollectionMonthlyCell(kv.Value.enc, kv.Value.paid)),
             grandEncounters, grandPaid);
     }
+#endif
 
 
     /// <summary>
@@ -1707,15 +1719,29 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
 
         // Labs that have a dedicated InsuranceVsAging SP route through the generic SP reader.
         // SP name pattern: dbo.usp_Get{prefix}_CS_InsuranceVsAging
+        // If the SP is not deployed yet (error 2812), fall back to live ClaimLevelData so
+        // Collection Report / page still work for that lab.
         if (!string.IsNullOrWhiteSpace(prefix))
-            return await GetInsuranceAgingViaSpAsync(
-                connectionString,
-                $"dbo.usp_Get{prefix}_CS_InsuranceVsAging",
-                filterPayerNames, filterPanelNames,
-                filterFirstBillFrom, filterFirstBillTo,
-                filterDosFrom, filterDosTo,
-                filterCheckDateFrom, filterCheckDateTo,
-                ct).ConfigureAwait(false);
+        {
+            var spName = $"dbo.usp_Get{prefix}_CS_InsuranceVsAging";
+            try
+            {
+                return await GetInsuranceAgingViaSpAsync(
+                    connectionString,
+                    spName,
+                    filterPayerNames, filterPanelNames,
+                    filterFirstBillFrom, filterFirstBillTo,
+                    filterDosFrom, filterDosTo,
+                    filterCheckDateFrom, filterCheckDateTo,
+                    ct).ConfigureAwait(false);
+            }
+            catch (SqlException ex) when (ex.Number == 2812)
+            {
+                _logger.LogWarning(
+                    "CollectionSummary SP {Sp} missing for lab {Lab}; falling back to live ClaimLevelData query.",
+                    spName, labName);
+            }
+        }
 
         // ?? Build WHERE clauses ?????????????????????????????????
         var whereClauses = new List<string>
@@ -2512,7 +2538,21 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+        var (sql, parameters) = BuildClaimLevelExportQuery(
+            filterPayerNames, filterPanelNames,
+            filterFirstBillFrom, filterFirstBillTo, filterDosFrom, filterDosTo,
+            filterCheckDateFrom, filterCheckDateTo);
+        return await ExecuteExportQueryAsync(connectionString, sql, parameters, ct);
+    }
 
+    /// <inheritdoc />
+    public (string Sql, List<SqlParameter> Parameters) BuildClaimLevelExportQuery(
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
+        DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
+        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null)
+    {
         var whereClauses = new List<string>();
         var parameters = new List<SqlParameter>();
 
@@ -2533,7 +2573,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             {whereStr}
             """;
 
-        return await ExecuteExportQueryAsync(connectionString, sql, parameters, ct);
+        return (sql, parameters);
     }
 
     /// <inheritdoc />
@@ -2547,7 +2587,21 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+        var (sql, parameters) = BuildLineLevelExportQuery(
+            filterPayerNames, filterPanelNames,
+            filterFirstBillFrom, filterFirstBillTo, filterDosFrom, filterDosTo,
+            filterCheckDateFrom, filterCheckDateTo);
+        return await ExecuteExportQueryAsync(connectionString, sql, parameters, ct);
+    }
 
+    /// <inheritdoc />
+    public (string Sql, List<SqlParameter> Parameters) BuildLineLevelExportQuery(
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterFirstBillFrom = null, DateOnly? filterFirstBillTo = null,
+        DateOnly? filterDosFrom = null, DateOnly? filterDosTo = null,
+        DateOnly? filterCheckDateFrom = null, DateOnly? filterCheckDateTo = null)
+    {
         var whereClauses = new List<string>();
         var parameters = new List<SqlParameter>();
 
@@ -2571,7 +2625,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             {whereStr}
             """;
 
-        return await ExecuteExportQueryAsync(connectionString, sql, parameters, ct);
+        return (sql, parameters);
     }
 
     /// <summary>Executes an export query and returns rows as list of column-value dictionaries.</summary>

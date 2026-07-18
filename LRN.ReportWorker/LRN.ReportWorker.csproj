@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>LRN.ReportWorker</RootNamespace>
+    <UserSecretsId>lrn-report-worker</UserSecretsId>
+    <!-- Worker references LabMetricsDashboard (Web SDK). Prefer this project's
+         appsettings / content when both would publish to the same relative path. -->
+    <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.104.2" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.15" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="9.0.15" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LRN.ReportQueue.Shared\LRN.ReportQueue.Shared.csproj" />
+    <!-- Web project referenced so Prediction/Forecasting exports reuse the SAME
+         view-model builders, Excel builders and stored procedures as the pages. -->
+    <ProjectReference Include="..\LabMetricsDashboard\LabMetricsDashboard.csproj" />
+  </ItemGroup>
+
+  <!-- Drop LabMetricsDashboard content that collides with this worker's publish folder
+       (NETSDK1152: appsettings.json, appsettings.Development.json, web.config, etc.). -->
+  <Target Name="ExcludeDashboardContentFromPublish" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="$([System.String]::Copy('%(ResolvedFileToPublish.FullPath)').Contains('LabMetricsDashboard'))
+                                        AND (
+                                          '%(Filename)%(Extension)' == 'appsettings.json'
+                                          OR '%(Filename)%(Extension)' == 'appsettings.Development.json'
+                                          OR '%(Filename)%(Extension)' == 'web.config'
+                                          OR '%(Filename)%(Extension)' == 'PCRLabsofAmerica.json'
+                                        )" />
+    </ItemGroup>
+  </Target>
+
+</Project>

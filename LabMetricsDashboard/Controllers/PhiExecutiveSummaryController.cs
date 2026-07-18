@@ -21,6 +21,8 @@ public class PhiExecutiveSummaryController : Controller
             ["Augustus_LRN"]      = "Aug",
             ["Certus"]            = "Cert",
             ["Certus_LRN"]        = "Cert",
+            ["CERT"]              = "Cert",
+            ["Cert"]              = "Cert",
             ["Cove"]              = "Cove",
             ["CoveLRN"]           = "Cove",
             ["Elixir"]            = "Elix",

@@ -71,11 +71,88 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         // catches them and surfaces an actionable error message via the view-model �
         // hiding errors here was the root cause of the silent "all fields empty" bug.
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+
+        // Column set computed once per result set so newer C# code keeps working
+        // against labs whose usp_GetPayerValidationReport predates newer columns.
+        var availableColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < reader.FieldCount; i++)
+            availableColumns.Add(reader.GetName(i));
+
         while (await reader.ReadAsync(cancellationToken))
-            records.Add(MapRow(reader));
+            records.Add(MapRow(reader, availableColumns));
 
         _logger.LogInformation("usp_GetPayerValidationReport returned {Count} rows.", records.Count);
         return records;
+    }
+
+    /// <inheritdoc/>
+    public async Task<PagedPredictionRecords> GetRecordsPagedAsync(
+        string  connectionString,
+        string? runId                                = null,
+        string? filterPayerName                      = null,
+        string? filterPanelName                      = null,
+        string? filterFinalCoverageStatus            = null,
+        string? filterCPTCode                        = null,
+        string? filterForecastingPayabilitySubstatus = null,
+        string? filterPredictionStatus               = null,
+        string? filterPayStatus                      = null,
+        int     pageNumber                           = 1,
+        int?    pageSize                             = 50,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            _logger.LogWarning("DbConnectionString is empty — returning empty paged dataset.");
+            return new PagedPredictionRecords([], 0, 0);
+        }
+
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        await using var cmd = new SqlCommand("dbo.usp_GetPayerValidationReportPaged", conn)
+        {
+            CommandType    = CommandType.StoredProcedure,
+            CommandTimeout = 120
+        };
+
+        cmd.Parameters.AddWithValue("@RunId",                                (object?)runId                                ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterPayerName",                      (object?)filterPayerName                      ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterPanelName",                      (object?)filterPanelName                      ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterFinalCoverageStatus",            (object?)filterFinalCoverageStatus            ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterCPTCode",                        (object?)filterCPTCode                        ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterForecastingPayabilitySubstatus", (object?)filterForecastingPayabilitySubstatus ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterPredictionStatus",               (object?)filterPredictionStatus               ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@FilterPayStatus",                      (object?)filterPayStatus                      ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@PageNumber",                           Math.Max(1, pageNumber));
+        cmd.Parameters.AddWithValue("@PageSize",                             (object?)pageSize ?? DBNull.Value);
+
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+
+        // Result set 1: counts
+        int totalFiltered = 0, totalAll = 0;
+        if (await reader.ReadAsync(cancellationToken))
+        {
+            totalFiltered = ReadInt32(reader, 0);
+            totalAll      = ReadInt32(reader, 1);
+        }
+
+        // Result set 2: page rows
+        var rows = new List<PredictionRecord>();
+        if (await reader.NextResultAsync(cancellationToken))
+        {
+            var availableColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < reader.FieldCount; i++)
+                availableColumns.Add(reader.GetName(i));
+
+            while (await reader.ReadAsync(cancellationToken))
+                rows.Add(MapRow(reader, availableColumns));
+        }
+
+        _logger.LogInformation(
+            "usp_GetPayerValidationReportPaged page {Page} (size {Size}): {Rows} rows of {Filtered:N0} filtered / {All:N0} total.",
+            pageNumber, pageSize, rows.Count, totalFiltered, totalAll);
+
+        return new PagedPredictionRecords(rows, totalFiltered, totalAll);
     }
 
     /// <inheritdoc/>
@@ -397,8 +474,10 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
     // Reads every column returned by usp_GetPayerValidationReport.
     // If a column is added/removed from the SP, only this method needs updating.
 
-    private static PredictionRecord MapRow(SqlDataReader r) => new()
+    private static PredictionRecord MapRow(SqlDataReader r, HashSet<string> cols) => new()
     {
+        RunId                                = StrOpt(r, cols, "RunId"),
+        WeekFolder                           = StrOpt(r, cols, "WeekFolder"),
         AccessionNo                          = Str(r, "AccessionNo"),
         VisitNumber                          = Str(r, "VisitNumber"),
         CPTCode                              = Str(r, "CPTCode"),
@@ -480,6 +559,20 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         PaymentDays                          = Str(r, "PaymentDays"),
         ExpectedPaymentDate                  = DateStr(r, "ExpectedPaymentDate"),
         ExpectedPaymentMonth                 = Str(r, "ExpectedPaymentMonth"),
+        BillingProvider                      = StrOpt(r, cols, "BillingProvider"),
+        ReferringProvider                    = StrOpt(r, cols, "ReferringProvider"),
+        ClinicName                           = StrOpt(r, cols, "ClinicName"),
+        SalesRepName                         = StrOpt(r, cols, "SalesRepName"),
+        PatientID                            = StrOpt(r, cols, "PatientID"),
+        ChargeEnteredDate                    = cols.Contains("ChargeEnteredDate") ? DateStr(r, "ChargeEnteredDate") : string.Empty,
+        POS                                  = StrOpt(r, cols, "POS"),
+        TOS                                  = StrOpt(r, cols, "TOS"),
+        CheckDate                            = cols.Contains("CheckDate") ? DateStr(r, "CheckDate") : string.Empty,
+        DaysToDOS                            = StrOpt(r, cols, "DaysToDOS"),
+        RollingDays                          = StrOpt(r, cols, "RollingDays"),
+        DaysToBill                           = StrOpt(r, cols, "DaysToBill"),
+        DaysToPost                           = StrOpt(r, cols, "DaysToPost"),
+        InsertedDateTime                     = DateTimeStrOpt(r, cols, "InsertedDateTime"),
         ForecastingPayabilitySubstatus       = Str(r, "ForecastingPayabilitySubstatus"),
         PredictionStatus                     = Str(r, "PredictionStatus"),
         Variance_AllowedAmount               = Dec(r, "Variance_AllowedAmount"),
@@ -490,6 +583,25 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
 
     private static string  Str(SqlDataReader r, string col)
         => r.IsDBNull(r.GetOrdinal(col)) ? string.Empty : r.GetString(r.GetOrdinal(col));
+
+    /// <summary>Reads a string column only when the result set contains it (older SP versions).</summary>
+    private static string StrOpt(SqlDataReader r, HashSet<string> cols, string col)
+        => cols.Contains(col) ? Str(r, col) : string.Empty;
+
+    /// <summary>Reads a DATETIME2/date-ish column defensively and formats it as MM/dd/yyyy HH:mm.</summary>
+    private static string DateTimeStrOpt(SqlDataReader r, HashSet<string> cols, string col)
+    {
+        if (!cols.Contains(col)) return string.Empty;
+        var ord = r.GetOrdinal(col);
+        if (r.IsDBNull(ord)) return string.Empty;
+        var value = r.GetValue(ord);
+        return value switch
+        {
+            DateTime dt => dt.ToString("MM/dd/yyyy HH:mm", System.Globalization.CultureInfo.InvariantCulture),
+            string s    => OADateOrRaw(s),
+            _           => value.ToString() ?? string.Empty,
+        };
+    }
 
     private static string DateStr(SqlDataReader r, string col) => OADateOrRaw(Str(r, col));
 

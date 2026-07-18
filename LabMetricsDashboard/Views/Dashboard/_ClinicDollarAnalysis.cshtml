@@ -53,22 +53,28 @@
 }
 .cda-table tbody tr:hover td:first-child { background: #f0f4ff; }
 
-/* Clinic-level rows */
+/* Clinic-level rows — same expand affordance as Sales Rep Summary */
 .cda-clinic-row { background: #f8f9fc; cursor: pointer; }
-.cda-clinic-row td:first-child { font-weight: 700; color: #0e3460; }
+.cda-clinic-row td:first-child { font-weight: 700; color: #0e3460; cursor: pointer; }
 .cda-clinic-row:hover { background: #eaf0ff; }
 .cda-clinic-row:hover td:first-child { background: #eaf0ff; }
+.cda-clinic-row.cda-expanded { background: #eef6fa; }
+.cda-clinic-row.cda-expanded td:first-child { background: #eef6fa; }
+.cda-clinic-row.cda-expanded .cs-drill-chevron { transform: rotate(90deg); }
 
-/* Status drill-down rows (hidden by default) */
 .cda-status-row { display: none; background: #fff; }
 .cda-status-row.cda-open { display: table-row; }
 .cda-status-row td:first-child { padding-left: 2rem; font-weight: 400; color: #475569; }
 
-/* Toggle chevron */
-.cda-toggle { display: inline-block; transition: transform .15s; margin-right: .4rem; font-size: .65rem; color: #64748b; }
-.cda-clinic-row.cda-expanded .cda-toggle { transform: rotate(90deg); }
+.cs-drill-chevron {
+    display: inline-block;
+    font-size: .65rem;
+    margin-right: .35rem;
+    color: #64748b;
+    transition: transform .2s;
+    vertical-align: middle;
+}
 
-/* Grand total footer */
 .cda-table tfoot td {
     background: #f1f5f9; font-weight: 700; color: #0e3460;
     padding: .5rem .8rem; border-top: 2px solid #0a2a4a;
@@ -80,7 +86,7 @@
 }
 </style>
 
-<div class="cda-scroll">
+<div class="cda-scroll" id="cdaTableRoot">
     <table class="cda-table">
         <thead>
             <tr>
@@ -91,11 +97,14 @@
             </tr>
         </thead>
         <tbody>
+            @{ var cdaIdx = 0; }
             @foreach (var clinic in Model.Clinics)
             {
-                var clinicId = $"cda-{clinic.ClinicName.GetHashCode():X8}";
+                var clinicId = $"cda-clinic-{cdaIdx++}";
                 <tr class="cda-clinic-row" data-cda-toggle="@clinicId">
-                    <td><span class="cda-toggle">&#9654;</span>@clinic.ClinicName</td>
+                    <td>
+                        <i class="bi bi-chevron-right cs-drill-chevron" aria-hidden="true"></i>@clinic.ClinicName
+                    </td>
                     <td>@clinic.ClaimCount.ToString("N0")</td>
                     <td>@clinic.TotalCharge.ToString("C2")</td>
                     <td>@clinic.InsurancePayment.ToString("C2")</td>
@@ -125,20 +134,3 @@
 <div class="text-muted mt-2" style="font-size:.68rem">
     Source: dbo.ClaimLevelData &middot; Lab: @Model.SelectedLab
 </div>
-
-<script nonce='@Context.Items["CspNonce"]'>
-(function () {
-    'use strict';
-
-    // Toggle clinic drill-down on click
-    document.querySelectorAll('.cda-clinic-row[data-cda-toggle]').forEach(function (row) {
-        row.addEventListener('click', function () {
-            var id = row.getAttribute('data-cda-toggle');
-            var isOpen = row.classList.toggle('cda-expanded');
-            document.querySelectorAll('.cda-status-row[data-cda-parent="' + id + '"]').forEach(function (sr) {
-                sr.classList.toggle('cda-open', isOpen);
-            });
-        });
-    });
-})();
-</script>

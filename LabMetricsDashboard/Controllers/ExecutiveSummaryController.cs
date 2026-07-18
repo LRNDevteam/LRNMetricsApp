@@ -20,7 +20,9 @@ public sealed class ExecutiveSummaryController : Controller
 
     // Maps LabSettings key → SP prefix used to build "dbo.usp_Get{prefix}_ExecutiveSummary".
     // Keep aligned with PhiExecutiveSummaryController.LabPrefixMap.
-    private static readonly Dictionary<string, string> LabPrefixMap =
+    // PUBLIC: reused by LRN.ReportWorker's ExecutiveSummaryReportGenerator so the
+    // async export resolves the exact same per-lab stored procedure.
+    public static readonly Dictionary<string, string> LabPrefixMap =
         new(StringComparer.OrdinalIgnoreCase)
         {
             ["RisingTides"]      = "RT",
@@ -32,6 +34,8 @@ public sealed class ExecutiveSummaryController : Controller
             ["Augustus_LRN"]     = "Aug",
             ["Certus"]           = "Cert",
             ["Certus_LRN"]       = "Cert",
+            ["CERT"]             = "Cert",
+            ["Cert"]             = "Cert",
             ["Inhealth"]         = "Inh",
             ["Inhealth_LRN"]     = "Inh",
             ["Inhealth_DTR"]     = "Inh",

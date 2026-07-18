@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using LabMetricsDashboard.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
 
 namespace LabMetricsDashboard.Controllers;
 
@@ -539,6 +540,113 @@ public class CollectionSummaryController : Controller
     }
 
     /// <summary>
+    /// Builds the Collection Summary export view model (all summary sheets' data,
+    /// fetched in parallel). Shared by ExportExcel and — PUBLIC for that reason —
+    /// LRN.ReportWorker's CollectionReportGenerator, so the async export reuses the
+    /// exact same repository queries and pivot logic.
+    /// </summary>
+    public async Task<CollectionSummaryViewModel> BuildCollectionExportViewModelAsync(
+        string selectedLab, string connStr, bool useLineEncounters, bool showTotalPayments,
+        List<string>? payerFilter, List<string>? panelFilter,
+        DateOnly? fbFromN, DateOnly? fbToN,
+        DateOnly? dosFromN, DateOnly? dosToN,
+        DateOnly? cdFromN, DateOnly? cdToN,
+        CancellationToken ct)
+    {
+        // Fetch all report data in parallel
+        var monthlyVolumeTask = _repo.GetCollectionMonthlyVolumeAsync(
+            connStr, selectedLab, useLineEncounters, payerFilter, panelFilter,
+            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
+        var weeklyVolumeTask = _repo.GetCollectionWeeklyVolumeAsync(
+            connStr, useLineEncounters, payerFilter, panelFilter,
+            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var reimbursementTask = _repo.GetTop5ReimbursementAsync(
+            connStr, payerFilter, panelFilter,
+            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var totalPaymentsTask = showTotalPayments
+            ? _repo.GetTop5TotalPaymentsAsync(connStr, payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)
+            : Task.FromResult(new Top5TotalPaymentsResult([]));
+        var insuranceAgingTask = _repo.GetInsuranceAgingAsync(
+            connStr, payerFilter, panelFilter,
+            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var panelPaymentTask = _repo.GetPanelPaymentAsync(
+            connStr, payerFilter, panelFilter,
+            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var insurancePaymentPctTask = _repo.GetInsurancePaymentPctAsync(
+            connStr, payerFilter, panelFilter,
+            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var cptPaymentPctTask = _repo.GetCptPaymentPctAsync(
+            connStr, payerFilter, panelFilter,
+            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var panelAveragesTask = _repo.GetPanelAveragesAsync(
+            connStr, payerFilter, panelFilter,
+            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var avgPaymentsTask = _repo.GetAvgPaymentsAsync(
+            connStr, payerFilter, panelFilter,
+            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var statusSummaryTask = _repo.GetStatusSummaryAsync(
+            connStr, payerFilter, panelFilter,
+            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+        var providerSummaryTask = _repo.GetProviderSummaryAsync(
+            connStr, payerFilter, panelFilter,
+            fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
+
+        // Soft-fail per sheet when a Collection Summary SP is not deployed on a lab DB
+        // (SqlException 2812). One missing SP must not fail the whole Collection Report.
+        static async Task<T> AwaitOrDefaultAsync<T>(
+            Task<T> task, T fallback, string sheet, string lab, ILogger logger)
+        {
+            try
+            {
+                return await task.ConfigureAwait(false);
+            }
+            catch (SqlException ex) when (ex.Number is 2812 or 208)
+            {
+                // 2812 = SP missing; 208 = snapshot table missing (e.g. Cert_CS_* not refreshed yet).
+                logger.LogWarning(
+                    "Collection export sheet '{Sheet}' skipped for lab {Lab}: missing SP/table ({Number}: {Message}).",
+                    sheet, lab, ex.Number, ex.Message);
+                return fallback;
+            }
+        }
+
+        var emptyMonthly = new CollectionMonthlyVolumeResult([], [], [], [], [], 0, 0m);
+        var emptyWeekly = new CollectionWeeklyVolumeResult([], [], [], 0, 0m);
+
+        return new CollectionSummaryViewModel
+        {
+            SelectedLab = selectedLab,
+            MonthlyClaimVolume = BuildCollectionMonthlyPivot(
+                await AwaitOrDefaultAsync(monthlyVolumeTask, emptyMonthly, "Monthly Claim Volume", selectedLab, _logger)),
+            WeeklyClaimVolume = BuildCollectionWeeklyPivot(
+                await AwaitOrDefaultAsync(weeklyVolumeTask, emptyWeekly, "Weekly Claim Volume", selectedLab, _logger)),
+            UsesLineEncounters = useLineEncounters,
+            Top5Reimbursement = (await AwaitOrDefaultAsync(
+                reimbursementTask, new Top5ReimbursementResult([]), "Top 5 Reimbursement", selectedLab, _logger)).Rows,
+            Top5TotalPayments = (await AwaitOrDefaultAsync(
+                totalPaymentsTask, new Top5TotalPaymentsResult([]), "Top 5 Total Payments", selectedLab, _logger)).Rows,
+            ShowTop5TotalPayments = showTotalPayments,
+            InsuranceAging = (await AwaitOrDefaultAsync(
+                insuranceAgingTask, new InsuranceAgingResult([]), "Insurance vs Aging", selectedLab, _logger)).Rows,
+            PanelPayments = (await AwaitOrDefaultAsync(
+                panelPaymentTask, new PanelPaymentResult([]), "Panel vs Payment", selectedLab, _logger)).Rows,
+            InsurancePaymentPct = (await AwaitOrDefaultAsync(
+                insurancePaymentPctTask, new InsurancePaymentPctResult([]), "Insurance vs Payment %", selectedLab, _logger)).Rows,
+            CptPaymentPct = (await AwaitOrDefaultAsync(
+                cptPaymentPctTask, new CptPaymentPctResult([]), "CPT vs Payment %", selectedLab, _logger)).Rows,
+            PanelAverages = (await AwaitOrDefaultAsync(
+                panelAveragesTask, new PanelAveragesResult([]), "Panel Averages", selectedLab, _logger)).PanelRows,
+            AvgPayments = await AwaitOrDefaultAsync(
+                avgPaymentsTask, new PanelAveragesResult([]), "Avg Payments", selectedLab, _logger),
+            StatusSummary = await AwaitOrDefaultAsync(
+                statusSummaryTask, StatusSummaryResult.Empty, "Status Summary", selectedLab, _logger),
+            ProviderSummary = await AwaitOrDefaultAsync(
+                providerSummaryTask, ProviderSummaryResult.Empty, "Provider Summary", selectedLab, _logger),
+        };
+    }
+
+    /// <summary>
     /// Exports Collection Summary report outputs plus raw data to an Excel file, respecting the current filters.
     /// </summary>
     public async Task<IActionResult> ExportExcel(
@@ -634,47 +742,9 @@ public class CollectionSummaryController : Controller
 
         try
         {
-            // Fetch all report data in parallel
-            var monthlyVolumeTask = _repo.GetCollectionMonthlyVolumeAsync(
-                connStr, selectedLab, useLineEncounters, payerFilter, panelFilter,
-                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
-            var weeklyVolumeTask = _repo.GetCollectionWeeklyVolumeAsync(
-                connStr, useLineEncounters, payerFilter, panelFilter,
-                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-            var reimbursementTask = _repo.GetTop5ReimbursementAsync(
-                connStr, payerFilter, panelFilter,
-                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-            var totalPaymentsTask = showTotalPayments
-                ? _repo.GetTop5TotalPaymentsAsync(connStr, payerFilter, panelFilter,
-                    fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct)
-                : Task.FromResult(new Top5TotalPaymentsResult([]));
-            var insuranceAgingTask = _repo.GetInsuranceAgingAsync(
-                connStr, payerFilter, panelFilter,
-                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-            var panelPaymentTask = _repo.GetPanelPaymentAsync(
-                connStr, payerFilter, panelFilter,
-                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-            var insurancePaymentPctTask = _repo.GetInsurancePaymentPctAsync(
-                connStr, payerFilter, panelFilter,
-                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-            var cptPaymentPctTask = _repo.GetCptPaymentPctAsync(
-                connStr, payerFilter, panelFilter,
-                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-            var panelAveragesTask = _repo.GetPanelAveragesAsync(
-                connStr, payerFilter, panelFilter,
-                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-            var avgPaymentsTask = _repo.GetAvgPaymentsAsync(
-                connStr, payerFilter, panelFilter,
-                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-            var statusSummaryTask = _repo.GetStatusSummaryAsync(
-                connStr, payerFilter, panelFilter,
-                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-            var providerSummaryTask = _repo.GetProviderSummaryAsync(
-                connStr, payerFilter, panelFilter,
-                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, selectedLab, ct);
-
             // Check row counts before fetching raw data — skip sheets that exceed 200,000 rows
-            // to avoid out-of-memory on large labs.
+            // to avoid out-of-memory on large labs. (The async CollectionReport export via
+            // LRN.ReportWorker has NO such limit — it streams the raw sheets in chunks.)
             const int RawDataRowLimit = 200_000;
             var claimCountTask = _repo.GetClaimLevelDataCountAsync(
                 connStr, payerFilter, panelFilter,
@@ -683,12 +753,10 @@ public class CollectionSummaryController : Controller
                 connStr, payerFilter, panelFilter,
                 fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
 
-            await Task.WhenAll(
-                monthlyVolumeTask, weeklyVolumeTask, reimbursementTask, totalPaymentsTask,
-                insuranceAgingTask, panelPaymentTask, insurancePaymentPctTask,
-                cptPaymentPctTask, panelAveragesTask, avgPaymentsTask,
-                statusSummaryTask, providerSummaryTask,
-                claimCountTask, lineCountTask);
+            var vm = await BuildCollectionExportViewModelAsync(
+                selectedLab, connStr, useLineEncounters, showTotalPayments,
+                payerFilter, panelFilter,
+                fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct);
 
             int claimCount = await claimCountTask;
             int lineCount  = await lineCountTask;
@@ -708,25 +776,6 @@ public class CollectionSummaryController : Controller
                 ? await _repo.GetLineLevelDataExportAsync(connStr, payerFilter, panelFilter,
                     fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct)
                 : [];
-
-            var vm = new CollectionSummaryViewModel
-            {
-                SelectedLab = selectedLab,
-                MonthlyClaimVolume = BuildCollectionMonthlyPivot(await monthlyVolumeTask),
-                WeeklyClaimVolume = BuildCollectionWeeklyPivot(await weeklyVolumeTask),
-                UsesLineEncounters = useLineEncounters,
-                Top5Reimbursement = (await reimbursementTask).Rows,
-                Top5TotalPayments = (await totalPaymentsTask).Rows,
-                ShowTop5TotalPayments = showTotalPayments,
-                InsuranceAging = (await insuranceAgingTask).Rows,
-                PanelPayments = (await panelPaymentTask).Rows,
-                InsurancePaymentPct = (await insurancePaymentPctTask).Rows,
-                CptPaymentPct = (await cptPaymentPctTask).Rows,
-                PanelAverages = (await panelAveragesTask).PanelRows,
-                AvgPayments = await avgPaymentsTask,
-                StatusSummary = await statusSummaryTask,
-                ProviderSummary = await providerSummaryTask,
-            };
 
             // Build active filters summary
             var activeFilters = new List<(string Label, string? Value)>();

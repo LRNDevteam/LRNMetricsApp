@@ -1,41 +1,97 @@
+@using LabMetricsDashboard.Models
 @model LabMetricsDashboard.Models.PayerPolicyValidationViewModel
 @{
     ViewData["Title"]       = $"Payer Policy Validation - {Model.SelectedLab}";
     ViewData["SelectedLab"] = Model.SelectedLab;
     ViewData["PageLabel"]   = "Payer Policy Validation";
+
+    bool hasFilters = Model.HasActiveFilters;
+
     var f = new Dictionary<string, string?>
     {
         ["lab"] = Model.SelectedLab,
         ["filterPayerName"] = Model.FilterPayerName,
-        ["filterPayerType"] = Model.FilterPayerType,
         ["filterPanelName"] = Model.FilterPanelName,
         ["filterFinalCoverageStatus"] = Model.FilterFinalCoverageStatus,
-        ["filterPayability"] = Model.FilterPayability,
         ["filterCPTCode"] = Model.FilterCPTCode,
+        ["filterForecastingPayabilitySubstatus"] = Model.FilterForecastingPayabilitySubstatus,
+        ["filterPredictionStatus"] = Model.FilterPredictionStatus,
+        ["filterPayStatus"] = Model.FilterPayStatus,
+        ["pageSize"] = Model.PageSize.ToString(),
         ["search"] = "true",
     };
+
+    var columns = PayerPolicyValidationColumns.All;
+    int[] presetSizes = [10, 25, 50, 100];
+    bool isCustomSize = !presetSizes.Contains(Model.PageSize);
+
+    static string CellText(PayerPolicyValidationColumns.Column col, PredictionRecord r)
+    {
+        var v = col.Value(r);
+        if (v is null) return string.Empty;
+        return col.IsMoney && v is decimal d ? d.ToString("C2") : v.ToString() ?? string.Empty;
+    }
 }
 
 <style>
-.ppv-wrap { overflow: auto; max-height: 70vh; border: 1px solid #e2e8f0; border-radius: 8px; }
-.ppv-table { width: 100%; border-collapse: collapse; font-size: .72rem; white-space: nowrap; }
+/* Filter panel — same style as Prediction page */
+.filter-panel { background:#fff; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,.07); }
+
+/* Results grid — Prediction-style scroll container, ~600px with frozen header + first 2 columns */
+.ppv-grid-scroll {
+    overflow: auto;
+    max-height: 600px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    -webkit-overflow-scrolling: touch;
+    position: relative;
+    isolation: isolate;
+    background: #fff;
+}
+.ppv-grid-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.ppv-grid-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; }
+.ppv-table {
+    width: max-content;
+    min-width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: .74rem;
+    white-space: nowrap;
+}
 .ppv-table thead th {
-    position: sticky; top: 0; z-index: 2;
-    background: linear-gradient(135deg, #0a1628, #0e3460);
-    color: #fff; font-size: .62rem; text-transform: uppercase;
-    padding: .5rem .6rem; border-right: 1px solid rgba(255,255,255,.1);
+    position: sticky; top: 0; z-index: 5;
+    background: #0f172a;
+    color: #fff;
+    font-weight: 700;
+    font-size: .68rem;
+    text-transform: uppercase;
+    padding: .55rem .65rem;
+    border: none;
+    border-right: 1px solid rgba(255,255,255,.08);
+    vertical-align: middle;
 }
-.ppv-table td { padding: .35rem .6rem; border-bottom: 1px solid #f1f5f9; border-right: 1px solid #f1f5f9; }
-.ppv-table tbody tr:hover { background: #f8fafc; }
+.ppv-table td {
+    padding: .4rem .65rem;
+    border-top: 1px solid #eef2f7;
+    border-right: 1px solid #eef2f7;
+    vertical-align: middle;
+    color: #1e293b;
+    background: #fff;
+}
+.ppv-table tbody tr:hover td { background: #f8fafc; }
 .ppv-money { text-align: right; font-variant-numeric: tabular-nums; }
-.ppv-export-overlay {
-    position: fixed; inset: 0; z-index: 9999; background: rgba(15,23,42,.55);
-    display: flex; align-items: center; justify-content: center;
+/* Frozen first two columns — fixed widths so the second column's left offset stays aligned */
+.ppv-table th.ppv-fz1, .ppv-table td.ppv-fz1,
+.ppv-table th.ppv-fz2, .ppv-table td.ppv-fz2 {
+    width: 150px; min-width: 150px; max-width: 150px;
+    overflow: hidden; text-overflow: ellipsis;
 }
-.ppv-export-dialog {
-    background: #fff; border-radius: 16px; padding: 2rem 2.5rem; width: 400px; text-align: center;
-    box-shadow: 0 8px 40px rgba(0,0,0,.18);
-}
+.ppv-table th.ppv-fz1, .ppv-table td.ppv-fz1 { position: sticky; left: 0; }
+.ppv-table th.ppv-fz2, .ppv-table td.ppv-fz2 { position: sticky; left: 150px; }
+.ppv-table thead th.ppv-fz1, .ppv-table thead th.ppv-fz2 { z-index: 7; background: #0f172a; }
+.ppv-table tbody td.ppv-fz1, .ppv-table tbody td.ppv-fz2 { z-index: 3; background: #fff; }
+.ppv-table tbody tr:hover td.ppv-fz1, .ppv-table tbody tr:hover td.ppv-fz2 { background: #f8fafc; }
+.ppv-table td.ppv-fz2, .ppv-table th.ppv-fz2 { box-shadow: 2px 0 4px rgba(15,23,42,.06); }
 </style>
 
 <div class="container-fluid px-4 py-3">
@@ -53,87 +109,131 @@
         <div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-1"></i>@Model.ErrorMessage</div>
     }
 
-    <div class="card shadow-sm mb-3">
-        <div class="card-header py-2 fw-semibold small">
-            <i class="bi bi-funnel me-1"></i>Filters
-            @if (Model.HasActiveFilters) { <span class="badge bg-warning text-dark ms-1">Active</span> }
+    <!-- ── Filter panel — same style as Prediction page ─────────────────── -->
+    <div class="filter-panel p-3 mb-4">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+            <span class="fw-semibold" style="font-size:.9rem">
+                &#128269; Filters
+                @if (hasFilters)
+                {
+                    <span class="badge bg-primary ms-1" style="font-size:.7rem">Active</span>
+                }
+            </span>
+            <button class="btn btn-sm btn-link text-muted p-0" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#ppvFilterBody"
+                    aria-expanded="true">
+                <i class="bi bi-chevron-up me-1"></i><span>Hide</span>
+            </button>
         </div>
-        <div class="card-body">
-            <form method="get" asp-action="Index" id="ppvFilterForm">
+        <div id="ppvFilterBody" class="collapse show">
+            <form method="get" asp-controller="PayerPolicyValidation" asp-action="Index" id="ppvFilterForm">
                 <input type="hidden" name="lab" value="@Model.SelectedLab" />
                 <input type="hidden" name="search" value="true" />
-                <div class="row g-2 mb-2">
-                    <div class="col-md-4">
-                        <label class="form-label small fw-semibold">Payer Name</label>
+                <div class="row g-2 align-items-end">
+                    <div class="col-sm-6 col-md-3">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PAYER NAME</label>
                         <select name="filterPayerName" class="form-select form-select-sm">
                             <option value="">All</option>
                             @foreach (var v in Model.PayerNames)
                             {
-                                <option value="@v" selected="@(Model.FilterPayerName == v)">@v</option>
+                                if (v == Model.FilterPayerName) { <option value="@v" selected="selected">@v</option> }
+                                else { <option value="@v">@v</option> }
                             }
                         </select>
                     </div>
-                    <div class="col-md-4">
-                        <label class="form-label small fw-semibold">Payer Type</label>
-                        <select name="filterPayerType" class="form-select form-select-sm">
-                            <option value="">All</option>
-                            @foreach (var v in Model.PayerTypes)
-                            {
-                                <option value="@v" selected="@(Model.FilterPayerType == v)">@v</option>
-                            }
-                        </select>
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label small fw-semibold">Panel</label>
+                    <div class="col-sm-6 col-md-3">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PANEL NAME</label>
                         <select name="filterPanelName" class="form-select form-select-sm">
                             <option value="">All</option>
                             @foreach (var v in Model.PanelNames)
                             {
-                                <option value="@v" selected="@(Model.FilterPanelName == v)">@v</option>
+                                if (v == Model.FilterPanelName) { <option value="@v" selected="selected">@v</option> }
+                                else { <option value="@v">@v</option> }
                             }
                         </select>
                     </div>
-                </div>
-                <div class="row g-2 mb-3">
-                    <div class="col-md-4">
-                        <label class="form-label small fw-semibold">Final Coverage</label>
-                        <select name="filterFinalCoverageStatus" class="form-select form-select-sm">
-                            <option value="">All</option>
-                            @foreach (var v in Model.FinalCoverageStatuses)
-                            {
-                                <option value="@v" selected="@(Model.FilterFinalCoverageStatus == v)">@v</option>
-                            }
-                        </select>
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label small fw-semibold">Payability</label>
-                        <select name="filterPayability" class="form-select form-select-sm">
-                            <option value="">All</option>
-                            @foreach (var v in Model.PayabilityOptions)
-                            {
-                                <option value="@v" selected="@(Model.FilterPayability == v)">@v</option>
-                            }
-                        </select>
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label small fw-semibold">CPT Code</label>
+                    <div class="col-sm-6 col-md-3">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">CPT CODE</label>
                         <select name="filterCPTCode" class="form-select form-select-sm">
                             <option value="">All</option>
                             @foreach (var v in Model.CPTCodes)
                             {
-                                <option value="@v" selected="@(Model.FilterCPTCode == v)">@v</option>
+                                if (v == Model.FilterCPTCode) { <option value="@v" selected="selected">@v</option> }
+                                else { <option value="@v">@v</option> }
                             }
                         </select>
                     </div>
+                    <div class="col-sm-6 col-md-3">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">FINAL COVERAGE</label>
+                        <select name="filterFinalCoverageStatus" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            @foreach (var v in Model.FinalCoverageStatuses)
+                            {
+                                if (v == Model.FilterFinalCoverageStatus) { <option value="@v" selected="selected">@v</option> }
+                                else { <option value="@v">@v</option> }
+                            }
+                        </select>
+                    </div>
+                    <div class="col-sm-6 col-md-3">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PAY STATUS</label>
+                        <select name="filterPayStatus" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            @foreach (var v in Model.PayStatuses)
+                            {
+                                if (v == Model.FilterPayStatus) { <option value="@v" selected="selected">@v</option> }
+                                else { <option value="@v">@v</option> }
+                            }
+                        </select>
+                    </div>
+                    <div class="col-sm-6 col-md-3">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">FORECAST SUBSTATUS</label>
+                        <select name="filterForecastingPayabilitySubstatus" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            @foreach (var v in Model.ForecastingPayabilitySubstatuses)
+                            {
+                                if (v == Model.FilterForecastingPayabilitySubstatus) { <option value="@v" selected="selected">@v</option> }
+                                else { <option value="@v">@v</option> }
+                            }
+                        </select>
+                    </div>
+                    <div class="col-sm-6 col-md-3">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PREDICTION STATUS</label>
+                        <select name="filterPredictionStatus" class="form-select form-select-sm">
+                            <option value="">All</option>
+                            @foreach (var v in Model.PredictionStatuses)
+                            {
+                                if (v == Model.FilterPredictionStatus) { <option value="@v" selected="selected">@v</option> }
+                                else { <option value="@v">@v</option> }
+                            }
+                        </select>
+                    </div>
+                    <div class="col-sm-6 col-md-3">
+                        <label class="form-label fw-semibold mb-1" style="font-size:.75rem">DISPLAY RECORDS</label>
+                        <div class="d-flex gap-1">
+                            <select id="ppvPageSizeSelect" class="form-select form-select-sm">
+                                @foreach (var s in presetSizes)
+                                {
+                                    if (!isCustomSize && s == Model.PageSize) { <option value="@s" selected="selected">@s</option> }
+                                    else { <option value="@s">@s</option> }
+                                }
+                                @if (isCustomSize) { <option value="custom" selected="selected">Custom</option> }
+                                else { <option value="custom">Custom</option> }
+                            </select>
+                            <input type="number" id="ppvPageSizeCustom" class="form-control form-control-sm"
+                                   min="1" max="100000" value="@Model.PageSize"
+                                   style="width:90px; @(isCustomSize ? "" : "display:none;")" />
+                            <input type="hidden" name="pageSize" id="ppvPageSizeValue" value="@Model.PageSize" />
+                        </div>
+                    </div>
                 </div>
-                <div class="d-flex gap-2">
-                    <button type="submit" class="btn btn-sm btn-primary">
-                        <i class="bi bi-filter me-1"></i>Apply Filters
-                    </button>
-                    <a asp-action="Index" asp-route-lab="@Model.SelectedLab" asp-route-search="false" class="btn btn-sm btn-outline-secondary">Clear Filters</a>
+                <div class="mt-2 d-flex gap-2">
+                    <button type="submit" class="btn btn-primary btn-sm">Apply Filters</button>
+                    <a asp-controller="PayerPolicyValidation" asp-action="Index" asp-route-lab="@Model.SelectedLab"
+                       class="btn btn-outline-secondary btn-sm">Clear</a>
                     @if (Model.DataLoaded)
                     {
-                        <button type="button" id="ppvExportBtn" class="btn btn-sm btn-outline-success ms-auto">
+                        <button type="button" id="ppvExportBtn" class="btn btn-sm btn-outline-success ms-auto"
+                                data-db-enabled="@(Model.DbEnabled ? "1" : "0")">
                             <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
                         </button>
                     }
@@ -146,7 +246,7 @@
     {
         <div class="text-center py-5 text-muted">
             <i class="bi bi-table fs-1 opacity-50"></i>
-            <div class="mt-2 fw-semibold">Select filters and click <em>Load Data</em></div>
+            <div class="mt-2 fw-semibold">Select filters and click <em>Apply Filters</em></div>
             <div class="small">Data loads from <strong>@Model.SelectedLab</strong> — dbo.PayerValidationReport</div>
         </div>
     }
@@ -159,44 +259,36 @@
             </span>
         </div>
 
-        <div class="ppv-wrap mb-3">
+        <div class="ppv-grid-scroll mb-3">
             <table class="ppv-table">
                 <thead>
                     <tr>
-                        <th>Accession</th>
-                        <th>CPT</th>
-                        <th>Payer</th>
-                        <th>Panel</th>
-                        <th>Pay Status</th>
-                        <th>Forecast Payability</th>
-                        <th>Exp. Pmt Date</th>
-                        <th>Billed</th>
-                        <th>Allowed</th>
-                        <th>Ins Paid</th>
-                        <th>Median Allowed</th>
-                        <th>Median Ins Paid</th>
-                        <th>Mode Allowed</th>
-                        <th>Mode Ins Paid</th>
+                        @for (var c = 0; c < columns.Count; c++)
+                        {
+                            var fz = c == 0 ? "ppv-fz1" : c == 1 ? "ppv-fz2" : "";
+                            <th class="@fz">@columns[c].Header</th>
+                        }
                     </tr>
                 </thead>
                 <tbody>
                     @foreach (var r in Model.Records)
                     {
                         <tr>
-                            <td>@r.AccessionNo</td>
-                            <td>@r.CPTCode</td>
-                            <td>@(string.IsNullOrWhiteSpace(r.PayerNameNormalized) ? r.PayerName : r.PayerNameNormalized)</td>
-                            <td>@r.PanelName</td>
-                            <td>@r.PayStatus</td>
-                            <td>@r.ForecastingPayability</td>
-                            <td>@r.ExpectedPaymentDate</td>
-                            <td class="ppv-money">@r.BilledAmount.ToString("C2")</td>
-                            <td class="ppv-money">@r.AllowedAmount.ToString("C2")</td>
-                            <td class="ppv-money">@r.InsurancePayment.ToString("C2")</td>
-                            <td class="ppv-money">@r.MedianAllowedAmountSameLab.ToString("C2")</td>
-                            <td class="ppv-money">@r.MedianInsurancePaidSameLab.ToString("C2")</td>
-                            <td class="ppv-money">@r.ModeAllowedAmountSameLab.ToString("C2")</td>
-                            <td class="ppv-money">@r.ModeInsurancePaidSameLab.ToString("C2")</td>
+                            @for (var c = 0; c < columns.Count; c++)
+                            {
+                                var col = columns[c];
+                                var cls = (c == 0 ? "ppv-fz1" : c == 1 ? "ppv-fz2" : "")
+                                          + (col.IsMoney ? " ppv-money" : "");
+                                var text = CellText(col, r);
+                                if (c < 2)
+                                {
+                                    <td class="@cls" title="@text">@text</td>
+                                }
+                                else
+                                {
+                                    <td class="@cls">@text</td>
+                                }
+                            }
                         </tr>
                     }
                 </tbody>
@@ -228,47 +320,100 @@
     }
 </div>
 
-<div id="ppvExportOverlay" class="ppv-export-overlay" style="display:none">
-    <div class="ppv-export-dialog">
-        <div class="fs-2 text-success mb-2"><i class="bi bi-file-earmark-excel"></i></div>
-        <div class="fw-bold mb-1">Generating Excel</div>
-        <div class="small text-muted" id="ppvExportStatus">Loading data from @Model.SelectedLab…</div>
-    </div>
-</div>
-
 @section Scripts {
 <script nonce='@Context.Items["CspNonce"]'>
 (function () {
-    var btn = document.getElementById('ppvExportBtn');
-    if (!btn) return;
+    // ── Display Records: preset sizes + custom value ─────────────────────
+    var sizeSelect = document.getElementById('ppvPageSizeSelect');
+    var sizeCustom = document.getElementById('ppvPageSizeCustom');
+    var sizeValue  = document.getElementById('ppvPageSizeValue');
 
-    btn.addEventListener('click', function () {
-        var form = document.getElementById('ppvFilterForm');
-        var params = new URLSearchParams(new FormData(form));
-        var url = '@Url.Action("ExportExcel", "PayerPolicyValidation")' + '?' + params.toString();
-        var overlay = document.getElementById('ppvExportOverlay');
-        if (overlay) overlay.style.display = 'flex';
-
-        var iframe = document.createElement('iframe');
-        iframe.style.display = 'none';
-        iframe.src = url;
-        document.body.appendChild(iframe);
-
-        var poll = setInterval(function () {
-            if (document.cookie.indexOf('ppvExportDone=1') !== -1) {
-                clearInterval(poll);
-                document.cookie = 'ppvExportDone=; Max-Age=0; path=/';
-                if (overlay) overlay.style.display = 'none';
-                iframe.remove();
+    function syncPageSize() {
+        if (!sizeSelect || !sizeValue) return;
+        if (sizeSelect.value === 'custom') {
+            if (sizeCustom) {
+                sizeCustom.style.display = '';
+                var v = parseInt(sizeCustom.value, 10);
+                sizeValue.value = (v && v > 0) ? v : '50';
             }
-        }, 500);
+        } else {
+            if (sizeCustom) sizeCustom.style.display = 'none';
+            sizeValue.value = sizeSelect.value;
+        }
+    }
+    if (sizeSelect) sizeSelect.addEventListener('change', syncPageSize);
+    if (sizeCustom) sizeCustom.addEventListener('input', syncPageSize);
 
-        setTimeout(function () {
-            clearInterval(poll);
-            if (overlay) overlay.style.display = 'none';
-            iframe.remove();
-        }, 900000);
-    });
+    var form = document.getElementById('ppvFilterForm');
+    if (form) form.addEventListener('submit', syncPageSize);
+
+    // ── Excel export ──────────────────────────────────────────────────────
+    // DB-enabled labs: ASYNC — queue the request, LRN.ReportWorker generates it,
+    // the 📄 Reports badge notifies when it's ready. No more long waits/timeouts.
+    // File-based labs: legacy synchronous download (no queue table available).
+    var btn = document.getElementById('ppvExportBtn');
+
+    function queueAsyncExport() {
+        var fd = new FormData(form);
+        var val = function (n) { return (fd.get(n) || '').toString().trim() || null; };
+        var filters = {
+            PayerName:                      val('filterPayerName'),
+            PanelName:                      val('filterPanelName'),
+            FinalCoverageStatus:            val('filterFinalCoverageStatus'),
+            CPTCode:                        val('filterCPTCode'),
+            ForecastingPayabilitySubstatus: val('filterForecastingPayabilitySubstatus'),
+            PredictionStatus:               val('filterPredictionStatus'),
+            PayStatus:                      val('filterPayStatus')
+        };
+
+        var body = new FormData();
+        body.append('lab', '@Model.SelectedLab');
+        body.append('reportType', 'PayerPolicyValidation');
+        body.append('filterDetails', JSON.stringify(filters));
+        var af = document.querySelector('#lrnReportsAf input[name="__RequestVerificationToken"]');
+        if (af) body.append('__RequestVerificationToken', af.value);
+
+        var original = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Queuing…';
+
+        fetch('@Url.Action("Queue", "UserReports")', { method: 'POST', body: body })
+            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+            .then(function (res) {
+                if (res.ok) {
+                    btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating — watch <strong>Reports</strong> 📄';
+                    if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
+                } else {
+                    btn.innerHTML = original;
+                    alert(res.j && res.j.message ? res.j.message : 'Could not queue the report.');
+                }
+            })
+            .catch(function () {
+                btn.innerHTML = original;
+                alert('Could not queue the report. Please try again.');
+            })
+            .finally(function () {
+                setTimeout(function () { btn.disabled = false; btn.innerHTML = original; }, 8000);
+            });
+    }
+
+    function legacySyncExport() {
+        var params = new URLSearchParams(new FormData(form));
+        params.delete('pageSize');
+        var url = '@Url.Action("ExportExcel", "PayerPolicyValidation")' + '?' + params.toString();
+        if (window.lmdExcelDownload) {
+            window.lmdExcelDownload(url);
+        } else {
+            window.location.href = url;
+        }
+    }
+
+    if (btn) {
+        btn.addEventListener('click', function () {
+            if (btn.getAttribute('data-db-enabled') === '1') queueAsyncExport();
+            else legacySyncExport();
+        });
+    }
 })();
 </script>
 }

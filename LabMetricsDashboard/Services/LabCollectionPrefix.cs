@@ -24,7 +24,13 @@ internal static class LabCollectionPrefix
         ["AugustusLabs"]       = "Aug",
         ["BeechTree"]          = "BT",
         ["Beech_Tree"]         = "BT",
+        // Certus: UI/config key is usually "Certus"; some DBs/scripts use CERT / Cert.
         ["Certus"]             = "Cert",
+        ["Certus_LRN"]         = "Cert",
+        ["CertusLabs"]         = "Cert",
+        ["Certus_Labs"]        = "Cert",
+        ["CERT"]               = "Cert",
+        ["Cert"]               = "Cert",
         ["Cove"]               = "Cove",
         ["Elixir"]             = "Elix",
         ["PhiLife"]            = "Phi",
@@ -50,9 +56,25 @@ internal static class LabCollectionPrefix
         if (string.IsNullOrWhiteSpace(labName)) return null;
         if (_map.TryGetValue(labName, out var p)) return p;
 
-        // Fallback: strip underscores/spaces and re-try (handles "Beech Tree" ? "BeechTree").
+        // Fallback: strip underscores/spaces and re-try (handles "Beech Tree" → "BeechTree").
         var normalized = labName.Replace("_", string.Empty).Replace(" ", string.Empty);
         return _map.TryGetValue(normalized, out var p2) ? p2 : null;
+    }
+
+    /// <summary>
+    /// Prefixes to try when resolving Collection Summary SPs/tables.
+    /// For Certus, both <c>Cert</c> and <c>CERT</c> are tried (some deployments use either).
+    /// </summary>
+    public static IReadOnlyList<string> GetPrefixCandidates(string? labName)
+    {
+        var primary = GetPrefix(labName);
+        if (string.IsNullOrWhiteSpace(primary))
+            return Array.Empty<string>();
+
+        if (primary.Equals("Cert", StringComparison.OrdinalIgnoreCase))
+            return ["Cert", "CERT"];
+
+        return [primary];
     }
 
     /// <summary>

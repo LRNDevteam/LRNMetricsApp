@@ -78,16 +78,24 @@ public class AccountController : Controller
 
         ClearFailedLogin(model.UserName);
 
-        // Resolve roles + labs for the user
-        var rolesForUser = await _repo.GetUserRolesAsync(user.LabUserID);
-        var allRoles     = (await _repo.GetAllRolesAsync()).ToDictionary(r => r.RoleID, r => r.RoleName);
+        // Resolve roles + labs for the user.
+        // These three queries are independent — run them concurrently instead of
+        // sequentially. Against a remote SQL server this cuts login time by two
+        // full network round trips (each repo call opens its own pooled connection).
+        var rolesForUserTask = _repo.GetUserRolesAsync(user.LabUserID);
+        var allRolesTask     = _repo.GetAllRolesAsync();
+        var userLabsTask     = _repo.GetUserLabsAsync(user.LabUserID);
+        await Task.WhenAll(rolesForUserTask, allRolesTask, userLabsTask);
+
+        var rolesForUser = await rolesForUserTask;
+        var allRoles     = (await allRolesTask).ToDictionary(r => r.RoleID, r => r.RoleName);
         var roleNames = rolesForUser
             .Select(r => allRoles.TryGetValue(r.RoleID, out var n) ? n : string.Empty)
             .Where(n => !string.IsNullOrWhiteSpace(n))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var userLabs = (await _repo.GetUserLabsAsync(user.LabUserID)).ToList();
+        var userLabs = (await userLabsTask).ToList();
 
         // IMPORTANT:
         // For login redirects and lab claims, rely on LabConfig:LabsID mapping from appsettings.json.

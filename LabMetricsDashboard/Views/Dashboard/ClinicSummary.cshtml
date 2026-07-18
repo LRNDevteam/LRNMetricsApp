@@ -245,6 +245,23 @@
 }
 .cs-drilldown-link .bi { font-size: .6rem; margin-left: .2rem; opacity: .6; }
 
+/* Clinic-grouped Highly Collected / Denied drilldowns */
+.clinic-breakdown-parent { cursor: pointer; }
+.clinic-breakdown-parent:hover { background: #edf4f8 !important; }
+.clinic-breakdown-parent.clinic-breakdown-open { background: #eef6fa; }
+.clinic-breakdown-parent.clinic-breakdown-open td:first-child { background: #eef6fa; }
+.clinic-breakdown-chevron { display: inline-block; transition: transform .2s; }
+.clinic-breakdown-parent.clinic-breakdown-open .clinic-breakdown-chevron { transform: rotate(90deg); }
+.clinic-breakdown-detail td { background: #f8fafc; }
+.clinic-breakdown-detail .cs-table { border: 1px solid #e0e6ed; border-radius: 8px; overflow: hidden; }
+.clinic-breakdown-detail .cs-table thead th { background: linear-gradient(135deg, #3a4a5c 0%, #5a6a7c 100%); }
+.clinic-breakdown-detail .cs-table td:first-child,
+.clinic-breakdown-detail .cs-table thead th:first-child { position: static; min-width: 180px; }
+.collected-theme .bi { color: #198754 !important; }
+.denied-theme .bi { color: #dc3545 !important; }
+.cs-flag-collected { background: #198754; color: #fff; }
+.cs-flag-denied { background: #dc3545; color: #fff; }
+
 /* ── Tabs ──────────────────────────────────────────────────────── */
 .cs-tabs {
     display: flex; gap: 0; margin-bottom: 1.25rem;
@@ -311,6 +328,12 @@
 
     string PlainPctCell(decimal pct) =>
         $"<span class='cs-pct-val'><span class='cs-pct-num'>{pct}%</span></span>";
+
+    string CollectedPctCell(decimal pct) =>
+        $"<span class='cs-pct-val'><span class='cs-flag cs-flag-collected'>&#9873;</span><span class='cs-pct-num'>{pct}%</span></span>";
+
+    string DeniedPctCell(decimal pct) =>
+        $"<span class='cs-pct-val'><span class='cs-flag cs-flag-denied'>&#9873;</span><span class='cs-pct-num'>{pct}%</span></span>";
 }
 
 <!-- ── Shared: Filter panel (above tabs, applies to all) ─────────── -->
@@ -589,23 +612,23 @@
     </div>
 
     <!-- Highly Collected / Highly Denied Tabbed Breakdown -->
-    <div class="cs-wrap mb-4" style="overflow:hidden">
+    <div class="cs-wrap mb-4" id="topBreakdownSection" style="overflow:hidden">
         <ul class="nav nav-tabs px-3 pt-2" id="topBreakdownTabs" role="tablist" style="border-bottom:1px solid #e0e6ed">
             <li class="nav-item" role="presentation">
                 <button class="nav-link active" id="tab-collected" data-bs-toggle="tab" data-bs-target="#pane-collected" type="button" role="tab" style="font-size:.78rem;font-weight:700">
-                    <i class="bi bi-cash-coin me-1" style="color:#0d5c74"></i>Highly Collected
+                    <i class="bi bi-cash-coin me-1" style="color:#198754"></i>Highly Collected
                 </button>
             </li>
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="tab-denied" data-bs-toggle="tab" data-bs-target="#pane-denied" type="button" role="tab" style="font-size:.78rem;font-weight:700">
-                    <i class="bi bi-shield-x me-1" style="color:#8b0000"></i>Highly Denied
+                    <i class="bi bi-shield-x me-1" style="color:#dc3545"></i>Highly Denied
                 </button>
             </li>
         </ul>
 
         <div class="tab-content">
             <!-- Highly Collected pane -->
-            <div class="tab-pane fade show active" id="pane-collected" role="tabpanel">
+            <div class="tab-pane fade show active collected-theme" id="pane-collected" role="tabpanel">
                 <ul class="nav nav-pills px-3 pt-2 pb-1 gap-1" id="collectedSubTabs" role="tablist">
                     <li class="nav-item" role="presentation"><button class="nav-link active py-1 px-2" style="font-size:.72rem" data-bs-toggle="pill" data-bs-target="#collected-clinic" type="button"><i class="bi bi-hospital me-1"></i>Clinic</button></li>
                     <li class="nav-item" role="presentation"><button class="nav-link py-1 px-2" style="font-size:.72rem" data-bs-toggle="pill" data-bs-target="#collected-salesrep" type="button"><i class="bi bi-person-badge me-1"></i>Sales Rep</button></li>
@@ -613,41 +636,84 @@
                     <li class="nav-item" role="presentation"><button class="nav-link py-1 px-2" style="font-size:.72rem" data-bs-toggle="pill" data-bs-target="#collected-panel" type="button"><i class="bi bi-grid-3x3-gap me-1"></i>Panel</button></li>
                 </ul>
                 <div class="tab-content px-2 pb-2">
-                    @{ var collectedCards = new[]
+                    <div class="tab-pane fade show active" id="collected-clinic" role="tabpanel">
+                        @if (Model.TopCollectedClinics.Count > 0)
                         {
-                            (Id: "collected-clinic",   Items: Model.TopCollectedClinics,    Active: true),
-                            (Id: "collected-salesrep", Items: Model.TopCollectedSalesReps,  Active: false),
-                            (Id: "collected-payer",    Items: Model.TopCollectedPayers,     Active: false),
-                            (Id: "collected-panel",    Items: Model.TopCollectedPanels,     Active: false),
+                            <div style="max-height:340px;overflow:auto">
+                                <table class="cs-table" style="font-size:.74rem">
+                                    <thead><tr><th style="text-align:left;min-width:180px"><i class="bi bi-hospital me-1"></i>Clinic</th><th>Claims</th><th>Billed</th><th>Ins. Paid</th><th><i class="bi bi-sort-down" aria-hidden="true"></i> Collection %</th></tr></thead>
+                                    <tbody>
+                                    @foreach (var item in Model.TopCollectedClinics)
+                                    {
+                                        <tr>
+                                            <td title="@item.Name">@item.Name</td>
+                                            <td class="cs-cnt">@item.ClaimCount.ToString("N0")</td>
+                                            <td class="cs-money">@item.TotalBilledCharges.ToString("C0")</td>
+                                            <td class="cs-money">@item.TotalInsurancePaid.ToString("C0")</td>
+                                            <td class="cs-pct">@Html.Raw(CollectedPctCell(item.CollectionPct))</td>
+                                        </tr>
+                                    }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="text-center text-muted py-4" style="font-size:.78rem">No data available</div>
+                        }
+                    </div>
+
+                    @{
+                        var collectedGroups = new[]
+                        {
+                            (Id: "collected-salesrep", Label: "Sales Rep", Icon: "bi-person-badge", Groups: Model.CollectedSalesRepsByClinic),
+                            (Id: "collected-payer", Label: "Payer", Icon: "bi-shield-check", Groups: Model.CollectedPayersByClinic),
+                            (Id: "collected-panel", Label: "Panel", Icon: "bi-grid-3x3-gap", Groups: Model.CollectedPanelsByClinic),
                         };
                     }
-                    @foreach (var card in collectedCards)
+                    @foreach (var card in collectedGroups)
                     {
-                        <div class="tab-pane fade @(card.Active ? "show active" : "")" id="@card.Id" role="tabpanel">
-                            @if (card.Items.Count > 0)
+                        <div class="tab-pane fade" id="@card.Id" role="tabpanel">
+                            @if (card.Groups.Count > 0)
                             {
-                                <div style="max-height:340px;overflow:auto">
+                                <div style="max-height:430px;overflow:auto">
                                     <table class="cs-table" style="font-size:.74rem">
-                                        <thead>
-                                            <tr>
-                                                <th style="text-align:left;min-width:180px">Name</th>
-                                                <th>Claims</th>
-                                                <th>Billed</th>
-                                                <th>Ins. Paid</th>
-                                                <th>Collection %</th>
-                                            </tr>
-                                        </thead>
+                                        <thead><tr><th style="text-align:left;min-width:220px"><i class="bi bi-hospital me-1"></i>Clinic</th><th>Claims</th><th>Billed</th><th>Ins. Paid</th><th>Collection %</th></tr></thead>
                                         <tbody>
-                                            @foreach (var item in card.Items)
-                                            {
-                                                <tr>
-                                                    <td title="@item.Name" style="text-align:left;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">@item.Name</td>
-                                                    <td class="cs-cnt">@item.ClaimCount.ToString("N0")</td>
-                                                    <td class="cs-money">@item.TotalBilledCharges.ToString("C0")</td>
-                                                    <td class="cs-money">@item.TotalInsurancePaid.ToString("C0")</td>
-                                                    <td class="cs-pct">@Html.Raw(PctCell(item.CollectionPct, item.CollectionPct))</td>
-                                                </tr>
-                                            }
+                                        @{ var collectedGroupIdx = 0; }
+                                        @foreach (var group in card.Groups)
+                                        {
+                                            var detailId = $"{card.Id}-clinic-{collectedGroupIdx++}";
+                                            <tr class="clinic-breakdown-parent" data-clinic-breakdown-target="@detailId">
+                                                <td title="@group.Clinic.Name"><i class="bi bi-chevron-right clinic-breakdown-chevron me-1"></i>@group.Clinic.Name</td>
+                                                <td class="cs-cnt">@group.Clinic.ClaimCount.ToString("N0")</td>
+                                                <td class="cs-money">@group.Clinic.TotalBilledCharges.ToString("C0")</td>
+                                                <td class="cs-money">@group.Clinic.TotalInsurancePaid.ToString("C0")</td>
+                                                <td class="cs-pct">@Html.Raw(CollectedPctCell(group.Clinic.CollectionPct))</td>
+                                            </tr>
+                                            <tr class="clinic-breakdown-detail" id="@detailId" style="display:none">
+                                                <td colspan="5" style="padding:0;background:#f8fafc;border-left:4px solid #198754">
+                                                    <div class="p-2">
+                                                        <div class="fw-bold mb-1" style="font-size:.68rem;color:#475569"><i class="bi @card.Icon me-1"></i>@card.Label</div>
+                                                        <table class="cs-table" style="font-size:.7rem;margin:0">
+                                                            <thead><tr><th style="text-align:left;padding:.3rem .5rem">@card.Label</th><th style="padding:.3rem .5rem">Claims</th><th style="padding:.3rem .5rem">Billed</th><th style="padding:.3rem .5rem">Ins. Paid</th><th style="padding:.3rem .5rem">Collection %</th></tr></thead>
+                                                            <tbody>
+                                                            @foreach (var item in group.Items)
+                                                            {
+                                                                <tr>
+                                                                    <td title="@item.Name" style="padding:.3rem .5rem">@item.Name</td>
+                                                                    <td class="cs-cnt" style="padding:.3rem .5rem">@item.ClaimCount.ToString("N0")</td>
+                                                                    <td class="cs-money" style="padding:.3rem .5rem">@item.TotalBilledCharges.ToString("C0")</td>
+                                                                    <td class="cs-money" style="padding:.3rem .5rem">@item.TotalInsurancePaid.ToString("C0")</td>
+                                                                    <td class="cs-pct" style="padding:.3rem .5rem">@Html.Raw(CollectedPctCell(item.CollectionPct))</td>
+                                                                </tr>
+                                                            }
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        }
                                         </tbody>
                                     </table>
                                 </div>
@@ -662,7 +728,7 @@
             </div>
 
             <!-- Highly Denied pane -->
-            <div class="tab-pane fade" id="pane-denied" role="tabpanel">
+            <div class="tab-pane fade denied-theme" id="pane-denied" role="tabpanel">
                 <ul class="nav nav-pills px-3 pt-2 pb-1 gap-1" id="deniedSubTabs" role="tablist">
                     <li class="nav-item" role="presentation"><button class="nav-link active py-1 px-2" style="font-size:.72rem" data-bs-toggle="pill" data-bs-target="#denied-clinic" type="button"><i class="bi bi-hospital me-1"></i>Clinic</button></li>
                     <li class="nav-item" role="presentation"><button class="nav-link py-1 px-2" style="font-size:.72rem" data-bs-toggle="pill" data-bs-target="#denied-salesrep" type="button"><i class="bi bi-person-badge me-1"></i>Sales Rep</button></li>
@@ -670,41 +736,84 @@
                     <li class="nav-item" role="presentation"><button class="nav-link py-1 px-2" style="font-size:.72rem" data-bs-toggle="pill" data-bs-target="#denied-panel" type="button"><i class="bi bi-grid-3x3-gap me-1"></i>Panel</button></li>
                 </ul>
                 <div class="tab-content px-2 pb-2">
-                    @{ var deniedCards = new[]
+                    <div class="tab-pane fade show active" id="denied-clinic" role="tabpanel">
+                        @if (Model.TopDeniedClinics.Count > 0)
                         {
-                            (Id: "denied-clinic",   Items: Model.TopDeniedClinics,    Active: true),
-                            (Id: "denied-salesrep", Items: Model.TopDeniedSalesReps,  Active: false),
-                            (Id: "denied-payer",    Items: Model.TopDeniedPayers,     Active: false),
-                            (Id: "denied-panel",    Items: Model.TopDeniedPanels,     Active: false),
+                            <div style="max-height:340px;overflow:auto">
+                                <table class="cs-table" style="font-size:.74rem">
+                                    <thead><tr><th style="text-align:left;min-width:180px"><i class="bi bi-hospital me-1"></i>Clinic</th><th>Denied Claims</th><th>Billed</th><th>Denied Charges</th><th><i class="bi bi-sort-down" aria-hidden="true"></i> Denial %</th></tr></thead>
+                                    <tbody>
+                                    @foreach (var item in Model.TopDeniedClinics)
+                                    {
+                                        <tr>
+                                            <td title="@item.Name">@item.Name</td>
+                                            <td class="cs-cnt">@item.DeniedClaimCount.ToString("N0")</td>
+                                            <td class="cs-money">@item.TotalBilledCharges.ToString("C0")</td>
+                                            <td class="cs-money">@item.TotalDeniedCharges.ToString("C0")</td>
+                                            <td class="cs-pct">@Html.Raw(DeniedPctCell(item.DenialPct))</td>
+                                        </tr>
+                                    }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="text-center text-muted py-4" style="font-size:.78rem">No denial data available</div>
+                        }
+                    </div>
+
+                    @{
+                        var deniedGroups = new[]
+                        {
+                            (Id: "denied-salesrep", Label: "Sales Rep", Icon: "bi-person-badge", Groups: Model.DeniedSalesRepsByClinic),
+                            (Id: "denied-payer", Label: "Payer", Icon: "bi-shield-check", Groups: Model.DeniedPayersByClinic),
+                            (Id: "denied-panel", Label: "Panel", Icon: "bi-grid-3x3-gap", Groups: Model.DeniedPanelsByClinic),
                         };
                     }
-                    @foreach (var card in deniedCards)
+                    @foreach (var card in deniedGroups)
                     {
-                        <div class="tab-pane fade @(card.Active ? "show active" : "")" id="@card.Id" role="tabpanel">
-                            @if (card.Items.Count > 0)
+                        <div class="tab-pane fade" id="@card.Id" role="tabpanel">
+                            @if (card.Groups.Count > 0)
                             {
-                                <div style="max-height:340px;overflow:auto">
+                                <div style="max-height:430px;overflow:auto">
                                     <table class="cs-table" style="font-size:.74rem">
-                                        <thead>
-                                            <tr>
-                                                <th style="text-align:left;min-width:180px">Name</th>
-                                                <th>Denied Claims</th>
-                                                <th>Billed</th>
-                                                <th>Denied Charges</th>
-                                                <th>Denial %</th>
-                                            </tr>
-                                        </thead>
+                                        <thead><tr><th style="text-align:left;min-width:220px"><i class="bi bi-hospital me-1"></i>Clinic</th><th>Denied Claims</th><th>Billed</th><th>Denied Charges</th><th>Denial %</th></tr></thead>
                                         <tbody>
-                                            @foreach (var item in card.Items)
-                                            {
-                                                <tr>
-                                                    <td title="@item.Name" style="text-align:left;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">@item.Name</td>
-                                                    <td class="cs-cnt">@item.DeniedClaimCount.ToString("N0")</td>
-                                                    <td class="cs-money">@item.TotalBilledCharges.ToString("C0")</td>
-                                                    <td class="cs-money">@item.TotalDeniedCharges.ToString("C0")</td>
-                                                    <td class="cs-pct">@Html.Raw(InversePctCell(item.DenialPct))</td>
-                                                </tr>
-                                            }
+                                        @{ var deniedGroupIdx = 0; }
+                                        @foreach (var group in card.Groups)
+                                        {
+                                            var detailId = $"{card.Id}-clinic-{deniedGroupIdx++}";
+                                            <tr class="clinic-breakdown-parent" data-clinic-breakdown-target="@detailId">
+                                                <td title="@group.Clinic.Name"><i class="bi bi-chevron-right clinic-breakdown-chevron me-1"></i>@group.Clinic.Name</td>
+                                                <td class="cs-cnt">@group.Clinic.DeniedClaimCount.ToString("N0")</td>
+                                                <td class="cs-money">@group.Clinic.TotalBilledCharges.ToString("C0")</td>
+                                                <td class="cs-money">@group.Clinic.TotalDeniedCharges.ToString("C0")</td>
+                                                <td class="cs-pct">@Html.Raw(DeniedPctCell(group.Clinic.DenialPct))</td>
+                                            </tr>
+                                            <tr class="clinic-breakdown-detail" id="@detailId" style="display:none">
+                                                <td colspan="5" style="padding:0;background:#f8fafc;border-left:4px solid #dc3545">
+                                                    <div class="p-2">
+                                                        <div class="fw-bold mb-1" style="font-size:.68rem;color:#475569"><i class="bi @card.Icon me-1"></i>@card.Label</div>
+                                                        <table class="cs-table" style="font-size:.7rem;margin:0">
+                                                            <thead><tr><th style="text-align:left;padding:.3rem .5rem">@card.Label</th><th style="padding:.3rem .5rem">Denied Claims</th><th style="padding:.3rem .5rem">Billed</th><th style="padding:.3rem .5rem">Denied Charges</th><th style="padding:.3rem .5rem">Denial %</th></tr></thead>
+                                                            <tbody>
+                                                            @foreach (var item in group.Items)
+                                                            {
+                                                                <tr>
+                                                                    <td title="@item.Name" style="padding:.3rem .5rem">@item.Name</td>
+                                                                    <td class="cs-cnt" style="padding:.3rem .5rem">@item.DeniedClaimCount.ToString("N0")</td>
+                                                                    <td class="cs-money" style="padding:.3rem .5rem">@item.TotalBilledCharges.ToString("C0")</td>
+                                                                    <td class="cs-money" style="padding:.3rem .5rem">@item.TotalDeniedCharges.ToString("C0")</td>
+                                                                    <td class="cs-pct" style="padding:.3rem .5rem">@Html.Raw(DeniedPctCell(item.DenialPct))</td>
+                                                                </tr>
+                                                            }
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        }
                                         </tbody>
                                     </table>
                                 </div>
@@ -764,6 +873,9 @@ else
         <i class="bi bi-arrow-clockwise spin-slow"></i> Loading Clinic Count by DOS Month…
     </div>
 </div>
+
+<!-- Ranking grids remain visible below every Clinic Summary analysis tab. -->
+<div id="topBreakdownHost"></div>
 
 <style>
 @@keyframes spin-slow { from { transform: rotate(0); } to { transform: rotate(360deg); } }
@@ -833,12 +945,68 @@ else
 
         var exportBtn = document.getElementById('exportExcelBtn');
         if (exportBtn) {
-            exportBtn.addEventListener('click', function () {
+            // Legacy synchronous download (fallback for labs without the report queue).
+            var csLegacyDownload = function () {
                 var form = document.getElementById('csFilterForm');
                 if (!form) return;
                 var params = new URLSearchParams(new FormData(form));
                 var url = '@Url.Action("ExportClinicSummaryExcel", "Dashboard")' + '?' + params.toString();
                 window.location.href = url;
+            };
+
+            // Async export (preferred): queue via UserReqReports; LRN.ReportWorker
+            // generates the workbook and the 📄 Reports badge notifies when ready.
+            exportBtn.addEventListener('click', function () {
+                var form = document.getElementById('csFilterForm');
+                if (!form) return;
+                var fd = new FormData(form);
+                var val = function (n) { return (fd.get(n) || '').toString().trim() || null; };
+                var all = function (n) {
+                    var v = fd.getAll(n).map(function (x) { return x.toString().trim(); })
+                             .filter(function (x) { return x.length > 0; });
+                    return v.length > 0 ? v : null;
+                };
+                var filters = {
+                    ClinicNames:   all('filterClinicNames'),
+                    SalesRepNames: all('filterSalesRepNames'),
+                    PayerNames:    all('filterPayerNames'),
+                    PanelNames:    all('filterPanelNames'),
+                    DosFrom:       val('filterDosFrom'),
+                    DosTo:         val('filterDosTo'),
+                    FirstBillFrom: val('filterFirstBillFrom'),
+                    FirstBillTo:   val('filterFirstBillTo')
+                };
+
+                var body = new FormData();
+                body.append('lab', '@Model.SelectedLab');
+                body.append('reportType', 'ClinicSummary');
+                body.append('filterDetails', JSON.stringify(filters));
+                var af = document.querySelector('#lrnReportsAf input[name="__RequestVerificationToken"]');
+                if (af) body.append('__RequestVerificationToken', af.value);
+
+                var original = exportBtn.innerHTML;
+                exportBtn.disabled = true;
+                exportBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Queuing…';
+
+                fetch('@Url.Action("Queue", "UserReports")', { method: 'POST', body: body })
+                    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+                    .then(function (res) {
+                        if (res.ok) {
+                            exportBtn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating — watch Reports 📄';
+                            if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
+                            setTimeout(function () { exportBtn.disabled = false; exportBtn.innerHTML = original; }, 8000);
+                        } else if (res.status === 400) {
+                            exportBtn.disabled = false; exportBtn.innerHTML = original;
+                            csLegacyDownload();
+                        } else {
+                            exportBtn.disabled = false; exportBtn.innerHTML = original;
+                            alert(res.j && res.j.message ? res.j.message : 'Could not queue the report.');
+                        }
+                    })
+                    .catch(function () {
+                        exportBtn.disabled = false; exportBtn.innerHTML = original;
+                        csLegacyDownload();
+                    });
             });
         }
     });
@@ -847,6 +1015,14 @@ else
 <!-- ── Tab switching + lazy-load JS ──────────────────────────────── -->
 <script nonce='@Context.Items["CspNonce"]'>
 (function () {
+    // The ranking block is rendered with the Clinic Summary data, but is shared by
+    // every analysis tab. Move it outside tabClinicSummary so tab switching cannot hide it.
+    var topBreakdown = document.getElementById('topBreakdownSection');
+    var topBreakdownHost = document.getElementById('topBreakdownHost');
+    if (topBreakdown && topBreakdownHost) {
+        topBreakdownHost.appendChild(topBreakdown);
+    }
+
     var tabs = document.querySelectorAll('.cs-tab[data-cs-tab]');
     var panels = document.querySelectorAll('.cs-tab-panel');
     var panelStatusLoaded = false;
@@ -899,6 +1075,50 @@ else
             });
     }
 
+    // Expand/collapse for AJAX grids (Clinic $ Analysis + Panel Status).
+    // Same > chevron pattern as Sales Rep Summary — delegated so it works
+    // even if partial script injection is blocked by CSP.
+    document.addEventListener('click', function (e) {
+        var breakdownRow = e.target.closest('.clinic-breakdown-parent[data-clinic-breakdown-target]');
+        if (breakdownRow) {
+            var breakdownId = breakdownRow.getAttribute('data-clinic-breakdown-target');
+            var breakdownDetail = document.getElementById(breakdownId);
+            if (breakdownDetail) {
+                var breakdownOpen = breakdownDetail.style.display !== 'none';
+                breakdownDetail.style.display = breakdownOpen ? 'none' : 'table-row';
+                breakdownRow.classList.toggle('clinic-breakdown-open', !breakdownOpen);
+                return;
+            }
+        }
+
+        var cdaRow = e.target.closest('.cda-clinic-row[data-cda-toggle]');
+        if (cdaRow) {
+            var cdaRoot = cdaRow.closest('#cdaTableRoot') || cdaRow.closest('#cdaPanelContent');
+            if (cdaRoot) {
+                var cdaId = cdaRow.getAttribute('data-cda-toggle');
+                var cdaOpen = cdaRow.classList.toggle('cda-expanded');
+                cdaRoot.querySelectorAll('.cda-status-row[data-cda-parent="' + cdaId + '"]').forEach(function (sr) {
+                    sr.classList.toggle('cda-open', cdaOpen);
+                });
+                return;
+            }
+        }
+
+        var cpsRow = e.target.closest('.cps-clinic-row[data-cps-toggle]');
+        if (cpsRow) {
+            var cpsTable = cpsRow.closest('.cps-table') || cpsRow.closest('#cpsPanelContent');
+            if (cpsTable) {
+                var cpsId = cpsRow.getAttribute('data-cps-toggle');
+                var wasExpanded = cpsRow.classList.contains('cps-expanded');
+                cpsRow.classList.toggle('cps-expanded', !wasExpanded);
+                cpsRow.classList.toggle('collapsed', wasExpanded);
+                cpsTable.querySelectorAll('tr.cps-panel-row[data-cps-group="' + cpsId + '"]').forEach(function (row) {
+                    row.classList.toggle('cps-open', !wasExpanded);
+                });
+            }
+        }
+    });
+
     tabs.forEach(function (tab) {
         tab.addEventListener('click', function () {
             var target = tab.getAttribute('data-cs-tab');
@@ -915,12 +1135,13 @@ else
 
             if (target === 'tabDollar' && !dollarAnalysisLoaded) {
                 dollarAnalysisLoaded = true;
-                loadAndInject('@Url.Action("ClinicDollarAnalysis", "Dashboard")' + '?' + getFilterParams(), 'cdaPanelContent', true);
+                // Markup-only: expand/collapse is handled by delegated click on ClinicSummary
+                loadAndInject('@Url.Action("ClinicDollarAnalysis", "Dashboard")' + '?' + getFilterParams(), 'cdaPanelContent', false);
             }
 
             if (target === 'tabPanelStatus' && !panelStatusLoaded) {
                 panelStatusLoaded = true;
-                loadAndInject('@Url.Action("ClinicPanelStatus", "Dashboard")' + '?' + getFilterParams(), 'cpsPanelContent', true);
+                loadAndInject('@Url.Action("ClinicPanelStatus", "Dashboard")' + '?' + getFilterParams(), 'cpsPanelContent', false);
             }
         });
     });

@@ -11,7 +11,8 @@ namespace LabMetricsDashboard.Controllers;
 /// </summary>
 public class PayerPolicyValidationController : Controller
 {
-    private const int PageSize = 50;
+    private const int DefaultPageSize = 50;
+    private const int MaxPageSize     = 100_000;
 
     private readonly LabSettings _labSettings;
     private readonly PayerPolicyValidationService _service;
@@ -27,19 +28,26 @@ public class PayerPolicyValidationController : Controller
         _logger      = logger;
     }
 
+    private static int NormalizePageSize(int pageSize) =>
+        pageSize < 1 ? DefaultPageSize : Math.Min(pageSize, MaxPageSize);
+
     /// <summary>GET /PayerPolicyValidation?lab=Phi_Life</summary>
     public async Task<IActionResult> Index(
         string? lab,
         string? filterPayerName,
-        string? filterPayerType,
         string? filterPanelName,
         string? filterFinalCoverageStatus,
-        string? filterPayability,
         string? filterCPTCode,
+        string? filterForecastingPayabilitySubstatus,
+        string? filterPredictionStatus,
+        string? filterPayStatus,
         bool search = true,  // Changed: default to true to load all data by default
         int page = 1,
+        int pageSize = DefaultPageSize,
         CancellationToken ct = default)
     {
+        pageSize = NormalizePageSize(pageSize);
+
         var availableLabs = PayerPolicyValidationService.GetAvailableLabs(_labSettings.Labs);
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
@@ -66,15 +74,17 @@ public class PayerPolicyValidationController : Controller
         {
             return View(new PayerPolicyValidationViewModel
             {
-                AvailableLabs             = availableLabs,
-                SelectedLab               = selectedLab,
-                DbEnabled                 = labConfig.DBEnabled,
-                FilterPayerName           = filterPayerName,
-                FilterPayerType           = filterPayerType,
-                FilterPanelName           = filterPanelName,
-                FilterFinalCoverageStatus = filterFinalCoverageStatus,
-                FilterPayability          = filterPayability,
-                FilterCPTCode             = filterCPTCode,
+                AvailableLabs                        = availableLabs,
+                SelectedLab                          = selectedLab,
+                DbEnabled                            = labConfig.DBEnabled,
+                PageSize                             = pageSize,
+                FilterPayerName                      = filterPayerName,
+                FilterPanelName                      = filterPanelName,
+                FilterFinalCoverageStatus            = filterFinalCoverageStatus,
+                FilterCPTCode                        = filterCPTCode,
+                FilterForecastingPayabilitySubstatus = filterForecastingPayabilitySubstatus,
+                FilterPredictionStatus               = filterPredictionStatus,
+                FilterPayStatus                      = filterPayStatus,
             });
         }
 
@@ -82,35 +92,36 @@ public class PayerPolicyValidationController : Controller
         {
             var result = await _service.LoadAsync(
                 selectedLab, labConfig,
-                filterPayerName, filterPayerType, filterPanelName,
-                filterFinalCoverageStatus, filterPayability, filterCPTCode,
-                page, PageSize, ct);
-
-            var baseData = result.BaseDataset;
+                filterPayerName, filterPanelName, filterFinalCoverageStatus, filterCPTCode,
+                filterForecastingPayabilitySubstatus, filterPredictionStatus, filterPayStatus,
+                page, pageSize, ct);
 
             return View(new PayerPolicyValidationViewModel
             {
-                AvailableLabs             = availableLabs,
-                SelectedLab               = selectedLab,
-                DataLoaded                = true,
-                DbEnabled                 = result.UsingDb,
-                DataSourceLabel           = result.DataSourceLabel,
-                Records                   = result.PagedRows,
-                Paging                    = new PageInfo(page, PageSize, result.AllFilteredRows.Count, baseData.Count),
+                AvailableLabs                        = availableLabs,
+                SelectedLab                          = selectedLab,
+                DataLoaded                           = true,
+                DbEnabled                            = result.UsingDb,
+                DataSourceLabel                      = result.DataSourceLabel,
+                Records                              = result.PagedRows,
+                Paging                               = new PageInfo(page, pageSize, result.TotalFiltered, result.TotalAll),
+                PageSize                             = pageSize,
 
-                FilterPayerName           = filterPayerName,
-                FilterPayerType           = filterPayerType,
-                FilterPanelName           = filterPanelName,
-                FilterFinalCoverageStatus = filterFinalCoverageStatus,
-                FilterPayability          = filterPayability,
-                FilterCPTCode             = filterCPTCode,
+                FilterPayerName                      = filterPayerName,
+                FilterPanelName                      = filterPanelName,
+                FilterFinalCoverageStatus            = filterFinalCoverageStatus,
+                FilterCPTCode                        = filterCPTCode,
+                FilterForecastingPayabilitySubstatus = filterForecastingPayabilitySubstatus,
+                FilterPredictionStatus               = filterPredictionStatus,
+                FilterPayStatus                      = filterPayStatus,
 
-                PayerNames            = Distinct(baseData, r => r.PayerNameNormalized),
-                PayerTypes            = Distinct(baseData, r => r.PayerType),
-                PanelNames            = Distinct(baseData, r => r.PanelName),
-                FinalCoverageStatuses = Distinct(baseData, r => r.FinalCoverageStatus),
-                PayabilityOptions     = Distinct(baseData, r => r.Payability),
-                CPTCodes              = Distinct(baseData, r => r.CPTCode),
+                PayerNames                       = result.Options.PayerNames,
+                PanelNames                       = result.Options.PanelNames,
+                FinalCoverageStatuses            = result.Options.FinalCoverageStatuses,
+                CPTCodes                         = result.Options.CPTCodes,
+                ForecastingPayabilitySubstatuses = result.Options.ForecastingPayabilitySubstatuses,
+                PredictionStatuses               = result.Options.PredictionStatuses,
+                PayStatuses                      = result.Options.PayStatuses,
             });
         }
         catch (Exception ex)
@@ -131,11 +142,12 @@ public class PayerPolicyValidationController : Controller
     public async Task<IActionResult> ExportExcel(
         string? lab,
         string? filterPayerName,
-        string? filterPayerType,
         string? filterPanelName,
         string? filterFinalCoverageStatus,
-        string? filterPayability,
         string? filterCPTCode,
+        string? filterForecastingPayabilitySubstatus,
+        string? filterPredictionStatus,
+        string? filterPayStatus,
         CancellationToken ct = default)
     {
         var availableLabs = PayerPolicyValidationService.GetAvailableLabs(_labSettings.Labs);
@@ -146,32 +158,23 @@ public class PayerPolicyValidationController : Controller
 
         try
         {
-            var result = await _service.LoadAsync(
+            var allFilteredRows = await _service.LoadAllFilteredAsync(
                 selectedLab, labConfig,
-                filterPayerName, filterPayerType, filterPanelName,
-                filterFinalCoverageStatus, filterPayability, filterCPTCode,
-                page: 1, pageSize: int.MaxValue, ct);
+                filterPayerName, filterPanelName, filterFinalCoverageStatus, filterCPTCode,
+                filterForecastingPayabilitySubstatus, filterPredictionStatus, filterPayStatus, ct);
 
             var activeFilters = BuildActiveFilters(
-                filterPayerName, filterPayerType, filterPanelName,
-                filterFinalCoverageStatus, filterPayability, filterCPTCode);
+                filterPayerName, filterPanelName, filterFinalCoverageStatus, filterCPTCode,
+                filterForecastingPayabilitySubstatus, filterPredictionStatus, filterPayStatus);
 
             var bytes = PayerPolicyValidationExcelBuilder.CreateWorkbook(
                 selectedLab,
-                result.AllFilteredRows,
+                allFilteredRows,
                 activeFilters.Count > 0 ? activeFilters : null);
 
             _logger.LogInformation(
                 "PayerPolicyValidation export [{Lab}]: {Rows:N0} rows.",
-                selectedLab, result.AllFilteredRows.Count);
-
-            Response.Cookies.Append("ppvExportDone", "1", new CookieOptions
-            {
-                Path     = "/",
-                HttpOnly = false,
-                SameSite = SameSiteMode.Lax,
-                MaxAge   = TimeSpan.FromSeconds(30),
-            });
+                selectedLab, allFilteredRows.Count);
 
             var fileName = $"{selectedLab}_PayerPolicyValidation_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
             return File(bytes,
@@ -185,29 +188,23 @@ public class PayerPolicyValidationController : Controller
         }
     }
 
-    private static List<string> Distinct(
-        IEnumerable<PredictionRecord> rows,
-        Func<PredictionRecord, string> selector) =>
-        rows.Select(selector).Where(v => !string.IsNullOrWhiteSpace(v))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(v => v)
-            .ToList();
-
     private static List<(string Label, string? Value)> BuildActiveFilters(
         string? filterPayerName,
-        string? filterPayerType,
         string? filterPanelName,
         string? filterFinalCoverageStatus,
-        string? filterPayability,
-        string? filterCPTCode)
+        string? filterCPTCode,
+        string? filterForecastingPayabilitySubstatus,
+        string? filterPredictionStatus,
+        string? filterPayStatus)
     {
         var list = new List<(string, string?)>();
         if (!string.IsNullOrWhiteSpace(filterPayerName)) list.Add(("Payer Name", filterPayerName));
-        if (!string.IsNullOrWhiteSpace(filterPayerType)) list.Add(("Payer Type", filterPayerType));
         if (!string.IsNullOrWhiteSpace(filterPanelName)) list.Add(("Panel", filterPanelName));
         if (!string.IsNullOrWhiteSpace(filterFinalCoverageStatus)) list.Add(("Final Coverage", filterFinalCoverageStatus));
-        if (!string.IsNullOrWhiteSpace(filterPayability)) list.Add(("Payability", filterPayability));
         if (!string.IsNullOrWhiteSpace(filterCPTCode)) list.Add(("CPT Code", filterCPTCode));
+        if (!string.IsNullOrWhiteSpace(filterForecastingPayabilitySubstatus)) list.Add(("Forecast Substatus", filterForecastingPayabilitySubstatus));
+        if (!string.IsNullOrWhiteSpace(filterPredictionStatus)) list.Add(("Prediction Status", filterPredictionStatus));
+        if (!string.IsNullOrWhiteSpace(filterPayStatus)) list.Add(("Pay Status", filterPayStatus));
         return list;
     }
 }
