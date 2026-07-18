@@ -1,0 +1,197 @@
+@using System.Globalization
+@model LabMetricsDashboard.ViewModels.LineItemGridViewModel
+@{
+    var usd = CultureInfo.GetCultureInfo("en-US");
+    const string Dash = "-";
+    string Txt(string? value) => string.IsNullOrWhiteSpace(value) ? Dash : value.Trim();
+    string Dt(DateTime? value) => value?.ToString("MM/dd/yyyy") ?? Dash;
+    string Cnt(int? value) => value?.ToString("N0", usd) ?? Dash;
+    string Amt(decimal? value) => value.HasValue ? value.Value.ToString("C2", usd) : Dash;
+    string Dec(decimal? value) => value?.ToString("N2", usd) ?? Dash;
+
+    var pageSizes = new[] { 50, 100, 250, 500, 1000 };
+    var columnFilters = Model.Filters.ColumnFilters ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    string ColFilter(string key) => columnFilters.TryGetValue(key, out var v) ? v : string.Empty;
+
+    var startItem = Model.LineItemCount == 0 ? 0 : ((Model.LineItemPage - 1) * Model.LineItemPageSize) + 1;
+    var endItem = Math.Min(Model.LineItemPage * Model.LineItemPageSize, Model.LineItemCount);
+
+    // Every dbo.DenialLineItem column carried by DenialLineItemRecord, in table order.
+    // Key = the real DB column name (used as the server-side per-column filter key; whitelisted in the API).
+    var lineItemColumns = new (string Header, string Css, string Key, Func<DenialLineItemRecord, string> Value)[]
+    {
+        ("Accession No", "fw-semibold", "AccessionNo", x => Txt(x.AccessionNo)),
+        ("Visit Number", "", "VisitNumber", x => Txt(x.VisitNumber)),
+        ("CPT Code", "", "CPTCode", x => Txt(x.CptCode)),
+        ("Payer Code", "lis-number-cell", "PayerCode", x => Cnt(x.PayerCode)),
+        ("Payer Name", "lis-wide-cell", "PayerName", x => Txt(x.PayerName)),
+        ("Payer Name Normalized", "lis-wide-cell", "PayerNameNormalized", x => Txt(x.PayerNameNormalized)),
+        ("Payer Type", "", "PayerType", x => Txt(x.PayerType)),
+        ("Pay Status", "", "PayStatus", x => Txt(x.PayStatus)),
+        ("Historical Payment", "", "HistoricalPayment", x => Txt(x.HistoricalPayment)),
+        ("Historical Paid Line Item Count", "lis-number-cell", "HistoricalPaidLineItemCount", x => Txt(x.HistoricalPaidLineItemCount)),
+        ("Historical Payment Confidence Score", "lis-number-cell", "HistoricalPaymentConfidenceScore", x => Txt(x.HistoricalPaymentConfidenceScore)),
+        ("Total Line Item Count", "lis-number-cell", "TotalLineItemCount", x => Cnt(x.TotalLineItemCount)),
+        ("Paid Line Item Count", "lis-number-cell", "PaidLineItemCount", x => Cnt(x.PaidLineItemCount)),
+        ("Paid Line Item Count %", "lis-number-cell", "PaidLineItemCountPercent", x => Dec(x.PaidLineItemCountPercent)),
+        ("Payer Found In Policy", "", "PayerFoundInPolicy", x => Txt(x.PayerFoundInPolicy)),
+        ("Date of Service", "lis-date-cell", "DateOfService", x => Dt(x.DateOfService)),
+        ("First Billed Date", "lis-date-cell", "FirstBilledDate", x => Dt(x.FirstBilledDate)),
+        ("Denial Date", "lis-date-cell", "DenialDate", x => Dt(x.DenialDate)),
+        ("Panel Name", "lis-wide-cell", "PanelName", x => Txt(x.PanelName)),
+        ("LIS ICD10 Codes", "lis-wide-cell", "LISICD10Codes", x => Txt(x.LisIcd10Codes)),
+        ("CCW ICD10 Code", "lis-wide-cell", "CCWICD10Code", x => Txt(x.CcwIcd10Code)),
+        ("Units", "lis-number-cell", "Units", x => Cnt(x.Units)),
+        ("Modifier", "", "Modifier", x => Txt(x.Modifier)),
+        ("Referring Provider", "lis-wide-cell", "ReferringProvider", x => Txt(x.ReferringProvider)),
+        ("Clinic Name", "lis-wide-cell", "ClinicName", x => Txt(x.ClinicName)),
+        ("Sales Rep", "lis-wide-cell", "SalesRepname", x => Txt(x.SalesRepname)),
+        ("Denial Code Original", "", "DenialCodeOriginal", x => Txt(x.DenialCodeOriginal)),
+        ("Denial Code Normalized", "", "DenialCodeNormalized", x => Txt(x.DenialCodeNormalized)),
+        ("Denial Description", "lis-wide-cell", "DenialDescription", x => Txt(x.DenialDescription)),
+        ("Billed Amount", "lis-number-cell", "BilledAmount", x => Amt(x.BilledAmount)),
+        ("Allowed Amount", "lis-number-cell", "AllowedAmount", x => Amt(x.AllowedAmount)),
+        ("Insurance Payment", "lis-number-cell", "InsurancePayment", x => Amt(x.InsurancePayment)),
+        ("Insurance Adjustment", "lis-number-cell", "InsuranceAdjustment", x => Amt(x.InsuranceAdjustment)),
+        ("Patient Paid Amount", "lis-number-cell", "PatientPaidAmount", x => Amt(x.PatientPaidAmount)),
+        ("Patient Adjustment", "lis-number-cell", "PatientAdjustment", x => Amt(x.PatientAdjustment)),
+        ("Insurance Balance", "lis-number-cell", "InsuranceBalance", x => Amt(x.InsuranceBalance)),
+        ("Patient Balance", "lis-number-cell", "PatientBalance", x => Amt(x.PatientBalance)),
+        ("Total Balance", "lis-number-cell", "TotalBalance", x => Amt(x.TotalBalance)),
+        ("Medicare Fee", "lis-number-cell", "MedicareFee", x => Amt(x.MedicareFee)),
+        ("Final Claim Status", "", "FinalClaimStatus", x => Txt(x.FinalClaimStatus)),
+        ("Covered ICD10 Codes Billed", "lis-wide-cell", "CoveredICD10CodesBilled", x => Txt(x.CoveredIcd10CodesBilled)),
+        ("Non Covered ICD10 Codes Billed", "lis-wide-cell", "NonCoveredICD10CodesBilled", x => Txt(x.NonCoveredIcd10CodesBilled)),
+        ("Billed ICD Codes Not In Payer Policy", "lis-wide-cell", "BilledICDCodesNotAvailableInPayerPolicy", x => Txt(x.BilledIcdCodesNotAvailableInPayerPolicy)),
+        ("Coverage Status", "", "CoverageStatus", x => Txt(x.CoverageStatus)),
+        ("Final Coverage Status", "", "FinalCoverageStatus", x => Txt(x.FinalCoverageStatus)),
+        ("Covered ICD10 Codes Per Payer Policy", "lis-wide-cell", "CoveredICD10CodesAsPerPayerPolicy", x => Txt(x.CoveredIcd10CodesAsPerPayerPolicy)),
+        ("Non Covered ICD10 Codes Per Payer Policy", "lis-wide-cell", "NonCoveredICD10CodesAsPerPayerPolicy", x => Txt(x.NonCoveredIcd10CodesAsPerPayerPolicy)),
+        ("Action Comment", "lis-wide-cell", "ActionComment", x => Txt(x.ActionComment)),
+        ("Resolution", "", "Resolution", x => Txt(x.Resolution)),
+        ("Lab Name", "lis-wide-cell", "LabName", x => Txt(x.LabName)),
+        ("Coding Validation", "", "CodingValidation", x => Txt(x.CodingValidation)),
+        ("Coding Validation Sub Status", "lis-wide-cell", "CodingValidationSubStatus", x => Txt(x.CodingValidationSubStatus)),
+        ("ICD Compliance Status", "", "ICDComplianceStatus", x => Txt(x.IcdComplianceStatus)),
+        ("ICD Compliance Substatus", "lis-wide-cell", "ICDComplianceSubstatus", x => Txt(x.IcdComplianceSubstatus)),
+        ("ICD Primary Indicator Available", "", "ICDPrimaryIndicatorAvailable", x => Txt(x.IcdPrimaryIndicatorAvailable)),
+        ("Covered ICD Presence", "", "CoveredICDPresence", x => Txt(x.CoveredIcdPresence)),
+        ("ICD Validation Confidence", "", "ICDValidationConfidence", x => Txt(x.IcdValidationConfidence)),
+        ("Frequency Condition Met", "", "FrequencyConditionMet", x => Txt(x.FrequencyConditionMet)),
+        ("Gender Condition Met", "", "GenderConditionMet", x => Txt(x.GenderConditionMet)),
+        ("Payability", "", "Payability", x => Txt(x.Payability)),
+        ("Forecasting Payability", "", "ForecastingPayability", x => Txt(x.ForecastingPayability)),
+        ("Policy Coverage Expectation", "lis-wide-cell", "PolicyCoverageExpectation", x => Txt(x.PolicyCoverageExpectation)),
+        ("Denial Validity", "", "DenialValidity", x => Txt(x.DenialValidity)),
+        ("Coverage Expectation Remarks", "lis-wide-cell", "CoverageExpectationRemarks", x => Txt(x.CoverageExpectationRemarks)),
+        ("Expected Average Allowed Amount", "lis-number-cell", "ExpectedAverageAllowedAmount", x => Amt(x.ExpectedAverageAllowedAmount)),
+        ("Expected Average Insurance Payment", "lis-number-cell", "ExpectedAverageInsurancePayment", x => Amt(x.ExpectedAverageInsurancePayment)),
+        ("Expected Allowed Amount Same Lab", "lis-number-cell", "ExpectedAllowedAmountSameLab", x => Amt(x.ExpectedAllowedAmountSameLab)),
+        ("Expected Insurance Payment Same Lab", "lis-number-cell", "ExpectedInsurancePaymentSameLab", x => Amt(x.ExpectedInsurancePaymentSameLab)),
+        ("Mode Allowed Amount Same Lab", "lis-number-cell", "ModeAllowedAmountSameLab", x => Amt(x.ModeAllowedAmountSameLab)),
+        ("Mode Insurance Paid Same Lab", "lis-number-cell", "ModeInsurancePaidSameLab", x => Amt(x.ModeInsurancePaidSameLab)),
+        ("Mode Allowed Amount Peer", "lis-number-cell", "ModeAllowedAmountPeer", x => Amt(x.ModeAllowedAmountPeer)),
+        ("Mode Insurance Paid Peer", "lis-number-cell", "ModeInsurancePaidPeer", x => Amt(x.ModeInsurancePaidPeer)),
+        ("Median Allowed Amount Same Lab", "lis-number-cell", "MedianAllowedAmountSameLab", x => Amt(x.MedianAllowedAmountSameLab)),
+        ("Median Insurance Paid Same Lab", "lis-number-cell", "MedianInsurancePaidSameLab", x => Amt(x.MedianInsurancePaidSameLab)),
+        ("Median Allowed Amount Peer", "lis-number-cell", "MedianAllowedAmountPeer", x => Amt(x.MedianAllowedAmountPeer)),
+        ("Median Insurance Paid Peer", "lis-number-cell", "MedianInsurancePaidPeer", x => Amt(x.MedianInsurancePaidPeer)),
+        ("Mode Allowed Amount Difference", "lis-number-cell", "ModeAllowedAmountDifference", x => Amt(x.ModeAllowedAmountDifference)),
+        ("Mode Insurance Paid Difference", "lis-number-cell", "ModeInsurancePaidDifference", x => Amt(x.ModeInsurancePaidDifference)),
+        ("Median Allowed Amount Difference", "lis-number-cell", "MedianAllowedAmountDifference", x => Amt(x.MedianAllowedAmountDifference)),
+        ("Median Insurance Paid Difference", "lis-number-cell", "MedianInsurancePaidDifference", x => Amt(x.MedianInsurancePaidDifference)),
+        ("Denial Rate", "lis-number-cell", "DenialRate", x => Dec(x.DenialRate)),
+        ("Adjustment Rate", "lis-number-cell", "AdjustmentRate", x => Dec(x.AdjustmentRate)),
+        ("Payment Days", "lis-number-cell", "PaymentDays", x => Cnt(x.PaymentDays)),
+        ("Expected Payment Date", "lis-date-cell", "ExpectedPaymentDate", x => Dt(x.ExpectedPaymentDate)),
+        ("Expected Payment Month", "", "ExpectedPaymentMonth", x => Txt(x.ExpectedPaymentMonth)),
+        ("Billing Provider", "lis-wide-cell", "BillingProvider", x => Txt(x.BillingProvider)),
+        ("Denial Classification", "lis-wide-cell", "DenialClassification", x => Txt(x.CleanDenialClassification)),
+        ("Denial Type", "", "DenialType", x => Txt(x.DenialType)),
+        ("Action Category", "lis-wide-cell", "ActionCategory", x => Txt(x.CleanActionCategory)),
+        ("Action Code", "", "ActionCode", x => Txt(x.ActionCode)),
+        ("Recommended Action", "lis-wide-cell", "RecommendedAction", x => Txt(x.RecommendedAction)),
+        ("Task Guidance", "lis-wide-cell", "TaskGuidance", x => Txt(x.TaskGuidance)),
+        ("Task Status", "", "TaskStatus", x => Txt(x.TaskStatus)),
+        ("Priority", "", "Priority", x => Txt(x.CleanPriority)),
+        ("SLA Days", "lis-number-cell", "SLADays", x => Txt(x.SlaDays)),
+        ("Patient ID", "", "PatientID", x => Txt(x.PatientId)),
+        ("Charge Entered Date", "lis-date-cell", "ChargeEnteredDate", x => Dt(x.ChargeEnteredDate)),
+        ("POS", "", "POS", x => Txt(x.Pos)),
+        ("TOS", "", "TOS", x => Txt(x.Tos)),
+        ("Check Date", "lis-date-cell", "CheckDate", x => Dt(x.CheckDate)),
+        ("Days to DOS", "lis-number-cell", "DaystoDOS", x => Cnt(x.DaystoDos)),
+        ("Rolling Days", "", "RollingDays", x => Txt(x.RollingDays)),
+        ("Days to Bill", "lis-number-cell", "DaystoBill", x => Cnt(x.DaystoBill)),
+        ("Days to Post", "lis-number-cell", "DaystoPost", x => Cnt(x.DaystoPost)),
+        ("Run ID", "", "RunId", x => Txt(x.RunId)),
+        ("Created On", "lis-date-cell", "CreatedOn", x => Dt(x.CreatedOn))
+    };
+    var activeColumnFilters = lineItemColumns.Count(c => !string.IsNullOrWhiteSpace(ColFilter(c.Key)));
+}
+<div class="ajax-grid-body" data-grid-page="@Model.LineItemPage" data-grid-total-pages="@Model.LineItemTotalPages">
+    <div class="lis-scroll no-fs" data-grid-pane>
+        <table class="table table-hover align-middle lis-list-table sortable-table excel-grid" id="lineItemTable">
+            <thead>
+                <tr class="grid-head-row">
+                    @foreach (var column in lineItemColumns)
+                    {
+                        <th class="@column.Css">@column.Header</th>
+                    }
+                </tr>
+                <tr class="grid-filter-row">
+                    @foreach (var column in lineItemColumns)
+                    {
+                        <th class="@column.Css">
+                            <input type="text" class="col-filter" data-col="@column.Key" value="@ColFilter(column.Key)" placeholder="Filter" aria-label="Filter @column.Header" autocomplete="off" />
+                        </th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @if (Model.PagedLineItems.Any())
+                {
+                    @foreach (var item in Model.PagedLineItems)
+                    {
+                        <tr>
+                            @foreach (var column in lineItemColumns)
+                            {
+                                <td class="@column.Css">@column.Value(item)</td>
+                            }
+                        </tr>
+                    }
+                }
+                else
+                {
+                    <tr>
+                        <td colspan="@lineItemColumns.Length" class="text-center text-muted py-4">
+                            @(activeColumnFilters > 0 ? "No line items match the current column filters." : "No line-item rows were found for the selected lab.")
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <div class="pager-shell grid-pager">
+        <div class="pager-info">
+            <div class="pager-meta">Showing @startItem-@endItem of @Model.LineItemCount.ToString("N0") line items@(activeColumnFilters > 0 ? $" (filtered by {activeColumnFilters} column{(activeColumnFilters == 1 ? "" : "s")})" : "")</div>
+            <label class="pager-size">
+                <span class="pager-size-label">Rows per page</span>
+                <select class="form-select form-select-sm grid-page-size" data-grid-size aria-label="Rows per page">
+                    @foreach (var size in pageSizes)
+                    {
+                        <option value="@size" selected="@(size == Model.LineItemPageSize)">@size</option>
+                    }
+                </select>
+            </label>
+        </div>
+        <div class="pager-actions">
+            <button type="button" class="pager-btn grid-page-btn @(Model.LineItemPage <= 1 ? "disabled" : string.Empty)" data-page="1" @(Model.LineItemPage <= 1 ? "disabled" : string.Empty)>First</button>
+            <button type="button" class="pager-btn grid-page-btn @(Model.LineItemPage <= 1 ? "disabled" : string.Empty)" data-page="@(Model.LineItemPage - 1)" @(Model.LineItemPage <= 1 ? "disabled" : string.Empty)>Prev</button>
+            <span class="pager-btn active">@Model.LineItemPage / @Model.LineItemTotalPages</span>
+            <button type="button" class="pager-btn grid-page-btn @(Model.LineItemPage >= Model.LineItemTotalPages ? "disabled" : string.Empty)" data-page="@(Model.LineItemPage + 1)" @(Model.LineItemPage >= Model.LineItemTotalPages ? "disabled" : string.Empty)>Next</button>
+            <button type="button" class="pager-btn grid-page-btn @(Model.LineItemPage >= Model.LineItemTotalPages ? "disabled" : string.Empty)" data-page="@Model.LineItemTotalPages" @(Model.LineItemPage >= Model.LineItemTotalPages ? "disabled" : string.Empty)>Last</button>
+        </div>
+    </div>
+</div>

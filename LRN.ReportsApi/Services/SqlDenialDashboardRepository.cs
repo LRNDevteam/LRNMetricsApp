@@ -338,7 +338,7 @@ ORDER BY {orderBy};";
 		};
 
 		AddScopeParameters(legacyCommand, cols, labId, currentRunId);
-		AddLineItemFilterParameters(legacyCommand, filters);
+		AddLineItemFilterParameters(legacyCommand, filters, cols);
 
 		var legacyItems = new List<DenialBreakdownSourceRecord>();
 		await using var legacyReader = await legacyCommand.ExecuteReaderAsync(cancellationToken);
@@ -373,7 +373,7 @@ ORDER BY {orderBy};";
 		var sql = $"SELECT COUNT(1) FROM dbo.DenialLineItem WHERE {where};";
 		await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 180 };
 		AddScopeParameters(command, cols, labId, currentRunId);
-		AddLineItemFilterParameters(command, filters);
+		AddLineItemFilterParameters(command, filters, cols);
 		var result = await command.ExecuteScalarAsync(cancellationToken);
 		return result == null || result == DBNull.Value ? 0 : Convert.ToInt32(result);
 	}
@@ -909,7 +909,7 @@ ORDER BY {OrderBy(cols, "DateOfService", "AccessionNo")}{pagingSql};";
 
 		await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 180 };
 		AddScopeParameters(command, cols, labId, currentRunId);
-		AddLineItemFilterParameters(command, filters);
+		AddLineItemFilterParameters(command, filters, cols);
 		if (withPaging)
 		{
 			command.Parameters.AddWithValue("@Offset", (Math.Max(page, 1) - 1) * Math.Max(pageSize, 1));
@@ -1260,7 +1260,28 @@ WHERE TABLE_SCHEMA = @Schema AND TABLE_NAME = @Table;";
 		AddDateRange(where, cols, "FirstBilledDate", filters.FirstBilledDateFrom, filters.FirstBilledDateTo, "@FirstBilledDateFrom", "@FirstBilledDateTo");
 		AddDateRange(where, cols, "DateOfService", filters.DateOfServiceFrom, filters.DateOfServiceTo, "@DateOfServiceFrom", "@DateOfServiceTo");
 
+		// Excel-style per-column "contains" filters. Whitelisted to real table columns so
+		// the column key can never inject SQL; the value is always a parameter.
+		var columnFilters = ValidColumnFilters(cols, filters.ColumnFilters);
+		for (var i = 0; i < columnFilters.Count; i++)
+		{
+			where.Add($"ISNULL(CONVERT(nvarchar(4000), [{columnFilters[i].Key}]), '') LIKE @cf{i}");
+		}
+
 		return where.Count == 0 ? "1 = 1" : string.Join(" AND ", where);
+	}
+
+	/// <summary>
+	/// Column filters that target a real column and carry a value, ordered deterministically so the
+	/// WHERE builder and the parameter binder agree on the @cfN names.
+	/// </summary>
+	private static List<KeyValuePair<string, string>> ValidColumnFilters(HashSet<string> cols, Dictionary<string, string>? columnFilters)
+	{
+		if (columnFilters is null || columnFilters.Count == 0) return new List<KeyValuePair<string, string>>();
+		return columnFilters
+			.Where(kv => !string.IsNullOrWhiteSpace(kv.Key) && cols.Contains(kv.Key) && !string.IsNullOrWhiteSpace(kv.Value))
+			.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+			.ToList();
 	}
 
 	private static void AddExact(List<string> where, HashSet<string> cols, string column, string? value, string parameter)
@@ -1303,8 +1324,14 @@ WHERE TABLE_SCHEMA = @Schema AND TABLE_NAME = @Table;";
 		if (to.HasValue) where.Add($"[{column}] <= {toParameter}");
 	}
 
-	private static void AddLineItemFilterParameters(SqlCommand command, DenialDashboardFilters filters)
+	private static void AddLineItemFilterParameters(SqlCommand command, DenialDashboardFilters filters, HashSet<string> cols)
 	{
+		var columnFilters = ValidColumnFilters(cols, filters.ColumnFilters);
+		for (var i = 0; i < columnFilters.Count; i++)
+		{
+			command.Parameters.AddWithValue($"@cf{i}", $"%{columnFilters[i].Value.Trim()}%");
+		}
+
 		if (filters.Status != "(All)") command.Parameters.AddWithValue("@Status", filters.Status);
 		if (filters.Priority != "(All)") command.Parameters.AddWithValue("@Priority", filters.Priority);
 		if (filters.ActionCategory != "(All)") command.Parameters.AddWithValue("@ActionCategory", filters.ActionCategory);

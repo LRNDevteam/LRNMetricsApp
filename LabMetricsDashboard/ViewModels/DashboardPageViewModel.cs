@@ -58,6 +58,11 @@ public class DashboardPageViewModel
     public bool IsArManager { get; set; }
     public bool IsArReviewer { get; set; }
     public List<ReviewerOption> ReviewerOptions { get; set; } = new();
+
+    /// <summary>Line Item grid payload for the AJAX-swappable partial.</summary>
+    public LineItemGridViewModel LineItemGrid { get; set; } = new();
+    /// <summary>Denial Insight grid payload for the AJAX-swappable partial.</summary>
+    public InsightGridViewModel InsightGrid { get; set; } = new();
 }
 
 /// <summary>A denial code plus its description, used to populate the Denial Insight code filter.</summary>

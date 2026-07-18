@@ -24,6 +24,12 @@ using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Secrets (connection strings, JWT signing key, import API key) live in appsettings.Local.json,
+// which is gitignored and machine/environment specific. The tracked appsettings*.json files must
+// never contain credentials. Environment variables can also be used
+// (e.g. ConnectionStrings__DefaultConnection).
+builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+
 const string DenialWorkflowLocalDevCorsPolicy = "DenialWorkflowLocalDevCors";
 
 // Windows Event Log requires elevated access on some developer machines. Keep local

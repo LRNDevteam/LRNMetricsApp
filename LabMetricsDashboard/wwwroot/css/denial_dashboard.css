@@ -1703,6 +1703,181 @@ footer {
 		height: auto;
 	}
 
+	/* Pager is relocated into the overlay while fullscreen so paging stays
+	   reachable; pin it below the scroll pane instead of letting it stretch. */
+	.fs-host.is-fs > .pager-shell {
+		flex: 0 0 auto;
+		margin-top: .5rem;
+	}
+
 body.fs-lock {
 	overflow: hidden;
 }
+
+/* Thin cell borders across every dashboard table (data grids, filter-panel
+   summaries, SLA tracker, task board, and the weekly/monthly pivots). */
+.app-table td,
+.app-table th,
+.lis-list-table td,
+.lis-list-table th {
+	border: 1px solid #e3ebf5;
+}
+
+/* ------------------------------------------------------------------
+   Excel-style AJAX grids (Line Item + Denial Insight). The .ajax-grid
+   container persists across body swaps; only .grid-content is replaced.
+   It doubles as the fullscreen host so paging/filtering stays put.
+   ------------------------------------------------------------------ */
+.ajax-grid {
+	position: relative;
+}
+
+.grid-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: .6rem;
+	margin-bottom: .6rem;
+}
+
+	.grid-toolbar .grid-hint {
+		color: #6b7280;
+		font-size: .82rem;
+		font-weight: 600;
+	}
+
+	.grid-toolbar .fs-btn {
+		margin-left: auto;
+	}
+
+.grid-content {
+	position: relative;
+}
+
+/* Loading overlay shown while a grid page/filter request is in flight. */
+.grid-loading {
+	position: absolute;
+	inset: 0;
+	z-index: 30;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: rgba(255, 255, 255, .62);
+	backdrop-filter: blur(1px);
+	border-radius: .6rem;
+}
+
+.ajax-grid.is-loading .grid-content {
+	opacity: .55;
+	transition: opacity .12s ease-in-out;
+}
+
+/* Self-contained spinner so the overlay is visible regardless of site-wide loader styles. */
+.grid-loading .page-loader-spinner {
+	width: 42px;
+	height: 42px;
+	border: 4px solid #cfe0f1;
+	border-top-color: #1f6feb;
+	border-radius: 50%;
+	animation: grid-spin .8s linear infinite;
+}
+
+@keyframes grid-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+/* Per-column filter row is hidden for now (kept in the DOM, just not rendered),
+   so server-side column filtering can be re-enabled by removing this one rule. */
+.grid-filter-row {
+	display: none;
+}
+
+/* Per-column filter row sits directly under the header and stays with it. */
+.excel-grid thead .grid-head-row th {
+	position: sticky;
+	top: 0;
+	z-index: 6;
+}
+
+.excel-grid thead .grid-filter-row th {
+	position: sticky;
+	top: 38px;
+	z-index: 5;
+	background: #f2f7fc;
+	padding: .25rem .35rem;
+	border-top: 0;
+}
+
+.col-filter {
+	width: 100%;
+	min-width: 90px;
+	border: 1px solid #cfe0f1;
+	border-radius: .4rem;
+	padding: .18rem .4rem;
+	font-size: .76rem;
+	font-weight: 500;
+	color: #123b63;
+	background: #fff;
+}
+
+	.col-filter:focus {
+		outline: none;
+		border-color: #5b9df9;
+		box-shadow: 0 0 0 .16rem rgba(91, 157, 249, .18);
+	}
+
+	.col-filter::placeholder {
+		color: #9fb2c7;
+		font-weight: 500;
+	}
+
+.grid-pager {
+	margin-top: .2rem;
+}
+
+/* Fullscreen: the container becomes a full-viewport overlay and its inner
+   scroll pane flexes to fill, keeping the toolbar and pager always visible. */
+.ajax-grid.is-grid-fs {
+	position: fixed;
+	inset: 0;
+	z-index: 1090;
+	margin: 0;
+	background: #fff;
+	padding: .7rem .9rem .9rem;
+	display: flex;
+	flex-direction: column;
+	gap: .4rem;
+}
+
+	.ajax-grid.is-grid-fs .grid-toolbar {
+		margin-bottom: 0;
+	}
+
+	.ajax-grid.is-grid-fs .grid-content {
+		flex: 1 1 auto;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.ajax-grid.is-grid-fs .ajax-grid-body {
+		flex: 1 1 auto;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+	}
+
+		.ajax-grid.is-grid-fs .ajax-grid-body > [data-grid-pane] {
+			flex: 1 1 auto;
+			min-height: 0;
+			max-height: none !important;
+			height: auto;
+			overflow: auto;
+		}
+
+		.ajax-grid.is-grid-fs .ajax-grid-body > .grid-pager {
+			flex: 0 0 auto;
+			margin-top: .5rem;
+		}

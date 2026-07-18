@@ -274,6 +274,10 @@
             {
                 <li><a class="dropdown-item" asp-controller="MasterValues" asp-action="PayerPolicyInsuranceMaster"><i class="bi bi-file-earmark-medical"></i> Payer Policy Insurance Master</a></li>
             }
+            @if (canSeeLabMaster || canSeePolicyMaster)
+            {
+                <li><a class="dropdown-item" asp-controller="MasterValues" asp-action="PayerRules"><i class="bi bi-diagram-3"></i> Payer Mapping Rules</a></li>
+            }
             <li><hr class="dropdown-divider" /></li>
             @if (isLrnAdmin || isPayerPolicyAdmin || isReportsManager || isReportsAnalyst)
             {

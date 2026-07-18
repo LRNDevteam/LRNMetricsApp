@@ -24,6 +24,9 @@ public interface IDenialCodeMasterExcelService
 {
     Task<DenialCodeMasterImportResult> ImportAsync(int labId, Stream stream, string? sourceFileName, string? userName, CancellationToken ct);
     Task<string> RegenerateExportAsync(int labId, CancellationToken ct);
+
+    /// <summary>Builds an empty import template (headers + one sample row) that round-trips through ImportAsync.</summary>
+    byte[] BuildImportTemplate();
 }
 
 public interface IDenialActionChangeVerificationRepository
@@ -1135,6 +1138,17 @@ public sealed class SqlDenialCodeMasterRepository : IDenialCodeMasterRepository
 public sealed class DenialCodeMasterExcelService : IDenialCodeMasterExcelService
 {
     private const string SheetName = "Denial Classifier";
+    private const string TitleText = "INDEPENDENT LABORATORY - DENIAL ACTION CLASSIFIER";
+
+    // Header row shared by the export, the import parser (column order matters - see ImportAsync),
+    // and the downloadable template so all three can never drift apart.
+    private static readonly string[] TemplateHeaders =
+    [
+        "Denial Code", "Denial Description", "Denial Classification", "Coverage Status", "ICD Compliance Status",
+        "Denial Validity", "Action Code", "Recommended Action", "Action Category", "Task", "Short Category",
+        "Priority", "SLA (Days)", "Notes / Comments"
+    ];
+
     private readonly IDenialCodeMasterRepository _repo;
     private readonly DenialCodeMasterExportOptions _options;
 
@@ -1198,14 +1212,13 @@ public sealed class DenialCodeMasterExcelService : IDenialCodeMasterExcelService
 
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add(SheetName);
-        sheet.Cell(1, 1).Value = "INDEPENDENT LABORATORY - DENIAL ACTION CLASSIFIER";
-        sheet.Range(1, 1, 1, 14).Merge().Style.Font.SetBold();
+        sheet.Cell(1, 1).Value = TitleText;
+        sheet.Range(1, 1, 1, TemplateHeaders.Length).Merge().Style.Font.SetBold();
 
-        string[] headers = ["Denial Code", "Denial Description", "Denial Classification", "Coverage Status", "ICD Compliance Status", "Denial Validity", "Action Code", "Recommended Action", "Action Category", "Task", "Short Category", "Priority", "SLA (Days)", "Notes / Comments"];
-        for (var i = 0; i < headers.Length; i++)
+        for (var i = 0; i < TemplateHeaders.Length; i++)
         {
             var cell = sheet.Cell(2, i + 1);
-            cell.Value = headers[i];
+            cell.Value = TemplateHeaders[i];
             cell.Style.Font.Bold = true;
         }
 
@@ -1233,6 +1246,38 @@ public sealed class DenialCodeMasterExcelService : IDenialCodeMasterExcelService
         sheet.Columns().AdjustToContents();
         workbook.SaveAs(path);
         return path;
+    }
+
+    public byte[] BuildImportTemplate()
+    {
+        using var workbook = new XLWorkbook();
+        var sheet = workbook.Worksheets.Add(SheetName);
+        sheet.Cell(1, 1).Value = TitleText;
+        sheet.Range(1, 1, 1, TemplateHeaders.Length).Merge().Style.Font.SetBold();
+
+        for (var i = 0; i < TemplateHeaders.Length; i++)
+        {
+            var cell = sheet.Cell(2, i + 1);
+            cell.Value = TemplateHeaders[i];
+            cell.Style.Font.Bold = true;
+        }
+
+        // One illustrative sample row so users see the expected shape. Row 3 == first data row,
+        // matching ImportAsync (which starts reading at row 3 and skips rows with a blank Denial Code).
+        string[] sample =
+        [
+            "CO-16", "Claim/service lacks information", "Coding", "Covered", "Compliant",
+            "Valid", "AC-01", "Correct and resubmit the claim", "Rebill", "Review and rebill claim",
+            "Rebill", "High", "30", "Sample row - replace or delete before importing"
+        ];
+        for (var i = 0; i < sample.Length; i++) sheet.Cell(3, i + 1).Value = sample[i];
+
+        sheet.SheetView.FreezeRows(2);
+        sheet.Columns().AdjustToContents();
+
+        using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+        return stream.ToArray();
     }
 
     private static string? Text(IXLCell cell)

@@ -30,6 +30,10 @@ public sealed class PayerMappingController : ControllerBase
     // The resolve-or-create policy API mints Payer Policy records, so it needs policy-write authority
     // (LRN Admin / Payer Policy Admin / Reports Analyst) or direct Lab-map authority.
     private bool CanResolvePolicy => PayerMasterRoles.CanWritePolicy(User) || CanMap;
+    // The two resolve APIs are open to external integrations without a JWT: the auth middleware
+    // stamps those anonymous calls with the LRNPublicResolve identity (Name = PublicApiClient),
+    // and ONLY the two resolve actions honor it - every other action still requires real roles.
+    private bool IsPublicResolveCall => string.Equals(User.Identity?.AuthenticationType, "LRNPublicResolve", StringComparison.Ordinal);
     private string UserName() => PayerMasterRoles.UserName(User);
 
     /// <summary>MappingStatus counts for the notification bell (Mapped / Unmapped / Pending Review / No Match).</summary>
@@ -49,7 +53,7 @@ public sealed class PayerMappingController : ControllerBase
     [HttpPost("payer-mapper/resolve-lab-payer")]
     public async Task<ActionResult<ResolveLabPayerResponse>> ResolveLabPayer(ResolveLabPayerRequest request, CancellationToken ct)
     {
-        if (!CanView) return Denied();
+        if (!CanView && !IsPublicResolveCall) return Denied();
         if (string.IsNullOrWhiteSpace(request?.PayerNameRaw)) return BadRequest(new { message = "PayerNameRaw is required." });
         return Ok(await _mapping.ResolveLabPayerAsync(request, ct));
     }
@@ -63,7 +67,7 @@ public sealed class PayerMappingController : ControllerBase
     [HttpPost("payer-mapper/resolve-payer-policy")]
     public async Task<ActionResult<ResolvePayerPolicyResponse>> ResolvePayerPolicy(ResolvePayerPolicyRequest request, CancellationToken ct)
     {
-        if (!CanResolvePolicy) return Denied();
+        if (!CanResolvePolicy && !IsPublicResolveCall) return Denied();
         if (string.IsNullOrWhiteSpace(request?.PayerNameRaw)) return BadRequest(new { message = "PayerNameRaw is required." });
         return Ok(await _mapping.ResolvePolicyPayerAsync(request, UserName(), ct));
     }
@@ -106,6 +110,15 @@ public sealed class PayerMappingController : ControllerBase
     {
         if (!CanMap) return Denied();
         var result = await _mapping.RejectAsync(id, UserName(), ct);
+        return result.Success ? Ok(result) : BadRequest(new { message = result.Message });
+    }
+
+    /// <summary>Unmap a mapped payer so the user can remap it (recommendation #1).</summary>
+    [HttpPost("insurance-payers/{id:int}/mapping/unmap")]
+    public async Task<ActionResult<PayerMappingActionResult>> Unmap(int id, CancellationToken ct)
+    {
+        if (!CanMap) return Denied();
+        var result = await _mapping.UnmapAsync(id, UserName(), ct);
         return result.Success ? Ok(result) : BadRequest(new { message = result.Message });
     }
 

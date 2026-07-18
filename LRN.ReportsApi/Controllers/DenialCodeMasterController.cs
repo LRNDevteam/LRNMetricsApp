@@ -144,6 +144,14 @@ public sealed class DenialCodeMasterController : ControllerBase
         return Ok(new { success = true, message = "Classifier Excel regenerated.", path });
     }
 
+    [HttpGet("template")]
+    public ActionResult DownloadTemplate()
+    {
+        if (!IsArManagerFromToken()) return AccessDenied();
+        var bytes = _excelService.BuildImportTemplate();
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "DenialCodeMaster_Template.xlsx");
+    }
+
     [HttpGet("export")]
     public async Task<IActionResult> Export([FromQuery] int labId, CancellationToken ct)
     {

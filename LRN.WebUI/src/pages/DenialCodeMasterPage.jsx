@@ -389,6 +389,16 @@ export default function DenialCodeMasterPage({ labId, role = '', setMessage, onR
     a.remove();
   }
 
+  async function downloadTemplate() {
+    const url = await denialWorkflowService.getDenialCodeMasterTemplateUrl();
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'DenialCodeMaster_Template.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
   async function savePushReview(payload) {
     if (!pushAudit || !pushEditor) return;
     try {
@@ -441,6 +451,7 @@ export default function DenialCodeMasterPage({ labId, role = '', setMessage, onR
       <label className="claim-search-wrap"><i className="bi bi-search" /><input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') setQuery({ ...query, search, page: 1 }); }} placeholder="Search denial code, classification, action" /></label>
       <button className="wl-btn xs" onClick={() => setQuery({ ...query, search, page: 1 })}>Search</button>
       {canEdit && <button className="wl-btn teal xs" onClick={() => setEditor({})}><i className="bi bi-plus-circle" /> Add</button>}
+      {canEdit && <button className="wl-btn xs" onClick={downloadTemplate}><i className="bi bi-file-earmark-arrow-down" /> Download Template</button>}
       {canEdit && <label className={`wl-btn xs dcm-upload ${importing ? 'disabled' : ''}`} aria-disabled={importing}><i className={`bi ${importing ? 'bi-hourglass-split' : 'bi-upload'}`} /> {importing ? 'Importing Excel...' : 'Import Excel'}<input type="file" accept=".xlsx,.xlsm,.xltx,.xltm" disabled={importing} onChange={e => { importFile(e.target.files?.[0]); e.target.value = ''; }} /></label>}
       {canEdit && <button className={`wl-btn xs ${regenerating ? 'disabled' : ''}`} disabled={regenerating} onClick={regenerate}><i className={`bi ${regenerating ? 'bi-hourglass-split' : 'bi-arrow-repeat'}`} /> {regenerating ? 'Regenerating...' : 'Regenerate'}</button>}
       <button className="wl-btn xs" onClick={downloadExport}><i className="bi bi-download" /> Export Excel</button>

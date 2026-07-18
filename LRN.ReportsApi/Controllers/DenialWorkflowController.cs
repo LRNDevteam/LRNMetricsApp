@@ -48,7 +48,11 @@ public sealed class DenialWorkflowController : ControllerBase
         });
     }
 
+    // This endpoint is reachable without a JWT (see Program.cs carve-out), so it must be
+    // hardened against abuse: cap the request size and every field, and keep header-line
+    // fields on a single line so a caller cannot forge log entries with CR/LF injection.
     [HttpPost("client-logs")]
+    [RequestSizeLimit(64 * 1024)]
     public IActionResult SaveReactClientLog([FromBody] ReactClientLogRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Message)) return BadRequest(new { message = "Log message is required." });
@@ -56,10 +60,25 @@ public sealed class DenialWorkflowController : ControllerBase
         var folder = Path.IsPathRooted(configured) ? configured : Path.Combine(AppContext.BaseDirectory, configured);
         Directory.CreateDirectory(folder);
         var path = Path.Combine(folder, $"react-{DateTime.UtcNow:yyyy-MM-dd}.log");
-        var userName = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "anonymous";
-        var entry = $"[{DateTime.UtcNow:O}] [{request.Level}] User={userName} URL={request.Url}{Environment.NewLine}Message={request.Message}{Environment.NewLine}Context={request.Context}{Environment.NewLine}UserAgent={request.UserAgent}{Environment.NewLine}Stack={request.Stack}{Environment.NewLine}{new string('-', 100)}{Environment.NewLine}";
+        var userName = OneLine(FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "anonymous", 128);
+        var level = OneLine(request.Level, 16);
+        var url = OneLine(request.Url, 2048);
+        var userAgent = OneLine(request.UserAgent, 512);
+        var message = Truncate(request.Message, 8000);
+        var context = Truncate(request.Context, 8000);
+        var stack = Truncate(request.Stack, 8000);
+        var entry = $"[{DateTime.UtcNow:O}] [{level}] User={userName} URL={url}{Environment.NewLine}Message={message}{Environment.NewLine}Context={context}{Environment.NewLine}UserAgent={userAgent}{Environment.NewLine}Stack={stack}{Environment.NewLine}{new string('-', 100)}{Environment.NewLine}";
         lock (ReactLogLock) System.IO.File.AppendAllText(path, entry, Encoding.UTF8);
         return Accepted();
+    }
+
+    private static string OneLine(string? value, int maxLength)
+        => Truncate((value ?? string.Empty).Replace('\r', ' ').Replace('\n', ' '), maxLength);
+
+    private static string Truncate(string? value, int maxLength)
+    {
+        value ??= string.Empty;
+        return value.Length <= maxLength ? value : value[..maxLength];
     }
 
     [HttpGet("support-contacts")]
@@ -236,6 +255,19 @@ public sealed class DenialWorkflowController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        // UAT TC-170: ClosedXML throws ArgumentException for a missing worksheet and other
+        // exception types for unreadable workbooks. Those escaped the InvalidDataException
+        // catch above and surfaced as a raw 500 ("Issue happened. Please contact admin
+        // support") instead of telling the reviewer what is wrong with the file.
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Denial worklist upload file could not be parsed ({FileName}).", file.FileName);
+            return BadRequest(new { message = $"The upload file could not be read: {ex.Message} Please re-download the upload template and try again." });
+        }
 
         var errors = new List<string>();
         var actionableRows = rows
@@ -337,7 +369,7 @@ public sealed class DenialWorkflowController : ControllerBase
                 var noteTask = claimTasks[0];
                 await _service.SaveNoteAsync(new SaveDenialNoteRequest
                 {
-                    LabId = labId, ClaimId = item.ClaimId,
+                    LabId = labId, ClaimId = item.ClaimId, TaskId = item.TaskId,
                     NoteLevel = !string.IsNullOrWhiteSpace(item.TaskId) ? "Task" : "Claim",
                     NoteText = notes, Status = NormalizeWorkflowStatus(noteTask.Status), CreatedBy = userName
                 }, ct);
@@ -737,7 +769,10 @@ public sealed class DenialWorkflowController : ControllerBase
     private static string SafePath(string value)
     {
         foreach (var c in Path.GetInvalidFileNameChars()) value = value.Replace(c, '_');
-        return value.Trim();
+        value = value.Trim();
+        // "." and ".." survive the invalid-char replacement but change the resolved
+        // directory (path traversal). Map any dots-only segment to a harmless name.
+        return value.Trim('.').Length == 0 ? "_" : value;
     }
 
 
@@ -1047,6 +1082,11 @@ public sealed class DenialWorkflowController : ControllerBase
         "Payer follow-up guidance needed",
         "Documentation requirement unclear",
         "EOB / payer response clarification",
+        // Spec-reconciled wordings the React popup and the upload template use (the two lists
+        // had drifted, so template escalation rows were rejected as "not a valid EscalationReason").
+        "Documentation required",
+        "Coding / CPT clarification",
+        "ICD / diagnosis clarification",
         "Other"
     };
 
@@ -1120,7 +1160,10 @@ public sealed class DenialWorkflowController : ControllerBase
     private static bool CsvHasClaimAction(IReadOnlyDictionary<string, string> row)
         => new[]
         {
-            "UpdateStatus", "NewStatus", "Comments", "ReviewerComments", "Comment",
+            // UAT TC-170: "Notes" is an editable template column with its own save branch, but it
+            // was missing here, so a row where the reviewer filled in only Notes was silently
+            // dropped as "no action" and nothing was imported.
+            "UpdateStatus", "NewStatus", "Comments", "ReviewerComments", "Comment", "Notes",
             "EscalationReason", "OtherEscalationReason", "EscalationComment",
             "EscalationExpectedResponseDate", "EscalationResponse",
             "RecommendedNextAction", "EscalationResponseComment", "ResponseComment"
@@ -1213,8 +1256,11 @@ public sealed class DenialWorkflowController : ControllerBase
         // Must match the worksheet name WriteClaimUploadTemplateAsync actually creates
         // (workbook.Worksheets.Add("Task Upload")) — these had drifted apart, so every
         // downloaded template failed to re-upload with "There isn't a worksheet named
-        // 'Claim Upload'".
-        var sheet = workbook.Worksheet("Task Upload");
+        // 'Claim Upload'". UAT TC-170: reviewers also re-save/rename the sheet, so fall back
+        // to the first visible worksheet rather than hard-failing on the name.
+        if (!workbook.Worksheets.TryGetWorksheet("Task Upload", out var sheet))
+            sheet = workbook.Worksheets.FirstOrDefault(x => x.Visibility == ClosedXML.Excel.XLWorksheetVisibility.Visible)
+                ?? throw new InvalidDataException("The workbook has no visible worksheet. Please re-download the upload template.");
         var used = sheet.RangeUsed() ?? throw new InvalidDataException("The Task Upload worksheet is empty.");
         var headerRow = used.FirstRow();
         var headers = headerRow.Cells().Select(x => x.GetString().Trim()).ToArray();

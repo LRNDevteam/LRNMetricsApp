@@ -42,6 +42,14 @@
     .mv-badge.pending { background: #FDF3E3; color: #B7791F; }
     .mv-badge.unmapped { background: #EEF2F7; color: #475569; }
     .mv-badge.nomatch { background: #FBEAE9; color: #B3261E; }
+    .mv-combo { position: relative; }
+    /* Rendered as a fixed overlay (moved to the page body) so the scrollable modal never clips it. */
+    .mv-combo-results { position: fixed; z-index: 2000; max-height: 240px; overflow: auto; background: #fff; border: 1px solid #cfdcec; border-radius: 6px; box-shadow: 0 12px 26px rgba(15, 23, 42, .16); }
+    .mv-combo-item { padding: .4rem .6rem; cursor: pointer; font-size: .82rem; border-bottom: 1px solid #eef2f7; }
+    .mv-combo-item:last-child { border-bottom: none; }
+    .mv-combo-item:hover, .mv-combo-item.active { background: #eef6ff; }
+    .mv-combo-item .gid { font-weight: 800; color: #2E5C8A; }
+    .mv-combo-item .muted { color: #64748b; }
     .mv-loader { display: none; position: absolute; inset: 0; z-index: 5; align-items: center; justify-content: center; background: rgba(248, 250, 252, .74); backdrop-filter: blur(1px); }
     .mv-loader.active { display: flex; }
     .mv-loader-box { background: #0f172a; color: white; border-radius: 8px; padding: .75rem 1rem; display: inline-flex; gap: .7rem; align-items: center; box-shadow: 0 18px 40px rgba(15, 23, 42, .22); }
@@ -112,7 +120,7 @@
         <div class="mv-loader" id="gridLoader"><div class="mv-loader-box"><span class="spinner-border spinner-border-sm"></span><span id="busyText">Loading records...</span></div></div>
         <div class="mv-grid-scroll">
             <table class="table table-sm table-hover table-bordered align-middle mv-table mb-0">
-                <thead><tr><th class="sortable" data-sort="payerCode">Payer Code <span class="mv-sort"></span></th><th class="sortable" data-sort="payerNameRaw">Payer Name (Raw) <span class="mv-sort"></span></th><th class="sortable" data-sort="payerNameNormalized">Normalized <span class="mv-sort"></span></th><th class="sortable" data-sort="globalPayerID">Global Payer ID <span class="mv-sort"></span></th><th>Mapping Status</th><th class="sortable" data-sort="payerGroupCode">Group Code <span class="mv-sort"></span></th><th class="sortable" data-sort="payerCommonCode">Common Code <span class="mv-sort"></span></th><th class="sortable" data-sort="parent">Parent <span class="mv-sort"></span></th><th class="sortable" data-sort="planType">Plan Type <span class="mv-sort"></span></th><th class="sortable" data-sort="mcoType">MCO Type <span class="mv-sort"></span></th><th class="sortable" data-sort="payerState">Payer State <span class="mv-sort"></span></th><th class="sortable" data-sort="isActive">Status <span class="mv-sort"></span></th><th class="sortable" data-sort="benefitAdminCode">Benefit Code <span class="mv-sort"></span></th><th class="sortable" data-sort="benefitAdministrator">Benefit Manager <span class="mv-sort"></span></th><th class="sortable" data-sort="labName">Lab <span class="mv-sort"></span></th><th class="sortable" data-sort="labState">Lab State <span class="mv-sort"></span></th><th class="sortable" data-sort="labStateCode">Lab State Code <span class="mv-sort"></span></th><th class="sortable" data-sort="remarks">Remarks <span class="mv-sort"></span></th><th class="text-end">Actions</th></tr></thead>
+                <thead><tr><th class="sortable" data-sort="payerCode">Payer Code <span class="mv-sort"></span></th><th class="sortable" data-sort="payerNameRaw">Payer Name (Raw) <span class="mv-sort"></span></th><th class="sortable" data-sort="payerNameNormalized">Normalized <span class="mv-sort"></span></th><th class="sortable" data-sort="globalPayerID">Global Payer ID <span class="mv-sort"></span></th><th class="sortable" data-sort="mappingStatus">Mapping Status <span class="mv-sort"></span></th><th class="sortable" data-sort="mappedSource">Mapped Source <span class="mv-sort"></span></th><th class="sortable" data-sort="mappedOn">Mapped Date <span class="mv-sort"></span></th><th class="sortable" data-sort="payerGroupCode">Group Code <span class="mv-sort"></span></th><th class="sortable" data-sort="payerCommonCode">Common Code <span class="mv-sort"></span></th><th class="sortable" data-sort="parent">Parent <span class="mv-sort"></span></th><th class="sortable" data-sort="planType">Plan Type <span class="mv-sort"></span></th><th class="sortable" data-sort="mcoType">MCO Type <span class="mv-sort"></span></th><th class="sortable" data-sort="payerState">Payer State <span class="mv-sort"></span></th><th class="sortable" data-sort="isActive">Status <span class="mv-sort"></span></th><th class="sortable" data-sort="benefitAdminCode">Benefit Code <span class="mv-sort"></span></th><th class="sortable" data-sort="benefitAdministrator">Benefit Manager <span class="mv-sort"></span></th><th class="sortable" data-sort="labName">Lab <span class="mv-sort"></span></th><th class="sortable" data-sort="labState">Lab State <span class="mv-sort"></span></th><th class="sortable" data-sort="labStateCode">Lab State Code <span class="mv-sort"></span></th><th class="sortable" data-sort="remarks">Remarks <span class="mv-sort"></span></th><th class="text-end">Actions</th></tr></thead>
                 <tbody id="rows"></tbody>
             </table>
         </div>
@@ -145,16 +153,16 @@
                     <input type="hidden" name="labStateCode" />
                     <input type="hidden" name="labName" />
                     <div class="col-md-6"><label class="form-label">Payer Name (Raw) *</label><input class="form-control" name="payerNameRaw" required placeholder="As it appears in the lab master file" /></div>
-                    <div class="col-md-6"><label class="form-label">Payer Name Normalized <span class="mv-readonly-tag">Read-only, system-generated</span></label><input class="form-control" name="payerNameNormalized" readonly tabindex="-1" /></div>
+                    <div class="col-md-6 mv-combo"><label class="form-label">Payer Name Normalized <span class="mv-readonly-tag">Pick from Payer Policy</span></label><input class="form-control" name="payerNameNormalized" id="normPicker" autocomplete="off" placeholder="Search Payer Policy normalized name…" /><div class="mv-combo-results d-none" id="normResults"></div></div>
                     <div class="col-md-4"><label class="form-label">Payer Code <span class="mv-readonly-tag" id="payerCodeTag">Locked once assigned</span></label><input class="form-control" name="payerCode" placeholder="Optional" /></div>
                     <div class="col-md-4"><label class="form-label">Lab *</label><select class="form-select" name="labId" id="labEdit" required><option value="">Select...</option></select></div>
                     <div class="col-md-4"><label class="form-label">Lab State</label><select class="form-select" name="labState"><option value=""></option></select></div>
                     <div class="col-md-4"><label class="form-label">Mapping Status <span class="mv-readonly-tag">System-managed</span></label><input class="form-control" id="mappingStatusDisplay" readonly tabindex="-1" value="Unmapped" /></div>
-                    <div class="col-md-4"><label class="form-label">Global Payer ID <span class="mv-readonly-tag">Set via Review Match</span></label><input class="form-control" name="globalPayerID" readonly tabindex="-1" placeholder="Blank until mapped" /></div>
+                    <div class="col-md-4"><label class="form-label">Global Payer ID <span class="mv-readonly-tag">Loaded from Payer Policy</span></label><input type="hidden" name="globalPayerID" /><input class="form-control" id="gpidDisplay" readonly tabindex="-1" placeholder="From selected normalized" /></div>
                     <div class="col-md-4"><label class="form-label">Payer Common Code</label><input class="form-control" name="payerCommonCode" placeholder="Optional" /></div>
                     <div class="col-md-4"><label class="form-label">Payer Group Code</label><input class="form-control" name="payerGroupCode" placeholder="Optional" /></div>
                     <div class="col-md-4"><label class="form-label">Plan Type *</label><select class="form-select" name="planType" required><option value="">Select...</option><option>Medicare</option><option>Medicaid</option><option>Commercial</option><option>Managed Care</option><option>Other</option></select></div>
-                    <div class="col-md-4"><label class="form-label">Payer State *</label><select class="form-select" name="payerState" required><option value="">Select...</option></select></div>
+                    <div class="col-md-4"><label class="form-label">Payer State</label><select class="form-select" name="payerState"><option value="">Select...</option></select></div>
                     <div class="col-md-4"><label class="form-label">Is Active <span class="mv-readonly-tag">System-managed</span></label><input class="form-control" name="isActive" readonly tabindex="-1" /></div>
                     <div class="col-md-12"><label class="form-label">Remarks</label><textarea class="form-control" name="remarks" rows="2" placeholder="Optional notes"></textarea></div>
                 </form>
@@ -253,10 +261,10 @@ const canWrite=@(Model.CanWrite ? "true" : "false"),requiresApproval=@(Model.Req
 const canMap=canWrite&&!requiresApproval;
 let page=1,pageSize=20,totalPages=1,labs=[],sortColumn='',sortDirection='asc',dupConfirmed=false,currentItems=[];
 let matchRecordId=null,matchSelected=null,matchTimer=null;
-const urls={data:'@Url.Action("InsurancePayersData","MasterValues")',get:'@Url.Action("InsurancePayer","MasterValues")',save:'@Url.Action("SaveInsurancePayer","MasterValues")',status:'@Url.Action("InsuranceStatus","MasterValues")',import:'@Url.Action("ImportInsurance","MasterValues")',resolve:'@Url.Action("ResolveInsuranceConflicts","MasterValues")',export:'@Url.Action("ExportInsurance","MasterValues")',labs:'@Url.Action("Labs","MasterValues")',lookup:'@Url.Action("PolicyPayerLookup","MasterValues")',suggestions:'@Url.Action("MappingSuggestions","MasterValues")',mapSearch:'@Url.Action("MappingSearch","MasterValues")',approve:'@Url.Action("ApproveMapping","MasterValues")',manualMap:'@Url.Action("ManualMapping","MasterValues")',rejectMap:'@Url.Action("RejectMapping","MasterValues")'};
+const urls={data:'@Url.Action("InsurancePayersData","MasterValues")',get:'@Url.Action("InsurancePayer","MasterValues")',save:'@Url.Action("SaveInsurancePayer","MasterValues")',status:'@Url.Action("InsuranceStatus","MasterValues")',import:'@Url.Action("ImportInsurance","MasterValues")',resolve:'@Url.Action("ResolveInsuranceConflicts","MasterValues")',export:'@Url.Action("ExportInsurance","MasterValues")',labs:'@Url.Action("Labs","MasterValues")',lookup:'@Url.Action("PolicyPayerLookup","MasterValues")',suggestions:'@Url.Action("MappingSuggestions","MasterValues")',mapSearch:'@Url.Action("MappingSearch","MasterValues")',approve:'@Url.Action("ApproveMapping","MasterValues")',manualMap:'@Url.Action("ManualMapping","MasterValues")',rejectMap:'@Url.Action("RejectMapping","MasterValues")',unmap:'@Url.Action("UnmapMapping","MasterValues")'};
 const aliases=[['1','Prism Molecular','Prism'],['2','InHealth','InHealth-DTR'],['4','Cove','Cove'],['5','Dylo','Dylo'],['6','PCRDx - AL','PCR AL'],['7','PCRDx - CO','PCR CO'],['10','BeechTree','Beech Tree'],['13','PCR Labs of America','PCR Labs of America'],['18','Certus','Certus'],['23','Northwest','NWL'],['24','Augustus_Labs','Augustus'],['16','Elixir','Elixir'],['12','Phi Life','Phi Life'],['9','Rising Tides','Rising Tides']];
 const US_STATES=['AL','AK','AZ','AR','CA','CO','CT','DE','DC','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'];
-const COLS=19;
+const COLS=21;
 const editModal=canWrite?new bootstrap.Modal(document.getElementById('editModal')):null;
 const matchModal=canWrite?new bootstrap.Modal(document.getElementById('matchModal')):null;
 const conflictModalEl=document.getElementById('conflictModal');
@@ -264,6 +272,7 @@ const conflictModal=conflictModalEl?new bootstrap.Modal(conflictModalEl):null;
 let conflictList=[];
 const loader=document.getElementById('gridLoader'),busyText=document.getElementById('busyText');
 function esc(v){return (v??'').toString().replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+function fmtDate(v){if(!v)return '—';const d=new Date(v);return isNaN(d)?'—':d.toLocaleString([], {year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});}
 function normalize(v){return (v||'').toString().toUpperCase().replace(/[^A-Z0-9]+/g,' ').replace(/\s+/g,' ').trim();}
 function normKey(v){return (v||'').toString().toUpperCase().replace(/[^A-Z0-9]/g,'');}
 // Resolve a record's lab: LabId when valid, otherwise match LabName against the lab list
@@ -307,13 +316,14 @@ function mappingBadge(x){
 }
 function rowActions(x){
   if(!canWrite)return '';
-  // Edit is always available; Deactivate only while the record is still active.
+  // Unmapped rows get "Match"; mapped rows get "Unmap" (recommendation #1: unmap then remap).
   const match=!isMapped(x)?`<button class="btn btn-sm btn-warning matchBtn" data-id="${x.labInsuranceMasterId}" data-name="${esc(x.payerNameRaw)}" title="Review suggested Global Payer ID match">Match</button> `:'';
+  const unmap=(isMapped(x)&&canMap)?`<button class="btn btn-sm btn-outline-warning unmapBtn" data-id="${x.labInsuranceMasterId}" data-name="${esc(x.payerNameRaw)}" title="Unmap this payer so it can be remapped"><i class="bi bi-x-circle"></i> Unmap</button> `:'';
   const deact=isActiveVal(x.isActive)?` <button class="btn btn-sm btn-outline-danger stat" data-id="${x.labInsuranceMasterId}" data-name="${esc(x.payerNameRaw)}" title="Deactivate"><i class="bi bi-slash-circle"></i></button>`:'';
-  return match+`<button class="btn btn-sm btn-outline-primary edit" data-id="${x.labInsuranceMasterId}" title="Edit"><i class="bi bi-pencil"></i> Edit</button>${deact}`;
+  return match+unmap+`<button class="btn btn-sm btn-outline-primary edit" data-id="${x.labInsuranceMasterId}" title="Edit"><i class="bi bi-pencil"></i> Edit</button>${deact}`;
 }
 function rowHtml(x){
-  return `<tr data-id="${x.labInsuranceMasterId}" class="${!isMapped(x)&&isActiveVal(x.isActive)?'unmapped':''}"><td class="mv-primary">${esc(x.payerCode)}</td><td class="mv-primary">${esc(x.payerNameRaw)}</td><td>${esc(x.payerNameNormalized)}</td><td>${esc(x.globalPayerID??'—')}</td><td>${mappingBadge(x)}</td><td>${esc(x.payerGroupCode)}</td><td>${esc(x.payerCommonCode)}</td><td>${esc(x.parent)}</td><td>${esc(x.planType)}</td><td>${esc(x.mcoType)}</td><td>${esc(x.payerState)}</td><td>${activeBadge(x.isActive)}</td><td>${esc(x.benefitAdminCode)}</td><td>${esc(x.benefitAdministrator)}</td><td>${esc(x.labName)}</td><td>${esc(x.labState)}</td><td>${esc(x.labStateCode)}</td><td>${esc(x.remarks)}</td><td class="text-end text-nowrap">${rowActions(x)}</td></tr>`;
+  return `<tr data-id="${x.labInsuranceMasterId}" class="${!isMapped(x)&&isActiveVal(x.isActive)?'unmapped':''}"><td class="mv-primary">${esc(x.payerCode)}</td><td class="mv-primary">${esc(x.payerNameRaw)}</td><td>${esc(x.payerNameNormalized)}</td><td>${esc(x.globalPayerID??'—')}</td><td>${mappingBadge(x)}</td><td>${esc(x.mappedSource||'—')}</td><td>${fmtDate(x.mappedOn)}</td><td>${esc(x.payerGroupCode)}</td><td>${esc(x.payerCommonCode)}</td><td>${esc(x.parent)}</td><td>${esc(x.planType)}</td><td>${esc(x.mcoType)}</td><td>${esc(x.payerState)}</td><td>${activeBadge(x.isActive)}</td><td>${esc(x.benefitAdminCode)}</td><td>${esc(x.benefitAdministrator)}</td><td>${esc(x.labName)}</td><td>${esc(x.labState)}</td><td>${esc(x.labStateCode)}</td><td>${esc(x.remarks)}</td><td class="text-end text-nowrap">${rowActions(x)}</td></tr>`;
 }
 function renderRows(items){
   // Mapping status is filtered server-side (the select posts as 'mappingStatus' via qs()),
@@ -334,9 +344,12 @@ document.getElementById('exportBtn').onclick=()=>{const btn=document.getElementB
 
 if(canWrite){
   const f=document.getElementById('editForm');
+  let policySelected=false,normTimer=null,selectedNormalized='';
   US_STATES.forEach(s=>{f.elements.payerState.insertAdjacentHTML('beforeend',`<option>${s}</option>`);f.elements.labState.insertAdjacentHTML('beforeend',`<option>${s}</option>`);});
   function setSelect(sel,value){if(value&&![...sel.options].some(o=>o.value===String(value)))sel.insertAdjacentHTML('beforeend',`<option>${esc(value)}</option>`);sel.value=value??'';}
   function hideDup(){document.getElementById('dupWarning').classList.add('d-none');dupConfirmed=false;document.getElementById('saveBtn').textContent='Submit';}
+  // Payer Name Normalized is a Payer Policy picker; Global Payer ID is a read-only mirror of the pick.
+  const normPicker=document.getElementById('normPicker'),normResults=document.getElementById('normResults'),gpidDisplay=document.getElementById('gpidDisplay');
   function fill(x){
     f.reset();
     document.getElementById('id').value=x?.labInsuranceMasterId||'';
@@ -348,9 +361,14 @@ if(canWrite){
     if(labId&&![...f.elements.labId.options].some(o=>o.value===labId))
       f.elements.labId.insertAdjacentHTML('beforeend',`<option value="${labId}">${esc(labNameFor(labId)||x.labName||('Lab '+labId))}</option>`);
     f.elements.labId.value=labId;
-    f.elements.payerNameNormalized.value=x?normalize(x.payerNameRaw):'';
+    // Normalized + Global Payer ID come only from the Payer Policy master (never typed here).
+    selectedNormalized=x?(x.payerNameNormalized||''):'';
+    f.elements.payerNameNormalized.value=selectedNormalized;
     f.elements.isActive.value=x?(x.isActive||'Active'):'Active';
     f.elements.payerNameRaw.readOnly=!!x;
+    policySelected=!!(x&&isMapped(x));
+    if(normResults)normResults.classList.add('d-none');
+    if(gpidDisplay)gpidDisplay.value=x&&x.globalPayerID!=null?String(x.globalPayerID):'';
     // Payer Code: read-only when the record already has one; editable when blank or adding new.
     const hasCode=!!(x&&(x.payerCode||'').trim());
     f.elements.payerCode.readOnly=hasCode;
@@ -359,7 +377,61 @@ if(canWrite){
     document.getElementById('mappingStatusDisplay').value=x&&isMapped(x)?'Mapped':'Unmapped';
     hideDup();document.getElementById('saveError').classList.add('d-none');
   }
-  f.elements.payerNameRaw.addEventListener('input',e=>{f.elements.payerNameNormalized.value=normalize(e.target.value);hideDup();});
+  f.elements.payerNameRaw.addEventListener('input',()=>{hideDup();});
+
+  // ── Payer Name Normalized picker: choose a Payer Policy record; Global Payer ID + related fields load from it.
+  //    New normalized names / Global Payer IDs cannot be typed here - they only come from the Payer Policy master.
+  function clearPolicySelection(){policySelected=false;selectedNormalized='';f.elements.globalPayerID.value='';if(gpidDisplay)gpidDisplay.value='';document.getElementById('mappingStatusDisplay').value='Unmapped';}
+  function applyPolicy(rec){
+    policySelected=true;
+    selectedNormalized=rec.payerNameNormalized||'';
+    normPicker.value=selectedNormalized;
+    f.elements.globalPayerID.value=rec.globalPayerId??'';
+    if(gpidDisplay)gpidDisplay.value=rec.globalPayerId??'';
+    if(rec.payerState)setSelect(f.elements.payerState,rec.payerState);
+    if(rec.planType)setSelect(f.elements.planType,rec.planType);
+    if(rec.globalPayerCode)f.elements.payerCommonCode.value=rec.globalPayerCode;
+    if(rec.payerGroupCode!==null&&rec.payerGroupCode!==undefined&&rec.payerGroupCode!=='')f.elements.payerGroupCode.value=rec.payerGroupCode;
+    if(rec.benefitAdminCode)f.elements.benefitAdminCode.value=rec.benefitAdminCode;
+    if(rec.benefitAdministrator)f.elements.benefitAdministrator.value=rec.benefitAdministrator;
+    document.getElementById('mappingStatusDisplay').value='Mapped';
+    normResults.classList.add('d-none');
+  }
+  async function searchNorm(term){
+    try{const r=await fetch(urls.lookup+'?'+new URLSearchParams({search:term,page:1,pageSize:25}));const d=await r.json();return (d.items||[]).filter(x=>x.globalPayerId!==null&&x.globalPayerId!==undefined&&x.payerNameNormalized&&isActiveVal(x.isActive));}catch{return [];}
+  }
+  // Lift the results panel out of the scrollable modal so its overflow can never clip the dropdown.
+  if(normResults)document.body.appendChild(normResults);
+  function positionNorm(){
+    if(!normPicker)return;
+    const r=normPicker.getBoundingClientRect();
+    normResults.style.top=r.bottom+'px';
+    normResults.style.left=r.left+'px';
+    normResults.style.width=r.width+'px';
+  }
+  function hideNorm(){normResults.classList.add('d-none');}
+  function renderNorm(list){
+    if(!list.length){normResults.innerHTML='<div class="mv-combo-item muted">No Payer Policy match. Leave blank to add as Unmapped.</div>';}
+    else{
+      normResults.innerHTML=list.map((x,i)=>`<div class="mv-combo-item" data-i="${i}"><span class="gid">${esc(x.payerNameNormalized)}</span> <span class="muted">— GID ${esc(x.globalPayerId)} • ${esc(x.payerNameRaw)} • ${esc(x.payerState||'—')} • ${esc(x.planType||'—')}</span></div>`).join('');
+      normResults.querySelectorAll('.mv-combo-item[data-i]').forEach(el=>el.addEventListener('mousedown',ev=>{ev.preventDefault();applyPolicy(list[Number(el.dataset.i)]);}));
+    }
+    positionNorm();
+    normResults.classList.remove('d-none');
+  }
+  if(normPicker){
+    normPicker.addEventListener('input',()=>{
+      const term=normPicker.value.trim();
+      if(policySelected)clearPolicySelection(); // editing the field drops the prior selection
+      clearTimeout(normTimer);
+      if(term.length<1){hideNorm();return;}
+      normTimer=setTimeout(async()=>{renderNorm(await searchNorm(term));},250);
+    });
+    // Free text that was not chosen from the list is not accepted - revert to the last selection (or blank).
+    normPicker.addEventListener('blur',()=>{setTimeout(()=>{hideNorm();if(normPicker.value.trim()!==selectedNormalized){normPicker.value=selectedNormalized;if(!selectedNormalized)clearPolicySelection();}},150);});
+    document.addEventListener('scroll',()=>{if(!normResults.classList.contains('d-none'))positionNorm();},true);
+    window.addEventListener('resize',hideNorm);
+  }
   async function findDuplicate(name,labId,currentId){
     try{
       const r=await fetch(urls.data+'?'+new URLSearchParams({search:name,page:1,pageSize:100}));
@@ -369,9 +441,14 @@ if(canWrite){
   }
   document.getElementById('addBtn').onclick=()=>{fill(null);document.getElementById('editTitle').textContent='Add Payer — Lab Insurance Master';editModal.show();};
   document.getElementById('rows').onclick=async e=>{
-    const edit=e.target.closest('.edit'),stat=e.target.closest('.stat'),match=e.target.closest('.matchBtn');
+    const edit=e.target.closest('.edit'),stat=e.target.closest('.stat'),match=e.target.closest('.matchBtn'),unmap=e.target.closest('.unmapBtn');
     if(edit){setBusy(true,'Opening record...');try{const r=await fetch(urls.get+'?id='+edit.dataset.id);fill(await r.json());document.getElementById('editTitle').textContent='Edit Payer — Lab Insurance Master';editModal.show();}finally{setBusy(false);}}
     if(match){openMatch(match.dataset.id,match.dataset.name);}
+    if(unmap){
+      if(!confirm(`Unmap "${unmap.dataset.name}"?\n\nThis clears the current Global Payer ID mapping so you can remap it to the correct payer. The change is audited.`))return;
+      setBusy(true,'Unmapping...');
+      try{const r=await fetch(urls.unmap+'?id='+unmap.dataset.id,{method:'POST',headers:{'Content-Type':'application/json'}});if(!r.ok){alert(await errorText(r));}await load();}finally{setBusy(false);}
+    }
     if(stat){
       const msg=requiresApproval
         ?`Deactivate "${stat.dataset.name}"?\n\nThis request will be routed to LRN Admin / Reports Manager for approval. Deactivated payers cannot be reactivated.`
@@ -385,7 +462,9 @@ if(canWrite){
     const btn=document.getElementById('saveBtn');
     if(!f.reportValidity())return;
     const data=Object.fromEntries(new FormData(f));
-    data.payerNameNormalized=normalize(data.payerNameRaw);
+    // Payer Name Normalized + Global Payer ID come only from the picked Payer Policy record (never typed).
+    // selectedNormalized is the last confirmed pick (seeded from the record on edit), so free text never leaks in.
+    data.payerNameNormalized=selectedNormalized||'';
     data.globalPayerID=data.globalPayerID?Number(data.globalPayerID):null;
     data.labId=data.labId?Number(data.labId):null;
     if(data.labId){const name=labNameFor(data.labId);if(name)data.labName=name;}

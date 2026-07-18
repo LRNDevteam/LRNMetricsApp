@@ -109,6 +109,17 @@ public sealed class InMemoryLabRepository : ILabInsuranceRepository
         return Task.CompletedTask;
     }
 
+    public Task<bool> UnmapAsync(int id, string userName, CancellationToken ct)
+    {
+        if (!Rows.TryGetValue(id, out var s)) return Task.FromResult(false);
+        s.GlobalPayerId = null;
+        s.MappingStatus = "Unmapped";
+        s.MappedBy = null;
+        s.LastEvaluatedOn = DateTime.UtcNow;
+        PendingCandidates.Remove(id);
+        return Task.FromResult(true);
+    }
+
     public Task<bool> ApplyUserMappingAsync(int id, PayerPolicyRecord policyRecord, string mappedBy, string userName, CancellationToken ct)
     {
         if (!Rows.TryGetValue(id, out var s)) return Task.FromResult(false);

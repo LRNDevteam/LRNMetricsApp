@@ -5,6 +5,9 @@ using LRN.PayerPolicyMapper.Core.Data;
 
 var host = Host.CreateDefaultBuilder(args)
     .UseContentRoot(AppContext.BaseDirectory)
+    // Secrets (connection strings) live in appsettings.Local.json, which is gitignored.
+    // The tracked appsettings.json must never contain credentials.
+    .ConfigureAppConfiguration(cfg => cfg.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true))
     .UseWindowsService(o => o.ServiceName = "LRN - Payer Policy Mapper")
     .ConfigureLogging((context, logging) =>
     {

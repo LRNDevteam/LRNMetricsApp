@@ -22,10 +22,16 @@ public interface IMasterValuesApiClient
     Task<MasterPagedResult<PayerPolicyInsuranceMasterDto>> GetPolicyPayersAsync(IQueryCollection query, CancellationToken ct);
     Task<PayerPolicyInsuranceMasterDto?> GetPolicyPayerAsync(int id, CancellationToken ct);
     Task SavePolicyPayerAsync(int? id, PayerPolicyInsuranceMasterDto dto, CancellationToken ct);
+    Task<int> GetPolicyNextGlobalPayerIdAsync(CancellationToken ct);
     Task UpdatePolicyStatusAsync(int id, string? isActive, CancellationToken ct);
     Task<ImportResultDto> ImportPolicyAsync(IFormFile file, CancellationToken ct);
     Task<(byte[] Content, string FileName)> ExportPolicyAsync(IQueryCollection query, CancellationToken ct);
     Task<IReadOnlyList<MasterValueLabOption>> GetLabsAsync(CancellationToken ct);
+
+    // Payer mapping rules admin (single-page CRUD over the 6 rule tables) - raw JSON passthrough,
+    // the API is the single source of truth for the table metadata and validation.
+    Task<string> GetPayerRulesRawAsync(string path, CancellationToken ct);
+    Task<string> SendPayerRulesRawAsync(HttpMethod method, string path, string jsonBody, CancellationToken ct);
 
     // Payer mapping intelligence (LRN.PayerPolicyMapper pipeline endpoints)
     Task<PayerMappingSuggestionsResponse?> GetMappingSuggestionsAsync(int labInsuranceMasterId, CancellationToken ct);
@@ -33,6 +39,7 @@ public interface IMasterValuesApiClient
     Task<PayerMappingActionResult> ApproveMappingAsync(int labInsuranceMasterId, PayerMappingActionRequest request, CancellationToken ct);
     Task<PayerMappingActionResult> ManualMapAsync(int labInsuranceMasterId, PayerMappingActionRequest request, CancellationToken ct);
     Task<PayerMappingActionResult> RejectMappingAsync(int labInsuranceMasterId, CancellationToken ct);
+    Task<PayerMappingActionResult> UnmapMappingAsync(int labInsuranceMasterId, CancellationToken ct);
     Task<MappingStatusSummaryDto> GetMappingSummaryAsync(CancellationToken ct);
 
     // Payer Service Audit (worker run history + manual trigger)
@@ -97,6 +104,11 @@ public sealed class MasterValuesApiClient : IMasterValuesApiClient
     public Task SavePolicyPayerAsync(int? id, PayerPolicyInsuranceMasterDto dto, CancellationToken ct)
         => SendJsonAsync(id.HasValue ? HttpMethod.Put : HttpMethod.Post, id.HasValue ? $"api/master-values/payer-policy-insurance/{id}" : "api/master-values/payer-policy-insurance", dto, ct);
 
+    public async Task<int> GetPolicyNextGlobalPayerIdAsync(CancellationToken ct)
+        => (await GetAsync<NextGlobalIdResponse>("api/master-values/payer-policy-insurance/next-global-id", ct))?.NextGlobalPayerId ?? 0;
+
+    private sealed record NextGlobalIdResponse(int NextGlobalPayerId);
+
     public Task UpdatePolicyStatusAsync(int id, string? isActive, CancellationToken ct)
         => SendJsonAsync(HttpMethod.Patch, $"api/master-values/payer-policy-insurance/{id}/status", new { isActive }, ct);
 
@@ -124,6 +136,9 @@ public sealed class MasterValuesApiClient : IMasterValuesApiClient
     public Task<PayerMappingActionResult> RejectMappingAsync(int labInsuranceMasterId, CancellationToken ct)
         => PostForResultAsync<object, PayerMappingActionResult>($"api/master-values/insurance-payers/{labInsuranceMasterId}/mapping/reject", new { }, ct);
 
+    public Task<PayerMappingActionResult> UnmapMappingAsync(int labInsuranceMasterId, CancellationToken ct)
+        => PostForResultAsync<object, PayerMappingActionResult>($"api/master-values/insurance-payers/{labInsuranceMasterId}/mapping/unmap", new { }, ct);
+
     public async Task<MappingStatusSummaryDto> GetMappingSummaryAsync(CancellationToken ct)
         => await GetAsync<MappingStatusSummaryDto>("api/master-values/insurance-payers/mapping-summary", ct) ?? new();
 
@@ -150,6 +165,26 @@ public sealed class MasterValuesApiClient : IMasterValuesApiClient
 
     public async Task<IReadOnlyList<PayerMasterNotificationDto>> GetNotificationsAsync(int take, CancellationToken ct)
         => await GetAsync<List<PayerMasterNotificationDto>>($"api/master-values/workflow/notifications?take={take}", ct) ?? [];
+
+    public async Task<string> GetPayerRulesRawAsync(string path, CancellationToken ct)
+    {
+        await AuthorizeAsync(ct);
+        using var response = await _http.GetAsync("api/master-values/payer-rules/" + path, ct);
+        await EnsureSuccessAsync(response, ct);
+        return await response.Content.ReadAsStringAsync(ct);
+    }
+
+    public async Task<string> SendPayerRulesRawAsync(HttpMethod method, string path, string jsonBody, CancellationToken ct)
+    {
+        await AuthorizeAsync(ct);
+        using var request = new HttpRequestMessage(method, "api/master-values/payer-rules/" + path)
+        {
+            Content = new StringContent(string.IsNullOrWhiteSpace(jsonBody) ? "{}" : jsonBody, Encoding.UTF8, "application/json")
+        };
+        using var response = await _http.SendAsync(request, ct);
+        await EnsureSuccessAsync(response, ct);
+        return await response.Content.ReadAsStringAsync(ct);
+    }
 
     private async Task<TResult> PostForResultAsync<TPayload, TResult>(string url, TPayload payload, CancellationToken ct) where TResult : new()
     {

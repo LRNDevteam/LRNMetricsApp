@@ -87,6 +87,87 @@ public sealed class MasterValuesController : Controller
         return Json(await _api.GetPolicyPayersAsync(Request.Query, ct));
     }
 
+    // ── Payer Mapping Rules admin (single page CRUD over the 6 rule tables) ──────
+    // Rule edits change matching behavior globally, so writes are LRN Admin / Payer
+    // Policy Admin only (no analyst approval flow); master viewers may read.
+    private bool CanViewRules => CanViewPolicy || CanViewLab;
+    private bool CanWriteRules => IsLrnAdmin || IsPayerPolicyAdmin;
+
+    private static bool ValidRuleTableKey(string? table)
+        => !string.IsNullOrWhiteSpace(table) && table.Length <= 40 && table.All(c => char.IsLetterOrDigit(c) || c == '-');
+
+    [HttpGet]
+    public IActionResult PayerRules()
+    {
+        if (!CanViewRules) return Forbid();
+        ViewData["PageLabel"] = "Payer Mapping Rules";
+        return View(new MasterValuesPageViewModel
+        {
+            Title = "Payer Mapping Rules",
+            RoleLabel = RoleLabel,
+            CanWrite = CanWriteRules
+        });
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> PayerRulesTables(CancellationToken ct)
+    {
+        if (!CanViewRules) return Forbid();
+        return Content(await _api.GetPayerRulesRawAsync("tables", ct), "application/json");
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> PayerRulesData(string table, CancellationToken ct)
+    {
+        if (!CanViewRules) return Forbid();
+        if (!ValidRuleTableKey(table)) return BadRequest(new { message = "Unknown rule table." });
+        return Content(await _api.GetPayerRulesRawAsync(Uri.EscapeDataString(table), ct), "application/json");
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> SavePayerRule(string table, string? id, CancellationToken ct)
+    {
+        if (!CanWriteRules) return Forbid();
+        if (!ValidRuleTableKey(table)) return BadRequest(new { message = "Unknown rule table." });
+        using var reader = new StreamReader(Request.Body);
+        var body = await reader.ReadToEndAsync(ct);
+        var path = Uri.EscapeDataString(table) + (string.IsNullOrWhiteSpace(id) ? string.Empty : "/" + Uri.EscapeDataString(id));
+        try
+        {
+            var result = await _api.SendPayerRulesRawAsync(string.IsNullOrWhiteSpace(id) ? HttpMethod.Post : HttpMethod.Put, path, body, ct);
+            return Content(result, "application/json");
+        }
+        catch (InvalidOperationException ex) { return BadRequest(ErrorPayload(ex.Message)); }
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> PayerRuleStatus(string table, string id, [FromBody] MasterValueStatusBody request, CancellationToken ct)
+    {
+        if (!CanWriteRules) return Forbid();
+        if (!ValidRuleTableKey(table) || string.IsNullOrWhiteSpace(id)) return BadRequest(new { message = "Unknown rule table or record." });
+        try
+        {
+            var payload = System.Text.Json.JsonSerializer.Serialize(new { isActive = request?.IsActive ?? false });
+            var result = await _api.SendPayerRulesRawAsync(HttpMethod.Patch, $"{Uri.EscapeDataString(table)}/{Uri.EscapeDataString(id)}/status", payload, ct);
+            return Content(result, "application/json");
+        }
+        catch (InvalidOperationException ex) { return BadRequest(ErrorPayload(ex.Message)); }
+    }
+
+    public sealed class MasterValueStatusBody { public bool IsActive { get; set; } }
+
+    /// <summary>The API error body is already JSON ({"message":...}); pass it through, else wrap plain text.</summary>
+    private static object ErrorPayload(string message)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(message);
+            if (doc.RootElement.TryGetProperty("message", out var m)) return new { message = m.GetString() };
+        }
+        catch (System.Text.Json.JsonException) { }
+        return new { message };
+    }
+
     // ── Payer mapping intelligence (pipeline suggestions / typeahead / explicit actions) ──
     // Mapping confirmations write directly (Global Payer ID + PayerAlias + audit), so the three
     // actions follow the same authority as bulk import; approval-routed roles keep the legacy
@@ -138,6 +219,14 @@ public sealed class MasterValuesController : Controller
     {
         if (!CanMapDirect) return Forbid();
         try { return Json(await _api.RejectMappingAsync(id, ct)); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> UnmapMapping(int id, CancellationToken ct)
+    {
+        if (!CanMapDirect) return Forbid();
+        try { return Json(await _api.UnmapMappingAsync(id, ct)); }
         catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
@@ -229,6 +318,14 @@ public sealed class MasterValuesController : Controller
         if (!CanViewPolicy) return Forbid();
         var row = await _api.GetPolicyPayerAsync(id, ct);
         return row is null ? NotFound() : Json(row);
+    }
+
+    // Next Global Payer ID a new Payer Policy record would take (MAX + 1) - pre-fills the add form.
+    [HttpGet]
+    public async Task<IActionResult> PolicyNextGlobalPayerId(CancellationToken ct)
+    {
+        if (!CanWritePolicy) return Forbid();
+        return Json(new { nextGlobalPayerId = await _api.GetPolicyNextGlobalPayerIdAsync(ct) });
     }
 
     [HttpPost]

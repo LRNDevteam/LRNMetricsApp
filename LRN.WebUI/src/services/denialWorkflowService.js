@@ -73,6 +73,7 @@ export const denialWorkflowService = {
   },
   regenerateDenialCodeMasterExcel: (labId) => api(`/denial-code-master/regenerate-export?labId=${encodeURIComponent(labId)}`, { method: 'POST' }),
   getDenialCodeMasterExportUrl: (labId) => apiUrl(`/denial-code-master/export?labId=${encodeURIComponent(labId)}`),
+  getDenialCodeMasterTemplateUrl: () => apiUrl('/denial-code-master/template'),
   getDenialActionVerification: async (query) => normalizePagedResult(await api(`/denial-action-verification?${qs(query)}`)),
   getDenialActionVerificationBatch: (labId, batchId) => api(`/denial-action-verification/batch/${encodeURIComponent(batchId)}?labId=${encodeURIComponent(labId)}`),
   getDenialActionVerificationLookups: (labId) => api(`/denial-action-verification/lookups?labId=${encodeURIComponent(labId)}`),

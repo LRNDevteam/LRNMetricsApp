@@ -22,6 +22,8 @@ public interface IMasterValuesRepository
     Task<IReadOnlyList<PayerPolicyInsuranceMasterDto>> GetPolicyPayersForExportAsync(PayerPolicyInsuranceMasterQuery query, CancellationToken ct);
     Task<PayerPolicyInsuranceMasterDto?> GetPolicyPayerAsync(int id, CancellationToken ct);
     Task<int> CreatePolicyPayerAsync(PayerPolicyInsuranceMasterDto dto, string? userName, CancellationToken ct);
+    /// <summary>The next Global Payer ID a new Payer Policy record would take (MAX numeric id + 1), for pre-filling the add form.</summary>
+    Task<int> GetNextPolicyGlobalPayerIdAsync(CancellationToken ct);
     /// <summary>Inserts a new Payer Policy record with the next sequential Global Payer ID (atomic) and returns it.</summary>
     Task<(int PPInsuranceMasterId, int GlobalPayerId, string GlobalPayerCode)> MintPolicyPayerAsync(
         string payerNameRaw, string? payerNameNormalized, string? state, string? userName, CancellationToken ct);
@@ -61,7 +63,7 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
             SELECT LabInsuranceMasterId, PayerCode, PayerNameRaw, PayerNameNormalized, GlobalPayerID,
                    PayerGroupCode, PayerCommonCode, Parent, PlanType, MCOType, PayerState, IsActive,
                    BenefitAdminCode, BenefitAdministrator, Remarks, LabName, LabId, LabState, LabStateCode,
-                   MappingStatus, MappedBy
+                   MappingStatus, MappedBy, MappedSource, MappedOn
             FROM dbo.LabInsuranceMaster
             WHERE {where}
             ORDER BY {orderBy}
@@ -90,7 +92,7 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
             SELECT LabInsuranceMasterId, PayerCode, PayerNameRaw, PayerNameNormalized, GlobalPayerID,
                    PayerGroupCode, PayerCommonCode, Parent, PlanType, MCOType, PayerState, IsActive,
                    BenefitAdminCode, BenefitAdministrator, Remarks, LabName, LabId, LabState, LabStateCode,
-                   MappingStatus, MappedBy
+                   MappingStatus, MappedBy, MappedSource, MappedOn
             FROM dbo.LabInsuranceMaster WHERE LabInsuranceMasterId = @Id;
             """, conn);
         cmd.Parameters.AddWithValue("@Id", id);
@@ -741,6 +743,9 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         if (!dto.GlobalPayerId.HasValue) throw new ArgumentException("Global Payer ID is required.");
         await using var conn = Open();
         await conn.OpenAsync(ct);
+        // Payer Name must be unique in the master (a new payer under an existing normalized group still
+        // needs its own distinct raw name).
+        await EnsurePolicyRawNameAvailableAsync(conn, dto.PayerNameRaw, null, ct);
         await EnsurePolicyUniqueAsync(conn, dto, null, ct);
         await using var cmd = new SqlCommand("""
             INSERT INTO dbo.PayerPolicyInsuranceMaster
@@ -755,6 +760,15 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
             """, conn);
         AddPolicyParams(cmd, dto);
         cmd.Parameters.AddWithValue("@CreatedBy", DbValue(userName));
+        return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+    }
+
+    public async Task<int> GetNextPolicyGlobalPayerIdAsync(CancellationToken ct)
+    {
+        await using var conn = Open();
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(
+            "SELECT ISNULL(MAX(TRY_CONVERT(INT, GlobalPayerId)), 1000) + 1 FROM dbo.PayerPolicyInsuranceMaster;", conn);
         return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
     }
 
@@ -823,6 +837,27 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         await using var conn = Open();
         await conn.OpenAsync(ct);
         await EnsurePolicyUniqueAsync(conn, dto, id, ct);
+
+        // Mapped Lab Insurance rows carry this policy record's normalized name (copied at map
+        // time), so a rename here must follow through to them or the two masters drift apart.
+        string? oldNormalized = null;
+        int? oldGlobalPayerId = null;
+        await using (var old = new SqlCommand(
+            "SELECT PayerNameNormalized, GlobalPayerId FROM dbo.PayerPolicyInsuranceMaster WHERE PPInsuranceMasterId=@Id;", conn))
+        {
+            old.Parameters.AddWithValue("@Id", id);
+            await using var rd = await old.ExecuteReaderAsync(ct);
+            if (await rd.ReadAsync(ct))
+            {
+                oldNormalized = rd.IsDBNull(0) ? null : rd.GetString(0);
+                // PayerPolicyInsuranceMaster.GlobalPayerId is nvarchar(50) (LabInsuranceMaster's
+                // GlobalPayerID is int) - parse rather than cast, and skip the lab-side
+                // propagation when the stored value is not numeric (such records cannot be mapped).
+                var oldGidRaw = rd.IsDBNull(1) ? null : rd.GetValue(1)?.ToString();
+                if (int.TryParse((oldGidRaw ?? string.Empty).Trim(), out var parsedGid)) oldGlobalPayerId = parsedGid;
+            }
+        }
+
         await using var cmd = new SqlCommand("""
             UPDATE dbo.PayerPolicyInsuranceMaster
             SET GlobalPayerId=@GlobalPayerId, GlobalPayerCode=@GlobalPayerCode, PayerGroupCode=@PayerGroupCode,
@@ -836,7 +871,29 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         AddPolicyParams(cmd, dto);
         cmd.Parameters.AddWithValue("@Id", id);
         cmd.Parameters.AddWithValue("@ModifiedBy", DbValue(userName));
-        return await cmd.ExecuteNonQueryAsync(ct) > 0;
+        var updated = await cmd.ExecuteNonQueryAsync(ct) > 0;
+
+        if (updated
+            && oldGlobalPayerId.HasValue
+            && !string.IsNullOrWhiteSpace(dto.PayerNameNormalized)
+            && !string.IsNullOrWhiteSpace(oldNormalized)
+            && !string.Equals(oldNormalized, dto.PayerNameNormalized, StringComparison.Ordinal))
+        {
+            // Only rows mapped to this policy's group AND still carrying the old normalized name;
+            // rows a user hand-corrected on the lab side keep their value.
+            await using var sync = new SqlCommand("""
+                UPDATE dbo.LabInsuranceMaster
+                SET PayerNameNormalized=@NewNormalized, ModifiedBy=@ModifiedBy, ModifiedOn=SYSUTCDATETIME()
+                WHERE MappingStatus='Mapped' AND GlobalPayerID=@OldGid AND PayerNameNormalized=@OldNormalized;
+                """, conn);
+            sync.Parameters.AddWithValue("@NewNormalized", dto.PayerNameNormalized!.Trim());
+            sync.Parameters.AddWithValue("@OldNormalized", oldNormalized);
+            sync.Parameters.AddWithValue("@OldGid", oldGlobalPayerId.Value);
+            sync.Parameters.AddWithValue("@ModifiedBy", DbValue(userName));
+            await sync.ExecuteNonQueryAsync(ct);
+        }
+
+        return updated;
     }
 
     public Task<bool> UpdatePolicyPayerStatusAsync(int id, string? isActive, string? userName, CancellationToken ct)
@@ -1171,6 +1228,21 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
             throw new ArgumentException($"A Payer Policy record for '{dto.PayerNameRaw.Trim()}' with Global Payer ID {(dto.GlobalPayerId?.ToString() ?? "(blank)")} already exists.");
     }
 
+    private static async Task EnsurePolicyRawNameAvailableAsync(SqlConnection conn, string? payerNameRaw, int? excludeId, CancellationToken ct)
+    {
+        var raw = (payerNameRaw ?? string.Empty).Trim();
+        if (raw.Length == 0) return;
+        await using var cmd = new SqlCommand("""
+            SELECT TOP (1) PPInsuranceMasterId FROM dbo.PayerPolicyInsuranceMaster
+            WHERE LTRIM(RTRIM(PayerNameRaw)) = @Raw COLLATE Latin1_General_CI_AS
+              AND (@ExcludeId IS NULL OR PPInsuranceMasterId <> @ExcludeId);
+            """, conn);
+        cmd.Parameters.AddWithValue("@Raw", raw);
+        cmd.Parameters.AddWithValue("@ExcludeId", (object?)excludeId ?? DBNull.Value);
+        if (await cmd.ExecuteScalarAsync(ct) != null)
+            throw new ArgumentException($"A Payer Policy record with the Payer Name '{raw}' already exists. Enter a different Payer Name.");
+    }
+
     private static async Task<int?> FindInsuranceByNormalizedGlobalAsync(SqlConnection conn, string? payerNameNormalized, int? globalPayerId, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(payerNameNormalized) || !globalPayerId.HasValue) return null;
@@ -1275,7 +1347,11 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
             ["labName"] = "LabName",
             ["labState"] = "LabState",
             ["labStateCode"] = "LabStateCode",
-            ["remarks"] = "Remarks"
+            ["remarks"] = "Remarks",
+            ["mappingStatus"] = "MappingStatus",
+            ["mappedSource"] = "MappedSource",
+            ["mappedBy"] = "MappedBy",
+            ["mappedOn"] = "MappedOn"
         };
         return BuildOrderBy(q.SortColumn, q.SortDirection, columns, "LabInsuranceMasterId DESC");
     }
@@ -1475,6 +1551,7 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
     private static string CiKey(string value) => value.Trim().ToUpperInvariant();
     private static string? Str(SqlDataReader r, string c) => r.IsDBNull(r.GetOrdinal(c)) ? null : r.GetString(r.GetOrdinal(c));
     private static int? Int(SqlDataReader r, string c) => r.IsDBNull(r.GetOrdinal(c)) ? null : r.GetInt32(r.GetOrdinal(c));
+    private static DateTime? Date(SqlDataReader r, string c) => r.IsDBNull(r.GetOrdinal(c)) ? null : r.GetDateTime(r.GetOrdinal(c));
 
     private static InsurancePayerMasterDto MapInsurance(SqlDataReader r) => new()
     {
@@ -1498,7 +1575,9 @@ public sealed class SqlMasterValuesRepository : IMasterValuesRepository
         LabState = Str(r, "LabState"),
         LabStateCode = Str(r, "LabStateCode"),
         MappingStatus = Str(r, "MappingStatus"),
-        MappedBy = Str(r, "MappedBy")
+        MappedBy = Str(r, "MappedBy"),
+        MappedSource = Str(r, "MappedSource"),
+        MappedOn = Date(r, "MappedOn")
     };
 
     private static PayerPolicyInsuranceMasterDto MapPolicy(SqlDataReader r) => new()

@@ -86,8 +86,8 @@ public sealed class SqlLabInsuranceRepository : ILabInsuranceRepository
         await using var cmd = new SqlCommand("""
             UPDATE dbo.LabInsuranceMaster
             SET GlobalPayerID = @Gid, PayerNameNormalized = @Normalized, MappingStatus = 'Mapped',
-                MappedBy = @MappedBy, ModifiedBy = @MappedBy, ModifiedOn = SYSUTCDATETIME(),
-                LastEvaluatedOn = SYSUTCDATETIME()
+                MappedBy = @MappedBy, MappedSource = 'System', MappedOn = SYSUTCDATETIME(),
+                ModifiedBy = @MappedBy, ModifiedOn = SYSUTCDATETIME(), LastEvaluatedOn = SYSUTCDATETIME()
             WHERE LabInsuranceMasterId = @Id;
             DELETE FROM dbo.PendingMatchCandidates WHERE LabInsuranceMasterId = @Id;
             """, conn);
@@ -96,6 +96,24 @@ public sealed class SqlLabInsuranceRepository : ILabInsuranceRepository
         cmd.Parameters.AddWithValue("@Normalized", payerNameNormalized);
         cmd.Parameters.AddWithValue("@MappedBy", mappedBy);
         await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<bool> UnmapAsync(int labInsuranceMasterId, string userName, CancellationToken ct)
+    {
+        await using var conn = Open();
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand("""
+            UPDATE dbo.LabInsuranceMaster
+            SET GlobalPayerID = NULL, MappingStatus = 'Unmapped',
+                MappedBy = NULL, MappedSource = NULL, MappedOn = NULL,
+                ModifiedBy = @UserName, ModifiedOn = SYSUTCDATETIME(),
+                LastEvaluatedOn = SYSUTCDATETIME()
+            WHERE LabInsuranceMasterId = @Id;
+            DELETE FROM dbo.PendingMatchCandidates WHERE LabInsuranceMasterId = @Id;
+            """, conn);
+        cmd.Parameters.AddWithValue("@Id", labInsuranceMasterId);
+        cmd.Parameters.AddWithValue("@UserName", userName);
+        return await cmd.ExecuteNonQueryAsync(ct) > 0;
     }
 
     public async Task ApplyManualReviewAsync(int labInsuranceMasterId, string payerNameNormalized, IReadOnlyList<MatchCandidate> candidates, CancellationToken ct)
@@ -179,6 +197,7 @@ public sealed class SqlLabInsuranceRepository : ILabInsuranceRepository
         await using var cmd = new SqlCommand("""
             UPDATE dbo.LabInsuranceMaster
             SET GlobalPayerID = @Gid, MappingStatus = 'Mapped', MappedBy = @MappedBy,
+                MappedSource = 'User', MappedOn = SYSUTCDATETIME(),
                 PayerNameNormalized = COALESCE(@PayerNameNormalized, PayerNameNormalized),
                 PayerCommonCode = COALESCE(@GlobalPayerCode, PayerCommonCode),
                 PayerGroupCode = COALESCE(@PayerGroupCode, PayerGroupCode),
