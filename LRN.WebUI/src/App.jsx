@@ -580,6 +580,9 @@ export default function App() {
     setWorkflowNotifications(prev => ({ ...prev, loading: true }));
     try {
       let sections = [];
+      // Authoritative distinct-claim total for the role (reviewer path only). Left null when
+      // unavailable so we fall back to counting the fetched items.
+      let reviewerTotal = null;
       if (reviewerOnly) {
         const baseQuery = {
           labId,
@@ -590,7 +593,13 @@ export default function App() {
           page: 1,
           pageSize: 50
         };
-        const [assigned, pending, actionRequired, escalations, responses, followUps] = await Promise.all([
+        // The getTasks calls below return one row per CPT/line task, so counting distinct claims
+        // within a single 50-row page badly under-reports (a reviewer with 100 claims but several
+        // tasks each collapses to ~9). Pull the real distinct-claim counts from the light count
+        // endpoint for the badges/total. Kept resilient: a slow/failed count call falls back to
+        // the page-derived counts rather than breaking the whole notification.
+        const [menuCounts, assigned, pending, actionRequired, escalations, responses, followUps] = await Promise.all([
+          denialWorkflowService.getClaimMenuCounts(baseQuery).catch(() => null),
           denialWorkflowService.getTasks({ ...baseQuery, taskView: 'assigned' }),
           denialWorkflowService.getTasks({ ...baseQuery, taskView: 'open' }),
           denialWorkflowService.getTasks({ ...baseQuery, status: 'Pending Review' }),
@@ -604,14 +613,33 @@ export default function App() {
         const escalationItems = normalizeNotificationItems(escalations);
         const responseItems = normalizeNotificationItems(responses);
         const followUpItems = normalizeFollowUpNotificationItems(followUps);
+        const countField = (...keys) => {
+          if (!menuCounts) return null;
+          for (const key of keys) {
+            const n = Number(menuCounts[key]);
+            if (Number.isFinite(n)) return n;
+          }
+          return null;
+        };
+        const assignedCount = countField('assigned', 'Assigned');
+        const allCount = countField('allClaims', 'AllClaims', 'totalClaims', 'TotalClaims');
+        const closedCount = countField('closed', 'Closed');
+        const responseCount = countField('escalationResponse', 'EscalationResponse');
+        const escalationsCount = countField('escalated', 'Escalated');
+        const openCount = allCount != null ? Math.max(allCount - (closedCount ?? 0), 0) : null;
+        // Prefer the authoritative distinct-claim count; fall back to the page sample only when
+        // the count endpoint returned nothing.
+        const pick = (authoritative, items) => (authoritative != null ? authoritative : distinctClaimCount(items));
         sections = [
           { key: 'follow-up', label: 'Follow-ups due tomorrow', count: distinctClaimCount(followUpItems), items: followUpItems, targetView: 'all' },
-          { key: 'assigned', label: 'Assigned claims', count: distinctClaimCount(assignedItems), items: assignedItems, targetView: 'assigned' },
-          { key: 'pending', label: 'Pending claims', count: distinctClaimCount(pendingItems), items: pendingItems, targetView: 'open' },
+          { key: 'assigned', label: 'Assigned claims', count: pick(assignedCount, assignedItems), items: assignedItems, targetView: 'assigned' },
+          { key: 'pending', label: 'Pending claims', count: pick(openCount, pendingItems), items: pendingItems, targetView: 'open' },
           { key: 'action', label: 'Action required claims', count: distinctClaimCount(actionRequiredItems), items: actionRequiredItems, targetView: 'open', status: 'Pending Review' },
-          { key: 'response', label: 'Escalated response claims', count: distinctClaimCount(responseItems), items: responseItems, targetView: 'escalationResponse' },
-          { key: 'escalations', label: 'Escalation claims', count: distinctClaimCount(escalationItems), items: escalationItems, targetView: 'escalations' }
+          { key: 'response', label: 'Escalated response claims', count: pick(responseCount, responseItems), items: responseItems, targetView: 'escalationResponse' },
+          { key: 'escalations', label: 'Escalation claims', count: pick(escalationsCount, escalationItems), items: escalationItems, targetView: 'escalations' }
         ].filter(section => section.count > 0);
+        // "N distinct claim(s) available for your role" = the reviewer's total distinct claims.
+        reviewerTotal = allCount != null ? allCount : (assignedCount ?? null);
       } else if (externalManager) {
         const managerBaseQuery = {
           labId,
@@ -633,7 +661,11 @@ export default function App() {
         ].filter(section => section.count > 0);
       }
 
-      const total = distinctSectionClaimCount(sections);
+      // Reviewer total comes from the authoritative distinct-claim count when available; otherwise
+      // fall back to de-duplicating the fetched section items.
+      const total = reviewerTotal != null && reviewerTotal > 0
+        ? reviewerTotal
+        : distinctSectionClaimCount(sections);
       setWorkflowNotifications({ loading: false, sections, total });
       const key = `${user.userName || ''}|${user.role || ''}|${labId}`;
       if (total > 0 && initialNotificationKeyRef.current !== key) {

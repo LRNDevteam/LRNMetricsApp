@@ -1215,17 +1215,25 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 }
 .status-scope-modal{width:min(980px,96vw);height:min(86vh,780px);display:flex;flex-direction:column}
 .status-scope-modal .wl-modal-hd{padding:16px 20px;border-bottom:1px solid #d8e0ea}
-.status-scope-modal .note-modal-ft{position:sticky;bottom:0;z-index:2;background:#f8fafc;border-top:1px solid #d8e0ea}
+.status-scope-modal .note-modal-ft{position:sticky;bottom:0;z-index:2;background:#f8fafc;border-top:1px solid #d8e0ea;align-items:center;justify-content:space-between;gap:12px}
 .status-scope-body{padding:16px 20px 20px;overflow:auto;min-height:0;flex:1}
 .status-scope-callout{border:1px solid #bfdbfe;background:#eff6ff;color:#1e3a8a;border-radius:10px;padding:11px 13px;margin-bottom:14px;display:flex;flex-direction:column;gap:3px;font-size:12px}
 .status-scope-callout.amber{background:#fff7ed;border-color:#fdba74;color:#9a3412}
-.status-scope-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px 12px;margin-bottom:12px;align-items:start}
+.status-scope-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px 12px;margin-bottom:12px;align-items:start}
 .status-scope-grid.single{grid-template-columns:minmax(240px,420px)}
-.status-scope-grid .doc-type-field{grid-column:3 / 5}
-.status-scope-grid label,.status-scope-comments{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:800;color:#334155}
+.status-scope-grid .doc-type-field{grid-column:1 / 3}
+.status-scope-grid .escalate-to-field{grid-column:3 / 5}
+.status-scope-grid label,.status-scope-grid .status-scope-field,.status-scope-comments{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:800;color:#334155}
+.status-scope-grid .status-scope-field{min-width:0;align-self:start}
 .field-label-row{display:inline-flex;align-items:center;gap:4px;line-height:1.2}
-.status-scope-grid input,.status-scope-grid select{min-height:36px;border:1px solid #cbd5e1;border-radius:8px;padding:7px 9px;background:#fff}
+.status-scope-grid .field-label-row{min-height:16px}
+.status-scope-grid input:not([type="checkbox"]),.status-scope-grid select{width:100%;min-height:36px;border:1px solid #cbd5e1;border-radius:8px;padding:7px 9px;background:#fff}
 .doctype-help{display:block;margin-top:2px;padding:8px 10px;border:1px solid #bfdbfe;background:#eff6ff;color:#1e3a8a;border-radius:8px;font-size:12px;font-weight:700;line-height:1.35}
+/* Escalate To: keep the checkbox its native size and lay the control out as one tidy row. */
+.status-scope-grid .escalate-to-field{gap:6px}
+.status-scope-grid .doc-type-field,.status-scope-grid .escalate-to-field{align-self:start}
+.wl-checkbox-inline{flex-direction:row!important;align-items:center;gap:8px;min-height:36px;padding:0 10px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;font-size:12px;font-weight:700;color:#334155;cursor:pointer}
+.wl-checkbox-inline input[type="checkbox"]{flex:0 0 auto;width:16px;height:16px;min-height:0;margin:0;padding:0;border-radius:4px;accent-color:#0d9488;cursor:pointer}
 .status-scope-comments{margin-top:4px}
 .status-scope-comments textarea{min-height:92px;max-height:140px}
 .status-preview{background:#f8fafc;border:1px dashed #94a3b8;border-radius:10px;padding:12px;margin:12px 0}
@@ -1246,6 +1254,20 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .structured-note-field span{display:block;font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.05em;color:#64748b;margin-bottom:3px}
 .structured-note-field strong{display:block;font-size:12px;line-height:1.35;color:#0f172a;white-space:pre-wrap}
 .structured-note-plain{white-space:pre-line}
+.structured-note-wrap{display:flex;flex-direction:column;gap:8px}
+/* AR Manager response highlight so the reviewer immediately notices the manager's reply. */
+.manager-response-callout{border:1px solid #6ee7b7;background:#ecfdf5;border-left:4px solid #10b981;border-radius:8px;padding:8px 11px;display:flex;flex-direction:column;gap:4px}
+.manager-response-badge{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.05em;color:#047857}
+.manager-response-badge i{font-size:12px}
+.manager-response-line{font-size:12px;line-height:1.4;color:#064e3b;white-space:pre-wrap}
+.manager-response-line span{display:block;font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.05em;color:#059669;margin-top:2px}
+.manager-response-line strong{color:#064e3b;font-weight:700}
+@media(prefers-color-scheme:dark){
+  .manager-response-callout{border-color:#065f46;background:rgba(6,95,70,.18);border-left-color:#10b981}
+  .manager-response-badge{color:#6ee7b7}
+  .manager-response-line,.manager-response-line strong{color:#a7f3d0}
+  .manager-response-line span{color:#6ee7b7}
+}
 .history-comment{display:grid;grid-template-columns:72px minmax(0,1fr);gap:8px;margin-top:6px}
 .history-comment>span{font-size:13px;color:#475569}
 .claim-task-workbench{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;padding:14px;background:#f8fafc}
@@ -1278,7 +1300,8 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .claim-task-side{display:flex;flex-direction:column}.claim-task-side>div{padding:14px 16px;border-bottom:1px solid #d8e0ea}.claim-task-side>div:last-child{border-bottom:0}.claim-task-side h4{margin:0 0 10px;font-size:12px;color:#0f172a;text-transform:uppercase}.claim-task-side p{margin:8px 0 0;font-size:12px;color:#64748b}
 .scope-progress{height:8px;background:#e5e7eb;border-radius:999px;overflow:hidden}.scope-progress i{display:block;height:100%;background:#1f9d8a;border-radius:999px}
 .scope-kv{display:flex;justify-content:space-between;gap:10px;margin:8px 0;font-size:12px}.scope-kv span{color:#64748b}.scope-kv strong{color:#0f172a}
-@media(max-width:1100px){.status-scope-grid{grid-template-columns:1fr 1fr}.status-scope-grid .doc-type-field{grid-column:auto}.claim-task-workbench{grid-template-columns:1fr}.claim-drawer-header-main,.claim-drawer-header-overview{grid-template-columns:1fr}}
+@media(max-width:1100px){.status-scope-grid{grid-template-columns:1fr 1fr}.status-scope-grid .doc-type-field,.status-scope-grid .escalate-to-field{grid-column:auto}.claim-task-workbench{grid-template-columns:1fr}.claim-drawer-header-main,.claim-drawer-header-overview{grid-template-columns:1fr}}
+@media(max-width:700px){.status-scope-grid{grid-template-columns:1fr}.status-scope-modal .note-modal-ft{flex-direction:column;align-items:stretch}.status-scope-modal .note-modal-ft .wl-btn{width:100%}}
 /* Aging dashboard */
 .aging-dashboard{display:flex;flex-direction:column;gap:14px}
 .global-filter-hidden{display:none}
@@ -1367,6 +1390,10 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .claim-rows-scroll{max-height:none;overflow:visible}
 .claim-list-row{width:100%;display:grid;grid-template-columns:auto auto minmax(150px,1.3fr) minmax(120px,1fr) 94px 92px;gap:10px;align-items:center;border:0;border-bottom:.5px solid #eef2f7;background:#fff;padding:10px 14px;text-align:left;cursor:default;color:#0f172a}
 .claim-list-row-wide{grid-template-columns:auto auto minmax(150px,1.2fr) minmax(90px,.7fr) minmax(150px,1.1fr) minmax(140px,1fr) minmax(100px,.75fr) minmax(120px,.8fr) minmax(92px,.65fr) 94px minmax(120px,.8fr) 100px 96px;min-width:1560px}
+/* My Worklist grid has exactly 11 cells (spacer, chevron, then 9 data columns). Pin its template
+   to those 11 columns for both header and rows so headers line up with their values and there is
+   no trailing dead space from the shared 13-column template. */
+.claim-list-head-wide.my-worklist-head,.claim-list-row-wide.my-worklist-row{grid-template-columns:auto auto minmax(150px,1.2fr) minmax(90px,.7fr) minmax(150px,1.1fr) minmax(140px,1fr) minmax(100px,.75fr) minmax(120px,.8fr) minmax(92px,.65fr) 94px minmax(120px,.8fr);min-width:1180px}
 .claim-sort-btn{border:0;background:transparent;color:inherit;font:inherit;font-weight:800;text-transform:uppercase;letter-spacing:.06em;padding:0;display:inline-flex;align-items:center;gap:4px;cursor:pointer}
 .claim-sort-btn i{font-size:10px;color:#1abc9c}
 .claim-filter-toggle-row{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0 0 8px}

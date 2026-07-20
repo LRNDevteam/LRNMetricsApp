@@ -693,7 +693,7 @@ public sealed class DenialWorkflowController : ControllerBase
         var role = FirstClaim(ClaimTypes.Role, "role", "roles");
         if (IsReadOnlyWorkflowRole(role)) return StatusCode(StatusCodes.Status403Forbidden, new { message = "This role cannot update task status." });
         if (IsReviewerOnly(role) && await _service.IsTaskUnderInternalEscalationAsync(request.LabId, request.TaskId, ct))
-            return StatusCode(StatusCodes.Status409Conflict, new { message = "This claim is under AR Manager escalation review. Status cannot be updated until the manager responds." });
+            return StatusCode(StatusCodes.Status409Conflict, new { message = "This claim is escalated to the AR Manager for response. The claim will not change until the AR Manager responds." });
         request.Status = NormalizeWorkflowStatus(request.Status);
         var validationError = ValidateTaskStatusUpdate(request, role);
         if (!string.IsNullOrWhiteSpace(validationError)) return BadRequest(new { message = validationError });

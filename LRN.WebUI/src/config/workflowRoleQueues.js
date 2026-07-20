@@ -15,6 +15,7 @@ export const workflowQueueConfig = {
     { key: 'payerFollowup', label: 'Payer Follow-up Required', filters: ['followUpReason', 'aging', 'payerName', 'panelName', 'followupDue'] },
     { key: 'pendingDocumentation', label: 'Pending Documentation', filters: [...commonManagerFilters, 'documentationType'] },
     { key: 'pendingPayerResponse', label: 'Pending Payer Response', filters: ['aging', 'nextFollowUpDate', 'payerName', 'actionCategory'] },
+    { key: 'internalEscalation', label: 'Escalated Claims', filters: [...commonManagerFilters, 'escalationReason'] },
     { key: 'escalationResponse', label: 'Escalation Response', filters: [...commonManagerFilters, 'documentationType', 'escalationReason'] },
     { key: 'closed', label: 'Closed', filters: commonManagerFilters },
     { key: 'all', label: 'All Claims', filters: ['status', 'aging', 'denialClassification', 'actionCategory', 'payerName', 'panelName'] }

@@ -1472,15 +1472,55 @@ SELECT VerificationPending = COUNT(1) FROM dbo.DenialVerificationTask WHERE {Lab
         var linePageJoinSql = hasLineClaimUid
             ? "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(l.ClaimUID,''))), ''), CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))), 'CLM-', ''))) = p.ClaimUid"
             : "CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))), 'CLM-', '')) = p.ClaimUid";
+        // Sargable join on indexed columns (see the matching change in GetClaimsAsync).
         var taskJoinSql = hasTaskClaimUid
-            ? "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.ClaimUID,''))), ''), NULLIF(LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))), ''), CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(t.ClaimID,''))), 'CLM-', ''))) = c.ClaimUid"
+            ? "(t.ClaimUID = c.ClaimUid OR t.ClaimIDNormalized = c.ClaimKey)"
             : "t.ClaimIDNormalized = c.ClaimKey";
         var reviewerClaimMatchSql = hasLineClaimUid && hasTaskClaimUid
             ? "(NULLIF(LTRIM(RTRIM(ISNULL(tbx.ClaimUID,''))), '') = NULLIF(LTRIM(RTRIM(ISNULL(l.ClaimUID,''))), '') OR tbx.ClaimIDNormalized = l.VisitNumberNormalized)"
             : "tbx.ClaimIDNormalized = l.VisitNumberNormalized";
-        var where = BuildClaimWhere(filter, "l", reviewerClaimMatchSql, await HasTaskBoardAssignedToNormalizedAsync(con, ct));
+        var taskBoardHasAssignedToNormalized = await HasTaskBoardAssignedToNormalizedAsync(con, ct);
+        // For a reviewer, narrow to their assigned claims via a small pre-materialized #ReviewerScope
+        // temp table (seek on AssignedToNormalized -> ~100 rows) and suppress BuildClaimWhere's
+        // full-table correlated EXISTS. Previously #ClaimBase scanned every DenialLineItem row in the
+        // lab and probed the 300k-row DenialTaskBoard per row with a non-sargable OR match, which is
+        // what timed out. The scoped probe below hits an indexed ~100-row temp instead.
+        var reviewerOnly = IsReviewerOnly(filter.Role);
+        var where = BuildClaimWhere(filter, "l", reviewerClaimMatchSql, taskBoardHasAssignedToNormalized, suppressReviewerScope: reviewerOnly);
         var lineLabScope = LabScopeSql("l.LabId");
         var taskLabScope = LabScopeSql("t.LabId");
+        var scopeTaskClaimUidExpr = hasTaskClaimUid
+            ? "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.ClaimUID,''))), ''), NULLIF(LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))), ''), CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(t.ClaimID,''))), 'CLM-', '')))"
+            : "CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(t.ClaimID,''))), 'CLM-', ''))";
+        var scopeAssignedToPredicate = taskBoardHasAssignedToNormalized
+            ? "t.AssignedToNormalized = LOWER(LTRIM(RTRIM(@RoleUserName)))"
+            : "LOWER(LTRIM(RTRIM(ISNULL(t.AssignedTo,'')))) = LOWER(LTRIM(RTRIM(@RoleUserName)))";
+        var reviewerScopePrefix = reviewerOnly ? $@"
+IF OBJECT_ID('tempdb..#ReviewerScope') IS NOT NULL DROP TABLE #ReviewerScope;
+SELECT DISTINCT
+    ClaimUid = {scopeTaskClaimUidExpr},
+    ClaimIDNormalized = NULLIF(LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))), '')
+INTO #ReviewerScope
+FROM dbo.DenialTaskBoard t WITH (NOLOCK)
+WHERE {taskLabScope}
+  AND {scopeAssignedToPredicate};
+CREATE CLUSTERED INDEX IX_ReviewerScope_ClaimUid ON #ReviewerScope(ClaimUid);
+" : string.Empty;
+        // The normalized-visit branch is a fallback ONLY for line rows that carry no ClaimUID of
+        // their own. A line row that does have a ClaimUID must match the reviewer's assigned set by
+        // ClaimUID exactly; otherwise a claim whose ClaimUID and VisitNumber are inconsistent gets
+        // pulled in a second time under its own ClaimUID group and inflates the distinct-claim count
+        // (the "100 everywhere but 105 in the notification" over-count).
+        var normalizedFallbackGuard = hasLineClaimUid
+            ? "NULLIF(LTRIM(RTRIM(ISNULL(l.ClaimUID,''))),'') IS NULL AND "
+            : string.Empty;
+        var reviewerScopeFilter = reviewerOnly ? $@"
+  AND EXISTS (
+      SELECT 1 FROM #ReviewerScope rs
+      WHERE rs.ClaimUid = {lineClaimUidExpr}
+         OR ({normalizedFallbackGuard}rs.ClaimIDNormalized <> '' AND rs.ClaimIDNormalized = l.VisitNumberNormalized)
+  )" : string.Empty;
+        var reviewerScopeCleanup = reviewerOnly ? "\nIF OBJECT_ID('tempdb..#ReviewerScope') IS NOT NULL DROP TABLE #ReviewerScope;" : string.Empty;
         var escalationLabScope = LabScopeSql("e.LabId");
         var closedLabScope = LabScopeSql("dc.LabId");
         var normalizedStatusSql = NormalizedTaskStatusSql("t");
@@ -1496,7 +1536,7 @@ SELECT VerificationPending = COUNT(1) FROM dbo.DenialVerificationTask WHERE {Lab
 IF OBJECT_ID('tempdb..#TaskClaimAgg') IS NOT NULL DROP TABLE #TaskClaimAgg;
 IF OBJECT_ID('tempdb..#TaskClaimRaw') IS NOT NULL DROP TABLE #TaskClaimRaw;
 IF OBJECT_ID('tempdb..#ClaimBase') IS NOT NULL DROP TABLE #ClaimBase;
-
+{reviewerScopePrefix}
 SELECT
     ClaimUid = {lineClaimUidExpr},
     ClaimId = MAX(LTRIM(RTRIM(ISNULL(l.VisitNumber,'')))),
@@ -1505,7 +1545,7 @@ INTO #ClaimBase
 FROM dbo.DenialLineItem l WITH (NOLOCK)
 WHERE {lineLabScope}
   AND NULLIF(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))),'') IS NOT NULL
-  {where.WhereClause}
+  {where.WhereClause}{reviewerScopeFilter}
 GROUP BY {lineClaimUidExpr};
 
 CREATE NONCLUSTERED INDEX IX_ClaimBase_ClaimUid ON #ClaimBase(ClaimUid);
@@ -1581,11 +1621,15 @@ LEFT JOIN #TaskClaimAgg tca ON tca.ClaimUid = c.ClaimUid;
 
 DROP TABLE #ClaimBase;
 DROP TABLE #TaskClaimRaw;
-DROP TABLE #TaskClaimAgg;";
+DROP TABLE #TaskClaimAgg;{reviewerScopeCleanup}";
 
         await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 300 };
         AddFilterParams(cmd, filter);
         AddExtraParams(cmd, where.Parameters);
+        // When the reviewer scope is suppressed in BuildClaimWhere, @RoleUserName is no longer added
+        // there but is still referenced by the #ReviewerScope prefix, so add it here.
+        if (reviewerOnly && !cmd.Parameters.Contains("@RoleUserName"))
+            cmd.Parameters.AddWithValue("@RoleUserName", (filter.UserName ?? string.Empty).Trim());
         await using var rd = await cmd.ExecuteReaderAsync(ct);
 
         var result = new ClaimSubMenuCounts();
@@ -1701,11 +1745,17 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
         var lineClaimUidExpr = hasLineClaimUid
             ? "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(l.ClaimUID,''))), ''), CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))), 'CLM-', '')))"
             : "CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))), 'CLM-', ''))";
+        // Sargable joins: compare the big table's INDEXED columns (DenialLineItem.ClaimUID /
+        // VisitNumberNormalized, DenialTaskBoard.ClaimUID / ClaimIDNormalized) against the per-row
+        // key from the small temp table. Wrapping the big-table side in COALESCE/NULLIF/CONVERT (the
+        // previous form) is non-sargable and forces a scan or nested-loop over 300k rows on every
+        // page load — the cause of the multi-minute claim-list load. The two OR'd equalities cover
+        // both the ClaimUID-keyed and VisitNumber/normalized-keyed rows via index seeks (index union).
         var linePageJoinSql = hasLineClaimUid
-            ? "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(l.ClaimUID,''))), ''), CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))), 'CLM-', ''))) = p.ClaimUid"
-            : "CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))), 'CLM-', '')) = p.ClaimUid";
+            ? "(l.ClaimUID = p.ClaimUid OR l.VisitNumberNormalized = CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(p.VisitNumber,''))), 'CLM-', '')))"
+            : "l.VisitNumberNormalized = CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(p.VisitNumber,''))), 'CLM-', ''))";
         var taskJoinSql = hasTaskClaimUid
-            ? "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.ClaimUID,''))), ''), NULLIF(LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))), ''), CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(t.ClaimID,''))), 'CLM-', ''))) = cb.ClaimUid"
+            ? "(t.ClaimUID = cb.ClaimUid OR t.ClaimIDNormalized = cb.ClaimKey)"
             : "t.ClaimIDNormalized = cb.ClaimKey";
         var accessionNumberSelect = hasAccessionNo
             ? "LTRIM(RTRIM(ISNULL(l.AccessionNo,'')))"
@@ -1741,10 +1791,47 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
         var reviewerClaimMatchSql = hasLineClaimUid && hasTaskClaimUid
             ? "(NULLIF(LTRIM(RTRIM(ISNULL(tbx.ClaimUID,''))), '') = NULLIF(LTRIM(RTRIM(ISNULL(l.ClaimUID,''))), '') OR tbx.ClaimIDNormalized = l.VisitNumberNormalized)"
             : "tbx.ClaimIDNormalized = l.VisitNumberNormalized";
-        var where = BuildClaimWhere(baseFilter, "l", reviewerClaimMatchSql, await HasTaskBoardAssignedToNormalizedAsync(con, ct));
+        var taskBoardHasAssignedToNormalized = await HasTaskBoardAssignedToNormalizedAsync(con, ct);
+        // Same reviewer-scope optimization as GetClaimSubMenuCountsAsync: narrow #ClaimBase to the
+        // reviewer's assigned claims via a small indexed temp table instead of a full-table
+        // correlated EXISTS. This is the My Worklist claim-list load that also timed out.
+        var reviewerOnly = IsReviewerOnly(filter.Role);
+        var where = BuildClaimWhere(baseFilter, "l", reviewerClaimMatchSql, taskBoardHasAssignedToNormalized, suppressReviewerScope: reviewerOnly);
         var lineLabScope = LabScopeSql("l.LabId");
         var taskLabScope = LabScopeSql("t.LabId");
         var escalationLabScope = LabScopeSql("e.LabId");
+        var scopeTaskClaimUidExpr = hasTaskClaimUid
+            ? "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.ClaimUID,''))), ''), NULLIF(LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))), ''), CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(t.ClaimID,''))), 'CLM-', '')))"
+            : "CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(t.ClaimID,''))), 'CLM-', ''))";
+        var scopeAssignedToPredicate = taskBoardHasAssignedToNormalized
+            ? "t.AssignedToNormalized = LOWER(LTRIM(RTRIM(@RoleUserName)))"
+            : "LOWER(LTRIM(RTRIM(ISNULL(t.AssignedTo,'')))) = LOWER(LTRIM(RTRIM(@RoleUserName)))";
+        var reviewerScopePrefix = reviewerOnly ? $@"
+IF OBJECT_ID('tempdb..#ReviewerScope') IS NOT NULL DROP TABLE #ReviewerScope;
+SELECT DISTINCT
+    ClaimUid = {scopeTaskClaimUidExpr},
+    ClaimIDNormalized = NULLIF(LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))), '')
+INTO #ReviewerScope
+FROM dbo.DenialTaskBoard t WITH (NOLOCK)
+WHERE {taskLabScope}
+  AND {scopeAssignedToPredicate};
+CREATE CLUSTERED INDEX IX_ReviewerScope_ClaimUid ON #ReviewerScope(ClaimUid);
+" : string.Empty;
+        // The normalized-visit branch is a fallback ONLY for line rows that carry no ClaimUID of
+        // their own. A line row that does have a ClaimUID must match the reviewer's assigned set by
+        // ClaimUID exactly; otherwise a claim whose ClaimUID and VisitNumber are inconsistent gets
+        // pulled in a second time under its own ClaimUID group and inflates the distinct-claim count
+        // (the "100 everywhere but 105 in the notification" over-count).
+        var normalizedFallbackGuard = hasLineClaimUid
+            ? "NULLIF(LTRIM(RTRIM(ISNULL(l.ClaimUID,''))),'') IS NULL AND "
+            : string.Empty;
+        var reviewerScopeFilter = reviewerOnly ? $@"
+  AND EXISTS (
+      SELECT 1 FROM #ReviewerScope rs
+      WHERE rs.ClaimUid = {lineClaimUidExpr}
+         OR ({normalizedFallbackGuard}rs.ClaimIDNormalized <> '' AND rs.ClaimIDNormalized = l.VisitNumberNormalized)
+  )" : string.Empty;
+        var reviewerScopeCleanup = reviewerOnly ? "\nIF OBJECT_ID('tempdb..#ReviewerScope') IS NOT NULL DROP TABLE #ReviewerScope;" : string.Empty;
         var claimView = NormalizeTaskView(filter.TaskView);
         var normalizedStatusSql = NormalizedTaskStatusSql("t");
         var queueCaseSql = ClaimQueueCaseSql("r");
@@ -1764,7 +1851,7 @@ IF OBJECT_ID('tempdb..#FilteredClaims') IS NOT NULL DROP TABLE #FilteredClaims;
 IF OBJECT_ID('tempdb..#PageLineDetails') IS NOT NULL DROP TABLE #PageLineDetails;
 IF OBJECT_ID('tempdb..#ClaimBase') IS NOT NULL DROP TABLE #ClaimBase;
 IF OBJECT_ID('tempdb..#EscalationClaimAgg') IS NOT NULL DROP TABLE #EscalationClaimAgg;
-
+{reviewerScopePrefix}
 SELECT
     ClaimUid = {lineClaimUidExpr},
     ClaimId = MAX(LTRIM(RTRIM(ISNULL(l.VisitNumber,'')))),
@@ -1775,7 +1862,7 @@ INTO #ClaimBase
 FROM dbo.DenialLineItem l WITH (NOLOCK)
 WHERE {lineLabScope}
   AND NULLIF(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))),'') IS NOT NULL
-  {where.WhereClause}
+  {where.WhereClause}{reviewerScopeFilter}
 GROUP BY {lineClaimUidExpr};
 
 CREATE CLUSTERED INDEX IX_ClaimBase_Page ON #ClaimBase(DateOfService DESC, ClaimId);
@@ -1952,7 +2039,7 @@ DROP TABLE #PageLineDetails;
 DROP TABLE #ClaimBase;
 DROP TABLE #EscalationClaimAgg;
 DROP TABLE #TaskClaimRaw;
-DROP TABLE #TaskClaimAgg;";
+DROP TABLE #TaskClaimAgg;{reviewerScopeCleanup}";
 
         var result = new PagedResult<ClaimLevelRow>
         {
@@ -1968,6 +2055,10 @@ DROP TABLE #TaskClaimAgg;";
         AddFilterParams(cmd, filter);
         AddExtraParams(cmd, where.Parameters);
         AddPagingParams(cmd, filter);
+        // @RoleUserName is referenced by the #ReviewerScope prefix but no longer added by
+        // BuildClaimWhere when the reviewer scope is suppressed, so add it here.
+        if (reviewerOnly && !cmd.Parameters.Contains("@RoleUserName"))
+            cmd.Parameters.AddWithValue("@RoleUserName", (filter.UserName ?? string.Empty).Trim());
 
         await using var rd = await cmd.ExecuteReaderAsync(ct);
 
@@ -2454,18 +2545,23 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
         var claimUidSelect = hasTaskClaimUid
             ? "ClaimUID = ISNULL(t.ClaimUID,'')"
             : "ClaimUID = CAST('' AS nvarchar(150))";
+        // Sargable claim lookup: compare the indexed columns directly so SQL Server can seek
+        // (ClaimUID -> IX_DWF_TaskBoard_ClaimUID_StatusAgg, ClaimIDNormalized -> IX_DenialTaskBoard_ClaimIDNormalized)
+        // instead of scanning all 300k rows. The previous version wrapped every column in
+        // LTRIM/RTRIM/ISNULL and used a leading-wildcard LIKE ('%' + @ClaimId), both non-sargable,
+        // which forced a full DenialTaskBoard scan on every single-claim drill-down. ClaimIDNormalized
+        // is backfilled/normalized (EnsureDenialTaskBoardNormalizedClaimIdAsync runs above), so the
+        // dropped CONVERT(REPLACE(ClaimID)) branch is already covered by @ClaimKey against it.
         var claimLookupWhere = hasTaskClaimUid
             ? @"(
-				   LTRIM(RTRIM(ISNULL(t.ClaimUID,''))) = @ClaimUid
-				   OR LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))) = @ClaimKey
-				   OR CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(t.ClaimID,''))), 'CLM-', '')) = @ClaimKey
-				   OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) = @ClaimId
-				   OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) LIKE '%' + @ClaimId
+				   t.ClaimUID = @ClaimUid
+				   OR t.ClaimIDNormalized = @ClaimKey
+				   OR t.ClaimID = @ClaimId
 			   )"
-            : @"LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))) = @ClaimKey
-				   OR CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(t.ClaimID,''))), 'CLM-', '')) = @ClaimKey
-				   OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) = @ClaimId
-				   OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) LIKE '%' + @ClaimId";
+            : @"(
+				   t.ClaimIDNormalized = @ClaimKey
+				   OR t.ClaimID = @ClaimId
+			   )";
         var taskLabScope = LabScopeSql("t.LabId");
         var taskClaimUidExpr = hasTaskClaimUid
             ? "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(t.[ClaimUID],''))), ''), LTRIM(RTRIM(ISNULL(t.[ClaimIDNormalized],''))), LTRIM(RTRIM(ISNULL(t.[ClaimID],''))))"
@@ -3900,7 +3996,7 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
         return (w.Count == 0 ? string.Empty : " AND " + string.Join(" AND ", w), p);
     }
 
-    private static (string WhereClause, Dictionary<string, object> Parameters) BuildClaimWhere(DenialWorkflowFilter f, string a, string? reviewerClaimMatchSql = null, bool taskBoardHasAssignedToNormalized = false)
+    private static (string WhereClause, Dictionary<string, object> Parameters) BuildClaimWhere(DenialWorkflowFilter f, string a, string? reviewerClaimMatchSql = null, bool taskBoardHasAssignedToNormalized = false, bool suppressReviewerScope = false)
     {
         var w = new List<string>();
         var p = new Dictionary<string, object>();
@@ -3911,7 +4007,11 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
             ? $"tbx.ClaimIDNormalized = {a}.VisitNumberNormalized"
             : reviewerClaimMatchSql;
 
-        if (IsReviewerOnly(f.Role))
+        // suppressReviewerScope lets a caller that has already narrowed the row set to the
+        // reviewer's claims (e.g. via a pre-materialized #ReviewerScope temp table) skip this
+        // correlated EXISTS against the full 300k-row DenialTaskBoard, which is non-sargable
+        // (OR across two columns) and is the primary cause of the reviewer dashboard timeouts.
+        if (IsReviewerOnly(f.Role) && !suppressReviewerScope)
         {
             var assignedToPredicate = taskBoardHasAssignedToNormalized
                 ? "tbx.AssignedToNormalized = LOWER(LTRIM(RTRIM(@RoleUserName)))"
@@ -4334,14 +4434,18 @@ IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL AND COL_LENGTH('dbo.DenialLin
 SELECT TOP (200) NoteId,LabId,ClaimId,TaskId,CptCode,NoteLevel,NoteText,Status,NextFollowUpDate,CreatedBy,CreatedOn
 FROM dbo.DenialClaimNotes WITH (NOLOCK)
 WHERE IsDeleted=0 AND LabId=@LabId AND NoteLevel='Line'
-  AND ClaimIdNormalized=@ClaimIdNormalized
+  AND (ClaimIdNormalized=@ClaimIdNormalized
+       OR ClaimIdNormalized LIKE @ClaimIdNormalized + '\_%' ESCAPE '\'
+       OR @ClaimIdNormalized LIKE ClaimIdNormalized + '\_%' ESCAPE '\')
   AND (@TaskId='' OR ISNULL(TaskId,'')=@TaskId)
   AND (@CptCode='' OR ISNULL(CptCode,'')=@CptCode)
 ORDER BY CreatedOn DESC, NoteId DESC;" : @"
 SELECT TOP (200) NoteId,LabId,ClaimId,TaskId,CptCode,NoteLevel,NoteText,Status,NextFollowUpDate,CreatedBy,CreatedOn
 FROM dbo.DenialClaimNotes WITH (NOLOCK)
 WHERE IsDeleted=0 AND LabId=@LabId AND NoteLevel='Claim'
-  AND ClaimIdNormalized=@ClaimIdNormalized
+  AND (ClaimIdNormalized=@ClaimIdNormalized
+       OR ClaimIdNormalized LIKE @ClaimIdNormalized + '\_%' ESCAPE '\'
+       OR @ClaimIdNormalized LIKE ClaimIdNormalized + '\_%' ESCAPE '\')
 ORDER BY CreatedOn DESC, NoteId DESC;";
         await using var con = OpenLab(labId);
         await con.OpenAsync(ct);

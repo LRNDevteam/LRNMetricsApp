@@ -14,14 +14,23 @@ function timestamp(value) {
 
 function buildEvents({ claim, notes, documents, escalations }) {
   const events = [];
-  (escalations || []).forEach((item, index) => events.push({
-    key: `escalation-${item.escalationId || index}`,
-    date: eventDate(item),
-    title: item.status ? `${item.escalationReason || 'Escalation'} - ${item.status}` : item.escalationReason || 'Escalation submitted',
-    by: item.createdBy || item.escalatedBy || '-',
-    comment: item.comments || (item.escalatedTo ? `To: ${item.escalatedTo}` : ''),
-    tone: 'purple'
-  }));
+  (escalations || []).forEach((item, index) => {
+    // An escalation to a client/account manager is external; a reviewer -> AR Manager escalation is
+    // internal. Show the workflow status ("Internal Escalation" / "External Escalation") as the
+    // event title rather than the raw escalation state (e.g. "... - Open").
+    const target = `${item.escalatedToRole || ''} ${item.escalatedTo || ''} ${item.escalationScope || ''}`.toLowerCase();
+    const escalationType = target.includes('client') || target.includes('account') || target.includes('external')
+      ? 'External Escalation'
+      : 'Internal Escalation';
+    events.push({
+      key: `escalation-${item.escalationId || index}`,
+      date: eventDate(item),
+      title: item.escalationReason ? `${escalationType} — ${item.escalationReason}` : escalationType,
+      by: item.createdBy || item.escalatedBy || '-',
+      comment: item.comments || (item.escalatedTo ? `To: ${item.escalatedTo}` : ''),
+      tone: 'purple'
+    });
+  });
   (notes || []).forEach((item, index) => events.push({
     key: `note-${item.noteId || index}`,
     date: eventDate(item),

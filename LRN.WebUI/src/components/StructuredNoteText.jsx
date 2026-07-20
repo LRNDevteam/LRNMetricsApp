@@ -35,13 +35,45 @@ function formatFieldValue(field) {
   return cpts.length ? `CPTs: ${cpts.join(', ')}` : field.value;
 }
 
+// The AR Manager's response to an escalation is appended to the escalation comment as
+// "Manager Response: ..." (and optionally "Recommended Next Action: ..."). Pull it out so it can be
+// highlighted for the reviewer instead of blending into the rest of the comment text.
+function extractManagerResponse(text = '') {
+  const value = String(text || '');
+  const mr = value.match(/Manager Response:\s*([\s\S]*?)(?=\n?\s*Recommended Next Action:|$)/i);
+  const na = value.match(/Recommended Next Action:\s*([\s\S]*?)$/i);
+  let cut = value.length;
+  if (mr && mr.index < cut) cut = mr.index;
+  if (na && na.index < cut) cut = na.index;
+  return {
+    managerResponse: mr ? mr[1].trim() : '',
+    nextAction: na ? na[1].trim() : '',
+    rest: value.slice(0, cut).trim()
+  };
+}
+
 export default function StructuredNoteText({ text }) {
-  const fields = parseStructuredNote(text);
-  if (!fields.length) return <span className="structured-note-plain">{text || '-'}</span>;
-  return <div className="structured-note">
-    {fields.map(field => <div className={`structured-note-field ${field.label === 'Note' || field.label === 'Affected Lines' || field.label === 'Documentation Description' ? 'wide' : ''} ${field.label === 'Recommended Action' ? 'recommended-action' : ''}`} key={field.label}>
-      <span>{field.label}</span>
-      <strong>{formatFieldValue(field)}</strong>
-    </div>)}
+  const { managerResponse, nextAction, rest } = extractManagerResponse(text);
+  const fields = parseStructuredNote(rest);
+  const body = fields.length
+    ? <div className="structured-note">
+        {fields.map(field => <div className={`structured-note-field ${field.label === 'Note' || field.label === 'Affected Lines' || field.label === 'Documentation Description' ? 'wide' : ''} ${field.label === 'Recommended Action' ? 'recommended-action' : ''}`} key={field.label}>
+          <span>{field.label}</span>
+          <strong>{formatFieldValue(field)}</strong>
+        </div>)}
+      </div>
+    : (rest ? <span className="structured-note-plain">{rest}</span> : null);
+
+  if (!managerResponse && !nextAction) {
+    return body || <span className="structured-note-plain">{text || '-'}</span>;
+  }
+
+  return <div className="structured-note-wrap">
+    {body}
+    <div className="manager-response-callout" role="note">
+      <span className="manager-response-badge"><i className="bi bi-reply-fill" /> AR Manager Response</span>
+      {managerResponse ? <div className="manager-response-line"><strong>{managerResponse}</strong></div> : null}
+      {nextAction ? <div className="manager-response-line"><span>Recommended Next Action</span><strong>{nextAction}</strong></div> : null}
+    </div>
   </div>;
 }
