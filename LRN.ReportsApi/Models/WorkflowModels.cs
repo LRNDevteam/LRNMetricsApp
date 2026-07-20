@@ -315,8 +315,35 @@ public sealed class ClaimCsvUploadResult
     public int AddedComments { get; set; }
     public int EscalatedClaims { get; set; }
     public int EscalationResponses { get; set; }
+    public int SuccessCount { get; set; }
+    public int FailureCount { get; set; }
+    public IReadOnlyList<ClaimCsvRowResult> Results { get; set; } = Array.Empty<ClaimCsvRowResult>();
     public IReadOnlyList<string> Errors { get; set; } = Array.Empty<string>();
     public string Message { get; set; } = string.Empty;
+}
+
+public sealed class ClaimCsvChangedValue
+{
+    public string Field { get; set; } = string.Empty;
+    public string OldValue { get; set; } = string.Empty;
+    public string NewValue { get; set; } = string.Empty;
+}
+
+public sealed class ClaimCsvRowResult
+{
+    public int RowNumber { get; set; }
+    public string ClaimId { get; set; } = string.Empty;
+    public string TaskId { get; set; } = string.Empty;
+    // "Success" | "Failed"
+    public string Status { get; set; } = string.Empty;
+    // What the row did, e.g. "Status Update", "Comment", "Reviewer Escalation", "Escalation Response".
+    public string Action { get; set; } = string.Empty;
+    public string OldStatus { get; set; } = string.Empty;
+    public string NewStatus { get; set; } = string.Empty;
+    public List<ClaimCsvChangedValue> ChangedValues { get; set; } = new();
+    public string Note { get; set; } = string.Empty;
+    // Populated only for failed rows.
+    public string FailureReason { get; set; } = string.Empty;
 }
 
 public sealed class ClaimUploadForm

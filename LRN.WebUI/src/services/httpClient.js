@@ -90,6 +90,13 @@ export async function api(path, options = {}) {
       response = await executeRequest(path, options, token);
     }
   } catch (err) {
+    // A superseded or unmounted request aborts its own AbortController on purpose (tab/filter
+    // switch, navigation). That is an expected cancellation, not a failure: do not log it as an
+    // error and do not mask it as the generic error. Rethrow it as a real AbortError so callers
+    // can recognise err.name === 'AbortError' (and their signal.aborted checks) and ignore it.
+    if (err?.name === 'AbortError' || options?.signal?.aborted) {
+      throw err?.name === 'AbortError' ? err : new DOMException('The operation was aborted.', 'AbortError');
+    }
     logClientError(err, `API request failed before response: ${path}`);
     if (err?.message && String(err.message).toLowerCase().includes('login')) throw err;
     throw new DenialWorkflowError(GENERIC_WORKFLOW_ERROR);

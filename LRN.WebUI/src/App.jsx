@@ -1148,6 +1148,9 @@ export default function App() {
       setClaimTasks({});
       setExpandedClaim('');
       setClaims(await denialWorkflowService.getClaims({ ...query, taskView: claimTaskView }));
+      // Assigning moves claims between tabs (Unassigned -> Assigned), so refresh the tab badge
+      // counts too — previously they stayed stale until a full page reload.
+      refreshMenuCounts();
     } catch (err) { setMessage(workflowIssueMessage(err)); }
     finally { setLoading(false); }
   }

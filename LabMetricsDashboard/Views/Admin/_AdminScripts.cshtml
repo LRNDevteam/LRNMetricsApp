@@ -2,6 +2,10 @@
 <script nonce='@Context.Items["CspNonce"]'>
 (function(){
     function jsonFormData(form) { return new FormData(form); }
+    // Resolve the Admin controller path through the app root so these AJAX calls keep working
+    // when the app is hosted under a virtual path / sub-application (not just the site root).
+    // Absolute paths from the domain root 404 under a path base; Url.Content resolves it correctly.
+    const ADMIN_BASE = '@Url.Content("~/Admin")';
 
     function wireLabChipPickers(root){
         (root || document).querySelectorAll('.lab-chip-picker').forEach(function(picker){
@@ -136,6 +140,22 @@
 
     wireCreateUserValidation('frmCreateUserModal', 'createUserPassword', 'createUserConfirm', 'createUserConfirmFeedback');
     wireCreateUserValidation('frmCreateUserPage', 'NewUserPassword', 'NewUserConfirmPassword', '');
+
+    // Password show/hide toggle for the modal create-user form. The input-group button flips the
+    // field between type=password and type=text and swaps the eye icon.
+    function wirePasswordToggle(toggleId, inputId){
+        const btn = document.getElementById(toggleId);
+        const input = document.getElementById(inputId);
+        if (!btn || !input) return;
+        btn.addEventListener('click', function(){
+            const reveal = input.type === 'password';
+            input.type = reveal ? 'text' : 'password';
+            btn.innerHTML = reveal ? '<i class="bi bi-eye-slash"></i>' : '<i class="bi bi-eye"></i>';
+            btn.setAttribute('aria-pressed', reveal ? 'true' : 'false');
+        });
+    }
+    wirePasswordToggle('createUserPwdToggle', 'createUserPassword');
+    wirePasswordToggle('createUserConfirmToggle', 'createUserConfirm');
 
     const frmCreateUser = document.getElementById('frmCreateUserModal') || document.getElementById('frmCreateUser') || document.getElementById('frmCreateUserPage') || document.getElementById('frmCreateUserPageOnly') || document.getElementById('frmCreateUser');
     if (frmCreateUser){
@@ -316,7 +336,7 @@
                 if (submitLabel) submitLabel.textContent = submitButton.dataset.defaultText || 'Create User';
             }
             const fd = jsonFormData(frmCreateUser);
-            fetch('/Admin/CreateUserAjax', { method: 'POST', body: fd, credentials: 'same-origin' })
+            fetch(ADMIN_BASE + '/CreateUserAjax', { method: 'POST', body: fd, credentials: 'same-origin' })
             .then(async r=>{
                 if (!r.ok) { const d = await r.json().catch(()=>null); const msg = d && d.errors ? d.errors.join('; ') : 'Create user failed';
                     const errEl = document.getElementById('createUserErrors'); if (errEl) { errEl.classList.remove('d-none'); errEl.textContent = msg; }
@@ -337,7 +357,7 @@
         frmCreateRole.addEventListener('submit', function(e){
             e.preventDefault();
             const fd = jsonFormData(frmCreateRole);
-            fetch('/Admin/CreateRoleAjax', { method: 'POST', body: fd, credentials: 'same-origin' })
+            fetch(ADMIN_BASE + '/CreateRoleAjax', { method: 'POST', body: fd, credentials: 'same-origin' })
             .then(async r=>{ if (!r.ok){ const d = await r.json().catch(()=>null); alert(d && d.errors? d.errors.join('; '): 'Create role failed'); return;} await refreshRoles(); frmCreateRole.reset(); }).catch(err=>{ console.error(err); alert(err.message||'Error'); });
         });
     }
@@ -345,18 +365,18 @@
     // Assign role forms
     const frmAssignRole = document.getElementById('frmAssignRole') || document.getElementById('frmAssignRolePage');
     if (frmAssignRole){
-        frmAssignRole.addEventListener('submit', function(e){ e.preventDefault(); const fd = jsonFormData(frmAssignRole); fetch('/Admin/AssignRoleAjax',{method:'POST',body:fd,credentials:'same-origin'}).then(r=>{ if (!r.ok) { alert('Assign failed'); return;} const uid = (document.getElementById('mapUserSelect')||document.getElementById('mapUserSelectPage')).value; if (uid) loadMappingsForUser(uid); }).catch(err=>{console.error(err); alert('Network error');}); });
+        frmAssignRole.addEventListener('submit', function(e){ e.preventDefault(); const fd = jsonFormData(frmAssignRole); fetch(ADMIN_BASE + '/AssignRoleAjax',{method:'POST',body:fd,credentials:'same-origin'}).then(r=>{ if (!r.ok) { alert('Assign failed'); return;} const uid = (document.getElementById('mapUserSelect')||document.getElementById('mapUserSelectPage')).value; if (uid) loadMappingsForUser(uid); }).catch(err=>{console.error(err); alert('Network error');}); });
     }
 
     // Assign lab forms
     const frmAssignLab = document.getElementById('frmAssignLab') || document.getElementById('frmAssignLabPage');
     if (frmAssignLab){
-        frmAssignLab.addEventListener('submit', function(e){ e.preventDefault(); const fd = jsonFormData(frmAssignLab); fetch('/Admin/AssignUserLabAjax',{method:'POST',body:fd,credentials:'same-origin'}).then(r=>{ if (!r.ok){ alert('Assign lab failed'); return;} const uid = (document.getElementById('mapUserSelect2')||document.getElementById('mapUserSelectPage2')).value; if (uid) loadMappingsForUser(uid); }).catch(err=>{console.error(err); alert('Network error');}); });
+        frmAssignLab.addEventListener('submit', function(e){ e.preventDefault(); const fd = jsonFormData(frmAssignLab); fetch(ADMIN_BASE + '/AssignUserLabAjax',{method:'POST',body:fd,credentials:'same-origin'}).then(r=>{ if (!r.ok){ alert('Assign lab failed'); return;} const uid = (document.getElementById('mapUserSelect2')||document.getElementById('mapUserSelectPage2')).value; if (uid) loadMappingsForUser(uid); }).catch(err=>{console.error(err); alert('Network error');}); });
     }
 
     // Remove delegated
-    document.addEventListener('click', function(e){ const tr = e.target.closest('[data-remove-role]'); if (tr){ const id = tr.getAttribute('data-remove-role'); fetch('/Admin/RemoveUserRole',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'userRoleId='+encodeURIComponent(id),credentials:'same-origin'}).then(r=>{ if(r.ok){ const uid = (document.getElementById('mapUserSelect')||document.getElementById('mapUserSelectPage')).value; if(uid) loadMappingsForUser(uid);} else alert('Remove failed');}); } });
-    document.addEventListener('click', function(e){ const tr = e.target.closest('[data-remove-ul]'); if (tr){ const id = tr.getAttribute('data-remove-ul'); fetch('/Admin/RemoveUserLab',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'ulid='+encodeURIComponent(id),credentials:'same-origin'}).then(r=>{ if(r.ok){ const uid = (document.getElementById('mapUserSelect2')||document.getElementById('mapUserSelectPage2')).value; if(uid) loadMappingsForUser(uid);} else alert('Remove failed');}); } });
+    document.addEventListener('click', function(e){ const tr = e.target.closest('[data-remove-role]'); if (tr){ const id = tr.getAttribute('data-remove-role'); fetch(ADMIN_BASE + '/RemoveUserRole',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'userRoleId='+encodeURIComponent(id),credentials:'same-origin'}).then(r=>{ if(r.ok){ const uid = (document.getElementById('mapUserSelect')||document.getElementById('mapUserSelectPage')).value; if(uid) loadMappingsForUser(uid);} else alert('Remove failed');}); } });
+    document.addEventListener('click', function(e){ const tr = e.target.closest('[data-remove-ul]'); if (tr){ const id = tr.getAttribute('data-remove-ul'); fetch(ADMIN_BASE + '/RemoveUserLab',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'ulid='+encodeURIComponent(id),credentials:'same-origin'}).then(r=>{ if(r.ok){ const uid = (document.getElementById('mapUserSelect2')||document.getElementById('mapUserSelectPage2')).value; if(uid) loadMappingsForUser(uid);} else alert('Remove failed');}); } });
     document.addEventListener('click', function(e){
         const btn = e.target.closest('[data-remove-userid]');
         if (!btn) return;
@@ -365,7 +385,7 @@
         const name = row ? (row.children[0]?.textContent || 'this user').trim() : 'this user';
         if (!confirm('Deactivate ' + name + '?')) return;
         btn.disabled = true;
-        fetch('/Admin/RemoveUser', {
+        fetch(ADMIN_BASE + '/RemoveUser', {
             method: 'POST',
             headers: { 'Content-Type':'application/x-www-form-urlencoded' },
             body: 'userId=' + encodeURIComponent(id),
@@ -392,15 +412,15 @@
         });
     }
 
-    window.refreshUsers = async function(){ try{ const r = await fetch('/Admin/GetUsersJson', {credentials:'same-origin'}); const data = await r.json(); const tbody = document.getElementById('tblUsersBody'); if(tbody){ tbody.innerHTML=''; data.forEach(u=>{ const tr = document.createElement('tr'); tr.setAttribute('data-userid', u.labUserID); const labs = [...new Set((u.labs||[]).map(x=>x.labName||x.labId).filter(Boolean))]; const roles = [...new Set((u.roles||[]).map(x=>x.roleName||x.RoleName||x.roleID||x.roleId).filter(Boolean))]; const name = `${u.firstName||''} ${u.lastName||''}`.trim(); const searchText = [u.userName, name, u.email, u.mobile, roles.join(' '), labs.join(' ')].filter(Boolean).join(' '); tr.setAttribute('data-search', searchText); tr.setAttribute('data-roles', roles.join(' ')); tr.setAttribute('data-labs', labs.join(' ')); const roleBadges = roles.map(x=>`<span class="badge user-badge user-badge-role me-1">${escapeHtml(x)}</span>`).join(''); const labBadges = labs.map(x=>`<span class="badge user-badge user-badge-lab me-1">${escapeHtml(x)}</span>`).join(''); tr.innerHTML = `<td>${escapeHtml(u.userName)}</td><td>${escapeHtml(name)}</td><td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.mobile)}</td><td>${roleBadges}</td><td>${labBadges}</td><td>${u.isActive? 'Yes':'No'}</td><td><div class="btn-group" role="group"><a class="btn btn-sm btn-primary user-action-btn" href="/Admin/Edit/${u.labUserID}" title="Edit user" aria-label="Edit ${escapeHtml(u.userName)}"><i class="bi bi-pencil-square"></i></a><button class="btn btn-sm btn-outline-danger user-action-btn" data-remove-userid="${u.labUserID}" title="Remove user" aria-label="Remove ${escapeHtml(u.userName)}"><i class="bi bi-trash3"></i></button></div></td>`; tbody.appendChild(tr); }); populateUserSelects(data); if (window.applyUserFilters) window.applyUserFilters(); }}catch(e){console.error(e);} };
-    window.refreshRoles = async function(){ try{ const r = await fetch('/Admin/GetRolesJson', {credentials:'same-origin'}); const data = await r.json(); document.querySelectorAll('#mapRoleSelect, #mapRoleSelectPage').forEach(sel=>{ if(!sel) return; sel.innerHTML = '<option value="">-- select role --</option>'; data.forEach(r=>{ const id = r.roleID||r.RoleID||r.roleId||r.RoleId; const name = r.roleName||r.RoleName||r.name||r.role; const opt = document.createElement('option'); opt.value = id; opt.textContent = name; sel.appendChild(opt); }); }); // labs
-        const lr = await fetch('/Admin/GetLabsJson', {credentials:'same-origin'}); const labs = await lr.json(); const labSel = document.getElementById('mapLabSelect')||document.getElementById('mapLabSelectPage'); if(labSel){ labSel.innerHTML = '<option value="">-- select lab --</option>'; labs.forEach(l=>{ const id = l.labId||l.LabId||l.labID||l.LabID; const name = l.labName||l.LabName||l.name; const o = document.createElement('option'); o.value = id; o.textContent = name; labSel.appendChild(o); }); }
+    window.refreshUsers = async function(){ try{ const r = await fetch(ADMIN_BASE + '/GetUsersJson', {credentials:'same-origin'}); const data = await r.json(); const tbody = document.getElementById('tblUsersBody'); if(tbody){ tbody.innerHTML=''; data.forEach(u=>{ const tr = document.createElement('tr'); tr.setAttribute('data-userid', u.labUserID); const labs = [...new Set((u.labs||[]).map(x=>x.labName||x.labId).filter(Boolean))]; const roles = [...new Set((u.roles||[]).map(x=>x.roleName||x.RoleName||x.roleID||x.roleId).filter(Boolean))]; const name = `${u.firstName||''} ${u.lastName||''}`.trim(); const searchText = [u.userName, name, u.email, u.mobile, roles.join(' '), labs.join(' ')].filter(Boolean).join(' '); tr.setAttribute('data-search', searchText); tr.setAttribute('data-roles', roles.join(' ')); tr.setAttribute('data-labs', labs.join(' ')); const roleBadges = roles.map(x=>`<span class="badge user-badge user-badge-role me-1">${escapeHtml(x)}</span>`).join(''); const labBadges = labs.map(x=>`<span class="badge user-badge user-badge-lab me-1">${escapeHtml(x)}</span>`).join(''); tr.innerHTML = `<td>${escapeHtml(u.userName)}</td><td>${escapeHtml(name)}</td><td>${escapeHtml(u.email)}</td><td>${escapeHtml(u.mobile)}</td><td>${roleBadges}</td><td>${labBadges}</td><td>${u.isActive? 'Yes':'No'}</td><td><div class="btn-group" role="group"><a class="btn btn-sm btn-primary user-action-btn" href="${ADMIN_BASE}/Edit/${u.labUserID}" title="Edit user" aria-label="Edit ${escapeHtml(u.userName)}"><i class="bi bi-pencil-square"></i></a><button class="btn btn-sm btn-outline-danger user-action-btn" data-remove-userid="${u.labUserID}" title="Remove user" aria-label="Remove ${escapeHtml(u.userName)}"><i class="bi bi-trash3"></i></button></div></td>`; tbody.appendChild(tr); }); populateUserSelects(data); if (window.applyUserFilters) window.applyUserFilters(); }}catch(e){console.error(e);} };
+    window.refreshRoles = async function(){ try{ const r = await fetch(ADMIN_BASE + '/GetRolesJson', {credentials:'same-origin'}); const data = await r.json(); document.querySelectorAll('#mapRoleSelect, #mapRoleSelectPage').forEach(sel=>{ if(!sel) return; sel.innerHTML = '<option value="">-- select role --</option>'; data.forEach(r=>{ const id = r.roleID||r.RoleID||r.roleId||r.RoleId; const name = r.roleName||r.RoleName||r.name||r.role; const opt = document.createElement('option'); opt.value = id; opt.textContent = name; sel.appendChild(opt); }); }); // labs
+        const lr = await fetch(ADMIN_BASE + '/GetLabsJson', {credentials:'same-origin'}); const labs = await lr.json(); const labSel = document.getElementById('mapLabSelect')||document.getElementById('mapLabSelectPage'); if(labSel){ labSel.innerHTML = '<option value="">-- select lab --</option>'; labs.forEach(l=>{ const id = l.labId||l.LabId||l.labID||l.LabID; const name = l.labName||l.LabName||l.name; const o = document.createElement('option'); o.value = id; o.textContent = name; labSel.appendChild(o); }); }
     }catch(e){console.error(e);} };
 
     function populateUserSelects(data){ ['mapUserSelect','mapUserSelect2','mapUserSelectPage','mapUserSelectPage2','mapUserSelect'].forEach(id=>{ const sel = document.getElementById(id); if(!sel) return; sel.innerHTML = '<option value="">-- select user --</option>'; data.forEach(u=>{ const opt = document.createElement('option'); opt.value = u.labUserID; opt.textContent = u.userName; sel.appendChild(opt); }); }); }
 
-    window.loadMappingsForUser = async function(userId){ try{ const r = await fetch('/Admin/GetUserRolesJson?userId='+encodeURIComponent(userId), {credentials:'same-origin'}); const roles = await r.json(); const tbody = document.querySelector('#tblUserRoles tbody')||document.querySelector('#tblUserRolesPage tbody'); if(tbody){ tbody.innerHTML=''; roles.forEach(ur=>{ const tr = document.createElement('tr'); tr.innerHTML = `<td>${ur.roleName||ur.roleID||ur.roleId}</td><td><button class="btn btn-sm btn-outline-danger" data-remove-role="${ur.userRoleId}">Remove</button></td>`; tbody.appendChild(tr); }); }
-        const r2 = await fetch('/Admin/GetUserLabsJson?userId='+encodeURIComponent(userId), {credentials:'same-origin'}); const labs = await r2.json(); const tbody2 = document.querySelector('#tblUserLabs tbody')||document.querySelector('#tblUserLabsPage tbody'); if(tbody2){ tbody2.innerHTML=''; labs.forEach(ul=>{ const tr = document.createElement('tr'); tr.innerHTML = `<td>${ul.labName||ul.labId}</td><td><button class="btn btn-sm btn-outline-danger" data-remove-ul="${ul.ulid}">Remove</button></td>`; tbody2.appendChild(tr); }); }
+    window.loadMappingsForUser = async function(userId){ try{ const r = await fetch(ADMIN_BASE + '/GetUserRolesJson?userId='+encodeURIComponent(userId), {credentials:'same-origin'}); const roles = await r.json(); const tbody = document.querySelector('#tblUserRoles tbody')||document.querySelector('#tblUserRolesPage tbody'); if(tbody){ tbody.innerHTML=''; roles.forEach(ur=>{ const tr = document.createElement('tr'); tr.innerHTML = `<td>${ur.roleName||ur.roleID||ur.roleId}</td><td><button class="btn btn-sm btn-outline-danger" data-remove-role="${ur.userRoleId}">Remove</button></td>`; tbody.appendChild(tr); }); }
+        const r2 = await fetch(ADMIN_BASE + '/GetUserLabsJson?userId='+encodeURIComponent(userId), {credentials:'same-origin'}); const labs = await r2.json(); const tbody2 = document.querySelector('#tblUserLabs tbody')||document.querySelector('#tblUserLabsPage tbody'); if(tbody2){ tbody2.innerHTML=''; labs.forEach(ul=>{ const tr = document.createElement('tr'); tr.innerHTML = `<td>${ul.labName||ul.labId}</td><td><button class="btn btn-sm btn-outline-danger" data-remove-ul="${ul.ulid}">Remove</button></td>`; tbody2.appendChild(tr); }); }
     }catch(e){console.error(e);} };
 
     // wire change events

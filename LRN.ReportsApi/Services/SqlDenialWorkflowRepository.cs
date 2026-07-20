@@ -39,9 +39,14 @@ public sealed class SqlDenialWorkflowRepository : IDenialWorkflowRepository
     private static async Task<bool> HasTaskBoardAssignedToNormalizedAsync(SqlConnection con, CancellationToken ct)
     {
         var dbKey = con.Database ?? string.Empty;
-        if (TaskBoardAssignedToNormalizedReady.TryGetValue(dbKey, out var cached)) return cached;
+        // Cache only the positive result. A negative used to be cached for the whole process
+        // lifetime, so after a DBA added the AssignedToNormalized column+index the running API kept
+        // using the slow non-sargable AssignedTo filter (full table scan -> timeouts) until an app
+        // restart. Re-checking while it is still absent is a cheap sys.columns lookup and lets the
+        // fast indexed path switch on automatically once the migration has been applied.
+        if (TaskBoardAssignedToNormalizedReady.TryGetValue(dbKey, out var cached) && cached) return true;
         var exists = await HasColumnAsync(con, "dbo.DenialTaskBoard", "AssignedToNormalized", ct);
-        TaskBoardAssignedToNormalizedReady[dbKey] = exists;
+        if (exists) TaskBoardAssignedToNormalizedReady[dbKey] = true;
         return exists;
     }
 
@@ -928,16 +933,19 @@ CREATE NONCLUSTERED INDEX IX_AgingTaskAgingDedup_Bucket ON #TaskAgingDedup(AgeBu
 
 SELECT
     TotalAmount = ISNULL(SUM(Amount), 0),
-    TotalClaims = COUNT(DISTINCT ClaimId),
+    -- Count the claim root, not the ClaimUID: a claim split into sub-claims (VisitNumber_1,
+    -- VisitNumber_2) shares one root, so counting ClaimId here inflated the total (100 claims
+    -- showed as 105). ClaimRoot == ClaimId when there is no sub-claim suffix.
+    TotalClaims = COUNT(DISTINCT ClaimRoot),
     TotalPayers = COUNT(DISTINCT NULLIF(PayerName,'')),
-    TotalSlaBreaches = COUNT(DISTINCT CASE WHEN AgeDays > 90 THEN ClaimId END)
+    TotalSlaBreaches = COUNT(DISTINCT CASE WHEN AgeDays > 90 THEN ClaimRoot END)
 FROM #LineAging;
 
 SELECT
     [Key] = AgeBucket,
     Amount = ISNULL(SUM(Amount), 0),
-    ClaimCount = COUNT(DISTINCT ClaimId),
-    SlaBreaches = COUNT(DISTINCT CASE WHEN AgeDays > 90 THEN ClaimId END)
+    ClaimCount = COUNT(DISTINCT ClaimRoot),
+    SlaBreaches = COUNT(DISTINCT CASE WHEN AgeDays > 90 THEN ClaimRoot END)
 FROM #LineAging
 GROUP BY AgeBucket;
 
@@ -946,8 +954,8 @@ SELECT
     SubTitle = PayerName,
     BucketKey = AgeBucket,
     Amount = ISNULL(SUM(Amount), 0),
-    ClaimCount = COUNT(DISTINCT ClaimId),
-    SlaBreaches = COUNT(DISTINCT CASE WHEN AgeDays > 90 THEN ClaimId END)
+    ClaimCount = COUNT(DISTINCT ClaimRoot),
+    SlaBreaches = COUNT(DISTINCT CASE WHEN AgeDays > 90 THEN ClaimRoot END)
 FROM #LineAging
 GROUP BY PayerName, AgeBucket
 ORDER BY SUM(Amount) DESC;
@@ -957,8 +965,8 @@ SELECT
     SubTitle = DenialClassification,
     BucketKey = AgeBucket,
     Amount = ISNULL(SUM(Amount), 0),
-    ClaimCount = COUNT(DISTINCT ClaimId),
-    SlaBreaches = COUNT(DISTINCT CASE WHEN AgeDays > 90 THEN ClaimId END)
+    ClaimCount = COUNT(DISTINCT ClaimRoot),
+    SlaBreaches = COUNT(DISTINCT CASE WHEN AgeDays > 90 THEN ClaimRoot END)
 FROM #TaskAgingDedup
 GROUP BY DenialClassification, AgeBucket
 ORDER BY SUM(Amount) DESC;
@@ -968,8 +976,8 @@ SELECT
     SubTitle = ActionCategory,
     BucketKey = AgeBucket,
     Amount = ISNULL(SUM(Amount), 0),
-    ClaimCount = COUNT(DISTINCT ClaimId),
-    SlaBreaches = COUNT(DISTINCT CASE WHEN AgeDays > 90 THEN ClaimId END)
+    ClaimCount = COUNT(DISTINCT ClaimRoot),
+    SlaBreaches = COUNT(DISTINCT CASE WHEN AgeDays > 90 THEN ClaimRoot END)
 FROM #TaskAgingDedup
 GROUP BY ActionCategory, AgeBucket
 ORDER BY SUM(Amount) DESC;
@@ -979,8 +987,8 @@ SELECT
     SubTitle = PanelName,
     BucketKey = AgeBucket,
     Amount = ISNULL(SUM(Amount), 0),
-    ClaimCount = COUNT(DISTINCT ClaimId),
-    SlaBreaches = COUNT(DISTINCT CASE WHEN AgeDays > 90 THEN ClaimId END)
+    ClaimCount = COUNT(DISTINCT ClaimRoot),
+    SlaBreaches = COUNT(DISTINCT CASE WHEN AgeDays > 90 THEN ClaimRoot END)
 FROM #LineAging
 GROUP BY PanelName, AgeBucket
 ORDER BY SUM(Amount) DESC;
@@ -990,8 +998,8 @@ SELECT
     SubTitle = 'Assigned workload',
     BucketKey = la.AgeBucket,
     Amount = ISNULL(SUM(la.Amount), 0),
-    ClaimCount = COUNT(DISTINCT la.ClaimId),
-    SlaBreaches = COUNT(DISTINCT CASE WHEN la.AgeDays > 90 THEN la.ClaimId END)
+    ClaimCount = COUNT(DISTINCT la.ClaimRoot),
+    SlaBreaches = COUNT(DISTINCT CASE WHEN la.AgeDays > 90 THEN la.ClaimRoot END)
 FROM #LineAging la
 INNER JOIN #TaskAssignment ta
   ON ta.ClaimRoot = la.ClaimRoot
@@ -1003,7 +1011,7 @@ SELECT TOP (5)
     Name = la.PayerName,
     SubTitle = 'SLA risk',
     Amount = ISNULL(SUM(la.Amount), 0),
-    ClaimCount = COUNT(DISTINCT la.ClaimId),
+    ClaimCount = COUNT(DISTINCT la.ClaimRoot),
     [Status] = CASE WHEN MAX(la.AgeDays) > 120 THEN 'Breached' ELSE 'At risk' END,
     DaysRemaining = CASE WHEN MAX(la.AgeDays) >= 90 THEN 0 ELSE 90 - MAX(la.AgeDays) END
 FROM #LineAging la
@@ -1015,7 +1023,7 @@ SELECT TOP (6)
     Name = ISNULL(ta.AssignedTo, 'Unassigned'),
     SubTitle = 'Assigned workload',
     Amount = ISNULL(SUM(la.Amount), 0),
-    ClaimCount = COUNT(DISTINCT la.ClaimId),
+    ClaimCount = COUNT(DISTINCT la.ClaimRoot),
     [Status] = CASE WHEN ISNULL(ta.AssignedTo, 'Unassigned') = 'Unassigned' THEN 'Needs action' ELSE 'On track' END,
     DaysRemaining = 0
 FROM #LineAging la
@@ -2660,6 +2668,10 @@ IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL
 BEGIN
     UPDATE l
     SET AssignedTo=@ReviewerUserName,
+        -- Mirror the DenialTaskBoard.Status transition above so both tables agree after assign
+        -- (previously TaskStatus was left as its old 'Open'/'New' value, so the line table showed
+        -- 'Open' while the task board showed 'Pending Review' for the same claim).
+        TaskStatus=CASE WHEN ISNULL(l.TaskStatus,'') IN ('','New','Open') THEN 'Pending Review' ELSE l.TaskStatus END,
         WorkFlowStatus='Assigned To AR Reviewer'
     FROM dbo.DenialLineItem l
     JOIN #ClaimIds c ON {lineClaimMatchSql};

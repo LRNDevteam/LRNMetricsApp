@@ -270,6 +270,19 @@ public sealed class DenialWorkflowController : ControllerBase
         }
 
         var errors = new List<string>();
+        var rowResults = new List<ClaimCsvRowResult>();
+        void RecordFailure(int failRowNumber, string failClaimId, string failTaskId, string reason)
+        {
+            AddCsvError(errors, failRowNumber, reason);
+            rowResults.Add(new ClaimCsvRowResult
+            {
+                RowNumber = failRowNumber,
+                ClaimId = failClaimId ?? string.Empty,
+                TaskId = failTaskId ?? string.Empty,
+                Status = "Failed",
+                FailureReason = reason
+            });
+        }
         var actionableRows = rows
             .Select((row, index) => new
             {
@@ -292,7 +305,7 @@ public sealed class DenialWorkflowController : ControllerBase
             {
                 if (string.IsNullOrWhiteSpace(r.ClaimId))
                 {
-                    AddCsvError(errors, r.RowNumber, "ClaimUID or ClaimID is required.");
+                    RecordFailure(r.RowNumber, string.Empty, r.TaskId, "ClaimUID or ClaimID is required.");
                     continue;
                 }
                 claimRows.Add((r.RowNumber, r.ClaimId, r.TaskId, r.Row));
@@ -304,12 +317,12 @@ public sealed class DenialWorkflowController : ControllerBase
             {
                 if (string.IsNullOrWhiteSpace(group.Key))
                 {
-                    foreach (var missingClaimRow in group) AddCsvError(errors, missingClaimRow.RowNumber, "ClaimUID or ClaimID is required.");
+                    foreach (var missingClaimRow in group) RecordFailure(missingClaimRow.RowNumber, string.Empty, missingClaimRow.TaskId, "ClaimUID or ClaimID is required.");
                     continue;
                 }
                 if (group.Count() > 1)
                 {
-                    AddCsvError(errors, group.First().RowNumber, $"Claim '{group.Key}' has updates on more than one CSV row. Enter claim-level values on only one row.");
+                    RecordFailure(group.First().RowNumber, group.Key, string.Empty, $"Claim '{group.Key}' has updates on more than one CSV row. Enter claim-level values on only one row.");
                     continue;
                 }
                 var claimRow = group.Single();
@@ -324,205 +337,273 @@ public sealed class DenialWorkflowController : ControllerBase
         var processedRows = 0;
         foreach (var item in claimRows)
         {
-            var allClaimTasks = await _service.GetTasksByClaimAsync(labId, item.ClaimId, ct);
-            if (allClaimTasks.Count == 0)
+            // One CSV claim row produces exactly one row result (Success or Failed). Per-row
+            // exceptions are caught so a single bad row cannot fail the whole batch.
+            var rowResult = new ClaimCsvRowResult { RowNumber = item.RowNumber, ClaimId = item.ClaimId, TaskId = item.TaskId };
+            void Fail(string reason)
             {
-                AddCsvError(errors, item.RowNumber, $"Claim '{item.ClaimId}' was not found.");
-                continue;
+                rowResult.Status = "Failed";
+                rowResult.FailureReason = reason;
+                AddCsvError(errors, item.RowNumber, reason);
+                rowResults.Add(rowResult);
             }
-            var claimTasks = !string.IsNullOrWhiteSpace(item.TaskId)
-                ? allClaimTasks.Where(x => string.Equals(x.TaskId?.Trim(), item.TaskId.Trim(), StringComparison.OrdinalIgnoreCase)).ToList()
-                : allClaimTasks;
-            if (claimTasks.Count == 0)
+            void AddChange(string field, string? oldVal, string? newVal)
             {
-                AddCsvError(errors, item.RowNumber, $"Task '{item.TaskId}' was not found for claim '{item.ClaimId}'.");
-                continue;
+                if (string.IsNullOrWhiteSpace(newVal)) return;
+                rowResult.ChangedValues.Add(new ClaimCsvChangedValue { Field = field, OldValue = (oldVal ?? string.Empty).Trim(), NewValue = newVal.Trim() });
             }
-            if (reviewerOnly && claimTasks.Any(x => !string.Equals(x.AssignedTo?.Trim(), userName.Trim(), StringComparison.OrdinalIgnoreCase)))
+            try
             {
-                AddCsvError(errors, item.RowNumber, "AR Reviewers can update only claims whose tasks are assigned to themselves.");
-                continue;
-            }
+                var allClaimTasks = await _service.GetTasksByClaimAsync(labId, item.ClaimId, ct);
+                if (allClaimTasks.Count == 0)
+                {
+                    Fail($"Claim '{item.ClaimId}' was not found.");
+                    continue;
+                }
+                var claimTasks = !string.IsNullOrWhiteSpace(item.TaskId)
+                    ? allClaimTasks.Where(x => string.Equals(x.TaskId?.Trim(), item.TaskId.Trim(), StringComparison.OrdinalIgnoreCase)).ToList()
+                    : allClaimTasks;
+                if (claimTasks.Count == 0)
+                {
+                    Fail($"Task '{item.TaskId}' was not found for claim '{item.ClaimId}'.");
+                    continue;
+                }
+                if (reviewerOnly && claimTasks.Any(x => !string.Equals(x.AssignedTo?.Trim(), userName.Trim(), StringComparison.OrdinalIgnoreCase)))
+                {
+                    Fail("AR Reviewers can update only claims whose tasks are assigned to themselves.");
+                    continue;
+                }
 
-            var updateStatusRaw = CsvValue(item.Row, "UpdateStatus", "NewStatus");
-            var updateStatus = string.IsNullOrWhiteSpace(updateStatusRaw) ? string.Empty : NormalizeWorkflowStatus(updateStatusRaw);
-            var comments = CsvValue(item.Row, "Comments", "ReviewerComments", "Comment");
-            var notes = CsvValue(item.Row, "Notes");
-            var escalationReason = CsvValue(item.Row, "EscalationReason");
-            var otherEscalationReason = CsvValue(item.Row, "OtherEscalationReason");
-            var escalationComment = CsvValue(item.Row, "EscalationComment");
-            var escalationResponse = CsvValue(item.Row, "EscalationResponse", "RecommendedNextAction");
-            var escalationResponseComment = CsvValue(item.Row, "EscalationResponseComment", "ResponseComment");
-            var rowChanged = false;
-            var hasStatusOrNote = !string.IsNullOrWhiteSpace(updateStatus) || !string.IsNullOrWhiteSpace(comments);
-            var hasReviewerEscalation = !string.IsNullOrWhiteSpace(escalationReason) || !string.IsNullOrWhiteSpace(escalationComment);
-            var hasManagerResponse = !string.IsNullOrWhiteSpace(escalationResponse) || !string.IsNullOrWhiteSpace(escalationResponseComment);
-            if (new[] { hasStatusOrNote, hasReviewerEscalation, hasManagerResponse }.Count(x => x) > 1)
-            {
-                AddCsvError(errors, item.RowNumber, "Use one claim action per row: status/note, reviewer escalation, or manager escalation response.");
-                continue;
-            }
+                var baseTask = claimTasks[0];
+                var currentStatus = NormalizeWorkflowStatus(baseTask.Status);
+                rowResult.OldStatus = currentStatus;
+                rowResult.NewStatus = currentStatus;
 
-            // Save standalone Notes column if provided (task-level template)
-            if (!string.IsNullOrWhiteSpace(notes) && string.IsNullOrWhiteSpace(comments) && !hasReviewerEscalation && !hasManagerResponse)
-            {
-                var noteTask = claimTasks[0];
-                await _service.SaveNoteAsync(new SaveDenialNoteRequest
+                var updateStatusRaw = CsvValue(item.Row, "UpdateStatus", "NewStatus");
+                var updateStatus = string.IsNullOrWhiteSpace(updateStatusRaw) ? string.Empty : NormalizeWorkflowStatus(updateStatusRaw);
+                var comments = CsvValue(item.Row, "Comments", "ReviewerComments", "Comment");
+                var notes = CsvValue(item.Row, "Notes");
+                var escalationReason = CsvValue(item.Row, "EscalationReason");
+                var otherEscalationReason = CsvValue(item.Row, "OtherEscalationReason");
+                var escalationComment = CsvValue(item.Row, "EscalationComment");
+                var escalationResponse = CsvValue(item.Row, "EscalationResponse", "RecommendedNextAction");
+                var escalationResponseComment = CsvValue(item.Row, "EscalationResponseComment", "ResponseComment");
+                var rowChanged = false;
+                var hasStatusOrNote = !string.IsNullOrWhiteSpace(updateStatus) || !string.IsNullOrWhiteSpace(comments);
+                var hasReviewerEscalation = !string.IsNullOrWhiteSpace(escalationReason) || !string.IsNullOrWhiteSpace(escalationComment);
+                var hasManagerResponse = !string.IsNullOrWhiteSpace(escalationResponse) || !string.IsNullOrWhiteSpace(escalationResponseComment);
+                if (new[] { hasStatusOrNote, hasReviewerEscalation, hasManagerResponse }.Count(x => x) > 1)
                 {
-                    LabId = labId, ClaimId = item.ClaimId, TaskId = item.TaskId,
-                    NoteLevel = !string.IsNullOrWhiteSpace(item.TaskId) ? "Task" : "Claim",
-                    NoteText = notes, Status = NormalizeWorkflowStatus(noteTask.Status), CreatedBy = userName
-                }, ct);
-                addedComments++;
-                rowChanged = true;
-            }
+                    Fail("Use one claim action per row: status/note, reviewer escalation, or manager escalation response.");
+                    continue;
+                }
 
-            if (!string.IsNullOrWhiteSpace(updateStatus))
-            {
-                if (string.IsNullOrWhiteSpace(comments))
+                // Save standalone Notes column if provided (task-level template)
+                if (!string.IsNullOrWhiteSpace(notes) && string.IsNullOrWhiteSpace(comments) && !hasReviewerEscalation && !hasManagerResponse)
                 {
-                    AddCsvError(errors, item.RowNumber, "Comments are required when UpdateStatus is provided.");
-                    continue;
-                }
-                var noteLevel = !string.IsNullOrWhiteSpace(item.TaskId) ? "Task" : "Claim";
-                var template = new UpdateTaskRequest
-                {
-                    LabId = labId, Status = updateStatus, Comments = comments, ActionBy = userName,
-                    ActionCompleted = CsvNullableBool(item.Row, "ActionCompleted"),
-                    ActualOutcome = CsvValue(item.Row, "ActualOutcome"),
-                    DocumentationType = CsvValue(item.Row, "DocumentationType"),
-                    FollowUpReason = CsvValue(item.Row, "FollowUpReason"),
-                    ClosureReason = CsvValue(item.Row, "ClosureReason"),
-                    ValidationStatus = CsvValue(item.Row, "ValidationStatus"),
-                    ExpectedResponseDate = CsvNullableDate(item.Row, "ExpectedResponseDate"),
-                    UpdateScope = "Claim", UpdateScopeValue = item.ClaimId
-                };
-                var validationError = ValidateTaskStatusUpdate(template, role);
-                if (!string.IsNullOrWhiteSpace(validationError))
-                {
-                    AddCsvError(errors, item.RowNumber, validationError);
-                    continue;
-                }
-                await _service.SaveNoteAsync(new SaveDenialNoteRequest
-                {
-                    LabId = labId, ClaimId = item.ClaimId, NoteLevel = noteLevel, NoteText = comments,
-                    Status = updateStatus, NextFollowUpDate = template.ExpectedResponseDate, CreatedBy = userName
-                }, ct);
-                addedComments++;
-                foreach (var task in claimTasks)
-                {
-                    template.TaskId = task.TaskId;
-                    if (await _service.UpdateTaskAsync(template, ct) > 0) updatedTasks++;
-                }
-                rowChanged = true;
-            }
-            else if (!string.IsNullOrWhiteSpace(comments))
-            {
-                var noteLevel = !string.IsNullOrWhiteSpace(item.TaskId) ? "Task" : "Claim";
-                await _service.SaveNoteAsync(new SaveDenialNoteRequest
-                {
-                    LabId = labId, ClaimId = item.ClaimId, NoteLevel = noteLevel, NoteText = comments,
-                    Status = NormalizeWorkflowStatus(claimTasks[0].Status), CreatedBy = userName
-                }, ct);
-                updatedTasks += await _service.UpdateClaimCommentsAsync(labId, item.ClaimId, comments, userName, ct);
-                addedComments++;
-                rowChanged = true;
-            }
-
-            if (!string.IsNullOrWhiteSpace(escalationReason) || !string.IsNullOrWhiteSpace(escalationComment))
-            {
-                if (!reviewerOnly)
-                {
-                    AddCsvError(errors, item.RowNumber, "EscalationReason upload is for AR Reviewer claim escalation. AR Managers should use EscalationResponse.");
-                    continue;
-                }
-                if (!ReviewerEscalationReasons.Contains(escalationReason))
-                {
-                    AddCsvError(errors, item.RowNumber, $"'{escalationReason}' is not a valid EscalationReason.");
-                    continue;
-                }
-                if (string.Equals(escalationReason, "Other", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(otherEscalationReason))
-                {
-                    AddCsvError(errors, item.RowNumber, "OtherEscalationReason is required when EscalationReason is Other.");
-                    continue;
-                }
-                if (string.IsNullOrWhiteSpace(escalationComment))
-                {
-                    AddCsvError(errors, item.RowNumber, "EscalationComment is required.");
-                    continue;
-                }
-                var finalReason = string.Equals(escalationReason, "Other", StringComparison.OrdinalIgnoreCase)
-                    ? $"Other - {otherEscalationReason}"
-                    : escalationReason;
-                await _service.SaveEscalationAsync(new SaveDenialEscalationRequest
-                {
-                    LabId = labId, ClaimId = item.ClaimId, EscalationLevel = "Claim",
-                    EscalationScope = "Overall Claim", EscalationScopeValue = item.ClaimId,
-                    EscalationScopeDisplay = "Overall Claim",
-                    AffectedTaskIds = string.Join(",", claimTasks.Select(x => x.TaskId).Where(x => !string.IsNullOrWhiteSpace(x))),
-                    RecommendedNextAction = "Manager review", EscalationReason = finalReason,
-                    Comments = escalationComment, Status = finalReason.Contains("write-off decision required", StringComparison.OrdinalIgnoreCase) ? "WriteOffPending" : "Open",
-                    NextFollowUpDate = CsvNullableDate(item.Row, "EscalationExpectedResponseDate"), CreatedBy = userName
-                }, ct);
-                foreach (var task in claimTasks)
-                {
-                    updatedTasks += await _service.UpdateTaskAsync(new UpdateTaskRequest
+                    await _service.SaveNoteAsync(new SaveDenialNoteRequest
                     {
-                        LabId = labId, TaskId = task.TaskId, Status = "Escalated to AR Manager",
-                        Comments = $"{finalReason} - {escalationComment}", ActionBy = userName,
-                        UpdateScope = "Claim", UpdateScopeValue = item.ClaimId
+                        LabId = labId, ClaimId = item.ClaimId, TaskId = item.TaskId,
+                        NoteLevel = !string.IsNullOrWhiteSpace(item.TaskId) ? "Task" : "Claim",
+                        NoteText = notes, Status = NormalizeWorkflowStatus(baseTask.Status), CreatedBy = userName
                     }, ct);
-                }
-                escalatedClaims++;
-                rowChanged = true;
-            }
-
-            if (!string.IsNullOrWhiteSpace(escalationResponse) || !string.IsNullOrWhiteSpace(escalationResponseComment))
-            {
-                if (!managerRole)
-                {
-                    AddCsvError(errors, item.RowNumber, "Only AR Manager/Admin can upload an EscalationResponse.");
-                    continue;
-                }
-                if (!ManagerEscalationResponses.Contains(escalationResponse))
-                {
-                    AddCsvError(errors, item.RowNumber, $"'{escalationResponse}' is not a valid EscalationResponse.");
-                    continue;
-                }
-                if (string.IsNullOrWhiteSpace(escalationResponseComment))
-                {
-                    AddCsvError(errors, item.RowNumber, "EscalationResponseComment is required.");
-                    continue;
-                }
-                var escalation = (await _service.GetEscalationsAsync(labId, item.ClaimId, null, null, "Claim", ct))
-                    .FirstOrDefault(x => !string.Equals(x.Status, "Resolved", StringComparison.OrdinalIgnoreCase)
-                        && !string.Equals(x.Status, "Closed", StringComparison.OrdinalIgnoreCase));
-                if (escalation is null)
-                {
-                    AddCsvError(errors, item.RowNumber, "No active claim-level escalation was found for the response.");
-                    continue;
-                }
-                var affected = await _service.ResolveEscalationAsync(new ResolveDenialEscalationRequest
-                {
-                    LabId = labId, EscalationId = escalation.EscalationId, ClaimId = item.ClaimId,
-                    EscalationLevel = "Claim", ResolutionAction = "rework",
-                    ResponseNote = escalationResponseComment, RecommendedNextAction = escalationResponse,
-                    ActionBy = userName
-                }, ct);
-                if (affected > 0)
-                {
-                    escalationResponses++;
+                    addedComments++;
+                    rowResult.Action = "Comment";
+                    rowResult.Note = notes;
                     rowChanged = true;
                 }
-                else AddCsvError(errors, item.RowNumber, "Escalation response was not applied.");
-            }
 
-            if (rowChanged) processedRows++;
+                if (!string.IsNullOrWhiteSpace(updateStatus))
+                {
+                    if (string.IsNullOrWhiteSpace(comments))
+                    {
+                        Fail("Comments are required when UpdateStatus is provided.");
+                        continue;
+                    }
+                    var noteLevel = !string.IsNullOrWhiteSpace(item.TaskId) ? "Task" : "Claim";
+                    var template = new UpdateTaskRequest
+                    {
+                        LabId = labId, Status = updateStatus, Comments = comments, ActionBy = userName,
+                        ActionCompleted = CsvNullableBool(item.Row, "ActionCompleted"),
+                        ActualOutcome = CsvValue(item.Row, "ActualOutcome"),
+                        DocumentationType = CsvValue(item.Row, "DocumentationType"),
+                        FollowUpReason = CsvValue(item.Row, "FollowUpReason"),
+                        ClosureReason = CsvValue(item.Row, "ClosureReason"),
+                        ValidationStatus = CsvValue(item.Row, "ValidationStatus"),
+                        ExpectedResponseDate = CsvNullableDate(item.Row, "ExpectedResponseDate"),
+                        UpdateScope = "Claim", UpdateScopeValue = item.ClaimId
+                    };
+                    var validationError = ValidateTaskStatusUpdate(template, role);
+                    if (!string.IsNullOrWhiteSpace(validationError))
+                    {
+                        Fail(validationError);
+                        continue;
+                    }
+                    await _service.SaveNoteAsync(new SaveDenialNoteRequest
+                    {
+                        LabId = labId, ClaimId = item.ClaimId, NoteLevel = noteLevel, NoteText = comments,
+                        Status = updateStatus, NextFollowUpDate = template.ExpectedResponseDate, CreatedBy = userName
+                    }, ct);
+                    addedComments++;
+                    foreach (var task in claimTasks)
+                    {
+                        template.TaskId = task.TaskId;
+                        if (await _service.UpdateTaskAsync(template, ct) > 0) updatedTasks++;
+                    }
+                    rowResult.Action = "Status Update";
+                    rowResult.NewStatus = updateStatus;
+                    rowResult.Note = comments;
+                    AddChange("Action Completed", baseTask.ActionCompleted?.ToString(), CsvNullableBool(item.Row, "ActionCompleted")?.ToString());
+                    AddChange("Actual Outcome", baseTask.ActualOutcome, CsvValue(item.Row, "ActualOutcome"));
+                    AddChange("Documentation Type", baseTask.DocumentationType, CsvValue(item.Row, "DocumentationType"));
+                    AddChange("Follow-up Reason", baseTask.FollowUpReason, CsvValue(item.Row, "FollowUpReason"));
+                    AddChange("Closure Reason", baseTask.ClosureReason, CsvValue(item.Row, "ClosureReason"));
+                    AddChange("Validation Status", baseTask.ValidationStatus, CsvValue(item.Row, "ValidationStatus"));
+                    AddChange("Expected Response Date", baseTask.ExpectedResponseDate?.ToString("yyyy-MM-dd"), CsvValue(item.Row, "ExpectedResponseDate"));
+                    rowChanged = true;
+                }
+                else if (!string.IsNullOrWhiteSpace(comments))
+                {
+                    var noteLevel = !string.IsNullOrWhiteSpace(item.TaskId) ? "Task" : "Claim";
+                    await _service.SaveNoteAsync(new SaveDenialNoteRequest
+                    {
+                        LabId = labId, ClaimId = item.ClaimId, NoteLevel = noteLevel, NoteText = comments,
+                        Status = NormalizeWorkflowStatus(baseTask.Status), CreatedBy = userName
+                    }, ct);
+                    updatedTasks += await _service.UpdateClaimCommentsAsync(labId, item.ClaimId, comments, userName, ct);
+                    addedComments++;
+                    rowResult.Action = "Comment";
+                    rowResult.Note = comments;
+                    rowChanged = true;
+                }
+
+                if (hasReviewerEscalation)
+                {
+                    if (!reviewerOnly)
+                    {
+                        Fail("EscalationReason upload is for AR Reviewer claim escalation. AR Managers should use EscalationResponse.");
+                        continue;
+                    }
+                    if (!ReviewerEscalationReasons.Contains(escalationReason))
+                    {
+                        Fail($"'{escalationReason}' is not a valid EscalationReason.");
+                        continue;
+                    }
+                    if (string.Equals(escalationReason, "Other", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(otherEscalationReason))
+                    {
+                        Fail("OtherEscalationReason is required when EscalationReason is Other.");
+                        continue;
+                    }
+                    if (string.IsNullOrWhiteSpace(escalationComment))
+                    {
+                        Fail("EscalationComment is required.");
+                        continue;
+                    }
+                    var finalReason = string.Equals(escalationReason, "Other", StringComparison.OrdinalIgnoreCase)
+                        ? $"Other - {otherEscalationReason}"
+                        : escalationReason;
+                    await _service.SaveEscalationAsync(new SaveDenialEscalationRequest
+                    {
+                        LabId = labId, ClaimId = item.ClaimId, EscalationLevel = "Claim",
+                        EscalationScope = "Overall Claim", EscalationScopeValue = item.ClaimId,
+                        EscalationScopeDisplay = "Overall Claim",
+                        AffectedTaskIds = string.Join(",", claimTasks.Select(x => x.TaskId).Where(x => !string.IsNullOrWhiteSpace(x))),
+                        RecommendedNextAction = "Manager review", EscalationReason = finalReason,
+                        Comments = escalationComment, Status = finalReason.Contains("write-off decision required", StringComparison.OrdinalIgnoreCase) ? "WriteOffPending" : "Open",
+                        NextFollowUpDate = CsvNullableDate(item.Row, "EscalationExpectedResponseDate"), CreatedBy = userName
+                    }, ct);
+                    foreach (var task in claimTasks)
+                    {
+                        updatedTasks += await _service.UpdateTaskAsync(new UpdateTaskRequest
+                        {
+                            LabId = labId, TaskId = task.TaskId, Status = "Escalated to AR Manager",
+                            Comments = $"{finalReason} - {escalationComment}", ActionBy = userName,
+                            UpdateScope = "Claim", UpdateScopeValue = item.ClaimId
+                        }, ct);
+                    }
+                    escalatedClaims++;
+                    rowResult.Action = "Reviewer Escalation";
+                    rowResult.NewStatus = "Escalated to AR Manager";
+                    rowResult.Note = escalationComment;
+                    AddChange("Escalation Reason", string.Empty, finalReason);
+                    rowChanged = true;
+                }
+
+                if (hasManagerResponse)
+                {
+                    if (!managerRole)
+                    {
+                        Fail("Only AR Manager/Admin can upload an EscalationResponse.");
+                        continue;
+                    }
+                    if (!ManagerEscalationResponses.Contains(escalationResponse))
+                    {
+                        Fail($"'{escalationResponse}' is not a valid EscalationResponse.");
+                        continue;
+                    }
+                    if (string.IsNullOrWhiteSpace(escalationResponseComment))
+                    {
+                        Fail("EscalationResponseComment is required.");
+                        continue;
+                    }
+                    var escalation = (await _service.GetEscalationsAsync(labId, item.ClaimId, null, null, "Claim", ct))
+                        .FirstOrDefault(x => !string.Equals(x.Status, "Resolved", StringComparison.OrdinalIgnoreCase)
+                            && !string.Equals(x.Status, "Closed", StringComparison.OrdinalIgnoreCase));
+                    if (escalation is null)
+                    {
+                        Fail("No active claim-level escalation was found for the response.");
+                        continue;
+                    }
+                    var affected = await _service.ResolveEscalationAsync(new ResolveDenialEscalationRequest
+                    {
+                        LabId = labId, EscalationId = escalation.EscalationId, ClaimId = item.ClaimId,
+                        EscalationLevel = "Claim", ResolutionAction = "rework",
+                        ResponseNote = escalationResponseComment, RecommendedNextAction = escalationResponse,
+                        ActionBy = userName
+                    }, ct);
+                    if (affected > 0)
+                    {
+                        escalationResponses++;
+                        rowResult.Action = "Escalation Response";
+                        rowResult.NewStatus = "Rework";
+                        rowResult.Note = escalationResponseComment;
+                        AddChange("Recommended Next Action", string.Empty, escalationResponse);
+                        rowChanged = true;
+                    }
+                    else
+                    {
+                        Fail("Escalation response was not applied.");
+                        continue;
+                    }
+                }
+
+                if (rowChanged)
+                {
+                    rowResult.Status = "Success";
+                    rowResults.Add(rowResult);
+                    processedRows++;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            // A per-row DB/service exception must not abort the whole batch. Log it server-side
+            // and record the row as Failed with a sanitized reason (UAT: one bad row previously
+            // 500'd the entire upload).
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Denial worklist upload row {RowNumber} failed for claim {ClaimId}.", item.RowNumber, item.ClaimId);
+                if (!string.Equals(rowResult.Status, "Failed", StringComparison.OrdinalIgnoreCase))
+                    Fail($"Server error while processing this row: {ex.Message}");
+            }
         }
 
+        var failureCount = rowResults.Count(x => string.Equals(x.Status, "Failed", StringComparison.OrdinalIgnoreCase));
+        var successCount = rowResults.Count(x => string.Equals(x.Status, "Success", StringComparison.OrdinalIgnoreCase));
         var result = new ClaimCsvUploadResult
         {
-            Success = errors.Count == 0,
+            Success = failureCount == 0,
             TotalRows = rows.Count,
             ProcessedRows = processedRows,
             SkippedRows = skipped,
@@ -530,8 +611,11 @@ public sealed class DenialWorkflowController : ControllerBase
             AddedComments = addedComments,
             EscalatedClaims = escalatedClaims,
             EscalationResponses = escalationResponses,
+            SuccessCount = successCount,
+            FailureCount = failureCount,
+            Results = rowResults.OrderBy(x => x.RowNumber).ToList(),
             Errors = errors,
-            Message = $"Processed {processedRows} claim row(s): {updatedTasks} task status update(s), {addedComments} claim comment(s), {escalatedClaims} escalation(s), and {escalationResponses} escalation response(s). Skipped {skipped} unchanged row(s).{(errors.Count > 0 ? $" {errors.Count} error(s) require correction." : string.Empty)}"
+            Message = $"Processed {processedRows} claim row(s): {updatedTasks} task status update(s), {addedComments} claim comment(s), {escalatedClaims} escalation(s), and {escalationResponses} escalation response(s). Skipped {skipped} unchanged row(s).{(failureCount > 0 ? $" {failureCount} row(s) require correction." : string.Empty)}"
         };
         return Ok(result);
     }
@@ -805,8 +889,38 @@ public sealed class DenialWorkflowController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.ResponseNote)) return BadRequest("Manager response note is required.");
         if (string.IsNullOrWhiteSpace(request.RecommendedNextAction)) return BadRequest("Recommended next action is required.");
         request.ActionBy = string.IsNullOrWhiteSpace(request.ActionBy) ? (FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "ReactWorkflow") : request.ActionBy;
-        var rows = await _service.ResolveEscalationAsync(request, ct);
-        return Ok(new DenialWorkflowResult { Success = rows > 0, RowsAffected = rows, Message = rows > 0 ? "Escalation response saved." : "Escalation response was not saved." });
+        try
+        {
+            var rows = await _service.ResolveEscalationAsync(request, ct);
+            return Ok(new DenialWorkflowResult
+            {
+                Success = rows > 0,
+                RowsAffected = rows,
+                Message = rows > 0
+                    ? "Escalation response saved."
+                    : "Escalation response could not be applied. The escalation may already be resolved, or the claim is no longer active."
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        // A raw exception here (e.g. a SQL error) otherwise surfaces to the client as a 500,
+        // which the workflow UI rewrites to the generic "Issue happened. Please contact admin
+        // support." message. Log the real exception server-side and return a specific,
+        // sanitized message so the AR Manager sees what to do next instead of a generic error.
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Escalation response failed for lab {LabId}, escalation {EscalationId}, claim {ClaimId}, action {ResolutionAction}, by {ActionBy}.",
+                request.LabId, request.EscalationId, request.ClaimId, request.ResolutionAction, request.ActionBy);
+            return Ok(new DenialWorkflowResult
+            {
+                Success = false,
+                RowsAffected = 0,
+                Message = "Escalation response could not be saved due to a server error. Please retry; if the problem continues, contact support."
+            });
+        }
     }
 
     [HttpGet("escalations")]

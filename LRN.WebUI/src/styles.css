@@ -1838,3 +1838,37 @@ body{background:#f5f7fb;color:#101828}
 .claim-split-shell .claim-task-table .sticky-cpt-col{position:sticky;left:0;width:100px;min-width:100px;max-width:100px;background:#fff;box-shadow:1px 0 0 #d8dee9;z-index:4}
 .claim-split-shell .claim-task-table .sticky-denial-col{position:sticky;left:100px;width:118px;min-width:118px;max-width:118px;background:#fff;box-shadow:8px 0 12px -12px rgba(15,23,42,.55),1px 0 0 #d8dee9;z-index:4}
 .claim-split-shell .claim-task-table th.sticky-cpt-col,.claim-split-shell .claim-task-table th.sticky-denial-col{background:#f8fafc;z-index:9}
+
+/* Bulk claim upload: modal with loading state + per-row results table */
+.csv-upload-modal{width:min(960px,96vw);max-width:96vw}
+.csv-upload-drop{display:flex;flex-direction:column;align-items:center;gap:7px;padding:22px;border:1.5px dashed #cbd5e1;border-radius:9px;background:#f8fafc;text-align:center}
+.csv-upload-drop>i{font-size:30px;color:#94a3b8}
+.csv-upload-drop strong{font-size:13px;color:#1e293b;word-break:break-all}
+.csv-upload-drop span{font-size:11px;color:#64748b}
+.csv-upload-error{display:flex;align-items:center;gap:7px;margin-top:9px;padding:8px 10px;border-radius:7px;background:#fef2f2;border:1px solid #fecaca;color:#b42318;font-size:12px}
+.csv-upload-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;min-height:190px;text-align:center}
+.csv-upload-loading strong{font-size:14px;color:#1e293b}
+.csv-upload-loading span{font-size:11px;color:#64748b}
+.csv-upload-spinner{font-size:30px;color:#0f766e;animation:claim-spin .8s linear infinite}
+.csv-upload-summary{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:11px}
+.csv-sum-badge{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;font-size:11px;font-weight:800;border:1px solid transparent}
+.csv-sum-badge.total{background:#eef2ff;color:#3730a3;border-color:#c7d2fe}
+.csv-sum-badge.success{background:#ecfdf5;color:#067647;border-color:#a7f3d0}
+.csv-sum-badge.failed{background:#fef2f2;color:#b42318;border-color:#fecaca}
+.csv-sum-badge.skipped{background:#f1f5f9;color:#475569;border-color:#e2e8f0}
+.csv-upload-results-scroll{max-height:52vh;overflow:auto;border:1px solid #e2e8f0;border-radius:8px}
+.csv-upload-results-table{width:100%;border-collapse:separate;border-spacing:0;font-size:11px}
+.csv-upload-results-table th{position:sticky;top:0;z-index:2;background:#f4f7fa;text-align:left;padding:8px 10px;color:#475569;font-weight:800;text-transform:uppercase;letter-spacing:.03em;font-size:9px;border-bottom:1px solid #e2e8f0;white-space:nowrap}
+.csv-upload-results-table td{padding:8px 10px;border-bottom:1px solid #f1f5f9;color:#334155;vertical-align:top}
+.csv-upload-results-table tr.row-fail td{background:#fffafa}
+.csv-upload-results-table small{color:#94a3b8}
+.csv-row-badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:10px;font-weight:800}
+.csv-row-badge.ok{background:#ecfdf5;color:#067647}
+.csv-row-badge.fail{background:#fef2f2;color:#b42318}
+.csv-status-change{white-space:nowrap}
+.csv-change-list{margin:0;padding-left:15px;display:flex;flex-direction:column;gap:2px}
+.csv-change-field{color:#64748b}
+.csv-note-cell{max-width:180px;white-space:pre-wrap;word-break:break-word}
+.csv-reason-cell{max-width:200px;color:#b42318;word-break:break-word}
+.csv-empty{text-align:center;color:#94a3b8;padding:18px}
+@media (prefers-reduced-motion:reduce){.csv-upload-spinner{animation:none}}
