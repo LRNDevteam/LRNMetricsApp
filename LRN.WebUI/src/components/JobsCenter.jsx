@@ -11,9 +11,12 @@ import { denialWorkflowService } from '../services/denialWorkflowService';
 const isActive = s => ['queued', 'running'].includes(String(s || '').toLowerCase());
 const isSuccessRow = s => String(s || '').toLowerCase() === 'success';
 
-function statusChip(status) {
+function statusChip(status, kind) {
   const s = String(status || '').toLowerCase();
-  if (s === 'downloaded') return <span className="jobs-chip downloaded"><i className="bi bi-check2-all" />Downloaded</span>;
+  // A finished download's file is available to save, so show it as "Ready" (whether or not it has
+  // been downloaded yet) instead of "Completed"/"Downloaded".
+  if (s === 'downloaded' || (kind === 'download' && s === 'completed'))
+    return <span className="jobs-chip downloaded"><i className="bi bi-check2-all" />Ready</span>;
   const cls = s === 'completed' ? 'ok' : s === 'failed' ? 'fail' : 'run';
   return <span className={`jobs-chip ${cls}`}>{isActive(s) ? <i className="bi bi-arrow-repeat jobs-spin" /> : null}{status || '-'}</span>;
 }
@@ -139,7 +142,7 @@ export function JobsBadge({ enabled = true, onOpenJobs = () => {}, setMessage = 
             <div className="jobs-row-title" title={j.fileName}>{j.fileName || (j.kind === 'upload' ? 'Claim upload' : 'Claim export')}</div>
             <div className="jobs-row-meta">{fmtTime(j.createdOnUtc)}{j.kind === 'upload' && !isActive(j.status) ? ` · ${j.successCount} ok / ${j.failureCount} failed` : ''}{j.kind === 'download' && j.rowCount ? ` · ${Number(j.rowCount).toLocaleString()} rows` : ''}</div>
           </div>
-          {statusChip(j.status)}
+          {statusChip(j.status, j.kind)}
           {j.kind === 'download' && j.downloadUrl && <button type="button" className="jobs-icon-btn" title="Download file" onClick={() => downloadExportFile(j, setMessage)}><i className="bi bi-download" /></button>}
           {j.kind === 'upload' && String(j.status).toLowerCase() === 'completed' && <button type="button" className="jobs-icon-btn" title="View results" onClick={() => { setOpen(false); onOpenJobs(j.jobId); }}><i className="bi bi-list-check" /></button>}
         </div>) : <div className="jobs-empty">No uploads or downloads yet.</div>}
@@ -338,7 +341,7 @@ export function JobsPage({ setMessage = () => {}, initialUploadJobId = '' }) {
             {filteredUploads.length ? filteredUploads.map(j => <tr key={j.jobId} className="jobs-click-row" onClick={() => setDetailJobId(j.jobId)}>
               <td className="jobs-file-cell" title={j.fileName}><i className="bi bi-upload jobs-row-icon upload" /> {j.fileName || '-'}</td>
               <td>{fmtTime(j.createdOnUtc)}</td>
-              <td>{statusChip(j.status)}</td>
+              <td>{statusChip(j.status, 'upload')}</td>
               <td className="r">{j.totalRows ?? '-'}</td>
               <td className="r jobs-num-ok">{isActive(j.status) ? '…' : j.successCount}</td>
               <td className="r jobs-num-fail">{isActive(j.status) ? '…' : j.failureCount}</td>
@@ -369,7 +372,7 @@ export function JobsPage({ setMessage = () => {}, initialUploadJobId = '' }) {
             {filteredExports.length ? filteredExports.map(j => <tr key={j.jobId}>
               <td className="jobs-file-cell" title={j.fileName}><i className="bi bi-download jobs-row-icon download" /> {j.fileName || '-'}</td>
               <td>{fmtTime(j.createdOnUtc)}</td>
-              <td>{statusChip(j.status)}</td>
+              <td>{statusChip(j.status, 'download')}</td>
               <td className="r">{j.rowCount ? Number(j.rowCount).toLocaleString() : '-'}</td>
               <td>{fmtTime(j.completedOnUtc)}</td>
               <td>

@@ -73,6 +73,7 @@ builder.Services.AddScoped<IPayerMappingService, PayerMappingService>();
 builder.Services.AddScoped<IPayerRulesAdminService, PayerRulesAdminService>();
 builder.Services.AddScoped<IDenialWorkflowIssueNotifier, DenialWorkflowIssueNotifier>();
 builder.Services.AddScoped<IDenialWorkflowSupportService, DenialWorkflowSupportService>();
+builder.Services.AddSingleton<IDenialWorkflowJobHistoryStore, DenialWorkflowJobHistoryStore>();
 builder.Services.AddSingleton<IDenialWorkflowExportJobService, DenialWorkflowExportJobService>();
 builder.Services.AddSingleton<IDenialWorkflowUploadJobService, DenialWorkflowUploadJobService>();
 builder.Services.AddHttpClient();

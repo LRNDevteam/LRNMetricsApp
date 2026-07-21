@@ -20,15 +20,18 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
     private static readonly TimeSpan MaxExportDuration = TimeSpan.FromMinutes(30);
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<DenialWorkflowExportJobService> _logger;
+    private readonly IDenialWorkflowJobHistoryStore _history;
     private readonly string _exportRoot;
 
     public DenialWorkflowExportJobService(
         IServiceScopeFactory scopeFactory,
         IConfiguration configuration,
+        IDenialWorkflowJobHistoryStore history,
         ILogger<DenialWorkflowExportJobService> logger)
     {
         _scopeFactory = scopeFactory;
         _logger = logger;
+        _history = history;
         _exportRoot = configuration["DenialWorkflowFileStorage:DownloadRootPath"]
             ?? configuration["DenialWorkflowExports:RootPath"]
             ?? Path.Combine(AppContext.BaseDirectory, "ClaimExports");
@@ -78,6 +81,7 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
         }
 
         Jobs[jobId] = state;
+        _history.Save(ToRecord(state));
         _ = Task.Run(() => RunJobAsync(filter, state));
 
         return new ClaimExportStartResponse
@@ -110,10 +114,8 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
     public IReadOnlyList<ClaimExportJobSummary> ListJobs(string requestedBy)
     {
         ExpireStaleJobs();
-        return Jobs.Values
+        var live = Jobs.Values
             .Where(x => CanAccess(x, requestedBy))
-            .OrderByDescending(x => x.CreatedOnUtc)
-            .Take(50)
             .Select(x => new ClaimExportJobSummary
             {
                 JobId = x.JobId,
@@ -130,15 +132,54 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
                     : null
             })
             .ToList();
+
+        // Merge durable history so jobs from previous sessions (before the last restart) still show.
+        // Live in-memory state wins for a JobId; historical Completed jobs keep a download link only
+        // while their file still exists on disk.
+        var liveIds = new HashSet<string>(live.Select(j => j.JobId), StringComparer.OrdinalIgnoreCase);
+        foreach (var h in _history.List(requestedBy, "download"))
+        {
+            if (liveIds.Contains(h.JobId)) continue;
+            var completed = string.Equals(h.Status, "Completed", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(h.Status, "Downloaded", StringComparison.OrdinalIgnoreCase);
+            var fileExists = completed && !string.IsNullOrWhiteSpace(h.FilePath) && File.Exists(h.FilePath);
+            live.Add(new ClaimExportJobSummary
+            {
+                JobId = h.JobId,
+                FileName = h.FileName,
+                Status = h.Status,
+                Message = h.Message,
+                RowCount = h.RowCount ?? 0,
+                CreatedOnUtc = h.CreatedOnUtc,
+                CompletedOnUtc = h.CompletedOnUtc,
+                DownloadUrl = fileExists ? $"/api/denialworkflow/claims/export/{h.JobId}/download" : null
+            });
+        }
+
+        return live.OrderByDescending(x => x.CreatedOnUtc).Take(100).ToList();
     }
 
     public ClaimExportFile? GetCompletedFile(string jobId, string requestedBy)
     {
-        if (!Jobs.TryGetValue(jobId, out var state) || !CanAccess(state, requestedBy)) return null;
-        if (!string.Equals(state.Status, "Completed", StringComparison.OrdinalIgnoreCase)) return null;
-        if (!File.Exists(state.FilePath)) return null;
-        state.DownloadedOnUtc ??= DateTime.UtcNow; // list shows "Downloaded" after first save
-        return new ClaimExportFile(state.FilePath, state.FileName, state.ContentType);
+        if (Jobs.TryGetValue(jobId, out var state) && CanAccess(state, requestedBy))
+        {
+            if (!string.Equals(state.Status, "Completed", StringComparison.OrdinalIgnoreCase)) return null;
+            if (!File.Exists(state.FilePath)) return null;
+            state.DownloadedOnUtc ??= DateTime.UtcNow; // list shows "Downloaded" after first save
+            _history.Save(ToRecord(state));
+            return new ClaimExportFile(state.FilePath, state.FileName, state.ContentType);
+        }
+
+        // Not in memory (e.g. after a restart): serve from durable history while the file survives.
+        var h = _history.Get(jobId);
+        if (h is null || !string.Equals(h.JobType, "download", StringComparison.OrdinalIgnoreCase)) return null;
+        if (!string.IsNullOrWhiteSpace(requestedBy) && !string.IsNullOrWhiteSpace(h.RequestedBy)
+            && !string.Equals(h.RequestedBy, requestedBy, StringComparison.OrdinalIgnoreCase)) return null;
+        var completed = string.Equals(h.Status, "Completed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(h.Status, "Downloaded", StringComparison.OrdinalIgnoreCase);
+        if (!completed || string.IsNullOrWhiteSpace(h.FilePath) || !File.Exists(h.FilePath)) return null;
+        _history.Save(h with { Status = "Downloaded" });
+        return new ClaimExportFile(h.FilePath, h.FileName, h.ContentType ?? "text/csv");
     }
 
     public ClaimExportStatusResponse? Cancel(string jobId, string requestedBy)
@@ -215,7 +256,17 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
             _logger.LogError(ex, "Claim export job {JobId} failed.", state.JobId);
             TryDelete(state.FilePath);
         }
+        finally
+        {
+            _history.Save(ToRecord(state));
+        }
     }
+
+    // Durable history projection of the current job state (best-effort; see IDenialWorkflowJobHistoryStore).
+    private JobHistoryRecord ToRecord(ExportJobState s) => new(
+        s.JobId, "download", s.RequestedBy, s.LabId, s.FileName,
+        s.DownloadedOnUtc is not null && string.Equals(s.Status, "Completed", StringComparison.OrdinalIgnoreCase) ? "Downloaded" : s.Status,
+        s.Message, s.RowCount, null, null, s.FilePath, s.ContentType, s.CreatedOnUtc, s.CompletedOnUtc);
 
     private static bool CanAccess(ExportJobState state, string requestedBy)
     {

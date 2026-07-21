@@ -90,7 +90,7 @@ export default function App() {
   const [notificationPopupOpen, setNotificationPopupOpen] = useState(false);
   const initialNotificationKeyRef = useRef('');
   const [claimMenuCounts, setClaimMenuCounts] = useState({ new: null, unassigned: null, assigned: null, payerFollowup: null, pendingDocumentation: null, pendingPayerResponse: null, writeOffApproval: null, slaAtRisk: null, escalations: null, internalEscalation: null, externalEscalation: null, escalationResponse: null, verification: null, closed: null, all: null });
-  const [myWorklistMenuCounts, setMyWorklistMenuCounts] = useState({ assigned: null, payerFollowup: null, pendingDocumentation: null, pendingPayerResponse: null, internalEscalation: null, externalEscalation: null, escalationResponse: null, closed: null, all: null });
+  const [myWorklistMenuCounts, setMyWorklistMenuCounts] = useState({ assigned: null, slaAtRisk: null, payerFollowup: null, pendingDocumentation: null, pendingPayerResponse: null, internalEscalation: null, externalEscalation: null, escalationResponse: null, closed: null, all: null });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [dashboardFiltersOpen, setDashboardFiltersOpen] = useState(false);
   const [claimFiltersOpen, setClaimFiltersOpen] = useState(false);
@@ -659,7 +659,7 @@ export default function App() {
         // the count endpoint returned nothing.
         const pick = (authoritative, items) => (authoritative != null ? authoritative : distinctClaimCount(items));
         sections = [
-          { key: 'follow-up', label: 'Follow-ups due tomorrow', count: distinctClaimCount(followUpItems), items: followUpItems, targetView: 'all' },
+          { key: 'follow-up', label: 'Follow-ups due tomorrow', count: distinctClaimCount(followUpItems), items: followUpItems, targetView: 'followupDue' },
           { key: 'assigned', label: 'Assigned claims', count: pick(assignedCount, assignedItems), items: assignedItems, targetView: 'assigned' },
           { key: 'pending', label: 'Pending claims', count: pick(openCount, pendingItems), items: pendingItems, targetView: 'open' },
           { key: 'action', label: 'Action required claims', count: distinctClaimCount(actionRequiredItems), items: actionRequiredItems, targetView: 'open', status: 'Pending Review' },
@@ -813,6 +813,7 @@ export default function App() {
     try {
       setMyWorklistMenuCounts({
         assigned: Number(latestClaimCounts?.assigned ?? latestClaimCounts?.Assigned ?? 0),
+        slaAtRisk: Number(latestClaimCounts?.slaAtRisk ?? latestClaimCounts?.SlaAtRisk ?? 0),
         payerFollowup: Number(latestClaimCounts?.payerFollowup ?? latestClaimCounts?.PayerFollowup ?? 0),
         pendingDocumentation: Number(latestClaimCounts?.pendingDocumentation ?? latestClaimCounts?.PendingDocumentation ?? 0),
         pendingPayerResponse: Number(latestClaimCounts?.pendingPayerResponse ?? latestClaimCounts?.PendingPayerResponse ?? 0),
@@ -1338,13 +1339,10 @@ export default function App() {
           <div><div className="lrn-page-title">{pageTitle}</div><div className="lrn-breadcrumb">LRN Analytics / <span>{pageTitle}</span></div></div>
         </div>
         <div className="topbar-actions">
-          {workflowNotifications.total > 0 && <div className="notification-wrap"><button type="button" className="notification-btn" title="Claims needing attention" onClick={() => setNotificationOpen(v => !v)}><i className="bi bi-bell-fill" /><span className="notification-count">{workflowNotifications.total}</span><span className="notification-text"><b>{workflowNotifications.total}</b> {reviewerOnly ? 'claims need attention' : 'escalation claim(s)'}</span></button>{notificationOpen && <NotificationDetails />}</div>}
+          {workflowNotifications.total > 0 && <div className="notification-wrap"><button type="button" className="notification-btn icon-only" title={`${workflowNotifications.total} ${reviewerOnly ? 'claims need attention' : 'escalation claim(s)'}`} onClick={() => setNotificationOpen(v => !v)}><i className="bi bi-bell-fill" /><span className="notification-count">{workflowNotifications.total}</span></button>{notificationOpen && <NotificationDetails />}</div>}
           {headerLabs.length > 0 && <select className="top-lab-select" value={labId || ''} onChange={e => setLabId(Number(e.target.value))}>{headerLabs.map(l => <option key={l.labId ?? l.LabId} value={l.labId ?? l.LabId}>{l.labName ?? l.LabName}</option>)}</select>}
           <JobsBadge enabled={authReady && !!labId} onOpenJobs={jobId => openJobsRef.current(jobId)} setMessage={setWorkflowMessage} onUploadCompleted={handleBackgroundUploadCompleted} />
-          {showOverallDownload && claimExportJob && <span className={`export-status-pill ${claimExportJob.status === 'Completed' ? 'done' : exportBusy ? 'running' : 'failed'}`} title={claimExportJob.message || claimExportJob.status}>{exportStatusText()}</span>}
-          {showOverallDownload && claimExportJob && <button type="button" className={`topbar-btn ${claimExportJob.status === 'Completed' ? 'teal' : ''}`} disabled={claimExportJob.status !== 'Completed'} onClick={downloadClaimExport} title={claimExportJob.message || claimExportJob.status}><i className={`bi ${claimExportJob.status === 'Completed' ? 'bi-file-earmark-excel' : 'bi-hourglass-split'}`} />{claimExportJob.status === 'Completed' ? 'Download File' : 'Waiting'}</button>}
-          {showOverallDownload && exportBusy && <button type="button" className="topbar-btn" onClick={refreshClaimExportStatus}><i className="bi bi-arrow-clockwise" />Refresh Export</button>}
-          {showOverallDownload && exportBusy && <button type="button" className="topbar-btn danger" onClick={cancelClaimExport}><i className="bi bi-x-circle" />Cancel Export</button>}
+          {showOverallDownload && claimExportJob && claimExportJob.status === 'Completed' && <button type="button" className="topbar-btn teal" onClick={downloadClaimExport} title={claimExportJob.message || claimExportJob.status}><i className="bi bi-file-earmark-excel" />Download File</button>}
           {showOverallDownload && <button className="topbar-btn teal" onClick={() => startClaimExport({ currentTab: false })} disabled={exportBusy}><i className="bi bi-download" />Overall Download</button>}
           <button type="button" className={`topbar-btn ${view === 'support' ? 'teal' : ''}`} onClick={() => setView('support')}><i className="bi bi-life-preserver" />Support</button>
           <div className="profile-menu">
@@ -1362,7 +1360,6 @@ export default function App() {
               <button type="button" onClick={logoutWorkflow}><i className="bi bi-box-arrow-right" />Logout</button>
             </div>}
           </div>
-          <button type="button" className="topbar-btn logout-top" onClick={logoutWorkflow}><i className="bi bi-box-arrow-right" />Logout</button>
         </div>
       </header>
       <main className="lrn-content">
@@ -1414,7 +1411,7 @@ export default function App() {
         {view === 'summary' && <DenialSummaryPage data={dashboard} canAssign={canAssign} onClassificationClick={openClaimsByClassification} onActionCategoryClick={openClaimsByActionCategory} onAssign={() => { setClaimTaskView('new'); setView(reviewerOnly ? 'myworklist' : 'claims'); setMessage({ type: 'info', text: canAssign ? 'Select the required claim rows, choose reviewer, then assign.' : 'This role has read-only workflow access.' }); }} />}
         {view === 'claims' && <ClaimAssignmentPage data={claims} loading={loading} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} currentUserRole={user.role || ''} canAssign={canAssign} readOnlyWorkflow={readOnlyWorkflow} taskView={claimTaskView} setTaskView={handleClaimTaskViewChange} tabCounts={claimMenuCounts} openEscalationResponse={() => handleClaimTabRoute('response')} openVerification={() => handleClaimTabRoute('verification')} setMessage={setWorkflowMessage} onDownloadTemplate={() => startClaimExport({ currentTab: true, uploadTemplate: true })} onCsvUploaded={async () => { setClaimTasks({}); setExpandedClaim(''); setClaims(await denialWorkflowService.getClaims({ ...query, taskView: claimTaskView })); await refreshMenuCounts(); }} exportBusy={exportBusy} filter={filter} setFilterValue={setFilterValue} assignedUsers={filterOptions.assignedUsers || []} />}
         {view === 'verification' && <VerificationPage data={verification} changePage={changePage} tabCounts={claimMenuCounts} onTabChange={handleClaimTabRoute} reviewers={reviewers} canAssign={canAssign} assignClaims={assignClaims} />}
-        {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setWorkflowMessage} onSaved={() => { refreshMenuCounts(); refreshWorkflowNotifications(); }} taskView={myWorklistView} setTaskView={handleMyWorklistViewChange} tabCounts={myWorklistMenuCounts} onExportQueryChange={setMyWorklistExportQuery} onDownloadTemplate={(exportQuery, tab) => startClaimExport({ currentTab: true, uploadTemplate: true, queryOverride: exportQuery, tabKey: tab?.key || myWorklistView, tabLabel: tab?.label || '' })} exportBusy={exportBusy} />}
+        {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setWorkflowMessage} onSaved={() => { refreshMenuCounts(); refreshWorkflowNotifications(); }} taskView={myWorklistView} setTaskView={handleMyWorklistViewChange} tabCounts={{ ...myWorklistMenuCounts, followupDue: (workflowNotifications.sections || []).find(s => s.key === 'follow-up')?.count ?? 0 }} onExportQueryChange={setMyWorklistExportQuery} onDownloadTemplate={(exportQuery, tab) => startClaimExport({ currentTab: true, uploadTemplate: true, queryOverride: exportQuery, tabKey: tab?.key || myWorklistView, tabLabel: tab?.label || '' })} exportBusy={exportBusy} />}
         {view === 'escalations' && <EscalationQueuePage labId={labId} user={user} reviewers={reviewers} taskView={escalationView === 'response' ? 'claim' : escalationView} responseOnly={escalationView === 'response'} setTaskView={setEscalationView} tabCounts={claimMenuCounts} onClaimTabChange={handleClaimTabRoute} canAssign={canAssign} assignClaims={assignClaims} setMessage={setWorkflowMessage} />}
         {view === 'denialcodemaster' && arManagerOnly && <DenialCodeMasterPage labId={labId} role={user.role || ''} setMessage={setWorkflowMessage} initialPushAuditId={mapperReviewAuditId} onPushConfirmed={()=>{setMapperNotification(null);setMapperReviewAuditId(null);}} onReviewActionChanges={(batchId) => { setActionVerificationBatchId(batchId || ''); setView('denialactionverification'); }} />}
         {view === 'denialmapper' && denialMapperRole && <DenialMapperPage user={user} labs={labs} labId={labId} setLabId={setLabId} setMessage={setWorkflowMessage} screen={denialMapperView} onScreenChange={setDenialMapperView} />}

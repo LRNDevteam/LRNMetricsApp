@@ -1569,7 +1569,7 @@ SELECT
     AssignedReviewerCount = COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ISNULL(t.AssignedTo,''))),'')),
     MaxCreatedOn = MAX(t.CreatedOn),
     HasVerification = MAX(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) IN ('required review','verification pending') THEN 1 ELSE 0 END),
-    HasSlaAtRisk = MAX(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.SLAStatus,'')))) IN ('at risk','atrisk','breached','overdue') AND {normalizedStatusSql} <> 'Closed' THEN 1 ELSE 0 END),
+    HasSlaAtRisk = MAX(CASE WHEN {normalizedStatusSql} <> 'Closed' AND ((t.DueDate IS NOT NULL AND CAST(t.DueDate AS date) <= CAST(DATEADD(day, 3, GETDATE()) AS date)) OR LOWER(LTRIM(RTRIM(ISNULL(t.SLAStatus,'')))) IN ('at risk','atrisk','breached','overdue')) THEN 1 ELSE 0 END),
     -- Live task status, not the permanent has-any-escalation-ever-been-responded-to flag. The
     -- latter never resets, so a claim the manager responded to weeks ago kept counting toward
     -- Escalation Response in this badge/precedence long after the reviewer moved it elsewhere or
@@ -1839,9 +1839,32 @@ CREATE CLUSTERED INDEX IX_ReviewerScope_ClaimUid ON #ReviewerScope(ClaimUid);
         // UAT TC-008/TC-131: keep the Assigned tab's membership rule identical to the badge/KPI rule
         // in GetClaimSubMenuCountsAsync (AssignedTaskCount = assigned AND not closed), so a
         // fully-closed claim no longer lingers in the AR Manager's Assigned tab.
-        var claimStatusWhere = claimView == "assigned" && NormalizeRoleToken(filter.Role).Contains("ARMANAGER")
-            ? "ISNULL(tca.AssignedTaskCount, 0) > 0"
-            : ClaimQueueWhereSql(claimView);
+        // "Follow-ups due tomorrow": claims whose latest note has NextFollowUpDate = tomorrow. This
+        // lives in DenialClaimNotes (not the task board), so it can't be a plain queue predicate --
+        // materialize the due-tomorrow claim keys into #FollowUpDue and intersect. Matching is
+        // generous (ClaimUID vs VisitNumber) like the notes/documents lookups.
+        var followUpDue = claimView == "followupdue";
+        var followUpDuePrefix = followUpDue ? @"
+IF OBJECT_ID('tempdb..#FollowUpDue') IS NOT NULL DROP TABLE #FollowUpDue;
+SELECT DISTINCT FollowKey = ln.ClaimIdNormalized
+INTO #FollowUpDue
+FROM (
+    SELECT n.ClaimIdNormalized, n.NextFollowUpDate,
+           rn = ROW_NUMBER() OVER (PARTITION BY n.ClaimIdNormalized, ISNULL(n.TaskId,''), ISNULL(n.CptCode,'') ORDER BY n.CreatedOn DESC, n.NoteId DESC)
+    FROM dbo.DenialClaimNotes n WITH (NOLOCK)
+    WHERE n.IsDeleted = 0 AND n.LabId = @LabId
+) ln
+WHERE ln.rn = 1
+  AND ln.NextFollowUpDate IS NOT NULL
+  AND CAST(ln.NextFollowUpDate AS date) = CAST(DATEADD(day, 1, GETDATE()) AS date)
+  AND NULLIF(LTRIM(RTRIM(ISNULL(ln.ClaimIdNormalized,''))),'') IS NOT NULL;
+" : string.Empty;
+        var followUpDueCleanup = followUpDue ? "\nIF OBJECT_ID('tempdb..#FollowUpDue') IS NOT NULL DROP TABLE #FollowUpDue;" : string.Empty;
+        var claimStatusWhere = followUpDue
+            ? @"ISNULL(tca.QueueName, '') <> 'Closed' AND EXISTS (SELECT 1 FROM #FollowUpDue fd WHERE fd.FollowKey = c.ClaimUid OR fd.FollowKey = c.ClaimKey OR fd.FollowKey LIKE c.ClaimKey + '\_%' ESCAPE '\' OR c.ClaimKey LIKE fd.FollowKey + '\_%' ESCAPE '\')"
+            : claimView == "assigned" && NormalizeRoleToken(filter.Role).Contains("ARMANAGER")
+                ? "ISNULL(tca.AssignedTaskCount, 0) > 0"
+                : ClaimQueueWhereSql(claimView);
 
         var sql = $@"
 IF OBJECT_ID('tempdb..#TaskClaimAgg') IS NOT NULL DROP TABLE #TaskClaimAgg;
@@ -1851,7 +1874,7 @@ IF OBJECT_ID('tempdb..#FilteredClaims') IS NOT NULL DROP TABLE #FilteredClaims;
 IF OBJECT_ID('tempdb..#PageLineDetails') IS NOT NULL DROP TABLE #PageLineDetails;
 IF OBJECT_ID('tempdb..#ClaimBase') IS NOT NULL DROP TABLE #ClaimBase;
 IF OBJECT_ID('tempdb..#EscalationClaimAgg') IS NOT NULL DROP TABLE #EscalationClaimAgg;
-{reviewerScopePrefix}
+{reviewerScopePrefix}{followUpDuePrefix}
 SELECT
     ClaimUid = {lineClaimUidExpr},
     ClaimId = MAX(LTRIM(RTRIM(ISNULL(l.VisitNumber,'')))),
@@ -1919,7 +1942,7 @@ SELECT
         ELSE NULL
     END),
     HasVerification = MAX(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) IN ('required review','verification pending') THEN 1 ELSE 0 END),
-    HasSlaAtRisk = MAX(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(t.SLAStatus,'')))) IN ('at risk','atrisk','breached','overdue') AND {normalizedStatusSql} <> 'Closed' THEN 1 ELSE 0 END),
+    HasSlaAtRisk = MAX(CASE WHEN {normalizedStatusSql} <> 'Closed' AND ((t.DueDate IS NOT NULL AND CAST(t.DueDate AS date) <= CAST(DATEADD(day, 3, GETDATE()) AS date)) OR LOWER(LTRIM(RTRIM(ISNULL(t.SLAStatus,'')))) IN ('at risk','atrisk','breached','overdue')) THEN 1 ELSE 0 END),
     -- Live task status, not the permanent has-any-escalation-ever-been-responded-to flag from
     -- EscalationClaimAgg (see the matching fix in GetClaimSubMenuCountsAsync) -- that never
     -- resets once true, so it kept claiming a claim for Escalation Response long after the
@@ -2039,7 +2062,7 @@ DROP TABLE #PageLineDetails;
 DROP TABLE #ClaimBase;
 DROP TABLE #EscalationClaimAgg;
 DROP TABLE #TaskClaimRaw;
-DROP TABLE #TaskClaimAgg;{reviewerScopeCleanup}";
+DROP TABLE #TaskClaimAgg;{reviewerScopeCleanup}{followUpDueCleanup}";
 
         var result = new PagedResult<ClaimLevelRow>
         {
@@ -2219,8 +2242,13 @@ ORDER BY {orderByCreated} t.ClaimID, t.TaskID;";
         var lineClaimKeyExpr = lineColumns.Contains("ClaimUID")
             ? "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(lx.[ClaimUID],''))), ''), CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(lx.[VisitNumber],''))), 'CLM-', '')))"
             : "CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(lx.[VisitNumber],''))), 'CLM-', ''))";
+        // Sargable line match: the DenialLineItem side uses its raw INDEXED columns (ClaimUID /
+        // VisitNumberNormalized), while the (bounded) #ExportTasks side supplies the per-row value,
+        // so the join seeks the line items instead of scanning the heap to compute a key for every row.
         var lineMatch = lineTableExists
-            ? $"{lineClaimKeyExpr} = {taskClaimUidExpr}"
+            ? ((lineColumns.Contains("ClaimUID") && taskColumns.Contains("ClaimUID"))
+                ? $"(lx.[ClaimUID] = t.[ClaimUID] OR lx.[VisitNumberNormalized] = {taskClaimKeyExpr})"
+                : $"lx.[VisitNumberNormalized] = {taskClaimKeyExpr}")
             : "1 = 0";
         if (lineColumns.Contains("CPTCode") && taskColumns.Contains("CPTCode"))
         {
@@ -3251,10 +3279,14 @@ WHERE TaskID = @TaskID AND LOWER(LTRIM(RTRIM(ISNULL(WorkFlowStatus,'')))) = 'int
             if (lineColumns.Contains("LabId"))
                 lineLabDeclaration = $"DECLARE @HasLineLab bit = CASE WHEN EXISTS (SELECT 1 FROM dbo.DenialLineItem WITH (NOLOCK) WHERE {LabScopeSql("LabId")}) THEN 1 ELSE 0 END;";
             var lineLabPart = lineColumns.Contains("LabId") ? $" AND (@HasLineLab=0 OR {LabScopeSql("lx.[LabId]")})" : "";
-            var lineClaimKeyExpr = lineColumns.Contains("ClaimUID")
-                ? "COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(lx.[ClaimUID],''))), ''), CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(lx.[VisitNumber],''))), 'CLM-', '')))"
-                : "CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(lx.[VisitNumber],''))), 'CLM-', ''))";
-            var lineClaimMatch = $"{lineClaimKeyExpr} = {claimUid}";
+            // Sargable line match: compare the DenialLineItem's INDEXED columns (ClaimUID /
+            // VisitNumberNormalized) directly against the task's ClaimUID / ClaimIDNormalized, so the
+            // OUTER APPLY seeks per task instead of scanning the whole DenialLineItem heap for every
+            // one of the exported tasks (the previous COALESCE/CONVERT form was non-sargable and is
+            // why an upload template of a few hundred tasks took minutes).
+            var lineClaimMatch = (lineColumns.Contains("ClaimUID") && taskColumns.Contains("ClaimUID"))
+                ? "(li.[ClaimUID] = t.[ClaimUID] OR li.[VisitNumberNormalized] = t.[ClaimIDNormalized])"
+                : "li.[VisitNumberNormalized] = t.[ClaimIDNormalized]";
             var lineCptMatch = (lineColumns.Contains("CPTCode") && taskColumns.Contains("CPTCode"))
                 ? " AND LTRIM(RTRIM(ISNULL(li.[CPTCode],''))) = LTRIM(RTRIM(ISNULL(t.[CPTCode],'')))"
                 : "";
@@ -4254,6 +4286,7 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
             "pendingpayerresponse" or "payerresponse" => "pendingpayerresponse",
             "writeoffapproval" or "writeoff" => "writeoffapproval",
             "slaatrisk" or "slaatrisks" or "atrisk" => "slaatrisk",
+            "followupdue" or "followupsdue" or "followup" => "followupdue",
             "all" or "allclaims" => "all",
             "closed" or "completed" => "closed",
             "escalation" or "escalations" or "escalated" or "escalate" => "escalations",

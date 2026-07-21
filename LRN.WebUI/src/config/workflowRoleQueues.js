@@ -12,6 +12,8 @@ const externalManagerQueues = [
 export const workflowQueueConfig = {
   arReviewer: [
     { key: 'assigned', label: 'Worklist', filters: ['status', 'aging', 'denialClassification', 'actionCategory', 'payerName', 'panelName', 'followupDue'] },
+    { key: 'slaAtRisk', label: 'SLA in 3 Days', filters: ['aging', 'denialClassification', 'actionCategory', 'payerName', 'panelName'], alert: true },
+    { key: 'followupDue', label: 'Follow-ups Due', filters: ['payerName', 'panelName', 'actionCategory'], alert: true },
     { key: 'payerFollowup', label: 'Payer Follow-up Required', filters: ['followUpReason', 'aging', 'payerName', 'panelName', 'followupDue'] },
     { key: 'pendingDocumentation', label: 'Pending Documentation', filters: [...commonManagerFilters, 'documentationType'] },
     { key: 'pendingPayerResponse', label: 'Pending Payer Response', filters: ['aging', 'nextFollowUpDate', 'payerName', 'actionCategory'] },
@@ -50,6 +52,8 @@ export function normalizeQueueKey(key) {
     documentationqueue: 'pendingDocumentation',
     pendingpayerresponse: 'pendingPayerResponse',
     payerresponse: 'pendingPayerResponse',
+    followupdue: 'followupDue',
+    followupsdue: 'followupDue',
     internalescalation: 'internalEscalation',
     externalescalation: 'externalEscalation',
     escalationresponse: 'escalationResponse',

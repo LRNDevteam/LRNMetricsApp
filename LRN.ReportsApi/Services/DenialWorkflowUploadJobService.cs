@@ -32,15 +32,18 @@ public sealed class DenialWorkflowUploadJobService : IDenialWorkflowUploadJobSer
     private static readonly TimeSpan RetentionWindow = TimeSpan.FromDays(7);
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<DenialWorkflowUploadJobService> _logger;
+    private readonly IDenialWorkflowJobHistoryStore _history;
     private readonly string _logRoot;
 
     public DenialWorkflowUploadJobService(
         IServiceScopeFactory scopeFactory,
         IConfiguration configuration,
+        IDenialWorkflowJobHistoryStore history,
         ILogger<DenialWorkflowUploadJobService> logger)
     {
         _scopeFactory = scopeFactory;
         _logger = logger;
+        _history = history;
         _logRoot = configuration["DenialWorkflowFileStorage:UploadLogRootPath"]
             ?? configuration["DenialWorkflowUploads:LogRootPath"]
             ?? Path.Combine(AppContext.BaseDirectory, "ClaimUploadLogs");
@@ -68,6 +71,7 @@ public sealed class DenialWorkflowUploadJobService : IDenialWorkflowUploadJobSer
         };
 
         Jobs[jobId] = state;
+        _history.Save(ToRecord(state));
         _ = Task.Run(() => RunJobAsync(state, work));
 
         return new ClaimUploadStartResponse
@@ -90,9 +94,8 @@ public sealed class DenialWorkflowUploadJobService : IDenialWorkflowUploadJobSer
     public IReadOnlyList<ClaimUploadJobSummary> ListJobs(string requestedBy)
     {
         ExpireStaleJobs();
-        return Jobs.Values
+        var live = Jobs.Values
             .Where(x => CanAccess(x, requestedBy))
-            .OrderByDescending(x => x.CreatedOnUtc)
             .Select(x => new ClaimUploadJobSummary
             {
                 JobId = x.JobId,
@@ -105,14 +108,45 @@ public sealed class DenialWorkflowUploadJobService : IDenialWorkflowUploadJobSer
                 CompletedOnUtc = x.CompletedOnUtc
             })
             .ToList();
+
+        // Merge durable history so uploads from previous sessions still show after a restart.
+        var liveIds = new HashSet<string>(live.Select(j => j.JobId), StringComparer.OrdinalIgnoreCase);
+        foreach (var h in _history.List(requestedBy, "upload"))
+        {
+            if (liveIds.Contains(h.JobId)) continue;
+            live.Add(new ClaimUploadJobSummary
+            {
+                JobId = h.JobId,
+                FileName = h.FileName,
+                Status = h.Status,
+                TotalRows = h.RowCount ?? 0,
+                SuccessCount = h.SuccessCount ?? 0,
+                FailureCount = h.FailureCount ?? 0,
+                CreatedOnUtc = h.CreatedOnUtc,
+                CompletedOnUtc = h.CompletedOnUtc
+            });
+        }
+
+        return live.OrderByDescending(x => x.CreatedOnUtc).Take(100).ToList();
     }
 
     public ClaimUploadLogFile? GetLogFile(string jobId, string requestedBy)
     {
-        if (!Jobs.TryGetValue(jobId, out var state) || !CanAccess(state, requestedBy)) return null;
-        if (string.IsNullOrWhiteSpace(state.LogFilePath) || !File.Exists(state.LogFilePath)) return null;
-        var downloadName = $"UploadLog_{SafeFilePart(Path.GetFileNameWithoutExtension(state.FileName))}_{state.CreatedOnUtc:yyyyMMdd_HHmmss}.csv";
-        return new ClaimUploadLogFile(state.LogFilePath, downloadName, "text/csv");
+        if (Jobs.TryGetValue(jobId, out var state) && CanAccess(state, requestedBy))
+        {
+            if (string.IsNullOrWhiteSpace(state.LogFilePath) || !File.Exists(state.LogFilePath)) return null;
+            var downloadName = $"UploadLog_{SafeFilePart(Path.GetFileNameWithoutExtension(state.FileName))}_{state.CreatedOnUtc:yyyyMMdd_HHmmss}.csv";
+            return new ClaimUploadLogFile(state.LogFilePath, downloadName, "text/csv");
+        }
+
+        // Not in memory (e.g. after a restart): serve the log from durable history while it survives.
+        var h = _history.Get(jobId);
+        if (h is null || !string.Equals(h.JobType, "upload", StringComparison.OrdinalIgnoreCase)) return null;
+        if (!string.IsNullOrWhiteSpace(requestedBy) && !string.IsNullOrWhiteSpace(h.RequestedBy)
+            && !string.Equals(h.RequestedBy, requestedBy, StringComparison.OrdinalIgnoreCase)) return null;
+        if (string.IsNullOrWhiteSpace(h.FilePath) || !File.Exists(h.FilePath)) return null;
+        var name = $"UploadLog_{SafeFilePart(Path.GetFileNameWithoutExtension(h.FileName))}_{h.CreatedOnUtc:yyyyMMdd_HHmmss}.csv";
+        return new ClaimUploadLogFile(h.FilePath, name, "text/csv");
     }
 
     public ClaimUploadStatusResponse? Cancel(string jobId, string requestedBy)
@@ -177,7 +211,17 @@ public sealed class DenialWorkflowUploadJobService : IDenialWorkflowUploadJobSer
             state.CompletedOnUtc = DateTime.UtcNow;
             _logger.LogError(ex, "Claim upload job {JobId} failed.", state.JobId);
         }
+        finally
+        {
+            _history.Save(ToRecord(state));
+        }
     }
+
+    // Durable history projection of the current upload state (best-effort).
+    private JobHistoryRecord ToRecord(UploadJobState s) => new(
+        s.JobId, "upload", s.RequestedBy, s.LabId, s.FileName, s.Status, s.Message,
+        s.TotalRows, s.Result?.SuccessCount ?? 0, s.Result?.FailureCount ?? 0,
+        s.LogFilePath, "text/csv", s.CreatedOnUtc, s.CompletedOnUtc);
 
     private string? WriteLog(UploadJobState state, ClaimCsvUploadResult result)
     {
