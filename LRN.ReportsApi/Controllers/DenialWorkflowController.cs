@@ -2,6 +2,7 @@ using LRN.ReportsApi.Models;
 using LRN.ReportsApi.Security;
 using LRN.ReportsApi.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.Http;
 using System.Security.Claims;
 using System.Text;
@@ -17,13 +18,15 @@ public sealed class DenialWorkflowController : ControllerBase
     private static readonly object ReactLogLock = new();
     private readonly IDenialWorkflowService _service;
     private readonly IDenialWorkflowExportJobService _exportJobs;
+    private readonly IDenialWorkflowUploadJobService _uploadJobs;
     private readonly IDenialWorkflowSupportService _supportService;
     private readonly IConfiguration _configuration;
     private readonly ILogger<DenialWorkflowController> _logger;
-    public DenialWorkflowController(IDenialWorkflowService service, IDenialWorkflowExportJobService exportJobs, IDenialWorkflowSupportService supportService, IConfiguration configuration, ILogger<DenialWorkflowController> logger)
+    public DenialWorkflowController(IDenialWorkflowService service, IDenialWorkflowExportJobService exportJobs, IDenialWorkflowUploadJobService uploadJobs, IDenialWorkflowSupportService supportService, IConfiguration configuration, ILogger<DenialWorkflowController> logger)
     {
         _service = service;
         _exportJobs = exportJobs;
+        _uploadJobs = uploadJobs;
         _supportService = supportService;
         _configuration = configuration;
         _logger = logger;
@@ -196,6 +199,13 @@ public sealed class DenialWorkflowController : ControllerBase
         return Accepted(_exportJobs.StartClaimsExport(normalized, requestedBy));
     }
 
+    [HttpGet("claims/export")]
+    public ActionResult<IReadOnlyList<ClaimExportJobSummary>> ListExportJobs()
+    {
+        var requestedBy = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? string.Empty;
+        return Ok(_exportJobs.ListJobs(requestedBy));
+    }
+
     [HttpGet("claims/export/{jobId}")]
     public ActionResult<ClaimExportStatusResponse> ClaimsExportStatus([FromRoute] string jobId)
     {
@@ -219,6 +229,39 @@ public sealed class DenialWorkflowController : ControllerBase
         var requestedBy = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? string.Empty;
         var status = _exportJobs.Cancel(jobId, requestedBy);
         return status is null ? NotFound(new { message = "Export job was not found." }) : Ok(status);
+    }
+
+    // ── Async bulk-upload job endpoints (mirror the export job endpoints) ──
+    [HttpGet("claims/upload")]
+    public ActionResult<IReadOnlyList<ClaimUploadJobSummary>> ListUploadJobs()
+    {
+        var requestedBy = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? string.Empty;
+        return Ok(_uploadJobs.ListJobs(requestedBy));
+    }
+
+    [HttpGet("claims/upload/{jobId}")]
+    public ActionResult<ClaimUploadStatusResponse> ClaimsUploadStatus([FromRoute] string jobId)
+    {
+        var requestedBy = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? string.Empty;
+        var status = _uploadJobs.GetStatus(jobId, requestedBy);
+        return status is null ? NotFound(new { message = "Upload job was not found." }) : Ok(status);
+    }
+
+    [HttpGet("claims/upload/{jobId}/log")]
+    public IActionResult DownloadUploadLog([FromRoute] string jobId)
+    {
+        var requestedBy = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? string.Empty;
+        var file = _uploadJobs.GetLogFile(jobId, requestedBy);
+        if (file is null) return NotFound(new { message = "Upload log is not available." });
+        return PhysicalFile(file.FilePath, file.ContentType, file.FileName);
+    }
+
+    [HttpDelete("claims/upload/{jobId}")]
+    public ActionResult<ClaimUploadStatusResponse> CancelClaimsUpload([FromRoute] string jobId)
+    {
+        var requestedBy = FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? string.Empty;
+        var status = _uploadJobs.Cancel(jobId, requestedBy);
+        return status is null ? NotFound(new { message = "Upload job was not found." }) : Ok(status);
     }
 
     [HttpPost("claims/upload-csv")]
@@ -269,6 +312,23 @@ public sealed class DenialWorkflowController : ControllerBase
             return BadRequest(new { message = $"The upload file could not be read: {ex.Message} Please re-download the upload template and try again." });
         }
 
+        // Fire-and-forget: enqueue the parsed rows for background processing and return a jobId
+        // immediately, so a 100-claim upload no longer blocks the user for minutes. Status + the
+        // per-row result are available via /claims/upload/{jobId}; the log via /claims/upload/{jobId}/log.
+        var startResponse = _uploadJobs.StartUpload(labId, file.FileName, rows.Count, userName,
+            (sp, token) => ProcessClaimUploadAsync(
+                sp.GetRequiredService<IDenialWorkflowService>(), _logger,
+                labId, role, userName, managerRole, reviewerOnly, rows, token));
+        return Accepted(startResponse);
+    }
+
+    // Lifted verbatim from the old synchronous upload action so the background job service can run
+    // it. Parameters are deliberately named _service/_logger so the body below compiles unchanged.
+    private static async Task<ClaimCsvUploadResult> ProcessClaimUploadAsync(
+        IDenialWorkflowService _service, ILogger _logger,
+        int labId, string role, string userName, bool managerRole, bool reviewerOnly,
+        List<Dictionary<string, string>> rows, CancellationToken ct)
+    {
         var errors = new List<string>();
         var rowResults = new List<ClaimCsvRowResult>();
         void RecordFailure(int failRowNumber, string failClaimId, string failTaskId, string reason)
@@ -335,6 +395,9 @@ public sealed class DenialWorkflowController : ControllerBase
         var escalatedClaims = 0;
         var escalationResponses = 0;
         var processedRows = 0;
+        // Escalation is a claim-level action: create at most one DenialClaimEscalations row per
+        // claim per upload, even when the file has several line/CPT rows for the same claim.
+        var escalatedClaimKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in claimRows)
         {
             // One CSV claim row produces exactly one row result (Success or Failed). Per-row
@@ -383,6 +446,7 @@ public sealed class DenialWorkflowController : ControllerBase
                 var updateStatus = string.IsNullOrWhiteSpace(updateStatusRaw) ? string.Empty : NormalizeWorkflowStatus(updateStatusRaw);
                 var comments = CsvValue(item.Row, "Comments", "ReviewerComments", "Comment");
                 var notes = CsvValue(item.Row, "Notes");
+                var cptCode = CsvValue(item.Row, "CptCode", "CPTCode", "CPT Code");
                 var escalationReason = CsvValue(item.Row, "EscalationReason");
                 var otherEscalationReason = CsvValue(item.Row, "OtherEscalationReason");
                 var escalationComment = CsvValue(item.Row, "EscalationComment");
@@ -403,7 +467,7 @@ public sealed class DenialWorkflowController : ControllerBase
                 {
                     await _service.SaveNoteAsync(new SaveDenialNoteRequest
                     {
-                        LabId = labId, ClaimId = item.ClaimId, TaskId = item.TaskId,
+                        LabId = labId, ClaimId = item.ClaimId, TaskId = item.TaskId, CptCode = cptCode,
                         NoteLevel = !string.IsNullOrWhiteSpace(item.TaskId) ? "Task" : "Claim",
                         NoteText = notes, Status = NormalizeWorkflowStatus(baseTask.Status), CreatedBy = userName
                     }, ct);
@@ -441,7 +505,8 @@ public sealed class DenialWorkflowController : ControllerBase
                     }
                     await _service.SaveNoteAsync(new SaveDenialNoteRequest
                     {
-                        LabId = labId, ClaimId = item.ClaimId, NoteLevel = noteLevel, NoteText = comments,
+                        LabId = labId, ClaimId = item.ClaimId, TaskId = item.TaskId, CptCode = cptCode,
+                        NoteLevel = noteLevel, NoteText = comments,
                         Status = updateStatus, NextFollowUpDate = template.ExpectedResponseDate, CreatedBy = userName
                     }, ct);
                     addedComments++;
@@ -467,7 +532,8 @@ public sealed class DenialWorkflowController : ControllerBase
                     var noteLevel = !string.IsNullOrWhiteSpace(item.TaskId) ? "Task" : "Claim";
                     await _service.SaveNoteAsync(new SaveDenialNoteRequest
                     {
-                        LabId = labId, ClaimId = item.ClaimId, NoteLevel = noteLevel, NoteText = comments,
+                        LabId = labId, ClaimId = item.ClaimId, TaskId = item.TaskId, CptCode = cptCode,
+                        NoteLevel = noteLevel, NoteText = comments,
                         Status = NormalizeWorkflowStatus(baseTask.Status), CreatedBy = userName
                     }, ct);
                     updatedTasks += await _service.UpdateClaimCommentsAsync(labId, item.ClaimId, comments, userName, ct);
@@ -502,16 +568,31 @@ public sealed class DenialWorkflowController : ControllerBase
                     var finalReason = string.Equals(escalationReason, "Other", StringComparison.OrdinalIgnoreCase)
                         ? $"Other - {otherEscalationReason}"
                         : escalationReason;
-                    await _service.SaveEscalationAsync(new SaveDenialEscalationRequest
+                    // Claim-level escalation: create the DenialClaimEscalations row and its claim note
+                    // once per claim, so a multi-line file cannot add duplicate escalations. The note
+                    // makes the escalation visible in Claim Notes / History like the single-claim flow.
+                    if (escalatedClaimKeys.Add(item.ClaimId))
                     {
-                        LabId = labId, ClaimId = item.ClaimId, EscalationLevel = "Claim",
-                        EscalationScope = "Overall Claim", EscalationScopeValue = item.ClaimId,
-                        EscalationScopeDisplay = "Overall Claim",
-                        AffectedTaskIds = string.Join(",", claimTasks.Select(x => x.TaskId).Where(x => !string.IsNullOrWhiteSpace(x))),
-                        RecommendedNextAction = "Manager review", EscalationReason = finalReason,
-                        Comments = escalationComment, Status = finalReason.Contains("write-off decision required", StringComparison.OrdinalIgnoreCase) ? "WriteOffPending" : "Open",
-                        NextFollowUpDate = CsvNullableDate(item.Row, "EscalationExpectedResponseDate"), CreatedBy = userName
-                    }, ct);
+                        await _service.SaveEscalationAsync(new SaveDenialEscalationRequest
+                        {
+                            LabId = labId, ClaimId = item.ClaimId, TaskId = item.TaskId, CptCode = cptCode,
+                            EscalationLevel = "Claim",
+                            EscalationScope = "Overall Claim", EscalationScopeValue = item.ClaimId,
+                            EscalationScopeDisplay = string.IsNullOrWhiteSpace(cptCode) ? "Overall Claim" : $"CPT {cptCode}",
+                            AffectedTaskIds = string.Join(",", claimTasks.Select(x => x.TaskId).Where(x => !string.IsNullOrWhiteSpace(x))),
+                            RecommendedNextAction = "Manager review", EscalationReason = finalReason,
+                            Comments = escalationComment, Status = finalReason.Contains("write-off decision required", StringComparison.OrdinalIgnoreCase) ? "WriteOffPending" : "Open",
+                            NextFollowUpDate = CsvNullableDate(item.Row, "EscalationExpectedResponseDate"), CreatedBy = userName
+                        }, ct);
+                        await _service.SaveNoteAsync(new SaveDenialNoteRequest
+                        {
+                            LabId = labId, ClaimId = item.ClaimId, TaskId = item.TaskId, CptCode = cptCode,
+                            NoteLevel = "Claim", NoteText = $"{finalReason} - {escalationComment}",
+                            Status = "Internal Escalation", CreatedBy = userName
+                        }, ct);
+                        addedComments++;
+                        escalatedClaims++;
+                    }
                     foreach (var task in claimTasks)
                     {
                         updatedTasks += await _service.UpdateTaskAsync(new UpdateTaskRequest
@@ -521,7 +602,6 @@ public sealed class DenialWorkflowController : ControllerBase
                             UpdateScope = "Claim", UpdateScopeValue = item.ClaimId
                         }, ct);
                     }
-                    escalatedClaims++;
                     rowResult.Action = "Reviewer Escalation";
                     rowResult.NewStatus = "Escalated to AR Manager";
                     rowResult.Note = escalationComment;
@@ -617,7 +697,7 @@ public sealed class DenialWorkflowController : ControllerBase
             Errors = errors,
             Message = $"Processed {processedRows} claim row(s): {updatedTasks} task status update(s), {addedComments} claim comment(s), {escalatedClaims} escalation(s), and {escalationResponses} escalation response(s). Skipped {skipped} unchanged row(s).{(failureCount > 0 ? $" {failureCount} row(s) require correction." : string.Empty)}"
         };
-        return Ok(result);
+        return result;
     }
 
 	[HttpGet("claim-tasks")]

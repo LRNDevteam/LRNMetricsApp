@@ -7,6 +7,7 @@ public interface IDenialWorkflowExportJobService
 {
     ClaimExportStartResponse StartClaimsExport(DenialWorkflowFilter filter, string requestedBy);
     ClaimExportStatusResponse? GetStatus(string jobId, string requestedBy);
+    IReadOnlyList<ClaimExportJobSummary> ListJobs(string requestedBy);
     ClaimExportFile? GetCompletedFile(string jobId, string requestedBy);
     ClaimExportStatusResponse? Cancel(string jobId, string requestedBy);
 }
@@ -106,11 +107,37 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
         };
     }
 
+    public IReadOnlyList<ClaimExportJobSummary> ListJobs(string requestedBy)
+    {
+        ExpireStaleJobs();
+        return Jobs.Values
+            .Where(x => CanAccess(x, requestedBy))
+            .OrderByDescending(x => x.CreatedOnUtc)
+            .Take(50)
+            .Select(x => new ClaimExportJobSummary
+            {
+                JobId = x.JobId,
+                FileName = x.FileName,
+                Status = x.DownloadedOnUtc is not null && string.Equals(x.Status, "Completed", StringComparison.OrdinalIgnoreCase)
+                    ? "Downloaded"
+                    : x.Status,
+                Message = x.Message,
+                RowCount = x.RowCount,
+                CreatedOnUtc = x.CreatedOnUtc,
+                CompletedOnUtc = x.CompletedOnUtc,
+                DownloadUrl = string.Equals(x.Status, "Completed", StringComparison.OrdinalIgnoreCase)
+                    ? $"/api/denialworkflow/claims/export/{x.JobId}/download"
+                    : null
+            })
+            .ToList();
+    }
+
     public ClaimExportFile? GetCompletedFile(string jobId, string requestedBy)
     {
         if (!Jobs.TryGetValue(jobId, out var state) || !CanAccess(state, requestedBy)) return null;
         if (!string.Equals(state.Status, "Completed", StringComparison.OrdinalIgnoreCase)) return null;
         if (!File.Exists(state.FilePath)) return null;
+        state.DownloadedOnUtc ??= DateTime.UtcNow; // list shows "Downloaded" after first save
         return new ClaimExportFile(state.FilePath, state.FileName, state.ContentType);
     }
 
@@ -125,9 +152,21 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
             state.Message = "Export was cancelled by the user.";
             state.CompletedOnUtc = DateTime.UtcNow;
             TryDelete(state.FilePath);
+            return GetStatus(jobId, requestedBy);
         }
 
-        return GetStatus(jobId, requestedBy);
+        // Finished job: DELETE removes it from the list (and deletes the file) — powers the
+        // trash action in the Jobs Center.
+        Jobs.TryRemove(jobId, out _);
+        TryDelete(state.FilePath);
+        return new ClaimExportStatusResponse
+        {
+            JobId = state.JobId,
+            Status = "Deleted",
+            Message = "Export was removed.",
+            CreatedOnUtc = state.CreatedOnUtc,
+            CompletedOnUtc = state.CompletedOnUtc
+        };
     }
 
     private async Task RunJobAsync(DenialWorkflowFilter filter, ExportJobState state)
@@ -234,6 +273,7 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
         public int RowCount { get; set; }
         public DateTime CreatedOnUtc { get; init; }
         public DateTime? CompletedOnUtc { get; set; }
+        public DateTime? DownloadedOnUtc { get; set; }
         public CancellationTokenSource? Cancellation { get; init; }
     }
 }

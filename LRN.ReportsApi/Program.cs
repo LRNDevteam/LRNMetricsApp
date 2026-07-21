@@ -74,6 +74,7 @@ builder.Services.AddScoped<IPayerRulesAdminService, PayerRulesAdminService>();
 builder.Services.AddScoped<IDenialWorkflowIssueNotifier, DenialWorkflowIssueNotifier>();
 builder.Services.AddScoped<IDenialWorkflowSupportService, DenialWorkflowSupportService>();
 builder.Services.AddSingleton<IDenialWorkflowExportJobService, DenialWorkflowExportJobService>();
+builder.Services.AddSingleton<IDenialWorkflowUploadJobService, DenialWorkflowUploadJobService>();
 builder.Services.AddHttpClient();
 builder.Services.AddAuthorization();
 builder.Services.AddControllers();

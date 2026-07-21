@@ -305,6 +305,59 @@ public sealed class ClaimExportStatusResponse
     public string? DownloadUrl { get; set; }
 }
 
+// Async bulk-upload job responses — mirrors the export job responses above so the client can
+// enqueue an upload, poll status, then open the per-row result / download the log.
+public sealed class ClaimUploadStartResponse
+{
+    public string JobId { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+    public int TotalRows { get; set; }
+    public DateTime CreatedOnUtc { get; set; }
+}
+
+public sealed class ClaimUploadStatusResponse
+{
+    public string JobId { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;   // Queued | Running | Completed | Failed
+    public string Message { get; set; } = string.Empty;
+    public int TotalRows { get; set; }
+    public int SuccessCount { get; set; }
+    public int FailureCount { get; set; }
+    public DateTime CreatedOnUtc { get; set; }
+    public DateTime? CompletedOnUtc { get; set; }
+    public string? DownloadUrl { get; set; }             // log download, when finished
+    // Full per-row detail (populated once finished) — powers the upload-detail popup.
+    public ClaimCsvUploadResult? Result { get; set; }
+}
+
+// Compact row for the top-right jobs badge: one per export/download job.
+public sealed class ClaimExportJobSummary
+{
+    public string JobId { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+    public int RowCount { get; set; }
+    public DateTime CreatedOnUtc { get; set; }
+    public DateTime? CompletedOnUtc { get; set; }
+    public string? DownloadUrl { get; set; }
+}
+
+// Compact row for the "Upload Status" list page (one per uploaded file).
+public sealed class ClaimUploadJobSummary
+{
+    public string JobId { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public int TotalRows { get; set; }
+    public int SuccessCount { get; set; }
+    public int FailureCount { get; set; }
+    public DateTime CreatedOnUtc { get; set; }
+    public DateTime? CompletedOnUtc { get; set; }
+}
+
 public sealed class ClaimCsvUploadResult
 {
     public bool Success { get; set; }

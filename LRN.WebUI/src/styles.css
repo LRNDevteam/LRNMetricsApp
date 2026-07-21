@@ -1899,3 +1899,72 @@ body{background:#f5f7fb;color:#101828}
 .csv-reason-cell{max-width:200px;color:#b42318;word-break:break-word}
 .csv-empty{text-align:center;color:#94a3b8;padding:18px}
 @media (prefers-reduced-motion:reduce){.csv-upload-spinner{animation:none}}
+
+/* Jobs Center: topbar badge + dropdown + Uploads & Downloads page */
+.jobs-badge-wrap{position:relative}
+.jobs-badge-btn{white-space:nowrap}
+.jobs-badge-count{background:#0f766e}
+.csv-upload-queued{display:flex;flex-direction:column;align-items:center;gap:9px;padding:26px 18px;text-align:center}
+.csv-upload-queued>i{font-size:34px;color:#0f766e}
+.csv-upload-queued strong{font-size:15px;color:#1e293b}
+.csv-upload-queued span{font-size:12px;color:#64748b;max-width:420px}
+.csv-upload-modal-compact{width:min(640px,94vw)}
+.jobs-dropdown{position:absolute;top:calc(100% + 8px);right:0;z-index:2100;width:min(430px,92vw);background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 14px 34px rgba(15,23,42,.16);overflow:hidden}
+.jobs-dropdown-hd{display:flex;justify-content:space-between;align-items:center;padding:10px 13px;background:#f8fafc;border-bottom:1px solid #e2e8f0;font-size:12px}
+.jobs-dropdown-hd span{color:#64748b;font-size:10px}
+.jobs-dropdown-list{max-height:330px;overflow-y:auto}
+.jobs-row{display:flex;align-items:center;gap:9px;padding:9px 13px;border-bottom:1px solid #f1f5f9;font-size:11px}
+.jobs-row:last-child{border-bottom:0}
+.jobs-row-icon{width:26px;height:26px;flex:0 0 26px;display:grid;place-items:center;border-radius:7px;font-size:12px}
+.jobs-row-icon.upload{background:#eef2ff;color:#3730a3}
+.jobs-row-icon.download{background:#ecfdf5;color:#067647}
+.jobs-row-main{flex:1;min-width:0}
+.jobs-row-title{font-weight:700;color:#1e293b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.jobs-row-meta{color:#94a3b8;font-size:9.5px;margin-top:2px}
+.jobs-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:999px;font-size:9.5px;font-weight:800;white-space:nowrap}
+.jobs-chip.ok{background:#ecfdf5;color:#067647}
+.jobs-chip.fail{background:#fef2f2;color:#b42318}
+.jobs-chip.run{background:#eff6ff;color:#1d4ed8}
+.jobs-spin{animation:claim-spin .9s linear infinite;font-size:10px}
+.jobs-empty{padding:22px;text-align:center;color:#94a3b8;font-size:11px}
+.jobs-dropdown-ft{display:block;width:100%;padding:10px;border:0;background:#f8fafc;border-top:1px solid #e2e8f0;color:#0f766e;font-weight:800;font-size:11px;cursor:pointer}
+.jobs-dropdown-ft:hover{background:#f0fdfa}
+.jobs-page-card{margin-bottom:14px}
+.jobs-page-hd{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.jobs-table td,.jobs-table th{font-size:11px}
+.jobs-table .r{text-align:right}
+.jobs-file-cell{font-weight:700;color:#1e293b;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.jobs-file-cell .jobs-row-icon{display:inline-grid;vertical-align:middle;margin-right:5px}
+.jobs-click-row{cursor:pointer}
+.jobs-click-row:hover td{background:#f8fafc}
+.jobs-num-ok{color:#067647;font-weight:800}
+.jobs-num-fail{color:#b42318;font-weight:800}
+/* Tabs + date filter toolbar on the Uploads & Downloads page */
+.jobs-tab-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-bottom:1px solid #e2e8f0;background:#f8fafc;border-radius:9px 9px 0 0}
+.jobs-tabs{display:flex;gap:6px}
+.jobs-tab{display:inline-flex;align-items:center;gap:7px;padding:7px 15px;border:1px solid #d8e0ea;border-radius:999px;background:#fff;color:#475569;font-size:11px;font-weight:800;cursor:pointer}
+.jobs-tab b{background:#eef2f7;border-radius:999px;padding:1px 8px;font-size:10px}
+.jobs-tab.active{background:#0f766e;border-color:#0f766e;color:#fff}
+.jobs-tab.active b{background:rgba(255,255,255,.22);color:#fff}
+.jobs-tab-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.jobs-tab-tools label{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.04em}
+.jobs-tab-tools input[type="date"]{height:30px;border:1px solid #cbd5e1;border-radius:7px;padding:0 8px;font-size:11px;background:#fff}
+/* Inset the table from the card edges (bordered, rounded, own scroll area) */
+.jobs-page-card .dt-wrap{margin:14px 16px 18px;border:1px solid #e2e8f0;border-radius:9px;overflow:auto}
+.jobs-page-card .jobs-table{margin:0}
+/* Sortable headers */
+.jobs-sort-th{cursor:pointer;user-select:none;white-space:nowrap}
+.jobs-sort-th:hover{background:#eef2f7}
+.jobs-sort-th>span{display:inline-flex;align-items:center;gap:5px}
+.jobs-sort-icon{font-size:9px;color:#b6c2d2}
+.jobs-sort-icon.active{color:#0f766e}
+/* Action icon buttons (match the LRN reports panel style: filled green download, outlined red trash) */
+.jobs-actions{display:flex;align-items:center;gap:7px}
+.jobs-icon-btn{width:30px;height:30px;display:inline-grid;place-items:center;border-radius:7px;border:1px solid #15803d;background:#16a34a;color:#fff;font-size:13px;cursor:pointer;transition:filter .12s}
+.jobs-icon-btn:hover{filter:brightness(1.06)}
+.jobs-icon-btn.teal{background:#0f766e;border-color:#0d655e}
+.jobs-icon-btn.danger{background:#fff;border-color:#fda29b;color:#dc2626}
+.jobs-icon-btn.danger:hover{background:#fef2f2}
+.jobs-chip.downloaded{background:#fff;border:1px solid #a7f3d0;color:#067647}
+.jobs-chip.downloaded i{font-size:11px}
+@media (prefers-reduced-motion:reduce){.jobs-spin{animation:none}}

@@ -3414,7 +3414,11 @@ ORDER BY {string.Join(", ", orderByParts)};";
 
         sheet.SheetView.FreezeRows(1);
         sheet.SheetView.FreezeColumns(2);
-        sheet.Columns().AdjustToContents(8, 50);
+        // Auto-fit every column including the header row. The previous call used the
+        // (startRow, endRow) overload — AdjustToContents(8, 50) measured only rows 8-50,
+        // skipping the header and first data rows, so columns came out mis-sized.
+        // Measure header + a capped sample of data rows, clamped to a sane width range.
+        sheet.Columns().AdjustToContents(1, Math.Min(lastRow, 500), 10d, 60d);
         lookupSheet.Hide();
         workbook.SaveAs(output);
         return taskRows.Count;

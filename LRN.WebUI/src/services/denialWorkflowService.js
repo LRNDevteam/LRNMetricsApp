@@ -22,14 +22,38 @@ export const denialWorkflowService = {
   getInsights: (query) => api(`/insights?${qs(query)}`),
   getClaims: async (query, options = {}) => normalizePagedResult(await api(`/claims?${qs(query)}`, options)),
   startClaimsExport: (query) => api('/claims/export', { method: 'POST', body: JSON.stringify(query || {}) }),
+  listExportJobs: () => api('/claims/export'),
   getClaimsExportStatus: (jobId) => api(`/claims/export/${encodeURIComponent(jobId)}`),
   cancelClaimsExport: (jobId) => api(`/claims/export/${encodeURIComponent(jobId)}`, { method: 'DELETE' }),
   getClaimsExportDownloadUrl: (jobId) => apiUrl(`/claims/export/${encodeURIComponent(jobId)}/download`),
-  uploadClaimsCsv: (labId, file) => {
+  // Enqueue a bulk upload — returns { jobId, status, message, totalRows } immediately (202); the
+  // server processes it in the background so the user is no longer held on the page.
+  enqueueClaimsUpload: (labId, file) => {
     const form = new FormData();
     form.append('labId', labId);
     form.append('file', file);
     return api('/claims/upload-csv', { method: 'POST', body: form });
+  },
+  getUploadStatus: (jobId) => api(`/claims/upload/${encodeURIComponent(jobId)}`),
+  listUploadJobs: () => api('/claims/upload'),
+  cancelUpload: (jobId) => api(`/claims/upload/${encodeURIComponent(jobId)}`, { method: 'DELETE' }),
+  getUploadLogUrl: (jobId) => apiUrl(`/claims/upload/${encodeURIComponent(jobId)}/log`),
+  // Back-compat wrapper: enqueue then poll to completion and resolve with the per-row result,
+  // so existing callers keep working while the request thread is no longer blocked server-side.
+  uploadClaimsCsv: async (labId, file, { onProgress } = {}) => {
+    const start = await denialWorkflowService.enqueueClaimsUpload(labId, file);
+    const jobId = start?.jobId;
+    if (!jobId) return start;
+    const deadline = Date.now() + 30 * 60 * 1000;
+    for (;;) {
+      await new Promise(r => setTimeout(r, 2000));
+      const status = await denialWorkflowService.getUploadStatus(jobId);
+      if (onProgress) onProgress(status);
+      const s = String(status?.status || '').toLowerCase();
+      if (s === 'completed') return status.result || { message: status.message, jobId };
+      if (s === 'failed') throw new Error(status.message || 'Upload failed.');
+      if (Date.now() > deadline) throw new Error('Upload is still processing — check the Uploads list shortly.');
+    }
   },
   getTasks: async (query, options = {}) => normalizePagedResult(await api(`/tasks?${qs(query)}`, options)),
   getVerification: async (query, options = {}) => normalizePagedResult(await api(`/verification?${qs(query)}`, options)),
