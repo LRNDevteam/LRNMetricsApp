@@ -55,7 +55,11 @@ function ManagerDashboard({ data, onKpiClick }) {
 function AnalystDashboard({ data, user, labName, onKpiClick }) {
   const workload = data.analystWorkload || [];
   const mine = workload.find(x => String(x.reviewerName || '').toLowerCase() === String(user?.displayName || user?.userName || '').toLowerCase()) || workload[0] || {};
-  const assignedClaims = data.assignedClaims ?? mine.totalClaims ?? data.totalClaims ?? 0;
+  // Use the same per-reviewer workload row that renders the "My Aging View" table above, so the
+  // tile always matches it. data.assignedClaims is the queue-PRECEDENCE count (a claim in payer
+  // follow-up / documentation / escalation leaves the "Assigned" bucket), which read 91 while the
+  // aging table showed all 100 actively-assigned claims.
+  const assignedClaims = mine.assigned ?? mine.totalClaims ?? data.assignedClaims ?? data.totalClaims ?? 0;
   const pendingTasks = mine.pendingTasks ?? mine.pending ?? data.openInProgressCount ?? 0;
   const closedTasks = mine.closedTasks ?? mine.closed ?? data.closedCount ?? 0;
   const openBalance = data.outstandingAmount || 0;
@@ -70,7 +74,7 @@ function AnalystDashboard({ data, user, labName, onKpiClick }) {
       <RoleKpi label="Open Balance" value={money(openBalance)} tone="teal" />
     </div>
     <div className="role-grid two analyst-layout">
-      <RoleCard title="Priority Work Queue">
+      <RoleCard title="Priority Work Queue" subtitle="A claim is listed under every denial classification it carries, so queue claim counts can add up to more than your assigned total.">
         <div className="role-table-wrap"><table className="role-table wide"><thead><tr><th>Queue</th><th>Claims</th><th>Tasks</th><th>Balance</th><th>Priority</th></tr></thead><tbody>
           {(data.denialClassifications || []).slice(0, 6).map((r, i) => <tr key={i}><td>{r.classification || 'Unclassified'}</td><td>{n(r.claims || r.count)}</td><td>{n(r.tasks || r.count)}</td><td>{money(r.outstanding)}</td><td><RiskPill value={i < 2 ? 'High' : i < 4 ? 'Medium' : 'Low'} /></td></tr>)}
           {!(data.denialClassifications || []).length && <EmptyRow colSpan={5} />}

@@ -955,8 +955,12 @@ public sealed class DenialWorkflowController : ControllerBase
     public async Task<ActionResult<PagedResult<DenialEscalationQueueRow>>> EscalationQueue([FromQuery] DenialWorkflowFilter filter, [FromQuery] string escalationLevel = "Claim", CancellationToken ct = default)
     {
         if (filter.LabId <= 0) return BadRequest("LabId is required.");
-        if (string.Equals(filter.TaskView, "response", StringComparison.OrdinalIgnoreCase) && IsReadOnlyWorkflowRole(FirstClaim(ClaimTypes.Role, "role", "roles")))
+        var tokenRole = FirstClaim(ClaimTypes.Role, "role", "roles") ?? string.Empty;
+        if (string.Equals(filter.TaskView, "response", StringComparison.OrdinalIgnoreCase) && IsReadOnlyWorkflowRole(tokenRole))
             return StatusCode(StatusCodes.Status403Forbidden, new { message = "This role cannot access Escalation Response." });
+        // External managers must only see escalations addressed to their own role; take the role
+        // from the token so the query-string cannot widen the scope (Round 4 Group D).
+        if (IsClientManagerRole(tokenRole) || IsAccountManagerRole(tokenRole)) filter.Role = tokenRole;
         return Ok(await _service.GetEscalationQueueAsync(Normalize(filter), escalationLevel, ct));
     }
 
@@ -969,6 +973,9 @@ public sealed class DenialWorkflowController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.ResponseNote)) return BadRequest("Manager response note is required.");
         if (string.IsNullOrWhiteSpace(request.RecommendedNextAction)) return BadRequest("Recommended next action is required.");
         request.ActionBy = string.IsNullOrWhiteSpace(request.ActionBy) ? (FirstClaim(ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn") ?? "ReactWorkflow") : request.ActionBy;
+        // Attribution comes from the token, not the payload: the responder's own role decides the
+        // response label (Account Manager Response / Client Response / Manager Response).
+        request.ActionByRole = FirstClaim(ClaimTypes.Role, "role", "roles") ?? string.Empty;
         try
         {
             var rows = await _service.ResolveEscalationAsync(request, ct);
@@ -1249,6 +1256,7 @@ public sealed class DenialWorkflowController : ControllerBase
         "Pending Documentation",
         "Write-Off Pending Approval",
         "Escalated to AR Manager",
+        "External Escalation",
         "Rework",
         "Closed"
     };
@@ -1304,7 +1312,11 @@ public sealed class DenialWorkflowController : ControllerBase
         {
             "" or "open" or "in progress" or "in-progress" or "pending review" => "Assigned",
             "pending payer" => "Pending Payer Response",
-            "escalated" or "internal escalation" or "external escalation" => "Escalated to AR Manager",
+            "escalated" or "internal escalation" => "Escalated to AR Manager",
+            // Round 4 UAT B3: external escalation (to Client/Account Manager) must keep its own
+            // label — collapsing it into 'Escalated to AR Manager' mislabeled every externally
+            // escalated claim and hid it from External Escalation queue filtering.
+            "external escalation" => "External Escalation",
             "completed" => "Closed",
             "required review" or "returned for rework" => "Rework",
             _ => value

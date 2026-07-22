@@ -60,7 +60,8 @@ function normalizeWorkflowStatus(value) {
   const v = String(value || '').trim().toLowerCase();
   if (!v || v === 'open' || v === 'in progress' || v === 'pending review') return 'Assigned';
   if (v === 'pending payer') return 'Pending Payer Response';
-  if (v === 'escalated' || v === 'internal escalation' || v === 'external escalation') return 'Escalated to AR Manager';
+  if (v === 'escalated' || v === 'internal escalation') return 'Escalated to AR Manager';
+  if (v === 'external escalation') return 'External Escalation';
   if (v === 'completed') return 'Closed';
   if (v === 'required review') return 'Rework';
   return value || 'Assigned';
@@ -374,7 +375,10 @@ export default function ClaimAssignmentPage({ data, reviewers, selected, setSele
     if (!canAssign) return setMessage({ type: 'warning', text: 'Only Admin and AR Manager users can escalate claims/tasks.' });
     if (!target || !target.claimIds?.length) return setMessage({ type: 'warning', text: 'Please select one or more claim rows.' });
     setEscalationPopup(target);
-    setEscalationReason(escalationReasons[0]);
+    // Escalating from the Write-Off Approval queue is by definition a write-off decision request:
+    // carrying this reason makes the Account/Client Manager's queue show the Approve/Reject
+    // Write Off decision actions instead of the generic response actions (Round 4 B5).
+    setEscalationReason(taskView === 'writeOffApproval' ? 'Write-off decision required' : escalationReasons[0]);
     setEscalationRecommendedAction('');
     setEscalationComment('');
     setEscalationAssignee('');

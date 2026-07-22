@@ -196,6 +196,9 @@ public sealed class DenialClassificationSummaryRow
 {
     public string Classification { get; set; } = string.Empty;
     public int Count { get; set; }
+    // Task rows behind Count's distinct claims — lets the UI show claims vs tasks instead of
+    // repeating the claim count in both columns.
+    public int Tasks { get; set; }
     public decimal BilledAmount { get; set; }
     public decimal InsuranceBalance { get; set; }
     public decimal Outstanding { get; set; }
@@ -652,18 +655,24 @@ public sealed class UpdateTaskRequest
     public int LabId { get; set; }
     public string TaskId { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
-    public string Comments { get; set; } = string.Empty;
-    public string ActionBy { get; set; } = string.Empty;
+    // Round 4 UAT Group A: these optional fields MUST stay nullable. With nullable reference
+    // types enabled, [ApiController] treats a non-nullable string property as implicitly
+    // [Required], and the workflow UI sends explicit JSON nulls for fields a given status does
+    // not use (e.g. followUpReason: null on a write-off approval). That combination auto-400'd
+    // every Approve/Reject Write Off and several status changes before the action even ran.
+    // Status-specific requiredness is enforced deliberately in ValidateTaskStatusUpdate.
+    public string? Comments { get; set; }
+    public string? ActionBy { get; set; }
     public bool? ActionCompleted { get; set; }
-    public string ActualOutcome { get; set; } = string.Empty;
-    public string DocumentationType { get; set; } = string.Empty;
-    public string FollowUpReason { get; set; } = string.Empty;
-    public string ClosureReason { get; set; } = string.Empty;
-    public string SyncConfirmation { get; set; } = string.Empty;
-    public string ValidationStatus { get; set; } = string.Empty;
+    public string? ActualOutcome { get; set; }
+    public string? DocumentationType { get; set; }
+    public string? FollowUpReason { get; set; }
+    public string? ClosureReason { get; set; }
+    public string? SyncConfirmation { get; set; }
+    public string? ValidationStatus { get; set; }
     public DateTime? ExpectedResponseDate { get; set; }
     public string UpdateScope { get; set; } = "Line";
-    public string UpdateScopeValue { get; set; } = string.Empty;
+    public string? UpdateScopeValue { get; set; }
 }
 
 public sealed class VerificationDecisionRequest
@@ -699,14 +708,16 @@ public sealed class SaveDenialNoteRequest
     public string? CptCode { get; set; }
     public string NoteLevel { get; set; } = "Claim";
     public string NoteText { get; set; } = string.Empty;
-    public string Status { get; set; } = string.Empty;
+    // Nullable for the same reason as UpdateTaskRequest: a client sending an explicit null for an
+    // optional field must not trip the implicit-[Required] auto-400.
+    public string? Status { get; set; }
     public DateTime? NextFollowUpDate { get; set; }
-    public string FollowUpReason { get; set; } = string.Empty;
+    public string? FollowUpReason { get; set; }
     public bool? ActionCompleted { get; set; }
-    public string ActualOutcome { get; set; } = string.Empty;
-    public string DocumentationType { get; set; } = string.Empty;
+    public string? ActualOutcome { get; set; }
+    public string? DocumentationType { get; set; }
     public bool ValidateWorkflowFields { get; set; }
-    public string CreatedBy { get; set; } = string.Empty;
+    public string? CreatedBy { get; set; }
 }
 
 public sealed class FollowUpNotificationRow
@@ -860,8 +871,12 @@ public sealed class ResolveDenialEscalationRequest
     public string ResolutionAction { get; set; } = string.Empty;
     public string ResponseNote { get; set; } = string.Empty;
     public string RecommendedNextAction { get; set; } = string.Empty;
-    public string ReassignTo { get; set; } = string.Empty;
-    public string ActionBy { get; set; } = string.Empty;
+    public string? ReassignTo { get; set; }
+    public string? ActionBy { get; set; }
+    // Set server-side from the authenticated token, never from the client: used to attribute the
+    // response ('Account Manager Response' vs 'Client Response' vs 'Manager Response') so an
+    // external manager's response is not recorded under the escalating AR Manager (Round 4 B4).
+    public string? ActionByRole { get; set; }
 }
 
 public sealed class DenialClaimHistoryRow
