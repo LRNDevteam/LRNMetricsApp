@@ -26,12 +26,30 @@ public sealed class DenialWorkflowJobHistoryStore : IDenialWorkflowJobHistorySto
     private readonly string _connectionString;
     private readonly ILogger<DenialWorkflowJobHistoryStore> _logger;
     private int _ensured;
+    // Circuit breaker: when the DB is unreachable, stop hammering it. The Jobs badge polls List()
+    // every few seconds per user; without this, each poll blocks a thread on a synchronous
+    // con.Open() for the full connect timeout while SQL is down, which piles up into connection-
+    // pool-timeout exhaustion (observed 2026-07-22). While tripped, calls short-circuit to
+    // empty/no-op — this store is already best-effort and must never break the live in-memory flow.
+    private long _downUntilTicks;
+    private static readonly TimeSpan DownCooldown = TimeSpan.FromSeconds(30);
 
     public DenialWorkflowJobHistoryStore(IConfiguration configuration, ILogger<DenialWorkflowJobHistoryStore> logger)
     {
-        _connectionString = configuration.GetConnectionString("DefaultConnection") ?? string.Empty;
+        var raw = configuration.GetConnectionString("DefaultConnection") ?? string.Empty;
+        // Fail fast (5s) rather than the default 15s so a dead server frees the thread quickly.
+        _connectionString = string.IsNullOrWhiteSpace(raw) || raw.Contains("Connect Timeout", StringComparison.OrdinalIgnoreCase) || raw.Contains("Connection Timeout", StringComparison.OrdinalIgnoreCase)
+            ? raw
+            : raw.TrimEnd(';') + ";Connect Timeout=5";
         _logger = logger;
     }
+
+    private void MarkDown() => Interlocked.Exchange(ref _downUntilTicks, DateTime.UtcNow.Add(DownCooldown).Ticks);
+    private void MarkUp() { if (Interlocked.Read(ref _downUntilTicks) != 0) Interlocked.Exchange(ref _downUntilTicks, 0); }
+
+    private static bool IsConnectivity(Exception ex) =>
+        ex is SqlException { Number: 53 or 40 or -2 or 258 or 10053 or 10054 or 10060 or 4060 or 40197 or 40501 or 40613 or 233 or 64 }
+        || (ex is InvalidOperationException && ex.Message.Contains("from the pool", StringComparison.OrdinalIgnoreCase));
 
     private const string EnsureSql = @"
 IF OBJECT_ID('dbo.DenialWorkflowJobHistory','U') IS NULL
@@ -77,7 +95,9 @@ SELECT TOP (1) JobId,JobType,RequestedBy,LabId,FileName,Status,Message,[RowCount
 FROM dbo.DenialWorkflowJobHistory WITH (NOLOCK)
 WHERE JobId=@JobId;";
 
-    private bool Available() => !string.IsNullOrWhiteSpace(_connectionString);
+    private bool Available()
+        => !string.IsNullOrWhiteSpace(_connectionString)
+           && DateTime.UtcNow.Ticks >= Interlocked.Read(ref _downUntilTicks);
 
     private void EnsureTable(SqlConnection con)
     {
@@ -118,9 +138,11 @@ WHERE JobId=@JobId;";
             cmd.Parameters.AddWithValue("@CreatedOnUtc", r.CreatedOnUtc);
             cmd.Parameters.AddWithValue("@CompletedOnUtc", (object?)r.CompletedOnUtc ?? DBNull.Value);
             cmd.ExecuteNonQuery();
+            MarkUp();
         }
         catch (Exception ex)
         {
+            if (IsConnectivity(ex)) MarkDown();
             _logger.LogWarning(ex, "Could not persist job history for {JobId}.", r.JobId);
         }
     }
@@ -139,9 +161,11 @@ WHERE JobId=@JobId;";
             cmd.Parameters.AddWithValue("@JobType", jobType);
             using var rd = cmd.ExecuteReader();
             while (rd.Read()) rows.Add(ReadRecord(rd));
+            MarkUp();
         }
         catch (Exception ex)
         {
+            if (IsConnectivity(ex)) MarkDown();
             _logger.LogWarning(ex, "Could not read job history for {User}.", requestedBy);
         }
         return rows;
@@ -158,10 +182,13 @@ WHERE JobId=@JobId;";
             using var cmd = new SqlCommand(GetSql, con) { CommandTimeout = 60 };
             cmd.Parameters.AddWithValue("@JobId", jobId);
             using var rd = cmd.ExecuteReader();
-            return rd.Read() ? ReadRecord(rd) : null;
+            var record = rd.Read() ? ReadRecord(rd) : null;
+            MarkUp();
+            return record;
         }
         catch (Exception ex)
         {
+            if (IsConnectivity(ex)) MarkDown();
             _logger.LogWarning(ex, "Could not read job history record {JobId}.", jobId);
             return null;
         }

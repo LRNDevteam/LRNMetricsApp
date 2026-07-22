@@ -508,7 +508,7 @@ export default function App() {
     toDate: debouncedFilter.toDate || '',
     taskView: view === 'claims' ? claimTaskView : '',
     page: debouncedFilter.page || 1,
-    pageSize: 100
+    pageSize: debouncedFilter.pageSize || 50
   }), [labId, user.role, user.userName, debouncedFilter, reviewerOnly, view, claimTaskView]);
 
   const menuCountQuery = useMemo(() => ({
@@ -891,6 +891,8 @@ export default function App() {
   function setFilterValue(k, v) { setFilter(f => ({ ...f, [k]: v, page: 1 })); }
   function clearFilter() { resetWorkflowFilters(); }
   function changePage(page) { setFilter(f => ({ ...f, page })); }
+  // Page-size change resets to page 1 so the user isn't stranded past the new last page.
+  function changePageSize(size) { setFilter(f => ({ ...f, pageSize: Number(size) || 50, page: 1 })); }
 
   function applyDrilldownFilters(next = {}) {
     const nextFilter = { ...filter, ...next, page: 1 };
@@ -1409,7 +1411,7 @@ export default function App() {
           setMessage({ type: 'info', text: `Showing claims for ${row?.name || 'selected group'} / ${bucket?.label || 'aging bucket'}.` });
         }} />}
         {view === 'summary' && <DenialSummaryPage data={dashboard} canAssign={canAssign} onClassificationClick={openClaimsByClassification} onActionCategoryClick={openClaimsByActionCategory} onAssign={() => { setClaimTaskView('new'); setView(reviewerOnly ? 'myworklist' : 'claims'); setMessage({ type: 'info', text: canAssign ? 'Select the required claim rows, choose reviewer, then assign.' : 'This role has read-only workflow access.' }); }} />}
-        {view === 'claims' && <ClaimAssignmentPage data={claims} loading={loading} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} labId={labId} currentUser={user.userName || 'ReactWorkflow'} currentUserRole={user.role || ''} canAssign={canAssign} readOnlyWorkflow={readOnlyWorkflow} taskView={claimTaskView} setTaskView={handleClaimTaskViewChange} tabCounts={claimMenuCounts} openEscalationResponse={() => handleClaimTabRoute('response')} openVerification={() => handleClaimTabRoute('verification')} setMessage={setWorkflowMessage} onDownloadTemplate={() => startClaimExport({ currentTab: true, uploadTemplate: true })} onCsvUploaded={async () => { setClaimTasks({}); setExpandedClaim(''); setClaims(await denialWorkflowService.getClaims({ ...query, taskView: claimTaskView })); await refreshMenuCounts(); }} exportBusy={exportBusy} filter={filter} setFilterValue={setFilterValue} assignedUsers={filterOptions.assignedUsers || []} />}
+        {view === 'claims' && <ClaimAssignmentPage data={claims} loading={loading} reviewers={reviewers} selected={selectedClaims} setSelected={setSelectedClaims} bulkReviewer={bulkReviewer} setBulkReviewer={setBulkReviewer} loadClaimTasks={loadClaimTasks} claimTasks={claimTasks} expandedClaim={expandedClaim} assignClaims={assignClaims} changePage={changePage} changePageSize={changePageSize} pageSize={filter.pageSize || 50} labId={labId} currentUser={user.userName || 'ReactWorkflow'} currentUserRole={user.role || ''} canAssign={canAssign} readOnlyWorkflow={readOnlyWorkflow} taskView={claimTaskView} setTaskView={handleClaimTaskViewChange} tabCounts={claimMenuCounts} openEscalationResponse={() => handleClaimTabRoute('response')} openVerification={() => handleClaimTabRoute('verification')} setMessage={setWorkflowMessage} onDownloadTemplate={() => startClaimExport({ currentTab: true, uploadTemplate: true })} onCsvUploaded={async () => { setClaimTasks({}); setExpandedClaim(''); setClaims(await denialWorkflowService.getClaims({ ...query, taskView: claimTaskView })); await refreshMenuCounts(); }} exportBusy={exportBusy} filter={filter} setFilterValue={setFilterValue} assignedUsers={filterOptions.assignedUsers || []} />}
         {view === 'verification' && <VerificationPage data={verification} changePage={changePage} tabCounts={claimMenuCounts} onTabChange={handleClaimTabRoute} reviewers={reviewers} canAssign={canAssign} assignClaims={assignClaims} />}
         {view === 'myworklist' && <MyWorklistPage labId={labId} user={user} options={filterOptions} filter={filter} setMessage={setWorkflowMessage} onSaved={() => { refreshMenuCounts(); refreshWorkflowNotifications(); }} taskView={myWorklistView} setTaskView={handleMyWorklistViewChange} tabCounts={{ ...myWorklistMenuCounts, followupDue: (workflowNotifications.sections || []).find(s => s.key === 'follow-up')?.count ?? 0 }} onExportQueryChange={setMyWorklistExportQuery} onDownloadTemplate={(exportQuery, tab) => startClaimExport({ currentTab: true, uploadTemplate: true, queryOverride: exportQuery, tabKey: tab?.key || myWorklistView, tabLabel: tab?.label || '' })} exportBusy={exportBusy} />}
         {view === 'escalations' && <EscalationQueuePage labId={labId} user={user} reviewers={reviewers} taskView={escalationView === 'response' ? 'claim' : escalationView} responseOnly={escalationView === 'response'} setTaskView={setEscalationView} tabCounts={claimMenuCounts} onClaimTabChange={handleClaimTabRoute} canAssign={canAssign} assignClaims={assignClaims} setMessage={setWorkflowMessage} />}

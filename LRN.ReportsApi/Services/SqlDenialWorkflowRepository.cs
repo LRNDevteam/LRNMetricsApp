@@ -1749,7 +1749,9 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
 
     public async Task<PagedResult<ClaimLevelRow>> GetClaimsAsync(DenialWorkflowFilter filter, CancellationToken ct)
     {
-        filter.PageSize = 100;
+        // Honor the client's page size (Rows-per-page: 25/50/100) instead of forcing 100. Clamp to
+        // a safe range so a crafted request cannot ask for an unbounded page.
+        filter.PageSize = filter.PageSize <= 0 ? 50 : Math.Clamp(filter.PageSize, 25, 100);
         if (filter.Page <= 0) filter.Page = 1;
 
         await using var con = OpenLab(filter.LabId);
@@ -1841,7 +1843,7 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
         // reviewer's assigned claims via a small indexed temp table instead of a full-table
         // correlated EXISTS. This is the My Worklist claim-list load that also timed out.
         var reviewerOnly = IsReviewerOnly(filter.Role);
-        var where = BuildClaimWhere(baseFilter, "l", reviewerClaimMatchSql, taskBoardHasAssignedToNormalized, suppressReviewerScope: reviewerOnly);
+        var where = BuildClaimWhere(baseFilter, "l", reviewerClaimMatchSql, taskBoardHasAssignedToNormalized, suppressReviewerScope: reviewerOnly, patientNameSearchExpr: patientNameSelect);
         var lineLabScope = LabScopeSql("l.LabId");
         var taskLabScope = LabScopeSql("t.LabId");
         var escalationLabScope = LabScopeSql("e.LabId");
@@ -4077,7 +4079,7 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
         return (w.Count == 0 ? string.Empty : " AND " + string.Join(" AND ", w), p);
     }
 
-    private static (string WhereClause, Dictionary<string, object> Parameters) BuildClaimWhere(DenialWorkflowFilter f, string a, string? reviewerClaimMatchSql = null, bool taskBoardHasAssignedToNormalized = false, bool suppressReviewerScope = false)
+    private static (string WhereClause, Dictionary<string, object> Parameters) BuildClaimWhere(DenialWorkflowFilter f, string a, string? reviewerClaimMatchSql = null, bool taskBoardHasAssignedToNormalized = false, bool suppressReviewerScope = false, string? patientNameSearchExpr = null)
     {
         var w = new List<string>();
         var p = new Dictionary<string, object>();
@@ -4213,12 +4215,15 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
 
         if (!string.IsNullOrWhiteSpace(f.SearchText))
         {
+            // Column-safe patient-name search (see BuildClaimWhere param doc): tab search box finds
+            // a claim by patient name as well as claim id / payer / clinic / provider.
+            var patientNameOr = string.IsNullOrWhiteSpace(patientNameSearchExpr) ? string.Empty : $" OR ({patientNameSearchExpr}) LIKE @Search";
             w.Add($@"(
 			ISNULL({a}.VisitNumber,'') LIKE @Search OR
 			ISNULL({a}.PatientID,'') LIKE @Search OR
 			ISNULL({a}.ClinicName,'') LIKE @Search OR
 			ISNULL({a}.PayerName,'') LIKE @Search OR
-			ISNULL({a}.ReferringProvider,'') LIKE @Search
+			ISNULL({a}.ReferringProvider,'') LIKE @Search{patientNameOr}
 		)");
 
             p["@Search"] = "%" + f.SearchText.Trim() + "%";

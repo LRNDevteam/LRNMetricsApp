@@ -241,6 +241,7 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
   const [expanded, setExpanded] = useState('');
   const [drawerTab, setDrawerTab] = useState('lines');
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const [local, setLocal] = useState({ payerName: '', denialClassification: '', actionCategory: '', status: '', searchText: '' });
   const [debouncedLocal, setDebouncedLocal] = useState(local);
 
@@ -348,13 +349,13 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
     taskView: taskView === 'open' ? 'myopen' : taskView,
     searchText: debouncedLocal.searchText || filter?.searchText || '',
     page,
-    pageSize: 100
+    pageSize
     // Depend on the specific fields actually read above, not the whole `user`/`filter` objects.
     // App.jsx's window-focus handler calls setUser(me) with a freshly-parsed object on every tab
     // refocus (even when nothing about the user actually changed), and that new object reference
     // was enough to rebuild this memo and refire the load effect below — reloading the current
     // tab's data every time the browser tab regained focus.
-  }), [labId, user?.role, user?.userName, filter, debouncedLocal, taskView, page]);
+  }), [labId, user?.role, user?.userName, filter, debouncedLocal, taskView, page, pageSize]);
 
   useEffect(() => { onExportQueryChange(query); }, [query, onExportQueryChange]);
 
@@ -365,7 +366,7 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
     try {
       const result = await denialWorkflowService.getClaims(query, signal ? { signal } : {});
       if (signal?.aborted || requestId !== loadRequestRef.current) return;
-      setData({ items: result?.items || [], page: result?.page || page, pageSize: result?.pageSize || 100, totalCount: result?.totalCount || 0, totalPages: result?.totalPages || 0 });
+      setData({ items: result?.items || [], page: result?.page || page, pageSize: result?.pageSize || pageSize, totalCount: result?.totalCount || 0, totalPages: result?.totalPages || 0 });
     } catch (e) {
       if (!signal?.aborted && requestId === loadRequestRef.current) setMessage?.({ type: 'danger', text: e.message });
     }
@@ -381,6 +382,7 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
 
   const rows = data.items || [];
   function changePage(nextPage) { setExpanded(''); setPage(nextPage); }
+  function changePageSize(size) { setExpanded(''); setPageSize(Number(size) || 50); setPage(1); }
 
   useEffect(() => { setPage(1); setExpanded(''); }, [local, taskView]);
   useEffect(() => { setLineRowsByClaim({}); }, [taskView, labId]);
@@ -772,7 +774,7 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
     </div></div>}
     <WorklistClaimSplit claims={claims} rows={rows} taskTotal={taskTotal} loading={loading} data={data} expanded={expanded} setExpanded={setExpanded} drawerTab={drawerTab} setDrawerTab={setDrawerTab} activeClaim={activeClaim} clientManager={clientManager} accountManager={accountManager} taskView={taskView} setTaskView={setTaskView} myTabs={myTabs} tabCounts={tabCounts} notes={notes} docs={docs} escalations={escalations} canEditClaim={canEditClaim} canEditLine={canEditLine} canCreateEscalation={canCreateEscalation} canEscalateClaim={canEscalateClaim} isClaimEscalatedToManager={isClaimEscalatedToManager} canDeleteDocumentForClaim={canDeleteDocumentForClaim} openNote={openNote} openDocs={openDocs} openEsc={openEsc} openDocument={openDocument} deleteDocument={deleteDocument} loadDrawerTab={loadDrawerTab} searchText={local.searchText} setSearchText={value => setLocal(x => ({ ...x, searchText: value }))} csvUpload={canUpdateTasks ? <ClaimCsvUpload labId={labId} setMessage={setMessage} onUploaded={async () => { await load(); onSaved?.(); }} onDownloadTemplate={() => onDownloadTemplate(query, myTabs.find(x => x.key === taskView))} templateBusy={exportBusy} /> : null} />
     <div className="wl-card my-worklist-old-table"><div className="wl-card-hd"><b>{clientManager ? 'Client Manager' : accountManager ? 'Account Manager' : 'AR Reviewer'} · My Worklist · {myTabs.find(x => x.key === taskView)?.label}</b><span>{loading ? 'Loading...' : `${data.totalCount || claims.length} claim(s)`}</span></div><div className="wl-table-scroll"><table className="wl-main-table"><thead><tr><th></th><th>Claim ID</th><th>Payer</th><th>Panel</th><th>Patient ID</th><th>DOS</th><th>Created On</th><th>Clinic</th><th>Provider</th><th>Assigned To</th><th>Balance</th><th>Claim Notes</th><th>Docs</th><th>Escalate</th><th>Status</th></tr></thead><tbody>{claims.map(c => <React.Fragment key={c.claimId}><tr className={expanded === c.claimId ? 'open' : ''} onClick={() => setExpanded(expanded === c.claimId ? '' : c.claimId)}><td><i className={`bi ${expanded === c.claimId ? 'bi-chevron-down' : 'bi-chevron-right'}`} /></td><td className="linkish">{c.claimId}</td><td>{c.payerName}</td><td>{c.panelName}</td><td>{c.patientId}</td><td>{fmtDate(c.dateOfService)}</td><td>{fmtDate(c.createdOn)}</td><td>{c.clinicName}</td><td>{c.referringProvider}</td><td>{c.assignedTo || '-'}</td><td className="money">{money(c.balance)}</td><td><button className="wl-icon icon-note" disabled={!canEditClaim(c)} onClick={e => { e.stopPropagation(); openNote('Claim', c); }}><i className="bi bi-pencil-square" /></button></td><td><button className="wl-icon icon-doc" disabled={!canEditClaim(c)} onClick={e => { e.stopPropagation(); openDocs(c); }}><i className="bi bi-paperclip" /></button></td><td>{canEscalateClaim(c) ? <button className="wl-btn red xs" onClick={e => { e.stopPropagation(); openEsc('Claim', c); }}>Escalate</button> : isClaimEscalatedToManager(c) ? <span className="muted-text">Escalated to AR Manager</span> : <span className="muted-text">View only</span>}</td><td><span className={`wl-badge ${String(c.status).toLowerCase().replaceAll(' ', '-')}`}>{c.status}</span></td></tr>{expanded === c.claimId && <tr><td colSpan="15" className="wl-detail-cell"><div className="wl-detail-title">CPT / line-level task details</div><div className="wl-line-scroll"><table className="wl-line-table"><thead><tr><th>Task ID</th><th>CPT</th><th>Units</th><th>Modifier</th><th>Denial</th><th>Coverage</th><th>ICD Status</th><th>Classification</th><th>Validity</th><th>Balance</th><th>Action / Task</th><th>SLA</th><th>Assigned To</th><th>Status</th><th>Created On</th><th>Notes</th><th>Escalate</th></tr></thead><tbody>{c.lines.map(l => <tr key={l.taskId}><td><b>{l.taskId}</b></td><td>{l.cptCode}</td><td>{l.units ?? '-'}</td><td>{l.modifier || '-'}</td><td>{l.denialCode}</td><td>{l.coverageStatus || '-'}</td><td>{l.icdComplianceStatus || '-'}</td><td>{l.denialClassification}</td><td>{l.denialValidity || '-'}</td><td className="money">{money(l.insuranceBalance)}</td><td>{l.task || l.recommendedAction}</td><td>{l.daysRemaining ?? '-'}</td><td>{l.assignedTo || '-'}</td><td><span className={`wl-badge ${String(l.status).toLowerCase().replaceAll(' ', '-')}`}>{l.status || 'Open'}</span></td><td>{fmtDate(l.createdOn)}</td><td><button className="wl-icon icon-note" disabled={!canEditLine(l)} onClick={() => openNote('Line', c, l)}><i className="bi bi-pencil-square" /></button></td><td>{canEscalateClaim(c) ? <button className="wl-btn red xs" onClick={() => openEsc('Line', c, l)}>Escalate</button> : isClaimEscalatedToManager(c) ? <span className="muted-text">Escalated</span> : <span className="muted-text">View only</span>}</td></tr>)}</tbody></table></div></td></tr>}</React.Fragment>)}</tbody></table></div></div>
-    <Pager data={data} changePage={changePage} />
+    <Pager data={data} changePage={changePage} changePageSize={changePageSize} pageSize={pageSize} />
 
     {renderNoteModal()}
     {docCtx && <Modal title={`Claim Documents · ${docCtx.claimId}`} onClose={() => { setDocError(''); setDocCtx(null); }}><div className="wl-modal-body">{docError ? <div className="esc-inline-error"><i className="bi bi-exclamation-circle" /> {docError}</div> : null}<label>Denial Code - CPT Code<select className="wl-full" value={docLineTarget} onChange={e => { setDocError(''); setDocLineTarget(e.target.value); }} disabled={docUploading}><option value="">Overall claim</option>{lineOptions(docCtx).map(x => <option key={x.key} value={x.key}>{x.label}</option>)}</select></label><input type="file" multiple onChange={e => { setDocError(''); setDocFiles(e.target.files); }} disabled={docUploading} /><div><textarea className="wl-textarea" maxLength={MAX_TEXT_LENGTH} value={docComment} onChange={e => { setDocError(''); setDocComment(limitText(e.target.value)); }} placeholder="Document comment..." disabled={docUploading} /><div className="text-count">{textCountLabel(docComment)}</div></div><button className="wl-btn teal" disabled={docUploading || !canUploadForClaim(docCtx) || (clientManager && !claimHasClientInfoPending(docCtx))} onClick={uploadDocs}>{docUploading ? 'Uploading documents...' : 'Upload documents'}</button>{isClaimEscalatedToManager(docCtx) ? <div className="info-strip">This claim is escalated to the AR Manager. Documents can be uploaded again once the manager responds.</div> : null}<h4>Uploaded documents</h4>{docs.map(d => <div className="wl-history" key={d.documentId}><b>{d.originalFileName}</b><div>{d.comment}</div><small>{d.uploadedBy} · {fmtDate(d.uploadedOn)} · {Math.round(Number(d.fileSizeBytes || 0) / 1024)} KB</small><div className="doc-row-actions"><button className="wl-btn xs" type="button" onClick={() => openDocument(d.documentId)}>Download</button>{canDeleteDocumentForClaim(docCtx) && <button className="wl-btn red xs" type="button" onClick={() => deleteDocument(d.documentId, docCtx.claimId)}>Delete</button>}</div></div>)}</div></Modal>}

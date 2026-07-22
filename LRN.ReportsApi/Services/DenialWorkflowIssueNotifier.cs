@@ -47,9 +47,38 @@ public sealed class DenialWorkflowIssueNotifier : IDenialWorkflowIssueNotifier
         _logger = logger;
     }
 
+    // Throttle for the transient-infra path — static because the notifier is scoped (new per request).
+    private static long _lastTransientLogTicks;
+    private static readonly TimeSpan TransientLogThrottle = TimeSpan.FromSeconds(60);
+
+    // A SQL connectivity/transient outage (server unreachable, connect/pool timeout, Azure SQL
+    // throttling) is an infrastructure event, not a per-request application defect. Writing one
+    // issue file + firing one (frequently dead) Teams webhook per failed request turns a single
+    // outage into thousands of files and futile HTTP POSTs (observed 2026-07-22).
+    private static bool IsTransientInfra(Exception ex) =>
+        ex is Microsoft.Data.SqlClient.SqlException { Number: 53 or 40 or -2 or 258 or 10053 or 10054 or 10060 or 4060 or 40197 or 40501 or 40613 or 49918 or 49919 or 49920 or 233 or 64 }
+        || (ex is InvalidOperationException && ex.Message.Contains("from the pool", StringComparison.OrdinalIgnoreCase));
+
     public async Task<DenialWorkflowIssueReport> ReportAsync(HttpContext context, Exception exception, string action, CancellationToken ct = default)
     {
         var correlationId = GetCorrelationId(context);
+
+        if (IsTransientInfra(exception))
+        {
+            // Log a single throttled warning; skip the per-request file + webhook.
+            var nowTicks = DateTime.UtcNow.Ticks;
+            var last = Interlocked.Read(ref _lastTransientLogTicks);
+            if (nowTicks - last > TransientLogThrottle.Ticks
+                && Interlocked.CompareExchange(ref _lastTransientLogTicks, nowTicks, last) == last)
+            {
+                _logger.LogWarning(exception,
+                    "Denial workflow database connectivity issue (per-request issue files + Teams alerts suppressed for {ThrottleSeconds}s). Action: {Action}.",
+                    (int)TransientLogThrottle.TotalSeconds, action);
+            }
+            await Task.CompletedTask;
+            return new DenialWorkflowIssueReport(correlationId, null);
+        }
+
         var userName = FirstClaim(context, ClaimTypes.Name, "name", "preferred_username", "unique_name", "upn", ClaimTypes.Email, "email");
         var role = FirstClaim(context, ClaimTypes.Role, "role", "roles");
         var page = $"{context.Request.Method} {context.Request.Path}{SanitizeQueryString(context.Request.QueryString.Value)}";
