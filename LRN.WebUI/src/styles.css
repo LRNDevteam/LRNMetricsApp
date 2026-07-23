@@ -221,6 +221,15 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
   padding-right:14px;
   padding-bottom:10px;
 }
+/* Cap the claim list height so the page doesn't grow with the result set; scroll vertically
+   inside the table area and keep the header row pinned (with an opaque background) while scrolling. */
+.claim-assign-scroll,.wl-table-scroll{max-height:62vh;overflow-y:auto}
+.claim-assign-scroll thead th,.wl-table-scroll thead th{position:sticky;top:0;z-index:6;background:#eef2f7}
+.claim-assign-scroll thead th.sticky-col,.claim-assign-scroll thead th.select-col{z-index:8}
+/* AR Reviewer My Worklist split list: cap the rows area and scroll vertically (the column
+   header sits above this container, so it stays visible). Two-class selector overrides the
+   general .claim-rows-scroll{max-height:none} rule. */
+.my-worklist-pane .claim-rows-scroll{max-height:60vh;overflow-y:auto}
 .claim-card .dt-wrap.claim-assign-scroll{
   padding-left:0;
 }
