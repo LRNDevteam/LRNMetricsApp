@@ -3302,6 +3302,10 @@ WHERE TaskID = @TaskID AND LOWER(LTRIM(RTRIM(ISNULL(WorkFlowStatus,'')))) = 'int
         string TDate(string col) => taskColumns.Contains(col) ? $"ISNULL(CONVERT(varchar(10), t.[{col}], 101),'')" : "''";
         string TNum(string col) => taskColumns.Contains(col) ? $"ISNULL(CONVERT(varchar(20), t.[{col}]),'')" : "''";
         string L(string col) => lineColumns.Contains(col) ? $"ISNULL(LTRIM(RTRIM(lx.[{col}])),'')" : "''";
+        // Date/number variants for DenialLineItem columns: ISNULL(<date>, '') would fail the
+        // date/varchar type clash, so convert first (mirrors TDate/TNum on the task board).
+        string LDate(string col) => lineColumns.Contains(col) ? $"ISNULL(CONVERT(varchar(10), lx.[{col}], 101),'')" : "''";
+        string LNum(string col) => lineColumns.Contains(col) ? $"ISNULL(CONVERT(varchar(30), lx.[{col}]),'')" : "''";
 
         // OUTER APPLY SELECT TOP 1 avoids row fan-out when multiple DenialLineItem rows match the same task.
         var lineJoinSql = "";
@@ -3379,7 +3383,28 @@ SELECT
     CoveredICDPresence                      = {L("CoveredICDPresence")},
     LISICD10Codes                           = {L("LISICD10Codes")},
     NonCoveredICD10CodesAsPerPayerPolicy    = {L("NonCoveredICD10CodesAsPerPayerPolicy")},
-    NonCoveredICD10CodesBilled              = {L("NonCoveredICD10CodesBilled")}
+    NonCoveredICD10CodesBilled              = {L("NonCoveredICD10CodesBilled")},
+    -- Round 5 UAT (Group E, upload #4): one shared template for every role. These line-level
+    -- descriptive columns previously appeared only in the claim detail export, which is what made
+    -- the AR Manager and AR Reviewer files look like different templates. They come from the line
+    -- item already OUTER APPLY'd as lx, so they add no extra joins.
+    ClaimUID                                = {L("ClaimUID")},
+    AccessionNo                             = {L("AccessionNo")},
+    PatientDOB                              = {LDate("PatientDOB")},
+    SubscriberId                            = {L("SubscriberId")},
+    Source                                  = {L("Source")},
+    PayStatus                               = {L("PayStatus")},
+    BilledAmount                            = {LNum("BilledAmount")},
+    FinalClaimStatus                        = {L("FinalClaimStatus")},
+    FinalCoverageStatus                     = {L("FinalCoverageStatus")},
+    ActionComment                           = {L("ActionComment")},
+    DenialDate                              = {LDate("DenialDate")},
+    DaystoDOS                               = {LNum("DaystoDOS")},
+    DaystoBill                              = {LNum("DaystoBill")},
+    DenialType                              = {L("DenialType")},
+    TaskGuidance                            = {L("TaskGuidance")},
+    TaskStatus                              = {L("TaskStatus")},
+    ShortCategory                           = {L("ShortCategory")}
 FROM dbo.DenialTaskBoard t WITH (NOLOCK)
 {lineJoinSql}
 WHERE {taskLabPredicate}
@@ -3398,7 +3423,13 @@ ORDER BY {string.Join(", ", orderByParts)};";
             "ICDCodes","ICDComplianceStatus","CoverageStatus","DenialValidity",
             "CCWICD10Code","BilledICDCodesNotAvailableInPayerPolicy","CoveredICD10CodesAsPerPayerPolicy",
             "CoveredICD10CodesBilled","CoveredICDPresence","LISICD10Codes",
-            "NonCoveredICD10CodesAsPerPayerPolicy","NonCoveredICD10CodesBilled"
+            "NonCoveredICD10CodesAsPerPayerPolicy","NonCoveredICD10CodesBilled",
+            // Round 5 UAT (Group E, upload #4): line-level columns that used to exist only in the
+            // claim detail export. Appended (rather than interleaved) so the existing column order
+            // is unchanged for anyone working from a previously downloaded file.
+            "ClaimUID","AccessionNo","PatientDOB","SubscriberId","Source","PayStatus","BilledAmount",
+            "FinalClaimStatus","FinalCoverageStatus","ActionComment","DenialDate","DaystoDOS",
+            "DaystoBill","DenialType","TaskGuidance","TaskStatus","ShortCategory"
         };
         // UAT TC-171/TC-172: the editable columns mirror the AR Reviewer status-update popup
         // (New Line Status, Expected Response Date, Action Completed, Actual Outcome,

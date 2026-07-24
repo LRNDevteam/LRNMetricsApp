@@ -73,6 +73,9 @@ public sealed class DenialWorkflowFilter
     public DateTime? FromDate { get; set; }
     public DateTime? ToDate { get; set; }
     public bool UploadTemplate { get; set; }
+    // Display label of the tab the download was started from (e.g. "Payer Follow-up Required").
+    // Cosmetic only — used to name the exported file; never affects the query or its cache key.
+    public string TabLabel { get; set; } = string.Empty;
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 100;
 }

@@ -1144,6 +1144,9 @@ export default function App() {
         ...baseQuery,
         taskView: currentTab ? activeTabKey : '',
         uploadTemplate,
+        // Names the generated file after the tab it came from. Overall Download (not a tab, not a
+        // template) sends nothing so its filename stays as-is.
+        tabLabel: (currentTab || uploadTemplate) ? activeTabLabel : '',
         page: 1,
         pageSize: 100,
         fromDate: baseQuery.fromDate || null,

@@ -355,6 +355,16 @@ public sealed class DenialWorkflowController : ControllerBase
             .ToList();
         var skipped = rows.Count - actionableRows.Count;
 
+        // Round 5 UAT (Group E, upload #1-#4): a reviewer who typed notes into the CLAIM DETAIL
+        // EXPORT and uploaded it had every row silently counted as "skipped". That file's note
+        // columns are ClaimNotes / EscalationNotes / CombinedNotes / DocumentComments -- read-only
+        // aggregated history, none of which are action columns (see CsvHasClaimAction), and they
+        // must NOT be treated as input or the concatenated history would be re-imported as new
+        // notes. Detect the wrong file and say so instead of reporting an unexplained skip.
+        var detailExportOnlyColumns = new[] { "ClaimNotes", "EscalationNotes", "CombinedNotes", "DocumentComments" };
+        var looksLikeDetailExport = rows.Count > 0
+            && detailExportOnlyColumns.Any(c => rows[0].ContainsKey(c));
+
         // Task-level template when any row has a TaskID column value
         var isTaskLevel = actionableRows.Any(x => !string.IsNullOrWhiteSpace(x.TaskId));
 
@@ -545,9 +555,17 @@ public sealed class DenialWorkflowController : ControllerBase
 
                 if (hasReviewerEscalation)
                 {
-                    if (!reviewerOnly)
+                    // Escalation direction follows the uploader's role, mirroring the UI:
+                    //   AR Reviewer  -> INTERNAL escalation to the AR Manager role.
+                    //   AR Manager   -> EXTERNAL escalation to the Client Manager + Account Manager
+                    //                   roles (AR Managers were previously rejected outright here,
+                    //                   which is what blocked "escalate as AR Manager" on upload).
+                    // Escalation is role-addressed, never user-addressed: EscalatedToRole is what the
+                    // escalation queue filters on, so every user holding that role in the lab sees it.
+                    var isExternalEscalation = !reviewerOnly;
+                    if (isExternalEscalation && !managerRole)
                     {
-                        Fail("EscalationReason upload is for AR Reviewer claim escalation. AR Managers should use EscalationResponse.");
+                        Fail("Only AR Reviewer (internal) or AR Manager/Admin (external) users can escalate a claim.");
                         continue;
                     }
                     if (!ReviewerEscalationReasons.Contains(escalationReason))
@@ -582,28 +600,40 @@ public sealed class DenialWorkflowController : ControllerBase
                             AffectedTaskIds = string.Join(",", claimTasks.Select(x => x.TaskId).Where(x => !string.IsNullOrWhiteSpace(x))),
                             RecommendedNextAction = "Manager review", EscalationReason = finalReason,
                             Comments = escalationComment, Status = finalReason.Contains("write-off decision required", StringComparison.OrdinalIgnoreCase) ? "WriteOffPending" : "Open",
+                            // Address the escalation to the ROLE(s), not a person. The external value
+                            // names both roles so a single escalation is visible to every Client
+                            // Manager AND every Account Manager (the queue matches on this field).
+                            EscalatedToRole = isExternalEscalation ? "Client Manager, Account Manager" : "AR Manager",
+                            EscalatedTo = isExternalEscalation ? "Client Manager / Account Manager" : "AR Manager",
                             NextFollowUpDate = CsvNullableDate(item.Row, "EscalationExpectedResponseDate"), CreatedBy = userName
                         }, ct);
                         await _service.SaveNoteAsync(new SaveDenialNoteRequest
                         {
                             LabId = labId, ClaimId = item.ClaimId, TaskId = item.TaskId, CptCode = cptCode,
                             NoteLevel = "Claim", NoteText = $"{finalReason} - {escalationComment}",
-                            Status = "Internal Escalation", CreatedBy = userName
+                            Status = isExternalEscalation ? "External Escalation" : "Internal Escalation", CreatedBy = userName
                         }, ct);
                         addedComments++;
                         escalatedClaims++;
                     }
-                    foreach (var task in claimTasks)
+                    // Internal escalation parks the tasks in "Escalated to AR Manager". An external
+                    // escalation must NOT overwrite the task status — the External Escalation queue is
+                    // derived from the DenialClaimEscalations row (ExternalEscalationExists), and
+                    // stamping the tasks would wipe the working status the reviewer left behind.
+                    if (!isExternalEscalation)
                     {
-                        updatedTasks += await _service.UpdateTaskAsync(new UpdateTaskRequest
+                        foreach (var task in claimTasks)
                         {
-                            LabId = labId, TaskId = task.TaskId, Status = "Escalated to AR Manager",
-                            Comments = $"{finalReason} - {escalationComment}", ActionBy = userName,
-                            UpdateScope = "Claim", UpdateScopeValue = item.ClaimId
-                        }, ct);
+                            updatedTasks += await _service.UpdateTaskAsync(new UpdateTaskRequest
+                            {
+                                LabId = labId, TaskId = task.TaskId, Status = "Escalated to AR Manager",
+                                Comments = $"{finalReason} - {escalationComment}", ActionBy = userName,
+                                UpdateScope = "Claim", UpdateScopeValue = item.ClaimId
+                            }, ct);
+                        }
                     }
-                    rowResult.Action = "Reviewer Escalation";
-                    rowResult.NewStatus = "Escalated to AR Manager";
+                    rowResult.Action = isExternalEscalation ? "External Escalation" : "Reviewer Escalation";
+                    rowResult.NewStatus = isExternalEscalation ? "External Escalation" : "Escalated to AR Manager";
                     rowResult.Note = escalationComment;
                     AddChange("Escalation Reason", string.Empty, finalReason);
                     rowChanged = true;
@@ -679,11 +709,20 @@ public sealed class DenialWorkflowController : ControllerBase
             }
         }
 
+        // Nothing in the file was actionable: explain why rather than silently reporting a skip.
+        var nothingActionable = rows.Count > 0 && actionableRows.Count == 0;
+        if (nothingActionable)
+        {
+            errors.Add(looksLikeDetailExport
+                ? "No rows were imported. This file looks like the claim detail export (it has ClaimNotes / EscalationNotes / CombinedNotes columns), which is a read-only extract. Use Upload Template to download the editable template, then fill in UpdateStatus, Comments, Notes or the Escalation columns."
+                : "No rows were imported because no editable column had a value. Fill in at least one of UpdateStatus, Comments, Notes, or the Escalation columns (EscalationReason / EscalationComment / EscalationResponse) on the rows you want to update.");
+        }
+
         var failureCount = rowResults.Count(x => string.Equals(x.Status, "Failed", StringComparison.OrdinalIgnoreCase));
         var successCount = rowResults.Count(x => string.Equals(x.Status, "Success", StringComparison.OrdinalIgnoreCase));
         var result = new ClaimCsvUploadResult
         {
-            Success = failureCount == 0,
+            Success = failureCount == 0 && !nothingActionable,
             TotalRows = rows.Count,
             ProcessedRows = processedRows,
             SkippedRows = skipped,
@@ -695,7 +734,9 @@ public sealed class DenialWorkflowController : ControllerBase
             FailureCount = failureCount,
             Results = rowResults.OrderBy(x => x.RowNumber).ToList(),
             Errors = errors,
-            Message = $"Processed {processedRows} claim row(s): {updatedTasks} task status update(s), {addedComments} claim comment(s), {escalatedClaims} escalation(s), and {escalationResponses} escalation response(s). Skipped {skipped} unchanged row(s).{(failureCount > 0 ? $" {failureCount} row(s) require correction." : string.Empty)}"
+            Message = nothingActionable
+                ? errors[^1]
+                : $"Processed {processedRows} claim row(s): {updatedTasks} task status update(s), {addedComments} claim comment(s), {escalatedClaims} escalation(s), and {escalationResponses} escalation response(s). Skipped {skipped} unchanged row(s).{(failureCount > 0 ? $" {failureCount} row(s) require correction." : string.Empty)}"
         };
         return result;
     }

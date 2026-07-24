@@ -19,6 +19,7 @@ public interface IDenialWorkflowJobHistoryStore
     void Save(JobHistoryRecord record);
     IReadOnlyList<JobHistoryRecord> List(string requestedBy, string jobType);
     JobHistoryRecord? Get(string jobId);
+    void Delete(string jobId);
 }
 
 public sealed class DenialWorkflowJobHistoryStore : IDenialWorkflowJobHistoryStore
@@ -94,6 +95,8 @@ ORDER BY CreatedOnUtc DESC;";
 SELECT TOP (1) JobId,JobType,RequestedBy,LabId,FileName,Status,Message,[RowCount],SuccessCount,FailureCount,FilePath,ContentType,CreatedOnUtc,CompletedOnUtc
 FROM dbo.DenialWorkflowJobHistory WITH (NOLOCK)
 WHERE JobId=@JobId;";
+
+    private const string DeleteSql = @"DELETE FROM dbo.DenialWorkflowJobHistory WHERE JobId=@JobId;";
 
     private bool Available()
         => !string.IsNullOrWhiteSpace(_connectionString)
@@ -191,6 +194,29 @@ WHERE JobId=@JobId;";
             if (IsConnectivity(ex)) MarkDown();
             _logger.LogWarning(ex, "Could not read job history record {JobId}.", jobId);
             return null;
+        }
+    }
+
+    // Removing a finished job from the Jobs Center must also drop its durable row, otherwise
+    // ListJobs() merges the history back in and the row reappears on the next refresh (i.e. the
+    // trash button appears to do nothing).
+    public void Delete(string jobId)
+    {
+        if (!Available() || string.IsNullOrWhiteSpace(jobId)) return;
+        try
+        {
+            using var con = new SqlConnection(_connectionString);
+            con.Open();
+            EnsureTable(con);
+            using var cmd = new SqlCommand(DeleteSql, con) { CommandTimeout = 60 };
+            cmd.Parameters.AddWithValue("@JobId", jobId);
+            cmd.ExecuteNonQuery();
+            MarkUp();
+        }
+        catch (Exception ex)
+        {
+            if (IsConnectivity(ex)) MarkDown();
+            _logger.LogWarning(ex, "Could not delete job history record {JobId}.", jobId);
         }
     }
 

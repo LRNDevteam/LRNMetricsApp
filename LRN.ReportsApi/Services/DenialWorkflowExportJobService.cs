@@ -22,6 +22,9 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
     private readonly ILogger<DenialWorkflowExportJobService> _logger;
     private readonly IDenialWorkflowJobHistoryStore _history;
     private readonly string _exportRoot;
+    // LabId -> LabName, from LabConfig:LabsID. Resolved server-side so the exported file is named
+    // from configuration rather than whatever the client happens to send.
+    private readonly IReadOnlyDictionary<int, string> _labNamesById;
 
     public DenialWorkflowExportJobService(
         IServiceScopeFactory scopeFactory,
@@ -36,15 +39,35 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
             ?? configuration["DenialWorkflowExports:RootPath"]
             ?? Path.Combine(AppContext.BaseDirectory, "ClaimExports");
         Directory.CreateDirectory(_exportRoot);
+
+        _labNamesById = (configuration.GetSection("LabConfig:LabsID").Get<List<LabNameConfigItem>>() ?? [])
+            .Where(x => x.Id > 0 && !string.IsNullOrWhiteSpace(x.Name))
+            .GroupBy(x => x.Id)
+            .ToDictionary(g => g.Key, g => g.First().Name.Trim());
+    }
+
+    private sealed class LabNameConfigItem
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = string.Empty;
     }
 
     public ClaimExportStartResponse StartClaimsExport(DenialWorkflowFilter filter, string requestedBy)
     {
         var jobId = Guid.NewGuid().ToString("N");
         var safeUser = SafeFilePart(requestedBy);
-        var fileName = filter.UploadTemplate
-            ? $"Claim_Upload_Template_{filter.LabId}_{DateTime.UtcNow:yyyyMMdd_HHmmss}_{safeUser}.xlsx"
-            : $"Claim_Detail_Export_{filter.LabId}_{DateTime.UtcNow:yyyyMMdd_HHmmss}_{safeUser}.csv";
+        // DenialLineItem_<LabName>_<TabName>_<MMDDYYYY>_<User>.<ext>
+        // e.g. DenialLineItem_NorthWest_Payer_Follow_up_Required_07232026_ARManager1.xlsx
+        // The tab segment is omitted for Overall Download (no tab). Lab name falls back to the id
+        // when LabConfig has no entry. The extension still matches the real content (xlsx template
+        // vs csv detail export) so Excel does not refuse to open it.
+        var labPart = _labNamesById.TryGetValue(filter.LabId, out var labName) && !string.IsNullOrWhiteSpace(labName)
+            ? SafeFilePart(labName)
+            : filter.LabId.ToString();
+        var tabPart = string.IsNullOrWhiteSpace(filter.TabLabel) ? string.Empty : $"_{SafeFilePart(filter.TabLabel)}";
+        var stamp = DateTime.Now.ToString("MMddyyyy");
+        var extension = filter.UploadTemplate ? "xlsx" : "csv";
+        var fileName = $"DenialLineItem_{labPart}{tabPart}_{stamp}_{safeUser}.{extension}";
         var filePath = Path.Combine(_exportRoot, $"{jobId}_{fileName}");
         var state = new ExportJobState
         {
@@ -184,7 +207,27 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
 
     public ClaimExportStatusResponse? Cancel(string jobId, string requestedBy)
     {
-        if (!Jobs.TryGetValue(jobId, out var state) || !CanAccess(state, requestedBy)) return null;
+        if (!Jobs.TryGetValue(jobId, out var state) || !CanAccess(state, requestedBy))
+        {
+            // Not in memory — a job from before the last restart lives only in durable history, so
+            // removing the history row (and its file) IS the delete. Without this the trash button
+            // silently does nothing for every job older than the current process.
+            var h = _history.Get(jobId);
+            if (h is null || !string.Equals(h.JobType, "download", StringComparison.OrdinalIgnoreCase)) return null;
+            if (!string.IsNullOrWhiteSpace(requestedBy) && !string.IsNullOrWhiteSpace(h.RequestedBy)
+                && !string.Equals(h.RequestedBy, requestedBy, StringComparison.OrdinalIgnoreCase)) return null;
+
+            _history.Delete(jobId);
+            TryDelete(h.FilePath ?? string.Empty);
+            return new ClaimExportStatusResponse
+            {
+                JobId = jobId,
+                Status = "Deleted",
+                Message = "Export was removed.",
+                CreatedOnUtc = h.CreatedOnUtc,
+                CompletedOnUtc = h.CompletedOnUtc
+            };
+        }
         if (string.Equals(state.Status, "Queued", StringComparison.OrdinalIgnoreCase)
             || string.Equals(state.Status, "Running", StringComparison.OrdinalIgnoreCase))
         {
@@ -197,8 +240,10 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
         }
 
         // Finished job: DELETE removes it from the list (and deletes the file) — powers the
-        // trash action in the Jobs Center.
+        // trash action in the Jobs Center. Must also drop the durable history row, otherwise
+        // ListJobs() merges it straight back in and the row reappears after refresh.
         Jobs.TryRemove(jobId, out _);
+        _history.Delete(jobId);
         TryDelete(state.FilePath);
         return new ClaimExportStatusResponse
         {

@@ -151,7 +151,28 @@ public sealed class DenialWorkflowUploadJobService : IDenialWorkflowUploadJobSer
 
     public ClaimUploadStatusResponse? Cancel(string jobId, string requestedBy)
     {
-        if (!Jobs.TryGetValue(jobId, out var state) || !CanAccess(state, requestedBy)) return null;
+        if (!Jobs.TryGetValue(jobId, out var state) || !CanAccess(state, requestedBy))
+        {
+            // Not in memory — a job from before the last restart lives only in durable history, so
+            // removing the history row (and its log) IS the delete. Without this the trash button
+            // silently does nothing for every job older than the current process.
+            var h = _history.Get(jobId);
+            if (h is null || !string.Equals(h.JobType, "upload", StringComparison.OrdinalIgnoreCase)) return null;
+            if (!string.IsNullOrWhiteSpace(requestedBy) && !string.IsNullOrWhiteSpace(h.RequestedBy)
+                && !string.Equals(h.RequestedBy, requestedBy, StringComparison.OrdinalIgnoreCase)) return null;
+
+            _history.Delete(jobId);
+            TryDelete(h.FilePath);
+            return new ClaimUploadStatusResponse
+            {
+                JobId = jobId,
+                FileName = h.FileName,
+                Status = "Deleted",
+                Message = "Upload record was removed.",
+                CreatedOnUtc = h.CreatedOnUtc,
+                CompletedOnUtc = h.CompletedOnUtc
+            };
+        }
         if (IsActive(state.Status))
         {
             state.Cancellation?.Cancel();
@@ -162,8 +183,10 @@ public sealed class DenialWorkflowUploadJobService : IDenialWorkflowUploadJobSer
         }
 
         // Finished job: DELETE removes it from the list (and deletes its log) — powers the
-        // trash action in the Jobs Center.
+        // trash action in the Jobs Center. Must also drop the durable history row, otherwise
+        // ListJobs() merges it straight back in and the row reappears after refresh.
         Jobs.TryRemove(jobId, out _);
+        _history.Delete(jobId);
         TryDelete(state.LogFilePath);
         return new ClaimUploadStatusResponse
         {
