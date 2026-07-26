@@ -1642,7 +1642,7 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .history-timeline-track:before{content:"";position:absolute;top:9px;bottom:-9px;left:13px;width:2px;background:#dbeafe}
 .history-timeline-row:last-child .history-timeline-track:before{bottom:30px}
 .history-timeline-track i{position:absolute;top:1px;left:7px;width:13px;height:13px;border-radius:50%;box-shadow:0 0 0 3px #eef6ff}
-.history-timeline-track.green i{background:#22c55e}.history-timeline-track.blue i{background:#0b82f0}.history-timeline-track.purple i{background:#8b5cf6}.history-timeline-track.gray i{background:#94a3b8}
+.history-timeline-track.green i{background:#22c55e}.history-timeline-track.blue i{background:#0b82f0}.history-timeline-track.purple i{background:#8b5cf6}.history-timeline-track.gray i{background:#94a3b8}.history-timeline-track.amber i{background:#f5a623}
 .history-timeline-content{padding-bottom:18px;min-width:0}
 .history-timeline-content h4{margin:0 0 7px;font-size:14px;font-weight:800;color:#1f2937}
 .history-timeline-content p{margin:3px 0 0;font-size:13px;line-height:1.35;color:#475569;white-space:pre-line}

@@ -41,6 +41,7 @@ builder.Services.AddScoped<IDenialMapperRepository, SqlDenialMapperRepository>()
 builder.Services.AddScoped<IMasterValuesRepository, SqlMasterValuesRepository>();
 builder.Services.AddScoped<IMenuRepository, SqlMenuRepository>();
 builder.Services.AddScoped<ILabAnalyticsRepository, SqlLabAnalyticsRepository>();
+builder.Services.AddScoped<ICptLookupRepository, SqlCptLookupRepository>();
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IDenialDashboardRepository, SqlDenialDashboardRepository>();
 builder.Services.AddScoped<IPayerMasterWorkflowService, PayerMasterWorkflowService>();

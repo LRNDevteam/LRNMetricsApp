@@ -106,6 +106,7 @@ export default function ClaimAssignmentPage({ data, reviewers, selected, setSele
   const [escalationOtherReason, setEscalationOtherReason] = useState('');
   const [escalationProgress, setEscalationProgress] = useState({ done: 0, total: 0, current: '' });
   const [escalationHistory, setEscalationHistory] = useState([]);
+  const [assignmentHistory, setAssignmentHistory] = useState([]);
   const [claimSearch, setClaimSearch] = useState('');
   const [sort, setSort] = useState({ key: 'dateOfService', dir: 'desc' });
   const noteSavingRef = useRef(false);
@@ -364,14 +365,16 @@ export default function ClaimAssignmentPage({ data, reviewers, selected, setSele
       try { setDocuments(await denialWorkflowService.getClaimDocuments(labId, claimId) || []); } catch { }
     }
     if (tab === 'history') {
-      setNoteHistory([]); setDocuments([]); setEscalationHistory([]);
+      setNoteHistory([]); setDocuments([]); setEscalationHistory([]); setAssignmentHistory([]);
       try {
-        const [notes, docs, escalations] = await Promise.all([
+        const [notes, docs, escalations, history] = await Promise.all([
           denialWorkflowService.getNotes({ labId, claimId, noteLevel: 'Claim' }),
           denialWorkflowService.getClaimDocuments(labId, claimId),
-          denialWorkflowService.getEscalations({ labId, claimId, escalationLevel: 'Claim' })
+          denialWorkflowService.getEscalations({ labId, claimId, escalationLevel: 'Claim' }),
+          // Assignment/status audit — surfaces the "Assigned to <user>" event and its timestamp.
+          denialWorkflowService.getClaimHistory({ labId, claimId, historyLevel: 'Claim' }).catch(() => [])
         ]);
-        setNoteHistory(notes || []); setDocuments(docs || []); setEscalationHistory(dedupeEscalations(escalations || []));
+        setNoteHistory(notes || []); setDocuments(docs || []); setEscalationHistory(dedupeEscalations(escalations || [])); setAssignmentHistory(history || []);
       } catch { }
     }
   }
@@ -711,7 +714,7 @@ export default function ClaimAssignmentPage({ data, reviewers, selected, setSele
           {drawerTab === 'lines' && <table className="claim-task-table full-task-columns thin-bordered"><thead><tr><th>TaskID</th><th className="sticky-cpt-col">CPTCode</th><th>Units</th><th>Modifier</th><th className="sticky-denial-col">DenialCode</th><th>DenialDescription</th><th>DenialClassification</th><th>ActionCode</th><th>ActionCategory</th><th>RecommendedAction</th><th>Priority</th><th className="r">InsuranceBalance</th><th>SLADays</th><th>Status</th><th>DateOpened</th><th>DueDate</th><th>SLAStatus</th><th>FirstBilledDate</th><th>ChargeEnteredDate</th><th>ICDCodes</th><th>ICDComplianceStatus</th><th>DenialValidity</th></tr></thead><tbody>{activeTasks.length ? activeTasks.map((t, i) => <tr key={t.taskId || i}><td><strong>{t.taskId || '-'}</strong></td><td className="sticky-cpt-col"><code className="code">{t.cptCode || '-'}</code></td><td>{t.units ?? '-'}</td><td>{t.modifier || '-'}</td><td className="sticky-denial-col"><code className="code">{t.denialCode || '-'}</code></td><td className="wrap-wide">{t.denialDescription || '-'}</td><td>{t.denialClassification || '-'}</td><td>{t.actionCode || '-'}</td><td>{t.actionCategory || '-'}</td><td className="wrap-wide">{t.recommendedAction || '-'}</td><td>{t.priority || '-'}</td><td className="r">{money(t.insuranceBalance)}</td><td>{t.slaDays ?? '-'}</td><td><span className={`badge ${statusClass(t.status || '')}`}>{t.status || '-'}</span></td><td>{date(t.dateOpened)}</td><td>{date(t.dueDate)}</td><td><span className={`badge ${statusClass(t.slaStatus || '')}`}>{t.slaStatus || '-'}</span></td><td>{date(t.firstBilledDate)}</td><td>{date(t.chargeEnteredDate)}</td><td className="wrap-wide">{t.icdCodes || '-'}</td><td>{t.icdComplianceStatus || '-'}</td><td>{t.denialValidity || '-'}</td></tr>) : <tr><td colSpan={22} className="empty-cell">Loading or no tasks found for this claim.</td></tr>}</tbody></table>}
           {drawerTab === 'notes' && <ClaimNotesPanel notes={noteHistory} canAdd={!readOnlyWorkflow} onAdd={() => openClaimNotes(activeClaim)} formatDate={date} />}
           {drawerTab === 'documents' && <DocumentTable documents={documents} canUpload={uploadAllowed} canDelete={() => canDeleteDocumentForClaim(activeClaim)} onUpload={() => openClaimDocuments(activeSupportClaimId)} onDownload={openDocument} onDelete={documentId => deleteDocument(documentId, activeSupportClaimId)} formatDate={date} />}
-          {drawerTab === 'history' && <HistoryTimeline claim={activeClaim} notes={noteHistory} documents={documents} escalations={escalationHistory} formatDate={date} />}
+          {drawerTab === 'history' && <HistoryTimeline claim={activeClaim} notes={noteHistory} documents={documents} escalations={escalationHistory} history={assignmentHistory} formatDate={date} />}
         </div>
       </section>}
     </div>

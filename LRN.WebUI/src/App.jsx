@@ -803,7 +803,9 @@ export default function App() {
         externalEscalation: Number(counts?.externalEscalation ?? counts?.ExternalEscalation ?? 0),
         escalationResponse: Number(counts?.escalationResponse ?? counts?.EscalationResponse ?? 0),
         verification: Number(counts?.verification ?? counts?.Verification ?? 0),
-        closed: Number(counts?.closed ?? counts?.Closed ?? 0),
+        // Closed queue badge comes from the DenialClosedClaims-backed ClosedQueue count so it matches
+        // the Closed list; fall back to the board-derived Closed for older API responses.
+        closed: Number(counts?.closedQueue ?? counts?.ClosedQueue ?? counts?.closed ?? counts?.Closed ?? 0),
         all: Number(counts?.allClaims ?? counts?.AllClaims ?? counts?.totalClaims ?? counts?.TotalClaims ?? 0)
       });
     } catch {
@@ -821,7 +823,10 @@ export default function App() {
         externalEscalation: Number(latestClaimCounts?.externalEscalation ?? latestClaimCounts?.ExternalEscalation ?? 0),
         escalationResponse: Number(latestClaimCounts?.escalationResponse ?? latestClaimCounts?.EscalationResponse ?? 0),
         all: Number(latestClaimCounts?.allClaims ?? latestClaimCounts?.AllClaims ?? latestClaimCounts?.totalClaims ?? latestClaimCounts?.TotalClaims ?? 0),
-        closed: Number(latestClaimCounts?.closed ?? latestClaimCounts?.Closed ?? 0)
+        // Closed badge must match the Closed queue list, which reads dbo.DenialClosedClaims -> use
+        // ClosedQueue, not the board-derived Closed (that only sees closed claims still on the task
+        // board and showed 1 instead of 3). Falls back to Closed for older API responses.
+        closed: Number(latestClaimCounts?.closedQueue ?? latestClaimCounts?.ClosedQueue ?? latestClaimCounts?.closed ?? latestClaimCounts?.Closed ?? 0)
       });
     } catch {
       setMyWorklistMenuCounts({ assigned: null, payerFollowup: null, pendingDocumentation: null, pendingPayerResponse: null, internalEscalation: null, externalEscalation: null, escalationResponse: null, all: null, closed: null });

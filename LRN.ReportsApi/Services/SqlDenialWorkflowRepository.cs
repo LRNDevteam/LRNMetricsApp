@@ -1642,33 +1642,63 @@ DROP TABLE #ClaimBase;
 DROP TABLE #TaskClaimRaw;
 DROP TABLE #TaskClaimAgg;{reviewerScopeCleanup}";
 
-        await using var cmd = new SqlCommand(sql, con) { CommandTimeout = 300 };
-        AddFilterParams(cmd, filter);
-        AddExtraParams(cmd, where.Parameters);
-        // When the reviewer scope is suppressed in BuildClaimWhere, @RoleUserName is no longer added
-        // there but is still referenced by the #ReviewerScope prefix, so add it here.
-        if (reviewerOnly && !cmd.Parameters.Contains("@RoleUserName"))
-            cmd.Parameters.AddWithValue("@RoleUserName", (filter.UserName ?? string.Empty).Trim());
-        await using var rd = await cmd.ExecuteReaderAsync(ct);
-
         var result = new ClaimSubMenuCounts();
-        if (await rd.ReadAsync(ct))
+        // Scope the aggregation command + reader so both are disposed before the follow-up
+        // closed-count query runs on this same connection. MARS is not enabled, so leaving this
+        // reader open made the next ExecuteScalarAsync throw "There is already an open DataReader
+        // associated with this Connection" — which failed the whole counts call and showed every
+        // tab badge as 0.
+        await using (var cmd = new SqlCommand(sql, con) { CommandTimeout = 300 })
         {
-            result.TotalClaims = GetInt(rd, "TotalClaims");
-            result.New = GetInt(rd, "New");
-            result.Unassigned = GetInt(rd, "Unassigned");
-            result.Assigned = GetInt(rd, "Assigned");
-            result.PayerFollowup = GetInt(rd, "PayerFollowup");
-            result.PendingDocumentation = GetInt(rd, "PendingDocumentation");
-            result.PendingPayerResponse = GetInt(rd, "PendingPayerResponse");
-            result.WriteOffApproval = GetInt(rd, "WriteOffApproval");
-            result.Closed = GetInt(rd, "Closed");
-            result.Escalated = GetInt(rd, "Escalated");
-            result.InternalEscalation = GetInt(rd, "InternalEscalation");
-            result.ExternalEscalation = GetInt(rd, "ExternalEscalation");
-            result.EscalationResponse = GetInt(rd, "EscalationResponse");
-            result.Verification = GetInt(rd, "Verification");
-            result.SlaAtRisk = GetInt(rd, "SlaAtRisk");
+            AddFilterParams(cmd, filter);
+            AddExtraParams(cmd, where.Parameters);
+            // When the reviewer scope is suppressed in BuildClaimWhere, @RoleUserName is no longer added
+            // there but is still referenced by the #ReviewerScope prefix, so add it here.
+            if (reviewerOnly && !cmd.Parameters.Contains("@RoleUserName"))
+                cmd.Parameters.AddWithValue("@RoleUserName", (filter.UserName ?? string.Empty).Trim());
+            await using var rd = await cmd.ExecuteReaderAsync(ct);
+
+            if (await rd.ReadAsync(ct))
+            {
+                result.TotalClaims = GetInt(rd, "TotalClaims");
+                result.New = GetInt(rd, "New");
+                result.Unassigned = GetInt(rd, "Unassigned");
+                result.Assigned = GetInt(rd, "Assigned");
+                result.PayerFollowup = GetInt(rd, "PayerFollowup");
+                result.PendingDocumentation = GetInt(rd, "PendingDocumentation");
+                result.PendingPayerResponse = GetInt(rd, "PendingPayerResponse");
+                result.WriteOffApproval = GetInt(rd, "WriteOffApproval");
+                result.Closed = GetInt(rd, "Closed");
+                result.Escalated = GetInt(rd, "Escalated");
+                result.InternalEscalation = GetInt(rd, "InternalEscalation");
+                result.ExternalEscalation = GetInt(rd, "ExternalEscalation");
+                result.EscalationResponse = GetInt(rd, "EscalationResponse");
+                result.Verification = GetInt(rd, "Verification");
+                result.SlaAtRisk = GetInt(rd, "SlaAtRisk");
+            }
+        }
+
+        // Round 1 (07/24) UAT: the Closed queue badge showed 1 while the reviewer's Closed list held
+        // 3. Root cause: the badge above is derived from the live task board, but the Closed queue
+        // list (GetClosedClaimsAsync) reads dbo.DenialClosedClaims — and a closed claim's board tasks
+        // are often unassigned/removed on close, so they drop out of the reviewer-scoped board count.
+        // Count the badge from the same store, with the same reviewer/assignee scope the list uses.
+        var closedAssignee = reviewerOnly
+            ? (filter.UserName ?? string.Empty).Trim()
+            : !string.IsNullOrWhiteSpace(filter.AssignedTo) ? filter.AssignedTo.Trim()
+            : !string.IsNullOrWhiteSpace(filter.Reviewer) ? filter.Reviewer.Trim()
+            : string.Empty;
+        var closedScopeSql = string.IsNullOrWhiteSpace(closedAssignee)
+            ? string.Empty
+            : " AND LTRIM(RTRIM(ISNULL(dc.AssignedTo,''))) = @ClosedAssignee";
+        await using (var closedCmd = new SqlCommand(
+            $"SELECT COUNT_BIG(1) FROM dbo.DenialClosedClaims dc WITH (NOLOCK) WHERE {LabScopeSql("dc.LabId")}{closedScopeSql};", con)
+            { CommandTimeout = 120 })
+        {
+            AddFilterParams(closedCmd, filter);
+            if (!string.IsNullOrWhiteSpace(closedAssignee)) closedCmd.Parameters.AddWithValue("@ClosedAssignee", closedAssignee);
+            var closedScalar = await closedCmd.ExecuteScalarAsync(ct);
+            result.ClosedQueue = closedScalar == DBNull.Value || closedScalar is null ? 0 : Convert.ToInt32(closedScalar);
         }
 
         ClaimCountsCache[cacheKey] = new ClaimCountsCacheEntry(DateTime.UtcNow, result);
@@ -3307,6 +3337,33 @@ WHERE TaskID = @TaskID AND LOWER(LTRIM(RTRIM(ISNULL(WorkFlowStatus,'')))) = 'int
         string LDate(string col) => lineColumns.Contains(col) ? $"ISNULL(CONVERT(varchar(10), lx.[{col}], 101),'')" : "''";
         string LNum(string col) => lineColumns.Contains(col) ? $"ISNULL(CONVERT(varchar(30), lx.[{col}]),'')" : "''";
 
+        // Round 1 (07/24) UAT: the downloaded template had a blank Notes column and no way to see
+        // the notes already entered on the claim, so a reviewer re-downloading to record the next
+        // step lost all prior context. Add a read-only NotesHistory column that concatenates the
+        // claim's notes (dbo.DenialClaimNotes — the same source as the Notes tab / claim history),
+        // newest last, for both AR Reviewer and AR Manager. The editable Notes input column stays
+        // separate. Notes may key the claim by either the composite ClaimUID or the short claim
+        // number, so match on both.
+        var notesTableExists = await TableExistsAsync(con, "dbo.DenialClaimNotes", ct);
+        var claimShort = taskColumns.Contains("ClaimIDNormalized")
+            ? "LTRIM(RTRIM(ISNULL(t.[ClaimIDNormalized],'')))"
+            : "CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(t.[ClaimID],''))), 'CLM-', ''))";
+        var notesApply = notesTableExists ? $@"
+OUTER APPLY (
+    SELECT NotesHistory = STUFF((
+        SELECT CHAR(13)+CHAR(10) + '[' + CONVERT(varchar(16), n.CreatedOn, 120) + '] '
+             + ISNULL(NULLIF(LTRIM(RTRIM(n.CreatedBy)),''),'Unknown')
+             + CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(n.Status,''))),'') IS NOT NULL THEN ' (' + LTRIM(RTRIM(n.Status)) + ')' ELSE '' END
+             + ': ' + ISNULL(n.NoteText,'')
+        FROM dbo.DenialClaimNotes n WITH (NOLOCK)
+        WHERE ISNULL(n.IsDeleted,0)=0 AND {LabScopeSql("n.LabId")}
+          AND (LTRIM(RTRIM(ISNULL(n.ClaimId,''))) = {claimUid}
+               OR REPLACE(LTRIM(RTRIM(ISNULL(n.ClaimId,''))), 'CLM-', '') = {claimShort})
+        ORDER BY n.CreatedOn
+        FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)'), 1, 2, '')
+) nh" : string.Empty;
+        var notesHistorySelect = notesTableExists ? "ISNULL(nh.NotesHistory, '')" : "''";
+
         // OUTER APPLY SELECT TOP 1 avoids row fan-out when multiple DenialLineItem rows match the same task.
         var lineJoinSql = "";
         var lineLabDeclaration = "DECLARE @HasLineLab bit = 0;";
@@ -3404,9 +3461,11 @@ SELECT
     DenialType                              = {L("DenialType")},
     TaskGuidance                            = {L("TaskGuidance")},
     TaskStatus                              = {L("TaskStatus")},
-    ShortCategory                           = {L("ShortCategory")}
+    ShortCategory                           = {L("ShortCategory")},
+    NotesHistory                            = {notesHistorySelect}
 FROM dbo.DenialTaskBoard t WITH (NOLOCK)
 {lineJoinSql}
+{notesApply}
 WHERE {taskLabPredicate}
   AND NULLIF({claimUid},'') IS NOT NULL
   {where.WhereClause}
@@ -3429,19 +3488,37 @@ ORDER BY {string.Join(", ", orderByParts)};";
             // is unchanged for anyone working from a previously downloaded file.
             "ClaimUID","AccessionNo","PatientDOB","SubscriberId","Source","PayStatus","BilledAmount",
             "FinalClaimStatus","FinalCoverageStatus","ActionComment","DenialDate","DaystoDOS",
-            "DaystoBill","DenialType","TaskGuidance","TaskStatus","ShortCategory"
+            "DaystoBill","DenialType","TaskGuidance","TaskStatus","ShortCategory",
+            // Round 1 (07/24) UAT: prior claim notes, so a re-downloaded template keeps the history
+            // the reviewer/manager already recorded. Read-only reference; the editable Notes column
+            // (below) is where new notes are entered.
+            "NotesHistory"
         };
         // UAT TC-171/TC-172: the editable columns mirror the AR Reviewer status-update popup
         // (New Line Status, Expected Response Date, Action Completed, Actual Outcome,
         // Documentation Type, Follow-up Reason, Closure Reason, Comments) plus the reviewer
         // escalation and manager escalation-response fields the upload endpoint accepts.
-        var editableHeaders = new[]
+        //
+        // Round 1 (07/24) UAT: EscalationResponse / EscalationResponseComment are an AR-Manager-only
+        // action (the upload endpoint already rejects them for reviewers with "Only AR Manager/Admin
+        // can upload an EscalationResponse"). They must not appear on the AR Reviewer template — a
+        // reviewer should never be offered a column they cannot use. Include them only for
+        // manager/admin roles.
+        var exportRoleToken = new string((filter.Role ?? string.Empty).Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+        var isManagerTemplate = exportRoleToken.Contains("ADMIN") || exportRoleToken.Contains("ARMANAGER");
+        var editableHeaderList = new List<string>
         {
             "UpdateStatus","ExpectedResponseDate","ActionCompleted","ActualOutcome",
             "DocumentationType","FollowUpReason","ClosureReason","ValidationStatus","Comments",
-            "EscalationReason","OtherEscalationReason","EscalationComment","EscalationExpectedResponseDate",
-            "EscalationResponse","EscalationResponseComment","Notes"
+            "EscalationReason","OtherEscalationReason","EscalationComment","EscalationExpectedResponseDate"
         };
+        if (isManagerTemplate)
+        {
+            editableHeaderList.Add("EscalationResponse");
+            editableHeaderList.Add("EscalationResponseComment");
+        }
+        editableHeaderList.Add("Notes");
+        var editableHeaders = editableHeaderList.ToArray();
         var headers = readOnlyHeaders.Concat(editableHeaders).ToArray();
         var readOnlyCount = readOnlyHeaders.Length;
 
@@ -5265,11 +5342,31 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
             ? ", RecommendedNextAction=@RecommendedNextAction"
             : string.Empty;
 
+        // Round 1 (07/24) UAT — Escalation Response upload failed with "Escalation response was not
+        // applied" and the claim never left the Internal Escalation queue. Root cause: the
+        // escalation's ClaimId is stored as the composite ClaimUID (e.g. 450561_1654034_20260519)
+        // while DenialTaskBoard.ClaimID/ClaimIDNormalized hold the short claim number (450561), so
+        // the task UPDATE below matched 0 rows — yet the escalation-status flip and the note insert
+        // in the same batch still ran, which is why the response showed under Notes but the tasks
+        // stayed "Escalated to AR Manager". Match on ClaimUID (when present) and on the short claim
+        // segment so the tasks are actually transitioned. @TargetClaimShort is derived in SQL below.
+        var hasTaskClaimUid = await HasColumnAsync(con, "dbo.DenialTaskBoard", "ClaimUID", ct);
+        var taskUidMatch = hasTaskClaimUid
+            ? "LTRIM(RTRIM(ISNULL(t.ClaimUID,''))) = LTRIM(RTRIM(ISNULL(@TargetClaimId,''))) OR "
+            : string.Empty;
+
         var sql = $@"
 DECLARE @TargetClaimId nvarchar(150), @TargetTaskId nvarchar(100), @TargetCptCode nvarchar(100), @OriginalReviewer nvarchar(256);
 SELECT @TargetClaimId=ClaimId, @TargetTaskId=ISNULL(TaskId,''), @TargetCptCode=ISNULL(CptCode,''), @OriginalReviewer=ISNULL(CreatedBy,'')
 FROM dbo.DenialClaimEscalations WITH (UPDLOCK, ROWLOCK)
 WHERE IsDeleted=0 AND LabId=@LabId AND EscalationId=@EscalationId;
+
+-- Short claim number from a composite ClaimUID (450561_1654034_20260519 -> 450561); the escalation
+-- may hold either form, the task board holds the short form. Used as an extra match below.
+DECLARE @TargetClaimShort nvarchar(150) =
+    CASE WHEN CHARINDEX('_', ISNULL(@TargetClaimId,'')) > 0
+         THEN LEFT(@TargetClaimId, CHARINDEX('_', @TargetClaimId) - 1)
+         ELSE @TargetClaimId END;
 
 IF @ResolutionAction IN ('approvewriteoff','rejectwriteoff')
    AND NULLIF(LTRIM(RTRIM(ISNULL(@OriginalReviewer,''))),'') IS NOT NULL
@@ -5302,9 +5399,12 @@ SET Status=@TaskStatus,
 OUTPUT INSERTED.TaskID, INSERTED.UniqueTrackId, CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(INSERTED.ClaimID,''))), 'CLM-', '')), ISNULL(INSERTED.LabId,@LabId), INSERTED.RunId, DELETED.Status, INSERTED.Status, DELETED.AssignedTo, INSERTED.AssignedTo
 INTO @Changed(TaskID,UniqueTrackId,ClaimId,LabId,RunId,OldStatus,NewStatus,OldAssignedTo,NewAssignedTo)
 FROM dbo.DenialTaskBoard t
-WHERE (LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))) = LTRIM(RTRIM(ISNULL(@TargetClaimId,'')))
+WHERE ({taskUidMatch}
+       LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))) = LTRIM(RTRIM(ISNULL(@TargetClaimId,'')))
        OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) = LTRIM(RTRIM(ISNULL(@TargetClaimId,'')))
-       OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) LIKE '%' + LTRIM(RTRIM(ISNULL(@TargetClaimId,''))))
+       OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) LIKE '%' + LTRIM(RTRIM(ISNULL(@TargetClaimId,'')))
+       OR LTRIM(RTRIM(ISNULL(t.ClaimIDNormalized,''))) = @TargetClaimShort
+       OR LTRIM(RTRIM(ISNULL(t.ClaimID,''))) = @TargetClaimShort)
   AND (@Level='Claim' OR @TargetTaskId='' OR ISNULL(t.TaskID,'')=@TargetTaskId)
   AND (@Level='Claim' OR @TargetCptCode='' OR ISNULL(t.CPTCode,'')=@TargetCptCode);
 

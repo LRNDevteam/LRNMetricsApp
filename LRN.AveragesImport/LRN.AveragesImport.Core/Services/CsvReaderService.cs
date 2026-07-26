@@ -36,11 +36,10 @@ public sealed class CsvReaderService : ICsvReaderService
     public CsvParseResult<CptAverageRecord> ReadCptAverages(string filePath)
         => Read<CptAverageRecord, CptAverageMap>(filePath, validator: null);
 
+    // A blank PayerID is imported as NULL rather than treated as a bad row — PanelAverage.PayerID
+    // is nullable in SQL, so the row is still valid data. Same for CptAverage.Global_Payer_ID.
     public CsvParseResult<PanelAverageRecord> ReadPanelAverages(string filePath)
-        => Read<PanelAverageRecord, PanelAverageMap>(
-            filePath,
-            // PanelAverage.PayerID is NOT NULL in SQL — a blank value would fail the whole bulk insert.
-            validator: r => string.IsNullOrWhiteSpace(r.PayerId) ? "PayerID is blank" : null);
+        => Read<PanelAverageRecord, PanelAverageMap>(filePath, validator: null);
 
     private CsvParseResult<T> Read<T, TMap>(string filePath, Func<T, string?>? validator)
         where TMap : ClassMap, new()

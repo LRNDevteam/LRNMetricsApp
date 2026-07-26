@@ -444,6 +444,11 @@ public sealed class ClaimSubMenuCounts
     public int Unassigned { get; set; }
     public int Assigned { get; set; }
     public int Closed { get; set; }
+    // The Closed *queue* count. The board-derived Closed above only sees claims still on the task
+    // board (and, for a reviewer, still assigned to them), but closed claims are moved to
+    // dbo.DenialClosedClaims, which is exactly what the Closed queue list reads. The tab badge must
+    // match that list, so it uses this value; Closed stays board-derived for dashboard open/closed math.
+    public int ClosedQueue { get; set; }
     public int Escalated { get; set; }
     public int Escalate { get => Escalated; set => Escalated = value; }
     public int InternalEscalation { get; set; }
