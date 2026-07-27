@@ -221,6 +221,15 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
   padding-right:14px;
   padding-bottom:10px;
 }
+/* Cap the claim list height so the page doesn't grow with the result set; scroll vertically
+   inside the table area and keep the header row pinned (with an opaque background) while scrolling. */
+.claim-assign-scroll,.wl-table-scroll{max-height:62vh;overflow-y:auto}
+.claim-assign-scroll thead th,.wl-table-scroll thead th{position:sticky;top:0;z-index:6;background:#eef2f7}
+.claim-assign-scroll thead th.sticky-col,.claim-assign-scroll thead th.select-col{z-index:8}
+/* AR Reviewer My Worklist split list: cap the rows area and scroll vertically (the column
+   header sits above this container, so it stays visible). Two-class selector overrides the
+   general .claim-rows-scroll{max-height:none} rule. */
+.my-worklist-pane .claim-rows-scroll{max-height:60vh;overflow-y:auto}
 .claim-card .dt-wrap.claim-assign-scroll{
   padding-left:0;
 }
@@ -500,6 +509,8 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 /* AR reviewer top notification */
 .notification-btn{position:relative;display:inline-flex;align-items:center;gap:7px;height:31px;padding:5px 10px;border:1px solid #cdeee8;border-radius:999px;background:#ecfdf8;color:#0f766e;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;box-shadow:0 1px 2px rgba(15,118,110,.08)}
 .notification-btn:hover{background:#dffaf2;border-color:#1abc9c;color:#075e55}.notification-btn .bi{font-size:14px}.notification-count{position:absolute;top:-7px;left:20px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#ef4444;color:#fff;border:2px solid #fff;display:inline-flex;align-items:center;justify-content:center;font-size:10px;line-height:1;font-weight:800}.notification-text b{font-size:12px;color:#0f766e}@media(max-width:1100px){.notification-text{display:none}.notification-btn{width:34px;justify-content:center;padding:5px}}
+.notification-btn.icon-only{width:34px;height:34px;padding:0;justify-content:center;border-radius:999px;gap:0}
+.notification-btn.icon-only .notification-count{left:auto;right:-5px;top:-5px}
 .notification-wrap{position:relative}
 .workflow-notification-panel{position:absolute;right:0;top:38px;width:min(430px,92vw);max-height:70vh;overflow:auto;background:#fff;border:1px solid #d8dee9;border-radius:10px;box-shadow:0 18px 45px rgba(15,23,42,.2);z-index:2100;padding:8px}
 .workflow-notification-panel.popup{position:static;width:100%;max-height:62vh;box-shadow:none;border:0;border-radius:0;padding:10px 14px 14px}
@@ -1175,7 +1186,9 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .role-page-head h2{margin:0;font-size:18px;font-weight:700;color:#1f2937}.role-page-head p{margin:2px 0 0;color:#6b7280;font-size:12px}.role-page-head p b{color:#1abc9c}.role-head-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.role-tag{background:#e6f4ff;color:#075985;font-size:11px;font-weight:700;padding:4px 10px;border-radius:999px}.role-user{display:inline-flex;align-items:center;gap:6px;color:#475569;font-size:12px;font-weight:600}
 .role-kpi-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.role-kpi{background:#fff;border:.5px solid #d8dee9;border-radius:10px;text-align:center;padding:13px 12px}.role-kpi-value{font-size:22px;font-weight:800;line-height:1.1;color:#1f2937}.role-kpi-label{font-size:11px;color:#6b7280;margin-top:4px}.role-kpi.blue .role-kpi-value{color:#075985}.role-kpi.teal .role-kpi-value{color:#1abc9c}.role-kpi.red .role-kpi-value{color:#e74c3c}.role-kpi.green .role-kpi-value{color:#22c55e}.role-kpi.amber .role-kpi-value{color:#f39c12}
 .dashboard-overview-grid{display:grid;grid-template-columns:minmax(190px,260px) minmax(0,1fr);gap:12px;align-items:start}.dashboard-kpi-stack{grid-template-columns:1fr}.dashboard-kpi-stack .role-kpi{text-align:left;padding:14px 16px}.reviewer-aging-table{min-width:980px}
-.role-grid.two{display:grid;grid-template-columns:1.15fr .85fr;gap:12px}.role-card{background:#fff;border:.5px solid #d8dee9;border-radius:10px;overflow:hidden;margin-bottom:12px}.role-card-hd{padding:10px 13px;border-bottom:.5px solid #d8dee9;background:#f8fafc;display:flex;align-items:center;justify-content:space-between}.role-card-title{font-size:13px;font-weight:700;color:#1f2937}.role-card-subtitle{font-size:11px;color:#64748b;margin-top:2px;max-width:640px}.role-card-body{padding:12px}.role-table-wrap{overflow:auto}.role-table{width:100%;min-width:720px;border-collapse:collapse;font-size:12px}.role-table.wide{min-width:900px}.role-table th{background:#f8fafc;color:#64748b;font-size:10px;text-transform:uppercase;letter-spacing:.05em;text-align:left;padding:8px 10px;border-bottom:.5px solid #d8dee9;white-space:nowrap}.role-table td{padding:8px 10px;border-bottom:.5px solid #e5e7eb;white-space:nowrap;vertical-align:middle}.role-table tbody tr:hover td{background:#f8fafc}.role-flag{display:inline-flex;align-items:center;border-radius:999px;padding:3px 8px;font-size:10px;font-weight:800;border:.5px solid transparent}.flag-red{background:#fde8e8;color:#991b1b;border-color:#f8b4b4}.flag-amber{background:#fef3c7;color:#92400e;border-color:#facc15}.flag-blue{background:#e0f2fe;color:#075985;border-color:#7dd3fc}.flag-green{background:#dcfce7;color:#166534;border-color:#86efac}
+.role-grid.two{display:grid;grid-template-columns:1.15fr .85fr;gap:12px}
+/* Analyst dashboard has a single card (Priority Work Queue) in this grid -- give it the full width. */
+.role-grid.two.analyst-layout{grid-template-columns:1fr}.role-card{background:#fff;border:.5px solid #d8dee9;border-radius:10px;overflow:hidden;margin-bottom:12px}.role-card-hd{padding:10px 13px;border-bottom:.5px solid #d8dee9;background:#f8fafc;display:flex;align-items:center;justify-content:space-between}.role-card-title{font-size:13px;font-weight:700;color:#1f2937}.role-card-subtitle{font-size:11px;color:#64748b;margin-top:2px;max-width:640px}.role-card-body{padding:12px}.role-table-wrap{overflow:auto}.role-table{width:100%;min-width:720px;border-collapse:collapse;font-size:12px}.role-table.wide{min-width:900px}.role-table th{background:#f8fafc;color:#64748b;font-size:10px;text-transform:uppercase;letter-spacing:.05em;text-align:left;padding:8px 10px;border-bottom:.5px solid #d8dee9;white-space:nowrap}.role-table td{padding:8px 10px;border-bottom:.5px solid #e5e7eb;white-space:nowrap;vertical-align:middle}.role-table tbody tr:hover td{background:#f8fafc}.role-flag{display:inline-flex;align-items:center;border-radius:999px;padding:3px 8px;font-size:10px;font-weight:800;border:.5px solid transparent}.flag-red{background:#fde8e8;color:#991b1b;border-color:#f8b4b4}.flag-amber{background:#fef3c7;color:#92400e;border-color:#facc15}.flag-blue{background:#e0f2fe;color:#075985;border-color:#7dd3fc}.flag-green{background:#dcfce7;color:#166534;border-color:#86efac}
 .role-metrics-list{display:flex;flex-direction:column;gap:8px}.role-metric{border:.5px solid #d8dee9;border-radius:9px;padding:10px;background:#fff;display:flex;align-items:center;justify-content:space-between;gap:10px}.role-metric b{font-size:12px}.role-metric span{display:block;font-size:10px;color:#6b7280;margin-top:2px}.role-metric strong{font-size:13px;color:#0f766e}.role-insight{background:#e8f8f3;border:.5px solid rgba(26,188,156,.35);border-radius:8px;padding:10px;font-size:12px;line-height:1.45;margin-bottom:8px;color:#334155}.role-insight.danger{background:#fef2f2;border-color:#fecaca;color:#7f1d1d}.role-insight.warn{background:#fffbeb;border-color:#fde68a;color:#78350f}.aging-row{margin-bottom:10px}.aging-row span{display:block;font-size:11px;color:#64748b;margin-bottom:5px}.aging-row div{height:8px;background:#e5e7eb;border-radius:999px;overflow:hidden}.aging-row i{display:block;height:100%;background:#1abc9c;border-radius:999px}.single-account-dashboard .role-page-head{border-left:4px solid #1abc9c}.analyst-dashboard .role-page-head{border-left:4px solid #0ea5e9}.manager-dashboard .role-page-head{border-left:4px solid #e74c3c}
 
 /* Inline escalation panels - popup removed */
@@ -1215,17 +1228,25 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 }
 .status-scope-modal{width:min(980px,96vw);height:min(86vh,780px);display:flex;flex-direction:column}
 .status-scope-modal .wl-modal-hd{padding:16px 20px;border-bottom:1px solid #d8e0ea}
-.status-scope-modal .note-modal-ft{position:sticky;bottom:0;z-index:2;background:#f8fafc;border-top:1px solid #d8e0ea}
+.status-scope-modal .note-modal-ft{position:sticky;bottom:0;z-index:2;background:#f8fafc;border-top:1px solid #d8e0ea;align-items:center;justify-content:space-between;gap:12px}
 .status-scope-body{padding:16px 20px 20px;overflow:auto;min-height:0;flex:1}
 .status-scope-callout{border:1px solid #bfdbfe;background:#eff6ff;color:#1e3a8a;border-radius:10px;padding:11px 13px;margin-bottom:14px;display:flex;flex-direction:column;gap:3px;font-size:12px}
 .status-scope-callout.amber{background:#fff7ed;border-color:#fdba74;color:#9a3412}
-.status-scope-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px 12px;margin-bottom:12px;align-items:start}
+.status-scope-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px 12px;margin-bottom:12px;align-items:start}
 .status-scope-grid.single{grid-template-columns:minmax(240px,420px)}
-.status-scope-grid .doc-type-field{grid-column:3 / 5}
-.status-scope-grid label,.status-scope-comments{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:800;color:#334155}
+.status-scope-grid .doc-type-field{grid-column:1 / 3}
+.status-scope-grid .escalate-to-field{grid-column:3 / 5}
+.status-scope-grid label,.status-scope-grid .status-scope-field,.status-scope-comments{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:800;color:#334155}
+.status-scope-grid .status-scope-field{min-width:0;align-self:start}
 .field-label-row{display:inline-flex;align-items:center;gap:4px;line-height:1.2}
-.status-scope-grid input,.status-scope-grid select{min-height:36px;border:1px solid #cbd5e1;border-radius:8px;padding:7px 9px;background:#fff}
+.status-scope-grid .field-label-row{min-height:16px}
+.status-scope-grid input:not([type="checkbox"]),.status-scope-grid select{width:100%;min-height:36px;border:1px solid #cbd5e1;border-radius:8px;padding:7px 9px;background:#fff}
 .doctype-help{display:block;margin-top:2px;padding:8px 10px;border:1px solid #bfdbfe;background:#eff6ff;color:#1e3a8a;border-radius:8px;font-size:12px;font-weight:700;line-height:1.35}
+/* Escalate To: keep the checkbox its native size and lay the control out as one tidy row. */
+.status-scope-grid .escalate-to-field{gap:6px}
+.status-scope-grid .doc-type-field,.status-scope-grid .escalate-to-field{align-self:start}
+.wl-checkbox-inline{flex-direction:row!important;align-items:center;gap:8px;min-height:36px;padding:0 10px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;font-size:12px;font-weight:700;color:#334155;cursor:pointer}
+.wl-checkbox-inline input[type="checkbox"]{flex:0 0 auto;width:16px;height:16px;min-height:0;margin:0;padding:0;border-radius:4px;accent-color:#0d9488;cursor:pointer}
 .status-scope-comments{margin-top:4px}
 .status-scope-comments textarea{min-height:92px;max-height:140px}
 .status-preview{background:#f8fafc;border:1px dashed #94a3b8;border-radius:10px;padding:12px;margin:12px 0}
@@ -1246,6 +1267,20 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .structured-note-field span{display:block;font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.05em;color:#64748b;margin-bottom:3px}
 .structured-note-field strong{display:block;font-size:12px;line-height:1.35;color:#0f172a;white-space:pre-wrap}
 .structured-note-plain{white-space:pre-line}
+.structured-note-wrap{display:flex;flex-direction:column;gap:8px}
+/* AR Manager response highlight so the reviewer immediately notices the manager's reply. */
+.manager-response-callout{border:1px solid #6ee7b7;background:#ecfdf5;border-left:4px solid #10b981;border-radius:8px;padding:8px 11px;display:flex;flex-direction:column;gap:4px}
+.manager-response-badge{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.05em;color:#047857}
+.manager-response-badge i{font-size:12px}
+.manager-response-line{font-size:12px;line-height:1.4;color:#064e3b;white-space:pre-wrap}
+.manager-response-line span{display:block;font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.05em;color:#059669;margin-top:2px}
+.manager-response-line strong{color:#064e3b;font-weight:700}
+@media(prefers-color-scheme:dark){
+  .manager-response-callout{border-color:#065f46;background:rgba(6,95,70,.18);border-left-color:#10b981}
+  .manager-response-badge{color:#6ee7b7}
+  .manager-response-line,.manager-response-line strong{color:#a7f3d0}
+  .manager-response-line span{color:#6ee7b7}
+}
 .history-comment{display:grid;grid-template-columns:72px minmax(0,1fr);gap:8px;margin-top:6px}
 .history-comment>span{font-size:13px;color:#475569}
 .claim-task-workbench{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;padding:14px;background:#f8fafc}
@@ -1278,7 +1313,8 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .claim-task-side{display:flex;flex-direction:column}.claim-task-side>div{padding:14px 16px;border-bottom:1px solid #d8e0ea}.claim-task-side>div:last-child{border-bottom:0}.claim-task-side h4{margin:0 0 10px;font-size:12px;color:#0f172a;text-transform:uppercase}.claim-task-side p{margin:8px 0 0;font-size:12px;color:#64748b}
 .scope-progress{height:8px;background:#e5e7eb;border-radius:999px;overflow:hidden}.scope-progress i{display:block;height:100%;background:#1f9d8a;border-radius:999px}
 .scope-kv{display:flex;justify-content:space-between;gap:10px;margin:8px 0;font-size:12px}.scope-kv span{color:#64748b}.scope-kv strong{color:#0f172a}
-@media(max-width:1100px){.status-scope-grid{grid-template-columns:1fr 1fr}.status-scope-grid .doc-type-field{grid-column:auto}.claim-task-workbench{grid-template-columns:1fr}.claim-drawer-header-main,.claim-drawer-header-overview{grid-template-columns:1fr}}
+@media(max-width:1100px){.status-scope-grid{grid-template-columns:1fr 1fr}.status-scope-grid .doc-type-field,.status-scope-grid .escalate-to-field{grid-column:auto}.claim-task-workbench{grid-template-columns:1fr}.claim-drawer-header-main,.claim-drawer-header-overview{grid-template-columns:1fr}}
+@media(max-width:700px){.status-scope-grid{grid-template-columns:1fr}.status-scope-modal .note-modal-ft{flex-direction:column;align-items:stretch}.status-scope-modal .note-modal-ft .wl-btn{width:100%}}
 /* Aging dashboard */
 .aging-dashboard{display:flex;flex-direction:column;gap:14px}
 .global-filter-hidden{display:none}
@@ -1367,6 +1403,10 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .claim-rows-scroll{max-height:none;overflow:visible}
 .claim-list-row{width:100%;display:grid;grid-template-columns:auto auto minmax(150px,1.3fr) minmax(120px,1fr) 94px 92px;gap:10px;align-items:center;border:0;border-bottom:.5px solid #eef2f7;background:#fff;padding:10px 14px;text-align:left;cursor:default;color:#0f172a}
 .claim-list-row-wide{grid-template-columns:auto auto minmax(150px,1.2fr) minmax(90px,.7fr) minmax(150px,1.1fr) minmax(140px,1fr) minmax(100px,.75fr) minmax(120px,.8fr) minmax(92px,.65fr) 94px minmax(120px,.8fr) 100px 96px;min-width:1560px}
+/* My Worklist grid has exactly 11 cells (spacer, chevron, then 9 data columns). Pin its template
+   to those 11 columns for both header and rows so headers line up with their values and there is
+   no trailing dead space from the shared 13-column template. */
+.claim-list-head-wide.my-worklist-head,.claim-list-row-wide.my-worklist-row{grid-template-columns:auto auto minmax(150px,1.2fr) minmax(90px,.7fr) minmax(150px,1.1fr) minmax(140px,1fr) minmax(100px,.75fr) minmax(120px,.8fr) minmax(92px,.65fr) 94px minmax(120px,.8fr);min-width:1180px}
 .claim-sort-btn{border:0;background:transparent;color:inherit;font:inherit;font-weight:800;text-transform:uppercase;letter-spacing:.06em;padding:0;display:inline-flex;align-items:center;gap:4px;cursor:pointer}
 .claim-sort-btn i{font-size:10px;color:#1abc9c}
 .claim-filter-toggle-row{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0 0 8px}
@@ -1602,7 +1642,7 @@ button,select,input,textarea{font-family:inherit}.lrn-wrap{display:flex;min-heig
 .history-timeline-track:before{content:"";position:absolute;top:9px;bottom:-9px;left:13px;width:2px;background:#dbeafe}
 .history-timeline-row:last-child .history-timeline-track:before{bottom:30px}
 .history-timeline-track i{position:absolute;top:1px;left:7px;width:13px;height:13px;border-radius:50%;box-shadow:0 0 0 3px #eef6ff}
-.history-timeline-track.green i{background:#22c55e}.history-timeline-track.blue i{background:#0b82f0}.history-timeline-track.purple i{background:#8b5cf6}.history-timeline-track.gray i{background:#94a3b8}
+.history-timeline-track.green i{background:#22c55e}.history-timeline-track.blue i{background:#0b82f0}.history-timeline-track.purple i{background:#8b5cf6}.history-timeline-track.gray i{background:#94a3b8}.history-timeline-track.amber i{background:#f5a623}
 .history-timeline-content{padding-bottom:18px;min-width:0}
 .history-timeline-content h4{margin:0 0 7px;font-size:14px;font-weight:800;color:#1f2937}
 .history-timeline-content p{margin:3px 0 0;font-size:13px;line-height:1.35;color:#475569;white-space:pre-line}
@@ -1838,3 +1878,112 @@ body{background:#f5f7fb;color:#101828}
 .claim-split-shell .claim-task-table .sticky-cpt-col{position:sticky;left:0;width:100px;min-width:100px;max-width:100px;background:#fff;box-shadow:1px 0 0 #d8dee9;z-index:4}
 .claim-split-shell .claim-task-table .sticky-denial-col{position:sticky;left:100px;width:118px;min-width:118px;max-width:118px;background:#fff;box-shadow:8px 0 12px -12px rgba(15,23,42,.55),1px 0 0 #d8dee9;z-index:4}
 .claim-split-shell .claim-task-table th.sticky-cpt-col,.claim-split-shell .claim-task-table th.sticky-denial-col{background:#f8fafc;z-index:9}
+
+/* Pager: Rows-per-page selector + range label */
+.pager{flex-wrap:wrap}
+.pager-size{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#64748b;font-weight:700;margin-right:auto}
+.pager-size select{height:28px;border:1px solid #cbd5e1;border-radius:6px;padding:0 6px;font-size:11px;background:#fff;color:#0f172a}
+.pager-range{font-size:11px;color:#64748b;font-variant-numeric:tabular-nums}
+
+/* Bulk claim upload: modal with loading state + per-row results table */
+.csv-upload-modal{width:min(960px,96vw);max-width:96vw}
+.csv-upload-drop{display:flex;flex-direction:column;align-items:center;gap:7px;padding:22px;border:1.5px dashed #cbd5e1;border-radius:9px;background:#f8fafc;text-align:center}
+.csv-upload-drop>i{font-size:30px;color:#94a3b8}
+.csv-upload-drop strong{font-size:13px;color:#1e293b;word-break:break-all}
+.csv-upload-drop span{font-size:11px;color:#64748b}
+.csv-upload-error{display:flex;align-items:center;gap:7px;margin-top:9px;padding:8px 10px;border-radius:7px;background:#fef2f2;border:1px solid #fecaca;color:#b42318;font-size:12px}
+.csv-upload-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;min-height:190px;text-align:center}
+.csv-upload-loading strong{font-size:14px;color:#1e293b}
+.csv-upload-loading span{font-size:11px;color:#64748b}
+.csv-upload-spinner{font-size:30px;color:#0f766e;animation:claim-spin .8s linear infinite}
+.csv-upload-summary{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:11px}
+.csv-sum-badge{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;font-size:11px;font-weight:800;border:1px solid transparent}
+.csv-sum-badge.total{background:#eef2ff;color:#3730a3;border-color:#c7d2fe}
+.csv-sum-badge.success{background:#ecfdf5;color:#067647;border-color:#a7f3d0}
+.csv-sum-badge.failed{background:#fef2f2;color:#b42318;border-color:#fecaca}
+.csv-sum-badge.skipped{background:#f1f5f9;color:#475569;border-color:#e2e8f0}
+.csv-upload-results-scroll{max-height:52vh;overflow:auto;border:1px solid #e2e8f0;border-radius:8px}
+.csv-upload-results-table{width:100%;border-collapse:separate;border-spacing:0;font-size:11px}
+.csv-upload-results-table th{position:sticky;top:0;z-index:2;background:#f4f7fa;text-align:left;padding:8px 10px;color:#475569;font-weight:800;text-transform:uppercase;letter-spacing:.03em;font-size:9px;border-bottom:1px solid #e2e8f0;white-space:nowrap}
+.csv-upload-results-table td{padding:8px 10px;border-bottom:1px solid #f1f5f9;color:#334155;vertical-align:top}
+.csv-upload-results-table tr.row-fail td{background:#fffafa}
+.csv-upload-results-table small{color:#94a3b8}
+.csv-row-badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:10px;font-weight:800}
+.csv-row-badge.ok{background:#ecfdf5;color:#067647}
+.csv-row-badge.fail{background:#fef2f2;color:#b42318}
+.csv-status-change{white-space:nowrap}
+.csv-change-list{margin:0;padding-left:15px;display:flex;flex-direction:column;gap:2px}
+.csv-change-field{color:#64748b}
+.csv-note-cell{max-width:180px;white-space:pre-wrap;word-break:break-word}
+.csv-reason-cell{max-width:200px;color:#b42318;word-break:break-word}
+.csv-empty{text-align:center;color:#94a3b8;padding:18px}
+@media (prefers-reduced-motion:reduce){.csv-upload-spinner{animation:none}}
+
+/* Jobs Center: topbar badge + dropdown + Uploads & Downloads page */
+.jobs-badge-wrap{position:relative}
+.jobs-badge-btn{white-space:nowrap}
+.jobs-badge-count{background:#0f766e}
+.csv-upload-queued{display:flex;flex-direction:column;align-items:center;gap:9px;padding:26px 18px;text-align:center}
+.csv-upload-queued>i{font-size:34px;color:#0f766e}
+.csv-upload-queued strong{font-size:15px;color:#1e293b}
+.csv-upload-queued span{font-size:12px;color:#64748b;max-width:420px}
+.csv-upload-modal-compact{width:min(640px,94vw)}
+.jobs-dropdown{position:absolute;top:calc(100% + 8px);right:0;z-index:2100;width:min(430px,92vw);background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 14px 34px rgba(15,23,42,.16);overflow:hidden}
+.jobs-dropdown-hd{display:flex;justify-content:space-between;align-items:center;padding:10px 13px;background:#f8fafc;border-bottom:1px solid #e2e8f0;font-size:12px}
+.jobs-dropdown-hd span{color:#64748b;font-size:10px}
+.jobs-dropdown-list{max-height:330px;overflow-y:auto}
+.jobs-row{display:flex;align-items:center;gap:9px;padding:9px 13px;border-bottom:1px solid #f1f5f9;font-size:11px}
+.jobs-row:last-child{border-bottom:0}
+.jobs-row-icon{width:26px;height:26px;flex:0 0 26px;display:grid;place-items:center;border-radius:7px;font-size:12px}
+.jobs-row-icon.upload{background:#eef2ff;color:#3730a3}
+.jobs-row-icon.download{background:#ecfdf5;color:#067647}
+.jobs-row-main{flex:1;min-width:0}
+.jobs-row-title{font-weight:700;color:#1e293b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.jobs-row-meta{color:#94a3b8;font-size:9.5px;margin-top:2px}
+.jobs-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:999px;font-size:9.5px;font-weight:800;white-space:nowrap}
+.jobs-chip.ok{background:#ecfdf5;color:#067647}
+.jobs-chip.fail{background:#fef2f2;color:#b42318}
+.jobs-chip.run{background:#eff6ff;color:#1d4ed8}
+.jobs-spin{animation:claim-spin .9s linear infinite;font-size:10px}
+.jobs-empty{padding:22px;text-align:center;color:#94a3b8;font-size:11px}
+.jobs-dropdown-ft{display:block;width:100%;padding:10px;border:0;background:#f8fafc;border-top:1px solid #e2e8f0;color:#0f766e;font-weight:800;font-size:11px;cursor:pointer}
+.jobs-dropdown-ft:hover{background:#f0fdfa}
+.jobs-page-card{margin-bottom:14px}
+.jobs-page-hd{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.jobs-table td,.jobs-table th{font-size:11px}
+.jobs-table .r{text-align:right}
+.jobs-file-cell{font-weight:700;color:#1e293b;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.jobs-file-cell .jobs-row-icon{display:inline-grid;vertical-align:middle;margin-right:5px}
+.jobs-click-row{cursor:pointer}
+.jobs-click-row:hover td{background:#f8fafc}
+.jobs-num-ok{color:#067647;font-weight:800}
+.jobs-num-fail{color:#b42318;font-weight:800}
+/* Tabs + date filter toolbar on the Uploads & Downloads page */
+.jobs-tab-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-bottom:1px solid #e2e8f0;background:#f8fafc;border-radius:9px 9px 0 0}
+.jobs-tabs{display:flex;gap:6px}
+.jobs-tab{display:inline-flex;align-items:center;gap:7px;padding:7px 15px;border:1px solid #d8e0ea;border-radius:999px;background:#fff;color:#475569;font-size:11px;font-weight:800;cursor:pointer}
+.jobs-tab b{background:#eef2f7;border-radius:999px;padding:1px 8px;font-size:10px}
+.jobs-tab.active{background:#0f766e;border-color:#0f766e;color:#fff}
+.jobs-tab.active b{background:rgba(255,255,255,.22);color:#fff}
+.jobs-tab-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.jobs-tab-tools label{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.04em}
+.jobs-tab-tools input[type="date"]{height:30px;border:1px solid #cbd5e1;border-radius:7px;padding:0 8px;font-size:11px;background:#fff}
+/* Inset the table from the card edges (bordered, rounded, own scroll area) */
+.jobs-page-card .dt-wrap{margin:14px 16px 18px;border:1px solid #e2e8f0;border-radius:9px;overflow:auto}
+.jobs-page-card .jobs-table{margin:0}
+/* Sortable headers */
+.jobs-sort-th{cursor:pointer;user-select:none;white-space:nowrap}
+.jobs-sort-th:hover{background:#eef2f7}
+.jobs-sort-th>span{display:inline-flex;align-items:center;gap:5px}
+.jobs-sort-icon{font-size:9px;color:#b6c2d2}
+.jobs-sort-icon.active{color:#0f766e}
+/* Action icon buttons (match the LRN reports panel style: filled green download, outlined red trash) */
+.jobs-actions{display:flex;align-items:center;gap:7px}
+.jobs-icon-btn{width:30px;height:30px;display:inline-grid;place-items:center;border-radius:7px;border:1px solid #15803d;background:#16a34a;color:#fff;font-size:13px;cursor:pointer;transition:filter .12s}
+.jobs-icon-btn:hover{filter:brightness(1.06)}
+.jobs-icon-btn.teal{background:#0f766e;border-color:#0d655e}
+.jobs-icon-btn.danger{background:#fff;border-color:#fda29b;color:#dc2626}
+.jobs-icon-btn.danger:hover{background:#fef2f2}
+.jobs-chip.downloaded{background:#fff;border:1px solid #a7f3d0;color:#067647}
+.jobs-chip.downloaded i{font-size:11px}
+@media (prefers-reduced-motion:reduce){.jobs-spin{animation:none}}

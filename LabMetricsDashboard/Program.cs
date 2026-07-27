@@ -616,6 +616,30 @@ builder.Services
 				ctx.Response.Redirect(loginUri);
 				return Task.CompletedTask;
 			},
+
+			// Business rule: never show the raw "Access Denied" page. An authenticated-but-
+			// unauthorized request (a stale session, or a denied action) is sent to the Metrics
+			// login page instead — a fresh login resolves the common stale-session case.
+			OnRedirectToAccessDenied = ctx =>
+			{
+				var returnUrl = ctx.Properties.RedirectUri ?? string.Empty;
+				var isSafeReturn =
+					!string.IsNullOrWhiteSpace(returnUrl)
+					&& !returnUrl.Contains("/Home/Error", StringComparison.OrdinalIgnoreCase)
+					&& !returnUrl.Contains("/Account/Login", StringComparison.OrdinalIgnoreCase)
+					&& !returnUrl.Contains("/Account/Logout", StringComparison.OrdinalIgnoreCase)
+					&& !returnUrl.Contains("/Account/AccessDenied", StringComparison.OrdinalIgnoreCase);
+
+				var pathBase = ctx.Request.PathBase.HasValue ? ctx.Request.PathBase.Value : string.Empty;
+				var loginUri = $"{pathBase}{options.LoginPath}";
+				if (isSafeReturn)
+				{
+					loginUri = $"{loginUri}?ReturnUrl={Uri.EscapeDataString(returnUrl)}";
+				}
+
+				ctx.Response.Redirect(loginUri);
+				return Task.CompletedTask;
+			},
 		};
 
 

@@ -1,0 +1,710 @@
+@model LabMetricsDashboard.Models.CptLookupPageViewModel
+@{
+    ViewData["Title"] = "CPT & Panel Lookup";
+}
+
+<style>
+    .cl-shell { display: flex; flex-direction: column; gap: 1rem; }
+    .cl-titlebar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+    .cl-title { display: flex; align-items: center; gap: .8rem; }
+    .cl-title-icon { width: 44px; height: 44px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #0F9B76, #0B1F3A); color: #fff; font-size: 1.25rem; box-shadow: 0 8px 18px rgba(15, 155, 118, .28); }
+    .cl-title h2 { margin: 0; font-size: 1.45rem; font-weight: 800; color: #162033; }
+    .cl-title small { color: #64748b; font-weight: 600; }
+    .cl-card { background: #fff; border: 1px solid #d9e2ef; border-radius: 10px; box-shadow: 0 6px 18px rgba(15, 23, 42, .06); }
+
+    /* Top-level CPT / Panel switch */
+    .cl-tabs { display: flex; gap: .35rem; border-bottom: 1px solid #d9e2ef; padding: 0 .35rem; }
+    .cl-tab { border: none; background: transparent; padding: .6rem 1.05rem; font-size: .84rem; font-weight: 700; color: #64748b; border-bottom: 3px solid transparent; cursor: pointer; display: inline-flex; align-items: center; gap: .4rem; }
+    .cl-tab:hover { color: #0f172a; background: #f8fafc; }
+    .cl-tab.active { color: #0F9B76; border-bottom-color: #0F9B76; }
+
+    .cl-filter { padding: 1rem 1rem .9rem; }
+    .cl-filter .form-label { margin-bottom: .25rem; font-size: .72rem; color: #475569; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; }
+    .cl-combo { position: relative; }
+    .cl-combo > input { padding-right: 1.9rem; }
+    .cl-combo::after { content: "\F282"; font-family: "bootstrap-icons"; position: absolute; right: .65rem; top: 50%; transform: translateY(-50%); color: #94a3b8; font-size: .7rem; pointer-events: none; }
+    .cl-combo-list { position: absolute; top: 100%; left: 0; right: 0; z-index: 40; margin-top: .3rem; background: #fff; border: 1px solid #cbd5e1; border-radius: .55rem; box-shadow: 0 14px 30px rgba(15, 23, 42, .18); max-height: 265px; overflow: auto; display: none; }
+    .cl-combo-list.open { display: block; }
+    .cl-combo-item { padding: .42rem .75rem; cursor: pointer; font-size: .82rem; color: #1e293b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cl-combo-item:hover { background: #E0F5EE; color: #075E48; }
+    .cl-combo-empty { padding: .55rem .75rem; color: #94a3b8; font-size: .78rem; }
+    .cl-chips { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .6rem; }
+    .cl-chip-tag { display: inline-flex; align-items: center; gap: .25rem; background: #E0F5EE; color: #075E48; font-size: .74rem; padding: .15rem .6rem; border-radius: 999px; border: 1px solid #9FE1CB; font-weight: 700; }
+
+    /* KPI tiles */
+    .cl-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .6rem; }
+    .cl-kpi { background: #fff; border: 1px solid #d9e2ef; border-radius: 11px; padding: .75rem .9rem; position: relative; overflow: hidden; }
+    .cl-kpi::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; }
+    .cl-kpi.k-navy::before { background: #0B1F3A; }
+    .cl-kpi.k-teal::before { background: #0F9B76; }
+    .cl-kpi.k-green::before { background: #27A558; }
+    .cl-kpi.k-amber::before { background: #F5A623; }
+    .cl-kpi-l { font-size: .72rem; color: #64748b; font-weight: 700; margin-bottom: .15rem; }
+    .cl-kpi-v { font-size: 1.3rem; font-weight: 700; color: #0f172a; line-height: 1.1; font-variant-numeric: tabular-nums; }
+    .cl-kpi-s { font-size: .72rem; color: #94a3b8; margin-top: .1rem; }
+
+    .cl-grid-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .55rem .9rem; border-bottom: 1px solid #e2e8f0; background: #0B1F3A; border-radius: 10px 10px 0 0; flex-wrap: wrap; }
+    .cl-grid-title { font-size: .82rem; font-weight: 700; color: #fff; display: inline-flex; align-items: center; gap: .4rem; }
+    .cl-grid-title span.count { font-weight: 400; opacity: .6; }
+    .cl-win-row { display: flex; gap: .2rem; }
+    .cl-win { padding: .2rem .6rem; font-size: .74rem; border-radius: 6px; border: 1px solid rgba(255,255,255,.22); background: transparent; color: rgba(255,255,255,.6); cursor: pointer; font-weight: 700; }
+    .cl-win.active { background: #0F9B76; color: #fff; border-color: #0F9B76; }
+    .cl-win:hover:not(.active) { background: rgba(255,255,255,.12); color: #fff; }
+
+    .cl-grid-wrap { position: relative; }
+    .cl-grid-scroll { overflow: auto; max-height: calc(100vh - 430px); min-height: 240px; }
+    /* 15 columns once the per-unit mode/median rates are shown — the wrapper scrolls. */
+    .cl-table { min-width: 1560px; font-size: .8rem; margin-bottom: 0; }
+    .cl-table th, .cl-table td { border: 1px solid #d8e1ee; }
+    .cl-table thead th { position: sticky; top: 0; z-index: 2; background: #f8fafc; color: #0f172a; white-space: nowrap; font-size: .72rem; text-transform: uppercase; letter-spacing: .02em; }
+    .cl-table thead th.cl-sort { cursor: pointer; user-select: none; }
+    .cl-table thead th.cl-sort:hover { background: #e8eef7; }
+    .cl-table thead th .cl-dir { color: #0F9B76; margin-left: .2rem; }
+    .cl-table tbody tr { cursor: pointer; }
+    .cl-table tbody tr:nth-child(even) { background: #fbfdff; }
+    .cl-table tbody tr:hover { background: #F0F6FF; }
+    .cl-table tbody tr.selected { background: #E0F5EE !important; }
+    .cl-table tbody td { white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+    .cl-table td.cl-num, .cl-table th.cl-num { text-align: right; font-variant-numeric: tabular-nums; }
+    .cl-code { display: inline-flex; background: #0B1F3A; color: #9FE1CB; font-size: .7rem; font-weight: 700; padding: .1rem .35rem; border-radius: 4px; font-family: var(--bs-font-monospace, monospace); }
+    .cl-muted { color: #94a3b8; font-style: italic; }
+    .cl-rate-lab { color: #7A4A00; border-bottom: 1px dotted #C9A227; cursor: help; }
+    .cl-win-badge { font-size: .72rem; font-weight: 700; color: #0F9B76; }
+    .d-ok { color: #0B6B51; font-weight: 700; }
+    .d-mid { color: #7A4A00; font-weight: 700; }
+    .d-hi { color: #7A1515; font-weight: 700; }
+
+    .cl-loader { display: none; position: absolute; inset: 0; z-index: 5; align-items: center; justify-content: center; background: rgba(248, 250, 252, .74); }
+    .cl-loader.active { display: flex; }
+    .cl-loader-box { background: #0f172a; color: white; border-radius: 8px; padding: .7rem 1rem; display: inline-flex; gap: .6rem; align-items: center; }
+    .cl-empty { padding: 3rem 1rem; text-align: center; color: #64748b; }
+    .cl-footer { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .65rem .9rem; border-top: 1px solid #e2e8f0; flex-wrap: wrap; }
+
+    /* Drill-down */
+    .cl-detail-head { background: #122849; padding: .7rem .95rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-radius: 10px 10px 0 0; flex-wrap: wrap; }
+    .cl-detail-t { font-size: .92rem; font-weight: 700; color: #fff; }
+    .cl-detail-s { font-size: .75rem; color: rgba(255,255,255,.5); margin-top: .1rem; }
+    .cl-detail-body { padding: .95rem; }
+    .cl-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .5rem; margin-bottom: .9rem; }
+    .cl-stat { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 7px; padding: .55rem .7rem; }
+    .cl-stat-l { font-size: .68rem; color: #64748b; text-transform: uppercase; letter-spacing: .03em; font-weight: 700; margin-bottom: .1rem; }
+    .cl-stat-v { font-size: .98rem; font-weight: 700; color: #0f172a; font-variant-numeric: tabular-nums; }
+    .cl-sec { font-size: .7rem; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: .05em; margin-bottom: .5rem; padding-bottom: .3rem; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; gap: .3rem; }
+    .cl-wins { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; margin-bottom: .9rem; }
+    .cl-wcard { border: 1px solid #e2e8f0; border-radius: 7px; padding: .55rem .7rem; background: #f8fafc; }
+    .cl-wcard.current { background: #E0F5EE; border-color: #9FE1CB; }
+    .cl-wcard-l { font-size: .76rem; font-weight: 800; color: #475569; margin-bottom: .35rem; display: flex; align-items: center; gap: .3rem; flex-wrap: wrap; }
+    .cl-wcard.current .cl-wcard-l { color: #075E48; }
+    .cl-wrow { display: flex; justify-content: space-between; gap: .5rem; padding: .1rem 0; border-bottom: 1px solid rgba(0,0,0,.05); font-size: .74rem; }
+    .cl-wrow:last-child { border-bottom: none; }
+    .cl-wrow-l { color: #64748b; }
+    .cl-wrow-v { font-weight: 700; color: #0f172a; font-variant-numeric: tabular-nums; }
+    .cl-bar-wrap { height: 5px; border-radius: 999px; background: #e2e8f0; overflow: hidden; margin-top: .2rem; }
+    .cl-bar { height: 100%; border-radius: 999px; }
+    .cl-note { font-size: .74rem; color: #94a3b8; }
+    .cl-legend { display: flex; flex-wrap: wrap; gap: .8rem; font-size: .74rem; color: #64748b; margin-top: .4rem; }
+
+    @@media (max-width: 992px) {
+        .cl-kpis, .cl-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .cl-wins { grid-template-columns: 1fr; }
+    }
+</style>
+
+<div class="cl-shell">
+    <div class="cl-titlebar">
+        <div class="cl-title">
+            <span class="cl-title-icon"><i class="bi bi-search"></i></span>
+            <div>
+                <h2>CPT &amp; Panel Lookup</h2>
+                <small>Averages with mode and median rates, by CPT code, panel, payer and time window. View-only.</small>
+            </div>
+        </div>
+        <button class="btn btn-success" type="button" id="exportBtn">
+            <i class="bi bi-file-earmark-excel"></i> Export to Excel
+        </button>
+    </div>
+
+    <div class="cl-card">
+        <div class="cl-tabs">
+            <button class="cl-tab active" type="button" data-tab="cpt"><i class="bi bi-upc-scan"></i> CPT lookup</button>
+            <button class="cl-tab" type="button" data-tab="panel"><i class="bi bi-grid-3x3-gap"></i> Panel lookup</button>
+        </div>
+        <div class="cl-filter">
+            <form id="filterForm" class="row g-3 align-items-end">
+                <div class="col-lg-2 col-md-6" id="cptCodeField">
+                    <label class="form-label">CPT Code</label>
+                    <div class="cl-combo" data-field="cptCode">
+                        <input class="form-control" name="cptCode" autocomplete="off" placeholder="All CPT codes" />
+                        <div class="cl-combo-list"></div>
+                    </div>
+                </div>
+                <div class="col-lg-3 col-md-6">
+                    <label class="form-label">Panel Name</label>
+                    <div class="cl-combo" data-field="panelName">
+                        <input class="form-control" name="panelName" autocomplete="off" placeholder="All panels" />
+                        <div class="cl-combo-list"></div>
+                    </div>
+                </div>
+                <div class="col-lg-3 col-md-6">
+                    <label class="form-label">Payer</label>
+                    <div class="cl-combo" data-field="payer">
+                        <input class="form-control" name="payer" autocomplete="off" placeholder="All payers" />
+                        <div class="cl-combo-list"></div>
+                    </div>
+                </div>
+                <div class="col-lg-2 col-md-6">
+                    <label class="form-label">Lab</label>
+                    <select class="form-select" name="labId" id="labSelect"><option value="">All Labs</option></select>
+                </div>
+                <div class="col-lg-2 col-md-12 d-flex gap-2 justify-content-end">
+                    <button class="btn btn-primary" type="submit"><i class="bi bi-search"></i> Search</button>
+                    <button class="btn btn-outline-secondary" type="button" id="resetBtn" title="Clear all filters"><i class="bi bi-arrow-counterclockwise"></i></button>
+                </div>
+                <input type="hidden" name="windowType" id="windowType" value="" />
+            </form>
+            <div class="cl-chips" id="chips"></div>
+        </div>
+    </div>
+
+    <div class="cl-kpis">
+        <div class="cl-kpi k-navy"><div class="cl-kpi-l">Matching rows</div><div class="cl-kpi-v" id="kpiRows">&mdash;</div><div class="cl-kpi-s" id="kpiRowsSub">records</div></div>
+        <div class="cl-kpi k-teal"><div class="cl-kpi-l">Avg allowed</div><div class="cl-kpi-v" id="kpiAllowed" style="color:#0F9B76">&mdash;</div><div class="cl-kpi-s">across all matches</div></div>
+        <div class="cl-kpi k-green"><div class="cl-kpi-l">Avg paid</div><div class="cl-kpi-v" id="kpiPaid" style="color:#27A558">&mdash;</div><div class="cl-kpi-s">across all matches</div></div>
+        <div class="cl-kpi k-amber"><div class="cl-kpi-l">Denial rate</div><div class="cl-kpi-v" id="kpiDenial" style="color:#B8791A">&mdash;</div><div class="cl-kpi-s">denied / total lines</div></div>
+    </div>
+
+    <div class="cl-card cl-grid-wrap">
+        <div class="cl-grid-head">
+            <span class="cl-grid-title"><i class="bi bi-table"></i> <span id="gridTitle">CPT results</span> <span class="count" id="gridCount"></span></span>
+            <div class="cl-win-row">
+                <button class="cl-win active" type="button" data-window="">All windows</button>
+                <button class="cl-win" type="button" data-window="Rolling90">90d</button>
+                <button class="cl-win" type="button" data-window="Rolling180">180d</button>
+                <button class="cl-win" type="button" data-window="YTD">YTD</button>
+            </div>
+        </div>
+        <div class="cl-loader" id="gridLoader"><div class="cl-loader-box"><span class="spinner-border spinner-border-sm"></span><span>Loading&hellip;</span></div></div>
+        <div class="cl-grid-scroll">
+            <table class="table table-sm table-hover table-bordered align-middle cl-table">
+                <thead><tr id="headRow"></tr></thead>
+                <tbody id="rows"></tbody>
+            </table>
+        </div>
+        <div class="cl-footer">
+            <small id="pageInfo" class="text-muted"></small>
+            <div class="d-flex align-items-center gap-2">
+                <span class="cl-note">Rows per page</span>
+                <select class="form-select form-select-sm w-auto" id="pageSizeSelect">
+                    <option selected>50</option><option>100</option><option>250</option><option>500</option>
+                </select>
+                <div class="btn-group">
+                    <button class="btn btn-outline-secondary btn-sm" id="firstBtn" title="First page"><i class="bi bi-chevron-double-left"></i></button>
+                    <button class="btn btn-outline-secondary btn-sm" id="prevBtn"><i class="bi bi-chevron-left"></i></button>
+                    <button class="btn btn-outline-secondary btn-sm" id="nextBtn"><i class="bi bi-chevron-right"></i></button>
+                    <button class="btn btn-outline-secondary btn-sm" id="lastBtn" title="Last page"><i class="bi bi-chevron-double-right"></i></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="cl-card" id="detailCard" style="display:none">
+        <div class="cl-detail-head">
+            <div>
+                <div class="cl-detail-t" id="detailTitle"></div>
+                <div class="cl-detail-s" id="detailSub"></div>
+            </div>
+            <button class="btn btn-sm btn-outline-light" type="button" id="detailClose"><i class="bi bi-x"></i> Close</button>
+        </div>
+        <div class="cl-detail-body">
+            <div class="cl-stats" id="detailStats"></div>
+            <div class="cl-sec"><i class="bi bi-arrow-left-right"></i> Window comparison</div>
+            <div class="cl-wins" id="detailWindows"></div>
+            <div class="cl-sec"><i class="bi bi-graph-up"></i> Trend across windows</div>
+            <div style="position:relative;width:100%;height:190px"><canvas id="detailChart" role="img" aria-label="Line chart comparing allowed, paid and median amounts across the rolling windows"></canvas></div>
+            <div class="cl-legend" id="detailLegend"></div>
+            <div class="cl-sec mt-3"><i class="bi bi-bar-chart"></i> Line counts</div>
+            <div id="detailBars" class="d-flex flex-column gap-2"></div>
+        </div>
+    </div>
+
+    <p class="cl-note mb-0">
+        View-only reference data. Click a row to compare it across every time window; click a column header to sort.
+        Mode and median rates come from <code>LabModes</code>/<code>LabMedians</code>, matched on lab, CPT, panel, payer and window.
+        A value shown as <span class="cl-rate-lab">~$0.00</span> is the lab-wide rate, used where that source has no row for
+        the specific payer; &mdash; means it has no matching row at all. On the panel tab the mode is the average of the
+        per-CPT modes for that panel &mdash; <em>Mode CPTs</em> is how many CPT codes that average covers.
+    </p>
+</div>
+
+@section Scripts {
+<script nonce='@Context.Items["CspNonce"]'>
+(function () {
+    const urls = {
+        cptData: '@Model.CptDataUrl',
+        panelData: '@Model.PanelDataUrl',
+        cptWindows: '@Model.CptWindowsUrl',
+        panelWindows: '@Model.PanelWindowsUrl',
+        cptOptions: '@Model.CptOptionsUrl',
+        panelOptions: '@Model.PanelOptionsUrl',
+        cptExport: '@Model.CptExportUrl',
+        panelExport: '@Model.PanelExportUrl',
+        labs: '@Model.LabsUrl'
+    };
+
+    const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+    const num = new Intl.NumberFormat('en-US');
+    const DASH = '—';
+    const WIN_LABEL = { 'Rolling90': '90d', 'Rolling180': '180d', 'YTD': 'YTD' };
+    const WIN_ORDER = ['Rolling90', 'Rolling180', 'YTD'];
+
+    // Column sets per tab. `key` doubles as the sortColumn sent to the API.
+    const CPT_COLUMNS = [
+        { key: 'cptCode', label: 'CPT', render: r => `<span class="cl-code">${esc(r.cptCode)}</span>` },
+        { key: 'panelName', label: 'Panel', render: r => text(r.panelName) },
+        { key: 'payerDisplayName', label: 'Payer', render: r => payer(r.payerDisplayName) },
+        { key: 'windowType', label: 'Win', render: r => `<span class="cl-win-badge">${esc(WIN_LABEL[r.windowType] || r.windowType || '')}</span>` },
+        { key: 'avgAllowedAmountPerUnit', label: 'Avg allowed/unit', money: true },
+        { key: 'avgPaidAmountPerUnit', label: 'Avg paid/unit', money: true },
+        { key: 'medianPaidAmount', label: 'Median paid', money: true },
+        { key: 'modeAllowedAmount', label: 'Mode allowed', num: true, render: r => rate(r.modeAllowedAmount, r.modeMatch) },
+        { key: 'modeInsurancePaymentAmount', label: 'Mode ins. paid', num: true, render: r => rate(r.modeInsurancePaymentAmount, r.modeMatch) },
+        { key: 'allowedAmountPerUnitMode', label: 'Allowed/unit (mode)', num: true, render: r => rate(r.allowedAmountPerUnitMode, r.modeMatch) },
+        { key: 'insurancePaymentPerUnitMode', label: 'Ins. paid/unit (mode)', num: true, render: r => rate(r.insurancePaymentPerUnitMode, r.modeMatch) },
+        { key: 'medianAllowedAmount', label: 'Median allowed', num: true, render: r => rate(r.medianAllowedAmount, r.medianMatch) },
+        { key: 'medianInsurancePaymentAmount', label: 'Median ins. paid', num: true, render: r => rate(r.medianInsurancePaymentAmount, r.medianMatch) },
+        { key: 'paidLineCount', label: 'Paid lines', num: true, render: r => lines(r.paidLineCount, r.totalLineCount) },
+        { key: 'denialRate', label: 'Denial', num: true, render: r => denial(r.denialRate) }
+    ];
+
+    const PANEL_COLUMNS = [
+        { key: 'panelName', label: 'Panel', render: r => text(r.panelName) },
+        { key: 'payerId', label: 'Payer ID', render: r => r.payerId ? `<span class="cl-code">${esc(r.payerId)}</span>` : `<span class="cl-muted">none</span>` },
+        { key: 'payerDisplayName', label: 'Payer', render: r => payer(r.payerDisplayName) },
+        { key: 'windowType', label: 'Win', render: r => `<span class="cl-win-badge">${esc(WIN_LABEL[r.windowType] || r.windowType || '')}</span>` },
+        { key: 'avgChargeAmount', label: 'Avg charge', money: true },
+        { key: 'avgAllowedAmount', label: 'Avg allowed', money: true },
+        { key: 'avgPaidAmount', label: 'Avg paid', money: true },
+        { key: 'medianPaidAmount', label: 'Median paid', money: true },
+        { key: 'p25PaidAmount', label: 'P25', money: true },
+        { key: 'p75PaidAmount', label: 'P75', money: true },
+        { key: 'modeAllowedAmount', label: 'Mode allowed', num: true, render: r => rate(r.modeAllowedAmount, r.modeMatch) },
+        { key: 'modeInsurancePaymentAmount', label: 'Mode ins. paid', num: true, render: r => rate(r.modeInsurancePaymentAmount, r.modeMatch) },
+        { key: 'modeCptCount', label: 'Mode CPTs', num: true, render: r => r.modeCptCount == null ? DASH : num.format(r.modeCptCount) },
+        { key: 'paidLineCount', label: 'Paid lines', num: true, render: r => lines(r.paidLineCount, r.totalLineCount) },
+        { key: 'denialRate', label: 'Denial', num: true, render: r => denial(r.denialRate) }
+    ];
+
+    let tab = 'cpt';
+    let page = 1, pageSize = 50, totalPages = 1;
+    let sortColumn = 'cptCode', sortDirection = 'asc';
+    let items = [], selectedIndex = null, detailChart = null;
+
+    const loader = document.getElementById('gridLoader');
+    const $ = id => document.getElementById(id);
+
+    function esc(v) {
+        return (v ?? '').toString().replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+    }
+    function money(v) { return (v === null || v === undefined || v === '') ? DASH : esc(usd.format(v)); }
+    function text(v) { return (v === null || v === undefined || v === '') ? `<span class="cl-muted">${DASH}</span>` : esc(v); }
+    function payer(v) { return (v === null || v === undefined || v === '') ? `<span class="cl-muted">Unspecified</span>` : esc(v); }
+    function lines(paid, total) {
+        if (paid === null || paid === undefined) return DASH;
+        const t = (total === null || total === undefined) ? '' : `<span class="text-muted"> / ${num.format(total)}</span>`;
+        return `${num.format(paid)}${t}`;
+    }
+    function denial(rate) {
+        if (rate === null || rate === undefined) return DASH;
+        const cls = rate >= 8 ? 'd-hi' : rate >= 5 ? 'd-mid' : 'd-ok';
+        return `<span class="${cls}">${rate.toFixed(1)}%</span>`;
+    }
+    // Mode/median rate cell. LabModes often has no row for the exact payer, in which
+    // case the API falls back to the lab-wide rate — that value is marked with a ~ so
+    // it is never read as this payer's own negotiated rate.
+    function rate(value, match) {
+        if (value === null || value === undefined) return DASH;
+        const amount = esc(usd.format(value));
+        return match === 'lab'
+            ? `<span class="cl-rate-lab" title="No payer-specific rate in LabModes/LabMedians — showing the lab-wide rate for this CPT, panel and window">~${amount}</span>`
+            : amount;
+    }
+    function columns() { return tab === 'cpt' ? CPT_COLUMNS : PANEL_COLUMNS; }
+    function setBusy(on) { loader.classList.toggle('active', on); }
+
+    function filterParams() {
+        const fd = new FormData($('filterForm'));
+        // The CPT code filter only applies to the CPT tab.
+        if (tab === 'panel') fd.delete('cptCode');
+        fd.set('sortColumn', sortColumn);
+        fd.set('sortDirection', sortDirection);
+        return fd;
+    }
+
+    function renderChips() {
+        const fd = filterParams();
+        const parts = [];
+        const add = (label, value) => { if (value) parts.push(`${label}: ${value}`); };
+        add('CPT', fd.get('cptCode'));
+        add('Panel', fd.get('panelName'));
+        add('Payer', fd.get('payer'));
+        const win = fd.get('windowType');
+        if (win) parts.push(WIN_LABEL[win] || win);
+        const labSel = $('labSelect');
+        if (labSel.value) parts.push(labSel.options[labSel.selectedIndex].text);
+        $('chips').innerHTML = parts.map(p =>
+            `<span class="cl-chip-tag"><i class="bi bi-tag"></i>${esc(p)}</span>`).join('');
+    }
+
+    function renderHead() {
+        $('headRow').innerHTML = columns().map(c => {
+            const dir = sortColumn === c.key ? `<span class="cl-dir">${sortDirection === 'asc' ? '&#9650;' : '&#9660;'}</span>` : '';
+            const cls = (c.money || c.num) ? ' cl-num' : '';
+            return `<th class="cl-sort${cls}" data-key="${esc(c.key)}" title="Sort by ${esc(c.label)}">${esc(c.label)}${dir}</th>`;
+        }).join('');
+        document.querySelectorAll('#headRow th.cl-sort').forEach(th => {
+            th.onclick = () => {
+                const key = th.dataset.key;
+                if (sortColumn === key) sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+                else { sortColumn = key; sortDirection = 'asc'; }
+                page = 1; load();
+            };
+        });
+    }
+
+    function renderRows() {
+        const cols = columns();
+        if (!items.length) {
+            $('rows').innerHTML = `<tr><td colspan="${cols.length}"><div class="cl-empty">
+                <div class="fw-bold">No records found</div><div>Adjust the filters above.</div></div></td></tr>`;
+            return;
+        }
+        $('rows').innerHTML = items.map((r, i) => {
+            const cells = cols.map(c => {
+                const cls = (c.money || c.num) ? ' class="cl-num"' : '';
+                const html = c.render ? c.render(r) : (c.money ? money(r[c.key]) : text(r[c.key]));
+                return `<td${cls}>${html}</td>`;
+            }).join('');
+            return `<tr data-index="${i}"${selectedIndex === i ? ' class="selected"' : ''}>${cells}</tr>`;
+        }).join('');
+        document.querySelectorAll('#rows tr[data-index]').forEach(tr => {
+            tr.onclick = () => showDetail(parseInt(tr.dataset.index, 10));
+        });
+    }
+
+    function renderKpis(summary, total) {
+        $('kpiRows').textContent = num.format(total || 0);
+        $('kpiRowsSub').textContent = tab === 'cpt' ? 'CPT rows' : 'panel rows';
+        $('kpiAllowed').textContent = summary && summary.avgAllowed != null ? usd.format(summary.avgAllowed) : DASH;
+        $('kpiPaid').textContent = summary && summary.avgPaid != null ? usd.format(summary.avgPaid) : DASH;
+        $('kpiDenial').textContent = summary && summary.denialRate != null ? summary.denialRate.toFixed(1) + '%' : DASH;
+    }
+
+    async function load() {
+        setBusy(true);
+        try {
+            const fd = filterParams();
+            fd.set('page', page);
+            fd.set('pageSize', pageSize);
+            const url = (tab === 'cpt' ? urls.cptData : urls.panelData) + '?' + new URLSearchParams(fd);
+            const response = await fetch(url);
+            if (!response.ok) throw new Error('request failed');
+            const data = await response.json();
+
+            items = data.items || [];
+            totalPages = Math.max(1, data.totalPages || 1);
+            if (page > totalPages) page = totalPages;
+
+            const total = data.totalCount || 0;
+            const from = total === 0 ? 0 : ((data.page - 1) * data.pageSize) + 1;
+            const to = Math.min(data.page * data.pageSize, total);
+            $('gridCount').textContent = `(${num.format(total)} row${total === 1 ? '' : 's'})`;
+            $('pageInfo').textContent = total === 0
+                ? 'No rows'
+                : `Showing ${num.format(from)}-${num.format(to)} of ${num.format(total)} · Page ${data.page} of ${totalPages}`;
+
+            renderKpis(data.summary, total);
+            renderHead();
+            renderRows();
+            renderChips();
+            $('firstBtn').disabled = $('prevBtn').disabled = page <= 1;
+            $('nextBtn').disabled = $('lastBtn').disabled = page >= totalPages;
+        } catch (e) {
+            items = [];
+            $('rows').innerHTML = `<tr><td colspan="${columns().length}">
+                <div class="cl-empty text-danger">Unable to load the data. Please try again.</div></td></tr>`;
+            renderKpis(null, 0);
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    // ── drill-down ───────────────────────────────────────────────────────────
+    async function showDetail(index) {
+        const row = items[index];
+        if (!row) return;
+        selectedIndex = index;
+        renderRows();
+
+        const isCpt = tab === 'cpt';
+        $('detailTitle').textContent = isCpt
+            ? `CPT ${row.cptCode || ''} — ${row.panelName || 'No panel'}`
+            : `${row.panelName || 'No panel'}`;
+        $('detailSub').textContent = `${row.payerDisplayName || 'Unspecified payer'} · ${row.labName || 'Unknown lab'}`;
+        $('detailCard').style.display = 'block';
+
+        const params = new URLSearchParams({ labId: row.labId ?? '' });
+        if (isCpt) {
+            params.set('cptCode', row.cptCode ?? '');
+            if (row.panelName) params.set('panelName', row.panelName);
+        } else {
+            params.set('panelName', row.panelName ?? '');
+        }
+        if (row.payerDisplayName) params.set('payer', row.payerDisplayName);
+
+        let windows = [];
+        try {
+            const response = await fetch((isCpt ? urls.cptWindows : urls.panelWindows) + '?' + params);
+            if (response.ok) windows = await response.json();
+        } catch (e) { /* fall back to the single selected row */ }
+        if (!windows.length) windows = [row];
+
+        renderDetailStats(row, isCpt);
+        renderDetailWindows(row, windows, isCpt);
+        renderDetailChart(windows, isCpt);
+        renderDetailBars(row);
+        $('detailCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function renderDetailStats(row, isCpt) {
+        const stats = isCpt ? [
+            { l: 'Avg charge / unit', v: money(row.avgChargeAmountPerUnit) },
+            { l: 'Avg allowed / unit', v: money(row.avgAllowedAmountPerUnit), c: '#0F9B76' },
+            { l: 'Avg paid / unit', v: money(row.avgPaidAmountPerUnit), c: '#27A558' },
+            { l: 'Patient responsibility', v: money(row.avgPatientResponsibilityPerUnit) },
+            { l: 'Mode allowed', v: rate(row.modeAllowedAmount, row.modeMatch) },
+            { l: 'Mode insurance paid', v: rate(row.modeInsurancePaymentAmount, row.modeMatch) },
+            { l: 'Allowed / unit (mode)', v: rate(row.allowedAmountPerUnitMode, row.modeMatch) },
+            { l: 'Ins. paid / unit (mode)', v: rate(row.insurancePaymentPerUnitMode, row.modeMatch) },
+            { l: 'Median allowed', v: rate(row.medianAllowedAmount, row.medianMatch) },
+            { l: 'Median insurance paid', v: rate(row.medianInsurancePaymentAmount, row.medianMatch) },
+            { l: 'Allowed / unit (median)', v: rate(row.allowedAmountPerUnitMedian, row.medianMatch) },
+            { l: 'Ins. paid / unit (median)', v: rate(row.insurancePaymentPerUnitMedian, row.medianMatch) }
+        ] : [
+            { l: 'Avg charge', v: money(row.avgChargeAmount) },
+            { l: 'Avg allowed', v: money(row.avgAllowedAmount), c: '#0F9B76' },
+            { l: 'Avg paid', v: money(row.avgPaidAmount), c: '#27A558' },
+            { l: 'Patient responsibility', v: money(row.avgPatientResponsibility) },
+            { l: 'Median paid', v: money(row.medianPaidAmount) },
+            { l: 'P25 / P75 paid', v: `${money(row.p25PaidAmount)} / ${money(row.p75PaidAmount)}` },
+            { l: 'Mode allowed', v: rate(row.modeAllowedAmount, row.modeMatch) },
+            {
+                l: 'Mode ins. paid',
+                v: rate(row.modeInsurancePaymentAmount, row.modeMatch) +
+                   (row.modeCptCount ? ` <span class="cl-note">(${num.format(row.modeCptCount)} CPT${row.modeCptCount === 1 ? '' : 's'})</span>` : '')
+            }
+        ];
+        $('detailStats').innerHTML = stats.map(s =>
+            `<div class="cl-stat"><div class="cl-stat-l">${esc(s.l)}</div>
+             <div class="cl-stat-v"${s.c ? ` style="color:${s.c}"` : ''}>${s.v}</div></div>`).join('');
+    }
+
+    function renderDetailWindows(row, windows, isCpt) {
+        $('detailWindows').innerHTML = WIN_ORDER.map(w => {
+            const match = windows.find(x => x.windowType === w);
+            const current = row.windowType === w;
+            if (!match) {
+                return `<div class="cl-wcard"><div class="cl-wcard-l">${WIN_LABEL[w]}</div>
+                        <div class="cl-note">No data</div></div>`;
+            }
+            const rows = isCpt ? [
+                ['Avg allowed', money(match.avgAllowedAmountPerUnit)],
+                ['Avg paid', money(match.avgPaidAmountPerUnit)],
+                ['Median paid', money(match.medianPaidAmount)],
+                ['Mode allowed', rate(match.modeAllowedAmount, match.modeMatch)],
+                ['Median allowed', rate(match.medianAllowedAmount, match.medianMatch)],
+                ['Paid lines', lines(match.paidLineCount, match.totalLineCount)],
+                ['Denial', match.denialRate != null ? match.denialRate.toFixed(1) + '%' : DASH]
+            ] : [
+                ['Avg allowed', money(match.avgAllowedAmount)],
+                ['Avg paid', money(match.avgPaidAmount)],
+                ['Median paid', money(match.medianPaidAmount)],
+                ['P25 / P75', `${money(match.p25PaidAmount)} / ${money(match.p75PaidAmount)}`],
+                ['Mode allowed', rate(match.modeAllowedAmount, match.modeMatch)],
+                ['Paid lines', lines(match.paidLineCount, match.totalLineCount)],
+                ['Denial', match.denialRate != null ? match.denialRate.toFixed(1) + '%' : DASH]
+            ];
+            const badge = current ? '<span class="badge rounded-pill" style="background:#0F9B76">selected</span>' : '';
+            return `<div class="cl-wcard${current ? ' current' : ''}">
+                <div class="cl-wcard-l">${WIN_LABEL[w]} ${badge}</div>
+                ${rows.map(([l, v]) => `<div class="cl-wrow"><span class="cl-wrow-l">${l}</span><span class="cl-wrow-v">${v}</span></div>`).join('')}
+            </div>`;
+        }).join('');
+    }
+
+    function renderDetailChart(windows, isCpt) {
+        const byWindow = WIN_ORDER.map(w => windows.find(x => x.windowType === w) || null);
+        const pick = (row, cptKey, panelKey) => {
+            if (!row) return null;
+            const v = isCpt ? row[cptKey] : row[panelKey];
+            return v === null || v === undefined ? null : Number(v);
+        };
+        const series = [
+            { label: 'Avg allowed', color: '#0F9B76', dash: [], data: byWindow.map(r => pick(r, 'avgAllowedAmountPerUnit', 'avgAllowedAmount')) },
+            { label: 'Avg paid', color: '#27A558', dash: [5, 3], data: byWindow.map(r => pick(r, 'avgPaidAmountPerUnit', 'avgPaidAmount')) },
+            { label: 'Median paid', color: '#F5A623', dash: [2, 2], data: byWindow.map(r => pick(r, 'medianPaidAmount', 'medianPaidAmount')) }
+        ];
+
+        if (detailChart) { detailChart.destroy(); detailChart = null; }
+        detailChart = new Chart($('detailChart').getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: WIN_ORDER.map(w => WIN_LABEL[w]),
+                datasets: series.map(s => ({
+                    label: s.label, data: s.data, borderColor: s.color, backgroundColor: s.color,
+                    borderWidth: 2, borderDash: s.dash, pointRadius: 4, tension: .3, fill: false, spanGaps: true
+                }))
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${c.parsed.y == null ? DASH : usd.format(c.parsed.y)}` } }
+                },
+                scales: {
+                    x: { grid: { color: 'rgba(0,0,0,.05)' }, ticks: { font: { size: 10 }, color: '#64748b' } },
+                    y: { grid: { color: 'rgba(0,0,0,.05)' }, ticks: { font: { size: 10 }, color: '#64748b', callback: v => usd.format(v) }, beginAtZero: false }
+                }
+            }
+        });
+        $('detailLegend').innerHTML = series.map(s =>
+            `<span class="d-inline-flex align-items-center gap-1">
+                <span style="width:16px;height:0;display:inline-block;border-top:2px ${s.dash.length ? 'dashed' : 'solid'} ${s.color}"></span>${esc(s.label)}</span>`).join('');
+    }
+
+    function renderDetailBars(row) {
+        const total = row.totalLineCount || 0;
+        const adjusted = row.adjustedLineCount != null
+            ? row.adjustedLineCount
+            : Math.max(0, total - (row.paidLineCount || 0) - (row.deniedLineCount || 0));
+        const bars = [
+            { l: 'Paid lines', n: row.paidLineCount || 0, c: '#27A558' },
+            { l: 'Denied lines', n: row.deniedLineCount || 0, c: '#E24B4A' },
+            { l: 'Adjusted lines', n: adjusted, c: '#F5A623' }
+        ];
+        $('detailBars').innerHTML = bars.map(b => `
+            <div>
+                <div class="d-flex justify-content-between" style="font-size:.75rem">
+                    <span class="text-muted">${b.l}</span>
+                    <span class="fw-bold">${num.format(b.n)}<span class="fw-normal text-muted"> / ${num.format(total)}</span></span>
+                </div>
+                <div class="cl-bar-wrap"><div class="cl-bar" style="width:${total ? Math.max(2, Math.round(b.n / total * 100)) : 0}%;background:${b.c}"></div></div>
+            </div>`).join('');
+    }
+
+    function closeDetail() {
+        $('detailCard').style.display = 'none';
+        selectedIndex = null;
+        if (detailChart) { detailChart.destroy(); detailChart = null; }
+        renderRows();
+    }
+
+    // ── filters / combos ─────────────────────────────────────────────────────
+    function initCombo(wrap) {
+        const input = wrap.querySelector('input');
+        const list = wrap.querySelector('.cl-combo-list');
+        const field = wrap.dataset.field;
+        let timer = null;
+        async function fetchOptions() {
+            const params = new URLSearchParams({ field, term: input.value || '' });
+            const lab = $('labSelect').value;
+            if (lab) params.set('labId', lab);
+            let values = [];
+            try {
+                const response = await fetch((tab === 'cpt' ? urls.cptOptions : urls.panelOptions) + '?' + params);
+                if (response.ok) values = await response.json();
+            } catch (e) { /* dropdown just stays empty */ }
+            if (document.activeElement !== input) return;
+            list.innerHTML = (values && values.length)
+                ? values.map(v => `<div class="cl-combo-item" data-value="${esc(v)}" title="${esc(v)}">${esc(v)}</div>`).join('')
+                : '<div class="cl-combo-empty">No matches</div>';
+            list.querySelectorAll('.cl-combo-item').forEach(el => {
+                el.onmousedown = e => {
+                    e.preventDefault();
+                    input.value = el.getAttribute('data-value');
+                    list.classList.remove('open');
+                    page = 1; closeDetail(); load();
+                };
+            });
+            list.classList.add('open');
+        }
+        input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(fetchOptions, 250); });
+        input.addEventListener('focus', fetchOptions);
+        input.addEventListener('blur', () => setTimeout(() => list.classList.remove('open'), 150));
+        input.addEventListener('keydown', e => { if (e.key === 'Escape') list.classList.remove('open'); });
+    }
+
+    async function loadLabs() {
+        try {
+            const response = await fetch(urls.labs);
+            if (!response.ok) return;
+            const labs = await response.json();
+            $('labSelect').innerHTML = '<option value="">All Labs</option>' +
+                (labs || []).map(l => `<option value="${l.labId}">${esc(l.labName)}</option>`).join('');
+        } catch (e) { /* lab filter stays on All Labs */ }
+    }
+
+    function switchTab(next) {
+        if (tab === next) return;
+        tab = next;
+        document.querySelectorAll('.cl-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === next));
+        // The CPT code filter is meaningless on the panel tab.
+        $('cptCodeField').style.display = next === 'cpt' ? '' : 'none';
+        $('gridTitle').textContent = next === 'cpt' ? 'CPT results' : 'Panel results';
+        sortColumn = next === 'cpt' ? 'cptCode' : 'panelName';
+        sortDirection = 'asc';
+        page = 1;
+        closeDetail();
+        load();
+    }
+
+    document.querySelectorAll('.cl-tab').forEach(t => { t.onclick = () => switchTab(t.dataset.tab); });
+    document.querySelectorAll('.cl-combo').forEach(initCombo);
+    document.querySelectorAll('.cl-win').forEach(btn => {
+        btn.onclick = () => {
+            document.querySelectorAll('.cl-win').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            $('windowType').value = btn.dataset.window;
+            page = 1; closeDetail(); load();
+        };
+    });
+
+    $('filterForm').onsubmit = e => { e.preventDefault(); page = 1; closeDetail(); load(); };
+    $('labSelect').onchange = () => { page = 1; closeDetail(); load(); };
+    $('resetBtn').onclick = () => {
+        $('filterForm').reset();
+        $('windowType').value = '';
+        document.querySelectorAll('.cl-win').forEach(b => b.classList.toggle('active', b.dataset.window === ''));
+        $('pageSizeSelect').value = '50';
+        pageSize = 50;
+        sortColumn = tab === 'cpt' ? 'cptCode' : 'panelName';
+        sortDirection = 'asc';
+        page = 1;
+        closeDetail();
+        load();
+    };
+    $('pageSizeSelect').onchange = e => { pageSize = parseInt(e.target.value, 10) || 50; page = 1; load(); };
+    $('firstBtn').onclick = () => { if (page > 1) { page = 1; load(); } };
+    $('prevBtn').onclick = () => { if (page > 1) { page--; load(); } };
+    $('nextBtn').onclick = () => { if (page < totalPages) { page++; load(); } };
+    $('lastBtn').onclick = () => { if (page < totalPages) { page = totalPages; load(); } };
+    $('detailClose').onclick = closeDetail;
+    $('exportBtn').onclick = () => {
+        window.location = (tab === 'cpt' ? urls.cptExport : urls.panelExport) + '?' + new URLSearchParams(filterParams());
+    };
+
+    renderHead();
+    loadLabs();
+    load();
+})();
+</script>
+}

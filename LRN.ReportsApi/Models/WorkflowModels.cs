@@ -73,6 +73,9 @@ public sealed class DenialWorkflowFilter
     public DateTime? FromDate { get; set; }
     public DateTime? ToDate { get; set; }
     public bool UploadTemplate { get; set; }
+    // Display label of the tab the download was started from (e.g. "Payer Follow-up Required").
+    // Cosmetic only — used to name the exported file; never affects the query or its cache key.
+    public string TabLabel { get; set; } = string.Empty;
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 100;
 }
@@ -196,6 +199,9 @@ public sealed class DenialClassificationSummaryRow
 {
     public string Classification { get; set; } = string.Empty;
     public int Count { get; set; }
+    // Task rows behind Count's distinct claims — lets the UI show claims vs tasks instead of
+    // repeating the claim count in both columns.
+    public int Tasks { get; set; }
     public decimal BilledAmount { get; set; }
     public decimal InsuranceBalance { get; set; }
     public decimal Outstanding { get; set; }
@@ -305,6 +311,59 @@ public sealed class ClaimExportStatusResponse
     public string? DownloadUrl { get; set; }
 }
 
+// Async bulk-upload job responses — mirrors the export job responses above so the client can
+// enqueue an upload, poll status, then open the per-row result / download the log.
+public sealed class ClaimUploadStartResponse
+{
+    public string JobId { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+    public int TotalRows { get; set; }
+    public DateTime CreatedOnUtc { get; set; }
+}
+
+public sealed class ClaimUploadStatusResponse
+{
+    public string JobId { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;   // Queued | Running | Completed | Failed
+    public string Message { get; set; } = string.Empty;
+    public int TotalRows { get; set; }
+    public int SuccessCount { get; set; }
+    public int FailureCount { get; set; }
+    public DateTime CreatedOnUtc { get; set; }
+    public DateTime? CompletedOnUtc { get; set; }
+    public string? DownloadUrl { get; set; }             // log download, when finished
+    // Full per-row detail (populated once finished) — powers the upload-detail popup.
+    public ClaimCsvUploadResult? Result { get; set; }
+}
+
+// Compact row for the top-right jobs badge: one per export/download job.
+public sealed class ClaimExportJobSummary
+{
+    public string JobId { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+    public int RowCount { get; set; }
+    public DateTime CreatedOnUtc { get; set; }
+    public DateTime? CompletedOnUtc { get; set; }
+    public string? DownloadUrl { get; set; }
+}
+
+// Compact row for the "Upload Status" list page (one per uploaded file).
+public sealed class ClaimUploadJobSummary
+{
+    public string JobId { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public int TotalRows { get; set; }
+    public int SuccessCount { get; set; }
+    public int FailureCount { get; set; }
+    public DateTime CreatedOnUtc { get; set; }
+    public DateTime? CompletedOnUtc { get; set; }
+}
+
 public sealed class ClaimCsvUploadResult
 {
     public bool Success { get; set; }
@@ -315,8 +374,35 @@ public sealed class ClaimCsvUploadResult
     public int AddedComments { get; set; }
     public int EscalatedClaims { get; set; }
     public int EscalationResponses { get; set; }
+    public int SuccessCount { get; set; }
+    public int FailureCount { get; set; }
+    public IReadOnlyList<ClaimCsvRowResult> Results { get; set; } = Array.Empty<ClaimCsvRowResult>();
     public IReadOnlyList<string> Errors { get; set; } = Array.Empty<string>();
     public string Message { get; set; } = string.Empty;
+}
+
+public sealed class ClaimCsvChangedValue
+{
+    public string Field { get; set; } = string.Empty;
+    public string OldValue { get; set; } = string.Empty;
+    public string NewValue { get; set; } = string.Empty;
+}
+
+public sealed class ClaimCsvRowResult
+{
+    public int RowNumber { get; set; }
+    public string ClaimId { get; set; } = string.Empty;
+    public string TaskId { get; set; } = string.Empty;
+    // "Success" | "Failed"
+    public string Status { get; set; } = string.Empty;
+    // What the row did, e.g. "Status Update", "Comment", "Reviewer Escalation", "Escalation Response".
+    public string Action { get; set; } = string.Empty;
+    public string OldStatus { get; set; } = string.Empty;
+    public string NewStatus { get; set; } = string.Empty;
+    public List<ClaimCsvChangedValue> ChangedValues { get; set; } = new();
+    public string Note { get; set; } = string.Empty;
+    // Populated only for failed rows.
+    public string FailureReason { get; set; } = string.Empty;
 }
 
 public sealed class ClaimUploadForm
@@ -358,6 +444,11 @@ public sealed class ClaimSubMenuCounts
     public int Unassigned { get; set; }
     public int Assigned { get; set; }
     public int Closed { get; set; }
+    // The Closed *queue* count. The board-derived Closed above only sees claims still on the task
+    // board (and, for a reviewer, still assigned to them), but closed claims are moved to
+    // dbo.DenialClosedClaims, which is exactly what the Closed queue list reads. The tab badge must
+    // match that list, so it uses this value; Closed stays board-derived for dashboard open/closed math.
+    public int ClosedQueue { get; set; }
     public int Escalated { get; set; }
     public int Escalate { get => Escalated; set => Escalated = value; }
     public int InternalEscalation { get; set; }
@@ -572,18 +663,24 @@ public sealed class UpdateTaskRequest
     public int LabId { get; set; }
     public string TaskId { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
-    public string Comments { get; set; } = string.Empty;
-    public string ActionBy { get; set; } = string.Empty;
+    // Round 4 UAT Group A: these optional fields MUST stay nullable. With nullable reference
+    // types enabled, [ApiController] treats a non-nullable string property as implicitly
+    // [Required], and the workflow UI sends explicit JSON nulls for fields a given status does
+    // not use (e.g. followUpReason: null on a write-off approval). That combination auto-400'd
+    // every Approve/Reject Write Off and several status changes before the action even ran.
+    // Status-specific requiredness is enforced deliberately in ValidateTaskStatusUpdate.
+    public string? Comments { get; set; }
+    public string? ActionBy { get; set; }
     public bool? ActionCompleted { get; set; }
-    public string ActualOutcome { get; set; } = string.Empty;
-    public string DocumentationType { get; set; } = string.Empty;
-    public string FollowUpReason { get; set; } = string.Empty;
-    public string ClosureReason { get; set; } = string.Empty;
-    public string SyncConfirmation { get; set; } = string.Empty;
-    public string ValidationStatus { get; set; } = string.Empty;
+    public string? ActualOutcome { get; set; }
+    public string? DocumentationType { get; set; }
+    public string? FollowUpReason { get; set; }
+    public string? ClosureReason { get; set; }
+    public string? SyncConfirmation { get; set; }
+    public string? ValidationStatus { get; set; }
     public DateTime? ExpectedResponseDate { get; set; }
     public string UpdateScope { get; set; } = "Line";
-    public string UpdateScopeValue { get; set; } = string.Empty;
+    public string? UpdateScopeValue { get; set; }
 }
 
 public sealed class VerificationDecisionRequest
@@ -619,14 +716,16 @@ public sealed class SaveDenialNoteRequest
     public string? CptCode { get; set; }
     public string NoteLevel { get; set; } = "Claim";
     public string NoteText { get; set; } = string.Empty;
-    public string Status { get; set; } = string.Empty;
+    // Nullable for the same reason as UpdateTaskRequest: a client sending an explicit null for an
+    // optional field must not trip the implicit-[Required] auto-400.
+    public string? Status { get; set; }
     public DateTime? NextFollowUpDate { get; set; }
-    public string FollowUpReason { get; set; } = string.Empty;
+    public string? FollowUpReason { get; set; }
     public bool? ActionCompleted { get; set; }
-    public string ActualOutcome { get; set; } = string.Empty;
-    public string DocumentationType { get; set; } = string.Empty;
+    public string? ActualOutcome { get; set; }
+    public string? DocumentationType { get; set; }
     public bool ValidateWorkflowFields { get; set; }
-    public string CreatedBy { get; set; } = string.Empty;
+    public string? CreatedBy { get; set; }
 }
 
 public sealed class FollowUpNotificationRow
@@ -780,8 +879,12 @@ public sealed class ResolveDenialEscalationRequest
     public string ResolutionAction { get; set; } = string.Empty;
     public string ResponseNote { get; set; } = string.Empty;
     public string RecommendedNextAction { get; set; } = string.Empty;
-    public string ReassignTo { get; set; } = string.Empty;
-    public string ActionBy { get; set; } = string.Empty;
+    public string? ReassignTo { get; set; }
+    public string? ActionBy { get; set; }
+    // Set server-side from the authenticated token, never from the client: used to attribute the
+    // response ('Account Manager Response' vs 'Client Response' vs 'Manager Response') so an
+    // external manager's response is not recorded under the escalating AR Manager (Round 4 B4).
+    public string? ActionByRole { get; set; }
 }
 
 public sealed class DenialClaimHistoryRow

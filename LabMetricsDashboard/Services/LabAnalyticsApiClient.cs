@@ -10,18 +10,20 @@ namespace LabMetricsDashboard.Services;
 
 public interface ILabAnalyticsApiClient
 {
-    Task<MasterPagedResult<LabModeDto>> GetModesAsync(IQueryCollection query, CancellationToken ct);
-    Task<MasterPagedResult<LabMedianDto>> GetMediansAsync(IQueryCollection query, CancellationToken ct);
-    Task<(byte[] Content, string FileName)> ExportModesAsync(IQueryCollection query, CancellationToken ct);
-    Task<(byte[] Content, string FileName)> ExportMediansAsync(IQueryCollection query, CancellationToken ct);
-    Task<IReadOnlyList<string>> GetModeOptionsAsync(IQueryCollection query, CancellationToken ct);
-    Task<IReadOnlyList<string>> GetMedianOptionsAsync(IQueryCollection query, CancellationToken ct);
+    Task<LookupResultDto<CptLookupRowDto>> GetCptLookupAsync(IQueryCollection query, CancellationToken ct);
+    Task<LookupResultDto<PanelLookupRowDto>> GetPanelLookupAsync(IQueryCollection query, CancellationToken ct);
+    Task<IReadOnlyList<CptLookupRowDto>> GetCptWindowsAsync(IQueryCollection query, CancellationToken ct);
+    Task<IReadOnlyList<PanelLookupRowDto>> GetPanelWindowsAsync(IQueryCollection query, CancellationToken ct);
+    Task<IReadOnlyList<string>> GetCptOptionsAsync(IQueryCollection query, CancellationToken ct);
+    Task<IReadOnlyList<string>> GetPanelOptionsAsync(IQueryCollection query, CancellationToken ct);
+    Task<(byte[] Content, string FileName)> ExportCptAsync(IQueryCollection query, CancellationToken ct);
+    Task<(byte[] Content, string FileName)> ExportPanelAsync(IQueryCollection query, CancellationToken ct);
     Task<IReadOnlyList<MasterValueLabOption>> GetLabsAsync(CancellationToken ct);
 }
 
 /// <summary>
-/// Proxy to the LRN.ReportsApi analytics endpoints (Lab Modes / Median).
-/// Same base URL and workflow JWT handshake as the Master Values client.
+/// Proxy to the LRN.ReportsApi analytics endpoints behind the CPT &amp; Panel
+/// Lookup screen. Same base URL and workflow JWT handshake as the Master Values client.
 /// </summary>
 public sealed class LabAnalyticsApiClient : ILabAnalyticsApiClient
 {
@@ -43,26 +45,32 @@ public sealed class LabAnalyticsApiClient : ILabAnalyticsApiClient
         }
     }
 
-    public async Task<MasterPagedResult<LabModeDto>> GetModesAsync(IQueryCollection query, CancellationToken ct)
-        => await GetAsync<MasterPagedResult<LabModeDto>>("api/analytics/lab-modes" + Query(query), ct) ?? new();
+    public async Task<LookupResultDto<CptLookupRowDto>> GetCptLookupAsync(IQueryCollection query, CancellationToken ct)
+        => await GetAsync<LookupResultDto<CptLookupRowDto>>("api/analytics/cpt-lookup" + Query(query), ct) ?? new();
 
-    public async Task<MasterPagedResult<LabMedianDto>> GetMediansAsync(IQueryCollection query, CancellationToken ct)
-        => await GetAsync<MasterPagedResult<LabMedianDto>>("api/analytics/lab-medians" + Query(query), ct) ?? new();
+    public async Task<LookupResultDto<PanelLookupRowDto>> GetPanelLookupAsync(IQueryCollection query, CancellationToken ct)
+        => await GetAsync<LookupResultDto<PanelLookupRowDto>>("api/analytics/panel-lookup" + Query(query), ct) ?? new();
 
-    public Task<(byte[] Content, string FileName)> ExportModesAsync(IQueryCollection query, CancellationToken ct)
-        => ExportAsync("api/analytics/lab-modes/export" + Query(query), "LabModes.xlsx", ct);
+    public async Task<IReadOnlyList<CptLookupRowDto>> GetCptWindowsAsync(IQueryCollection query, CancellationToken ct)
+        => await GetAsync<List<CptLookupRowDto>>("api/analytics/cpt-lookup/windows" + Query(query), ct) ?? [];
 
-    public Task<(byte[] Content, string FileName)> ExportMediansAsync(IQueryCollection query, CancellationToken ct)
-        => ExportAsync("api/analytics/lab-medians/export" + Query(query), "LabMedians.xlsx", ct);
+    public async Task<IReadOnlyList<PanelLookupRowDto>> GetPanelWindowsAsync(IQueryCollection query, CancellationToken ct)
+        => await GetAsync<List<PanelLookupRowDto>>("api/analytics/panel-lookup/windows" + Query(query), ct) ?? [];
 
-    public async Task<IReadOnlyList<string>> GetModeOptionsAsync(IQueryCollection query, CancellationToken ct)
-        => await GetAsync<List<string>>("api/analytics/lab-modes/options" + Query(query), ct) ?? [];
+    public async Task<IReadOnlyList<string>> GetCptOptionsAsync(IQueryCollection query, CancellationToken ct)
+        => await GetAsync<List<string>>("api/analytics/cpt-lookup/options" + Query(query), ct) ?? [];
 
-    public async Task<IReadOnlyList<string>> GetMedianOptionsAsync(IQueryCollection query, CancellationToken ct)
-        => await GetAsync<List<string>>("api/analytics/lab-medians/options" + Query(query), ct) ?? [];
+    public async Task<IReadOnlyList<string>> GetPanelOptionsAsync(IQueryCollection query, CancellationToken ct)
+        => await GetAsync<List<string>>("api/analytics/panel-lookup/options" + Query(query), ct) ?? [];
+
+    public Task<(byte[] Content, string FileName)> ExportCptAsync(IQueryCollection query, CancellationToken ct)
+        => ExportAsync("api/analytics/cpt-lookup/export" + Query(query), "CptLookup.xlsx", ct);
+
+    public Task<(byte[] Content, string FileName)> ExportPanelAsync(IQueryCollection query, CancellationToken ct)
+        => ExportAsync("api/analytics/panel-lookup/export" + Query(query), "PanelLookup.xlsx", ct);
 
     public async Task<IReadOnlyList<MasterValueLabOption>> GetLabsAsync(CancellationToken ct)
-        => await GetAsync<List<MasterValueLabOption>>("api/analytics/labs", ct) ?? [];
+        => await GetAsync<List<MasterValueLabOption>>("api/analytics/lookup-labs", ct) ?? [];
 
     private async Task<(byte[] Content, string FileName)> ExportAsync(string url, string fallbackName, CancellationToken ct)
     {

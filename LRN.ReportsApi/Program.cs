@@ -41,6 +41,7 @@ builder.Services.AddScoped<IDenialMapperRepository, SqlDenialMapperRepository>()
 builder.Services.AddScoped<IMasterValuesRepository, SqlMasterValuesRepository>();
 builder.Services.AddScoped<IMenuRepository, SqlMenuRepository>();
 builder.Services.AddScoped<ILabAnalyticsRepository, SqlLabAnalyticsRepository>();
+builder.Services.AddScoped<ICptLookupRepository, SqlCptLookupRepository>();
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IDenialDashboardRepository, SqlDenialDashboardRepository>();
 builder.Services.AddScoped<IPayerMasterWorkflowService, PayerMasterWorkflowService>();
@@ -73,7 +74,9 @@ builder.Services.AddScoped<IPayerMappingService, PayerMappingService>();
 builder.Services.AddScoped<IPayerRulesAdminService, PayerRulesAdminService>();
 builder.Services.AddScoped<IDenialWorkflowIssueNotifier, DenialWorkflowIssueNotifier>();
 builder.Services.AddScoped<IDenialWorkflowSupportService, DenialWorkflowSupportService>();
+builder.Services.AddSingleton<IDenialWorkflowJobHistoryStore, DenialWorkflowJobHistoryStore>();
 builder.Services.AddSingleton<IDenialWorkflowExportJobService, DenialWorkflowExportJobService>();
+builder.Services.AddSingleton<IDenialWorkflowUploadJobService, DenialWorkflowUploadJobService>();
 builder.Services.AddHttpClient();
 builder.Services.AddAuthorization();
 builder.Services.AddControllers();

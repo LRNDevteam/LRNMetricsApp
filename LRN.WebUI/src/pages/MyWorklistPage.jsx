@@ -60,15 +60,27 @@ function normalizeStatus(value) {
   const v = String(value || '').trim().toLowerCase();
   if (!v || v === 'open' || v === 'in progress' || v === 'pending review') return 'Assigned';
   if (v === 'pending payer') return 'Pending Payer Response';
-  if (v === 'escalated' || v === 'internal escalation' || v === 'external escalation') return 'Escalated to AR Manager';
+  if (v === 'escalated' || v === 'internal escalation') return 'Escalated to AR Manager';
+  if (v === 'external escalation') return 'External Escalation';
   if (v === 'completed') return 'Closed';
   if (v === 'required review') return 'Rework';
   return value || 'Assigned';
 }
 
 function pendingPayerOutcomeForLines(lines = []) {
-  const text = lines.map(l => `${l?.actionCategory || ''} ${l?.recommendedAction || ''} ${l?.task || ''}`).join(' ').toLowerCase();
-  return text.includes('doc') || text.includes('medical record') || text.includes('auth') ? 'Documentation Uploaded' : 'Appeal Submitted';
+  // Round 4 UAT C7: derive the Actual Outcome from what was actually recommended/performed —
+  // this used to fall through to 'Appeal Submitted' for everything, so a Rebill recommendation
+  // still recorded 'Appeal Submitted'. Includes reviewerComments so a manager response like
+  // 'Proceed with Rebill' drives the outcome too. Returns '' when nothing matches so the
+  // user-selected outcome (or none) is kept instead of a wrong hardcoded default.
+  const text = lines.map(l => `${l?.actionCategory || ''} ${l?.recommendedAction || ''} ${l?.task || ''} ${l?.reviewerComments || ''}`).join(' ').toLowerCase();
+  if (text.includes('rebill')) return 'Rebill Submitted';
+  if (text.includes('corrected claim')) return 'Corrected Claim Submitted';
+  if (text.includes('write-off') || text.includes('write off') || text.includes('writeoff')) return 'Write-Off Recommended';
+  if (text.includes('doc') || text.includes('medical record') || text.includes('auth')) return 'Documentation Uploaded';
+  if (text.includes('payer call') || text.includes('payer follow')) return 'Payer Call Completed';
+  if (text.includes('appeal')) return 'Appeal Submitted';
+  return '';
 }
 
 function groupByClaim(rows) {
@@ -187,12 +199,12 @@ function ClaimTaskLevelView({ claim, canEditClaim, canEditLine, openNote, showMa
     <div className="claim-task-workbench-main">
       <div className="claim-task-panel-head"><div><h3>Denial Lines / Action Tracker</h3><p>Use status updates by claim, action group, denial classification, CPT, or selected lines.</p></div><button className="wl-btn teal" type="button" disabled={!canEditClaim(claim)} onClick={() => openNote('Claim', claim)}>Open Update Status Modal</button></div>
       {hasHorizontalOverflow && <div className="claim-action-scroll-rail" ref={topScrollRef} aria-label="Horizontal table scroll"><div style={{ width: `${tableScrollWidth}px` }} /></div>}
-      <div className="claim-action-table-wrap" ref={tableScrollRef} tabIndex="0" aria-label="Claim action lines; scroll horizontally to view all columns"><table className="claim-action-table full-line-table"><thead><tr><th className="sticky-cpt">CPT Code</th><th className="sticky-denial">Denial Code</th><th>Task ID</th><th>Units</th><th>Modifier</th><th>Denial Description</th><th>Denial Classification</th><th>Action Code</th><th>Action Category</th><th>Recommended Action</th>{showManagerResponse && <th>Manager Response</th>}<th>Priority</th><th>Insurance Balance</th><th>SLA Days</th><th>Status</th><th>Date Opened</th><th>Due Date</th><th>SLA Status</th><th>First Billed Date</th><th>Charge Entered Date</th><th>ICD Codes</th><th>ICD Compliance Status</th><th>Denial Validity</th><th>CCW ICD10 Code</th><th>Billed ICD Not In Payer Policy</th><th>Covered ICD10 (Payer Policy)</th><th>Covered ICD10 Billed</th><th>ICD Coverage Presence</th><th>LIS ICD10 Codes</th><th>Non-Covered ICD10 (Policy)</th><th>Non-Covered ICD10 Billed</th><th>Update</th></tr></thead><tbody>{lines.length ? lines.map((l, i) => <tr key={l.taskId || i} className={String(l.status || '').toLowerCase().includes('closed') ? 'dim' : ''}><td className="sticky-cpt"><code className="code">{l.cptCode || '-'}</code></td><td className="sticky-denial"><code className="code">{l.denialCode || '-'}</code></td><td><strong>{l.taskId || '-'}</strong></td><td>{l.units ?? '-'}</td><td>{l.modifier || '-'}</td><td className="wrap-wide">{l.denialDescription || '-'}</td><td>{l.denialClassification || '-'}</td><td>{l.actionCode || '-'}</td><td>{l.actionCategory || '-'}</td><td className={`wrap-wide ${showManagerResponse ? 'recommended-action-cell' : ''}`}><strong>{l.recommendedAction || '-'}</strong></td>{showManagerResponse && <td className="wrap-wide manager-response-cell">{l.reviewerComments || 'No manager response recorded.'}</td>}<td>{l.priority || '-'}</td><td>{money(l.insuranceBalance)}</td><td>{l.slaDays ?? '-'}</td><td><span className={`wl-badge ${String(l.status || 'Assigned').toLowerCase().replaceAll(' ', '-')}`}>{l.status || 'Assigned'}</span></td><td>{fmtDate(l.dateOpened)}</td><td>{fmtDate(l.dueDate)}</td><td><span className={`wl-badge ${String(l.slaStatus || '').toLowerCase().replaceAll(' ', '-')}`}>{l.slaStatus || '-'}</span></td><td>{fmtDate(l.firstBilledDate)}</td><td>{fmtDate(l.chargeEnteredDate)}</td><td className="wrap-wide">{l.icdCodes || '-'}</td><td>{l.icdComplianceStatus || '-'}</td><td>{l.denialValidity || '-'}</td><td className="wrap-wide">{l.ccwIcd10Code || '-'}</td><td className="wrap-wide">{l.billedIcdCodesNotAvailableInPayerPolicy || '-'}</td><td className="wrap-wide">{l.coveredIcd10CodesAsPerPayerPolicy || '-'}</td><td className="wrap-wide">{l.coveredIcd10CodesBilled || '-'}</td><td>{l.coveredIcdPresence || '-'}</td><td className="wrap-wide">{l.lisIcd10Codes || '-'}</td><td className="wrap-wide">{l.nonCoveredIcd10CodesAsPerPayerPolicy || '-'}</td><td className="wrap-wide">{l.nonCoveredIcd10CodesBilled || '-'}</td><td><button className="wl-btn xs" type="button" disabled={!canEditLine(l)} onClick={() => openNote('Line', claim, l)}>Update</button></td></tr>) : <tr><td colSpan={showManagerResponse ? 32 : 31} className="empty-cell">No task lines found for this claim.</td></tr>}</tbody></table></div>
+      <div className="claim-action-table-wrap" ref={tableScrollRef} tabIndex="0" aria-label="Claim action lines; scroll horizontally to view all columns"><table className="claim-action-table full-line-table"><thead><tr><th className="sticky-cpt">CPT Code</th><th className="sticky-denial">Denial Code</th><th>Task ID</th><th>Units</th><th>Modifier</th><th>Denial Description</th><th>Denial Classification</th><th>Action Code</th><th>Action Category</th>{!showManagerResponse && <th>Recommended Action</th>}{showManagerResponse && <th>Manager Response</th>}<th>Priority</th><th>Insurance Balance</th><th>SLA Days</th><th>Status</th><th>Date Opened</th><th>Due Date</th><th>SLA Status</th><th>First Billed Date</th><th>Charge Entered Date</th><th>ICD Codes</th><th>ICD Compliance Status</th><th>Denial Validity</th><th>CCW ICD10 Code</th><th>Billed ICD Not In Payer Policy</th><th>Covered ICD10 (Payer Policy)</th><th>Covered ICD10 Billed</th><th>ICD Coverage Presence</th><th>LIS ICD10 Codes</th><th>Non-Covered ICD10 (Policy)</th><th>Non-Covered ICD10 Billed</th><th>Update</th></tr></thead><tbody>{lines.length ? lines.map((l, i) => <tr key={l.taskId || i} className={String(l.status || '').toLowerCase().includes('closed') ? 'dim' : ''}><td className="sticky-cpt"><code className="code">{l.cptCode || '-'}</code></td><td className="sticky-denial"><code className="code">{l.denialCode || '-'}</code></td><td><strong>{l.taskId || '-'}</strong></td><td>{l.units ?? '-'}</td><td>{l.modifier || '-'}</td><td className="wrap-wide">{l.denialDescription || '-'}</td><td>{l.denialClassification || '-'}</td><td>{l.actionCode || '-'}</td><td>{l.actionCategory || '-'}</td>{!showManagerResponse && <td className="wrap-wide"><strong>{l.recommendedAction || '-'}</strong></td>}{showManagerResponse && <td className="wrap-wide manager-response-cell">{l.reviewerComments || 'No manager response recorded.'}</td>}<td>{l.priority || '-'}</td><td>{money(l.insuranceBalance)}</td><td>{l.slaDays ?? '-'}</td><td><span className={`wl-badge ${String(l.status || 'Assigned').toLowerCase().replaceAll(' ', '-')}`}>{l.status || 'Assigned'}</span></td><td>{fmtDate(l.dateOpened)}</td><td>{fmtDate(l.dueDate)}</td><td><span className={`wl-badge ${String(l.slaStatus || '').toLowerCase().replaceAll(' ', '-')}`}>{l.slaStatus || '-'}</span></td><td>{fmtDate(l.firstBilledDate)}</td><td>{fmtDate(l.chargeEnteredDate)}</td><td className="wrap-wide">{l.icdCodes || '-'}</td><td>{l.icdComplianceStatus || '-'}</td><td>{l.denialValidity || '-'}</td><td className="wrap-wide">{l.ccwIcd10Code || '-'}</td><td className="wrap-wide">{l.billedIcdCodesNotAvailableInPayerPolicy || '-'}</td><td className="wrap-wide">{l.coveredIcd10CodesAsPerPayerPolicy || '-'}</td><td className="wrap-wide">{l.coveredIcd10CodesBilled || '-'}</td><td>{l.coveredIcdPresence || '-'}</td><td className="wrap-wide">{l.lisIcd10Codes || '-'}</td><td className="wrap-wide">{l.nonCoveredIcd10CodesAsPerPayerPolicy || '-'}</td><td className="wrap-wide">{l.nonCoveredIcd10CodesBilled || '-'}</td><td><button className="wl-btn xs" type="button" disabled={!canEditLine(l)} onClick={() => openNote('Line', claim, l)}>Update</button></td></tr>) : <tr><td colSpan={31} className="empty-cell">No task lines found for this claim.</td></tr>}</tbody></table></div>
     </div>
   </div>;
 }
 
-function WorklistClaimSplit({ claims, rows, taskTotal = 0, loading, data, expanded, setExpanded, drawerTab, setDrawerTab, activeClaim, clientManager, accountManager, taskView, setTaskView, myTabs, tabCounts = {}, notes, docs, escalations, canEditClaim, canEditLine, canCreateEscalation, canDeleteDocumentForClaim, openNote, openDocs, openEsc, openDocument, deleteDocument, loadDrawerTab, searchText = '', setSearchText = () => {}, csvUpload = null }) {
+function WorklistClaimSplit({ claims, rows, taskTotal = 0, loading, data, expanded, setExpanded, drawerTab, setDrawerTab, activeClaim, clientManager, accountManager, taskView, setTaskView, myTabs, tabCounts = {}, notes, docs, escalations, history = [], canEditClaim, canEditLine, canCreateEscalation, canEscalateClaim = () => false, isClaimEscalatedToManager = () => false, canDeleteDocumentForClaim, openNote, openDocs, openEsc, openDocument, deleteDocument, loadDrawerTab, searchText = '', setSearchText = () => {}, csvUpload = null }) {
   const roleLabel = clientManager ? 'Client Manager' : accountManager ? 'Account Manager' : 'AR Reviewer';
   const activeTab = myTabs.find(x => x.key === taskView);
   const activeClaimLines = activeClaim?.lines || [];
@@ -204,19 +216,19 @@ function WorklistClaimSplit({ claims, rows, taskTotal = 0, loading, data, expand
       <div className="claim-view-top"><div><div className="claim-view-title">My Worklist</div><div className="claim-view-subtitle">{activeTab?.label || 'Work'} claims - {claims.length} claim(s), {taskTotal} task(s)</div></div><span className="table-count">{loading ? 'Loading...' : activeTab?.label || 'Work'}</span></div>
       <div className="claim-list-toolbar"><label className="claim-search-wrap"><i className="bi bi-search" /><input value={searchText} onChange={e => setSearchText(e.target.value)} placeholder="Search claim, payer, patient" aria-label="Search worklist by claim, payer, or patient" /></label><div className="claim-tab-row">{myTabs.map(t => { const count = Number(tabCounts?.[t.countKey || t.key] || 0); const active = taskView === t.key; return <button key={t.key} type="button" className={`claim-tab ${active ? 'active' : ''} ${active && loading ? 'is-loading' : ''} ${t.alert && count > 0 ? 'has-alert' : ''}`} title={t.hint} onClick={() => setTaskView(t.key)} disabled={active && loading}><span>{t.label}</span>{active && loading ? <i className="bi bi-arrow-repeat claim-tab-spinner" aria-label="Loading claims" /> : <b>{tabCounts?.[t.countKey || t.key] ?? 0}</b>}</button>; })}{csvUpload}</div></div>
       {loading && <div className="claim-tab-loading" role="status"><i className="bi bi-arrow-repeat" /><strong>Loading {activeTab?.label || 'worklist'} claims</strong><span>Refreshing this queue with the latest assignments...</span></div>}
-      <div className="claim-list-head claim-list-head-wide my-worklist-head"><span>Claim</span><span>Source</span><span>Payer Name</span><span>Patient Name</span><span>Patient ID</span><span>Subscriber ID</span><span>DOS</span><span>Balance</span><span>Status</span></div>
+      <div className="claim-list-head claim-list-head-wide my-worklist-head"><span aria-hidden="true" className="my-worklist-spacer" /><span aria-hidden="true" /><span>Claim</span><span>Source</span><span>Payer Name</span><span>Patient Name</span><span>Patient ID</span><span>Subscriber ID</span><span>DOS</span><span>Balance</span><span>Status</span></div>
       <div className="claim-rows-scroll">{claims.length ? claims.map(c => <button type="button" key={c.claimId} className={`claim-list-row claim-list-row-wide my-worklist-row ${expanded === c.claimId ? 'active' : ''}`} onClick={() => { setExpanded(expanded === c.claimId ? '' : c.claimId); setDrawerTab('lines'); }}><span className="claim-row-check my-worklist-spacer" aria-hidden="true" /><span className="claim-expand-dot"><i className={`bi ${expanded === c.claimId ? 'bi-chevron-down' : 'bi-chevron-right'}`} /></span><span className="claim-list-id"><strong className="claim-id-link as-text">{c.claimId}</strong><small>UID {c.claimId || '-'}</small></span><span className="claim-list-payer" title={c.source}>{c.source || '-'}</span><span className="claim-list-payer" title={c.payerName}>{c.payerName}</span><span className="claim-list-payer" title={c.patientName}>{c.patientName || '-'}</span><span className="claim-list-payer" title={c.patientId}>{c.patientId || '-'}</span><span className="claim-list-payer" title={c.subscriberId}>{c.subscriberId || '-'}</span><span className="claim-list-payer">{fmtDate(c.dateOfService)}</span><span className="claim-list-amt">{money(c.balance)}</span><span className={`wl-badge ${String(c.status).toLowerCase().replaceAll(' ', '-')}`}>{c.status}</span></button>) : <div className="claim-empty-panel">No worklist claims found.</div>}</div>
     </section>}
     {activeClaim && <section className="claim-drawer open my-worklist-claim-drawer">
       <div className="claim-drawer-header"><div className="claim-drawer-header-main"><div className="claim-drawer-header-title"><div className="claim-drawer-kicker">My Worklist / Claim / Line Level</div><h3>{activeClaim.claimId}</h3><p>{activeClaim.payerName || '-'} - {money(activeClaim.balance)}</p></div><div className="claim-drawer-header-overview"><span><b>Claim Status</b><strong className={`wl-badge ${String(activeClaim.status || 'Assigned').toLowerCase().replaceAll(' ', '-')}`}>{activeClaim.status || 'Assigned'}</strong></span><span><b>Status Completion</b><strong>{activeClaimCompleted} of {activeClaimLines.length} actions completed</strong><i className="scope-progress inline"><i style={{ width: `${activeClaimPct}%` }} /></i></span><span className="claim-drawer-overview-actions"><b>Action Summary</b>{activeClaimActions.length ? activeClaimActions.map(action => { const group = activeClaimLines.filter(line => (line.actionCategory || line.task || line.recommendedAction) === action); const done = group.filter(line => String(line.status || '').toLowerCase().includes('closed')).length; return <em className="scope-kv" key={action}><span>{action}</span><strong>{done}/{group.length}</strong></em>; }) : <small>No actions available.</small>}</span></div></div><button className="wl-icon" title="Close claim drawer" type="button" onClick={() => setExpanded('')}><i className="bi bi-x-lg" /></button></div>
       <div className="claim-drawer-meta"><span><b>Source</b>{activeClaim.source || '-'}</span><span><b>Panel</b>{activeClaim.panelName || '-'}</span><span><b>Patient</b>{activeClaim.patientName || '-'}</span><span><b>Subscriber</b>{activeClaim.subscriberId || '-'}</span><span><b>DOS</b>{fmtDate(activeClaim.dateOfService)}</span><span><b>Created</b>{fmtDate(activeClaim.createdOn)}</span><span><b>Clinic</b>{activeClaim.clinicName || '-'}</span><span><b>Provider</b>{activeClaim.referringProvider || '-'}</span><span><b>Assigned</b>{activeClaim.assignedTo || '-'}</span></div>
-      <div className="claim-drawer-actions"><button className="wl-icon icon-note" title="Claim notes" type="button" onClick={() => openNote('Claim', activeClaim)}><i className="bi bi-pencil-square" /></button><button className="wl-icon icon-doc" title="Claim documents" type="button" onClick={() => openDocs(activeClaim)}><i className="bi bi-paperclip" /></button>{canCreateEscalation ? <button className="wl-btn red xs" type="button" onClick={() => openEsc('Claim', activeClaim)}>Escalate</button> : <span className="muted-text">View only</span>}</div>
+      <div className="claim-drawer-actions"><button className="wl-icon icon-note" title="Claim notes" type="button" disabled={!canEditClaim(activeClaim)} onClick={() => openNote('Claim', activeClaim)}><i className="bi bi-pencil-square" /></button><button className="wl-icon icon-doc" title="Claim documents" type="button" onClick={() => openDocs(activeClaim)}><i className="bi bi-paperclip" /></button>{canEscalateClaim(activeClaim) ? <button className="wl-btn red xs" type="button" onClick={() => openEsc('Claim', activeClaim)}>Escalate</button> : isClaimEscalatedToManager(activeClaim) ? <span className="muted-text">Escalated to AR Manager</span> : <span className="muted-text">View only</span>}</div>
       <div className="claim-drawer-tabs"><button className={drawerTab === 'lines' ? 'active' : ''} type="button" onClick={() => setDrawerTab('lines')}>Tasks ({activeClaim.lines?.length || 0})</button><button className={drawerTab === 'notes' ? 'active' : ''} type="button" onClick={() => loadDrawerTab('notes', activeClaim)}>Notes ({notes.length})</button><button className={drawerTab === 'documents' ? 'active' : ''} type="button" onClick={() => loadDrawerTab('documents', activeClaim)}>Documents ({docs.length})</button><button className={drawerTab === 'history' ? 'active' : ''} type="button" onClick={() => loadDrawerTab('history', activeClaim)}>History</button></div>
       <div className="claim-drawer-body">
         {drawerTab === 'lines' && <ClaimTaskLevelView claim={activeClaim} canEditClaim={canEditClaim} canEditLine={canEditLine} openNote={openNote} showManagerResponse={taskView === 'escalationResponse'} />}
         {drawerTab === 'notes' && <ClaimNotesPanel notes={notes} canAdd={canEditClaim(activeClaim)} onAdd={() => openNote('Claim', activeClaim)} formatDate={fmtDate} />}
         {drawerTab === 'documents' && <DocumentTable documents={docs} canUpload={canEditClaim(activeClaim)} canDelete={() => canDeleteDocumentForClaim(activeClaim)} onUpload={() => openDocs(activeClaim)} onDownload={openDocument} onDelete={documentId => deleteDocument(documentId, activeClaim.claimId)} formatDate={fmtDate} />}
-        {drawerTab === 'history' && <HistoryTimeline claim={activeClaim} notes={notes} documents={docs} escalations={escalations} formatDate={fmtDate} />}
+        {drawerTab === 'history' && <HistoryTimeline claim={activeClaim} notes={notes} documents={docs} escalations={escalations} history={history} formatDate={fmtDate} />}
       </div>
     </section>}
   </div>;
@@ -229,6 +241,7 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
   const [expanded, setExpanded] = useState('');
   const [drawerTab, setDrawerTab] = useState('lines');
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const [local, setLocal] = useState({ payerName: '', denialClassification: '', actionCategory: '', status: '', searchText: '' });
   const [debouncedLocal, setDebouncedLocal] = useState(local);
 
@@ -279,7 +292,9 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
   const [escScopeValue, setEscScopeValue] = useState('');
   const [escFiles, setEscFiles] = useState([]);
   const [escalations, setEscalations] = useState([]);
+  const [history, setHistory] = useState([]);
   const [escSaving, setEscSaving] = useState(false);
+  const [escSubmitted, setEscSubmitted] = useState(false);
   const escSavingRef = useRef(false);
   const loadRequestRef = useRef(0);
 
@@ -294,8 +309,24 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
   // Escalation is always a claim-level action for every role; a single line/task can never be
   // escalated independently of its claim, so this is not gated by role.
   const reviewerEscalationClaimOnly = true;
-  const canEditClaim = (claim) => canUpdateTasks || (clientManager && claimHasClientInfoPending(claim));
-  const canEditLine = (line) => canUpdateTasks || (clientManager && isClientInfoPending(line));
+  // A claim escalated to the AR Manager (internal escalation) is locked for the AR Reviewer until
+  // the manager responds -- no notes/status updates, no document uploads, no re-escalation. Mirrors
+  // the backend guard (DenialTaskBoard.WorkFlowStatus = 'internal escalation'). Once the manager
+  // responds the claim moves to "Escalation Response" and the reviewer can act again. Managers are
+  // never locked here (they act on escalations).
+  const isClaimEscalatedToManager = (claim) => {
+    if (!roleIsReviewerOnly(role)) return false;
+    const state = `${claim?.status || ''} ${claim?.workflowStatus || ''} ${claim?.claimStatus || ''} ${claim?.queueName || ''} ${claim?.claimQueue || ''}`.toLowerCase();
+    if (state.includes('escalation response')) return false;
+    if (state.includes('internal escalation') || state.includes('escalated to ar manager')) return true;
+    const lines = claim?.lines || [];
+    return lines.length > 0 && lines.some(l => String(l.status || '').toLowerCase().includes('escalated'))
+      && lines.every(l => { const s = String(l.status || '').toLowerCase(); return s.includes('escalated') || s.includes('closed'); });
+  };
+  const canEditClaim = (claim) => (canUpdateTasks || (clientManager && claimHasClientInfoPending(claim))) && !isClaimEscalatedToManager(claim);
+  const canEditLine = (line) => (canUpdateTasks || (clientManager && isClientInfoPending(line))) && !String(line?.status || '').toLowerCase().includes('escalated');
+  const canEscalateClaim = (claim) => canCreateEscalation && !isClaimEscalatedToManager(claim);
+  const canUploadForClaim = (claim) => canUploadDocuments && !isClaimEscalatedToManager(claim);
   const canDeleteDocumentForClaim = (claim) => canDeleteClaimDocument(claim, { canUpload: canUploadDocuments, canEdit: canEditClaim(claim), uploading: docUploading, taskView });
 
   const query = useMemo(() => ({
@@ -319,13 +350,13 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
     taskView: taskView === 'open' ? 'myopen' : taskView,
     searchText: debouncedLocal.searchText || filter?.searchText || '',
     page,
-    pageSize: 100
+    pageSize
     // Depend on the specific fields actually read above, not the whole `user`/`filter` objects.
     // App.jsx's window-focus handler calls setUser(me) with a freshly-parsed object on every tab
     // refocus (even when nothing about the user actually changed), and that new object reference
     // was enough to rebuild this memo and refire the load effect below — reloading the current
     // tab's data every time the browser tab regained focus.
-  }), [labId, user?.role, user?.userName, filter, debouncedLocal, taskView, page]);
+  }), [labId, user?.role, user?.userName, filter, debouncedLocal, taskView, page, pageSize]);
 
   useEffect(() => { onExportQueryChange(query); }, [query, onExportQueryChange]);
 
@@ -336,7 +367,7 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
     try {
       const result = await denialWorkflowService.getClaims(query, signal ? { signal } : {});
       if (signal?.aborted || requestId !== loadRequestRef.current) return;
-      setData({ items: result?.items || [], page: result?.page || page, pageSize: result?.pageSize || 100, totalCount: result?.totalCount || 0, totalPages: result?.totalPages || 0 });
+      setData({ items: result?.items || [], page: result?.page || page, pageSize: result?.pageSize || pageSize, totalCount: result?.totalCount || 0, totalPages: result?.totalPages || 0 });
     } catch (e) {
       if (!signal?.aborted && requestId === loadRequestRef.current) setMessage?.({ type: 'danger', text: e.message });
     }
@@ -352,6 +383,7 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
 
   const rows = data.items || [];
   function changePage(nextPage) { setExpanded(''); setPage(nextPage); }
+  function changePageSize(size) { setExpanded(''); setPageSize(Number(size) || 50); setPage(1); }
 
   useEffect(() => { setPage(1); setExpanded(''); }, [local, taskView]);
   useEffect(() => { setLineRowsByClaim({}); }, [taskView, labId]);
@@ -380,7 +412,12 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
   useEffect(() => {
     if (!labId || !expanded || lineRowsByClaim[expanded]) return undefined;
     let cancelled = false;
-    denialWorkflowService.getClaimTasks(labId, expanded, taskView)
+    // Task rows are keyed by the composite ClaimUID, but `expanded` is the row's claimId
+    // (VisitNumber). Pass the claim's claimUid when available so the backend can seek
+    // t.ClaimUID directly instead of falling back to a slow, often-empty fuzzy match.
+    const activeRow = claims.find(c => c.claimId === expanded) || null;
+    const lookupId = activeRow?.claimUid || activeRow?.claimUID || expanded;
+    denialWorkflowService.getClaimTasks(labId, lookupId, taskView)
       .then(taskRows => {
         if (cancelled) return;
         setLineRowsByClaim(prev => prev[expanded] ? prev : { ...prev, [expanded]: taskRows || [] });
@@ -389,7 +426,7 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
         if (!cancelled) setMessage?.({ type: 'danger', text: e.message || 'Unable to load claim task lines.' });
       });
     return () => { cancelled = true; };
-  }, [expanded, labId, lineRowsByClaim, setMessage, taskView]);
+  }, [expanded, labId, lineRowsByClaim, setMessage, taskView, claims]);
 
   function lineOptions(claim) {
     return (claim?.lines || []).map((l, i) => ({
@@ -453,6 +490,7 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
     const failNote = (text) => { setNoteError(text); return; };
     if (!noteText.trim()) return failNote('Please enter comments.');
     const claim = noteCtx.claim;
+    if (isClaimEscalatedToManager(claim)) return failNote('This claim is escalated to the AR Manager and cannot be updated until the manager responds.');
     const task = selectedLine(noteLineTarget, claim);
     const affectedLines = affectedNoteLines(claim);
     if (canUpdateTasks && !affectedLines.length) return failNote('No eligible open lines match the selected update scope.');
@@ -468,7 +506,9 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
       if (noteStatus === 'Closed' && !actualOutcome) return failNote('Actual outcome is required to close the claim or line.');
       if (noteStatus === 'Write-Off Pending Approval' && !actualOutcome) return failNote('Actual outcome is required for write-off approval.');
     }
-    const effectiveActualOutcome = noteStatus === 'Pending Payer Response' && actionCompleted === 'true' ? pendingPayerOutcomeForLines(affectedLines.length ? affectedLines : [actualTask || task]) : actualOutcome;
+    const effectiveActualOutcome = noteStatus === 'Pending Payer Response' && actionCompleted === 'true'
+      ? (pendingPayerOutcomeForLines(affectedLines.length ? affectedLines : [actualTask || task]) || actualOutcome)
+      : actualOutcome;
     const updatePayload = taskId => ({
       labId,
       taskId,
@@ -488,7 +528,16 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
     setNoteSaving(true);
     setNoteError('');
     try {
-      const noteLevel = affectedLines.length === 1 ? 'Line' : 'Claim';
+      // A "By Claim" note is a claim-wide comment and must be stored at claim level so it is
+      // visible for every CPT on the claim. Previously the level was derived only from how many
+      // lines were affected, so if just one open line qualified (the rest closed/escalated/protected)
+      // the claim-wide comment was bound to that single CPT and showed up under only that CPT.
+      const claimScopeNote = !task && noteUpdateScope === 'By Claim';
+      const noteLevel = claimScopeNote || affectedLines.length !== 1 ? 'Claim' : 'Line';
+      // A claim-level note covers the whole claim, so its summary should list every CPT on the
+      // claim -- not just the lines that qualified for the status update. Using affectedLines here
+      // is what made the saved note (and therefore the History/Claim Notes views) show a single CPT.
+      const summaryLines = claimScopeNote ? (claim.lines || []) : affectedLines;
       const completedLabel = actionCompleted === '' ? 'Not set' : actionCompleted === 'true' ? 'Yes' : 'No';
       const statusSummary = [
         `Update Scope: ${noteUpdateScope}`,
@@ -501,13 +550,13 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
         `Action Completed: ${completedLabel}`,
         documentationType ? `Documentation Type: ${documentationType}` : '',
         documentationType && documentationDescriptions[documentationType] ? `Documentation Description: ${documentationDescriptions[documentationType]}` : '',
-        affectedLines.length ? `Affected Lines: CPTs: ${[...new Set(affectedLines.map(l => String(l.cptCode || '').trim()).filter(Boolean))].join(', ')}` : ''
+        summaryLines.length ? `Affected Lines: CPTs: ${[...new Set(summaryLines.map(l => String(l.cptCode || '').trim()).filter(Boolean))].join(', ')}` : ''
       ].filter(Boolean).join('\n');
       const selectedNoteText = `${statusSummary}\n\nNote: ${noteText}`.trim();
       if (canUpdateTasks && noteStatus) {
         for (const l of affectedLines) await denialWorkflowService.updateTask(updatePayload(l.taskId));
       }
-      await denialWorkflowService.saveNote({ labId, claimId: claim.claimId, taskId: affectedLines.length === 1 ? affectedLines[0].taskId || '' : '', cptCode: affectedLines.length === 1 ? affectedLines[0].cptCode || '' : '', noteLevel, noteText: selectedNoteText, status: noteStatus, nextFollowUpDate: noteFollowUpDate || null, followUpReason, actionCompleted: actionCompleted === '' ? null : actionCompleted === 'true', actualOutcome: effectiveActualOutcome, documentationType, validateWorkflowFields: true, createdBy: user?.userName || 'ReactWorkflow' });
+      await denialWorkflowService.saveNote({ labId, claimId: claim.claimId, taskId: noteLevel === 'Line' ? affectedLines[0]?.taskId || '' : '', cptCode: noteLevel === 'Line' ? affectedLines[0]?.cptCode || '' : '', noteLevel, noteText: selectedNoteText, status: noteStatus, nextFollowUpDate: noteFollowUpDate || null, followUpReason, actionCompleted: actionCompleted === '' ? null : actionCompleted === 'true', actualOutcome: effectiveActualOutcome, documentationType, validateWorkflowFields: true, createdBy: user?.userName || 'ReactWorkflow' });
       if (noteStatus === 'Pending Documentation' && escalateOnDocRequest) {
         await denialWorkflowService.saveEscalation({ labId, claimId: claim.claimId, taskId: '', cptCode: '', escalationLevel: 'Claim', escalationScope: 'Overall Claim', escalationScopeValue: claim.claimId, escalationScopeDisplay: 'Overall Claim', recommendedNextAction: 'Manager review', escalationReason: 'Documentation requirement unclear', comments: noteText, status: 'Open', nextFollowUpDate: noteFollowUpDate || null, createdBy: user?.userName || 'ReactWorkflow' });
       }
@@ -529,6 +578,7 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
   async function uploadDocs() {
     if (docUploading) return;
     if (!canUploadDocuments) return setDocError('This role cannot upload documents.');
+    if (isClaimEscalatedToManager(docCtx)) return setDocError('This claim is escalated to the AR Manager. You cannot upload documents until the manager responds.');
     if (clientManager && !claimHasClientInfoPending(docCtx)) return setDocError('Client Manager can upload documents only for Client Info Pending escalations.');
     if (!docFiles?.length) return setDocError('Select at least one document.');
     setDocUploading(true);
@@ -572,18 +622,33 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
     if (tab === 'notes') setNotes(await denialWorkflowService.getNotes({ labId, claimId: claim.claimId, noteLevel: 'Claim' }) || []);
     if (tab === 'documents') setDocs(await denialWorkflowService.getClaimDocuments(labId, claim.claimId) || []);
     if (tab === 'history') {
-      const [n, d, e] = await Promise.all([
+      const [n, d, e, h] = await Promise.all([
         denialWorkflowService.getNotes({ labId, claimId: claim.claimId, noteLevel: 'Claim' }),
         denialWorkflowService.getClaimDocuments(labId, claim.claimId),
-        denialWorkflowService.getEscalations({ labId, claimId: claim.claimId, escalationLevel: 'Claim' })
+        denialWorkflowService.getEscalations({ labId, claimId: claim.claimId, escalationLevel: 'Claim' }),
+        // Assignment/status audit (dbo.DenialTaskHistory). This is what surfaces the
+        // "Assigned to <user>" event with its timestamp in the timeline; without it the
+        // History tab only ever showed "Claim created".
+        denialWorkflowService.getClaimHistory({ labId, claimId: claim.claimId, historyLevel: 'Claim' }).catch(() => [])
       ]);
-      setNotes(n || []); setDocs(d || []); setEscalations(dedupeEscalations(e || []));
+      setNotes(n || []); setDocs(d || []); setEscalations(dedupeEscalations(e || [])); setHistory(h || []);
     }
   }
 
   async function openEsc(level, claim, task) {
+    // Ensure the claim's line rows are available for eligibility. The drawer cache can be empty
+    // (drill-down not yet loaded, or a ClaimUID/VisitNumber mismatch), which would otherwise make
+    // an open claim look like it has no escalatable lines. Fetch fresh by ClaimUID when missing.
+    let escClaim = claim;
+    if (!escClaim.lines || !escClaim.lines.length) {
+      try {
+        const lookupId = claim.claimUid || claim.claimUID || claim.claimId;
+        const taskRows = await denialWorkflowService.getClaimTasks(labId, lookupId, taskView);
+        if (taskRows?.length) escClaim = { ...claim, lines: taskRows };
+      } catch { /* keep the original claim; saveEscalation still guards for an open claim */ }
+    }
     const appliesTo = reviewerEscalationClaimOnly ? 'Overall Claim' : task ? 'Specific CPT' : 'Overall Claim';
-    setEscError(''); setEscCtx({ level: reviewerEscalationClaimOnly ? 'Claim' : level === 'Line' || task ? 'Line' : 'Claim', claim, task: reviewerEscalationClaimOnly ? null : task || null }); setEscReason(escalationReasons[0]); setEscComment(''); setEscFollowUpDate(''); setEscOtherReason(''); setEscFiles([]); setEscAppliesTo(appliesTo); setEscScopeValue(reviewerEscalationClaimOnly ? '' : task?.taskId || '');
+    setEscError(''); setEscSubmitted(false); setEscCtx({ level: reviewerEscalationClaimOnly ? 'Claim' : level === 'Line' || task ? 'Line' : 'Claim', claim: escClaim, task: reviewerEscalationClaimOnly ? null : task || null }); setEscReason(escalationReasons[0]); setEscComment(''); setEscFollowUpDate(''); setEscOtherReason(''); setEscFiles([]); setEscAppliesTo(appliesTo); setEscScopeValue(reviewerEscalationClaimOnly ? '' : task?.taskId || '');
     const data = await denialWorkflowService.getEscalations({ labId, claimId: claim.claimId, escalationLevel: 'Claim' });
     setEscalations(dedupeEscalations(data || []));
   }
@@ -611,16 +676,30 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
             ? sourceLines.filter(x => (x.denialClassification || '') === escScopeValue)
             : sourceLines;
       const affected = affectedRaw.filter(x => !isProtectedLine(x));
-      if (!affected.length) {
+      const claimClosed = String(claim.status || '').toLowerCase().includes('closed');
+      if (!affected.length && !(reviewerEscalationClaimOnly && !claimClosed)) {
         throw new Error('No eligible lines can be escalated. Closed or already escalated lines are protected.');
       }
+      // Reviewer escalating an open claim: if no line rows resolved (line detail unavailable, or a
+      // ClaimUID/VisitNumber mismatch prevented matching), still record the claim-level escalation
+      // rather than blocking. Per-line status writes below simply no-op when there are none.
       const scopeDisplay = effectiveAppliesTo === 'Specific CPT'
         ? `CPT ${selectedTask?.cptCode || escScopeValue || '-'}${selectedTask?.denialCode ? ` / ${selectedTask.denialCode}` : ''}`
         : effectiveAppliesTo;
       const escalationStatus = finalEscReason.toLowerCase().includes('write-off decision required') ? 'WriteOffPending' : 'Open';
       await denialWorkflowService.saveEscalation({ labId, claimId: claim.claimId, taskId: reviewerEscalationClaimOnly ? '' : selectedTask?.taskId || '', cptCode: reviewerEscalationClaimOnly ? '' : selectedTask?.cptCode || '', escalationLevel: effectiveAppliesTo === 'Specific CPT' ? 'Line' : 'Claim', escalationScope: effectiveAppliesTo, escalationScopeValue: effectiveAppliesTo === 'Overall Claim' ? claim.claimId : escScopeValue || claim.claimId, escalationScopeDisplay: scopeDisplay, affectedTaskIds: affected.map(x => x.taskId).filter(Boolean).join(','), recommendedNextAction: 'Manager review', escalationReason: finalEscReason, comments: finalEscComment, status: escalationStatus, nextFollowUpDate: escFollowUpDate || null, createdBy: user?.userName || 'ReactWorkflow' });
+      // The escalation record is now created: lock the form so it cannot be submitted twice, even
+      // if a later step below reports a conflict.
+      setEscSubmitted(true);
       if (escFiles.length) await denialWorkflowService.uploadClaimDocuments(labId, claim.claimId, `[Escalation Attachment] ${finalEscReason}${finalEscComment ? ' - ' + finalEscComment : ''}`, user?.userName || 'ReactWorkflow', escFiles);
-      for (const l of affected) await denialWorkflowService.updateTask({ labId, taskId: l.taskId, status: 'Escalated to AR Manager', comments: `${finalEscReason}${finalEscComment ? ' - ' + finalEscComment : ''}`, actionBy: user?.userName || 'ReactWorkflow' });
+      // Stamp each line as escalated. The claim is already under escalation now, so the reviewer
+      // guard (409 "escalated to the AR Manager") is expected here -- swallow it per line so it does
+      // not re-open the form and invite a duplicate submission.
+      for (const l of affected) {
+        try {
+          await denialWorkflowService.updateTask({ labId, taskId: l.taskId, status: 'Escalated to AR Manager', comments: `${finalEscReason}${finalEscComment ? ' - ' + finalEscComment : ''}`, actionBy: user?.userName || 'ReactWorkflow' });
+        } catch { /* task already under escalation from this submit; ignore */ }
+      }
       setMessage?.({ type: 'success', text: 'Claim escalation saved.' });
       onSaved?.();
       setEscFiles([]);
@@ -651,16 +730,16 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
         <div className="status-scope-callout"><strong>Update Scope controls bulk behavior</strong><span>Choose what you are updating, then review the affected open lines before saving.</span></div>
         {noteError ? <div className="esc-inline-error"><i className="bi bi-exclamation-circle" /> {noteError}</div> : null}
         <div className="status-scope-grid">
-          <label>Update Scope<select className="wl-full" value={noteUpdateScope} disabled={noteSaving} onChange={e => setScope(e.target.value, claim)}>{noteScopeOptions.map(x => <option key={x}>{x}</option>)}</select></label>
-          <label>Scope Value<select className="wl-full" value={noteScopeValue} disabled={noteSaving || noteUpdateScope === 'By Selected Lines'} onChange={e => { setNoteError(''); setNoteScopeValue(e.target.value); }}>{values.map(x => <option key={x} value={x}>{x}</option>)}</select></label>
-          <label>Recommended Action<select className="wl-full" value={recommendedActionValue} disabled aria-readonly="true"><option value={recommendedActionValue}>{recommendedActionValue}</option></select></label>
-          <label>New Line Status<select className="wl-full" value={noteStatus} disabled={noteSaving} onChange={e => { setNoteError(''); setNoteStatus(e.target.value); }}>{statusOptions.map(x => <option key={x}>{x}</option>)}</select></label>
-          <label><span className="field-label-row">{['Payer Follow-up Required', 'Pending Payer Response', 'Pending Documentation'].includes(noteStatus) ? 'Expected Response Date' : 'Next Follow-up Date'} {['Payer Follow-up Required', 'Pending Payer Response', 'Pending Documentation'].includes(noteStatus) ? <span className="required-star">*</span> : null}</span><input type="date" value={noteFollowUpDate} onChange={e => { setNoteError(''); setNoteFollowUpDate(e.target.value); }} disabled={noteSaving} /></label>
-          <label>Actual Action / Outcome<select className="wl-full" value={actualOutcomeValue} disabled={noteSaving || !!pendingPayerAutoOutcome} onChange={e => { setNoteError(''); setActualOutcome(e.target.value); }}><option value="">Select outcome</option>{actualOutcomes.map(x => <option key={x}>{x}</option>)}</select>{pendingPayerAutoOutcome ? <span className="doctype-help">Auto-assigned from Action Category for Pending Payer Response.</span> : null}</label>
-          <label><span className="field-label-row">Action Completed? {noteStatus === 'Pending Payer Response' ? <span className="required-star">*</span> : null}</span><select className="wl-full" value={actionCompleted} disabled={noteSaving} onChange={e => { setNoteError(''); setActionCompleted(e.target.value); }}><option value="">Select</option><option value="true">Yes</option><option value="false">No</option></select></label>
-          {noteStatus === 'Pending Documentation' && <label className="doc-type-field">Documentation Type<select className="wl-full" value={documentationType} disabled={noteSaving} onChange={e => { setNoteError(''); setDocumentationType(e.target.value); }}><option value="">Select type</option>{documentationTypes.map(x => <option key={x}>{x}</option>)}</select>{docDescription ? <span className="doctype-help">{docDescription}</span> : null}</label>}
-          {noteStatus === 'Pending Documentation' && <label className="doc-type-field escalate-to-field"><span className="field-label-row">Escalate To</span><label className="wl-checkbox-inline"><input type="checkbox" checked={escalateOnDocRequest} disabled={noteSaving} onChange={e => setEscalateOnDocRequest(e.target.checked)} /> AR Manager</label><span className="doctype-help">Optional - also submits an internal escalation ("Documentation requirement unclear") to the AR Manager.</span></label>}
-          {noteStatus === 'Payer Follow-up Required' && <label>Follow-up Reason <span className="required-star">*</span><select className="wl-full" value={followUpReason} disabled={noteSaving} onChange={e => { setNoteError(''); setFollowUpReason(e.target.value); }}><option value="">Select reason</option>{followUpReasons.map(x => <option key={x}>{x}</option>)}</select></label>}
+          <label className="status-scope-field"><span className="field-label-row">Update Scope</span><select className="wl-full" value={noteUpdateScope} disabled={noteSaving} onChange={e => setScope(e.target.value, claim)}>{noteScopeOptions.map(x => <option key={x}>{x}</option>)}</select></label>
+          <label className="status-scope-field"><span className="field-label-row">Scope Value</span><select className="wl-full" value={noteScopeValue} disabled={noteSaving || noteUpdateScope === 'By Selected Lines'} onChange={e => { setNoteError(''); setNoteScopeValue(e.target.value); }}>{values.map(x => <option key={x} value={x}>{x}</option>)}</select></label>
+          <label className="status-scope-field"><span className="field-label-row">Recommended Action</span><select className="wl-full" value={recommendedActionValue} disabled aria-readonly="true"><option value={recommendedActionValue}>{recommendedActionValue}</option></select></label>
+          <label className="status-scope-field"><span className="field-label-row">New Line Status</span><select className="wl-full" value={noteStatus} disabled={noteSaving} onChange={e => { setNoteError(''); setNoteStatus(e.target.value); }}>{statusOptions.map(x => <option key={x}>{x}</option>)}</select></label>
+          <label className="status-scope-field"><span className="field-label-row">{['Payer Follow-up Required', 'Pending Payer Response', 'Pending Documentation'].includes(noteStatus) ? 'Expected Response Date' : 'Next Follow-up Date'} {['Payer Follow-up Required', 'Pending Payer Response', 'Pending Documentation'].includes(noteStatus) ? <span className="required-star">*</span> : null}</span><input type="date" value={noteFollowUpDate} onChange={e => { setNoteError(''); setNoteFollowUpDate(e.target.value); }} disabled={noteSaving} /></label>
+          <label className="status-scope-field"><span className="field-label-row">Actual Action / Outcome</span><select className="wl-full" value={actualOutcomeValue} disabled={noteSaving || !!pendingPayerAutoOutcome} onChange={e => { setNoteError(''); setActualOutcome(e.target.value); }}><option value="">Select outcome</option>{actualOutcomes.map(x => <option key={x}>{x}</option>)}</select>{pendingPayerAutoOutcome ? <span className="doctype-help">Auto-assigned from Action Category for Pending Payer Response.</span> : null}</label>
+          <label className="status-scope-field"><span className="field-label-row">Action Completed? {noteStatus === 'Pending Payer Response' ? <span className="required-star">*</span> : null}</span><select className="wl-full" value={actionCompleted} disabled={noteSaving} onChange={e => { setNoteError(''); setActionCompleted(e.target.value); }}><option value="">Select</option><option value="true">Yes</option><option value="false">No</option></select></label>
+          {noteStatus === 'Pending Documentation' && <label className="status-scope-field doc-type-field"><span className="field-label-row">Documentation Type</span><select className="wl-full" value={documentationType} disabled={noteSaving} onChange={e => { setNoteError(''); setDocumentationType(e.target.value); }}><option value="">Select type</option>{documentationTypes.map(x => <option key={x}>{x}</option>)}</select>{docDescription ? <span className="doctype-help">{docDescription}</span> : null}</label>}
+          {noteStatus === 'Pending Documentation' && <div className="status-scope-field escalate-to-field"><span className="field-label-row">Escalate To</span><label className="wl-checkbox-inline"><input type="checkbox" checked={escalateOnDocRequest} disabled={noteSaving} onChange={e => setEscalateOnDocRequest(e.target.checked)} /> AR Manager</label><span className="doctype-help">Optional - also submits an internal escalation ("Documentation requirement unclear") to the AR Manager.</span></div>}
+          {noteStatus === 'Payer Follow-up Required' && <label className="status-scope-field"><span className="field-label-row">Follow-up Reason <span className="required-star">*</span></span><select className="wl-full" value={followUpReason} disabled={noteSaving} onChange={e => { setNoteError(''); setFollowUpReason(e.target.value); }}><option value="">Select reason</option>{followUpReasons.map(x => <option key={x}>{x}</option>)}</select></label>}
         </div>
         <label className="status-scope-comments">Clarification / Status Note<textarea className="wl-textarea" maxLength={MAX_TEXT_LENGTH} value={noteText} onChange={e => { setNoteError(''); setNoteText(limitText(e.target.value)); }} placeholder="Enter comments..." disabled={noteSaving} /><div className="text-count">{textCountLabel(noteText)}</div></label>
         {pendingPayerCompletionMissing ? <div className="status-validation-callout"><strong>Action Completed is required</strong><span>Select Yes for Pending Payer Response. The actual outcome will be assigned from the Action Category.</span></div> : null}
@@ -680,6 +759,15 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
 
   useEffect(() => { if ((clientManager || accountManager) && !['pendingDocumentation', 'externalEscalation', 'closed', 'all'].includes(taskView)) setTaskView('externalEscalation'); }, [accountManager, clientManager, taskView, setTaskView]);
 
+  // A claim already has a live escalation awaiting the AR Manager when any of its escalation
+  // records is not yet resolved/responded. The submit button is locked in that case (and once this
+  // session has just submitted) so the reviewer cannot create duplicate escalations.
+  const escalationAlreadyPending = (escalations || []).some(x => {
+    const status = String(x?.status || '').toLowerCase();
+    return !['resolved', 'closed', 'responded', 'response submitted', 'manager response', 'completed', 'rejected', 'approved'].some(k => status.includes(k));
+  });
+  const escalationLocked = escSubmitted || escalationAlreadyPending;
+
   return <div className="wl-page">
     <div className="wl-kpis"><div><b>{kpi.claims}</b><span>Assigned claims</span></div><div><b>{kpi.tasks}</b><span>Open tasks</span></div><div><b>{money(kpi.balance)}</b><span>Ins. balance</span></div><div><b>{kpi.escalated}</b><span>Escalated</span></div></div>
     {!roleIsReviewerOnly(user?.role) && <div className="wl-card wl-filters"><div className="wl-card-hd"><b>My Worklist Filters</b><button className="wl-btn xs" onClick={() => setLocal({ payerName: '', denialClassification: '', actionCategory: '', status: '', searchText: '' })}>Clear all</button></div><div className="wl-filter-grid">
@@ -689,16 +777,16 @@ export default function MyWorklistPage({ labId, user, options, filter, setMessag
       <SearchableMultiSelect label="Status" value={local.status} onChange={v => setLocal(x => ({ ...x, status: v }))} options={statusOptions} placeholder="All statuses" />
       <label className="span2">Search<input value={local.searchText} onChange={e => setLocal(x => ({ ...x, searchText: e.target.value }))} placeholder="Claim, payer, CPT, task..." /></label>
     </div></div>}
-    <WorklistClaimSplit claims={claims} rows={rows} taskTotal={taskTotal} loading={loading} data={data} expanded={expanded} setExpanded={setExpanded} drawerTab={drawerTab} setDrawerTab={setDrawerTab} activeClaim={activeClaim} clientManager={clientManager} accountManager={accountManager} taskView={taskView} setTaskView={setTaskView} myTabs={myTabs} tabCounts={tabCounts} notes={notes} docs={docs} escalations={escalations} canEditClaim={canEditClaim} canEditLine={canEditLine} canCreateEscalation={canCreateEscalation} canDeleteDocumentForClaim={canDeleteDocumentForClaim} openNote={openNote} openDocs={openDocs} openEsc={openEsc} openDocument={openDocument} deleteDocument={deleteDocument} loadDrawerTab={loadDrawerTab} searchText={local.searchText} setSearchText={value => setLocal(x => ({ ...x, searchText: value }))} csvUpload={canUpdateTasks ? <ClaimCsvUpload labId={labId} setMessage={setMessage} onUploaded={async () => { await load(); onSaved?.(); }} onDownloadTemplate={() => onDownloadTemplate(query, myTabs.find(x => x.key === taskView))} templateBusy={exportBusy} /> : null} />
-    <div className="wl-card my-worklist-old-table"><div className="wl-card-hd"><b>{clientManager ? 'Client Manager' : accountManager ? 'Account Manager' : 'AR Reviewer'} · My Worklist · {myTabs.find(x => x.key === taskView)?.label}</b><span>{loading ? 'Loading...' : `${data.totalCount || claims.length} claim(s)`}</span></div><div className="wl-table-scroll"><table className="wl-main-table"><thead><tr><th></th><th>Claim ID</th><th>Payer</th><th>Panel</th><th>Patient ID</th><th>DOS</th><th>Created On</th><th>Clinic</th><th>Provider</th><th>Assigned To</th><th>Balance</th><th>Claim Notes</th><th>Docs</th><th>Escalate</th><th>Status</th></tr></thead><tbody>{claims.map(c => <React.Fragment key={c.claimId}><tr className={expanded === c.claimId ? 'open' : ''} onClick={() => setExpanded(expanded === c.claimId ? '' : c.claimId)}><td><i className={`bi ${expanded === c.claimId ? 'bi-chevron-down' : 'bi-chevron-right'}`} /></td><td className="linkish">{c.claimId}</td><td>{c.payerName}</td><td>{c.panelName}</td><td>{c.patientId}</td><td>{fmtDate(c.dateOfService)}</td><td>{fmtDate(c.createdOn)}</td><td>{c.clinicName}</td><td>{c.referringProvider}</td><td>{c.assignedTo || '-'}</td><td className="money">{money(c.balance)}</td><td><button className="wl-icon icon-note" disabled={!canEditClaim(c)} onClick={e => { e.stopPropagation(); openNote('Claim', c); }}><i className="bi bi-pencil-square" /></button></td><td><button className="wl-icon icon-doc" disabled={!canEditClaim(c)} onClick={e => { e.stopPropagation(); openDocs(c); }}><i className="bi bi-paperclip" /></button></td><td>{canCreateEscalation ? <button className="wl-btn red xs" onClick={e => { e.stopPropagation(); openEsc('Claim', c); }}>Escalate</button> : <span className="muted-text">View only</span>}</td><td><span className={`wl-badge ${String(c.status).toLowerCase().replaceAll(' ', '-')}`}>{c.status}</span></td></tr>{expanded === c.claimId && <tr><td colSpan="15" className="wl-detail-cell"><div className="wl-detail-title">CPT / line-level task details</div><div className="wl-line-scroll"><table className="wl-line-table"><thead><tr><th>Task ID</th><th>CPT</th><th>Units</th><th>Modifier</th><th>Denial</th><th>Coverage</th><th>ICD Status</th><th>Classification</th><th>Validity</th><th>Balance</th><th>Action / Task</th><th>SLA</th><th>Assigned To</th><th>Status</th><th>Created On</th><th>Notes</th><th>Escalate</th></tr></thead><tbody>{c.lines.map(l => <tr key={l.taskId}><td><b>{l.taskId}</b></td><td>{l.cptCode}</td><td>{l.units ?? '-'}</td><td>{l.modifier || '-'}</td><td>{l.denialCode}</td><td>{l.coverageStatus || '-'}</td><td>{l.icdComplianceStatus || '-'}</td><td>{l.denialClassification}</td><td>{l.denialValidity || '-'}</td><td className="money">{money(l.insuranceBalance)}</td><td>{l.task || l.recommendedAction}</td><td>{l.daysRemaining ?? '-'}</td><td>{l.assignedTo || '-'}</td><td><span className={`wl-badge ${String(l.status).toLowerCase().replaceAll(' ', '-')}`}>{l.status || 'Open'}</span></td><td>{fmtDate(l.createdOn)}</td><td><button className="wl-icon icon-note" disabled={!canEditLine(l)} onClick={() => openNote('Line', c, l)}><i className="bi bi-pencil-square" /></button></td><td>{canCreateEscalation ? <button className="wl-btn red xs" onClick={() => openEsc('Line', c, l)}>Escalate</button> : <span className="muted-text">View only</span>}</td></tr>)}</tbody></table></div></td></tr>}</React.Fragment>)}</tbody></table></div></div>
-    <Pager data={data} changePage={changePage} />
+    <WorklistClaimSplit claims={claims} rows={rows} taskTotal={taskTotal} loading={loading} data={data} expanded={expanded} setExpanded={setExpanded} drawerTab={drawerTab} setDrawerTab={setDrawerTab} activeClaim={activeClaim} clientManager={clientManager} accountManager={accountManager} taskView={taskView} setTaskView={setTaskView} myTabs={myTabs} tabCounts={tabCounts} notes={notes} docs={docs} escalations={escalations} history={history} canEditClaim={canEditClaim} canEditLine={canEditLine} canCreateEscalation={canCreateEscalation} canEscalateClaim={canEscalateClaim} isClaimEscalatedToManager={isClaimEscalatedToManager} canDeleteDocumentForClaim={canDeleteDocumentForClaim} openNote={openNote} openDocs={openDocs} openEsc={openEsc} openDocument={openDocument} deleteDocument={deleteDocument} loadDrawerTab={loadDrawerTab} searchText={local.searchText} setSearchText={value => setLocal(x => ({ ...x, searchText: value }))} csvUpload={canUpdateTasks ? <ClaimCsvUpload labId={labId} setMessage={setMessage} onUploaded={async () => { await load(); onSaved?.(); }} onDownloadTemplate={() => onDownloadTemplate(query, myTabs.find(x => x.key === taskView))} templateBusy={exportBusy} /> : null} />
+    <div className="wl-card my-worklist-old-table"><div className="wl-card-hd"><b>{clientManager ? 'Client Manager' : accountManager ? 'Account Manager' : 'AR Reviewer'} · My Worklist · {myTabs.find(x => x.key === taskView)?.label}</b><span>{loading ? 'Loading...' : `${data.totalCount || claims.length} claim(s)`}</span></div><div className="wl-table-scroll"><table className="wl-main-table"><thead><tr><th></th><th>Claim ID</th><th>Payer</th><th>Panel</th><th>Patient ID</th><th>DOS</th><th>Created On</th><th>Clinic</th><th>Provider</th><th>Assigned To</th><th>Balance</th><th>Claim Notes</th><th>Docs</th><th>Escalate</th><th>Status</th></tr></thead><tbody>{claims.map(c => <React.Fragment key={c.claimId}><tr className={expanded === c.claimId ? 'open' : ''} onClick={() => setExpanded(expanded === c.claimId ? '' : c.claimId)}><td><i className={`bi ${expanded === c.claimId ? 'bi-chevron-down' : 'bi-chevron-right'}`} /></td><td className="linkish">{c.claimId}</td><td>{c.payerName}</td><td>{c.panelName}</td><td>{c.patientId}</td><td>{fmtDate(c.dateOfService)}</td><td>{fmtDate(c.createdOn)}</td><td>{c.clinicName}</td><td>{c.referringProvider}</td><td>{c.assignedTo || '-'}</td><td className="money">{money(c.balance)}</td><td><button className="wl-icon icon-note" disabled={!canEditClaim(c)} onClick={e => { e.stopPropagation(); openNote('Claim', c); }}><i className="bi bi-pencil-square" /></button></td><td><button className="wl-icon icon-doc" disabled={!canEditClaim(c)} onClick={e => { e.stopPropagation(); openDocs(c); }}><i className="bi bi-paperclip" /></button></td><td>{canEscalateClaim(c) ? <button className="wl-btn red xs" onClick={e => { e.stopPropagation(); openEsc('Claim', c); }}>Escalate</button> : isClaimEscalatedToManager(c) ? <span className="muted-text">Escalated to AR Manager</span> : <span className="muted-text">View only</span>}</td><td><span className={`wl-badge ${String(c.status).toLowerCase().replaceAll(' ', '-')}`}>{c.status}</span></td></tr>{expanded === c.claimId && <tr><td colSpan="15" className="wl-detail-cell"><div className="wl-detail-title">CPT / line-level task details</div><div className="wl-line-scroll"><table className="wl-line-table"><thead><tr><th>Task ID</th><th>CPT</th><th>Units</th><th>Modifier</th><th>Denial</th><th>Coverage</th><th>ICD Status</th><th>Classification</th><th>Validity</th><th>Balance</th><th>Action / Task</th><th>SLA</th><th>Assigned To</th><th>Status</th><th>Created On</th><th>Notes</th><th>Escalate</th></tr></thead><tbody>{c.lines.map(l => <tr key={l.taskId}><td><b>{l.taskId}</b></td><td>{l.cptCode}</td><td>{l.units ?? '-'}</td><td>{l.modifier || '-'}</td><td>{l.denialCode}</td><td>{l.coverageStatus || '-'}</td><td>{l.icdComplianceStatus || '-'}</td><td>{l.denialClassification}</td><td>{l.denialValidity || '-'}</td><td className="money">{money(l.insuranceBalance)}</td><td>{l.task || l.recommendedAction}</td><td>{l.daysRemaining ?? '-'}</td><td>{l.assignedTo || '-'}</td><td><span className={`wl-badge ${String(l.status).toLowerCase().replaceAll(' ', '-')}`}>{l.status || 'Open'}</span></td><td>{fmtDate(l.createdOn)}</td><td><button className="wl-icon icon-note" disabled={!canEditLine(l)} onClick={() => openNote('Line', c, l)}><i className="bi bi-pencil-square" /></button></td><td>{canEscalateClaim(c) ? <button className="wl-btn red xs" onClick={() => openEsc('Line', c, l)}>Escalate</button> : isClaimEscalatedToManager(c) ? <span className="muted-text">Escalated</span> : <span className="muted-text">View only</span>}</td></tr>)}</tbody></table></div></td></tr>}</React.Fragment>)}</tbody></table></div></div>
+    <Pager data={data} changePage={changePage} changePageSize={changePageSize} pageSize={pageSize} />
 
     {renderNoteModal()}
-    {docCtx && <Modal title={`Claim Documents · ${docCtx.claimId}`} onClose={() => { setDocError(''); setDocCtx(null); }}><div className="wl-modal-body">{docError ? <div className="esc-inline-error"><i className="bi bi-exclamation-circle" /> {docError}</div> : null}<label>Denial Code - CPT Code<select className="wl-full" value={docLineTarget} onChange={e => { setDocError(''); setDocLineTarget(e.target.value); }} disabled={docUploading}><option value="">Overall claim</option>{lineOptions(docCtx).map(x => <option key={x.key} value={x.key}>{x.label}</option>)}</select></label><input type="file" multiple onChange={e => { setDocError(''); setDocFiles(e.target.files); }} disabled={docUploading} /><div><textarea className="wl-textarea" maxLength={MAX_TEXT_LENGTH} value={docComment} onChange={e => { setDocError(''); setDocComment(limitText(e.target.value)); }} placeholder="Document comment..." disabled={docUploading} /><div className="text-count">{textCountLabel(docComment)}</div></div><button className="wl-btn teal" disabled={docUploading || !canUploadDocuments || (clientManager && !claimHasClientInfoPending(docCtx))} onClick={uploadDocs}>{docUploading ? 'Uploading documents...' : 'Upload documents'}</button><h4>Uploaded documents</h4>{docs.map(d => <div className="wl-history" key={d.documentId}><b>{d.originalFileName}</b><div>{d.comment}</div><small>{d.uploadedBy} · {fmtDate(d.uploadedOn)} · {Math.round(Number(d.fileSizeBytes || 0) / 1024)} KB</small><div className="doc-row-actions"><button className="wl-btn xs" type="button" onClick={() => openDocument(d.documentId)}>Download</button>{canDeleteDocumentForClaim(docCtx) && <button className="wl-btn red xs" type="button" onClick={() => deleteDocument(d.documentId, docCtx.claimId)}>Delete</button>}</div></div>)}</div></Modal>}
+    {docCtx && <Modal title={`Claim Documents · ${docCtx.claimId}`} onClose={() => { setDocError(''); setDocCtx(null); }}><div className="wl-modal-body">{docError ? <div className="esc-inline-error"><i className="bi bi-exclamation-circle" /> {docError}</div> : null}<label>Denial Code - CPT Code<select className="wl-full" value={docLineTarget} onChange={e => { setDocError(''); setDocLineTarget(e.target.value); }} disabled={docUploading}><option value="">Overall claim</option>{lineOptions(docCtx).map(x => <option key={x.key} value={x.key}>{x.label}</option>)}</select></label><input type="file" multiple onChange={e => { setDocError(''); setDocFiles(e.target.files); }} disabled={docUploading} /><div><textarea className="wl-textarea" maxLength={MAX_TEXT_LENGTH} value={docComment} onChange={e => { setDocError(''); setDocComment(limitText(e.target.value)); }} placeholder="Document comment..." disabled={docUploading} /><div className="text-count">{textCountLabel(docComment)}</div></div><button className="wl-btn teal" disabled={docUploading || !canUploadForClaim(docCtx) || (clientManager && !claimHasClientInfoPending(docCtx))} onClick={uploadDocs}>{docUploading ? 'Uploading documents...' : 'Upload documents'}</button>{isClaimEscalatedToManager(docCtx) ? <div className="info-strip">This claim is escalated to the AR Manager. Documents can be uploaded again once the manager responds.</div> : null}<h4>Uploaded documents</h4>{docs.map(d => <div className="wl-history" key={d.documentId}><b>{d.originalFileName}</b><div>{d.comment}</div><small>{d.uploadedBy} · {fmtDate(d.uploadedOn)} · {Math.round(Number(d.fileSizeBytes || 0) / 1024)} KB</small><div className="doc-row-actions"><button className="wl-btn xs" type="button" onClick={() => openDocument(d.documentId)}>Download</button>{canDeleteDocumentForClaim(docCtx) && <button className="wl-btn red xs" type="button" onClick={() => deleteDocument(d.documentId, docCtx.claimId)}>Delete</button>}</div></div>)}</div></Modal>}
     {escCtx && <Modal title={`Escalate Claim ${escCtx.claim.claimId} to AR Manager`} className="wl-escalation-modal" onClose={() => { setEscError(''); setEscCtx(null); }}>
       <div className="wl-inline-escalation-body wl-modal-escalation-body">
-        <div className="wl-inline-escalation-form">{escError ? <div className="esc-inline-error"><i className="bi bi-exclamation-circle" /> {escError}</div> : null}{!reviewerEscalationClaimOnly && <label>Escalation Applies To<select className="wl-full" value={escAppliesTo} disabled={escSaving} onChange={e => { setEscError(''); setEscAppliesTo(e.target.value); setEscScopeValue(''); }}>{escalationAppliesToOptions.map(x => <option key={x}>{x}</option>)}</select></label>}{!reviewerEscalationClaimOnly && escAppliesTo === 'Specific CPT' && <label>Specific CPT<select className="wl-full" value={escScopeValue} disabled={escSaving} onChange={e => { setEscError(''); setEscScopeValue(e.target.value); }}><option value="">Select CPT + Denial Code + Action</option>{(escCtx.claim.lines || []).map((l, i) => <option key={`${l.taskId || i}`} value={l.taskId || l.cptCode}>{l.cptCode || '-'} - {l.denialCode || '-'} - {l.actionCategory || l.task || l.recommendedAction || '-'}</option>)}</select></label>}{!reviewerEscalationClaimOnly && escAppliesTo === 'Action Group' && <label>Action Group<select className="wl-full" value={escScopeValue} disabled={escSaving} onChange={e => { setEscError(''); setEscScopeValue(e.target.value); }}><option value="">Select action group</option>{Array.from(new Set((escCtx.claim.lines || []).map(l => l.actionCategory).filter(Boolean))).map(x => <option key={x}>{x}</option>)}</select></label>}{!reviewerEscalationClaimOnly && escAppliesTo === 'Denial Classification' && <label>Denial Classification<select className="wl-full" value={escScopeValue} disabled={escSaving} onChange={e => { setEscError(''); setEscScopeValue(e.target.value); }}><option value="">Select classification</option>{Array.from(new Set((escCtx.claim.lines || []).map(l => l.denialClassification).filter(Boolean))).map(x => <option key={x}>{x}</option>)}</select></label>}{showEscalationReason && <><label>Escalation Reason<select className="wl-full" value={escReason} disabled={escSaving} onChange={e => { setEscError(''); setEscReason(e.target.value); }}>{escalationReasons.map(x => <option key={x}>{x}</option>)}</select></label>{escReason === 'Other' && <label>Other reason<input className="wl-full" value={escOtherReason} disabled={escSaving} onChange={e => { setEscError(''); setEscOtherReason(e.target.value); }} placeholder="Enter other escalation reason..." /></label>}</>}<label>Clarification / Escalation Note<textarea className="wl-textarea" maxLength={MAX_TEXT_LENGTH} value={escComment} disabled={escSaving} onChange={e => { setEscError(''); setEscComment(limitText(e.target.value)); }} placeholder="Explain what manager has to review..." /><div className="text-count">{textCountLabel(escComment)}</div></label><label>Expected Response<input className="wl-full" type="date" value={escFollowUpDate} disabled={escSaving} onChange={e => { setEscError(''); setEscFollowUpDate(e.target.value); }} /></label><label>Attachment <span className="muted-text">(Optional)</span><input className="wl-full" type="file" multiple disabled={escSaving} onChange={e => { setEscError(''); setEscFiles(Array.from(e.target.files || [])); }} /></label>{escFiles.length ? <div className="info-strip">{escFiles.length} attachment(s) selected.</div> : null}<button className="wl-btn red" disabled={escSaving || (showEscalationReason && escReason === 'Other' && !escOtherReason.trim())} onClick={saveEscalation}>{escSaving ? 'Submitting...' : 'Submit to AR Manager'}</button></div>
-        <div className="wl-inline-escalation-history"><h4>Escalation history</h4>{escalations.length ? escalations.map(x => <div className="wl-history" key={x.escalationId}><b>{x.escalationReason}</b><div>{x.comments}</div><small>{x.status} · {x.nextFollowUpDate ? `Follow-up: ${fmtDate(x.nextFollowUpDate)} · ` : ''}{x.createdBy} · {fmtDate(x.createdOn)}</small></div>) : <div className="empty-cell">No escalation history found.</div>}</div>
+        <div className="wl-inline-escalation-form">{escError ? <div className="esc-inline-error"><i className="bi bi-exclamation-circle" /> {escError}</div> : null}{!reviewerEscalationClaimOnly && <label>Escalation Applies To<select className="wl-full" value={escAppliesTo} disabled={escSaving} onChange={e => { setEscError(''); setEscAppliesTo(e.target.value); setEscScopeValue(''); }}>{escalationAppliesToOptions.map(x => <option key={x}>{x}</option>)}</select></label>}{!reviewerEscalationClaimOnly && escAppliesTo === 'Specific CPT' && <label>Specific CPT<select className="wl-full" value={escScopeValue} disabled={escSaving} onChange={e => { setEscError(''); setEscScopeValue(e.target.value); }}><option value="">Select CPT + Denial Code + Action</option>{(escCtx.claim.lines || []).map((l, i) => <option key={`${l.taskId || i}`} value={l.taskId || l.cptCode}>{l.cptCode || '-'} - {l.denialCode || '-'} - {l.actionCategory || l.task || l.recommendedAction || '-'}</option>)}</select></label>}{!reviewerEscalationClaimOnly && escAppliesTo === 'Action Group' && <label>Action Group<select className="wl-full" value={escScopeValue} disabled={escSaving} onChange={e => { setEscError(''); setEscScopeValue(e.target.value); }}><option value="">Select action group</option>{Array.from(new Set((escCtx.claim.lines || []).map(l => l.actionCategory).filter(Boolean))).map(x => <option key={x}>{x}</option>)}</select></label>}{!reviewerEscalationClaimOnly && escAppliesTo === 'Denial Classification' && <label>Denial Classification<select className="wl-full" value={escScopeValue} disabled={escSaving} onChange={e => { setEscError(''); setEscScopeValue(e.target.value); }}><option value="">Select classification</option>{Array.from(new Set((escCtx.claim.lines || []).map(l => l.denialClassification).filter(Boolean))).map(x => <option key={x}>{x}</option>)}</select></label>}{showEscalationReason && <><label>Escalation Reason<select className="wl-full" value={escReason} disabled={escSaving} onChange={e => { setEscError(''); setEscReason(e.target.value); }}>{escalationReasons.map(x => <option key={x}>{x}</option>)}</select></label>{escReason === 'Other' && <label>Other reason<input className="wl-full" value={escOtherReason} disabled={escSaving} onChange={e => { setEscError(''); setEscOtherReason(e.target.value); }} placeholder="Enter other escalation reason..." /></label>}</>}<label>Clarification / Escalation Note<textarea className="wl-textarea" maxLength={MAX_TEXT_LENGTH} value={escComment} disabled={escSaving} onChange={e => { setEscError(''); setEscComment(limitText(e.target.value)); }} placeholder="Explain what manager has to review..." /><div className="text-count">{textCountLabel(escComment)}</div></label><label>Expected Response<input className="wl-full" type="date" value={escFollowUpDate} disabled={escSaving} onChange={e => { setEscError(''); setEscFollowUpDate(e.target.value); }} /></label><label>Attachment <span className="muted-text">(Optional)</span><input className="wl-full" type="file" multiple disabled={escSaving} onChange={e => { setEscError(''); setEscFiles(Array.from(e.target.files || [])); }} /></label>{escFiles.length ? <div className="info-strip">{escFiles.length} attachment(s) selected.</div> : null}{escalationLocked ? <div className="info-strip">This claim is already escalated to the AR Manager. You cannot escalate it again until the manager responds.</div> : null}<button className="wl-btn red" disabled={escSaving || escalationLocked || (showEscalationReason && escReason === 'Other' && !escOtherReason.trim())} onClick={saveEscalation}>{escSaving ? 'Submitting...' : escalationLocked ? 'Escalation Submitted' : 'Submit to AR Manager'}</button></div>
+        <div className="wl-inline-escalation-history"><h4>Escalation history</h4>{escalations.length ? escalations.map(x => <div className="wl-history" key={x.escalationId}><b>{x.escalationReason}</b>{x.comments ? <div className="wl-history-comment"><StructuredNoteText text={x.comments} /></div> : null}<small>{x.status} · {x.nextFollowUpDate ? `Follow-up: ${fmtDate(x.nextFollowUpDate)} · ` : ''}{x.createdBy} · {fmtDate(x.createdOn)}</small></div>) : <div className="empty-cell">No escalation history found.</div>}</div>
       </div>
     </Modal>}
   </div>;

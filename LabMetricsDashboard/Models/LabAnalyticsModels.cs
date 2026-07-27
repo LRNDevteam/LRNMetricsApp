@@ -1,61 +1,117 @@
 namespace LabMetricsDashboard.Models;
 
-// ── Analytics: Lab Modes / Median (LabMedians) view-only list pages ──────────
+// ── Analytics: CPT & Panel Lookup ────────────────────────────────────────────
+// One screen over four LRNMaster tables — dbo.CPTAverage and dbo.PanelAverage
+// for the averages, dbo.LabModes and dbo.LabMedians for the mode/median rates.
+// View-only; all data comes from LRN.ReportsApi (/api/analytics/*).
 
-public sealed class LabModeDto
+/// <summary>A CPTAverage row with the matching mode/median rates attached.</summary>
+public sealed class CptLookupRowDto
 {
-    public string? PayerName { get; set; }
-    public string? PanelName { get; set; }
+    public int? LabId { get; set; }
+    public string? LabName { get; set; }
     public string? CptCode { get; set; }
-    public decimal? AllowedAmount { get; set; }
-    public decimal? InsurancePayment { get; set; }
-    public int? DistinctAllowedPaymentCount { get; set; }
+    public string? PanelName { get; set; }
+    public string? PayerDisplayName { get; set; }
+    public string? PayerCommonCode { get; set; }
+    public int? GlobalPayerId { get; set; }
+    public string? WindowType { get; set; }
+    public DateTime? StartDate { get; set; }
+    public DateTime? EndDate { get; set; }
+    public DateTime? AsOfDate { get; set; }
+
+    public int? AvgUnits { get; set; }
+    public decimal? AvgChargeAmountPerUnit { get; set; }
+    public decimal? AvgAllowedAmountPerUnit { get; set; }
+    public decimal? AvgPaidAmountPerUnit { get; set; }
+    public decimal? AvgPatientResponsibilityPerUnit { get; set; }
+    public decimal? MedianPaidAmount { get; set; }
+    public decimal? P25PaidAmount { get; set; }
+    public decimal? P75PaidAmount { get; set; }
+    public int? PaidLineCount { get; set; }
+    public int? TotalLineCount { get; set; }
+    public int? DeniedLineCount { get; set; }
+    public int? AdjustedLineCount { get; set; }
+
     public decimal? ModeAllowedAmount { get; set; }
     public decimal? ModeInsurancePaymentAmount { get; set; }
     public decimal? AllowedAmountPerUnitMode { get; set; }
     public decimal? InsurancePaymentPerUnitMode { get; set; }
-    public string LabName { get; set; } = string.Empty;
-}
 
-public sealed class LabMedianDto
-{
-    public string? PayerName { get; set; }
-    public string? PanelName { get; set; }
-    public string? CptCode { get; set; }
-    public decimal? AllowedAmount { get; set; }
-    public decimal? InsurancePayment { get; set; }
-    public int? DistinctAllowedPaymentCount { get; set; }
     public decimal? MedianAllowedAmount { get; set; }
     public decimal? MedianInsurancePaymentAmount { get; set; }
     public decimal? AllowedAmountPerUnitMedian { get; set; }
     public decimal? InsurancePaymentPerUnitMedian { get; set; }
-    public string LabName { get; set; } = string.Empty;
+
+    /// <summary>"payer" (this payer's own rate), "lab" (lab-wide fallback) or null (no rate).</summary>
+    public string? ModeMatch { get; set; }
+    public string? MedianMatch { get; set; }
+
+    public decimal? DenialRate { get; set; }
 }
 
-/// <summary>Column metadata consumed by the shared Views/Analytics/LabRates.cshtml grid.</summary>
-public sealed class LabRateColumn
+/// <summary>A PanelAverage row — panel-level averages, no CPT breakdown.</summary>
+public sealed class PanelLookupRowDto
 {
-    public LabRateColumn(string key, string label, string type)
-    {
-        Key = key;
-        Label = label;
-        Type = type;
-    }
+    public int? LabId { get; set; }
+    public string? LabName { get; set; }
+    public string? PanelName { get; set; }
+    public string? PayerId { get; set; }
+    public string? PayerDisplayName { get; set; }
+    public string? WindowType { get; set; }
+    public DateTime? StartDate { get; set; }
+    public DateTime? EndDate { get; set; }
+    public DateTime? AsOfDate { get; set; }
+    public decimal? AvgChargeAmount { get; set; }
+    public decimal? AvgAllowedAmount { get; set; }
+    public decimal? AvgPaidAmount { get; set; }
+    public decimal? AvgPatientResponsibility { get; set; }
+    public decimal? MedianPaidAmount { get; set; }
+    public decimal? P25PaidAmount { get; set; }
+    public decimal? P75PaidAmount { get; set; }
+    public int? PaidLineCount { get; set; }
+    public int? TotalLineCount { get; set; }
+    public int? DeniedLineCount { get; set; }
+    public int? AdjustedLineCount { get; set; }
 
-    /// <summary>camelCase JSON field name; also sent to the API as sortColumn.</summary>
-    public string Key { get; }
-    public string Label { get; }
-    /// <summary>text | money | int — controls formatting and alignment.</summary>
-    public string Type { get; }
+    // Panel-level modes: the average of the per-CPT modes in dbo.LabModes for this
+    // panel, with ModeCptCount showing how many CPTs that average covers.
+    public decimal? ModeAllowedAmount { get; set; }
+    public decimal? ModeInsurancePaymentAmount { get; set; }
+    public int? ModeCptCount { get; set; }
+    public string? ModeMatch { get; set; }
+
+    public decimal? DenialRate { get; set; }
 }
 
-public sealed class LabRatePageViewModel
+public sealed class LookupSummaryDto
 {
-    public string Title { get; set; } = string.Empty;
-    public string Subtitle { get; set; } = string.Empty;
-    public string DataUrl { get; set; } = string.Empty;
+    public int RowCount { get; set; }
+    public decimal? AvgAllowed { get; set; }
+    public decimal? AvgPaid { get; set; }
+    public decimal? DenialRate { get; set; }
+}
+
+public sealed class LookupResultDto<T>
+{
+    public List<T> Items { get; set; } = new();
+    public int Page { get; set; } = 1;
+    public int PageSize { get; set; } = 50;
+    public int TotalCount { get; set; }
+    public int TotalPages { get; set; }
+    public LookupSummaryDto Summary { get; set; } = new();
+}
+
+/// <summary>Endpoint URLs handed to Views/Analytics/CptLookup.cshtml.</summary>
+public sealed class CptLookupPageViewModel
+{
+    public string CptDataUrl { get; set; } = string.Empty;
+    public string PanelDataUrl { get; set; } = string.Empty;
+    public string CptWindowsUrl { get; set; } = string.Empty;
+    public string PanelWindowsUrl { get; set; } = string.Empty;
+    public string CptOptionsUrl { get; set; } = string.Empty;
+    public string PanelOptionsUrl { get; set; } = string.Empty;
+    public string CptExportUrl { get; set; } = string.Empty;
+    public string PanelExportUrl { get; set; } = string.Empty;
     public string LabsUrl { get; set; } = string.Empty;
-    public string ExportUrl { get; set; } = string.Empty;
-    public string OptionsUrl { get; set; } = string.Empty;
-    public IReadOnlyList<LabRateColumn> Columns { get; set; } = Array.Empty<LabRateColumn>();
 }

@@ -98,7 +98,7 @@
           <label class="form-label">Password <span class="text-danger">*</span></label>
           <div class="input-group">
             <input id="createUserPassword" class="form-control smooth" name="NewUserPassword" type="password" placeholder="Min 8 characters" minlength="8" required autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" />
-            <span class="input-group-text bg-transparent"><i class="bi bi-lock"></i></span>
+            <button class="btn btn-outline-secondary" type="button" id="createUserPwdToggle" title="Show or hide password" aria-label="Show or hide password" tabindex="-1"><i class="bi bi-eye"></i></button>
             <div class="invalid-feedback" id="createUserPasswordFeedback"></div>
           </div>
           @Html.ValidationMessageFor(m => m.NewUserPassword, "", new { @class = "text-danger small" })
@@ -111,7 +111,7 @@
           <label class="form-label">Confirm Password <span class="text-danger">*</span></label>
           <div class="input-group">
             <input id="createUserConfirm" class="form-control smooth" name="NewUserConfirmPassword" type="password" placeholder="Re-enter password" minlength="8" required autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" />
-            <span class="input-group-text bg-transparent"><i class="bi bi-lock-fill"></i></span>
+            <button class="btn btn-outline-secondary" type="button" id="createUserConfirmToggle" title="Show or hide password" aria-label="Show or hide password" tabindex="-1"><i class="bi bi-eye"></i></button>
           </div>
           <div class="invalid-feedback" id="createUserConfirmFeedback"></div>
           @Html.ValidationMessageFor(m => m.NewUserConfirmPassword, "", new { @class = "text-danger small" })

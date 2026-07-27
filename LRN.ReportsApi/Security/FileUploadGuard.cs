@@ -20,7 +20,11 @@ public static class FileUploadGuard
 
     private static async Task<string?> ValidateAsync(IFormFile? file, long maxBytes, IReadOnlySet<string> allowedExtensions, CancellationToken ct)
     {
-        if (file is null || file.Length == 0) return "Select a file to upload.";
+        if (file is null) return "Select a file to upload.";
+        // Round 4 UAT Defect E: an empty file (e.g. a Word document created via right-click >
+        // New that was never opened/saved with content) previously returned "Select a file to
+        // upload.", which reads as if no file was chosen. State the actual reason.
+        if (file.Length == 0) return "The selected file is empty (0 KB). Open the document, add content and save it, then upload again.";
         if (file.Length > maxBytes) return $"File is too large. Maximum allowed size is {maxBytes / 1024 / 1024:N0} MB.";
 
         var fileName = Path.GetFileName(file.FileName);
@@ -29,7 +33,7 @@ public static class FileUploadGuard
 
         var extension = Path.GetExtension(fileName);
         if (string.IsNullOrWhiteSpace(extension) || !allowedExtensions.Contains(extension))
-            return $"File type '{extension}' is not allowed.";
+            return $"File type '{extension}' is not allowed. Allowed types: {string.Join(", ", allowedExtensions)}.";
 
         await using var stream = file.OpenReadStream();
         var header = new byte[Math.Min(16, (int)Math.Min(file.Length, 16))];

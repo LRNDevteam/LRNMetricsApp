@@ -162,8 +162,12 @@ public class AccountController : Controller
             principal,
             new AuthenticationProperties
             {
-                IsPersistent = model.RememberMe,
-                ExpiresUtc   = DateTimeOffset.UtcNow.AddHours(model.RememberMe ? 24 * 14 : 8)
+                // Always a session cookie (no browser Expires/Max-Age), so closing the browser ends
+                // the session and forces a fresh login on reopen. The 8h ExpiresUtc still caps an
+                // idle session within the same browser run. RememberMe no longer persists across
+                // browser close by design.
+                IsPersistent = false,
+                ExpiresUtc   = DateTimeOffset.UtcNow.AddHours(8)
             });
 
         // Honor ?returnUrl=... if it's local

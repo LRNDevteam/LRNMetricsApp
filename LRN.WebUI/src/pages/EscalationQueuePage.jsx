@@ -61,6 +61,26 @@ function distinctHistoryRows(rows = []) {
   });
 }
 
+// Round 5 UAT B1#8: the responder's note (e.g. the Account Manager's response) is appended into
+// the escalation Comments as a "<Role> Response: [by <user>] <text>" segment on a new line. The
+// review popup rendered the whole blob as a single paragraph, so the manager's/AM's response was
+// buried in the original analyst note. Split it so the original escalation note and each response
+// render as their own line items.
+function splitEscalationComments(raw) {
+  const text = String(raw || '');
+  if (!text.trim()) return { original: '', responses: [] };
+  const parts = text.split(/\r?\n(?=(?:Account Manager|Client|Manager) Response:)/);
+  const original = (parts.shift() || '').trim();
+  const responses = parts
+    .map((seg) => {
+      const m = seg.match(/^((?:Account Manager|Client|Manager) Response):\s*(?:\[by ([^\]]*)\]\s*)?([\s\S]*)$/);
+      if (!m) return { label: 'Response', by: '', text: seg.trim() };
+      return { label: m[1], by: (m[2] || '').trim(), text: (m[3] || '').trim() };
+    })
+    .filter((r) => r.text);
+  return { original, responses };
+}
+
 function ageText(value) {
   if (!value) return '-';
   const d = new Date(value);
@@ -461,12 +481,21 @@ function EscalationDetail({ row, draft, setDraft, reviewers, canReassign, resolv
           <Info label="Escalation status" value={row.status || 'Open'} />
           <Info label="Next follow-up" value={date(row.nextFollowUpDate)} />
         </div>
-        <div className="esc-note-card">
-          <div className="esc-note-label">Escalation note from {row.analyst || row.createdBy || 'analyst'}</div>
-          <span className="esc-reason-pill">{row.escalationReason}</span>
-          <div className="esc-note-text">{row.comments || 'No escalation comment entered.'}</div>
-          <div className="esc-note-meta">{row.createdBy || row.analyst || '-'} - {date(row.createdOn)}</div>
-        </div>
+        {(() => {
+          const { original, responses } = splitEscalationComments(row.comments);
+          return <>
+            <div className="esc-note-card">
+              <div className="esc-note-label">Escalation note from {row.analyst || row.createdBy || 'analyst'}</div>
+              <span className="esc-reason-pill">{row.escalationReason}</span>
+              <div className="esc-note-text">{original || 'No escalation comment entered.'}</div>
+              <div className="esc-note-meta">{row.createdBy || row.analyst || '-'} - {date(row.createdOn)}</div>
+            </div>
+            {responses.map((r, i) => <div className="esc-note-card esc-response-card" key={i}>
+              <div className="esc-note-label">{r.label}{r.by ? ` from ${r.by}` : ''}</div>
+              <div className="esc-note-text">{r.text}</div>
+            </div>)}
+          </>;
+        })()}
       </div>
       <div>
         <div className="esc-section-title">Manager response</div>

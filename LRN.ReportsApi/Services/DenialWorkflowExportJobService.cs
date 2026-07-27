@@ -7,6 +7,7 @@ public interface IDenialWorkflowExportJobService
 {
     ClaimExportStartResponse StartClaimsExport(DenialWorkflowFilter filter, string requestedBy);
     ClaimExportStatusResponse? GetStatus(string jobId, string requestedBy);
+    IReadOnlyList<ClaimExportJobSummary> ListJobs(string requestedBy);
     ClaimExportFile? GetCompletedFile(string jobId, string requestedBy);
     ClaimExportStatusResponse? Cancel(string jobId, string requestedBy);
 }
@@ -19,28 +20,54 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
     private static readonly TimeSpan MaxExportDuration = TimeSpan.FromMinutes(30);
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<DenialWorkflowExportJobService> _logger;
+    private readonly IDenialWorkflowJobHistoryStore _history;
     private readonly string _exportRoot;
+    // LabId -> LabName, from LabConfig:LabsID. Resolved server-side so the exported file is named
+    // from configuration rather than whatever the client happens to send.
+    private readonly IReadOnlyDictionary<int, string> _labNamesById;
 
     public DenialWorkflowExportJobService(
         IServiceScopeFactory scopeFactory,
         IConfiguration configuration,
+        IDenialWorkflowJobHistoryStore history,
         ILogger<DenialWorkflowExportJobService> logger)
     {
         _scopeFactory = scopeFactory;
         _logger = logger;
+        _history = history;
         _exportRoot = configuration["DenialWorkflowFileStorage:DownloadRootPath"]
             ?? configuration["DenialWorkflowExports:RootPath"]
             ?? Path.Combine(AppContext.BaseDirectory, "ClaimExports");
         Directory.CreateDirectory(_exportRoot);
+
+        _labNamesById = (configuration.GetSection("LabConfig:LabsID").Get<List<LabNameConfigItem>>() ?? [])
+            .Where(x => x.Id > 0 && !string.IsNullOrWhiteSpace(x.Name))
+            .GroupBy(x => x.Id)
+            .ToDictionary(g => g.Key, g => g.First().Name.Trim());
+    }
+
+    private sealed class LabNameConfigItem
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = string.Empty;
     }
 
     public ClaimExportStartResponse StartClaimsExport(DenialWorkflowFilter filter, string requestedBy)
     {
         var jobId = Guid.NewGuid().ToString("N");
         var safeUser = SafeFilePart(requestedBy);
-        var fileName = filter.UploadTemplate
-            ? $"Claim_Upload_Template_{filter.LabId}_{DateTime.UtcNow:yyyyMMdd_HHmmss}_{safeUser}.xlsx"
-            : $"Claim_Detail_Export_{filter.LabId}_{DateTime.UtcNow:yyyyMMdd_HHmmss}_{safeUser}.csv";
+        // DenialLineItem_<LabName>_<TabName>_<MMDDYYYY>_<User>.<ext>
+        // e.g. DenialLineItem_NorthWest_Payer_Follow_up_Required_07232026_ARManager1.xlsx
+        // The tab segment is omitted for Overall Download (no tab). Lab name falls back to the id
+        // when LabConfig has no entry. The extension still matches the real content (xlsx template
+        // vs csv detail export) so Excel does not refuse to open it.
+        var labPart = _labNamesById.TryGetValue(filter.LabId, out var labName) && !string.IsNullOrWhiteSpace(labName)
+            ? SafeFilePart(labName)
+            : filter.LabId.ToString();
+        var tabPart = string.IsNullOrWhiteSpace(filter.TabLabel) ? string.Empty : $"_{SafeFilePart(filter.TabLabel)}";
+        var stamp = DateTime.Now.ToString("MMddyyyy");
+        var extension = filter.UploadTemplate ? "xlsx" : "csv";
+        var fileName = $"DenialLineItem_{labPart}{tabPart}_{stamp}_{safeUser}.{extension}";
         var filePath = Path.Combine(_exportRoot, $"{jobId}_{fileName}");
         var state = new ExportJobState
         {
@@ -77,6 +104,7 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
         }
 
         Jobs[jobId] = state;
+        _history.Save(ToRecord(state));
         _ = Task.Run(() => RunJobAsync(filter, state));
 
         return new ClaimExportStartResponse
@@ -106,17 +134,100 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
         };
     }
 
+    public IReadOnlyList<ClaimExportJobSummary> ListJobs(string requestedBy)
+    {
+        ExpireStaleJobs();
+        var live = Jobs.Values
+            .Where(x => CanAccess(x, requestedBy))
+            .Select(x => new ClaimExportJobSummary
+            {
+                JobId = x.JobId,
+                FileName = x.FileName,
+                Status = x.DownloadedOnUtc is not null && string.Equals(x.Status, "Completed", StringComparison.OrdinalIgnoreCase)
+                    ? "Downloaded"
+                    : x.Status,
+                Message = x.Message,
+                RowCount = x.RowCount,
+                CreatedOnUtc = x.CreatedOnUtc,
+                CompletedOnUtc = x.CompletedOnUtc,
+                DownloadUrl = string.Equals(x.Status, "Completed", StringComparison.OrdinalIgnoreCase)
+                    ? $"/api/denialworkflow/claims/export/{x.JobId}/download"
+                    : null
+            })
+            .ToList();
+
+        // Merge durable history so jobs from previous sessions (before the last restart) still show.
+        // Live in-memory state wins for a JobId; historical Completed jobs keep a download link only
+        // while their file still exists on disk.
+        var liveIds = new HashSet<string>(live.Select(j => j.JobId), StringComparer.OrdinalIgnoreCase);
+        foreach (var h in _history.List(requestedBy, "download"))
+        {
+            if (liveIds.Contains(h.JobId)) continue;
+            var completed = string.Equals(h.Status, "Completed", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(h.Status, "Downloaded", StringComparison.OrdinalIgnoreCase);
+            var fileExists = completed && !string.IsNullOrWhiteSpace(h.FilePath) && File.Exists(h.FilePath);
+            live.Add(new ClaimExportJobSummary
+            {
+                JobId = h.JobId,
+                FileName = h.FileName,
+                Status = h.Status,
+                Message = h.Message,
+                RowCount = h.RowCount ?? 0,
+                CreatedOnUtc = h.CreatedOnUtc,
+                CompletedOnUtc = h.CompletedOnUtc,
+                DownloadUrl = fileExists ? $"/api/denialworkflow/claims/export/{h.JobId}/download" : null
+            });
+        }
+
+        return live.OrderByDescending(x => x.CreatedOnUtc).Take(100).ToList();
+    }
+
     public ClaimExportFile? GetCompletedFile(string jobId, string requestedBy)
     {
-        if (!Jobs.TryGetValue(jobId, out var state) || !CanAccess(state, requestedBy)) return null;
-        if (!string.Equals(state.Status, "Completed", StringComparison.OrdinalIgnoreCase)) return null;
-        if (!File.Exists(state.FilePath)) return null;
-        return new ClaimExportFile(state.FilePath, state.FileName, state.ContentType);
+        if (Jobs.TryGetValue(jobId, out var state) && CanAccess(state, requestedBy))
+        {
+            if (!string.Equals(state.Status, "Completed", StringComparison.OrdinalIgnoreCase)) return null;
+            if (!File.Exists(state.FilePath)) return null;
+            state.DownloadedOnUtc ??= DateTime.UtcNow; // list shows "Downloaded" after first save
+            _history.Save(ToRecord(state));
+            return new ClaimExportFile(state.FilePath, state.FileName, state.ContentType);
+        }
+
+        // Not in memory (e.g. after a restart): serve from durable history while the file survives.
+        var h = _history.Get(jobId);
+        if (h is null || !string.Equals(h.JobType, "download", StringComparison.OrdinalIgnoreCase)) return null;
+        if (!string.IsNullOrWhiteSpace(requestedBy) && !string.IsNullOrWhiteSpace(h.RequestedBy)
+            && !string.Equals(h.RequestedBy, requestedBy, StringComparison.OrdinalIgnoreCase)) return null;
+        var completed = string.Equals(h.Status, "Completed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(h.Status, "Downloaded", StringComparison.OrdinalIgnoreCase);
+        if (!completed || string.IsNullOrWhiteSpace(h.FilePath) || !File.Exists(h.FilePath)) return null;
+        _history.Save(h with { Status = "Downloaded" });
+        return new ClaimExportFile(h.FilePath, h.FileName, h.ContentType ?? "text/csv");
     }
 
     public ClaimExportStatusResponse? Cancel(string jobId, string requestedBy)
     {
-        if (!Jobs.TryGetValue(jobId, out var state) || !CanAccess(state, requestedBy)) return null;
+        if (!Jobs.TryGetValue(jobId, out var state) || !CanAccess(state, requestedBy))
+        {
+            // Not in memory — a job from before the last restart lives only in durable history, so
+            // removing the history row (and its file) IS the delete. Without this the trash button
+            // silently does nothing for every job older than the current process.
+            var h = _history.Get(jobId);
+            if (h is null || !string.Equals(h.JobType, "download", StringComparison.OrdinalIgnoreCase)) return null;
+            if (!string.IsNullOrWhiteSpace(requestedBy) && !string.IsNullOrWhiteSpace(h.RequestedBy)
+                && !string.Equals(h.RequestedBy, requestedBy, StringComparison.OrdinalIgnoreCase)) return null;
+
+            _history.Delete(jobId);
+            TryDelete(h.FilePath ?? string.Empty);
+            return new ClaimExportStatusResponse
+            {
+                JobId = jobId,
+                Status = "Deleted",
+                Message = "Export was removed.",
+                CreatedOnUtc = h.CreatedOnUtc,
+                CompletedOnUtc = h.CompletedOnUtc
+            };
+        }
         if (string.Equals(state.Status, "Queued", StringComparison.OrdinalIgnoreCase)
             || string.Equals(state.Status, "Running", StringComparison.OrdinalIgnoreCase))
         {
@@ -125,9 +236,23 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
             state.Message = "Export was cancelled by the user.";
             state.CompletedOnUtc = DateTime.UtcNow;
             TryDelete(state.FilePath);
+            return GetStatus(jobId, requestedBy);
         }
 
-        return GetStatus(jobId, requestedBy);
+        // Finished job: DELETE removes it from the list (and deletes the file) — powers the
+        // trash action in the Jobs Center. Must also drop the durable history row, otherwise
+        // ListJobs() merges it straight back in and the row reappears after refresh.
+        Jobs.TryRemove(jobId, out _);
+        _history.Delete(jobId);
+        TryDelete(state.FilePath);
+        return new ClaimExportStatusResponse
+        {
+            JobId = state.JobId,
+            Status = "Deleted",
+            Message = "Export was removed.",
+            CreatedOnUtc = state.CreatedOnUtc,
+            CompletedOnUtc = state.CompletedOnUtc
+        };
     }
 
     private async Task RunJobAsync(DenialWorkflowFilter filter, ExportJobState state)
@@ -176,7 +301,17 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
             _logger.LogError(ex, "Claim export job {JobId} failed.", state.JobId);
             TryDelete(state.FilePath);
         }
+        finally
+        {
+            _history.Save(ToRecord(state));
+        }
     }
+
+    // Durable history projection of the current job state (best-effort; see IDenialWorkflowJobHistoryStore).
+    private JobHistoryRecord ToRecord(ExportJobState s) => new(
+        s.JobId, "download", s.RequestedBy, s.LabId, s.FileName,
+        s.DownloadedOnUtc is not null && string.Equals(s.Status, "Completed", StringComparison.OrdinalIgnoreCase) ? "Downloaded" : s.Status,
+        s.Message, s.RowCount, null, null, s.FilePath, s.ContentType, s.CreatedOnUtc, s.CompletedOnUtc);
 
     private static bool CanAccess(ExportJobState state, string requestedBy)
     {
@@ -234,6 +369,7 @@ public sealed class DenialWorkflowExportJobService : IDenialWorkflowExportJobSer
         public int RowCount { get; set; }
         public DateTime CreatedOnUtc { get; init; }
         public DateTime? CompletedOnUtc { get; set; }
+        public DateTime? DownloadedOnUtc { get; set; }
         public CancellationTokenSource? Cancellation { get; init; }
     }
 }
