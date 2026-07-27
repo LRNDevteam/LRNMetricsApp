@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Data;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
@@ -7,6 +8,13 @@ namespace LRN.ReportQueue.Shared;
 /// <summary>ADO.NET implementation over the UserReqReports objects deployed per lab DB.</summary>
 public sealed class SqlReportRequestRepository : IReportRequestRepository
 {
+    /// <summary>
+    /// Per-DB cache: whether dbo.UserReqReports.ProgressPercent exists.
+    /// Avoids throwing SqlException 207 on every My Reports / badge poll when a lab
+    /// has not yet run the ProgressPercent migration.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, bool> ProgressColumnCache = new(StringComparer.OrdinalIgnoreCase);
+
     private readonly ILogger<SqlReportRequestRepository> _logger;
 
     public SqlReportRequestRepository(ILogger<SqlReportRequestRepository> logger)
@@ -104,6 +112,9 @@ public sealed class SqlReportRequestRepository : IReportRequestRepository
 
     public async Task<bool> UpdateProgressAsync(string connectionString, long reportId, byte percent, CancellationToken ct = default)
     {
+        if (!await HasProgressPercentAsync(connectionString, ct))
+            return true; // schema not migrated — treat as cooperative continue (do not fail the job)
+
         const string sql = """
             UPDATE dbo.UserReqReports
                SET ProgressPercent = @Pct, UpdatedDate = SYSDATETIME()
@@ -111,12 +122,20 @@ public sealed class SqlReportRequestRepository : IReportRequestRepository
             SELECT @@ROWCOUNT;
             """;
 
-        await using var conn = new SqlConnection(connectionString);
-        await conn.OpenAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 10 };
-        cmd.Parameters.AddWithValue("@Id",  reportId);
-        cmd.Parameters.AddWithValue("@Pct", Math.Min(percent, (byte)100));
-        return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct) ?? 0) > 0;
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+            await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 10 };
+            cmd.Parameters.AddWithValue("@Id",  reportId);
+            cmd.Parameters.AddWithValue("@Pct", Math.Min(percent, (byte)100));
+            return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct) ?? 0) > 0;
+        }
+        catch (SqlException ex) when (ex.Number == 207)
+        {
+            MarkProgressColumnMissing(connectionString);
+            return true;
+        }
     }
 
     public async Task<bool> CancelAsync(string connectionString, long reportId, string userName, CancellationToken ct = default)
@@ -251,14 +270,16 @@ public sealed class SqlReportRequestRepository : IReportRequestRepository
         int top = 20, CancellationToken ct = default)
     {
         userName = (userName ?? string.Empty).Trim();
+        var includeProgress = await HasProgressPercentAsync(connectionString, ct);
         try
         {
-            return await ReadUserReportsAsync(connectionString, userName, top, includeProgress: true, ct);
+            return await ReadUserReportsAsync(connectionString, userName, top, includeProgress, ct);
         }
         catch (SqlException ex) when (ex.Number == 207) // Invalid column name (e.g. ProgressPercent not migrated)
         {
-            _logger.LogWarning(ex,
-                "UserReqReports schema missing a column for user panel query; retrying without ProgressPercent.");
+            MarkProgressColumnMissing(connectionString);
+            _logger.LogInformation(
+                "UserReqReports.ProgressPercent missing on this lab DB; using schema without progress until migration is applied.");
             return await ReadUserReportsAsync(connectionString, userName, top, includeProgress: false, ct);
         }
     }
@@ -297,15 +318,14 @@ public sealed class SqlReportRequestRepository : IReportRequestRepository
     public async Task<UserReportRow?> GetForDownloadAsync(string connectionString, long reportId,
         string userName, Guid token, CancellationToken ct = default)
     {
+        var includeProgress = await HasProgressPercentAsync(connectionString, ct);
         try
         {
-            return await ReadForDownloadAsync(connectionString, reportId, userName, token, includeProgress: true, ct);
+            return await ReadForDownloadAsync(connectionString, reportId, userName, token, includeProgress, ct);
         }
         catch (SqlException ex) when (ex.Number == 207) // Invalid column name (e.g. ProgressPercent not migrated)
         {
-            _logger.LogWarning(ex,
-                "UserReqReports schema missing a column for download query (report {ReportId}); retrying without ProgressPercent.",
-                reportId);
+            MarkProgressColumnMissing(connectionString);
             return await ReadForDownloadAsync(connectionString, reportId, userName, token, includeProgress: false, ct);
         }
     }
@@ -384,15 +404,14 @@ public sealed class SqlReportRequestRepository : IReportRequestRepository
 
     public async Task<bool> RetryAsync(string connectionString, long reportId, string userName, CancellationToken ct = default)
     {
+        var includeProgress = await HasProgressPercentAsync(connectionString, ct);
         try
         {
-            return await ExecuteRetryAsync(connectionString, reportId, userName, includeProgress: true, ct);
+            return await ExecuteRetryAsync(connectionString, reportId, userName, includeProgress, ct);
         }
         catch (SqlException ex) when (ex.Number == 207) // Invalid column name (e.g. ProgressPercent not migrated)
         {
-            _logger.LogWarning(ex,
-                "UserReqReports schema missing ProgressPercent for retry (report {ReportId}); retrying update without it.",
-                reportId);
+            MarkProgressColumnMissing(connectionString);
             return await ExecuteRetryAsync(connectionString, reportId, userName, includeProgress: false, ct);
         }
     }
@@ -439,6 +458,52 @@ public sealed class SqlReportRequestRepository : IReportRequestRepository
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────
+
+    private static string CacheKey(string connectionString)
+    {
+        // Prefer DataSource+Initial Catalog so pool/password differences don't fragment the cache.
+        try
+        {
+            var b = new SqlConnectionStringBuilder(connectionString);
+            return $"{b.DataSource}|{b.InitialCatalog}";
+        }
+        catch
+        {
+            return connectionString;
+        }
+    }
+
+    private async Task<bool> HasProgressPercentAsync(string connectionString, CancellationToken ct)
+    {
+        var key = CacheKey(connectionString);
+        if (ProgressColumnCache.TryGetValue(key, out var cached))
+            return cached;
+
+        const string sql = "SELECT CASE WHEN COL_LENGTH('dbo.UserReqReports', 'ProgressPercent') IS NULL THEN 0 ELSE 1 END;";
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+            await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 10 };
+            var present = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct) ?? 0) == 1;
+            ProgressColumnCache[key] = present;
+            if (!present)
+            {
+                _logger.LogWarning(
+                    "dbo.UserReqReports.ProgressPercent is missing on {Db}. Run SQL_Scripts/UserReqReports/03_Add_ProgressPercent.sql. Progress % will be hidden until then.",
+                    CacheKey(connectionString));
+            }
+            return present;
+        }
+        catch (SqlException ex) when (ex.Number is 208 or 207) // table/column missing
+        {
+            ProgressColumnCache[key] = false;
+            return false;
+        }
+    }
+
+    private static void MarkProgressColumnMissing(string connectionString) =>
+        ProgressColumnCache[CacheKey(connectionString)] = false;
 
     private static SqlCommand StoredProc(SqlConnection conn, string name, int timeoutSeconds) =>
         new(name, conn) { CommandType = CommandType.StoredProcedure, CommandTimeout = timeoutSeconds };

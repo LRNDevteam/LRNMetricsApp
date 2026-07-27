@@ -1,6 +1,6 @@
 @model LineLevelViewModel
 @{
-    ViewData["Title"]       = $"Line Level ù {Model.SelectedLab}";
+    ViewData["Title"]       = $"Line Level ÔøΩ {Model.SelectedLab}";
     ViewData["SelectedLab"] = Model.SelectedLab;
     ViewData["PageLabel"]   = "Line Level Details";
 
@@ -94,7 +94,7 @@
                 <div class="col-sm-6 col-md-2">
                     <label class="form-label fw-semibold mb-1" style="font-size:.75rem">PAYER NAME</label>
                     <input type="text" name="filterPayerName" value="@Model.FilterPayerName"
-                           class="form-control form-control-sm" placeholder="Searchù" />
+                           class="form-control form-control-sm" placeholder="SearchÔøΩ" />
                 </div>
                 <!-- Payer Type -->
                 <div class="col-sm-6 col-md-2">
@@ -105,7 +105,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search payer typesù" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search payer typesÔøΩ" autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var pt in Model.PayerTypes)
                                 {
@@ -125,7 +125,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search CPT codesù" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search CPT codesÔøΩ" autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var cpt in Model.CPTCodes)
                                 {
@@ -145,7 +145,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search statusesù" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search statusesÔøΩ" autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var cs in Model.ClaimStatuses)
                                 {
@@ -165,7 +165,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Searchù" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="SearchÔøΩ" autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var ps in Model.PayStatuses)
                                 {
@@ -185,7 +185,7 @@
                             <span class="cs-ms-count" style="display:none">0</span>
                         </div>
                         <div class="cs-ms-panel">
-                            <input type="text" class="cs-ms-search" placeholder="Search clinicsù" autocomplete="off" />
+                            <input type="text" class="cs-ms-search" placeholder="Search clinicsÔøΩ" autocomplete="off" />
                             <div class="cs-ms-list">
                                 @foreach (var cn in Model.ClinicNames)
                                 {
@@ -200,7 +200,7 @@
                 <div class="col-sm-6 col-md-1">
                     <label class="form-label fw-semibold mb-1" style="font-size:.75rem">DENIAL CODE</label>
                     <input type="text" name="filterDenialCode" value="@Model.FilterDenialCode"
-                           class="form-control form-control-sm" placeholder="Searchù" />
+                           class="form-control form-control-sm" placeholder="SearchÔøΩ" />
                 </div>
             </div>
             <div class="d-flex gap-2">
@@ -458,23 +458,33 @@ else
 
         var original = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>QueuingÖ';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>QueuingÔøΩ';
 
         fetch('@Url.Action("Queue", "UserReports")', { method: 'POST', body: body })
             .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
             .then(function (res) {
                 if (res.ok) {
-                    btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating ó watch Reports ??';
+                    btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating ÔøΩ watch Reports ??';
+                    if (window.lrnShowReportAlert) window.lrnShowReportAlert('success');
                     if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
                     setTimeout(function () { btn.disabled = false; btn.innerHTML = original; }, 8000);
                 } else {
                     btn.disabled = false; btn.innerHTML = original;
-                    alert(res.j && res.j.message ? res.j.message : 'Could not queue the report.');
+                    var qMsg = res.j && res.j.message ? res.j.message : '';
+                    if (window.lrnShowReportAlert) {
+                        if (res.status === 409 || /already/i.test(qMsg)) {
+                            window.lrnShowReportAlert('info');
+                        } else {
+                            window.lrnShowReportAlert('error', { message: qMsg || 'Could not queue the report.' });
+                        }
+                    }
                 }
             })
             .catch(function () {
                 btn.disabled = false; btn.innerHTML = original;
-                alert('Could not queue the report.');
+                if (window.lrnShowReportAlert) {
+                    window.lrnShowReportAlert('error', { message: 'Could not queue the report.' });
+                }
             });
     });
 })();

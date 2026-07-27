@@ -95,12 +95,14 @@ public sealed class CodingDbService
     /// meaning the file has already been processed in a previous run.
     /// Returns true when a row was inserted or updated, false when skipped.
     /// </summary>
-    public bool UpsertFinancialSummary(CodingFinancialSummary s)
+    public bool UpsertFinancialSummary(CodingFinancialSummary s, bool force = false)
     {
         using var conn = new SqlConnection(_connectionString);
         conn.Open();
 
         // Guard: skip if this exact source file was already loaded for this lab/week.
+        // Bypassed in DBRefresh mode (force = true) so regenerated reports re-upsert.
+        if (!force)
         using (var chk = new SqlCommand(
             """
             SELECT COUNT(1) FROM dbo.CodingFinancialSummary
@@ -112,7 +114,7 @@ public sealed class CodingDbService
             chk.Parameters.AddWithValue("@WeekFolder",    s.WeekFolder);
             chk.Parameters.AddWithValue("@SourceFilePath", s.SourceFilePath);
             if ((int)chk.ExecuteScalar()! > 0)
-                return false;   // already loaded — nothing to do
+                return false;   // already loaded ï¿½ nothing to do
         }
 
         using var cmd = new SqlCommand("dbo.usp_UpsertCodingFinancialSummary", conn)
@@ -149,6 +151,56 @@ public sealed class CodingDbService
 
         cmd.ExecuteNonQuery();
         return true;
+    }
+
+    /// <summary>
+    /// Clears the CodingValidationFileLog entry for a RunId so the bulk-insert
+    /// proc will accept a regenerated report with the same RunId (DBRefresh
+    /// mode). Existing rows are archived by the proc before re-insert.
+    /// Returns true when an entry was deleted.
+    /// </summary>
+    public bool ClearFileLogEntry(string runId)
+    {
+        using var conn = new SqlConnection(_connectionString);
+        conn.Open();
+        using var cmd = new SqlCommand("dbo.usp_ClearCodingValidationFileLog", conn)
+        {
+            CommandType    = CommandType.StoredProcedure,
+            CommandTimeout = 60
+        };
+        cmd.Parameters.AddWithValue("@RunId", runId);
+        var result = cmd.ExecuteScalar();
+        return result is int deleted && deleted > 0;
+    }
+
+    /// <summary>
+    /// Rebuilds the four Coding aggregate tables (YTD/WTD Insights + Summary)
+    /// via <c>dbo.usp_RefreshCodingAggregates</c>.
+    /// When <paramref name="onlyIfEmpty"/> is true the proc refreshes only if
+    /// the aggregate tables are empty while CodingValidation has rows (used on
+    /// the "file already loaded" path so first deployments still populate).
+    /// Returns (Dataset, RowsInserted) per table; empty list = nothing done.
+    /// </summary>
+    public List<(string Dataset, int Rows)> RefreshAggregates(string labName, bool onlyIfEmpty = false)
+    {
+        var results = new List<(string, int)>();
+
+        using var conn = new SqlConnection(_connectionString);
+        conn.Open();
+
+        using var cmd = new SqlCommand("dbo.usp_RefreshCodingAggregates", conn)
+        {
+            CommandType    = CommandType.StoredProcedure,
+            CommandTimeout = 600
+        };
+        cmd.Parameters.AddWithValue("@LabName",     labName);
+        cmd.Parameters.AddWithValue("@OnlyIfEmpty", onlyIfEmpty);
+
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+            results.Add((reader.GetString(0), reader.GetInt32(1)));
+
+        return results;
     }
 
     // ?? TVP builder ???????????????????????????????????????????????????????????

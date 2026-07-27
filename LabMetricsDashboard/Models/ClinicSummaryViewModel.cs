@@ -79,7 +79,7 @@ public sealed record ClinicDeniedBreakdownGroup
 }
 
 /// <summary>
-/// One row of the Clinic Summary table ù aggregated from Claim Level records for a single clinic.
+/// One row of the Clinic Summary table ÔøΩ aggregated from Claim Level records for a single clinic.
 /// </summary>
 public sealed record ClinicSummaryRow
 {
@@ -104,7 +104,7 @@ public sealed record ClinicSummaryRow
     public decimal AverageAllowedAmount { get; init; }
     public decimal AverageInsurancePaidAmount { get; init; }
 
-    // Percentages (0ù100, rounded to nearest int)
+    // Percentages (0ÔøΩ100, rounded to nearest int)
     public decimal PaidClaimPct => BilledClaimCount == 0 ? 0
         : Math.Round((decimal)PaidClaimCount / BilledClaimCount * 100, 0);
 

@@ -11,14 +11,14 @@ namespace LRN.ProductionReports.Services;
 /// that maps 1-to-1 to a single Excel sheet.
 /// </summary>
 /// <param name="SheetName">The target worksheet name (max 31 characters, already truncated).</param>
-/// <param name="Columns">Column names in ordinal order — shared across all rows.</param>
+/// <param name="Columns">Column names in ordinal order ï¿½ shared across all rows.</param>
 /// <param name="Rows">The data rows for this sheet; each element is a value array aligned to <paramref name="Columns"/>.</param>
 public sealed record RawDataSegment(string SheetName, string[] Columns, List<object?[]> Rows);
 
 /// <summary>
 /// Builds a formatted Excel workbook from Production Report data
-/// using the Office 2013–2022 green (Accent 6) colour palette with gold (Accent 4)
-/// year/grand-total highlights — same theme and Calibri fonts as the Prediction
+/// using the Office 2013ï¿½2022 green (Accent 6) colour palette with gold (Accent 4)
+/// year/grand-total highlights ï¿½ same theme and Calibri fonts as the Prediction
 /// summary export (ExcelTheme green family, matching PredictionExcelExportBuilder).
 /// Headers use merged cells mirroring the view table layout exactly.
 /// </summary>
@@ -495,7 +495,7 @@ public static class ProductionReportExcelExportBuilder
             AppendWeeklySection(ws, vm, row + 2);
     }
 
-    /// <summary>Returns a letter label (A, B, … Z, AA, AB, …) for a zero-based panel index.</summary>
+    /// <summary>Returns a letter label (A, B, ï¿½ Z, AA, AB, ï¿½) for a zero-based panel index.</summary>
     private static string PanelLabel(int idx)
     {
         if (idx < 26)
@@ -1320,7 +1320,10 @@ public static class ProductionReportExcelExportBuilder
             dataRange.Style.Border.OutsideBorderColor = XLColor.FromHtml("#E2E8F0");
         }
 
-        foreach (var col in ws.ColumnsUsed())
+        // Materialize first: setting Width registers a column definition in the
+        // worksheet's internal collection, which would invalidate a live
+        // ColumnsUsed() enumerator ("Collection was modifiedâ€¦").
+        foreach (var col in ws.ColumnsUsed().ToList())
             col.Width = 18;
 
         ws.SheetView.FreezeRows(2);

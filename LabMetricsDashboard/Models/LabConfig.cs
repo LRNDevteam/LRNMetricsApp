@@ -90,6 +90,13 @@ public sealed class LabCsvConfig
     public string? Reports { get; init; }
 
     /// <summary>
+    /// Root folder for CodingMaster AvgsOutput (CptAverage / PanelAverage CSVs).
+    /// When set, Coding Summary Download packages these files with the Excel export.
+    /// Mirrors CaptureDataApp / CodingMaster <c>Output.Avgs</c>.
+    /// </summary>
+    public string? Avgs { get; init; }
+
+    /// <summary>
     /// Enables the Coding Summary page under Analytics menu.
     /// Defaults to true for backward compatibility.
     /// </summary>

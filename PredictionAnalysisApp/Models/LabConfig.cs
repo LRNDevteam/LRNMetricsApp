@@ -46,6 +46,11 @@ public sealed class LabConfig
     /// </summary>
     public int DbAggregateLargeLabRowThreshold { get; set; } = 700_000;
 
+    /// <summary>
+    /// Forces the aggregate step to run for the newest RunId even if its
+    /// PayerValidationFileLog.FileStatus is not 3. The app resets this to false
+    /// after a successful aggregate run.
+    /// </summary>
     public bool DataRefresh { get; set; }
 
     public string? LastProcessedFile { get; set; }

@@ -516,6 +516,13 @@ builder.Services.AddRateLimiter(options =>
 	options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 });
 
+// Compress large HTML responses (Coding Summary renders all tabs in one page;
+// gzip/brotli typically shrinks it 10-20x, cutting transfer time drastically).
+builder.Services.AddResponseCompression(options =>
+{
+	options.EnableForHttps = true;
+});
+
 builder.Services.AddControllersWithViews(options =>
 {
 	options.Filters.AddService<AppUsageAuditFilter>();
@@ -757,6 +764,7 @@ if (app.Environment.IsDevelopment())
 {
 	app.UseHttpsRedirection();
 }
+app.UseResponseCompression();
 app.UseStaticFiles();
 app.UseRouting();
 app.UseRequestTimeouts();

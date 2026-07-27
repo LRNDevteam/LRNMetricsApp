@@ -63,5 +63,6 @@ public static class ReportTypes
     public const string RevenueDashboard   = "RevenueDashboard";
     public const string ClinicSummary      = "ClinicSummary";
     public const string SalesRepSummary    = "SalesRepSummary";
+    public const string CodingSummary      = "CodingSummary";
     public const string LisSummary         = "LisSummary";
 }

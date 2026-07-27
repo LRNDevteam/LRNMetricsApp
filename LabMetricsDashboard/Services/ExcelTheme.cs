@@ -270,7 +270,12 @@ public static class ExcelTheme
     public static void AutoFitColumns(IXLWorksheet ws, int colCount, double minWidth = 14,
         double firstColMinWidth = 30)
     {
-        ws.Columns().AdjustToContents();
+        // Adjust by column index only. Columns().AdjustToContents() enumerates the
+        // live column collection while ClosedXML mutates it (registers column defs),
+        // which throws "Collection was modified; enumeration operation may not execute."
+        for (int c = 1; c <= colCount; c++)
+            ws.Column(c).AdjustToContents();
+
         ws.Column(1).Width = Math.Max(ws.Column(1).Width, firstColMinWidth);
         for (int c = 2; c <= colCount; c++)
             ws.Column(c).Width = Math.Max(ws.Column(c).Width, minWidth);

@@ -89,10 +89,10 @@ public static class ClinicSummaryExcelExportBuilder
         var avgCols   = new HashSet<int> { 12, 13 };
         var pctCols   = new HashSet<int> { 14, 15, 16, 17, 18, 19, 20, 21 };
 
-        // Row 1 — title bar
+        // Row 1 ï¿½ title bar
         ExcelTheme.WriteTitleBar(ws, 1, colCount, $"Clinic Summary | {labName}");
 
-        // Row 2 — column headers (all use the same dark-green header)
+        // Row 2 ï¿½ column headers (all use the same dark-green header)
         ExcelTheme.WriteHeaderRow(ws, 2, 1, headers);
         // First column left-aligned
         ws.Cell(2, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
@@ -130,7 +130,7 @@ public static class ClinicSummaryExcelExportBuilder
 
         ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 15, firstColMinWidth: 30);
 
-        // Conditional formatting — "higher is better" pct columns
+        // Conditional formatting ï¿½ "higher is better" pct columns
         int lastDataRow = rows.Count + 2 + (totals is not null ? 1 : 0);
         foreach (int c in new[] { 19, 20, 21 })
         {
@@ -143,7 +143,7 @@ public static class ClinicSummaryExcelExportBuilder
                 .Fill.SetBackgroundColor(ExcelTheme.BadBg).Font.SetFontColor(ExcelTheme.BadFg);
         }
 
-        // Conditional formatting — "lower is better" pct columns
+        // Conditional formatting ï¿½ "lower is better" pct columns
         foreach (int c in new[] { 15, 16, 17, 18 })
         {
             var range = ws.Range(3, c + 1, lastDataRow, c + 1);

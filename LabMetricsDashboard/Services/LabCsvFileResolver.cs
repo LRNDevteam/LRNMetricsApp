@@ -157,6 +157,93 @@ public sealed class LabCsvFileResolver
     }
 
     /// <summary>
+    /// Resolves the latest Payer CPT Average and Panel CPT Average CSV files
+    /// under <see cref="LabCsvConfig.Avgs"/>, preferring the same week folder
+    /// as the latest CodingValidated report when available.
+    /// </summary>
+    public CodingAverageFiles ResolveCodingAverageFiles(string labName)
+    {
+        var cacheKey = $"LabResolver_CodingAvgs_{labName}";
+
+        return _cache.GetOrCreate(cacheKey, entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = CacheDuration;
+
+            if (!_labSettings.Labs.TryGetValue(labName, out var config))
+            {
+                _logger.LogWarning("Lab '{LabName}' not found in LabSettings.", labName);
+                return CodingAverageFiles.Empty;
+            }
+
+            var avgsRoot = config.Avgs;
+            if (string.IsNullOrWhiteSpace(avgsRoot) || !Directory.Exists(avgsRoot))
+                return CodingAverageFiles.Empty;
+
+            // Prefer averages from the same week as the latest CodingValidated file.
+            string? preferredWeek = null;
+            var codingReport = ResolveCodingMasterReport(labName);
+            if (!string.IsNullOrWhiteSpace(codingReport))
+                preferredWeek = Path.GetFileName(Path.GetDirectoryName(codingReport));
+
+            string? cpt = null;
+            string? panel = null;
+
+            if (!string.IsNullOrWhiteSpace(preferredWeek))
+            {
+                var weekDirs = Directory
+                    .EnumerateDirectories(avgsRoot, "*", SearchOption.AllDirectories)
+                    .Where(d => string.Equals(Path.GetFileName(d), preferredWeek, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                foreach (var weekDir in weekDirs)
+                {
+                    cpt ??= FindLatestAvgCsv(weekDir, labName, "_CptAverage_");
+                    panel ??= FindLatestAvgCsv(weekDir, labName, "_PanelAverage_");
+                    if (cpt is not null && panel is not null) break;
+                }
+            }
+
+            // Fallback: newest matching files anywhere under Avgs.
+            cpt ??= FindLatestAvgCsv(avgsRoot, labName, "_CptAverage_", recursive: true);
+            panel ??= FindLatestAvgCsv(avgsRoot, labName, "_PanelAverage_", recursive: true);
+
+            // Fallback: any CptAverage / PanelAverage under Avgs (lab name may differ slightly).
+            cpt ??= FindLatestAvgCsv(avgsRoot, labNameFilter: null, "_CptAverage_", recursive: true);
+            panel ??= FindLatestAvgCsv(avgsRoot, labNameFilter: null, "_PanelAverage_", recursive: true);
+
+            if (cpt is not null || panel is not null)
+            {
+                _logger.LogInformation(
+                    "Resolved Coding averages for '{Lab}' week='{Week}': Cpt={Cpt}, Panel={Panel}",
+                    labName, preferredWeek, cpt, panel);
+            }
+
+            return new CodingAverageFiles(cpt, panel, preferredWeek);
+        })!;
+    }
+
+    private static string? FindLatestAvgCsv(
+        string root, string? labNameFilter, string keyword, bool recursive = false)
+    {
+        if (!Directory.Exists(root)) return null;
+        var option = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+        return Directory.EnumerateFiles(root, "*.csv", option)
+            .Where(f =>
+            {
+                var name = Path.GetFileName(f);
+                if (!name.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+                    return false;
+                if (!string.IsNullOrWhiteSpace(labNameFilter)
+                    && !name.Contains(labNameFilter, StringComparison.OrdinalIgnoreCase))
+                    return false;
+                return true;
+            })
+            .Select(f => new FileInfo(f))
+            .MaxBy(fi => fi.LastWriteTimeUtc)
+            ?.FullName;
+    }
+
+    /// <summary>
     /// Resolves both Claim Level and Line Level CSV paths in a single directory scan,
     /// cached for <see cref="CacheDuration"/>.
     /// </summary>
@@ -241,3 +328,14 @@ public sealed class LabCsvFileResolver
 public sealed record ResolvedLabCsvPaths(
     string? ClaimLevelCsvPath,
     string? LineLevelCsvPath);
+
+/// <summary>Resolved CodingMaster average CSV paths for a lab (CptAverage / PanelAverage).</summary>
+public sealed record CodingAverageFiles(
+    string? CptAveragePath,
+    string? PanelAveragePath,
+    string? WeekFolder)
+{
+    public static readonly CodingAverageFiles Empty = new(null, null, null);
+    public bool HasAny => !string.IsNullOrWhiteSpace(CptAveragePath)
+                       || !string.IsNullOrWhiteSpace(PanelAveragePath);
+}

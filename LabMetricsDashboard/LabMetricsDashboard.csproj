@@ -7,10 +7,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Content Include="E:\LRN-Data\PayerPolicy_v2\2026\ReportsDashboard\Application\Configs\PCRLabsofAmerica.json" Link="PCRLabsofAmerica.json" />
-  </ItemGroup>
-
-  <ItemGroup>
+    <!-- Lab configs are loaded at runtime from LabConfigFolder (appsettings.json).
+         Do NOT bake a per-lab config into the build output: it ships a stale copy
+         (and a plaintext DB password) into the web root and, when LabConfigFolder
+         resolves to the app directory, overrides the live config — which caused the
+         "Coding Summary not available for PCRLabsofAmerica" banner. -->
     <None Include="RcmWatcherService\RcmWatcherService.csproj" />
   </ItemGroup>
 

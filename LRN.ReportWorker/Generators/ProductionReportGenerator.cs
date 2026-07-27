@@ -17,7 +17,9 @@ namespace LRN.ReportWorker.Generators;
 /// pre-generated snapshot" fast path is deliberately NOT replicated, so queued
 /// exports always reflect current data and current formatting.
 /// NorthWest uses INorthWestProductionSummaryRepository + the NW green-palette
-/// builder; every other lab uses IProductionReportRepository + the standard builder.
+/// builder; Augustus uses IAugustusProductionSummaryRepository for summaries then
+/// the standard Excel builder + claim/line streaming; every other lab uses
+/// IProductionReportRepository + the standard builder.
 /// </summary>
 public sealed class ProductionReportGenerator : IReportGenerator
 {
@@ -26,17 +28,20 @@ public sealed class ProductionReportGenerator : IReportGenerator
     private readonly LabSettings _labSettings;
     private readonly IProductionReportRepository _repo;
     private readonly INorthWestProductionSummaryRepository _nwRepo;
+    private readonly IAugustusProductionSummaryRepository _augRepo;
     private readonly ILogger<ProductionReportGenerator> _logger;
 
     public ProductionReportGenerator(
         LabSettings labSettings,
         IProductionReportRepository repo,
         INorthWestProductionSummaryRepository nwRepo,
+        IAugustusProductionSummaryRepository augRepo,
         ILogger<ProductionReportGenerator> logger)
     {
         _labSettings = labSettings;
         _repo        = repo;
         _nwRepo      = nwRepo;
+        _augRepo     = augRepo;
         _logger      = logger;
     }
 
@@ -90,6 +95,8 @@ public sealed class ProductionReportGenerator : IReportGenerator
 
         var isNorthWest = job.LabName.Equals("NorthWest", StringComparison.OrdinalIgnoreCase)
                        || job.LabName.Equals("NWL",       StringComparison.OrdinalIgnoreCase);
+        var isAugustus = job.LabName.Equals("Augustus_Labs", StringComparison.OrdinalIgnoreCase)
+                      || job.LabName.Equals("Augustus",      StringComparison.OrdinalIgnoreCase);
 
         var tempPath = targetPath + ".tmp";
         try
@@ -97,8 +104,11 @@ public sealed class ProductionReportGenerator : IReportGenerator
             var totalRows = isNorthWest
                 ? await BuildNorthWestAsync(connStr, job, f, payerArg, panelArg,
                     dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, tempPath, Progress, ct)
-                : await BuildStandardAsync(connStr, config, job, f, payerArg, panelArg,
-                    dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, tempPath, Progress, ct);
+                : isAugustus
+                    ? await BuildAugustusAsync(connStr, job, f, payerArg, panelArg,
+                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, tempPath, Progress, ct)
+                    : await BuildStandardAsync(connStr, config, job, f, payerArg, panelArg,
+                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, tempPath, Progress, ct);
             File.Move(tempPath, targetPath, overwrite: true);
 
             var size = new FileInfo(targetPath).Length;
@@ -149,17 +159,11 @@ public sealed class ProductionReportGenerator : IReportGenerator
             payerPanelTask, unbilledAgingTask, cptBreakdownTask);
         await progress(35);
 
-        // Phase 2 — SQL-pre-split raw segments + run info.
-        var claimSegmentsTask = _repo.GetClaimLevelDataExportSegmentsAsync(
-            connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
-        var lineSegmentsTask = _repo.GetLineLevelDataExportSegmentsAsync(
-            connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
+        // Phase 2 — run info only. Claim/Line raw sheets are OpenXml-streamed onto
+        // disk after the summary workbook is saved (avoids ClosedXML OOM).
         var runInfoTask = _repo.GetRunInfoAsync(connStr, ct);
-        await Task.WhenAll(claimSegmentsTask, lineSegmentsTask, runInfoTask);
-
-        var claimSegments = claimSegmentsTask.Result;
-        var lineSegments  = lineSegmentsTask.Result;
-        await progress(70);
+        await runInfoTask;
+        await progress(45);
 
         var result       = monthlyTask.Result;
         var weeklyResult = weeklyTask.Result;
@@ -220,14 +224,161 @@ public sealed class ProductionReportGenerator : IReportGenerator
         };
 
         var (weekFolder, runId) = runInfoTask.Result;
-        using var workbook = ProductionReportExcelExportBuilder.CreateWorkbook(
-            vm, job.LabName, claimSegments, lineSegments, weekFolder, runId, _logger);
-        await progress(88);
-
-        using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+        using (var workbook = ProductionReportExcelExportBuilder.CreateWorkbookSummaryOnly(
+            vm, job.LabName, weekFolder, runId))
+        {
+            using var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None);
             workbook.SaveAs(fs);
+        }
+        await progress(55);
 
-        return claimSegments.Sum(s => s.Rows.Count) + lineSegments.Sum(s => s.Rows.Count);
+        var sqlRepo = _repo as SqlProductionReportRepository
+            ?? throw new InvalidOperationException("Production report repository must be SqlProductionReportRepository for streamed exports.");
+
+        var claimRows = await sqlRepo.AppendSpExportSheetsToFileAsync(
+            tempPath, connStr,
+            "dbo.usp_GetClaimLevelExportBuckets",
+            "dbo.usp_GetClaimLevelExportDataByDateRange",
+            "ClaimLevel", LRN.ProductionReports.Services.ExcelTheme.TabGreen,
+            payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo,
+            ct: ct);
+        await progress(75);
+
+        var lineRows = await sqlRepo.AppendSpExportSheetsToFileAsync(
+            tempPath, connStr,
+            "dbo.usp_GetLineLevelExportBuckets",
+            "dbo.usp_GetLineLevelExportDataByDateRange",
+            "LineLevel", LRN.ProductionReports.Services.ExcelTheme.TabGold,
+            payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo,
+            ct: ct);
+        await progress(95);
+
+        return claimRows + lineRows;
+    }
+
+    // ── Augustus — summaries via usp_GetAug_*; claim/line via standard SP stream ─
+    private async Task<int> BuildAugustusAsync(
+        string connStr, ClaimedReport job, ProductionReportFilters f,
+        List<string>? payerArg, List<string>? panelArg,
+        DateOnly? dosFrom, DateOnly? dosTo, DateOnly? fbFrom, DateOnly? fbTo,
+        DateOnly? fbldFrom, DateOnly? fbldTo,
+        string tempPath, Func<byte, Task> progress, CancellationToken ct)
+    {
+        // Phase 1 — 7 summary queries via Augustus SPs (usp_GetAug_*), never NW_*/Rule path.
+        var monthlyTask = _augRepo.GetMonthlyAsync(
+            connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
+        var weeklyTask = _augRepo.GetWeeklyAsync(
+            connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
+        var codingTask = _augRepo.GetCodingAsync(
+            connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
+        var payerBreakdownTask = _augRepo.GetPayerBreakdownAsync(
+            connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
+        var payerPanelTask = _augRepo.GetPayerByPanelAsync(
+            connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
+        var unbilledAgingTask = _augRepo.GetUnbilledAgingAsync(
+            connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
+        var cptBreakdownTask = _augRepo.GetCptBreakdownAsync(
+            connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
+
+        await Task.WhenAll(monthlyTask, weeklyTask, codingTask, payerBreakdownTask,
+            payerPanelTask, unbilledAgingTask, cptBreakdownTask);
+        await progress(35);
+
+        // Phase 2 — run info only. Claim/Line raw sheets are OpenXml-streamed onto
+        // disk after the summary workbook is saved (Augustus has no NW-style segments).
+        var runInfoTask = _repo.GetRunInfoAsync(connStr, ct);
+        await runInfoTask;
+        await progress(45);
+
+        var result       = monthlyTask.Result;
+        var weeklyResult = weeklyTask.Result;
+        var codingResult = codingTask.Result;
+        var pbResult     = payerBreakdownTask.Result;
+        var pxpResult    = payerPanelTask.Result;
+        var uaResult     = unbilledAgingTask.Result;
+        var cptResult    = cptBreakdownTask.Result;
+
+        var vm = new ProductionReportViewModel
+        {
+            AvailableLabs       = _labSettings.Labs.Keys.OrderBy(x => x).ToList(),
+            SelectedLab         = job.LabName,
+            FilterPayerNames    = f.PayerNames ?? [],
+            FilterPanelNames    = f.PanelNames ?? [],
+            FilterFirstBillFrom = f.FirstBillFrom,
+            FilterFirstBillTo   = f.FirstBillTo,
+            FilterDosFrom       = f.DosFrom,
+            FilterDosTo         = f.DosTo,
+            FilterFirstBilledFrom = f.FirstBilledFrom,
+            FilterFirstBilledTo   = f.FirstBilledTo,
+            PayerNames          = result.PayerNames,
+            PanelNames          = result.PanelNames,
+            Months              = result.Months,
+            Years               = result.Years,
+            PanelRows           = result.PanelRows,
+            GrandTotalByMonth   = result.GrandTotalByMonth,
+            GrandTotalClaims    = result.GrandTotalClaims,
+            GrandTotalCharges   = result.GrandTotalCharges,
+            WeekColumns              = weeklyResult.WeekColumns,
+            WeeklyPanelRows          = weeklyResult.PanelRows,
+            WeeklyGrandTotalByWeek   = weeklyResult.GrandTotalByWeek,
+            WeeklyGrandTotalClaims   = weeklyResult.GrandTotalClaims,
+            WeeklyGrandTotalCharges  = weeklyResult.GrandTotalCharges,
+            CodingPanelRows          = codingResult.PanelRows,
+            CodingGrandTotalClaims   = codingResult.GrandTotalClaims,
+            CodingGrandTotalCharges  = codingResult.GrandTotalCharges,
+            PayerBreakdownMonths     = pbResult.Months,
+            PayerBreakdownYears      = pbResult.Years,
+            PayerBreakdownRows       = pbResult.PayerRows,
+            PayerBreakdownGrandByMonth = pbResult.GrandTotalByMonth,
+            PayerBreakdownGrandTotal   = pbResult.GrandTotal,
+            PayerPanelColumns           = pxpResult.PanelColumns,
+            PayerPanelRows              = pxpResult.PayerRows,
+            PayerPanelGrandByPanel      = pxpResult.GrandTotalByPanel,
+            PayerPanelGrandTotalClaims  = pxpResult.GrandTotalClaims,
+            PayerPanelGrandTotalCharges = pxpResult.GrandTotalCharges,
+            UnbilledAgingRows               = uaResult.PanelRows,
+            UnbilledAgingGrandByBucket      = uaResult.GrandTotalByBucket,
+            UnbilledAgingGrandTotalClaims   = uaResult.GrandTotalClaims,
+            UnbilledAgingGrandTotalCharges  = uaResult.GrandTotalCharges,
+            CptBreakdownMonths              = cptResult.Months,
+            CptBreakdownYears               = cptResult.Years,
+            CptBreakdownRows                = cptResult.CptRows,
+            CptBreakdownGrandByMonth        = cptResult.GrandTotalByMonth,
+            CptBreakdownGrandTotalUnits     = cptResult.GrandTotalUnits,
+            CptBreakdownGrandTotalCharges   = cptResult.GrandTotalCharges,
+        };
+
+        var (weekFolder, runId) = runInfoTask.Result;
+        using (var workbook = ProductionReportExcelExportBuilder.CreateWorkbookSummaryOnly(
+            vm, job.LabName, weekFolder, runId))
+        {
+            using var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None);
+            workbook.SaveAs(fs);
+        }
+        await progress(55);
+
+        var sqlRepo = _repo as SqlProductionReportRepository
+            ?? throw new InvalidOperationException("Production report repository must be SqlProductionReportRepository for streamed exports.");
+
+        var claimRows = await sqlRepo.AppendSpExportSheetsToFileAsync(
+            tempPath, connStr,
+            "dbo.usp_GetClaimLevelExportBuckets",
+            "dbo.usp_GetClaimLevelExportDataByDateRange",
+            "ClaimLevel", LRN.ProductionReports.Services.ExcelTheme.TabGreen,
+            payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo,
+            ct: ct);
+        await progress(75);
+
+        var lineRows = await sqlRepo.AppendSpExportSheetsToFileAsync(
+            tempPath, connStr,
+            "dbo.usp_GetLineLevelExportBuckets",
+            "dbo.usp_GetLineLevelExportDataByDateRange",
+            "LineLevel", LRN.ProductionReports.Services.ExcelTheme.TabGold,
+            payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo,
+            ct: ct);
+        await progress(95);
+
+        return claimRows + lineRows;
     }
 
     // ── NorthWest — mirrors ExportNorthWestProductionReportExcel ───────────────

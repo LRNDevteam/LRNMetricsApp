@@ -62,6 +62,8 @@ var host = Host.CreateDefaultBuilder(args)
             LRN.ProductionReports.Services.SqlProductionReportRepository>();
         services.AddSingleton<LabMetricsDashboard.Services.INorthWestProductionSummaryRepository,
             LabMetricsDashboard.Services.SqlNorthWestProductionSummaryRepository>();
+        services.AddSingleton<LabMetricsDashboard.Services.IAugustusProductionSummaryRepository,
+            LabMetricsDashboard.Services.SqlAugustusProductionSummaryRepository>();
         services.AddSingleton<LabMetricsDashboard.Services.SqlPhiExecutiveSummaryRepository>();
         services.AddSingleton<LabMetricsDashboard.Services.IDashboardRepository,
             LabMetricsDashboard.Services.SqlDashboardRepository>();
@@ -69,6 +71,8 @@ var host = Host.CreateDefaultBuilder(args)
             LabMetricsDashboard.Services.SqlClinicSummaryRepository>();
         services.AddSingleton<LabMetricsDashboard.Services.ISalesRepSummaryRepository,
             LabMetricsDashboard.Services.SqlSalesRepSummaryRepository>();
+        services.AddSingleton<LabMetricsDashboard.Services.ICodingValidationRepository,
+            LabMetricsDashboard.Services.SqlCodingValidationRepository>();
 
         // One IReportGenerator per report type — add future reports here.
         services.AddSingleton<IReportGenerator, PayerPolicyValidationReportGenerator>();
@@ -82,6 +86,7 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddSingleton<IReportGenerator, RevenueDashboardReportGenerator>();
         services.AddSingleton<IReportGenerator, ClinicSummaryReportGenerator>();
         services.AddSingleton<IReportGenerator, SalesRepSummaryReportGenerator>();
+        services.AddSingleton<IReportGenerator, CodingSummaryReportGenerator>();
         services.AddSingleton<ReportGeneratorFactory>();
 
         services.AddSingleton<ReportJobProcessor>();

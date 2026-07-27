@@ -12,6 +12,13 @@ public sealed class LabConfig
  public bool DBEnabled { get; set; }
  public string? DbConnectionString { get; set; }
 
+ /// <summary>
+ /// When true, forces a full reload of this lab's latest report even if the
+ /// same SourceFilePath is already loaded (prior rows are archived first).
+ /// Equivalent to passing the "DBRefresh" command-line arg, but per-lab.
+ /// </summary>
+ public bool DBRefresh { get; set; }
+
  /// <summary>The lab-specific folder that contains the latest CodingValidated reports.</summary>
  [JsonIgnore]
  public string CodingReportsPath => Output.Reports;

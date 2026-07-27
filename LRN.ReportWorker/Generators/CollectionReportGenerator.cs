@@ -1,4 +1,3 @@
-using System.Data;
 using ClosedXML.Excel;
 using LabMetricsDashboard.Controllers;
 using LabMetricsDashboard.Models;
@@ -6,7 +5,6 @@ using LabMetricsDashboard.Services;
 using LRN.ReportQueue.Shared;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -28,9 +26,6 @@ namespace LRN.ReportWorker.Generators;
 public sealed class CollectionReportGenerator : IReportGenerator
 {
     public string ReportType => ReportTypes.CollectionReport;
-
-    private const int SheetSplitThreshold = 300_000;
-    private const int InsertBatchSize     = 10_000;
 
     private readonly IServiceProvider _services;
     private readonly LabSettings _labSettings;
@@ -128,144 +123,38 @@ public sealed class CollectionReportGenerator : IReportGenerator
         int claimCount, int lineCount, string tempPath,
         Func<byte, Task> progress, CancellationToken ct)
     {
-        // Summary sheets from the existing builder; raw lists empty — the two
-        // placeholder raw sheets it creates are removed and replaced below with
-        // streamed, chunked versions.
-        using var wb = CollectionSummaryExcelExportBuilder.CreateWorkbook(
-            vm, [], [], job.LabName, f.ToActiveFilterList());
+        // Summary sheets via ClosedXML (small). Raw Claim/Line sheets streamed with
+        // OpenXml and merged in — ClosedXML SaveAs OOMs when those sheets are huge.
+        using (var wb = CollectionSummaryExcelExportBuilder.CreateWorkbook(
+            vm, [], [], job.LabName, f.ToActiveFilterList()))
+        {
+            foreach (var placeholder in wb.Worksheets
+                         .Where(ws => ws.Name is "ClaimLevelData" or "LineLevelData")
+                         .ToList())
+                placeholder.Delete();
 
-        foreach (var placeholder in wb.Worksheets
-                     .Where(ws => ws.Name is "ClaimLevelData" or "LineLevelData")
-                     .ToList())
-            placeholder.Delete();
+            using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                wb.SaveAs(fs);
+        }
+        await progress(20);
 
         var totalAll = Math.Max(1, claimCount + lineCount);
 
-        // Progress budget: 15–55% claim rows, 55–90% line rows, 90%+ save.
         var (claimQuery, claimParams) = _repo.BuildClaimLevelExportQuery(
             payerFilter, panelFilter, fbFrom, fbTo, dosFrom, dosTo, cdFrom, cdTo);
-        var claimRows = await StreamTableAsync(
-            wb, connStr, claimQuery, claimParams, "ClaimLevelData", job.LabName,
-            ExcelTheme.TabGreen,
-            done => progress((byte)(15 + Math.Min(40, done * 40L / totalAll))), ct);
+        var claimRows = await OpenXmlRowStreamer.AppendSqlSheetsToWorkbookAsync(
+            tempPath, connStr, claimQuery, claimParams, "ClaimLevelData",
+            done => progress((byte)(20 + Math.Min(35, done * 35L / totalAll))), ct);
+        await progress(55);
 
         var (lineQuery, lineParams) = _repo.BuildLineLevelExportQuery(
             payerFilter, panelFilter, fbFrom, fbTo, dosFrom, dosTo, cdFrom, cdTo);
-        var lineRows = await StreamTableAsync(
-            wb, connStr, lineQuery, lineParams, "LineLevelData", job.LabName,
-            ExcelTheme.SubHeaderBg,
+        var lineRows = await OpenXmlRowStreamer.AppendSqlSheetsToWorkbookAsync(
+            tempPath, connStr, lineQuery, lineParams, "LineLevelData",
             done => progress((byte)(55 + Math.Min(35, done * 35L / totalAll))), ct);
 
-        await progress(90);
-
-        using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
-            wb.SaveAs(fs);
-
+        await progress(95);
         return claimRows + lineRows;
-    }
-
-    /// <summary>
-    /// Streams one SELECT into sheets named {baseName}, {baseName}_P2, … —
-    /// 10K-row InsertData batches, new sheet every 300K rows.
-    /// </summary>
-    private static async Task<int> StreamTableAsync(
-        XLWorkbook wb, string connStr, string sql, List<SqlParameter> parameters,
-        string baseName, string labName, XLColor tabColor,
-        Func<int, Task> onRows, CancellationToken ct)
-    {
-        await using var conn = new SqlConnection(connStr);
-        await conn.OpenAsync(ct);
-        await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 1800 };
-        foreach (var p in parameters)
-            cmd.Parameters.Add(new SqlParameter(p.ParameterName, p.Value ?? DBNull.Value));
-
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-
-        var headers = Enumerable.Range(0, reader.FieldCount).Select(reader.GetName).ToArray();
-
-        IXLWorksheet? ws = null;
-        var nextRow = 3;
-        var sheetRowCount = 0;
-        var sheetIndex = 0;
-        var total = 0;
-        var batch = new List<object?[]>(InsertBatchSize);
-
-        void Flush()
-        {
-            if (ws is null || batch.Count == 0) { batch.Clear(); return; }
-            ws.Cell(nextRow, 1).InsertData(batch);
-            nextRow += batch.Count;
-            batch.Clear();
-        }
-
-        IXLWorksheet NewSheet()
-        {
-            sheetIndex++;
-            var name = sheetIndex == 1 ? baseName : $"{baseName}_P{sheetIndex}";
-            var sheet = wb.AddWorksheet(name.Length <= 31 ? name : name[..31]);
-            sheet.TabColor = tabColor;
-            sheet.Style.Font.FontName = "Calibri";
-            sheet.Style.Font.FontSize = 10;
-
-            sheet.Range(1, 1, 1, headers.Length).Merge();
-            var title = sheet.Cell(1, 1);
-            title.Value = $"{baseName} — {labName}" + (sheetIndex > 1 ? $" (part {sheetIndex})" : "");
-            title.Style.Font.Bold = true;
-            title.Style.Font.FontColor = XLColor.White;
-            title.Style.Font.FontName = ExcelTheme.FontName;
-            title.Style.Font.FontSize = ExcelTheme.FontSizeTitle;
-            title.Style.Fill.BackgroundColor = ExcelTheme.TitleBg;
-
-            for (var c = 0; c < headers.Length; c++)
-                sheet.Cell(2, c + 1).Value = headers[c];
-            var hdr = sheet.Range(2, 1, 2, headers.Length);
-            hdr.Style.Font.Bold = true;
-            hdr.Style.Font.FontColor = XLColor.White;
-            hdr.Style.Font.FontName = ExcelTheme.FontName;
-            hdr.Style.Font.FontSize = ExcelTheme.FontSizeHeader;
-            hdr.Style.Fill.BackgroundColor = ExcelTheme.HeaderBg;
-            sheet.SheetView.FreezeRows(2);
-            return sheet;
-        }
-
-        while (await reader.ReadAsync(ct))
-        {
-            ct.ThrowIfCancellationRequested();
-
-            if (ws is null || sheetRowCount >= SheetSplitThreshold)
-            {
-                Flush();
-                ws = NewSheet();
-                nextRow = 3;
-                sheetRowCount = 0;
-            }
-
-            var values = new object?[headers.Length];
-            for (var c = 0; c < headers.Length; c++)
-            {
-                var v = reader.GetValue(c);
-                values[c] = v is DBNull ? string.Empty : v;
-            }
-            batch.Add(values);
-            total++;
-            sheetRowCount++;
-
-            if (batch.Count >= InsertBatchSize)
-            {
-                Flush();
-                await onRows(total);
-            }
-        }
-        Flush();
-
-        if (ws is null)
-        {
-            var empty = wb.AddWorksheet(baseName);
-            empty.TabColor = tabColor;
-            empty.Cell(1, 1).Value = "No data available.";
-        }
-
-        return total;
     }
 
     private static DateOnly? ParseDate(string? value) =>

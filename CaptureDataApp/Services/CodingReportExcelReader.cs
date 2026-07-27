@@ -5,8 +5,8 @@ namespace CaptureDataApp.Services;
 
 /// <summary>
 /// Reads a CodingValidated Excel report and extracts:
-///   • All detail rows from the "CodingValidated" sheet
-///   • The financial summary block from the "Financial Dashboard" sheet
+///   ï¿½ All detail rows from the "CodingValidated" sheet
+///   ï¿½ The financial summary block from the "Financial Dashboard" sheet
 /// </summary>
 public static class CodingReportExcelReader
 {
@@ -16,29 +16,36 @@ public static class CodingReportExcelReader
     // ?? Public API ????????????????????????????????????????????????????????????
 
     public static (List<CodingValidationRow> Rows, CodingFinancialSummary Summary)
-        Read(string filePath, string labName, string weekFolder)
+        Read(string filePath, string labName, string weekFolder, AppLogger? log = null)
     {
         if (!File.Exists(filePath))
             throw new FileNotFoundException($"Report file not found: {filePath}");
 
         using var wb = new XLWorkbook(filePath);
 
-        var rows    = ReadDetailRows(wb, filePath, labName, weekFolder);
+        var rows    = ReadDetailRows(wb, filePath, labName, weekFolder, log);
         var summary = ReadFinancialSummary(wb, filePath, labName, weekFolder);
 
         return (rows, summary);
     }
 
+    /// <summary>Warn to the log file when available, else to the console.</summary>
+    private static void Warn(AppLogger? log, string message)
+    {
+        if (log is not null) log.Warn(message);
+        else Console.WriteLine($"[WARN] {message}");
+    }
+
     // ?? Detail rows (CodingValidated sheet) ???????????????????????????????????
 
     private static List<CodingValidationRow> ReadDetailRows(
-        XLWorkbook wb, string filePath, string labName, string weekFolder)
+        XLWorkbook wb, string filePath, string labName, string weekFolder, AppLogger? log = null)
     {
         var rows = new List<CodingValidationRow>();
 
         if (!wb.TryGetWorksheet(DetailSheet, out var ws))
         {
-            Console.WriteLine($"  [WARN] Sheet '{DetailSheet}' not found in {Path.GetFileName(filePath)}");
+            Warn(log, $"  Sheet '{DetailSheet}' not found in {Path.GetFileName(filePath)}");
             return rows;
         }
 
@@ -49,6 +56,26 @@ public static class CodingReportExcelReader
         var headers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var cell in firstRow.CellsUsed())
             headers[cell.Value.ToString().Trim()] = cell.Address.ColumnNumber;
+
+        // Warn about expected headers missing from the sheet. Get() silently
+        // returns "" for unknown headers, which loads blank values into the DB
+        // and shows up downstream as $0.00 (e.g. Lost Revenue / Revenue at Risk
+        // when the AvgPaidAmount headers don't match).
+        string[] criticalHeaders =
+        [
+            "AccessionNo", "PanelName", "DateofService", "TotalCharge",
+            "ActualCPTCode", "ExpectedCPTCode", "MissingCPTCodes", "AdditionalCPTCodes",
+            "Missing CPT (Charge)", "Additional CPT (Charges)",
+            "MissingCPT_AvgAllowedAmount", "MissingCPT_AvgPaidAmount",
+            "AdditionalCPT_AvgAllowedAmount", "AdditionalCPT_AvgPaidAmount",
+            "Validation Status",
+        ];
+        var missingHeaders = criticalHeaders.Where(h => !headers.ContainsKey(h)).ToList();
+        if (missingHeaders.Count > 0)
+        {
+            Warn(log, $"  {Path.GetFileName(filePath)}: sheet '{DetailSheet}' is missing expected column(s): {string.Join(", ", missingHeaders)}");
+            Warn(log, $"  Actual headers found: {string.Join(" | ", headers.Keys)}");
+        }
 
         // Derive metadata from filename:  {RunId}_{LabName}_CodingValidated_{WeekFolder}.xlsx
         // RunId is everything before the first underscore (e.g. "20260316R0215").

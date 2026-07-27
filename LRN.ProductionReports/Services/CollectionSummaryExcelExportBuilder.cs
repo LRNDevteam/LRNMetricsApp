@@ -91,7 +91,10 @@ public static class CollectionSummaryExcelExportBuilder
 
         WriteMonthlyRow(worksheet, row, string.Empty, "Grand Total", result.GrandTotalByMonth, result.GrandTotalByYear, result.GrandTotalClaimCount, result.GrandTotalPaid, years, periodsByYear, true);
         StyleBody(worksheet.Range(4, 1, row, col + 2));
-        worksheet.Columns().AdjustToContents();
+        // Index-based: Columns().AdjustToContents() can throw "Collection was modified".
+        var lastMonthlyCol = worksheet.LastColumnUsed()?.ColumnNumber() ?? 1;
+        for (int c = 1; c <= lastMonthlyCol; c++)
+            worksheet.Column(c).AdjustToContents();
         worksheet.SheetView.FreezeRows(4);
     }
 
@@ -132,7 +135,10 @@ public static class CollectionSummaryExcelExportBuilder
 
         WriteWeeklyRow(worksheet, row, string.Empty, "Grand Total", result.GrandTotalByWeek, result.GrandTotalClaimCount, result.GrandTotalPaid, result.Weeks, true);
         StyleBody(worksheet.Range(4, 1, row, col + 2));
-        worksheet.Columns().AdjustToContents();
+        // Index-based: Columns().AdjustToContents() can throw "Collection was modified".
+        var lastWeeklyCol = worksheet.LastColumnUsed()?.ColumnNumber() ?? 1;
+        for (int c = 1; c <= lastWeeklyCol; c++)
+            worksheet.Column(c).AdjustToContents();
         worksheet.SheetView.FreezeRows(3);
     }
 

@@ -253,7 +253,7 @@
                         ? $"{r.Status.DisplayName()} {r.ProgressPercent}%"
                         : r.Status.DisplayName();
 
-                    <div class="ur-row">
+                    <div class="ur-row" data-lab="@r.LabName" data-id="@r.ReportId" data-status="@r.Status.DisplayName()">
                         <div class="ur-icon"><i class="bi bi-file-earmark-excel"></i></div>
                         <div class="ur-main">
                             <div class="ur-title">@r.ReportType<span class="ur-lab">@r.LabName</span></div>
@@ -386,9 +386,93 @@
         });
     });
 
-    // Auto-refresh while anything is queued/processing (including items hidden by filters).
+    // Live progress: poll Summary and patch % in place (no full reload).
+    // Reload only when status changes (Queued → Processing → Ready/Failed) so
+    // download/retry buttons appear. Previously the page only did a hard reload
+    // every 10s, so % looked stuck until refresh.
     var hasActive = @(hasActive ? "true" : "false");
-    if (hasActive) setTimeout(function () { window.location.reload(); }, 10000);
+    var summaryUrl = '@Url.Action("Summary", "UserReports")';
+    var IDLE_MS = 30000, BUSY_MS = 2500, timer = null;
+
+    function progressHtml(pct) {
+        var known = pct != null && pct !== '';
+        var n = known ? Math.max(0, Math.min(100, Number(pct))) : 0;
+        return '<div class="ur-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100"'
+            + (known ? ' aria-valuenow="' + n + '"' : '') + '>'
+            + '<div class="ur-progress-label"><span><i class="bi bi-arrow-repeat me-1"></i>Processing</span>'
+            + '<span>' + (known ? n + '%' : '…') + '</span></div>'
+            + '<div class="ur-progress-track"><div class="ur-progress-bar'
+            + (known ? '' : ' indeterminate') + '"'
+            + (known ? ' style="width:' + n + '%"' : '') + '></div></div></div>';
+    }
+
+    function applyProgress(row, pct) {
+        var known = pct != null && pct !== '';
+        var n = known ? Math.max(0, Math.min(100, Number(pct))) : 0;
+        var box = row.querySelector('.ur-progress');
+        if (!box) {
+            // Was Queued chip — swap to progress bar without full reload.
+            var chip = row.querySelector('.ur-status');
+            if (chip) {
+                var wrap = document.createElement('div');
+                wrap.innerHTML = progressHtml(pct);
+                chip.replaceWith(wrap.firstChild);
+            }
+            return;
+        }
+        var label = box.querySelector('.ur-progress-label span:last-child');
+        var bar = box.querySelector('.ur-progress-bar');
+        if (label) label.textContent = known ? n + '%' : '…';
+        if (bar) {
+            bar.classList.toggle('indeterminate', !known);
+            bar.style.width = known ? n + '%' : '';
+        }
+        if (known) box.setAttribute('aria-valuenow', String(n));
+        else box.removeAttribute('aria-valuenow');
+    }
+
+    async function pollProgress() {
+        try {
+            var r = await fetch(summaryUrl);
+            if (!r.ok) { schedule(hasActive ? BUSY_MS : IDLE_MS); return; }
+            var data = await r.json();
+            var rows = data.reports || [];
+            var stillBusy = (data.inProgress || 0) > 0;
+            var needReload = false;
+
+            rows.forEach(function (rep) {
+                var el = document.querySelector(
+                    '.ur-row[data-lab="' + rep.lab + '"][data-id="' + rep.reportId + '"]');
+                if (!el) return;
+                var prev = el.getAttribute('data-status') || '';
+                var next = rep.status || '';
+                if (prev && next && prev !== next) {
+                    needReload = true;
+                    return;
+                }
+                if (next === 'Processing') applyProgress(el, rep.progress);
+            });
+
+            // A report finished/failed (or left this page's window) — refresh chrome once.
+            if (!stillBusy && hasActive) needReload = true;
+
+            if (needReload) {
+                window.location.reload();
+                return;
+            }
+            hasActive = stillBusy;
+            schedule(stillBusy ? BUSY_MS : IDLE_MS);
+        } catch (e) {
+            schedule(hasActive ? BUSY_MS : IDLE_MS);
+        }
+    }
+
+    function schedule(ms) {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(pollProgress, ms);
+    }
+
+    if (hasActive) schedule(BUSY_MS);
 })();
 </script>
 }

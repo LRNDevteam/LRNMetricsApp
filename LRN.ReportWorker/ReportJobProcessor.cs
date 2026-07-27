@@ -24,6 +24,16 @@ public sealed class ReportJobProcessor
 
     public static readonly string WorkerName = $"{Environment.MachineName}\\LRN.ReportWorker";
 
+    /// <summary>
+    /// Process-wide gate that serializes the actual report/workbook generation.
+    /// ClosedXML 0.104.2 keeps non-thread-safe static state (theme/colour/style
+    /// caches), so building two workbooks at once (MaxConcurrentReports > 1) can
+    /// intermittently throw "Collection was modified; enumeration operation may not
+    /// execute." Only one report is built at a time; the queue still claims/polls
+    /// concurrently, so this fixes the race without reworking every generator.
+    /// </summary>
+    private static readonly SemaphoreSlim _generateGate = new(1, 1);
+
     public ReportJobProcessor(
         IReportRequestRepository repo,
         ReportGeneratorFactory generators,
@@ -82,7 +92,19 @@ public sealed class ReportJobProcessor
             // Publish an initial value immediately. Long COUNT/setup queries can otherwise
             // leave Processing with a null percentage until the first data batch is written.
             await OnProgress(1);
-            var result = await generator.GenerateAsync(lab, job, fileName, fullPath, OnProgress, ct);
+
+            // Serialize generation: ClosedXML's static caches are not thread-safe,
+            // so overlapping builds race and throw "Collection was modified".
+            await _generateGate.WaitAsync(ct);
+            GeneratedReportFile result;
+            try
+            {
+                result = await generator.GenerateAsync(lab, job, fileName, fullPath, OnProgress, ct);
+            }
+            finally
+            {
+                _generateGate.Release();
+            }
 
             if (!await _repo.IsStillProcessingAsync(lab.DbConnectionString!, job.ReportId, CancellationToken.None))
             {

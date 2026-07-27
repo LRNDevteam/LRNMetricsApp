@@ -510,3 +510,32 @@ public sealed record ForecastingSummaryFilters(
         }
     }
 }
+
+/// <summary>
+/// Filter snapshot for a Coding Summary Excel export. The page currently exports
+/// the full lab dataset (no server-side year/week/panel filter); this contract
+/// exists so queue validation stays consistent with other report types.
+/// </summary>
+public sealed record CodingSummaryFilters(
+    string? Note = null)
+{
+    private static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    public string ToJson() => JsonSerializer.Serialize(this, JsonOpts);
+
+    public static CodingSummaryFilters FromJson(string? json) =>
+        string.IsNullOrWhiteSpace(json)
+            ? new CodingSummaryFilters()
+            : JsonSerializer.Deserialize<CodingSummaryFilters>(json, JsonOpts)
+              ?? new CodingSummaryFilters();
+
+    public List<(string Label, string? Value)> ToActiveFilterList()
+    {
+        var list = new List<(string, string?)>();
+        if (!string.IsNullOrWhiteSpace(Note)) list.Add(("Note", Note));
+        return list;
+    }
+}

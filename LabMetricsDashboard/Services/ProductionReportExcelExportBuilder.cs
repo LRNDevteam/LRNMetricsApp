@@ -17,7 +17,7 @@ public sealed record RawDataSegment(string SheetName, List<Dictionary<string, ob
 
 /// <summary>
 /// Builds a formatted Excel workbook from Production Report data
-/// using the Office 2013–2022 blue (Accent 1) / amber (Accent 2) colour palette
+/// using the Office 2013ï¿½2022 blue (Accent 1) / amber (Accent 2) colour palette
 /// that matches the on-screen dark-navy / amber header display.
 /// Headers use merged cells mirroring the view table layout exactly.
 /// </summary>
@@ -466,7 +466,7 @@ public static class ProductionReportExcelExportBuilder
             AppendWeeklySection(ws, vm, row + 2);
     }
 
-    /// <summary>Returns a letter label (A, B, … Z, AA, AB, …) for a zero-based panel index.</summary>
+    /// <summary>Returns a letter label (A, B, ï¿½ Z, AA, AB, ï¿½) for a zero-based panel index.</summary>
     private static string PanelLabel(int idx)
     {
         if (idx < 26)
@@ -1299,7 +1299,10 @@ public static class ProductionReportExcelExportBuilder
             dataRange.Style.Border.OutsideBorderColor = XLColor.FromHtml("#E2E8F0");
         }
 
-        foreach (var col in ws.ColumnsUsed())
+        // Materialize first: setting Width registers a column definition in the
+        // worksheet's internal collection, which would invalidate a live
+        // ColumnsUsed() enumerator ("Collection was modifiedâ€¦").
+        foreach (var col in ws.ColumnsUsed().ToList())
             col.Width = 18;
 
         ws.SheetView.FreezeRows(2);

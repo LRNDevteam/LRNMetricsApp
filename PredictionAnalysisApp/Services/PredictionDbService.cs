@@ -155,11 +155,118 @@ public class PredictionDbService
 
     // ?? Public entry point ????????????????????????????????????????????????????
 
+    // ════════════════════════════════════════════════════════════════════════
+    // AGGREGATE CONTROL (FileStatus workflow)
+    //
+    // INSERTION is now the Python app's responsibility: it captures the CSV and
+    // inserts into dbo.PayerValidationFileLog + dbo.PayerValidationReport, and
+    // sets FileStatus = 3 (Ready for Aggregate). This app only runs the aggregate
+    // stored procedures. The methods below drive that handshake.
+    //
+    // FileStatus values:  3 = Ready for aggregate   (set by Python)
+    //                     4 = Aggregate InProgress   (set here, step 3)
+    //                     5 = Aggregate Completed     (set here, step 5)
+    //
+    // Required stored procedures (owned/created on the DB side):
+    //   dbo.usp_PV_GetLatestAggregateRun  @IncludeAnyStatus BIT
+    //        -> SELECT TOP 1 RunId FROM dbo.PayerValidationFileLog
+    //           WHERE (@IncludeAnyStatus = 1 OR FileStatus = 3)
+    //           ORDER BY FileLogId DESC;   (returns NULL when none)
+    //   dbo.usp_PV_ReportRunIdMatches     @RunId NVARCHAR(100)
+    //        -> returns BIT 1 when the newest DISTINCT RunId in
+    //           dbo.PayerValidationReport equals @RunId, else 0.
+    //   dbo.usp_PV_UpdateFileStatus       @RunId NVARCHAR(100), @FileStatus INT
+    //        -> UPDATE dbo.PayerValidationFileLog SET FileStatus = @FileStatus
+    //           WHERE RunId = @RunId;
+    // ════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// STEP 1 — Returns the latest RunId whose FileStatus = 3 (Ready for
+    /// aggregate). When <paramref name="includeAnyStatus"/> is true (DataRefresh)
+    /// it returns the newest RunId regardless of status. Null when none pending.
+    /// </summary>
+    public string? GetLatestAggregateRunId(bool includeAnyStatus)
+    {
+        try
+        {
+            using var conn = new SqlConnection(_connectionString);
+            conn.Open();
+            using var cmd = new SqlCommand("dbo.usp_PV_GetLatestAggregateRun", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 30
+            };
+            cmd.Parameters.AddWithValue("@IncludeAnyStatus", includeAnyStatus);
+            var result = cmd.ExecuteScalar();
+            return result is null or DBNull ? null : Convert.ToString(result);
+        }
+        catch (Exception ex)
+        {
+            AppLogger.LogDbWarn($"GetLatestAggregateRunId failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// STEP 2 — Returns true when the newest DISTINCT RunId in
+    /// <c>dbo.PayerValidationReport</c> matches <paramref name="runId"/>,
+    /// confirming Python finished loading the report rows for that run.
+    /// </summary>
+    public bool ReportRunIdMatches(string runId)
+    {
+        try
+        {
+            using var conn = new SqlConnection(_connectionString);
+            conn.Open();
+            using var cmd = new SqlCommand("dbo.usp_PV_ReportRunIdMatches", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 60
+            };
+            cmd.Parameters.AddWithValue("@RunId", runId);
+            var result = cmd.ExecuteScalar();
+            return result is bool b ? b
+                 : result is not (null or DBNull) && Convert.ToInt32(result) == 1;
+        }
+        catch (Exception ex)
+        {
+            AppLogger.LogDbWarn($"ReportRunIdMatches failed for RunId={runId}: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// STEP 3 / STEP 5 — Sets dbo.PayerValidationFileLog.FileStatus for the run.
+    /// (4 = Aggregate InProgress, 5 = Aggregate Completed.)
+    /// </summary>
+    public void UpdateFileStatus(string runId, int fileStatus)
+    {
+        try
+        {
+            using var conn = new SqlConnection(_connectionString);
+            conn.Open();
+            using var cmd = new SqlCommand("dbo.usp_PV_UpdateFileStatus", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 30
+            };
+            cmd.Parameters.AddWithValue("@RunId",      runId);
+            cmd.Parameters.AddWithValue("@FileStatus", fileStatus);
+            cmd.ExecuteNonQuery();
+        }
+        catch (Exception ex)
+        {
+            AppLogger.LogDbError($"UpdateFileStatus(RunId={runId}, FileStatus={fileStatus}) failed", ex);
+            throw; // caller decides whether to abort the aggregate for this lab
+        }
+    }
+
     /// <summary>
     /// Returns true when <paramref name="sourceFilePath"/> already has an entry
     /// in <c>dbo.PayerValidationFileLog</c> � used to skip re-insertion for a
     /// file that was already processed in a previous run.
     /// Returns false on any DB error so the caller falls through to insert.
+    /// [DORMANT] Insertion is now the Python app's responsibility.
     /// </summary>
     public bool FileAlreadyLogged(string sourceFilePath, string labName)
     {

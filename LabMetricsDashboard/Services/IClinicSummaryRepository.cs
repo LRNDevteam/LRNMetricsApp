@@ -60,7 +60,7 @@ public interface IClinicSummaryRepository
 
     /// <summary>
     /// Returns Clinic Count by DOS Month: pivot of COUNT(DISTINCT ClaimID)
-    /// grouped by ClinicName × YEAR(DateOfService) × MONTH(DateOfService).
+    /// grouped by ClinicName ï¿½ YEAR(DateOfService) ï¿½ MONTH(DateOfService).
     /// </summary>
     Task<ClinicDosCountViewModel> GetClinicDosCountAsync(
         string connectionString,

@@ -1073,8 +1073,11 @@ public static class CollectionSummaryExcelExportBuilder
             ws.Range(row, 1, row, colCount).Merge();
         }
 
-        // Set fixed column widths instead of AutoFitColumns (avoids scanning all rows)
-        foreach (var col in ws.ColumnsUsed())
+        // Set fixed column widths instead of AutoFitColumns (avoids scanning all rows).
+        // Materialize first: setting Width registers a column definition in the
+        // worksheet's internal collection, which would invalidate a live
+        // ColumnsUsed() enumerator ("Collection was modified…").
+        foreach (var col in ws.ColumnsUsed().ToList())
             col.Width = 18;
 
         ws.SheetView.FreezeRows(2);
@@ -1177,7 +1180,10 @@ public static class CollectionSummaryExcelExportBuilder
 
     private static void AutoFitColumns(IXLWorksheet ws)
     {
-        foreach (var col in ws.ColumnsUsed())
+        // Materialize first: AdjustToContents/Width mutate the worksheet's internal
+        // column collection, which would invalidate a live ColumnsUsed() enumerator
+        // ("Collection was modified…").
+        foreach (var col in ws.ColumnsUsed().ToList())
         {
             col.AdjustToContents();
             if (col.Width > 35) col.Width = 35;

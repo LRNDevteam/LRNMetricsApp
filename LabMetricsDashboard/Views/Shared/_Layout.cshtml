@@ -583,6 +583,230 @@
         .lmd-usermenu form {
         margin: 0;
         }
+
+        /* -- Shared report alert toast -------------------------------- */
+        .lrn-report-toast {
+        position: fixed;
+        top: 82px;
+        right: 24px;
+        z-index: 11050;
+        width: 400px;
+        max-width: calc(100vw - 32px);
+        background: rgba(255, 255, 255, .82);
+        border: 1px solid rgba(232, 237, 244, .86);
+        border-radius: 16px;
+        box-shadow: 0 16px 48px rgba(15, 23, 42, .14), 0 4px 12px rgba(15, 23, 42, .06);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        transform: translateX(calc(100% + 32px));
+        opacity: 0;
+        pointer-events: none;
+        transition: transform .48s cubic-bezier(.2, .9, .25, 1), opacity .32s ease;
+        overflow: hidden;
+        }
+
+        .lrn-report-toast.is-success {
+        background: linear-gradient(135deg, rgba(236, 253, 245, .92) 0%, rgba(240, 253, 244, .84) 56%, rgba(255, 255, 255, .82) 100%);
+        border-color: rgba(167, 243, 208, .88);
+        }
+
+        .lrn-report-toast.is-visible {
+        transform: translateX(0);
+        opacity: 1;
+        pointer-events: auto;
+        }
+
+        .lrn-report-toast-inner {
+        display: flex;
+        align-items: flex-start;
+        gap: .85rem;
+        padding: 1.1rem 1rem .9rem 1.1rem;
+        }
+
+        .lrn-report-toast-badge {
+        flex: 0 0 auto;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        font-size: 1.15rem;
+        margin-top: .05rem;
+        }
+
+        .lrn-report-toast.is-success .lrn-report-toast-badge {
+        background: rgba(13, 133, 83, .12);
+        color: #0d8553;
+        box-shadow: inset 0 0 0 1px rgba(13, 133, 83, .12);
+        }
+
+        .lrn-report-toast.is-info .lrn-report-toast-badge {
+        background: #eef4ff;
+        color: #1565c0;
+        }
+
+        .lrn-report-toast.is-error .lrn-report-toast-badge {
+        background: #fef2f2;
+        color: #c62828;
+        }
+
+        .lrn-report-toast-content {
+        flex: 1 1 auto;
+        min-width: 0;
+        padding-top: .1rem;
+        }
+
+        .lrn-report-toast-title {
+        font-size: .98rem;
+        font-weight: 800;
+        color: #0f172a;
+        margin-bottom: .28rem;
+        letter-spacing: -.01em;
+        }
+
+        .lrn-report-toast.is-success .lrn-report-toast-title {
+        color: #0f5132;
+        }
+
+        .lrn-report-toast-message {
+        font-size: .8rem;
+        line-height: 1.55;
+        color: #5b6b82;
+        }
+
+        .lrn-report-toast-actions {
+        display: flex;
+        align-items: center;
+        gap: .55rem;
+        margin-top: .8rem;
+        }
+
+        .lrn-report-toast-action {
+        border: none;
+        border-radius: 999px;
+        padding: .42rem .82rem;
+        font-size: .74rem;
+        font-weight: 700;
+        line-height: 1;
+        cursor: pointer;
+        transition: transform .15s ease, box-shadow .15s ease, background .15s ease, color .15s ease;
+        }
+
+        .lrn-report-toast-action:hover {
+        transform: translateY(-1px);
+        }
+
+        .lrn-report-toast-action.primary {
+        background: #eaf2ff;
+        color: #1556a8;
+        box-shadow: inset 0 0 0 1px #cfe0fb;
+        }
+
+        .lrn-report-toast.is-success .lrn-report-toast-action.primary {
+        background: rgba(13, 133, 83, .10);
+        color: #0d6b45;
+        box-shadow: inset 0 0 0 1px rgba(13, 133, 83, .18);
+        }
+
+        .lrn-report-toast-action.primary:hover {
+        background: #ddeafe;
+        }
+
+        .lrn-report-toast.is-success .lrn-report-toast-action.primary:hover {
+        background: rgba(13, 133, 83, .16);
+        }
+
+        .lrn-report-toast-action.ghost {
+        background: transparent;
+        color: #64748b;
+        box-shadow: inset 0 0 0 1px #d7e0ea;
+        }
+
+        .lrn-report-toast-action.ghost:hover {
+        color: #334155;
+        background: #f8fafc;
+        }
+
+        .lrn-report-toast-message strong {
+        color: #334155;
+        font-weight: 700;
+        }
+
+        .lrn-report-toast.is-success .lrn-report-toast-message {
+        color: #466052;
+        }
+
+        .lrn-report-toast.is-success .lrn-report-toast-message strong {
+        color: #0f5132;
+        }
+
+        .lrn-report-toast-chip {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        margin: 0 .1rem;
+        vertical-align: -5px;
+        background: #eef5ff;
+        color: #1565c0;
+        border: 1px solid #d6e4fb;
+        border-radius: 6px;
+        font-size: .8rem;
+        }
+
+        .lrn-report-toast-close {
+        flex: 0 0 auto;
+        border: none;
+        background: transparent;
+        color: #9aa7b8;
+        cursor: pointer;
+        font-size: .85rem;
+        padding: .2rem;
+        line-height: 1;
+        border-radius: 8px;
+        margin-top: -.05rem;
+        }
+
+        .lrn-report-toast-close:hover {
+        color: #5b6b82;
+        background: #f1f4f8;
+        }
+
+        .lrn-report-toast-progress {
+        height: 3px;
+        background: rgba(241, 245, 249, .72);
+        }
+
+        .lrn-report-toast-progress-bar {
+        height: 100%;
+        width: 100%;
+        transform-origin: left center;
+        transform: scaleX(1);
+        }
+
+        .lrn-report-toast.is-success .lrn-report-toast-progress-bar {
+        background: linear-gradient(90deg, #10b981, #0d8553);
+        }
+
+        .lrn-report-toast.is-info .lrn-report-toast-progress-bar {
+        background: linear-gradient(90deg, #3b82f6, #1565c0);
+        }
+
+        .lrn-report-toast.is-error .lrn-report-toast-progress-bar {
+        background: linear-gradient(90deg, #f59e0b, #c62828);
+        }
+
+        @@keyframes lrnRptBtnPulse {
+        0% { box-shadow: 0 0 0 0 rgba(21, 101, 192, .45); }
+        70% { box-shadow: 0 0 0 12px rgba(21, 101, 192, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(21, 101, 192, 0); }
+        }
+
+        #rptBtn.lrn-rpt-attention {
+        border-radius: 50%;
+        animation: lrnRptBtnPulse 1.2s ease-out 3;
+        }
     </style>
 </head>
 
@@ -907,7 +1131,8 @@
                 deleteUrl = '@Url.Action("Delete", "UserReports")',
                 retryUrl = '@Url.Action("Retry", "UserReports")',
                 cancelUrl = '@Url.Action("Cancel", "UserReports")';
-            var IDLE_MS = 30000, BUSY_MS = 10000, timer = null;
+            // BUSY_MS was 10s — progress % looked frozen until a long wait or hard refresh.
+            var IDLE_MS = 30000, BUSY_MS = 2500, timer = null;
 
             function esc(v) { return (v == null ? '' : String(v)).replace(/[&<>"']/g, function (m) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m]; }); }
             function afToken() {
@@ -1109,7 +1334,12 @@
         })
         .catch(function (err) {
         console.error('Excel download error:', err);
-        alert('Excel export failed. Please try again.');
+        if (window.lrnShowReportAlert) {
+        window.lrnShowReportAlert('error', {
+        title: 'Export failed',
+        message: 'Excel export failed. Please try again.'
+        });
+        }
         })
         .finally(function () {
         if (loader) loader.classList.remove('active');
@@ -1276,6 +1506,150 @@
         window.setInterval(function () {
         sendHeartbeat(false);
         }, 15000);
+        })();
+    </script>
+
+    <div id="lrnReportToast" class="lrn-report-toast" role="status" aria-live="polite" aria-atomic="true">
+        <div class="lrn-report-toast-inner">
+            <div class="lrn-report-toast-badge"><i class="bi bi-check-circle-fill"></i></div>
+            <div class="lrn-report-toast-content">
+                <div class="lrn-report-toast-title">Report queued</div>
+                <div class="lrn-report-toast-message"></div>
+                <div class="lrn-report-toast-actions">
+                    <button type="button" class="lrn-report-toast-action primary" id="lrnReportToastOpen">
+                        Open Reports
+                    </button>
+                    <button type="button" class="lrn-report-toast-action ghost" id="lrnReportToastDismiss">
+                        Dismiss
+                    </button>
+                </div>
+            </div>
+            <button type="button" class="lrn-report-toast-close" id="lrnReportToastClose" aria-label="Dismiss">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+        <div class="lrn-report-toast-progress"><div class="lrn-report-toast-progress-bar"></div></div>
+    </div>
+
+    <script nonce='@Context.Items["CspNonce"]'>
+        (function () {
+            var toast = document.getElementById('lrnReportToast');
+            if (!toast) return;
+
+            var badgeEl = toast.querySelector('.lrn-report-toast-badge i');
+            var titleEl = toast.querySelector('.lrn-report-toast-title');
+            var messageEl = toast.querySelector('.lrn-report-toast-message');
+            var progressBar = toast.querySelector('.lrn-report-toast-progress-bar');
+            var openBtn = document.getElementById('lrnReportToastOpen');
+            var dismissBtn = document.getElementById('lrnReportToastDismiss');
+            var hideTimer = null;
+            var progressTimer = null;
+
+            var defaults = {
+                success: {
+                    title: 'Report queued',
+                    message: 'Your report is now in the queue. You can keep working while we generate it, then download it from <strong>Reports</strong> <span class="lrn-report-toast-chip"><i class="bi bi-file-earmark-arrow-down"></i></span> in the top right.',
+                    icon: 'bi-check-circle-fill',
+                    pulse: true
+                },
+                info: {
+                    title: 'Generation already underway',
+                    message: 'This same report is already running for your current filters. No need to start it again; it will appear in <strong>Reports</strong> <span class="lrn-report-toast-chip"><i class="bi bi-file-earmark-arrow-down"></i></span> as soon as it is ready.',
+                    icon: 'bi-hourglass-split',
+                    pulse: true
+                },
+                error: {
+                    title: 'Unable to start report',
+                    message: 'We could not start the report right now. Please try again in a moment. If the issue persists, refresh the page or check your connection.',
+                    icon: 'bi-exclamation-triangle-fill',
+                    pulse: false
+                }
+            };
+
+            function hideReportAlert() {
+                toast.classList.remove('is-visible');
+                if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+                if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+            }
+
+            function pulseReportsBtn() {
+                var rptBtn = document.getElementById('rptBtn');
+                if (!rptBtn) return;
+                rptBtn.classList.remove('lrn-rpt-attention');
+                void rptBtn.offsetWidth;
+                rptBtn.classList.add('lrn-rpt-attention');
+                setTimeout(function () { rptBtn.classList.remove('lrn-rpt-attention'); }, 4000);
+            }
+
+            function openReportsPanel() {
+                var wrap = document.getElementById('rptWrap');
+                var btn = document.getElementById('rptBtn');
+                var panel = document.getElementById('rptPanel');
+                if (!wrap || !btn || !panel) return;
+                panel.style.display = 'block';
+                if (typeof window.lrnReportsBadgeRefresh === 'function') {
+                    window.lrnReportsBadgeRefresh();
+                }
+                hideReportAlert();
+            }
+
+            function startProgress(timeoutMs) {
+                if (!progressBar) return;
+                var start = Date.now();
+                progressBar.style.transition = 'none';
+                progressBar.style.transform = 'scaleX(1)';
+                if (progressTimer) clearInterval(progressTimer);
+                progressTimer = setInterval(function () {
+                    var elapsed = Date.now() - start;
+                    var pct = Math.max(0, 1 - (elapsed / timeoutMs));
+                    progressBar.style.transform = 'scaleX(' + pct + ')';
+                    if (pct <= 0) {
+                        clearInterval(progressTimer);
+                        progressTimer = null;
+                    }
+                }, 50);
+            }
+
+            window.lrnShowReportAlert = function (type, opts) {
+                opts = opts || {};
+                type = type || 'success';
+                var preset = defaults[type] || defaults.success;
+
+                toast.classList.remove('is-success', 'is-info', 'is-error');
+                toast.classList.add('is-' + type);
+
+                if (badgeEl) badgeEl.className = 'bi ' + (opts.icon || preset.icon);
+                if (titleEl) titleEl.textContent = opts.title || preset.title;
+                if (messageEl) {
+                    if (opts.message) {
+                        messageEl.textContent = opts.message;
+                    } else {
+                        messageEl.innerHTML = preset.message;
+                    }
+                }
+                if (openBtn) openBtn.style.display = type === 'error' ? 'none' : '';
+
+                var timeoutMs = opts.timeoutMs != null ? opts.timeoutMs : 9000;
+                toast.classList.add('is-visible');
+                startProgress(timeoutMs);
+
+                if (hideTimer) clearTimeout(hideTimer);
+                hideTimer = setTimeout(hideReportAlert, timeoutMs);
+
+                if (preset.pulse && opts.pulse !== false) pulseReportsBtn();
+            };
+
+            window.lrnHideReportAlert = hideReportAlert;
+
+            var closeBtn = document.getElementById('lrnReportToastClose');
+            if (closeBtn) closeBtn.addEventListener('click', hideReportAlert);
+            if (dismissBtn) dismissBtn.addEventListener('click', hideReportAlert);
+            if (openBtn) openBtn.addEventListener('click', function () {
+                hideReportAlert();
+                // Navigate to the full "My Reports" (ViewReport) page rather than
+                // only opening the top-right flyout panel.
+                window.location.href = '@Url.Action("Index", "UserReports")';
+            });
         })();
     </script>
 

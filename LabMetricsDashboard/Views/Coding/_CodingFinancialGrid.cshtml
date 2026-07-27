@@ -1,0 +1,337 @@
+@model List<LabMetricsDashboard.Models.CodingFinancialSummaryRow>
+@{
+    var en = System.Globalization.CultureInfo.GetCultureInfo("en-US");
+    string Money(decimal? v) => (v ?? 0m).ToString("C2", en);
+    string MoneyShort(decimal? v)
+    {
+        var d = v ?? 0m;
+        var abs = Math.Abs(d);
+        var sign = d < 0 ? "-" : "";
+        if (abs >= 1_000_000m) return $"{sign}${abs / 1_000_000m:0.##}M";
+        if (abs >= 1_000m)     return $"{sign}${abs / 1_000m:0.#}K";
+        return $"{sign}${abs:0}";
+    }
+    string Num(int? v) => (v ?? 0).ToString("N0", en);
+    string NumReq(int v) => v.ToString("N0", en);
+    string Rate(LabMetricsDashboard.Models.CodingFinancialSummaryRow r)
+    {
+        var d = !string.IsNullOrWhiteSpace(r.ComplianceRatePct) ? r.ComplianceRatePct : (r.ComplianceRate ?? "");
+        if (string.IsNullOrWhiteSpace(d)) return "-";
+        d = d.Trim();
+        return d.EndsWith("%") ? d : d + "%";
+    }
+    decimal RateVal(string rate)
+    {
+        var raw = rate.TrimEnd('%', ' ');
+        return decimal.TryParse(raw, System.Globalization.NumberStyles.Any,
+            System.Globalization.CultureInfo.InvariantCulture, out var p) ? p : -1m;
+    }
+    bool IsGood(string rate) => RateVal(rate) >= 90m;
+
+    // Headline card values come from the most recent week (first row, already ordered desc).
+    var head = Model.FirstOrDefault();
+    var headRate = head is null ? "-" : Rate(head);
+    var headRateVal = RateVal(headRate);
+    var headNet = head is null ? 0m : head.RevenueAtRisk_PotentialRecoup - head.RevenueLoss_PotentialLoss;
+}
+
+<style>
+    /* ── Financial dashboard (scoped) ─────────────────────────────── */
+    .fin-dash { --pos:#0f9d6f; --neg:#d64545; --warn:#c98a00; --ink:#1b2a44; --muted:#6b7a90; }
+    .fin-tooltip-trigger{ position:relative; }
+    .fin-tooltip-trigger:focus{ outline:none; }
+    .fin-tooltip{
+        display:none; position:absolute; left:0; bottom:calc(100% + 12px);
+        width:390px; max-width:min(390px, calc(100vw - 32px));
+        padding:1rem 1.1rem; border:1px solid #334155; border-radius:16px;
+        background:linear-gradient(145deg,#172033,#1e293b); color:#e2e8f0;
+        box-shadow:0 18px 42px rgba(15,23,42,.32); text-align:left; z-index:30;
+        pointer-events:none;
+    }
+    .fin-tooltip::after{
+        content:""; position:absolute; left:28px; bottom:-8px; width:16px; height:16px;
+        transform:rotate(45deg); background:#1e293b;
+        border-right:1px solid #334155; border-bottom:1px solid #334155;
+    }
+    .fin-tooltip-trigger:hover .fin-tooltip,
+    .fin-tooltip-trigger:focus .fin-tooltip,
+    .fin-tooltip-trigger:focus-within .fin-tooltip{ display:block; }
+    .fin-tooltip-title{
+        display:flex; align-items:center; gap:.55rem; margin-bottom:.7rem;
+        color:#f8fafc; font-size:.9rem; font-weight:800;
+    }
+    .fin-tooltip-title i{
+        display:inline-grid; place-items:center; width:28px; height:28px; border-radius:50%;
+        background:#3730a3; color:#c7d2fe;
+    }
+    .fin-tooltip-formula{
+        margin-bottom:.65rem; color:#cbd5e1; font-size:.76rem; line-height:1.4;
+    }
+    .fin-tooltip-row{
+        display:grid; grid-template-columns:84px 1fr; gap:.6rem; padding:.36rem 0;
+        border-top:1px solid rgba(148,163,184,.16); font-size:.72rem;
+    }
+    .fin-tooltip-row:first-of-type{ border-top:0; }
+    .fin-tooltip-key{ color:#94a3b8; font-weight:700; }
+    .fin-tooltip-value{ color:#f8fafc; font-weight:700; font-variant-numeric:tabular-nums; }
+    .fin-kpi-help{
+        display:inline-grid; place-items:center; width:18px; height:18px; border-radius:50%;
+        background:#e8eef6; color:#516079; font-size:.68rem; cursor:help;
+    }
+
+    .fin-kpis {
+        display:grid; gap:.9rem; margin-bottom:1.4rem;
+        grid-template-columns:repeat(auto-fit,minmax(210px,1fr));
+    }
+    .fin-kpi {
+        position:relative; overflow:visible; border-radius:16px; padding:1.05rem 1.15rem;
+        background:linear-gradient(160deg,#ffffff 0%,#f6f9fc 100%);
+        border:1px solid #e6ecf3; box-shadow:0 2px 10px rgba(27,42,68,.05);
+    }
+    .fin-kpi::before{ content:""; position:absolute; left:0; top:0; bottom:0; width:5px; background:var(--accent,#1565c0); }
+    .fin-kpi-label{ font-size:.7rem; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--muted); display:flex; align-items:center; gap:.4rem; }
+    .fin-kpi-ico{ font-size:.95rem; }
+    .fin-kpi-value{ font-size:1.72rem; font-weight:800; color:var(--ink); line-height:1.15; margin-top:.35rem; letter-spacing:-.01em; }
+    .fin-kpi-sub{ font-size:.74rem; color:var(--muted); margin-top:.2rem; }
+    .fin-kpi.accent-blue  { --accent:#1565c0; }
+    .fin-kpi.accent-green { --accent:var(--pos); }
+    .fin-kpi.accent-red   { --accent:var(--neg); }
+    .fin-kpi.accent-amber { --accent:var(--warn); }
+    .fin-kpi .val-pos{ color:var(--pos); } .fin-kpi .val-neg{ color:var(--neg); }
+
+    .fin-donut{ position:absolute; right:.9rem; top:50%; transform:translateY(-50%);
+        width:52px; height:52px; border-radius:50%;
+        background:conic-gradient(var(--ring) calc(var(--pct)*1%), #e9eef4 0);
+        display:flex; align-items:center; justify-content:center; }
+    .fin-donut::after{ content:""; position:absolute; width:38px; height:38px; border-radius:50%; background:#fff; }
+    .fin-donut span{ position:relative; z-index:1; font-size:.66rem; font-weight:800; color:var(--ink); }
+
+    .fin-section{ margin-bottom:1.15rem; }
+    .fin-section-head{ display:flex; align-items:baseline; gap:.6rem; margin:0 0 .55rem .1rem; }
+    .fin-section-title{ font-size:.95rem; font-weight:700; color:var(--ink); margin:0; display:flex; align-items:center; gap:.45rem; }
+    .fin-section-sub{ font-size:.74rem; color:var(--muted); }
+    .fin-card{ border:1px solid #e6ecf3; border-radius:14px; overflow:hidden; box-shadow:0 1px 6px rgba(27,42,68,.04); background:#fff; }
+    .fin-tbl{ width:100%; border-collapse:collapse; font-size:.8rem; }
+    .fin-tbl thead th{
+        background:#f4f7fb; color:#516079; font-size:.68rem; font-weight:700;
+        letter-spacing:.05em; text-transform:uppercase; padding:.6rem .85rem; text-align:right; white-space:nowrap;
+        border-bottom:1px solid #e6ecf3;
+    }
+    .fin-tbl thead th:first-child{ text-align:left; }
+    .fin-tbl tbody td{ padding:.62rem .85rem; text-align:right; color:var(--ink); border-bottom:1px solid #f0f3f7; white-space:nowrap; }
+    .fin-tbl tbody td:first-child{ text-align:left; font-weight:600; }
+    .fin-tbl tbody tr:last-child td{ border-bottom:none; }
+    .fin-tbl tbody tr:hover{ background:#f8fbff; }
+    .fin-pos{ color:var(--pos); font-weight:700; } .fin-neg{ color:var(--neg); font-weight:700; }
+    .fin-chip{ display:inline-block; padding:.16rem .6rem; border-radius:999px; font-size:.72rem; font-weight:800; }
+    .fin-chip.good{ background:#e3f6ee; color:#0b7350; }
+    .fin-chip.warn{ background:#fdf0d9; color:#9a6a00; }
+    .fin-row.is-hidden{ display:none !important; }
+</style>
+
+<div class="fin-dash">
+
+    <!-- ── Headline KPI cards (latest week) ─────────────────────────── -->
+    @if (head is not null)
+    {
+        <div class="fin-kpis">
+            <div class="fin-kpi accent-blue">
+                <div class="fin-kpi-label"><span class="fin-kpi-ico">&#128203;</span> Claims processed</div>
+                <div class="fin-kpi-value">@NumReq(head.TotalClaims)</div>
+                <div class="fin-kpi-sub">Week @head.WeekFolder</div>
+            </div>
+            <div class="fin-kpi accent-blue">
+                <div class="fin-kpi-label"><span class="fin-kpi-ico">&#128181;</span> Billed charges</div>
+                <div class="fin-kpi-value">@MoneyShort(head.TotalBilledCharges)</div>
+                <div class="fin-kpi-sub">Expected @MoneyShort(head.ExpectedBilledCharges)</div>
+            </div>
+            <div class="fin-kpi accent-red">
+                <div class="fin-kpi-label fin-tooltip-trigger" tabindex="0">
+                    <span class="fin-kpi-ico">&#128201;</span> Lost revenue
+                    <span class="fin-kpi-help">i</span>
+                    <div class="fin-tooltip" role="tooltip">
+                        <div class="fin-tooltip-title"><i class="bi bi-info"></i>Lost Revenue</div>
+                        <div class="fin-tooltip-formula">Estimated missed revenue from claims with missing CPTs for the selected week.</div>
+                        <div class="fin-tooltip-row"><span class="fin-tooltip-key">Claims</span><span class="fin-tooltip-value">@Num(head.RevenueLoss_Claims) claims with missing CPT impact</span></div>
+                        <div class="fin-tooltip-row"><span class="fin-tooltip-key">Billed</span><span class="fin-tooltip-value">@Money(head.RevenueLoss_ActualBilled) actual billed on those claims</span></div>
+                        <div class="fin-tooltip-row"><span class="fin-tooltip-key">Value used</span><span class="fin-tooltip-value">@Money(head.RevenueLoss_PotentialLoss) total potential loss</span></div>
+                    </div>
+                </div>
+                <div class="fin-kpi-value val-neg">@MoneyShort(head.RevenueLoss_PotentialLoss)</div>
+                <div class="fin-kpi-sub">@Num(head.RevenueLoss_Claims) claims with leakage</div>
+            </div>
+            <div class="fin-kpi accent-green">
+                <div class="fin-kpi-label fin-tooltip-trigger" tabindex="0">
+                    <span class="fin-kpi-ico">&#128176;</span> Net impact
+                    <span class="fin-kpi-help">i</span>
+                    <div class="fin-tooltip" role="tooltip">
+                        <div class="fin-tooltip-title"><i class="bi bi-info"></i>Net Impact</div>
+                        <div class="fin-tooltip-formula">Revenue at Risk minus Lost Revenue for the selected week.</div>
+                        <div class="fin-tooltip-row"><span class="fin-tooltip-key">At risk</span><span class="fin-tooltip-value">@Money(head.RevenueAtRisk_PotentialRecoup)</span></div>
+                        <div class="fin-tooltip-row"><span class="fin-tooltip-key">Less loss</span><span class="fin-tooltip-value">@Money(head.RevenueLoss_PotentialLoss)</span></div>
+                        <div class="fin-tooltip-row"><span class="fin-tooltip-key">Result</span><span class="fin-tooltip-value">@Money(head.RevenueAtRisk_PotentialRecoup) - @Money(head.RevenueLoss_PotentialLoss) = @(headNet >= 0 ? "+" : "-")@Money(Math.Abs(headNet))</span></div>
+                    </div>
+                </div>
+                <div class="fin-kpi-value @(headNet >= 0 ? "val-pos" : "val-neg")">@(headNet >= 0 ? "+" : "-")@MoneyShort(Math.Abs(headNet))</div>
+                <div class="fin-kpi-sub">Recoup @MoneyShort(head.RevenueAtRisk_PotentialRecoup)</div>
+            </div>
+            <div class="fin-kpi @(headRateVal >= 90m ? "accent-green" : "accent-amber")">
+                <div class="fin-kpi-label"><span class="fin-kpi-ico">&#9989;</span> Compliance</div>
+                <div class="fin-kpi-value">@headRate</div>
+                <div class="fin-kpi-sub">@Num(head.TotalErrorClaims) error claims</div>
+                @if (headRateVal >= 0)
+                {
+                    <div class="fin-donut" style="--pct:@(headRateVal.ToString("0.#", en)); --ring:@(headRateVal >= 90m ? "#0f9d6f" : "#c98a00");">
+                        <span>@Math.Round(headRateVal)%</span>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+
+    <!-- ── Revenue loss ─────────────────────────────────────────────── -->
+    <section class="fin-section">
+        <div class="fin-section-head">
+            <h3 class="fin-section-title"><span>&#128201;</span> Revenue loss</h3>
+            <span class="fin-section-sub">Leakage from claims with coding issues</span>
+        </div>
+        <div class="fin-card">
+            <table class="fin-tbl">
+                <thead>
+                    <tr><th>Week</th><th>Claims</th><th>Actual billed</th><th>Potential loss</th><th></th></tr>
+                </thead>
+                <tbody>
+                @foreach (var row in Model)
+                {
+                    <tr class="fin-row cs-fin-row" data-fin-week="@row.WeekFolder">
+                        <td>@row.WeekFolder</td>
+                        <td>@Num(row.RevenueLoss_Claims)</td>
+                        <td>@Money(row.RevenueLoss_ActualBilled)</td>
+                        <td class="fin-neg">@Money(row.RevenueLoss_PotentialLoss)</td>
+                        <td>
+                            <button type="button" class="btn btn-sm cs-view-calc"
+                                    data-scope="financial"
+                                    data-week="@row.WeekFolder"
+                                    title="View calculation for @row.WeekFolder">
+                                <i class="bi bi-calculator"></i>View
+                            </button>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- ── Revenue at risk ──────────────────────────────────────────── -->
+    <section class="fin-section">
+        <div class="fin-section-head">
+            <h3 class="fin-section-title fin-tooltip-trigger" tabindex="0">
+                <span>&#128200;</span> Revenue at risk <span class="fin-kpi-help">i</span>
+                <div class="fin-tooltip" role="tooltip">
+                    <div class="fin-tooltip-title"><i class="bi bi-info"></i>Revenue at Risk</div>
+                    <div class="fin-tooltip-formula">Estimated recoverable revenue from claims with additional CPT opportunities for the selected week.</div>
+                    <div class="fin-tooltip-row"><span class="fin-tooltip-key">Claims</span><span class="fin-tooltip-value">@Num(head?.RevenueAtRisk_Claims) claims with additional CPT opportunity</span></div>
+                    <div class="fin-tooltip-row"><span class="fin-tooltip-key">Billed</span><span class="fin-tooltip-value">@Money(head?.RevenueAtRisk_ActualBilled) actual billed on those claims</span></div>
+                    <div class="fin-tooltip-row"><span class="fin-tooltip-key">Value used</span><span class="fin-tooltip-value">@Money(head?.RevenueAtRisk_PotentialRecoup) potential recoupment</span></div>
+                </div>
+            </h3>
+            <span class="fin-section-sub">Recoverable value and net opportunity</span>
+        </div>
+        <div class="fin-card">
+            <table class="fin-tbl">
+                <thead>
+                    <tr><th>Week</th><th>Claims</th><th>Actual billed</th><th>Potential recoupment</th><th>Net opportunity</th><th></th></tr>
+                </thead>
+                <tbody>
+                @foreach (var row in Model)
+                {
+                    var net = row.RevenueAtRisk_PotentialRecoup - row.RevenueLoss_PotentialLoss;
+                    var netPos = net >= 0;
+                    <tr class="fin-row cs-fin-row" data-fin-week="@row.WeekFolder">
+                        <td>@row.WeekFolder</td>
+                        <td>@Num(row.RevenueAtRisk_Claims)</td>
+                        <td>@Money(row.RevenueAtRisk_ActualBilled)</td>
+                        <td class="fin-pos">@Money(row.RevenueAtRisk_PotentialRecoup)</td>
+                        <td class="@(netPos ? "fin-pos" : "fin-neg")">@(netPos ? "+" : "-")@Money(Math.Abs(net))</td>
+                        <td>
+                            <button type="button" class="btn btn-sm cs-view-calc"
+                                    data-scope="financial"
+                                    data-week="@row.WeekFolder"
+                                    title="View calculation for @row.WeekFolder">
+                                <i class="bi bi-calculator"></i>View
+                            </button>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- ── Revenue impact (only if any non-zero) ────────────────────── -->
+    @{
+        var anyImpact = Model.Any(r =>
+            (r.RevenueImpact_Claims ?? 0) != 0
+            || r.RevenueImpact_ActualBilled != 0m
+            || r.RevenueImpact_PotentialLoss != 0m
+            || r.RevenueImpact_ExpectedRecoup != 0m);
+    }
+    @if (anyImpact)
+    {
+        <section class="fin-section">
+            <div class="fin-section-head">
+                <h3 class="fin-section-title"><span>&#9878;</span> Revenue impact</h3>
+                <span class="fin-section-sub">Combined loss and recoupment signals</span>
+            </div>
+            <div class="fin-card">
+                <table class="fin-tbl">
+                    <thead>
+                        <tr><th>Week</th><th>Claims</th><th>Actual billed</th><th>Potential loss</th><th>Expected recoup</th></tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var row in Model)
+                    {
+                        <tr class="fin-row cs-fin-row" data-fin-week="@row.WeekFolder">
+                            <td>@row.WeekFolder</td>
+                            <td>@Num(row.RevenueImpact_Claims)</td>
+                            <td>@Money(row.RevenueImpact_ActualBilled)</td>
+                            <td class="fin-neg">@Money(row.RevenueImpact_PotentialLoss)</td>
+                            <td class="fin-pos">@Money(row.RevenueImpact_ExpectedRecoup)</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    }
+
+    <!-- ── Claim quality ────────────────────────────────────────────── -->
+    <section class="fin-section">
+        <div class="fin-section-head">
+            <h3 class="fin-section-title"><span>&#127919;</span> Claim quality</h3>
+            <span class="fin-section-sub">CPT issue mix and error claims</span>
+        </div>
+        <div class="fin-card">
+            <table class="fin-tbl">
+                <thead>
+                    <tr><th>Week</th><th>Missing CPTs</th><th>Additional CPTs</th><th>Both</th><th>Error claims</th><th>Compliance</th></tr>
+                </thead>
+                <tbody>
+                @foreach (var row in Model)
+                {
+                    var rate = Rate(row);
+                    <tr class="fin-row cs-fin-row" data-fin-week="@row.WeekFolder">
+                        <td>@row.WeekFolder</td>
+                        <td>@Num(row.ClaimsWithMissingCPTs)</td>
+                        <td>@Num(row.ClaimsWithAdditionalCPTs)</td>
+                        <td>@Num(row.ClaimsWithBothMissingAndAdditional)</td>
+                        <td class="fin-neg">@Num(row.TotalErrorClaims)</td>
+                        <td><span class="fin-chip @(IsGood(rate) ? "good" : "warn")">@rate</span></td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>

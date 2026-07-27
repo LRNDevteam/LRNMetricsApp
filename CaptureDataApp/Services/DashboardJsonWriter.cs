@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using CaptureDataApp.Models;
 
@@ -15,13 +14,13 @@ namespace CaptureDataApp.Services;
 ///   Output : E:\...\ReportsOutput\03.19.2026\20260327_PhiLife_CodingValidated.json
 ///
 /// Payload sections:
-///   Meta              – lab name, week, report date, generated timestamp
-///   FinancialSummary  – totals, revenue loss, revenue at risk, compliance
-///   YtdInsights       – per-panel YTD coding insights (lost revenue, revenue at risk, net impact)
-///   YtdSummary        – per-panel YTD aggregated summary
-///   WtdInsights       – per-panel WTD coding insights
-///   WtdSummary        – per-panel WTD aggregated summary
-///   ValidationDetail  – latest week raw validation rows
+///   Meta              ï¿½ lab name, week, report date, generated timestamp
+///   FinancialSummary  ï¿½ totals, revenue loss, revenue at risk, compliance
+///   YtdInsights       ï¿½ per-panel YTD coding insights (lost revenue, revenue at risk, net impact)
+///   YtdSummary        ï¿½ per-panel YTD aggregated summary
+///   WtdInsights       ï¿½ per-panel WTD coding insights
+///   WtdSummary        ï¿½ per-panel WTD aggregated summary
+///   ValidationDetail  ï¿½ latest week raw validation rows
 /// </summary>
 public static class DashboardJsonWriter
 {

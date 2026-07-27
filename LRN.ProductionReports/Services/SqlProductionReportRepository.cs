@@ -2742,11 +2742,17 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
 
         // The ALL bucket returns NULL FromDate/ToDate when the data SP requires real dates.
         // Fill in a safe wide range so the data SP never receives nulls.
-        foreach (var b in result.Where(b =>
-            b.BucketType.Equals("ALL", StringComparison.OrdinalIgnoreCase)
-            && (!b.FromDate.HasValue || !b.ToDate.HasValue)))
+        // Index loop (not foreach/Where): assigning into result while a LINQ Where
+        // enumerator is live throws "Collection was modified".
+        for (var i = 0; i < result.Count; i++)
         {
-            result[result.IndexOf(b)] = b with
+            var b = result[i];
+            if (!b.BucketType.Equals("ALL", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (b.FromDate.HasValue && b.ToDate.HasValue)
+                continue;
+
+            result[i] = b with
             {
                 FromDate = firstBilledFrom.HasValue
                     ? firstBilledFrom.Value.ToDateTime(TimeOnly.MinValue)
@@ -4065,33 +4071,20 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             grandByMonth.Values.Sum(c => c.ClaimCount));
     }
 
+    /// <summary>
+    /// Resolves the lab-specific read-SP prefix (e.g. <c>Aug_</c>, <c>NW_</c>) from the
+    /// connection string catalog. <paramref name="rule"/> is intentionally ignored for
+    /// prefix selection: Rule2/3/4/5 describe pivot/filter <em>behavior</em>, not which
+    /// lab owns the stored procedures. Mapping Rule3→Aug_ / Rule4→NW_ previously caused
+    /// Augustus (or any lab whose WeekRule was set to Rule4) to call
+    /// <c>usp_GetNW_WeeklyBilledProductionSummary</c> against the wrong database.
+    /// </summary>
     private static bool TryResolveReadStoredProcedurePrefix(string connectionString, string? rule, out string prefix)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
         prefix = string.Empty;
-        var isRule2 = string.Equals(rule, "Rule2", StringComparison.OrdinalIgnoreCase);
-        var isRule3 = string.Equals(rule, "Rule3", StringComparison.OrdinalIgnoreCase);
-        var isRule4 = string.Equals(rule, "Rule4", StringComparison.OrdinalIgnoreCase);
-        var isRule5 = string.Equals(rule, "Rule5", StringComparison.OrdinalIgnoreCase);
-
-        if (isRule2)
-        {
-            prefix = CertusPrefix;
-            return true;
-        }
-
-        if (isRule3)
-        {
-            prefix = AugustusPrefix;
-            return true;
-        }
-
-        if (isRule4)
-        {
-            prefix = NorthWestPrefix;
-            return true;
-        }
+        _ = rule; // retained for call-site compatibility; does not select lab prefix
 
         var builder = new SqlConnectionStringBuilder(connectionString);
         var initialCatalog = builder.InitialCatalog;
@@ -4109,6 +4102,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             "Certus_LRN" => CertusPrefix,
             "Augustus_LRN" => AugustusPrefix,
             "NWL" => NorthWestPrefix,
+            "NWL_LRN" => NorthWestPrefix,
             "InHealthDTR_LRN" => InHealthDTRPrefix,
             _ => string.Empty,
         };
@@ -4128,7 +4122,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         if (string.IsNullOrEmpty(prefix) && string.Equals(initialCatalog, "InHealthDTR", StringComparison.OrdinalIgnoreCase))
             prefix = InHealthDTRPrefix;
 
-        if (string.IsNullOrEmpty(prefix) && !isRule5)
+        if (string.IsNullOrEmpty(prefix))
         {
             if (string.Equals(initialCatalog, "BeechTree", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(initialCatalog, "Beech_Tree_LRN", StringComparison.OrdinalIgnoreCase))
@@ -4140,14 +4134,23 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             {
                 prefix = PcrPrefix;
             }
-        }
-
-        if (isRule5 && string.IsNullOrEmpty(prefix))
-        {
-            if (initialCatalog.Contains("Cove", StringComparison.OrdinalIgnoreCase))
+            else if (initialCatalog.Contains("Cove", StringComparison.OrdinalIgnoreCase))
+            {
                 prefix = CovePrefix;
+            }
             else if (initialCatalog.Contains("Elixir", StringComparison.OrdinalIgnoreCase))
+            {
                 prefix = ElixirPrefix;
+            }
+            else if (initialCatalog.Contains("Augustus", StringComparison.OrdinalIgnoreCase))
+            {
+                prefix = AugustusPrefix;
+            }
+            else if (initialCatalog.Contains("NWL", StringComparison.OrdinalIgnoreCase)
+                || initialCatalog.Contains("NorthWest", StringComparison.OrdinalIgnoreCase))
+            {
+                prefix = NorthWestPrefix;
+            }
         }
 
         return !string.IsNullOrEmpty(prefix);

@@ -5,8 +5,16 @@ using Microsoft.Data.SqlClient;
 namespace LabMetricsDashboard.Services;
 
 /// <summary>
-/// Reads Coding Validation summary data directly from the CodingValidation table
-/// using inline aggregation queries (no stored procedure dependency).
+/// Reads Coding Validation summary data via the stored procedures created in
+/// CaptureDataApp/Sql/04_CodingAggregates.sql.
+///
+/// The YTD/WTD Insights and Summary datasets come from pre-computed aggregate
+/// tables (CodingAgg_*) that CaptureDataApp refreshes after each weekly load
+/// (usp_RefreshCodingAggregates), so page loads no longer run GROUP BY /
+/// FOR XML queries over the full CodingValidation table.
+///
+/// Convention: BillableCptCombo = ExpectedCPTCode (what SHOULD be billed),
+///             BilledCptCombo   = ActualCPTCode   (what WAS billed).
 /// </summary>
 public sealed class SqlCodingValidationRepository : ICodingValidationRepository
 {
@@ -16,52 +24,13 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
         => _logger = logger;
 
     /// <summary>
-    /// Returns the YTD Coding Insights rows, grouped by Year / PanelName plus
-    /// the four CPT combination columns so each distinct combination appears
-    /// as its own row (matches the per-combination breakdown image).
+    /// Returns the YTD Coding Insights rows (one per Year / PanelName / distinct
+    /// CPT combination) from dbo.CodingAgg_YtdInsights.
     /// </summary>
     public async Task<List<CodingInsightRow>> GetYtdInsightsAsync(
         string connectionString, string labName, CancellationToken ct = default)
     {
-        // BillableCptCombo = ExpectedCPTCode (the panel master / what should have been billed,
-        // typically clean codes like "87481*5, 87529*2, ...")
-        // BilledCptCombo   = ActualCPTCode   (what was actually billed, often with modifier
-        // markers such as "87481*5(59), 87529*2(59), ...")
-        // The four CPT columns already contain the full comma-separated combo per claim row,
-        // so we select them as-is and add them to the GROUP BY to keep distinct combinations
-        // as separate rows (no STUFF / FOR XML aggregation needed).
-        const string sql = """
-            SELECT
-                YEAR(TRY_CAST(DateofService AS DATE))                        AS ServiceYear,
-                PanelName,
-                ISNULL(ExpectedCPTCode,    '')                               AS BillableCptCombo,
-                ISNULL(ActualCPTCode,      '')                               AS BilledCptCombo,
-                ISNULL(MissingCPTCodes,    '')                               AS MissingCpts,
-                ISNULL(AdditionalCPTCodes, '')                               AS AdditionalCpts,
-                COUNT(*)                                                     AS TotalClaims,
-                AVG(TRY_CAST(TotalCharge              AS DECIMAL(18,2)))     AS BilledChargesPerClaim,
-                SUM(TRY_CAST(MissingCPT_Charges       AS DECIMAL(18,2)))     AS TotalBilledChargesForMissingCpts,
-                SUM(TRY_CAST(MissingCPT_AvgPaidAmount AS DECIMAL(18,2)))     AS LostRevenue,
-                SUM(TRY_CAST(AdditionalCPT_Charges    AS DECIMAL(18,2)))     AS TotalBilledChargesForAdditionalCpts,
-                SUM(TRY_CAST(AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2)))  AS RevenueAtRisk
-            FROM dbo.CodingValidation
-            WHERE PanelName IS NOT NULL AND PanelName <> ''
-              AND YEAR(TRY_CAST(DateofService AS DATE)) IS NOT NULL
-            GROUP BY
-                YEAR(TRY_CAST(DateofService AS DATE)),
-                PanelName,
-                ISNULL(ExpectedCPTCode,    ''),
-                ISNULL(ActualCPTCode,      ''),
-                ISNULL(MissingCPTCodes,    ''),
-                ISNULL(AdditionalCPTCodes, '')
-            ORDER BY
-                ServiceYear DESC,
-                PanelName,
-                BillableCptCombo,
-                BilledCptCombo;
-            """;
-
-        return await QueryAsync(connectionString, sql, labName,
+        return await QueryProcAsync(connectionString, "dbo.usp_GetCodingAggYtdInsights", labName,
             r => new CodingInsightRow
             {
                 Year                               = r.GetInt32(r.GetOrdinal("ServiceYear")),
@@ -81,89 +50,13 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
     }
 
     /// <summary>
-    /// Returns the YTD Summary rows (panel-level totals) grouped by Year / PanelName,
-    /// matching the summary table shown in the dashboard image.
+    /// Returns the YTD Summary rows (panel-level totals per Year / PanelName)
+    /// from dbo.CodingAgg_YtdSummary.
     /// </summary>
     public async Task<List<CodingSummaryRow>> GetYtdSummaryAsync(
         string connectionString, string labName, CancellationToken ct = default)
     {
-        const string sql = """
-            SELECT
-                g.ServiceYear,
-                g.PanelName,
-                -- BillableCptCombo = ExpectedCPTCode (panel master / what should be billed)
-                STUFF((
-                    SELECT DISTINCT '*' + d1.ExpectedCPTCode
-                    FROM dbo.CodingValidation d1
-                    WHERE YEAR(TRY_CAST(d1.DateofService AS DATE)) = g.ServiceYear
-                      AND d1.PanelName = g.PanelName
-                      AND d1.ExpectedCPTCode IS NOT NULL AND d1.ExpectedCPTCode <> ''
-                    ORDER BY '*' + d1.ExpectedCPTCode
-                    FOR XML PATH(''), TYPE).value('.','NVARCHAR(MAX)'), 1, 1, '') AS BillableCptCombo,
-                -- BilledCptCombo = ActualCPTCode (what was actually billed)
-                STUFF((
-                    SELECT DISTINCT '*' + d2.ActualCPTCode
-                    FROM dbo.CodingValidation d2
-                    WHERE YEAR(TRY_CAST(d2.DateofService AS DATE)) = g.ServiceYear
-                      AND d2.PanelName = g.PanelName
-                      AND d2.ActualCPTCode IS NOT NULL AND d2.ActualCPTCode <> ''
-                    ORDER BY '*' + d2.ActualCPTCode
-                    FOR XML PATH(''), TYPE).value('.','NVARCHAR(MAX)'), 1, 1, '') AS BilledCptCombo,
-                -- Distinct MissingCPTCodes values
-                STUFF((
-                    SELECT DISTINCT '*' + d3.MissingCPTCodes
-                    FROM dbo.CodingValidation d3
-                    WHERE YEAR(TRY_CAST(d3.DateofService AS DATE)) = g.ServiceYear
-                      AND d3.PanelName = g.PanelName
-                      AND d3.MissingCPTCodes IS NOT NULL AND d3.MissingCPTCodes <> ''
-                    ORDER BY '*' + d3.MissingCPTCodes
-                    FOR XML PATH(''), TYPE).value('.','NVARCHAR(MAX)'), 1, 1, '') AS MissingCpts,
-                -- Distinct AdditionalCPTCodes values
-                STUFF((
-                    SELECT DISTINCT '*' + d4.AdditionalCPTCodes
-                    FROM dbo.CodingValidation d4
-                    WHERE YEAR(TRY_CAST(d4.DateofService AS DATE)) = g.ServiceYear
-                      AND d4.PanelName = g.PanelName
-                      AND d4.AdditionalCPTCodes IS NOT NULL AND d4.AdditionalCPTCodes <> ''
-                    ORDER BY '*' + d4.AdditionalCPTCodes
-                    FOR XML PATH(''), TYPE).value('.','NVARCHAR(MAX)'), 1, 1, '') AS AdditionalCpts,
-                g.TotalClaims,
-                g.TotalBilledCharges,
-                g.DistinctClaimsWithMissingCpts,
-                g.TotalBilledChargesForMissingCpts,
-                g.DistinctClaimsWithAdditionalCpts,
-                g.TotalBilledChargesForAdditionalCpts,
-                g.LostRevenue,
-                g.RevenueAtRisk
-            FROM (
-                SELECT
-                    YEAR(TRY_CAST(DateofService AS DATE))                           AS ServiceYear,
-                    PanelName,
-                    COUNT(*)                                                         AS TotalClaims,
-                    SUM(TRY_CAST(TotalCharge AS DECIMAL(18,2)))                     AS TotalBilledCharges,
-                    COUNT(DISTINCT CASE WHEN MissingCPTCodes  IS NOT NULL
-                                         AND MissingCPTCodes  <> ''
-                                        THEN AccessionNo END)                        AS DistinctClaimsWithMissingCpts,
-                    SUM(TRY_CAST(MissingCPT_Charges AS DECIMAL(18,2)))              AS TotalBilledChargesForMissingCpts,
-                    COUNT(DISTINCT CASE WHEN AdditionalCPTCodes IS NOT NULL
-                                         AND AdditionalCPTCodes  <> ''
-                                        THEN AccessionNo END)                        AS DistinctClaimsWithAdditionalCpts,
-                    SUM(TRY_CAST(AdditionalCPT_Charges AS DECIMAL(18,2)))           AS TotalBilledChargesForAdditionalCpts,
-                    SUM(TRY_CAST(MissingCPT_AvgPaidAmount AS DECIMAL(18,2)))        AS LostRevenue,
-                    SUM(TRY_CAST(AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2)))     AS RevenueAtRisk
-                FROM dbo.CodingValidation
-                WHERE PanelName IS NOT NULL AND PanelName <> ''
-                  AND YEAR(TRY_CAST(DateofService AS DATE)) IS NOT NULL
-                GROUP BY
-                    YEAR(TRY_CAST(DateofService AS DATE)),
-                    PanelName
-            ) g
-            ORDER BY
-                g.ServiceYear DESC,
-                g.PanelName;
-            """;
-
-        return await QueryAsync(connectionString, sql, labName,
+        return await QueryProcAsync(connectionString, "dbo.usp_GetCodingAggYtdSummary", labName,
             r => new CodingSummaryRow
             {
                 Year                               = r.GetInt32(r.GetOrdinal("ServiceYear")),
@@ -184,55 +77,16 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
             }, ct);
     }
 
-    // ?? helpers ???????????????????????????????????????????????????????????????
-
     /// <summary>
-    /// Returns WTD Coding Insights rows grouped by WeekFolder / PanelName plus
-    /// the four CPT combination columns so each distinct combination appears
-    /// as its own row (matches the per-combination breakdown image).
+    /// Returns WTD Coding Insights rows (one per WeekFolder / PanelName / distinct
+    /// CPT combination) from dbo.CodingAgg_WtdInsights.
     /// WeekFolder values come directly from CodingValidation.WeekFolder
     /// (e.g. "03/20/2026 to 03/26/2026") as stored by CaptureDataApp.
     /// </summary>
     public async Task<List<CodingWtdInsightRow>> GetWtdInsightsAsync(
         string connectionString, string labName, CancellationToken ct = default)
     {
-        // BillableCptCombo = ExpectedCPTCode (panel master / what should have been billed)
-        // BilledCptCombo   = ActualCPTCode   (what was actually billed, often with modifiers)
-        // Each distinct (Billable / Billed / Missing / Additional) combination becomes
-        // its own row. The CPT columns already contain the full comma-separated combo
-        // string per claim, so they are selected as-is.
-        const string sql = """
-            SELECT
-                WeekFolder,
-                PanelName,
-                ISNULL(ExpectedCPTCode,    '')                               AS BillableCptCombo,
-                ISNULL(ActualCPTCode,      '')                               AS BilledCptCombo,
-                ISNULL(MissingCPTCodes,    '')                               AS MissingCpts,
-                ISNULL(AdditionalCPTCodes, '')                               AS AdditionalCpts,
-                COUNT(*)                                                     AS TotalClaims,
-                SUM(TRY_CAST(TotalCharge              AS DECIMAL(18,2)))     AS TotalBilledCharges,
-                SUM(TRY_CAST(MissingCPT_Charges       AS DECIMAL(18,2)))     AS BilledChargesForMissingCpts,
-                SUM(TRY_CAST(MissingCPT_AvgPaidAmount AS DECIMAL(18,2)))     AS RevenueLoss,
-                SUM(TRY_CAST(AdditionalCPT_Charges    AS DECIMAL(18,2)))     AS BilledChargesForAdditionalCpts,
-                SUM(TRY_CAST(AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2)))  AS PotentialRecoupment
-            FROM dbo.CodingValidation
-            WHERE WeekFolder IS NOT NULL AND WeekFolder <> ''
-              AND PanelName  IS NOT NULL AND PanelName  <> ''
-            GROUP BY
-                WeekFolder,
-                PanelName,
-                ISNULL(ExpectedCPTCode,    ''),
-                ISNULL(ActualCPTCode,      ''),
-                ISNULL(MissingCPTCodes,    ''),
-                ISNULL(AdditionalCPTCodes, '')
-            ORDER BY
-                WeekFolder DESC,
-                PanelName,
-                BillableCptCombo,
-                BilledCptCombo;
-            """;
-
-        return await QueryAsync(connectionString, sql, labName,
+        return await QueryProcAsync(connectionString, "dbo.usp_GetCodingAggWtdInsights", labName,
             r => new CodingWtdInsightRow
             {
                 WeekFolder                    = Str(r, "WeekFolder"),
@@ -252,74 +106,13 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
     }
 
     /// <summary>
-    /// Returns WTD Summary rows grouped by WeekFolder / PanelName.
+    /// Returns WTD Summary rows (per WeekFolder / PanelName) from
+    /// dbo.CodingAgg_WtdSummary.
     /// </summary>
     public async Task<List<CodingWtdSummaryRow>> GetWtdSummaryAsync(
         string connectionString, string labName, CancellationToken ct = default)
     {
-        const string sql = """
-            SELECT
-                g.WeekFolder,
-                g.PanelName,
-                -- BillableCptCombo = ExpectedCPTCode (panel master / what should be billed)
-                STUFF((
-                    SELECT DISTINCT '*' + d1.ExpectedCPTCode
-                    FROM dbo.CodingValidation d1
-                    WHERE d1.WeekFolder  = g.WeekFolder
-                      AND d1.PanelName   = g.PanelName
-                      AND d1.ExpectedCPTCode IS NOT NULL AND d1.ExpectedCPTCode <> ''
-                    ORDER BY '*' + d1.ExpectedCPTCode
-                    FOR XML PATH(''), TYPE).value('.','NVARCHAR(MAX)'), 1, 1, '') AS BillableCptCombo,
-                -- BilledCptCombo = ActualCPTCode (what was actually billed)
-                STUFF((
-                    SELECT DISTINCT '*' + d2.ActualCPTCode
-                    FROM dbo.CodingValidation d2
-                    WHERE d2.WeekFolder  = g.WeekFolder
-                      AND d2.PanelName   = g.PanelName
-                      AND d2.ActualCPTCode IS NOT NULL AND d2.ActualCPTCode <> ''
-                    ORDER BY '*' + d2.ActualCPTCode
-                    FOR XML PATH(''), TYPE).value('.','NVARCHAR(MAX)'), 1, 1, '') AS BilledCptCombo,
-                -- Distinct MissingCPTCodes values
-                STUFF((
-                    SELECT DISTINCT '*' + d3.MissingCPTCodes
-                    FROM dbo.CodingValidation d3
-                    WHERE d3.WeekFolder  = g.WeekFolder
-                      AND d3.PanelName   = g.PanelName
-                      AND d3.MissingCPTCodes IS NOT NULL AND d3.MissingCPTCodes <> ''
-                    ORDER BY '*' + d3.MissingCPTCodes
-                    FOR XML PATH(''), TYPE).value('.','NVARCHAR(MAX)'), 1, 1, '') AS MissingCpts,
-                -- Distinct AdditionalCPTCodes values
-                STUFF((
-                    SELECT DISTINCT '*' + d4.AdditionalCPTCodes
-                    FROM dbo.CodingValidation d4
-                    WHERE d4.WeekFolder  = g.WeekFolder
-                      AND d4.PanelName   = g.PanelName
-                      AND d4.AdditionalCPTCodes IS NOT NULL AND d4.AdditionalCPTCodes <> ''
-                    ORDER BY '*' + d4.AdditionalCPTCodes
-                    FOR XML PATH(''), TYPE).value('.','NVARCHAR(MAX)'), 1, 1, '') AS AdditionalCpts,
-                g.TotalClaims,
-                g.DistinctClaimsWithMissingCpts,
-                g.TotalBilledChargesForMissingCpts,
-                g.AvgAllowedAmountForMissingCpts
-            FROM (
-                SELECT
-                    WeekFolder,
-                    PanelName,
-                    COUNT(*)                                                                AS TotalClaims,
-                    COUNT(DISTINCT CASE WHEN MissingCPTCodes IS NOT NULL
-                                         AND MissingCPTCodes <> ''
-                                        THEN AccessionNo END)                               AS DistinctClaimsWithMissingCpts,
-                    SUM(TRY_CAST(MissingCPT_Charges AS DECIMAL(18,2)))                     AS TotalBilledChargesForMissingCpts,
-                    AVG(TRY_CAST(MissingCPT_AvgAllowedAmount AS DECIMAL(18,2)))            AS AvgAllowedAmountForMissingCpts
-                FROM dbo.CodingValidation
-                WHERE WeekFolder IS NOT NULL AND WeekFolder <> ''
-                  AND PanelName  IS NOT NULL AND PanelName  <> ''
-                GROUP BY WeekFolder, PanelName
-            ) g
-            ORDER BY g.WeekFolder DESC, g.PanelName;
-            """;
-
-        return await QueryAsync(connectionString, sql, labName,
+        return await QueryProcAsync(connectionString, "dbo.usp_GetCodingAggWtdSummary", labName,
             r => new CodingWtdSummaryRow
             {
                 WeekFolder                      = Str(r, "WeekFolder"),
@@ -336,48 +129,23 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
     }
 
     /// <summary>
-    /// Returns all rows from dbo.CodingFinancialSummary ordered by InsertedDateTime desc.
-    /// No LabName filter � each lab has its own database.
+    /// Returns all rows from dbo.CodingFinancialSummary (newest first) via
+    /// dbo.usp_GetCodingFinancialSummary. No LabName filter — each lab has its
+    /// own database.
     /// </summary>
     public async Task<List<CodingFinancialSummaryRow>> GetFinancialSummaryAsync(
         string connectionString, CancellationToken ct = default)
     {
-        const string sql = """
-            SELECT
-                SummaryId,
-                WeekFolder,
-                ReportDate,
-                TotalClaims,
-                TotalBilledCharges,
-                ExpectedBilledCharges,
-                RevenueImpact_Claims,
-                RevenueImpact_ActualBilled,
-                RevenueImpact_PotentialLoss,
-                RevenueImpact_ExpectedRecoup,
-                RevenueLoss_Claims,
-                RevenueLoss_ActualBilled,
-                RevenueLoss_PotentialLoss,
-                RevenueAtRisk_Claims,
-                RevenueAtRisk_ActualBilled,
-                RevenueAtRisk_PotentialRecoup,
-                Compliance_TotalClaims,
-                Compliance_ClaimsWithIssues,
-                ComplianceRate,
-                ClaimsWithMissingCPTs,
-                ClaimsWithAdditionalCPTs,
-                ClaimsWithBothMissingAndAdditional,
-                TotalErrorClaims,
-                ComplianceRatePct
-            FROM dbo.CodingFinancialSummary
-            ORDER BY InsertedDateTime DESC;
-            """;
-
         var results = new List<CodingFinancialSummaryRow>();
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd    = new SqlCommand(sql, conn) { CommandTimeout = 120 };
+            await using var cmd = new SqlCommand("dbo.usp_GetCodingFinancialSummary", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 120
+            };
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))
             {
@@ -419,75 +187,24 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
         return results;
     }
 
-    private async Task<List<T>> QueryAsync<T>(
-        string connectionString, string sql, string labName,
-        Func<SqlDataReader, T> map, CancellationToken ct)
-    {
-        var results = new List<T>();
-        try
-        {
-            await using var conn = new SqlConnection(connectionString);
-            await conn.OpenAsync(ct);
-
-            await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 120 };
-
-            await using var reader = await cmd.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
-                results.Add(map(reader));
-
-            _logger.LogInformation(
-                "CodingValidation query for '{LabName}' returned {Count} rows.", labName, results.Count);
-        }
-        catch (Exception ex)
-        {
-            // Log the full exception � never swallow silently so blank pages are diagnosable.
-            _logger.LogError(ex,
-                "CodingValidation query failed for lab '{LabName}': {Message}", labName, ex.Message);
-            throw;   // re-throw so the controller can show the error in the UI
-        }
-        return results;
-    }
-
-    private static string  Str(SqlDataReader r, string col)
-        => r.IsDBNull(r.GetOrdinal(col)) ? string.Empty : r.GetString(r.GetOrdinal(col));
-
-    private static decimal Dec(SqlDataReader r, string col)
-        => r.IsDBNull(r.GetOrdinal(col)) ? 0m : r.GetDecimal(r.GetOrdinal(col));
-
-    private static int? NullInt(SqlDataReader r, string col)
-        => r.IsDBNull(r.GetOrdinal(col)) ? null : r.GetInt32(r.GetOrdinal(col));
-
     /// <summary>
-    /// Returns the most recent week's raw CodingValidation rows for the Validation Detail tab.
-    /// Capped at 5 000 rows to keep page load fast.
+    /// Returns the most recent week's raw CodingValidation rows for the
+    /// Validation Detail tab via dbo.usp_GetCodingValidationDetail
+    /// (capped at 5 000 rows to keep page load fast).
     /// </summary>
     public async Task<List<CodingValidationDetailRow>> GetValidationDetailRowsAsync(
         string connectionString, CancellationToken ct = default)
     {
-        const string sql = """
-            SELECT TOP 5000
-                WeekFolder, AccessionNo, PanelName, DateofService,
-                ActualCPTCode, ExpectedCPTCode,
-                MissingCPTCodes, AdditionalCPTCodes,
-                ValidationStatus, TotalCharge,
-                MissingCPT_Charges, AdditionalCPT_Charges, Remarks
-            FROM dbo.CodingValidation
-            WHERE WeekFolder = (
-                SELECT TOP 1 WeekFolder FROM dbo.CodingValidation
-                ORDER BY InsertedDateTime DESC
-            )
-              AND AccessionNo   IS NOT NULL AND LTRIM(RTRIM(AccessionNo))   <> ''
-              AND PanelName     IS NOT NULL AND LTRIM(RTRIM(PanelName))     <> ''
-              AND DateofService IS NOT NULL AND LTRIM(RTRIM(DateofService)) <> ''
-            ORDER BY PanelName, AccessionNo;
-            """;
-
         var results = new List<CodingValidationDetailRow>();
         try
         {
-            await using var conn   = new SqlConnection(connectionString);
+            await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd    = new SqlCommand(sql, conn) { CommandTimeout = 120 };
+            await using var cmd = new SqlCommand("dbo.usp_GetCodingValidationDetail", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 120
+            };
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))
             {
@@ -517,4 +234,263 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
         }
         return results;
     }
+
+    /// <inheritdoc />
+    public async Task<CodingCalculationDetail> GetCalculationDetailAsync(
+        string connectionString,
+        string labName,
+        string scope,
+        int? year,
+        string? weekFolder,
+        string? panelName,
+        string? missingCpts,
+        string? additionalCpts,
+        CancellationToken ct = default)
+    {
+        scope = (scope ?? "ytd").Trim().ToLowerInvariant();
+        panelName = string.IsNullOrWhiteSpace(panelName) ? null : panelName.Trim();
+        weekFolder = string.IsNullOrWhiteSpace(weekFolder) ? null : weekFolder.Trim();
+        // null = do not filter; empty string = match blank CPT codes (insight rows).
+        missingCpts = missingCpts is null ? null : missingCpts.Trim();
+        additionalCpts = additionalCpts is null ? null : additionalCpts.Trim();
+
+        var where = new List<string> { "1 = 1" };
+        if (!string.IsNullOrEmpty(panelName))
+            where.Add("PanelName = @PanelName");
+        if (string.Equals(scope, "ytd", StringComparison.OrdinalIgnoreCase) && year.HasValue)
+            where.Add("YEAR(TRY_CAST(DateofService AS DATE)) = @Year");
+        if ((string.Equals(scope, "wtd", StringComparison.OrdinalIgnoreCase)
+             || string.Equals(scope, "financial", StringComparison.OrdinalIgnoreCase))
+            && !string.IsNullOrEmpty(weekFolder))
+            where.Add("WeekFolder = @WeekFolder");
+        if (missingCpts is not null)
+            where.Add("ISNULL(MissingCPTCodes, '') = @MissingCpts");
+        if (additionalCpts is not null)
+            where.Add("ISNULL(AdditionalCPTCodes, '') = @AdditionalCpts");
+
+        var whereSql = string.Join(" AND ", where);
+
+        var totalsSql = $"""
+            SELECT
+                COUNT(*) AS TotalClaims,
+                COUNT(CASE WHEN MissingCPTCodes IS NOT NULL AND LTRIM(RTRIM(MissingCPTCodes)) <> '' THEN 1 END) AS ClaimsWithMissing,
+                COUNT(CASE WHEN AdditionalCPTCodes IS NOT NULL AND LTRIM(RTRIM(AdditionalCPTCodes)) <> '' THEN 1 END) AS ClaimsWithAdditional,
+                ISNULL(SUM(TRY_CAST(MissingCPT_Charges AS DECIMAL(18,2))), 0) AS MissingCharges,
+                ISNULL(SUM(TRY_CAST(AdditionalCPT_Charges AS DECIMAL(18,2))), 0) AS AdditionalCharges,
+                ISNULL(SUM(TRY_CAST(MissingCPT_AvgPaidAmount AS DECIMAL(18,2))), 0) AS LostRevenue,
+                ISNULL(SUM(TRY_CAST(AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2))), 0) AS RevenueAtRisk
+            FROM dbo.CodingValidation WITH (NOLOCK)
+            WHERE {whereSql}
+            """;
+
+        var groupsSql = $"""
+            SELECT TOP (75)
+                ISNULL(MissingCPTCodes, '') AS MissingCpts,
+                ISNULL(AdditionalCPTCodes, '') AS AdditionalCpts,
+                COUNT(*) AS ClaimCount,
+                ISNULL(SUM(TRY_CAST(MissingCPT_Charges AS DECIMAL(18,2))), 0) AS MissingCharges,
+                ISNULL(SUM(TRY_CAST(MissingCPT_AvgPaidAmount AS DECIMAL(18,2))), 0) AS MissingAvgPaid,
+                ISNULL(SUM(TRY_CAST(AdditionalCPT_Charges AS DECIMAL(18,2))), 0) AS AdditionalCharges,
+                ISNULL(SUM(TRY_CAST(AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2))), 0) AS AdditionalAvgPaid
+            FROM dbo.CodingValidation WITH (NOLOCK)
+            WHERE {whereSql}
+              AND (
+                    (MissingCPTCodes IS NOT NULL AND LTRIM(RTRIM(MissingCPTCodes)) <> '')
+                 OR (AdditionalCPTCodes IS NOT NULL AND LTRIM(RTRIM(AdditionalCPTCodes)) <> '')
+              )
+            GROUP BY ISNULL(MissingCPTCodes, ''), ISNULL(AdditionalCPTCodes, '')
+            ORDER BY
+                ISNULL(SUM(TRY_CAST(MissingCPT_AvgPaidAmount AS DECIMAL(18,2))), 0)
+              + ISNULL(SUM(TRY_CAST(AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2))), 0) DESC
+            """;
+
+        var samplesSql = $"""
+            SELECT TOP (100)
+                ISNULL(AccessionNo, '') AS AccessionNo,
+                ISNULL(DateofService, '') AS DateofService,
+                ISNULL(WeekFolder, '') AS WeekFolder,
+                ISNULL(PanelName, '') AS PanelName,
+                ISNULL(PayerCommonCode, '') AS PayerCommonCode,
+                ISNULL(MissingCPTCodes, '') AS MissingCpts,
+                ISNULL(AdditionalCPTCodes, '') AS AdditionalCpts,
+                ISNULL(TRY_CAST(MissingCPT_Charges AS DECIMAL(18,2)), 0) AS MissingCharges,
+                ISNULL(TRY_CAST(MissingCPT_AvgPaidAmount AS DECIMAL(18,2)), 0) AS MissingAvgPaid,
+                ISNULL(TRY_CAST(AdditionalCPT_Charges AS DECIMAL(18,2)), 0) AS AdditionalCharges,
+                ISNULL(TRY_CAST(AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2)), 0) AS AdditionalAvgPaid
+            FROM dbo.CodingValidation WITH (NOLOCK)
+            WHERE {whereSql}
+              AND (
+                    ISNULL(TRY_CAST(MissingCPT_AvgPaidAmount AS DECIMAL(18,2)), 0) <> 0
+                 OR ISNULL(TRY_CAST(AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2)), 0) <> 0
+                 OR (MissingCPTCodes IS NOT NULL AND LTRIM(RTRIM(MissingCPTCodes)) <> '')
+                 OR (AdditionalCPTCodes IS NOT NULL AND LTRIM(RTRIM(AdditionalCPTCodes)) <> '')
+              )
+            ORDER BY
+                ISNULL(TRY_CAST(MissingCPT_AvgPaidAmount AS DECIMAL(18,2)), 0)
+              + ISNULL(TRY_CAST(AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2)), 0) DESC,
+                AccessionNo
+            """;
+
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+
+            int totalClaims = 0, claimsMissing = 0, claimsAddl = 0;
+            decimal missingCharges = 0, addlCharges = 0, lost = 0, atRisk = 0;
+
+            await using (var cmd = new SqlCommand(totalsSql, conn) { CommandTimeout = 120 })
+            {
+                BindCalcParams(cmd, year, weekFolder, panelName, missingCpts, additionalCpts);
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+                if (await reader.ReadAsync(ct))
+                {
+                    totalClaims = reader.GetInt32(0);
+                    claimsMissing = reader.GetInt32(1);
+                    claimsAddl = reader.GetInt32(2);
+                    missingCharges = reader.GetDecimal(3);
+                    addlCharges = reader.GetDecimal(4);
+                    lost = reader.GetDecimal(5);
+                    atRisk = reader.GetDecimal(6);
+                }
+            }
+
+            var groups = new List<CodingCalcCptGroup>();
+            await using (var cmd = new SqlCommand(groupsSql, conn) { CommandTimeout = 120 })
+            {
+                BindCalcParams(cmd, year, weekFolder, panelName, missingCpts, additionalCpts);
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                {
+                    groups.Add(new CodingCalcCptGroup
+                    {
+                        MissingCpts = reader.GetString(0),
+                        AdditionalCpts = reader.GetString(1),
+                        ClaimCount = reader.GetInt32(2),
+                        MissingCharges = reader.GetDecimal(3),
+                        MissingAvgPaid = reader.GetDecimal(4),
+                        AdditionalCharges = reader.GetDecimal(5),
+                        AdditionalAvgPaid = reader.GetDecimal(6),
+                    });
+                }
+            }
+
+            var samples = new List<CodingCalcClaimSample>();
+            await using (var cmd = new SqlCommand(samplesSql, conn) { CommandTimeout = 120 })
+            {
+                BindCalcParams(cmd, year, weekFolder, panelName, missingCpts, additionalCpts);
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                {
+                    samples.Add(new CodingCalcClaimSample
+                    {
+                        AccessionNo = reader.GetString(0),
+                        DateofService = reader.GetString(1),
+                        WeekFolder = reader.GetString(2),
+                        PanelName = reader.GetString(3),
+                        PayerCommonCode = reader.GetString(4),
+                        MissingCpts = reader.GetString(5),
+                        AdditionalCpts = reader.GetString(6),
+                        MissingCharges = reader.GetDecimal(7),
+                        MissingAvgPaid = reader.GetDecimal(8),
+                        AdditionalCharges = reader.GetDecimal(9),
+                        AdditionalAvgPaid = reader.GetDecimal(10),
+                    });
+                }
+            }
+
+            _logger.LogInformation(
+                "CalculationDetail scope={Scope} year={Year} week={Week} panel={Panel} claims={Claims} groups={Groups} samples={Samples}",
+                scope, year, weekFolder, panelName, totalClaims, groups.Count, samples.Count);
+
+            return new CodingCalculationDetail
+            {
+                LabName = labName,
+                Scope = scope,
+                Year = year,
+                WeekFolder = weekFolder,
+                PanelName = panelName,
+                MissingCptsFilter = missingCpts,
+                AdditionalCptsFilter = additionalCpts,
+                TotalClaims = totalClaims,
+                ClaimsWithMissingCpts = claimsMissing,
+                ClaimsWithAdditionalCpts = claimsAddl,
+                MissingChargesTotal = missingCharges,
+                AdditionalChargesTotal = addlCharges,
+                LostRevenue = lost,
+                RevenueAtRisk = atRisk,
+                CptGroups = groups,
+                ClaimSamples = samples,
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GetCalculationDetailAsync failed for lab '{LabName}'.", labName);
+            throw;
+        }
+    }
+
+    private static void BindCalcParams(
+        SqlCommand cmd,
+        int? year,
+        string? weekFolder,
+        string? panelName,
+        string? missingCpts,
+        string? additionalCpts)
+    {
+        if (year.HasValue)
+            cmd.Parameters.AddWithValue("@Year", year.Value);
+        if (!string.IsNullOrEmpty(weekFolder))
+            cmd.Parameters.AddWithValue("@WeekFolder", weekFolder);
+        if (!string.IsNullOrEmpty(panelName))
+            cmd.Parameters.AddWithValue("@PanelName", panelName);
+        if (missingCpts is not null)
+            cmd.Parameters.AddWithValue("@MissingCpts", missingCpts);
+        if (additionalCpts is not null)
+            cmd.Parameters.AddWithValue("@AdditionalCpts", additionalCpts);
+    }
+
+    // ── helpers ───────────────────────────────────────────────────────────────
+
+    private async Task<List<T>> QueryProcAsync<T>(
+        string connectionString, string procName, string labName,
+        Func<SqlDataReader, T> map, CancellationToken ct)
+    {
+        var results = new List<T>();
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+
+            await using var cmd = new SqlCommand(procName, conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 120
+            };
+
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+                results.Add(map(reader));
+
+            _logger.LogInformation(
+                "{Proc} for '{LabName}' returned {Count} rows.", procName, labName, results.Count);
+        }
+        catch (Exception ex)
+        {
+            // Log the full exception — never swallow silently so blank pages are diagnosable.
+            _logger.LogError(ex,
+                "{Proc} failed for lab '{LabName}': {Message}", procName, labName, ex.Message);
+            throw;   // re-throw so the controller can show the error in the UI
+        }
+        return results;
+    }
+
+    private static string  Str(SqlDataReader r, string col)
+        => r.IsDBNull(r.GetOrdinal(col)) ? string.Empty : r.GetString(r.GetOrdinal(col));
+
+    private static decimal Dec(SqlDataReader r, string col)
+        => r.IsDBNull(r.GetOrdinal(col)) ? 0m : r.GetDecimal(r.GetOrdinal(col));
+
+    private static int? NullInt(SqlDataReader r, string col)
+        => r.IsDBNull(r.GetOrdinal(col)) ? null : r.GetInt32(r.GetOrdinal(col));
 }

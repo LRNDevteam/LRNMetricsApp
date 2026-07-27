@@ -2138,6 +2138,8 @@ public class DashboardController : Controller
             : productionRule;
         // Per-lab week boundary (e.g. "Mon to Sun", "Thu to Wed"). Null/empty => Monday-to-Sunday.
         var weekRange = config.ProductionSummary?.WeekRange;
+        var isAugustusLab = selectedLab.Equals("Augustus_Labs", StringComparison.OrdinalIgnoreCase)
+                         || selectedLab.Equals("Augustus", StringComparison.OrdinalIgnoreCase);
         var isNorthWestLab = selectedLab.Equals("NorthWest", StringComparison.OrdinalIgnoreCase);
 
         var payerFilter = filterPayerNames.Count > 0 ? filterPayerNames : null;
@@ -2151,33 +2153,49 @@ public class DashboardController : Controller
 
         try
         {
-            var monthlyTask = isNorthWestLab
-                ? _nwSummaryRepo.GetMonthlyAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                : _productionReportRepo.GetMonthlyClaimVolumeAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, productionRule, ct);
+            // Augustus / NorthWest: route through lab-specific parameterised SPs (usp_GetAug_* / usp_GetNW_*),
+            // never Rule/prefix resolution via SqlProductionReportRepository.
+            var monthlyTask = isAugustusLab
+                ? _augSummaryRepo.GetMonthlyAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                : isNorthWestLab
+                    ? _nwSummaryRepo.GetMonthlyAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                    : _productionReportRepo.GetMonthlyClaimVolumeAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, productionRule, ct);
 
-            var weeklyTask = isNorthWestLab
-                ? _nwSummaryRepo.GetWeeklyAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                : _productionReportRepo.GetWeeklyClaimVolumeAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, weekRule, weekRange, ct);
+            var weeklyTask = isAugustusLab
+                ? _augSummaryRepo.GetWeeklyAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                : isNorthWestLab
+                    ? _nwSummaryRepo.GetWeeklyAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                    : _productionReportRepo.GetWeeklyClaimVolumeAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, weekRule, weekRange, ct);
 
-            var codingTask = isNorthWestLab
-                ? _nwSummaryRepo.GetCodingAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                : _productionReportRepo.GetCodingAsync(connStr, panelFilter, ct);
+            var codingTask = isAugustusLab
+                ? _augSummaryRepo.GetCodingAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                : isNorthWestLab
+                    ? _nwSummaryRepo.GetCodingAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                    : _productionReportRepo.GetCodingAsync(connStr, panelFilter, ct);
 
-            var payerBreakdownTask = isNorthWestLab
-                ? _nwSummaryRepo.GetPayerBreakdownAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                : _productionReportRepo.GetPayerBreakdownAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, productionRule, ct);
+            var payerBreakdownTask = isAugustusLab
+                ? _augSummaryRepo.GetPayerBreakdownAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                : isNorthWestLab
+                    ? _nwSummaryRepo.GetPayerBreakdownAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                    : _productionReportRepo.GetPayerBreakdownAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, productionRule, ct);
 
-            var payerPanelTask = isNorthWestLab
-                ? _nwSummaryRepo.GetPayerByPanelAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                : _productionReportRepo.GetPayerPanelAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, productionRule, ct);
+            var payerPanelTask = isAugustusLab
+                ? _augSummaryRepo.GetPayerByPanelAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                : isNorthWestLab
+                    ? _nwSummaryRepo.GetPayerByPanelAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                    : _productionReportRepo.GetPayerPanelAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, productionRule, ct);
 
-            var unbilledAgingTask = isNorthWestLab
-                ? _nwSummaryRepo.GetUnbilledAgingAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                : _productionReportRepo.GetUnbilledAgingAsync(connStr, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, productionRule, ct);
+            var unbilledAgingTask = isAugustusLab
+                ? _augSummaryRepo.GetUnbilledAgingAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                : isNorthWestLab
+                    ? _nwSummaryRepo.GetUnbilledAgingAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                    : _productionReportRepo.GetUnbilledAgingAsync(connStr, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, productionRule, ct);
 
-            var cptBreakdownTask = isNorthWestLab
-                ? _nwSummaryRepo.GetCptBreakdownAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                : _productionReportRepo.GetCptBreakdownAsync(connStr, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
+            var cptBreakdownTask = isAugustusLab
+                ? _augSummaryRepo.GetCptBreakdownAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                : isNorthWestLab
+                    ? _nwSummaryRepo.GetCptBreakdownAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                    : _productionReportRepo.GetCptBreakdownAsync(connStr, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
 
             await Task.WhenAll(monthlyTask, weeklyTask, codingTask, payerBreakdownTask, payerPanelTask, unbilledAgingTask, cptBreakdownTask);
 
@@ -2819,85 +2837,76 @@ public class DashboardController : Controller
             _logger.LogInformation(
                 "[ProdExcelExport] Phase 1 START — 7 summary queries running concurrently");
 
-            var monthlyTask = _productionReportRepo.GetMonthlyClaimVolumeAsync(
-                connStr,
-                filterPayerNames.Count > 0 ? filterPayerNames : null,
-                filterPanelNames.Count > 0 ? filterPanelNames : null,
-                dosFrom != default ? dosFrom : null,
-                dosTo != default ? dosTo : null,
-                fbFrom != default ? fbFrom : null,
-                fbTo != default ? fbTo : null,
-                fbldFrom != default ? fbldFrom : null,
-                fbldTo != default ? fbldTo : null,
-                productionRule,
-                ct);
+            var isAugustusLab = selectedLab.Equals("Augustus_Labs", StringComparison.OrdinalIgnoreCase)
+                             || selectedLab.Equals("Augustus", StringComparison.OrdinalIgnoreCase);
 
-            var weeklyTask = _productionReportRepo.GetWeeklyClaimVolumeAsync(
-                connStr,
-                filterPayerNames.Count > 0 ? filterPayerNames : null,
-                filterPanelNames.Count > 0 ? filterPanelNames : null,
-                dosFrom != default ? dosFrom : null,
-                dosTo != default ? dosTo : null,
-                fbFrom != default ? fbFrom : null,
-                fbTo != default ? fbTo : null,
-                fbldFrom != default ? fbldFrom : null,
-                fbldTo != default ? fbldTo : null,
-                weekRule,
-                weekRange,
-                ct);
+            var payerArg    = filterPayerNames.Count > 0 ? filterPayerNames : null;
+            var panelArg    = filterPanelNames.Count > 0 ? filterPanelNames : null;
+            var dosFromArg  = dosFrom  != default ? dosFrom  : (DateOnly?)null;
+            var dosToArg    = dosTo    != default ? dosTo    : (DateOnly?)null;
+            var fbFromArg   = fbFrom   != default ? fbFrom   : (DateOnly?)null;
+            var fbToArg     = fbTo     != default ? fbTo     : (DateOnly?)null;
+            var fbldFromArg = fbldFrom != default ? fbldFrom : (DateOnly?)null;
+            var fbldToArg   = fbldTo   != default ? fbldTo   : (DateOnly?)null;
 
-            var codingTask = _productionReportRepo.GetCodingAsync(
-                connStr,
-                filterPanelNames.Count > 0 ? filterPanelNames : null,
-                ct);
+            // Augustus: route summaries through usp_GetAug_* (same as ProductionReport display).
+            var monthlyTask = isAugustusLab
+                ? _augSummaryRepo.GetMonthlyAsync(
+                    connStr, payerArg, panelArg,
+                    dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                : _productionReportRepo.GetMonthlyClaimVolumeAsync(
+                    connStr, payerArg, panelArg,
+                    dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg,
+                    productionRule, ct);
 
-            var payerBreakdownTask = _productionReportRepo.GetPayerBreakdownAsync(
-                connStr,
-                filterPayerNames.Count > 0 ? filterPayerNames : null,
-                filterPanelNames.Count > 0 ? filterPanelNames : null,
-                dosFrom != default ? dosFrom : null,
-                dosTo != default ? dosTo : null,
-                fbFrom != default ? fbFrom : null,
-                fbTo != default ? fbTo : null,
-                fbldFrom != default ? fbldFrom : null,
-                fbldTo != default ? fbldTo : null,
-                productionRule,
-                ct);
+            var weeklyTask = isAugustusLab
+                ? _augSummaryRepo.GetWeeklyAsync(
+                    connStr, payerArg, panelArg,
+                    dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                : _productionReportRepo.GetWeeklyClaimVolumeAsync(
+                    connStr, payerArg, panelArg,
+                    dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg,
+                    weekRule, weekRange, ct);
 
-            var payerPanelTask = _productionReportRepo.GetPayerPanelAsync(
-                connStr,
-                filterPayerNames.Count > 0 ? filterPayerNames : null,
-                filterPanelNames.Count > 0 ? filterPanelNames : null,
-                dosFrom != default ? dosFrom : null,
-                dosTo != default ? dosTo : null,
-                fbFrom != default ? fbFrom : null,
-                fbTo != default ? fbTo : null,
-                fbldFrom != default ? fbldFrom : null,
-                fbldTo != default ? fbldTo : null,
-                productionRule,
-                ct);
+            var codingTask = isAugustusLab
+                ? _augSummaryRepo.GetCodingAsync(
+                    connStr, payerArg, panelArg,
+                    dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                : _productionReportRepo.GetCodingAsync(connStr, panelArg, ct);
 
-            var unbilledAgingTask = _productionReportRepo.GetUnbilledAgingAsync(
-                connStr,
-                filterPanelNames.Count > 0 ? filterPanelNames : null,
-                dosFrom != default ? dosFrom : null,
-                dosTo != default ? dosTo : null,
-                fbFrom != default ? fbFrom : null,
-                fbTo != default ? fbTo : null,
-                fbldFrom != default ? fbldFrom : null,
-                fbldTo != default ? fbldTo : null,
-                productionRule,
-                ct);
+            var payerBreakdownTask = isAugustusLab
+                ? _augSummaryRepo.GetPayerBreakdownAsync(
+                    connStr, payerArg, panelArg,
+                    dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                : _productionReportRepo.GetPayerBreakdownAsync(
+                    connStr, payerArg, panelArg,
+                    dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg,
+                    productionRule, ct);
 
-            var cptBreakdownTask = _productionReportRepo.GetCptBreakdownAsync(
-                connStr,
-                dosFrom != default ? dosFrom : null,
-                dosTo != default ? dosTo : null,
-                fbFrom != default ? fbFrom : null,
-                fbTo != default ? fbTo : null,
-                fbldFrom != default ? fbldFrom : null,
-                fbldTo != default ? fbldTo : null,
-                ct);
+            var payerPanelTask = isAugustusLab
+                ? _augSummaryRepo.GetPayerByPanelAsync(
+                    connStr, payerArg, panelArg,
+                    dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                : _productionReportRepo.GetPayerPanelAsync(
+                    connStr, payerArg, panelArg,
+                    dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg,
+                    productionRule, ct);
+
+            var unbilledAgingTask = isAugustusLab
+                ? _augSummaryRepo.GetUnbilledAgingAsync(
+                    connStr, payerArg, panelArg,
+                    dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                : _productionReportRepo.GetUnbilledAgingAsync(
+                    connStr, panelArg,
+                    dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg,
+                    productionRule, ct);
+
+            var cptBreakdownTask = isAugustusLab
+                ? _augSummaryRepo.GetCptBreakdownAsync(
+                    connStr, payerArg, panelArg,
+                    dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                : _productionReportRepo.GetCptBreakdownAsync(
+                    connStr, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
 
             await Task.WhenAll(monthlyTask, weeklyTask, codingTask, payerBreakdownTask, payerPanelTask, unbilledAgingTask, cptBreakdownTask);
 
@@ -2926,15 +2935,6 @@ public class DashboardController : Controller
                 cptResult.CptRows.Count);
 
             // ── Phase 2 : Raw data export queries and SQL-backed sheet split ──────
-            var payerFilter    = filterPayerNames.Count > 0 ? filterPayerNames : null;
-            var panelFilter    = filterPanelNames.Count > 0 ? filterPanelNames : null;
-            var fbFromFilter   = fbFrom   != default ? fbFrom   : (DateOnly?)null;
-            var fbToFilter     = fbTo     != default ? fbTo     : (DateOnly?)null;
-            var dosFromFilter  = dosFrom  != default ? dosFrom  : (DateOnly?)null;
-            var dosToFilter    = dosTo    != default ? dosTo    : (DateOnly?)null;
-            var fbldFromFilter = fbldFrom != default ? fbldFrom : (DateOnly?)null;
-            var fbldToFilter   = fbldTo   != default ? fbldTo   : (DateOnly?)null;
-
             phaseSw.Restart();
             _logger.LogInformation(
                 "[ProdExcelExportSplit] Phase 2 START — SQL splitting ClaimLevelData + LineLevelData " +
@@ -2942,11 +2942,11 @@ public class DashboardController : Controller
                 300_000);
 
             var claimSegmentsTask = _productionReportRepo.GetClaimLevelDataExportSegmentsAsync(
-                connStr, payerFilter, panelFilter, dosFromFilter, dosToFilter,
-                fbFromFilter, fbToFilter, fbldFromFilter, fbldToFilter, ct);
+                connStr, payerArg, panelArg, dosFromArg, dosToArg,
+                fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
             var lineSegmentsTask = _productionReportRepo.GetLineLevelDataExportSegmentsAsync(
-                connStr, payerFilter, panelFilter, dosFromFilter, dosToFilter,
-                fbFromFilter, fbToFilter, fbldFromFilter, fbldToFilter, ct);
+                connStr, payerArg, panelArg, dosFromArg, dosToArg,
+                fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
             var runInfoTask = _productionReportRepo.GetRunInfoAsync(connStr, ct);
 
             await Task.WhenAll(claimSegmentsTask, lineSegmentsTask, runInfoTask);

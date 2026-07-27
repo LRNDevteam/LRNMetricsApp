@@ -1,4 +1,4 @@
-﻿using LabMetricsDashboard.Models;
+using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Models;
 using System.Diagnostics;
 using Microsoft.Data.SqlClient;

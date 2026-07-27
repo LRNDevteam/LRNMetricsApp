@@ -169,6 +169,8 @@ public class UserReportsController : Controller
                     ClinicSalesRepSummaryFilters.FromJson(filterDetails).ToJson()),
                 "salesrepsummary" => (ReportTypes.SalesRepSummary,
                     ClinicSalesRepSummaryFilters.FromJson(filterDetails).ToJson()),
+                "codingsummary" => (ReportTypes.CodingSummary,
+                    CodingSummaryFilters.FromJson(filterDetails).ToJson()),
                 _ => throw new NotSupportedException($"Unknown report type '{reportType}'."),
             };
         }

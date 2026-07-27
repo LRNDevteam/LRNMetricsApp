@@ -1648,6 +1648,7 @@ th.pr-month-data, td.pr-month-data {
                     .then(function (res) {
                         if (res.ok) {
                             exportBtn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating — watch Reports 📄';
+                            if (window.lrnShowReportAlert) window.lrnShowReportAlert('success');
                             if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
                             setTimeout(function () { exportBtn.disabled = false; exportBtn.innerHTML = original; }, 8000);
                         } else if (res.status === 400) {
@@ -1655,7 +1656,14 @@ th.pr-month-data, td.pr-month-data {
                             legacySyncExport();
                         } else {
                             exportBtn.disabled = false; exportBtn.innerHTML = original;
-                            alert(res.j && res.j.message ? res.j.message : 'Could not queue the report.');
+                            var qMsg = res.j && res.j.message ? res.j.message : '';
+                            if (window.lrnShowReportAlert) {
+                                if (res.status === 409 || /already/i.test(qMsg)) {
+                                    window.lrnShowReportAlert('info');
+                                } else {
+                                    window.lrnShowReportAlert('error', { message: qMsg || 'Could not queue the report.' });
+                                }
+                            }
                         }
                     })
                     .catch(function () {

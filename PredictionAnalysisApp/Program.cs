@@ -1,4 +1,4 @@
-﻿using PredictionAnalysis;
+using PredictionAnalysis;
 using PredictionAnalysis.Models;
 using PredictionAnalysis.Services;
 using LRN.Notifications.Abstractions;
@@ -99,6 +99,16 @@ try
 
         try
         {
+#if ENABLE_LEGACY_CAPTURE
+            // ════════════════════════════════════════════════════════════════════
+            // LEGACY FILE-CAPTURE PIPELINE (Excel read → analyze → report → DB insert)
+            //
+            // Insertion into PayerValidationFileLog & PayerValidationReport is now
+            // the Python app's responsibility, so this whole path is disabled by
+            // default. To restore it, define the ENABLE_LEGACY_CAPTURE build symbol
+            // (csproj <DefineConstants>) — the DB-insert code inside STEP 3B is what
+            // must be re-enabled if needed.
+            // ════════════════════════════════════════════════════════════════════
             Console.WriteLine($"[Lab] Input      : {lab.InputFolderPath}");
             Console.WriteLine($"[Lab] Processing : {lab.ProcessingFolderPath}");
             Console.WriteLine($"[Lab] Output     : {lab.OutputFolderPath}");
@@ -446,6 +456,84 @@ try
 
             AppLogger.Log($"[Lab {labIndex}/{labs.Count}] SUCCESS : {lab.LabName} | RunId: {runId} | Output: {finalOutputPath}");
             labSuccess++;
+#else
+            // ════════════════════════════════════════════════════════════════════
+            // AGGREGATE-ONLY WORKFLOW
+            // The Python app captures the CSV and inserts into
+            // PayerValidationFileLog + PayerValidationReport (FileStatus = 3).
+            // This app only runs the aggregate stored procedures once the data is
+            // loaded, then flips FileStatus 3 → 4 → 5.
+            // ════════════════════════════════════════════════════════════════════
+            if (!lab.EnableDatabaseInsert || string.IsNullOrWhiteSpace(lab.DbConnectionString))
+            {
+                Console.WriteLine($"[Lab] SKIP — DB disabled or DbConnectionString empty (aggregate requires DB).");
+                AppLogger.LogWarn($"[Lab {labIndex}/{labs.Count}] SKIPPED : {lab.LabName} | DB disabled / no connection string.");
+                labSkipped++;
+                continue;
+            }
+
+            var db = new PredictionDbService(
+                lab.DbConnectionString,
+                lab.DbInsertChunkSize,
+                lab.DbAggregateChunkSize,
+                lab.DbAggregateRefreshTimeoutSeconds,
+                lab.DbAggregateLargeLabRowThreshold);
+
+            // Force aggregate for the newest run (ignoring FileStatus) when
+            // DataRefresh is true in the lab JSON.
+            var forceAggregate = lab.DataRefresh;
+
+            // STEP 1 — latest RunId pending aggregate (FileStatus = 3), or the
+            //          newest run overall when DataRefresh = true.
+            runId = db.GetLatestAggregateRunId(forceAggregate) ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(runId))
+            {
+                Console.WriteLine($"[Step 1] No RunId pending aggregate (FileStatus=3){(forceAggregate ? " / DataRefresh" : "")} — nothing to do.");
+                AppLogger.Log($"[Lab {labIndex}/{labs.Count}] SKIPPED : {lab.LabName} | No aggregate-pending RunId.");
+                labSkipped++;
+                continue;
+            }
+            Console.WriteLine($"[Step 1] Aggregate-pending RunId : {runId}{(forceAggregate ? "  (forced refresh)" : "")}");
+
+            // STEP 2 — FileLog RunId must match the newest distinct RunId in
+            //          PayerValidationReport (confirms Python finished the load).
+            if (!db.ReportRunIdMatches(runId))
+            {
+                Console.WriteLine($"[Step 2] SKIP — RunId '{runId}' does not match distinct RunId in PayerValidationReport. Data not fully loaded.");
+                AppLogger.LogWarn($"[Lab {labIndex}/{labs.Count}] SKIPPED : {lab.LabName} | RunId '{runId}' mismatch with PayerValidationReport.");
+                labSkipped++;
+                continue;
+            }
+            Console.WriteLine($"[Step 2] RunId matches PayerValidationReport — proceeding.");
+
+            // STEP 3 — mark Aggregate InProgress (FileStatus = 4).
+            db.UpdateFileStatus(runId, 4);
+            AppLogger.LogDb($"[{lab.LabName}] FileStatus → 4 (Aggregate InProgress) for RunId={runId}.");
+
+            // STEP 4 — execute the aggregate stored procedures:
+            //          dbo.usp_RefreshAllPredictionAggregates (which runs the PV_*
+            //          refresh SPs: SummaryBuckets, ValidationByPayer,
+            //          PayerPayStatusBreakdown, DenialBreakdown, NoResponseBreakdown,
+            //          AdjustedByPayer, SummaryMetrics, FilterOptions) plus
+            //          dbo.usp_EnrichPV_DenialDescriptionFromMaster.
+            db.RefreshAggregatesForRun(lab.LabName, runId, weekStartDate: null, lab.MasterDbConnectionString);
+
+            // STEP 5 — mark Aggregate Completed (FileStatus = 5).
+            db.UpdateFileStatus(runId, 5);
+            AppLogger.LogDb($"[{lab.LabName}] FileStatus → 5 (Aggregate Completed) for RunId={runId}.");
+
+            // STEP 6 — reset DataRefresh in {LabName}.json so the next run is not forced.
+            if (forceAggregate)
+            {
+                lab.DataRefresh = false;
+                LabConfigLoader.SaveLastProcessed(configFilePath, lab);
+                AppLogger.LogDb($"[{lab.LabName}] DataRefresh reset to false in {Path.GetFileName(configFilePath)}.");
+            }
+
+            Console.WriteLine($"\n[Lab {lab.LabName}] Aggregate complete for RunId={runId}.");
+            AppLogger.Log($"[Lab {labIndex}/{labs.Count}] SUCCESS : {lab.LabName} | Aggregate | RunId: {runId}");
+            labSuccess++;
+#endif
         }
         catch (Exception ex)
         {

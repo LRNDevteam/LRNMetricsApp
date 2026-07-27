@@ -106,7 +106,7 @@ public static class SalesRepSummaryExcelExportBuilder
 
         ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 15, firstColMinWidth: 30);
 
-        // Conditional formatting — "higher is better"
+        // Conditional formatting ï¿½ "higher is better"
         int lastDataRow = rows.Count + 2 + (totals is not null ? 1 : 0);
         foreach (int c in new[] { 18, 19, 20 })
         {
@@ -119,7 +119,7 @@ public static class SalesRepSummaryExcelExportBuilder
                 .Fill.SetBackgroundColor(ExcelTheme.BadBg).Font.SetFontColor(ExcelTheme.BadFg);
         }
 
-        // Conditional formatting — "lower is better"
+        // Conditional formatting ï¿½ "lower is better"
         foreach (int c in new[] { 14, 15, 16, 17 })
         {
             var range = ws.Range(3, c + 1, lastDataRow, c + 1);

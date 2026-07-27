@@ -7,16 +7,16 @@ namespace LabMetricsDashboard.Services;
 
 /// <summary>
 /// Builds a formatted Excel workbook for the NorthWest Production Summary Report.
-/// All sheets use the Office 2013–2022 green (Accent 6) colour palette from
-/// <see cref="ExcelTheme"/> — matching the Page Layout ? Colors ? Office 2013–2022 theme:
+/// All sheets use the Office 2013ï¿½2022 green (Accent 6) colour palette from
+/// <see cref="ExcelTheme"/> ï¿½ matching the Page Layout ? Colors ? Office 2013ï¿½2022 theme:
 /// <list type="bullet">
-///   <item>Title bars   — <c>TitleBg  #385723</c> (Accent 6 Darker 50 %)</item>
-///   <item>Column-group headers — <c>HeaderBg  #548235</c> (Accent 6 Darker 25 %)</item>
-///   <item>Month / sub-section — <c>SubHeaderBg  #70AD47</c> (Accent 6 base)</item>
-///   <item>Panel / group rows  — <c>GroupRowBg  #C5E0B4</c> (Accent 6 Lighter 60 %)</item>
-///   <item>Banded data rows    — <c>BandedRowBg  #E2EFDA</c> (Accent 6 Lighter 80 %)</item>
-///   <item>Total row           — <c>TotalRowBg  #A9D18E</c> (Accent 6 Lighter 40 %)</item>
-///   <item>Year / grand-total highlight — <c>GoldAccent  #FFC000</c> (Accent 4)</item>
+///   <item>Title bars   ï¿½ <c>TitleBg  #385723</c> (Accent 6 Darker 50 %)</item>
+///   <item>Column-group headers ï¿½ <c>HeaderBg  #548235</c> (Accent 6 Darker 25 %)</item>
+///   <item>Month / sub-section ï¿½ <c>SubHeaderBg  #70AD47</c> (Accent 6 base)</item>
+///   <item>Panel / group rows  ï¿½ <c>GroupRowBg  #C5E0B4</c> (Accent 6 Lighter 60 %)</item>
+///   <item>Banded data rows    ï¿½ <c>BandedRowBg  #E2EFDA</c> (Accent 6 Lighter 80 %)</item>
+///   <item>Total row           ï¿½ <c>TotalRowBg  #A9D18E</c> (Accent 6 Lighter 40 %)</item>
+///   <item>Year / grand-total highlight ï¿½ <c>GoldAccent  #FFC000</c> (Accent 4)</item>
 /// </list>
 /// </summary>
 public static class NorthWestProductionSummaryExcelExportBuilder
@@ -199,7 +199,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             .OrderBy(g => g.Key)
             .ToDictionary(g => g.Key, g => g.OrderBy(m => m).ToList());
 
-        // Column count: 1 (panel label) + per-year(months×2 + 2 year-total) + 2 grand-total
+        // Column count: 1 (panel label) + per-year(monthsï¿½2 + 2 year-total) + 2 grand-total
         int colCount = 1;
         foreach (var year in validYears)
             colCount += monthsByYear.GetValueOrDefault(year, []).Count * 2 + 2;
@@ -375,7 +375,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             int lastYear  = weeks[^1].WeekEnd.Year;
             weekTitle = firstYear == lastYear
                 ? $"Weekly Breakdown | Date of Entry | {firstYear}"
-                : $"Weekly Breakdown | Date of Entry | {firstYear}–{lastYear}";
+                : $"Weekly Breakdown | Date of Entry | {firstYear}ï¿½{lastYear}";
         }
 
         int row = startRow;
@@ -397,7 +397,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         foreach (var w in weeks)
         {
             WriteMergedHeader(ws, hRow2, hRow2, hCol, hCol + 1,
-                $"{w.WeekStart:MMM dd} – {w.WeekEnd:MMM dd}", ExcelTheme.SubHeaderBg);
+                $"{w.WeekStart:MMM dd} ï¿½ {w.WeekEnd:MMM dd}", ExcelTheme.SubHeaderBg);
             hCol += 2;
         }
 
@@ -616,7 +616,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         ExcelTheme.AutoFitColumns(ws, colCount);
     }
 
-    // ?? Payer × Panel ?????????????????????????????????????????????????????????
+    // ?? Payer ï¿½ Panel ?????????????????????????????????????????????????????????
 
     private static void BuildPayerPanelSheet(XLWorkbook wb, ProductionReportViewModel vm)
     {
@@ -630,11 +630,11 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         int colCount = 1 + panels.Count * 2 + 2;
 
         int row = 1;
-        ExcelTheme.WriteTitleBar(ws, row, colCount, "Payer × Panel");
+        ExcelTheme.WriteTitleBar(ws, row, colCount, "Payer ï¿½ Panel");
         row++;
 
         int hRow1 = row;
-        WriteMergedHeader(ws, hRow1, hRow1 + 1, 1, 1, "Payer × Panel", ExcelTheme.HeaderBg);
+        WriteMergedHeader(ws, hRow1, hRow1 + 1, 1, 1, "Payer ï¿½ Panel", ExcelTheme.HeaderBg);
         int hCol = 2;
         foreach (var p in panels)
         {
@@ -693,7 +693,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         ExcelTheme.AutoFitColumns(ws, colCount);
     }
 
-    // ?? Unbilled × Aging ??????????????????????????????????????????????????????
+    // ?? Unbilled ï¿½ Aging ??????????????????????????????????????????????????????
 
     private static void BuildUnbilledAgingSheet(XLWorkbook wb, ProductionReportViewModel vm)
     {
@@ -707,11 +707,11 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         int colCount = 1 + buckets.Count * 2 + 2;
 
         int row = 1;
-        ExcelTheme.WriteTitleBar(ws, row, colCount, "Unbilled × Aging");
+        ExcelTheme.WriteTitleBar(ws, row, colCount, "Unbilled ï¿½ Aging");
         row++;
 
         int hRow1 = row;
-        WriteMergedHeader(ws, hRow1, hRow1 + 1, 1, 1, "Unbilled × Aging", ExcelTheme.HeaderBg);
+        WriteMergedHeader(ws, hRow1, hRow1 + 1, 1, 1, "Unbilled ï¿½ Aging", ExcelTheme.HeaderBg);
         int hCol = 2;
         foreach (var b in buckets)
         {
@@ -924,7 +924,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
 
     // ?? Shared helpers ????????????????????????????????????????????????????????
 
-    /// <summary>Returns a letter label (A … Z, AA, AB …) for a zero-based panel index.</summary>
+    /// <summary>Returns a letter label (A ï¿½ Z, AA, AB ï¿½) for a zero-based panel index.</summary>
     private static string PanelLabel(int idx)
     {
         if (idx < 26) return ((char)('A' + idx)).ToString();
@@ -1053,8 +1053,8 @@ public static class NorthWestProductionSummaryExcelExportBuilder
 
         int row = 1;
         var titleText = truncated
-            ? $"{sheetName} — {labName}  (showing {rowsToWrite:N0} of {rows.Count:N0} rows)"
-            : $"{sheetName} — {labName}  ({rows.Count:N0} rows)";
+            ? $"{sheetName} ï¿½ {labName}  (showing {rowsToWrite:N0} of {rows.Count:N0} rows)"
+            : $"{sheetName} ï¿½ {labName}  ({rows.Count:N0} rows)";
 
         // Green title bar (NW brand colour)
         ExcelTheme.WriteTitleBar(ws, row, colCount, titleText);
@@ -1063,7 +1063,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         ExcelTheme.WriteHeaderRow(ws, row, 1, columns, ExcelTheme.HeaderBg);
         row++;
 
-        // Write raw values — skip per-cell styling on large datasets for performance
+        // Write raw values ï¿½ skip per-cell styling on large datasets for performance
         for (int r = 0; r < rowsToWrite; r++)
         {
             var dataRow = rows[r];
@@ -1103,7 +1103,10 @@ public static class NorthWestProductionSummaryExcelExportBuilder
             dataRange.Style.Border.OutsideBorderColor = XLColor.FromHtml("#E2E8F0");
         }
 
-        foreach (var col in ws.ColumnsUsed())
+        // Materialize first: setting Width registers a column definition in the
+        // worksheet's internal collection, which would invalidate a live
+        // ColumnsUsed() enumerator ("Collection was modifiedâ€¦").
+        foreach (var col in ws.ColumnsUsed().ToList())
             col.Width = 18;
 
         ws.SheetView.FreezeRows(2);
@@ -1137,7 +1140,7 @@ public static class NorthWestProductionSummaryExcelExportBuilder
         }
     }
 
-    // ?? Split helpers (use ChargeEnteredDate — NW primary date column) ????????
+    // ?? Split helpers (use ChargeEnteredDate ï¿½ NW primary date column) ????????
 
     private static int GetChargeEnteredYear(string[] columns, object?[] row)
     {

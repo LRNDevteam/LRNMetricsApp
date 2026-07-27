@@ -1,0 +1,80 @@
+@model LabMetricsDashboard.Models.CodingSummaryViewModel
+@{
+    var weeks = Model.WtdInsightRows.Select(r => r.WeekFolder).Distinct().OrderByDescending(w => w).ToList();
+    string Short(string? s, int max = 60)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return "-";
+        s = s.Trim();
+        return s.Length <= max ? s : s[..max] + "...";
+    }
+}
+@if (!weeks.Any())
+{
+    <div class="cs-table-wrap p-4"><div class="cs-empty"><div class="fw-semibold">No WTD insight data available.</div></div></div>
+}
+else
+{
+    <div class="small text-muted mb-2">@Model.WtdInsightRows.Count rows. Full CPT detail in Download Excel.</div>
+}
+@foreach (var week in weeks)
+{
+    var wrows = Model.WtdInsightRows.Where(r => r.WeekFolder == week).ToList();
+    <div class="cs-year-section">
+        <div class="cs-year-header">
+            <span class="cs-year-pill">@week</span>
+            <span class="cs-year-count">@wrows.Count rows</span>
+        </div>
+        <div class="cs-table-wrap"><div class="cs-table-scroll">
+        <table class="cs-table">
+            <thead><tr>
+                <th style="text-align:left">Week</th>
+                <th style="text-align:left">Panel</th>
+                <th style="text-align:left">Billable CPT</th>
+                <th>Claims</th>
+                <th>Billed</th>
+                <th style="text-align:left">Billed CPT</th>
+                <th style="text-align:left">Missing</th>
+                <th>Missing $</th>
+                <th>Rev Loss</th>
+                <th style="text-align:left">Additional</th>
+                <th>Addl $</th>
+                <th>Recoup</th>
+                <th>Net</th>
+                <th style="text-align:center">Calc</th>
+            </tr></thead>
+            <tbody>
+            @foreach (var r in wrows)
+            {
+                var ni = r.NetImpact;
+                <tr data-week="@r.WeekFolder" data-panel="@r.PanelName">
+                    <td>@r.WeekFolder</td>
+                    <td>@r.PanelName</td>
+                    <td class="mono small" title="@r.BillableCptCombo">@Short(r.BillableCptCombo)</td>
+                    <td class="r"><strong>@r.TotalClaims.ToString("N0")</strong></td>
+                    <td class="r">$@r.TotalBilledCharges.ToString("N2")</td>
+                    <td class="mono small" title="@r.BilledCptCombo">@Short(r.BilledCptCombo)</td>
+                    <td class="mono small" title="@r.MissingCpts">@Short(r.MissingCpts)</td>
+                    <td class="r">$@r.BilledChargesForMissingCpts.ToString("N2")</td>
+                    <td class="r">$@r.RevenueLoss.ToString("N2")</td>
+                    <td class="mono small" title="@r.AdditionalCpts">@Short(r.AdditionalCpts)</td>
+                    <td class="r">$@r.BilledChargesForAdditionalCpts.ToString("N2")</td>
+                    <td class="r">$@r.PotentialRecoupment.ToString("N2")</td>
+                    <td class="r">@(ni < 0 ? "-" : ni > 0 ? "+" : "")$@Math.Abs(ni).ToString("N2")</td>
+                    <td class="r" style="text-align:center">
+                        <button type="button" class="btn btn-sm cs-view-calc"
+                                data-scope="wtd"
+                                data-week="@r.WeekFolder"
+                                data-panel="@r.PanelName"
+                                data-missing="@r.MissingCpts"
+                                data-additional="@r.AdditionalCpts"
+                                title="View calculation">
+                            <i class="bi bi-calculator"></i>View
+                        </button>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+        </div></div>
+    </div>
+}

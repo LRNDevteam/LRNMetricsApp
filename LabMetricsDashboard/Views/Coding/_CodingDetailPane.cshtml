@@ -1,0 +1,115 @@
+@model LabMetricsDashboard.Models.CodingSummaryViewModel
+@if (!Model.DetailRows.Any())
+{
+    <div class="cs-table-wrap p-4">
+        <div class="cs-empty">
+            <div class="cs-empty-icon">&#128203;</div>
+            <div class="fw-semibold">No validation detail rows available.</div>
+            <div class="small mt-1">Ensure CaptureDataApp has processed at least one report.</div>
+        </div>
+    </div>
+}
+else
+{
+    @if (!string.IsNullOrWhiteSpace(Model.DetailRows[0].WeekFolder))
+    {
+        <div style="margin-bottom:.6rem">
+            <span class="cs-year-pill" style="font-size:.78rem">&#128197;&thinsp; @Model.DetailRows[0].WeekFolder</span>
+            <span class="cs-year-count ms-2" id="det-total-count">@Model.DetailRows.Count rows</span>
+        </div>
+    }
+    <div class="cs-table-wrap">
+        <div class="cs-table-scroll">
+            <table class="cs-table" id="tbl-detail" style="min-width:780px">
+                <thead>
+                    <tr>
+                        <th style="width:2rem"></th>
+                        <th style="text-align:left">Accession No.</th>
+                        <th style="text-align:left">Panel</th>
+                        <th>Date of Service</th>
+                        <th>Validation Status</th>
+                        <th>Total Charge</th>
+                        <th>Missing Charge</th>
+                        <th>Additional Charge</th>
+                    </tr>
+                </thead>
+                <tbody id="tbody-detail">
+                    @foreach (var r in Model.DetailRows)
+                    {
+                        var isMissing    = !string.IsNullOrWhiteSpace(r.MissingCPTCodes);
+                        var isAdditional = !string.IsNullOrWhiteSpace(r.AdditionalCPTCodes);
+                        var statusClass  = r.ValidationStatus.Contains("Valid", StringComparison.OrdinalIgnoreCase)
+                                           && !r.ValidationStatus.Contains("Invalid", StringComparison.OrdinalIgnoreCase)
+                                           ? "det-status-ok" : "det-status-err";
+                        var actualTags   = r.ActualCPTCode.Split(new[]{',',';',' '}, StringSplitOptions.RemoveEmptyEntries);
+                        var expectedTags = r.ExpectedCPTCode.Split(new[]{',',';',' '}, StringSplitOptions.RemoveEmptyEntries);
+                        var missingTags  = r.MissingCPTCodes.Split(new[]{',',';',' '}, StringSplitOptions.RemoveEmptyEntries);
+                        var extraTags    = r.AdditionalCPTCodes.Split(new[]{',',';',' '}, StringSplitOptions.RemoveEmptyEntries);
+                        <tr class="det-row-main"
+                            data-panel="@r.PanelName"
+                            data-status="@r.ValidationStatus"
+                            data-search="@(r.AccessionNo + " " + r.ActualCPTCode + " " + r.ExpectedCPTCode + " " + r.MissingCPTCodes)">
+                            <td class="det-toggle-cell"><div class="det-arrow"></div></td>
+                            <td class="mono">@r.AccessionNo</td>
+                            <td><span class="panel-chip">@r.PanelName</span></td>
+                            <td class="r">@r.DateofService</td>
+                            <td><span class="det-status-chip @statusClass">@r.ValidationStatus</span></td>
+                            <td class="r money-neutral">@(string.IsNullOrWhiteSpace(r.TotalCharge) ? "-" : "$\u2009" + r.TotalCharge)</td>
+                            <td class="r @(isMissing ? "money-neg" : "money-neutral")">@(string.IsNullOrWhiteSpace(r.MissingCPT_Charges) ? "-" : "$\u2009" + r.MissingCPT_Charges)</td>
+                            <td class="r @(isAdditional ? "money-warn" : "money-neutral")">@(string.IsNullOrWhiteSpace(r.AdditionalCPT_Charges) ? "-" : "$\u2009" + r.AdditionalCPT_Charges)</td>
+                        </tr>
+                        <tr class="det-row-expand">
+                            <td colspan="8" class="det-expand-inner">
+                                <div class="det-expand-grid">
+                                    <div class="det-expand-block">
+                                        <div class="det-expand-label">Actual CPT Codes</div>
+                                        <div class="cpt-tags">
+                                            @if (actualTags.Length == 0){ <span style="color:#aaa;font-size:.72rem">-</span> }
+                                            @foreach (var t in actualTags){ <span class="cpt-tag cpt-tag-actual">@t</span> }
+                                        </div>
+                                    </div>
+                                    <div class="det-expand-block">
+                                        <div class="det-expand-label">Expected CPT Codes</div>
+                                        <div class="cpt-tags">
+                                            @if (expectedTags.Length == 0){ <span style="color:#aaa;font-size:.72rem">-</span> }
+                                            @foreach (var t in expectedTags){ <span class="cpt-tag cpt-tag-expected">@t</span> }
+                                        </div>
+                                    </div>
+                                    @if (isMissing)
+                                    {
+                                        <div class="det-expand-block">
+                                            <div class="det-expand-label" style="color:#c62828">Missing CPTs</div>
+                                            <div class="cpt-tags">
+                                                @foreach (var t in missingTags){ <span class="cpt-tag cpt-tag-missing">@t</span> }
+                                            </div>
+                                        </div>
+                                    }
+                                    @if (isAdditional)
+                                    {
+                                        <div class="det-expand-block">
+                                            <div class="det-expand-label" style="color:#e65100">Additional CPTs</div>
+                                            <div class="cpt-tags">
+                                                @foreach (var t in extraTags){ <span class="cpt-tag cpt-tag-extra">@t</span> }
+                                            </div>
+                                        </div>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(r.Remarks))
+                                    {
+                                        <div class="det-expand-block" style="grid-column:1/-1">
+                                            <div class="det-expand-label">Remarks</div>
+                                            <div style="font-size:.75rem;color:#4a5568">@r.Remarks</div>
+                                        </div>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <div class="det-pager" id="det-pager">
+            <span class="det-pager-info" id="det-pager-info"></span>
+            <div id="det-pager-btns"></div>
+        </div>
+    </div>
+}

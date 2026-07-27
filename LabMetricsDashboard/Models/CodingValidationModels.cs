@@ -1,6 +1,6 @@
 namespace LabMetricsDashboard.Models;
 
-/// <summary>YTD Coding Insights row — one row per Year/PanelName.</summary>
+/// <summary>YTD Coding Insights row ï¿½ one row per Year/PanelName.</summary>
 public sealed class CodingInsightRow
 {
     public int    Year             { get; init; }
@@ -18,7 +18,7 @@ public sealed class CodingInsightRow
     public decimal NetImpact       { get; init; }
 }
 
-/// <summary>YTD Summary row — one row per Year/PanelName.</summary>
+/// <summary>YTD Summary row ï¿½ one row per Year/PanelName.</summary>
 public sealed class CodingSummaryRow
 {
     public int     Year                             { get; init; }
@@ -38,7 +38,7 @@ public sealed class CodingSummaryRow
     public decimal NetImpact                        { get; init; }
 }
 
-/// <summary>WTD Coding Insights row — one row per WeekFolder/PanelName.</summary>
+/// <summary>WTD Coding Insights row ï¿½ one row per WeekFolder/PanelName.</summary>
 public sealed class CodingWtdInsightRow
 {
     public string  WeekFolder      { get; init; } = string.Empty;
@@ -56,7 +56,7 @@ public sealed class CodingWtdInsightRow
     public decimal NetImpact       { get; init; }
 }
 
-/// <summary>WTD Summary row — one row per WeekFolder/PanelName.</summary>
+/// <summary>WTD Summary row ï¿½ one row per WeekFolder/PanelName.</summary>
 public sealed class CodingWtdSummaryRow
 {
     public string  WeekFolder                        { get; init; } = string.Empty;
@@ -72,7 +72,7 @@ public sealed class CodingWtdSummaryRow
 }
 
 /// <summary>
-/// One row from dbo.CodingFinancialSummary — one record per LabName/WeekFolder.
+/// One row from dbo.CodingFinancialSummary ï¿½ one record per LabName/WeekFolder.
 /// Maps exactly to the Financial Dashboard sheet captured by CaptureDataApp.
 /// </summary>
 public sealed class CodingFinancialSummaryRow
@@ -110,7 +110,7 @@ public sealed class CodingFinancialSummaryRow
 }
 
 /// <summary>
-/// One raw row from dbo.CodingValidation — used in the Validation Detail tab.
+/// One raw row from dbo.CodingValidation ï¿½ used in the Validation Detail tab.
 /// Only the columns useful for display are mapped.
 /// </summary>
 public sealed class CodingValidationDetailRow
@@ -130,35 +130,93 @@ public sealed class CodingValidationDetailRow
     public string Remarks               { get; init; } = string.Empty;
 }
 
+/// <summary>Drill-down payload for the View Calculation modal.</summary>
+public sealed class CodingCalculationDetail
+{
+    public string LabName { get; init; } = string.Empty;
+    public string Scope { get; init; } = string.Empty; // ytd | wtd | financial
+    public int? Year { get; init; }
+    public string? WeekFolder { get; init; }
+    public string? PanelName { get; init; }
+    public string? MissingCptsFilter { get; init; }
+    public string? AdditionalCptsFilter { get; init; }
+
+    public int TotalClaims { get; init; }
+    public int ClaimsWithMissingCpts { get; init; }
+    public int ClaimsWithAdditionalCpts { get; init; }
+    public decimal MissingChargesTotal { get; init; }
+    public decimal AdditionalChargesTotal { get; init; }
+    public decimal LostRevenue { get; init; }
+    public decimal RevenueAtRisk { get; init; }
+    public decimal NetImpact => LostRevenue - RevenueAtRisk;
+
+    public List<CodingCalcCptGroup> CptGroups { get; init; } = [];
+    public List<CodingCalcClaimSample> ClaimSamples { get; init; } = [];
+}
+
+/// <summary>One CPT-combination rollup contributing to Lost / At Risk.</summary>
+public sealed class CodingCalcCptGroup
+{
+    public string MissingCpts { get; init; } = string.Empty;
+    public string AdditionalCpts { get; init; } = string.Empty;
+    public int ClaimCount { get; init; }
+    public decimal MissingCharges { get; init; }
+    public decimal MissingAvgPaid { get; init; }
+    public decimal AdditionalCharges { get; init; }
+    public decimal AdditionalAvgPaid { get; init; }
+}
+
+/// <summary>Sample claim line showing the exact AvgPaid values used.</summary>
+public sealed class CodingCalcClaimSample
+{
+    public string AccessionNo { get; init; } = string.Empty;
+    public string DateofService { get; init; } = string.Empty;
+    public string WeekFolder { get; init; } = string.Empty;
+    public string PanelName { get; init; } = string.Empty;
+    public string PayerCommonCode { get; init; } = string.Empty;
+    public string MissingCpts { get; init; } = string.Empty;
+    public string AdditionalCpts { get; init; } = string.Empty;
+    public decimal MissingCharges { get; init; }
+    public decimal MissingAvgPaid { get; init; }
+    public decimal AdditionalCharges { get; init; }
+    public decimal AdditionalAvgPaid { get; init; }
+}
+
 public sealed class CodingSummaryViewModel
 {
     public string LabName { get; init; } = string.Empty;
     public List<string> AvailableLabs { get; init; } = [];
 
-    /// <summary>Grouped by year descending, then PanelName — for the YTD Insights tab.</summary>
+    /// <summary>Grouped by year descending, then PanelName ï¿½ for the YTD Insights tab.</summary>
     public List<CodingInsightRow> InsightRows { get; init; } = [];
 
-    /// <summary>Grouped by year descending, then PanelName — for the YTD Summary tab.</summary>
+    /// <summary>Grouped by year descending, then PanelName ï¿½ for the YTD Summary tab.</summary>
     public List<CodingSummaryRow> SummaryRows { get; init; } = [];
 
-    /// <summary>Grouped by WeekFolder descending, then PanelName — for the WTD Insights tab.</summary>
+    /// <summary>Grouped by WeekFolder descending, then PanelName ï¿½ for the WTD Insights tab.</summary>
     public List<CodingWtdInsightRow> WtdInsightRows { get; init; } = [];
 
-    /// <summary>Grouped by WeekFolder descending, then PanelName — for the WTD Summary tab.</summary>
+    /// <summary>Grouped by WeekFolder descending, then PanelName ï¿½ for the WTD Summary tab.</summary>
     public List<CodingWtdSummaryRow> WtdSummaryRows { get; init; } = [];
 
-    /// <summary>One row per WeekFolder ordered desc — drives the KPI strip and Financial Dashboard pills.</summary>
+    /// <summary>One row per WeekFolder ordered desc ï¿½ drives the KPI strip and Financial Dashboard pills.</summary>
     public List<CodingFinancialSummaryRow> FinancialRows { get; init; } = [];
 
     /// <summary>Raw CodingValidation rows for the Validation Detail tab.</summary>
     public List<CodingValidationDetailRow> DetailRows { get; init; } = [];
 
-    /// <summary>Latest financial summary row — used to populate the KPI hero strip.</summary>
+    /// <summary>Latest financial summary row ï¿½ used to populate the KPI hero strip.</summary>
     public CodingFinancialSummaryRow? LatestFinancial => FinancialRows.Count > 0 ? FinancialRows[0] : null;
 
     public bool HasData => InsightRows.Count > 0 || SummaryRows.Count > 0
                         || WtdInsightRows.Count > 0 || WtdSummaryRows.Count > 0
                         || FinancialRows.Count > 0 || DetailRows.Count > 0;
     public string? ErrorMessage { get; init; }
+
+    /// <summary>
+    /// When true, Download packages Coding Summary Excel with CptAverage / PanelAverage CSVs (ZIP).
+    /// Driven by lab config <c>Avgs</c> path.
+    /// </summary>
+    public bool PackageAverageFiles { get; init; }
 }
 

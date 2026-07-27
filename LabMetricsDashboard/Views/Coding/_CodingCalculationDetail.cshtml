@@ -1,0 +1,222 @@
+@model LabMetricsDashboard.Models.CodingCalculationDetail
+@{
+    var en = System.Globalization.CultureInfo.GetCultureInfo("en-US");
+    string Money(decimal v) => v.ToString("C2", en);
+    string Num(int v) => v.ToString("N0", en);
+    string Short(string? s, int max = 80)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return "—";
+        s = s.Trim();
+        return s.Length <= max ? s : s[..max] + "…";
+    }
+    var scopeLabel = Model.Scope switch
+    {
+        "wtd" => "WTD",
+        "financial" => "Financial week",
+        _ => "YTD"
+    };
+    var titleBits = new List<string> { scopeLabel };
+    if (Model.Year.HasValue) titleBits.Add(Model.Year.Value.ToString());
+    if (!string.IsNullOrWhiteSpace(Model.WeekFolder)) titleBits.Add(Model.WeekFolder!);
+    if (!string.IsNullOrWhiteSpace(Model.PanelName)) titleBits.Add(Model.PanelName!);
+}
+<style>
+    .calc-detail { font-size: .84rem; color: #1b2a44; }
+    .calc-detail-kpis {
+        display: grid; gap: .75rem; margin-bottom: 1rem;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    }
+    .calc-detail-kpi {
+        border: 1px solid #e6ecf3; border-radius: 12px; padding: .75rem .85rem;
+        background: linear-gradient(160deg, #fff, #f7fafc);
+    }
+    .calc-detail-kpi .lbl {
+        font-size: .68rem; font-weight: 700; letter-spacing: .06em;
+        text-transform: uppercase; color: #6b7a90;
+    }
+    .calc-detail-kpi .val {
+        margin-top: .2rem; font-size: 1.15rem; font-weight: 800;
+        font-variant-numeric: tabular-nums;
+    }
+    .calc-detail-kpi .val.neg { color: #d64545; }
+    .calc-detail-kpi .val.pos { color: #0f9d6f; }
+    .calc-detail-formula {
+        border: 1px solid #e6ecf3; border-radius: 12px; padding: .85rem 1rem;
+        background: #f8fafc; margin-bottom: 1rem; line-height: 1.45;
+    }
+    .calc-detail-formula code {
+        font-size: .78rem; background: #eef2f7; padding: .1rem .35rem; border-radius: 4px;
+    }
+    .calc-detail-section { margin-bottom: 1.1rem; }
+    .calc-detail-section h6 {
+        font-size: .82rem; font-weight: 800; margin: 0 0 .45rem; color: #1b2a44;
+    }
+    .calc-detail-section .sub { font-size: .74rem; color: #6b7a90; margin-bottom: .5rem; }
+    .calc-detail-tbl-wrap {
+        max-height: 280px; overflow: auto; border: 1px solid #e6ecf3; border-radius: 10px;
+    }
+    .calc-detail-tbl { width: 100%; border-collapse: collapse; font-size: .76rem; }
+    .calc-detail-tbl th {
+        position: sticky; top: 0; background: #f4f7fb; color: #516079;
+        font-size: .66rem; text-transform: uppercase; letter-spacing: .04em;
+        padding: .45rem .55rem; text-align: right; white-space: nowrap; border-bottom: 1px solid #e6ecf3;
+    }
+    .calc-detail-tbl th:first-child,
+    .calc-detail-tbl th:nth-child(2) { text-align: left; }
+    .calc-detail-tbl td {
+        padding: .42rem .55rem; text-align: right; border-bottom: 1px solid #f0f3f7;
+        vertical-align: top; font-variant-numeric: tabular-nums;
+    }
+    .calc-detail-tbl td:first-child,
+    .calc-detail-tbl td:nth-child(2) { text-align: left; max-width: 220px; word-break: break-word; }
+    .calc-detail-tbl tr:last-child td { border-bottom: none; }
+    .calc-detail-tbl .mono { font-family: ui-monospace, Consolas, monospace; font-size: .72rem; }
+    .calc-detail-meta { font-size: .74rem; color: #6b7a90; margin-bottom: .75rem; }
+</style>
+
+<div class="calc-detail">
+    <div class="calc-detail-meta">
+        <strong>@Model.LabName</strong>
+        · @string.Join(" · ", titleBits)
+        @if (!string.IsNullOrWhiteSpace(Model.MissingCptsFilter) || !string.IsNullOrWhiteSpace(Model.AdditionalCptsFilter))
+        {
+            <span>· Insight CPT filter applied</span>
+        }
+    </div>
+
+    <div class="calc-detail-formula">
+        <div><strong>Value used:</strong> <code>MissingCPT_AvgPaidAmount</code> / <code>AdditionalCPT_AvgPaidAmount</code>
+            from Coding Validated (sourced from CPT AvgsOutput <code>AvgPaidAmountPerUnit</code>).</div>
+        <div class="mt-1">
+            <strong>Lost Revenue</strong> = SUM(<code>MissingCPT_AvgPaidAmount</code>)
+            &nbsp;·&nbsp;
+            <strong>Revenue at Risk</strong> = SUM(<code>AdditionalCPT_AvgPaidAmount</code>)
+            &nbsp;·&nbsp;
+            <strong>Net Impact</strong> = Lost − At Risk
+        </div>
+        <div class="mt-1 text-muted" style="font-size:.74rem">
+            Charges columns are shown for comparison only — they are <em>not</em> used in Lost / At Risk.
+        </div>
+    </div>
+
+    <div class="calc-detail-kpis">
+        <div class="calc-detail-kpi">
+            <div class="lbl">Claims in scope</div>
+            <div class="val">@Num(Model.TotalClaims)</div>
+        </div>
+        <div class="calc-detail-kpi">
+            <div class="lbl">Missing charges</div>
+            <div class="val">@Money(Model.MissingChargesTotal)</div>
+        </div>
+        <div class="calc-detail-kpi">
+            <div class="lbl">Lost revenue</div>
+            <div class="val neg">@Money(Model.LostRevenue)</div>
+        </div>
+        <div class="calc-detail-kpi">
+            <div class="lbl">Additional charges</div>
+            <div class="val">@Money(Model.AdditionalChargesTotal)</div>
+        </div>
+        <div class="calc-detail-kpi">
+            <div class="lbl">Revenue at risk</div>
+            <div class="val pos">@Money(Model.RevenueAtRisk)</div>
+        </div>
+        <div class="calc-detail-kpi">
+            <div class="lbl">Net impact</div>
+            <div class="val @(Model.NetImpact >= 0 ? "pos" : "neg")">
+                @(Model.NetImpact >= 0 ? "+" : "-")@Money(Math.Abs(Model.NetImpact))
+            </div>
+        </div>
+    </div>
+
+    <div class="calc-detail-section">
+        <h6>CPT combination breakdown</h6>
+        <div class="sub">
+            @Num(Model.ClaimsWithMissingCpts) claims with missing CPTs ·
+            @Num(Model.ClaimsWithAdditionalCpts) with additional CPTs ·
+            Top @Model.CptGroups.Count groups by Avg Paid impact
+        </div>
+        @if (Model.CptGroups.Count == 0)
+        {
+            <div class="text-muted">No missing/additional CPT combinations in this scope.</div>
+        }
+        else
+        {
+            <div class="calc-detail-tbl-wrap">
+                <table class="calc-detail-tbl">
+                    <thead>
+                        <tr>
+                            <th>Missing CPTs</th>
+                            <th>Additional CPTs</th>
+                            <th>Claims</th>
+                            <th>Missing $</th>
+                            <th>Missing Avg Paid</th>
+                            <th>Addl $</th>
+                            <th>Addl Avg Paid</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var g in Model.CptGroups)
+                    {
+                        <tr>
+                            <td class="mono" title="@g.MissingCpts">@Short(g.MissingCpts)</td>
+                            <td class="mono" title="@g.AdditionalCpts">@Short(g.AdditionalCpts)</td>
+                            <td>@Num(g.ClaimCount)</td>
+                            <td>@Money(g.MissingCharges)</td>
+                            <td class="@(g.MissingAvgPaid != 0 ? "neg" : "")">@Money(g.MissingAvgPaid)</td>
+                            <td>@Money(g.AdditionalCharges)</td>
+                            <td class="@(g.AdditionalAvgPaid != 0 ? "pos" : "")">@Money(g.AdditionalAvgPaid)</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    <div class="calc-detail-section">
+        <h6>Claim samples (exact values used)</h6>
+        <div class="sub">Up to @Model.ClaimSamples.Count claim rows sorted by Avg Paid impact</div>
+        @if (Model.ClaimSamples.Count == 0)
+        {
+            <div class="text-muted">No claim samples for this scope.</div>
+        }
+        else
+        {
+            <div class="calc-detail-tbl-wrap">
+                <table class="calc-detail-tbl">
+                    <thead>
+                        <tr>
+                            <th>Accession</th>
+                            <th>Payer</th>
+                            <th>Missing / Additional</th>
+                            <th>Missing $</th>
+                            <th>Missing Avg Paid</th>
+                            <th>Addl $</th>
+                            <th>Addl Avg Paid</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var c in Model.ClaimSamples)
+                    {
+                        <tr>
+                            <td>
+                                <div class="mono">@c.AccessionNo</div>
+                                <div class="text-muted" style="font-size:.68rem">@c.DateofService · @Short(c.PanelName, 40)</div>
+                            </td>
+                            <td class="mono">@Short(c.PayerCommonCode, 24)</td>
+                            <td>
+                                <div class="mono" title="@c.MissingCpts">M: @Short(c.MissingCpts, 48)</div>
+                                <div class="mono text-muted" title="@c.AdditionalCpts">A: @Short(c.AdditionalCpts, 48)</div>
+                            </td>
+                            <td>@Money(c.MissingCharges)</td>
+                            <td class="@(c.MissingAvgPaid != 0 ? "neg" : "")">@Money(c.MissingAvgPaid)</td>
+                            <td>@Money(c.AdditionalCharges)</td>
+                            <td class="@(c.AdditionalAvgPaid != 0 ? "pos" : "")">@Money(c.AdditionalAvgPaid)</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
