@@ -89,6 +89,32 @@ public sealed class SqlDenialWorkflowRepository : IDenialWorkflowRepository
     }
 
 
+    /// <summary>
+    /// Editable columns for the upload template, in order. EscalationResponse /
+    /// EscalationResponseComment are AR-Manager/Admin-only (the upload endpoint rejects them for
+    /// reviewers), so they are included only for those roles — a reviewer must never be offered a
+    /// column they cannot use (Round 1 UAT). The read-only reference columns are constant and are
+    /// prepended by the caller.
+    /// </summary>
+    internal static string[] BuildUploadTemplateEditableHeaders(string? role)
+    {
+        var token = new string((role ?? string.Empty).Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+        var isManager = token.Contains("ADMIN") || token.Contains("ARMANAGER");
+        var headers = new List<string>
+        {
+            "UpdateStatus","ExpectedResponseDate","ActionCompleted","ActualOutcome",
+            "DocumentationType","FollowUpReason","ClosureReason","ValidationStatus","Comments",
+            "EscalationReason","OtherEscalationReason","EscalationComment","EscalationExpectedResponseDate"
+        };
+        if (isManager)
+        {
+            headers.Add("EscalationResponse");
+            headers.Add("EscalationResponseComment");
+        }
+        headers.Add("Notes");
+        return headers.ToArray();
+    }
+
     private static async Task EnsureDenialTaskBoardNormalizedClaimIdAsync(SqlConnection con, CancellationToken ct)
     {
         // Run DDL only once per database per process lifetime — concurrent callers skip after the first succeeds.
@@ -3504,21 +3530,7 @@ ORDER BY {string.Join(", ", orderByParts)};";
         // can upload an EscalationResponse"). They must not appear on the AR Reviewer template — a
         // reviewer should never be offered a column they cannot use. Include them only for
         // manager/admin roles.
-        var exportRoleToken = new string((filter.Role ?? string.Empty).Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
-        var isManagerTemplate = exportRoleToken.Contains("ADMIN") || exportRoleToken.Contains("ARMANAGER");
-        var editableHeaderList = new List<string>
-        {
-            "UpdateStatus","ExpectedResponseDate","ActionCompleted","ActualOutcome",
-            "DocumentationType","FollowUpReason","ClosureReason","ValidationStatus","Comments",
-            "EscalationReason","OtherEscalationReason","EscalationComment","EscalationExpectedResponseDate"
-        };
-        if (isManagerTemplate)
-        {
-            editableHeaderList.Add("EscalationResponse");
-            editableHeaderList.Add("EscalationResponseComment");
-        }
-        editableHeaderList.Add("Notes");
-        var editableHeaders = editableHeaderList.ToArray();
+        var editableHeaders = BuildUploadTemplateEditableHeaders(filter.Role);
         var headers = readOnlyHeaders.Concat(editableHeaders).ToArray();
         var readOnlyCount = readOnlyHeaders.Length;
 

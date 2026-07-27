@@ -1275,17 +1275,34 @@ public sealed class DenialWorkflowController : ControllerBase
             || r.Contains("ACCOUNTMANAGER");
     }
 
-    private static bool IsReadOnlyWorkflowRole(string? role) => IsClientManagerRole(role) || IsAccountManagerRole(role);
-    private static bool IsClientManagerRole(string? role) => NormalizeRoleToken(role).Contains("CLIENTMANAGER");
-    private static bool IsAccountManagerRole(string? role) => NormalizeRoleToken(role).Contains("ACCOUNTMANAGER");
+    internal static bool IsReadOnlyWorkflowRole(string? role) => IsClientManagerRole(role) || IsAccountManagerRole(role);
+    internal static bool IsClientManagerRole(string? role) => NormalizeRoleToken(role).Contains("CLIENTMANAGER");
+    internal static bool IsAccountManagerRole(string? role) => NormalizeRoleToken(role).Contains("ACCOUNTMANAGER");
 
-    private static bool IsReviewerOnly(string? role)
+    internal static bool IsReviewerOnly(string? role)
     {
         var r = NormalizeRoleToken(role);
-        return (r.Contains("ARREVIEWER") || r.Contains("ARANALYSER") || r.Contains("ARANALYZER") || r.Contains("REVIEWER"))
+        // "AR Analyst" is a real reviewer-tier role (see the AnalystSelectableStatuses guard and the
+        // "AR Analyst users can only select..." validation message), and the React side already
+        // treats "analyst" as reviewer-only. The backend previously matched only "analyser"/"analyzer"
+        // (the -er/-zer spellings), so a user whose role was literally "AR Analyst" was NOT classified
+        // as a reviewer — giving them non-reviewer claim scope and letting them pick manager-only
+        // statuses. Match "analyst" too and align the spellings with the frontend.
+        return (r.Contains("REVIEWER") || r.Contains("ANALYST") || r.Contains("ANALYSER") || r.Contains("ANALYZER"))
             && !r.Contains("MANAGER")
             && !r.Contains("ADMIN");
     }
+
+    /// <summary>True when the role may upload a manager escalation response (AR Manager / Admin).</summary>
+    internal static bool IsManagerOrAdminRole(string? role)
+    {
+        var r = NormalizeRoleToken(role);
+        return r.Contains("ADMIN") || r.Contains("ARMANAGER");
+    }
+
+    /// <summary>Whether the given escalation-response value is one the manager may submit.</summary>
+    internal static bool IsValidManagerEscalationResponse(string? value)
+        => !string.IsNullOrWhiteSpace(value) && ManagerEscalationResponses.Contains(value.Trim());
 
     private static readonly HashSet<string> CanonicalLineStatuses = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -1346,7 +1363,7 @@ public sealed class DenialWorkflowController : ControllerBase
         "Other"
     };
 
-    private static string NormalizeWorkflowStatus(string? status)
+    internal static string NormalizeWorkflowStatus(string? status)
     {
         var value = (status ?? string.Empty).Trim();
         return value.ToLowerInvariant() switch
@@ -1364,7 +1381,7 @@ public sealed class DenialWorkflowController : ControllerBase
         };
     }
 
-    private static string ValidateTaskStatusUpdate(UpdateTaskRequest request, string? role)
+    internal static string ValidateTaskStatusUpdate(UpdateTaskRequest request, string? role)
     {
         if (!CanonicalLineStatuses.Contains(request.Status))
             return $"'{request.Status}' is not a valid denial workflow status.";
@@ -1393,7 +1410,7 @@ public sealed class DenialWorkflowController : ControllerBase
         };
     }
 
-    private static string NormalizeRoleToken(string? value)
+    internal static string NormalizeRoleToken(string? value)
         => new string((value ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
 
     private static string CsvValue(IReadOnlyDictionary<string, string> row, params string[] names)
@@ -1404,7 +1421,7 @@ public sealed class DenialWorkflowController : ControllerBase
         return string.Empty;
     }
 
-    private static bool CsvHasClaimAction(IReadOnlyDictionary<string, string> row)
+    internal static bool CsvHasClaimAction(IReadOnlyDictionary<string, string> row)
         => new[]
         {
             // UAT TC-170: "Notes" is an editable template column with its own save branch, but it
