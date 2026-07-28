@@ -454,6 +454,7 @@ public sealed class ClaimSubMenuCounts
     public int InternalEscalation { get; set; }
     public int ExternalEscalation { get; set; }
     public int EscalationResponse { get; set; }
+    public int ExternalResponse { get; set; }
     public int Verification { get; set; }
     public int PayerFollowup { get; set; }
     public int PendingDocumentation { get; set; }

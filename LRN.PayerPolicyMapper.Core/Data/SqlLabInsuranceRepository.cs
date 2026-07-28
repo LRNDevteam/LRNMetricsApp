@@ -250,13 +250,17 @@ public sealed class SqlLabInsuranceRepository : ILabInsuranceRepository
         var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         await using var conn = Open();
         await conn.OpenAsync(ct);
+        // Degrade gracefully on labs where the payer-mapping master has not been provisioned:
+        // without the OBJECT_ID guard this threw "Invalid object name 'dbo.LabInsuranceMaster'"
+        // (SQL error 208), which surfaced to the UI as a generic "Issue happened" banner.
         await using var cmd = new SqlCommand("""
-            SELECT ISNULL(NULLIF(LTRIM(RTRIM(MappingStatus)), ''),
-                          CASE WHEN GlobalPayerID IS NOT NULL THEN 'Mapped' ELSE 'Unmapped' END) AS Status,
-                   COUNT(1)
-            FROM dbo.LabInsuranceMaster
-            GROUP BY ISNULL(NULLIF(LTRIM(RTRIM(MappingStatus)), ''),
-                            CASE WHEN GlobalPayerID IS NOT NULL THEN 'Mapped' ELSE 'Unmapped' END);
+            IF OBJECT_ID('dbo.LabInsuranceMaster', 'U') IS NOT NULL
+                SELECT ISNULL(NULLIF(LTRIM(RTRIM(MappingStatus)), ''),
+                              CASE WHEN GlobalPayerID IS NOT NULL THEN 'Mapped' ELSE 'Unmapped' END) AS Status,
+                       COUNT(1)
+                FROM dbo.LabInsuranceMaster
+                GROUP BY ISNULL(NULLIF(LTRIM(RTRIM(MappingStatus)), ''),
+                                CASE WHEN GlobalPayerID IS NOT NULL THEN 'Mapped' ELSE 'Unmapped' END);
             """, conn);
         await using var r = await cmd.ExecuteReaderAsync(ct);
         while (await r.ReadAsync(ct)) counts[r.GetString(0)] = r.GetInt32(1);

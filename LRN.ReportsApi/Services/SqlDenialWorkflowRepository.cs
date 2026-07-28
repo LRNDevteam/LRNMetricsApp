@@ -1446,6 +1446,7 @@ SELECT VerificationPending = COUNT(1) FROM dbo.DenialVerificationTask WITH (NOLO
         WHEN ISNULL({alias}.PendingDocumentationCount,0) > 0 THEN 'Pending Documentation'
         WHEN ISNULL({alias}.PayerFollowupCount,0) > 0 THEN 'Payer Followup'
         WHEN ISNULL({alias}.PendingPayerResponseCount,0) > 0 THEN 'Pending Payer Response'
+        WHEN ISNULL({alias}.HasEscalationResponse,0) = 1 AND ISNULL({alias}.ExternalResponseExists,0) = 1 THEN 'External Response'
         WHEN ISNULL({alias}.HasEscalationResponse,0) = 1 THEN 'Escalation Response'
         WHEN ISNULL({alias}.TaskCount,0) > 0 AND ISNULL({alias}.ClosedCount,0) = ISNULL({alias}.TaskCount,0) THEN 'Closed'
         WHEN ISNULL({alias}.AssignedTaskCount,0) > 0 THEN 'Assigned'
@@ -1464,6 +1465,7 @@ SELECT VerificationPending = COUNT(1) FROM dbo.DenialVerificationTask WITH (NOLO
         WHEN 'Closed' THEN 'Closed'
         WHEN 'Assigned' THEN 'Assigned'
         WHEN 'Unassigned' THEN 'Unassigned'
+        WHEN 'External Response' THEN 'External Response'
         WHEN 'Escalation Response' THEN 'Escalation Response'
         ELSE 'New'
     END";
@@ -1482,10 +1484,12 @@ SELECT VerificationPending = COUNT(1) FROM dbo.DenialVerificationTask WITH (NOLO
         // etc.) it must leave the "SLA at Risk" (manager) / "SLA in 3 Days" (reviewer) bucket.
         // Only claims still sitting in Assigned / Unassigned / New count as SLA at risk.
         "slaatrisk" => "ISNULL(tca.HasSlaAtRisk, 0) = 1 AND ISNULL(tca.QueueName, '') IN ('Assigned','Unassigned','New')",
-        "escalations" => "ISNULL(tca.QueueName, '') IN ('Internal Escalation','External Escalation','Escalation Response')",
+        "escalations" => "ISNULL(tca.QueueName, '') IN ('Internal Escalation','External Escalation','Escalation Response','External Response')",
         "internalescalation" => "ISNULL(tca.QueueName, '') = 'Internal Escalation'",
         "externalescalation" => "ISNULL(tca.QueueName, '') = 'External Escalation'",
         "escalationresponse" => "ISNULL(tca.QueueName, '') = 'Escalation Response'",
+        // New AR Manager tab: claims the Client/Account Manager has responded to (external response).
+        "externalresponse" => "ISNULL(tca.QueueName, '') = 'External Response'",
         "closed" => "ISNULL(tca.QueueName, '') = 'Closed'",
         "verification" => "ISNULL(tca.HasVerification, 0) = 1",
         "all" => "1=1",
@@ -1631,6 +1635,28 @@ SELECT
                    OR LOWER(LTRIM(RTRIM(ISNULL(e.EscalatedToRole,'')))) LIKE '%accountmanager%'
                    OR LOWER(LTRIM(RTRIM(ISNULL(e.EscalatedTo,'')))) LIKE '%client manager%'
                    OR LOWER(LTRIM(RTRIM(ISNULL(e.EscalatedTo,'')))) LIKE '%account manager%')
+              -- Round 1 (07/27) UAT: only an UNRESPONDED external escalation keeps the claim in the
+              -- External Escalation queue. Once the Account/Client Manager has responded (and the
+              -- AR Manager reassigns it to the reviewer as Rework), this must reset so the claim
+              -- leaves External Escalation instead of being stuck there permanently.
+              AND LOWER(LTRIM(RTRIM(ISNULL(e.Status,'')))) NOT IN ('response submitted','responded','manager response','resolved','writeoffapproved','writeoffrejected','closed')
+              AND ISNULL(e.Comments,'') NOT LIKE '%Manager Response:%'
+              AND ISNULL(e.Comments,'') NOT LIKE '%Client Response:%'
+        ) THEN 1 ELSE 0 END,
+    -- New External Response queue: the complement of the above -- a Client/Account Manager HAS
+    -- responded to the external escalation. Gated at the queue level by the live HasEscalationResponse
+    -- flag so it resets once the AR Manager reassigns the claim (same reset behaviour as the internal
+    -- Escalation Response queue).
+    ExternalResponseExists = CASE WHEN EXISTS (
+            SELECT 1 FROM dbo.DenialClaimEscalations e WITH (NOLOCK)
+            WHERE e.IsDeleted=0 AND {escalationLabScope} AND e.ClaimId IN (c.ClaimUid, c.ClaimId)
+              AND (LOWER(LTRIM(RTRIM(ISNULL(e.EscalatedToRole,'')))) LIKE '%clientmanager%'
+                   OR LOWER(LTRIM(RTRIM(ISNULL(e.EscalatedToRole,'')))) LIKE '%accountmanager%'
+                   OR LOWER(LTRIM(RTRIM(ISNULL(e.EscalatedTo,'')))) LIKE '%client manager%'
+                   OR LOWER(LTRIM(RTRIM(ISNULL(e.EscalatedTo,'')))) LIKE '%account manager%')
+              AND (LOWER(LTRIM(RTRIM(ISNULL(e.Status,'')))) IN ('response submitted','responded','manager response','resolved','writeoffapproved','writeoffrejected')
+                   OR ISNULL(e.Comments,'') LIKE '%Manager Response:%'
+                   OR ISNULL(e.Comments,'') LIKE '%Client Response:%')
         ) THEN 1 ELSE 0 END
 INTO #TaskClaimRaw
 FROM #ClaimBase c
@@ -1659,6 +1685,7 @@ SELECT
     InternalEscalation = SUM(CASE WHEN ISNULL(tca.[Status], '') = 'Internal Escalation' THEN 1 ELSE 0 END),
     ExternalEscalation = SUM(CASE WHEN ISNULL(tca.[Status], '') = 'External Escalation' THEN 1 ELSE 0 END),
     EscalationResponse = SUM(CASE WHEN ISNULL(tca.[Status], '') = 'Escalation Response' THEN 1 ELSE 0 END),
+    ExternalResponse = SUM(CASE WHEN ISNULL(tca.[Status], '') = 'External Response' THEN 1 ELSE 0 END),
     Verification = SUM(ISNULL(tca.HasVerification, 0)),
     SlaAtRisk = SUM(CASE WHEN ISNULL(tca.HasSlaAtRisk, 0) = 1 AND ISNULL(tca.QueueName, '') IN ('Assigned','Unassigned','New') THEN 1 ELSE 0 END)
 FROM #ClaimBase c
@@ -1699,6 +1726,7 @@ DROP TABLE #TaskClaimAgg;{reviewerScopeCleanup}";
                 result.InternalEscalation = GetInt(rd, "InternalEscalation");
                 result.ExternalEscalation = GetInt(rd, "ExternalEscalation");
                 result.EscalationResponse = GetInt(rd, "EscalationResponse");
+                result.ExternalResponse = GetInt(rd, "ExternalResponse");
                 result.Verification = GetInt(rd, "Verification");
                 result.SlaAtRisk = GetInt(rd, "SlaAtRisk");
             }
@@ -1978,6 +2006,22 @@ SELECT
               OR LOWER(LTRIM(RTRIM(ISNULL(e.EscalatedToRole,'')))) LIKE '%accountmanager%'
               OR LOWER(LTRIM(RTRIM(ISNULL(e.EscalatedTo,'')))) LIKE '%client manager%'
               OR LOWER(LTRIM(RTRIM(ISNULL(e.EscalatedTo,'')))) LIKE '%account manager%')
+         -- Only an UNRESPONDED external escalation keeps the claim in External Escalation (see the
+         -- matching change in GetClaimSubMenuCountsAsync). Resets once the manager has responded.
+         AND LOWER(LTRIM(RTRIM(ISNULL(e.Status,'')))) NOT IN ('response submitted','responded','manager response','resolved','writeoffapproved','writeoffrejected','closed')
+         AND ISNULL(e.Comments,'') NOT LIKE '%Manager Response:%'
+         AND ISNULL(e.Comments,'') NOT LIKE '%Client Response:%'
+        THEN 1 ELSE 0 END),
+    -- External Response: the Client/Account Manager HAS responded to the external escalation.
+    ExternalResponseExists = MAX(CASE
+        WHEN e.EscalationId IS NOT NULL
+         AND (LOWER(LTRIM(RTRIM(ISNULL(e.EscalatedToRole,'')))) LIKE '%clientmanager%'
+              OR LOWER(LTRIM(RTRIM(ISNULL(e.EscalatedToRole,'')))) LIKE '%accountmanager%'
+              OR LOWER(LTRIM(RTRIM(ISNULL(e.EscalatedTo,'')))) LIKE '%client manager%'
+              OR LOWER(LTRIM(RTRIM(ISNULL(e.EscalatedTo,'')))) LIKE '%account manager%')
+         AND (LOWER(LTRIM(RTRIM(ISNULL(e.Status,'')))) IN ('response submitted','responded','manager response','resolved','writeoffapproved','writeoffrejected')
+              OR ISNULL(e.Comments,'') LIKE '%Manager Response:%'
+              OR ISNULL(e.Comments,'') LIKE '%Client Response:%')
         THEN 1 ELSE 0 END)
 INTO #EscalationClaimAgg
 FROM #ClaimBase cb
@@ -2024,6 +2068,7 @@ SELECT
         WHEN LOWER(LTRIM(RTRIM(ISNULL(t.Status,'')))) = 'rework' AND LOWER(LTRIM(RTRIM(ISNULL(t.WorkFlowStatus,'')))) = 'response escalation' THEN 1
         ELSE 0 END),
     ExternalEscalationExists = ISNULL(MAX(eca.ExternalEscalationExists), 0),
+    ExternalResponseExists = ISNULL(MAX(eca.ExternalResponseExists), 0),
     WorkFlowStatus = CASE
         WHEN MAX(CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(t.WorkFlowStatus,''))),'') IS NOT NULL THEN 1 ELSE 0 END) = 1
             THEN MAX(NULLIF(LTRIM(RTRIM(ISNULL(t.WorkFlowStatus,''))),''))
@@ -3198,6 +3243,17 @@ SELECT COUNT(1) FROM @Changed;";
         await using var con = OpenLab(request.LabId);
         await con.OpenAsync(ct);
         var taskColumns = await GetColumnSetAsync(con, "dbo.DenialTaskBoard", ct);
+        // Round 1 (07/27) UAT: a ClaimID with two DOS (two ClaimUIDs) had one line closed, but the
+        // line-item status write matched on VisitNumber (the short ClaimID), so BOTH DOS were shown
+        // Closed. Scope the line write to the DOS-specific ClaimUID when both tables carry it.
+        var lineColumnsForUpdate = await TableExistsAsync(con, "dbo.DenialLineItem", ct)
+            ? await GetColumnSetAsync(con, "dbo.DenialLineItem", ct)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var scopeLineByClaimUid = taskColumns.Contains("ClaimUID") && lineColumnsForUpdate.Contains("ClaimUID");
+        var changedClaimUidOut = taskColumns.Contains("ClaimUID") ? "ISNULL(INSERTED.ClaimUID,'')" : "CAST('' AS nvarchar(150))";
+        var lineChangedJoin = scopeLineByClaimUid
+            ? "l.ClaimUID = c.ClaimUid"
+            : "CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))), 'CLM-', ''))=c.ClaimId";
         var optionalSets = new List<string>();
         if (taskColumns.Contains("ActionCompleted")) optionalSets.Add("ActionCompleted=@ActionCompleted");
         if (taskColumns.Contains("ActualOutcome")) optionalSets.Add("ActualOutcome=@ActualOutcome");
@@ -3212,7 +3268,7 @@ SELECT COUNT(1) FROM @Changed;";
         var optionalSetSql = optionalSets.Count > 0 ? "," + Environment.NewLine + "    " + string.Join("," + Environment.NewLine + "    ", optionalSets) : string.Empty;
         var historySnapshot = BuildWorkflowStatusSnapshot(request);
         var sql = $@"
-DECLARE @Changed TABLE(TaskID nvarchar(100), ClaimId nvarchar(150), OldWorkFlowStatus nvarchar(100), NewWorkFlowStatus nvarchar(100), OldAssignedTo nvarchar(255), NewAssignedTo nvarchar(255));
+DECLARE @Changed TABLE(TaskID nvarchar(100), ClaimId nvarchar(150), ClaimUid nvarchar(150), OldWorkFlowStatus nvarchar(100), NewWorkFlowStatus nvarchar(100), OldAssignedTo nvarchar(255), NewAssignedTo nvarchar(255));
 
 UPDATE dbo.DenialTaskBoard
 SET Status=@Status,
@@ -3221,19 +3277,21 @@ SET Status=@Status,
     ReviewerUpdatedBy=@ActionBy,
     ReviewerUpdatedOn=SYSDATETIME(),
     DateCompleted=CASE WHEN @IsClosed=1 THEN CONVERT(date,GETDATE()) ELSE DateCompleted END{optionalSetSql}
-OUTPUT INSERTED.TaskID, CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(INSERTED.ClaimID,''))), 'CLM-', '')), DELETED.WorkFlowStatus, INSERTED.WorkFlowStatus, DELETED.AssignedTo, INSERTED.AssignedTo
-INTO @Changed(TaskID, ClaimId, OldWorkFlowStatus, NewWorkFlowStatus, OldAssignedTo, NewAssignedTo)
+OUTPUT INSERTED.TaskID, CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(INSERTED.ClaimID,''))), 'CLM-', '')), {changedClaimUidOut}, DELETED.WorkFlowStatus, INSERTED.WorkFlowStatus, DELETED.AssignedTo, INSERTED.AssignedTo
+INTO @Changed(TaskID, ClaimId, ClaimUid, OldWorkFlowStatus, NewWorkFlowStatus, OldAssignedTo, NewAssignedTo)
 WHERE TaskID=@TaskID;
 
 IF OBJECT_ID('dbo.DenialLineItem','U') IS NOT NULL
 BEGIN
     -- TaskStatus mirrors normal task-progression Status (independent of WorkFlowStatus, which
     -- carries escalation/assignment/closure signal state read by the claim precedence engine).
+    -- Scoped to the DOS-specific ClaimUID (see scopeLineByClaimUid) so a two-DOS ClaimID no longer
+    -- cross-contaminates the other DOS's line status.
     UPDATE l
     SET WorkFlowStatus = CASE WHEN @IsClosed=1 THEN 'Closed Claim' ELSE NULLIF(@Status,'') END,
         TaskStatus = CASE WHEN @IsClosed=1 THEN 'Closed' ELSE NULLIF(@Status,'') END
     FROM dbo.DenialLineItem l
-    JOIN @Changed c ON CONVERT(varchar(150), REPLACE(LTRIM(RTRIM(ISNULL(l.VisitNumber,''))), 'CLM-', ''))=c.ClaimId;
+    JOIN @Changed c ON {lineChangedJoin};
 END;
 
 IF @IsClosed=1
@@ -4477,6 +4535,7 @@ DELETE FROM dbo.DenialVerificationTask WHERE VerificationId=@VerificationId;"
             "internalescalation" or "internal" => "internalescalation",
             "externalescalation" or "external" => "externalescalation",
             "escalationresponse" or "response" => "escalationresponse",
+            "externalresponse" => "externalresponse",
             "verification" or "requiredreview" => "verification",
             "open" or "opennew" or "pending" => "open",
             "reviewernew" or "mynew" or "myopen" => "myopen",
