@@ -2699,12 +2699,23 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;";
         // escalation ClaimId (t.ClaimID LIKE '%'+e.ClaimId), but this task lookup matched ClaimID
         // only exactly, so a claim surfaced via the suffix match loaded zero tasks. Mirror the
         // queue's suffix fallback here so every claim visible in a queue can load its tasks.
+        // ClaimUID is the canonical, per-accession unique key. The SAME short ClaimID can belong to
+        // several accessions (different ClaimUIDs), so the ClaimID/ClaimIDNormalized/LIKE fallbacks
+        // below are NON-unique and would pull tasks from every accession that shares the ClaimID —
+        // that is the duplicate task/line rows seen on drill-down. Guard the fallbacks behind an
+        // uncorrelated "does a matching ClaimUID exist?" probe (seeks the ClaimUID index, evaluated
+        // once): when the caller passes a real ClaimUID we match ONLY that accession and never fall
+        // back. The ClaimID fallback fires only for legacy callers that pass a short ClaimID for which
+        // no ClaimUID row exists (e.g. an old escalation/closed-queue row).
+        var uidExistsProbe = $"EXISTS (SELECT 1 FROM dbo.DenialTaskBoard tu WITH (NOLOCK) WHERE (@HasTaskLab=0 OR {LabScopeSql("tu.LabId")}) AND tu.ClaimUID = @ClaimUid)";
         var claimLookupWhere = hasTaskClaimUid
-            ? @"(
+            ? $@"(
 				   t.ClaimUID = @ClaimUid
-				   OR t.ClaimIDNormalized = @ClaimKey
-				   OR t.ClaimID = @ClaimId
-				   OR t.ClaimID LIKE '%' + @ClaimId
+				   OR (NOT {uidExistsProbe} AND (
+				          t.ClaimIDNormalized = @ClaimKey
+				          OR t.ClaimID = @ClaimId
+				          OR t.ClaimID LIKE '%' + @ClaimId
+				      ))
 			   )"
             : @"(
 				   t.ClaimIDNormalized = @ClaimKey

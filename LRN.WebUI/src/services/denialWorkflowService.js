@@ -115,6 +115,14 @@ export const denialWorkflowService = {
   ,getDenialMapperLabs: () => api('/denial-mapper/labs')
   ,compareDenialMapperPush: (labIds) => api('/denial-mapper/compare-push', { method: 'POST', body: JSON.stringify({ labIds }) })
   ,confirmDenialMapperPush: (pushAuditIds) => api('/denial-mapper/confirm-push', { method: 'POST', body: JSON.stringify({ pushAuditIds }) })
+  // Async "Push to Labs" — two backgrounded steps, each returns a jobId (202); poll the job for
+  // completion so the admin is never blocked. Step 1 compares (creates pending pushes); step 2
+  // confirms/distributes a pending push (deferrable, run from Push Status).
+  ,startDenialMapperCompare: (labIds) => api('/denial-mapper/push/compare', { method: 'POST', body: JSON.stringify({ labIds }) })
+  ,startDenialMapperConfirm: (pushAuditIds) => api('/denial-mapper/push/confirm', { method: 'POST', body: JSON.stringify({ pushAuditIds }) })
+  ,getDenialMapperPushJob: (jobId) => api(`/denial-mapper/push/jobs/${encodeURIComponent(jobId)}`)
+  ,listDenialMapperPushJobs: () => api('/denial-mapper/push/jobs')
+  ,listDenialMapperPushes: (take = 100) => api(`/denial-mapper/confirm-push/list?take=${take}`)
   ,cancelDenialMapperPush: (pushAuditIds) => api('/denial-mapper/cancel-push', { method: 'POST', body: JSON.stringify({ pushAuditIds }) })
   ,getDenialMapperPushVerification: (pushAuditId) => api(`/denial-mapper/push-verification/${pushAuditId}`)
   ,updateDenialMapperPushVerificationDetail: (pushAuditId, detailId, payload) => api(`/denial-mapper/push-verification/${pushAuditId}/details/${detailId}`, { method: 'PUT', body: JSON.stringify(payload) })

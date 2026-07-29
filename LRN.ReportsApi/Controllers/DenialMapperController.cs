@@ -10,7 +10,7 @@ namespace LRN.ReportsApi.Controllers;
 [ApiController]
 [Route("api/denialworkflow/denial-mapper")]
 [Route("api/denial-workflow/denial-mapper")]
-public sealed class DenialMapperController(IDenialMapperRepository repository, IDenialWorkflowService workflowService) : ControllerBase
+public sealed class DenialMapperController(IDenialMapperRepository repository, IDenialWorkflowService workflowService, IDenialMapperPushJobService pushJobs) : ControllerBase
 {
     [HttpGet("dashboard")]
     public async Task<ActionResult<DenialMapperDashboard>> Dashboard([FromQuery] int? labId, CancellationToken ct)
@@ -56,6 +56,50 @@ public sealed class DenialMapperController(IDenialMapperRepository repository, I
     [HttpPost("confirm-push")]
     public async Task<ActionResult> ConfirmPush(DenialMapperPushDecisionRequest request,CancellationToken ct)
     {if(!IsAdmin())return Denied();var count=await repository.ConfirmPushAsync(request.PushAuditIds,UserName(),Role(),ct);return Ok(new{labCount=count,message=$"Super Master staged in {count} lab(s) and is awaiting AR Manager confirmation. Existing overrides were preserved."});}
+
+    // Async "Push to Labs" step 1 — compare: returns a jobId immediately and runs ComparePushAsync on
+    // a background scope (it counts open tasks per difference per lab, which is slow), so the admin is
+    // never blocked on the page. Creates the PendingConfirmation push-audit rows the confirm step needs.
+    [HttpPost("push/compare")]
+    public ActionResult<MapperPushJobStartResponse> StartCompareJob(DenialMapperPushRequest request)
+    {
+        if (!IsAdmin()) return Denied();
+        return Accepted(pushJobs.StartCompare(request.LabIds, UserName(), Role()));
+    }
+
+    // Async "Push to Labs" step 2 — confirm/distribute: the admin confirms a pending push (from the
+    // Push Status page) and ConfirmPushAsync merges the Super Master into each lab master in the
+    // background. Deferrable per spec ("confirm pushing also taking time so we can do it later").
+    [HttpPost("push/confirm")]
+    public ActionResult<MapperPushJobStartResponse> StartConfirmJob(DenialMapperPushDecisionRequest request)
+    {
+        if (!IsAdmin()) return Denied();
+        return Accepted(pushJobs.StartConfirm(request.PushAuditIds, UserName(), Role()));
+    }
+
+    [HttpGet("push/jobs")]
+    public ActionResult<IReadOnlyList<MapperPushJobStatusResponse>> PushJobs()
+    {
+        if (!IsAdmin()) return Denied();
+        return Ok(pushJobs.ListJobs(UserName()));
+    }
+
+    [HttpGet("push/jobs/{jobId}")]
+    public ActionResult<MapperPushJobStatusResponse> PushJob(string jobId)
+    {
+        if (!IsAdmin()) return Denied();
+        var status = pushJobs.GetStatus(jobId, UserName());
+        return status is null ? NotFound(new { message = "Push job was not found." }) : Ok(status);
+    }
+
+    // Confirmation page (Slice C): recent distributed pushes with their state (pending confirm /
+    // confirmed / failed). In-progress distribution is read from confirm-push/jobs on the client.
+    [HttpGet("confirm-push/list")]
+    public async Task<ActionResult<IReadOnlyList<DenialMapperPushSummary>>> ConfirmPushList([FromQuery] int take = 100, CancellationToken ct = default)
+    {
+        if (!IsAdmin()) return Denied();
+        return Ok(await repository.ListPushesAsync(take, ct));
+    }
 
     [HttpPost("cancel-push")]
     public async Task<ActionResult> CancelPush(DenialMapperPushDecisionRequest request,CancellationToken ct)

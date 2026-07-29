@@ -108,6 +108,25 @@ public sealed class DenialMapperPushDecisionRequest
     public IReadOnlyList<long> PushAuditIds { get; set; } = Array.Empty<long>();
 }
 
+// Row for the admin "Push Status / Confirmations" page (Slice C): one persisted push-audit record
+// with its confirmation state. PushStatus 'Pushed' = distributed to the lab and awaiting AR Manager
+// confirmation (highlighted); 'Confirmed' = AR Manager confirmed; 'Failed' = distribution failed.
+public sealed class DenialMapperPushSummary
+{
+    public long PushAuditId { get; set; }
+    public int TargetLabId { get; set; }
+    public string TargetLabName { get; set; } = string.Empty;
+    public string PushStatus { get; set; } = string.Empty;
+    public int TotalCompared { get; set; }
+    public int TotalDifferences { get; set; }
+    public int TotalAssignedOpenTasksAffected { get; set; }
+    public string PushedByUserId { get; set; } = string.Empty;
+    public string? ConfirmedByUserId { get; set; }
+    public string? FailureMessage { get; set; }
+    public DateTime CreatedOn { get; set; }
+    public DateTime? ConfirmedOn { get; set; }
+}
+
 public sealed class DenialMapperPushDetailEditRequest
 {
     public string ActionCode { get; set; } = string.Empty;

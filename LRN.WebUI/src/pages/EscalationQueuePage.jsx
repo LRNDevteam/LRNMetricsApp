@@ -199,8 +199,11 @@ export default function EscalationQueuePage({ labId, user, reviewers = [], taskV
     if (!row?.claimId) return;
     setLineTasksBusy(true);
     try {
+      // Always drill down by the canonical ClaimUID (a short ClaimID can belong to several
+      // accessions and would load duplicate line tasks); fall back to claimId only if no uid.
+      const lookupId = row.claimUid || row.claimUID || row.claimId;
       const [taskRows, docs] = await Promise.all([
-        denialWorkflowService.getClaimTasks(labId, row.claimId, level === 'Line' ? 'assigned' : ''),
+        denialWorkflowService.getClaimTasks(labId, lookupId, level === 'Line' ? 'assigned' : ''),
         denialWorkflowService.getClaimDocuments(labId, row.claimId)
       ]);
       setLineTasks(taskRows || []);

@@ -66,15 +66,34 @@ internal sealed class FileLogWriter : IDisposable
         var today = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         lock (_lock)
         {
-            if (_date != today)
+            try
             {
-                _writer?.Dispose();
-                _writer = new StreamWriter(Path.Combine(_directory, $"api-{today}.log"), true, System.Text.Encoding.UTF8) { AutoFlush = true };
-                _date = today;
+                if (_date != today || _writer is null)
+                {
+                    _writer?.Dispose();
+                    _writer = OpenShared(Path.Combine(_directory, $"api-{today}.log"));
+                    _date = today;
+                }
+                _writer.WriteLine(entry);
             }
-            _writer!.WriteLine(entry);
+            catch (IOException)
+            {
+                // Another process holds the handle for a moment (or is rolling the file). Never let
+                // logging throw into the request pipeline — drop this line and re-open next time.
+                try { _writer?.Dispose(); } catch { }
+                _writer = null;
+                _date = string.Empty;
+            }
         }
     }
 
-    public void Dispose() { lock (_lock) _writer?.Dispose(); }
+    // Open the rolling log with FileShare.ReadWrite so more than one API process (e.g. a VS debug
+    // instance and a dotnet-run instance) can append to the same day's file without a sharing lock.
+    private static StreamWriter OpenShared(string path)
+    {
+        var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+        return new StreamWriter(stream, System.Text.Encoding.UTF8) { AutoFlush = true };
+    }
+
+    public void Dispose() { lock (_lock) { try { _writer?.Dispose(); } catch { } } }
 }
