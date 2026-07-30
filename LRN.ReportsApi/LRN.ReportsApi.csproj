@@ -14,4 +14,7 @@
   <ItemGroup>
     <ProjectReference Include="..\LRN.PayerPolicyMapper.Core\LRN.PayerPolicyMapper.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="LRN.ReportsApi.Tests" />
+  </ItemGroup>
 </Project>

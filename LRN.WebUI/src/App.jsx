@@ -89,7 +89,7 @@ export default function App() {
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [notificationPopupOpen, setNotificationPopupOpen] = useState(false);
   const initialNotificationKeyRef = useRef('');
-  const [claimMenuCounts, setClaimMenuCounts] = useState({ new: null, unassigned: null, assigned: null, payerFollowup: null, pendingDocumentation: null, pendingPayerResponse: null, writeOffApproval: null, slaAtRisk: null, escalations: null, internalEscalation: null, externalEscalation: null, escalationResponse: null, verification: null, closed: null, all: null });
+  const [claimMenuCounts, setClaimMenuCounts] = useState({ new: null, unassigned: null, assigned: null, payerFollowup: null, pendingDocumentation: null, pendingPayerResponse: null, writeOffApproval: null, slaAtRisk: null, escalations: null, internalEscalation: null, externalEscalation: null, escalationResponse: null, externalResponse: null, verification: null, closed: null, all: null });
   const [myWorklistMenuCounts, setMyWorklistMenuCounts] = useState({ assigned: null, slaAtRisk: null, payerFollowup: null, pendingDocumentation: null, pendingPayerResponse: null, internalEscalation: null, externalEscalation: null, escalationResponse: null, closed: null, all: null });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [dashboardFiltersOpen, setDashboardFiltersOpen] = useState(false);
@@ -175,7 +175,9 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (externalManager && view === 'myworklist') setView('claims', { closeSidebar: false });
+    // External managers use the unified claim view; keep them off My Worklist and the standalone
+    // escalation page (their escalation work is the External Escalation / External Response tabs).
+    if (externalManager && (view === 'myworklist' || view === 'escalations')) setView('claims', { closeSidebar: false });
   }, [externalManager, view]);
 
   // Jobs Center (background uploads/downloads): a specific upload jobId can be focused so the
@@ -802,6 +804,7 @@ export default function App() {
         internalEscalation: Number(counts?.internalEscalation ?? counts?.InternalEscalation ?? 0),
         externalEscalation: Number(counts?.externalEscalation ?? counts?.ExternalEscalation ?? 0),
         escalationResponse: Number(counts?.escalationResponse ?? counts?.EscalationResponse ?? 0),
+        externalResponse: Number(counts?.externalResponse ?? counts?.ExternalResponse ?? 0),
         verification: Number(counts?.verification ?? counts?.Verification ?? 0),
         // Closed queue badge comes from the DenialClosedClaims-backed ClosedQueue count so it matches
         // the Closed list; fall back to the board-derived Closed for older API responses.
@@ -809,7 +812,7 @@ export default function App() {
         all: Number(counts?.allClaims ?? counts?.AllClaims ?? counts?.totalClaims ?? counts?.TotalClaims ?? 0)
       });
     } catch {
-      setClaimMenuCounts({ new: 0, unassigned: 0, assigned: 0, payerFollowup: 0, pendingDocumentation: 0, pendingPayerResponse: 0, writeOffApproval: 0, slaAtRisk: 0, escalations: 0, internalEscalation: 0, externalEscalation: 0, escalationResponse: 0, verification: 0, closed: 0, all: 0 });
+      setClaimMenuCounts({ new: 0, unassigned: 0, assigned: 0, payerFollowup: 0, pendingDocumentation: 0, pendingPayerResponse: 0, writeOffApproval: 0, slaAtRisk: 0, escalations: 0, internalEscalation: 0, externalEscalation: 0, escalationResponse: 0, externalResponse: 0, verification: 0, closed: 0, all: 0 });
     }
 
     try {
@@ -1306,7 +1309,10 @@ export default function App() {
             )}
           </>
         )}
-        {(externalManager || readOnlyWorkflow) && (
+        {/* Client/Account Managers now use the unified Claim View (with External Escalation /
+            External Response tabs) instead of the separate escalation page. The standalone
+            Escalation Queue nav remains only for other read-only roles. */}
+        {(readOnlyWorkflow && !externalManager) && (
           <>
             <button className={`lrn-nav-item ${view === 'escalations' ? 'active' : ''}`} onClick={() => setView('escalations', { closeSidebar: false })}><i className="bi bi-exclamation-triangle" />Escalation Queue<span className="lrn-nav-badge">{menuCountText(claimMenuCounts.escalations)}</span></button>
             {view === 'escalations' && (
@@ -1327,6 +1333,7 @@ export default function App() {
             {(denialMapperAdmin || clientManager || accountManager) && <button className={`lrn-nav-subitem ${view === 'denialmapper' && denialMapperView === 'dashboard' ? 'active' : ''}`} onClick={() => { setDenialMapperView('dashboard'); setView('denialmapper'); }}><span className="nav-sub-label">Dashboard</span></button>}
             {(denialMapperAdmin || denialMapperViewer) && <button className={`lrn-nav-subitem ${view === 'denialmapper' && denialMapperView === 'super' ? 'active' : ''}`} onClick={() => { setDenialMapperView('super'); setView('denialmapper'); }}><span className="nav-sub-label">{denialMapperAdmin ? 'Super Master / Push' : 'Super Master'}</span></button>}
             <button className={`lrn-nav-subitem ${view === 'denialmapper' && (denialMapperView === 'labs' || denialMapperView === 'lab') ? 'active' : ''}`} onClick={() => { setDenialMapperView(denialMapperAdmin ? 'labs' : 'lab'); setView('denialmapper'); }}><span className="nav-sub-label">Lab Master</span></button>
+            {denialMapperAdmin && <button className={`lrn-nav-subitem ${view === 'denialmapper' && denialMapperView === 'pushstatus' ? 'active' : ''}`} onClick={() => { setDenialMapperView('pushstatus'); setView('denialmapper'); }}><span className="nav-sub-label">Push Status</span></button>}
             {/* UAT: AR Manager owns Denial Code Master but had no way to see its change history —
                 there's no DCM-specific audit table, so grant them the Denial Mapper's existing
                 Audit Log (Super Master/push/override history) instead of building a new one. */}

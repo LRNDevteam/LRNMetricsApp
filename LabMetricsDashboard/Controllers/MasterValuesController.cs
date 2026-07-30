@@ -9,10 +9,12 @@ namespace LabMetricsDashboard.Controllers;
 public sealed class MasterValuesController : Controller
 {
     private readonly IMasterValuesApiClient _api;
+    private readonly ILogger<MasterValuesController> _logger;
 
-    public MasterValuesController(IMasterValuesApiClient api)
+    public MasterValuesController(IMasterValuesApiClient api, ILogger<MasterValuesController> logger)
     {
         _api = api;
+        _logger = logger;
     }
 
     // ── Payer Master roles (Requirements Spec §2) ─────────────────────────────
@@ -179,7 +181,20 @@ public sealed class MasterValuesController : Controller
     public async Task<IActionResult> MappingSummary(CancellationToken ct)
     {
         if (!CanViewLab) return Forbid();
-        return Json(await _api.GetMappingSummaryAsync(ct));
+        // The navbar payer-mapping bell polls this on every page. When LRN.ReportsApi is unreachable
+        // or DenialWorkflowApi:BaseUrl is unset, GetMappingSummaryAsync throws — which used to bubble
+        // up as an unhandled 500 on every poll, flooding the logs with a "continuous exception". This
+        // widget is best-effort (the client JS already ignores a non-OK/empty response), so return an
+        // empty summary and log a warning instead of failing the request.
+        try
+        {
+            return Json(await _api.GetMappingSummaryAsync(ct));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Payer mapping summary unavailable (Reports API unreachable/misconfigured); returning empty summary.");
+            return Json(new MappingStatusSummaryDto());
+        }
     }
 
     [HttpGet]
@@ -476,7 +491,16 @@ public sealed class MasterValuesController : Controller
     public async Task<IActionResult> NotificationsData(int take, CancellationToken ct)
     {
         if (!HasAnyMasterAccess) return Forbid();
-        return Json(await _api.GetNotificationsAsync(take <= 0 ? 50 : take, ct));
+        // Same navbar bell as MappingSummary — best-effort, must not 500 when the Reports API is down.
+        try
+        {
+            return Json(await _api.GetNotificationsAsync(take <= 0 ? 50 : take, ct));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Payer master notifications unavailable (Reports API unreachable/misconfigured); returning none.");
+            return Json(Array.Empty<PayerMasterNotificationDto>());
+        }
     }
 
     [HttpGet]

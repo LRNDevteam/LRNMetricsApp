@@ -18,6 +18,7 @@ public interface IDenialMapperRepository
     Task<int> ConfirmPushAsync(IReadOnlyList<long> pushAuditIds, string user, string role, CancellationToken ct);
     Task CancelPushAsync(IReadOnlyList<long> pushAuditIds, string user, CancellationToken ct);
     Task<DenialMapperPushAuditView?> PushAuditAsync(long pushAuditId, CancellationToken ct);
+    Task<IReadOnlyList<DenialMapperPushSummary>> ListPushesAsync(int take, CancellationToken ct);
     Task UpdatePushAuditDetailAsync(long pushAuditId, long detailId, DenialMapperPushDetailEditRequest request, string user, string role, CancellationToken ct);
     Task<IReadOnlyList<DenialMapperNotification>> PendingNotificationsAsync(int labId, string user, CancellationToken ct);
     Task<int> AcknowledgeNotificationAsync(long pushAuditId, int labId, string user, CancellationToken ct);
@@ -242,6 +243,21 @@ public sealed class SqlDenialMapperRepository : IDenialMapperRepository
         await using var c=Open();await c.OpenAsync(ct);await EnsurePushAuditSchemaAsync(c,ct);DenialMapperPushAuditView? result=null;
         await using(var cmd=new SqlCommand("SELECT a.PushAuditId,a.SourceLabId,a.TargetLabId,ISNULL(l.LabName,''),a.PushedByUserId,a.PushStatus,a.TotalCompared,a.TotalDifferences,a.TotalAssignedOpenTasksAffected,a.CreatedOn,a.ConfirmedOn FROM dbo.DenialMapperPushAudit a LEFT JOIN dbo.Labs l ON l.LabId=a.TargetLabId WHERE a.PushAuditId=@Id",c)){cmd.Parameters.AddWithValue("@Id",id);await using var r=await cmd.ExecuteReaderAsync(ct);if(await r.ReadAsync(ct))result=new(){PushAuditId=r.GetInt64(0),SourceLabId=r.GetInt32(1),TargetLabId=r.GetInt32(2),TargetLabName=r.GetString(3),PushedByUserId=r.GetString(4),PushStatus=r.GetString(5),TotalCompared=r.GetInt32(6),TotalDifferences=r.GetInt32(7),TotalAssignedOpenTasksAffected=r.GetInt32(8),CreatedOn=r.GetDateTime(9),ConfirmedOn=r.IsDBNull(10)?null:r.GetDateTime(10)};}
         if(result is null)return null;result.Differences=await ReadPushDetailsAsync(c,id,result.TargetLabName,ct);return result;
+    }
+
+    public async Task<IReadOnlyList<DenialMapperPushSummary>> ListPushesAsync(int take,CancellationToken ct)
+    {
+        var list=new List<DenialMapperPushSummary>();
+        await using var c=Open();await c.OpenAsync(ct);await EnsurePushAuditSchemaAsync(c,ct);
+        // Push Status page states: 'PendingConfirmation' (compared, awaiting the admin's confirm/
+        // distribute — actionable), 'Pushed' (distributed, awaiting AR Manager), 'Confirmed', and
+        // 'Failed'. 'Cancelled' rows are hidden; in-progress compare/distribute is surfaced separately
+        // from the live push-job service.
+        await using var cmd=new SqlCommand("SELECT TOP(@Take) a.PushAuditId,a.TargetLabId,ISNULL(l.LabName,''),a.PushStatus,a.TotalCompared,a.TotalDifferences,a.TotalAssignedOpenTasksAffected,a.PushedByUserId,a.ConfirmedByUserId,a.FailureMessage,a.CreatedOn,a.ConfirmedOn FROM dbo.DenialMapperPushAudit a LEFT JOIN dbo.Labs l ON l.LabId=a.TargetLabId WHERE a.PushStatus IN ('PendingConfirmation','Pushed','Confirmed','Failed') ORDER BY a.CreatedOn DESC",c);
+        cmd.Parameters.AddWithValue("@Take",Math.Clamp(take,1,500));
+        await using var r=await cmd.ExecuteReaderAsync(ct);
+        while(await r.ReadAsync(ct))list.Add(new(){PushAuditId=r.GetInt64(0),TargetLabId=r.GetInt32(1),TargetLabName=r.GetString(2),PushStatus=r.GetString(3),TotalCompared=r.GetInt32(4),TotalDifferences=r.GetInt32(5),TotalAssignedOpenTasksAffected=r.GetInt32(6),PushedByUserId=S(r,7),ConfirmedByUserId=r.IsDBNull(8)?null:r.GetString(8),FailureMessage=r.IsDBNull(9)?null:r.GetString(9),CreatedOn=r.GetDateTime(10),ConfirmedOn=r.IsDBNull(11)?null:r.GetDateTime(11)});
+        return list;
     }
 
     public async Task UpdatePushAuditDetailAsync(long pushAuditId,long detailId,DenialMapperPushDetailEditRequest q,string user,string role,CancellationToken ct)

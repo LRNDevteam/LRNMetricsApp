@@ -1,10 +1,16 @@
 import { canAssignRole, isAccountManagerRole, isArReviewerRole, isClientManagerRole } from '../utils/formatters';
 
 const commonManagerFilters = ['reviewer', 'aging', 'denialClassification', 'actionCategory', 'payerName', 'panelName', 'clinic', 'salesRepname'];
+// Client / Account Manager: the SAME claim + line view as the AR Manager (read-only), plus the
+// "Respond Escalation" tab (external escalations routed to them, which they respond to). Rendered
+// inline in the unified ClaimAssignmentPage, not the separate escalation page. There is no
+// "External Response" tab for them -- once they respond, the claim leaves their queue and moves to
+// the AR Manager's Assigned / External Response.
 const externalManagerQueues = [
   { key: 'new', label: 'New', filters: commonManagerFilters },
   { key: 'unassigned', label: 'Unassigned', filters: [...commonManagerFilters, 'balanceBucket'] },
   { key: 'assigned', label: 'Assigned', filters: commonManagerFilters },
+  { key: 'externalEscalation', label: 'Respond Escalation', filters: [...commonManagerFilters, 'documentationType', 'escalationReason'], alert: true },
   { key: 'closed', label: 'Closed', filters: commonManagerFilters },
   { key: 'all', label: 'All Claims', filters: ['status', 'reviewer', 'aging', 'denialClassification', 'actionCategory', 'payerName', 'panelName'] }
 ];
@@ -32,7 +38,11 @@ export const workflowQueueConfig = {
     { key: 'pendingPayerResponse', label: 'Pending Payer Response', filters: [...commonManagerFilters, 'reviewer', 'nextFollowUpDate'] },
     { key: 'internalEscalation', label: 'Internal Escalation', filters: [...commonManagerFilters, 'documentationType', 'escalationReason'] },
     { key: 'externalEscalation', label: 'External Escalation', filters: [...commonManagerFilters, 'documentationType', 'escalationReason'] },
-    { key: 'escalationResponse', label: 'Escalation Response', filters: [...commonManagerFilters, 'documentationType', 'escalationReason'] },
+    // AR Manager no longer has an "Escalation Response" tab: when an INTERNAL escalation is
+    // responded to, the claim returns to the manager's "Assigned" queue (and the AR Reviewer sees
+    // it under their "Escalation Response"). The manager's response tab is now "External Response",
+    // holding the Client/Account Manager responses only.
+    { key: 'externalResponse', label: 'External Response', filters: [...commonManagerFilters, 'documentationType', 'escalationReason'] },
     { key: 'writeOffApproval', label: 'Write Off Approval', filters: commonManagerFilters },
     { key: 'closed', label: 'Closed', filters: commonManagerFilters },
     { key: 'all', label: 'All Claims', filters: ['status', 'reviewer', 'aging', 'denialClassification', 'actionCategory', 'payerName', 'panelName'] }
@@ -58,6 +68,7 @@ export function normalizeQueueKey(key) {
     externalescalation: 'externalEscalation',
     escalationresponse: 'escalationResponse',
     response: 'escalationResponse',
+    externalresponse: 'externalResponse',
     writeoffapproval: 'writeOffApproval',
     writeoff: 'writeOffApproval',
     slaatrisk: 'slaAtRisk',

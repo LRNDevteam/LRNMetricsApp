@@ -76,6 +76,7 @@ builder.Services.AddScoped<IDenialWorkflowIssueNotifier, DenialWorkflowIssueNoti
 builder.Services.AddScoped<IDenialWorkflowSupportService, DenialWorkflowSupportService>();
 builder.Services.AddSingleton<IDenialWorkflowJobHistoryStore, DenialWorkflowJobHistoryStore>();
 builder.Services.AddSingleton<IDenialWorkflowExportJobService, DenialWorkflowExportJobService>();
+builder.Services.AddSingleton<IDenialMapperPushJobService, DenialMapperPushJobService>();
 builder.Services.AddSingleton<IDenialWorkflowUploadJobService, DenialWorkflowUploadJobService>();
 builder.Services.AddHttpClient();
 builder.Services.AddAuthorization();
