@@ -85,6 +85,20 @@ public class CodingController : Controller
         var (summaries, wtdSummaries, financial, fetchError) =
             await FetchInitialDataAsync(connStr, selectedLab, dbLabName, ct);
 
+        // >>> CVUI-SRC CHANGE (2026-07-27): load source-file provenance (RunId + inserted datetime).
+        //     REVERT: delete this block and the SourceFiles assignment below.
+        List<CodingSourceFileRow> sourceFiles = [];
+        try
+        {
+            sourceFiles = await GetCachedAsync($"Coding_SourceFiles_{selectedLab}",
+                () => _repo.GetSourceFilesAsync(connStr, dbLabName, ct));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Coding source-file info unavailable for '{Lab}'.", selectedLab);
+        }
+        // <<< END CVUI-SRC CHANGE
+
         return View(new CodingSummaryViewModel
         {
             LabName               = selectedLab,
@@ -92,6 +106,7 @@ public class CodingController : Controller
             SummaryRows           = summaries,
             WtdSummaryRows        = wtdSummaries,
             FinancialRows         = financial,
+            SourceFiles           = sourceFiles, // CVUI-SRC (2026-07-27)
             ErrorMessage          = fetchError,
             PackageAverageFiles   = !string.IsNullOrWhiteSpace(config.Avgs),
         });
@@ -159,8 +174,13 @@ public class CodingController : Controller
         }
     }
 
+    // >>> CVDETAIL-PAGE (2026-07-28): the Validation Detail tab is now server-side paged + filtered.
+    //     page/pageSize/panel/status/search come from the pager + filter bar via AJAX.
+    //     REVERT: drop the extra parameters and go back to loading all rows at once.
     [HttpGet]
-    public async Task<IActionResult> DetailPane(string? lab, CancellationToken ct)
+    public async Task<IActionResult> DetailPane(string? lab, CancellationToken ct,
+        int page = 1, int pageSize = 50,
+        string? panel = null, string? status = null, string? search = null)
     {
         var availableLabs = _labSettings.Labs.Keys.ToList();
         var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
@@ -173,14 +193,26 @@ public class CodingController : Controller
 
         try
         {
-            var detail = await GetCachedAsync(
-                $"Coding_Detail_{selectedLab}",
-                () => _repo.GetValidationDetailRowsAsync(config.DbConnectionString!, ct));
+            // CVDETAIL-PAGE (2026-07-28): fetch only the requested page (filters applied in SQL).
+            // Not cached — the page/filter combination changes on every interaction.
+            if (pageSize is < 1 or > 500) pageSize = 50;
+            if (page < 1) page = 1;
+
+            var result = await _repo.GetValidationDetailPagedAsync(
+                config.DbConnectionString!, page, pageSize, panel, status, search, ct);
 
             return PartialView("_CodingDetailPane", new CodingSummaryViewModel
             {
-                LabName    = selectedLab,
-                DetailRows = detail,
+                LabName            = selectedLab,
+                DetailRows         = result.Rows,
+                DetailPage         = page,
+                DetailPageSize     = pageSize,
+                DetailTotalRows    = result.TotalRows,
+                DetailPanels       = result.Panels,
+                DetailStatuses     = result.Statuses,
+                DetailPanelFilter  = panel,
+                DetailStatusFilter = status,
+                DetailSearch       = search,
             });
         }
         catch (Exception ex)
@@ -379,7 +411,9 @@ public class CodingController : Controller
             var t3 = GetCachedAsync($"Coding_WtdInsights_{cacheLabKey}", () => _repo.GetWtdInsightsAsync(connStr, dbLabName, ct));
             var t4 = GetCachedAsync($"Coding_WtdSummary_{cacheLabKey}", () => _repo.GetWtdSummaryAsync(connStr, dbLabName, ct));
             var t5 = GetCachedAsync($"Coding_Financial_{cacheLabKey}", () => _repo.GetFinancialSummaryAsync(connStr, ct));
-            var t6 = GetCachedAsync($"Coding_Detail_{cacheLabKey}", () => _repo.GetValidationDetailRowsAsync(connStr, ct));
+            // CVDETAIL-ALL (2026-07-27): export uses the uncapped proc (all weeks, no TOP 5000);
+            // its own cache key so it never mixes with the capped screen data.
+            var t6 = GetCachedAsync($"Coding_DetailExport_{cacheLabKey}", () => _repo.GetValidationDetailExportRowsAsync(connStr, ct));
             await Task.WhenAll(t1, t2, t3, t4, t5, t6);
             return (t1.Result, t2.Result, t3.Result, t4.Result, t5.Result, t6.Result, null);
         }

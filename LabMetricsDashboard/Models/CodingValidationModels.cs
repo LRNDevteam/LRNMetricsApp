@@ -69,6 +69,14 @@ public sealed class CodingWtdSummaryRow
     public int     DistinctClaimsWithMissingCpts     { get; init; }
     public decimal TotalBilledChargesForMissingCpts  { get; init; }
     public decimal AvgAllowedAmountForMissingCpts    { get; init; }
+    // >>> CVTPL-1.4 CHANGE (2026-07-27): WTD Summary aligned to Output Template v1.4.
+    //     REVERT: delete the five properties below.
+    public int     DistinctClaimsWithAdditionalCpts     { get; init; }
+    public decimal TotalBilledChargesForAdditionalCpts  { get; init; }
+    public decimal LostRevenue                          { get; init; }
+    public decimal RevenueAtRisk                        { get; init; }
+    public decimal NetImpact                            { get; init; }
+    // <<< END CVTPL-1.4 CHANGE
 }
 
 /// <summary>
@@ -128,7 +136,56 @@ public sealed class CodingValidationDetailRow
     public string MissingCPT_Charges    { get; init; } = string.Empty;
     public string AdditionalCPT_Charges { get; init; } = string.Empty;
     public string Remarks               { get; init; } = string.Empty;
+
+    // >>> CVDETAIL+ (2026-07-27): extra columns requested for the Validation Detail sheet.
+    //     REVERT: delete these properties (and the matching SP columns / mappings / sheet cells).
+    public string VisitNumber                                 { get; init; } = string.Empty;
+    public string PayerName_Raw                               { get; init; } = string.Empty;
+    public string Carrier                                     { get; init; } = string.Empty;
+    public string Payer_Code                                  { get; init; } = string.Empty;
+    public string PayerCommonCode                             { get; init; } = string.Empty;
+    public string Payer_Group_Code                            { get; init; } = string.Empty;
+    public string Global_Payer_ID                             { get; init; } = string.Empty;
+    public string FirstBillDate                               { get; init; } = string.Empty;
+    public string AllowedAmount                               { get; init; } = string.Empty;
+    public string InsurancePayment                            { get; init; } = string.Empty;
+    public string ExpectedCharges                             { get; init; } = string.Empty;
+    public string MissingCPT_AvgAllowedAmount                 { get; init; } = string.Empty;
+    public string MissingCPT_AvgPaidAmount                    { get; init; } = string.Empty;
+    public string MissingCPT_AvgPatientResponsibilityAmount   { get; init; } = string.Empty;
+    public string AdditionalCPT_AvgAllowedAmount              { get; init; } = string.Empty;
+    public string AdditionalCPT_AvgPaidAmount                 { get; init; } = string.Empty;
+    public string AdditionalCPT_AvgPatientResponsibilityAmount{ get; init; } = string.Empty;
+    public string MissingCPT_ChargeSource                     { get; init; } = string.Empty;
+    public string AdditionalCPT_ChargeSource                  { get; init; } = string.Empty;
+    // <<< END CVDETAIL+
 }
+
+// >>> CVDETAIL-PAGE (2026-07-28): one server-side page of Validation Detail rows.
+//     REVERT: delete this class and the paging fields on CodingSummaryViewModel.
+/// <summary>A page of Validation Detail rows plus the filtered total and drop-down options.</summary>
+public sealed class CodingValidationDetailPage
+{
+    public List<CodingValidationDetailRow> Rows      { get; init; } = [];
+    public int           TotalRows                   { get; init; }
+    public List<string>  Panels                      { get; init; } = [];
+    public List<string>  Statuses                    { get; init; } = [];
+}
+// <<< END CVDETAIL-PAGE
+
+// >>> CVUI-SRC CHANGE (2026-07-27): source-data provenance for the Coding Summary header.
+//     REVERT: delete this CodingSourceFileRow class.
+/// <summary>One row from dbo.CodingValidationFileLog — the source file that fed CodingValidation.</summary>
+public sealed class CodingSourceFileRow
+{
+    public string    RunId               { get; init; } = string.Empty;
+    public string    WeekFolder          { get; init; } = string.Empty;
+    public string    LabName             { get; init; } = string.Empty;
+    public string    FileName            { get; init; } = string.Empty;
+    public DateTime? FileCreatedDateTime { get; init; }
+    public DateTime  InsertedDateTime    { get; init; }
+}
+// <<< END CVUI-SRC CHANGE
 
 /// <summary>Drill-down payload for the View Calculation modal.</summary>
 public sealed class CodingCalculationDetail
@@ -148,7 +205,10 @@ public sealed class CodingCalculationDetail
     public decimal AdditionalChargesTotal { get; init; }
     public decimal LostRevenue { get; init; }
     public decimal RevenueAtRisk { get; init; }
-    public decimal NetImpact => LostRevenue - RevenueAtRisk;
+    // >>> CVTPL-1.4 CHANGE (2026-07-27): Net Impact = Revenue at Risk - Lost Revenue per template v1.4.
+    //     REVERT: restore -> NetImpact => LostRevenue - RevenueAtRisk;
+    public decimal NetImpact => RevenueAtRisk - LostRevenue;
+    // <<< END CVTPL-1.4 CHANGE
 
     public List<CodingCalcCptGroup> CptGroups { get; init; } = [];
     public List<CodingCalcClaimSample> ClaimSamples { get; init; } = [];
@@ -204,6 +264,28 @@ public sealed class CodingSummaryViewModel
 
     /// <summary>Raw CodingValidation rows for the Validation Detail tab.</summary>
     public List<CodingValidationDetailRow> DetailRows { get; init; } = [];
+
+    // >>> CVDETAIL-PAGE (2026-07-28): server-side paging state for the Validation Detail tab.
+    //     REVERT: delete these properties.
+    public int          DetailPage       { get; init; } = 1;
+    public int          DetailPageSize   { get; init; } = 50;
+    public int          DetailTotalRows  { get; init; }
+    public List<string> DetailPanels     { get; init; } = [];
+    public List<string> DetailStatuses   { get; init; } = [];
+    public string?      DetailPanelFilter  { get; init; }
+    public string?      DetailStatusFilter { get; init; }
+    public string?      DetailSearch       { get; init; }
+    public int          DetailTotalPages =>
+        DetailPageSize <= 0 ? 1 : Math.Max(1, (int)Math.Ceiling(DetailTotalRows / (double)DetailPageSize));
+    // <<< END CVDETAIL-PAGE
+
+    // >>> CVUI-SRC CHANGE (2026-07-27): source files (dbo.CodingValidationFileLog) feeding this data.
+    //     REVERT: delete SourceFiles + LatestSource.
+    /// <summary>Source files that populated CodingValidation, newest first.</summary>
+    public List<CodingSourceFileRow> SourceFiles { get; init; } = [];
+    /// <summary>Most recently inserted source file — drives the header provenance line.</summary>
+    public CodingSourceFileRow? LatestSource => SourceFiles.Count > 0 ? SourceFiles[0] : null;
+    // <<< END CVUI-SRC CHANGE
 
     /// <summary>Latest financial summary row � used to populate the KPI hero strip.</summary>
     public CodingFinancialSummaryRow? LatestFinancial => FinancialRows.Count > 0 ? FinancialRows[0] : null;

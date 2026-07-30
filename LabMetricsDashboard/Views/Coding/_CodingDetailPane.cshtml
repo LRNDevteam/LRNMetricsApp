@@ -1,4 +1,18 @@
 @model LabMetricsDashboard.Models.CodingSummaryViewModel
+@* >>> CVDETAIL-PAGE (2026-07-28): server-side paged pane. This block carries the paging/filter
+   state + drop-down options to the page script, which re-requests DetailPane on change.
+   REVERT: delete this div and the pager block at the bottom. *@
+<div id="det-state"
+     data-page="@Model.DetailPage"
+     data-page-size="@Model.DetailPageSize"
+     data-total="@Model.DetailTotalRows"
+     data-total-pages="@Model.DetailTotalPages"
+     data-panel="@Model.DetailPanelFilter"
+     data-status="@Model.DetailStatusFilter"
+     data-search="@Model.DetailSearch"
+     data-panels="@string.Join("|", Model.DetailPanels)"
+     data-statuses="@string.Join("|", Model.DetailStatuses)"
+     style="display:none"></div>
 @if (!Model.DetailRows.Any())
 {
     <div class="cs-table-wrap p-4">
@@ -11,16 +25,19 @@
 }
 else
 {
-    @if (!string.IsNullOrWhiteSpace(Model.DetailRows[0].WeekFolder))
-    {
-        <div style="margin-bottom:.6rem">
-            <span class="cs-year-pill" style="font-size:.78rem">&#128197;&thinsp; @Model.DetailRows[0].WeekFolder</span>
-            <span class="cs-year-count ms-2" id="det-total-count">@Model.DetailRows.Count rows</span>
-        </div>
-    }
+    @* CVDETAIL-PAGE (2026-07-28): counts reflect the whole filtered set, not just this page. *@
+    <div style="margin-bottom:.6rem">
+        <span class="cs-year-pill" style="font-size:.78rem">&#128197;&thinsp; All weeks</span>
+        <span class="cs-year-count ms-2" id="det-total-count">@Model.DetailTotalRows.ToString("N0") rows</span>
+    </div>
     <div class="cs-table-wrap">
-        <div class="cs-table-scroll">
-            <table class="cs-table" id="tbl-detail" style="min-width:780px">
+        @* CVDETAIL-COLS (2026-07-28): 33 columns — freeze the header + first two columns and cap
+           the height so the horizontal scroll is usable (same treatment as the Insights grids). *@
+        <div class="cs-table-scroll has-many-rows cs-always-frozen" style="max-height:560px">
+            @* >>> CVDETAIL-COLS (2026-07-28): the grid now shows every field that the Excel export
+               contains (same order), so screen and file match. Horizontal scroll handles the width.
+               REVERT: trim the thead/tbody back to the original 7 display columns + toggle. *@
+            <table class="cs-table" id="tbl-detail" style="min-width:2600px">
                 <thead>
                     <tr>
                         <th style="width:2rem"></th>
@@ -31,6 +48,31 @@ else
                         <th>Total Charge</th>
                         <th>Missing Charge</th>
                         <th>Additional Charge</th>
+                        <th style="text-align:left">Week</th>
+                        <th style="text-align:left">Actual CPT</th>
+                        <th style="text-align:left">Expected CPT</th>
+                        <th style="text-align:left">Missing CPTs</th>
+                        <th style="text-align:left">Additional CPTs</th>
+                        <th style="text-align:left">Visit Number</th>
+                        <th style="text-align:left">Payer Name</th>
+                        <th style="text-align:left">Carrier</th>
+                        <th style="text-align:left">Payer Code</th>
+                        <th style="text-align:left">Payer Common Code</th>
+                        <th style="text-align:left">Payer Group Code</th>
+                        <th style="text-align:left">Global Payer ID</th>
+                        <th>First Bill Date</th>
+                        <th>Allowed Amount</th>
+                        <th>Insurance Payment</th>
+                        <th>Expected Charges</th>
+                        <th>Missing CPT Avg Allowed</th>
+                        <th>Missing CPT Avg Paid</th>
+                        <th>Missing CPT Avg Pt Resp</th>
+                        <th>Additional CPT Avg Allowed</th>
+                        <th>Additional CPT Avg Paid</th>
+                        <th>Additional CPT Avg Pt Resp</th>
+                        <th style="text-align:left">Missing CPT Charge Source</th>
+                        <th style="text-align:left">Additional CPT Charge Source</th>
+                        <th style="text-align:left">Remarks</th>
                     </tr>
                 </thead>
                 <tbody id="tbody-detail">
@@ -57,9 +99,36 @@ else
                             <td class="r money-neutral">@(string.IsNullOrWhiteSpace(r.TotalCharge) ? "-" : "$\u2009" + r.TotalCharge)</td>
                             <td class="r @(isMissing ? "money-neg" : "money-neutral")">@(string.IsNullOrWhiteSpace(r.MissingCPT_Charges) ? "-" : "$\u2009" + r.MissingCPT_Charges)</td>
                             <td class="r @(isAdditional ? "money-warn" : "money-neutral")">@(string.IsNullOrWhiteSpace(r.AdditionalCPT_Charges) ? "-" : "$\u2009" + r.AdditionalCPT_Charges)</td>
+                            @* CVDETAIL-COLS (2026-07-28): remaining export fields *@
+                            <td class="cs-nowrap">@r.WeekFolder</td>
+                            <td class="cpt-full" title="@r.ActualCPTCode">@(string.IsNullOrWhiteSpace(r.ActualCPTCode) ? "-" : r.ActualCPTCode)</td>
+                            <td class="cpt-full" title="@r.ExpectedCPTCode">@(string.IsNullOrWhiteSpace(r.ExpectedCPTCode) ? "-" : r.ExpectedCPTCode)</td>
+                            <td class="cpt-full" title="@r.MissingCPTCodes">@(string.IsNullOrWhiteSpace(r.MissingCPTCodes) ? "-" : r.MissingCPTCodes)</td>
+                            <td class="cpt-full" title="@r.AdditionalCPTCodes">@(string.IsNullOrWhiteSpace(r.AdditionalCPTCodes) ? "-" : r.AdditionalCPTCodes)</td>
+                            <td class="mono">@r.VisitNumber</td>
+                            <td class="cs-nowrap">@r.PayerName_Raw</td>
+                            <td class="cs-nowrap">@r.Carrier</td>
+                            <td class="cs-nowrap">@r.Payer_Code</td>
+                            <td class="cs-nowrap">@r.PayerCommonCode</td>
+                            <td class="cs-nowrap">@r.Payer_Group_Code</td>
+                            <td class="cs-nowrap">@r.Global_Payer_ID</td>
+                            <td class="r cs-nowrap">@r.FirstBillDate</td>
+                            <td class="r money-neutral">@(string.IsNullOrWhiteSpace(r.AllowedAmount) ? "-" : "$\u2009" + r.AllowedAmount)</td>
+                            <td class="r money-neutral">@(string.IsNullOrWhiteSpace(r.InsurancePayment) ? "-" : "$\u2009" + r.InsurancePayment)</td>
+                            <td class="r money-neutral">@(string.IsNullOrWhiteSpace(r.ExpectedCharges) ? "-" : "$\u2009" + r.ExpectedCharges)</td>
+                            <td class="r money-neutral">@(string.IsNullOrWhiteSpace(r.MissingCPT_AvgAllowedAmount) ? "-" : "$\u2009" + r.MissingCPT_AvgAllowedAmount)</td>
+                            <td class="r money-neutral">@(string.IsNullOrWhiteSpace(r.MissingCPT_AvgPaidAmount) ? "-" : "$\u2009" + r.MissingCPT_AvgPaidAmount)</td>
+                            <td class="r money-neutral">@(string.IsNullOrWhiteSpace(r.MissingCPT_AvgPatientResponsibilityAmount) ? "-" : "$\u2009" + r.MissingCPT_AvgPatientResponsibilityAmount)</td>
+                            <td class="r money-neutral">@(string.IsNullOrWhiteSpace(r.AdditionalCPT_AvgAllowedAmount) ? "-" : "$\u2009" + r.AdditionalCPT_AvgAllowedAmount)</td>
+                            <td class="r money-neutral">@(string.IsNullOrWhiteSpace(r.AdditionalCPT_AvgPaidAmount) ? "-" : "$\u2009" + r.AdditionalCPT_AvgPaidAmount)</td>
+                            <td class="r money-neutral">@(string.IsNullOrWhiteSpace(r.AdditionalCPT_AvgPatientResponsibilityAmount) ? "-" : "$\u2009" + r.AdditionalCPT_AvgPatientResponsibilityAmount)</td>
+                            <td class="cs-nowrap">@r.MissingCPT_ChargeSource</td>
+                            <td class="cs-nowrap">@r.AdditionalCPT_ChargeSource</td>
+                            <td>@r.Remarks</td>
                         </tr>
                         <tr class="det-row-expand">
-                            <td colspan="8" class="det-expand-inner">
+                            @* CVDETAIL-COLS (2026-07-28): colspan must cover toggle + 32 data columns. *@
+                            <td colspan="33" class="det-expand-inner">
                                 <div class="det-expand-grid">
                                     <div class="det-expand-block">
                                         <div class="det-expand-label">Actual CPT Codes</div>
@@ -107,9 +176,40 @@ else
                 </tbody>
             </table>
         </div>
+        @* >>> CVDETAIL-PAGE (2026-07-28): server-rendered pager. Buttons carry data-page;
+           the page script re-requests DetailPane for that page. *@
+        @{
+            var totalPages = Model.DetailTotalPages;
+            var curPage    = Model.DetailPage;
+            var from       = Model.DetailTotalRows == 0 ? 0 : ((curPage - 1) * Model.DetailPageSize) + 1;
+            var to         = Math.Min(curPage * Model.DetailPageSize, Model.DetailTotalRows);
+            var lo         = Math.Max(1, curPage - 2);
+            var hi         = Math.Min(totalPages, lo + 4);
+            lo             = Math.Max(1, hi - 4);
+        }
         <div class="det-pager" id="det-pager">
-            <span class="det-pager-info" id="det-pager-info"></span>
-            <div id="det-pager-btns"></div>
+            <span class="det-pager-info" id="det-pager-info">
+                Showing @from.ToString("N0")-@to.ToString("N0") of @Model.DetailTotalRows.ToString("N0") rows
+            </span>
+            <div id="det-pager-btns">
+                <button type="button" class="det-pager-btn det-page-link" data-page="@(curPage - 1)" @(curPage <= 1 ? "disabled" : "")>&#8249; Prev</button>
+                @if (lo > 1)
+                {
+                    <button type="button" class="det-pager-btn det-page-link" data-page="1">1</button>
+                    @if (lo > 2) { <span class="det-pager-ellipsis">...</span> }
+                }
+                @for (int p = lo; p <= hi; p++)
+                {
+                    <button type="button" class="det-pager-btn det-page-link @(p == curPage ? "active" : "")" data-page="@p">@p</button>
+                }
+                @if (hi < totalPages)
+                {
+                    @if (hi < totalPages - 1) { <span class="det-pager-ellipsis">...</span> }
+                    <button type="button" class="det-pager-btn det-page-link" data-page="@totalPages">@totalPages</button>
+                }
+                <button type="button" class="det-pager-btn det-page-link" data-page="@(curPage + 1)" @(curPage >= totalPages ? "disabled" : "")>Next &#8250;</button>
+            </div>
         </div>
+        @* <<< END CVDETAIL-PAGE *@
     </div>
 }

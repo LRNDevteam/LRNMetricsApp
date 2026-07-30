@@ -8,10 +8,17 @@ ViewData["PageLabel"]   = "Coding Summary";
 var years = Model.SummaryRows.Select(r => r.Year)
                  .Distinct().OrderByDescending(y => y).ToList();
 
+// >>> CVBILL-1.4 (2026-07-27): week labels are billed-date ranges "MM/dd/yyyy to MM/dd/yyyy".
+//     Sort chronologically by the range END date, not lexically. REVERT: delete WeekEnd + use OrderByDescending(w => w).
+Func<string, DateTime> WeekEnd = w =>
+    (!string.IsNullOrWhiteSpace(w) && w.Length >= 10
+     && DateTime.TryParse(w.Substring(w.Length - 10), out var d)) ? d : DateTime.MinValue;
+// <<< END CVBILL-1.4
+
 // Shared filter option lists - union across summary tabs (insights load lazily).
 var sharedWeeks = Model.WtdSummaryRows.Select(r => r.WeekFolder)
                       .Where(w => !string.IsNullOrWhiteSpace(w))
-                      .Distinct().OrderByDescending(w => w).ToList();
+                      .Distinct().OrderByDescending(WeekEnd).ToList();   // CVBILL-1.4: was OrderByDescending(w => w)
 var sharedPanels = Model.SummaryRows.Select(r => r.PanelName)
                       .Union(Model.WtdSummaryRows.Select(r => r.PanelName))
                       .Where(p => !string.IsNullOrWhiteSpace(p))
@@ -222,6 +229,25 @@ var sharedPanels = Model.SummaryRows.Select(r => r.PanelName)
     background: linear-gradient(to right, rgba(0,0,0,0.05), transparent);
     pointer-events: none;
 }
+/* >>> CVUI-INS (2026-07-27): YTD/WTD Coding Insights grids — always-on frozen header + first 2 columns,
+   400px tall with horizontal scroll, full CPT on one line, Panel never wraps.
+   Reuses the .has-many-rows sticky rules; .cs-always-frozen keeps them on regardless of row count.
+   REVERT: delete this block, undo the applyScrollbarClasses guard, and remove the
+   'has-many-rows cs-always-frozen' classes + cpt-full/cs-nowrap from the two Insights partials. */
+.cs-table-scroll.cs-always-frozen { max-height:400px; overflow:auto; position:relative; }
+/* Opaque backgrounds so the frozen columns hide content scrolling underneath */
+.cs-table-scroll.cs-always-frozen .cs-table tbody td:nth-child(1),
+.cs-table-scroll.cs-always-frozen .cs-table tbody td:nth-child(2) { background:#fff; }
+.cs-table-scroll.cs-always-frozen .cs-table tbody tr:hover td:nth-child(1),
+.cs-table-scroll.cs-always-frozen .cs-table tbody tr:hover td:nth-child(2) { background:#f0f8ff; }
+/* Full CPT combination on a single line so the horizontal scrollbar engages */
+.cs-table td.cpt-full {
+    font-size:.68rem; font-family:'Courier New',monospace;
+    white-space:nowrap; color:#37474f;
+}
+/* Panel column never wraps */
+.cs-table td.cs-nowrap, .cs-table th.cs-nowrap { white-space:nowrap; }
+/* <<< END CVUI-INS */
 .cs-table {
     width:100%; border-collapse:collapse; font-size:.76rem;
     min-width:900px;
@@ -441,6 +467,15 @@ var sharedPanels = Model.SummaryRows.Select(r => r.PanelName)
     font-size:.82rem; font-weight:800; color:#fff; letter-spacing:.04em;
 }
 .ck-header-date { font-size:.76rem; color:rgba(255,255,255,.7); font-weight:600; }
+/* >>> CVUI-SRC (2026-07-27): source-data provenance line in the Coding Summary header.
+   REVERT: delete this block and the source markup in the header. */
+.ck-header-source {
+    margin-left:auto; font-size:.74rem; color:rgba(255,255,255,.82); font-weight:600;
+    display:inline-flex; align-items:center; gap:.35rem; flex-wrap:wrap;
+}
+.ck-header-source strong { color:#fff; font-weight:800; }
+.ck-header-source .ck-src-sep { opacity:.5; }
+/* <<< END CVUI-SRC */
 
 /* 3-col grid */
 .ck-grid {
@@ -977,6 +1012,16 @@ else if (Model.HasData && fin is not null)
             <span class="ck-header-week">&#128197;&thinsp;@kpiWeek</span>
             @if (!string.IsNullOrWhiteSpace(fin.ReportDate))
             { <span class="ck-header-date">Report Date:&thinsp;@fin.ReportDate</span> }
+            @* >>> CVUI-SRC (2026-07-27): source data RunId + inserted datetime. REVERT: delete this block. *@
+            @if (Model.LatestSource is not null)
+            {
+                var src = Model.LatestSource;
+                <span class="ck-header-source" title="Source file that populated this Coding Validation data">
+                    &#128194;&thinsp;Source:&nbsp;<strong>@src.RunId</strong>
+                    <span class="ck-src-sep">·</span>inserted&nbsp;@src.InsertedDateTime.ToString("MMM d, yyyy h:mm tt")
+                </span>
+            }
+            @* <<< END CVUI-SRC *@
         </div>
 
         <!-- Row 1: Totals - Revenue Loss -->
@@ -1364,8 +1409,9 @@ else
                                         Lost<br/>Revenue <span class="calc-help">i</span>
                                         <span class="calc-tooltip" role="tooltip">
                                             <span class="calc-tooltip-title"><i class="bi bi-info"></i>Lost Revenue</span>
-                                            <span class="calc-tooltip-formula">Sum of MissingCPT_AvgPaidAmount for each Year / Panel row.</span>
-                                            <span class="calc-tooltip-row"><span class="calc-tooltip-key">Source</span><span class="calc-tooltip-value">Missing CPT average paid amounts</span></span>
+                                            @* CVTPL-1.4: source is Average Allowed Amount (was AvgPaidAmount). REVERT: restore "AvgPaidAmount" wording. *@
+                                            <span class="calc-tooltip-formula">Sum of MissingCPT_AvgAllowedAmount for each Year / Panel row.</span>
+                                            <span class="calc-tooltip-row"><span class="calc-tooltip-key">Source</span><span class="calc-tooltip-value">Missing CPT average allowed amounts</span></span>
                                             <span class="calc-tooltip-row"><span class="calc-tooltip-key">Meaning</span><span class="calc-tooltip-value">Estimated revenue missed because required CPTs were not billed</span></span>
                                         </span>
                                     </th>
@@ -1373,8 +1419,9 @@ else
                                         Revenue<br/>at Risk <span class="calc-help">i</span>
                                         <span class="calc-tooltip" role="tooltip">
                                             <span class="calc-tooltip-title"><i class="bi bi-info"></i>Revenue at Risk</span>
-                                            <span class="calc-tooltip-formula">Sum of AdditionalCPT_AvgPaidAmount for each Year / Panel row.</span>
-                                            <span class="calc-tooltip-row"><span class="calc-tooltip-key">Source</span><span class="calc-tooltip-value">Additional CPT average paid amounts</span></span>
+                                            @* CVTPL-1.4: source is Average Allowed Amount (was AvgPaidAmount). REVERT: restore "AvgPaidAmount" wording. *@
+                                            <span class="calc-tooltip-formula">Sum of AdditionalCPT_AvgAllowedAmount for each Year / Panel row.</span>
+                                            <span class="calc-tooltip-row"><span class="calc-tooltip-key">Source</span><span class="calc-tooltip-value">Additional CPT average allowed amounts</span></span>
                                             <span class="calc-tooltip-row"><span class="calc-tooltip-key">Meaning</span><span class="calc-tooltip-value">Estimated recoverable value from extra CPT opportunities</span></span>
                                         </span>
                                     </th>
@@ -1382,8 +1429,11 @@ else
                                         Net Impact <span class="calc-help">i</span>
                                         <span class="calc-tooltip" role="tooltip">
                                             <span class="calc-tooltip-title"><i class="bi bi-info"></i>Net Impact</span>
-                                            <span class="calc-tooltip-formula">Lost Revenue - Revenue at Risk for each Year / Panel row.</span>
-                                            <span class="calc-tooltip-row"><span class="calc-tooltip-key">Formula</span><span class="calc-tooltip-value">Lost Revenue - Revenue at Risk</span></span>
+                                            @* >>> CVTPL-1.4 CHANGE (2026-07-27): Net Impact = Revenue at Risk - Lost Revenue per template v1.4.
+                                               REVERT: restore "Lost Revenue - Revenue at Risk" wording. *@
+                                            <span class="calc-tooltip-formula">Revenue at Risk - Lost Revenue for each Year / Panel row.</span>
+                                            <span class="calc-tooltip-row"><span class="calc-tooltip-key">Formula</span><span class="calc-tooltip-value">Revenue at Risk - Lost Revenue</span></span>
+                                            @* <<< END CVTPL-1.4 CHANGE *@
                                             <span class="calc-tooltip-row"><span class="calc-tooltip-key">Positive</span><span class="calc-tooltip-value">More recoverable opportunity than leakage</span></span>
                                             <span class="calc-tooltip-row"><span class="calc-tooltip-key">Negative</span><span class="calc-tooltip-value">Leakage exceeds recoverable opportunity</span></span>
                                         </span>
@@ -1448,7 +1498,7 @@ else
             <span class="cs-filter-label" style="margin-left:.25rem">Week</span>
             <select id="flt-wtd-summary-week" class="cs-filter-select" style="min-width:220px">
                 <option value="">All Weeks</option>
-                @foreach (var w in Model.WtdSummaryRows.Select(r => r.WeekFolder).Distinct().OrderByDescending(x => x))
+                @foreach (var w in Model.WtdSummaryRows.Select(r => r.WeekFolder).Distinct().OrderByDescending(WeekEnd)) @* CVBILL-1.4: chronological *@
                 { <option value="@w">@w</option> }
             </select>
             <span class="cs-filter-label">Panel</span>
@@ -1465,7 +1515,7 @@ else
         </div>
         @{
             var wtdSummaryWeeks = Model.WtdSummaryRows.Select(r => r.WeekFolder)
-                                        .Distinct().OrderByDescending(w => w).ToList();
+                                        .Distinct().OrderByDescending(WeekEnd).ToList();   // CVBILL-1.4: chronological
         }
         @if (!wtdSummaryWeeks.Any())
         {
@@ -1487,27 +1537,63 @@ else
                 <div class="cs-table-wrap">
                     <div class="cs-table-scroll">
                         <table class="cs-table">
+                            @* >>> CVTPL-1.4 CHANGE (2026-07-27): WTD Summary columns aligned to Output Template v1.4.
+                                   REVERT: restore the pre-1.4 5-column thead/tbody (Panel, Total No. of Claims,
+                                   Distinct Claims with Missing CPTs, Total Billed Charges for Missing CPTs,
+                                   Total Average Allowed Amount for Missing CPTs). *@
                             <thead>
                                 <tr>
                                     <th style="text-align:left">Panel</th>
                                     <th>Total No.<br/>of Claims</th>
-                                    <th>Distinct Claims<br/>with Missing CPTs</th>
-                                    <th>Total Billed Charges<br/>for Missing CPTs</th>
-                                    <th>Total Average Allowed Amount<br/>for Missing CPTs</th>
+                                    <th>Distinct Claims<br/>w/ Missing CPTs</th>
+                                    <th>Total Billed for<br/>Missing CPTs</th>
+                                    <th>Distinct Claims<br/>w/ Additional CPTs</th>
+                                    <th>Total Billed for<br/>Additional CPTs</th>
+                                    <th class="calc-tooltip-trigger" tabindex="0">
+                                        Lost<br/>Revenue <span class="calc-help">i</span>
+                                        <span class="calc-tooltip" role="tooltip">
+                                            <span class="calc-tooltip-title"><i class="bi bi-info"></i>Lost Revenue</span>
+                                            <span class="calc-tooltip-formula">Sum of the Average Allowed Amount for the Missing CPT codes, grouped by panel.</span>
+                                        </span>
+                                    </th>
+                                    <th class="calc-tooltip-trigger" tabindex="0">
+                                        Revenue<br/>at Risk <span class="calc-help">i</span>
+                                        <span class="calc-tooltip" role="tooltip">
+                                            <span class="calc-tooltip-title"><i class="bi bi-info"></i>Revenue at Risk</span>
+                                            <span class="calc-tooltip-formula">Sum of the Average Allowed Amount for the Additional CPT codes, grouped by panel.</span>
+                                        </span>
+                                    </th>
+                                    <th class="calc-tooltip-trigger" tabindex="0">
+                                        Net Impact <span class="calc-help">i</span>
+                                        <span class="calc-tooltip" role="tooltip">
+                                            <span class="calc-tooltip-title"><i class="bi bi-info"></i>Net Impact</span>
+                                            <span class="calc-tooltip-formula">Revenue at Risk - Lost Revenue for each Week / Panel row.</span>
+                                        </span>
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody id="tbody-wtd-summary-@week.GetHashCode()">
                                 @foreach (var r in wrows)
                                 {
+                                    var wni = r.NetImpact;
                                     <tr data-week="@r.WeekFolder" data-panel="@r.PanelName">
                                         <td><span class="panel-chip">@r.PanelName</span></td>
                                         <td class="r"><strong>@r.TotalClaims.ToString("N0")</strong></td>
                                         <td class="r">@r.DistinctClaimsWithMissingCpts.ToString("N0")</td>
                                         <td class="r money money-neutral">$&thinsp;@r.TotalBilledChargesForMissingCpts.ToString("N2")</td>
-                                        <td class="r money money-neutral">$&thinsp;@r.AvgAllowedAmountForMissingCpts.ToString("N2")</td>
+                                        <td class="r">@r.DistinctClaimsWithAdditionalCpts.ToString("N0")</td>
+                                        <td class="r money money-neutral">$&thinsp;@r.TotalBilledChargesForAdditionalCpts.ToString("N2")</td>
+                                        <td class="r money @(r.LostRevenue != 0 ? "money-neg" : "money-neutral")">$&thinsp;@r.LostRevenue.ToString("N2")</td>
+                                        <td class="r money money-neutral">$&thinsp;@r.RevenueAtRisk.ToString("N2")</td>
+                                        <td class="r">
+                                            <span class="impact-chip @(wni < 0 ? "neg" : wni > 0 ? "pos" : "zero")">
+                                                @(wni < 0 ? "-" : wni > 0 ? "+" : "")$@Math.Abs(wni).ToString("N2")
+                                            </span>
+                                        </td>
                                     </tr>
                                 }
                             </tbody>
+                            @* <<< END CVTPL-1.4 CHANGE *@
                         </table>
                     </div>
                 </div>
@@ -1689,6 +1775,11 @@ else
                 if (overlay) overlay.classList.remove('active');
                 pane.innerHTML = html;
                 pane.dataset.lazyLoaded = '1';
+                // CVDETAIL-PAGE (2026-07-28): populate the detail drop-downs + count from the
+                // server lists once the (lazy) pane has rendered.
+                if (pane.id === 'pane-detail' && typeof window.syncDetailFilterOptions === 'function') {
+                    window.syncDetailFilterOptions();
+                }
             })
             .catch(function (err) {
                 clearTimeout(timeoutId);
@@ -1915,6 +2006,13 @@ else
     function applyScrollbarClasses(root) {
         var scope = root || document;
         scope.querySelectorAll('.cs-table-scroll').forEach(function (scrollDiv) {
+            // >>> CVUI-INS (2026-07-27): Insights grids are always frozen — keep has-many-rows on
+            //     regardless of row count. REVERT: delete this guard.
+            if (scrollDiv.classList.contains('cs-always-frozen')) {
+                scrollDiv.classList.add('has-many-rows');
+                return;
+            }
+            // <<< END CVUI-INS
             var table = scrollDiv.querySelector('table');
             if (!table) return;
             var tbody = table.querySelector('tbody');
@@ -2260,95 +2358,103 @@ else
 
     // ?? Validation Detail: filter + pager + expand ???????????????????????
     (function () {
-        var PAGE_SIZE = 50;
-        var allRows   = [];   // {main, expand, panel, status, search, visible}
-        var filtered  = [];   // subset after filters applied
-        var curPage   = 1;
+        // >>> CVDETAIL-PAGE (2026-07-28): server-side paging + filtering.
+        //     Previously every row was rendered into the DOM and filtered/paged client-side,
+        //     which was far too slow at 30k+ rows. Now each page is fetched from DetailPane.
+        //     REVERT: restore the client-side buildIndex/applyFilters/renderPage/renderPagerBtns block.
+        var detPane     = document.getElementById('pane-detail');
+        var detBaseUrl  = detPane ? detPane.getAttribute('data-lazy-url') : null;
+        var detLoading  = false;
+        var detDebounce = null;
 
-        function buildIndex() {
-            var mains = document.querySelectorAll('#tbody-detail .det-row-main');
-            mains.forEach(function (m) {
-                allRows.push({
-                    main:   m,
-                    expand: m.nextElementSibling,
-                    panel:  m.getAttribute('data-panel')  || '',
-                    status: m.getAttribute('data-status') || '',
-                    search: (m.getAttribute('data-search') || '').toLowerCase()
+        function detState() {
+            var el = document.getElementById('det-state');
+            return {
+                page:       el ? parseInt(el.getAttribute('data-page') || '1', 10)       : 1,
+                pageSize:   el ? parseInt(el.getAttribute('data-page-size') || '50', 10) : 50,
+                total:      el ? parseInt(el.getAttribute('data-total') || '0', 10)      : 0,
+                totalPages: el ? parseInt(el.getAttribute('data-total-pages') || '1', 10): 1,
+                panels:     el ? (el.getAttribute('data-panels')   || '') : '',
+                statuses:   el ? (el.getAttribute('data-statuses') || '') : ''
+            };
+        }
+
+        // Fill the Panel/Status drop-downs from the server lists (once per load).
+        window.syncDetailFilterOptions = syncDetailFilterOptions;
+        function syncDetailFilterOptions() {
+            var st = detState();
+            var cnt0 = document.getElementById('flt-det-count');
+            if (cnt0 && st.total) cnt0.textContent = st.total.toLocaleString() + ' row' + (st.total !== 1 ? 's' : '');
+            [['flt-det-panel', st.panels, 'All Panels'],
+             ['flt-det-status', st.statuses, 'All Statuses']].forEach(function (cfg) {
+                var sel = document.getElementById(cfg[0]);
+                if (!sel || !cfg[1]) return;
+                var current = sel.value;
+                var opts = cfg[1].split('|').filter(function (v) { return v !== ''; });
+                if (sel.options.length - 1 === opts.length) return;   // already populated
+                sel.innerHTML = '';
+                var all = document.createElement('option');
+                all.value = ''; all.textContent = cfg[2];
+                sel.appendChild(all);
+                opts.forEach(function (v) {
+                    var o = document.createElement('option');
+                    o.value = v; o.textContent = v;
+                    sel.appendChild(o);
                 });
+                sel.value = current;
             });
         }
 
-        function applyFilters() {
+        function loadDetailPage(page) {
+            if (!detPane || !detBaseUrl || detLoading) return;
+            detLoading = true;
+
             var panel  = (document.getElementById('flt-det-panel')  || {}).value || '';
             var status = (document.getElementById('flt-det-status') || {}).value || '';
-            var search = ((document.getElementById('flt-det-search') || {}).value || '').toLowerCase();
-            filtered = allRows.filter(function (r) {
-                return (!panel  || r.panel  === panel)
-                    && (!status || r.status === status)
-                    && (!search || r.search.indexOf(search) !== -1);
-            });
-            var cnt = document.getElementById('flt-det-count');
-            if (cnt) cnt.textContent = filtered.length + ' row' + (filtered.length !== 1 ? 's' : '');
-            curPage = 1;
-            renderPage();
-            // Re-apply scrollbar classes after filter changes row visibility
-            if (typeof applyScrollbarClasses === 'function') {
-                setTimeout(applyScrollbarClasses, 50);
-            }
+            var search = (document.getElementById('flt-det-search') || {}).value || '';
+            var st     = detState();
+
+            var url = detBaseUrl
+                + (detBaseUrl.indexOf('?') === -1 ? '?' : '&')
+                + 'page='   + encodeURIComponent(page || 1)
+                + '&pageSize=' + encodeURIComponent(st.pageSize || 50)
+                + '&panel='  + encodeURIComponent(panel)
+                + '&status=' + encodeURIComponent(status)
+                + '&search=' + encodeURIComponent(search);
+
+            detPane.style.opacity = '.5';
+            fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function (r) { return r.text(); })
+                .then(function (html) {
+                    detPane.innerHTML = html;
+                    var cnt = document.getElementById('flt-det-count');
+                    var s2  = detState();
+                    if (cnt) cnt.textContent = s2.total.toLocaleString() + ' row' + (s2.total !== 1 ? 's' : '');
+                    syncDetailFilterOptions();
+                    // CVDETAIL-COLS: re-apply frozen header/columns after the page swap.
+                    setTimeout(function () {
+                        if (typeof applyScrollbarClasses === 'function')   applyScrollbarClasses(detPane);
+                        if (typeof setStickyColumnPositions === 'function') setStickyColumnPositions(detPane);
+                    }, 30);
+                })
+                .catch(function (e) { console.error('Validation Detail load failed', e); })
+                .finally(function () {
+                    detLoading = false;
+                    detPane.style.opacity = '';
+                });
         }
+        window.loadDetailPage = loadDetailPage;
 
-        function renderPage() {
-            // Hide all rows first
-            allRows.forEach(function (r) {
-                r.main.style.display   = 'none';
-                r.expand.style.display = 'none';
-                r.expand.classList.remove('open');
-                r.main.classList.remove('open');
-            });
-
-            var start = (curPage - 1) * PAGE_SIZE;
-            var page  = filtered.slice(start, start + PAGE_SIZE);
-            page.forEach(function (r) { r.main.style.display = ''; });
-
-            // Pager info
-            var info = document.getElementById('det-pager-info');
-            if (info) {
-                var from = filtered.length === 0 ? 0 : start + 1;
-                var to   = Math.min(start + PAGE_SIZE, filtered.length);
-                info.textContent = 'Showing ' + from + '-' + to + ' of ' + filtered.length + ' rows';
-            }
-            renderPagerBtns();
-        }
-
-        function renderPagerBtns() {
-            var container = document.getElementById('det-pager-btns');
-            if (!container) return;
-            container.innerHTML = '';
-            var totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-            if (totalPages <= 1) return;
-
-            function mkBtn(label, page, disabled, active) {
-                var b = document.createElement('button');
-                b.className = 'det-pager-btn' + (active ? ' active' : '');
-                b.textContent = label;
-                b.disabled = !!disabled;
-                if (!disabled) b.addEventListener('click', function () { curPage = page; renderPage(); });
-                return b;
-            }
-
-            container.appendChild(mkBtn('<<', 1,          curPage === 1, false));
-            container.appendChild(mkBtn('<', curPage - 1, curPage === 1, false));
-
-            // page number buttons - show window of -2 around current
-            var lo = Math.max(1, curPage - 2);
-            var hi = Math.min(totalPages, curPage + 2);
-            if (lo > 1)          { container.appendChild(mkBtn('1', 1, false, false)); if (lo > 2) { var e=document.createElement('span'); e.className='det-pager-ellipsis'; e.textContent='...'; container.appendChild(e); } }
-            for (var p = lo; p <= hi; p++) container.appendChild(mkBtn(String(p), p, false, p === curPage));
-            if (hi < totalPages) { if (hi < totalPages-1) { var e2=document.createElement('span'); e2.className='det-pager-ellipsis'; e2.textContent='...'; container.appendChild(e2); } container.appendChild(mkBtn(String(totalPages), totalPages, false, false)); }
-
-            container.appendChild(mkBtn('>', curPage + 1, curPage === totalPages, false));
-            container.appendChild(mkBtn('>>', totalPages,  curPage === totalPages, false));
-        }
+        // Pager buttons (event-delegated — the pager is re-rendered on every load).
+        document.addEventListener('click', function (evt) {
+            var btn = evt.target.closest('.det-page-link');
+            if (!btn || btn.disabled) return;
+            var p = parseInt(btn.getAttribute('data-page') || '1', 10);
+            var st = detState();
+            if (p < 1 || p > st.totalPages || p === st.page) return;
+            loadDetailPage(p);
+        });
+        // <<< END CVDETAIL-PAGE
 
         // Row expand/collapse - Validation Detail
         window.detToggle = function (mainRow) {
@@ -2370,23 +2476,30 @@ else
             }
         };
 
+        // CVDETAIL-PAGE (2026-07-28): filters now re-query the server (page resets to 1).
         window.resetDetailFilter = function () {
             ['flt-det-panel', 'flt-det-status'].forEach(function (id) {
                 var el = document.getElementById(id); if (el) el.value = '';
             });
             var s = document.getElementById('flt-det-search'); if (s) s.value = '';
-            applyFilters();
+            loadDetailPage(1);
         };
 
         ['flt-det-panel', 'flt-det-status'].forEach(function (id) {
             var el = document.getElementById(id);
-            if (el) el.addEventListener('change', applyFilters);
+            if (el) el.addEventListener('change', function () { loadDetailPage(1); });
         });
         var detSearch = document.getElementById('flt-det-search');
-        if (detSearch) detSearch.addEventListener('input', applyFilters);
+        if (detSearch) {
+            // Debounce typing so we don't fire a query per keystroke.
+            detSearch.addEventListener('input', function () {
+                clearTimeout(detDebounce);
+                detDebounce = setTimeout(function () { loadDetailPage(1); }, 400);
+            });
+        }
 
-        buildIndex();
-        applyFilters();
+        // Populate the drop-downs from whatever the first (lazy) load returned.
+        syncDetailFilterOptions();
     }());
 
 }());

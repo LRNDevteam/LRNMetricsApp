@@ -1961,6 +1961,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
 
             var (cols, rows) = await GetSpExportDataAsync(
                 connectionString, dataSpName,
+                bucket.BucketType,   // CVEXP-ALL (2026-07-27)
                 from, to,
                 payerParam, panelParam,
                 filterDosFrom, filterDosTo,
@@ -2054,6 +2055,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             int written = await StreamSpDataToWorksheetAsync(
                 workbook, sheetName, tabColor,
                 connectionString, dataSpName,
+                bucket.BucketType,   // CVEXP-ALL (2026-07-27)
                 from, to, payerParam, panelParam,
                 filterDosFrom, filterDosTo,
                 filterFirstBillFrom, filterFirstBillTo,
@@ -2194,6 +2196,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                 int written = await CreateSingleBucketFileAsync(
                     bucketFile, sheetName,
                     connectionString, dataSpName,
+                    bucket.BucketType,   // CVEXP-ALL (2026-07-27)
                     from, to, payerParam, panelParam,
                     filterDosFrom, filterDosTo,
                     filterFirstBillFrom, filterFirstBillTo,
@@ -2279,6 +2282,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
     private static async Task<int> CreateSingleBucketFileAsync(
         string bucketFile, string sheetName,
         string connectionString, string dataSpName,
+        string bucketType,   // CVEXP-ALL (2026-07-27)
         DateOnly? fromDate, DateOnly? toDate,
         string? payerNames, string? panelNames,
         DateOnly? dosFrom,        DateOnly? dosTo,
@@ -2298,6 +2302,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         int written = await StreamBucketViaOpenXmlAsync(
             workbookPart, sheets, sheetName, /* tabColor unused */ XLColor.NoColor,
             connectionString, dataSpName,
+            bucketType,
             fromDate, toDate, payerNames, panelNames,
             dosFrom, dosTo, cedFrom, cedTo,
             firstBilledFrom, firstBilledTo,
@@ -2358,6 +2363,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         XLColor tabColor,
         string connectionString,
         string dataSpName,
+        string bucketType,   // CVEXP-ALL (2026-07-27): 'ALL' / 'UNDATED' / 'YEAR' / 'MONTH'
         DateOnly? fromDate, DateOnly? toDate,
         string? payerNames, string? panelNames,
         DateOnly? dosFrom,        DateOnly? dosTo,
@@ -2374,6 +2380,8 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             CommandTimeout = 1200
         };
 
+        // CVEXP-ALL: tell the data SP which slice to return (ALL/UNDATED bypass the date range).
+        cmd.Parameters.Add(new SqlParameter("@BucketType",      SqlDbType.VarChar, 20) { Value = (object?)bucketType ?? "RANGE" });
         cmd.Parameters.Add(new SqlParameter("@FromDate",        SqlDbType.Date) { Value = fromDate.HasValue        ? fromDate.Value.ToDateTime(TimeOnly.MinValue)        : DBNull.Value });
         cmd.Parameters.Add(new SqlParameter("@ToDate",          SqlDbType.Date) { Value = toDate.HasValue          ? toDate.Value.ToDateTime(TimeOnly.MinValue)          : DBNull.Value });
         cmd.Parameters.Add(new SqlParameter("@PayerNames",      SqlDbType.NVarChar, -1) { Value = (object?)payerNames ?? DBNull.Value });
@@ -2619,6 +2627,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         XLColor tabColor,
         string connectionString,
         string dataSpName,
+        string bucketType,   // CVEXP-ALL (2026-07-27)
         DateOnly? fromDate, DateOnly? toDate,
         string? payerNames, string? panelNames,
         DateOnly? dosFrom,        DateOnly? dosTo,
@@ -2633,6 +2642,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             CommandTimeout = 600
         };
 
+        cmd.Parameters.Add(new SqlParameter("@BucketType",      SqlDbType.VarChar, 20) { Value = (object?)bucketType ?? "RANGE" });   // CVEXP-ALL
         cmd.Parameters.Add(new SqlParameter("@FromDate",        SqlDbType.Date) { Value = fromDate.HasValue        ? fromDate.Value.ToDateTime(TimeOnly.MinValue)        : DBNull.Value });
         cmd.Parameters.Add(new SqlParameter("@ToDate",          SqlDbType.Date) { Value = toDate.HasValue          ? toDate.Value.ToDateTime(TimeOnly.MinValue)          : DBNull.Value });
         cmd.Parameters.Add(new SqlParameter("@PayerNames",      SqlDbType.NVarChar, -1) { Value = (object?)payerNames ?? DBNull.Value });
@@ -2769,6 +2779,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
     private static async Task<(string[] Columns, List<object?[]> Rows)> GetSpExportDataAsync(
         string connectionString,
         string spName,
+        string bucketType,   // CVEXP-ALL (2026-07-27)
         DateOnly? fromDate,
         DateOnly? toDate,
         string? payerNames,
@@ -2785,6 +2796,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             CommandTimeout = 600
         };
 
+        cmd.Parameters.Add(new SqlParameter("@BucketType",      SqlDbType.VarChar, 20) { Value = (object?)bucketType ?? "RANGE" });   // CVEXP-ALL
         cmd.Parameters.Add(new SqlParameter("@FromDate",        SqlDbType.Date) { Value = fromDate.HasValue ? fromDate.Value.ToDateTime(TimeOnly.MinValue) : DBNull.Value });
         cmd.Parameters.Add(new SqlParameter("@ToDate",          SqlDbType.Date) { Value = toDate.HasValue   ? toDate.Value.ToDateTime(TimeOnly.MinValue)   : DBNull.Value });
         cmd.Parameters.Add(new SqlParameter("@PayerNames",      SqlDbType.NVarChar, -1) { Value = (object?)payerNames ?? DBNull.Value });

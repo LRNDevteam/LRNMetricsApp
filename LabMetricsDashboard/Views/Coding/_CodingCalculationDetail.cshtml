@@ -85,15 +85,18 @@
     </div>
 
     <div class="calc-detail-formula">
-        <div><strong>Value used:</strong> <code>MissingCPT_AvgPaidAmount</code> / <code>AdditionalCPT_AvgPaidAmount</code>
-            from Coding Validated (sourced from CPT AvgsOutput <code>AvgPaidAmountPerUnit</code>).</div>
+        @* >>> CVTPL-1.4 CHANGE (2026-07-27): Allowed-amount basis + Net Impact = At Risk − Lost per template v1.4.
+               REVERT: restore the pre-1.4 wording (AvgPaidAmount / AvgPaidAmountPerUnit / "Net Impact = Lost − At Risk"). *@
+        <div><strong>Value used:</strong> <code>MissingCPT_AvgAllowedAmount</code> / <code>AdditionalCPT_AvgAllowedAmount</code>
+            from Coding Validated (sourced from CPT AvgsOutput <code>AvgAllowedAmountPerUnit</code>).</div>
         <div class="mt-1">
-            <strong>Lost Revenue</strong> = SUM(<code>MissingCPT_AvgPaidAmount</code>)
+            <strong>Lost Revenue</strong> = SUM(<code>MissingCPT_AvgAllowedAmount</code>)
             &nbsp;·&nbsp;
-            <strong>Revenue at Risk</strong> = SUM(<code>AdditionalCPT_AvgPaidAmount</code>)
+            <strong>Revenue at Risk</strong> = SUM(<code>AdditionalCPT_AvgAllowedAmount</code>)
             &nbsp;·&nbsp;
-            <strong>Net Impact</strong> = Lost − At Risk
+            <strong>Net Impact</strong> = At Risk − Lost
         </div>
+        @* <<< END CVTPL-1.4 CHANGE *@
         <div class="mt-1 text-muted" style="font-size:.74rem">
             Charges columns are shown for comparison only — they are <em>not</em> used in Lost / At Risk.
         </div>

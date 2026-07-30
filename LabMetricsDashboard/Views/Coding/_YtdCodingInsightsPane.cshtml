@@ -1,12 +1,7 @@
 @model LabMetricsDashboard.Models.CodingSummaryViewModel
 @{
     var years = Model.InsightRows.Select(r => r.Year).Distinct().OrderByDescending(y => y).ToList();
-    string Short(string? s, int max = 60)
-    {
-        if (string.IsNullOrWhiteSpace(s)) return "-";
-        s = s.Trim();
-        return s.Length <= max ? s : s[..max] + "...";
-    }
+    // CVUI-INS (2026-07-27): Short() truncation removed — CPT columns now show full text.
 }
 @if (!years.Any())
 {
@@ -25,14 +20,16 @@ else
             <span class="cs-year-pill">@year</span>
             <span class="cs-year-count">@rows.Count rows</span>
         </div>
-        <div class="cs-table-wrap"><div class="cs-table-scroll">
+        @* CVUI-INS (2026-07-27): always-frozen header + first 2 columns, 400px tall, horizontal scroll.
+           REVERT: remove 'has-many-rows cs-always-frozen' below. *@
+        <div class="cs-table-wrap"><div class="cs-table-scroll has-many-rows cs-always-frozen">
         <table class="cs-table">
             <thead><tr>
                 <th style="text-align:left">Year</th>
-                <th style="text-align:left">Panel</th>
+                <th class="cs-nowrap" style="text-align:left">Panel</th>
                 <th style="text-align:left">Billable CPT</th>
                 <th>Claims</th>
-                <th>Billed / claim</th>
+                <th>Total Billed Charges</th>@* CVTOTCHG (2026-07-28): was "Billed / claim" (AVG) *@
                 <th style="text-align:left">Billed CPT</th>
                 <th style="text-align:left">Missing</th>
                 <th>Missing $</th>
@@ -49,15 +46,15 @@ else
                 var ni = r.NetImpact;
                 <tr data-year="@r.Year" data-panel="@r.PanelName">
                     <td>@r.Year</td>
-                    <td>@r.PanelName</td>
-                    <td class="mono small" title="@r.BillableCptCombo">@Short(r.BillableCptCombo)</td>
+                    <td class="cs-nowrap">@r.PanelName</td>
+                    <td class="cpt-full" title="@r.BillableCptCombo">@(string.IsNullOrWhiteSpace(r.BillableCptCombo) ? "-" : r.BillableCptCombo)</td>
                     <td class="r"><strong>@r.TotalClaims.ToString("N0")</strong></td>
                     <td class="r">$@r.BilledChargesPerClaim.ToString("N2")</td>
-                    <td class="mono small" title="@r.BilledCptCombo">@Short(r.BilledCptCombo)</td>
-                    <td class="mono small" title="@r.MissingCpts">@Short(r.MissingCpts)</td>
+                    <td class="cpt-full" title="@r.BilledCptCombo">@(string.IsNullOrWhiteSpace(r.BilledCptCombo) ? "-" : r.BilledCptCombo)</td>
+                    <td class="cpt-full" title="@r.MissingCpts">@(string.IsNullOrWhiteSpace(r.MissingCpts) ? "-" : r.MissingCpts)</td>
                     <td class="r">$@r.TotalBilledChargesForMissingCpts.ToString("N2")</td>
                     <td class="r">$@r.LostRevenue.ToString("N2")</td>
-                    <td class="mono small" title="@r.AdditionalCpts">@Short(r.AdditionalCpts)</td>
+                    <td class="cpt-full" title="@r.AdditionalCpts">@(string.IsNullOrWhiteSpace(r.AdditionalCpts) ? "-" : r.AdditionalCpts)</td>
                     <td class="r">$@r.TotalBilledChargesForAdditionalCpts.ToString("N2")</td>
                     <td class="r">$@r.RevenueAtRisk.ToString("N2")</td>
                     <td class="r">@(ni < 0 ? "-" : ni > 0 ? "+" : "")$@Math.Abs(ni).ToString("N2")</td>

@@ -11,6 +11,13 @@ namespace LabMetricsDashboard.Services;
 /// </summary>
 public static class CodingExcelExportBuilder
 {
+    // >>> CVBILL-1.4 (2026-07-27): WTD week labels are billed-date ranges "MM/dd/yyyy to MM/dd/yyyy".
+    //     Sort chronologically by the range END date. REVERT: delete WeekEnd + use OrderByDescending(w => w).
+    private static DateTime WeekEnd(string w) =>
+        (!string.IsNullOrWhiteSpace(w) && w.Length >= 10
+         && DateTime.TryParse(w.Substring(w.Length - 10), out var d)) ? d : DateTime.MinValue;
+    // <<< END CVBILL-1.4
+
     /// <summary>Creates the workbook from the Coding Summary view model.</summary>
     public static XLWorkbook CreateWorkbook(CodingSummaryViewModel vm, string labName)
     {
@@ -117,59 +124,83 @@ public static class CodingExcelExportBuilder
         // blank spacer row
         row++;
 
-        // ── Row 1: TOTALS (left) + REVENUE LOSS (right) ─────────────────
-        row = WriteCardTitle(ws, row, 1, 3, "TOTALS", "Overall billing volume & expected value");
-        WriteCardTitle(ws, row - 2, 5, 7, "REVENUE LOSS", "Claims with issues producing leakage");
+        // >>> CVKPI-RI (2026-07-27): added a REVENUE IMPACT card next to TOTALS.
+        //     Card grid reflowed to 3 rows (was 2) so nothing is removed:
+        //       Row 1: TOTALS            | REVENUE IMPACT   (new)
+        //       Row 2: REVENUE LOSS      | REVENUE AT RISK
+        //       Row 3: COMPLIANCE RATE   | (empty)
+        //     REVERT: restore the previous 2-row layout (TOTALS+REVENUE LOSS, REVENUE AT RISK+COMPLIANCE).
 
-        row = WriteKpiRow(ws, row, 1, "#", "Total No. of Claims",
+        // ── Row 1: TOTALS (left) + REVENUE IMPACT (right) ───────────────
+        // Left/right cards have different heights (3 vs 4 metrics), so track rows independently.
+        int r1Start = row;
+        int lRow = WriteCardTitle(ws, r1Start, 1, 3, "TOTALS", "Overall billing volume & expected value");
+        lRow = WriteKpiRow(ws, lRow, 1, "#", "Total No. of Claims",
             fin.TotalClaims.ToString("N0"), ValueNavy);
-        WriteKpiRow(ws, row - 1, 5, "#", "Total No. of Claims",
-            fin.RevenueLoss_Claims?.ToString("N0") ?? "—", ValueNavy);
-
-        row = WriteKpiRow(ws, row, 1, "$", "Total Billed Charges",
+        lRow = WriteKpiRow(ws, lRow, 1, "$", "Total Billed Charges",
             $"${fin.TotalBilledCharges:N2}", ValueNavy);
-        WriteKpiRow(ws, row - 1, 5, "$", "Total Actual Billed Charges",
-            $"${fin.RevenueLoss_ActualBilled:N2}", ValueNavy);
-
-        row = WriteKpiRow(ws, row, 1, "≈", "Expected Billed Charges",
+        lRow = WriteKpiRow(ws, lRow, 1, "≈", "Expected Billed Charges",
             $"${fin.ExpectedBilledCharges:N2}", BluePrimary);
-        WriteKpiRow(ws, row - 1, 5, "!", "Potential Loss in Revenue",
-            $"${fin.RevenueLoss_PotentialLoss:N2}", DangerRed);
 
-        // card bottom border
-        WriteCardBottomBorder(ws, row, 1, 3, BluePrimary);
-        WriteCardBottomBorder(ws, row, 5, 7, DangerRed);
-        row++;
+        int rRow = WriteCardTitle(ws, r1Start, 5, 7, "REVENUE IMPACT", "Actual billed vs. potential loss & recoupment");
+        rRow = WriteKpiRow(ws, rRow, 5, "#", "Total No. of Claims",
+            fin.RevenueImpact_Claims?.ToString("N0") ?? "—", ValueNavy);
+        rRow = WriteKpiRow(ws, rRow, 5, "$", "Total Actual Billed Charges",
+            $"${fin.RevenueImpact_ActualBilled:N2}", ValueNavy);
+        rRow = WriteKpiRow(ws, rRow, 5, "!", "Potential Loss in Revenue",
+            $"${fin.RevenueImpact_PotentialLoss:N2}", DangerRed);
+        rRow = WriteKpiRow(ws, rRow, 5, "✓", "Expected Potential Recoupements",
+            $"${fin.RevenueImpact_ExpectedRecoup:N2}", SuccessGreen);
+
+        int r1Bottom = Math.Max(lRow, rRow);
+        WriteCardBottomBorder(ws, r1Bottom, 1, 3, BluePrimary);
+        WriteCardBottomBorder(ws, r1Bottom, 5, 7, SuccessGreen);
+        row = r1Bottom + 1;
 
         // blank spacer row
         row++;
 
-        // ── Row 2: REVENUE AT RISK (left) + COMPLIANCE RATE (right) ─────
-        row = WriteCardTitle(ws, row, 1, 3, "REVENUE AT RISK", "Recoverable value pending resolution");
-        WriteCardTitle(ws, row - 2, 5, 7, "COMPLIANCE RATE", "Issue-free claims ratio for the selected period");
+        // ── Row 2: REVENUE LOSS (left) + REVENUE AT RISK (right) ────────
+        row = WriteCardTitle(ws, row, 1, 3, "REVENUE LOSS", "Claims with issues producing leakage");
+        WriteCardTitle(ws, row - 2, 5, 7, "REVENUE AT RISK", "Recoverable value pending resolution");
 
         row = WriteKpiRow(ws, row, 1, "#", "Total No. of Claims",
-            fin.RevenueAtRisk_Claims?.ToString("N0") ?? "—", ValueNavy);
+            fin.RevenueLoss_Claims?.ToString("N0") ?? "—", ValueNavy);
         WriteKpiRow(ws, row - 1, 5, "#", "Total No. of Claims",
-            fin.Compliance_TotalClaims?.ToString("N0") ?? "—", ValueNavy);
+            fin.RevenueAtRisk_Claims?.ToString("N0") ?? "—", ValueNavy);
 
         row = WriteKpiRow(ws, row, 1, "$", "Total Actual Billed Charges",
+            $"${fin.RevenueLoss_ActualBilled:N2}", ValueNavy);
+        WriteKpiRow(ws, row - 1, 5, "$", "Total Actual Billed Charges",
             $"${fin.RevenueAtRisk_ActualBilled:N2}", ValueNavy);
-        WriteKpiRow(ws, row - 1, 5, "!", "Claims with Issues",
-            fin.Compliance_ClaimsWithIssues?.ToString("N0") ?? "—", DangerRed);
 
-        row = WriteKpiRow(ws, row, 1, "✓", "Potential Recoupment",
+        row = WriteKpiRow(ws, row, 1, "!", "Potential Loss in Revenue",
+            $"${fin.RevenueLoss_PotentialLoss:N2}", DangerRed);
+        WriteKpiRow(ws, row - 1, 5, "✓", "Potential Recoupment",
             $"${fin.RevenueAtRisk_PotentialRecoup:N2}", SuccessGreen);
-        WriteKpiRow(ws, row - 1, 5, "%", "Compliance Rate",
-            fin.ComplianceRatePct, GetComplianceColor(fin.ComplianceRatePct));
 
         // card bottom border
-        WriteCardBottomBorder(ws, row, 1, 3, WarningOrange);
-        WriteCardBottomBorder(ws, row, 5, 7, BluePrimary);
+        WriteCardBottomBorder(ws, row, 1, 3, DangerRed);
+        WriteCardBottomBorder(ws, row, 5, 7, WarningOrange);
         row++;
 
         // blank spacer row
         row++;
+
+        // ── Row 3: COMPLIANCE RATE (left) ───────────────────────────────
+        row = WriteCardTitle(ws, row, 1, 3, "COMPLIANCE RATE", "Issue-free claims ratio for the selected period");
+        row = WriteKpiRow(ws, row, 1, "#", "Total No. of Claims",
+            fin.Compliance_TotalClaims?.ToString("N0") ?? "—", ValueNavy);
+        row = WriteKpiRow(ws, row, 1, "!", "Claims with Issues",
+            fin.Compliance_ClaimsWithIssues?.ToString("N0") ?? "—", DangerRed);
+        row = WriteKpiRow(ws, row, 1, "%", "Compliance Rate",
+            fin.ComplianceRatePct, GetComplianceColor(fin.ComplianceRatePct));
+        WriteCardBottomBorder(ws, row, 1, 3, BluePrimary);
+        row++;
+
+        // blank spacer row
+        row++;
+        // <<< END CVKPI-RI
 
         // ── Detail Breakdown section ─────────────────────────────────────
         var detailRange = ws.Range(row, 1, row, totalCols);
@@ -549,7 +580,7 @@ public static class CodingExcelExportBuilder
         string[] headers =
         [
             "Year", "Panel Name", "Billable CPT Combo", "Total Claims",
-            "Billed Charges/Claim", "Billed CPT Combo", "Missing CPTs",
+            "Total Billed Charges", "Billed CPT Combo", "Missing CPTs",   // CVTOTCHG (2026-07-28): was "Billed Charges/Claim"
             "Billed Charges (Missing)", "Lost Revenue",
             "Additional CPTs", "Billed Charges (Additional)", "Revenue at Risk", "Net Impact"
         ];
@@ -720,7 +751,7 @@ public static class CodingExcelExportBuilder
 
         WriteUiTitleBar(ws, 1, colCount, "WTD Coding Insights");
 
-        var weeks = rows.Select(r => r.WeekFolder).Distinct().OrderByDescending(w => w).ToList();
+        var weeks = rows.Select(r => r.WeekFolder).Distinct().OrderByDescending(WeekEnd).ToList();   // CVBILL-1.4: chronological
         int rowNum = 2;
 
         foreach (var week in weeks)
@@ -789,17 +820,22 @@ public static class CodingExcelExportBuilder
 
         // CPT-combination columns are intentionally omitted - they are surfaced
         // in the WTD Insights sheet (per-combination breakdown).
+        // >>> CVTPL-1.4 CHANGE (2026-07-27): WTD Summary columns aligned to Output Template v1.4.
+        //     REVERT: restore the pre-1.4 6-column header/body (…, "Avg Allowed Amount for Missing CPTs").
         string[] headers =
         [
             "Week", "Panel",
             "Total No. of Claims", "Distinct claims with Missing CPTs",
-            "Total Billed Charges for Missing CPTs", "Avg Allowed Amount for Missing CPTs"
+            "Total Billed Charges for Missing CPTs",
+            "Distinct claims with Additional CPTs", "Total Billed Charges for Additional CPTs",
+            "Lost Revenue", "Revenue at Risk", "Net Impact"
         ];
+        // <<< END CVTPL-1.4 CHANGE
         int colCount = headers.Length;
 
         WriteUiTitleBar(ws, 1, colCount, "WTD Coding Summary");
 
-        var weeks = rows.Select(r => r.WeekFolder).Distinct().OrderByDescending(w => w).ToList();
+        var weeks = rows.Select(r => r.WeekFolder).Distinct().OrderByDescending(WeekEnd).ToList();   // CVBILL-1.4: chronological
         int rowNum = 2;
 
         foreach (var week in weeks)
@@ -817,12 +853,18 @@ public static class CodingExcelExportBuilder
                 bool isAlt = r % 2 != 0;
                 var s = weekRows[r];
 
+                // >>> CVTPL-1.4 CHANGE (2026-07-27): write full template v1.4 WTD Summary row.
+                //     REVERT: restore pre-1.4 body (cols 1-6, last = AvgAllowedAmountForMissingCpts).
                 ws.Cell(rowNum, 1).Value = s.WeekFolder;
                 ws.Cell(rowNum, 2).Value = s.PanelName;
                 ws.Cell(rowNum, 3).Value = s.TotalClaims;
                 ws.Cell(rowNum, 4).Value = s.DistinctClaimsWithMissingCpts;
                 ws.Cell(rowNum, 5).Value = s.TotalBilledChargesForMissingCpts;
-                ws.Cell(rowNum, 6).Value = s.AvgAllowedAmountForMissingCpts;
+                ws.Cell(rowNum, 6).Value = s.DistinctClaimsWithAdditionalCpts;
+                ws.Cell(rowNum, 7).Value = s.TotalBilledChargesForAdditionalCpts;
+                ws.Cell(rowNum, 8).Value = s.LostRevenue;
+                ws.Cell(rowNum, 9).Value = s.RevenueAtRisk;
+                ws.Cell(rowNum, 10).Value = s.NetImpact;
 
                 for (int c = 1; c <= colCount; c++)
                     StyleUiDataCell(ws.Cell(rowNum, c), isAlt);
@@ -830,14 +872,18 @@ public static class CodingExcelExportBuilder
                 StylePanelChip(ws.Cell(rowNum, 2));
                 ws.Cell(rowNum, 3).Style.Font.Bold = true;
                 StyleMoneyCell(ws.Cell(rowNum, 5), s.TotalBilledChargesForMissingCpts);
-                StyleMoneyCell(ws.Cell(rowNum, 6), s.AvgAllowedAmountForMissingCpts);
+                StyleMoneyCell(ws.Cell(rowNum, 7), s.TotalBilledChargesForAdditionalCpts);
+                StyleMoneyCell(ws.Cell(rowNum, 8), s.LostRevenue != 0 ? -1 : 0);
+                StyleMoneyCell(ws.Cell(rowNum, 9), s.RevenueAtRisk);
+                StyleImpactCell(ws.Cell(rowNum, 10), s.NetImpact);
 
                 rowNum++;
             }
         }
 
-        foreach (int c in new[] { 3, 4 }) ws.Column(c).Style.NumberFormat.Format = "#,##0";
-        foreach (int c in new[] { 5, 6 }) ws.Column(c).Style.NumberFormat.Format = "$#,##0.00";
+        foreach (int c in new[] { 3, 4, 6 }) ws.Column(c).Style.NumberFormat.Format = "#,##0";
+        foreach (int c in new[] { 5, 7, 8, 9, 10 }) ws.Column(c).Style.NumberFormat.Format = "$#,##0.00";
+        // <<< END CVTPL-1.4 CHANGE
 
         ws.SheetView.FreezeRows(1);
         ExcelTheme.AutoFitColumns(ws, colCount, minWidth: 14, firstColMinWidth: 22);
@@ -855,7 +901,15 @@ public static class CodingExcelExportBuilder
         [
             "Week", "Accession No", "Panel Name", "Date of Service",
             "Actual CPT", "Expected CPT", "Missing CPTs", "Additional CPTs",
-            "Status", "Total Charge", "Missing CPT Charges", "Additional CPT Charges", "Remarks"
+            "Status", "Total Charge", "Missing CPT Charges", "Additional CPT Charges", "Remarks",
+            // >>> CVDETAIL+ (2026-07-27): extra requested columns. REVERT: remove from here to end of array.
+            "Visit Number", "Payer Name", "Carrier", "Payer Code", "Payer Common Code",
+            "Payer Group Code", "Global Payer ID", "First Bill Date", "Allowed Amount", "Insurance Payment",
+            "Expected Charges",
+            "Missing CPT Avg Allowed", "Missing CPT Avg Paid", "Missing CPT Avg Pt Resp",
+            "Additional CPT Avg Allowed", "Additional CPT Avg Paid", "Additional CPT Avg Pt Resp",
+            "Missing CPT Charge Source", "Additional CPT Charge Source"
+            // <<< END CVDETAIL+
         ];
         int colCount = headers.Length;
 
@@ -881,6 +935,27 @@ public static class CodingExcelExportBuilder
             ws.Cell(rowNum, 11).Value = d.MissingCPT_Charges;
             ws.Cell(rowNum, 12).Value = d.AdditionalCPT_Charges;
             ws.Cell(rowNum, 13).Value = d.Remarks;
+            // >>> CVDETAIL+ (2026-07-27): extra requested columns (14-32). REVERT: delete this block.
+            ws.Cell(rowNum, 14).Value = d.VisitNumber;
+            ws.Cell(rowNum, 15).Value = d.PayerName_Raw;
+            ws.Cell(rowNum, 16).Value = d.Carrier;
+            ws.Cell(rowNum, 17).Value = d.Payer_Code;
+            ws.Cell(rowNum, 18).Value = d.PayerCommonCode;
+            ws.Cell(rowNum, 19).Value = d.Payer_Group_Code;
+            ws.Cell(rowNum, 20).Value = d.Global_Payer_ID;
+            ws.Cell(rowNum, 21).Value = d.FirstBillDate;
+            ws.Cell(rowNum, 22).Value = d.AllowedAmount;
+            ws.Cell(rowNum, 23).Value = d.InsurancePayment;
+            ws.Cell(rowNum, 24).Value = d.ExpectedCharges;
+            ws.Cell(rowNum, 25).Value = d.MissingCPT_AvgAllowedAmount;
+            ws.Cell(rowNum, 26).Value = d.MissingCPT_AvgPaidAmount;
+            ws.Cell(rowNum, 27).Value = d.MissingCPT_AvgPatientResponsibilityAmount;
+            ws.Cell(rowNum, 28).Value = d.AdditionalCPT_AvgAllowedAmount;
+            ws.Cell(rowNum, 29).Value = d.AdditionalCPT_AvgPaidAmount;
+            ws.Cell(rowNum, 30).Value = d.AdditionalCPT_AvgPatientResponsibilityAmount;
+            ws.Cell(rowNum, 31).Value = d.MissingCPT_ChargeSource;
+            ws.Cell(rowNum, 32).Value = d.AdditionalCPT_ChargeSource;
+            // <<< END CVDETAIL+
 
             for (int c = 1; c <= colCount; c++)
                 StyleUiDataCell(ws.Cell(rowNum, c), isAlt);

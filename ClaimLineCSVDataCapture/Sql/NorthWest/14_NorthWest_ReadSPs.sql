@@ -678,9 +678,13 @@ BEGIN
     DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
     DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
 
+    -- >>> CVEXP-ALL (2026-07-27): claim/line export must write EVERY row; the buckets are only
+    --     for splitting into sheets. #Base now INCLUDES rows with a NULL/blank/unparseable
+    --     FirstBilledDate (previously excluded, which silently dropped those claims).
+    --     REVERT: restore FirstBilledDate DATE NOT NULL + the "WHERE ... IS NOT NULL" line.
     CREATE TABLE #Base
     (
-        FirstBilledDate DATE          NOT NULL,
+        FirstBilledDate DATE          NULL,   -- CVEXP-ALL: was NOT NULL
         ClaimId         NVARCHAR(100) NULL
     );
 
@@ -689,8 +693,7 @@ BEGIN
         TRY_CAST(FirstBilledDate AS DATE),
         CAST(ClaimId AS NVARCHAR(100))
     FROM dbo.ClaimLevelData
-    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
-      AND (@HasPayerFilter = 0 OR LEFT(LTRIM(RTRIM(ISNULL(PayerName_Raw,'Unknown'))),200) IN (SELECT Value FROM @PayerList))
+    WHERE (@HasPayerFilter = 0 OR LEFT(LTRIM(RTRIM(ISNULL(PayerName_Raw,'Unknown'))),200) IN (SELECT Value FROM @PayerList))
       AND (@HasPanelFilter = 0 OR LEFT(LTRIM(RTRIM(ISNULL(PanelType,'Unknown'))),200) IN (SELECT Value FROM @PanelList))
       AND (@DosFrom         IS NULL OR TRY_CAST(DateOfService     AS DATE) >= @DosFrom)
       AND (@DosTo           IS NULL OR TRY_CAST(DateOfService     AS DATE) <= @DosTo)
@@ -698,9 +701,12 @@ BEGIN
       AND (@CEDTo           IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) <= @CEDTo)
       AND (@FirstBilledFrom IS NULL OR TRY_CAST(FirstBilledDate   AS DATE) >= @FirstBilledFrom)
       AND (@FirstBilledTo   IS NULL OR TRY_CAST(FirstBilledDate   AS DATE) <= @FirstBilledTo);
+    -- <<< END CVEXP-ALL
 
-    DECLARE @cntClaim INT = 0;
-    SELECT @cntClaim = COUNT(*) FROM #Base;
+    DECLARE @cntClaim   INT = 0;
+    DECLARE @cntUndated INT = 0;   -- CVEXP-ALL: rows with no usable FirstBilledDate
+    SELECT @cntClaim   = COUNT(*) FROM #Base;
+    SELECT @cntUndated = COUNT(*) FROM #Base WHERE FirstBilledDate IS NULL;
 
     CREATE TABLE #Buckets
     (
@@ -715,6 +721,7 @@ BEGIN
 
     IF (@cntClaim <= @Threshold)
     BEGIN
+        -- CVEXP-ALL: single sheet holds EVERYTHING (dated + undated); data SP returns all rows for 'ALL'.
         INSERT INTO #Buckets (BucketType, YearNo, MonthNo, FromDate, ToDate, RecordCount, SheetName)
         VALUES ('ALL', NULL, NULL, NULL, NULL, @cntClaim, 'All_Claim');
     END
@@ -724,6 +731,7 @@ BEGIN
         (
             SELECT YEAR(FirstBilledDate) AS YearNo, COUNT(*) AS RecordCount
             FROM #Base
+            WHERE FirstBilledDate IS NOT NULL   -- CVEXP-ALL: undated rows handled by the UNDATED bucket below
             GROUP BY YEAR(FirstBilledDate)
         )
         INSERT INTO #Buckets (BucketType, YearNo, MonthNo, FromDate, ToDate, RecordCount, SheetName)
@@ -731,7 +739,8 @@ BEGIN
                DATEFROMPARTS(yc.YearNo, 1, 1),
                DATEFROMPARTS(yc.YearNo, 12, 31),
                yc.RecordCount,
-               CAST(yc.YearNo AS VARCHAR(4)) + '_Claim'
+               -- CVEXP-ALL: placeholder/garbage dates that parse to year 1900 are labelled 'Other_' instead of '1900_'.
+               CASE WHEN yc.YearNo <= 1900 THEN 'Other' ELSE CAST(yc.YearNo AS VARCHAR(4)) END + '_Claim'
         FROM YearCounts yc
         WHERE yc.RecordCount <= @Threshold;
 
@@ -739,6 +748,7 @@ BEGIN
         (
             SELECT YEAR(FirstBilledDate) AS YearNo
             FROM #Base
+            WHERE FirstBilledDate IS NOT NULL   -- CVEXP-ALL
             GROUP BY YEAR(FirstBilledDate)
             HAVING COUNT(*) > @Threshold
         ),
@@ -759,6 +769,13 @@ BEGIN
                LEFT(DATENAME(MONTH, DATEFROMPARTS(mc.YearNo, mc.MonthNo, 1)), 3)
                    + CAST(mc.YearNo AS VARCHAR(4)) + '_Claim'
         FROM MonthCounts mc;
+
+        -- >>> CVEXP-ALL (2026-07-27): dedicated sheet for rows with no usable FirstBilledDate,
+        --     so the split path never drops them. REVERT: delete this IF block.
+        IF (@cntUndated > 0)
+            INSERT INTO #Buckets (BucketType, YearNo, MonthNo, FromDate, ToDate, RecordCount, SheetName)
+            VALUES ('UNDATED', NULL, NULL, NULL, NULL, @cntUndated, 'Undated_Claim');
+        -- <<< END CVEXP-ALL
     END
 
     SELECT BucketType, YearNo, MonthNo, FromDate, ToDate, RecordCount, SheetName
@@ -769,8 +786,8 @@ GO
 
 /* ---- 2) ClaimLevel Data By Date Range -------------------- */
 CREATE OR ALTER PROCEDURE dbo.usp_GetClaimLevelExportDataByDateRange
-    @FromDate         DATE,
-    @ToDate           DATE,
+    @FromDate         DATE          = NULL,   -- CVEXP-ALL: nullable now (ALL/UNDATED buckets pass no dates)
+    @ToDate           DATE          = NULL,
     @PayerNames       NVARCHAR(MAX) = NULL,
     @PanelNames       NVARCHAR(MAX) = NULL,
     @DosFrom          DATE          = NULL,
@@ -778,22 +795,28 @@ CREATE OR ALTER PROCEDURE dbo.usp_GetClaimLevelExportDataByDateRange
     @CEDFrom          DATE          = NULL,
     @CEDTo            DATE          = NULL,
     @FirstBilledFrom  DATE          = NULL,
-    @FirstBilledTo    DATE          = NULL
+    @FirstBilledTo    DATE          = NULL,
+    @BucketType       VARCHAR(20)   = 'RANGE'  -- CVEXP-ALL: 'ALL' = every row, 'UNDATED' = null-date rows, else date range
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    IF @FromDate IS NULL OR @ToDate IS NULL
+    -- >>> CVEXP-ALL (2026-07-27): only the date-RANGE buckets need From/To. ALL and UNDATED
+    --     buckets deliberately pass no dates. REVERT: restore the unconditional NULL check.
+    IF @BucketType NOT IN ('ALL','UNDATED') AND (@FromDate IS NULL OR @ToDate IS NULL)
     BEGIN
-        RAISERROR('FromDate and ToDate are required.', 16, 1);
+        -- CVEXP-ALL: backward-compat — a pre-fix caller (e.g. an un-rebuilt ClaimLineCSVDataCapture)
+        -- that receives the new UNDATED bucket passes null dates without @BucketType. Return an
+        -- empty set instead of raising, so deploying these SPs never disturbs that app.
         RETURN;
     END;
 
-    IF @FromDate > @ToDate
+    IF @BucketType NOT IN ('ALL','UNDATED') AND @FromDate > @ToDate
     BEGIN
         RAISERROR('FromDate cannot be greater than ToDate.', 16, 1);
         RETURN;
     END;
+    -- <<< END CVEXP-ALL
 
     DECLARE @PayerList TABLE (Value NVARCHAR(200) NOT NULL);
     DECLARE @PanelList TABLE (Value NVARCHAR(200) NOT NULL);
@@ -815,8 +838,19 @@ BEGIN
 
     SELECT *
     FROM dbo.ClaimLevelData
-    WHERE TRY_CAST(FirstBilledDate AS DATE) >= @FromDate
-      AND TRY_CAST(FirstBilledDate AS DATE) < DATEADD(DAY, 1, @ToDate)
+    -- >>> CVEXP-ALL (2026-07-27): row inclusion by bucket type.
+    --     ALL     -> every row (no FirstBilledDate filter)
+    --     UNDATED -> only rows with no usable FirstBilledDate
+    --     RANGE   -> original date-range slice
+    --     REVERT: restore the two-line FirstBilledDate BETWEEN predicate.
+    WHERE (
+              @BucketType = 'ALL'
+           OR (@BucketType = 'UNDATED' AND TRY_CAST(FirstBilledDate AS DATE) IS NULL)
+           OR (@BucketType NOT IN ('ALL','UNDATED')
+               AND TRY_CAST(FirstBilledDate AS DATE) >= @FromDate
+               AND TRY_CAST(FirstBilledDate AS DATE) < DATEADD(DAY, 1, @ToDate))
+          )
+    -- <<< END CVEXP-ALL
       AND (@HasPayerFilter = 0 OR LEFT(LTRIM(RTRIM(ISNULL(PayerName_Raw,'Unknown'))),200) IN (SELECT Value FROM @PayerList))
       AND (@HasPanelFilter = 0 OR LEFT(LTRIM(RTRIM(ISNULL(PanelType,'Unknown'))),200) IN (SELECT Value FROM @PanelList))
       AND (@DosFrom         IS NULL OR TRY_CAST(DateOfService     AS DATE) >= @DosFrom)
@@ -862,9 +896,11 @@ BEGIN
     DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
     DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
 
+    -- >>> CVEXP-ALL (2026-07-27): include rows with NULL/blank/unparseable FirstBilledDate so no line is dropped.
+    --     REVERT: restore FirstBilledDate DATE NOT NULL + the "WHERE ... IS NOT NULL" line.
     CREATE TABLE #Base
     (
-        FirstBilledDate DATE          NOT NULL,
+        FirstBilledDate DATE          NULL,   -- CVEXP-ALL: was NOT NULL
         ClaimId         NVARCHAR(100) NULL
     );
 
@@ -873,8 +909,7 @@ BEGIN
         TRY_CAST(FirstBilledDate AS DATE),
         CAST(ClaimId AS NVARCHAR(100))
     FROM dbo.LineLevelData
-    WHERE TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
-      AND (@HasPayerFilter = 0 OR LEFT(LTRIM(RTRIM(ISNULL(PayerName_Raw,'Unknown'))),200) IN (SELECT Value FROM @PayerList))
+    WHERE (@HasPayerFilter = 0 OR LEFT(LTRIM(RTRIM(ISNULL(PayerName_Raw,'Unknown'))),200) IN (SELECT Value FROM @PayerList))
       AND (@HasPanelFilter = 0 OR LEFT(LTRIM(RTRIM(ISNULL(Panelname,'Unknown'))),200) IN (SELECT Value FROM @PanelList))
       AND (@DosFrom         IS NULL OR TRY_CAST(DateOfService     AS DATE) >= @DosFrom)
       AND (@DosTo           IS NULL OR TRY_CAST(DateOfService     AS DATE) <= @DosTo)
@@ -882,9 +917,12 @@ BEGIN
       AND (@CEDTo           IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) <= @CEDTo)
       AND (@FirstBilledFrom IS NULL OR TRY_CAST(FirstBilledDate   AS DATE) >= @FirstBilledFrom)
       AND (@FirstBilledTo   IS NULL OR TRY_CAST(FirstBilledDate   AS DATE) <= @FirstBilledTo);
+    -- <<< END CVEXP-ALL
 
-    DECLARE @cntLine INT = 0;
-    SELECT @cntLine = COUNT(*) FROM #Base;
+    DECLARE @cntLine    INT = 0;
+    DECLARE @cntUndated INT = 0;   -- CVEXP-ALL
+    SELECT @cntLine    = COUNT(*) FROM #Base;
+    SELECT @cntUndated = COUNT(*) FROM #Base WHERE FirstBilledDate IS NULL;
 
     CREATE TABLE #Buckets
     (
@@ -899,6 +937,7 @@ BEGIN
 
     IF (@cntLine <= @Threshold)
     BEGIN
+        -- CVEXP-ALL: single sheet holds EVERYTHING (dated + undated); data SP returns all rows for 'ALL'.
         INSERT INTO #Buckets (BucketType, YearNo, MonthNo, FromDate, ToDate, RecordCount, SheetName)
         VALUES ('ALL', NULL, NULL, NULL, NULL, @cntLine, 'All_Line');
     END
@@ -908,6 +947,7 @@ BEGIN
         (
             SELECT YEAR(FirstBilledDate) AS YearNo, COUNT(*) AS RecordCount
             FROM #Base
+            WHERE FirstBilledDate IS NOT NULL   -- CVEXP-ALL: undated rows handled by the UNDATED bucket below
             GROUP BY YEAR(FirstBilledDate)
         )
         INSERT INTO #Buckets (BucketType, YearNo, MonthNo, FromDate, ToDate, RecordCount, SheetName)
@@ -915,7 +955,8 @@ BEGIN
                DATEFROMPARTS(yc.YearNo, 1, 1),
                DATEFROMPARTS(yc.YearNo, 12, 31),
                yc.RecordCount,
-               CAST(yc.YearNo AS VARCHAR(4)) + '_Line'
+               -- CVEXP-ALL: placeholder/garbage dates that parse to year 1900 are labelled 'Other_' instead of '1900_'.
+               CASE WHEN yc.YearNo <= 1900 THEN 'Other' ELSE CAST(yc.YearNo AS VARCHAR(4)) END + '_Line'
         FROM YearCounts yc
         WHERE yc.RecordCount <= @Threshold;
 
@@ -923,6 +964,7 @@ BEGIN
         (
             SELECT YEAR(FirstBilledDate) AS YearNo
             FROM #Base
+            WHERE FirstBilledDate IS NOT NULL   -- CVEXP-ALL
             GROUP BY YEAR(FirstBilledDate)
             HAVING COUNT(*) > @Threshold
         ),
@@ -943,6 +985,13 @@ BEGIN
                LEFT(DATENAME(MONTH, DATEFROMPARTS(mc.YearNo, mc.MonthNo, 1)), 3)
                    + CAST(mc.YearNo AS VARCHAR(4)) + '_Line'
         FROM MonthCounts mc;
+
+        -- >>> CVEXP-ALL (2026-07-27): dedicated sheet for rows with no usable FirstBilledDate.
+        --     REVERT: delete this IF block.
+        IF (@cntUndated > 0)
+            INSERT INTO #Buckets (BucketType, YearNo, MonthNo, FromDate, ToDate, RecordCount, SheetName)
+            VALUES ('UNDATED', NULL, NULL, NULL, NULL, @cntUndated, 'Undated_Line');
+        -- <<< END CVEXP-ALL
     END
 
     SELECT BucketType, YearNo, MonthNo, FromDate, ToDate, RecordCount, SheetName
@@ -953,8 +1002,8 @@ GO
 
 /* ---- 4) LineLevel Data By Date Range --------------------- */
 CREATE OR ALTER PROCEDURE dbo.usp_GetLineLevelExportDataByDateRange
-    @FromDate         DATE,
-    @ToDate           DATE,
+    @FromDate         DATE          = NULL,   -- CVEXP-ALL: nullable now (ALL/UNDATED buckets pass no dates)
+    @ToDate           DATE          = NULL,
     @PayerNames       NVARCHAR(MAX) = NULL,
     @PanelNames       NVARCHAR(MAX) = NULL,
     @DosFrom          DATE          = NULL,
@@ -962,22 +1011,27 @@ CREATE OR ALTER PROCEDURE dbo.usp_GetLineLevelExportDataByDateRange
     @CEDFrom          DATE          = NULL,
     @CEDTo            DATE          = NULL,
     @FirstBilledFrom  DATE          = NULL,
-    @FirstBilledTo    DATE          = NULL
+    @FirstBilledTo    DATE          = NULL,
+    @BucketType       VARCHAR(20)   = 'RANGE'  -- CVEXP-ALL: 'ALL' = every row, 'UNDATED' = null-date rows, else date range
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    IF @FromDate IS NULL OR @ToDate IS NULL
+    -- >>> CVEXP-ALL (2026-07-27): only date-RANGE buckets need From/To. REVERT: restore unconditional NULL check.
+    IF @BucketType NOT IN ('ALL','UNDATED') AND (@FromDate IS NULL OR @ToDate IS NULL)
     BEGIN
-        RAISERROR('FromDate and ToDate are required.', 16, 1);
+        -- CVEXP-ALL: backward-compat — a pre-fix caller (e.g. an un-rebuilt ClaimLineCSVDataCapture)
+        -- that receives the new UNDATED bucket passes null dates without @BucketType. Return an
+        -- empty set instead of raising, so deploying these SPs never disturbs that app.
         RETURN;
     END;
 
-    IF @FromDate > @ToDate
+    IF @BucketType NOT IN ('ALL','UNDATED') AND @FromDate > @ToDate
     BEGIN
         RAISERROR('FromDate cannot be greater than ToDate.', 16, 1);
         RETURN;
     END;
+    -- <<< END CVEXP-ALL
 
     DECLARE @PayerList TABLE (Value NVARCHAR(200) NOT NULL);
     DECLARE @PanelList TABLE (Value NVARCHAR(200) NOT NULL);
@@ -999,8 +1053,16 @@ BEGIN
 
     SELECT *
     FROM dbo.LineLevelData
-    WHERE TRY_CAST(FirstBilledDate AS DATE) >= @FromDate
-      AND TRY_CAST(FirstBilledDate AS DATE) < DATEADD(DAY, 1, @ToDate)
+    -- >>> CVEXP-ALL (2026-07-27): ALL = every row, UNDATED = null-date rows, RANGE = date slice.
+    --     REVERT: restore the two-line FirstBilledDate BETWEEN predicate.
+    WHERE (
+              @BucketType = 'ALL'
+           OR (@BucketType = 'UNDATED' AND TRY_CAST(FirstBilledDate AS DATE) IS NULL)
+           OR (@BucketType NOT IN ('ALL','UNDATED')
+               AND TRY_CAST(FirstBilledDate AS DATE) >= @FromDate
+               AND TRY_CAST(FirstBilledDate AS DATE) < DATEADD(DAY, 1, @ToDate))
+          )
+    -- <<< END CVEXP-ALL
       AND (@HasPayerFilter = 0 OR LEFT(LTRIM(RTRIM(ISNULL(PayerName_Raw,'Unknown'))),200) IN (SELECT Value FROM @PayerList))
       AND (@HasPanelFilter = 0 OR LEFT(LTRIM(RTRIM(ISNULL(Panelname,'Unknown'))),200) IN (SELECT Value FROM @PanelList))
       AND (@DosFrom         IS NULL OR TRY_CAST(DateOfService     AS DATE) >= @DosFrom)

@@ -1,152 +1,53 @@
--- =============================================================================
--- 04_CodingAggregates.sql
--- Aggregate tables + stored procedures for the Coding Summary dashboard.
---
--- Purpose : Pre-compute the YTD/WTD Insights & Summary datasets once per data
---           load (CaptureDataApp) instead of running expensive GROUP BY /
---           FOR XML queries on every dashboard page hit.
---
--- Objects :
---   Tables : dbo.CodingAgg_YtdInsights   (per Year/Panel/CPT-combination)
---            dbo.CodingAgg_YtdSummary    (per Year/Panel)
---            dbo.CodingAgg_WtdInsights   (per Week/Panel/CPT-combination)
---            dbo.CodingAgg_WtdSummary    (per Week/Panel)
---   Procs  : dbo.usp_RefreshCodingAggregates   (rebuild all 4 tables)
---            dbo.usp_GetCodingAggYtdInsights
---            dbo.usp_GetCodingAggYtdSummary
---            dbo.usp_GetCodingAggWtdInsights
---            dbo.usp_GetCodingAggWtdSummary
---            dbo.usp_GetCodingFinancialSummary (reads CodingFinancialSummary)
---            dbo.usp_GetCodingValidationDetail (latest week, TOP 5000)
---
--- Conventions (must match the Coding Summary UI):
---   BillableCptCombo = ExpectedCPTCode (panel master / what SHOULD be billed)
---   BilledCptCombo   = ActualCPTCode   (what WAS billed)
---   -- >>> CVTPL-1.4 CHANGE (2026-07-27): Net Impact sign + Allowed basis per template v1.4.
---   NetImpact        = RevenueAtRisk - LostRevenue  (all scopes; was LostRevenue - RevenueAtRisk pre-1.4)
---   LostRevenue      = SUM(MissingCPT_AvgAllowedAmount)    (template: "Sum of the Average Allowed Amount"; was AvgPaidAmount pre-1.4)
---   RevenueAtRisk    = SUM(AdditionalCPT_AvgAllowedAmount) (template: "Sum of the Average Allowed Amount"; was AvgPaidAmount pre-1.4)
---   -- <<< END CVTPL-1.4 CHANGE
---
--- Deployment: run once per lab database, then either run CaptureDataApp or
---             execute:  EXEC dbo.usp_RefreshCodingAggregates @LabName = '<lab>';
--- =============================================================================
+/* =============================================================================
+   05_CodingValidation_Incremental_2026-07-28.sql
+   -----------------------------------------------------------------------------
+   INCREMENTAL deploy script — contains ONLY the objects changed/added in the
+   Coding Validation work of Jul 2026. Use this instead of re-running the full
+   04_CodingAggregates.sql baseline (which also re-creates the 4 aggregate tables
+   and the unchanged read procs).
 
--- ── 1. Aggregate tables ──────────────────────────────────────────────────────
+   DEPLOY TO: every lab database that runs Coding Validation. Idempotent
+              (CREATE OR ALTER + guarded ALTER TABLE) — safe to re-run.
 
-IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'CodingAgg_YtdInsights')
-CREATE TABLE dbo.CodingAgg_YtdInsights
-(
-    AggId                               INT            NOT NULL IDENTITY(1,1) PRIMARY KEY,
-    LabName                             NVARCHAR(500)  NULL,
-    ServiceYear                         INT            NOT NULL,
-    PanelName                           NVARCHAR(500)  NOT NULL,
-    BillableCptCombo                    NVARCHAR(MAX)  NULL,
-    BilledCptCombo                      NVARCHAR(MAX)  NULL,
-    MissingCpts                         NVARCHAR(MAX)  NULL,
-    AdditionalCpts                      NVARCHAR(MAX)  NULL,
-    TotalClaims                         INT            NOT NULL DEFAULT 0,
-    BilledChargesPerClaim               DECIMAL(18,2)  NULL,
-    TotalBilledChargesForMissingCpts    DECIMAL(18,2)  NULL,
-    LostRevenue                         DECIMAL(18,2)  NULL,
-    TotalBilledChargesForAdditionalCpts DECIMAL(18,2)  NULL,
-    RevenueAtRisk                       DECIMAL(18,2)  NULL,
-    NetImpact                           DECIMAL(18,2)  NULL,
-    RefreshedDateTime                   DATETIME       NOT NULL DEFAULT GETDATE()
-);
-GO
-IF NOT EXISTS (SELECT 1 FROM sys.indexes
-               WHERE name = 'IX_CodingAgg_YtdInsights_YearPanel'
-                 AND object_id = OBJECT_ID('dbo.CodingAgg_YtdInsights'))
-CREATE INDEX IX_CodingAgg_YtdInsights_YearPanel
-    ON dbo.CodingAgg_YtdInsights (ServiceYear DESC, PanelName);
+   AFTER DEPLOY, run once per lab to rebuild the aggregates with the new logic:
+       EXEC dbo.usp_RefreshCodingAggregates @LabName = '<lab>';
+
+   ---------------------------------------------------------------------------
+   CONTENTS (change tags in brackets)
+   ---------------------------------------------------------------------------
+   0. dbo.CodingAgg_WtdSummary                    [CVTPL-1.4] 5 added columns
+   1. dbo.usp_RefreshCodingAggregates             [CVTPL-1.4 / CVBILL-1.4 / CVDEV-1.4 / CVRI / CVTOTCHG]
+        - Net Impact = Revenue at Risk - Lost Revenue
+        - Lost Rev / Rev at Risk = SUM(Average ALLOWED amount)
+        - WTD Summary gains 5 columns
+        - All periods keyed off FirstBillDate; WTD = latest 2 Fri-Thu weeks;
+          YTD = all earlier billed-date years (excludes the WTD window)
+        - Claim counts = COUNT(DISTINCT VisitNumber)
+        - Panels shown only if they have >=1 Missing/Additional CPT claim
+        - Recomputes CodingFinancialSummary.RevenueImpact_* [CVRI]
+        - YTD Insights 'BilledChargesPerClaim' now holds TOTAL billed charges
+          (SUM, was AVG); UI/Excel label = "Total Billed Charges"      [CVTOTCHG]
+   2. dbo.usp_GetCodingAggWtdInsights             [CVBILL-1.4] chronological week order
+   3. dbo.usp_GetCodingAggWtdSummary              [CVTPL-1.4 / CVBILL-1.4] new columns + order
+   4. dbo.usp_GetCodingValidationSourceInfo       [CVUI-SRC]  NEW - source RunId / inserted date
+   5. dbo.usp_GetCodingRevenueImpact              [CVRI]      NEW - Revenue Impact from CodingValidation
+   6. dbo.usp_GetCodingValidationDetail           [CVDETAIL+] 19 extra columns (screen proc, still capped)
+   7. dbo.usp_GetCodingValidationDetailExport     [CVDETAIL-ALL]  NEW - ALL rows for the Excel export
+   8. dbo.usp_GetCodingValidationDetailPaged      [CVDETAIL-PAGE] NEW - paged + filtered for the UI tab
+   *  Export + Paged procs drop rows that would render completely empty [CVDETAIL-BLANK]
+
+   APP DEPLOY REQUIRED WITH THIS SCRIPT: LabMetricsDashboard + LRN.ReportWorker.
+   Deploy SQL FIRST, then the apps.
+
+   REVERT: search the repo for the tag names above.
+   ============================================================================= */
+
+SET NOCOUNT ON;
 GO
 
-IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'CodingAgg_YtdSummary')
-CREATE TABLE dbo.CodingAgg_YtdSummary
-(
-    AggId                               INT            NOT NULL IDENTITY(1,1) PRIMARY KEY,
-    LabName                             NVARCHAR(500)  NULL,
-    ServiceYear                         INT            NOT NULL,
-    PanelName                           NVARCHAR(500)  NOT NULL,
-    BillableCptCombo                    NVARCHAR(MAX)  NULL,
-    BilledCptCombo                      NVARCHAR(MAX)  NULL,
-    MissingCpts                         NVARCHAR(MAX)  NULL,
-    AdditionalCpts                      NVARCHAR(MAX)  NULL,
-    TotalClaims                         INT            NOT NULL DEFAULT 0,
-    TotalBilledCharges                  DECIMAL(18,2)  NULL,
-    DistinctClaimsWithMissingCpts       INT            NOT NULL DEFAULT 0,
-    TotalBilledChargesForMissingCpts    DECIMAL(18,2)  NULL,
-    DistinctClaimsWithAdditionalCpts    INT            NOT NULL DEFAULT 0,
-    TotalBilledChargesForAdditionalCpts DECIMAL(18,2)  NULL,
-    LostRevenue                         DECIMAL(18,2)  NULL,
-    RevenueAtRisk                       DECIMAL(18,2)  NULL,
-    NetImpact                           DECIMAL(18,2)  NULL,
-    RefreshedDateTime                   DATETIME       NOT NULL DEFAULT GETDATE()
-);
-GO
-IF NOT EXISTS (SELECT 1 FROM sys.indexes
-               WHERE name = 'IX_CodingAgg_YtdSummary_YearPanel'
-                 AND object_id = OBJECT_ID('dbo.CodingAgg_YtdSummary'))
-CREATE INDEX IX_CodingAgg_YtdSummary_YearPanel
-    ON dbo.CodingAgg_YtdSummary (ServiceYear DESC, PanelName);
-GO
-
-IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'CodingAgg_WtdInsights')
-CREATE TABLE dbo.CodingAgg_WtdInsights
-(
-    AggId                               INT            NOT NULL IDENTITY(1,1) PRIMARY KEY,
-    LabName                             NVARCHAR(500)  NULL,
-    WeekFolder                          NVARCHAR(500)  NOT NULL,
-    PanelName                           NVARCHAR(500)  NOT NULL,
-    BillableCptCombo                    NVARCHAR(MAX)  NULL,
-    BilledCptCombo                      NVARCHAR(MAX)  NULL,
-    MissingCpts                         NVARCHAR(MAX)  NULL,
-    AdditionalCpts                      NVARCHAR(MAX)  NULL,
-    TotalClaims                         INT            NOT NULL DEFAULT 0,
-    TotalBilledCharges                  DECIMAL(18,2)  NULL,
-    BilledChargesForMissingCpts         DECIMAL(18,2)  NULL,
-    RevenueLoss                         DECIMAL(18,2)  NULL,
-    BilledChargesForAdditionalCpts      DECIMAL(18,2)  NULL,
-    PotentialRecoupment                 DECIMAL(18,2)  NULL,
-    NetImpact                           DECIMAL(18,2)  NULL,
-    RefreshedDateTime                   DATETIME       NOT NULL DEFAULT GETDATE()
-);
-GO
-IF NOT EXISTS (SELECT 1 FROM sys.indexes
-               WHERE name = 'IX_CodingAgg_WtdInsights_WeekPanel'
-                 AND object_id = OBJECT_ID('dbo.CodingAgg_WtdInsights'))
-CREATE INDEX IX_CodingAgg_WtdInsights_WeekPanel
-    ON dbo.CodingAgg_WtdInsights (WeekFolder DESC, PanelName);
-GO
-
-IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'CodingAgg_WtdSummary')
-CREATE TABLE dbo.CodingAgg_WtdSummary
-(
-    AggId                               INT            NOT NULL IDENTITY(1,1) PRIMARY KEY,
-    LabName                             NVARCHAR(500)  NULL,
-    WeekFolder                          NVARCHAR(500)  NOT NULL,
-    PanelName                           NVARCHAR(500)  NOT NULL,
-    BillableCptCombo                    NVARCHAR(MAX)  NULL,
-    BilledCptCombo                      NVARCHAR(MAX)  NULL,
-    MissingCpts                         NVARCHAR(MAX)  NULL,
-    AdditionalCpts                      NVARCHAR(MAX)  NULL,
-    TotalClaims                         INT            NOT NULL DEFAULT 0,
-    DistinctClaimsWithMissingCpts       INT            NOT NULL DEFAULT 0,
-    TotalBilledChargesForMissingCpts    DECIMAL(18,2)  NULL,
-    AvgAllowedAmountForMissingCpts      DECIMAL(18,2)  NULL,
-    -- >>> CVTPL-1.4 CHANGE (2026-07-27): WTD Summary aligned to Output Template v1.4.
-    --     Added Additional-CPT + revenue columns so WTD Summary matches YTD Summary / template.
-    --     REVERT: delete the five columns below (down to the END marker).
-    DistinctClaimsWithAdditionalCpts    INT            NOT NULL DEFAULT 0,
-    TotalBilledChargesForAdditionalCpts DECIMAL(18,2)  NULL,
-    LostRevenue                         DECIMAL(18,2)  NULL,
-    RevenueAtRisk                       DECIMAL(18,2)  NULL,
-    NetImpact                           DECIMAL(18,2)  NULL,
-    -- <<< END CVTPL-1.4 CHANGE
-    RefreshedDateTime                   DATETIME       NOT NULL DEFAULT GETDATE()
-);
-GO
+/* ---------------------------------------------------------------------------
+   0. CodingAgg_WtdSummary - add the 5 template v1.4 columns (idempotent)
+   --------------------------------------------------------------------------- */
 -- >>> CVTPL-1.4 CHANGE (2026-07-27): idempotent ADD COLUMN for already-deployed WTD Summary tables.
 --     REVERT: delete this whole guarded block.
 IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.CodingAgg_WtdSummary') AND name = 'DistinctClaimsWithAdditionalCpts')
@@ -165,12 +66,6 @@ IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Coding
     ALTER TABLE dbo.CodingAgg_WtdSummary ADD NetImpact DECIMAL(18,2) NULL;
 GO
 -- <<< END CVTPL-1.4 CHANGE
-IF NOT EXISTS (SELECT 1 FROM sys.indexes
-               WHERE name = 'IX_CodingAgg_WtdSummary_WeekPanel'
-                 AND object_id = OBJECT_ID('dbo.CodingAgg_WtdSummary'))
-CREATE INDEX IX_CodingAgg_WtdSummary_WeekPanel
-    ON dbo.CodingAgg_WtdSummary (WeekFolder DESC, PanelName);
-GO
 
 -- ── 2. Refresh procedure ─────────────────────────────────────────────────────
 -- Full rebuild of all four aggregate tables from dbo.CodingValidation.
@@ -580,39 +475,6 @@ BEGIN
 END
 GO
 
--- ── 3. Read procedures (used by LabMetricsDashboard + CaptureDataApp JSON) ───
-
-CREATE OR ALTER PROCEDURE dbo.usp_GetCodingAggYtdInsights
-AS
-BEGIN
-    SET NOCOUNT ON;
-    SELECT
-        ServiceYear, PanelName,
-        BillableCptCombo, BilledCptCombo, MissingCpts, AdditionalCpts,
-        TotalClaims, BilledChargesPerClaim,
-        TotalBilledChargesForMissingCpts, LostRevenue,
-        TotalBilledChargesForAdditionalCpts, RevenueAtRisk, NetImpact
-    FROM dbo.CodingAgg_YtdInsights
-    ORDER BY ServiceYear DESC, PanelName, BillableCptCombo, BilledCptCombo;
-END
-GO
-
-CREATE OR ALTER PROCEDURE dbo.usp_GetCodingAggYtdSummary
-AS
-BEGIN
-    SET NOCOUNT ON;
-    SELECT
-        ServiceYear, PanelName,
-        BillableCptCombo, BilledCptCombo, MissingCpts, AdditionalCpts,
-        TotalClaims, TotalBilledCharges,
-        DistinctClaimsWithMissingCpts, TotalBilledChargesForMissingCpts,
-        DistinctClaimsWithAdditionalCpts, TotalBilledChargesForAdditionalCpts,
-        LostRevenue, RevenueAtRisk, NetImpact
-    FROM dbo.CodingAgg_YtdSummary
-    ORDER BY ServiceYear DESC, PanelName;
-END
-GO
-
 CREATE OR ALTER PROCEDURE dbo.usp_GetCodingAggWtdInsights
 AS
 BEGIN
@@ -665,6 +527,7 @@ BEGIN
     ORDER BY InsertedDateTime DESC, FileLogId DESC;
 END
 GO
+
 -- <<< END CVUI-SRC CHANGE
 
 -- >>> CVRI (2026-07-27): compute Revenue Impact directly from dbo.CodingValidation.
@@ -696,38 +559,6 @@ BEGIN
     FROM dbo.CodingValidation
     WHERE (ISNULL(MissingCPTCodes,'') <> '' OR ISNULL(AdditionalCPTCodes,'') <> '')   -- deviation claims only
       AND (@WeekFolder IS NULL OR WeekFolder = @WeekFolder);
-END
-GO
-
-CREATE OR ALTER PROCEDURE dbo.usp_GetCodingFinancialSummary
-AS
-BEGIN
-    SET NOCOUNT ON;
-    SELECT
-        SummaryId, WeekFolder, ReportDate,
-        TotalClaims, TotalBilledCharges, ExpectedBilledCharges,
-        RevenueImpact_Claims, RevenueImpact_ActualBilled,
-        RevenueImpact_PotentialLoss, RevenueImpact_ExpectedRecoup,
-        RevenueLoss_Claims, RevenueLoss_ActualBilled, RevenueLoss_PotentialLoss,
-        RevenueAtRisk_Claims, RevenueAtRisk_ActualBilled, RevenueAtRisk_PotentialRecoup,
-        Compliance_TotalClaims, Compliance_ClaimsWithIssues, ComplianceRate,
-        ClaimsWithMissingCPTs, ClaimsWithAdditionalCPTs,
-        ClaimsWithBothMissingAndAdditional, TotalErrorClaims, ComplianceRatePct
-    FROM dbo.CodingFinancialSummary
-    ORDER BY InsertedDateTime DESC;
-END
-GO
-
--- Used by CaptureDataApp's DBRefresh mode: clearing the file-log entry lets
--- usp_BulkInsertCodingValidation reload a regenerated report that has the same
--- RunId (it archives the current rows into CodingValidationData first).
-CREATE OR ALTER PROCEDURE dbo.usp_ClearCodingValidationFileLog
-    @RunId NVARCHAR(500)
-AS
-BEGIN
-    SET NOCOUNT ON;
-    DELETE FROM dbo.CodingValidationFileLog WHERE RunId = @RunId;
-    SELECT @@ROWCOUNT AS RowsDeleted;
 END
 GO
 
@@ -809,6 +640,7 @@ BEGIN
     ORDER BY WeekFolder DESC, PanelName, AccessionNo;
 END
 GO
+
 -- <<< END CVDETAIL-ALL
 
 -- >>> CVDETAIL-PAGE (2026-07-28): server-side paging + filtering for the Validation Detail TAB.
@@ -882,4 +714,5 @@ BEGIN
     ORDER BY ValidationStatus;
 END
 GO
--- <<< END CVDETAIL-PAGE
+PRINT '05_CodingValidation_Incremental_2026-07-28.sql completed.';
+GO

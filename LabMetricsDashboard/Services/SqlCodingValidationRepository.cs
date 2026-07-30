@@ -45,7 +45,10 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
                 AdditionalCpts                     = Str(r, "AdditionalCpts"),
                 TotalBilledChargesForAdditionalCpts = Dec(r, "TotalBilledChargesForAdditionalCpts"),
                 RevenueAtRisk                      = Dec(r, "RevenueAtRisk"),
-                NetImpact                          = Dec(r, "LostRevenue") - Dec(r, "RevenueAtRisk"),
+                // >>> CVTPL-1.4 CHANGE (2026-07-27): Net Impact = Revenue at Risk - Lost Revenue per template v1.4.
+                //     REVERT: restore -> Dec(r, "LostRevenue") - Dec(r, "RevenueAtRisk")
+                NetImpact                          = Dec(r, "RevenueAtRisk") - Dec(r, "LostRevenue"),
+                // <<< END CVTPL-1.4 CHANGE
             }, ct);
     }
 
@@ -73,7 +76,10 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
                 TotalBilledChargesForAdditionalCpts = Dec(r, "TotalBilledChargesForAdditionalCpts"),
                 LostRevenue                        = Dec(r, "LostRevenue"),
                 RevenueAtRisk                      = Dec(r, "RevenueAtRisk"),
-                NetImpact                          = Dec(r, "LostRevenue") - Dec(r, "RevenueAtRisk"),
+                // >>> CVTPL-1.4 CHANGE (2026-07-27): Net Impact = Revenue at Risk - Lost Revenue per template v1.4.
+                //     REVERT: restore -> Dec(r, "LostRevenue") - Dec(r, "RevenueAtRisk")
+                NetImpact                          = Dec(r, "RevenueAtRisk") - Dec(r, "LostRevenue"),
+                // <<< END CVTPL-1.4 CHANGE
             }, ct);
     }
 
@@ -101,7 +107,10 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
                 AdditionalCpts                = Str(r, "AdditionalCpts"),
                 BilledChargesForAdditionalCpts = Dec(r, "BilledChargesForAdditionalCpts"),
                 PotentialRecoupment           = Dec(r, "PotentialRecoupment"),
-                NetImpact                     = Dec(r, "RevenueLoss") - Dec(r, "PotentialRecoupment"),
+                // >>> CVTPL-1.4 CHANGE (2026-07-27): Net Impact = Potential Recoupment - Revenue Loss per template v1.4.
+                //     REVERT: restore -> Dec(r, "RevenueLoss") - Dec(r, "PotentialRecoupment")
+                NetImpact                     = Dec(r, "PotentialRecoupment") - Dec(r, "RevenueLoss"),
+                // <<< END CVTPL-1.4 CHANGE
             }, ct);
     }
 
@@ -125,6 +134,14 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
                 DistinctClaimsWithMissingCpts   = r.GetInt32(r.GetOrdinal("DistinctClaimsWithMissingCpts")),
                 TotalBilledChargesForMissingCpts = Dec(r, "TotalBilledChargesForMissingCpts"),
                 AvgAllowedAmountForMissingCpts  = Dec(r, "AvgAllowedAmountForMissingCpts"),
+                // >>> CVTPL-1.4 CHANGE (2026-07-27): map WTD Summary additional-CPT + revenue columns per template v1.4.
+                //     REVERT: delete the five mappings below.
+                DistinctClaimsWithAdditionalCpts    = r.GetInt32(r.GetOrdinal("DistinctClaimsWithAdditionalCpts")),
+                TotalBilledChargesForAdditionalCpts = Dec(r, "TotalBilledChargesForAdditionalCpts"),
+                LostRevenue                         = Dec(r, "LostRevenue"),
+                RevenueAtRisk                       = Dec(r, "RevenueAtRisk"),
+                NetImpact                           = Dec(r, "NetImpact"),
+                // <<< END CVTPL-1.4 CHANGE
             }, ct);
     }
 
@@ -192,39 +209,105 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
     /// Validation Detail tab via dbo.usp_GetCodingValidationDetail
     /// (capped at 5 000 rows to keep page load fast).
     /// </summary>
-    public async Task<List<CodingValidationDetailRow>> GetValidationDetailRowsAsync(
+    public Task<List<CodingValidationDetailRow>> GetValidationDetailRowsAsync(
         string connectionString, CancellationToken ct = default)
+        => GetValidationDetailCoreAsync(connectionString, "dbo.usp_GetCodingValidationDetail", ct);
+
+    // >>> CVDETAIL-ALL (2026-07-27): uncapped variant for the Excel export — every row, all weeks.
+    //     REVERT: delete this method (and its interface entry) and re-point callers to GetValidationDetailRowsAsync.
+    /// <summary>Returns ALL CodingValidation rows (no TOP, all weeks) for the Excel export.</summary>
+    public Task<List<CodingValidationDetailRow>> GetValidationDetailExportRowsAsync(
+        string connectionString, CancellationToken ct = default)
+        => GetValidationDetailCoreAsync(connectionString, "dbo.usp_GetCodingValidationDetailExport", ct);
+    // <<< END CVDETAIL-ALL
+
+    // >>> CVDETAIL-PAGE (2026-07-28): one page of Validation Detail rows, filtered in SQL.
+    //     REVERT: delete this method (and its interface entry).
+    public async Task<CodingValidationDetailPage> GetValidationDetailPagedAsync(
+        string connectionString, int page, int pageSize,
+        string? panelName, string? status, string? search, CancellationToken ct = default)
+    {
+        if (page     < 1) page     = 1;
+        if (pageSize < 1) pageSize = 50;
+
+        var rows     = new List<CodingValidationDetailRow>();
+        var panels   = new List<string>();
+        var statuses = new List<string>();
+        var total    = 0;
+
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+            await using var cmd = new SqlCommand("dbo.usp_GetCodingValidationDetailPaged", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 120
+            };
+            cmd.Parameters.AddWithValue("@Offset",    (page - 1) * pageSize);
+            cmd.Parameters.AddWithValue("@PageSize",  pageSize);
+            cmd.Parameters.AddWithValue("@PanelName", (object?)panelName ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Status",    (object?)status    ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Search",    (object?)search    ?? DBNull.Value);
+
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+            // 1) page rows (+ filtered total)
+            var readTotal = false;
+            while (await reader.ReadAsync(ct))
+            {
+                if (!readTotal)
+                {
+                    total = reader.IsDBNull(reader.GetOrdinal("TotalRows"))
+                        ? 0 : reader.GetInt32(reader.GetOrdinal("TotalRows"));
+                    readTotal = true;
+                }
+                rows.Add(MapDetailRow(reader));
+            }
+
+            // 2) panel options
+            if (await reader.NextResultAsync(ct))
+                while (await reader.ReadAsync(ct))
+                    panels.Add(Str(reader, "PanelName"));
+
+            // 3) status options
+            if (await reader.NextResultAsync(ct))
+                while (await reader.ReadAsync(ct))
+                    statuses.Add(Str(reader, "ValidationStatus"));
+
+            _logger.LogInformation(
+                "CodingValidation detail page {Page} (size {Size}) returned {Count} of {Total} rows.",
+                page, pageSize, rows.Count, total);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GetValidationDetailPagedAsync failed: {Message}", ex.Message);
+            throw;
+        }
+
+        return new CodingValidationDetailPage
+        {
+            Rows = rows, TotalRows = total, Panels = panels, Statuses = statuses
+        };
+    }
+    // <<< END CVDETAIL-PAGE
+
+    private async Task<List<CodingValidationDetailRow>> GetValidationDetailCoreAsync(
+        string connectionString, string procName, CancellationToken ct)
     {
         var results = new List<CodingValidationDetailRow>();
         try
         {
             await using var conn = new SqlConnection(connectionString);
             await conn.OpenAsync(ct);
-            await using var cmd = new SqlCommand("dbo.usp_GetCodingValidationDetail", conn)
+            await using var cmd = new SqlCommand(procName, conn)
             {
                 CommandType    = CommandType.StoredProcedure,
-                CommandTimeout = 120
+                CommandTimeout = 300   // CVDETAIL-ALL: export variant can return 30k+ rows
             };
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))
-            {
-                results.Add(new CodingValidationDetailRow
-                {
-                    WeekFolder            = Str(reader, "WeekFolder"),
-                    AccessionNo           = Str(reader, "AccessionNo"),
-                    PanelName             = Str(reader, "PanelName"),
-                    DateofService         = Str(reader, "DateofService"),
-                    ActualCPTCode         = Str(reader, "ActualCPTCode"),
-                    ExpectedCPTCode       = Str(reader, "ExpectedCPTCode"),
-                    MissingCPTCodes       = Str(reader, "MissingCPTCodes"),
-                    AdditionalCPTCodes    = Str(reader, "AdditionalCPTCodes"),
-                    ValidationStatus      = Str(reader, "ValidationStatus"),
-                    TotalCharge           = Str(reader, "TotalCharge"),
-                    MissingCPT_Charges    = Str(reader, "MissingCPT_Charges"),
-                    AdditionalCPT_Charges = Str(reader, "AdditionalCPT_Charges"),
-                    Remarks               = Str(reader, "Remarks"),
-                });
-            }
+                results.Add(MapDetailRow(reader));   // CVDETAIL-PAGE: shared mapper
             _logger.LogInformation("CodingValidation detail rows returned {Count}.", results.Count);
         }
         catch (Exception ex)
@@ -236,6 +319,11 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
     }
 
     /// <inheritdoc />
+    // >>> CVTPL-1.4 CHANGE (2026-07-27): drill-down "View Calculation" now sums Average ALLOWED amounts
+    //     (MissingCPT_AvgAllowedAmount / AdditionalCPT_AvgAllowedAmount) so it reconciles with the
+    //     Allowed-based Lost Revenue / Revenue at Risk headline figures per Output Template v1.4.
+    //     REVERT: change every "AvgAllowedAmount" back to "AvgPaidAmount" inside this method.
+    // <<< END CVTPL-1.4 CHANGE
     public async Task<CodingCalculationDetail> GetCalculationDetailAsync(
         string connectionString,
         string labName,
@@ -277,8 +365,8 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
                 COUNT(CASE WHEN AdditionalCPTCodes IS NOT NULL AND LTRIM(RTRIM(AdditionalCPTCodes)) <> '' THEN 1 END) AS ClaimsWithAdditional,
                 ISNULL(SUM(TRY_CAST(MissingCPT_Charges AS DECIMAL(18,2))), 0) AS MissingCharges,
                 ISNULL(SUM(TRY_CAST(AdditionalCPT_Charges AS DECIMAL(18,2))), 0) AS AdditionalCharges,
-                ISNULL(SUM(TRY_CAST(MissingCPT_AvgPaidAmount AS DECIMAL(18,2))), 0) AS LostRevenue,
-                ISNULL(SUM(TRY_CAST(AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2))), 0) AS RevenueAtRisk
+                ISNULL(SUM(TRY_CAST(MissingCPT_AvgAllowedAmount AS DECIMAL(18,2))), 0) AS LostRevenue,
+                ISNULL(SUM(TRY_CAST(AdditionalCPT_AvgAllowedAmount AS DECIMAL(18,2))), 0) AS RevenueAtRisk
             FROM dbo.CodingValidation WITH (NOLOCK)
             WHERE {whereSql}
             """;
@@ -289,9 +377,9 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
                 ISNULL(AdditionalCPTCodes, '') AS AdditionalCpts,
                 COUNT(*) AS ClaimCount,
                 ISNULL(SUM(TRY_CAST(MissingCPT_Charges AS DECIMAL(18,2))), 0) AS MissingCharges,
-                ISNULL(SUM(TRY_CAST(MissingCPT_AvgPaidAmount AS DECIMAL(18,2))), 0) AS MissingAvgPaid,
+                ISNULL(SUM(TRY_CAST(MissingCPT_AvgAllowedAmount AS DECIMAL(18,2))), 0) AS MissingAvgPaid,
                 ISNULL(SUM(TRY_CAST(AdditionalCPT_Charges AS DECIMAL(18,2))), 0) AS AdditionalCharges,
-                ISNULL(SUM(TRY_CAST(AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2))), 0) AS AdditionalAvgPaid
+                ISNULL(SUM(TRY_CAST(AdditionalCPT_AvgAllowedAmount AS DECIMAL(18,2))), 0) AS AdditionalAvgPaid
             FROM dbo.CodingValidation WITH (NOLOCK)
             WHERE {whereSql}
               AND (
@@ -300,8 +388,8 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
               )
             GROUP BY ISNULL(MissingCPTCodes, ''), ISNULL(AdditionalCPTCodes, '')
             ORDER BY
-                ISNULL(SUM(TRY_CAST(MissingCPT_AvgPaidAmount AS DECIMAL(18,2))), 0)
-              + ISNULL(SUM(TRY_CAST(AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2))), 0) DESC
+                ISNULL(SUM(TRY_CAST(MissingCPT_AvgAllowedAmount AS DECIMAL(18,2))), 0)
+              + ISNULL(SUM(TRY_CAST(AdditionalCPT_AvgAllowedAmount AS DECIMAL(18,2))), 0) DESC
             """;
 
         var samplesSql = $"""
@@ -314,20 +402,20 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
                 ISNULL(MissingCPTCodes, '') AS MissingCpts,
                 ISNULL(AdditionalCPTCodes, '') AS AdditionalCpts,
                 ISNULL(TRY_CAST(MissingCPT_Charges AS DECIMAL(18,2)), 0) AS MissingCharges,
-                ISNULL(TRY_CAST(MissingCPT_AvgPaidAmount AS DECIMAL(18,2)), 0) AS MissingAvgPaid,
+                ISNULL(TRY_CAST(MissingCPT_AvgAllowedAmount AS DECIMAL(18,2)), 0) AS MissingAvgPaid,
                 ISNULL(TRY_CAST(AdditionalCPT_Charges AS DECIMAL(18,2)), 0) AS AdditionalCharges,
-                ISNULL(TRY_CAST(AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2)), 0) AS AdditionalAvgPaid
+                ISNULL(TRY_CAST(AdditionalCPT_AvgAllowedAmount AS DECIMAL(18,2)), 0) AS AdditionalAvgPaid
             FROM dbo.CodingValidation WITH (NOLOCK)
             WHERE {whereSql}
               AND (
-                    ISNULL(TRY_CAST(MissingCPT_AvgPaidAmount AS DECIMAL(18,2)), 0) <> 0
-                 OR ISNULL(TRY_CAST(AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2)), 0) <> 0
+                    ISNULL(TRY_CAST(MissingCPT_AvgAllowedAmount AS DECIMAL(18,2)), 0) <> 0
+                 OR ISNULL(TRY_CAST(AdditionalCPT_AvgAllowedAmount AS DECIMAL(18,2)), 0) <> 0
                  OR (MissingCPTCodes IS NOT NULL AND LTRIM(RTRIM(MissingCPTCodes)) <> '')
                  OR (AdditionalCPTCodes IS NOT NULL AND LTRIM(RTRIM(AdditionalCPTCodes)) <> '')
               )
             ORDER BY
-                ISNULL(TRY_CAST(MissingCPT_AvgPaidAmount AS DECIMAL(18,2)), 0)
-              + ISNULL(TRY_CAST(AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2)), 0) DESC,
+                ISNULL(TRY_CAST(MissingCPT_AvgAllowedAmount AS DECIMAL(18,2)), 0)
+              + ISNULL(TRY_CAST(AdditionalCPT_AvgAllowedAmount AS DECIMAL(18,2)), 0) DESC,
                 AccessionNo
             """;
 
@@ -452,6 +540,24 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
+    // >>> CVUI-SRC CHANGE (2026-07-27): read source files (RunId + inserted datetime) for the header.
+    //     REVERT: delete this method.
+    public async Task<List<CodingSourceFileRow>> GetSourceFilesAsync(
+        string connectionString, string labName, CancellationToken ct = default)
+    {
+        return await QueryProcAsync(connectionString, "dbo.usp_GetCodingValidationSourceInfo", labName,
+            r => new CodingSourceFileRow
+            {
+                RunId               = Str(r, "RunId"),
+                WeekFolder          = Str(r, "WeekFolder"),
+                LabName             = Str(r, "LabName"),
+                FileName            = Str(r, "FileName"),
+                FileCreatedDateTime = DtNull(r, "FileCreatedDateTime"),
+                InsertedDateTime    = DtNull(r, "InsertedDateTime") ?? default,
+            }, ct);
+    }
+    // <<< END CVUI-SRC CHANGE
+
     private async Task<List<T>> QueryProcAsync<T>(
         string connectionString, string procName, string labName,
         Func<SqlDataReader, T> map, CancellationToken ct)
@@ -493,4 +599,49 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
 
     private static int? NullInt(SqlDataReader r, string col)
         => r.IsDBNull(r.GetOrdinal(col)) ? null : r.GetInt32(r.GetOrdinal(col));
+
+    // >>> CVDETAIL-PAGE (2026-07-28): shared row mapper used by the paged, capped and export readers.
+    //     REVERT: inline this back into GetValidationDetailCoreAsync.
+    private static CodingValidationDetailRow MapDetailRow(SqlDataReader reader) => new()
+    {
+        WeekFolder            = Str(reader, "WeekFolder"),
+        AccessionNo           = Str(reader, "AccessionNo"),
+        PanelName             = Str(reader, "PanelName"),
+        DateofService         = Str(reader, "DateofService"),
+        ActualCPTCode         = Str(reader, "ActualCPTCode"),
+        ExpectedCPTCode       = Str(reader, "ExpectedCPTCode"),
+        MissingCPTCodes       = Str(reader, "MissingCPTCodes"),
+        AdditionalCPTCodes    = Str(reader, "AdditionalCPTCodes"),
+        ValidationStatus      = Str(reader, "ValidationStatus"),
+        TotalCharge           = Str(reader, "TotalCharge"),
+        MissingCPT_Charges    = Str(reader, "MissingCPT_Charges"),
+        AdditionalCPT_Charges = Str(reader, "AdditionalCPT_Charges"),
+        Remarks               = Str(reader, "Remarks"),
+        VisitNumber                                  = Str(reader, "VisitNumber"),
+        PayerName_Raw                                = Str(reader, "PayerName_Raw"),
+        Carrier                                      = Str(reader, "Carrier"),
+        Payer_Code                                   = Str(reader, "Payer_Code"),
+        PayerCommonCode                              = Str(reader, "PayerCommonCode"),
+        Payer_Group_Code                             = Str(reader, "Payer_Group_Code"),
+        Global_Payer_ID                              = Str(reader, "Global_Payer_ID"),
+        FirstBillDate                                = Str(reader, "FirstBillDate"),
+        AllowedAmount                                = Str(reader, "AllowedAmount"),
+        InsurancePayment                             = Str(reader, "InsurancePayment"),
+        ExpectedCharges                              = Str(reader, "ExpectedCharges"),
+        MissingCPT_AvgAllowedAmount                  = Str(reader, "MissingCPT_AvgAllowedAmount"),
+        MissingCPT_AvgPaidAmount                     = Str(reader, "MissingCPT_AvgPaidAmount"),
+        MissingCPT_AvgPatientResponsibilityAmount    = Str(reader, "MissingCPT_AvgPatientResponsibilityAmount"),
+        AdditionalCPT_AvgAllowedAmount               = Str(reader, "AdditionalCPT_AvgAllowedAmount"),
+        AdditionalCPT_AvgPaidAmount                  = Str(reader, "AdditionalCPT_AvgPaidAmount"),
+        AdditionalCPT_AvgPatientResponsibilityAmount = Str(reader, "AdditionalCPT_AvgPatientResponsibilityAmount"),
+        MissingCPT_ChargeSource                      = Str(reader, "MissingCPT_ChargeSource"),
+        AdditionalCPT_ChargeSource                   = Str(reader, "AdditionalCPT_ChargeSource"),
+    };
+    // <<< END CVDETAIL-PAGE
+
+    // >>> CVUI-SRC CHANGE (2026-07-27): nullable DateTime reader for source-file columns.
+    //     REVERT: delete this helper.
+    private static DateTime? DtNull(SqlDataReader r, string col)
+        => r.IsDBNull(r.GetOrdinal(col)) ? null : r.GetDateTime(r.GetOrdinal(col));
+    // <<< END CVUI-SRC CHANGE
 }

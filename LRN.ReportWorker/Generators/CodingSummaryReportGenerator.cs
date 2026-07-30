@@ -63,7 +63,8 @@ public sealed class CodingSummaryReportGenerator : IReportGenerator
         var tWtdInsights  = _repo.GetWtdInsightsAsync(connStr, dbLabName, ct);
         var tWtdSummaries = _repo.GetWtdSummaryAsync(connStr, dbLabName, ct);
         var tFinancial    = _repo.GetFinancialSummaryAsync(connStr, ct);
-        var tDetail       = _repo.GetValidationDetailRowsAsync(connStr, ct);
+        // CVDETAIL-ALL (2026-07-27): export uses the uncapped proc (all weeks, no TOP 5000).
+        var tDetail       = _repo.GetValidationDetailExportRowsAsync(connStr, ct);
         await Task.WhenAll(tInsights, tSummaries, tWtdInsights, tWtdSummaries, tFinancial, tDetail);
         await Progress(70);
 
