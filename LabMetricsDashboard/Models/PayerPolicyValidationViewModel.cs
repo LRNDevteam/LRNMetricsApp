@@ -21,6 +21,9 @@ public sealed class PayerPolicyValidationViewModel
 
     public string? ErrorMessage { get; init; }
 
+    /// <summary>Billed week / RunId / inserted-date banner (from LineClaimFileLogs when available).</summary>
+    public AnalysisRangeInfo AnalysisRange { get; init; } = AnalysisRangeInfo.Empty;
+
     // ── Active filters ─────────────────────────────────────────────────────────
 
     public string? FilterPayerName { get; init; }

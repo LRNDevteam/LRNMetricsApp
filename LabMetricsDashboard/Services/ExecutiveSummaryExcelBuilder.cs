@@ -88,6 +88,8 @@ public sealed class ExecutiveSummaryExcelBuilder
             Line($"Analysis Range:  Billed Week Range — {vm.ReportWeekFolder}", bold: true);
         if (!string.IsNullOrWhiteSpace(vm.ReportRunId))
             Line($"ReportId (RunID):  {vm.ReportRunId}", bold: false);
+        if (vm.ReportInsertedDateTime.HasValue)
+            Line($"Inserted Date:  {vm.ReportInsertedDateTime.Value:MMM d, yyyy h:mm tt}", bold: false);
         if (!string.IsNullOrWhiteSpace(vm.LimsRunId))
             Line($"LIMSMaster RunID:  {vm.LimsRunId}", bold: false);
 

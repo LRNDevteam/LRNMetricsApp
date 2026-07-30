@@ -289,6 +289,8 @@
 <!-- Page heading -->
 <h2 class="mb-3 fw-bold">Clinic Summary <span class="badge bg-primary bg-gradient fw-semibold" style="font-size:.45em;vertical-align:middle;border-radius:20px;padding:.35em .85em">@Model.SelectedLab</span></h2>
 
+@await Html.PartialAsync("_AnalysisRangeBanner", Model.AnalysisRange)
+
 <!-- Cross-page navigation -->
 <div class="cs-cross-nav">
     <span class="cs-cross-nav-label">Navigate to:</span>
@@ -301,7 +303,7 @@
     <a href="@Url.Action("LineLevel", "Dashboard", new { lab = Model.SelectedLab })">
         <i class="bi bi-list-columns-reverse"></i> Line Level
     </a>
-    <a href="@Url.Action("ProductionReport", "Dashboard", new { lab = Model.SelectedLab })">
+    <a href="@Url.Action("ProductionSummaryReport", "Dashboard", new { lab = Model.SelectedLab })">
         <i class="bi bi-graph-up-arrow"></i> Production Report
     </a>
 </div>

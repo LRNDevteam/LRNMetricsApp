@@ -54,6 +54,7 @@ public sealed record WtdSummaryRecord(
     string  WeekFolder,
     string  PanelName,
     int     TotalClaims,
+    decimal TotalBilledCharges,
     int     DistinctClaimsWithMissingCpts,
     decimal TotalBilledChargesForMissingCpts,
     decimal AvgAllowedAmountForMissingCpts

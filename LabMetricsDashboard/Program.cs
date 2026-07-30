@@ -390,6 +390,7 @@ builder.Services.AddScoped<IClinicSummaryRepository, SqlClinicSummaryRepository>
 builder.Services.AddScoped<ISalesRepSummaryRepository, SqlSalesRepSummaryRepository>();
 builder.Services.AddScoped<IDashboardRepository, SqlDashboardRepository>();
 builder.Services.AddScoped<IProductionReportRepository, SqlProductionReportRepository>();
+builder.Services.AddScoped<IAnalysisRangeService, AnalysisRangeService>();
 builder.Services.AddScoped<INorthWestProductionSummaryRepository, SqlNorthWestProductionSummaryRepository>();
 builder.Services.AddScoped<IAugustusProductionSummaryRepository, SqlAugustusProductionSummaryRepository>();
 

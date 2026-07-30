@@ -16,6 +16,9 @@ public sealed class CollectionSummaryViewModel
     public List<string> AvailableLabs { get; set; } = [];
     public string SelectedLab { get; set; } = string.Empty;
 
+    /// <summary>Billed week / RunId / inserted-date banner (from LineClaimFileLogs).</summary>
+    public AnalysisRangeInfo AnalysisRange { get; set; } = AnalysisRangeInfo.Empty;
+
     /// <summary>
     /// Active per-lab Collection Summary rule applied to the Monthly Claim Volume tab
     /// (e.g. <c>"Northwestlabs Rule"</c>). Null/empty when the lab uses the legacy default behavior.

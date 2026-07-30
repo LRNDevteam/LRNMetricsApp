@@ -37,17 +37,17 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
                 PanelName                          = Str(r, "PanelName"),
                 BillableCptCombo                   = Str(r, "BillableCptCombo"),
                 TotalClaims                        = r.GetInt32(r.GetOrdinal("TotalClaims")),
-                BilledChargesPerClaim              = Dec(r, "BilledChargesPerClaim"),
+                BilledChargesPerClaim              = ReadDec(r, "BilledChargesPerClaim"),
                 BilledCptCombo                     = Str(r, "BilledCptCombo"),
                 MissingCpts                        = Str(r, "MissingCpts"),
-                TotalBilledChargesForMissingCpts   = Dec(r, "TotalBilledChargesForMissingCpts"),
-                LostRevenue                        = Dec(r, "LostRevenue"),
+                TotalBilledChargesForMissingCpts   = ReadDec(r, "TotalBilledChargesForMissingCpts"),
+                LostRevenue                        = ReadDec(r, "LostRevenue"),
                 AdditionalCpts                     = Str(r, "AdditionalCpts"),
-                TotalBilledChargesForAdditionalCpts = Dec(r, "TotalBilledChargesForAdditionalCpts"),
-                RevenueAtRisk                      = Dec(r, "RevenueAtRisk"),
+                TotalBilledChargesForAdditionalCpts = ReadDec(r, "TotalBilledChargesForAdditionalCpts"),
+                RevenueAtRisk                      = ReadDec(r, "RevenueAtRisk"),
                 // >>> CVTPL-1.4 CHANGE (2026-07-27): Net Impact = Revenue at Risk - Lost Revenue per template v1.4.
-                //     REVERT: restore -> Dec(r, "LostRevenue") - Dec(r, "RevenueAtRisk")
-                NetImpact                          = Dec(r, "RevenueAtRisk") - Dec(r, "LostRevenue"),
+                //     REVERT: restore -> ReadDec(r, "LostRevenue") - ReadDec(r, "RevenueAtRisk")
+                NetImpact                          = ReadDec(r, "RevenueAtRisk") - ReadDec(r, "LostRevenue"),
                 // <<< END CVTPL-1.4 CHANGE
             }, ct);
     }
@@ -69,16 +69,16 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
                 MissingCpts                        = Str(r, "MissingCpts"),
                 AdditionalCpts                     = Str(r, "AdditionalCpts"),
                 TotalClaims                        = r.GetInt32(r.GetOrdinal("TotalClaims")),
-                TotalBilledCharges                 = Dec(r, "TotalBilledCharges"),
+                TotalBilledCharges                 = ReadDec(r, "TotalBilledCharges"),
                 DistinctClaimsWithMissingCpts      = r.GetInt32(r.GetOrdinal("DistinctClaimsWithMissingCpts")),
-                TotalBilledChargesForMissingCpts   = Dec(r, "TotalBilledChargesForMissingCpts"),
+                TotalBilledChargesForMissingCpts   = ReadDec(r, "TotalBilledChargesForMissingCpts"),
                 DistinctClaimsWithAdditionalCpts   = r.GetInt32(r.GetOrdinal("DistinctClaimsWithAdditionalCpts")),
-                TotalBilledChargesForAdditionalCpts = Dec(r, "TotalBilledChargesForAdditionalCpts"),
-                LostRevenue                        = Dec(r, "LostRevenue"),
-                RevenueAtRisk                      = Dec(r, "RevenueAtRisk"),
+                TotalBilledChargesForAdditionalCpts = ReadDec(r, "TotalBilledChargesForAdditionalCpts"),
+                LostRevenue                        = ReadDec(r, "LostRevenue"),
+                RevenueAtRisk                      = ReadDec(r, "RevenueAtRisk"),
                 // >>> CVTPL-1.4 CHANGE (2026-07-27): Net Impact = Revenue at Risk - Lost Revenue per template v1.4.
-                //     REVERT: restore -> Dec(r, "LostRevenue") - Dec(r, "RevenueAtRisk")
-                NetImpact                          = Dec(r, "RevenueAtRisk") - Dec(r, "LostRevenue"),
+                //     REVERT: restore -> ReadDec(r, "LostRevenue") - ReadDec(r, "RevenueAtRisk")
+                NetImpact                          = ReadDec(r, "RevenueAtRisk") - ReadDec(r, "LostRevenue"),
                 // <<< END CVTPL-1.4 CHANGE
             }, ct);
     }
@@ -99,17 +99,17 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
                 PanelName                     = Str(r, "PanelName"),
                 BillableCptCombo              = Str(r, "BillableCptCombo"),
                 TotalClaims                   = r.GetInt32(r.GetOrdinal("TotalClaims")),
-                TotalBilledCharges            = Dec(r, "TotalBilledCharges"),
+                TotalBilledCharges            = ReadDec(r, "TotalBilledCharges"),
                 BilledCptCombo                = Str(r, "BilledCptCombo"),
                 MissingCpts                   = Str(r, "MissingCpts"),
-                BilledChargesForMissingCpts   = Dec(r, "BilledChargesForMissingCpts"),
-                RevenueLoss                   = Dec(r, "RevenueLoss"),
+                BilledChargesForMissingCpts   = ReadDec(r, "BilledChargesForMissingCpts"),
+                RevenueLoss                   = ReadDec(r, "RevenueLoss"),
                 AdditionalCpts                = Str(r, "AdditionalCpts"),
-                BilledChargesForAdditionalCpts = Dec(r, "BilledChargesForAdditionalCpts"),
-                PotentialRecoupment           = Dec(r, "PotentialRecoupment"),
+                BilledChargesForAdditionalCpts = ReadDec(r, "BilledChargesForAdditionalCpts"),
+                PotentialRecoupment           = ReadDec(r, "PotentialRecoupment"),
                 // >>> CVTPL-1.4 CHANGE (2026-07-27): Net Impact = Potential Recoupment - Revenue Loss per template v1.4.
-                //     REVERT: restore -> Dec(r, "RevenueLoss") - Dec(r, "PotentialRecoupment")
-                NetImpact                     = Dec(r, "PotentialRecoupment") - Dec(r, "RevenueLoss"),
+                //     REVERT: restore -> ReadDec(r, "RevenueLoss") - ReadDec(r, "PotentialRecoupment")
+                NetImpact                     = ReadDec(r, "PotentialRecoupment") - ReadDec(r, "RevenueLoss"),
                 // <<< END CVTPL-1.4 CHANGE
             }, ct);
     }
@@ -124,30 +124,31 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
         return await QueryProcAsync(connectionString, "dbo.usp_GetCodingAggWtdSummary", labName,
             r => new CodingWtdSummaryRow
             {
-                WeekFolder                      = Str(r, "WeekFolder"),
-                PanelName                       = Str(r, "PanelName"),
-                BillableCptCombo                = Str(r, "BillableCptCombo"),
-                BilledCptCombo                  = Str(r, "BilledCptCombo"),
-                MissingCpts                     = Str(r, "MissingCpts"),
-                AdditionalCpts                  = Str(r, "AdditionalCpts"),
-                TotalClaims                     = r.GetInt32(r.GetOrdinal("TotalClaims")),
-                DistinctClaimsWithMissingCpts   = r.GetInt32(r.GetOrdinal("DistinctClaimsWithMissingCpts")),
-                TotalBilledChargesForMissingCpts = Dec(r, "TotalBilledChargesForMissingCpts"),
-                AvgAllowedAmountForMissingCpts  = Dec(r, "AvgAllowedAmountForMissingCpts"),
+                WeekFolder                       = Str(r, "WeekFolder"),
+                PanelName                        = Str(r, "PanelName"),
+                BillableCptCombo                 = Str(r, "BillableCptCombo"),
+                BilledCptCombo                   = Str(r, "BilledCptCombo"),
+                MissingCpts                      = Str(r, "MissingCpts"),
+                AdditionalCpts                   = Str(r, "AdditionalCpts"),
+                TotalClaims                      = r.GetInt32(r.GetOrdinal("TotalClaims")),
+                TotalBilledCharges               = ReadDec(r, "TotalBilledCharges"),
+                DistinctClaimsWithMissingCpts    = r.GetInt32(r.GetOrdinal("DistinctClaimsWithMissingCpts")),
+                TotalBilledChargesForMissingCpts = ReadDec(r, "TotalBilledChargesForMissingCpts"),
+                AvgAllowedAmountForMissingCpts   = ReadDec(r, "AvgAllowedAmountForMissingCpts"),
                 // >>> CVTPL-1.4 CHANGE (2026-07-27): map WTD Summary additional-CPT + revenue columns per template v1.4.
                 //     REVERT: delete the five mappings below.
                 DistinctClaimsWithAdditionalCpts    = r.GetInt32(r.GetOrdinal("DistinctClaimsWithAdditionalCpts")),
-                TotalBilledChargesForAdditionalCpts = Dec(r, "TotalBilledChargesForAdditionalCpts"),
-                LostRevenue                         = Dec(r, "LostRevenue"),
-                RevenueAtRisk                       = Dec(r, "RevenueAtRisk"),
-                NetImpact                           = Dec(r, "NetImpact"),
+                TotalBilledChargesForAdditionalCpts = ReadDec(r, "TotalBilledChargesForAdditionalCpts"),
+                LostRevenue                         = ReadDec(r, "LostRevenue"),
+                RevenueAtRisk                       = ReadDec(r, "RevenueAtRisk"),
+                NetImpact                           = ReadDec(r, "NetImpact"),
                 // <<< END CVTPL-1.4 CHANGE
             }, ct);
     }
 
     /// <summary>
     /// Returns all rows from dbo.CodingFinancialSummary (newest first) via
-    /// dbo.usp_GetCodingFinancialSummary. No LabName filter — each lab has its
+    /// dbo.usp_GetCodingFinancialSummary. No LabName filter - each lab has its
     /// own database.
     /// </summary>
     public async Task<List<CodingFinancialSummaryRow>> GetFinancialSummaryAsync(
@@ -172,18 +173,18 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
                     WeekFolder                         = Str(reader, "WeekFolder"),
                     ReportDate                         = Str(reader, "ReportDate"),
                     TotalClaims                        = NullInt(reader, "TotalClaims")  ?? 0,
-                    TotalBilledCharges                 = Dec(reader, "TotalBilledCharges"),
-                    ExpectedBilledCharges              = Dec(reader, "ExpectedBilledCharges"),
+                    TotalBilledCharges                 = ReadDec(reader, "TotalBilledCharges"),
+                    ExpectedBilledCharges              = ReadDec(reader, "ExpectedBilledCharges"),
                     RevenueImpact_Claims               = NullInt(reader, "RevenueImpact_Claims"),
-                    RevenueImpact_ActualBilled         = Dec(reader, "RevenueImpact_ActualBilled"),
-                    RevenueImpact_PotentialLoss        = Dec(reader, "RevenueImpact_PotentialLoss"),
-                    RevenueImpact_ExpectedRecoup       = Dec(reader, "RevenueImpact_ExpectedRecoup"),
+                    RevenueImpact_ActualBilled         = ReadDec(reader, "RevenueImpact_ActualBilled"),
+                    RevenueImpact_PotentialLoss        = ReadDec(reader, "RevenueImpact_PotentialLoss"),
+                    RevenueImpact_ExpectedRecoup       = ReadDec(reader, "RevenueImpact_ExpectedRecoup"),
                     RevenueLoss_Claims                 = NullInt(reader, "RevenueLoss_Claims"),
-                    RevenueLoss_ActualBilled           = Dec(reader, "RevenueLoss_ActualBilled"),
-                    RevenueLoss_PotentialLoss          = Dec(reader, "RevenueLoss_PotentialLoss"),
+                    RevenueLoss_ActualBilled           = ReadDec(reader, "RevenueLoss_ActualBilled"),
+                    RevenueLoss_PotentialLoss          = ReadDec(reader, "RevenueLoss_PotentialLoss"),
                     RevenueAtRisk_Claims               = NullInt(reader, "RevenueAtRisk_Claims"),
-                    RevenueAtRisk_ActualBilled         = Dec(reader, "RevenueAtRisk_ActualBilled"),
-                    RevenueAtRisk_PotentialRecoup      = Dec(reader, "RevenueAtRisk_PotentialRecoup"),
+                    RevenueAtRisk_ActualBilled         = ReadDec(reader, "RevenueAtRisk_ActualBilled"),
+                    RevenueAtRisk_PotentialRecoup      = ReadDec(reader, "RevenueAtRisk_PotentialRecoup"),
                     Compliance_TotalClaims             = NullInt(reader, "Compliance_TotalClaims"),
                     Compliance_ClaimsWithIssues        = NullInt(reader, "Compliance_ClaimsWithIssues"),
                     ComplianceRate                     = Str(reader, "ComplianceRate"),
@@ -194,6 +195,7 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
                     ComplianceRatePct                  = Str(reader, "ComplianceRatePct"),
                 });
             }
+
             _logger.LogInformation("CodingFinancialSummary returned {Count} rows.", results.Count);
         }
         catch (Exception ex)
@@ -594,11 +596,21 @@ public sealed class SqlCodingValidationRepository : ICodingValidationRepository
     private static string  Str(SqlDataReader r, string col)
         => r.IsDBNull(r.GetOrdinal(col)) ? string.Empty : r.GetString(r.GetOrdinal(col));
 
-    private static decimal Dec(SqlDataReader r, string col)
+    private static decimal ReadDec(SqlDataReader r, string col)
         => r.IsDBNull(r.GetOrdinal(col)) ? 0m : r.GetDecimal(r.GetOrdinal(col));
 
     private static int? NullInt(SqlDataReader r, string col)
         => r.IsDBNull(r.GetOrdinal(col)) ? null : r.GetInt32(r.GetOrdinal(col));
+
+    private static bool HasCol(SqlDataReader r, string col)
+    {
+        for (var i = 0; i < r.FieldCount; i++)
+        {
+            if (string.Equals(r.GetName(i), col, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
 
     // >>> CVDETAIL-PAGE (2026-07-28): shared row mapper used by the paged, capped and export readers.
     //     REVERT: inline this back into GetValidationDetailCoreAsync.

@@ -9,6 +9,9 @@ public sealed class SalesRepSummaryViewModel
     public List<string> AvailableLabs { get; init; } = [];
     public string SelectedLab { get; init; } = string.Empty;
 
+    /// <summary>Billed week / RunId / inserted-date banner (from LineClaimFileLogs).</summary>
+    public AnalysisRangeInfo AnalysisRange { get; init; } = AnalysisRangeInfo.Empty;
+
     // Filters (multi-select)
     public List<string> FilterSalesRepNames { get; init; } = [];
     public List<string> FilterClinicNames { get; init; } = [];

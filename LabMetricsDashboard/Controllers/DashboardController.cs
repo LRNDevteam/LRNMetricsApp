@@ -36,6 +36,7 @@ public class DashboardController : Controller
     private readonly IAugustusProductionSummaryRepository _augSummaryRepo;
     private readonly IReadOnlyDictionary<string, ILabProductionSummaryRepository> _labSummaryRepos;
     private readonly IClaimLineRepository _claimLineRepo;
+    private readonly IAnalysisRangeService _analysisRange;
     private readonly ILogger<DashboardController> _logger;
 
     public DashboardController(
@@ -50,6 +51,7 @@ public class DashboardController : Controller
         IAugustusProductionSummaryRepository augSummaryRepo,
         IReadOnlyDictionary<string, ILabProductionSummaryRepository> labSummaryRepos,
         IClaimLineRepository claimLineRepo,
+        IAnalysisRangeService analysisRange,
         ILogger<DashboardController> logger)
     {
         _labSettings = labSettings;
@@ -63,6 +65,7 @@ public class DashboardController : Controller
         _augSummaryRepo = augSummaryRepo;
         _labSummaryRepos = labSummaryRepos;
         _claimLineRepo = claimLineRepo;
+        _analysisRange = analysisRange;
         _logger = logger;
     }
 
@@ -668,6 +671,8 @@ public class DashboardController : Controller
             filterDosNull,
             page, PageSize, ct);
 
+        var analysisRange = await _analysisRange.GetAsync(connStr, ct);
+
         var vm = new ClaimLevelViewModel
         {
             AvailableLabs      = availableLabs,
@@ -703,6 +708,7 @@ public class DashboardController : Controller
             Records            = result.Records,
             Paging             = new PageInfo(Math.Max(1, page), PageSize, result.TotalFiltered, result.TotalAll),
             DataSource         = "SQL Database",
+            AnalysisRange      = analysisRange,
         };
 
         return View(vm);
@@ -907,6 +913,8 @@ public class DashboardController : Controller
             filterPayStatuses, filterCPTCodes, filterClinicNames,
             filterDenialCode, page, PageSize, ct);
 
+        var analysisRange = await _analysisRange.GetAsync(connStr, ct);
+
         var vm = new LineLevelViewModel
         {
             AvailableLabs       = availableLabs,
@@ -926,6 +934,7 @@ public class DashboardController : Controller
             Records             = result.Records,
             Paging              = new PageInfo(Math.Max(1, page), PageSize, result.TotalFiltered, result.TotalAll),
             DataSource          = "SQL Database",
+            AnalysisRange       = analysisRange,
         };
 
         return View(vm);
@@ -1132,6 +1141,8 @@ public class DashboardController : Controller
 
             var rows = result.Rows;
 
+            var analysisRange = await _analysisRange.GetAsync(connStr, ct);
+
             // Build grand-total row from the rows
             var totals = new ClinicSummaryRow
             {
@@ -1155,6 +1166,7 @@ public class DashboardController : Controller
             {
                 AvailableLabs      = availableLabs,
                 SelectedLab        = selectedLab,
+                AnalysisRange      = analysisRange,
                 FilterClinicNames  = filterClinicNames,
                 FilterSalesRepNames = filterSalesRepNames,
                 FilterPayerNames   = filterPayerNames,
@@ -1607,6 +1619,8 @@ public class DashboardController : Controller
 
             var rows = result.Rows;
 
+            var analysisRange = await _analysisRange.GetAsync(connStr, ct);
+
             var totals = new SalesRepSummaryRow
             {
                 SalesRepName                = "Grand Total",
@@ -1628,6 +1642,7 @@ public class DashboardController : Controller
             {
                 AvailableLabs        = availableLabs,
                 SelectedLab          = selectedLab,
+                AnalysisRange        = analysisRange,
                 FilterSalesRepNames  = filterSalesRepNames,
                 FilterClinicNames    = filterClinicNames,
                 FilterPayerNames     = filterPayerNames,
@@ -2046,13 +2061,15 @@ public class DashboardController : Controller
         };
     }
 
-    // ?? Production Report ????????????????????????????????????????????????
+    // ── Production Report ────────────────────────────────────────────────────
+    // Legacy URL: forwards to Production Summary Report so menus, bookmarks,
+    // and cross-page links keep working without updating every caller.
 
     /// <summary>
-    /// Production Report page � Monthly Claim Volume pivot table.
-    /// Source: dbo.ClaimLevelData grouped by PanelName � Year/Month(FirstBilledDate).
+    /// Redirects to <see cref="ProductionSummaryReport"/> (preferred entry point).
+    /// Preserves lab + filter query parameters.
     /// </summary>
-    public async Task<IActionResult> ProductionReport(
+    public IActionResult ProductionReport(
         string? lab,
         List<string>? filterPayerNames,
         List<string>? filterPanelNames,
@@ -2061,215 +2078,20 @@ public class DashboardController : Controller
         string? filterFirstBillFrom,
         string? filterFirstBillTo,
         string? filterFirstBilledFrom,
-        string? filterFirstBilledTo,
-        CancellationToken ct = default)
+        string? filterFirstBilledTo)
     {
-        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
-        var selectedLab   = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
-
-        filterPayerNames = filterPayerNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
-        filterPanelNames = filterPanelNames?.Where(v => !string.IsNullOrWhiteSpace(v)).ToList() ?? [];
-
-        if (string.IsNullOrWhiteSpace(selectedLab))
-            return View(new ProductionReportViewModel { AvailableLabs = availableLabs });
-
-        if (!_labSettings.Labs.TryGetValue(selectedLab, out var config))
+        return RedirectToAction(nameof(ProductionSummaryReport), new
         {
-            return View(new ProductionReportViewModel
-            {
-                AvailableLabs = availableLabs,
-                SelectedLab   = selectedLab,
-                ErrorMessage  = $"Configuration not found for {selectedLab}.",
-            });
-        }
-
-        if (!config.EnableProductionReport)
-        {
-            return View(new ProductionReportViewModel
-            {
-                AvailableLabs = availableLabs,
-                SelectedLab   = selectedLab,
-                ErrorMessage  = $"Production Report feature is not enabled for {selectedLab}. Please contact your administrator.",
-            });
-        }
-
-        if (!config.LineClaimEnable)
-        {
-            return View(new ProductionReportViewModel
-            {
-                AvailableLabs = availableLabs,
-                SelectedLab   = selectedLab,
-                ErrorMessage  = $"Production Report is currently not available for {selectedLab}.",
-            });
-        }
-
-        var connStr = config.DbConnectionString;
-        if (string.IsNullOrWhiteSpace(connStr))
-        {
-            return View(new ProductionReportViewModel
-            {
-                AvailableLabs = availableLabs,
-                SelectedLab   = selectedLab,
-                ErrorMessage  = $"Production Report is currently not available for {selectedLab}. No connection string configured.",
-            });
-        }
-
-        DateOnly.TryParse(filterFirstBillFrom, out var fbFrom);
-        DateOnly.TryParse(filterFirstBillTo, out var fbTo);
-        DateOnly.TryParse(filterDosFrom, out var dosFrom);
-        DateOnly.TryParse(filterDosTo, out var dosTo);
-        DateOnly.TryParse(filterFirstBilledFrom, out var fbldFrom);
-        DateOnly.TryParse(filterFirstBilledTo, out var fbldTo);
-
-        var hasFilters = filterPayerNames.Count > 0
-            || filterPanelNames.Count > 0
-            || dosFrom != default
-            || dosTo != default
-            || fbFrom != default
-            || fbTo != default
-            || fbldFrom != default
-            || fbldTo != default;
-
-        // Resolve the per-lab Production Summary rule (e.g. "Rule1" => use ChargeEnteredDate columns).
-        var productionRule = config.ProductionSummary?.Rule;
-        // Per-lab Weekly Claim Volume rule. Falls back to the monthly Rule when not configured.
-        var weekRule = !string.IsNullOrWhiteSpace(config.ProductionSummary?.WeekRule)
-            ? config.ProductionSummary!.WeekRule
-            : productionRule;
-        // Per-lab week boundary (e.g. "Mon to Sun", "Thu to Wed"). Null/empty => Monday-to-Sunday.
-        var weekRange = config.ProductionSummary?.WeekRange;
-        var isAugustusLab = selectedLab.Equals("Augustus_Labs", StringComparison.OrdinalIgnoreCase)
-                         || selectedLab.Equals("Augustus", StringComparison.OrdinalIgnoreCase);
-        var isNorthWestLab = selectedLab.Equals("NorthWest", StringComparison.OrdinalIgnoreCase);
-
-        var payerFilter = filterPayerNames.Count > 0 ? filterPayerNames : null;
-        var panelFilter = filterPanelNames.Count > 0 ? filterPanelNames : null;
-        var dosFromArg = dosFrom != default ? dosFrom : (DateOnly?)null;
-        var dosToArg = dosTo != default ? dosTo : (DateOnly?)null;
-        var fbFromArg = fbFrom != default ? fbFrom : (DateOnly?)null;
-        var fbToArg = fbTo != default ? fbTo : (DateOnly?)null;
-        var fbldFromArg = fbldFrom != default ? fbldFrom : (DateOnly?)null;
-        var fbldToArg = fbldTo != default ? fbldTo : (DateOnly?)null;
-
-        try
-        {
-            // Augustus / NorthWest: route through lab-specific parameterised SPs (usp_GetAug_* / usp_GetNW_*),
-            // never Rule/prefix resolution via SqlProductionReportRepository.
-            var monthlyTask = isAugustusLab
-                ? _augSummaryRepo.GetMonthlyAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                : isNorthWestLab
-                    ? _nwSummaryRepo.GetMonthlyAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                    : _productionReportRepo.GetMonthlyClaimVolumeAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, productionRule, ct);
-
-            var weeklyTask = isAugustusLab
-                ? _augSummaryRepo.GetWeeklyAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                : isNorthWestLab
-                    ? _nwSummaryRepo.GetWeeklyAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                    : _productionReportRepo.GetWeeklyClaimVolumeAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, weekRule, weekRange, ct);
-
-            var codingTask = isAugustusLab
-                ? _augSummaryRepo.GetCodingAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                : isNorthWestLab
-                    ? _nwSummaryRepo.GetCodingAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                    : _productionReportRepo.GetCodingAsync(connStr, panelFilter, ct);
-
-            var payerBreakdownTask = isAugustusLab
-                ? _augSummaryRepo.GetPayerBreakdownAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                : isNorthWestLab
-                    ? _nwSummaryRepo.GetPayerBreakdownAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                    : _productionReportRepo.GetPayerBreakdownAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, productionRule, ct);
-
-            var payerPanelTask = isAugustusLab
-                ? _augSummaryRepo.GetPayerByPanelAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                : isNorthWestLab
-                    ? _nwSummaryRepo.GetPayerByPanelAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                    : _productionReportRepo.GetPayerPanelAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, productionRule, ct);
-
-            var unbilledAgingTask = isAugustusLab
-                ? _augSummaryRepo.GetUnbilledAgingAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                : isNorthWestLab
-                    ? _nwSummaryRepo.GetUnbilledAgingAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                    : _productionReportRepo.GetUnbilledAgingAsync(connStr, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, productionRule, ct);
-
-            var cptBreakdownTask = isAugustusLab
-                ? _augSummaryRepo.GetCptBreakdownAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                : isNorthWestLab
-                    ? _nwSummaryRepo.GetCptBreakdownAsync(connStr, payerFilter, panelFilter, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
-                    : _productionReportRepo.GetCptBreakdownAsync(connStr, dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
-
-            await Task.WhenAll(monthlyTask, weeklyTask, codingTask, payerBreakdownTask, payerPanelTask, unbilledAgingTask, cptBreakdownTask);
-
-            var result = monthlyTask.Result;
-            var weeklyResult = weeklyTask.Result;
-            var codingResult = codingTask.Result;
-            var pbResult = payerBreakdownTask.Result;
-            var pxpResult = payerPanelTask.Result;
-            var uaResult = unbilledAgingTask.Result;
-            var cptResult = cptBreakdownTask.Result;
-
-            return View(new ProductionReportViewModel
-            {
-                AvailableLabs      = availableLabs,
-                SelectedLab        = selectedLab,
-                ProductionSummaryRule = productionRule,
-                ProductionSummaryWeekRule = weekRule,
-                ProductionSummaryWeekRange = weekRange,
-                FilterPayerNames   = filterPayerNames,
-                FilterPanelNames   = filterPanelNames,
-                FilterFirstBillFrom = filterFirstBillFrom,
-                FilterFirstBillTo  = filterFirstBillTo,
-                FilterDosFrom = filterDosFrom,
-                FilterDosTo = filterDosTo,
-                FilterFirstBilledFrom = filterFirstBilledFrom,
-                FilterFirstBilledTo = filterFirstBilledTo,
-                PayerNames         = result.PayerNames,
-                PanelNames         = result.PanelNames,
-                Months             = result.Months,
-                Years              = result.Years,
-                PanelRows          = result.PanelRows,
-                GrandTotalByMonth  = result.GrandTotalByMonth,
-                GrandTotalClaims   = result.GrandTotalClaims,
-                GrandTotalCharges  = result.GrandTotalCharges,
-                WeekColumns             = weeklyResult.WeekColumns,
-                WeeklyPanelRows         = weeklyResult.PanelRows,
-                WeeklyGrandTotalByWeek  = weeklyResult.GrandTotalByWeek,
-                WeeklyGrandTotalClaims  = weeklyResult.GrandTotalClaims,
-                WeeklyGrandTotalCharges = weeklyResult.GrandTotalCharges,
-                CodingPanelRows         = codingResult.PanelRows,
-                CodingGrandTotalClaims  = codingResult.GrandTotalClaims,
-                CodingGrandTotalCharges = codingResult.GrandTotalCharges,
-                PayerBreakdownMonths    = pbResult.Months,
-                PayerBreakdownYears     = pbResult.Years,
-                PayerBreakdownRows      = pbResult.PayerRows,
-                PayerBreakdownGrandByMonth = pbResult.GrandTotalByMonth,
-                PayerBreakdownGrandTotal   = pbResult.GrandTotal,
-                PayerPanelColumns          = pxpResult.PanelColumns,
-                PayerPanelRows             = pxpResult.PayerRows,
-                PayerPanelGrandByPanel     = pxpResult.GrandTotalByPanel,
-                PayerPanelGrandTotalClaims = pxpResult.GrandTotalClaims,
-                PayerPanelGrandTotalCharges = pxpResult.GrandTotalCharges,
-                UnbilledAgingRows              = uaResult.PanelRows,
-                UnbilledAgingGrandByBucket     = uaResult.GrandTotalByBucket,
-                UnbilledAgingGrandTotalClaims  = uaResult.GrandTotalClaims,
-                UnbilledAgingGrandTotalCharges = uaResult.GrandTotalCharges,
-                CptBreakdownMonths             = cptResult.Months,
-                CptBreakdownYears              = cptResult.Years,
-                CptBreakdownRows               = cptResult.CptRows,
-                CptBreakdownGrandByMonth       = cptResult.GrandTotalByMonth,
-                CptBreakdownGrandTotalUnits    = cptResult.GrandTotalUnits,
-                CptBreakdownGrandTotalCharges  = cptResult.GrandTotalCharges,
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Production Report query failed for lab '{LabName}'.", selectedLab);
-            return View(new ProductionReportViewModel
-            {
-                AvailableLabs = availableLabs,
-                SelectedLab   = selectedLab,
-                ErrorMessage  = $"Failed to load Production Report: {ex.Message}",
-            });
-        }
+            lab,
+            filterPayerNames,
+            filterPanelNames,
+            filterDosFrom,
+            filterDosTo,
+            filterFirstBillFrom,
+            filterFirstBillTo,
+            filterFirstBilledFrom,
+            filterFirstBilledTo,
+        });
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -2647,8 +2469,9 @@ public class DashboardController : Controller
                 }
             }
 
-            var (runWeekFolder, runId) = await _productionReportRepo.GetRunInfoAsync(connStr, ct);
+            var analysisRange = await _analysisRange.GetAsync(connStr, ct);
             var limsRunId = await _productionReportRepo.GetLimsRunIdAsync(connStr, ct);
+            ViewData["AnalysisRange"] = analysisRange;
 
             return View(new ProductionReportViewModel
             {
@@ -2705,8 +2528,8 @@ public class DashboardController : Controller
                 CptBreakdownGrandTotalUnits    = cptResult.GrandTotalUnits,
                 CptBreakdownGrandTotalCharges  = cptResult.GrandTotalCharges,
                 CptUnitsLabel                  = genericSummaryRepo?.IsCertus == true ? "Billed Units" : "No. of Claims",
-                ReportWeekFolder               = runWeekFolder,
-                ReportRunId                    = runId,
+                ReportWeekFolder               = analysisRange.WeekFolder,
+                ReportRunId                    = analysisRange.RunId,
                 LimsRunId                      = limsRunId,
             });
         }
@@ -2750,7 +2573,7 @@ public class DashboardController : Controller
             || string.IsNullOrWhiteSpace(config.DbConnectionString))
         {
             TempData["ExportError"] = "Production Report export is not available for the selected lab.";
-            return RedirectToAction(nameof(ProductionReport), new { lab });
+            return RedirectToAction(nameof(ProductionSummaryReport), new { lab });
         }
 
         var connStr   = config.DbConnectionString;
@@ -2789,7 +2612,7 @@ public class DashboardController : Controller
                 if (recentReport is null)
                 {
                     TempData["ExportError"] = $"No pre-generated Production Report Excel was found for {selectedLab}. Please wait for ClaimLineCSVDataCapture to generate it or apply filters to build a live export.";
-                    return RedirectToAction(nameof(ProductionReport), new { lab });
+                    return RedirectToAction(nameof(ProductionSummaryReport), new { lab });
                 }
 
                 Response.Cookies.Append("prExportDone", "1", new CookieOptions
@@ -3082,7 +2905,7 @@ public class DashboardController : Controller
         {
             _logger.LogError(ex, "Production Report Excel export failed for lab '{LabName}'.", selectedLab);
             TempData["ExportError"] = $"Export failed: {ex.Message}";
-            return RedirectToAction(nameof(ProductionReport), new { lab });
+            return RedirectToAction(nameof(ProductionSummaryReport), new { lab });
         }
     }
 
@@ -3115,7 +2938,7 @@ public class DashboardController : Controller
             || string.IsNullOrWhiteSpace(config.DbConnectionString))
         {
             TempData["ExportError"] = "NorthWest Production Report export is not available for the selected lab.";
-            return RedirectToAction(nameof(ProductionReport), new { lab });
+            return RedirectToAction(nameof(ProductionSummaryReport), new { lab });
         }
 
         var connStr = config.DbConnectionString;
@@ -3330,7 +3153,7 @@ public class DashboardController : Controller
         {
             _logger.LogError(ex, "NorthWest Production Report Excel export failed for lab '{LabName}'.", selectedLab);
             TempData["ExportError"] = $"Export failed: {ex.Message}";
-            return RedirectToAction(nameof(ProductionReport), new { lab });
+            return RedirectToAction(nameof(ProductionSummaryReport), new { lab });
         }
     }
 

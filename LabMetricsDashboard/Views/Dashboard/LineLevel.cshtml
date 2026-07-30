@@ -70,6 +70,8 @@
 <!-- Header -->
 <h2 class="mb-3 fw-bold">&#128203; Line Level Details <span class="badge bg-primary bg-gradient fw-semibold" style="font-size:.45em;vertical-align:middle;border-radius:20px;padding:.35em .85em">@Model.SelectedLab</span></h2>
 
+@await Html.PartialAsync("_AnalysisRangeBanner", Model.AnalysisRange)
+
 <!-- Collapsible filter panel -->
 <div class="ll-filter-panel p-3 mb-4">
     <div class="d-flex align-items-center justify-content-between mb-2">

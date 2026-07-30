@@ -44,4 +44,7 @@ public sealed class LineLevelViewModel
 
     /// <summary>User-facing error message when the query fails (e.g. timeout).</summary>
     public string? ErrorMessage { get; init; }
+
+    /// <summary>Billed week / RunId / inserted-date banner (from LineClaimFileLogs).</summary>
+    public AnalysisRangeInfo AnalysisRange { get; init; } = AnalysisRangeInfo.Empty;
 }

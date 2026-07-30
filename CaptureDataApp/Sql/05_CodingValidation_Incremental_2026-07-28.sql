@@ -66,6 +66,9 @@ IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Coding
     ALTER TABLE dbo.CodingAgg_WtdSummary ADD NetImpact DECIMAL(18,2) NULL;
 GO
 -- <<< END CVTPL-1.4 CHANGE
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.CodingAgg_WtdSummary') AND name = 'TotalBilledCharges')
+    ALTER TABLE dbo.CodingAgg_WtdSummary ADD TotalBilledCharges DECIMAL(18,2) NULL;
+GO
 
 -- ── 2. Refresh procedure ─────────────────────────────────────────────────────
 -- Full rebuild of all four aggregate tables from dbo.CodingValidation.
@@ -353,7 +356,7 @@ BEGIN
         INSERT INTO dbo.CodingAgg_WtdSummary
             (LabName, WeekFolder, PanelName,
              BillableCptCombo, BilledCptCombo, MissingCpts, AdditionalCpts,
-             TotalClaims, DistinctClaimsWithMissingCpts,
+             TotalClaims, TotalBilledCharges, DistinctClaimsWithMissingCpts,
              TotalBilledChargesForMissingCpts, AvgAllowedAmountForMissingCpts,
              -- >>> CVTPL-1.4 CHANGE (2026-07-27): additional-CPT + revenue columns per template v1.4.
              --     REVERT: remove this line's 5 column names.
@@ -398,6 +401,7 @@ BEGIN
                 ORDER BY '*' + d4.AdditionalCPTCodes
                 FOR XML PATH(''), TYPE).value('.','NVARCHAR(MAX)'), 1, 1, '') AS AdditionalCpts,
             g.TotalClaims,
+            g.TotalBilledCharges,
             g.DistinctClaimsWithMissingCpts,
             g.TotalBilledChargesForMissingCpts,
             g.AvgAllowedAmountForMissingCpts,
@@ -414,6 +418,7 @@ BEGIN
                 BillWeek AS WeekFolder,                       -- CVBILL-1.4: billed-date week range, was source WeekFolder
                 PanelName,
                 COUNT(DISTINCT VisitNumber)                                                AS TotalClaims,
+                SUM(TRY_CAST(TotalCharge AS DECIMAL(18,2)))               AS TotalBilledCharges,
                 COUNT(DISTINCT CASE WHEN MissingCPTCodes IS NOT NULL
                                      AND MissingCPTCodes <> ''
                                     THEN VisitNumber END)                AS DistinctClaimsWithMissingCpts,
@@ -442,27 +447,31 @@ BEGIN
         -- CVBILL-1.4: #cv is a session temp table; drop before COMMIT so re-runs are clean.
         IF OBJECT_ID('tempdb..#cv') IS NOT NULL DROP TABLE #cv;
 
-        -- >>> CVRI (2026-07-27): recompute Revenue Impact into CodingFinancialSummary from
-        --     CodingValidation (deviation claims; Paid basis), so the KPI card is populated even
-        --     when the source Financial Dashboard block was not captured.
-        --     Overwrites any source-provided Revenue Impact with the computed values.
-        --     REVERT: delete this UPDATE block.
-        UPDATE f
-        SET f.RevenueImpact_Claims         = x.Claims,
-            f.RevenueImpact_ActualBilled   = x.ActualBilled,
-            f.RevenueImpact_PotentialLoss  = x.PotentialLoss,
-            f.RevenueImpact_ExpectedRecoup = x.ExpectedRecoup
-        FROM dbo.CodingFinancialSummary f
-        CROSS APPLY (
+        -- >>> CVRI (2026-07-27 / 2026-07-30): recompute Revenue Impact into CodingFinancialSummary
+        --     from CodingValidation (deviation claims; Paid basis), keyed by WeekFolder only.
+        --     PREVIOUSLY: CROSS APPLY + OR NOT EXISTS fallback when WeekFolder had no deviations —
+        --     that plan did ~100M+ logical reads on Cove (~32k rows) and hung the refresh for minutes.
+        --     Now: one GROUP BY WeekFolder, INNER JOIN — unmatched financial rows keep existing RI.
+        --     REVERT: restore the CROSS APPLY / OR NOT EXISTS block from git history.
+        ;WITH ri AS (
             SELECT
+                cv.WeekFolder,
                 Claims         = COUNT(DISTINCT cv.VisitNumber),
-                ActualBilled   = ISNULL(SUM(TRY_CAST(cv.TotalCharge                AS DECIMAL(18,2))), 0),
-                PotentialLoss  = ISNULL(SUM(TRY_CAST(cv.MissingCPT_AvgPaidAmount    AS DECIMAL(18,2))), 0),
-                ExpectedRecoup = ISNULL(SUM(TRY_CAST(cv.AdditionalCPT_AvgPaidAmount AS DECIMAL(18,2))), 0)
+                ActualBilled   = ISNULL(SUM(TRY_CAST(cv.TotalCharge                   AS DECIMAL(18,2))), 0),
+                PotentialLoss  = ISNULL(SUM(TRY_CAST(cv.MissingCPT_AvgPaidAmount       AS DECIMAL(18,2))), 0),
+                ExpectedRecoup = ISNULL(SUM(TRY_CAST(cv.AdditionalCPT_AvgPaidAmount    AS DECIMAL(18,2))), 0)
             FROM dbo.CodingValidation cv
-            WHERE cv.WeekFolder = f.WeekFolder
-              AND (ISNULL(cv.MissingCPTCodes,'') <> '' OR ISNULL(cv.AdditionalCPTCodes,'') <> '')
-        ) x;
+            WHERE ISNULL(cv.MissingCPTCodes, '') <> ''
+               OR ISNULL(cv.AdditionalCPTCodes, '') <> ''
+            GROUP BY cv.WeekFolder
+        )
+        UPDATE f
+        SET f.RevenueImpact_Claims         = ri.Claims,
+            f.RevenueImpact_ActualBilled   = ri.ActualBilled,
+            f.RevenueImpact_PotentialLoss  = ri.PotentialLoss,
+            f.RevenueImpact_ExpectedRecoup = ri.ExpectedRecoup
+        FROM dbo.CodingFinancialSummary f
+        INNER JOIN ri ON ri.WeekFolder = f.WeekFolder;
         -- <<< END CVRI
 
     COMMIT TRANSACTION;
@@ -499,7 +508,7 @@ BEGIN
     SELECT
         WeekFolder, PanelName,
         BillableCptCombo, BilledCptCombo, MissingCpts, AdditionalCpts,
-        TotalClaims, DistinctClaimsWithMissingCpts,
+        TotalClaims, TotalBilledCharges, DistinctClaimsWithMissingCpts,
         TotalBilledChargesForMissingCpts, AvgAllowedAmountForMissingCpts,
         -- >>> CVTPL-1.4 CHANGE (2026-07-27): expose additional-CPT + revenue columns per template v1.4.
         --     REVERT: delete this line.

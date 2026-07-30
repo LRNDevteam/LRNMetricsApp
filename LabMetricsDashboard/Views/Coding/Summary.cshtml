@@ -1024,7 +1024,7 @@ else if (Model.HasData && fin is not null)
             @* <<< END CVUI-SRC *@
         </div>
 
-        <!-- Row 1: Totals - Revenue Loss -->
+        <!-- Row 1: Totals | Revenue Impact (Excel CVKPI-RI layout) -->
         <div class="ck-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
 
             <!-- TOTALS -->
@@ -1063,6 +1063,52 @@ else if (Model.HasData && fin is not null)
                     </div>
                 </div>
             </article>
+
+            <!-- REVENUE IMPACT -->
+            <article class="ck-card">
+                <div class="ck-card-head">
+                    <div class="ck-card-head-meta">
+                        <p class="ck-card-title">Revenue Impact</p>
+                        <p class="ck-card-desc">Actual billed vs. potential loss &amp; recoupment</p>
+                    </div>
+                    <div class="ck-chip"><span class="ck-ico ck-ico-teal">&#128200;</span> Impact</div>
+                </div>
+                <div class="ck-card-body">
+                    <div class="ck-rows">
+                        <div class="ck-row">
+                            <div class="ck-row-left"><p class="ck-label"><span class="ck-tag">#</span> Total No. of Claims</p></div>
+                            <div class="ck-row-right"><p class="ck-value">@(fin.RevenueImpact_Claims?.ToString("N0", enUs) ?? "0")</p></div>
+                        </div>
+                        <div class="ck-row">
+                            <div class="ck-row-left"><p class="ck-label"><span class="ck-tag">$</span> Total Actual Billed Charges</p></div>
+                            <div class="ck-row-right"><p class="ck-value sm">@fin.RevenueImpact_ActualBilled.ToString("C2", enUs)</p></div>
+                        </div>
+                        <div class="ck-row">
+                            <div class="ck-row-left"><p class="ck-label"><span class="ck-tag">!</span> Potential Loss in Revenue</p></div>
+                            <div class="ck-row-right"><p class="ck-value sm ck-danger">@fin.RevenueImpact_PotentialLoss.ToString("C2", enUs)</p></div>
+                        </div>
+                        <div class="ck-row">
+                            <div class="ck-row-left"><p class="ck-label"><span class="ck-tag">&check;</span> Expected Potential Recoupements</p></div>
+                            <div class="ck-row-right"><p class="ck-value sm ck-success">@fin.RevenueImpact_ExpectedRecoup.ToString("C2", enUs)</p></div>
+                        </div>
+                    </div>
+                    <div class="ck-spark" aria-label="sparkline">
+                        <svg viewBox="0 0 100 40" preserveAspectRatio="none">
+                            <defs><linearGradient id="ckg2" x1="0" y1="0" x2="1" y2="1">
+                                <stop offset="0" stop-color="#0A7A74" stop-opacity="0.35"/>
+                                <stop offset="1" stop-color="#2F6FED" stop-opacity="0.18"/>
+                            </linearGradient></defs>
+                            <path d="M0,22 C12,18 22,14 34,16 C46,18 54,28 66,24 C78,20 88,12 100,10 L100,40 L0,40 Z" fill="url(#ckg2)"/>
+                            <path d="M0,22 C12,18 22,14 34,16 C46,18 54,28 66,24 C78,20 88,12 100,10" fill="none" stroke="rgba(15,118,110,.55)" stroke-width="1.4"/>
+                        </svg>
+                    </div>
+                </div>
+            </article>
+
+        </div><!-- /.ck-grid row1 -->
+
+        <!-- Row 2: Revenue Loss | Revenue At Risk | Compliance Rate (no 3rd row) -->
+        <div class="ck-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:12px">
 
             <!-- REVENUE LOSS -->
             <article class="ck-card">
@@ -1110,11 +1156,6 @@ else if (Model.HasData && fin is not null)
                     </div>
                 </div>
             </article>
-
-        </div><!-- /.ck-grid row1 -->
-
-        <!-- Row 2: Revenue at Risk - Compliance -->
-        <div class="ck-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-top:12px">
 
             <!-- REVENUE AT RISK -->
             <article class="ck-card">
@@ -1179,7 +1220,7 @@ else if (Model.HasData && fin is not null)
                 </div>
             </article>
 
-            <!-- COMPLIANCE RATE -->
+            <!-- COMPLIANCE RATE (same 2nd row — do not add a 3rd row) -->
             <article class="ck-card">
                 <div class="ck-card-head">
                     <div class="ck-card-head-meta">
@@ -1545,6 +1586,7 @@ else
                                 <tr>
                                     <th style="text-align:left">Panel</th>
                                     <th>Total No.<br/>of Claims</th>
+                                    <th>Total Billed<br/>Charges</th>
                                     <th>Distinct Claims<br/>w/ Missing CPTs</th>
                                     <th>Total Billed for<br/>Missing CPTs</th>
                                     <th>Distinct Claims<br/>w/ Additional CPTs</th>
@@ -1579,6 +1621,7 @@ else
                                     <tr data-week="@r.WeekFolder" data-panel="@r.PanelName">
                                         <td><span class="panel-chip">@r.PanelName</span></td>
                                         <td class="r"><strong>@r.TotalClaims.ToString("N0")</strong></td>
+                                        <td class="r money money-neutral">$&thinsp;@r.TotalBilledCharges.ToString("N2")</td>
                                         <td class="r">@r.DistinctClaimsWithMissingCpts.ToString("N0")</td>
                                         <td class="r money money-neutral">$&thinsp;@r.TotalBilledChargesForMissingCpts.ToString("N2")</td>
                                         <td class="r">@r.DistinctClaimsWithAdditionalCpts.ToString("N0")</td>

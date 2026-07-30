@@ -180,6 +180,9 @@ public sealed class ProductionReportViewModel
     /// <summary>The most recent RunId from LineClaimFileLogs.</summary>
     public string? ReportRunId { get; init; }
 
+    /// <summary>When the latest claim/line file was inserted (LineClaimFileLogs.InsertedDateTime), if available.</summary>
+    public DateTime? ReportInsertedDateTime { get; init; }
+
     public bool HasFilters => FilterPayerNames.Count > 0
         || FilterPanelNames.Count > 0
         || FilterPayerNamesExclude

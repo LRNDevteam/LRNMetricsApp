@@ -1,0 +1,32 @@
+@model LabMetricsDashboard.Models.AnalysisRangeInfo?
+@* Analysis-range banner — same layout as Executive Summary / Production Report *@
+@if (Model is { HasAny: true })
+{
+    <div class="d-flex flex-wrap gap-3 align-items-center mb-3 px-1" style="font-size:.82rem;color:#374151;">
+        <span>
+            <span class="fw-semibold text-secondary" style="font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;">Analysis Range:</span>
+            <span class="ms-1 fw-semibold text-dark">Billed Week Range</span>
+            @if (!string.IsNullOrWhiteSpace(Model.WeekFolder))
+            {
+                <span class="ms-1 text-muted">&mdash;</span>
+                <span class="ms-1 fw-semibold" style="color:#0e3460;">@Model.WeekFolder</span>
+            }
+        </span>
+        @if (!string.IsNullOrWhiteSpace(Model.RunId))
+        {
+            <span class="vr" style="height:1.1em;align-self:center;opacity:.3;"></span>
+            <span>
+                <span class="fw-semibold text-secondary" style="font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;">ReportId (RunID):</span>
+                <span class="ms-1 fw-semibold" style="color:#0e3460;">@Model.RunId</span>
+            </span>
+        }
+        @if (Model.InsertedDateTime.HasValue)
+        {
+            <span class="vr" style="height:1.1em;align-self:center;opacity:.3;"></span>
+            <span>
+                <span class="fw-semibold text-secondary" style="font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;">Inserted Date:</span>
+                <span class="ms-1 fw-semibold" style="color:#0e3460;">@Model.InsertedDateTime.Value.ToString("MMM d, yyyy h:mm tt")</span>
+            </span>
+        }
+    </div>
+}

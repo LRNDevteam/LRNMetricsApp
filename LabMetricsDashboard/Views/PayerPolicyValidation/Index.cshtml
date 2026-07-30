@@ -104,6 +104,8 @@
         }
     </div>
 
+    @await Html.PartialAsync("_AnalysisRangeBanner", Model.AnalysisRange)
+
     @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
     {
         <div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-1"></i>@Model.ErrorMessage</div>

@@ -104,6 +104,9 @@ public sealed class PhiExecutiveSummaryViewModel
     /// <summary>LIMSMaster RunId, shown alongside the ClaimLevelData RunId.</summary>
     public string? LimsRunId { get; set; }
 
+    /// <summary>When the latest claim/line file was inserted, if available.</summary>
+    public DateTime? ReportInsertedDateTime { get; set; }
+
     /// <summary>Error message when the query fails or is unavailable.</summary>
     public string? ErrorMessage { get; set; }
 

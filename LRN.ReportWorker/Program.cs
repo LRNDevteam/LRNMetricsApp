@@ -56,6 +56,8 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddTransient<LabMetricsDashboard.Controllers.PredictionController>();
         services.AddSingleton<LabMetricsDashboard.Services.ICollectionSummaryRepository,
             LabMetricsDashboard.Services.SqlCollectionSummaryRepository>();
+        services.AddSingleton<LabMetricsDashboard.Services.IAnalysisRangeService,
+            LabMetricsDashboard.Services.AnalysisRangeService>();
         services.AddTransient<LabMetricsDashboard.Controllers.CollectionSummaryController>();
         services.AddSingleton<LabMetricsDashboard.Services.SqlClaimLineRepository>();
         services.AddSingleton<LRN.ProductionReports.Services.IProductionReportRepository,

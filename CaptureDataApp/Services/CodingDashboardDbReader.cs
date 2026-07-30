@@ -88,6 +88,7 @@ public static class CodingDashboardDbReader
             WeekFolder:                      Str(r, "WeekFolder"),
             PanelName:                       Str(r, "PanelName"),
             TotalClaims:                     r.GetInt32(r.GetOrdinal("TotalClaims")),
+            TotalBilledCharges:              Dec(r, "TotalBilledCharges"),
             DistinctClaimsWithMissingCpts:   r.GetInt32(r.GetOrdinal("DistinctClaimsWithMissingCpts")),
             TotalBilledChargesForMissingCpts: Dec(r, "TotalBilledChargesForMissingCpts"),
             AvgAllowedAmountForMissingCpts:  Dec(r, "AvgAllowedAmountForMissingCpts")

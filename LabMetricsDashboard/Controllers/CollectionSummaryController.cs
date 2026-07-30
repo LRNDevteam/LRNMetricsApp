@@ -17,15 +17,18 @@ public class CollectionSummaryController : Controller
 {
     private readonly LabSettings _labSettings;
     private readonly ICollectionSummaryRepository _repo;
+    private readonly IAnalysisRangeService _analysisRange;
     private readonly ILogger<CollectionSummaryController> _logger;
 
     public CollectionSummaryController(
         LabSettings labSettings,
         ICollectionSummaryRepository repo,
+        IAnalysisRangeService analysisRange,
         ILogger<CollectionSummaryController> logger)
     {
         _labSettings = labSettings;
         _repo = repo;
+        _analysisRange = analysisRange;
         _logger = logger;
     }
 
@@ -158,6 +161,7 @@ public class CollectionSummaryController : Controller
             DateOnly? cdToN    = cdTo    == default ? null : cdTo;
 
             var monthlyRule = config.CollectionSummary?.Rule; // kept for view model display only
+            var analysisRange = await _analysisRange.GetAsync(connStr, ct);
 
             // ?? Live mode: only load the active tab (MCM) + Top-5 cards on page load.
             // All other tabs will lazy-load via AJAX when first clicked, preventing
@@ -187,6 +191,7 @@ public class CollectionSummaryController : Controller
                     AvailableLabs        = availableLabs,
                     SelectedLab          = selectedLab,
                     CollectionSummaryRule = monthlyRule,
+                    AnalysisRange        = analysisRange,
                     FilterPayerNames     = filterPayerNames,
                     FilterPanelNames     = filterPanelNames,
                     FilterFirstBillFrom  = filterFirstBillFrom,
@@ -237,6 +242,7 @@ public class CollectionSummaryController : Controller
                 AvailableLabs = availableLabs,
                 SelectedLab = selectedLab,
                 CollectionSummaryRule = monthlyRule,
+                AnalysisRange = analysisRange,
                 FilterPayerNames = filterPayerNames,
                 FilterPanelNames = filterPanelNames,
                 FilterFirstBillFrom = filterFirstBillFrom,

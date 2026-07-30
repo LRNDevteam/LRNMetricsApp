@@ -6,7 +6,7 @@
     ViewData["PageLabel"]   = "Production Report";
 
     // Allows ProductionSummaryReport.cshtml to reuse this view by overriding the form target.
-    var formAction = ViewData["FormAction"] as string ?? "ProductionReport";
+    var formAction = ViewData["FormAction"] as string ?? "ProductionSummaryReport";
     var exportAction = formAction == "ProductionSummaryReport"
                        && string.Equals(Model.SelectedLab, "NorthWest", StringComparison.OrdinalIgnoreCase)
         ? "ExportNorthWestProductionReportExcel"
@@ -313,33 +313,13 @@ th.pr-month-data, td.pr-month-data {
 
 @if (!string.IsNullOrWhiteSpace(Model.SelectedLab))
 {
-    <div class="d-flex flex-wrap gap-3 align-items-center mb-3 px-1" style="font-size:.82rem;color:#374151;">
-        <span>
-            <span class="fw-semibold text-secondary" style="font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;">Analysis Range:</span>
-            <span class="ms-1 fw-semibold text-dark">Billed Week Range</span>
-            @if (!string.IsNullOrWhiteSpace(Model.ReportWeekFolder))
-            {
-                <span class="ms-1 text-muted">&mdash;</span>
-                <span class="ms-1 fw-semibold" style="color:#0e3460;">@Model.ReportWeekFolder</span>
-            }
-        </span>
-        @if (!string.IsNullOrWhiteSpace(Model.ReportRunId))
+    var banner = ViewData["AnalysisRange"] as LabMetricsDashboard.Models.AnalysisRangeInfo
+        ?? new LabMetricsDashboard.Models.AnalysisRangeInfo
         {
-            <span class="vr" style="height:1.1em;align-self:center;opacity:.3;"></span>
-            <span>
-                <span class="fw-semibold text-secondary" style="font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;">ReportId (RunID):</span>
-                <span class="ms-1 fw-semibold" style="color:#0e3460;">@Model.ReportRunId</span>
-            </span>
-        }
-       @*  @if (!string.IsNullOrWhiteSpace(Model.LimsRunId))
-        {
-            <span class="vr" style="height:1.1em;align-self:center;opacity:.3;"></span>
-            <span>
-                <span class="fw-semibold text-secondary" style="font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;">LIMSMaster RunID:</span>
-                <span class="ms-1 fw-semibold" style="color:#0e3460;">@Model.LimsRunId</span>
-            </span>
-        } *@
-    </div>
+            WeekFolder = Model.ReportWeekFolder,
+            RunId = Model.ReportRunId,
+        };
+    @await Html.PartialAsync("_AnalysisRangeBanner", banner)
 }
 
 

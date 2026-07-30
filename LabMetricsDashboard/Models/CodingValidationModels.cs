@@ -66,6 +66,8 @@ public sealed class CodingWtdSummaryRow
     public string  MissingCpts                       { get; init; } = string.Empty;
     public string  AdditionalCpts                    { get; init; } = string.Empty;
     public int     TotalClaims                       { get; init; }
+    /// <summary>SUM(TotalCharge) for the week/panel — same logic as YTD Summary TotalBilledCharges.</summary>
+    public decimal TotalBilledCharges                { get; init; }
     public int     DistinctClaimsWithMissingCpts     { get; init; }
     public decimal TotalBilledChargesForMissingCpts  { get; init; }
     public decimal AvgAllowedAmountForMissingCpts    { get; init; }

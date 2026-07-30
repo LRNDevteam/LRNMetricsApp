@@ -16,15 +16,18 @@ public class PayerPolicyValidationController : Controller
 
     private readonly LabSettings _labSettings;
     private readonly PayerPolicyValidationService _service;
+    private readonly IAnalysisRangeService _analysisRange;
     private readonly ILogger<PayerPolicyValidationController> _logger;
 
     public PayerPolicyValidationController(
         LabSettings labSettings,
         PayerPolicyValidationService service,
+        IAnalysisRangeService analysisRange,
         ILogger<PayerPolicyValidationController> logger)
     {
         _labSettings = labSettings;
         _service     = service;
+        _analysisRange = analysisRange;
         _logger      = logger;
     }
 
@@ -96,6 +99,10 @@ public class PayerPolicyValidationController : Controller
                 filterForecastingPayabilitySubstatus, filterPredictionStatus, filterPayStatus,
                 page, pageSize, ct);
 
+            var analysisRange = !string.IsNullOrWhiteSpace(labConfig.DbConnectionString)
+                ? await _analysisRange.GetAsync(labConfig.DbConnectionString!, ct)
+                : AnalysisRangeInfo.Empty;
+
             return View(new PayerPolicyValidationViewModel
             {
                 AvailableLabs                        = availableLabs,
@@ -106,6 +113,7 @@ public class PayerPolicyValidationController : Controller
                 Records                              = result.PagedRows,
                 Paging                               = new PageInfo(page, pageSize, result.TotalFiltered, result.TotalAll),
                 PageSize                             = pageSize,
+                AnalysisRange                        = analysisRange,
 
                 FilterPayerName                      = filterPayerName,
                 FilterPanelName                      = filterPanelName,

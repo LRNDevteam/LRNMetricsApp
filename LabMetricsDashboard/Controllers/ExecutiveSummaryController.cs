@@ -16,6 +16,7 @@ public sealed class ExecutiveSummaryController : Controller
 {
     private readonly LabSettings _labSettings;
     private readonly SqlPhiExecutiveSummaryRepository _repo;
+    private readonly IAnalysisRangeService _analysisRange;
     private readonly ILogger<ExecutiveSummaryController> _logger;
 
     // Maps LabSettings key → SP prefix used to build "dbo.usp_Get{prefix}_ExecutiveSummary".
@@ -53,10 +54,12 @@ public sealed class ExecutiveSummaryController : Controller
     public ExecutiveSummaryController(
         LabSettings labSettings,
         SqlPhiExecutiveSummaryRepository repo,
+        IAnalysisRangeService analysisRange,
         ILogger<ExecutiveSummaryController> logger)
     {
         _labSettings = labSettings;
         _repo        = repo;
+        _analysisRange = analysisRange;
         _logger      = logger;
     }
 
@@ -174,12 +177,15 @@ public sealed class ExecutiveSummaryController : Controller
         vm.SelectedProviders = providers is null ? [] : [.. providers];
         vm.SelectedReps      = reps      is null ? [] : [.. reps];
 
-        // Run / analysis-range banner: RunID + week range from ClaimLevelData,
-        // plus the LIMSMaster RunID alongside (mirrors the Production Report header).
-        var (weekFolder, claimRunId, limsRunId) = await _repo.GetRunInfoAsync(connStr, ct);
-        vm.ReportWeekFolder = weekFolder;
-        vm.ReportRunId      = claimRunId;
-        vm.LimsRunId        = limsRunId;
+        // Run / analysis-range banner: WeekFolder + RunId + InsertedDate from
+        // LineClaimFileLogs (shared AnalysisRangeService), plus LIMSMaster RunId.
+        var analysisRange = await _analysisRange.GetAsync(connStr, ct);
+        var (_, _, limsRunId) = await _repo.GetRunInfoAsync(connStr, ct);
+        vm.ReportWeekFolder        = analysisRange.WeekFolder;
+        vm.ReportRunId             = analysisRange.RunId;
+        vm.ReportInsertedDateTime  = analysisRange.InsertedDateTime;
+        vm.LimsRunId               = limsRunId;
+        ViewData["AnalysisRange"]  = analysisRange;
 
         // Pre-populate dimension filter options from the lab's FilterOptions SP (if it exists)
         var filterSpName = $"dbo.usp_Get{prefix}_ExecutiveSummary_FilterOptions";
