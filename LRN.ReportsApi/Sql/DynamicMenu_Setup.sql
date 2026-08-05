@@ -167,6 +167,21 @@ BEGIN
     END
 END
 
+/* ── 3c. Master Values: Report Audit Log (idempotent add) ─────────────────
+   Report run status by RunId + downloadable run error log.                  */
+DECLARE @MasterValuesId INT =
+    (SELECT MenuItemId FROM dbo.MenuItems
+     WHERE MenuName = N'Master Values' AND ParentMenuItemId IS NULL AND IsDeleted = 0);
+
+IF @MasterValuesId IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM dbo.MenuItems
+                   WHERE ParentMenuItemId = @MasterValuesId AND MenuName = N'Report Audit Log' AND IsDeleted = 0)
+BEGIN
+    INSERT dbo.MenuItems (ParentMenuItemId, MenuName, ControllerName, ActionName, IconClass, MenuOrder, IsDisabled, CreatedBy)
+    VALUES (@MasterValuesId, N'Report Audit Log', N'MasterValues', N'ReportAuditLog', N'bi-journal-text', 6, 0, N'system');
+    PRINT 'Added Master Values > Report Audit Log menu item';
+END
+
 /* ── 4. Default access: grant EVERY menu to the Admin role ────────────────
    Re-runnable: newly added menu items are granted to Admin on each run.     */
 INSERT dbo.UserRoleMenu (RoleId, MenuItemId, CreatedBy)

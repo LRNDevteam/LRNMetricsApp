@@ -33,6 +33,11 @@ public interface IMasterValuesApiClient
     Task<string> GetPayerRulesRawAsync(string path, CancellationToken ct);
     Task<string> SendPayerRulesRawAsync(HttpMethod method, string path, string jsonBody, CancellationToken ct);
 
+    // Report Audit Log - raw JSON passthrough: the report-status columns are built from
+    // ReportTypeMaster at execution time, so there is no fixed DTO to bind them to.
+    Task<string> GetReportAuditRawAsync(string path, IQueryCollection query, CancellationToken ct);
+    Task<(byte[] Content, string FileName)> ExportReportAuditLogsAsync(IQueryCollection query, CancellationToken ct);
+
     // Payer mapping intelligence (LRN.PayerPolicyMapper pipeline endpoints)
     Task<PayerMappingSuggestionsResponse?> GetMappingSuggestionsAsync(int labInsuranceMasterId, CancellationToken ct);
     Task<IReadOnlyList<PayerPolicySearchResultDto>> SearchPolicyPayersRankedAsync(string query, CancellationToken ct);
@@ -165,6 +170,17 @@ public sealed class MasterValuesApiClient : IMasterValuesApiClient
 
     public async Task<IReadOnlyList<PayerMasterNotificationDto>> GetNotificationsAsync(int take, CancellationToken ct)
         => await GetAsync<List<PayerMasterNotificationDto>>($"api/master-values/workflow/notifications?take={take}", ct) ?? [];
+
+    public async Task<string> GetReportAuditRawAsync(string path, IQueryCollection query, CancellationToken ct)
+    {
+        await AuthorizeAsync(ct);
+        using var response = await _http.GetAsync("api/master-values/report-audit-log/" + path + Query(query), ct);
+        await EnsureSuccessAsync(response, ct);
+        return await response.Content.ReadAsStringAsync(ct);
+    }
+
+    public Task<(byte[] Content, string FileName)> ExportReportAuditLogsAsync(IQueryCollection query, CancellationToken ct)
+        => ExportAsync("api/master-values/report-audit-log/logs/export" + Query(query), "ReportAuditLog.csv", ct);
 
     public async Task<string> GetPayerRulesRawAsync(string path, CancellationToken ct)
     {

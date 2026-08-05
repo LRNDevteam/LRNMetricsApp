@@ -503,6 +503,45 @@ public sealed class MasterValuesController : Controller
         }
     }
 
+    // ── Report Audit Log: every report run's status by Run ID, plus that run's error log ──
+    // Read-only screen; anyone with a Master Values screen may view it and download the logs.
+
+    [HttpGet]
+    public IActionResult ReportAuditLog()
+    {
+        if (!HasAnyMasterAccess) return Forbid();
+        ViewData["PageLabel"] = "Report Audit Log";
+        return View(new MasterValuesPageViewModel { Title = "Report Audit Log", RoleLabel = RoleLabel });
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> ReportAuditRuns(CancellationToken ct)
+    {
+        if (!HasAnyMasterAccess) return Forbid();
+        try { return Content(await _api.GetReportAuditRawAsync("runs", Request.Query, ct), "application/json"); }
+        catch (InvalidOperationException ex) { return BadRequest(ErrorPayload(ex.Message)); }
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> ReportAuditLogs(CancellationToken ct)
+    {
+        if (!HasAnyMasterAccess) return Forbid();
+        try { return Content(await _api.GetReportAuditRawAsync("logs", Request.Query, ct), "application/json"); }
+        catch (InvalidOperationException ex) { return BadRequest(ErrorPayload(ex.Message)); }
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> ReportAuditLogsExport(CancellationToken ct)
+    {
+        if (!HasAnyMasterAccess) return Forbid();
+        try
+        {
+            var result = await _api.ExportReportAuditLogsAsync(Request.Query, ct);
+            return File(result.Content, "text/csv", result.FileName);
+        }
+        catch (InvalidOperationException ex) { return BadRequest(ErrorPayload(ex.Message)); }
+    }
+
     [HttpGet]
     public async Task<IActionResult> ExportInsurance(CancellationToken ct)
     {

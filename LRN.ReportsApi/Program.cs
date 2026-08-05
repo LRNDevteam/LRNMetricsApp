@@ -39,6 +39,7 @@ builder.Services.AddScoped<IDenialCodeMasterExcelService, DenialCodeMasterExcelS
 builder.Services.AddScoped<IDenialActionChangeVerificationRepository, SqlDenialActionChangeVerificationRepository>();
 builder.Services.AddScoped<IDenialMapperRepository, SqlDenialMapperRepository>();
 builder.Services.AddScoped<IMasterValuesRepository, SqlMasterValuesRepository>();
+builder.Services.AddScoped<IReportAuditLogService, ReportAuditLogService>();
 builder.Services.AddScoped<IMenuRepository, SqlMenuRepository>();
 builder.Services.AddScoped<ILabAnalyticsRepository, SqlLabAnalyticsRepository>();
 builder.Services.AddScoped<ICptLookupRepository, SqlCptLookupRepository>();
