@@ -1,0 +1,91 @@
+namespace LabMetricsDashboard.Models;
+
+/// <summary>Status of one report within one run, as reported by the workflow tracker.</summary>
+public enum ReportRunStatus
+{
+    /// <summary>The tracker returned no value - this report is not produced for this lab.</summary>
+    NotConfigured = 0,
+    Success = 1,
+    Failed = 2,
+    Pending = 3
+}
+
+/// <summary>
+/// One entry in the report catalog: the bridge between a tracker column and the page that shows it.
+/// <see cref="TrackerColumn"/> is the join key and must match the SP column name exactly.
+/// </summary>
+public sealed record ReportCatalogEntry(
+    string TrackerColumn,
+    string DisplayName,
+    string ShortName,
+    string Icon,
+    string Group,
+    string? Controller,
+    string? Action,
+    string? FeatureFlag);
+
+public sealed class LabReportStatus
+{
+    public required ReportCatalogEntry Catalog { get; init; }
+    public ReportRunStatus Status { get; init; }
+
+    /// <summary>Success + a known route + the lab's feature flag on + the user permitted.</summary>
+    public bool IsLinkable { get; init; }
+
+    /// <summary>Why the cell is not a link. Surfaced as the cell tooltip.</summary>
+    public string? BlockedReason { get; init; }
+
+    /// <summary>The raw tracker value, kept for the tooltip when it is not one of the known states.</summary>
+    public string? RawStatus { get; init; }
+}
+
+public sealed class LabReportRow
+{
+    public required string LabDisplayName { get; init; }
+
+    /// <summary>The LabSettings key used for <c>?lab=</c>. Empty when the lab could not be resolved.</summary>
+    public required string LabConfigKey { get; init; }
+
+    public bool IsMapped => !string.IsNullOrEmpty(LabConfigKey);
+    public string? RunId { get; init; }
+    public string? Week { get; init; }
+    public DateTime? SyncedOn { get; init; }
+    public List<LabReportStatus> Reports { get; init; } = [];
+
+    public int ReadyCount => Reports.Count(r => r.Status == ReportRunStatus.Success);
+    public int FailedCount => Reports.Count(r => r.Status == ReportRunStatus.Failed);
+    public bool HasFailures => FailedCount > 0;
+
+    /// <summary>Avatar initial for the lab tile.</summary>
+    public string Initial => string.IsNullOrWhiteSpace(LabDisplayName) ? "?" : LabDisplayName.Trim()[..1].ToUpperInvariant();
+}
+
+public sealed class ReportBoardViewModel
+{
+    /// <summary>Report columns in display order - catalog order first, then any unknown SP columns.</summary>
+    public List<ReportCatalogEntry> Columns { get; init; } = [];
+
+    public List<LabReportRow> Rows { get; init; } = [];
+    public DateTime? LastSyncedOn { get; init; }
+    public string View { get; init; } = "matrix";     // matrix | cards
+    public string Sort { get; init; } = "latest";     // latest | az
+    public string Filter { get; init; } = "all";      // all | failed | incomplete
+
+    /// <summary>Set when the tracker call failed; the page renders an error card instead of a blank grid.</summary>
+    public string? DataError { get; init; }
+
+    /// <summary>When the cached copy last succeeded, shown alongside <see cref="DataError"/>.</summary>
+    public DateTime? LastGoodAt { get; init; }
+
+    public int TotalReady => Rows.Sum(r => r.ReadyCount);
+    public int TotalFailed => Rows.Sum(r => r.FailedCount);
+
+    /// <summary>Column groups in display order, for the coloured band row above the matrix.</summary>
+    public List<(string Group, int Span)> ColumnBands =>
+        Columns.Aggregate(new List<(string Group, int Span)>(), (bands, column) =>
+        {
+            if (bands.Count > 0 && bands[^1].Group == column.Group) bands[^1] = (column.Group, bands[^1].Span + 1);
+            else bands.Add((column.Group, 1));
+            return bands;
+        });
+}

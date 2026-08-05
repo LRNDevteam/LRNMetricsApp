@@ -461,6 +461,12 @@ builder.Services
 builder.Services
 	.AddHttpClient<ILabAnalyticsApiClient, LabAnalyticsApiClient>()
 	.ConfigureHttpClient(client => client.Timeout = TimeSpan.FromMinutes(2));
+// Report Control Board (report workflow tracker). Short timeout: this is a landing page, and a
+// slow tracker must show the error card quickly rather than hold the page.
+builder.Services
+	.AddHttpClient<IReportBoardApiClient, ReportBoardApiClient>()
+	.ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddSingleton<ILabNameResolver, LabNameResolver>();
 
 // Dynamic role-based navbar (Menu Master + Role Menu Mapping via LRN.ReportsApi).
 // Short timeout: this client sits on the hot path of EVERY page (navbar + MenuAccessFilter).

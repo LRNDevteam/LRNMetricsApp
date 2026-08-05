@@ -182,6 +182,29 @@ BEGIN
     PRINT 'Added Master Values > Report Audit Log menu item';
 END
 
+/* ── 3d. Home Dashboard - Report Control Board (idempotent add) ───────────
+   New landing page: every report of each lab's latest run, from the workflow
+   tracker. MenuOrder 0 puts it above Home; MenuService sorts roots by MenuOrder.
+
+   Unlike the other menus this one is granted to EVERY role below, not just Admin:
+   it is a landing page, and the page itself already limits each user to the labs
+   on their claims. Remove the mapping in Role Menu Mapping to hide it from a role. */
+IF NOT EXISTS (SELECT 1 FROM dbo.MenuItems
+               WHERE MenuName = N'Home Dashboard' AND ParentMenuItemId IS NULL AND IsDeleted = 0)
+BEGIN
+    INSERT dbo.MenuItems (ParentMenuItemId, MenuName, ControllerName, ActionName, IconClass, MenuOrder, IsDisabled, CreatedBy)
+    VALUES (NULL, N'Home Dashboard', N'ReportBoard', N'Index', N'bi-grid-3x3-gap-fill', 0, 0, N'system');
+    PRINT 'Added Home Dashboard (Report Control Board) menu item';
+END
+
+INSERT dbo.UserRoleMenu (RoleId, MenuItemId, CreatedBy)
+SELECT r.RoleID, m.MenuItemId, N'system'
+FROM dbo.Roles r
+CROSS JOIN dbo.MenuItems m
+WHERE m.MenuName = N'Home Dashboard' AND m.ParentMenuItemId IS NULL AND m.IsDeleted = 0
+  AND NOT EXISTS (SELECT 1 FROM dbo.UserRoleMenu x
+                  WHERE x.RoleId = r.RoleID AND x.MenuItemId = m.MenuItemId);
+
 /* ── 4. Default access: grant EVERY menu to the Admin role ────────────────
    Re-runnable: newly added menu items are granted to Admin on each run.     */
 INSERT dbo.UserRoleMenu (RoleId, MenuItemId, CreatedBy)

@@ -18,6 +18,11 @@ public interface IReportAuditLogService
     Task<ReportAuditPivotResult> GetRunsAsync(ReportAuditQuery query, CancellationToken ct);
     Task<IReadOnlyList<ReportRunLogEntry>> GetLogsAsync(ReportRunLogQuery query, CancellationToken ct);
     Task<(byte[] Content, string FileName)> ExportLogsAsync(ReportRunLogQuery query, CancellationToken ct);
+    /// <summary>
+    /// Pipeline failures from dbo.LRN_Error_Log for one run - the operational view (step, error code,
+    /// recommended action, owning team), which the info log does not carry.
+    /// </summary>
+    Task<IReadOnlyList<PipelineErrorEntry>> GetPipelineErrorsAsync(string? runId, string? labName, CancellationToken ct);
 }
 
 public sealed class ReportAuditQuery
@@ -67,6 +72,26 @@ public sealed class ReportAuditPivotResult
     /// <summary>Report-type columns in the order the proc emitted them (ReportTypeMaster.DisplayOrder).</summary>
     public List<string> ReportColumns { get; set; } = new();
     public List<ReportAuditRunRow> Rows { get; set; } = new();
+}
+
+/// <summary>One row of dbo.LRN_Error_Log - a failure raised by the report pipeline itself.</summary>
+public sealed class PipelineErrorEntry
+{
+    public string? RunId { get; set; }
+    public string? LabName { get; set; }
+    public DateTime? ErrorTime { get; set; }
+    public string? Severity { get; set; }
+    public string? StepName { get; set; }
+    public string? ErrorCode { get; set; }
+    public string? ErrorSummary { get; set; }
+    public string? MissingColumns { get; set; }
+    public string? SheetName { get; set; }
+    public string? FileName { get; set; }
+    public string? RecommendedAction { get; set; }
+    public string? OwnerTeam { get; set; }
+    public string? TicketId { get; set; }
+    public string? Status { get; set; }
+    public string? SourceSystem { get; set; }
 }
 
 public sealed class ReportRunLogEntry
@@ -236,6 +261,48 @@ public sealed class ReportAuditLogService : IReportAuditLogService
                 SourceFileName = ReadString(reader, 6),
                 CreatedOn = reader.IsDBNull(7) ? null : reader.GetDateTime(7),
                 CreatedBy = ReadString(reader, 8)
+            });
+        }
+        return entries;
+    }
+
+    public async Task<IReadOnlyList<PipelineErrorEntry>> GetPipelineErrorsAsync(string? runId, string? labName, CancellationToken ct)
+    {
+        var entries = new List<PipelineErrorEntry>();
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand("""
+            SELECT  E.RunID, E.LabName, E.ErrorTimeIST, E.Severity, E.StepName, E.ErrorCode,
+                    E.ErrorSummary, E.MissingColumns, E.SheetName, E.FileName,
+                    E.RecommendedAction, E.OwnerTeam, E.TicketID, E.Status, E.SourceSystem
+            FROM    dbo.LRN_Error_Log E
+            WHERE  (@RunId   IS NULL OR E.RunID   = @RunId)
+              AND  (@LabName IS NULL OR E.LabName = @LabName)
+            ORDER BY E.ErrorTimeIST DESC;
+            """, conn) { CommandTimeout = 30 };
+        AddNullable(cmd, "@RunId", SqlDbType.VarChar, 30, Trim(runId));
+        AddNullable(cmd, "@LabName", SqlDbType.VarChar, 120, Trim(labName));
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            entries.Add(new PipelineErrorEntry
+            {
+                RunId = ReadString(reader, 0),
+                LabName = ReadString(reader, 1),
+                ErrorTime = reader.IsDBNull(2) ? null : reader.GetDateTime(2),
+                Severity = ReadString(reader, 3),
+                StepName = ReadString(reader, 4),
+                ErrorCode = ReadString(reader, 5),
+                ErrorSummary = ReadString(reader, 6),
+                MissingColumns = ReadString(reader, 7),
+                SheetName = ReadString(reader, 8),
+                FileName = ReadString(reader, 9),
+                RecommendedAction = ReadString(reader, 10),
+                OwnerTeam = ReadString(reader, 11),
+                TicketId = ReadString(reader, 12),
+                Status = ReadString(reader, 13),
+                SourceSystem = ReadString(reader, 14)
             });
         }
         return entries;
