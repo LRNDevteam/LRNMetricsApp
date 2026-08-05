@@ -31,6 +31,7 @@ if (OperatingSystem.IsWindows())
 // Core Services
 builder.Services.AddSingleton<CsvStepLogger>();
 builder.Services.AddSingleton<ExcelTableReader>();
+builder.Services.AddSingleton<PayerValidationReportRepository>();
 builder.Services.AddSingleton<DenialCodeNormalizer>();
 builder.Services.AddSingleton<DenialDatabaseBuilder>();
 builder.Services.AddSingleton<ExcelWriter>();

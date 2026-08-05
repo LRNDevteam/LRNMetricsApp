@@ -4,9 +4,17 @@ What it does (per LAB):
 
 **Output columns**: includes ALL original PayerPolicy columns (same order) + new columns (DenialCode_Original, DenialCode_Normalized, validation flags, Status Action Code, Task Guidance). The DenialCode column itself is replaced with the normalized value.
 
-1. Loads 2 Excel files:
-   - PayerPolicyFile (must contain a column named "DenialCode")
-   - ClaimActionMapper (must contain a denial prefix column like "Denial Code_Prefix" / "Denial code_prefix" and the mapping columns)
+1. Loads the denial source:
+   - **Denial rows come from SQL, not from a file.** For every lab, the worker reads
+     `[<LabDatabase>].[dbo].[PayerValidationReport]` where `PayStatus = 'Denied'`
+     (table/status configurable via `PayerValidationReportTable` / `DeniedPayStatus`).
+     The upstream process no longer publishes `*_Payer_Policy_ValidationReport.xlsx`.
+     SQL columns are re-keyed to the old Excel header names, so all downstream mapping is unchanged.
+   - The RunId, WeekFolder and SourceFullPath columns supply the run identity that used to be
+     parsed out of the workbook file name and folder path. With `ProcessLatestRunOnly = true`
+     only the newest RunId is processed; a RunId already present in `dbo.DenialAnalysisRunLog` is skipped.
+   - ClaimActionMapper is still an Excel file (must contain a denial prefix column like
+     "Denial Code_Prefix" / "Denial code_prefix" and the mapping columns)
 2. Normalizes `PayerPolicyFile.DenialCode`:
    - split by comma
    - uppercase
@@ -20,12 +28,19 @@ What it does (per LAB):
      Payer Policy Validation Required, CPT Validation Required, ICD Validation Required,
      Frequency Validation Required, Gender Validation Required, MUE Validation Required,
      Payability, Status Action Code, Recommended Action, Task Guidance
-4. Outputs an Excel file per lab:
-   <OutputRoot>\<LabName>\<Month>\<MMDDYYYY>\<LabName>_DenialDatabase_MMDDYYYY.xlsx
-5. Step-by-step CSV logging:
+4. Copies the result into the LAB database (this is the primary output):
+   DenialInsight, DenialLineItem and DenialTaskBoard, plus a RunLog row in LRNMaster.
+5. Optionally outputs the export package per lab (xlsx + line-item csv + zip):
+   <OutputRoot>\<LabName>\<Year>\<Month>\<Week>\<RunId>_<LabName>_DenialAnalysisReport_<Week>.zip
+   **Off by default.** Controlled by `DenialDatabaseProcessor:GenerateOutputFiles`; when false the
+   worker performs the SQL copy only and writes no files. `UploadOutputsToSharePoint` gates the
+   SharePoint upload of that package and is ignored when `GenerateOutputFiles` is false.
+6. Step-by-step CSV logging:
    Log columns:
    LabName,LabId,StepDescription,LogType,PayerPolicyFilePath,ClaimActionMapperFilePath,ErrorInfo,LogDateTime,OutputPath
-6. Optional SharePoint upload (Graph API):
+   (PayerPolicyFilePath now holds the SQL source label, e.g.
+   `NWL_LRN.dbo.PayerValidationReport (RunId=..., PayStatus=Denied, Rows=...)`)
+7. Optional SharePoint upload (Graph API):
    Upload to: <SharePointUploadPath base folder>/<LABNAME>/<Month>/<MMDDYYYY>/LabName_DenialDatabase_MMDDYYYY.xlsx
 
 ---

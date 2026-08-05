@@ -1,4 +1,5 @@
 ﻿using DenialDatabaseProcessorWorker.Models;
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace DenialDatabaseProcessorWorker.Services;
@@ -24,9 +25,7 @@ public sealed class FileResolver
 			.OrderByDescending(Path.GetFileName)
 			.FirstOrDefault() ?? throw new InvalidOperationException("No week folder found.");
 
-		// Payer policy can arrive as Excel or CSV; pick the newest matching file of either type.
-		var payerFile = new[] { "*_Payer_Policy_ValidationReport.xlsx", "*_Payer_Policy_ValidationReport.csv" }
-			.SelectMany(pattern => Directory.GetFiles(weekDir, pattern))
+		var payerFile = Directory.GetFiles(weekDir, "*_Payer_Policy_ValidationReport.xlsx")
 			.OrderByDescending(File.GetCreationTimeUtc)
 			.FirstOrDefault() ?? throw new InvalidOperationException("No Payer Policy file found.");
 
@@ -64,6 +63,64 @@ public sealed class FileResolver
 		var yearFolder = Path.GetFileName(Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(payerPolicyFile))));
 
 		return (yearFolder, monthFolder, weekFolder);
+	}
+
+	/// <summary>
+	/// Rebuilds the Year / Month / Week output folders when the denial rows come from
+	/// PayerValidationReport instead of a workbook on disk.
+	/// SourceFullPath is used when it still carries the ...\Year\Month\Week\File.xlsx shape;
+	/// otherwise the week folder ("02.06.2026 - 02.12.2026") and the run date are used.
+	/// </summary>
+	public (string YearFolder, string MonthFolder, string WeekFolder) ExtractFolderStructure(
+		string? sourceFullPath,
+		string? weekFolder,
+		DateTime fallbackDate)
+	{
+		if (!string.IsNullOrWhiteSpace(sourceFullPath))
+		{
+			var (year, month, week) = ExtractFolderStructure(sourceFullPath);
+
+			if (!string.IsNullOrWhiteSpace(year) &&
+				!string.IsNullOrWhiteSpace(month) &&
+				!string.IsNullOrWhiteSpace(week))
+			{
+				return (year, month, week);
+			}
+		}
+
+		var week2 = string.IsNullOrWhiteSpace(weekFolder) ? "UnknownDate" : weekFolder.Trim();
+		var anchor = ExtractWeekStartDate(week2) ?? fallbackDate;
+
+		var yearFolder = anchor.ToString("yyyy", CultureInfo.InvariantCulture);
+		var monthFolder = anchor.ToString("MM.MMMM", CultureInfo.InvariantCulture);
+
+		return (yearFolder, monthFolder, SanitizeSegment(week2));
+	}
+
+	/// <summary>Reads the start date out of a "02.06.2026 - 02.12.2026" style week folder.</summary>
+	private static DateTime? ExtractWeekStartDate(string weekFolder)
+	{
+		var match = Regex.Match(weekFolder, @"(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})");
+
+		if (!match.Success)
+			return null;
+
+		return DateTime.TryParseExact(
+			$"{match.Groups[1].Value}/{match.Groups[2].Value}/{match.Groups[3].Value}",
+			"M/d/yyyy",
+			CultureInfo.InvariantCulture,
+			DateTimeStyles.None,
+			out var parsed)
+			? parsed
+			: null;
+	}
+
+	private static string SanitizeSegment(string value)
+	{
+		foreach (var c in Path.GetInvalidFileNameChars())
+			value = value.Replace(c, '_');
+
+		return value.Trim();
 	}
 
 	private Version ExtractVersion(string fileNameWithoutExtension)
