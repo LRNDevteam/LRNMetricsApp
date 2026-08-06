@@ -4,6 +4,7 @@ using DenialDatabaseProcessorWorker.Models;
 using DenialDatabaseProcessorWorker.Normalizers;
 using DenialDatabaseProcessorWorker.Notifications;
 using DenialDatabaseProcessorWorker.Services;
+using DenialDatabaseProcessorWorker.Services.ReportLogging;
 using DenialDatabaseProcessorWorker.Services.Workflow;
 using DenialDatabaseProcessorWorker.Models.Workflow;
 using DenialDatabaseProcessorWorker.Services.SharePoint;
@@ -43,6 +44,12 @@ builder.Services.AddSingleton<OutputPathBuilder>();
 builder.Services.AddSingleton<DenialAnalysisRunLogRepository>();
 builder.Services.AddSingleton<DenialTaskBoardRepository>();
 builder.Services.AddHttpClient<IDenialWorkflowApiClient, DenialWorkflowApiClient>();
+
+// Run logging + workflow tracker (LRNMaster). Both wrap stored procedures and swallow
+// their own failures, so a logging outage costs a log row and not the run.
+builder.Services.AddSingleton<RecentSuccessRunProvider>();
+builder.Services.AddSingleton<ReportRunIdInfoLogger>();
+builder.Services.AddSingleton<ReportsWorkflowTrackerRepository>();
 
 // SharePoint
 builder.Services.AddHttpClient<SharePointGraphClient>();

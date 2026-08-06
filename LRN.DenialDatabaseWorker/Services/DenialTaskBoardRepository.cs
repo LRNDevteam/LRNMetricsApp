@@ -9,117 +9,121 @@ namespace DenialDatabaseProcessorWorker.Services;
 
 public sealed class DenialTaskBoardRepository
 {
+	/// <summary>
+	/// Used when no timeout is supplied. The ADO.NET default of 30 seconds is not enough:
+	/// GetExistingTasksAsync reads every task row a lab has ever accumulated.
+	/// </summary>
+	private const int DefaultCommandTimeoutSeconds = 600;
+
 	private readonly string _connectionString;
+	private readonly int _commandTimeoutSeconds;
 
 	public DenialTaskBoardRepository(IConfiguration configuration)
 	{
 		_connectionString = configuration.GetConnectionString("DenialDatabase")
 							?? throw new InvalidOperationException("Connection string 'DenialDatabase' not found.");
+		_commandTimeoutSeconds = DefaultCommandTimeoutSeconds;
 	}
 
 	// Use this constructor when reading/writing lab-level tables.
 	// Example: NorthWest must read dbo.DenialTaskBoard from NWL_Lab / NWL_LRN, not LRNMaster.
-	public DenialTaskBoardRepository(string connectionString)
+	public DenialTaskBoardRepository(string connectionString, int commandTimeoutSeconds = DefaultCommandTimeoutSeconds)
 	{
 		if (string.IsNullOrWhiteSpace(connectionString))
 			throw new ArgumentException("Lab database connection string is required.", nameof(connectionString));
 
+		if (commandTimeoutSeconds < 0)
+			throw new ArgumentOutOfRangeException(nameof(commandTimeoutSeconds), "Command timeout cannot be negative. Use 0 for no timeout.");
+
 		_connectionString = connectionString;
+		_commandTimeoutSeconds = commandTimeoutSeconds;
 	}
 
+	/// <summary>
+	/// The parts of an existing task that TaskBoardBuilder carries forward onto the new run.
+	/// Deliberately narrow: this is read for every task a lab has ever accumulated, so every
+	/// extra column is paid once per row. Only add a property here together with its column.
+	/// </summary>
 	public sealed class ExistingTaskInfo
 	{
-		public string TaskId { get; set; } = "";
-		public DateTime? DateOpened { get; set; }
-		public Dictionary<string, string> Row { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+		public string TaskId { get; init; } = "";
+		public DateTime? DateOpened { get; init; }
+		public DateTime? DateCompleted { get; init; }
+		public string Status { get; init; } = "";
+		public string AssignedTo { get; init; } = "";
+		public string WorkFlowStatus { get; init; } = "";
 	}
 
 	// Key: UniqueTrackId (ClaimUID|CPTCode|DenialCode)
+	//
+	// Ten columns, not the full row. This used to select all 34 - including ICDCodes and
+	// DenialValidity, both NVARCHAR(MAX) - and materialize a 33-entry dictionary per row,
+	// when the builder only ever reads TaskId, DateOpened, DateCompleted, Status, AssignedTo
+	// and WorkFlowStatus. On a lab with a large board that dragged the LOB data across the
+	// wire for every task and timed out. The four key columns are here to rebuild the lookup
+	// key; the rest were never used.
 	public async Task<Dictionary<string, ExistingTaskInfo>> GetExistingTasksAsync(int labId)
 	{
 		const string sql = @"
-SELECT TaskID, ClaimID, PatientId, CPTCode, DenialCode,
-       DenialDescription, DenialClassification, ActionCode, RecommendedAction,
-       Task, ActionCategory, Priority, SLADays, Status,
-       InsuranceBalance, IsCurrentDenial, AssignedTo,
-       DateOpened, DueDate, DateCompleted, DaysRemaining, SLAStatus,
-       LabId, LabName, RunId, CreatedOn, UniqueTrackId,
-       ClaimUID,
-       ICDCodes, CoverageStatus, ICDComplianceStatus, DenialValidity,
-       WorkFlowStatus, ClaimFrom
+SELECT TaskID, ClaimUID, CPTCode, DenialCode, UniqueTrackId,
+       Status, AssignedTo, WorkFlowStatus, DateOpened, DateCompleted
 FROM dbo.DenialTaskBoard
 WHERE LabId = @LabId";
 
 		var result = new Dictionary<string, ExistingTaskInfo>(StringComparer.OrdinalIgnoreCase);
 
 		await using var conn = new SqlConnection(_connectionString);
-		await using var cmd = new SqlCommand(sql, conn);
+		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = _commandTimeoutSeconds };
 		cmd.Parameters.AddWithValue("@LabId", labId);
 		await conn.OpenAsync().ConfigureAwait(false);
 
 		await using var reader = await cmd.ExecuteReaderAsync().ConfigureAwait(false);
+
+		// Resolve ordinals once rather than hashing the column name on every field of every row.
+		int taskIdOrd = reader.GetOrdinal("TaskID");
+		int claimUidOrd = reader.GetOrdinal("ClaimUID");
+		int cptCodeOrd = reader.GetOrdinal("CPTCode");
+		int denialCodeOrd = reader.GetOrdinal("DenialCode");
+		int uniqueTrackIdOrd = reader.GetOrdinal("UniqueTrackId");
+		int statusOrd = reader.GetOrdinal("Status");
+		int assignedToOrd = reader.GetOrdinal("AssignedTo");
+		int workFlowStatusOrd = reader.GetOrdinal("WorkFlowStatus");
+		int dateOpenedOrd = reader.GetOrdinal("DateOpened");
+		int dateCompletedOrd = reader.GetOrdinal("DateCompleted");
+
 		while (await reader.ReadAsync().ConfigureAwait(false))
 		{
-			var storedUniqueTrackId = reader["UniqueTrackId"] as string ?? "";
-			var claimUid = reader["ClaimUID"]?.ToString() ?? "";
-			var cptCode = reader["CPTCode"]?.ToString() ?? "";
-			var denialCode = reader["DenialCode"]?.ToString() ?? "";
+			var claimUid = GetText(reader, claimUidOrd);
+			var cptCode = GetText(reader, cptCodeOrd);
+			var denialCode = GetText(reader, denialCodeOrd);
+
 			var uniqueTrackId = BuildTaskKey(claimUid, cptCode, denialCode);
 
 			if (string.IsNullOrWhiteSpace(uniqueTrackId))
-				uniqueTrackId = storedUniqueTrackId;
+				uniqueTrackId = GetText(reader, uniqueTrackIdOrd);
 
 			if (string.IsNullOrWhiteSpace(uniqueTrackId))
 				continue;
 
-			var info = new ExistingTaskInfo
+			result[uniqueTrackId] = new ExistingTaskInfo
 			{
-				TaskId = reader["TaskID"] as string ?? "",
-				DateOpened = reader["DateOpened"] is DateTime dt ? dt : (DateTime?)null,
-				Row = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-				{
-					["Task ID"] = reader["TaskID"]?.ToString() ?? "",
-					["Claim ID"] = reader["ClaimID"]?.ToString() ?? "",
-					["ClaimUID"] = claimUid,
-					["Patient / Acct #"] = reader["PatientId"]?.ToString() ?? "",
-					["CPT Code"] = cptCode,
-					["Denial Code"] = denialCode,
-					["Denial Description"] = reader["DenialDescription"]?.ToString() ?? "",
-					["Denial Classification"] = reader["DenialClassification"]?.ToString() ?? "",
-					["Action Code"] = reader["ActionCode"]?.ToString() ?? "",
-					["Recommended Action"] = reader["RecommendedAction"]?.ToString() ?? "",
-					["Task"] = reader["Task"]?.ToString() ?? "",
-					["Action Category"] = reader["ActionCategory"]?.ToString() ?? "",
-					["Priority"] = reader["Priority"]?.ToString() ?? "",
-					["SLA (Days)"] = reader["SLADays"]?.ToString() ?? "",
-					["Status"] = reader["Status"]?.ToString() ?? "",
-					["Insurance Balance"] = reader["InsuranceBalance"]?.ToString() ?? "",
-					["IsCurrentDenial"] = reader["IsCurrentDenial"]?.ToString() ?? "",
-					["Assigned To"] = reader["AssignedTo"]?.ToString() ?? "",
-					["Date Opened"] = reader["DateOpened"] is DateTime doDt ? doDt.ToString("yyyy-MM-dd") : "",
-					["Due Date"] = reader["DueDate"] is DateTime ddDt ? ddDt.ToString("yyyy-MM-dd") : "",
-					["Date Completed"] = reader["DateCompleted"] is DateTime dcDt ? dcDt.ToString("yyyy-MM-dd") : "",
-					["Days Remaining"] = reader["DaysRemaining"]?.ToString() ?? "",
-					["SLA Status"] = reader["SLAStatus"]?.ToString() ?? "",
-					["LabId"] = reader["LabId"]?.ToString() ?? "",
-					["LabName"] = reader["LabName"]?.ToString() ?? "",
-					["RunId"] = reader["RunId"]?.ToString() ?? "",
-					["CreatedOn"] = reader["CreatedOn"] is DateTime coDt ? coDt.ToString("O") : "",
-					["UniqueTrackId"] = uniqueTrackId,
-					["ICDCodes"] = reader["ICDCodes"]?.ToString() ?? "",
-					["CoverageStatus"] = reader["CoverageStatus"]?.ToString() ?? "",
-					["ICDComplianceStatus"] = reader["ICDComplianceStatus"]?.ToString() ?? "",
-					["DenialValidity"] = reader["DenialValidity"]?.ToString() ?? "",
-					["WorkFlowStatus"] = reader["WorkFlowStatus"]?.ToString() ?? "",
-					["ClaimFrom"] = reader["ClaimFrom"]?.ToString() ?? ""
-				}
+				TaskId = GetText(reader, taskIdOrd),
+				DateOpened = GetDate(reader, dateOpenedOrd),
+				DateCompleted = GetDate(reader, dateCompletedOrd),
+				Status = GetText(reader, statusOrd),
+				AssignedTo = GetText(reader, assignedToOrd),
+				WorkFlowStatus = GetText(reader, workFlowStatusOrd)
 			};
-
-			result[uniqueTrackId] = info;
 		}
 
 		return result;
 	}
+
+	private static string GetText(SqlDataReader reader, int ordinal)
+		=> reader.IsDBNull(ordinal) ? "" : reader.GetValue(ordinal)?.ToString() ?? "";
+
+	private static DateTime? GetDate(SqlDataReader reader, int ordinal)
+		=> reader.IsDBNull(ordinal) ? null : reader.GetValue(ordinal) as DateTime?;
 
 	private static string BuildTaskKey(string? claimUid, string? cptCode, string? denialCode)
 	{
@@ -262,7 +266,9 @@ CREATE TABLE #DeletedUnassignedClaimUIDs
 	ClaimUID NVARCHAR(600) NOT NULL
 );";
 
-		await using var cmd = new SqlCommand(sql, conn, tx);
+		// No timeout, like every other statement in this transaction: the DDL itself is
+		// trivial, but it can sit behind tempdb contention while the rest of the batch runs.
+		await using var cmd = new SqlCommand(sql, conn, tx) { CommandTimeout = 0 };
 		await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
 	}
 

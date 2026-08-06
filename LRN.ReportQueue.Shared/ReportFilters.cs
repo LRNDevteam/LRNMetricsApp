@@ -512,6 +512,153 @@ public sealed record ForecastingSummaryFilters(
 }
 
 /// <summary>
+/// Filter snapshot for a Denial Dashboard export — mirrors
+/// DenialDashboardController.ExportToExcel's DenialDashboardFilters. The multi-choice
+/// filters travel pipe-delimited exactly as the page posts them ("(All)" = no filter),
+/// and dates as strings, so the worker rebuilds the page's own filter object verbatim.
+/// </summary>
+public sealed record DenialDashboardReportFilters(
+    int?    LabId               = null,
+    string? DenialCode          = null,
+    string? Status              = null,
+    string? Priority            = null,
+    string? ActionCategory      = null,
+    string? Deadline            = null,
+    string? Classification      = null,
+    string? SalesRepname        = null,
+    string? ClinicName          = null,
+    string? ReferringProvider   = null,
+    string? PayerName           = null,
+    string? PayerType           = null,
+    string? PanelName           = null,
+    string? FirstBilledDateFrom = null,
+    string? FirstBilledDateTo   = null,
+    string? DateOfServiceFrom   = null,
+    string? DateOfServiceTo     = null,
+    string? DenialDateFrom      = null,
+    string? DenialDateTo        = null)
+{
+    private static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    public string ToJson() => JsonSerializer.Serialize(this, JsonOpts);
+
+    public static DenialDashboardReportFilters FromJson(string? json) =>
+        string.IsNullOrWhiteSpace(json)
+            ? new DenialDashboardReportFilters()
+            : JsonSerializer.Deserialize<DenialDashboardReportFilters>(json, JsonOpts)
+              ?? new DenialDashboardReportFilters();
+
+    public List<(string Label, string? Value)> ToActiveFilterList()
+    {
+        var list = new List<(string, string?)>();
+        AddChoice("Status", Status);
+        AddChoice("Priority", Priority);
+        AddChoice("Action Category", ActionCategory);
+        AddChoice("Deadline", Deadline);
+        AddChoice("Classification", Classification);
+        AddChoice("Denial Code", DenialCode);
+        AddChoice("Sales Rep", SalesRepname);
+        AddChoice("Clinic", ClinicName);
+        AddChoice("Referring Provider", ReferringProvider);
+        AddChoice("Payer Name", PayerName);
+        AddChoice("Payer Type", PayerType);
+        AddChoice("Panel Name", PanelName);
+        Add("First Billed From", FirstBilledDateFrom);
+        Add("First Billed To", FirstBilledDateTo);
+        Add("Date of Service From", DateOfServiceFrom);
+        Add("Date of Service To", DateOfServiceTo);
+        Add("Denial Date From", DenialDateFrom);
+        Add("Denial Date To", DenialDateTo);
+        return list;
+
+        void Add(string label, string? value)
+        {
+            if (!string.IsNullOrWhiteSpace(value)) list.Add((label, value));
+        }
+        void AddChoice(string label, string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return;
+            // "(All)" is the page's own "no filter" sentinel — never a real selection.
+            var parts = value
+                .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(x => !x.Equals("(All)", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (parts.Count > 0) list.Add((label, string.Join(", ", parts)));
+        }
+    }
+}
+
+/// <summary>
+/// Filter snapshot for a LIS Summary / LIMS Master export — mirrors
+/// LisSummaryController.ExportToExcel's parameters exactly. The multi-select
+/// filters (Panel/Clinic/RefPhy/SalesRep/Collector) travel pipe-delimited, the
+/// same shape the page's hidden inputs post, so the worker reuses the page's
+/// WHERE building untouched.
+/// </summary>
+public sealed record LisSummaryReportFilters(
+    int?    LabId     = null,
+    string? DateType  = null,
+    string? DateFrom  = null,
+    string? DateTo    = null,
+    string? Panel     = null,
+    string? Clinic    = null,
+    string? RefPhy    = null,
+    string? SalesRep  = null,
+    string? Collector = null)
+{
+    private static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    public string ToJson() => JsonSerializer.Serialize(this, JsonOpts);
+
+    public static LisSummaryReportFilters FromJson(string? json) =>
+        string.IsNullOrWhiteSpace(json)
+            ? new LisSummaryReportFilters()
+            : JsonSerializer.Deserialize<LisSummaryReportFilters>(json, JsonOpts)
+              ?? new LisSummaryReportFilters();
+
+    /// <summary>"Collected" unless the page asked for one of the other LIMS date columns.</summary>
+    public string EffectiveDateType =>
+        DateType is not null
+        && (DateType.Equals("Received", StringComparison.OrdinalIgnoreCase)
+            || DateType.Equals("Resulted", StringComparison.OrdinalIgnoreCase))
+            ? DateType
+            : "Collected";
+
+    public List<(string Label, string? Value)> ToActiveFilterList()
+    {
+        var list = new List<(string, string?)>
+        {
+            ("Date Type", EffectiveDateType),
+        };
+        Add("Date From", DateFrom);
+        Add("Date To", DateTo);
+        AddMulti("Panel", Panel);
+        AddMulti("Clinic", Clinic);
+        AddMulti("Ref Phy", RefPhy);
+        AddMulti("Sales Rep", SalesRep);
+        AddMulti("Collector", Collector);
+        return list;
+
+        void Add(string label, string? value)
+        {
+            if (!string.IsNullOrWhiteSpace(value)) list.Add((label, value));
+        }
+        void AddMulti(string label, string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return;
+            var parts = value.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (parts.Length > 0) list.Add((label, string.Join(", ", parts)));
+        }
+    }
+}
+
+/// <summary>
 /// Filter snapshot for a Coding Summary Excel export. The page currently exports
 /// the full lab dataset (no server-side year/week/panel filter); this contract
 /// exists so queue validation stays consistent with other report types.

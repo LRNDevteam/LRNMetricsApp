@@ -942,7 +942,7 @@
             </div>
         </div>
 
-        <form method="get" asp-action="Index" asp-controller="LisSummary" class="lis-filter-row">
+        <form method="get" asp-action="Index" asp-controller="LisSummary" class="lis-filter-row" id="lisFilterForm">
             <input type="hidden" name="lab" value="@Model.CurrentLabName" />
             <input type="hidden" name="LabId" value="@filters.LabId" />
             <input type="hidden" name="ActiveTab" value="@activeTab" />
@@ -1124,8 +1124,10 @@
                     <i class="bi bi-funnel me-1"></i>Apply Filters
                 </button>
 
-                <button type="submit" class="btn btn-outline-success rounded-pill px-4"
-                        formaction="@Url.Action("ExportToExcel", "LisSummary")">
+                @* Queues the LIMS Master workbook (LIS Summary + full line-level sheet) on
+                   LRN.ReportWorker; falls back to the synchronous download when the lab has
+                   no report queue. See the script at the bottom of this page. *@
+                <button type="button" id="lisExportExcelBtn" class="btn btn-outline-success rounded-pill px-4">
                     <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
                 </button>
 
@@ -1523,4 +1525,83 @@ else
         requestAnimationFrame(updateLisHeaderOffsets);
         window.addEventListener('resize', updateLisHeaderOffsets, { passive: true });
     })();
+</script>
+
+@* ── Excel export ──────────────────────────────────────────────────────────────
+   Queues a LisSummary report; LRN.ReportWorker builds the two-sheet workbook
+   ("LIS Summary" + the FULL "LIMS Master" line-level sheet, with the
+   AdditionalFields JSON expanded into real columns) and the 📄 Reports badge
+   notifies when it is ready. Falls back to the synchronous download when the
+   lab has no UserReqReports queue deployed. *@
+<script nonce='@Context.Items["CspNonce"]'>
+(function () {
+    var btn  = document.getElementById('lisExportExcelBtn');
+    var form = document.getElementById('lisFilterForm');
+    if (!btn || !form) return;
+
+    function legacyDownload() {
+        var params = new URLSearchParams(new FormData(form));
+        window.location.href = '@Url.Action("ExportToExcel", "LisSummary")' + '?' + params.toString();
+    }
+
+    btn.addEventListener('click', function () {
+        var lab = '@Model.ConfiguredLabKey';
+        if (!lab) { legacyDownload(); return; }
+
+        var fd  = new FormData(form);
+        var val = function (n) { return (fd.get(n) || '').toString().trim() || null; };
+        var num = function (n) { var v = parseInt(val(n), 10); return isNaN(v) ? null : v; };
+
+        var filters = {
+            LabId:     num('LabId'),
+            DateType:  val('DateType'),
+            DateFrom:  val('DateFrom'),
+            DateTo:    val('DateTo'),
+            Panel:     val('Panel'),
+            Clinic:    val('Clinic'),
+            RefPhy:    val('RefPhy'),
+            SalesRep:  val('SalesRep'),
+            Collector: val('Collector')
+        };
+
+        var body = new FormData();
+        body.append('lab', lab);
+        body.append('reportType', 'LisSummary');
+        body.append('filterDetails', JSON.stringify(filters));
+        var af = document.querySelector('#lrnReportsAf input[name="__RequestVerificationToken"]');
+        if (af) body.append('__RequestVerificationToken', af.value);
+
+        var original = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Queuing\u2026';
+
+        fetch('@Url.Action("Queue", "UserReports")', { method: 'POST', body: body })
+            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+            .then(function (res) {
+                if (res.ok) {
+                    btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating - watch Reports';
+                    if (window.lrnShowReportAlert) window.lrnShowReportAlert('success');
+                    if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
+                    setTimeout(function () { btn.disabled = false; btn.innerHTML = original; }, 8000);
+                } else if (res.status === 400) {
+                    btn.disabled = false; btn.innerHTML = original;
+                    legacyDownload();
+                } else {
+                    btn.disabled = false; btn.innerHTML = original;
+                    var qMsg = res.j && res.j.message ? res.j.message : '';
+                    if (window.lrnShowReportAlert) {
+                        if (res.status === 409 || /already/i.test(qMsg)) {
+                            window.lrnShowReportAlert('info');
+                        } else {
+                            window.lrnShowReportAlert('error', { message: qMsg || 'Could not queue the report.' });
+                        }
+                    }
+                }
+            })
+            .catch(function () {
+                btn.disabled = false; btn.innerHTML = original;
+                legacyDownload();
+            });
+    });
+})();
 </script>

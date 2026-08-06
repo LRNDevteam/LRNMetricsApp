@@ -47,6 +47,7 @@ public class LisSummaryController : Controller
 				Filters = filters,
 				LabOptions = [],
 				CurrentLabName = string.Empty,
+				ConfiguredLabKey = string.Empty,
 				ErrorMessage = "No LIS Summary enabled labs were found."
 			});
 		}
@@ -63,6 +64,7 @@ public class LisSummaryController : Controller
 				Filters = filters,
 				LabOptions = labOptions,
 				CurrentLabName = selectedLabName,
+				ConfiguredLabKey = selectedLabName,
 				ErrorMessage = $"Configuration not found for {selectedLabName}."
 			});
 		}
@@ -74,6 +76,7 @@ public class LisSummaryController : Controller
 				Filters = filters,
 				LabOptions = labOptions,
 				CurrentLabName = selectedLabName,
+				ConfiguredLabKey = selectedLabName,
 				ErrorMessage = $"LIS Summary is currently not available for {selectedLabName}."
 			});
 		}
@@ -122,6 +125,7 @@ public class LisSummaryController : Controller
 				Filters = filters,
 				LabOptions = labOptions,
 				CurrentLabName = selectedLabOption?.LabName ?? selectedLabName,
+				ConfiguredLabKey = selectedLabName,
 				Result = result,
 				LineData = lineData,
 				FilterOptions = filterOptions
@@ -135,6 +139,7 @@ public class LisSummaryController : Controller
 				Filters = filters,
 				LabOptions = labOptions,
 				CurrentLabName = selectedLabOption?.LabName ?? selectedLabName,
+				ConfiguredLabKey = selectedLabName,
 				ErrorMessage = $"Failed to load LIS Summary: {ex.Message}"
 			});
 		}

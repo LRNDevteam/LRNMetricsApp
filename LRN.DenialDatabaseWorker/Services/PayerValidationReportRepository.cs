@@ -13,7 +13,8 @@ public sealed record PayerValidationRun(
 	string WeekFolder,
 	string SourceFullPath,
 	DateTime? InsertedDateTime,
-	int DeniedRowCount);
+	int DeniedRowCount,
+	int TotalRowCount);
 
 /// <summary>
 /// Reads denial rows straight out of each lab database ([dbo].[PayerValidationReport]).
@@ -25,8 +26,6 @@ public sealed record PayerValidationRun(
 /// </summary>
 public sealed class PayerValidationReportRepository
 {
-	private const int CommandTimeoutSeconds = 600;
-
 	private static readonly Regex TableNamePattern =
 		new(@"^\[?(?<schema>[A-Za-z0-9_]+)\]?\.\[?(?<table>[A-Za-z0-9_]+)\]?$", RegexOptions.Compiled);
 
@@ -159,34 +158,37 @@ public sealed class PayerValidationReportRepository
 		_options = options.Value;
 	}
 
+	private int CommandTimeoutSeconds => _options.SqlCommandTimeoutSeconds;
+
 	/// <summary>
-	/// Returns the newest run that has denial rows, or null when the lab has none.
-	/// Runs are ordered by the latest InsertedDateTime so a re-published week wins.
+	/// Looks one RunId up in this lab's table and returns its metadata, or null when the lab
+	/// has no rows for that run at all. That null is the "is this run in this lab database?"
+	/// answer - the RunId comes from LRNMaster and only some labs carry rows for it.
+	/// TotalRowCount is every row for the run; DeniedRowCount is the subset that gets imported.
 	/// </summary>
-	public async Task<PayerValidationRun?> GetLatestDeniedRunAsync(LabConfig lab, CancellationToken ct)
+	public async Task<PayerValidationRun?> GetRunAsync(LabConfig lab, string runId, CancellationToken ct)
 	{
+		if (string.IsNullOrWhiteSpace(runId))
+			return null;
+
+		// RunId is compared bare so the predicate stays sargable: wrapping the column in
+		// LTRIM/RTRIM/ISNULL makes an index on RunId unusable and forces a full scan of a
+		// very wide table, which is what times out on the larger labs. SQL Server already
+		// ignores trailing blanks in '=', and a NULL RunId can never match a non-empty value,
+		// so the bare comparison returns the same rows.
 		var sql = $@"
-SELECT TOP (1)
-       runs.RunId,
-       runs.WeekFolder,
-       runs.SourceFullPath,
-       runs.LastInserted,
-       runs.DeniedRowCount
-FROM (
-    SELECT ISNULL(RunId, '')                     AS RunId,
-           MAX(ISNULL(WeekFolder, ''))           AS WeekFolder,
-           MAX(ISNULL(SourceFullPath, ''))       AS SourceFullPath,
-           MAX(InsertedDateTime)                 AS LastInserted,
-           COUNT_BIG(1)                          AS DeniedRowCount
-    FROM {QualifiedTableName()}
-    WHERE LTRIM(RTRIM(ISNULL(PayStatus, ''))) = @PayStatus
-    GROUP BY ISNULL(RunId, '')
-) AS runs
-ORDER BY runs.LastInserted DESC, runs.RunId DESC;";
+SELECT MAX(ISNULL(WeekFolder, ''))     AS WeekFolder,
+       MAX(ISNULL(SourceFullPath, '')) AS SourceFullPath,
+       MAX(InsertedDateTime)           AS LastInserted,
+       COUNT_BIG(1)                    AS TotalRowCount,
+       SUM(CASE WHEN LTRIM(RTRIM(ISNULL(PayStatus, ''))) = @PayStatus THEN 1 ELSE 0 END) AS DeniedRowCount
+FROM {QualifiedTableName()}
+WHERE RunId = @RunId;";
 
 		await using var conn = new SqlConnection(lab.LabConnectionString);
 		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = CommandTimeoutSeconds };
 		cmd.Parameters.Add("@PayStatus", SqlDbType.NVarChar, 100).Value = _options.DeniedPayStatus;
+		cmd.Parameters.Add("@RunId", SqlDbType.NVarChar, 200).Value = runId.Trim();
 
 		await conn.OpenAsync(ct).ConfigureAwait(false);
 		await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -194,12 +196,19 @@ ORDER BY runs.LastInserted DESC, runs.RunId DESC;";
 		if (!await reader.ReadAsync(ct).ConfigureAwait(false))
 			return null;
 
+		// The aggregate always returns a row; zero rows for the run is the empty case.
+		var totalRowCount = reader.IsDBNull(3) ? 0 : Convert.ToInt32(reader.GetInt64(3));
+
+		if (totalRowCount == 0)
+			return null;
+
 		return new PayerValidationRun(
-			RunId: reader.IsDBNull(0) ? "" : reader.GetString(0).Trim(),
-			WeekFolder: reader.IsDBNull(1) ? "" : reader.GetString(1).Trim(),
-			SourceFullPath: reader.IsDBNull(2) ? "" : reader.GetString(2).Trim(),
-			InsertedDateTime: reader.IsDBNull(3) ? null : reader.GetDateTime(3),
-			DeniedRowCount: reader.IsDBNull(4) ? 0 : Convert.ToInt32(reader.GetInt64(4)));
+			RunId: runId.Trim(),
+			WeekFolder: reader.IsDBNull(0) ? "" : reader.GetString(0).Trim(),
+			SourceFullPath: reader.IsDBNull(1) ? "" : reader.GetString(1).Trim(),
+			InsertedDateTime: reader.IsDBNull(2) ? null : reader.GetDateTime(2),
+			DeniedRowCount: reader.IsDBNull(4) ? 0 : Convert.ToInt32(reader.GetValue(4)),
+			TotalRowCount: totalRowCount);
 	}
 
 	/// <summary>
@@ -212,19 +221,25 @@ ORDER BY runs.LastInserted DESC, runs.RunId DESC;";
 		string? runId,
 		CancellationToken ct)
 	{
+		// The RunId filter is composed in, not written as "(@RunId IS NULL OR RunId = @RunId)":
+		// that OR form has to produce one plan for both cases and gives up the index seek even
+		// when a RunId is supplied. PayStatus keeps its trim, evaluated as a residual over the
+		// far smaller set the RunId seek returns.
+		var filterByRun = !string.IsNullOrWhiteSpace(runId);
+
 		var sql = $@"
 SELECT *
 FROM {QualifiedTableName()}
-WHERE LTRIM(RTRIM(ISNULL(PayStatus, ''))) = @PayStatus
-  AND (@RunId IS NULL OR ISNULL(RunId, '') = @RunId);";
+WHERE LTRIM(RTRIM(ISNULL(PayStatus, ''))) = @PayStatus{(filterByRun ? "\n  AND RunId = @RunId" : "")};";
 
 		var rows = new List<Dictionary<string, string>>();
 
 		await using var conn = new SqlConnection(lab.LabConnectionString);
 		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = CommandTimeoutSeconds };
 		cmd.Parameters.Add("@PayStatus", SqlDbType.NVarChar, 100).Value = _options.DeniedPayStatus;
-		cmd.Parameters.Add("@RunId", SqlDbType.NVarChar, 200).Value =
-			string.IsNullOrWhiteSpace(runId) ? DBNull.Value : runId;
+
+		if (filterByRun)
+			cmd.Parameters.Add("@RunId", SqlDbType.NVarChar, 200).Value = runId!.Trim();
 
 		await conn.OpenAsync(ct).ConfigureAwait(false);
 		await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);

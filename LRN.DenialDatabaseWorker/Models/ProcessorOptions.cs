@@ -38,6 +38,26 @@ public sealed class ProcessorOptions
 	/// <summary>Upload the export package to SharePoint. Ignored when GenerateOutputFiles is false.</summary>
 	public bool UploadOutputsToSharePoint { get; init; } = false;
 
+	/// <summary>
+	/// Name this worker reports under in dbo.ReportsWorkflowTracker. It must match
+	/// dbo.ReportTypeMaster character for character or the upsert is rejected.
+	/// </summary>
+	public string ReportName { get; init; } = "Denial Report";
+
+	/// <summary>@CreatedBy for both report-log procedures: the process identity, never a person.</summary>
+	public string ReportLogCreatedBy { get; init; } = "Denial Database Processor";
+
+	/// <summary>Stored procedure in LRNMaster that returns each lab's most recent successful run.</summary>
+	public string RecentSuccessRunProcedure { get; init; } = "dbo.sp_GetRecentSuccessRunByLab";
+
+	/// <summary>
+	/// Command timeout, in seconds, for the reads and writes in the lab copy path.
+	/// This is a batch worker against tables that keep growing, so the ADO.NET default of
+	/// 30 seconds is far too short: a large lab (Certus) reads its whole DenialTaskBoard and
+	/// a whole run's PayerValidationReport in one statement. 0 means no timeout.
+	/// </summary>
+	public int SqlCommandTimeoutSeconds { get; init; } = 600;
+
 	// Add this so worker can access configuration
 	public IConfiguration? Configuration { get; set; }
 	public double IntervalMinutes { get; set; }

@@ -25,12 +25,24 @@ public class DenialDashboardController : Controller
 
 	private readonly IDenialDashboardApiClient _dashboardApi;
 	private readonly IUserManagementRepository _userRepository;
+	private readonly LabConfigOptions _labConfig;
 
-	public DenialDashboardController(IDenialDashboardApiClient dashboardApi, IUserManagementRepository userRepository)
+	public DenialDashboardController(
+		IDenialDashboardApiClient dashboardApi,
+		IUserManagementRepository userRepository,
+		LabConfigOptions labConfig)
 	{
 		_dashboardApi = dashboardApi;
 		_userRepository = userRepository;
+		_labConfig = labConfig;
 	}
+
+	/// <summary>
+	/// Dashboard LabId → LabSettings config key (LabConfig:LabsID), which is what the report
+	/// queue keys connection strings by. Falls back to the display name when unmapped.
+	/// </summary>
+	private string ResolveConfiguredLabKey(int labId, string displayName)
+		=> _labConfig.GetLabNameById(labId) ?? displayName;
 
 	[HttpGet]
 	public async Task<IActionResult> Index(
@@ -138,6 +150,7 @@ public class DenialDashboardController : Controller
 		{
 			Filters = normalizedFilters,
 			CurrentLabName = currentLab.LabName,
+			ConfiguredLabKey = ResolveConfiguredLabKey(selectedLabId, currentLab.LabName),
 			CurrentRunId = currentRunId,
 			CurrentSourceFileName = runInfo.SourceFileName ?? string.Empty,
 			CurrentWeekFolder = runInfo.WeekFolder ?? string.Empty,
@@ -313,7 +326,7 @@ public class DenialDashboardController : Controller
 
 	// Applies the Denial Code filter plus any Excel-style per-column filters to the (small,
 	// pre-aggregated) insight set in memory.
-	private static List<DenialInsightRecord> FilterInsights(List<DenialInsightRecord> allInsights, DenialDashboardFilters filters)
+	public static List<DenialInsightRecord> FilterInsights(List<DenialInsightRecord> allInsights, DenialDashboardFilters filters)
 	{
 		IEnumerable<DenialInsightRecord> query = allInsights;
 
@@ -395,17 +408,17 @@ public class DenialDashboardController : Controller
 		// The workbook is always rebuilt from data fetched through the API. The previous
 		// "serve the latest pre-built .xlsx off the report server's disk" shortcut was removed
 		// when the Denial Dashboard data access moved into LRN.ReportsApi.
-		var filteredRecords = ApplyFilters(await _dashboardApi.GetByLabAsync(selectedLab.LabId, cancellationToken), normalizedFilters)
-			.OrderBy(x => x.DueDate)
-			.ThenBy(x => x.TaskId)
-			.ToList();
+		var allRecords = await _dashboardApi.GetByLabAsync(selectedLab.LabId, cancellationToken);
 		var lineItems = (await _dashboardApi.GetLineItemsForExportByLabAsync(selectedLab.LabId, normalizedFilters, cancellationToken)).ToList();
+		var insights = (await _dashboardApi.GetInsightTableByLabAsync(selectedLab.LabId, cancellationToken)).ToList();
 		var breakdownSource = (await _dashboardApi.GetBreakdownSourceByLabAsync(selectedLab.LabId, normalizedFilters, cancellationToken)).ToList();
-		var weeklyPivot = BuildBreakdownPivot(breakdownSource, monthly: false);
-		var monthlyPivot = BuildBreakdownPivot(breakdownSource, monthly: true);
 		var currentRunId = await _dashboardApi.GetCurrentRunIdAsync(selectedLab.LabId, cancellationToken) ?? string.Empty;
 
-		using var workbook = DenialDashboardExcelExportBuilder.CreateWorkbook(lineItems, filteredRecords, weeklyPivot, monthlyPivot);
+		var exportData = BuildExportData(
+			selectedLab.LabName, currentRunId, normalizedFilters,
+			allRecords, lineItems, insights, breakdownSource);
+
+		using var workbook = DenialDashboardExcelExportBuilder.CreateWorkbook(exportData);
 
 		await using var stream = new MemoryStream();
 		workbook.SaveAs(stream);
@@ -878,7 +891,52 @@ public class DenialDashboardController : Controller
 	private static string NormalizeCsvHeader(string? header)
 		=> string.IsNullOrWhiteSpace(header) ? string.Empty : new string(header.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
 
-	private static DenialDashboardFilters Normalize(DenialDashboardFilters filters, int? selectedLabId)
+	/// <summary>
+	/// Aggregates one lab's denial data into the six exported tabs exactly the way
+	/// <see cref="Index"/> aggregates them for the page — filters, breakdowns and pivots all
+	/// come from the same helpers. Shared by the synchronous download and by
+	/// LRN.ReportWorker's queued DenialDashboard report, so the two can never drift.
+	/// </summary>
+	/// <param name="allRecords">Unfiltered task-board rows; filtered here.</param>
+	/// <param name="lineItems">Line items ALREADY filtered server-side by <paramref name="filters"/>.</param>
+	public static DenialDashboardExportData BuildExportData(
+		string labName,
+		string runId,
+		DenialDashboardFilters filters,
+		IEnumerable<DenialRecord> allRecords,
+		IReadOnlyList<DenialLineItemRecord> lineItems,
+		IReadOnlyList<DenialInsightRecord> insights,
+		IEnumerable<DenialBreakdownSourceRecord> breakdownSource,
+		IReadOnlyList<(string Label, string? Value)>? activeFilters = null)
+	{
+		var records = allRecords.ToList();
+		var filteredRecords = ApplyFilters(records, filters)
+			.OrderBy(x => x.DueDate)
+			.ThenBy(x => x.TaskId)
+			.ToList();
+
+		var breakdownRows = breakdownSource.ToList();
+
+		return new DenialDashboardExportData(
+			LabName: labName,
+			RunId: runId,
+			LineItems: lineItems,
+			TaskRecords: filteredRecords,
+			Insights: FilterInsights(insights.ToList(), filters),
+			WeeklyPivot: BuildBreakdownPivot(breakdownRows, monthly: false),
+			MonthlyPivot: BuildBreakdownPivot(breakdownRows, monthly: true),
+			StatusBreakdown: BuildBreakdown(filteredRecords, x => x.Status, ["Open", "In Progress", "Completed", "On Hold", "Escalated", "Closed"]),
+			PriorityBreakdown: BuildBreakdown(filteredRecords, x => x.Priority, ["High", "Medium", "Low"]),
+			ActionCategoryBreakdown: BuildBreakdown(filteredRecords, x => x.EffectiveActionCategory),
+			ClassificationBreakdown: BuildBreakdown(filteredRecords, x => x.DenialClassification),
+			DeadlineBreakdown: BuildDeadlineBreakdown(filteredRecords),
+			// Notes/assignment come from the UNFILTERED task board: a line item still carries its
+			// workflow state even when its task row is excluded by the current filters.
+			Workflow: new DenialWorkflowLineItemAnnotator(records),
+			ActiveFilters: activeFilters ?? []);
+	}
+
+	public static DenialDashboardFilters Normalize(DenialDashboardFilters filters, int? selectedLabId)
 	{
 		var activeTab = string.IsNullOrWhiteSpace(filters.ActiveTab) ? "dashboard" : filters.ActiveTab.Trim();
 		if (activeTab.Equals("claim-view", StringComparison.OrdinalIgnoreCase)) activeTab = "line-item";
@@ -937,7 +995,7 @@ public class DenialDashboardController : Controller
 		return string.Join("|", items);
 	}
 
-	private static IEnumerable<DenialRecord> ApplyFilters(IEnumerable<DenialRecord> records, DenialDashboardFilters filters)
+	public static IEnumerable<DenialRecord> ApplyFilters(IEnumerable<DenialRecord> records, DenialDashboardFilters filters)
 	{
 		var statusSet = ParseSelectedValues(filters.Status, true).ToHashSet(StringComparer.OrdinalIgnoreCase);
 		var prioritySet = ParseSelectedValues(filters.Priority, true).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -1021,7 +1079,7 @@ public class DenialDashboardController : Controller
 		};
 	}
 
-	private static List<BreakdownItem> BuildBreakdown(List<DenialRecord> records, Func<DenialRecord, string> selector, IEnumerable<string>? preferredOrder = null)
+	public static List<BreakdownItem> BuildBreakdown(List<DenialRecord> records, Func<DenialRecord, string> selector, IEnumerable<string>? preferredOrder = null)
 	{
 		var total = records.Count;
 		var groups = records.GroupBy(x => selector(x) ?? string.Empty)
@@ -1043,7 +1101,7 @@ public class DenialDashboardController : Controller
 		return groups.OrderBy(x => orderLookup.TryGetValue(x.Label, out var order) ? order : int.MaxValue).ThenByDescending(x => x.Count).ThenBy(x => x.Label).ToList();
 	}
 
-	private static List<BreakdownItem> BuildDeadlineBreakdown(List<DenialRecord> records)
+	public static List<BreakdownItem> BuildDeadlineBreakdown(List<DenialRecord> records)
 	{
 		return DeadlineBuckets.Select(bucket => new BreakdownItem
 		{
@@ -1121,7 +1179,7 @@ public class DenialDashboardController : Controller
 			}).ToList();
 	}
 
-	private static BreakdownPivotViewModel BuildBreakdownPivot(IEnumerable<DenialBreakdownSourceRecord> rows, bool monthly)
+	public static BreakdownPivotViewModel BuildBreakdownPivot(IEnumerable<DenialBreakdownSourceRecord> rows, bool monthly)
 	{
 		var prepared = rows.Where(x => x.DenialDate.HasValue)
 			.Select(x => new PreparedBreakdownRow(x.DenialDate!.Value.Date, (x.VisitNumber ?? string.Empty).Trim(), x.InsuranceBalance, NormalizePivotText(x.PayerName, "(Blank Insurance)"), BuildDenialLabel(x.DenialCodeNormalized, x.DenialDescription)))

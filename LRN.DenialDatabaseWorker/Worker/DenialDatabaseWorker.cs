@@ -6,6 +6,7 @@ using DenialDatabaseProcessorWorker.Models;
 using DenialDatabaseProcessorWorker.Normalizers;
 using DenialDatabaseProcessorWorker.Notifications;
 using DenialDatabaseProcessorWorker.Services;
+using DenialDatabaseProcessorWorker.Services.ReportLogging;
 using DenialDatabaseProcessorWorker.Services.SharePoint;
 using DenialDatabaseProcessorWorker.Services.Workflow;
 using DenialDatabaseProcessorWorker.Models.Workflow;
@@ -37,6 +38,11 @@ public sealed class DenialDatabaseWorker : BackgroundService
     private readonly IDenialWorkflowApiClient _workflowApiClient;
     private readonly SharePointGraphOptions _spOpt;
 
+    // Run logging + workflow tracker (LRNMaster). These are what the report dashboard reads.
+    private readonly RecentSuccessRunProvider _recentSuccessRunProvider;
+    private readonly ReportRunIdInfoLogger _infoLogger;
+    private readonly ReportsWorkflowTrackerRepository _workflowTracker;
+
     public DenialDatabaseWorker(
         ILogger<DenialDatabaseWorker> logger,
         IOptions<ProcessorOptions> options,
@@ -54,7 +60,10 @@ public sealed class DenialDatabaseWorker : BackgroundService
         DenialTaskBoardRepository denialTaskBoardRepo,
         IDenialWorkflowApiClient workflowApiClient,
         ISharePointUploader uploader,
-        IOptions<SharePointGraphOptions> spOpt)
+        IOptions<SharePointGraphOptions> spOpt,
+        RecentSuccessRunProvider recentSuccessRunProvider,
+        ReportRunIdInfoLogger infoLogger,
+        ReportsWorkflowTrackerRepository workflowTracker)
     {
         _logger = logger;
         _options = options.Value;
@@ -73,6 +82,9 @@ public sealed class DenialDatabaseWorker : BackgroundService
         _uploader = uploader;
         _spOpt = spOpt.Value;
         _teamsNotifier = teamsNotifier;
+        _recentSuccessRunProvider = recentSuccessRunProvider;
+        _infoLogger = infoLogger;
+        _workflowTracker = workflowTracker;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -102,36 +114,70 @@ public sealed class DenialDatabaseWorker : BackgroundService
         string claimActionMapperFile = "";
         string outFile = "";
         string runId = "";
+        var startedOn = DateTime.Now;
 
         try
         {
+            // Step 1 - the RunId to work under. The report never invents one: it attaches
+            // itself to the lab's most recent successful run in LRNMaster.dbo.LRN_Run_Log.
+            var successRun = await _recentSuccessRunProvider.GetLatestSuccessRunAsync(lab.LabName, ct);
+
+            if (successRun is null)
+            {
+                // Not an error - the lab has no successful run yet, so there is nothing to
+                // report on. Both logging procedures reject a blank RunId, so exit quietly.
+                _logger.LogInformation(
+                    "Lab {LabName}: {Procedure} returned no successful run. Nothing to process.",
+                    lab.LabName, _options.RecentSuccessRunProcedure);
+                return;
+            }
+
+            runId = successRun.RunId;
+
+            // Step 2 - do not repeat work already done for this RunId. Only a Success row
+            // stops us; a previous Failed or Skipped run is exactly the one to retry.
+            if (await _workflowTracker.IsAlreadySuccessfulAsync(runId, ct))
+            {
+                _logger.LogInformation(
+                    "Lab {LabName}: {ReportName} already succeeded for RunId {RunId}. Skipping.",
+                    lab.LabName, _options.ReportName, runId);
+                return;
+            }
+
+            // Step 3 - open the trail and mark the tracker InProgress before any work starts.
+            await _infoLogger.StartAsync(runId, lab.LabName,
+                $"Denial report started for lab {lab.LabName} (LabId={lab.LabId}).", ct: ct);
+
+            await _workflowTracker.UpsertAsync(runId, WorkflowStatus.InProgress, startedOn: startedOn, ct: ct);
+
+            // Is this run present in this lab's database at all? Only some labs carry rows
+            // for a given run, and a lab without them has nothing to import.
+            var sourceRun = await _payerValidationRepo.GetRunAsync(lab, runId, ct);
+
+            if (sourceRun is null)
+            {
+                await CompleteAsSkippedAsync(lab, runId, startedOn,
+                    $"RunId {runId} has no rows in {SourceTableLabel(lab)}.", ct);
+                return;
+            }
+
+            payerPolicySource = BuildSourceLabel(lab, sourceRun);
+
+            await _infoLogger.InfoAsync(runId, lab.LabName,
+                $"Run found in {SourceTableLabel(lab)}. Rows={sourceRun.TotalRowCount}, " +
+                $"{_options.DeniedPayStatus}Rows={sourceRun.DeniedRowCount}.", ct: ct);
+
+            if (await _runLogRepo.ExistsAsync(runId))
+            {
+                await CompleteAsSkippedAsync(lab, runId, startedOn,
+                    $"RunId {runId} is already recorded in dbo.DenialAnalysisRunLog.", ct);
+                return;
+            }
+
             claimActionMapperFile = _fileResolver.GetLatestClaimActionMapper(lab);
 
             if (string.IsNullOrWhiteSpace(claimActionMapperFile) || !File.Exists(claimActionMapperFile))
                 throw new FileNotFoundException("Latest claim action mapper file not found.", claimActionMapperFile);
-
-            // Denial rows now come from the lab database, not from the payer policy workbook.
-            var sourceRun = await _payerValidationRepo.GetLatestDeniedRunAsync(lab, ct);
-
-            if (sourceRun is null)
-            {
-                _logger.LogInformation(
-                    "No '{PayStatus}' rows found in {Table} for lab {LabName}. Nothing to process.",
-                    _options.DeniedPayStatus, _options.PayerValidationReportTable, lab.LabName);
-                return;
-            }
-
-            runId = sourceRun.RunId;
-            payerPolicySource = BuildSourceLabel(lab, sourceRun);
-
-            if (string.IsNullOrWhiteSpace(runId))
-                throw new InvalidOperationException($"{_options.PayerValidationReportTable} rows for lab {lab.LabName} have no RunId.");
-
-            if (await _runLogRepo.ExistsAsync(runId))
-            {
-                _logger.LogInformation("RunId {RunId} already processed. Skipping lab {LabName}.", runId, lab.LabName);
-                return;
-            }
 
             var (yearFolder, monthFolder, weekFolder) = _fileResolver.ExtractFolderStructure(
                 sourceRun.SourceFullPath,
@@ -152,7 +198,7 @@ public sealed class DenialDatabaseWorker : BackgroundService
             // 1. Load existing tasks from the selected LAB database, not LRNMaster.
             // DenialTaskBoard is lab-level, so NorthWest must read from NWL_Lab / NWL_LRN,
             // Augustus from Augustus_LRN, Certus from Certus_LRN, etc.
-            var labTaskBoardRepo = new DenialTaskBoardRepository(lab.LabConnectionString);
+            var labTaskBoardRepo = new DenialTaskBoardRepository(lab.LabConnectionString, _options.SqlCommandTimeoutSeconds);
             var existingTasks = await labTaskBoardRepo.GetExistingTasksAsync(lab.LabId);
 
             // 2. Load Claim Action Mapper
@@ -160,6 +206,9 @@ public sealed class DenialDatabaseWorker : BackgroundService
             var claimRows = _excelReader.Read(claimActionMapperFile, "Denial Classifier");
             var claimMapperIndex = new ClaimActionMapperIndex(claimRows);
             await _stepLogger.LogAsync(lab, "Load ClaimActionMapper excel", "Completed", payerPolicySource, claimActionMapperFile, outFile, null, ct);
+
+            await _infoLogger.InfoAsync(runId, lab.LabName,
+                $"Claim action mapper loaded. Rows={claimRows.Count}.", claimActionMapperFile, ct);
 
             // 3. Load denied rows from the lab database (PayerValidationReport)
             await _stepLogger.LogAsync(lab, "Load PayerValidationReport denied rows", "InProgress", payerPolicySource, claimActionMapperFile, outFile, null, ct);
@@ -174,13 +223,15 @@ public sealed class DenialDatabaseWorker : BackgroundService
 
             if (payerRows.Count == 0)
             {
-                _logger.LogInformation(
-                    "Lab {LabName}: RunId {RunId} returned no '{PayStatus}' rows. Nothing to copy.",
-                    lab.LabName, runId, _options.DeniedPayStatus);
-
                 await _stepLogger.LogAsync(lab, "Completed", "Completed", payerPolicySource, claimActionMapperFile, outFile, "No denied rows.", ct);
+
+                await CompleteAsSkippedAsync(lab, runId, startedOn,
+                    $"RunId {runId} has no '{_options.DeniedPayStatus}' rows in {SourceTableLabel(lab)}. Nothing to copy.", ct);
                 return;
             }
+
+            await _infoLogger.InfoAsync(runId, lab.LabName,
+                $"Read {payerRows.Count} '{_options.DeniedPayStatus}' rows from {SourceTableLabel(lab)}.", ct: ct);
 
             // 4. Normalize + map
             await _stepLogger.LogAsync(lab, "Normalize DenialCode + map fields", "InProgress", payerPolicySource, claimActionMapperFile, outFile, null, ct);
@@ -262,6 +313,10 @@ public sealed class DenialDatabaseWorker : BackgroundService
             await _stepLogger.LogAsync(lab, "Write Denial insight/line/task-board tables", "Completed", payerPolicySource, claimActionMapperFile, outFile,
                 $"InsightRows={insightTable.Rows.Count}, LineRows={lineItemTable.Rows.Count}, TaskBoardRows={taskBoardTable.Rows.Count}", ct);
 
+            await _infoLogger.InfoAsync(runId, lab.LabName,
+                $"Denial tables loaded into {TryGetDatabaseName(lab.LabConnectionString)}. " +
+                $"InsightRows={insightTable.Rows.Count}, LineRows={lineItemTable.Rows.Count}, TaskBoardRows={taskBoardTable.Rows.Count}.", ct: ct);
+
             // Workflow API sync is disabled in this worker path because task-board rows are bulk copied directly.
             // Keeping both direct bulk copy and API sync can create duplicates or fail when LRN.ReportsApi is not running.
             // If workflow/history processing is required later, call the API from a separate controlled flow after bulk copy.
@@ -283,23 +338,86 @@ public sealed class DenialDatabaseWorker : BackgroundService
             }
 
             await _stepLogger.LogAsync(lab, "Completed", "Completed", payerPolicySource, claimActionMapperFile, outFile, null, ct);
+
+            // Step 4 - the outcome. LineRows is the natural count for this report: one row
+            // per denial copied into the lab's DenialLineItem table.
+            await _workflowTracker.UpsertAsync(
+                runId,
+                WorkflowStatus.Success,
+                rowCount: lineItemTable.Rows.Count,
+                startedOn: startedOn,
+                completedOn: DateTime.Now,
+                ct: ct);
+
+            await _infoLogger.EndAsync(runId, lab.LabName,
+                $"Denial report processing ended for lab {lab.LabName}.", ct: ct);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Lab processing failed: {LabName}", lab.LabName);
             await _stepLogger.LogAsync(lab, "Failed", "Failed", payerPolicySource, claimActionMapperFile, outFile, ex.ToString(), ct);
+
+            // The failure path. CancellationToken.None on purpose: a host shutdown must not
+            // leave the tracker sitting on InProgress with no explanation.
+            await _infoLogger.ErrorAsync(runId, lab.LabName, ex, claimActionMapperFile, CancellationToken.None);
+
+            await _workflowTracker.UpsertAsync(
+                runId,
+                WorkflowStatus.Failed,
+                startedOn: startedOn,
+                completedOn: DateTime.Now,
+                remarks: SummarizeError(ex),
+                ct: CancellationToken.None);
+
+            await _infoLogger.EndAsync(runId, lab.LabName,
+                $"Denial report processing ended with an error for lab {lab.LabName}.", ct: CancellationToken.None);
         }
+    }
+
+    /// <summary>
+    /// Closes the run out as Skipped. A missing tracker row is worse than a Skipped one:
+    /// an absent row is indistinguishable from a crashed process, so a report that decides
+    /// it has nothing to do still says so, with the reason.
+    /// </summary>
+    private async Task CompleteAsSkippedAsync(LabConfig lab, string runId, DateTime startedOn, string reason, CancellationToken ct)
+    {
+        _logger.LogInformation("Lab {LabName}: {Reason} Skipping.", lab.LabName, reason);
+
+        await _infoLogger.WarningAsync(runId, lab.LabName, reason, ct: ct);
+
+        await _workflowTracker.UpsertAsync(
+            runId,
+            WorkflowStatus.Skipped,
+            startedOn: startedOn,
+            completedOn: DateTime.Now,
+            remarks: reason,
+            ct: ct);
+
+        await _infoLogger.EndAsync(runId, lab.LabName,
+            $"Denial report skipped for lab {lab.LabName}.", ct: ct);
+    }
+
+    /// <summary>One line for @Remarks. The full exception text goes to the info log.</summary>
+    private static string SummarizeError(Exception ex)
+    {
+        var message = (ex.Message ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
+        return $"{ex.GetType().Name}: {message}";
+    }
+
+    /// <summary>"NWL_LRN.dbo.PayerValidationReport" - used in log messages and remarks.</summary>
+    private string SourceTableLabel(LabConfig lab)
+    {
+        var database = TryGetDatabaseName(lab.LabConnectionString);
+
+        return string.IsNullOrWhiteSpace(database)
+            ? _options.PayerValidationReportTable
+            : $"{database}.{_options.PayerValidationReportTable}";
     }
 
     /// <summary>Human readable "source" used in the step log now that there is no input workbook.</summary>
     private string BuildSourceLabel(LabConfig lab, PayerValidationRun run)
     {
-        var database = TryGetDatabaseName(lab.LabConnectionString);
-        var table = string.IsNullOrWhiteSpace(database)
-            ? _options.PayerValidationReportTable
-            : $"{database}.{_options.PayerValidationReportTable}";
-
-        return $"{table} (RunId={run.RunId}, PayStatus={_options.DeniedPayStatus}, Rows={run.DeniedRowCount})";
+        return $"{SourceTableLabel(lab)} (RunId={run.RunId}, PayStatus={_options.DeniedPayStatus}, Rows={run.DeniedRowCount})";
     }
 
     private static string TryGetDatabaseName(string connectionString)

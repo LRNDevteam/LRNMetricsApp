@@ -75,6 +75,14 @@ var host = Host.CreateDefaultBuilder(args)
             LabMetricsDashboard.Services.SqlSalesRepSummaryRepository>();
         services.AddSingleton<LabMetricsDashboard.Services.ICodingValidationRepository,
             LabMetricsDashboard.Services.SqlCodingValidationRepository>();
+        services.AddSingleton<LabMetricsDashboard.Services.ILisSummaryRepository,
+            LabMetricsDashboard.Services.SqlLisSummaryRepository>();
+        // Denial Dashboard reads go straight to SQL (the same queries LRN.ReportsApi runs
+        // for the page) — the HTTP client mints its JWT from the signed-in HttpContext,
+        // which a background service does not have. Needs ConnectionStrings:DefaultConnection
+        // plus each lab's ConnectionKey entry, exactly as in the dashboard's appsettings.
+        services.AddSingleton<LabMetricsDashboard.Services.IDenialRecordRepository,
+            LabMetricsDashboard.Services.SqlDenialRecordRepository>();
 
         // One IReportGenerator per report type — add future reports here.
         services.AddSingleton<IReportGenerator, PayerPolicyValidationReportGenerator>();
@@ -89,6 +97,8 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddSingleton<IReportGenerator, ClinicSummaryReportGenerator>();
         services.AddSingleton<IReportGenerator, SalesRepSummaryReportGenerator>();
         services.AddSingleton<IReportGenerator, CodingSummaryReportGenerator>();
+        services.AddSingleton<IReportGenerator, LisSummaryReportGenerator>();
+        services.AddSingleton<IReportGenerator, DenialDashboardReportGenerator>();
         services.AddSingleton<ReportGeneratorFactory>();
 
         services.AddSingleton<ReportJobProcessor>();
