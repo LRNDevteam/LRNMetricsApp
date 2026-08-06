@@ -136,6 +136,24 @@ public sealed class ReportBoardController : Controller
         });
     }
 
+    /// <summary>
+    /// Downloads the run's Error log as a CSV — the board's error link points here. Backed by
+    /// usp_ReportRunIdInfoLog_Get @Runid = &lt;runId&gt;, @logtype = 'Error'. If the file cannot be
+    /// produced (API down, no rows), fall back to the on-screen error page so the click is never dead.
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> RunErrorsCsv(string? runId, string? lab, string? labName, string? report, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(runId))
+            return RedirectToAction(nameof(Index));
+
+        var csv = await _api.GetRunErrorsCsvAsync(runId, null, ct);
+        if (csv is null || csv.Content.Length == 0)
+            return RedirectToAction(nameof(RunErrors), new { runId, lab, labName, report });
+
+        return File(csv.Content, csv.ContentType, csv.FileName);
+    }
+
     private LabReportStatus BuildCell(
         ReportCatalogEntry column,
         ReportBoardApiRow apiRow,

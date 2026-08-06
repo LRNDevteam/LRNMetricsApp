@@ -1,6 +1,7 @@
 using System.Data;
 using System.Globalization;
 using System.Text;
+using ClosedXML.Excel;
 using Microsoft.Data.SqlClient;
 
 namespace LRN.ReportsApi.Services;
@@ -18,6 +19,11 @@ public interface IReportAuditLogService
     Task<ReportAuditPivotResult> GetRunsAsync(ReportAuditQuery query, CancellationToken ct);
     Task<IReadOnlyList<ReportRunLogEntry>> GetLogsAsync(ReportRunLogQuery query, CancellationToken ct);
     Task<(byte[] Content, string FileName)> ExportLogsAsync(ReportRunLogQuery query, CancellationToken ct);
+    /// <summary>
+    /// The run's log as a formatted .xlsx: columns auto-sized to their content and the Log Message
+    /// column wrapped, so a long message stays readable instead of a single runaway CSV column.
+    /// </summary>
+    Task<(byte[] Content, string FileName)> ExportLogsExcelAsync(ReportRunLogQuery query, CancellationToken ct);
     /// <summary>
     /// Pipeline failures from dbo.LRN_Error_Log for one run - the operational view (step, error code,
     /// recommended action, owning team), which the info log does not carry.
@@ -334,6 +340,76 @@ public sealed class ReportAuditLogService : IReportAuditLogService
 
         // BOM so Excel opens the UTF-8 message text (which carries non-ASCII characters) correctly.
         return (Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(csv.ToString())).ToArray(), fileName);
+    }
+
+    public async Task<(byte[] Content, string FileName)> ExportLogsExcelAsync(ReportRunLogQuery query, CancellationToken ct)
+    {
+        var entries = await GetLogsAsync(query, ct);
+
+        using var workbook = new XLWorkbook();
+        var ws = workbook.Worksheets.Add("Error Log");
+
+        // Header row.
+        for (var c = 0; c < LogCsvHeader.Length; c++)
+            ws.Cell(1, c + 1).Value = LogCsvHeader[c];
+        var header = ws.Row(1);
+        header.Style.Font.Bold = true;
+        header.Style.Fill.BackgroundColor = XLColor.FromHtml("#0e3460");
+        header.Style.Font.FontColor = XLColor.White;
+        header.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+
+        var r = 2;
+        foreach (var e in entries)
+        {
+            ws.Cell(r, 1).Value = e.ReportRunIdInfoLogId;
+            ws.Cell(r, 2).Value = e.RunId;
+            ws.Cell(r, 3).Value = e.ReportType ?? string.Empty;
+            ws.Cell(r, 4).Value = e.SourceSystem ?? string.Empty;
+            ws.Cell(r, 5).Value = e.LogType ?? string.Empty;
+            ws.Cell(r, 6).Value = e.LogMessage ?? string.Empty;
+            ws.Cell(r, 7).Value = e.SourceFileName ?? string.Empty;
+            ws.Cell(r, 8).Value = e.CreatedOn?.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) ?? string.Empty;
+            ws.Cell(r, 9).Value = e.CreatedBy ?? string.Empty;
+            r++;
+        }
+
+        var used = ws.RangeUsed();
+        if (used is not null)
+        {
+            used.Style.Alignment.Vertical = XLAlignmentVerticalValues.Top;
+            used.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
+            used.Style.Border.BottomBorderColor = XLColor.FromHtml("#e2e8f0");
+        }
+
+        // Auto-size every column to its content, then cap so one long value can't create a runaway
+        // column. The Log Message column (6) instead gets a fixed generous width + wrap, so long
+        // messages flow onto multiple lines within the cell and each row grows to fit.
+        ws.Columns().AdjustToContents();
+        const int LogMessageColumn = 6;
+        foreach (var column in ws.ColumnsUsed())
+        {
+            if (column.ColumnNumber() == LogMessageColumn)
+            {
+                column.Width = 90;
+                column.Style.Alignment.WrapText = true;
+            }
+            else if (column.Width > 55)
+            {
+                column.Width = 55;
+                column.Style.Alignment.WrapText = true;
+            }
+        }
+
+        ws.SheetView.FreezeRows(1);
+        if (r > 2) ws.Range(1, 1, r - 1, LogCsvHeader.Length).SetAutoFilter();
+
+        using var ms = new MemoryStream();
+        workbook.SaveAs(ms);
+
+        var scope = string.IsNullOrWhiteSpace(query.RunId) ? "AllRuns" : SafeFilePart(query.RunId!);
+        var kind = string.IsNullOrWhiteSpace(query.LogType) ? "AllLogs" : SafeFilePart(query.LogType!.Replace(",", "-"));
+        var fileName = $"ReportAudit_{kind}_{scope}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+        return (ms.ToArray(), fileName);
     }
 
     private static string NormalizeMode(string? mode)

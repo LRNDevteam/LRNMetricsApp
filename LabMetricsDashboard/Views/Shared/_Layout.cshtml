@@ -892,7 +892,7 @@
         }
         <!-- ─── Top brand bar (logo + lab dropdown + user) ─── -->
         <div class="lmd-brandbar">
-            <a class="brand-link" asp-controller="Home" asp-action="Index">
+            <a class="brand-link" asp-controller="ReportBoard" asp-action="Index">
                 <img src="~/images/LRN-White-Logo-footer-1-1.png" alt="LRN Logo" />
             </a>
             <div class="brand-spacer"></div>
@@ -1035,9 +1035,7 @@
         @if (!string.IsNullOrEmpty(selectedLab))
         {
             <div class="lmd-breadcrumb d-flex align-items-center flex-wrap gap-1">
-                <a asp-controller="Home" asp-action="Index">Home</a>
-                <span class="bc-sep">›</span>
-                <a asp-controller="Dashboard" asp-action="Index" asp-route-lab="@selectedLab">Revenue Dashboard</a>
+                <a asp-controller="ReportBoard" asp-action="Index">Home</a>
                 @if (!string.IsNullOrEmpty(pageLabel))
                 {
                     <span class="bc-sep">›</span>

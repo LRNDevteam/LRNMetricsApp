@@ -33,7 +33,6 @@
     var activeTab = Model.Filters.ActiveTab;
     var activeFilters = new List<KeyValuePair<string, string?>>
 {
-    new("Lab", string.IsNullOrWhiteSpace(Model.CurrentLabName) ? "-" : Model.CurrentLabName),
     new("Status", SelectedSummary(Model.Filters.Status, true)),
     new("Priority", SelectedSummary(Model.Filters.Priority, true)),
     new("Action Category", SelectedSummary(Model.Filters.ActionCategory, true)),
@@ -692,6 +691,12 @@
             </div>
         </div>
 
+        <div class="d-flex flex-wrap gap-2 mb-3 dd-run-chips">
+            <span class="chip chip-muted"><i class="bi bi-building me-1"></i>Lab: @(string.IsNullOrWhiteSpace(Model.CurrentLabName) ? "-" : Model.CurrentLabName)</span>
+            <span class="chip chip-muted"><i class="bi bi-hash"></i>Run: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span>
+            <span class="chip chip-muted" title="@Model.CurrentSourceFileName"><i class="bi bi-file-earmark-text me-1"></i>Source File: @(string.IsNullOrWhiteSpace(Model.CurrentSourceFileName) ? "-" : Model.CurrentSourceFileName)</span>
+        </div>
+
         <div class="collapse show" id="dashboardFiltersCollapse">
             <form method="get" class="row g-3 align-items-end filter-form-grid" id="dashboardFilterForm">
                 <div class="col-12">
@@ -823,18 +828,12 @@
 
                 <div class="col-12 d-flex flex-wrap justify-content-between align-items-center gap-3 mt-2">
                     <div class="d-flex flex-wrap gap-2">
-                        <span class="chip chip-muted">Run: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span>
-
                         @if (activeFilters.Any())
                         {
                             @foreach (var filter in activeFilters)
                             {
                                 <span class="chip">@filter.Key: <strong>@filter.Value</strong></span>
                             }
-                        }
-                        else
-                        {
-                            <span class="chip chip-muted">Only the selected lab is applied</span>
                         }
                     </div>
                     <div class="d-flex flex-wrap gap-2">

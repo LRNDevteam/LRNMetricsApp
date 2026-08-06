@@ -51,7 +51,7 @@
 
 <li class="nav-item">
     <a class="nav-link" asp-controller="ReportBoard" asp-action="Index">
-        <i class="bi bi-grid-3x3-gap-fill"></i> Home Dashboard
+        <i class="bi bi-grid-3x3-gap-fill"></i> Report Board
     </a>
 </li>
 
@@ -64,11 +64,8 @@
     </li>
 }
 
-<li class="nav-item">
-    <a class="nav-link" asp-controller="Dashboard" asp-action="Index">
-        <i class="bi bi-speedometer2"></i> Revenue Dashboard
-    </a>
-</li>
+@* Revenue Dashboard removed from the menu; the page is still reachable (e.g. the Report Board
+   lab cards' "Revenue dashboard" button). Report Board is now the landing/home page. *@
 
 <li class="nav-item dropdown">
     <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">

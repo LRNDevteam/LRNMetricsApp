@@ -36,95 +36,95 @@ const string DenialWorkflowLocalDevCorsPolicy = "DenialWorkflowLocalDevCors";
 // startup independent of that external service while retaining normal production logging.
 if (builder.Environment.IsDevelopment())
 {
-	builder.Logging.ClearProviders();
-	builder.Logging.AddConsole();
-	builder.Logging.AddDebug();
+    builder.Logging.ClearProviders();
+    builder.Logging.AddConsole();
+    builder.Logging.AddDebug();
 }
 
 // Local React/Vite runs on https://localhost:5173 and calls MVC through the
 // project or IIS Express HTTPS ports (44350/44351/57996).
 // For fetch(..., credentials: "include") the auth cookie must be SameSite=None and Secure.
 var useWorkflowCrossOriginCookie = builder.Environment.IsDevelopment()
-	|| builder.Configuration.GetValue<bool>("DenialWorkflowAuth:UseCrossOriginCookies");
+    || builder.Configuration.GetValue<bool>("DenialWorkflowAuth:UseCrossOriginCookies");
 
 // ── File logging ─────────────────────────────────────────────────
 // Writes Warning+ logs (DB errors, crashes) to rolling daily text files.
 var fileLogSection = builder.Configuration.GetSection("Logging:File");
 
 var configuredLogDir = builder.Environment.IsDevelopment()
-	? Path.Combine(AppContext.BaseDirectory, "Logs")
-	: fileLogSection["LogDirectory"];
+    ? Path.Combine(AppContext.BaseDirectory, "Logs")
+    : fileLogSection["LogDirectory"];
 var resolvedLogDir = string.IsNullOrWhiteSpace(configuredLogDir)
-	? Path.Combine(AppContext.BaseDirectory, "Logs")
-	: (Path.IsPathRooted(configuredLogDir)
-		? configuredLogDir
-		: Path.Combine(AppContext.BaseDirectory, configuredLogDir));
+    ? Path.Combine(AppContext.BaseDirectory, "Logs")
+    : (Path.IsPathRooted(configuredLogDir)
+        ? configuredLogDir
+        : Path.Combine(AppContext.BaseDirectory, configuredLogDir));
 
 var fileLogOptions = new FileLoggerOptions
 {
-	LogDirectory = resolvedLogDir,
-	MinLevel = Enum.TryParse<LogLevel>(fileLogSection["LogLevel"], true, out var lvl)
-		? lvl
-		: LogLevel.Warning,
-	ProductionExcelSplitMinLevel = Enum.TryParse<LogLevel>(fileLogSection["ProductionExcelSplitLogLevel"], true, out var splitLvl)
-		? splitLvl
-		: LogLevel.Information,
-	RetainDays = int.TryParse(fileLogSection["RetainDays"], out var rd)
-		? rd
-		: 30
+    LogDirectory = resolvedLogDir,
+    MinLevel = Enum.TryParse<LogLevel>(fileLogSection["LogLevel"], true, out var lvl)
+        ? lvl
+        : LogLevel.Warning,
+    ProductionExcelSplitMinLevel = Enum.TryParse<LogLevel>(fileLogSection["ProductionExcelSplitLogLevel"], true, out var splitLvl)
+        ? splitLvl
+        : LogLevel.Information,
+    RetainDays = int.TryParse(fileLogSection["RetainDays"], out var rd)
+        ? rd
+        : 30
 };
 
 try
 {
-	builder.Logging.AddProvider(new FileLoggerProvider(fileLogOptions));
+    builder.Logging.AddProvider(new FileLoggerProvider(fileLogOptions));
 }
 catch (Exception ex)
 {
-	// Do not fail app startup because custom file logger failed.
-	Console.Error.WriteLine($"File logger initialization failed: {ex}");
+    // Do not fail app startup because custom file logger failed.
+    Console.Error.WriteLine($"File logger initialization failed: {ex}");
 }
 
 // Bind the "LabConfig" section from appsettings.json.
 var labConfigOptions = builder.Configuration
-	.GetSection(LabConfigOptions.Section)
-	.Get<LabConfigOptions>() ?? new LabConfigOptions();
+    .GetSection(LabConfigOptions.Section)
+    .Get<LabConfigOptions>() ?? new LabConfigOptions();
 
 // Temporary startup logger helpers
 void LogStartupError(string message, Exception? ex = null)
 {
-	try
-	{
-		var logDir = fileLogOptions.LogDirectory;
-		if (!Path.IsPathRooted(logDir))
-		{
-			logDir = Path.Combine(AppContext.BaseDirectory, logDir);
-		}
+    try
+    {
+        var logDir = fileLogOptions.LogDirectory;
+        if (!Path.IsPathRooted(logDir))
+        {
+            logDir = Path.Combine(AppContext.BaseDirectory, logDir);
+        }
 
-		Directory.CreateDirectory(logDir);
+        Directory.CreateDirectory(logDir);
 
-		var logFile = Path.Combine(logDir, $"startup-{DateTime.Now:yyyyMMdd}.log");
-		var lines = new List<string>
-		{
-			new string('=', 120),
-			$"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}"
-		};
+        var logFile = Path.Combine(logDir, $"startup-{DateTime.Now:yyyyMMdd}.log");
+        var lines = new List<string>
+        {
+            new string('=', 120),
+            $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}"
+        };
 
-		if (ex != null)
-		{
-			lines.Add(ex.ToString());
-		}
+        if (ex != null)
+        {
+            lines.Add(ex.ToString());
+        }
 
-		File.AppendAllLines(logFile, lines);
-	}
-	catch
-	{
-		// Do not crash startup because logging failed.
-	}
+        File.AppendAllLines(logFile, lines);
+    }
+    catch
+    {
+        // Do not crash startup because logging failed.
+    }
 }
 
 void LogStartupWarning(string message)
 {
-	LogStartupError("WARNING: " + message);
+    LogStartupError("WARNING: " + message);
 }
 
 // Load each lab's dedicated JSON file from the shared config folder.
@@ -140,75 +140,75 @@ var skippedLabNames = new List<string>();
 var labNamesToLoad = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 foreach (var labName in labConfigOptions.Labs ?? Enumerable.Empty<string>())
 {
-	if (!string.IsNullOrWhiteSpace(labName)) labNamesToLoad.Add(labName);
+    if (!string.IsNullOrWhiteSpace(labName)) labNamesToLoad.Add(labName);
 }
 foreach (var lab in labConfigOptions.LabsID ?? new List<LabIdInfo>())
 {
-	if (!string.IsNullOrWhiteSpace(lab.Name)) labNamesToLoad.Add(lab.Name);
+    if (!string.IsNullOrWhiteSpace(lab.Name)) labNamesToLoad.Add(lab.Name);
 }
 
 if (labNamesToLoad.Count == 0)
 {
-	LogStartupWarning("No labs were configured to load. Configure LabConfig:Labs or LabConfig:LabsID in appsettings.json.");
+    LogStartupWarning("No labs were configured to load. Configure LabConfig:Labs or LabConfig:LabsID in appsettings.json.");
 }
 
 foreach (var labName in labNamesToLoad)
 {
-	var filePath = Path.Combine(labConfigOptions.LabConfigFolder ?? string.Empty, $"{labName}.json");
+    var filePath = Path.Combine(labConfigOptions.LabConfigFolder ?? string.Empty, $"{labName}.json");
 
-	if (!File.Exists(filePath))
-	{
-		LogStartupWarning($"Lab config file not found for lab '{labName}'. Expected path: {filePath}");
-		skippedLabNames.Add(labName);
-		continue;
-	}
+    if (!File.Exists(filePath))
+    {
+        LogStartupWarning($"Lab config file not found for lab '{labName}'. Expected path: {filePath}");
+        skippedLabNames.Add(labName);
+        continue;
+    }
 
-	try
-	{
-		// Validate JSON first so a malformed file does not crash the whole app.
-		var jsonText = File.ReadAllText(filePath);
-		using var _ = System.Text.Json.JsonDocument.Parse(jsonText);
+    try
+    {
+        // Validate JSON first so a malformed file does not crash the whole app.
+        var jsonText = File.ReadAllText(filePath);
+        using var _ = System.Text.Json.JsonDocument.Parse(jsonText);
 
-		builder.Configuration.AddJsonFile(filePath, optional: false, reloadOnChange: true);
-		validLabNames.Add(labName);
-	}
-	catch (System.Text.Json.JsonException jsonEx)
-	{
-		LogStartupError(
-			$"Invalid JSON in lab config file for lab '{labName}'. File: {filePath}",
-			jsonEx);
+        builder.Configuration.AddJsonFile(filePath, optional: false, reloadOnChange: true);
+        validLabNames.Add(labName);
+    }
+    catch (System.Text.Json.JsonException jsonEx)
+    {
+        LogStartupError(
+            $"Invalid JSON in lab config file for lab '{labName}'. File: {filePath}",
+            jsonEx);
 
-		skippedLabNames.Add(labName);
-	}
-	catch (FormatException formatEx)
-	{
-		LogStartupError(
-			$"Format error while loading lab config file for lab '{labName}'. File: {filePath}",
-			formatEx);
+        skippedLabNames.Add(labName);
+    }
+    catch (FormatException formatEx)
+    {
+        LogStartupError(
+            $"Format error while loading lab config file for lab '{labName}'. File: {filePath}",
+            formatEx);
 
-		skippedLabNames.Add(labName);
-	}
-	catch (InvalidDataException dataEx)
-	{
-		LogStartupError(
-			$"Invalid data while loading lab config file for lab '{labName}'. File: {filePath}",
-			dataEx);
+        skippedLabNames.Add(labName);
+    }
+    catch (InvalidDataException dataEx)
+    {
+        LogStartupError(
+            $"Invalid data while loading lab config file for lab '{labName}'. File: {filePath}",
+            dataEx);
 
-		skippedLabNames.Add(labName);
-	}
-	catch (Exception ex)
-	{
-		LogStartupError(
-			$"Unexpected error while loading lab config file for lab '{labName}'. File: {filePath}",
-			ex);
+        skippedLabNames.Add(labName);
+    }
+    catch (Exception ex)
+    {
+        LogStartupError(
+            $"Unexpected error while loading lab config file for lab '{labName}'. File: {filePath}",
+            ex);
 
-		skippedLabNames.Add(labName);
-	}
+        skippedLabNames.Add(labName);
+    }
 }
 
 if (skippedLabNames.Count > 0)
 {
-	LogStartupWarning($"Skipped lab configs: {string.Join(", ", skippedLabNames)}");
+    LogStartupWarning($"Skipped lab configs: {string.Join(", ", skippedLabNames)}");
 }
 
 // Re-read configuration after all valid lab files have been added.
@@ -222,29 +222,29 @@ var labSettings = new LabSettings();
 
 void RebuildLabSettings()
 {
-	// Replace the dictionary reference atomically (do not mutate in-place).
-	labSettings.Labs = validLabNames.ToDictionary(
-		labName => labName,
-		labName => configuration.GetSection(labName).Get<LabCsvConfig>() ?? new LabCsvConfig(),
-		StringComparer.OrdinalIgnoreCase);
+    // Replace the dictionary reference atomically (do not mutate in-place).
+    labSettings.Labs = validLabNames.ToDictionary(
+        labName => labName,
+        labName => configuration.GetSection(labName).Get<LabCsvConfig>() ?? new LabCsvConfig(),
+        StringComparer.OrdinalIgnoreCase);
 }
 
 RebuildLabSettings();
 
 ChangeToken.OnChange(
-	() => ((IConfigurationRoot)configuration).GetReloadToken(),
-	() =>
-	{
-		try
-		{
-			RebuildLabSettings();
-			LogStartupWarning($"Lab config reloaded: {string.Join(", ", validLabNames)}");
-		}
-		catch (Exception ex)
-		{
-			LogStartupError("Failed to rebuild LabSettings after configuration reload.", ex);
-		}
-	});
+    () => ((IConfigurationRoot)configuration).GetReloadToken(),
+    () =>
+    {
+        try
+        {
+            RebuildLabSettings();
+            LogStartupWarning($"Lab config reloaded: {string.Join(", ", validLabNames)}");
+        }
+        catch (Exception ex)
+        {
+            LogStartupError("Failed to rebuild LabSettings after configuration reload.", ex);
+        }
+    });
 
 // ── Data Protection ─────────────────────────────────────────────────────────
 // IMPORTANT FOR IIS PUBLISHING:
@@ -260,95 +260,95 @@ ChangeToken.OnChange(
 
 static bool TryEnsureWritableDirectory(string path, out DirectoryInfo directory, out string? error)
 {
-	directory = new DirectoryInfo(path);
-	error = null;
+    directory = new DirectoryInfo(path);
+    error = null;
 
-	try
-	{
-		directory.Create();
+    try
+    {
+        directory.Create();
 
-		// Verify write permission now, during startup, instead of failing later
-		// when the Login form tries to create an antiforgery token.
-		var testFile = Path.Combine(directory.FullName, $".__write_test_{Guid.NewGuid():N}.tmp");
-		File.WriteAllText(testFile, "ok");
-		File.Delete(testFile);
+        // Verify write permission now, during startup, instead of failing later
+        // when the Login form tries to create an antiforgery token.
+        var testFile = Path.Combine(directory.FullName, $".__write_test_{Guid.NewGuid():N}.tmp");
+        File.WriteAllText(testFile, "ok");
+        File.Delete(testFile);
 
-		return true;
-	}
-	catch (Exception ex)
-	{
-		error = ex.Message;
-		return false;
-	}
+        return true;
+    }
+    catch (Exception ex)
+    {
+        error = ex.Message;
+        return false;
+    }
 }
 
 var configuredDpKeysPath = builder.Configuration["DataProtection:KeysPath"];
 
 var preferredDpKeysPath = string.IsNullOrWhiteSpace(configuredDpKeysPath)
-	? Path.Combine(
-		Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-		"LRNMetrics",
-		"DataProtectionKeys")
-	: (Path.IsPathRooted(configuredDpKeysPath)
-		? configuredDpKeysPath
-		: Path.Combine(AppContext.BaseDirectory, configuredDpKeysPath));
+    ? Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "LRNMetrics",
+        "DataProtectionKeys")
+    : (Path.IsPathRooted(configuredDpKeysPath)
+        ? configuredDpKeysPath
+        : Path.Combine(AppContext.BaseDirectory, configuredDpKeysPath));
 
 if (!TryEnsureWritableDirectory(preferredDpKeysPath, out var dpKeysDir, out var dpError))
 {
-	LogStartupWarning($"DataProtection keys path is not writable: {preferredDpKeysPath}. Error: {dpError}");
+    LogStartupWarning($"DataProtection keys path is not writable: {preferredDpKeysPath}. Error: {dpError}");
 
-	// Fallback keeps the application alive even when the configured IIS folder has
-	// no permission. This prevents the login page from crashing. For best stability
-	// across app-pool recycles, fix folder permission and use ProgramData path.
-	var fallbackDpKeysPath = Path.Combine(AppContext.BaseDirectory, "App_Data", "DataProtectionKeys");
+    // Fallback keeps the application alive even when the configured IIS folder has
+    // no permission. This prevents the login page from crashing. For best stability
+    // across app-pool recycles, fix folder permission and use ProgramData path.
+    var fallbackDpKeysPath = Path.Combine(AppContext.BaseDirectory, "App_Data", "DataProtectionKeys");
 
-	if (!TryEnsureWritableDirectory(fallbackDpKeysPath, out dpKeysDir, out var fallbackError))
-	{
-		throw new InvalidOperationException(
-			$"DataProtection key storage is not writable. Preferred path: '{preferredDpKeysPath}' ({dpError}). " +
-			$"Fallback path: '{fallbackDpKeysPath}' ({fallbackError}). " +
-			"Grant Modify permission to the IIS AppPool identity or set DataProtection:KeysPath to a writable folder.");
-	}
+    if (!TryEnsureWritableDirectory(fallbackDpKeysPath, out dpKeysDir, out var fallbackError))
+    {
+        throw new InvalidOperationException(
+            $"DataProtection key storage is not writable. Preferred path: '{preferredDpKeysPath}' ({dpError}). " +
+            $"Fallback path: '{fallbackDpKeysPath}' ({fallbackError}). " +
+            "Grant Modify permission to the IIS AppPool identity or set DataProtection:KeysPath to a writable folder.");
+    }
 
-	LogStartupWarning($"DataProtection keys path fallback is being used: {dpKeysDir.FullName}");
+    LogStartupWarning($"DataProtection keys path fallback is being used: {dpKeysDir.FullName}");
 }
 else
 {
-	LogStartupWarning($"DataProtection keys path: {dpKeysDir.FullName}");
+    LogStartupWarning($"DataProtection keys path: {dpKeysDir.FullName}");
 }
 
 builder.Services
-	.AddDataProtection()
-	.PersistKeysToFileSystem(dpKeysDir)
-	.SetApplicationName("LRNMetricsDashboard");
+    .AddDataProtection()
+    .PersistKeysToFileSystem(dpKeysDir)
+    .SetApplicationName("LRNMetricsDashboard");
 
 builder.Services.AddAntiforgery(options =>
 {
-	//<<<<<<< HEAD
-	//    options.Cookie.Name         = "LRN.Antiforgery";
-	//    options.Cookie.SameSite     = SameSiteMode.Lax;
-	//    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
-	//    options.Cookie.HttpOnly     = true;
-	//=======
-	//	options.Cookie.Name = "LRN.Antiforgery";
-	//	options.Cookie.SameSite = builder.Environment.IsDevelopment() ? SameSiteMode.Lax : SameSiteMode.None;
-		options.Cookie.Path = "/";
-	//	options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
-	//		? CookieSecurePolicy.SameAsRequest
-	//		: CookieSecurePolicy.Always;
-	//	options.Cookie.HttpOnly = true;
-	//>>>>>>> 23cf9fdcfbffecee7d6826a98b7baa4821a4bc13
+    //<<<<<<< HEAD
+    //    options.Cookie.Name         = "LRN.Antiforgery";
+    //    options.Cookie.SameSite     = SameSiteMode.Lax;
+    //    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+    //    options.Cookie.HttpOnly     = true;
+    //=======
+    //	options.Cookie.Name = "LRN.Antiforgery";
+    //	options.Cookie.SameSite = builder.Environment.IsDevelopment() ? SameSiteMode.Lax : SameSiteMode.None;
+    options.Cookie.Path = "/";
+    //	options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+    //		? CookieSecurePolicy.SameAsRequest
+    //		: CookieSecurePolicy.Always;
+    //	options.Cookie.HttpOnly = true;
+    //>>>>>>> 23cf9fdcfbffecee7d6826a98b7baa4821a4bc13
 
-	options.Cookie.Name = "LRN.Antiforgery";
-	// Lax works for same-site forms on local IIS (http://localhost/LRNMetrics) and
-	// HTTPS production. SameSite=None requires a Secure cookie and breaks plain HTTP.
-	options.Cookie.SameSite = SameSiteMode.Lax;
-	options.Cookie.Path = "/";
-	// SameAsRequest: do not require SSL to render antiforgery tokens.
-	// CookieSecurePolicy.Always throws InvalidOperationException on Login when the
-	// site is published as Production but opened over HTTP (local IIS).
-	options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
-	options.Cookie.HttpOnly = true;
+    options.Cookie.Name = "LRN.Antiforgery";
+    // Lax works for same-site forms on local IIS (http://localhost/LRNMetrics) and
+    // HTTPS production. SameSite=None requires a Secure cookie and breaks plain HTTP.
+    options.Cookie.SameSite = SameSiteMode.Lax;
+    options.Cookie.Path = "/";
+    // SameAsRequest: do not require SSL to render antiforgery tokens.
+    // CookieSecurePolicy.Always throws InvalidOperationException on Login when the
+    // site is published as Production but opened over HTTP (local IIS).
+    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+    options.Cookie.HttpOnly = true;
 });
 
 // ── Forwarded Headers (IIS reverse-proxy / SSL termination) ────────────────────
@@ -358,22 +358,22 @@ builder.Services.AddAntiforgery(options =>
 // This also covers out-of-process (reverse-proxy) deployments.
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
-	options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-	// Trust loopback (127.0.0.1 / ::1) — the address IIS uses when forwarding internally.
-	foreach (var proxy in builder.Configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>() ?? Array.Empty<string>())
-	{
-		if (IPAddress.TryParse(proxy, out var address)) options.KnownProxies.Add(address);
-	}
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    // Trust loopback (127.0.0.1 / ::1) — the address IIS uses when forwarding internally.
+    foreach (var proxy in builder.Configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>() ?? Array.Empty<string>())
+    {
+        if (IPAddress.TryParse(proxy, out var address)) options.KnownProxies.Add(address);
+    }
 });
 
 var useMockData = builder.Configuration.GetValue<bool>("DashboardData:UseMockData");
 if (useMockData)
 {
-	builder.Services.AddSingleton<IDenialRecordRepository, MockDenialRecordRepository>();
+    builder.Services.AddSingleton<IDenialRecordRepository, MockDenialRecordRepository>();
 }
 else
 {
-	builder.Services.AddScoped<IDenialRecordRepository, SqlDenialRecordRepository>();
+    builder.Services.AddScoped<IDenialRecordRepository, SqlDenialRecordRepository>();
 }
 
 builder.Services.AddSingleton(labSettings);
@@ -398,18 +398,18 @@ builder.Services.AddScoped<IAugustusProductionSummaryRepository, SqlAugustusProd
 // One SqlLabProductionSummaryRepository per lab, keyed by the lab name used in the LabSettings config.
 builder.Services.AddSingleton<IReadOnlyDictionary<string, ILabProductionSummaryRepository>>(sp =>
 {
-	var logger = sp.GetRequiredService<ILogger<SqlLabProductionSummaryRepository>>();
-	return new Dictionary<string, ILabProductionSummaryRepository>(StringComparer.OrdinalIgnoreCase)
-	{
-		["Certus"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Certus),
-		["Cove"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Cove),
-		["Elixir"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Elixir),
-		["PCRLabsofAmerica"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.PCRLabsofAmerica),
-		["Beech_Tree"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.BeechTree),
-		["Rising_Tides"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.RisingTides),
-		["Phi_Life"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.PhiLife),
-		["Inhealth_DTR"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.InHealthDTR),
-	};
+    var logger = sp.GetRequiredService<ILogger<SqlLabProductionSummaryRepository>>();
+    return new Dictionary<string, ILabProductionSummaryRepository>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Certus"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Certus),
+        ["Cove"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Cove),
+        ["Elixir"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.Elixir),
+        ["PCRLabsofAmerica"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.PCRLabsofAmerica),
+        ["Beech_Tree"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.BeechTree),
+        ["Rising_Tides"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.RisingTides),
+        ["Phi_Life"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.PhiLife),
+        ["Inhealth_DTR"] = new SqlLabProductionSummaryRepository(logger, LabSummaryTableConfig.InHealthDTR),
+    };
 });
 builder.Services.AddScoped<IClaimLineRepository, SqlClaimLineRepository>();
 builder.Services.AddScoped<ICptSearchRepository, SqlCptSearchRepository>();
@@ -419,7 +419,7 @@ builder.Services.AddScoped<PayerPolicyValidationService>();
 
 // Async report queue (UserReqReports per lab DB; generation runs in LRN.ReportWorker)
 builder.Services.AddSingleton<LRN.ReportQueue.Shared.IReportRequestRepository,
-	LRN.ReportQueue.Shared.SqlReportRequestRepository>();
+    LRN.ReportQueue.Shared.SqlReportRequestRepository>();
 builder.Services.AddScoped<UserReportService>();
 
 builder.Services.AddScoped<ILisSummaryRepository, SqlLisSummaryRepository>();
@@ -452,20 +452,20 @@ builder.Services.AddHttpClient<IDenialWorkflowApiClient, DenialWorkflowApiClient
 // Denial Dashboard data now comes from LRN.ReportsApi. Long timeout because GetByLab returns
 // the full task-board set (can be tens of thousands of rows) for in-memory aggregation.
 builder.Services
-	.AddHttpClient<IDenialDashboardApiClient, DenialDashboardApiClient>()
-	.ConfigureHttpClient(client => client.Timeout = TimeSpan.FromMinutes(10));
+    .AddHttpClient<IDenialDashboardApiClient, DenialDashboardApiClient>()
+    .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromMinutes(10));
 builder.Services
-	.AddHttpClient<IMasterValuesApiClient, MasterValuesApiClient>()
-	.ConfigureHttpClient(client => client.Timeout = TimeSpan.FromMinutes(10));
+    .AddHttpClient<IMasterValuesApiClient, MasterValuesApiClient>()
+    .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromMinutes(10));
 // Analytics reference lists (Modes / Meridian) served by LRN.ReportsApi.
 builder.Services
-	.AddHttpClient<ILabAnalyticsApiClient, LabAnalyticsApiClient>()
-	.ConfigureHttpClient(client => client.Timeout = TimeSpan.FromMinutes(2));
+    .AddHttpClient<ILabAnalyticsApiClient, LabAnalyticsApiClient>()
+    .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromMinutes(2));
 // Report Control Board (report workflow tracker). Short timeout: this is a landing page, and a
 // slow tracker must show the error card quickly rather than hold the page.
 builder.Services
-	.AddHttpClient<IReportBoardApiClient, ReportBoardApiClient>()
-	.ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(15));
+    .AddHttpClient<IReportBoardApiClient, ReportBoardApiClient>()
+    .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<ILabNameResolver, LabNameResolver>();
 
 // Dynamic role-based navbar (Menu Master + Role Menu Mapping via LRN.ReportsApi).
@@ -473,201 +473,201 @@ builder.Services.AddSingleton<ILabNameResolver, LabNameResolver>();
 // A slow/unreachable Reports API must fail fast so pages keep rendering (menu falls back
 // to the static navbar and access checks fail open).
 builder.Services
-	.AddHttpClient<IMenuApiClient, MenuApiClient>()
-	.ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(
-		builder.Configuration.GetValue<int?>("DenialWorkflowApi:MenuTimeoutSeconds") ?? 5));
+    .AddHttpClient<IMenuApiClient, MenuApiClient>()
+    .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(
+        builder.Configuration.GetValue<int?>("DenialWorkflowApi:MenuTimeoutSeconds") ?? 5));
 builder.Services.AddScoped<IMenuService, MenuService>();
 builder.Services.AddScoped<MenuAccessFilter>();
 
 // Allow local Vite React dev server to call MVC AuthToken endpoint with cookies.
 // Production stays same-origin, but these origins are useful while debugging React locally.
 var denialWorkflowCorsOrigins = builder.Configuration
-	.GetSection("DenialWorkflowCors:AllowedOrigins")
-	.Get<string[]>()
-	?.Where(x => !string.IsNullOrWhiteSpace(x))
-	.Select(x => x.Trim().TrimEnd('/'))
-	.Distinct(StringComparer.OrdinalIgnoreCase)
-	.ToArray()
-	?? new[]
-	{
-		"http://localhost:5173",
-		"https://localhost:5173",
-		"http://127.0.0.1:5173",
-		"https://127.0.0.1:5173"
-	};
+    .GetSection("DenialWorkflowCors:AllowedOrigins")
+    .Get<string[]>()
+    ?.Where(x => !string.IsNullOrWhiteSpace(x))
+    .Select(x => x.Trim().TrimEnd('/'))
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray()
+    ?? new[]
+    {
+        "http://localhost:5173",
+        "https://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://127.0.0.1:5173"
+    };
 
 builder.Services.AddCors(options =>
 {
-	options.AddPolicy(DenialWorkflowLocalDevCorsPolicy, policy =>
-	{
-		policy
-			.WithOrigins(denialWorkflowCorsOrigins)
-			.AllowAnyHeader()
-			.AllowAnyMethod()
-			.AllowCredentials();
-	});
+    options.AddPolicy(DenialWorkflowLocalDevCorsPolicy, policy =>
+    {
+        policy
+            .WithOrigins(denialWorkflowCorsOrigins)
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
+    });
 });
 
 builder.Services.AddRateLimiter(options =>
 {
-	options.AddPolicy("login", context =>
-		RateLimitPartition.GetFixedWindowLimiter(
-			$"{context.Connection.RemoteIpAddress}|{(context.Request.HasFormContentType ? context.Request.Form["UserName"].ToString().Trim().ToUpperInvariant() : string.Empty)}",
-			_ => new FixedWindowRateLimiterOptions
-			{
-				PermitLimit = builder.Configuration.GetValue<int?>("Security:LoginRateLimit:PermitLimit") ?? 5,
-				Window = TimeSpan.FromMinutes(builder.Configuration.GetValue<int?>("Security:LoginRateLimit:WindowMinutes") ?? 1),
-				QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-				QueueLimit = 0
-			}));
-	options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("login", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            $"{context.Connection.RemoteIpAddress}|{(context.Request.HasFormContentType ? context.Request.Form["UserName"].ToString().Trim().ToUpperInvariant() : string.Empty)}",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = builder.Configuration.GetValue<int?>("Security:LoginRateLimit:PermitLimit") ?? 5,
+                Window = TimeSpan.FromMinutes(builder.Configuration.GetValue<int?>("Security:LoginRateLimit:WindowMinutes") ?? 1),
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = 0
+            }));
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 });
 
 // Compress large HTML responses (Coding Summary renders all tabs in one page;
 // gzip/brotli typically shrinks it 10-20x, cutting transfer time drastically).
 builder.Services.AddResponseCompression(options =>
 {
-	options.EnableForHttps = true;
+    options.EnableForHttps = true;
 });
 
 builder.Services.AddControllersWithViews(options =>
 {
-	options.Filters.AddService<AppUsageAuditFilter>();
-	// Server-side menu enforcement (FR-9): blocks direct URLs to menu-managed
-	// routes the user's role has no mapping for. Non-managed routes pass through.
-	options.Filters.AddService<MenuAccessFilter>();
-	// Require authenticated user for every action by default.
-	// Use [AllowAnonymous] on Account/Login etc.
-	var policy = new AuthorizationPolicyBuilder()
-		.RequireAuthenticatedUser()
-		.Build();
-	options.Filters.Add(new AuthorizeFilter(policy));
+    options.Filters.AddService<AppUsageAuditFilter>();
+    // Server-side menu enforcement (FR-9): blocks direct URLs to menu-managed
+    // routes the user's role has no mapping for. Non-managed routes pass through.
+    options.Filters.AddService<MenuAccessFilter>();
+    // Require authenticated user for every action by default.
+    // Use [AllowAnonymous] on Account/Login etc.
+    var policy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
+    options.Filters.Add(new AuthorizeFilter(policy));
 });
 
 builder.Services.AddRequestTimeouts();
 
 // ── Cookie authentication ─────────────────────────────────────────
 builder.Services
-	//<<<<<<< HEAD
-	//    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-	//    .AddCookie(options =>
-	//    {
-	//        options.LoginPath        = "/Account/Login";
-	//        options.LogoutPath       = "/Account/Logout";
-	//        options.AccessDeniedPath = "/Account/AccessDenied";
-	//        options.ExpireTimeSpan   = TimeSpan.FromHours(8);
-	//        options.SlidingExpiration = true;
-	//        options.Cookie.Name     = "LRN.Auth";
-	//        options.Cookie.HttpOnly  = true;
-	//        options.Cookie.SameSite  = SameSiteMode.Lax;
-	//        // SameAsRequest: Secure flag is added only when the connection is already HTTPS.
-	//        // Using Always on an HTTP-only IIS server caused Chrome to silently drop the
-	//        // auth cookie after login, so every request was redirected back to the login page.
-	//        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
-	//=======
-	.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-	.AddCookie(options =>
-	{
-		options.LoginPath = "/Account/Login";
-		options.LogoutPath = "/Account/Logout";
-		options.AccessDeniedPath = "/Account/AccessDenied";
-		options.ExpireTimeSpan = TimeSpan.FromHours(8);
-		options.SlidingExpiration = true;
-		options.Cookie.Name = "LRN.Auth";
-		options.Cookie.HttpOnly = true;
-		options.Cookie.SameSite = useWorkflowCrossOriginCookie ? SameSiteMode.None : SameSiteMode.Lax;
-		options.Cookie.Path = "/";
-		// Required for local React/Vite cross-origin AuthToken fetch.
-		// If this is SameAsRequest/Lax in Development, Chrome will not send LRN.Auth
-		// from https://localhost:5173 to https://localhost:44350, causing login loops.
-		options.Cookie.SecurePolicy = useWorkflowCrossOriginCookie
-			? CookieSecurePolicy.Always
-			// SameAsRequest for normal same-site host: works on HTTPS prod and HTTP local IIS.
-			// Always on HTTP local Production drops the auth cookie after login (Chrome).
-			: CookieSecurePolicy.SameAsRequest;
+    //<<<<<<< HEAD
+    //    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    //    .AddCookie(options =>
+    //    {
+    //        options.LoginPath        = "/Account/Login";
+    //        options.LogoutPath       = "/Account/Logout";
+    //        options.AccessDeniedPath = "/Account/AccessDenied";
+    //        options.ExpireTimeSpan   = TimeSpan.FromHours(8);
+    //        options.SlidingExpiration = true;
+    //        options.Cookie.Name     = "LRN.Auth";
+    //        options.Cookie.HttpOnly  = true;
+    //        options.Cookie.SameSite  = SameSiteMode.Lax;
+    //        // SameAsRequest: Secure flag is added only when the connection is already HTTPS.
+    //        // Using Always on an HTTP-only IIS server caused Chrome to silently drop the
+    //        // auth cookie after login, so every request was redirected back to the login page.
+    //        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+    //=======
+    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
+    {
+        options.LoginPath = "/Account/Login";
+        options.LogoutPath = "/Account/Logout";
+        options.AccessDeniedPath = "/Account/AccessDenied";
+        options.ExpireTimeSpan = TimeSpan.FromHours(8);
+        options.SlidingExpiration = true;
+        options.Cookie.Name = "LRN.Auth";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = useWorkflowCrossOriginCookie ? SameSiteMode.None : SameSiteMode.Lax;
+        options.Cookie.Path = "/";
+        // Required for local React/Vite cross-origin AuthToken fetch.
+        // If this is SameAsRequest/Lax in Development, Chrome will not send LRN.Auth
+        // from https://localhost:5173 to https://localhost:44350, causing login loops.
+        options.Cookie.SecurePolicy = useWorkflowCrossOriginCookie
+            ? CookieSecurePolicy.Always
+            // SameAsRequest for normal same-site host: works on HTTPS prod and HTTP local IIS.
+            // Always on HTTP local Production drops the auth cookie after login (Chrome).
+            : CookieSecurePolicy.SameAsRequest;
 
-		// ── ReturnUrl loop guard ──────────────────────────────────────────────
-		// Prevent the error and login pages from being embedded as a ReturnUrl.
-		// Without this guard, a failing error page causes an exponentially growing
-		// ReturnUrl query string (/Home/Error?ReturnUrl=/Home/Error?...) until IIS
-		// rejects the request with HTTP 404.15 (query string too long).
-		//
-		// CRITICAL: when the app is hosted as an IIS sub-application (e.g. /LRNMetrics),
-		// every redirect URL MUST be prefixed with Request.PathBase, otherwise IIS routes
-		// the redirect to the root site and returns 404.0 (file not found).
-		options.Events = new CookieAuthenticationEvents
-		{
-			OnRedirectToLogin = ctx =>
-			{
-				var returnUrl = ctx.Properties.RedirectUri ?? string.Empty;
+        // ── ReturnUrl loop guard ──────────────────────────────────────────────
+        // Prevent the error and login pages from being embedded as a ReturnUrl.
+        // Without this guard, a failing error page causes an exponentially growing
+        // ReturnUrl query string (/Home/Error?ReturnUrl=/Home/Error?...) until IIS
+        // rejects the request with HTTP 404.15 (query string too long).
+        //
+        // CRITICAL: when the app is hosted as an IIS sub-application (e.g. /LRNMetrics),
+        // every redirect URL MUST be prefixed with Request.PathBase, otherwise IIS routes
+        // the redirect to the root site and returns 404.0 (file not found).
+        options.Events = new CookieAuthenticationEvents
+        {
+            OnRedirectToLogin = ctx =>
+            {
+                var returnUrl = ctx.Properties.RedirectUri ?? string.Empty;
 
-				// A "safe" ReturnUrl is one that does NOT point at the error/login/logout
-				// pages — those would just trigger another redirect cycle.
-				var isSafeReturn =
-					!string.IsNullOrWhiteSpace(returnUrl)
-					&& !returnUrl.Contains("/Home/Error", StringComparison.OrdinalIgnoreCase)
-					&& !returnUrl.Contains("/Account/Login", StringComparison.OrdinalIgnoreCase)
-					&& !returnUrl.Contains("/Account/Logout", StringComparison.OrdinalIgnoreCase);
+                // A "safe" ReturnUrl is one that does NOT point at the error/login/logout
+                // pages — those would just trigger another redirect cycle.
+                var isSafeReturn =
+                    !string.IsNullOrWhiteSpace(returnUrl)
+                    && !returnUrl.Contains("/Home/Error", StringComparison.OrdinalIgnoreCase)
+                    && !returnUrl.Contains("/Account/Login", StringComparison.OrdinalIgnoreCase)
+                    && !returnUrl.Contains("/Account/Logout", StringComparison.OrdinalIgnoreCase);
 
-				// Build the login URL using PathBase so sub-app deployments (e.g. /LRNMetrics)
-				// work correctly. Without PathBase the redirect goes to the IIS root site.
-				var pathBase = ctx.Request.PathBase.HasValue ? ctx.Request.PathBase.Value : string.Empty;
-				var loginUri = $"{pathBase}{options.LoginPath}";
+                // Build the login URL using PathBase so sub-app deployments (e.g. /LRNMetrics)
+                // work correctly. Without PathBase the redirect goes to the IIS root site.
+                var pathBase = ctx.Request.PathBase.HasValue ? ctx.Request.PathBase.Value : string.Empty;
+                var loginUri = $"{pathBase}{options.LoginPath}";
 
-				if (isSafeReturn)
-				{
-					// Preserve the ReturnUrl exactly as the framework would have built it.
-					loginUri = $"{loginUri}?ReturnUrl={Uri.EscapeDataString(returnUrl)}";
-				}
+                if (isSafeReturn)
+                {
+                    // Preserve the ReturnUrl exactly as the framework would have built it.
+                    loginUri = $"{loginUri}?ReturnUrl={Uri.EscapeDataString(returnUrl)}";
+                }
 
-				ctx.Response.Redirect(loginUri);
-				return Task.CompletedTask;
-			},
+                ctx.Response.Redirect(loginUri);
+                return Task.CompletedTask;
+            },
 
-			// Business rule: never show the raw "Access Denied" page. An authenticated-but-
-			// unauthorized request (a stale session, or a denied action) is sent to the Metrics
-			// login page instead — a fresh login resolves the common stale-session case.
-			OnRedirectToAccessDenied = ctx =>
-			{
-				var returnUrl = ctx.Properties.RedirectUri ?? string.Empty;
-				var isSafeReturn =
-					!string.IsNullOrWhiteSpace(returnUrl)
-					&& !returnUrl.Contains("/Home/Error", StringComparison.OrdinalIgnoreCase)
-					&& !returnUrl.Contains("/Account/Login", StringComparison.OrdinalIgnoreCase)
-					&& !returnUrl.Contains("/Account/Logout", StringComparison.OrdinalIgnoreCase)
-					&& !returnUrl.Contains("/Account/AccessDenied", StringComparison.OrdinalIgnoreCase);
+            // Business rule: never show the raw "Access Denied" page. An authenticated-but-
+            // unauthorized request (a stale session, or a denied action) is sent to the Metrics
+            // login page instead — a fresh login resolves the common stale-session case.
+            OnRedirectToAccessDenied = ctx =>
+            {
+                var returnUrl = ctx.Properties.RedirectUri ?? string.Empty;
+                var isSafeReturn =
+                    !string.IsNullOrWhiteSpace(returnUrl)
+                    && !returnUrl.Contains("/Home/Error", StringComparison.OrdinalIgnoreCase)
+                    && !returnUrl.Contains("/Account/Login", StringComparison.OrdinalIgnoreCase)
+                    && !returnUrl.Contains("/Account/Logout", StringComparison.OrdinalIgnoreCase)
+                    && !returnUrl.Contains("/Account/AccessDenied", StringComparison.OrdinalIgnoreCase);
 
-				var pathBase = ctx.Request.PathBase.HasValue ? ctx.Request.PathBase.Value : string.Empty;
-				var loginUri = $"{pathBase}{options.LoginPath}";
-				if (isSafeReturn)
-				{
-					loginUri = $"{loginUri}?ReturnUrl={Uri.EscapeDataString(returnUrl)}";
-				}
+                var pathBase = ctx.Request.PathBase.HasValue ? ctx.Request.PathBase.Value : string.Empty;
+                var loginUri = $"{pathBase}{options.LoginPath}";
+                if (isSafeReturn)
+                {
+                    loginUri = $"{loginUri}?ReturnUrl={Uri.EscapeDataString(returnUrl)}";
+                }
 
-				ctx.Response.Redirect(loginUri);
-				return Task.CompletedTask;
-			},
-		};
-
-
+                ctx.Response.Redirect(loginUri);
+                return Task.CompletedTask;
+            },
+        };
 
 
-	});
+
+
+    });
 
 var app = builder.Build();
 
 // Log skipped labs into normal logger after DI is ready.
 if (skippedLabNames.Count > 0)
 {
-	var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
-	startupLogger.LogWarning("Some lab config files were skipped due to missing/invalid JSON: {Labs}", skippedLabNames);
+    var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+    startupLogger.LogWarning("Some lab config files were skipped due to missing/invalid JSON: {Labs}", skippedLabNames);
 }
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
 {
-	app.UseExceptionHandler("/Home/Error");
-	app.UseHsts();
+    app.UseExceptionHandler("/Home/Error");
+    app.UseHsts();
 }
 
 // ── Forwarded headers MUST be processed first ────────────────────────────────
@@ -687,61 +687,61 @@ app.Use(ApplySecurityHeadersMiddleware);
 // to the same URL so the next request gets fresh cookies issued by the current key ring.
 app.Use(async (context, next) =>
 {
-	try
-	{
-		await next();
-	}
-	catch (Exception ex) when (
-		ex is System.Security.Cryptography.CryptographicException
-		|| ex is Microsoft.AspNetCore.Antiforgery.AntiforgeryValidationException
-		|| ex.InnerException is System.Security.Cryptography.CryptographicException)
-	{
-		var staleCookieNames = context.Request.Cookies.Keys
-			.Where(k => k.StartsWith("LRN.", StringComparison.OrdinalIgnoreCase)
-					 || k.StartsWith(".AspNetCore.", StringComparison.OrdinalIgnoreCase))
-			.ToList();
+    try
+    {
+        await next();
+    }
+    catch (Exception ex) when (
+        ex is System.Security.Cryptography.CryptographicException
+        || ex is Microsoft.AspNetCore.Antiforgery.AntiforgeryValidationException
+        || ex.InnerException is System.Security.Cryptography.CryptographicException)
+    {
+        var staleCookieNames = context.Request.Cookies.Keys
+            .Where(k => k.StartsWith("LRN.", StringComparison.OrdinalIgnoreCase)
+                     || k.StartsWith(".AspNetCore.", StringComparison.OrdinalIgnoreCase))
+            .ToList();
 
-		foreach (var cookieName in staleCookieNames)
-			context.Response.Cookies.Delete(cookieName);
+        foreach (var cookieName in staleCookieNames)
+            context.Response.Cookies.Delete(cookieName);
 
-		var staleLogger = context.RequestServices.GetRequiredService<ILoggerFactory>()
-			.CreateLogger("StaleCookieRecovery");
-		staleLogger.LogWarning(ex,
-			"Stale auth/antiforgery cookie(s) cleared for {Path} (cookies: {Cookies}). Redirecting to retry.",
-			context.Request.Path, string.Join(",", staleCookieNames));
+        var staleLogger = context.RequestServices.GetRequiredService<ILoggerFactory>()
+            .CreateLogger("StaleCookieRecovery");
+        staleLogger.LogWarning(ex,
+            "Stale auth/antiforgery cookie(s) cleared for {Path} (cookies: {Cookies}). Redirecting to retry.",
+            context.Request.Path, string.Join(",", staleCookieNames));
 
-		if (!context.Response.HasStarted)
-		{
-			// Send the user back to the same URL so the request runs again with fresh cookies.
-			var pathBase = context.Request.PathBase.HasValue ? context.Request.PathBase.Value : string.Empty;
-			var path = context.Request.Path.HasValue ? context.Request.Path.Value : "/";
-			context.Response.Redirect($"{pathBase}{path}");
-		}
-	}
+        if (!context.Response.HasStarted)
+        {
+            // Send the user back to the same URL so the request runs again with fresh cookies.
+            var pathBase = context.Request.PathBase.HasValue ? context.Request.PathBase.Value : string.Empty;
+            var path = context.Request.Path.HasValue ? context.Request.Path.Value : "/";
+            context.Response.Redirect($"{pathBase}{path}");
+        }
+    }
 });
 
 
 // ── Global error logging (all environments) ─────────────────────
 app.Use(async (context, next) =>
 {
-	try
-	{
-		await next();
-	}
-	catch (Exception ex)
-	{
-		var logger = context.RequestServices.GetRequiredService<ILoggerFactory>()
-			.CreateLogger("UnhandledException");
+    try
+    {
+        await next();
+    }
+    catch (Exception ex)
+    {
+        var logger = context.RequestServices.GetRequiredService<ILoggerFactory>()
+            .CreateLogger("UnhandledException");
 
-		logger.LogCritical(ex,
-			"Unhandled exception on {Method} {Path}{Query} | TraceId={TraceId}",
-			context.Request.Method,
-			context.Request.Path,
-			context.Request.QueryString,
-			context.TraceIdentifier);
+        logger.LogCritical(ex,
+            "Unhandled exception on {Method} {Path}{Query} | TraceId={TraceId}",
+            context.Request.Method,
+            context.Request.Path,
+            context.Request.QueryString,
+            context.TraceIdentifier);
 
-		throw;
-	}
+        throw;
+    }
 });
 
 // ── Login antiforgery 400 self-healing ────────────────────────────────────────
@@ -758,33 +758,33 @@ app.Use(async (context, next) =>
 // fresh antiforgery token from the current key ring.
 app.Use(async (context, next) =>
 {
-	await next();
+    await next();
 
-	if (context.Response.StatusCode != StatusCodes.Status400BadRequest) return;
-	if (context.Response.HasStarted) return;
-	if (!HttpMethods.IsPost(context.Request.Method)) return;
+    if (context.Response.StatusCode != StatusCodes.Status400BadRequest) return;
+    if (context.Response.HasStarted) return;
+    if (!HttpMethods.IsPost(context.Request.Method)) return;
 
-	var path = context.Request.Path.Value ?? string.Empty;
-	if (!path.StartsWith("/Account/", StringComparison.OrdinalIgnoreCase)) return;
+    var path = context.Request.Path.Value ?? string.Empty;
+    if (!path.StartsWith("/Account/", StringComparison.OrdinalIgnoreCase)) return;
 
-	var staleCookieNames = context.Request.Cookies.Keys
-		.Where(k => k.StartsWith("LRN.", StringComparison.OrdinalIgnoreCase)
-				 || k.StartsWith(".AspNetCore.", StringComparison.OrdinalIgnoreCase))
-		.ToList();
+    var staleCookieNames = context.Request.Cookies.Keys
+        .Where(k => k.StartsWith("LRN.", StringComparison.OrdinalIgnoreCase)
+                 || k.StartsWith(".AspNetCore.", StringComparison.OrdinalIgnoreCase))
+        .ToList();
 
-	foreach (var cookieName in staleCookieNames)
-		context.Response.Cookies.Delete(cookieName);
+    foreach (var cookieName in staleCookieNames)
+        context.Response.Cookies.Delete(cookieName);
 
-	context.RequestServices.GetRequiredService<ILoggerFactory>()
-		.CreateLogger("LoginCookieRecovery")
-		.LogWarning(
-			"POST {Path} returned 400 (likely stale antiforgery/auth cookie after publish). " +
-			"Cleared {Count} cookie(s) [{Names}] and redirecting to login.",
-			path, staleCookieNames.Count, string.Join(",", staleCookieNames));
+    context.RequestServices.GetRequiredService<ILoggerFactory>()
+        .CreateLogger("LoginCookieRecovery")
+        .LogWarning(
+            "POST {Path} returned 400 (likely stale antiforgery/auth cookie after publish). " +
+            "Cleared {Count} cookie(s) [{Names}] and redirecting to login.",
+            path, staleCookieNames.Count, string.Join(",", staleCookieNames));
 
-	var pathBase = context.Request.PathBase.HasValue ? context.Request.PathBase.Value : string.Empty;
-	context.Response.Clear();
-	context.Response.Redirect($"{pathBase}/Account/Login");
+    var pathBase = context.Request.PathBase.HasValue ? context.Request.PathBase.Value : string.Empty;
+    context.Response.Clear();
+    context.Response.Redirect($"{pathBase}/Account/Login");
 });
 
 // HTTPS redirection: only useful when running standalone (Visual Studio / Kestrel).
@@ -793,7 +793,7 @@ app.Use(async (context, next) =>
 // cannot infer the port behind the reverse proxy. Disable it for production.
 if (app.Environment.IsDevelopment())
 {
-	app.UseHttpsRedirection();
+    app.UseHttpsRedirection();
 }
 app.UseResponseCompression();
 app.UseStaticFiles();
@@ -811,9 +811,9 @@ app.UseAuthorization();
 app.MapStaticAssets();
 
 app.MapControllerRoute(
-	name: "default",
-	pattern: "{controller=Home}/{action=Index}/{id?}")
-	.WithStaticAssets();
+    name: "default",
+    pattern: "{controller=ReportBoard}/{action=Index}/{id?}")
+    .WithStaticAssets();
 
 // Map attribute-routed controllers (e.g. HelpBotController -> /api/helpbot/*)
 app.MapControllers();
@@ -822,42 +822,42 @@ app.Run();
 
 static async Task ApplySecurityHeadersMiddleware(HttpContext context, Func<Task> next)
 {
-	context.Items["CspNonce"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16));
-	ApplySecurityHeaders(context);
-	await next();
+    context.Items["CspNonce"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16));
+    ApplySecurityHeaders(context);
+    await next();
 }
 
 static void ApplySecurityHeaders(HttpContext context)
 {
-	var environment = context.RequestServices.GetRequiredService<IWebHostEnvironment>();
-	// Local login can move between Vite, Kestrel, and IIS Express ports. Browsers
-	// validate every form redirect against form-action, so a fixed port list is
-	// fragile even when the initial POST target is present. form-action does not
-	// fall back to default-src: omit it only in Development and keep Production
-	// restricted to the origin that served the login page.
-	var formActionDirective = environment.IsDevelopment()
-		? string.Empty
-		: "form-action 'self'; ";
+    var environment = context.RequestServices.GetRequiredService<IWebHostEnvironment>();
+    // Local login can move between Vite, Kestrel, and IIS Express ports. Browsers
+    // validate every form redirect against form-action, so a fixed port list is
+    // fragile even when the initial POST target is present. form-action does not
+    // fall back to default-src: omit it only in Development and keep Production
+    // restricted to the origin that served the login page.
+    var formActionDirective = environment.IsDevelopment()
+        ? string.Empty
+        : "form-action 'self'; ";
 
-	var headers = context.Response.Headers;
-	headers["X-Content-Type-Options"] = "nosniff";
-	headers["X-Frame-Options"] = "SAMEORIGIN";
-	headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
-	headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()";
-	headers["Content-Security-Policy"] =
-		"default-src 'self'; " +
-		"base-uri 'self'; " +
-		"object-src 'none'; " +
-		"frame-ancestors 'self'; " +
-		formActionDirective +
-		"img-src 'self' data: blob:; " +
-		"font-src 'self' data:; " +
-		"style-src 'self' 'unsafe-inline'; " +
-		$"script-src 'self' 'nonce-{context.Items["CspNonce"]}'; " +
-		"connect-src 'self' http://localhost:* https://localhost:* ws://localhost:* wss://localhost:* http://127.0.0.1:* https://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:*";
+    var headers = context.Response.Headers;
+    headers["X-Content-Type-Options"] = "nosniff";
+    headers["X-Frame-Options"] = "SAMEORIGIN";
+    headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()";
+    headers["Content-Security-Policy"] =
+        "default-src 'self'; " +
+        "base-uri 'self'; " +
+        "object-src 'none'; " +
+        "frame-ancestors 'self'; " +
+        formActionDirective +
+        "img-src 'self' data: blob:; " +
+        "font-src 'self' data:; " +
+        "style-src 'self' 'unsafe-inline'; " +
+        $"script-src 'self' 'nonce-{context.Items["CspNonce"]}'; " +
+        "connect-src 'self' http://localhost:* https://localhost:* ws://localhost:* wss://localhost:* http://127.0.0.1:* https://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:*";
 
-	if (context.Request.IsHttps)
-	{
-		headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
-	}
+    if (context.Request.IsHttps)
+    {
+        headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
+    }
 }

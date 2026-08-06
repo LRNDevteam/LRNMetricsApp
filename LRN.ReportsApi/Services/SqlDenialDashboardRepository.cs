@@ -37,6 +37,28 @@ public class SqlDenialDashboardRepository : IDenialDashboardRepository
 		{
 			entry.AbsoluteExpirationRelativeToNow = LabsCacheDuration;
 
+			await using var connection = new SqlConnection(_masterConnectionString);
+			await connection.OpenAsync(cancellationToken);
+
+			// Canonical labs from LRNMaster.dbo.Labs — the single source of truth for LabId across the
+			// whole application. Keyed by a normalized name so "Augustus_Labs" ↔ "Augustus Labs" and
+			// "Northwest" ↔ "NorthWest" line up regardless of environment (no hardcoded ids).
+			var canonicalByName = new Dictionary<string, int>(StringComparer.Ordinal);
+			await using (var canonicalCmd = new SqlCommand(
+				"SELECT LabId, LabName FROM dbo.Labs WHERE ISNULL(IsActive, 0) = 1;", connection)
+				{ CommandType = CommandType.Text, CommandTimeout = 120 })
+			await using (var canonicalReader = await canonicalCmd.ExecuteReaderAsync(cancellationToken))
+			{
+				while (await canonicalReader.ReadAsync(cancellationToken))
+				{
+					var key = NormalizeLabToken(GetString(canonicalReader, "LabName"));
+					if (key.Length > 0) canonicalByName[key] = GetInt(canonicalReader, "LabId");
+				}
+			}
+
+			// The dashboard's own labs (dbo.LRNMetricsLab) carry the ConnectionKey and the id embedded in
+			// the per-lab data. Present the canonical LabId outward, but remember the internal id for the
+			// [LabId] = @LabId scope so per-lab filtering is byte-identical to before this mapping.
 			const string sql = @"
 SELECT
     CAST(ISNULL(LabId, 0) AS int) AS LabId,
@@ -47,21 +69,43 @@ WHERE ISNULL(IsActive, 0) = 1
 ORDER BY LabName, LabId;";
 
 			var items = new List<LabOption>();
-			await using var connection = new SqlConnection(_masterConnectionString);
-			await connection.OpenAsync(cancellationToken);
-			await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 120 };
-			await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-			while (await reader.ReadAsync(cancellationToken))
+			await using (var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 120 })
+			await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
 			{
-				items.Add(new LabOption
+				while (await reader.ReadAsync(cancellationToken))
 				{
-					LabId = GetInt(reader, "LabId"),
-					LabName = GetString(reader, "LabName"),
-					ConnectionKey = GetString(reader, "ConnectionKey")
-				});
+					var internalLabId = GetInt(reader, "LabId");
+					var labName = GetString(reader, "LabName");
+					var canonicalLabId = canonicalByName.TryGetValue(NormalizeLabToken(labName), out var mapped)
+						? mapped
+						: internalLabId; // No dbo.Labs match (e.g. Rising Tides / Phi Life / Elixir): keep own id.
+
+					items.Add(new LabOption
+					{
+						LabId = canonicalLabId,
+						LabName = labName,
+						ConnectionKey = GetString(reader, "ConnectionKey"),
+						InternalLabId = internalLabId
+					});
+				}
 			}
 			return (IReadOnlyList<LabOption>)items;
 		}) ?? Array.Empty<LabOption>();
+	}
+
+	private static string NormalizeLabToken(string? value)
+		=> new((value ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+
+	/// <summary>
+	/// Translates a canonical (outward) LabId to the internal dbo.LRNMetricsLab id that the per-lab
+	/// data tables embed, for the [LabId] = @LabId scope only. Resolved from the outward id each call
+	/// (never from an already-internal id), so delegating methods can't double-translate. Falls back to
+	/// the input when there is no remap.
+	/// </summary>
+	private async Task<int> ScopeLabIdAsync(int outwardLabId, CancellationToken cancellationToken)
+	{
+		var lab = (await GetLabsAsync(cancellationToken)).FirstOrDefault(x => x.LabId == outwardLabId);
+		return lab is not null && lab.InternalLabId > 0 ? lab.InternalLabId : outwardLabId;
 	}
 
 	public async Task<IReadOnlyList<DenialRecord>> GetByLabAsync(int labId, CancellationToken cancellationToken = default)
@@ -134,7 +178,7 @@ ORDER BY {OrderBy(cols, "DueDate", "TaskID")};";
 
 			var items = new List<DenialRecord>();
 			await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 180 };
-			AddScopeParameters(command, cols, labId, currentRunId);
+			await AddScopeParametersAsync(command, cols, labId, currentRunId, cancellationToken);
 
 			await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 			while (await reader.ReadAsync(cancellationToken))
@@ -250,7 +294,7 @@ ORDER BY {orderBy};";
 
 			var items = new List<DenialInsightRecord>();
 			await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 180 };
-			AddScopeParameters(command, cols, labId, currentRunId);
+			await AddScopeParametersAsync(command, cols, labId, currentRunId, cancellationToken);
 
 			await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 			while (await reader.ReadAsync(cancellationToken))
@@ -314,7 +358,7 @@ ORDER BY {orderBy};";
 			return Array.Empty<DenialBreakdownSourceRecord>();
 		}
 
-		var useBilledAmountInsuranceBalance = ShouldUseBilledAmountInsuranceBalance(labId);
+		var useBilledAmountInsuranceBalance = ShouldUseBilledAmountInsuranceBalance(await ScopeLabIdAsync(labId, cancellationToken));
 
 		var whereLegacy = BuildLineItemWhere(cols, filters, currentRunId);
 
@@ -337,7 +381,7 @@ ORDER BY {orderBy};";
 			CommandTimeout = 180
 		};
 
-		AddScopeParameters(legacyCommand, cols, labId, currentRunId);
+		await AddScopeParametersAsync(legacyCommand, cols, labId, currentRunId, cancellationToken);
 		AddLineItemFilterParameters(legacyCommand, filters, cols);
 
 		var legacyItems = new List<DenialBreakdownSourceRecord>();
@@ -372,7 +416,7 @@ ORDER BY {orderBy};";
 		var where = BuildLineItemWhere(cols, filters, currentRunId);
 		var sql = $"SELECT COUNT(1) FROM dbo.DenialLineItem WHERE {where};";
 		await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 180 };
-		AddScopeParameters(command, cols, labId, currentRunId);
+		await AddScopeParametersAsync(command, cols, labId, currentRunId, cancellationToken);
 		AddLineItemFilterParameters(command, filters, cols);
 		var result = await command.ExecuteScalarAsync(cancellationToken);
 		return result == null || result == DBNull.Value ? 0 : Convert.ToInt32(result);
@@ -388,7 +432,7 @@ ORDER BY {orderBy};";
 		var where = BuildScopedWhere(cols, currentRunId);
 		var sql = $@"SELECT DISTINCT TOP (200) LTRIM(RTRIM(ISNULL(PayerName, ''))) AS PayerNameValue FROM dbo.DenialLineItem WHERE {where} AND ISNULL(PayerName, '') <> '' ORDER BY PayerNameValue;";
 		await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 120 };
-		AddScopeParameters(command, cols, labId, currentRunId);
+		await AddScopeParametersAsync(command, cols, labId, currentRunId, cancellationToken);
 		var items = new List<string>();
 		await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 		while (await reader.ReadAsync(cancellationToken))
@@ -409,7 +453,7 @@ ORDER BY {orderBy};";
 		var where = BuildScopedWhere(cols, currentRunId);
 		var sql = $@"SELECT DISTINCT TOP (200) LTRIM(RTRIM(ISNULL(PanelName, ''))) AS PanelNameValue FROM dbo.DenialLineItem WHERE {where} AND ISNULL(PanelName, '') <> '' ORDER BY PanelNameValue;";
 		await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 120 };
-		AddScopeParameters(command, cols, labId, currentRunId);
+		await AddScopeParametersAsync(command, cols, labId, currentRunId, cancellationToken);
 		var items = new List<string>();
 		await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 		while (await reader.ReadAsync(cancellationToken))
@@ -423,6 +467,7 @@ ORDER BY {orderBy};";
 	public async Task<DenialFilterAutocompleteOptions> GetFilterAutocompleteOptionsAsync(int labId, CancellationToken cancellationToken = default)
 	{
 		var currentRunId = await GetCurrentRunIdAsync(labId, cancellationToken);
+		var scopeLabId = await ScopeLabIdAsync(labId, cancellationToken);
 		var cacheKey = AutocompleteCacheKey(labId, currentRunId);
 
 		return await _cache.GetOrCreateAsync(cacheKey, async entry =>
@@ -442,12 +487,12 @@ ORDER BY {orderBy};";
 
 			return new DenialFilterAutocompleteOptions
 			{
-				PayerNames = await GetAutocompleteValuesAsync(connection, labId, currentRunId, "PayerName", taskCols, lineCols, cancellationToken),
-				PayerTypes = await GetAutocompleteValuesAsync(connection, labId, currentRunId, "PayerType", taskCols, lineCols, cancellationToken),
-				PanelNames = await GetAutocompleteValuesAsync(connection, labId, currentRunId, "PanelName", taskCols, lineCols, cancellationToken),
-				ReferringProviders = await GetAutocompleteValuesAsync(connection, labId, currentRunId, "ReferringProvider", taskCols, lineCols, cancellationToken),
-				ClinicNames = await GetAutocompleteValuesAsync(connection, labId, currentRunId, "ClinicName", taskCols, lineCols, cancellationToken),
-				SalesRepnames = await GetAutocompleteValuesAsync(connection, labId, currentRunId, "SalesRepname", taskCols, lineCols, cancellationToken)
+				PayerNames = await GetAutocompleteValuesAsync(connection, scopeLabId, currentRunId, "PayerName", taskCols, lineCols, cancellationToken),
+				PayerTypes = await GetAutocompleteValuesAsync(connection, scopeLabId, currentRunId, "PayerType", taskCols, lineCols, cancellationToken),
+				PanelNames = await GetAutocompleteValuesAsync(connection, scopeLabId, currentRunId, "PanelName", taskCols, lineCols, cancellationToken),
+				ReferringProviders = await GetAutocompleteValuesAsync(connection, scopeLabId, currentRunId, "ReferringProvider", taskCols, lineCols, cancellationToken),
+				ClinicNames = await GetAutocompleteValuesAsync(connection, scopeLabId, currentRunId, "ClinicName", taskCols, lineCols, cancellationToken),
+				SalesRepnames = await GetAutocompleteValuesAsync(connection, scopeLabId, currentRunId, "SalesRepname", taskCols, lineCols, cancellationToken)
 			};
 		}) ?? new DenialFilterAutocompleteOptions();
 	}
@@ -472,10 +517,38 @@ ORDER BY {orderBy};";
 
 			var sql = $"SELECT TOP (1) [RunId] FROM dbo.DenialTaskBoard {where} {orderBy};";
 			await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 120 };
-			if (cols.Contains("LabId")) command.Parameters.AddWithValue("@LabId", labId);
+			if (cols.Contains("LabId")) command.Parameters.AddWithValue("@LabId", await ScopeLabIdAsync(labId, cancellationToken));
 			var result = await command.ExecuteScalarAsync(cancellationToken);
 			return result == null || result == DBNull.Value ? null : Convert.ToString(result);
 		});
+	}
+
+	public async Task<DenialRunInfo> GetRunInfoAsync(int labId, CancellationToken cancellationToken = default)
+	{
+		var runId = await GetCurrentRunIdAsync(labId, cancellationToken) ?? string.Empty;
+		var info = new DenialRunInfo { RunId = runId };
+		if (string.IsNullOrWhiteSpace(runId)) return info;
+
+		try
+		{
+			// The source file that produced this run lives in LRNMaster.dbo.LRN_Run_Log
+			// (RunID -> InputMasterFileName). This is on the master connection, not the lab db.
+			await using var connection = new SqlConnection(_masterConnectionString);
+			await connection.OpenAsync(cancellationToken);
+			if (!await TableExistsAsync(connection, "dbo", "LRN_Run_Log", cancellationToken)) return info;
+
+			await using var command = new SqlCommand(
+				"SELECT LTRIM(RTRIM(ISNULL(InputMasterFileName, ''))) AS SourceFile FROM dbo.LRN_Run_Log WHERE RunID = @RunId;",
+				connection) { CommandType = CommandType.Text, CommandTimeout = 60 };
+			command.Parameters.AddWithValue("@RunId", runId);
+			var result = await command.ExecuteScalarAsync(cancellationToken);
+			info.SourceFileName = result is null || result == DBNull.Value ? string.Empty : Convert.ToString(result) ?? string.Empty;
+		}
+		catch (SqlException)
+		{
+			// Provenance is best-effort; never let it break the dashboard.
+		}
+		return info;
 	}
 
 	public async Task<string?> GetLatestExportFilePathForLabAsync(int labId, CancellationToken cancellationToken = default)
@@ -694,7 +767,7 @@ SELECT MatchedRows = (SELECT COUNT(1) FROM #MatchedRows);";
 		var where = new List<string> { BuildScopedWhere(cols, currentRunId), "LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(255), [DenialCode]), ''))) = @DenialCode", $"({string.Join(" OR ", payerPredicates)})" };
 		var sql = $"UPDATE dbo.DenialTaskBoard SET {string.Join(", ", setParts)} WHERE {string.Join(" AND ", where)}; SELECT @@ROWCOUNT;";
 		await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 180 };
-		AddScopeParameters(command, cols, labId, currentRunId);
+		await AddScopeParametersAsync(command, cols, labId, currentRunId, cancellationToken);
 		command.Parameters.AddWithValue("@DenialCode", denialCode.Trim());
 		command.Parameters.AddWithValue("@PayerName", payerName.Trim());
 		command.Parameters.AddWithValue("@Reviewer", reviewerUserName.Trim());
@@ -740,7 +813,7 @@ SELECT MatchedRows = (SELECT COUNT(1) FROM #MatchedRows);";
 		command.Parameters.AddWithValue("@Reviewer", reviewerUserName);
 		command.Parameters.AddWithValue("@DenialCode", denialCode);
 		command.Parameters.AddWithValue("@PayerName", payerName);
-		command.Parameters.AddWithValue("@LabId", labId);
+		command.Parameters.AddWithValue("@LabId", await ScopeLabIdAsync(labId, cancellationToken));
 		command.Parameters.AddWithValue("@RunId", runId ?? string.Empty);
 		await command.ExecuteNonQueryAsync(cancellationToken);
 	}
@@ -769,7 +842,7 @@ SELECT MatchedRows = (SELECT COUNT(1) FROM #MatchedRows);";
 		var where = new List<string> { BuildScopedWhere(cols, currentRunId), "[TaskID] = @TaskID", "LTRIM(RTRIM(ISNULL([AssignedTo], ''))) = @Reviewer" };
 		var sql = $"UPDATE dbo.DenialTaskBoard SET {string.Join(", ", setParts)} WHERE {string.Join(" AND ", where)}; SELECT @@ROWCOUNT;";
 		await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 180 };
-		AddScopeParameters(command, cols, labId, currentRunId);
+		await AddScopeParametersAsync(command, cols, labId, currentRunId, cancellationToken);
 		command.Parameters.AddWithValue("@TaskID", taskId.Trim());
 		command.Parameters.AddWithValue("@Status", status.Trim());
 		command.Parameters.AddWithValue("@Comments", comments?.Trim() ?? string.Empty);
@@ -788,7 +861,7 @@ SELECT MatchedRows = (SELECT COUNT(1) FROM #MatchedRows);";
 		if (!await TableExistsAsync(connection, "dbo", "DenialLineItem", cancellationToken)) return Array.Empty<DenialLineItemRecord>();
 
 		var cols = await GetTableColumnsAsync(connection, "dbo", "DenialLineItem", cancellationToken);
-		var useBilledAmountInsuranceBalance = ShouldUseBilledAmountInsuranceBalance(labId);
+		var useBilledAmountInsuranceBalance = ShouldUseBilledAmountInsuranceBalance(await ScopeLabIdAsync(labId, cancellationToken));
 		var where = BuildLineItemWhere(cols, filters, currentRunId);
 		var pagingSql = withPaging ? " OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY" : string.Empty;
 		var claimLevelApplySql = string.Empty;
@@ -908,7 +981,7 @@ WHERE {where}
 ORDER BY {OrderBy(cols, "DateOfService", "AccessionNo")}{pagingSql};";
 
 		await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 180 };
-		AddScopeParameters(command, cols, labId, currentRunId);
+		await AddScopeParametersAsync(command, cols, labId, currentRunId, cancellationToken);
 		AddLineItemFilterParameters(command, filters, cols);
 		if (withPaging)
 		{
@@ -1235,9 +1308,11 @@ WHERE TABLE_SCHEMA = @Schema AND TABLE_NAME = @Table;";
 		return where.Count == 0 ? "1 = 1" : string.Join(" AND ", where);
 	}
 
-	private static void AddScopeParameters(SqlCommand command, HashSet<string> cols, int labId, string? currentRunId)
+	private async Task AddScopeParametersAsync(SqlCommand command, HashSet<string> cols, int outwardLabId, string? currentRunId, CancellationToken cancellationToken)
 	{
-		if (cols.Contains("LabId")) command.Parameters.AddWithValue("@LabId", labId);
+		// The per-lab [LabId] = @LabId scope uses the INTERNAL id embedded in the lab's data, not the
+		// canonical id we expose outward — so filtering is byte-identical to before the LabId mapping.
+		if (cols.Contains("LabId")) command.Parameters.AddWithValue("@LabId", await ScopeLabIdAsync(outwardLabId, cancellationToken));
 		if (!string.IsNullOrWhiteSpace(currentRunId) && cols.Contains("RunId")) command.Parameters.AddWithValue("@RunId", currentRunId);
 	}
 

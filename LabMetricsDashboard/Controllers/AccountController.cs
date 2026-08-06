@@ -179,11 +179,11 @@ public class AccountController : Controller
         // Routing rules
         var isDenialWorkflowUser = isArManager || isArReviewer || isClientManager || isAccountManager;
 
-        // 1) Admin without a Denial Workflow role => home page (full landing with lab tiles).
+        // 1) Admin without a Denial Workflow role => Report Control Board (the landing/home page).
         //    Users with Denial Workflow roles are routed to the workflow dashboard below.
         if (isAdmin && !isDenialWorkflowUser)
         {
-            return RedirectToAction("Index", "Home");
+            return RedirectToAction("Index", "ReportBoard");
         }
 
         // 2) Non-admin with no lab assignments at all ? friendly error
@@ -229,7 +229,10 @@ public class AccountController : Controller
             return RedirectToAction("Index", "DenialWorkflow", new { tab = "dashboard" });
         }
 
-        return RedirectToAction("Index", "Dashboard", new { lab = defaultLabName });
+        // Report Control Board is the landing/home page for everyone (was: Dashboard). The selected
+        // lab is still remembered via the lmd_selected_lab cookie above, so the Revenue dashboard
+        // opens on the right lab when reached from the board.
+        return RedirectToAction("Index", "ReportBoard");
     }
 
     [HttpPost]

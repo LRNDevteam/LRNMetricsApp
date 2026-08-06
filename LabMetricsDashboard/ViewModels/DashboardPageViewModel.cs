@@ -24,6 +24,8 @@ public class DashboardPageViewModel
     public List<LabOption> LabOptions { get; set; } = new();
     public string CurrentLabName { get; set; } = string.Empty;
     public string CurrentRunId { get; set; } = string.Empty;
+    public string CurrentSourceFileName { get; set; } = string.Empty;
+    public string CurrentWeekFolder { get; set; } = string.Empty;
 
     public List<string> StatusOptions { get; set; } = new();
     public List<string> PriorityOptions { get; set; } = new();

@@ -28,6 +28,10 @@ public sealed class DenialDashboardController : ControllerBase
     public async Task<ActionResult<CurrentRunResponse>> GetCurrentRun([FromQuery] int labId, CancellationToken cancellationToken)
         => Ok(new CurrentRunResponse { RunId = await _repository.GetCurrentRunIdAsync(labId, cancellationToken) });
 
+    [HttpGet("run-info")]
+    public async Task<ActionResult<DenialRunInfo>> GetRunInfo([FromQuery] int labId, CancellationToken cancellationToken)
+        => Ok(await _repository.GetRunInfoAsync(labId, cancellationToken));
+
     [HttpGet("records")]
     public async Task<ActionResult<IReadOnlyList<DenialRecord>>> GetRecords([FromQuery] int labId, CancellationToken cancellationToken)
         => Ok(await _repository.GetByLabAsync(labId, cancellationToken));

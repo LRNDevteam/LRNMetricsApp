@@ -21,10 +21,15 @@ public interface IReportBoardApiClient
 {
     Task<ReportBoardFetch> GetLatestAsync(bool refresh, CancellationToken ct);
     Task<RunErrorsResult> GetRunErrorsAsync(string runId, string? labName, string? reportType, CancellationToken ct);
+    /// <summary>Downloads the run's Error-log CSV (usp_ReportRunIdInfoLog_Get, @logtype='Error'). Null on failure.</summary>
+    Task<ReportErrorCsv?> GetRunErrorsCsvAsync(string runId, string? reportType, CancellationToken ct);
 }
 
 /// <summary>Outcome of a board fetch. <see cref="Data"/> may be a stale copy when Error is set.</summary>
 public sealed record ReportBoardFetch(ReportBoardApiResult? Data, string? Error, DateTime? FetchedAt);
+
+/// <summary>A downloaded error-log CSV, ready to stream back to the browser.</summary>
+public sealed record ReportErrorCsv(byte[] Content, string FileName, string ContentType);
 
 public sealed class ReportBoardApiClient : IReportBoardApiClient
 {
@@ -110,6 +115,34 @@ public sealed class ReportBoardApiClient : IReportBoardApiClient
         {
             _logger.LogWarning(ex, "Report board: the error log for run {RunId} could not be read.", runId);
             return new RunErrorsResult { LoadError = DescribeError(ex) };
+        }
+    }
+
+    public async Task<ReportErrorCsv?> GetRunErrorsCsvAsync(string runId, string? reportType, CancellationToken ct)
+    {
+        try
+        {
+            await AuthorizeAsync(ct);
+            var url = $"api/report-board/run-errors/export?runId={Uri.EscapeDataString(runId)}"
+                      + (string.IsNullOrWhiteSpace(reportType) ? string.Empty : $"&reportType={Uri.EscapeDataString(reportType)}");
+            using var response = await _http.GetAsync(url, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Report board: error CSV for run {RunId} returned {Status}.", runId, (int)response.StatusCode);
+                return null;
+            }
+            var content = await response.Content.ReadAsByteArrayAsync(ct);
+            var fileName = response.Content.Headers.ContentDisposition?.FileNameStar
+                           ?? response.Content.Headers.ContentDisposition?.FileName?.Trim('"')
+                           ?? $"RunErrors_{runId}.xlsx";
+            var contentType = response.Content.Headers.ContentType?.MediaType
+                              ?? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            return new ReportErrorCsv(content, fileName, contentType);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Report board: the error CSV for run {RunId} could not be downloaded.", runId);
+            return null;
         }
     }
 

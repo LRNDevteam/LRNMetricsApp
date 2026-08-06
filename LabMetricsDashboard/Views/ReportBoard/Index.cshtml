@@ -44,6 +44,19 @@
         ReportRunStatus.Pending => "d-wait",
         _ => "d-none"
     };
+
+    // Relative "run timeline" label for each lab's latest run (e.g. "6 d ago").
+    string RelativeTime(DateTime? when)
+    {
+        if (when is null) return "no run yet";
+        var span = DateTime.Now - when.Value;
+        if (span.TotalSeconds < 0) return when.Value.ToString("dd MMM yyyy");
+        if (span.TotalMinutes < 1) return "just now";
+        if (span.TotalMinutes < 60) return $"{(int)span.TotalMinutes} min ago";
+        if (span.TotalHours < 24) return $"{(int)span.TotalHours} h ago";
+        if (span.TotalDays < 30) return $"{(int)span.TotalDays} d ago";
+        return when.Value.ToString("dd MMM yyyy");
+    }
 }
 
 <style>
@@ -141,6 +154,13 @@
     .rcb-rep.bad { color:#b91c1c; }
     .d-ok { background:var(--ok); } .d-fail { background:var(--fail); } .d-none { background:var(--none); } .d-wait { background:var(--wait); }
     .rcb-groupname { font-size:.6rem; letter-spacing:.1em; text-transform:uppercase; color:#94a3b8; font-weight:800; padding:.45rem .5rem .15rem; }
+    /* Batch-style single line: report tiles in a group flow inline as compact pills (Claim + Line on one row). */
+    .rcb-rep-row { display:flex; flex-wrap:wrap; gap:6px; padding:0 .5rem .35rem; }
+    .rcb-rep-row .rcb-rep { flex:0 0 auto; border:1px solid var(--line); background:#f8fafc; padding:.3rem .6rem; border-radius:999px; font-size:.72rem; }
+    a.rcb-rep-row .rcb-rep:hover, .rcb-rep-row a.rcb-rep:hover { background:#eff6ff; border-color:#bfdbfe; color:#0d6efd; }
+    .rcb-rep-row .rcb-rep .arrow { margin-left:2px; }
+    .rcb-rep-row .rcb-rep.bad { border-color:var(--fail-line); background:var(--fail-bg); }
+    .rcb-rep-row .rcb-rep.off { border-style:dashed; }
     .rcb-card-foot { padding:.55rem .8rem; border-top:1px solid var(--line-soft); display:flex; gap:.35rem; flex-wrap:wrap; }
     .rcb-btn-s { border:1px solid var(--line); background:#fff; border-radius:8px; padding:.3rem .65rem; font-size:.7rem; font-weight:700; color:var(--ink-2); text-decoration:none; }
     .rcb-btn-s.pri { background:#0d6efd; border-color:#0d6efd; color:#fff; }
@@ -211,8 +231,8 @@
 
     <div class="rcb-toolbar">
         <div class="rcb-seg" role="group" aria-label="View">
-            <a asp-action="Index" asp-route-view="matrix" asp-route-sort="@Model.Sort" aria-pressed="@(Model.View == "matrix" ? "true" : "false")" id="rcbViewMatrix">Matrix</a>
-            <a asp-action="Index" asp-route-view="cards" asp-route-sort="@Model.Sort" aria-pressed="@(Model.View == "cards" ? "true" : "false")" id="rcbViewCards">Cards</a>
+            <a asp-action="Index" asp-route-view="matrix" asp-route-sort="@Model.Sort" aria-pressed="@(Model.View == "matrix" ? "true" : "false")" id="rcbViewMatrix">Worklist (table)</a>
+            <a asp-action="Index" asp-route-view="cards" asp-route-sort="@Model.Sort" aria-pressed="@(Model.View == "cards" ? "true" : "false")" id="rcbViewCards">Grid View</a>
         </div>
         <div class="rcb-search">
             <label class="visually-hidden" for="rcbSearch">Search labs or run ID</label>
@@ -301,11 +321,11 @@
                                         }
                                         else if (cell.Status == ReportRunStatus.Failed)
                                         {
-                                            <a class="rcb-cell fail" title="@Tooltip(cell) · open the error log"
-                                               asp-action="RunErrors" asp-route-runId="@row.RunId"
+                                            <a class="rcb-cell fail" title="@Tooltip(cell) · download the error log (Excel)" download
+                                               asp-action="RunErrorsCsv" asp-route-runId="@row.RunId"
                                                asp-route-lab="@row.LabConfigKey" asp-route-labName="@row.LabDisplayName"
                                                asp-route-report="@cell.Catalog.TrackerColumn">
-                                                <i class="bi bi-exclamation-lg"></i>
+                                                <i class="bi bi-download"></i>
                                             </a>
                                         }
                                         else
@@ -334,7 +354,7 @@
             </div>
             <div class="rcb-legend">
                 <span><i style="background:#10b981"></i>Available — click to open</span>
-                <span><i style="background:#ef4444"></i>Failed — click for the error log</span>
+                <span><i style="background:#ef4444"></i>Failed — click to download the error log (Excel)</span>
                 <span><i style="background:#f59e0b"></i>Pending</span>
                 <span><i style="background:#7c3aed"></i>Ready but not available to you</span>
                 <span><i style="background:#cbd5e1"></i>Not configured for this lab</span>
@@ -356,7 +376,7 @@
                     <div class="rcb-card-head" style="background:linear-gradient(135deg,@colour,@(colour)cc)">
                         <div>
                             <div class="n">@row.LabDisplayName</div>
-                            <div class="r">@row.RunId</div>
+                            <div class="r"><i class="bi bi-clock-history"></i> Updated: @RelativeTime(row.SyncedOn) · Run: @row.RunId</div>
                         </div>
                         @if (!string.IsNullOrWhiteSpace(row.Week))
                         {
@@ -379,6 +399,7 @@
                         @foreach (var group in row.Reports.GroupBy(r => r.Catalog.Group))
                         {
                             <div class="rcb-groupname">@group.Key</div>
+                            <div class="rcb-rep-row">
                             @foreach (var cell in group)
                             {
                                 if (cell.IsLinkable)
@@ -386,25 +407,26 @@
                                     <a class="rcb-rep" title="@Tooltip(cell)"
                                        asp-controller="@cell.Catalog.Controller" asp-action="@cell.Catalog.Action"
                                        asp-route-lab="@row.LabConfigKey" asp-route-runId="@row.RunId">
-                                        <span class="dot d-ok"></span>@cell.Catalog.DisplayName<span class="arrow">→</span>
+                                        <span class="dot d-ok"></span>@cell.Catalog.DisplayName
                                     </a>
                                 }
                                 else if (cell.Status == ReportRunStatus.Failed)
                                 {
-                                    <a class="rcb-rep bad" title="@Tooltip(cell)"
-                                       asp-action="RunErrors" asp-route-runId="@row.RunId"
+                                    <a class="rcb-rep bad" title="@Tooltip(cell) · download the error log (Excel)" download
+                                       asp-action="RunErrorsCsv" asp-route-runId="@row.RunId"
                                        asp-route-lab="@row.LabConfigKey" asp-route-labName="@row.LabDisplayName"
                                        asp-route-report="@cell.Catalog.TrackerColumn">
-                                        <span class="dot d-fail"></span>@cell.Catalog.DisplayName<span class="arrow">error log →</span>
+                                        <span class="dot d-fail"></span>@cell.Catalog.DisplayName<span class="arrow">↓</span>
                                     </a>
                                 }
                                 else
                                 {
                                     <span class="rcb-rep off" title="@Tooltip(cell)">
-                                        <span class="dot @DotClass(cell)"></span>@cell.Catalog.DisplayName<span class="arrow">—</span>
+                                        <span class="dot @DotClass(cell)"></span>@cell.Catalog.DisplayName
                                     </span>
                                 }
                             }
+                            </div>
                         }
                     </div>
                     <div class="rcb-card-foot">
@@ -454,10 +476,10 @@
                     }
                     else if (cell.Status == ReportRunStatus.Failed)
                     {
-                        <a class="rcb-dr-item" asp-action="RunErrors" asp-route-runId="@row.RunId"
+                        <a class="rcb-dr-item" download asp-action="RunErrorsCsv" asp-route-runId="@row.RunId"
                            asp-route-lab="@row.LabConfigKey" asp-route-labName="@row.LabDisplayName"
                            asp-route-report="@cell.Catalog.TrackerColumn">
-                            <i class="bi @cell.Catalog.Icon"></i> @cell.Catalog.DisplayName<span class="st fail">Error log</span>
+                            <i class="bi bi-download"></i> @cell.Catalog.DisplayName<span class="st fail">Error log</span>
                         </a>
                     }
                     else
@@ -473,7 +495,7 @@
             {
                 <div class="rcb-note">
                     <b>@row.FailedCount report@(row.FailedCount == 1 ? "" : "s") failed in this run.</b>
-                    Open the error log from any red row to see what stopped it.
+                    Click any red row to download the run's error log (Excel) and see what stopped it.
                 </div>
             }
             @if (!row.IsMapped)

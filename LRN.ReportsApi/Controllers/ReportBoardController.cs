@@ -91,4 +91,37 @@ public sealed class ReportBoardController : ControllerBase
 
         return Ok(new { runId, labName, reportType, pipelineErrors = pipeline, runLog = log, warnings });
     }
+
+    /// <summary>
+    /// CSV of the run's Error entries for download from the board's error link. This is exactly
+    /// usp_ReportRunIdInfoLog_Get @Runid = &lt;runId&gt;, @logtype = 'Error' (optionally narrowed to one
+    /// report type), streamed as a file. Kept on the board's own route so it inherits the board's
+    /// "any authenticated LRN user" access rather than the Master Values role gate.
+    /// </summary>
+    [HttpGet("run-errors/export")]
+    public async Task<ActionResult> ExportRunErrors(
+        [FromQuery] string? runId,
+        [FromQuery] string? reportType,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(runId))
+            return BadRequest(new { message = "A run id is required." });
+
+        try
+        {
+            // Formatted .xlsx (auto-sized columns + wrapped Log Message) rather than a flat CSV, so a
+            // long message stays readable instead of a single runaway column.
+            var (content, fileName) = await _service.ExportLogsExcelAsync(new ReportRunLogQuery
+            {
+                RunId = runId,
+                LogType = "Error",
+                ReportType = reportType
+            }, ct);
+            return File(content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+        }
+        catch (SqlException ex) when (ex.Number == 50000)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
 }

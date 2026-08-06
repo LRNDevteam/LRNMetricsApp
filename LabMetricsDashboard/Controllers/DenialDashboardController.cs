@@ -59,7 +59,8 @@ public class DenialDashboardController : Controller
 		var selectedLabId = currentLab.LabId;
 		filters.LabId = selectedLabId;
 		var normalizedFilters = Normalize(filters, selectedLabId);
-		var currentRunId = await _dashboardApi.GetCurrentRunIdAsync(selectedLabId, cancellationToken) ?? string.Empty;
+		var runInfo = await _dashboardApi.GetRunInfoAsync(selectedLabId, cancellationToken);
+		var currentRunId = runInfo.RunId ?? string.Empty;
 
 		var isArManager = HasAnyRole("AR Manager", "ARManager");
 		var isArReviewer = HasAnyRole("AR Reviewer", "ARReviewer", "AR Analyser", "ARAnalyser", "AR Analyzer", "ARAnalyzer");
@@ -138,6 +139,8 @@ public class DenialDashboardController : Controller
 			Filters = normalizedFilters,
 			CurrentLabName = currentLab.LabName,
 			CurrentRunId = currentRunId,
+			CurrentSourceFileName = runInfo.SourceFileName ?? string.Empty,
+			CurrentWeekFolder = runInfo.WeekFolder ?? string.Empty,
 			LabOptions = labs,
 			AllRecordCount = allRecords.Count,
 			FilteredRecordCount = filteredRecordCount,
@@ -735,34 +738,64 @@ public class DenialDashboardController : Controller
 		["LineItemPageSize"] = filters.LineItemPageSize <= 0 ? 100 : filters.LineItemPageSize
 	});
 
+	private const string SelectedLabCookieName = "lmd_selected_lab";
+
 	private static LabOption ResolveSelectedLab(HttpContext httpContext, IReadOnlyList<LabOption> labs, int? requestedLabId, string? requestedLabName)
 	{
 		if (labs.Count == 0) throw new InvalidOperationException("No active labs were found.");
 
-		var availableLabNames = labs.Select(x => x.LabName)
-			.Where(x => !string.IsNullOrWhiteSpace(x))
-			.Distinct(StringComparer.OrdinalIgnoreCase)
-			.OrderBy(x => x)
-			.ToList();
-
+		// 1) An explicit lab name on the request (a report link or the dashboard's own selector).
 		if (!string.IsNullOrWhiteSpace(requestedLabName))
 		{
-			var resolvedName = LabSelectionHelper.Resolve(httpContext, requestedLabName, availableLabNames);
-			var byName = FindLabByName(labs, resolvedName) ?? FindLabByName(labs, requestedLabName);
+			var byName = ResolveLabByLooseName(labs, requestedLabName);
 			if (byName is not null) return byName;
 		}
 
+		// 2) An explicit lab id.
 		if (requestedLabId.HasValue)
 		{
 			var byId = labs.FirstOrDefault(x => x.LabId == requestedLabId.Value);
 			if (byId is not null) return byId;
 		}
 
-		var sessionResolvedName = LabSelectionHelper.Resolve(httpContext, null, availableLabNames);
-		var sessionLab = FindLabByName(labs, sessionResolvedName);
-		if (sessionLab is not null) return sessionLab;
+		// 3) The shared cross-report cookie. The standard reports store a LabConfig KEY here (e.g.
+		//    "Inhealth_DTR", "Augustus_Labs"), which is a DIFFERENT namespace from the denial API's
+		//    lab NAMES (e.g. "InHealth", "Augustus"), so match tolerantly. Read-only on purpose: never
+		//    overwrite this cookie with a denial name — the standard reports resolve it as a config key,
+		//    so clobbering it made an InHealth selection reopen as the first lab (Augustus) everywhere.
+		if (httpContext.Request.Cookies.TryGetValue(SelectedLabCookieName, out var cookieLab)
+			&& !string.IsNullOrWhiteSpace(cookieLab))
+		{
+			var byCookie = ResolveLabByLooseName(labs, cookieLab);
+			if (byCookie is not null) return byCookie;
+		}
 
+		// 4) A sensible default.
 		return labs.FirstOrDefault(x => x.LabName.Equals(PreferredInitialLabName, StringComparison.OrdinalIgnoreCase)) ?? labs.First();
+	}
+
+	/// <summary>
+	/// Matches a lab name that may be either a denial lab NAME or a standard-report LabConfig KEY:
+	/// exact/case-insensitive, then normalized-token equality, then one normalized token being a
+	/// prefix of the other (so "Inhealth_DTR" resolves to "InHealth", "Certus_LRN" to "Certus", etc.).
+	/// </summary>
+	private static LabOption? ResolveLabByLooseName(IReadOnlyList<LabOption> labs, string? name)
+	{
+		var exact = FindLabByName(labs, name);
+		if (exact is not null) return exact;
+
+		var token = NormalizeLabToken(name);
+		if (token.Length < 3) return null;
+
+		return labs
+			.Select(l => (Lab: l, Token: NormalizeLabToken(l.LabName)))
+			.Where(x => x.Token.Length >= 3
+						&& (x.Token.StartsWith(token, StringComparison.Ordinal)
+							|| token.StartsWith(x.Token, StringComparison.Ordinal)))
+			// Longest matching lab token wins, so a short prefix can't shadow a more specific lab.
+			.OrderByDescending(x => x.Token.Length)
+			.Select(x => x.Lab)
+			.FirstOrDefault();
 	}
 
 	private static LabOption? FindLabByName(IReadOnlyList<LabOption> labs, string? labName)
