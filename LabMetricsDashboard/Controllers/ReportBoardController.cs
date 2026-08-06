@@ -161,7 +161,10 @@ public sealed class ReportBoardController : Controller
         string? configKey,
         IReadOnlyDictionary<string, bool> routeAllowed)
     {
-        apiRow.Statuses.TryGetValue(column.TrackerColumn, out var raw);
+        // A tile may derive its status from another report (StatusFrom) — LIMS Master mirrors
+        // "LIS Summary": success when LIS Summary succeeded for this run, otherwise failed.
+        var statusKey = column.StatusFrom ?? column.TrackerColumn;
+        apiRow.Statuses.TryGetValue(statusKey, out var raw);
         var status = ParseStatus(raw);
 
         string? blocked = null;

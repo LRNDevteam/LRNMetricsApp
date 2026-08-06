@@ -315,7 +315,7 @@
                                         {
                                             <a class="rcb-cell ok" title="@Tooltip(cell)"
                                                asp-controller="@cell.Catalog.Controller" asp-action="@cell.Catalog.Action"
-                                               asp-route-lab="@row.LabConfigKey" asp-route-runId="@row.RunId">
+                                               asp-route-lab="@row.LabConfigKey" asp-route-runId="@row.RunId" asp-route-ActiveTab="@cell.Catalog.LinkTab">
                                                 <i class="bi @cell.Catalog.Icon"></i>
                                             </a>
                                         }
@@ -406,7 +406,7 @@
                                 {
                                     <a class="rcb-rep" title="@Tooltip(cell)"
                                        asp-controller="@cell.Catalog.Controller" asp-action="@cell.Catalog.Action"
-                                       asp-route-lab="@row.LabConfigKey" asp-route-runId="@row.RunId">
+                                       asp-route-lab="@row.LabConfigKey" asp-route-runId="@row.RunId" asp-route-ActiveTab="@cell.Catalog.LinkTab">
                                         <span class="dot d-ok"></span>@cell.Catalog.DisplayName
                                     </a>
                                 }
@@ -470,7 +470,7 @@
                     if (cell.IsLinkable)
                     {
                         <a class="rcb-dr-item" asp-controller="@cell.Catalog.Controller" asp-action="@cell.Catalog.Action"
-                           asp-route-lab="@row.LabConfigKey" asp-route-runId="@row.RunId">
+                           asp-route-lab="@row.LabConfigKey" asp-route-runId="@row.RunId" asp-route-ActiveTab="@cell.Catalog.LinkTab">
                             <i class="bi @cell.Catalog.Icon"></i> @cell.Catalog.DisplayName<span class="st ok">Open</span>
                         </a>
                     }

@@ -43,12 +43,16 @@ public class ReportStatusParsingTests
 
 public class ReportCatalogTests
 {
+    // Mapped tracker columns (excludes "Error Log", which is a run artifact hidden from the board).
     private static readonly string[] SpColumnOrder =
     [
         "Line Level Master", "Claim Level Master", "LIS Summary", "Production Summary", "Collection Summary",
         "Denial Report", "Executive Summary", "Clinic Summary", "Sales Rep Summary", "Coding Validation",
-        "Payer Policy Validation", "Forecasting", "Prediction Analysis", "Error Log"
+        "Payer Policy Validation", "Forecasting", "Prediction Analysis"
     ];
+
+    // "LIMS Master" is an always-on nav tile, present even when the SP does not return it.
+    private const int AlwaysOnCount = 1;
 
     [Fact]
     public void Every_current_tracker_column_is_in_the_catalog()
@@ -62,12 +66,32 @@ public class ReportCatalogTests
     {
         var ordered = ReportCatalog.Order(SpColumnOrder);
 
-        Assert.Equal(SpColumnOrder.Length, ordered.Count);
+        // The mapped SP columns plus the always-on LIMS Master nav tile.
+        Assert.Equal(SpColumnOrder.Length + AlwaysOnCount, ordered.Count);
+        Assert.Contains(ordered, c => c.TrackerColumn == "LIMS Master");
         // The SP emits Denial Report before Executive Summary; the board groups it with the
         // summary reports at the end of that band instead.
         var denial = ordered.FindIndex(c => c.TrackerColumn == "Denial Report");
         var exec = ordered.FindIndex(c => c.TrackerColumn == "Executive Summary");
         Assert.True(exec < denial);
+    }
+
+    [Fact]
+    public void Error_Log_is_never_shown_on_the_board()
+    {
+        var ordered = ReportCatalog.Order(["LIS Summary", "Error Log"]);
+
+        Assert.DoesNotContain(ordered, c => c.TrackerColumn.Equals("Error Log", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Lims_Master_is_an_always_on_nav_tile()
+    {
+        // Not returned by the SP, but still present as a page shortcut.
+        var ordered = ReportCatalog.Order(["LIS Summary"]);
+
+        Assert.Contains(ordered, c => c.TrackerColumn == "LIMS Master");
+        Assert.True(ReportCatalog.IsNavShortcut("LIMS Master"));
     }
 
     [Fact]
@@ -77,7 +101,7 @@ public class ReportCatalogTests
 
         var ordered = ReportCatalog.Order(withNewReport);
 
-        Assert.Equal(withNewReport.Length, ordered.Count);
+        Assert.Equal(withNewReport.Length + AlwaysOnCount, ordered.Count);
         var added = ordered[^1];
         Assert.Equal("Cash Posting Summary", added.TrackerColumn);
         Assert.Null(added.Controller);

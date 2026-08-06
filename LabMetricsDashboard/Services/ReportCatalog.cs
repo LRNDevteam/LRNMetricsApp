@@ -19,6 +19,10 @@ public static class ReportCatalog
     /// <summary>Display order for the board, which is deliberately not the SP's column order.</summary>
     public static readonly IReadOnlyList<ReportCatalogEntry> Entries =
     [
+        // LIMS Master is the first source (raw LIMS data), before Line/Claim Level. It is not a tracker
+        // column of its own — always shown, and its status MIRRORS "LIS Summary" (StatusFrom): success
+        // when LIS Summary succeeded, else failed. Opens the LIS Summary page's LIMS line-level tab.
+        new("LIMS Master",             "LIMS Master",             "LIMS",     "bi-hdd-stack",            GroupSource,    "LisSummary",             "Index",                   null,               "line", "LIS Summary"),
         new("Line Level Master",       "Line Level Master",       "Line",     "bi-list-ul",              GroupSource,    "Dashboard",              "LineLevel",               "LineClaimEnable"),
         new("Claim Level Master",      "Claim Level Master",      "Claim",    "bi-file-text",            GroupSource,    "Dashboard",              "ClaimLevel",              "LineClaimEnable"),
 
@@ -33,11 +37,20 @@ public static class ReportCatalog
         new("Coding Validation",       "Coding Validation",       "Coding",   "bi-pencil-square",        GroupAnalytics, "Coding",                 "Summary",                 "EnableCoding"),
         new("Payer Policy Validation", "Payer Policy Validation", "Policy",   "bi-shield-check",         GroupAnalytics, "PayerPolicyValidation",  "Index",                   "EnablePrediction"),
         new("Prediction Analysis",     "Prediction Analysis",     "Predict",  "bi-activity",             GroupAnalytics, "Prediction",             "Index",                   "EnablePrediction"),
-        new("Forecasting",             "Forecasting",             "Forecast", "bi-calendar3",            GroupAnalytics, "Prediction",             "ForecastingSummary",      "EnableForcast"),
-        // The tracker's own "Error Log" column: a run-level artifact, so it points at the board's
-        // error page rather than a report page. No feature flag - every lab has a run log.
-        new("Error Log",               "Error Log",               "Errors",   "bi-journal-text",         GroupAnalytics, "ReportBoard",            "RunErrors",               null)
+        new("Forecasting",             "Forecasting",             "Forecast", "bi-calendar3",            GroupAnalytics, "Prediction",             "ForecastingSummary",      "EnableForcast")
     ];
+
+    /// <summary>True for always-shown tiles (e.g. LIMS Master) that the tracker SP does not return as
+    /// a column of their own — they still appear on every lab (their status can mirror another report).</summary>
+    public static bool IsNavShortcut(string? trackerColumn)
+        => trackerColumn is not null && AlwaysShow.Contains(trackerColumn);
+
+    /// <summary>
+    /// Tracker columns that are run artifacts, not reports, and must never appear on the board
+    /// (as a tile or a matrix/worklist column) even though the SP still returns them.
+    /// </summary>
+    private static readonly HashSet<string> Hidden =
+        new(StringComparer.OrdinalIgnoreCase) { "Error Log" };
 
     private static readonly Dictionary<string, ReportCatalogEntry> ByColumn =
         Entries.ToDictionary(e => e.TrackerColumn, StringComparer.OrdinalIgnoreCase);
@@ -59,12 +72,21 @@ public static class ReportCatalog
     /// </summary>
     public static List<ReportCatalogEntry> Order(IEnumerable<string> trackerColumns)
     {
-        var present = new HashSet<string>(trackerColumns, StringComparer.OrdinalIgnoreCase);
-        var known = Entries.Where(e => present.Contains(e.TrackerColumn)).ToList();
+        // Drop run-artifact columns (e.g. Error Log) entirely — never a tile or a matrix column.
+        var visibleTracker = trackerColumns.Where(c => !Hidden.Contains(c)).ToList();
+        var present = new HashSet<string>(visibleTracker, StringComparer.OrdinalIgnoreCase);
+        // Known catalog entries that the tracker produced, PLUS always-on nav tiles (LIMS Master) that
+        // are shortcuts to a page rather than a tracked report, so they show on every lab.
+        var known = Entries.Where(e => present.Contains(e.TrackerColumn) || AlwaysShow.Contains(e.TrackerColumn)).ToList();
         var knownColumns = new HashSet<string>(known.Select(e => e.TrackerColumn), StringComparer.OrdinalIgnoreCase);
-        var unknown = trackerColumns.Where(c => !knownColumns.Contains(c)).Select(Unknown);
+        var unknown = visibleTracker.Where(c => !knownColumns.Contains(c)).Select(Unknown);
         return [.. known, .. unknown];
     }
+
+    /// <summary>Catalog entries shown on every lab regardless of whether the tracker returned them —
+    /// navigation shortcuts (not tracked reports).</summary>
+    private static readonly HashSet<string> AlwaysShow =
+        new(StringComparer.OrdinalIgnoreCase) { "LIMS Master" };
 
     /// <summary>Initials-ish short header for an unknown column, so the matrix column stays narrow.</summary>
     private static string ShortenUnknown(string name)

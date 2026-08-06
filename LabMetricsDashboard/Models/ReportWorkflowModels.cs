@@ -22,7 +22,11 @@ public sealed record ReportCatalogEntry(
     string Group,
     string? Controller,
     string? Action,
-    string? FeatureFlag);
+    string? FeatureFlag,
+    string? LinkTab = null,
+    // When set, this tile's run status is read from another tracker column instead of its own
+    // (e.g. LIMS Master mirrors "LIS Summary": success if LIS Summary succeeded, else failed).
+    string? StatusFrom = null);
 
 public sealed class LabReportStatus
 {
