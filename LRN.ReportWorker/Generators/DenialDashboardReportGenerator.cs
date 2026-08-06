@@ -2,6 +2,7 @@ using LabMetricsDashboard.Controllers;
 using LabMetricsDashboard.Services;
 using LabMetricsDashboard.ViewModels;
 using LRN.ReportQueue.Shared;
+using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -34,25 +35,53 @@ public sealed class DenialDashboardReportGenerator : IReportGenerator
     }
 
     /// <summary>
-    /// Resolved per job, never in the constructor. SqlDenialRecordRepository throws from its
-    /// OWN constructor when ConnectionStrings:DefaultConnection is absent, and every
-    /// IReportGenerator is built while the host starts — constructor-injecting it would
-    /// abort the whole service on a deployment that sources its connection strings
-    /// elsewhere. Resolving here keeps that failure inside the one report that needs it.
+    /// A repository bound to THIS lab's own database.
+    ///
+    /// dbo.DenialTaskBoard / DenialLineItem / DenialInsight live in the lab database, which
+    /// the queue already handed us as <paramref name="lab"/> — so pointing the repository
+    /// straight at it skips the LRNMaster lookup and the ConnectionStrings:{ConnectionKey}
+    /// indirection the web app uses. That keeps this worker free of any master-database
+    /// configuration, which its deployment does not have.
+    ///
+    /// Resolved per job (transient), never constructor-injected: every IReportGenerator is
+    /// built while the host starts, so a resolution failure here must not abort the service.
     /// </summary>
-    private IDenialRecordRepository ResolveRepository()
+    private SqlDenialRecordRepository CreateRepository(LabDbConfig lab)
     {
-        try
-        {
-            return _services.GetRequiredService<IDenialRecordRepository>();
-        }
-        catch (Exception ex)
-        {
+        if (string.IsNullOrWhiteSpace(lab.DbConnectionString))
             throw new InvalidOperationException(
-                "Denial Dashboard reports need the denial databases configured for LRN.ReportWorker: " +
-                "ConnectionStrings:DefaultConnection (dbo.LRNMetricsLab) plus each lab's ConnectionKey entry. " +
-                $"Other report types are unaffected. Underlying error: {ex.Message}", ex);
-        }
+                $"Lab '{lab.LabName}' has no DbConnectionString in its config JSON — " +
+                "Denial Dashboard reports read the denial tables from the lab's own database.");
+
+        var repo = _services.GetRequiredService<SqlDenialRecordRepository>();
+        repo.LabConnectionResolver = _ => lab.DbConnectionString;
+        return repo;
+    }
+
+    /// <summary>
+    /// Fails loudly when the lab database has no denial tables. Without this the repository's
+    /// own "table missing → empty list" guards would hand the user a silently empty workbook
+    /// instead of telling them the data is not where the worker looked.
+    /// </summary>
+    private static async Task EnsureDenialTablesAsync(LabDbConfig lab, CancellationToken ct)
+    {
+        const string sql = @"
+SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM INFORMATION_SCHEMA.TABLES
+    WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'DenialLineItem'
+) THEN 1 ELSE 0 END;";
+
+        await using var connection = new SqlConnection(lab.DbConnectionString);
+        await connection.OpenAsync(ct);
+        await using var command = new SqlCommand(sql, connection) { CommandTimeout = 60 };
+        var exists = Convert.ToInt32(await command.ExecuteScalarAsync(ct)) == 1;
+
+        if (!exists)
+            throw new InvalidOperationException(
+                $"dbo.DenialLineItem was not found in lab '{lab.LabName}'s database. " +
+                "Denial Dashboard reports read the denial tables from the lab database configured " +
+                "in that lab's config JSON (DbConnectionString); point it at the database holding " +
+                "DenialLineItem / DenialTaskBoard / DenialInsight for this lab.");
     }
 
     public async Task<GeneratedReportFile> GenerateAsync(
@@ -65,15 +94,28 @@ public sealed class DenialDashboardReportGenerator : IReportGenerator
                 $"Denial Dashboard report {job.ReportId} has no LabId — the page must post the dashboard's numeric lab id.");
 
         var labId = f.LabId.Value;
-        var repo = ResolveRepository();
+        var repo = CreateRepository(lab);
+        await EnsureDenialTablesAsync(lab, ct);
 
         async Task Progress(byte pct)
         {
             if (reportProgressAsync is not null) await reportProgressAsync(pct);
         }
 
-        var labs = await repo.GetLabsAsync(ct);
-        var labName = labs.FirstOrDefault(x => x.LabId == labId)?.LabName ?? job.LabName;
+        // Display name only. The lab list lives in LRNMaster, which this worker may have no
+        // connection to — the queue's own lab name is a fine substitute when it doesn't.
+        var labName = job.LabName;
+        try
+        {
+            var labs = await repo.GetLabsAsync(ct);
+            labName = labs.FirstOrDefault(x => x.LabId == labId)?.LabName ?? job.LabName;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex,
+                "Report {ReportId}: LRNMetricsLab lookup unavailable; using the queue's lab name '{Lab}'.",
+                job.ReportId, job.LabName);
+        }
 
         // Same normalization the page applies before it queries anything, so "(All)" and
         // pipe-delimited multi-selects behave identically here.

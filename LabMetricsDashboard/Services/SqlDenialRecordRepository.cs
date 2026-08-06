@@ -17,15 +17,35 @@ public class SqlDenialRecordRepository : IDenialRecordRepository
 
 	private readonly IConfiguration _configuration;
 	private readonly IMemoryCache _cache;
-	private readonly string _masterConnectionString;
+	private readonly string? _masterConnectionString;
 
 	public SqlDenialRecordRepository(IConfiguration configuration, IMemoryCache cache)
 	{
 		_configuration = configuration;
 		_cache = cache;
-		_masterConnectionString = configuration.GetConnectionString("DefaultConnection")
-			?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is not configured.");
+		// Resolved lazily, NOT validated here: the denial tables all live in the lab's own
+		// database, and a host that supplies a lab connection through
+		// <see cref="LabConnectionResolver"/> never needs LRNMaster at all. Throwing from the
+		// constructor would take down any such host at DI time (LRN.ReportWorker did exactly
+		// that) even though it can do all its work without this connection string.
+		_masterConnectionString = configuration.GetConnectionString("DefaultConnection");
 	}
+
+	/// <summary>LRNMaster — only the lab list and the run-log export path need it.</summary>
+	private string MasterConnectionString => !string.IsNullOrWhiteSpace(_masterConnectionString)
+		? _masterConnectionString
+		: throw new InvalidOperationException("ConnectionStrings:DefaultConnection is not configured.");
+
+	/// <summary>
+	/// Supplies a lab's connection string directly, bypassing the
+	/// LRNMaster lookup + ConnectionStrings:{ConnectionKey} resolution that
+	/// <see cref="OpenLabConnectionAsync"/> otherwise performs. Set by hosts that already
+	/// know the lab database (LRN.ReportWorker resolves it from the per-lab config JSONs),
+	/// so they can read the denial tables without any master-database configuration.
+	/// Returning null or blank falls back to the normal lookup. Not thread-safe to change
+	/// after use — give each caller its own repository instance.
+	/// </summary>
+	public Func<int, string?>? LabConnectionResolver { get; set; }
 
 	private static string TaskBoardCacheKey(int labId) => $"denial-dashboard:task-board:{labId}";
 	private static string InsightTableCacheKey(int labId) => $"denial-dashboard:insight-table:{labId}";
@@ -48,7 +68,7 @@ WHERE ISNULL(IsActive, 0) = 1
 ORDER BY LabName, LabId;";
 
 			var items = new List<LabOption>();
-			await using var connection = new SqlConnection(_masterConnectionString);
+			await using var connection = new SqlConnection(MasterConnectionString);
 			await connection.OpenAsync(cancellationToken);
 			await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 120 };
 			await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -498,7 +518,7 @@ WHERE RunId = @RunId
   AND OutputFileName <> ''
 ORDER BY ISNULL(CreatedOn, '19000101') DESC;";
 
-			await using var connection = new SqlConnection(_masterConnectionString);
+			await using var connection = new SqlConnection(MasterConnectionString);
 			await connection.OpenAsync(cancellationToken);
 			await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text, CommandTimeout = 120 };
 			command.Parameters.AddWithValue("@RunId", currentRunId);
@@ -1172,6 +1192,15 @@ ORDER BY [Value];";
 
 	private async Task<SqlConnection> OpenLabConnectionAsync(int labId, CancellationToken cancellationToken)
 	{
+		// A host that already knows the lab database short-circuits the LRNMaster lookup.
+		var supplied = LabConnectionResolver?.Invoke(labId);
+		if (!string.IsNullOrWhiteSpace(supplied))
+		{
+			var suppliedConnection = new SqlConnection(supplied);
+			await suppliedConnection.OpenAsync(cancellationToken);
+			return suppliedConnection;
+		}
+
 		var lab = await GetLabAsync(labId, cancellationToken);
 		if (string.IsNullOrWhiteSpace(lab.ConnectionKey))
 		{

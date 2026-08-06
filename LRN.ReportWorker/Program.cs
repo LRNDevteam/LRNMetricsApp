@@ -79,10 +79,11 @@ var host = Host.CreateDefaultBuilder(args)
             LabMetricsDashboard.Services.SqlLisSummaryRepository>();
         // Denial Dashboard reads go straight to SQL (the same queries LRN.ReportsApi runs
         // for the page) — the HTTP client mints its JWT from the signed-in HttpContext,
-        // which a background service does not have. Needs ConnectionStrings:DefaultConnection
-        // plus each lab's ConnectionKey entry, exactly as in the dashboard's appsettings.
-        services.AddSingleton<LabMetricsDashboard.Services.IDenialRecordRepository,
-            LabMetricsDashboard.Services.SqlDenialRecordRepository>();
+        // which a background service does not have.
+        // TRANSIENT on purpose: DenialDashboardReportGenerator points each instance at one
+        // lab's database via LabConnectionResolver, so instances must not be shared between
+        // concurrently generating reports.
+        services.AddTransient<LabMetricsDashboard.Services.SqlDenialRecordRepository>();
 
         // One IReportGenerator per report type — add future reports here.
         services.AddSingleton<IReportGenerator, PayerPolicyValidationReportGenerator>();
