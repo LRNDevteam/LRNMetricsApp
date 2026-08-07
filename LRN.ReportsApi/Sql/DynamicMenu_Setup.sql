@@ -167,6 +167,59 @@ BEGIN
     END
 END
 
+/* ── 3c. Master Values: Report Audit Log (idempotent add) ─────────────────
+   Report run status by RunId + downloadable run error log.                  */
+DECLARE @MasterValuesId INT =
+    (SELECT MenuItemId FROM dbo.MenuItems
+     WHERE MenuName = N'Master Values' AND ParentMenuItemId IS NULL AND IsDeleted = 0);
+
+IF @MasterValuesId IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM dbo.MenuItems
+                   WHERE ParentMenuItemId = @MasterValuesId AND MenuName = N'Report Audit Log' AND IsDeleted = 0)
+BEGIN
+    INSERT dbo.MenuItems (ParentMenuItemId, MenuName, ControllerName, ActionName, IconClass, MenuOrder, IsDisabled, CreatedBy)
+    VALUES (@MasterValuesId, N'Report Audit Log', N'MasterValues', N'ReportAuditLog', N'bi-journal-text', 6, 0, N'system');
+    PRINT 'Added Master Values > Report Audit Log menu item';
+END
+
+/* ── 3d. Report Board - the landing/home page (replaces Revenue Dashboard) ──
+   Report Control Board: every report of each lab's latest run, from the workflow
+   tracker. MenuOrder 0 puts it first; MenuService sorts roots by MenuOrder.
+
+   Matched by controller/action (not name) so it upgrades an existing "Home Dashboard"
+   row to "Report Board" in place instead of creating a duplicate. Granted to EVERY
+   role (landing page); the page itself limits each user to the labs on their claims. */
+IF EXISTS (SELECT 1 FROM dbo.MenuItems
+           WHERE ParentMenuItemId IS NULL AND ControllerName = N'ReportBoard' AND ActionName = N'Index' AND IsDeleted = 0)
+BEGIN
+    UPDATE dbo.MenuItems
+    SET MenuName = N'Report Board', MenuOrder = 0, ModifiedBy = N'system', ModifiedOn = SYSDATETIME()
+    WHERE ParentMenuItemId IS NULL AND ControllerName = N'ReportBoard' AND ActionName = N'Index' AND IsDeleted = 0
+      AND (MenuName <> N'Report Board' OR MenuOrder <> 0);
+END
+ELSE
+BEGIN
+    INSERT dbo.MenuItems (ParentMenuItemId, MenuName, ControllerName, ActionName, IconClass, MenuOrder, IsDisabled, CreatedBy)
+    VALUES (NULL, N'Report Board', N'ReportBoard', N'Index', N'bi-grid-3x3-gap-fill', 0, 0, N'system');
+    PRINT 'Added Report Board (Report Control Board) menu item';
+END
+
+INSERT dbo.UserRoleMenu (RoleId, MenuItemId, CreatedBy)
+SELECT r.RoleID, m.MenuItemId, N'system'
+FROM dbo.Roles r
+CROSS JOIN dbo.MenuItems m
+WHERE m.ParentMenuItemId IS NULL AND m.ControllerName = N'ReportBoard' AND m.ActionName = N'Index' AND m.IsDeleted = 0
+  AND NOT EXISTS (SELECT 1 FROM dbo.UserRoleMenu x
+                  WHERE x.RoleId = r.RoleID AND x.MenuItemId = m.MenuItemId);
+
+/* Remove the top-level "Revenue Dashboard" link (Dashboard/Index). Soft delete only:
+   the Dashboard page/controller stays, and the report pages under Standard Reports
+   (Claim Level, Line Level, Production Summary, etc.) are unaffected. */
+UPDATE dbo.MenuItems
+SET IsDeleted = 1, ModifiedBy = N'system', ModifiedOn = SYSDATETIME()
+WHERE ParentMenuItemId IS NULL AND ControllerName = N'Dashboard' AND ActionName = N'Index' AND IsDeleted = 0;
+PRINT 'Report Board set as landing menu; Revenue Dashboard link removed (page kept).';
+
 /* ── 4. Default access: grant EVERY menu to the Admin role ────────────────
    Re-runnable: newly added menu items are granted to Admin on each run.     */
 INSERT dbo.UserRoleMenu (RoleId, MenuItemId, CreatedBy)

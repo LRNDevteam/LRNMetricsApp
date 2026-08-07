@@ -111,15 +111,6 @@
         background: rgba(255, 255, 255, .22);
         }
 
-        .nav-lab-btn.nav-lab-locked {
-        opacity: .6;
-        cursor: not-allowed;
-        }
-
-        .nav-lab-btn.nav-lab-locked:hover {
-        background: rgba(255, 255, 255, .12);
-        }
-
         .nav-lab-btn .bi-chevron-down {
         font-size: .55rem;
         opacity: .7;
@@ -838,10 +829,6 @@
             var pageLabel = ViewData["PageLabel"] as string;
             var allLabKeys = LabSettingsInstance.Labs.Keys.OrderBy(x => x).ToList();
 
-            // Pages can lock the navbar lab selector (e.g. the LIS drill-through,
-            // whose data is scoped to the lab it was opened from).
-            var disableLabSwitch = ViewData["DisableLabSwitch"] as bool? ?? false;
-
             // Restrict the navbar lab selector to labs the signed-in user is assigned to.
             // Admins see every lab. Anonymous (login screen) sees nothing.
             var isAdmin = User?.IsInRole("Admin") ?? false;
@@ -905,44 +892,31 @@
         }
         <!-- ─── Top brand bar (logo + lab dropdown + user) ─── -->
         <div class="lmd-brandbar">
-            <a class="brand-link" asp-controller="Home" asp-action="Index">
+            <a class="brand-link" asp-controller="ReportBoard" asp-action="Index">
                 <img src="~/images/LRN-White-Logo-footer-1-1.png" alt="LRN Logo" />
             </a>
             <div class="brand-spacer"></div>
             <div class="nav-toolbar">
                 @if (!string.IsNullOrEmpty(activeLab) && availableLabs.Count > 0)
                 {
-                    if (disableLabSwitch)
-                    {
-                        <span class="nav-lab-wrap">
-                            <span class="nav-lab-btn nav-lab-locked" title="Lab switching is locked on this page">
-                                <i class="bi bi-building"></i>
-                                @activeLab
-                                <i class="bi bi-lock-fill"></i>
-                            </span>
+                    <span class="nav-lab-wrap" id="navLabWrap">
+                        <span class="nav-lab-btn" id="navLabBtn" tabindex="0" title="Switch lab">
+                            <i class="bi bi-building"></i>
+                            @activeLab
+                            <i class="bi bi-chevron-down"></i>
                         </span>
-                    }
-                    else
-                    {
-                        <span class="nav-lab-wrap" id="navLabWrap">
-                            <span class="nav-lab-btn" id="navLabBtn" tabindex="0" title="Switch lab">
-                                <i class="bi bi-building"></i>
-                                @activeLab
-                                <i class="bi bi-chevron-down"></i>
-                            </span>
-                            <div class="nav-lab-panel" id="navLabPanel">
-                                <input type="text" class="nav-lab-search" id="navLabSearch"
-                                       placeholder="Search labs…" autocomplete="off" />
-                                <div class="nav-lab-list" id="navLabList">
-                                    @foreach (var lab in availableLabs)
-                                    {
-                                        <a href="#" data-lab="@lab"
-                                           class="@(lab == activeLab ? "active" : "")">@lab</a>
-                                    }
-                                </div>
+                        <div class="nav-lab-panel" id="navLabPanel">
+                            <input type="text" class="nav-lab-search" id="navLabSearch"
+                                   placeholder="Search labs…" autocomplete="off" />
+                            <div class="nav-lab-list" id="navLabList">
+                                @foreach (var lab in availableLabs)
+                                {
+                                    <a href="#" data-lab="@lab"
+                                       class="@(lab == activeLab ? "active" : "")">@lab</a>
+                                }
                             </div>
-                        </span>
-                    }
+                        </div>
+                    </span>
                 }
                 @if ((User?.Identity?.IsAuthenticated ?? false) && canSeeLabMaster)
                 {
@@ -1060,19 +1034,8 @@
         <!-- Breadcrumb bar — shown when a lab is selected -->
         @if (!string.IsNullOrEmpty(selectedLab))
         {
-            var bcParent    = ViewData["BreadcrumbParent"] as string;
-            var bcParentUrl = ViewData["BreadcrumbParentUrl"] as string;
             <div class="lmd-breadcrumb d-flex align-items-center flex-wrap gap-1">
-                <a asp-controller="Home" asp-action="Index">Home</a>
-                <span class="bc-sep">›</span>
-                @if (!string.IsNullOrEmpty(bcParent))
-                {
-                    <a href="@(string.IsNullOrEmpty(bcParentUrl) ? "#" : bcParentUrl)">@bcParent</a>
-                }
-                else
-                {
-                    <a asp-controller="Dashboard" asp-action="Index" asp-route-lab="@selectedLab">Revenue Dashboard</a>
-                }
+                <a asp-controller="ReportBoard" asp-action="Index">Home</a>
                 @if (!string.IsNullOrEmpty(pageLabel))
                 {
                     <span class="bc-sep">›</span>
@@ -1204,7 +1167,9 @@
                 RevenueDashboard: 'Revenue Dashboard',
                 ClinicSummary: 'Clinic Summary',
                 SalesRepSummary: 'Sales Rep Summary',
-                LisSummary: 'LIS Summary'
+                LisSummary: 'LIS Summary',
+                CodingSummary: 'Coding Summary',
+                DenialDashboard: 'Denial Dashboard'
             };
             var TYPE_COLORS = ['rpt-type-c1', 'rpt-type-c2', 'rpt-type-c3', 'rpt-type-c4', 'rpt-type-c5', 'rpt-type-c6'];
             function typeLabel(t) {

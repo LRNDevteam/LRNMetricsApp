@@ -132,7 +132,7 @@ public sealed partial class SqlCollectionSummaryRepository
                 pct = Convert.ToDecimal(r.GetValue(r.GetOrdinal("PaymentPct")));
 
             rows.Add(new InsuranceReimbursementRow(
-                Rank:                r.IsDBNull(r.GetOrdinal("PayerRank")) ? 0 : Convert.ToByte(r.GetValue(r.GetOrdinal("PayerRank"))),
+                Rank:                GetByteOrDefault(r, "PayerRank"),
                 PayerName:           r.IsDBNull(r.GetOrdinal("PayerName")) ? string.Empty : Convert.ToString(r.GetValue(r.GetOrdinal("PayerName"))) ?? string.Empty,
                 SumInsurancePayment: r.IsDBNull(r.GetOrdinal("SumInsurancePayment")) ? 0m : Convert.ToDecimal(r.GetValue(r.GetOrdinal("SumInsurancePayment"))),
                 SumChargeAmount:     r.IsDBNull(r.GetOrdinal("SumChargeAmount")) ? 0m : Convert.ToDecimal(r.GetValue(r.GetOrdinal("SumChargeAmount"))),
@@ -182,7 +182,7 @@ public sealed partial class SqlCollectionSummaryRepository
         while (await r.ReadAsync(ct))
         {
             rows.Add(new InsuranceTotalPaymentRow(
-                Rank:             r.GetByte(r.GetOrdinal("PayerRank")),
+                Rank:             GetByteOrDefault(r, "PayerRank"),
                 PayerName:        r.GetString(r.GetOrdinal("PayerName")),
                 TotalPayments:    r.GetDecimal(r.GetOrdinal("TotalPayments")),
                 UniqueVisitCount: r.GetInt32(r.GetOrdinal("UniqueVisitCount"))));
@@ -246,10 +246,10 @@ public sealed partial class SqlCollectionSummaryRepository
                     PanelName:     r.GetString(r.GetOrdinal("PanelName")),
                     PayerName:     r.GetString(r.GetOrdinal("PayerName")),
                     BillYear:      r.GetInt32 (r.GetOrdinal("BillYear")),
-                    BillMonth:     r.GetByte  (r.GetOrdinal("BillMonth")),
+                    BillMonth:     GetByteOrDefault(r, "BillMonth"),
                     LineItemCount: r.GetInt32 (r.GetOrdinal("NoOfClaims")),
                     InsurancePaid: r.GetDecimal(r.GetOrdinal("InsurancePayment")),
-                    PayerRank:     r.GetByte  (r.GetOrdinal("PayerRank"))));
+                    PayerRank:     GetByteOrDefault(r, "PayerRank")));
             }
         }
 
@@ -305,8 +305,8 @@ public sealed partial class SqlCollectionSummaryRepository
                 rows.Add((
                     r.GetString(r.GetOrdinal("PanelName")),
                     r.GetString(r.GetOrdinal("PayerName")),
-                    r.GetByte  (r.GetOrdinal("PayerRank")),
-                    r.GetByte  (r.GetOrdinal("WeekKey")),
+                    GetByteOrDefault(r, "PayerRank"),
+                    GetByteOrDefault(r, "WeekKey"),
                     r.GetDateTime(r.GetOrdinal("WeekStart")),
                     r.GetDateTime(r.GetOrdinal("WeekEnd")),
                     r.GetInt32 (r.GetOrdinal("NoOfClaims")),

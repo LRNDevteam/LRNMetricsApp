@@ -18,6 +18,7 @@ public interface IDenialDashboardRepository
     Task<IReadOnlyList<string>> GetPanelNamesByLabAsync(int labId, CancellationToken cancellationToken = default);
     Task<DenialFilterAutocompleteOptions> GetFilterAutocompleteOptionsAsync(int labId, CancellationToken cancellationToken = default);
     Task<string?> GetCurrentRunIdAsync(int labId, CancellationToken cancellationToken = default);
+    Task<DenialRunInfo> GetRunInfoAsync(int labId, CancellationToken cancellationToken = default);
     Task<string?> GetLatestExportFilePathForLabAsync(int labId, CancellationToken cancellationToken = default);
     Task<TaskBoardUploadResult> UpdateTaskBoardAsync(int labId, IReadOnlyList<TaskBoardCsvUpdate> updates, CancellationToken cancellationToken = default);
     Task<int> AssignReviewerByInsightAsync(int labId, string denialCode, string payerName, string reviewerUserName, string? runId, CancellationToken cancellationToken = default);

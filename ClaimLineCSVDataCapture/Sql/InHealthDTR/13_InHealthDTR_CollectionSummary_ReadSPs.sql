@@ -97,7 +97,7 @@ BEGIN
     ),
     ranked AS (
         SELECT TOP 5 PayerName, SumIns, SumChg, Visits,
-               CAST(ROW_NUMBER() OVER (ORDER BY SumIns DESC) AS TINYINT) AS PayerRank
+               CAST(ROW_NUMBER() OVER (ORDER BY SumIns DESC) AS INT) AS PayerRank
         FROM agg ORDER BY SumIns DESC
     )
     SELECT PayerRank, PayerName,
@@ -174,7 +174,7 @@ BEGIN
     ),
     ranked AS (
         SELECT TOP 5 PayerName, TotalPay, Visits,
-               CAST(ROW_NUMBER() OVER (ORDER BY TotalPay DESC) AS TINYINT) AS PayerRank
+               CAST(ROW_NUMBER() OVER (ORDER BY TotalPay DESC) AS INT) AS PayerRank
         FROM agg ORDER BY TotalPay DESC
     )
     SELECT PayerRank, PayerName, TotalPay AS TotalPayments, Visits AS UniqueVisitCount
@@ -266,7 +266,7 @@ BEGIN
         FROM Agg GROUP BY PanelName, PayerName
     )
     SELECT
-        a.PanelName, a.PayerName, CAST(r.PayerRank AS TINYINT) AS PayerRank,
+        a.PanelName, a.PayerName, CAST(r.PayerRank AS INT) AS PayerRank,
         a.BillYear, CAST(a.BillMonth AS TINYINT) AS BillMonth,
         a.NoOfClaims, a.InsurancePayment,
         CAST(a.InsurancePayment / NULLIF(a.NoOfClaims, 0) AS DECIMAL(18,2)) AS AveragePaidAmount
@@ -396,7 +396,7 @@ BEGIN
         FROM agg GROUP BY PanelName, PayerName
     )
     SELECT
-        a.PanelName, a.PayerName, CAST(r.PayerRank AS TINYINT) AS PayerRank,
+        a.PanelName, a.PayerName, CAST(r.PayerRank AS INT) AS PayerRank,
         CAST(a.WeekKey AS TINYINT) AS WeekKey,
         CASE a.WeekKey WHEN 1 THEN @W1Start WHEN 2 THEN @W2Start WHEN 3 THEN @W3Start WHEN 4 THEN @W4Start END AS WeekStart,
         CASE a.WeekKey WHEN 1 THEN @W1End   WHEN 2 THEN @W2End   WHEN 3 THEN @W3End   WHEN 4 THEN @W4End   END AS WeekEnd,
@@ -634,7 +634,7 @@ BEGIN
     ),
     ranks AS (
         SELECT PanelName, PayerName,
-               CAST(DENSE_RANK() OVER (PARTITION BY PanelName ORDER BY NoOfClaims DESC) AS TINYINT) AS PayerRank
+               CAST(DENSE_RANK() OVER (PARTITION BY PanelName ORDER BY NoOfClaims DESC) AS INT) AS PayerRank
         FROM agg
     )
     SELECT

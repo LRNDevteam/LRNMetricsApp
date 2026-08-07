@@ -22,17 +22,15 @@
      @FilterCol4/Op4/Val4  optional AND fourth predicate
      @Sec1..3 Name/Col/Vals  optional secondary series (StatusBreakdown)
 
-   Day-window (@DayWindow): end day of the billed week range. Applies ONLY
-   to the N-day received band (set 6) and the 9-day summary fields.
-   Summary KPIs, monthly trend, panels, MoM, status, and insurance use
-   full-month SUMs so Latest / Grand Total match the Executive Summary
-   Cash refresh.
+   Day-window (@DayWindow): end day of the billed week range. ALL Insight
+   Drill aggregates use days 1..@DayWindow of each month (Summary KPIs,
+   MoM, Avg 6 Months, Monthly Trend, panels, status, insurance, clinics).
 
    Returns 10 result sets (same shape as PmsDrill; values are rounded $):
      1 summary  2 monthly  3 panels (Avg6Months + MoM)  4 empty rate
      5 status breakdown  6 N-day received  7 empty rate-panels
-     8 top 10 insurance (full-month + MoM %)
-     9 top panels per top-10 insurance (full-month + MoM %)
+     8 top 10 insurance (DayWindow + MoM %)
+     9 top panels per top-10 insurance (DayWindow + MoM %)
     10 top 10 clinics per top panel (Avg6Months + MoM)
 
    Deploy independently of LisDrill / PmsDrill Core.
@@ -358,15 +356,15 @@ BEGIN
     IF EXISTS (SELECT 1 FROM #Claim)
         CREATE CLUSTERED INDEX IX_Claim_YM_Panel ON #Claim (CollYear, CollMonth, Panel, Payer, Clinic);
 
-    -- Full-month SUM; DayWindow only on Primary9 (N-day band).
+    -- DayWindow SUM for PrimaryCount and Primary9 (comparable WeekRange window).
     INSERT INTO #M (CollYear, CollMonth, PrimaryCount, Primary9)
     SELECT CollYear, CollMonth,
-           CAST(ROUND(SUM(CASE WHEN IsPrimary=1 THEN Amount ELSE 0 END), 0) AS bigint),
+           CAST(ROUND(SUM(CASE WHEN IsPrimary=1 AND CollDay BETWEEN 1 AND @DayWindow THEN Amount ELSE 0 END), 0) AS bigint),
            CAST(ROUND(SUM(CASE WHEN IsPrimary=1 AND CollDay BETWEEN 1 AND @DayWindow THEN Amount ELSE 0 END), 0) AS bigint)
     FROM #Claim
     GROUP BY CollYear, CollMonth
-    HAVING SUM(CASE WHEN IsPrimary=1 THEN Amount ELSE 0 END) <> 0
-        OR SUM(Amount) <> 0;
+    HAVING SUM(CASE WHEN IsPrimary=1 AND CollDay BETWEEN 1 AND @DayWindow THEN Amount ELSE 0 END) <> 0
+        OR SUM(CASE WHEN CollDay BETWEEN 1 AND @DayWindow THEN Amount ELSE 0 END) <> 0;
 
     INSERT INTO #MP (CollYear, CollMonth, PrimaryCount, Primary9)
     SELECT CollYear, CollMonth, PrimaryCount, Primary9
@@ -393,13 +391,15 @@ BEGIN
            Cnt = CAST(ROUND(SUM(Amount), 0) AS bigint)
     INTO #PanelMonth
     FROM #Claim
-    WHERE IsPrimary=1 AND Panel IS NOT NULL
+    WHERE IsPrimary=1 AND Panel IS NOT NULL AND CollDay BETWEEN 1 AND @DayWindow
     GROUP BY Panel, CollYear, CollMonth;
 
     IF OBJECT_ID('tempdb..#PanelMoM') IS NOT NULL DROP TABLE #PanelMoM;
     SELECT Panel,
-           Prev9Day = CAST(ROUND(SUM(CASE WHEN @PrevM IS NOT NULL AND CollYear=@PrevY AND CollMonth=@PrevM THEN Amount ELSE 0 END), 0) AS bigint),
-           Latest9Day = CAST(ROUND(SUM(CASE WHEN CollYear=@LatestY AND CollMonth=@LatestM THEN Amount ELSE 0 END), 0) AS bigint)
+           Prev9Day = CAST(ROUND(SUM(CASE WHEN CollDay BETWEEN 1 AND @DayWindow
+                                          AND @PrevM IS NOT NULL AND CollYear=@PrevY AND CollMonth=@PrevM THEN Amount ELSE 0 END), 0) AS bigint),
+           Latest9Day = CAST(ROUND(SUM(CASE WHEN CollDay BETWEEN 1 AND @DayWindow
+                                            AND CollYear=@LatestY AND CollMonth=@LatestM THEN Amount ELSE 0 END), 0) AS bigint)
     INTO #PanelMoM
     FROM #Claim
     WHERE IsPrimary=1 AND Panel IS NOT NULL
@@ -431,7 +431,7 @@ BEGIN
     SELECT Payer, CollYear, CollMonth, Cnt = CAST(ROUND(SUM(Amount), 0) AS bigint)
     INTO #PayerMonth
     FROM #Claim
-    WHERE IsPrimary=1 AND Payer IS NOT NULL
+    WHERE IsPrimary=1 AND Payer IS NOT NULL AND CollDay BETWEEN 1 AND @DayWindow
     GROUP BY Payer, CollYear, CollMonth;
 
     IF OBJECT_ID('tempdb..#TopPayers') IS NOT NULL DROP TABLE #TopPayers;
@@ -480,23 +480,23 @@ BEGIN
     -- Set 4: empty rate
     SELECT MonthLabel=N'', Resulted=CAST(0 AS bigint), Received=CAST(0 AS bigint), RatePct=CAST(NULL AS decimal(18,2)) WHERE 1=0;
 
-    -- Set 5: secondary series ($)
+    -- Set 5: secondary series ($, DayWindow)
     ;WITH Trail AS (
         SELECT TOP (7) CollYear, CollMonth FROM #M ORDER BY CollYear DESC, CollMonth DESC
     )
     SELECT Status, CollYear, CollMonth, Cnt FROM (
         SELECT @Sec1Name AS Status, c.CollYear, c.CollMonth,
-               CAST(ROUND(SUM(CASE WHEN c.S1=1 THEN c.Amount ELSE 0 END), 0) AS bigint) AS Cnt
+               CAST(ROUND(SUM(CASE WHEN c.S1=1 AND c.CollDay BETWEEN 1 AND @DayWindow THEN c.Amount ELSE 0 END), 0) AS bigint) AS Cnt
         FROM #Claim c JOIN Trail t ON t.CollYear=c.CollYear AND t.CollMonth=c.CollMonth
         WHERE @Sec1Name IS NOT NULL GROUP BY c.CollYear,c.CollMonth
         UNION ALL
         SELECT @Sec2Name, c.CollYear, c.CollMonth,
-               CAST(ROUND(SUM(CASE WHEN c.S2=1 THEN c.Amount ELSE 0 END), 0) AS bigint)
+               CAST(ROUND(SUM(CASE WHEN c.S2=1 AND c.CollDay BETWEEN 1 AND @DayWindow THEN c.Amount ELSE 0 END), 0) AS bigint)
         FROM #Claim c JOIN Trail t ON t.CollYear=c.CollYear AND t.CollMonth=c.CollMonth
         WHERE @Sec2Name IS NOT NULL GROUP BY c.CollYear,c.CollMonth
         UNION ALL
         SELECT @Sec3Name, c.CollYear, c.CollMonth,
-               CAST(ROUND(SUM(CASE WHEN c.S3=1 THEN c.Amount ELSE 0 END), 0) AS bigint)
+               CAST(ROUND(SUM(CASE WHEN c.S3=1 AND c.CollDay BETWEEN 1 AND @DayWindow THEN c.Amount ELSE 0 END), 0) AS bigint)
         FROM #Claim c JOIN Trail t ON t.CollYear=c.CollYear AND t.CollMonth=c.CollMonth
         WHERE @Sec3Name IS NOT NULL GROUP BY c.CollYear,c.CollMonth
     ) s
@@ -531,7 +531,7 @@ BEGIN
                Cnt = CAST(ROUND(SUM(c.Amount), 0) AS bigint)
         FROM #Claim c
         INNER JOIN #TopPayers t ON t.Payer = c.Payer
-        WHERE c.IsPrimary=1 AND c.Panel IS NOT NULL
+        WHERE c.IsPrimary=1 AND c.Panel IS NOT NULL AND c.CollDay BETWEEN 1 AND @DayWindow
         GROUP BY c.Payer, c.Panel, c.CollYear, c.CollMonth
     ),
     PayerPanelTot AS (
@@ -567,7 +567,7 @@ BEGIN
                Cnt = CAST(ROUND(SUM(c.Amount), 0) AS bigint)
         FROM #Claim c
         INNER JOIN #TopPanels t ON t.Panel = c.Panel
-        WHERE c.IsPrimary=1 AND c.Clinic IS NOT NULL
+        WHERE c.IsPrimary=1 AND c.Clinic IS NOT NULL AND c.CollDay BETWEEN 1 AND @DayWindow
         GROUP BY c.Panel, c.Clinic, c.CollYear, c.CollMonth
     ),
     ClinicAvg AS (
@@ -582,8 +582,10 @@ BEGIN
     ),
     ClinicMoM AS (
         SELECT c.Panel, c.Clinic,
-               Prev9Day = CAST(ROUND(SUM(CASE WHEN @PrevM IS NOT NULL AND c.CollYear=@PrevY AND c.CollMonth=@PrevM THEN c.Amount ELSE 0 END), 0) AS bigint),
-               Latest9Day = CAST(ROUND(SUM(CASE WHEN c.CollYear=@LatestY AND c.CollMonth=@LatestM THEN c.Amount ELSE 0 END), 0) AS bigint)
+               Prev9Day = CAST(ROUND(SUM(CASE WHEN c.CollDay BETWEEN 1 AND @DayWindow
+                                              AND @PrevM IS NOT NULL AND c.CollYear=@PrevY AND c.CollMonth=@PrevM THEN c.Amount ELSE 0 END), 0) AS bigint),
+               Latest9Day = CAST(ROUND(SUM(CASE WHEN c.CollDay BETWEEN 1 AND @DayWindow
+                                                AND c.CollYear=@LatestY AND c.CollMonth=@LatestM THEN c.Amount ELSE 0 END), 0) AS bigint)
         FROM #Claim c
         INNER JOIN #TopPanels t ON t.Panel = c.Panel
         WHERE c.IsPrimary=1 AND c.Clinic IS NOT NULL

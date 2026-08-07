@@ -6,9 +6,23 @@ namespace LRN.ReportsApi.Models;
 
 public class LabOption
 {
+    /// <summary>Canonical LabId from LRNMaster.dbo.Labs — the id exposed to callers, links and cookies
+    /// so it is consistent with the rest of the application. May differ from <see cref="InternalLabId"/>.</summary>
     public int LabId { get; set; }
     public string LabName { get; set; } = string.Empty;
     public string ConnectionKey { get; set; } = string.Empty;
+    /// <summary>The denial dashboard's own (dbo.LRNMetricsLab) id, which is what the per-lab data tables
+    /// embed and are filtered by. Used internally for the [LabId] = @LabId scope only. Defaults to
+    /// <see cref="LabId"/> when the lab is not remapped.</summary>
+    public int InternalLabId { get; set; }
+}
+
+/// <summary>Run provenance shown in the dashboard header: the run id and the source file it came from.</summary>
+public class DenialRunInfo
+{
+    public string RunId { get; set; } = string.Empty;
+    public string SourceFileName { get; set; } = string.Empty;
+    public string WeekFolder { get; set; } = string.Empty;
 }
 
 public class DenialDashboardFilters

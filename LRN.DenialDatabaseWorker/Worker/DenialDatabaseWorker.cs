@@ -6,10 +6,12 @@ using DenialDatabaseProcessorWorker.Models;
 using DenialDatabaseProcessorWorker.Normalizers;
 using DenialDatabaseProcessorWorker.Notifications;
 using DenialDatabaseProcessorWorker.Services;
+using DenialDatabaseProcessorWorker.Services.ReportLogging;
 using DenialDatabaseProcessorWorker.Services.SharePoint;
 using DenialDatabaseProcessorWorker.Services.Workflow;
 using DenialDatabaseProcessorWorker.Models.Workflow;
 using DenialDatabaseProcessorWorker.Utils;
+using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -24,6 +26,7 @@ public sealed class DenialDatabaseWorker : BackgroundService
     private readonly ITeamsNotifier _teamsNotifier;
     private readonly CsvStepLogger _stepLogger;
     private readonly ExcelTableReader _excelReader;
+    private readonly PayerValidationReportRepository _payerValidationRepo;
     private readonly DenialDatabaseBuilder _builder;
     private readonly ExcelWriter _excelWriter;
     private readonly ISharePointUploader _uploader;
@@ -35,12 +38,18 @@ public sealed class DenialDatabaseWorker : BackgroundService
     private readonly IDenialWorkflowApiClient _workflowApiClient;
     private readonly SharePointGraphOptions _spOpt;
 
+    // Run logging + workflow tracker (LRNMaster). These are what the report dashboard reads.
+    private readonly RecentSuccessRunProvider _recentSuccessRunProvider;
+    private readonly ReportRunIdInfoLogger _infoLogger;
+    private readonly ReportsWorkflowTrackerRepository _workflowTracker;
+
     public DenialDatabaseWorker(
         ILogger<DenialDatabaseWorker> logger,
         IOptions<ProcessorOptions> options,
         IOptions<List<LabConfig>> labs,
         CsvStepLogger stepLogger,
         ExcelTableReader excelReader,
+        PayerValidationReportRepository payerValidationRepo,
         DenialDatabaseBuilder builder,
         ExcelWriter excelWriter,
         ITeamsNotifier teamsNotifier,
@@ -51,13 +60,17 @@ public sealed class DenialDatabaseWorker : BackgroundService
         DenialTaskBoardRepository denialTaskBoardRepo,
         IDenialWorkflowApiClient workflowApiClient,
         ISharePointUploader uploader,
-        IOptions<SharePointGraphOptions> spOpt)
+        IOptions<SharePointGraphOptions> spOpt,
+        RecentSuccessRunProvider recentSuccessRunProvider,
+        ReportRunIdInfoLogger infoLogger,
+        ReportsWorkflowTrackerRepository workflowTracker)
     {
         _logger = logger;
         _options = options.Value;
         _labs = labs.Value;
         _stepLogger = stepLogger;
         _excelReader = excelReader;
+        _payerValidationRepo = payerValidationRepo;
         _builder = builder;
         _excelWriter = excelWriter;
         _insightBuilder = insightBuilder;
@@ -69,6 +82,9 @@ public sealed class DenialDatabaseWorker : BackgroundService
         _uploader = uploader;
         _spOpt = spOpt.Value;
         _teamsNotifier = teamsNotifier;
+        _recentSuccessRunProvider = recentSuccessRunProvider;
+        _infoLogger = infoLogger;
+        _workflowTracker = workflowTracker;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -94,63 +110,131 @@ public sealed class DenialDatabaseWorker : BackgroundService
 
     private async Task ProcessLabAsync(LabConfig lab, CancellationToken ct)
     {
-        string payerPolicyFile = "";
+        string payerPolicySource = "";
         string claimActionMapperFile = "";
         string outFile = "";
         string runId = "";
+        var startedOn = DateTime.Now;
 
         try
         {
-            payerPolicyFile = _fileResolver.GetLatestPayerPolicyFile(lab);
-            claimActionMapperFile = _fileResolver.GetLatestClaimActionMapper(lab);
+            // Step 1 - the RunId to work under. The report never invents one: it attaches
+            // itself to the lab's most recent successful run in LRNMaster.dbo.LRN_Run_Log.
+            var successRun = await _recentSuccessRunProvider.GetLatestSuccessRunAsync(lab.LabName, ct);
 
-            if (string.IsNullOrWhiteSpace(payerPolicyFile) || !File.Exists(payerPolicyFile))
-                throw new FileNotFoundException("Latest payer policy file not found.", payerPolicyFile);
+            if (successRun is null)
+            {
+                // Not an error - the lab has no successful run yet, so there is nothing to
+                // report on. Both logging procedures reject a blank RunId, so exit quietly.
+                _logger.LogInformation(
+                    "Lab {LabName}: {Procedure} returned no successful run. Nothing to process.",
+                    lab.LabName, _options.RecentSuccessRunProcedure);
+                return;
+            }
+
+            runId = successRun.RunId;
+
+            // Step 2 - do not repeat work already done for this RunId. Only a Success row
+            // stops us; a previous Failed or Skipped run is exactly the one to retry.
+            if (await _workflowTracker.IsAlreadySuccessfulAsync(runId, ct))
+            {
+                _logger.LogInformation(
+                    "Lab {LabName}: {ReportName} already succeeded for RunId {RunId}. Skipping.",
+                    lab.LabName, _options.ReportName, runId);
+                return;
+            }
+
+            // Step 3 - open the trail and mark the tracker InProgress before any work starts.
+            await _infoLogger.StartAsync(runId, lab.LabName,
+                $"Denial report started for lab {lab.LabName} (LabId={lab.LabId}).", ct: ct);
+
+            await _workflowTracker.UpsertAsync(runId, WorkflowStatus.InProgress, startedOn: startedOn, ct: ct);
+
+            // Is this run present in this lab's database at all? Only some labs carry rows
+            // for a given run, and a lab without them has nothing to import.
+            var sourceRun = await _payerValidationRepo.GetRunAsync(lab, runId, ct);
+
+            if (sourceRun is null)
+            {
+                await CompleteAsSkippedAsync(lab, runId, startedOn,
+                    $"RunId {runId} has no rows in {SourceTableLabel(lab)}.", ct);
+                return;
+            }
+
+            payerPolicySource = BuildSourceLabel(lab, sourceRun);
+
+            await _infoLogger.InfoAsync(runId, lab.LabName,
+                $"Run found in {SourceTableLabel(lab)}. Rows={sourceRun.TotalRowCount}, " +
+                $"{_options.DeniedPayStatus}Rows={sourceRun.DeniedRowCount}.", ct: ct);
+
+            if (await _runLogRepo.ExistsAsync(runId))
+            {
+                await CompleteAsSkippedAsync(lab, runId, startedOn,
+                    $"RunId {runId} is already recorded in dbo.DenialAnalysisRunLog.", ct);
+                return;
+            }
+
+            claimActionMapperFile = _fileResolver.GetLatestClaimActionMapper(lab);
 
             if (string.IsNullOrWhiteSpace(claimActionMapperFile) || !File.Exists(claimActionMapperFile))
                 throw new FileNotFoundException("Latest claim action mapper file not found.", claimActionMapperFile);
 
-            runId = _fileResolver.ExtractRunId(payerPolicyFile);
+            var (yearFolder, monthFolder, weekFolder) = _fileResolver.ExtractFolderStructure(
+                sourceRun.SourceFullPath,
+                sourceRun.WeekFolder,
+                sourceRun.InsertedDateTime ?? DateTime.Now);
 
-            if (string.IsNullOrWhiteSpace(runId))
-                throw new InvalidOperationException($"Unable to extract RunId from file: {payerPolicyFile}");
-
-            if (await _runLogRepo.ExistsAsync(runId))
-            {
-                _logger.LogInformation("RunId {RunId} already processed. Skipping lab {LabName}.", runId, lab.LabName);
-                return;
-            }
-
-            var (yearFolder, monthFolder, weekFolder) = _fileResolver.ExtractFolderStructure(payerPolicyFile);
             outFile = _outputPathBuilder.BuildOutputPath(
                 _options.OutputRoot,
                 lab.LabName,
                 runId,
                 yearFolder,
                 monthFolder,
-                weekFolder);
+                weekFolder,
+                createDirectory: _options.GenerateOutputFiles);
 
-            await _stepLogger.LogAsync(lab, "Start", "InProgress", payerPolicyFile, claimActionMapperFile, outFile, null, ct);
+            await _stepLogger.LogAsync(lab, "Start", "InProgress", payerPolicySource, claimActionMapperFile, outFile, null, ct);
 
             // 1. Load existing tasks from the selected LAB database, not LRNMaster.
             // DenialTaskBoard is lab-level, so NorthWest must read from NWL_Lab / NWL_LRN,
             // Augustus from Augustus_LRN, Certus from Certus_LRN, etc.
-            var labTaskBoardRepo = new DenialTaskBoardRepository(lab.LabConnectionString);
+            var labTaskBoardRepo = new DenialTaskBoardRepository(lab.LabConnectionString, _options.SqlCommandTimeoutSeconds);
             var existingTasks = await labTaskBoardRepo.GetExistingTasksAsync(lab.LabId);
 
             // 2. Load Claim Action Mapper
-            await _stepLogger.LogAsync(lab, "Load ClaimActionMapper excel", "InProgress", payerPolicyFile, claimActionMapperFile, outFile, null, ct);
+            await _stepLogger.LogAsync(lab, "Load ClaimActionMapper excel", "InProgress", payerPolicySource, claimActionMapperFile, outFile, null, ct);
             var claimRows = _excelReader.Read(claimActionMapperFile, "Denial Classifier");
             var claimMapperIndex = new ClaimActionMapperIndex(claimRows);
-            await _stepLogger.LogAsync(lab, "Load ClaimActionMapper excel", "Completed", payerPolicyFile, claimActionMapperFile, outFile, null, ct);
+            await _stepLogger.LogAsync(lab, "Load ClaimActionMapper excel", "Completed", payerPolicySource, claimActionMapperFile, outFile, null, ct);
 
-            // 3. Load Payer Policy
-            await _stepLogger.LogAsync(lab, "Load PayerPolicy excel", "InProgress", payerPolicyFile, claimActionMapperFile, outFile, null, ct);
-            var payerRows = _excelReader.Read(payerPolicyFile);
-            await _stepLogger.LogAsync(lab, "Load PayerPolicy excel", "Completed", payerPolicyFile, claimActionMapperFile, outFile, null, ct);
+            await _infoLogger.InfoAsync(runId, lab.LabName,
+                $"Claim action mapper loaded. Rows={claimRows.Count}.", claimActionMapperFile, ct);
+
+            // 3. Load denied rows from the lab database (PayerValidationReport)
+            await _stepLogger.LogAsync(lab, "Load PayerValidationReport denied rows", "InProgress", payerPolicySource, claimActionMapperFile, outFile, null, ct);
+
+            var payerRows = await _payerValidationRepo.GetDeniedRowsAsync(
+                lab,
+                _options.ProcessLatestRunOnly ? runId : null,
+                ct);
+
+            await _stepLogger.LogAsync(lab, "Load PayerValidationReport denied rows", "Completed", payerPolicySource, claimActionMapperFile, outFile,
+                $"DeniedRows={payerRows.Count}", ct);
+
+            if (payerRows.Count == 0)
+            {
+                await _stepLogger.LogAsync(lab, "Completed", "Completed", payerPolicySource, claimActionMapperFile, outFile, "No denied rows.", ct);
+
+                await CompleteAsSkippedAsync(lab, runId, startedOn,
+                    $"RunId {runId} has no '{_options.DeniedPayStatus}' rows in {SourceTableLabel(lab)}. Nothing to copy.", ct);
+                return;
+            }
+
+            await _infoLogger.InfoAsync(runId, lab.LabName,
+                $"Read {payerRows.Count} '{_options.DeniedPayStatus}' rows from {SourceTableLabel(lab)}.", ct: ct);
 
             // 4. Normalize + map
-            await _stepLogger.LogAsync(lab, "Normalize DenialCode + map fields", "InProgress", payerPolicyFile, claimActionMapperFile, outFile, null, ct);
+            await _stepLogger.LogAsync(lab, "Normalize DenialCode + map fields", "InProgress", payerPolicySource, claimActionMapperFile, outFile, null, ct);
             var (headers, finalRows) = _builder.Build(payerRows, claimMapperIndex);
             ApplyClaimUid(finalRows);
 
@@ -159,47 +243,53 @@ public sealed class DenialDatabaseWorker : BackgroundService
             // as Insurance Balance for insight, task-board creation, Excel export, and DB inserts.
             ApplyLabSpecificInsuranceBalanceRule(lab, finalRows);
 
-            await _stepLogger.LogAsync(lab, "Normalize DenialCode + map fields", "Completed", payerPolicyFile, claimActionMapperFile, outFile, null, ct);
-
-            // DenialLineItem and DenialTaskBoard must only carry denied line items.
-            // Insight still uses ALL rows because it aggregates paid vs denied.
-            var deniedRows = finalRows
-                .Where(r => string.Equals(
-                    GetValueByAnyKey(r, "Pay Status", "PayStatus").Trim(),
-                    "Denied",
-                    StringComparison.OrdinalIgnoreCase))
-                .ToList();
+            await _stepLogger.LogAsync(lab, "Normalize DenialCode + map fields", "Completed", payerPolicySource, claimActionMapperFile, outFile, null, ct);
 
             // 5. Build insight
-            await _stepLogger.LogAsync(lab, "Build insight rows", "InProgress", payerPolicyFile, claimActionMapperFile, outFile, null, ct);
+            await _stepLogger.LogAsync(lab, "Build insight rows", "InProgress", payerPolicySource, claimActionMapperFile, outFile, null, ct);
             var insight = _insightBuilder.Build(finalRows);
-            await _stepLogger.LogAsync(lab, "Build insight rows", "Completed", payerPolicyFile, claimActionMapperFile, outFile, null, ct);
+            await _stepLogger.LogAsync(lab, "Build insight rows", "Completed", payerPolicySource, claimActionMapperFile, outFile, null, ct);
 
             // 6. Build task board
-            await _stepLogger.LogAsync(lab, "Build task board rows", "InProgress", payerPolicyFile, claimActionMapperFile, outFile, null, ct);
+            await _stepLogger.LogAsync(lab, "Build task board rows", "InProgress", payerPolicySource, claimActionMapperFile, outFile, null, ct);
             var taskBuilder = new TaskBoardBuilder(lab.LabId, lab.LabName, runId, existingTasks);
-            var taskRows = taskBuilder.Build(deniedRows);
-            await _stepLogger.LogAsync(lab, "Build task board rows", "Completed", payerPolicyFile, claimActionMapperFile, outFile, null, ct);
+            var taskRows = taskBuilder.Build(finalRows);
+            await _stepLogger.LogAsync(lab, "Build task board rows", "Completed", payerPolicySource, claimActionMapperFile, outFile, null, ct);
 
-            // 7. Write Excel
-            await _stepLogger.LogAsync(lab, "Write DenialDatabase excel", "InProgress", payerPolicyFile, claimActionMapperFile, outFile, null, ct);
-
-            var filteredLineRows = deniedRows
+            var filteredLineRows = finalRows
               .Where(r =>
                   r.TryGetValue("DenialCode_Original", out var originalCode) &&
                   !string.IsNullOrWhiteSpace(originalCode))
               .ToList();
 
-            var exportResult = _excelWriter.Write(
-                                outFile,
-                                insight.Headers,
-                                insight.Rows,
-                                filteredLineRows,
-                                taskRows,
-                                null,
-                                null);
+            // 7. Write the xlsx / csv / zip export package.
+            // Controlled by DenialDatabaseProcessor:GenerateOutputFiles - when false the worker
+            // is a pure SQL copy and produces no files at all.
+            string exportPackagePath = "";
 
-            await _stepLogger.LogAsync(lab, "Write DenialDatabase export package", "Completed", payerPolicyFile, claimActionMapperFile, exportResult.ZipPath, null, ct);
+            if (_options.GenerateOutputFiles)
+            {
+                await _stepLogger.LogAsync(lab, "Write DenialDatabase export package", "InProgress", payerPolicySource, claimActionMapperFile, outFile, null, ct);
+
+                var exportResult = _excelWriter.Write(
+                                    outFile,
+                                    insight.Headers,
+                                    insight.Rows,
+                                    filteredLineRows,
+                                    taskRows,
+                                    null,
+                                    null);
+
+                exportPackagePath = exportResult.ZipPath;
+
+                await _stepLogger.LogAsync(lab, "Write DenialDatabase export package", "Completed", payerPolicySource, claimActionMapperFile, exportPackagePath, null, ct);
+            }
+            else
+            {
+                _logger.LogInformation("GenerateOutputFiles=false. Skipping xlsx/csv/zip export for lab {LabName}.", lab.LabName);
+                await _stepLogger.LogAsync(lab, "Write DenialDatabase export package", "Skipped", payerPolicySource, claimActionMapperFile, outFile,
+                    "GenerateOutputFiles=false", ct);
+            }
 
             // 8. Convert rows to DataTables (simple, column-per-key)
             var insightTable = ToDataTable(insight.Rows);
@@ -213,34 +303,132 @@ public sealed class DenialDatabaseWorker : BackgroundService
 
             // 10. Write DB tables into the selected LAB database.
             // DenialTaskBoard must be copied here also; do not depend on Workflow API for this worker run.
-            await _stepLogger.LogAsync(lab, "Write Denial insight/line/task-board tables", "InProgress", payerPolicyFile, claimActionMapperFile, outFile, null, ct);
+            await _stepLogger.LogAsync(lab, "Write Denial insight/line/task-board tables", "InProgress", payerPolicySource, claimActionMapperFile, outFile, null, ct);
 
             await labTaskBoardRepo.ReconcileBeforeWriteAsync(lab.LabId, lab.LabName, runId, lineItemTable, taskRows, ct);
             await insightWriter.WriteAsync(insightTable, lab, runId);
             await lineItemWriter.WriteAsync(lineItemTable, lab, runId);
             await taskBoardWriter.WriteAsync(taskBoardTable, lab, runId);
 
-            await _stepLogger.LogAsync(lab, "Write Denial insight/line/task-board tables", "Completed", payerPolicyFile, claimActionMapperFile, outFile,
+            await _stepLogger.LogAsync(lab, "Write Denial insight/line/task-board tables", "Completed", payerPolicySource, claimActionMapperFile, outFile,
                 $"InsightRows={insightTable.Rows.Count}, LineRows={lineItemTable.Rows.Count}, TaskBoardRows={taskBoardTable.Rows.Count}", ct);
+
+            await _infoLogger.InfoAsync(runId, lab.LabName,
+                $"Denial tables loaded into {TryGetDatabaseName(lab.LabConnectionString)}. " +
+                $"InsightRows={insightTable.Rows.Count}, LineRows={lineItemTable.Rows.Count}, TaskBoardRows={taskBoardTable.Rows.Count}.", ct: ct);
 
             // Workflow API sync is disabled in this worker path because task-board rows are bulk copied directly.
             // Keeping both direct bulk copy and API sync can create duplicates or fail when LRN.ReportsApi is not running.
             // If workflow/history processing is required later, call the API from a separate controlled flow after bulk copy.
 
             // 11. Insert RunLog
-            await _runLogRepo.InsertAsync(runId, lab.LabId, exportResult.ZipPath);
+            await _runLogRepo.InsertAsync(runId, lab.LabId, exportPackagePath);
 
-            // 12. Upload to SharePoint
-            await _stepLogger.LogAsync(lab, "Upload to SharePoint", "InProgress", payerPolicyFile, claimActionMapperFile, outFile, null, ct);
-            await _uploader.UploadIfEnabledAsync(lab, exportResult.ZipPath, DateTime.Now, ct);
-            await _stepLogger.LogAsync(lab, "Upload to SharePoint", "Completed", payerPolicyFile, claimActionMapperFile, outFile, null, ct);
+            // 12. Upload to SharePoint (only meaningful when the export package was produced)
+            if (_options.GenerateOutputFiles && _options.UploadOutputsToSharePoint && !string.IsNullOrWhiteSpace(exportPackagePath))
+            {
+                await _stepLogger.LogAsync(lab, "Upload to SharePoint", "InProgress", payerPolicySource, claimActionMapperFile, outFile, null, ct);
+                await _uploader.UploadIfEnabledAsync(lab, exportPackagePath, DateTime.Now, ct);
+                await _stepLogger.LogAsync(lab, "Upload to SharePoint", "Completed", payerPolicySource, claimActionMapperFile, outFile, null, ct);
+            }
+            else
+            {
+                await _stepLogger.LogAsync(lab, "Upload to SharePoint", "Skipped", payerPolicySource, claimActionMapperFile, outFile,
+                    _options.GenerateOutputFiles ? "UploadOutputsToSharePoint=false" : "GenerateOutputFiles=false", ct);
+            }
 
-            await _stepLogger.LogAsync(lab, "Completed", "Completed", payerPolicyFile, claimActionMapperFile, outFile, null, ct);
+            await _stepLogger.LogAsync(lab, "Completed", "Completed", payerPolicySource, claimActionMapperFile, outFile, null, ct);
+
+            // Step 4 - the outcome. LineRows is the natural count for this report: one row
+            // per denial copied into the lab's DenialLineItem table.
+            await _workflowTracker.UpsertAsync(
+                runId,
+                WorkflowStatus.Success,
+                rowCount: lineItemTable.Rows.Count,
+                startedOn: startedOn,
+                completedOn: DateTime.Now,
+                ct: ct);
+
+            await _infoLogger.EndAsync(runId, lab.LabName,
+                $"Denial report processing ended for lab {lab.LabName}.", ct: ct);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Lab processing failed: {LabName}", lab.LabName);
-            await _stepLogger.LogAsync(lab, "Failed", "Failed", payerPolicyFile, claimActionMapperFile, outFile, ex.ToString(), ct);
+            await _stepLogger.LogAsync(lab, "Failed", "Failed", payerPolicySource, claimActionMapperFile, outFile, ex.ToString(), ct);
+
+            // The failure path. CancellationToken.None on purpose: a host shutdown must not
+            // leave the tracker sitting on InProgress with no explanation.
+            await _infoLogger.ErrorAsync(runId, lab.LabName, ex, claimActionMapperFile, CancellationToken.None);
+
+            await _workflowTracker.UpsertAsync(
+                runId,
+                WorkflowStatus.Failed,
+                startedOn: startedOn,
+                completedOn: DateTime.Now,
+                remarks: SummarizeError(ex),
+                ct: CancellationToken.None);
+
+            await _infoLogger.EndAsync(runId, lab.LabName,
+                $"Denial report processing ended with an error for lab {lab.LabName}.", ct: CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// Closes the run out as Skipped. A missing tracker row is worse than a Skipped one:
+    /// an absent row is indistinguishable from a crashed process, so a report that decides
+    /// it has nothing to do still says so, with the reason.
+    /// </summary>
+    private async Task CompleteAsSkippedAsync(LabConfig lab, string runId, DateTime startedOn, string reason, CancellationToken ct)
+    {
+        _logger.LogInformation("Lab {LabName}: {Reason} Skipping.", lab.LabName, reason);
+
+        await _infoLogger.WarningAsync(runId, lab.LabName, reason, ct: ct);
+
+        await _workflowTracker.UpsertAsync(
+            runId,
+            WorkflowStatus.Skipped,
+            startedOn: startedOn,
+            completedOn: DateTime.Now,
+            remarks: reason,
+            ct: ct);
+
+        await _infoLogger.EndAsync(runId, lab.LabName,
+            $"Denial report skipped for lab {lab.LabName}.", ct: ct);
+    }
+
+    /// <summary>One line for @Remarks. The full exception text goes to the info log.</summary>
+    private static string SummarizeError(Exception ex)
+    {
+        var message = (ex.Message ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
+        return $"{ex.GetType().Name}: {message}";
+    }
+
+    /// <summary>"NWL_LRN.dbo.PayerValidationReport" - used in log messages and remarks.</summary>
+    private string SourceTableLabel(LabConfig lab)
+    {
+        var database = TryGetDatabaseName(lab.LabConnectionString);
+
+        return string.IsNullOrWhiteSpace(database)
+            ? _options.PayerValidationReportTable
+            : $"{database}.{_options.PayerValidationReportTable}";
+    }
+
+    /// <summary>Human readable "source" used in the step log now that there is no input workbook.</summary>
+    private string BuildSourceLabel(LabConfig lab, PayerValidationRun run)
+    {
+        return $"{SourceTableLabel(lab)} (RunId={run.RunId}, PayStatus={_options.DeniedPayStatus}, Rows={run.DeniedRowCount})";
+    }
+
+    private static string TryGetDatabaseName(string connectionString)
+    {
+        try
+        {
+            return new SqlConnectionStringBuilder(connectionString).InitialCatalog;
+        }
+        catch
+        {
+            return "";
         }
     }
 

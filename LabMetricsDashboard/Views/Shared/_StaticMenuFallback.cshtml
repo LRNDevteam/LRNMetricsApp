@@ -49,6 +49,12 @@
     }
 }
 
+<li class="nav-item">
+    <a class="nav-link" asp-controller="ReportBoard" asp-action="Index">
+        <i class="bi bi-grid-3x3-gap-fill"></i> Report Board
+    </a>
+</li>
+
 @if (isAdmin)
 {
     <li class="nav-item">
@@ -58,11 +64,8 @@
     </li>
 }
 
-<li class="nav-item">
-    <a class="nav-link" asp-controller="Dashboard" asp-action="Index">
-        <i class="bi bi-speedometer2"></i> Revenue Dashboard
-    </a>
-</li>
+@* Revenue Dashboard removed from the menu; the page is still reachable (e.g. the Report Board
+   lab cards' "Revenue dashboard" button). Report Board is now the landing/home page. *@
 
 <li class="nav-item dropdown">
     <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
@@ -283,6 +286,7 @@
             {
                 <li><a class="dropdown-item" asp-controller="MasterValues" asp-action="PayerServiceAudit"><i class="bi bi-gear-wide-connected"></i> Payer Service Audit</a></li>
             }
+            <li><a class="dropdown-item" asp-controller="MasterValues" asp-action="ReportAuditLog"><i class="bi bi-journal-text"></i> Report Audit Log</a></li>
             <li><a class="dropdown-item" asp-controller="MasterValues" asp-action="PayerMasterNotifications"><i class="bi bi-bell"></i> Notifications</a></li>
         </ul>
     </li>

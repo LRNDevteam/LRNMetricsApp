@@ -15,6 +15,7 @@ public interface IDenialDashboardApiClient
 {
     Task<IReadOnlyList<LabOption>> GetLabsAsync(CancellationToken cancellationToken = default);
     Task<string?> GetCurrentRunIdAsync(int labId, CancellationToken cancellationToken = default);
+    Task<DenialRunInfoDto> GetRunInfoAsync(int labId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<DenialRecord>> GetByLabAsync(int labId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<DenialInsightRecord>> GetInsightTableByLabAsync(int labId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<DenialLineItemRecord>> GetLineItemsByLabAsync(int labId, int page, int pageSize, DenialDashboardFilters filters, CancellationToken cancellationToken = default);
@@ -25,6 +26,14 @@ public interface IDenialDashboardApiClient
     Task<int> AssignReviewerByInsightAsync(int labId, string denialCode, string payerName, string reviewerUserName, string? runId, CancellationToken cancellationToken = default);
     Task<int> UpdateReviewerTaskAsync(int labId, string taskId, string status, string comments, string reviewerUserName, string? runId, CancellationToken cancellationToken = default);
     Task<TaskBoardUploadResult> UpdateTaskBoardAsync(int labId, IReadOnlyList<TaskBoardCsvUpdate> updates, CancellationToken cancellationToken = default);
+}
+
+/// <summary>Run provenance for the dashboard header (run id + the source file it came from).</summary>
+public sealed class DenialRunInfoDto
+{
+    public string RunId { get; set; } = string.Empty;
+    public string SourceFileName { get; set; } = string.Empty;
+    public string WeekFolder { get; set; } = string.Empty;
 }
 
 public sealed class DenialDashboardApiClient : IDenialDashboardApiClient
@@ -57,6 +66,12 @@ public sealed class DenialDashboardApiClient : IDenialDashboardApiClient
         await AuthorizeAsync(cancellationToken);
         var response = await _http.GetFromJsonAsync<CurrentRunResponse>($"api/denial-dashboard/current-run?labId={labId}", cancellationToken);
         return response?.RunId;
+    }
+
+    public async Task<DenialRunInfoDto> GetRunInfoAsync(int labId, CancellationToken cancellationToken = default)
+    {
+        await AuthorizeAsync(cancellationToken);
+        return await _http.GetFromJsonAsync<DenialRunInfoDto>($"api/denial-dashboard/run-info?labId={labId}", cancellationToken) ?? new DenialRunInfoDto();
     }
 
     public async Task<IReadOnlyList<DenialRecord>> GetByLabAsync(int labId, CancellationToken cancellationToken = default)

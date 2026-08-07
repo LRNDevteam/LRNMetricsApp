@@ -19,22 +19,20 @@
      @FilterCol4/Op4/Val4  optional AND fourth predicate
      @Sec1..3 Name/Col/Vals  optional secondary series (StatusBreakdown)
 
-   Day-window (@DayWindow): end day of the billed week range. Applies ONLY
-   to the N-day received band (set 6) and the 9-day summary fields.
-   Summary KPIs, monthly trend, panels, MoM, status, and insurance use
-   full-month counts so Latest / Grand Total match the Executive Summary
-   refresh. Row DateCol (DateofService, FirstBilledDate, …) is the column
-   whose day-of-month is used for the N-day window only.
+   Day-window (@DayWindow): end day of the billed week range. ALL Insight
+   Drill aggregates use days 1..@DayWindow of each month (Summary KPIs,
+   MoM, Avg 6 Months, Monthly Trend, panels, status, insurance, clinics).
+   Mismatch formula rows still use full-month ES companion mapping in C#.
 
    Returns 10 result sets:
      1 summary  2 monthly  3 panels (Avg6Months + MoM)  4 empty rate
      5 status breakdown  6 N-day received  7 empty rate-panels
-     8 top 10 insurance (full-month + MoM %)
-     9 top panels per top-10 insurance (full-month + MoM %)
+     8 top 10 insurance (DayWindow + MoM %)
+     9 top panels per top-10 insurance (DayWindow + MoM %)
     10 top 10 clinics per top panel (Avg6Months + MoM)
 
    Avg6Months window: WeekRange end-date month + 5 prior (e.g. week ending
-   in June → Jan–Jun), full-month counts (including a partial end month).
+   in June → Jan–Jun), DayWindow counts each month.
    ===================================================================== */
 IF OBJECT_ID('dbo.usp_GetExecutiveSummaryDetail_PmsDrill_Core', 'P') IS NOT NULL
     DROP PROCEDURE dbo.usp_GetExecutiveSummaryDetail_PmsDrill_Core;
@@ -512,11 +510,11 @@ BEGIN
 
         INSERT INTO #M (CollYear, CollMonth, PrimaryCount, Primary9)
         SELECT CollYear, CollMonth,
-               COUNT(DISTINCT CASE WHEN IsPrimary=1 THEN ClaimKey END),
+               COUNT(DISTINCT CASE WHEN IsPrimary=1 AND CollDay BETWEEN 1 AND @DayWindow THEN ClaimKey END),
                COUNT(DISTINCT CASE WHEN IsPrimary=1 AND CollDay BETWEEN 1 AND @DayWindow THEN ClaimKey END)
         FROM #Claim
         GROUP BY CollYear, CollMonth
-        HAVING COUNT(DISTINCT CASE WHEN IsPrimary=1 THEN ClaimKey END) > 0
+        HAVING COUNT(DISTINCT CASE WHEN IsPrimary=1 AND CollDay BETWEEN 1 AND @DayWindow THEN ClaimKey END) > 0
             OR COUNT(DISTINCT ClaimKey) > 0;
 
         INSERT INTO #MP (CollYear, CollMonth, PrimaryCount, Primary9)
@@ -531,7 +529,7 @@ BEGIN
     FROM #MP ORDER BY CollYear DESC,CollMonth DESC OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY;
     SELECT @PrevY=CollYear,@PrevM=CollMonth,@PrevC=PrimaryCount,@Prev9=Primary9
     FROM #MP ORDER BY CollYear DESC,CollMonth DESC OFFSET 1 ROWS FETCH NEXT 1 ROWS ONLY;
-    /* Avg6 = WeekRange end month + 5 prior (OFFSET 0; full-month). */
+    /* Avg6 = WeekRange end month + 5 prior (OFFSET 0; DayWindow). */
     SELECT @Avg6=AVG(CAST(PrimaryCount AS decimal(18,2)))
     FROM (SELECT PrimaryCount FROM #MP ORDER BY CollYear DESC,CollMonth DESC OFFSET 0 ROWS FETCH NEXT 6 ROWS ONLY) x;
 
@@ -549,19 +547,21 @@ BEGIN
     DECLARE @AvgMonthCount INT = (SELECT COUNT(*) FROM #AvgMonths);
     IF @AvgMonthCount < 1 SET @AvgMonthCount = 1;
 
-    -- Materialize panel aggregates once (Sets 3 + 10). Full-month #Claim.
+    -- Materialize panel aggregates once (Sets 3 + 10). DayWindow #Claim.
     IF OBJECT_ID('tempdb..#PanelMonth') IS NOT NULL DROP TABLE #PanelMonth;
     SELECT Panel, CollYear, CollMonth,
            Cnt = COUNT(DISTINCT ClaimKey)
     INTO #PanelMonth
     FROM #Claim
-    WHERE IsPrimary=1 AND Panel IS NOT NULL
+    WHERE IsPrimary=1 AND Panel IS NOT NULL AND CollDay BETWEEN 1 AND @DayWindow
     GROUP BY Panel, CollYear, CollMonth;
 
     IF OBJECT_ID('tempdb..#PanelMoM') IS NOT NULL DROP TABLE #PanelMoM;
     SELECT Panel,
-           Prev9Day = COUNT(DISTINCT CASE WHEN @PrevM IS NOT NULL AND CollYear=@PrevY AND CollMonth=@PrevM THEN ClaimKey END),
-           Latest9Day = COUNT(DISTINCT CASE WHEN CollYear=@LatestY AND CollMonth=@LatestM THEN ClaimKey END)
+           Prev9Day = COUNT(DISTINCT CASE WHEN CollDay BETWEEN 1 AND @DayWindow
+                                          AND @PrevM IS NOT NULL AND CollYear=@PrevY AND CollMonth=@PrevM THEN ClaimKey END),
+           Latest9Day = COUNT(DISTINCT CASE WHEN CollDay BETWEEN 1 AND @DayWindow
+                                            AND CollYear=@LatestY AND CollMonth=@LatestM THEN ClaimKey END)
     INTO #PanelMoM
     FROM #Claim
     WHERE IsPrimary=1 AND Panel IS NOT NULL
@@ -594,7 +594,7 @@ BEGIN
     SELECT Payer, CollYear, CollMonth, Cnt = COUNT(DISTINCT ClaimKey)
     INTO #PayerMonth
     FROM #Claim
-    WHERE IsPrimary=1 AND Payer IS NOT NULL
+    WHERE IsPrimary=1 AND Payer IS NOT NULL AND CollDay BETWEEN 1 AND @DayWindow
     GROUP BY Payer, CollYear, CollMonth;
 
     IF OBJECT_ID('tempdb..#TopPayers') IS NOT NULL DROP TABLE #TopPayers;
@@ -643,23 +643,23 @@ BEGIN
     -- Set 4: result rate (empty for PMS)
     SELECT MonthLabel=N'', Resulted=CAST(0 AS bigint), Received=CAST(0 AS bigint), RatePct=CAST(NULL AS decimal(18,2)) WHERE 1=0;
 
-    -- Set 5: secondary series as Status x month matrix (trailing 7 months)
+    -- Set 5: secondary series as Status x month matrix (trailing 7 months, DayWindow)
     ;WITH Trail AS (
         SELECT TOP (7) CollYear, CollMonth FROM #M ORDER BY CollYear DESC, CollMonth DESC
     )
     SELECT Status, CollYear, CollMonth, Cnt FROM (
         SELECT @Sec1Name AS Status, c.CollYear, c.CollMonth,
-               COUNT(DISTINCT CASE WHEN c.S1=1 THEN c.ClaimKey END) AS Cnt
+               COUNT(DISTINCT CASE WHEN c.S1=1 AND c.CollDay BETWEEN 1 AND @DayWindow THEN c.ClaimKey END) AS Cnt
         FROM #Claim c JOIN Trail t ON t.CollYear=c.CollYear AND t.CollMonth=c.CollMonth
         WHERE @Sec1Name IS NOT NULL GROUP BY c.CollYear,c.CollMonth
         UNION ALL
         SELECT @Sec2Name, c.CollYear, c.CollMonth,
-               COUNT(DISTINCT CASE WHEN c.S2=1 THEN c.ClaimKey END)
+               COUNT(DISTINCT CASE WHEN c.S2=1 AND c.CollDay BETWEEN 1 AND @DayWindow THEN c.ClaimKey END)
         FROM #Claim c JOIN Trail t ON t.CollYear=c.CollYear AND t.CollMonth=c.CollMonth
         WHERE @Sec2Name IS NOT NULL GROUP BY c.CollYear,c.CollMonth
         UNION ALL
         SELECT @Sec3Name, c.CollYear, c.CollMonth,
-               COUNT(DISTINCT CASE WHEN c.S3=1 THEN c.ClaimKey END)
+               COUNT(DISTINCT CASE WHEN c.S3=1 AND c.CollDay BETWEEN 1 AND @DayWindow THEN c.ClaimKey END)
         FROM #Claim c JOIN Trail t ON t.CollYear=c.CollYear AND t.CollMonth=c.CollMonth
         WHERE @Sec3Name IS NOT NULL GROUP BY c.CollYear,c.CollMonth
     ) s
@@ -694,7 +694,7 @@ BEGIN
                Cnt = COUNT(DISTINCT c.ClaimKey)
         FROM #Claim c
         INNER JOIN #TopPayers t ON t.Payer = c.Payer
-        WHERE c.IsPrimary=1 AND c.Panel IS NOT NULL
+        WHERE c.IsPrimary=1 AND c.Panel IS NOT NULL AND c.CollDay BETWEEN 1 AND @DayWindow
         GROUP BY c.Payer, c.Panel, c.CollYear, c.CollMonth
     ),
     PayerPanelTot AS (
@@ -730,7 +730,7 @@ BEGIN
                Cnt = COUNT(DISTINCT c.ClaimKey)
         FROM #Claim c
         INNER JOIN #TopPanels t ON t.Panel = c.Panel
-        WHERE c.IsPrimary=1 AND c.Clinic IS NOT NULL
+        WHERE c.IsPrimary=1 AND c.Clinic IS NOT NULL AND c.CollDay BETWEEN 1 AND @DayWindow
         GROUP BY c.Panel, c.Clinic, c.CollYear, c.CollMonth
     ),
     ClinicAvg AS (
@@ -745,8 +745,10 @@ BEGIN
     ),
     ClinicMoM AS (
         SELECT c.Panel, c.Clinic,
-               Prev9Day = COUNT(DISTINCT CASE WHEN @PrevM IS NOT NULL AND c.CollYear=@PrevY AND c.CollMonth=@PrevM THEN c.ClaimKey END),
-               Latest9Day = COUNT(DISTINCT CASE WHEN c.CollYear=@LatestY AND c.CollMonth=@LatestM THEN c.ClaimKey END)
+               Prev9Day = COUNT(DISTINCT CASE WHEN c.CollDay BETWEEN 1 AND @DayWindow
+                                              AND @PrevM IS NOT NULL AND c.CollYear=@PrevY AND c.CollMonth=@PrevM THEN c.ClaimKey END),
+               Latest9Day = COUNT(DISTINCT CASE WHEN c.CollDay BETWEEN 1 AND @DayWindow
+                                                AND c.CollYear=@LatestY AND c.CollMonth=@LatestM THEN c.ClaimKey END)
         FROM #Claim c
         INNER JOIN #TopPanels t ON t.Panel = c.Panel
         WHERE c.IsPrimary=1 AND c.Clinic IS NOT NULL

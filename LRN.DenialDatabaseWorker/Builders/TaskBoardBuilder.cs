@@ -180,32 +180,28 @@ public sealed class TaskBoardBuilder
 				// 1. Preserve existing Closed/Review tasks
 				if (existing != null)
 				{
-					assignedTo = existing.Row.GetValueOrDefault("Assigned To")?.Trim() ?? "";
-					workflowStatus = existing.Row.GetValueOrDefault("WorkFlowStatus")?.Trim() ?? "";
+					assignedTo = existing.AssignedTo.Trim();
+					workflowStatus = existing.WorkFlowStatus.Trim();
 
-					if (existing.Row.TryGetValue("Status", out var oldStatusRaw))
+					var oldStatus = CleanStatus(existing.Status);
+
+					if (!string.IsNullOrWhiteSpace(assignedTo))
 					{
-						var oldStatus = CleanStatus(oldStatusRaw);
+						status = oldStatus.Equals("Closed", StringComparison.OrdinalIgnoreCase)
+							? oldStatus
+							: "Review";
+					}
+					else if (!string.IsNullOrWhiteSpace(oldStatus) &&
+						(oldStatus.Equals("Closed", StringComparison.OrdinalIgnoreCase) ||
+						 oldStatus.Equals("Review", StringComparison.OrdinalIgnoreCase)))
+					{
+						status = oldStatus;
+					}
 
-						if (!string.IsNullOrWhiteSpace(assignedTo))
-						{
-							status = oldStatus.Equals("Closed", StringComparison.OrdinalIgnoreCase)
-								? oldStatus
-								: "Review";
-						}
-						else if (!string.IsNullOrWhiteSpace(oldStatus) &&
-							(oldStatus.Equals("Closed", StringComparison.OrdinalIgnoreCase) ||
-							 oldStatus.Equals("Review", StringComparison.OrdinalIgnoreCase)))
-						{
-							status = oldStatus;
-						}
-
-						if (status.Equals("Closed", StringComparison.OrdinalIgnoreCase) &&
-							existing.Row.TryGetValue("Date Completed", out var oldCompleted) &&
-							DateTime.TryParse(oldCompleted, out var parsed))
-						{
-							dateCompleted = parsed;
-						}
+					if (status.Equals("Closed", StringComparison.OrdinalIgnoreCase) &&
+						existing.DateCompleted.HasValue)
+					{
+						dateCompleted = existing.DateCompleted;
 					}
 				}
 

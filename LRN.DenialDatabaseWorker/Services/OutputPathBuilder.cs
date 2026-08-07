@@ -8,10 +8,14 @@ public sealed class OutputPathBuilder
 		string runId,
 		string yearFolder,
 		string monthFolder,
-		string weekFolder)
+		string weekFolder,
+		bool createDirectory = true)
 	{
 		var dir = Path.Combine(outputRoot, labName, yearFolder, monthFolder, weekFolder);
-		Directory.CreateDirectory(dir);
+
+		// Skipped when file generation is turned off; ExcelWriter creates the folder itself when it writes.
+		if (createDirectory)
+			Directory.CreateDirectory(dir);
 
 		var fileName = $"{runId}_{labName}_DenialAnalysisReport_{weekFolder}.xlsx";
 		return Path.Combine(dir, fileName);

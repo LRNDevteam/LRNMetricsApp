@@ -1,4 +1,5 @@
 using System.Data;
+using System.Text.Json;
 using LabMetricsDashboard.Models;
 using Microsoft.Data.SqlClient;
 
@@ -6,10 +7,30 @@ namespace LabMetricsDashboard.Services;
 
 public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 {
+	/// <summary>dbo.LIMSMaster column holding per-row extra fields as a JSON object.</summary>
+	private const string AdditionalFieldsColumn = "AdditionalFields";
+
+	/// <summary>Rows read to learn the AdditionalFields key ORDER (JSON document order).</summary>
+	private const int AdditionalFieldsOrderSample = 200;
+
+	/// <summary>Rows scanned for the key SET on the interactive line-data tab (full scan on export).</summary>
+	private const int AdditionalFieldsUiScanRows = 5_000;
+
+	/// <summary>Hard ceiling on generated AdditionalFields columns — a malformed feed can't blow up the sheet.</summary>
+	private const int AdditionalFieldsMaxColumns = 250;
+
 	private sealed record LineDataColumnSpec(
 		string Key,
 		string Header,
 		string Selector);
+
+	/// <summary>Everything the line-level SELECT is built from, shared by the page and the export.</summary>
+	private sealed record LineDataQuery(
+		HashSet<string> Columns,
+		string DateExpr,
+		string WhereSql,
+		List<SqlParameter> Parameters,
+		List<LineDataColumnSpec> Specs);
 
 	private sealed record RawLisGroup(
 		Dictionary<string, string> Fields,
@@ -593,6 +614,110 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		await using var conn = new SqlConnection(connectionString);
 		await conn.OpenAsync(ct);
 
+		var query = await BuildLineDataQueryAsync(
+			conn, labName, dateType, dateFrom, dateTo, panel, clinic, refPhy, salesRep, collector, ct);
+
+		// Sampled (not full-scan) key discovery: this runs on every render of the
+		// LIMS Line Data tab, so completeness is traded for a bounded query. The
+		// background export uses the full scan — see BuildLineDataExportPlanAsync.
+		var additionalKeys = await LoadAdditionalFieldKeysAsync(
+			conn, query, AdditionalFieldsUiScanRows, ct);
+
+		var selection = BuildLineSelection(query.Specs, additionalKeys, useHeaderAlias: false);
+		var sql = $"""
+			SELECT {string.Join("," + Environment.NewLine + "                   ", selection.Selectors)}
+			FROM dbo.LIMSMaster WITH (NOLOCK)
+			WHERE {query.WhereSql}
+			ORDER BY {query.DateExpr} DESC, {OrderByText(query.Columns)}
+			OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY;
+			""";
+
+		var totalCount = await CountLineDataAsync(conn, query, ct);
+
+		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 240 };
+		foreach (var p in query.Parameters) cmd.Parameters.Add(CloneParameter(p));
+		cmd.Parameters.Add(new SqlParameter("@offset", SqlDbType.Int) { Value = (pageNumber - 1) * pageSize });
+		cmd.Parameters.Add(new SqlParameter("@pageSize", SqlDbType.Int) { Value = pageSize });
+
+		var rows = new List<Dictionary<string, string>>();
+		await using var rdr = await cmd.ExecuteReaderAsync(ct);
+		while (await rdr.ReadAsync(ct))
+		{
+			var row = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+			foreach (var column in selection.Columns)
+			{
+				row[column.Key] = ReadText(rdr, column.Key);
+			}
+
+			rows.Add(row);
+		}
+
+		return new LisLineDataResult(selection.Columns, rows, totalCount, pageNumber, pageSize);
+	}
+
+	public async Task<LisLineExportPlan> BuildLineDataExportPlanAsync(
+		string connectionString,
+		string labName,
+		string dateType = "Collected",
+		DateOnly? dateFrom = null,
+		DateOnly? dateTo = null,
+		string? panel = null,
+		string? clinic = null,
+		string? refPhy = null,
+		string? salesRep = null,
+		string? collector = null,
+		CancellationToken ct = default)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+		await using var conn = new SqlConnection(connectionString);
+		await conn.OpenAsync(ct);
+
+		var query = await BuildLineDataQueryAsync(
+			conn, labName, dateType, dateFrom, dateTo, panel, clinic, refPhy, salesRep, collector, ct);
+
+		// scanRows: null → every matching row is inspected, so a key that only ever
+		// appears on old rows still becomes a column in the downloaded workbook.
+		var additionalKeys = await LoadAdditionalFieldKeysAsync(conn, query, scanRows: null, ct);
+		var selection = BuildLineSelection(query.Specs, additionalKeys, useHeaderAlias: true);
+
+		// Header text is the alias here: OpenXmlRowStreamer writes the reader's column
+		// names as the sheet header row, so the workbook shows "Order Id", not "OrderId".
+		var dataSql = $"""
+			SELECT {string.Join("," + Environment.NewLine + "                   ", selection.Selectors)}
+			FROM dbo.LIMSMaster WITH (NOLOCK)
+			WHERE {query.WhereSql}
+			ORDER BY {query.DateExpr} DESC, {OrderByText(query.Columns)};
+			""";
+
+		var totalRows = await CountLineDataAsync(conn, query, ct);
+
+		return new LisLineExportPlan(
+			dataSql,
+			query.Parameters.Select(CloneParameter).ToList(),
+			selection.Columns,
+			additionalKeys,
+			totalRows);
+	}
+
+	/// <summary>
+	/// Resolves the LIMSMaster shape for one lab and turns the page's filters into a
+	/// WHERE clause + parameters. Identical for the interactive tab and the export, so
+	/// a queued download always matches what the page showed.
+	/// </summary>
+	private static async Task<LineDataQuery> BuildLineDataQueryAsync(
+		SqlConnection conn,
+		string labName,
+		string dateType,
+		DateOnly? dateFrom,
+		DateOnly? dateTo,
+		string? panel,
+		string? clinic,
+		string? refPhy,
+		string? salesRep,
+		string? collector,
+		CancellationToken ct)
+	{
 		var columns = await GetLimsMasterColumnsAsync(conn, ct);
 		if (columns.Count == 0)
 		{
@@ -628,49 +753,230 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 		AddOptionalFilter(where, parameters, filterColumns.SalesRepExpression, "@salesRep", salesRep);
 		AddOptionalFilter(where, parameters, filterColumns.CollectorExpression, "@collector", collector);
 
-		var whereSql = string.Join(" AND ", where);
-		var lineColumns = LineDataColumns(columns, logicSheet);
-		var sql = $"""
-			SELECT {string.Join("," + Environment.NewLine + "                   ", lineColumns.Select(x => x.Selector))}
-			FROM dbo.LIMSMaster WITH (NOLOCK)
-			WHERE {whereSql}
-			ORDER BY {dateExpr} DESC, {OrderByText(columns)}
-			OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY;
-			""";
+		return new LineDataQuery(
+			columns,
+			dateExpr,
+			string.Join(" AND ", where),
+			parameters,
+			LineDataColumns(columns, logicSheet));
+	}
 
+	private static async Task<int> CountLineDataAsync(SqlConnection conn, LineDataQuery query, CancellationToken ct)
+	{
 		var countSql = $"""
 			SELECT COUNT(1)
 			FROM dbo.LIMSMaster WITH (NOLOCK)
-			WHERE {whereSql};
+			WHERE {query.WhereSql};
 			""";
 
-		await using var countCmd = new SqlCommand(countSql, conn) { CommandTimeout = 240 };
-		foreach (var p in parameters) countCmd.Parameters.Add(CloneParameter(p));
-		var totalCount = Convert.ToInt32(await countCmd.ExecuteScalarAsync(ct));
+		await using var cmd = new SqlCommand(countSql, conn) { CommandTimeout = 240 };
+		foreach (var p in query.Parameters) cmd.Parameters.Add(CloneParameter(p));
+		return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+	}
 
-		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 240 };
-		foreach (var p in parameters) cmd.Parameters.Add(CloneParameter(p));
-		cmd.Parameters.Add(new SqlParameter("@offset", SqlDbType.Int) { Value = (pageNumber - 1) * pageSize });
-		cmd.Parameters.Add(new SqlParameter("@pageSize", SqlDbType.Int) { Value = pageSize });
+	/// <summary>
+	/// Mapped LIMSMaster columns followed by one column per AdditionalFields JSON key.
+	/// <paramref name="useHeaderAlias"/> aliases each column with its display header
+	/// (export — the alias becomes the Excel header); false keeps the internal key
+	/// (page — the row dictionary is looked up by key).
+	/// </summary>
+	private static (List<string> Selectors, List<LisLineDataColumn> Columns) BuildLineSelection(
+		IReadOnlyList<LineDataColumnSpec> specs,
+		IReadOnlyList<string> additionalKeys,
+		bool useHeaderAlias)
+	{
+		var selectors = new List<string>(specs.Count + additionalKeys.Count);
+		var columns = new List<LisLineDataColumn>(specs.Count + additionalKeys.Count);
+		var usedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var usedAliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-		var rows = new List<Dictionary<string, string>>();
-		await using var rdr = await cmd.ExecuteReaderAsync(ct);
-		while (await rdr.ReadAsync(ct))
+		foreach (var spec in specs)
 		{
-			var row = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-			foreach (var column in lineColumns)
-			{
-				row[column.Key] = ReadText(rdr, column.Key);
-			}
-
-			rows.Add(row);
+			usedKeys.Add(spec.Key);
+			var alias = useHeaderAlias ? UniqueName(spec.Header, usedAliases) : spec.Key;
+			usedAliases.Add(alias);
+			selectors.Add(useHeaderAlias ? RealiasSelector(spec, alias) : spec.Selector);
+			columns.Add(new LisLineDataColumn(spec.Key, spec.Header));
 		}
 
-		var resultColumns = lineColumns
-			.Select(x => new LisLineDataColumn(x.Key, x.Header))
-			.ToList();
+		foreach (var jsonKey in additionalKeys)
+		{
+			// A JSON key that shadows a mapped column keeps both, disambiguated —
+			// the extracted value is not necessarily the same as the table column.
+			var key = usedKeys.Contains(jsonKey) ? $"{jsonKey} (Additional)" : jsonKey;
+			usedKeys.Add(key);
+			var alias = useHeaderAlias ? UniqueName(key, usedAliases) : key;
+			usedAliases.Add(alias);
+			selectors.Add($"{AdditionalFieldExpr(jsonKey)} AS {Q(alias)}");
+			columns.Add(new LisLineDataColumn(key, key));
+		}
 
-		return new LisLineDataResult(resultColumns, rows, totalCount, pageNumber, pageSize);
+		return (selectors, columns);
+	}
+
+	/// <summary>Swaps a spec's trailing <c>AS [Key]</c> for <c>AS [alias]</c>, leaving the expression intact.</summary>
+	private static string RealiasSelector(LineDataColumnSpec spec, string alias)
+	{
+		var suffix = $" AS {Q(spec.Key)}";
+		var expr = spec.Selector.EndsWith(suffix, StringComparison.Ordinal)
+			? spec.Selector[..^suffix.Length]
+			: spec.Selector;
+		return $"{expr} AS {Q(alias)}";
+	}
+
+	private static string UniqueName(string desired, HashSet<string> used)
+	{
+		if (!used.Contains(desired)) return desired;
+		for (var i = 2; i < 1000; i++)
+		{
+			var candidate = $"{desired} ({i})";
+			if (!used.Contains(candidate)) return candidate;
+		}
+		return $"{desired} {Guid.NewGuid():N}";
+	}
+
+	/// <summary>
+	/// One AdditionalFields property as a column. ISJSON guards rows whose text is not
+	/// valid JSON (JSON_VALUE would otherwise raise "JSON text is not properly formatted"
+	/// and fail the whole export).
+	/// </summary>
+	private static string AdditionalFieldExpr(string jsonKey)
+		=> $"CASE WHEN ISJSON({Q(AdditionalFieldsColumn)}) = 1 " +
+		   $"THEN JSON_VALUE({Q(AdditionalFieldsColumn)}, '{JsonPathLiteral(jsonKey)}') END";
+
+	/// <summary>A <c>$."key"</c> path, escaped for both JSON path syntax and the T-SQL literal around it.</summary>
+	private static string JsonPathLiteral(string jsonKey)
+	{
+		var escaped = jsonKey
+			.Replace("\\", "\\\\", StringComparison.Ordinal)
+			.Replace("\"", "\\\"", StringComparison.Ordinal);
+		return $"$.\"{escaped}\"".Replace("'", "''", StringComparison.Ordinal);
+	}
+
+	/// <summary>
+	/// Distinct property names inside dbo.LIMSMaster.AdditionalFields for the current
+	/// filters, in JSON document order (keys only seen beyond the ordering sample are
+	/// appended alphabetically).
+	/// <paramref name="scanRows"/> null scans every matching row; a value caps the scan.
+	/// Returns empty when the column is absent or the server has no JSON support.
+	/// </summary>
+	private static async Task<List<string>> LoadAdditionalFieldKeysAsync(
+		SqlConnection conn,
+		LineDataQuery query,
+		int? scanRows,
+		CancellationToken ct)
+	{
+		if (!query.Columns.Contains(AdditionalFieldsColumn)) return [];
+
+		var ordered = new List<string>();
+		var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+		try
+		{
+			// Pass 1 — a small newest-first sample, parsed in-process purely to fix the
+			// COLUMN ORDER to the order the fields appear in the JSON itself.
+			var orderSql = $"""
+				SELECT TOP (@sampleTop) {Q(AdditionalFieldsColumn)}
+				FROM dbo.LIMSMaster WITH (NOLOCK)
+				WHERE {query.WhereSql}
+				  AND {Q(AdditionalFieldsColumn)} IS NOT NULL
+				ORDER BY {query.DateExpr} DESC;
+				""";
+
+			await using (var orderCmd = new SqlCommand(orderSql, conn) { CommandTimeout = 120 })
+			{
+				foreach (var p in query.Parameters) orderCmd.Parameters.Add(CloneParameter(p));
+				orderCmd.Parameters.Add(new SqlParameter("@sampleTop", SqlDbType.Int) { Value = AdditionalFieldsOrderSample });
+
+				await using var rdr = await orderCmd.ExecuteReaderAsync(ct);
+				while (await rdr.ReadAsync(ct))
+				{
+					if (rdr.IsDBNull(0)) continue;
+					foreach (var key in ReadJsonObjectKeys(rdr.GetValue(0)))
+					{
+						if (seen.Count >= AdditionalFieldsMaxColumns) break;
+						if (seen.Add(key)) ordered.Add(key);
+					}
+				}
+			}
+
+			// Pass 2 — the complete key set for the scan window, so a field missing from
+			// the ordering sample still gets a column.
+			var scanSource = scanRows is null
+				? $"""
+					SELECT {Q(AdditionalFieldsColumn)}
+					  FROM dbo.LIMSMaster WITH (NOLOCK)
+					  WHERE {query.WhereSql} AND ISJSON({Q(AdditionalFieldsColumn)}) = 1
+					"""
+				: $"""
+					SELECT TOP (@scanTop) {Q(AdditionalFieldsColumn)}
+					  FROM dbo.LIMSMaster WITH (NOLOCK)
+					  WHERE {query.WhereSql} AND ISJSON({Q(AdditionalFieldsColumn)}) = 1
+					  ORDER BY {query.DateExpr} DESC
+					""";
+
+			var keySql = $"""
+				SELECT DISTINCT TOP (@keyCap) j.[key] AS [JsonKey]
+				FROM ({scanSource}) AS s
+				CROSS APPLY OPENJSON(s.{Q(AdditionalFieldsColumn)}) AS j
+				ORDER BY [JsonKey];
+				""";
+
+			var extra = new List<string>();
+			await using (var keyCmd = new SqlCommand(keySql, conn) { CommandTimeout = scanRows is null ? 1800 : 240 })
+			{
+				foreach (var p in query.Parameters) keyCmd.Parameters.Add(CloneParameter(p));
+				if (scanRows is not null)
+					keyCmd.Parameters.Add(new SqlParameter("@scanTop", SqlDbType.Int) { Value = scanRows.Value });
+				keyCmd.Parameters.Add(new SqlParameter("@keyCap", SqlDbType.Int) { Value = AdditionalFieldsMaxColumns });
+
+				await using var rdr = await keyCmd.ExecuteReaderAsync(ct);
+				while (await rdr.ReadAsync(ct))
+				{
+					if (rdr.IsDBNull(0)) continue;
+					extra.Add(rdr.GetString(0));
+				}
+			}
+
+			foreach (var key in extra)
+			{
+				if (string.IsNullOrWhiteSpace(key)) continue;
+				if (seen.Count >= AdditionalFieldsMaxColumns) break;
+				if (seen.Add(key)) ordered.Add(key);
+			}
+		}
+		catch (SqlException)
+		{
+			// ISJSON/OPENJSON/JSON_VALUE need compatibility level 130+. On an older
+			// database the export still succeeds — just without the extra columns.
+			return [];
+		}
+
+		return ordered;
+	}
+
+	/// <summary>Top-level property names of a JSON object value; empty for anything else.</summary>
+	private static List<string> ReadJsonObjectKeys(object? value)
+	{
+		var text = Convert.ToString(value)?.Trim();
+		if (string.IsNullOrEmpty(text) || text[0] != '{') return [];
+
+		try
+		{
+			using var doc = JsonDocument.Parse(text);
+			if (doc.RootElement.ValueKind != JsonValueKind.Object) return [];
+
+			var keys = new List<string>();
+			foreach (var property in doc.RootElement.EnumerateObject())
+			{
+				if (!string.IsNullOrWhiteSpace(property.Name)) keys.Add(property.Name);
+			}
+			return keys;
+		}
+		catch (JsonException)
+		{
+			return [];
+		}
 	}
 
 	private static DimensionProfile ResolveProfile(string labName, int? labId, HashSet<string> columns, string dateType)

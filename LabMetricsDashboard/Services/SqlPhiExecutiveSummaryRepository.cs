@@ -284,9 +284,9 @@ public sealed class SqlPhiExecutiveSummaryRepository
                 return vm;
 
             var rowDict   = new Dictionary<string, ExecSummaryRow>(StringComparer.OrdinalIgnoreCase);
-            var periodSet = new SortedSet<(int Year, int Month)>(
-                Comparer<(int Year, int Month)>.Create((a, b) =>
-                    a.Year != b.Year ? a.Year.CompareTo(b.Year) : a.Month.CompareTo(b.Month)));
+            // Track which (Year, Month) columns have any non-zero activity so we
+            // don't surface empty future stubs (e.g. Dec 2026 with all zeros).
+            var periodActivity = new Dictionary<(int Year, int Month), bool>();
             var yearSet = new SortedSet<int>();
             var yearlyTotals = new Dictionary<int, decimal>();
 
@@ -307,9 +307,12 @@ public sealed class SqlPhiExecutiveSummaryRepository
                     rowDict[rowKey] = row;
                 }
                 row.ValuesByYearMonth[(billYear, billMonth)] = metricValue;
-                if (billYear != 0 && billMonth != 0)
+                if (billYear != 0 && billMonth is >= 1 and <= 12)
                 {
-                    periodSet.Add((billYear, billMonth));
+                    if (metricValue != 0m)
+                        periodActivity[(billYear, billMonth)] = true;
+                    else
+                        periodActivity.TryAdd((billYear, billMonth), false);
                     yearSet.Add(billYear);
 
                     // Sum up yearly totals, but only for cash/avg categories
@@ -329,7 +332,12 @@ public sealed class SqlPhiExecutiveSummaryRepository
                 }
             }
 
-            var columns = periodSet.ToList();
+            // Month columns = periods with real activity only (drops empty Dec stubs, etc.).
+            var columns = periodActivity
+                .Where(kv => kv.Value)
+                .Select(kv => kv.Key)
+                .OrderBy(p => p.Year).ThenBy(p => p.Month)
+                .ToList();
             columns.Add((0, 0));
 
             vm.YearMonthColumns = columns;
@@ -804,6 +812,14 @@ public sealed class SqlPhiExecutiveSummaryRepository
         public bool IsCash => string.Equals(Source, "Cash", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
+        /// RowDef Sec1/2/3 series (e.g. Insurance Balance No Response / Denied) —
+        /// Core SP already builds StatusBreakdown; skip the heavy ES grid prefetch.
+        /// </summary>
+        public bool HasCoreStatusStack =>
+            new[] { Sec1Name, Sec2Name, Sec3Name }
+                .Count(n => !string.IsNullOrWhiteSpace(n)) >= 2;
+
+        /// <summary>
         /// Primary PMS "Total Billed (Claims)" row — companion mismatch band is shown
         /// only for these drills (not Fully Paid / Unbilled / mismatch itself).
         /// </summary>
@@ -899,6 +915,25 @@ public sealed class SqlPhiExecutiveSummaryRepository
         }
 
         return es.Rows.Count == 0 ? null : es;
+    }
+
+    /// <summary>
+    /// True when Core left &lt;2 status series or only placeholder panels — only then
+    /// is the Executive Summary SP needed for stack / By-Panel backfill.
+    /// </summary>
+    public bool NeedsEsStackOrPanelBackfill(ExecSummaryLisDrillViewModel vm)
+    {
+        if (vm.IsPmsMismatchDrill || vm.IsPmsFullyPaidDrill) return false;
+
+        var statusCount = vm.StatusBreakdown
+            .Select(s => s.Status?.Trim() ?? "")
+            .Where(s => s.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+        // Insurance Balance (Sec1/2/3) and similar — Core already stacked.
+        if (statusCount >= 2) return false;
+
+        return true;
     }
 
     /// <summary>
@@ -1132,6 +1167,147 @@ public sealed class SqlPhiExecutiveSummaryRepository
             .Where(d => d.Level == childLevel)
             .Select(d => d.Row)
             .ToList();
+    }
+
+    /// <summary>
+    /// Anchor Insight Drill months / Latest / MoM / Avg6 to the Billed Week Range
+    /// end date. Drops future stubs (e.g. Aug/Dec when WeekRange ends in July)
+    /// that appear when LIMSMaster has bad future collection dates.
+    /// </summary>
+    public void ApplyWeekRangeAsOfCutoff(
+        ExecSummaryLisDrillViewModel vm,
+        AnalysisRangeInfo? analysisRange)
+    {
+        if (vm.IsPmsMismatchDrill) return; // ES formula months stay as-of Index
+
+        DateTime asOf;
+        if (analysisRange?.WeekRangeEndDate is { } wrEnd)
+            asOf = wrEnd.Date;
+        else if (!AnalysisRangeInfo.TryParseWeekRangeEnd(analysisRange?.WeekFolder, out asOf))
+            return;
+
+        var asOfYm = asOf.Year * 100 + asOf.Month;
+        static bool TryMonthKey(string? label, out int ym)
+        {
+            ym = 0;
+            if (string.IsNullOrWhiteSpace(label)) return false;
+            if (!DateTime.TryParseExact(label.Trim(), "MMM yyyy",
+                    CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt))
+                return false;
+            ym = dt.Year * 100 + dt.Month;
+            return true;
+        }
+
+        bool KeepYm(int y, int m) => y > 0 && m is >= 1 and <= 12 && (y * 100 + m) <= asOfYm;
+
+        vm.Monthly = vm.Monthly
+            .Where(m => TryMonthKey(m.MonthLabel, out var ym) && ym <= asOfYm)
+            .Select(m =>
+            {
+                var isAsOf = TryMonthKey(m.MonthLabel, out var ym) && ym == asOfYm;
+                return new LisDrillMonthly
+                {
+                    MonthLabel = m.MonthLabel,
+                    ShortLabel = m.ShortLabel,
+                    Total = m.Total,
+                    IsPartial = isAsOf || m.IsPartial,
+                };
+            })
+            .OrderBy(m => TryMonthKey(m.MonthLabel, out var ym) ? ym : 0)
+            .ToList();
+
+        if (!vm.Monthly.Any(m => TryMonthKey(m.MonthLabel, out var ym) && ym == asOfYm))
+        {
+            vm.Monthly.Add(new LisDrillMonthly
+            {
+                MonthLabel = asOf.ToString("MMM yyyy", CultureInfo.InvariantCulture),
+                ShortLabel = asOf.ToString("MMM", CultureInfo.InvariantCulture),
+                Total = 0,
+                IsPartial = true,
+            });
+            vm.Monthly = vm.Monthly
+                .OrderBy(m => TryMonthKey(m.MonthLabel, out var ym) ? ym : 0)
+                .ToList();
+        }
+
+        vm.NineDayRange = vm.NineDayRange
+            .Where(d => TryMonthKey(d.MonthLabel, out var ym) && ym <= asOfYm)
+            .ToList();
+
+        vm.StatusBreakdown = vm.StatusBreakdown
+            .Where(s => KeepYm(s.Year, s.Month))
+            .ToList();
+
+        vm.SummaryMismatchMonths = vm.SummaryMismatchMonths
+            .Where(s => KeepYm(s.Year, s.Month))
+            .ToList();
+
+        vm.FullyPaidRateMonths = vm.FullyPaidRateMonths
+            .Where(s => KeepYm(s.Year, s.Month))
+            .ToList();
+
+        vm.RatePanels = vm.RatePanels
+            .Where(s => KeepYm(s.Year, s.Month))
+            .ToList();
+
+        vm.ResultRates = vm.ResultRates
+            .Where(r => TryMonthKey(r.MonthLabel, out var ym) && ym <= asOfYm)
+            .ToList();
+
+        var s = vm.Summary;
+        s.CutoffDate = asOf;
+        if (vm.Monthly.Count == 0)
+        {
+            s.LatestMonthLabel = asOf.ToString("MMM yyyy", CultureInfo.InvariantCulture);
+            s.LatestCount = 0;
+            s.PrevMonthLabel = "";
+            s.PrevCount = 0;
+            s.MoMChangePct = null;
+            s.Avg6 = null;
+            s.CurrVsAvgPct = null;
+            return;
+        }
+
+        var latest = vm.Monthly[^1];
+        var prev = vm.Monthly.Count > 1 ? vm.Monthly[^2] : null;
+        s.LatestMonthLabel = latest.MonthLabel;
+        s.LatestCount = latest.Total;
+        s.PrevMonthLabel = prev?.MonthLabel ?? "";
+        s.PrevCount = prev?.Total ?? 0;
+        s.MoMChangePct = prev is null || prev.Total == 0
+            ? null
+            : Math.Round((latest.Total - prev.Total) * 100m / prev.Total, 2, MidpointRounding.AwayFromZero);
+
+        var avgSrc = vm.Monthly.TakeLast(6).ToList();
+        if (avgSrc.Count > 0)
+        {
+            s.Avg6 = Math.Round((decimal)avgSrc.Average(x => x.Total), 2, MidpointRounding.AwayFromZero);
+            s.CurrVsAvgPct = s.Avg6 is { } a && a != 0
+                ? Math.Round((latest.Total - a) * 100m / a, 2, MidpointRounding.AwayFromZero)
+                : null;
+        }
+
+        var dayWin = vm.ComparableDayWindow > 0
+            ? vm.ComparableDayWindow
+            : analysisRange?.ComparableDayWindow ?? 0;
+        if (dayWin is >= 1 and <= 31)
+        {
+            var latest9 = vm.NineDayRange.LastOrDefault(d =>
+                string.Equals(d.ShortLabel, latest.ShortLabel, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(d.MonthLabel, latest.MonthLabel, StringComparison.OrdinalIgnoreCase));
+            var prev9 = prev is null ? null : vm.NineDayRange.LastOrDefault(d =>
+                string.Equals(d.ShortLabel, prev.ShortLabel, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(d.MonthLabel, prev.MonthLabel, StringComparison.OrdinalIgnoreCase));
+
+            s.Latest9DayLabel = $"{latest.ShortLabel} (1-{dayWin})";
+            s.Latest9DayCount = latest9?.Received9 ?? latest.Total;
+            s.Prev9DayLabel = prev is null ? "" : $"{prev.ShortLabel} (1-{dayWin})";
+            s.Prev9DayCount = prev9?.Received9 ?? prev?.Total ?? 0;
+            s.NineDayMoMPct = s.Prev9DayCount == 0
+                ? null
+                : Math.Round((s.Latest9DayCount - s.Prev9DayCount) * 100m / s.Prev9DayCount, 2,
+                    MidpointRounding.AwayFromZero);
+        }
     }
 
     /// <summary>

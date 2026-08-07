@@ -22,6 +22,16 @@ public sealed class SqlCollectionSummaryReportRepository : ICollectionSummaryRep
         CancellationToken ct = default)
         => GetMonthlyClaimVolumeAsync(connectionString, "dbo.usp_GetNW_CS_MonthlyClaimVolume", filters, ct);
 
+    private static byte ReadByteClamped(SqlDataReader reader, string column)
+    {
+        var o = reader.GetOrdinal(column);
+        if (reader.IsDBNull(o)) return 0;
+        var v = Convert.ToInt64(reader.GetValue(o));
+        if (v <= 0) return 0;
+        if (v > byte.MaxValue) return byte.MaxValue;
+        return (byte)v;
+    }
+
     /// <inheritdoc />
     public async Task<CollectionSummaryMonthlyClaimVolumeResult> GetMonthlyClaimVolumeAsync(
         string connectionString,
@@ -43,9 +53,9 @@ public sealed class SqlCollectionSummaryReportRepository : ICollectionSummaryRep
             rows.Add(new MonthlyRawRow(
                 PanelName: reader.GetString(reader.GetOrdinal("PanelName")),
                 PayerName: reader.GetString(reader.GetOrdinal("PayerName")),
-                PayerRank: reader.GetByte(reader.GetOrdinal("PayerRank")),
+                PayerRank: ReadByteClamped(reader, "PayerRank"),
                 Year: reader.GetInt32(reader.GetOrdinal("BillYear")),
-                Month: reader.GetByte(reader.GetOrdinal("BillMonth")),
+                Month: ReadByteClamped(reader, "BillMonth"),
                 ClaimCount: reader.GetInt32(reader.GetOrdinal("NoOfClaims")),
                 TotalPaid: reader.GetDecimal(reader.GetOrdinal("InsurancePayment"))));
         }
@@ -82,8 +92,8 @@ public sealed class SqlCollectionSummaryReportRepository : ICollectionSummaryRep
             rows.Add(new WeeklyRawRow(
                 PanelName: reader.GetString(reader.GetOrdinal("PanelName")),
                 PayerName: reader.GetString(reader.GetOrdinal("PayerName")),
-                PayerRank: reader.GetByte(reader.GetOrdinal("PayerRank")),
-                WeekKey: reader.GetByte(reader.GetOrdinal("WeekKey")),
+                PayerRank: ReadByteClamped(reader, "PayerRank"),
+                WeekKey: ReadByteClamped(reader, "WeekKey"),
                 WeekStart: DateOnly.FromDateTime(reader.GetDateTime(reader.GetOrdinal("WeekStart"))),
                 WeekEnd: DateOnly.FromDateTime(reader.GetDateTime(reader.GetOrdinal("WeekEnd"))),
                 ClaimCount: reader.GetInt32(reader.GetOrdinal("NoOfClaims")),

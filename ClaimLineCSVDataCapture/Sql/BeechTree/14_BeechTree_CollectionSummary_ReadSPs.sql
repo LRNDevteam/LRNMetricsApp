@@ -110,7 +110,7 @@ BEGIN
     )
     SELECT  a.PanelName,
             a.PayerName,
-            CAST(r.PayerRank AS TINYINT) AS PayerRank,
+            CAST(r.PayerRank AS INT) AS PayerRank,
             a.BillYear,
             CAST(a.BillMonth AS TINYINT) AS BillMonth,
             a.NoOfClaims,
@@ -205,7 +205,7 @@ BEGIN
     BEGIN
         SELECT  CAST(NULL AS NVARCHAR(500)) AS PanelName,
                 CAST(NULL AS NVARCHAR(500)) AS PayerName,
-                CAST(NULL AS TINYINT)       AS PayerRank,
+                CAST(NULL AS INT) AS PayerRank,
                 CAST(NULL AS TINYINT)       AS WeekKey,
                 CAST(NULL AS DATE)          AS WeekStart,
                 CAST(NULL AS DATE)          AS WeekEnd,
@@ -264,7 +264,7 @@ BEGIN
     )
     SELECT  a.PanelName,
             a.PayerName,
-            CAST(r.PayerRank AS TINYINT) AS PayerRank,
+            CAST(r.PayerRank AS INT) AS PayerRank,
             CAST(a.WeekKey AS TINYINT) AS WeekKey,
             CASE a.WeekKey WHEN 1 THEN @W1Start WHEN 2 THEN @W2Start WHEN 3 THEN @W3Start WHEN 4 THEN @W4Start END AS WeekStart,
             CASE a.WeekKey WHEN 1 THEN @W1End   WHEN 2 THEN @W2End   WHEN 3 THEN @W3End   WHEN 4 THEN @W4End   END AS WeekEnd,
@@ -348,7 +348,7 @@ BEGIN
         FROM base GROUP BY PayerName
     )
     SELECT TOP 5
-        CAST(ROW_NUMBER() OVER (ORDER BY SumInsurancePayment DESC) AS TINYINT) AS PayerRank,
+        CAST(ROW_NUMBER() OVER (ORDER BY SumInsurancePayment DESC) AS INT) AS PayerRank,
         PayerName, SumInsurancePayment, SumChargeAmount, UniqueVisitCount
     FROM agg
     ORDER BY PayerRank;
@@ -425,7 +425,7 @@ BEGIN
         FROM base GROUP BY PayerName
     )
     SELECT TOP 5
-        CAST(ROW_NUMBER() OVER (ORDER BY TotalPayments DESC) AS TINYINT) AS PayerRank,
+        CAST(ROW_NUMBER() OVER (ORDER BY TotalPayments DESC) AS INT) AS PayerRank,
         PayerName, TotalPayments, UniqueVisitCount
     FROM agg
     ORDER BY PayerRank;

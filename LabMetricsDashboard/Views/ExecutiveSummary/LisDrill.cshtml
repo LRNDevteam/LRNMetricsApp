@@ -54,14 +54,34 @@
     bool isPmsSource = string.Equals(Model.SourceLabel, "ClaimLevelData", StringComparison.OrdinalIgnoreCase)
                        && !Model.IsCashDrill;
     string themeClass = Model.ChartThemeClass; // idt-lis | idt-pms | idt-cash
-    // Solid / partial / stack palette by theme
+    // Solid / partial bars follow theme; stacked segments use Option-1 IB colors
+    // (blue / orange / red) so subcategory mixes stay readable across themes.
     string barSolid = isCash ? "#BE7B2C" : isPmsSource || Model.IsFullyPaidInsight ? "#6B5B95" : "#1f7a46";
     string barPartial = isCash ? "#E8D3B0" : isPmsSource || Model.IsFullyPaidInsight ? "#C4B8E0" : "#a8d5b5";
-    string[] stackPalette = isCash
-        ? ["#8B5A2B", "#BE7B2C", "#D4A574", "#E8D3B0"]
-        : isPmsSource || Model.IsFullyPaidInsight
-            ? ["#4A3F6B", "#6B5B95", "#8B7BB5", "#C4B8E0"]
-            : ["#145C32", "#1f7a46", "#3FA066", "#a8d5b5"];
+    const string stackPartial = "#D6D3D1"; // current / incomplete month
+    string[] stackPalette =
+    [
+        "#2563EB", // No Response
+        "#EA580C", // Denials / Fully Denied / Denied
+        "#16A34A", // Partially Denied (green — distinct from orange Denied)
+        "#0D9488", // extra series
+        "#7C3AED",
+        "#CA8A04",
+    ];
+    string StackColorFor(string? status, int fallbackIndex)
+    {
+        var s = (status ?? "").Trim();
+        if (s.Contains("No Response", StringComparison.OrdinalIgnoreCase))
+            return "#2563EB";
+        if (s.Contains("Partial", StringComparison.OrdinalIgnoreCase))
+            return "#16A34A";
+        if (s.Contains("Denial", StringComparison.OrdinalIgnoreCase)
+            || s.Equals("Fully Denied", StringComparison.OrdinalIgnoreCase)
+            || s.Equals("Denials", StringComparison.OrdinalIgnoreCase)
+            || s.Equals("Denied", StringComparison.OrdinalIgnoreCase))
+            return "#EA580C";
+        return stackPalette[fallbackIndex % stackPalette.Length];
+    }
     bool useStacked = Model.UseStackedTrend;
     bool hasRowHeading = !string.IsNullOrWhiteSpace(Model.RowTitleOverride);
     // Only show the generic Samples/Billable/NotResulted blurb when this is a
@@ -376,7 +396,7 @@
         <div class="idt-warn">
             <i class="bi bi-exclamation-triangle-fill"></i>
             <div>
-                <strong>Read @partial.MonthLabel with care:</strong> the report’s data range cuts off at @(cutoffStr ?? "the latest run date"), so the @partial.MonthLabel column reflects roughly the start of the month only. Month-over-month comparisons treat @partial.ShortLabel as partial; Average 6 Months still includes it. Treat any "@partial.ShortLabel drop" as a cutoff artifact, not a real trend, unless a metric says otherwise.
+                <strong>Comparable window:</strong> Insight KPIs, Monthly Trend, MoM, Avg 6 Months, and panel/clinic bands use the first @dayWin days of each month (WeekRange end day). @partial.MonthLabel is still the WeekRange end month (cutoff @(cutoffStr ?? "the latest run date")).
             </div>
         </div>
     }
@@ -512,7 +532,7 @@
                     <span><span class="idt-swatch" style="background:@barSolid"></span>@Model.MetricTitle</span>
                     @if (partial is not null)
                     {
-                        <span><span class="idt-swatch" style="background:@barPartial"></span>Faded bar = partial month (@partial.ShortLabel)</span>
+                    <span><span class="idt-swatch" style="background:@barPartial"></span>Faded bar = WeekRange end month (@partial.ShortLabel)</span>
                     }
                 </div>
                 @* Print/PDF: chart → table (browser print cannot reliably render bar charts). *@
@@ -584,7 +604,7 @@
                                 </tr>
                             </tbody>
                         </table>
-                        <div class="idt-foot">@(isCash ? "Dollar amounts" : "Samples received") in the first @dayWin days of each month — the comparable window while the current month is partial@(isCash ? " (DayWindow only on this band)" : "").</div>
+                        <div class="idt-foot">@(isCash ? "Dollar amounts" : "Samples received") in the first @dayWin days of each month — same WeekRange day-window used by Monthly Trend / MoM / Avg 6 Months.</div>
                     }
                     else
                     {
@@ -823,7 +843,7 @@
                 .ToDictionary(g => g.Key, g => g.Sum(v => v.Count));
             var statusColor = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             for (var si = 0; si < stackStatuses.Count; si++)
-                statusColor[stackStatuses[si]] = stackPalette[si % stackPalette.Length];
+                statusColor[stackStatuses[si]] = StackColorFor(stackStatuses[si], si);
 
             decimal stackMax = 0m;
             foreach (var m in chartMonths)
@@ -873,7 +893,7 @@
                                     stackLookup.TryGetValue((st, mdt.Year, mdt.Month), out var cnt);
                                     if (cnt <= 0) continue;
                                     stackTotal += cnt;
-                                    segs.Add((st, cnt, stackPalette[si % stackPalette.Length]));
+                                    segs.Add((st, cnt, StackColorFor(st, si)));
                                 }
                             }
 
@@ -896,7 +916,7 @@
                                         {
                                             var segPct = ((double)seg.Count * 100.0 / stackTotal).ToString("0.##", ci);
                                             <div class="idt-stack-seg"
-                                                 style="height:@segPct%;background:@(isPartialBar ? barPartial : seg.Color)"
+                                                 style="height:@segPct%;background:@(isPartialBar ? stackPartial : seg.Color)"
                                                  title="@seg.Status: @Num(seg.Count)"></div>
                                         }
                                     </div>
@@ -916,11 +936,11 @@
                 <div class="idt-legend">
                     @for (var si = 0; si < stackStatuses.Count; si++)
                     {
-                        <span><span class="idt-swatch" style="background:@stackPalette[si % stackPalette.Length]"></span>@stackStatuses[si]</span>
+                        <span><span class="idt-swatch" style="background:@StackColorFor(stackStatuses[si], si)"></span>@stackStatuses[si]</span>
                     }
                     @if (partial is not null)
                     {
-                        <span><span class="idt-swatch" style="background:@barPartial"></span>Faded = partial (@partial.ShortLabel)</span>
+                        <span><span class="idt-swatch" style="background:@stackPartial"></span>Faded = partial (@partial.ShortLabel)</span>
                     }
                 </div>
                 <div class="idt-foot">Subcategory mix by month. Separate from MoM Monthly Trend above.</div>
@@ -1228,7 +1248,7 @@
                             }
                         </tbody>
                     </table>
-                    <div class="idt-foot">Full-month counts for @prevMoLabel vs @latestMoLabel. MoM Δ = (latest − previous) ÷ previous.</div>
+                    <div class="idt-foot">First @dayWin days of @prevMoLabel vs @latestMoLabel (WeekRange day-window). MoM Δ = (latest − previous) ÷ previous.</div>
                 </div>
 
                 @* ── Tab: Top 10 Insurance & by Panel (real insurers only) ── *@

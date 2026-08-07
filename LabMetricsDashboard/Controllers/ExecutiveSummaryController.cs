@@ -503,11 +503,15 @@ public sealed class ExecutiveSummaryController : Controller
                         || titleLooksMismatch;
 
                     // Overlap RunInfo + optional ES companion with the heavy Core SP.
-                    // Also prefetch ES for parent→subcategory stacked charts (Other Samples, …).
+                    // Do NOT prefetch ES for Sec1/2/3 stacked rows (Insurance Balance) —
+                    // Core already returns StatusBreakdown; waiting on the full ES grid
+                    // was making those drills much slower than other Insight rows.
                     var mayNeedSubcategoryStack = !titleLooksMismatch && !titleLooksFullyPaid
                         && !def.IsPmsFullyPaid && !def.IsPmsMismatch;
+                    var mayNeedEsForStackOrPanels = mayNeedSubcategoryStack
+                        && !def.HasCoreStatusStack;
                     var runInfoTask = _repo.GetRunInfoAsync(config.DbConnectionString, ct);
-                    var esPrefetchTask = (needsEsCompanion || mayNeedSubcategoryStack)
+                    var esPrefetchTask = (needsEsCompanion || mayNeedEsForStackOrPanels)
                         ? _repo.PrefetchExecutiveSummaryForDrillAsync(
                             config.DbConnectionString, prefix, labName, year, ct)
                         : null;
@@ -630,18 +634,33 @@ public sealed class ExecutiveSummaryController : Controller
                         _repo.EnsureFullyPaidInsurerPanels(rowResult);
                     }
 
-                    // Parent rows with ES subcategories (Other Samples, Insurance Balance
-                    // without Sec1/2/3, etc.): build stacked StatusBreakdown from children.
+                    // Parent rows with ES subcategories (Other Samples, …): build stacked
+                    // StatusBreakdown from children. Skip when Core already stacked
+                    // (Insurance Balance Sec1/2/3) so we never wait on the ES SP.
                     if (mayNeedSubcategoryStack
                         && string.IsNullOrWhiteSpace(rowResult.ErrorMessage))
                     {
-                        _repo.ApplyEsSubcategoryStackFromSummary(
-                            rowResult, esPrefetch, year, rowCode, category);
-                        // Inhealth (and similar): Core may miss LRNPanelName → "All Panels".
-                        // Rebuild By-Panel from ES panel sub-rows under the parent.
-                        _repo.ApplyEsPanelsFromSummary(
-                            rowResult, esPrefetch, year, rowCode, category);
+                        if (esPrefetch is null
+                            && _repo.NeedsEsStackOrPanelBackfill(rowResult))
+                        {
+                            esPrefetch = await _repo.PrefetchExecutiveSummaryForDrillAsync(
+                                config.DbConnectionString, prefix, labName, year, ct);
+                        }
+
+                        if (esPrefetch is not null)
+                        {
+                            _repo.ApplyEsSubcategoryStackFromSummary(
+                                rowResult, esPrefetch, year, rowCode, category);
+                            // Inhealth (and similar): Core may miss LRNPanelName → "All Panels".
+                            // Rebuild By-Panel from ES panel sub-rows under the parent.
+                            _repo.ApplyEsPanelsFromSummary(
+                                rowResult, esPrefetch, year, rowCode, category);
+                        }
                     }
+
+                    // Drop months after WeekRange end (bad future DOS → Aug/Dec stubs).
+                    if (string.IsNullOrWhiteSpace(rowResult.ErrorMessage))
+                        _repo.ApplyWeekRangeAsOfCutoff(rowResult, analysisRange);
 
                     return View("LisDrill", rowResult);
                 }
@@ -761,6 +780,9 @@ public sealed class ExecutiveSummaryController : Controller
         result.AnalysisRange = analysisRange;
         var (_, _, limsRunId) = await _repo.GetRunInfoAsync(config.DbConnectionString, ct);
         result.LimsRunId = limsRunId;
+
+        if (string.IsNullOrWhiteSpace(result.ErrorMessage))
+            _repo.ApplyWeekRangeAsOfCutoff(result, analysisRange);
 
         return View("LisDrill", result);
     }

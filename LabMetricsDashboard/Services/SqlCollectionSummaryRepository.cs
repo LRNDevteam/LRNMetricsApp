@@ -96,7 +96,13 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
     private static byte GetByteOrDefault(SqlDataReader r, string column, byte defaultValue = 0)
     {
         var o = r.GetOrdinal(column);
-        return r.IsDBNull(o) ? defaultValue : Convert.ToByte(r.GetValue(o));
+        if (r.IsDBNull(o)) return defaultValue;
+        // PayerRank can exceed 255 on wide date filters; clamp so Convert.ToByte
+        // does not throw after Read SPs return INT ranks.
+        var v = Convert.ToInt64(r.GetValue(o));
+        if (v <= 0) return defaultValue;
+        if (v > byte.MaxValue) return byte.MaxValue;
+        return (byte)v;
     }
 
     private static decimal GetDecimalOrDefault(SqlDataReader r, string column, decimal defaultValue = 0m)
@@ -1163,7 +1169,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                 .Select((kv, idx) => new CollectionPayerDrillDown
                 {
                     PayerName = kv.Key,
-                    PayerRank = (byte)(idx + 1),
+                    PayerRank = (byte)Math.Min(byte.MaxValue, idx + 1),
                     ByMonth = kv.Value.byMonth.ToDictionary(
                         m => m.Key,
                         m => new CollectionMonthlyCell(m.Value.enc, m.Value.paid)),
@@ -1488,7 +1494,7 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                 .Select((kv, idx) => new CollectionWeeklyPayerDrillDown
                 {
                     PayerName = kv.Key,
-                    PayerRank = (byte)(idx + 1),
+                    PayerRank = (byte)Math.Min(byte.MaxValue, idx + 1),
                     ByWeek = kv.Value.byWeek.ToDictionary(
                         m => m.Key, m => new CollectionMonthlyCell(m.Value.enc, m.Value.paid)),
                     TotalEncounters = kv.Value.totalEnc,

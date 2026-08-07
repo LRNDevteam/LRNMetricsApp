@@ -24,24 +24,24 @@
      @Year    INT           0 = Grand Total (all years); else that year only
 
    Day-window (@DayWindow): end day of the billed week range (e.g. week
-   07.01.2026–07.18.2026 → 18). Applies ONLY to the dedicated N-Day Range
-   & Result Rate result sets (sets 4, 6, 7 and the 9-day summary fields).
-   Summary KPIs, monthly trend, panels, MoM, and status use full-month
-   counts so Latest / Grand Total match the Executive Summary refresh.
+   07.01.2026–07.04.2026 → 4). ALL Insight Drill aggregates use this
+   comparable window (days 1..@DayWindow of each month): Summary KPIs,
+   MoM, Avg 6 Months, Vs Avg, Monthly Trend, panels, clinics, status,
+   and the N-Day / Result Rate bands.
 
    Returns result sets:
-     1) Summary band  (full-month KPIs + DayWindow 9-day fields)
-     2) Monthly trend (trailing months; full-month; latest flagged partial)
-     3) Top panels    (Avg6Months + full-month MoM + Share%)
+     1) Summary band  (DayWindow KPIs + N-day labels)
+     2) Monthly trend (trailing months; DayWindow; latest flagged partial)
+     3) Top panels    (Avg6Months + DayWindow MoM + Share%)
      4) Result rate   (trailing months; DayWindow resulted / received)
-     5) Status breakdown (Not Resulted; full-month)
+     5) Status breakdown (Not Resulted; DayWindow)
      6) N-day received band (DayWindow)
      7) Result rate by panel (DayWindow)
-     8) Top 10 clinics per top panel (Avg6Months + full-month MoM + Share%)
+     8) Top 10 clinics per top panel (Avg6Months + DayWindow MoM + Share%)
 
    Avg6Months window: trailing 6 months anchored on the WeekRange end-date
    month (that month + 5 prior; e.g. week ending in June → Jan–Jun),
-   full-month counts (including a partial end month as of the report cutoff).
+   each month counted only through @DayWindow.
    ===================================================================== */
 IF OBJECT_ID('dbo.usp_GetExecutiveSummaryDetail_LisDrill_Core', 'P') IS NOT NULL
     DROP PROCEDURE dbo.usp_GetExecutiveSummaryDetail_LisDrill_Core;
@@ -85,7 +85,8 @@ CREATE PROCEDURE dbo.usp_GetExecutiveSummaryDetail_LisDrill_Core
     @Col4           NVARCHAR(128) = NULL,
     @Op4            NVARCHAR(32)  = N'=',
     @Val4           NVARCHAR(200) = NULL,
-    @DayWindow      INT           = 9
+    @DayWindow      INT           = 9,
+    @AsOfDate       DATE          = NULL   -- WeekRange end; drops months after this
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -338,13 +339,14 @@ BEGIN
              @Year = @Year, @BillableVal = @BillableVal, @NotResultedVal = @NotResultedVal, @Val2 = @Val2, @Val3 = @Val3, @Val4 = @Val4;
     END
 
-    /* Cutoff from full-month data (no DayWindow shrink — main aggregates
-       must match ES). TRY_CONVERT avoids DATEFROMPARTS failures. */
-    DECLARE @CutoffDate date =
-        (SELECT MAX(TRY_CONVERT(date, CONVERT(char(8),
-                    CollYear * 10000 + CollMonth * 100 + CollDay)))
-         FROM #Acc
-         WHERE @Mode = 0 OR (@Mode = 1 AND IsResulted = 1) OR (@Mode = 2 AND IsNotResulted = 1));
+    /* Cutoff: prefer WeekRange end (@AsOfDate); else max date in scope. */
+    DECLARE @CutoffDate date = @AsOfDate;
+    IF @CutoffDate IS NULL
+        SET @CutoffDate =
+            (SELECT MAX(TRY_CONVERT(date, CONVERT(char(8),
+                        CollYear * 10000 + CollMonth * 100 + CollDay)))
+             FROM #Acc
+             WHERE @Mode = 0 OR (@Mode = 1 AND IsResulted = 1) OR (@Mode = 2 AND IsNotResulted = 1));
 
     IF EXISTS (SELECT 1 FROM #Acc)
         CREATE CLUSTERED INDEX IX_Acc_YM_Panel ON #Acc (CollYear, CollMonth, Panel, Clinic);
@@ -354,12 +356,13 @@ BEGIN
        ------------------------------------------------------------------ */
     IF OBJECT_ID('tempdb..#Monthly') IS NOT NULL DROP TABLE #Monthly;
 
-    /* MetricCount = full month (matches ES). Metric9Day / Received9 /
-       ResultedCount / ReceivedCount = DayWindow only (N-Day section). */
+    /* MetricCount = DayWindow (WeekRange end-day comparable window).
+       Metric9Day / Received9 / ResultedCount / ReceivedCount = same window. */
     SELECT
         CollYear,
         CollMonth,
-        MetricCount   = COUNT(DISTINCT CASE WHEN (@Mode = 0 OR (@Mode = 1 AND IsResulted = 1) OR (@Mode = 2 AND IsNotResulted = 1))
+        MetricCount   = COUNT(DISTINCT CASE WHEN CollDay BETWEEN 1 AND @DayWindow
+                                             AND (@Mode = 0 OR (@Mode = 1 AND IsResulted = 1) OR (@Mode = 2 AND IsNotResulted = 1))
                                             THEN Accession END),
         Metric9Day    = COUNT(DISTINCT CASE WHEN CollDay BETWEEN 1 AND @DayWindow
                                              AND (@Mode = 0 OR (@Mode = 1 AND IsResulted = 1) OR (@Mode = 2 AND IsNotResulted = 1))
@@ -371,25 +374,51 @@ BEGIN
     FROM #Acc
     GROUP BY CollYear, CollMonth;
 
+    /* Drop months after WeekRange end (bad future DOS → Aug/Dec stubs). */
+    IF @AsOfDate IS NOT NULL
+        DELETE FROM #Monthly
+        WHERE CollYear > YEAR(@AsOfDate)
+           OR (CollYear = YEAR(@AsOfDate) AND CollMonth > MONTH(@AsOfDate));
+
     /* ------------------------------------------------------------------
        4. Latest / previous month + 6-month average (includes WeekRange
-          end month + 5 prior; full-month MetricCount).
+          end month + 5 prior; DayWindow MetricCount).
        ------------------------------------------------------------------ */
     DECLARE @LatestY INT, @LatestM INT, @LatestCount BIGINT, @Latest9 BIGINT;
     DECLARE @PrevY   INT, @PrevM   INT, @PrevCount   BIGINT, @Prev9   BIGINT;
     DECLARE @Avg6 DECIMAL(18,2);
 
-    SELECT @LatestY = CollYear, @LatestM = CollMonth,
-           @LatestCount = MetricCount, @Latest9 = Metric9Day
-    FROM #Monthly
-    ORDER BY CollYear DESC, CollMonth DESC
-    OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY;
+    IF @AsOfDate IS NOT NULL
+    BEGIN
+        SET @LatestY = YEAR(@AsOfDate);
+        SET @LatestM = MONTH(@AsOfDate);
+        SELECT @LatestCount = MetricCount, @Latest9 = Metric9Day
+        FROM #Monthly WHERE CollYear = @LatestY AND CollMonth = @LatestM;
+        SET @LatestCount = ISNULL(@LatestCount, 0);
+        SET @Latest9 = ISNULL(@Latest9, 0);
 
-    SELECT @PrevY = CollYear, @PrevM = CollMonth,
-           @PrevCount = MetricCount, @Prev9 = Metric9Day
-    FROM #Monthly
-    ORDER BY CollYear DESC, CollMonth DESC
-    OFFSET 1 ROWS FETCH NEXT 1 ROWS ONLY;
+        DECLARE @PrevAsOf date = DATEADD(MONTH, -1, DATEFROMPARTS(@LatestY, @LatestM, 1));
+        SET @PrevY = YEAR(@PrevAsOf);
+        SET @PrevM = MONTH(@PrevAsOf);
+        SELECT @PrevCount = MetricCount, @Prev9 = Metric9Day
+        FROM #Monthly WHERE CollYear = @PrevY AND CollMonth = @PrevM;
+        SET @PrevCount = ISNULL(@PrevCount, 0);
+        SET @Prev9 = ISNULL(@Prev9, 0);
+    END
+    ELSE
+    BEGIN
+        SELECT @LatestY = CollYear, @LatestM = CollMonth,
+               @LatestCount = MetricCount, @Latest9 = Metric9Day
+        FROM #Monthly
+        ORDER BY CollYear DESC, CollMonth DESC
+        OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY;
+
+        SELECT @PrevY = CollYear, @PrevM = CollMonth,
+               @PrevCount = MetricCount, @Prev9 = Metric9Day
+        FROM #Monthly
+        ORDER BY CollYear DESC, CollMonth DESC
+        OFFSET 1 ROWS FETCH NEXT 1 ROWS ONLY;
+    END
 
     /* Avg6 = end month + 5 prior (OFFSET 0, not 1). */
     SELECT @Avg6 = AVG(CAST(MetricCount AS DECIMAL(18,2)))
@@ -400,7 +429,7 @@ BEGIN
         OFFSET 0 ROWS FETCH NEXT 6 ROWS ONLY
     ) x;
 
-    /* Avg-6 month keys: WeekRange end month + 5 prior (full-month). */
+    /* Avg-6 month keys: WeekRange end month + 5 prior (DayWindow). */
     IF OBJECT_ID('tempdb..#AvgMonths') IS NOT NULL DROP TABLE #AvgMonths;
     SELECT CollYear, CollMonth
     INTO #AvgMonths
@@ -416,14 +445,16 @@ BEGIN
     IF @AvgMonthCount < 1 SET @AvgMonthCount = 1;
 
     DECLARE @GrandMetric BIGINT =
-        (SELECT COUNT(DISTINCT CASE WHEN (@Mode = 0 OR (@Mode = 1 AND IsResulted = 1) OR (@Mode = 2 AND IsNotResulted = 1))
+        (SELECT COUNT(DISTINCT CASE WHEN CollDay BETWEEN 1 AND @DayWindow
+                                     AND (@Mode = 0 OR (@Mode = 1 AND IsResulted = 1) OR (@Mode = 2 AND IsNotResulted = 1))
                                     THEN Accession END) FROM #Acc);
 
     /* Panel×month metric counts once — reused by Top panels + Clinic Top-10. */
     IF OBJECT_ID('tempdb..#PanelMonth') IS NOT NULL DROP TABLE #PanelMonth;
     SELECT
         Panel, CollYear, CollMonth,
-        Cnt = COUNT(DISTINCT CASE WHEN (@Mode = 0 OR (@Mode = 1 AND IsResulted = 1) OR (@Mode = 2 AND IsNotResulted = 1))
+        Cnt = COUNT(DISTINCT CASE WHEN CollDay BETWEEN 1 AND @DayWindow
+                                   AND (@Mode = 0 OR (@Mode = 1 AND IsResulted = 1) OR (@Mode = 2 AND IsNotResulted = 1))
                                   THEN Accession END)
     INTO #PanelMonth
     FROM #Acc
@@ -432,10 +463,12 @@ BEGIN
     IF OBJECT_ID('tempdb..#PanelMoM') IS NOT NULL DROP TABLE #PanelMoM;
     SELECT
         Panel,
-        Prev9Day = COUNT(DISTINCT CASE WHEN (@Mode = 0 OR (@Mode = 1 AND IsResulted = 1) OR (@Mode = 2 AND IsNotResulted = 1))
+        Prev9Day = COUNT(DISTINCT CASE WHEN CollDay BETWEEN 1 AND @DayWindow
+                                       AND (@Mode = 0 OR (@Mode = 1 AND IsResulted = 1) OR (@Mode = 2 AND IsNotResulted = 1))
                                        AND @PrevM IS NOT NULL AND CollYear = @PrevY AND CollMonth = @PrevM
                                        THEN Accession END),
-        Latest9Day = COUNT(DISTINCT CASE WHEN (@Mode = 0 OR (@Mode = 1 AND IsResulted = 1) OR (@Mode = 2 AND IsNotResulted = 1))
+        Latest9Day = COUNT(DISTINCT CASE WHEN CollDay BETWEEN 1 AND @DayWindow
+                                         AND (@Mode = 0 OR (@Mode = 1 AND IsResulted = 1) OR (@Mode = 2 AND IsNotResulted = 1))
                                          AND CollYear = @LatestY AND CollMonth = @LatestM
                                          THEN Accession END)
     INTO #PanelMoM
@@ -495,8 +528,8 @@ BEGIN
         NineDayMoMPct    = CASE WHEN ISNULL(@Prev9, 0) = 0 THEN NULL
                                 ELSE CAST((@Latest9 - @Prev9) * 100.0 / @Prev9 AS DECIMAL(18,2)) END;
 
-    /* === Result set 2 : Monthly totals (full-month) for the trend chart =
-       Trailing 13 months, ascending. Matches ES monthly cells.
+    /* === Result set 2 : Monthly totals (DayWindow) for the trend chart =
+       Trailing 13 months, ascending. Comparable 1..@DayWindow days each month.
        The latest month is flagged partial (as-of the report cutoff) so the UI
        can fade its bar. */
     SELECT
@@ -512,10 +545,10 @@ BEGIN
     ) m
     ORDER BY CollYear, CollMonth;
 
-    /* === Result set 3 : Top panels (Avg 6 Months + full-month MoM) =====
-       Avg6Months = mean of full-month counts over the WeekRange end month
+    /* === Result set 3 : Top panels (Avg 6 Months + DayWindow MoM) =====
+       Avg6Months = mean of DayWindow counts over the WeekRange end month
        + 5 prior (e.g. June end → Jan–Jun). Prev9Day/Latest9Day columns
-       hold full-month MoM (legacy names kept for the C# reader).
+       hold DayWindow MoM (legacy names kept for the C# reader).
        PeriodTotal kept as rounded Avg6Months for older readers. */
     SELECT
         Panel,
@@ -547,7 +580,7 @@ BEGIN
 
     /* === Result set 5 : Not-Resulted status breakdown (ClientStatus x month)
        Long format (one row per status/month); the UI pivots it. Only populated
-       for the Not Resulted metric (@Mode = 2). Full-month counts. */
+       for the Not Resulted metric (@Mode = 2). DayWindow counts. */
     SELECT
         Status    = ClientStatus,
         CollYear,
@@ -556,6 +589,7 @@ BEGIN
     FROM #Acc
     WHERE @Mode = 2
       AND IsNotResulted = 1
+      AND CollDay BETWEEN 1 AND @DayWindow
       AND (CollYear * 100 + CollMonth) IN (
             SELECT TOP (7) (CollYear * 100 + CollMonth)
             FROM #Monthly
@@ -607,12 +641,13 @@ BEGIN
     ORDER BY rr.Panel, rr.CollYear, rr.CollMonth;
 
     /* === Result set 8 : Top 10 clinics per Top-10 panel ================
-       Same Avg6Months window + full-month MoM as Set 3. SharePct is the
+       Same Avg6Months window + DayWindow MoM as Set 3. SharePct is the
        clinic's share of its parent panel's Avg6Months. Uses #TopPanels. */
     ;WITH ClinicMonth AS (
         SELECT
             a.Panel, a.Clinic, a.CollYear, a.CollMonth,
-            Cnt = COUNT(DISTINCT CASE WHEN (@Mode = 0 OR (@Mode = 1 AND IsResulted = 1) OR (@Mode = 2 AND IsNotResulted = 1))
+            Cnt = COUNT(DISTINCT CASE WHEN CollDay BETWEEN 1 AND @DayWindow
+                                       AND (@Mode = 0 OR (@Mode = 1 AND IsResulted = 1) OR (@Mode = 2 AND IsNotResulted = 1))
                                       THEN a.Accession END)
         FROM #Acc a
         INNER JOIN #TopPanels t ON t.Panel = a.Panel
@@ -633,10 +668,12 @@ BEGIN
     ClinicMoM AS (
         SELECT
             a.Panel, a.Clinic,
-            Prev9Day = COUNT(DISTINCT CASE WHEN (@Mode = 0 OR (@Mode = 1 AND IsResulted = 1) OR (@Mode = 2 AND IsNotResulted = 1))
+            Prev9Day = COUNT(DISTINCT CASE WHEN CollDay BETWEEN 1 AND @DayWindow
+                                           AND (@Mode = 0 OR (@Mode = 1 AND IsResulted = 1) OR (@Mode = 2 AND IsNotResulted = 1))
                                            AND @PrevM IS NOT NULL AND a.CollYear = @PrevY AND a.CollMonth = @PrevM
                                            THEN a.Accession END),
-            Latest9Day = COUNT(DISTINCT CASE WHEN (@Mode = 0 OR (@Mode = 1 AND IsResulted = 1) OR (@Mode = 2 AND IsNotResulted = 1))
+            Latest9Day = COUNT(DISTINCT CASE WHEN CollDay BETWEEN 1 AND @DayWindow
+                                             AND (@Mode = 0 OR (@Mode = 1 AND IsResulted = 1) OR (@Mode = 2 AND IsNotResulted = 1))
                                              AND a.CollYear = @LatestY AND a.CollMonth = @LatestM
                                              THEN a.Accession END)
         FROM #Acc a

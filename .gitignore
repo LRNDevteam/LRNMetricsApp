@@ -6,3 +6,4 @@ obj/
 /LRN.WebUI/node_modules
 /LRN.WebUI/dist
 /scripts/Analyze-Biggest-Local.ps1
+/LRN.ReportWorker/Properties/PublishProfiles/FolderProfile.pubxml

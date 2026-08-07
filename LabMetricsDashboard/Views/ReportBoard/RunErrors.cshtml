@@ -1,0 +1,144 @@
+@model LabMetricsDashboard.Controllers.RunErrorsViewModel
+@{
+    ViewData["Title"] = "Run Errors";
+    var hasAnything = !Model.Result.IsEmpty;
+}
+
+<style>
+    .rre-head { background:linear-gradient(120deg,#0a1628 0%,#3f1220 55%,#7f1d1d 100%); border-radius:14px; padding:1rem 1.3rem; color:#fff; margin-bottom:1rem; display:flex; align-items:center; gap:1rem; flex-wrap:wrap; }
+    .rre-head h2 { margin:0; font-size:1.15rem; font-weight:800; }
+    .rre-head .meta { font-size:.74rem; color:rgba(255,255,255,.7); font-family:Consolas,monospace; margin-top:.2rem; }
+    .rre-card { background:#fff; border:1px solid #e2e8f0; border-radius:14px; box-shadow:0 6px 22px rgba(15,23,42,.06); margin-bottom:1.1rem; overflow:hidden; }
+    .rre-card > h3 { margin:0; padding:.7rem 1rem; font-size:.8rem; font-weight:800; text-transform:uppercase; letter-spacing:.05em; color:#334155; background:#f8fafc; border-bottom:1px solid #e2e8f0; }
+    .rre-table { width:100%; font-size:.79rem; margin:0; border-collapse:collapse; }
+    .rre-table th { background:#f8fafc; color:#475569; font-size:.68rem; text-transform:uppercase; letter-spacing:.04em; text-align:left; padding:.5rem .7rem; border-bottom:1px solid #e2e8f0; white-space:nowrap; }
+    .rre-table td { padding:.55rem .7rem; border-bottom:1px solid #eef2f7; vertical-align:top; }
+    .rre-table td.wrap { white-space:pre-wrap; word-break:break-word; min-width:280px; max-width:520px; }
+    .rre-sev { display:inline-block; border-radius:5px; padding:.1rem .4rem; font-size:.66rem; font-weight:800; text-transform:uppercase; }
+    .rre-sev.ERROR { background:#fef2f2; color:#b91c1c; }
+    .rre-sev.WARNING { background:#fffbeb; color:#b45309; }
+    .rre-sev.INFO { background:#eff6ff; color:#1d4ed8; }
+    .rre-action { font-size:.74rem; color:#475569; background:#f8fafc; border-left:3px solid #94a3b8; padding:.35rem .55rem; border-radius:0 6px 6px 0; margin-top:.35rem; }
+    .rre-empty { background:#fff; border:1px solid #e2e8f0; border-radius:14px; padding:2rem; text-align:center; color:#64748b; }
+    .rre-warn { background:#fffbeb; border:1px solid #fde68a; color:#92400e; border-radius:10px; padding:.6rem .8rem; font-size:.8rem; margin-bottom:1rem; }
+</style>
+
+<div class="rre-head">
+    <div>
+        <h2><i class="bi bi-exclamation-octagon-fill"></i> Run errors</h2>
+        <div class="meta">
+            @Model.RunId
+            @if (!string.IsNullOrWhiteSpace(Model.LabDisplayName)) { <text> · @Model.LabDisplayName</text> }
+            @if (!string.IsNullOrWhiteSpace(Model.ReportName)) { <text> · @Model.ReportName</text> }
+        </div>
+    </div>
+    <div class="ms-auto d-flex gap-2">
+        <a class="btn btn-sm btn-light" asp-action="Index"><i class="bi bi-arrow-left"></i> Back to the board</a>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(Model.Result.LoadError))
+{
+    <div class="rre-warn"><b>The error log could not be read.</b> @Model.Result.LoadError</div>
+}
+@foreach (var warning in Model.Result.Warnings)
+{
+    <div class="rre-warn">@warning</div>
+}
+
+@if (!hasAnything)
+{
+    <div class="rre-empty">
+        <i class="bi bi-clipboard-check" style="font-size:2rem;"></i>
+        <div class="fw-bold mt-2">No error detail was recorded for run @Model.RunId</div>
+        <div class="small mt-1">
+            The pipeline writes failures to <code>dbo.LRN_Error_Log</code> and per-report messages to
+            <code>dbo.ReportRunIdInfoLog</code> in <b>LRNMaster</b>; neither has a row for this run.
+            @if (string.IsNullOrWhiteSpace(Model.Result.LoadError))
+            {
+                <text>The report may have been marked failed by a step that does not log detail.</text>
+            }
+        </div>
+        <a class="btn btn-sm btn-outline-secondary mt-3" asp-controller="MasterValues" asp-action="ReportAuditLog">
+            <i class="bi bi-journal-text"></i> Open the full Report Audit Log
+        </a>
+    </div>
+}
+else
+{
+    @if (Model.Result.PipelineErrors.Count > 0)
+    {
+        <div class="rre-card">
+            <h3>Pipeline failures <span class="text-muted">(@Model.Result.PipelineErrors.Count)</span></h3>
+            <div style="overflow-x:auto;">
+                <table class="rre-table">
+                    <thead>
+                        <tr>
+                            <th>When</th><th>Severity</th><th>Step</th><th>Code</th>
+                            <th>Summary &amp; recommended action</th><th>File</th><th>Owner</th><th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var error in Model.Result.PipelineErrors)
+                        {
+                            var severity = (error.Severity ?? string.Empty).ToUpperInvariant();
+                            <tr>
+                                <td>@(error.ErrorTime?.ToString("dd MMM HH:mm:ss") ?? "—")</td>
+                                <td><span class="rre-sev @severity">@(error.Severity ?? "—")</span></td>
+                                <td>@(error.StepName ?? "—")</td>
+                                <td><code>@(error.ErrorCode ?? "—")</code></td>
+                                <td class="wrap">
+                                    @error.ErrorSummary
+                                    @if (!string.IsNullOrWhiteSpace(error.MissingColumns))
+                                    {
+                                        <div class="rre-action"><b>Missing columns:</b> @error.MissingColumns</div>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(error.RecommendedAction))
+                                    {
+                                        <div class="rre-action"><b>Do this:</b> @error.RecommendedAction</div>
+                                    }
+                                </td>
+                                <td class="wrap" style="min-width:0;max-width:220px;font-size:.72rem;">@(error.FileName ?? "—")</td>
+                                <td>@(error.OwnerTeam ?? "—")</td>
+                                <td>@(error.Status ?? "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
+    @if (Model.Result.RunLog.Count > 0)
+    {
+        <div class="rre-card">
+            <h3>Report error messages <span class="text-muted">(@Model.Result.RunLog.Count)</span></h3>
+            <div style="overflow-x:auto;">
+                <table class="rre-table">
+                    <thead>
+                        <tr><th>When</th><th>Report</th><th>Source</th><th>Message</th><th>Source file</th><th>By</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var entry in Model.Result.RunLog)
+                        {
+                            <tr>
+                                <td>@(entry.CreatedOn?.ToString("dd MMM HH:mm:ss") ?? "—")</td>
+                                <td>@(entry.ReportType ?? "—")</td>
+                                <td>@(entry.SourceSystem ?? "—")</td>
+                                <td class="wrap">@entry.LogMessage</td>
+                                <td class="wrap" style="min-width:0;max-width:220px;font-size:.72rem;">@(entry.SourceFileName ?? "—")</td>
+                                <td>@(entry.CreatedBy ?? "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
+    <div class="d-flex gap-2">
+        <a class="btn btn-sm btn-outline-primary" asp-controller="MasterValues" asp-action="ReportAuditLog">
+            <i class="bi bi-journal-text"></i> Full Report Audit Log
+        </a>
+    </div>
+}

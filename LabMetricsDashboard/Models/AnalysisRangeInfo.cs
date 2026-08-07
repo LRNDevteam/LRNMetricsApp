@@ -48,51 +48,64 @@ public sealed class AnalysisRangeInfo
     ];
 
     /// <summary>
-    /// Parses the end date of a week-range string and returns its day (1–31).
-    /// Returns <paramref name="fallback"/> when the folder cannot be parsed
-    /// (default 0 so callers can apply CutoffDate before the final 9 fallback).
+    /// Parsed Week Range end date (e.g. "07.23.2026 - 07.29.2026" → 2026-07-29).
+    /// Null when <see cref="WeekFolder"/> cannot be parsed.
     /// </summary>
-    public static int ResolveComparableDayWindow(string? weekFolder, int fallback = 0)
-    {
-        if (string.IsNullOrWhiteSpace(weekFolder))
-            return fallback;
+    public DateTime? WeekRangeEndDate =>
+        TryParseWeekRangeEnd(WeekFolder, out var end) ? end : null;
 
-        // Extract every date-like token; the last one is the week-range end.
-        // Works for spaced/unspaced hyphen, en-dash, em-dash, NBSP, "to", etc.
+    /// <summary>
+    /// Parses the end date of a week-range string (full date, not just day).
+    /// </summary>
+    public static bool TryParseWeekRangeEnd(string? weekFolder, out DateTime endDate)
+    {
+        endDate = default;
+        if (string.IsNullOrWhiteSpace(weekFolder))
+            return false;
+
         var matches = DateTokenRegex.Matches(weekFolder);
         for (var i = matches.Count - 1; i >= 0; i--)
         {
-            if (TryParseWeekFolderDate(matches[i].Value, out var dt)
-                && dt.Day is >= 1 and <= 31)
+            if (TryParseWeekFolderDate(matches[i].Value, out var dt))
             {
-                return dt.Day;
+                endDate = dt.Date;
+                return true;
             }
         }
 
-        // Legacy path: segment after last range separator.
         var text = weekFolder.Trim()
-            .Replace('\u00A0', ' ')  // NBSP
-            .Replace('\u2013', '-')  // en dash
-            .Replace('\u2014', '-')  // em dash
-            .Replace('\u2212', '-'); // minus
+            .Replace('\u00A0', ' ')
+            .Replace('\u2013', '-')
+            .Replace('\u2014', '-')
+            .Replace('\u2212', '-');
 
         string endPart;
         var toIdx = text.LastIndexOf(" to ", StringComparison.OrdinalIgnoreCase);
         if (toIdx >= 0)
-        {
             endPart = text[(toIdx + 4)..].Trim();
-        }
         else
         {
             var dashIdx = text.LastIndexOf('-');
             endPart = dashIdx >= 0 ? text[(dashIdx + 1)..].Trim() : text;
         }
 
-        if (TryParseWeekFolderDate(endPart, out var endDt)
+        if (!TryParseWeekFolderDate(endPart, out var endDt))
+            return false;
+
+        endDate = endDt.Date;
+        return true;
+    }
+
+    /// <summary>
+    /// Parses the end date of a week-range string and returns its day (1–31).
+    /// Returns <paramref name="fallback"/> when the folder cannot be parsed
+    /// (default 0 so callers can apply CutoffDate before the final 9 fallback).
+    /// </summary>
+    public static int ResolveComparableDayWindow(string? weekFolder, int fallback = 0)
+    {
+        if (TryParseWeekRangeEnd(weekFolder, out var endDt)
             && endDt.Day is >= 1 and <= 31)
-        {
             return endDt.Day;
-        }
 
         return fallback;
     }

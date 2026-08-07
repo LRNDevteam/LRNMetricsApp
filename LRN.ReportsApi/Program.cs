@@ -39,6 +39,7 @@ builder.Services.AddScoped<IDenialCodeMasterExcelService, DenialCodeMasterExcelS
 builder.Services.AddScoped<IDenialActionChangeVerificationRepository, SqlDenialActionChangeVerificationRepository>();
 builder.Services.AddScoped<IDenialMapperRepository, SqlDenialMapperRepository>();
 builder.Services.AddScoped<IMasterValuesRepository, SqlMasterValuesRepository>();
+builder.Services.AddScoped<IReportAuditLogService, ReportAuditLogService>();
 builder.Services.AddScoped<IMenuRepository, SqlMenuRepository>();
 builder.Services.AddScoped<ILabAnalyticsRepository, SqlLabAnalyticsRepository>();
 builder.Services.AddScoped<ICptLookupRepository, SqlCptLookupRepository>();
@@ -167,7 +168,10 @@ app.Use(async (context, next) =>
         || path.StartsWithSegments("/api/denial-dashboard")
         || path.StartsWithSegments("/api/master-values")
         || path.StartsWithSegments("/api/menu")
-        || path.StartsWithSegments("/api/analytics");
+        || path.StartsWithSegments("/api/analytics")
+        // Report Control Board landing page. Must be listed here: anything not matched below runs
+        // with no authentication at all, and this endpoint exposes every lab's run status.
+        || path.StartsWithSegments("/api/report-board");
 
     // client-logs exists to capture client-side errors, including ones caused by auth being
     // broken or expired. Requiring a valid JWT here creates a chicken-and-egg failure: exactly

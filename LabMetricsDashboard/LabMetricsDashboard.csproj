@@ -7,6 +7,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Lets the unit tests reach internal helpers (status parsing, feature-flag gating,
+         lab name squashing) without widening their accessibility for the whole app. -->
+    <InternalsVisibleTo Include="LabMetricsDashboard.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Lab configs are loaded at runtime from LabConfigFolder (appsettings.json).
          Do NOT bake a per-lab config into the build output: it ships a stale copy
          (and a plaintext DB password) into the web root and, when LabConfigFolder

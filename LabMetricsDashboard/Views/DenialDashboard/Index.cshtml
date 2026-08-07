@@ -33,7 +33,6 @@
     var activeTab = Model.Filters.ActiveTab;
     var activeFilters = new List<KeyValuePair<string, string?>>
 {
-    new("Lab", string.IsNullOrWhiteSpace(Model.CurrentLabName) ? "-" : Model.CurrentLabName),
     new("Status", SelectedSummary(Model.Filters.Status, true)),
     new("Priority", SelectedSummary(Model.Filters.Priority, true)),
     new("Action Category", SelectedSummary(Model.Filters.ActionCategory, true)),
@@ -692,6 +691,12 @@
             </div>
         </div>
 
+        <div class="d-flex flex-wrap gap-2 mb-3 dd-run-chips">
+            <span class="chip chip-muted"><i class="bi bi-building me-1"></i>Lab: @(string.IsNullOrWhiteSpace(Model.CurrentLabName) ? "-" : Model.CurrentLabName)</span>
+            <span class="chip chip-muted"><i class="bi bi-hash"></i>Run: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span>
+            <span class="chip chip-muted" title="@Model.CurrentSourceFileName"><i class="bi bi-file-earmark-text me-1"></i>Source File: @(string.IsNullOrWhiteSpace(Model.CurrentSourceFileName) ? "-" : Model.CurrentSourceFileName)</span>
+        </div>
+
         <div class="collapse show" id="dashboardFiltersCollapse">
             <form method="get" class="row g-3 align-items-end filter-form-grid" id="dashboardFilterForm">
                 <div class="col-12">
@@ -823,18 +828,12 @@
 
                 <div class="col-12 d-flex flex-wrap justify-content-between align-items-center gap-3 mt-2">
                     <div class="d-flex flex-wrap gap-2">
-                        <span class="chip chip-muted">Run: @(string.IsNullOrWhiteSpace(Model.CurrentRunId) ? "-" : Model.CurrentRunId)</span>
-
                         @if (activeFilters.Any())
                         {
                             @foreach (var filter in activeFilters)
                             {
                                 <span class="chip">@filter.Key: <strong>@filter.Value</strong></span>
                             }
-                        }
-                        else
-                        {
-                            <span class="chip chip-muted">Only the selected lab is applied</span>
                         }
                     </div>
                     <div class="d-flex flex-wrap gap-2">
@@ -1763,18 +1762,8 @@
         });
 
         if (exportButton) {
-            exportButton.addEventListener('click', function () {
-                if (!form) {
-                    return;
-                }
-
-                const formData = new FormData(form);
-                const labId = formData.get('LabId');
-                if (!labId) {
-                    alert('Please select a lab first.');
-                    return;
-                }
-
+            // Synchronous fallback: used only when the lab has no report queue deployed.
+            function legacyDownload(formData) {
                 const params = new URLSearchParams();
                 formData.forEach(function (value, key) {
                     if (value !== null && value !== undefined && value !== '') {
@@ -1790,6 +1779,103 @@
                         loader.classList.add('hidden');
                     }
                 }, 3000);
+            }
+
+            // Queues a DenialDashboard report; LRN.ReportWorker builds the six-tab workbook
+            // (Monthly/Weekly Breakdown, Filter Panel, SLA Tracker, Denial Insight, Line Item
+            // with the workflow's Assigned To / Status / notes) and the 📄 Reports badge
+            // notifies when it is ready.
+            exportButton.addEventListener('click', function () {
+                if (!form) {
+                    return;
+                }
+
+                const formData = new FormData(form);
+                const labId = formData.get('LabId');
+                if (!labId) {
+                    alert('Please select a lab first.');
+                    return;
+                }
+
+                const val = function (n) {
+                    const v = formData.get(n);
+                    return v === null || v === undefined ? null : (v.toString().trim() || null);
+                };
+                // Multi-selects post one entry per checked value; the server expects them
+                // pipe-joined, the same shape the page's own links use.
+                const multi = function (n) {
+                    const v = formData.getAll(n)
+                        .map(function (x) { return x.toString().trim(); })
+                        .filter(function (x) { return x.length > 0; });
+                    return v.length > 0 ? v.join('|') : null;
+                };
+
+                const filters = {
+                    LabId: parseInt(labId.toString(), 10),
+                    DenialCode: val('DenialCode'),
+                    Status: multi('Status'),
+                    Priority: multi('Priority'),
+                    ActionCategory: multi('ActionCategory'),
+                    Deadline: multi('Deadline'),
+                    Classification: multi('Classification'),
+                    SalesRepname: multi('SalesRepname'),
+                    ClinicName: multi('ClinicName'),
+                    ReferringProvider: multi('ReferringProvider'),
+                    PayerName: multi('PayerName'),
+                    PayerType: multi('PayerType'),
+                    PanelName: multi('PanelName'),
+                    FirstBilledDateFrom: val('FirstBilledDateFrom'),
+                    FirstBilledDateTo: val('FirstBilledDateTo'),
+                    DateOfServiceFrom: val('DateOfServiceFrom'),
+                    DateOfServiceTo: val('DateOfServiceTo'),
+                    DenialDateFrom: val('DenialDateFrom'),
+                    DenialDateTo: val('DenialDateTo')
+                };
+
+                const body = new FormData();
+                body.append('lab', '@Model.ConfiguredLabKey');
+                body.append('reportType', 'DenialDashboard');
+                body.append('filterDetails', JSON.stringify(filters));
+                const af = document.querySelector('#lrnReportsAf input[name="__RequestVerificationToken"]');
+                if (af) body.append('__RequestVerificationToken', af.value);
+
+                const original = exportButton.innerHTML;
+                exportButton.disabled = true;
+                exportButton.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Queuing…';
+
+                fetch('@Url.Action("Queue", "UserReports")', { method: 'POST', body: body })
+                    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+                    .then(function (res) {
+                        if (res.ok) {
+                            exportButton.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating - watch Reports';
+                            if (window.lrnShowReportAlert) window.lrnShowReportAlert('success');
+                            if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
+                            setTimeout(function () {
+                                exportButton.disabled = false;
+                                exportButton.innerHTML = original;
+                            }, 8000);
+                        } else if (res.status === 400) {
+                            exportButton.disabled = false;
+                            exportButton.innerHTML = original;
+                            legacyDownload(formData);
+                        } else {
+                            exportButton.disabled = false;
+                            exportButton.innerHTML = original;
+                            const qMsg = res.j && res.j.message ? res.j.message : '';
+                            if (window.lrnShowReportAlert) {
+                                if (res.status === 409 || /already/i.test(qMsg)) {
+                                    window.lrnShowReportAlert('info');
+                                } else {
+                                    window.lrnShowReportAlert('error', { message: qMsg || 'Could not queue the report.' });
+                                }
+                            }
+                        }
+                    })
+                    .catch(function () {
+                        exportButton.disabled = false;
+                        exportButton.innerHTML = original;
+                        legacyDownload(formData);
+                    });
             });
         }
 

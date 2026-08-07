@@ -23,7 +23,17 @@ public class DashboardPageViewModel
 
     public List<LabOption> LabOptions { get; set; } = new();
     public string CurrentLabName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The LabSettings/LabConfig key behind <see cref="CurrentLabName"/> (which is the
+    /// dashboard's display name and can differ, e.g. "PCR Labs of America" vs
+    /// "PCRLabsofAmerica"). The report queue resolves connection strings by config key, so
+    /// the async export button must post THIS value. Falls back to the display name.
+    /// </summary>
+    public string ConfiguredLabKey { get; set; } = string.Empty;
     public string CurrentRunId { get; set; } = string.Empty;
+    public string CurrentSourceFileName { get; set; } = string.Empty;
+    public string CurrentWeekFolder { get; set; } = string.Empty;
 
     public List<string> StatusOptions { get; set; } = new();
     public List<string> PriorityOptions { get; set; } = new();
