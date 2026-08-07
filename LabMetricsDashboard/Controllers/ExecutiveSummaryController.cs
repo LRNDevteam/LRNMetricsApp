@@ -48,6 +48,10 @@ public sealed class ExecutiveSummaryController : Controller
             ["NWL"]              = "NW",
             ["PCRLabsofAmerica"] = "PCR",
             ["PCRLOA"]           = "PCR",
+            ["PCR_Dx_AL"]        = "PCR",
+            ["PCR_Dx_CO"]        = "PCR",
+            ["PCRAL"]            = "PCR",
+            ["PCRCO"]            = "PCR",
             ["Beech_Tree"]       = "BT",
         };
 
@@ -200,7 +204,7 @@ public sealed class ExecutiveSummaryController : Controller
         }
 
         _logger.LogInformation(
-            "ExecutiveSummary view rendered for lab='{Lab}' SP='{Sp}' rows={Rows} cols={Cols}",
+            "ExecutiveSummary ready to render for lab='{Lab}' SP='{Sp}' rows={Rows} cols={Cols}",
             labName, spName, vm.Rows.Count, vm.YearMonthColumns.Count);
 
         if (export == "excel")
@@ -375,5 +379,389 @@ public sealed class ExecutiveSummaryController : Controller
         }
 
         return View("Detail", vm);
+    }
+
+    /// <summary>
+    /// Insight drill-through for LIS / PMS / Cash Breakdown rows — reachable from
+    /// Grand Total / Year Total cells. Row filters from dbo.LisDrillRowDef;
+    /// Cash uses dbo.usp_GetExecutiveSummaryDetail_CashDrill_Core (dollar SUM).
+    /// URL: /ExecutiveSummary/LisDrill?lab=Cove&amp;rowCode=O&amp;category=Cash&amp;year=2026
+    /// (year=0 → Grand Total across all years).
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> LisDrill(
+        string? lab,
+        string  metric    = "Samples",
+        string? rowCode   = null,
+        string? rowTitle  = null,
+        string? category  = null,
+        int     year      = 0,
+        decimal? value    = null,
+        int?    yearFrom  = null,
+        int?    yearTo    = null,
+        int?    monthFrom = null,
+        int?    monthTo   = null,
+        CancellationToken ct = default)
+    {
+        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var labName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+
+        // Show the resolved lab in the navbar and lock lab switching: the drill
+        // data is scoped to the lab this page was opened from.
+        ViewData["SelectedLab"]      = labName;
+        ViewData["DisableLabSwitch"] = true;
+
+        // Breadcrumb: Home › Executive Summary (drill opens from there, not the
+        // Revenue Dashboard).
+        ViewData["BreadcrumbParent"]    = "Executive Summary";
+        ViewData["BreadcrumbParentUrl"] = Url.Action("Index", "ExecutiveSummary", new { lab = labName });
+
+        // Normalise metric to the supported values.
+        metric =
+            string.Equals(metric, "Billable",    StringComparison.OrdinalIgnoreCase) ? "Billable" :
+            string.Equals(metric, "NotResulted", StringComparison.OrdinalIgnoreCase) ? "NotResulted" :
+                                                                                        "Samples";
+
+        var backUrl = Url.Action("Index", "ExecutiveSummary", new
+        {
+            lab = labName, yearFrom, yearTo, monthFrom, monthTo,
+        }) ?? "/ExecutiveSummary";
+
+        var vm = new ExecSummaryLisDrillViewModel
+        {
+            Metric        = metric,
+            Year          = year,
+            SelectedValue = value,
+            BackUrl       = backUrl,
+        };
+
+        if (!_labSettings.Labs.TryGetValue(labName, out var config)
+            || string.IsNullOrWhiteSpace(config.DbConnectionString))
+        {
+            vm.ErrorMessage = "Lab not configured.";
+            return View("LisDrill", vm);
+        }
+
+        if (!LabPrefixMap.TryGetValue(labName, out var prefix))
+        {
+            vm.ErrorMessage = $"Drill-through not available for '{labName}'.";
+            return View("LisDrill", vm);
+        }
+
+        var analysisRange = await _analysisRange.GetAsync(config.DbConnectionString, ct);
+        // WeekFolder end-day → provisional 9 when unparsed (CutoffDate applied after SP).
+        var fromFolder = AnalysisRangeInfo.ResolveComparableDayWindow(
+            analysisRange.WeekFolder, fallback: 0);
+        var dayWindow = fromFolder > 0 ? fromFolder : 9;
+
+        // Prefer the ES grid heading when present (querystring), so the page
+        // title matches the Description column even before LisDrillRowDef loads.
+        var gridRowTitle = string.IsNullOrWhiteSpace(rowTitle) ? null : rowTitle.Trim();
+
+        // ── Row-level drill: a specific LIS Breakdown row (Billed, Unbilled,
+        //    sub-status, Other Samples…) resolved from dbo.LisDrillRowDef. ──
+        if (!string.IsNullOrWhiteSpace(rowCode))
+        {
+            category = string.IsNullOrWhiteSpace(category) ? category : category.Trim();
+            rowCode = rowCode.Trim();
+            var preferredSource =
+                string.Equals(category, "PMS", StringComparison.OrdinalIgnoreCase) ? "PMS" :
+                string.Equals(category, "Cash", StringComparison.OrdinalIgnoreCase) ? "Cash" :
+                string.Equals(category, "LIS", StringComparison.OrdinalIgnoreCase) ? "LIS" :
+                null;
+            var def = await _repo.GetLisDrillRowDefAsync(
+                config.DbConnectionString, prefix, rowCode, preferredSource, ct);
+            if (def is not null)
+            {
+                var coreSp = def.IsCash
+                    ? "dbo.usp_GetExecutiveSummaryDetail_CashDrill_Core"
+                    : def.IsPms
+                        ? "dbo.usp_GetExecutiveSummaryDetail_PmsDrill_Core"
+                        : "dbo.usp_GetExecutiveSummaryDetail_LisDrill_Core";
+
+                if (await _repo.StoredProcedureExistsAsync(config.DbConnectionString, coreSp, ct))
+                {
+                    // Prefer WeekFolder day when known — avoids a second full Core SP
+                    // call that only exists to discover CutoffDate.Day.
+                    var dayWindowKnownFromFolder = fromFolder > 0;
+
+                    var titleLooksFullyPaid = def.IsPms
+                        && !string.IsNullOrWhiteSpace(def.RowTitle)
+                        && def.RowTitle.Contains("Fully Paid", StringComparison.OrdinalIgnoreCase)
+                        && !def.RowTitle.Contains('$');
+                    // Mismatch = Op MISMATCH|* / title / URL rowTitle — even when Source
+                    // was mis-seeded, category=PMS + "Mismatch" still takes the ES path.
+                    var titleLooksMismatch =
+                        def.IsPmsMismatch
+                        || (string.Equals(category, "PMS", StringComparison.OrdinalIgnoreCase)
+                            && (ExecSummaryLisDrillViewModel.LooksLikeMismatchTitle(def.RowTitle)
+                                || ExecSummaryLisDrillViewModel.LooksLikeMismatchTitle(gridRowTitle)))
+                        || ExecSummaryLisDrillViewModel.LooksLikeMismatchTitle(gridRowTitle);
+                    var needsEsCompanion = def.IsPms
+                        && (def.IsPmsTotalBilledClaims || def.IsPmsFullyPaid || titleLooksFullyPaid
+                            || titleLooksMismatch)
+                        || titleLooksMismatch;
+
+                    // Overlap RunInfo + optional ES companion with the heavy Core SP.
+                    // Also prefetch ES for parent→subcategory stacked charts (Other Samples, …).
+                    var mayNeedSubcategoryStack = !titleLooksMismatch && !titleLooksFullyPaid
+                        && !def.IsPmsFullyPaid && !def.IsPmsMismatch;
+                    var runInfoTask = _repo.GetRunInfoAsync(config.DbConnectionString, ct);
+                    var esPrefetchTask = (needsEsCompanion || mayNeedSubcategoryStack)
+                        ? _repo.PrefetchExecutiveSummaryForDrillAsync(
+                            config.DbConnectionString, prefix, labName, year, ct)
+                        : null;
+
+                    ExecSummaryLisDrillViewModel rowResult;
+                    if (titleLooksMismatch)
+                    {
+                        // Formula row: KPIs / trend come from usp_Get{prefix}_ExecutiveSummary
+                        // (same numbers as the ES grid). Skip ClaimLevelData Core — it is not
+                        // the source of the Index cell and used to leave HasData false.
+                        rowResult = new ExecSummaryLisDrillViewModel
+                        {
+                            Metric = "Billable",
+                            Year = year,
+                            SourceLabel = "ClaimLevelData",
+                            ComparableDayWindow = dayWindow,
+                            IsPmsMismatchDrill = true,
+                            DescriptionOverride =
+                                "Matches the Executive Summary formula for this row: PMS Billed count (Date of Service) minus LIS Billed count (Request Collect Date) per month. Panel / Top Insurance are not shown — this metric is a period count difference, not a claim-level set.",
+                        };
+                    }
+                    else if (def.IsCash)
+                    {
+                        rowResult = await _repo.GetCashDrillCoreAsync(
+                            config.DbConnectionString, coreSp, year, def, dayWindow, ct);
+                    }
+                    else if (def.IsPms)
+                    {
+                        rowResult = await _repo.GetPmsDrillCoreAsync(
+                            config.DbConnectionString, coreSp, year, def, dayWindow, ct);
+                    }
+                    else
+                    {
+                        // No filter conditions → Total (all); otherwise a filtered count.
+                        var rowMetric = def.HasCondition ? "Billable" : "Samples";
+                        rowResult = await _repo.GetLisDrillCoreAsync(
+                            config.DbConnectionString, coreSp, rowMetric, year, def, dayWindow, ct);
+                    }
+
+                    // Refine only when WeekFolder was unparsed (provisional 9).
+                    // When WeekFolder parsed, refined == fromFolder already.
+                    // Skip re-query for mismatch (ES-backed, not DayWindow Core).
+                    if (!titleLooksMismatch
+                        && !dayWindowKnownFromFolder
+                        && string.IsNullOrWhiteSpace(rowResult.ErrorMessage))
+                    {
+                        var refined = AnalysisRangeInfo.ResolveComparableDayWindow(
+                            analysisRange.WeekFolder, rowResult.Summary.CutoffDate, fallback: 9);
+                        if (refined != dayWindow)
+                        {
+                            dayWindow = refined;
+                            if (def.IsCash)
+                            {
+                                rowResult = await _repo.GetCashDrillCoreAsync(
+                                    config.DbConnectionString, coreSp, year, def, dayWindow, ct);
+                            }
+                            else if (def.IsPms)
+                            {
+                                rowResult = await _repo.GetPmsDrillCoreAsync(
+                                    config.DbConnectionString, coreSp, year, def, dayWindow, ct);
+                            }
+                            else
+                            {
+                                var rowMetric = def.HasCondition ? "Billable" : "Samples";
+                                rowResult = await _repo.GetLisDrillCoreAsync(
+                                    config.DbConnectionString, coreSp, rowMetric, year, def, dayWindow, ct);
+                            }
+                        }
+                        else
+                        {
+                            dayWindow = refined;
+                        }
+                    }
+
+                    // Prefer the live ES grid heading when the URL carried it;
+                    // fall back to LisDrillRowDef.RowTitle.
+                    rowResult.RowTitleOverride =
+                        gridRowTitle ?? def.RowTitle;
+                    rowResult.BackUrl          = backUrl;
+                    rowResult.SelectedValue    = value;
+                    rowResult.AnalysisRange    = analysisRange;
+                    rowResult.ComparableDayWindow = dayWindow;
+                    var (_, _, rowLimsRunId)   = await runInfoTask;
+                    rowResult.LimsRunId        = rowLimsRunId;
+
+                    PhiExecutiveSummaryViewModel? esPrefetch = null;
+                    if (esPrefetchTask is not null)
+                        esPrefetch = await esPrefetchTask;
+
+                    // Total Billed (Claims): companion "Billed Mismatches" from ES
+                    // summary (same PMS grid / pmsgrid numbers as Index).
+                    if (def.IsPmsTotalBilledClaims
+                        && string.IsNullOrWhiteSpace(rowResult.ErrorMessage))
+                    {
+                        _repo.ApplyPmsBilledMismatchFromSummary(rowResult, esPrefetch, year);
+                    }
+
+                    // Billed Mismatch formula row: always map ES monthly columns
+                    // into drill Summary / Monthly / N-day (same as Index cell).
+                    if (titleLooksMismatch
+                        && string.IsNullOrWhiteSpace(rowResult.ErrorMessage))
+                    {
+                        rowResult.RowTitleOverride ??= gridRowTitle ?? def.RowTitle;
+                        _repo.ApplyPmsMismatchDrillFromSummary(
+                            rowResult, esPrefetch, year, rowCode);
+                    }
+
+                    // Fully Paid: companion "Fully Paid Rate vs. Billed Claims"
+                    // from ES summary Fully Paid ÷ Billed (Claims) rows.
+                    if ((def.IsPmsFullyPaid || titleLooksFullyPaid)
+                        && string.IsNullOrWhiteSpace(rowResult.ErrorMessage))
+                    {
+                        rowResult.IsPmsFullyPaidDrill = true;
+                        rowResult.DescriptionOverride =
+                            "Claims fully paid by insurance with no remaining balance.";
+                        _repo.ApplyPmsFullyPaidRateFromSummary(
+                            rowResult, esPrefetch, year, labName);
+                        if (!rowResult.HasFullyPaidRate)
+                            _repo.FillFullyPaidRateFromDrillSets(rowResult);
+                        _repo.EnsureFullyPaidInsurerPanels(rowResult);
+                    }
+
+                    // Parent rows with ES subcategories (Other Samples, Insurance Balance
+                    // without Sec1/2/3, etc.): build stacked StatusBreakdown from children.
+                    if (mayNeedSubcategoryStack
+                        && string.IsNullOrWhiteSpace(rowResult.ErrorMessage))
+                    {
+                        _repo.ApplyEsSubcategoryStackFromSummary(
+                            rowResult, esPrefetch, year, rowCode, category);
+                        // Inhealth (and similar): Core may miss LRNPanelName → "All Panels".
+                        // Rebuild By-Panel from ES panel sub-rows under the parent.
+                        _repo.ApplyEsPanelsFromSummary(
+                            rowResult, esPrefetch, year, rowCode, category);
+                    }
+
+                    return View("LisDrill", rowResult);
+                }
+
+                // Core SP missing — still serve mismatch from ES so the formula cell
+                // is not a claim-filter dead-end.
+                if (def.IsPmsMismatch
+                    || ExecSummaryLisDrillViewModel.LooksLikeMismatchTitle(def.RowTitle)
+                    || ExecSummaryLisDrillViewModel.LooksLikeMismatchTitle(gridRowTitle))
+                {
+                    var esOnly = await _repo.PrefetchExecutiveSummaryForDrillAsync(
+                        config.DbConnectionString, prefix, labName, year, ct);
+                    var mismatchVm = new ExecSummaryLisDrillViewModel
+                    {
+                        Metric = "Billable",
+                        Year = year,
+                        SourceLabel = "ClaimLevelData",
+                        ComparableDayWindow = dayWindow,
+                        IsPmsMismatchDrill = true,
+                        RowTitleOverride = gridRowTitle ?? def.RowTitle,
+                        SelectedValue = value,
+                        BackUrl = backUrl,
+                        AnalysisRange = analysisRange,
+                    };
+                    _repo.ApplyPmsMismatchDrillFromSummary(mismatchVm, esOnly, year, rowCode);
+                    var (_, _, limsRunIdMis) = await _repo.GetRunInfoAsync(config.DbConnectionString, ct);
+                    mismatchVm.LimsRunId = limsRunIdMis;
+                    return View("LisDrill", mismatchVm);
+                }
+
+                // Row def exists but the matching Core SP was not deployed.
+                vm.RowTitleOverride = gridRowTitle ?? def.RowTitle ?? rowCode;
+                vm.DescriptionOverride = string.Empty;
+                vm.ErrorMessage = def.IsCash
+                    ? $"Cash drill SP '{coreSp}' is not deployed for '{labName}'. Redeploy usp_GetExecutiveSummaryDetail_CashDrill.sql."
+                    : $"Drill SP '{coreSp}' is not deployed for '{labName}' yet.";
+                return View("LisDrill", vm);
+            }
+
+            // rowCode present but no LisDrillRowDef — ES-only mismatch when the
+            // URL title / category clearly identify a formula row.
+            if (string.Equals(category, "PMS", StringComparison.OrdinalIgnoreCase)
+                && ExecSummaryLisDrillViewModel.LooksLikeMismatchTitle(gridRowTitle))
+            {
+                var esOnly = await _repo.PrefetchExecutiveSummaryForDrillAsync(
+                    config.DbConnectionString, prefix, labName, year, ct);
+                var mismatchVm = new ExecSummaryLisDrillViewModel
+                {
+                    Metric = "Billable",
+                    Year = year,
+                    SourceLabel = "ClaimLevelData",
+                    ComparableDayWindow = dayWindow,
+                    IsPmsMismatchDrill = true,
+                    RowTitleOverride = gridRowTitle,
+                    SelectedValue = value,
+                    BackUrl = backUrl,
+                    AnalysisRange = analysisRange,
+                };
+                _repo.ApplyPmsMismatchDrillFromSummary(mismatchVm, esOnly, year, rowCode);
+                var (_, _, limsRunIdMis2) = await _repo.GetRunInfoAsync(config.DbConnectionString, ct);
+                mismatchVm.LimsRunId = limsRunIdMis2;
+                return View("LisDrill", mismatchVm);
+            }
+
+            // rowCode drill requested but not configured for this lab — say so
+            // rather than silently showing the wrong (default) metric.
+            vm.RowTitleOverride = gridRowTitle ?? rowCode;
+            vm.DescriptionOverride = string.Empty; // suppress generic Samples blurb
+            vm.ErrorMessage = string.Equals(category, "Cash", StringComparison.OrdinalIgnoreCase)
+                ? $"Cash row '{rowCode}' isn't seeded for '{labName}'. Redeploy LisDrillRowDef_Cash.sql (Source=Cash)."
+                : $"This breakdown row isn't set up for drill-through for '{labName}' yet.";
+            return View("LisDrill", vm);
+        }
+
+        // Prefer the lab-specific wrapper (exact Executive Summary parity);
+        // fall back to the generic auto-detecting procedure.
+        const string genericSp = "dbo.usp_GetExecutiveSummaryDetail_LisDrill";
+        var perLabSp = $"dbo.usp_Get{prefix}_ExecutiveSummaryDetail_LisDrill";
+
+        string drillSp;
+        if (await _repo.StoredProcedureExistsAsync(config.DbConnectionString, perLabSp, ct))
+            drillSp = perLabSp;
+        else if (await _repo.StoredProcedureExistsAsync(config.DbConnectionString, genericSp, ct))
+            drillSp = genericSp;
+        else
+        {
+            vm.ErrorMessage =
+                $"Drill-through data is not available yet. Neither '{perLabSp}' nor '{genericSp}' exists.";
+            return View("LisDrill", vm);
+        }
+
+        var result = await _repo.GetLisDrillAsync(config.DbConnectionString, drillSp, metric, year, dayWindow, ct);
+
+        // Only re-query Core when WeekFolder was unparsed (provisional window).
+        if (fromFolder <= 0 && string.IsNullOrWhiteSpace(result.ErrorMessage))
+        {
+            var refinedMetric = AnalysisRangeInfo.ResolveComparableDayWindow(
+                analysisRange.WeekFolder, result.Summary.CutoffDate, fallback: 9);
+            if (refinedMetric != dayWindow)
+            {
+                dayWindow = refinedMetric;
+                result = await _repo.GetLisDrillAsync(
+                    config.DbConnectionString, drillSp, metric, year, dayWindow, ct);
+            }
+            else
+            {
+                dayWindow = refinedMetric;
+            }
+        }
+
+        result.BackUrl       = backUrl;
+        result.SelectedValue = value;
+        result.ComparableDayWindow = dayWindow;
+
+        // Run/analysis-range banner (Billed Week Range + ReportId + Inserted Date),
+        // same source as the Executive Summary header, plus the LIMSMaster RunId.
+        result.AnalysisRange = analysisRange;
+        var (_, _, limsRunId) = await _repo.GetRunInfoAsync(config.DbConnectionString, ct);
+        result.LimsRunId = limsRunId;
+
+        return View("LisDrill", result);
     }
 }

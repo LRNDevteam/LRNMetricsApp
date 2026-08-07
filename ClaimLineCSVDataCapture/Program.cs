@@ -1,12 +1,44 @@
-﻿using System.Text.Json;
+﻿// ─────────────────────────────────────────────────────────────────────────────
+//  ClaimLineCSVDataCapture
+//
+//  SCOPE (revised):
+//    Claim Level / Line Level CSV ingestion is now performed by a SEPARATE
+//    application. Everything in this app that read, purged or inserted those
+//    CSVs is commented out below and marked:
+//
+//        [DISABLED - handled by external app]
+//
+//    What this app still does, per lab:
+//      STEP 1-5   Startup: config, field mappings, working folder, logging.
+//      STEP 6-7   Per-lab gates and field-mapping resolution.
+//      STEP 8     RunId CHANGE DETECTION.
+//                   - EXEC sp_GetRecentSuccessRunByLab on LRNMaster
+//                     (lrnanalytics-sqlmi.public.4e3a76f4ed99.database.windows.net,3342)
+//                     to fetch the lab's latest successful RunId.
+//                   - Compare it with LastProcessedRunId stored in the lab's
+//                     JSON config (next to ClaimLineRefresh).
+//                   - dataChanged = (RunIds differ) OR (ClaimLineRefresh = true)
+//      STEP 12    ClientPaidList .xlsx        (RisingTides only)
+//      STEP 13    TransactionDetail .xlsx     (BeechTree only)
+//      STEP 14    No-change exit / OnNewFile Executive Summary refresh
+//      STEP 15    BTWOSummary, decimal cleanup, dashboard, lab report SPs
+//      STEP 16    Executive Summary refresh
+//      STEP 17    Excel report generation - COMMENTED OUT, re-enable later
+//      STEP 18    Persist LastProcessedRunId + reset ClaimLineRefresh
+//
+//    Every step writes an explicit [STEP n] line to the log.
+// ─────────────────────────────────────────────────────────────────────────────
+
+using System.Text.Json;
 using ClaimLineCSVDataCapture.Models;
 using ClaimLineCSVDataCapture.Services;
-using LRN.ProductionReports.Models;
-using LRN.ProductionReports.Services;
+// [DISABLED - STEP 17 Excel report generation]
+//using LRN.ProductionReports.Models;
+//using LRN.ProductionReports.Services;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging.Abstractions;
+//using Microsoft.Extensions.Logging.Abstractions;
 
-// ── Configuration ─────────────────────────────────────────────────────────────
+// ── STEP 1: Configuration ─────────────────────────────────────────────────────
 var cfg = new ConfigurationBuilder()
     .SetBasePath(AppContext.BaseDirectory)
     .AddJsonFile("appsettings.json", optional: false)
@@ -18,7 +50,7 @@ var labConfigFolder = cfg["AppSettings:LabConfigFolder"]
 var labNames = cfg.GetSection("AppSettings:Labs").Get<List<string>>()
     ?? throw new InvalidOperationException("AppSettings:Labs is not configured.");
 
-// ── Load field mappings ───────────────────────────────────────────────────────
+// ── STEP 2: Load field mappings ───────────────────────────────────────────────
 var fieldMappingsPath = cfg["AppSettings:FieldMappingsPath"];
 if (string.IsNullOrWhiteSpace(fieldMappingsPath) || !File.Exists(fieldMappingsPath))
     fieldMappingsPath = Path.Combine(AppContext.BaseDirectory, "FieldMappings.json");
@@ -39,16 +71,18 @@ var globalFieldMappings = JsonSerializer.Deserialize<FieldMappingsRoot>(fieldMap
 // Keep backward-compatible alias — used when a lab has no lab-specific override
 var fieldMappings = globalFieldMappings;
 
+// ── STEP 3: Working folder ────────────────────────────────────────────────────
 var workingFolder = cfg["AppSettings:WorkingFolder"]
     ?? Path.Combine(Path.GetTempPath(), "ClaimLineCSVDataCapture");
 Directory.CreateDirectory(workingFolder);
 
-// ── LRNMaster connection (used by sp_GetRecentSuccessRunByLab RunId gate) ──────
+// ── LRNMaster connection (used by the STEP 8 sp_GetRecentSuccessRunByLab call) ─
 var masterConnectionString = cfg.GetConnectionString("DefaultConnection");
 
 // ── Logger ────────────────────────────────────────────────────────────────────
 using var log = new ClaimLineCSVDataCapture.Services.AppLogger(cfg);
-log.Header("ClaimLineCSVDataCapture — Claim/Line Level CSV Capture");
+log.Header("ClaimLineCSVDataCapture — Post-Ingestion Refresh (RunId change driven)");
+log.Info($"[STEP 1-3] Startup configuration loaded.");
 log.Info($"Log file          : {log.LogFilePath}");
 log.Info($"Lab config folder : {labConfigFolder}");
 log.Info($"Field mappings    : {fieldMappingsPath}");
@@ -59,27 +93,41 @@ log.Info($"  ClientPaidList fields : {fieldMappings.ClientPaidList.Fields.Count}
 log.Info($"Labs configured   : {labNames.Count}");
 log.Blank();
 
-// ── Load lab configs ──────────────────────────────────────────────────────────
+// ── STEP 4: Load lab configs ──────────────────────────────────────────────────
+log.Header("STEP 4 — Loading lab configurations");
 var labConfigs = LabConfigLoader.LoadAll(labConfigFolder, labNames, log);
-var productionReportRepo = new SqlProductionReportRepository(NullLogger<SqlProductionReportRepository>.Instance);
-var collectionSummaryRepo = new SqlCollectionSummaryReportRepository(NullLogger<SqlCollectionSummaryReportRepository>.Instance);
+
+// ── Report run logger (LRNMaster log + workflow tracker) ──────────────────────
+// Used at STEP 16b once each report group has finished refreshing.
+var reportLoggingEnabled = !bool.TryParse(cfg["ReportRunLogging:Enabled"], out var rlEnabled) || rlEnabled;
+var reportRunLogger = new ReportRunLogger(
+    masterConnectionString,
+    reportLoggingEnabled,
+    cfg["ReportRunLogging:CreatedBy"] ?? "ClaimLineCSVDataCapture",
+    log);
+
+// ── STEP 5: Report repositories ───────────────────────────────────────────────
+// [DISABLED - STEP 17 Excel report generation. Re-enable together with the
+//  report task blocks and helper methods further down this file.]
+//var productionReportRepo = new SqlProductionReportRepository(NullLogger<SqlProductionReportRepository>.Instance);
+//var collectionSummaryRepo = new SqlCollectionSummaryReportRepository(NullLogger<SqlCollectionSummaryReportRepository>.Instance);
 
 int labsProcessed = 0, labsSkipped = 0, labsFailed = 0;
 var processedLabNames = new List<string>();
 
-// Report tasks are started per-lab and awaited after the main loop
-// so that large-data labs don't block CSV ingestion for other labs.
-var reportTasks = new List<(string LabName, string ReportType, Task Task)>();
+// [DISABLED - STEP 17] Report tasks were started per-lab and awaited after the
+// main loop so that large-data labs didn't block other labs.
+//var reportTasks = new List<(string LabName, string ReportType, Task Task)>();
 
 foreach (var lab in labConfigs)
 {
     log.Header($"Lab: {lab.LabName}");
-    log.Info($"  ClaimLineInsert={lab.ClaimLineInsert}  ClaimLineRefresh={lab.ClaimLineRefresh}  DBEnabled={lab.DBEnabled}");
+    log.Info($"  [STEP 6] Evaluating lab gates — ClaimLineInsert={lab.ClaimLineInsert}  ClaimLineRefresh={lab.ClaimLineRefresh}  DBEnabled={lab.DBEnabled}");
 
     // ── Gate: skip lab if DBEnabled is false ──────────────────────────────
     if (!lab.DBEnabled)
     {
-        log.Warn($"  [SKIP] DBEnabled=false — skipping lab.");
+        log.Warn($"  [STEP 6] [SKIP] DBEnabled=false — skipping lab.");
         labsSkipped++;
         continue;
     }
@@ -87,7 +135,7 @@ foreach (var lab in labConfigs)
     // ── Gate: only proceed when ClaimLineInsert is enabled ─────────────────
     if (!lab.ClaimLineInsert)
     {
-        log.Warn($"  [SKIP] ClaimLineInsert is not enabled — skipping lab.");
+        log.Warn($"  [STEP 6] [SKIP] ClaimLineInsert is not enabled — skipping lab.");
         labsSkipped++;
         continue;
     }
@@ -95,33 +143,37 @@ foreach (var lab in labConfigs)
     // ── Validate config — check DbConnectionString ────────────────────────
     if (string.IsNullOrWhiteSpace(lab.DbConnectionString))
     {
-        log.Warn($"  [SKIP] ClaimLineInsert is enabled but DbConnectionString is not configured — skipping lab.");
+        log.Warn($"  [STEP 6] [SKIP] ClaimLineInsert is enabled but DbConnectionString is not configured — skipping lab.");
         labsSkipped++;
         continue;
     }
 
+    // ── ServerMastersPath is no longer required for Claim/Line ingestion (that
+    //    moved to the external app). It is still used to locate the supplemental
+    //    ClientPaidList / TransactionDetail workbooks, so a missing path is now a
+    //    WARNING rather than a hard skip — the refresh SPs must still run.
     if (string.IsNullOrWhiteSpace(lab.ServerMastersPath))
     {
-        log.Warn($"  [SKIP] ServerMastersBasePath or ServerMasterFolderName not configured.");
-        labsSkipped++;
-        continue;
+        log.Warn($"  [STEP 6] ServerMastersBasePath or ServerMasterFolderName not configured — " +
+                 $"supplemental file processing (ClientPaidList / TransactionDetail) will be skipped for this lab.");
     }
-
-    if (!Directory.Exists(lab.ServerMastersPath))
+    else if (!Directory.Exists(lab.ServerMastersPath))
     {
-        log.Warn($"  [SKIP] Path does not exist: {lab.ServerMastersPath}");
-        labsSkipped++;
-        continue;
+        log.Warn($"  [STEP 6] Path does not exist: {lab.ServerMastersPath} — " +
+                 $"supplemental file processing (ClientPaidList / TransactionDetail) will be skipped for this lab.");
+    }
+    else
+    {
+        log.Info($"  [STEP 6] Supplemental file source path : {lab.ServerMastersPath}");
     }
 
-    log.Info($"  CSV source path : {lab.ServerMastersPath}");
-
-    // Resolve field mappings: use lab-specific file when configured and present, else fall back to global
+    // ── STEP 7: Resolve field mappings ────────────────────────────────────────
+    // Use lab-specific file when configured and present, else fall back to global
     var labFieldMappingsPath = lab.Paths.LabFieldMappingsPath;
     FieldMappingsRoot labFieldMappings;
     if (!string.IsNullOrWhiteSpace(labFieldMappingsPath) && File.Exists(labFieldMappingsPath))
     {
-        log.Info($"  Field mappings    : {labFieldMappingsPath} (lab-specific)");
+        log.Info($"  [STEP 7] Field mappings : {labFieldMappingsPath} (lab-specific)");
         var labJson = File.ReadAllText(labFieldMappingsPath);
         labFieldMappings = JsonSerializer.Deserialize<FieldMappingsRoot>(labJson, jsonOptions)
             ?? throw new InvalidOperationException($"Failed to deserialize lab-specific FieldMappings.json for {lab.LabName}.");
@@ -129,43 +181,103 @@ foreach (var lab in labConfigs)
     else
     {
         if (!string.IsNullOrWhiteSpace(labFieldMappingsPath))
-            log.Warn($"  [FieldMappings] Lab-specific path not found: {labFieldMappingsPath} — using global.");
+            log.Warn($"  [STEP 7] Lab-specific mappings path not found: {labFieldMappingsPath} — using global.");
         labFieldMappings = globalFieldMappings;
     }
 
     var db = new ClaimLineDbService(lab.DbConnectionString);
-    var claimInserted = false;
-    var lineInserted = false;
+
+    // ── STEP 16b accumulators ────────────────────────────────────────────────
+    // Each report group stores its SP results here so a single log + tracker row
+    // per report type can be written once the refresh work is done.
+    List<(string SpName, long ElapsedMs, string? Error)>? prodSummaryResults = null;
+    List<(string SpName, long ElapsedMs, string? Error)>? collSummaryResults = null;
+    List<(string SpName, long ElapsedMs, string? Error)>? execSummaryResults = null;
+
     // Set true when a NEW TransactionDetail Adjustment file is loaded this run.
     // Used to gate the Executive Summary refresh so it only runs when data
     // actually changed (see the Executive Summary Refresh block below).
     var tdFileLoaded = false;
 
-    // ── Gate: validate latest input file's RunId against latest completed RunId ──
-    // Before processing the latest files, fetch the latest successfully completed
-    // RunId (sp_GetRecentSuccessRunByLab on LRNMaster) and compare it with the RunId
-    // prefix of the latest input file. Processing (including ClaimLineRefresh=true)
-    // only continues when both RunIds match.
-    // Scenario 1 (gate passes): a new Claim & Line file set aligned with the
-    //   latest completed RunId — process Claim/Line/ClientPaidList, then
-    //   TransactionDetail, then the Executive Summary SPs.
-    // Scenario 2 (gate fails): no new/matching Claim & Line files, so their
-    //   processing is skipped — BUT a new TransactionDetail Adjustment file may
-    //   still have arrived. It is processed below and the Executive Summary is
-    //   refreshed via usp_RefreshBT_ExecutiveSummary_OnNewFile.
-    var runIdGatePassed = RunIdGatePassed(lab, masterConnectionString, log);
-    if (!runIdGatePassed)
+    // ─────────────────────────────────────────────────────────────────────────
+    // STEP 8 — RunId CHANGE DETECTION
+    //
+    //   EXEC sp_GetRecentSuccessRunByLab @LabName = <FetchLatestCompletedRunIDParameter>
+    //   against LRNMaster returns the lab's latest successfully completed RunId.
+    //
+    //   That value is compared with LastProcessedRunId, stored in the lab's own
+    //   JSON config file alongside ClaimLineRefresh. Downstream processing runs
+    //   when:
+    //        the two RunIds DIFFER   (a new successful run has landed)
+    //     OR ClaimLineRefresh = true (forced re-refresh)
+    //
+    //   The new RunId is written back to the config at STEP 18, but only after
+    //   the lab completed successfully — a failed run therefore retries next time.
+    // ─────────────────────────────────────────────────────────────────────────
+    log.Header($"STEP 8 — RunId Change Detection — {lab.LabName}");
+
+    var storedRunId = lab.LastProcessedRunId?.Trim();
+    log.Info($"  [STEP 8] Stored LastProcessedRunId : {(string.IsNullOrWhiteSpace(storedRunId) ? "(none)" : storedRunId)}");
+
+    string? latestRunId   = null;
+    var     runIdLookupOk = false;
+
+    var labParam = lab.FetchLatestCompletedRunIDParameter;
+    if (string.IsNullOrWhiteSpace(labParam))
     {
-        labsSkipped++;
-        log.Warn($"  [RunId Gate] Claim/Line processing skipped for {lab.LabName}; still checking for a new TransactionDetail Adjustment file.");
+        log.Warn($"  [STEP 8] FetchLatestCompletedRunIDParameter not configured — cannot query sp_GetRecentSuccessRunByLab.");
+    }
+    else if (string.IsNullOrWhiteSpace(masterConnectionString))
+    {
+        log.Warn($"  [STEP 8] ConnectionStrings:DefaultConnection (LRNMaster) not configured — cannot query sp_GetRecentSuccessRunByLab.");
+    }
+    else
+    {
+        log.Info($"  [STEP 8] SP                    : sp_GetRecentSuccessRunByLab (LRNMaster)");
+        log.Info($"  [STEP 8] SP parameter @LabName : {labParam}");
+        try
+        {
+            latestRunId   = ClaimLineDbService.GetRecentSuccessRunByLab(masterConnectionString, labParam)?.Trim();
+            runIdLookupOk = true;
+            log.Info($"  [STEP 8] Latest successful RunId : {(string.IsNullOrWhiteSpace(latestRunId) ? "(none)" : latestRunId)}");
+        }
+        catch (Exception ex)
+        {
+            log.Error($"  [STEP 8] sp_GetRecentSuccessRunByLab failed — {ex.Message}");
+        }
     }
 
-    // ── Claim/Line/ClientPaidList processing runs only when the RunId gate passed
-    //    (Scenario 1). Scenario 2 (gate failed) falls straight through to the
-    //    TransactionDetail block below. ──────────────────────────────────────
-    if (runIdGatePassed)
-    {
-    // ── Refresh mode: purge existing lab data so the latest file re-inserts cleanly ──
+    // RunId is considered changed only when the lookup succeeded AND returned a
+    // non-empty value that differs from what was last processed. A failed lookup
+    // never triggers processing on its own — ClaimLineRefresh can still force it.
+    var runIdChanged = runIdLookupOk
+                       && !string.IsNullOrWhiteSpace(latestRunId)
+                       && !string.Equals(latestRunId, storedRunId, StringComparison.OrdinalIgnoreCase);
+
+    var dataChanged = runIdChanged || lab.ClaimLineRefresh;
+
+    log.Info($"  [STEP 8] Comparison  : Latest='{latestRunId ?? "(none)"}'  Stored='{storedRunId ?? "(none)"}'  =>  {(runIdChanged ? "CHANGED" : "UNCHANGED")}");
+    log.Info($"  [STEP 8] ClaimLineRefresh = {lab.ClaimLineRefresh}");
+    log.Info(dataChanged
+        ? $"  [STEP 8] [PROCEED] {(runIdChanged ? "New RunId detected" : "ClaimLineRefresh forced")} — running refresh steps for {lab.LabName}."
+        : $"  [STEP 8] [NO CHANGE] RunId unchanged and ClaimLineRefresh=false — refresh steps will be skipped for {lab.LabName}.");
+    log.Header($"STEP 8 — {lab.LabName} — {(dataChanged ? "CHANGED" : "NO CHANGE")}");
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // [DISABLED - handled by external app]
+    //
+    //   STEPS 9 / 10 / 11 — refresh purge, Claim Level CSV and Line Level CSV
+    //   ingestion. A separate application now reads those CSVs and populates
+    //   dbo.ClaimLevelData / dbo.LineLevelData / dbo.LineClaimFileLogs.
+    //
+    //   This app no longer touches them; it only reacts to the RunId that the
+    //   external app's run produced (STEP 8) and refreshes the aggregates.
+    //
+    //   The original code is preserved verbatim below should ingestion ever need
+    //   to move back into this application.
+    // ═════════════════════════════════════════════════════════════════════════
+    /*
+    // ── STEP 9 — Refresh mode: purge existing lab data so the latest file re-inserts cleanly ──
     if (lab.ClaimLineRefresh)
     {
         log.Info($"  [Refresh] ClaimLineRefresh=true — purging existing data for {lab.LabName}…");
@@ -182,7 +294,7 @@ foreach (var lab in labConfigs)
         }
     }
 
-    // ── Process Claim Level CSV ───────────────────────────────────────────────
+    // ── STEP 10 — Process Claim Level CSV ─────────────────────────────────────
     try
     {
         var claimResolved = CsvFileResolver.ResolveLatestClaimLevelWithDiag(
@@ -257,7 +369,7 @@ foreach (var lab in labConfigs)
         labsFailed++;
     }
 
-    // ── Process Line Level CSV ────────────────────────────────────────────────
+    // ── STEP 11 — Process Line Level CSV ──────────────────────────────────────
     try
     {
         var lineResolved = CsvFileResolver.ResolveLatestLineLevelWithDiag(
@@ -331,15 +443,24 @@ foreach (var lab in labConfigs)
         log.Error($"  [Line Level] {ex.Message}");
         labsFailed++;
     }
+    */
+    // ═════════════════ end [DISABLED - handled by external app] ═══════════════
 
-    // ── Process ClientPaidList .xlsx (RisingTides "Master" file — RisingTides only) ──
-    // ClientPaidList is synced the same way as Claim/Line Level (latest matching file
-    // in the current WeekFolder), but arrives as an .xlsx workbook rather than .csv,
-    // and the whole table is replaced on every run. The bulk-insert SP
-    // (usp_BulkInsertClientPaidListData) handles the RunId-based skip/replace logic
-    // itself, so there is no separate "already loaded" pre-check here.
-    if (lab.LabName.Equals("RisingTides", StringComparison.OrdinalIgnoreCase))
+    // ─────────────────────────────────────────────────────────────────────────
+    // STEP 12 — ClientPaidList .xlsx (RisingTides "Master" file — RisingTides only)
+    //
+    // Runs only when STEP 8 detected a change (new RunId or ClaimLineRefresh).
+    // The file arrives as an .xlsx workbook and the whole table is replaced on
+    // every run. The bulk-insert SP (usp_BulkInsertClientPaidListData) handles the
+    // RunId-based skip/replace logic itself, so there is no separate
+    // "already loaded" pre-check here.
+    // ─────────────────────────────────────────────────────────────────────────
+    if (dataChanged
+        && lab.LabName.Equals("RisingTides", StringComparison.OrdinalIgnoreCase)
+        && !string.IsNullOrWhiteSpace(lab.ServerMastersPath)
+        && Directory.Exists(lab.ServerMastersPath))
     {
+        log.Info($"  [STEP 12] ClientPaidList processing — starting.");
         try
         {
             var cplResolved = CsvFileResolver.ResolveLatestClientPaidListWithDiag(
@@ -431,25 +552,34 @@ foreach (var lab in labConfigs)
         }
         catch (Exception ex)
         {
-            log.Error($"  [ClientPaidList] {ex.Message}");
+            log.Error($"  [STEP 12] [ClientPaidList] {ex.Message}");
             labsFailed++;
         }
+
+        log.Info($"  [STEP 12] ClientPaidList processing — complete.");
+    }
+    else if (lab.LabName.Equals("RisingTides", StringComparison.OrdinalIgnoreCase))
+    {
+        log.Info($"  [STEP 12] ClientPaidList skipped — {(dataChanged ? "source path unavailable" : "no RunId change and ClaimLineRefresh=false")}.");
     }
 
-    }  // ── end if (runIdGatePassed) — Claim/Line/ClientPaidList processing ──
-
-    // ── Process TransactionDetail Adjustment .xlsx (BeechTree only) ──────────
-    // Runs in BOTH scenarios (gate pass and gate fail). The internal
-    // IsBTTransactionDetailFileAlreadyLoaded check ensures the same file is
-    // never re-imported.
+    // ─────────────────────────────────────────────────────────────────────────
+    // STEP 13 — TransactionDetail Adjustment .xlsx (BeechTree only)
+    //
+    // Runs regardless of the STEP 8 outcome: a new TransactionDetail workbook can
+    // arrive independently of a Claim/Line run. The internal
+    // IsBTTransactionDetailFileAlreadyLoaded check ensures the same file is never
+    // re-imported.
     // Triggered when lab config Paths.TransactionDetailAdjustmentKeyword is set.
     // The file name contains that keyword (e.g. "TransactionDetail Adjustment").
     // No RunId dedup — SP always inserts; BTWOSummary is truncated and rebuilt
     // from the raw table on every run.
+    // ─────────────────────────────────────────────────────────────────────────
     if ((lab.LabName.Equals("Beech_Tree", StringComparison.OrdinalIgnoreCase) ||
          lab.LabName.Equals("BeechTree",  StringComparison.OrdinalIgnoreCase))
         && !string.IsNullOrWhiteSpace(lab.Paths.TransactionDetailAdjustmentKeyword))
     {
+        log.Info($"  [STEP 13] TransactionDetail Adjustment processing — starting.");
         try
         {
             var tdKeyword    = lab.Paths.TransactionDetailAdjustmentKeyword!;
@@ -558,22 +688,22 @@ foreach (var lab in labConfigs)
                         // Executive Summary (Complete W/O rows) is refreshed this run.
                         tdFileLoaded = true;
 
-                        if (runIdGatePassed)
+                        if (dataChanged)
                         {
-                            // Scenario 1: refresh BTWOSummary now; the Executive Summary
-                            // prefix SPs run later in this iteration.
-                            log.Info($"  [TransactionDetail] Refreshing BTWOSummary…");
+                            // RunId changed (or refresh forced): rebuild BTWOSummary now;
+                            // the Executive Summary prefix SPs run at STEP 16 below.
+                            log.Info($"  [STEP 13] Refreshing BTWOSummary…");
                             var (totalRows, matchedRows, woError) = db.RefreshBTWOSummary();
                             if (woError is null)
-                                log.Info($"  [TransactionDetail] BTWOSummary rebuilt — {totalRows} total row(s), {matchedRows} matched to ClaimLevelData.");
+                                log.Info($"  [STEP 13] BTWOSummary rebuilt — {totalRows} total row(s), {matchedRows} matched to ClaimLevelData.");
                             else
-                                log.Error($"  [TransactionDetail] BTWOSummary refresh failed: {woError}");
+                                log.Error($"  [STEP 13] BTWOSummary refresh failed: {woError}");
                         }
                         else
                         {
-                            // Scenario 2: BTWOSummary + Executive Summary are rebuilt together
-                            // by usp_RefreshBT_ExecutiveSummary_OnNewFile (see ES block below).
-                            log.Info($"  [TransactionDetail] Gate skipped — deferring BTWOSummary + Executive Summary to usp_RefreshBT_ExecutiveSummary_OnNewFile.");
+                            // No RunId change: BTWOSummary + Executive Summary are rebuilt
+                            // together by usp_RefreshBT_ExecutiveSummary_OnNewFile at STEP 14.
+                            log.Info($"  [STEP 13] No RunId change — deferring BTWOSummary + Executive Summary to usp_RefreshBT_ExecutiveSummary_OnNewFile (STEP 14).");
                         }
                     }
                 }
@@ -590,60 +720,79 @@ foreach (var lab in labConfigs)
         }
         catch (Exception ex)
         {
-            log.Error($"  [TransactionDetail] {ex.Message}");
+            log.Error($"  [STEP 13] [TransactionDetail] {ex.Message}");
             labsFailed++;
         }
+
+        log.Info($"  [STEP 13] TransactionDetail Adjustment processing — complete.");
     }
 
-    // ── Scenario 2: RunId gate skipped Claim/Line, but the TransactionDetail
-    //    block above still ran. Refresh BTWOSummary + Executive Summary via the
-    //    gated wrapper SP, then skip all Claim/Line-driven reports for this lab. ─
-    if (!runIdGatePassed)
+    // ─────────────────────────────────────────────────────────────────────────
+    // STEP 14 — No-change exit
+    //
+    // STEP 8 found no new RunId and ClaimLineRefresh was false, so there is no
+    // new Claim/Line data to aggregate. A new TransactionDetail workbook may still
+    // have been loaded at STEP 13 — in that case rebuild BTWOSummary + Executive
+    // Summary via the wrapper SP. Either way, move on to the next lab: STEPS 15-18
+    // are skipped.
+    // ─────────────────────────────────────────────────────────────────────────
+    if (!dataChanged)
     {
         if (tdFileLoaded)
         {
-            log.Header($"Executive Summary Refresh (OnNewFile) — {lab.LabName}");
-            log.Info($"  [ES] New TransactionDetail file — running usp_RefreshBT_ExecutiveSummary_OnNewFile…");
+            log.Header($"STEP 14 — Executive Summary Refresh (OnNewFile) — {lab.LabName}");
+            log.Info($"  [STEP 14] New TransactionDetail file — running usp_RefreshBT_ExecutiveSummary_OnNewFile…");
             var onNewFileErr = db.RefreshBTExecutiveSummaryOnNewFile();
             if (onNewFileErr is null)
-                log.Info($"  [ES] usp_RefreshBT_ExecutiveSummary_OnNewFile — OK.");
+                log.Info($"  [STEP 14] usp_RefreshBT_ExecutiveSummary_OnNewFile — OK.");
             else
-                log.Error($"  [ES] usp_RefreshBT_ExecutiveSummary_OnNewFile — FAILED: {onNewFileErr}");
+                log.Error($"  [STEP 14] usp_RefreshBT_ExecutiveSummary_OnNewFile — FAILED: {onNewFileErr}");
         }
         else
         {
-            log.Info($"  [{lab.LabName}] Gate skipped and no new TransactionDetail file — nothing to refresh.");
+            log.Info($"  [STEP 14] No RunId change and no new TransactionDetail file — nothing to refresh for {lab.LabName}.");
         }
-        log.Info($"  [{lab.LabName}] TransactionDetail-only run complete — Claim/Line reports skipped.");
+
+        log.Info($"  [STEP 14] {lab.LabName} complete — STEPS 15-18 skipped (no new data).");
+        labsSkipped++;
+        log.Blank();
         continue;
     }
 
-    // ── Rebuild BTWOSummary when new ClaimLevel data arrived (BeechTree only) ──
-    // The TransactionDetail block already calls RefreshBTWOSummary when a new
-    // TransactionDetail file is loaded.  This block covers the case where only
-    // a new ClaimLevel file arrived — ClaimLevelData changed, so the join result
-    // in BTWOSummary (VisitNumber = ClaimID) must be rebuilt to stay accurate.
-    if (claimInserted
+    // ─────────────────────────────────────────────────────────────────────────
+    // STEP 15 — Post-change refresh work
+    //
+    // Reached only when STEP 8 reported a change (new RunId or ClaimLineRefresh).
+    // The external ingestion app has already refreshed ClaimLevelData /
+    // LineLevelData for this RunId, so the aggregates below can be rebuilt.
+    // ─────────────────────────────────────────────────────────────────────────
+    log.Header($"STEP 15 — Post-change refresh — {lab.LabName}");
+
+    // ── Rebuild BTWOSummary for BeechTree when STEP 13 did not already do it ──
+    // BTWOSummary joins BTTransactionDetailData to ClaimLevelData on
+    // VisitNumber = ClaimID. ClaimLevelData has changed with the new RunId, so the
+    // join result must be rebuilt. Skipped when the STEP 13 TransactionDetail block
+    // already rebuilt it this run.
+    if (!tdFileLoaded
         && (lab.LabName.Equals("Beech_Tree", StringComparison.OrdinalIgnoreCase) ||
             lab.LabName.Equals("BeechTree",  StringComparison.OrdinalIgnoreCase)))
     {
         try
         {
-            log.Info($"  [Claim Level] Refreshing BTWOSummary after new ClaimLevel data…");
+            log.Info($"  [STEP 15] Refreshing BTWOSummary after new ClaimLevel data…");
             var (totalRows, matchedRows, woError) = db.RefreshBTWOSummary();
             if (woError is null)
-                log.Info($"  [Claim Level] BTWOSummary rebuilt — {totalRows} total row(s), {matchedRows} matched to ClaimLevelData.");
+                log.Info($"  [STEP 15] BTWOSummary rebuilt — {totalRows} total row(s), {matchedRows} matched to ClaimLevelData.");
             else
-                log.Error($"  [Claim Level] BTWOSummary refresh failed: {woError}");
+                log.Error($"  [STEP 15] BTWOSummary refresh failed: {woError}");
         }
         catch (Exception ex)
         {
-            log.Error($"  [Claim Level] BTWOSummary refresh unexpected error: {ex.Message}");
+            log.Error($"  [STEP 15] BTWOSummary refresh unexpected error: {ex.Message}");
         }
     }
 
-    // ── Clean decimal suffixes from integer columns after both inserts ────────
-    if (claimInserted && lineInserted)
+    // ── Clean decimal suffixes, refresh dashboard and run lab report SPs ─────
     {
         try
         {
@@ -687,6 +836,7 @@ foreach (var lab in labConfigs)
             try
             {
                 var nwResults = db.RefreshNorthWestProductionReports();
+                prodSummaryResults = nwResults;
                 foreach (var (spName, elapsedMs, error) in nwResults)
                 {
                     if (error is null)
@@ -707,7 +857,7 @@ foreach (var lab in labConfigs)
                 log.Error($"  [NW Reports] Unexpected error running NorthWest production report SPs: {ex.Message}");
             }
 
-            RunCollectionSummary(log, db, "NW CS", db.RefreshNorthWestCollectionReports);
+            collSummaryResults = RunCollectionSummary(log, db, "NW CS", db.RefreshNorthWestCollectionReports);
         }
 
         // ── Augustus Labs production report aggregates ───────────────────────
@@ -739,6 +889,7 @@ foreach (var lab in labConfigs)
             try
             {
                 var augResults = db.RefreshAugustusProductionReports();
+                prodSummaryResults = augResults;
                 foreach (var (spName, elapsedMs, error) in augResults)
                 {
                     if (error is null)
@@ -758,7 +909,7 @@ foreach (var lab in labConfigs)
                 log.Error($"  [Aug Reports] Unexpected error running Augustus production report SPs: {ex.Message}");
             }
 
-            RunCollectionSummary(log, db, "Aug CS", db.RefreshAugustusCollectionReports);
+            collSummaryResults = RunCollectionSummary(log, db, "Aug CS", db.RefreshAugustusCollectionReports);
         }
 
         // ── Certus Labs production report aggregates ─────────────────────────
@@ -770,6 +921,7 @@ foreach (var lab in labConfigs)
             try
             {
                 var certResults = db.RefreshCertusProductionReports();
+                prodSummaryResults = certResults;
                 foreach (var (spName, elapsedMs, error) in certResults)
                 {
                     if (error is null)
@@ -789,7 +941,7 @@ foreach (var lab in labConfigs)
                 log.Error($"  [Cert Reports] Unexpected error running Certus production report SPs: {ex.Message}");
             }
 
-            RunCollectionSummary(log, db, "Cert CS", db.RefreshCertusCollectionReports);
+            collSummaryResults = RunCollectionSummary(log, db, "Cert CS", db.RefreshCertusCollectionReports);
         }
 
         // ── COVE Labs production report aggregates ────────────────────────────
@@ -801,6 +953,7 @@ foreach (var lab in labConfigs)
             try
             {
                 var coveResults = db.RefreshCoveProductionReports();
+                prodSummaryResults = coveResults;
                 foreach (var (spName, elapsedMs, error) in coveResults)
                 {
                     if (error is null)
@@ -820,7 +973,7 @@ foreach (var lab in labConfigs)
                 log.Error($"  [COVE Reports] Unexpected error running COVE production report SPs: {ex.Message}");
             }
 
-            RunCollectionSummary(log, db, "COVE CS", db.RefreshCoveCollectionReports);
+            collSummaryResults = RunCollectionSummary(log, db, "COVE CS", db.RefreshCoveCollectionReports);
         }
 
         // ── Elixir Labs production report aggregates ──────────────────────────
@@ -832,6 +985,7 @@ foreach (var lab in labConfigs)
             try
             {
                 var elixResults = db.RefreshElixirProductionReports();
+                prodSummaryResults = elixResults;
                 foreach (var (spName, elapsedMs, error) in elixResults)
                 {
                     if (error is null)
@@ -851,7 +1005,7 @@ foreach (var lab in labConfigs)
                 log.Error($"  [Elix Reports] Unexpected error running Elixir production report SPs: {ex.Message}");
             }
 
-            RunCollectionSummary(log, db, "Elix CS", db.RefreshElixirCollectionReports);
+            collSummaryResults = RunCollectionSummary(log, db, "Elix CS", db.RefreshElixirCollectionReports);
         }
 
         // ── PCRLabsofAmerica production report aggregates ─────────────────────
@@ -864,6 +1018,7 @@ foreach (var lab in labConfigs)
             try
             {
                 var pcrResults = db.RefreshPCRLabsProductionReports();
+                prodSummaryResults = pcrResults;
                 foreach (var (spName, elapsedMs, error) in pcrResults)
                 {
                     if (error is null)
@@ -883,7 +1038,7 @@ foreach (var lab in labConfigs)
                 log.Error($"  [PCR Reports] Unexpected error running PCRLabsofAmerica production report SPs: {ex.Message}");
             }
 
-            RunCollectionSummary(log, db, "PCR CS", db.RefreshPCRLabsCollectionReports);
+            collSummaryResults = RunCollectionSummary(log, db, "PCR CS", db.RefreshPCRLabsCollectionReports);
         }
 
         // ── Beech_Tree production report aggregates ───────────────────────────
@@ -896,6 +1051,7 @@ foreach (var lab in labConfigs)
             try
             {
                 var btResults = db.RefreshBeechTreeProductionReports();
+                prodSummaryResults = btResults;
                 foreach (var (spName, elapsedMs, error) in btResults)
                 {
                     if (error is null)
@@ -915,7 +1071,7 @@ foreach (var lab in labConfigs)
                 log.Error($"  [BT Reports] Unexpected error running BeechTree production report SPs: {ex.Message}");
             }
 
-            RunCollectionSummary(log, db, "BT CS", db.RefreshBeechTreeCollectionReports);
+            collSummaryResults = RunCollectionSummary(log, db, "BT CS", db.RefreshBeechTreeCollectionReports);
         }
 
         // ── RisingTides production report aggregates ──────────────────────────
@@ -927,6 +1083,7 @@ foreach (var lab in labConfigs)
             try
             {
                 var rtResults = db.RefreshRisingTidesProductionReports();
+                prodSummaryResults = rtResults;
                 foreach (var (spName, elapsedMs, error) in rtResults)
                 {
                     if (error is null)
@@ -954,6 +1111,7 @@ foreach (var lab in labConfigs)
             try
             {
                 var rtCsResults = db.RefreshRisingTidesCollectionReports();
+                collSummaryResults = rtCsResults;
                 foreach (var (spName, elapsedMs, error) in rtCsResults)
                 {
                     if (error is null)
@@ -984,6 +1142,7 @@ foreach (var lab in labConfigs)
             try
             {
                 var phiResults = db.RefreshPhiLifeProductionReports();
+                prodSummaryResults = phiResults;
                 foreach (var (spName, elapsedMs, error) in phiResults)
                 {
                     if (error is null)
@@ -1003,7 +1162,7 @@ foreach (var lab in labConfigs)
                 log.Error($"  [Phi Reports] Unexpected error running PhiLife production report SPs: {ex.Message}");
             }
 
-            RunCollectionSummary(log, db, "Phi CS", db.RefreshPhiLifeCollectionReports);
+            collSummaryResults = RunCollectionSummary(log, db, "Phi CS", db.RefreshPhiLifeCollectionReports);
         }
 
         // ── InHealthDTR production report aggregates ─────────────────────────
@@ -1016,6 +1175,7 @@ foreach (var lab in labConfigs)
             try
             {
                 var inhResults = db.RefreshInHealthDTRProductionReports();
+                prodSummaryResults = inhResults;
                 foreach (var (spName, elapsedMs, error) in inhResults)
                 {
                     if (error is null)
@@ -1035,10 +1195,12 @@ foreach (var lab in labConfigs)
                 log.Error($"  [InH Reports] Unexpected error running InHealthDTR production report SPs: {ex.Message}");
             }
 
-            RunCollectionSummary(log, db, "IHD CS", db.RefreshInHealthDTRCollectionReports);
+            collSummaryResults = RunCollectionSummary(log, db, "IHD CS", db.RefreshInHealthDTRCollectionReports);
         }
 
-        // ── Executive Summary aggregate refresh (generic, prefix-driven) ──────
+        // ─────────────────────────────────────────────────────────────────────
+        // STEP 16 — Executive Summary aggregate refresh (generic, prefix-driven)
+        //
         // Looks up this lab's SP-name prefix in ClaimLineDbService.LabPrefixMap and,
         // if found, runs dbo.usp_Refresh{prefix}_ExecutiveSummary and (if deployed)
         // dbo.usp_Refresh{prefix}_ExecutiveSummary_LIS_Alt. Either/both SPs are
@@ -1046,24 +1208,17 @@ foreach (var lab in labConfigs)
         // a new lab's Executive Summary requires only deploying the SQL scripts
         // named per this convention; no further changes here are needed.
         //
-        // GATE: only refresh when NEW data actually loaded this run (a new
-        // ClaimLevel, LineLevel, or TransactionDetail Adjustment file). This
-        // avoids re-running the heavy Executive Summary SPs on every run when
-        // nothing changed. The Executive Summary is built from ClaimLevelData +
-        // BTWOSummary, so any of these inserts is a valid trigger.
-        // Only scenario 1 (gate passed) reaches here; scenario 2 already continued.
-        var esDataChanged = claimInserted || lineInserted || tdFileLoaded;
-        if (!esDataChanged)
+        // Only reached when STEP 8 reported a change, so no extra gate is needed —
+        // the heavy SPs never run on an unchanged RunId.
+        // ─────────────────────────────────────────────────────────────────────
+        if (ClaimLineDbService.LabPrefixMap.TryGetValue(lab.LabName, out var esPrefix))
         {
-            log.Info($"  [ES] No new ClaimLevel / LineLevel / TransactionDetail file this run — Executive Summary refresh skipped.");
-        }
-        else if (ClaimLineDbService.LabPrefixMap.TryGetValue(lab.LabName, out var esPrefix))
-        {
-            log.Header($"Executive Summary Refresh — {lab.LabName}");
-            log.Info($"  [ES] Refreshing Executive Summary aggregates for prefix '{esPrefix}'…");
+            log.Header($"STEP 16 — Executive Summary Refresh — {lab.LabName}");
+            log.Info($"  [STEP 16] [ES] Refreshing Executive Summary aggregates for prefix '{esPrefix}'…");
             try
             {
                 var esResults = db.RefreshExecutiveSummaryByPrefix(esPrefix);
+                execSummaryResults = esResults;
                 if (esResults.Count == 0)
                 {
                     log.Info($"  [ES] No Executive Summary SPs deployed yet for prefix '{esPrefix}' — skipping.");
@@ -1092,10 +1247,125 @@ foreach (var lab in labConfigs)
 
             log.Blank();
         }
+        else
+        {
+            log.Info($"  [STEP 16] No Executive Summary SP prefix mapped for '{lab.LabName}' — skipped.");
+        }
 
+        // ─────────────────────────────────────────────────────────────────────
+        // STEP 16b — Report run logging (LRNMaster)
+        //
+        // Now that the report groups have finished, write one detail-log row and
+        // one workflow-tracker row per report type for this lab:
+        //
+        //   EXEC dbo.usp_ReportRunIdInfoLog_Insert   (log)
+        //   EXEC dbo.usp_ReportsWorkflowTracker_Upsert (tracker)
+        //
+        //   @ReportType / @ReportName : 'Production Summary' (12),
+        //                               'Collection Summary' (4),
+        //                               'Executive Summary'  (6)
+        //   @SourceSystem             : lab config FetchLatestCompletedRunIDParameter
+        //                               (the LRNMaster-facing lab name, e.g. 'Phi Life')
+        //   @SourceFileName           : one representative file from dbo.LineClaimFileLogs
+        //                               for this RunId (Claim Level preferred). These
+        //                               reports aggregate several tables — Production and
+        //                               Collection from ClaimLevel, Executive Summary from
+        //                               LIMSMaster + ClaimLevel + LineLevel — so any one
+        //                               logged file identifies the run. The full source
+        //                               list is recorded in @LogMessage.
+        //   @RowCount                 : 0. With multiple contributing tables a single
+        //                               count would be misleading.
+        //   @Status                   : Success only when every SP in the group passed.
+        //
+        // A report type with no results (SPs not deployed for the lab) is skipped.
+        // Every call is exception-isolated inside ReportRunLogger — a logging failure
+        // can never fail the lab or change the process exit code.
+        // ─────────────────────────────────────────────────────────────────────
+        if (reportRunLogger.Enabled)
+        {
+            log.Header($"STEP 16b — Report run logging — {lab.LabName}");
+
+            // Lab identity as LRNMaster knows it (same value used for
+            // sp_GetRecentSuccessRunByLab); fall back to the config key.
+            var sourceSystem = string.IsNullOrWhiteSpace(lab.FetchLatestCompletedRunIDParameter)
+                ? lab.LabName
+                : lab.FetchLatestCompletedRunIDParameter!;
+
+            // One representative source file for this RunId, from the lab's
+            // LineClaimFileLogs (Claim Level preferred — see GetSourceFileForRun).
+            string? srcFileName = null;
+            try
+            {
+                var fileInfo = string.IsNullOrWhiteSpace(latestRunId)
+                    ? null
+                    : db.GetSourceFileForRun(latestRunId!);
+
+                if (fileInfo is { } fi)
+                {
+                    srcFileName = fi.FileName;
+                    log.Info($"  [STEP 16b] LineClaimFileLogs — using FileType='{fi.FileType}', " +
+                             $"FileName='{fi.FileName ?? "(null)"}' as @SourceFileName.");
+                }
+                else
+                {
+                    log.Warn($"  [STEP 16b] No LineClaimFileLogs row for RunId '{latestRunId ?? "(none)"}' — " +
+                             $"@SourceFileName will be sent as NULL.");
+                }
+            }
+            catch (Exception ex)
+            {
+                log.Error($"  [STEP 16b] Failed to read LineClaimFileLogs for RunId '{latestRunId}': {ex.Message} — " +
+                          $"continuing with NULL @SourceFileName.");
+            }
+
+            var groups = new (string ReportType, List<(string SpName, long ElapsedMs, string? Error)>? Results)[]
+            {
+                (ReportRunLogger.ReportTypes.ProductionSummary, prodSummaryResults),
+                (ReportRunLogger.ReportTypes.CollectionSummary, collSummaryResults),
+                (ReportRunLogger.ReportTypes.ExecutiveSummary,  execSummaryResults),
+            };
+
+            foreach (var (reportType, results) in groups)
+            {
+                if (results is null || results.Count == 0)
+                {
+                    log.Info($"  [STEP 16b] {reportType} — no SPs ran for {lab.LabName}, nothing to report.");
+                    continue;
+                }
+
+                var groupSucceeded = results.All(r => r.Error is null);
+                var message        = ReportRunLogger.BuildGroupMessage(reportType, results);
+
+                reportRunLogger.Report(
+                    runId:          latestRunId!,
+                    reportType:     reportType,
+                    sourceSystem:   sourceSystem,
+                    sourceFileName: srcFileName,
+                    rowCount:       ReportRunLogger.NotApplicableRowCount,
+                    success:        groupSucceeded,
+                    logMessage:     message);
+            }
+
+            log.Blank();
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
+        // STEP 17 — Excel report generation
+        //
+        // [DISABLED - re-enable later if needed]
+        //
+        // Queued the Production Report and Collection Summary Report workbooks as
+        // background tasks so the main loop could continue to the next lab; all
+        // tasks were awaited after the loop before the process exited.
+        //
+        // To re-enable: uncomment this block, the `reportTasks` declaration and
+        // await block, the repository instantiations near the top of this file,
+        // the LRN.ProductionReports using directives, and the report helper
+        // methods at the bottom of this file.
+        // ═════════════════════════════════════════════════════════════════════
+        log.Info($"  [STEP 17] Excel report generation is disabled — skipped.");
+        /*
         // ── Production Report Excel generation — started in background ─────────
-        // Queued here so the main loop continues to the next lab immediately.
-        // All tasks are awaited after the loop before the process exits.
         var capturedLab1 = lab; // capture for closure
         reportTasks.Add((lab.LabName, "Production", Task.Run(async () =>
         {
@@ -1117,7 +1387,7 @@ foreach (var lab in labConfigs)
         if (GetCollectionSummarySpPrefix(lab) is not null)
         {
             var capturedLabCollection = lab;
-            var forceCollectionRegenerate = claimInserted || lineInserted;
+            var forceCollectionRegenerate = dataChanged;
             reportTasks.Add((lab.LabName, "Collection", Task.Run(async () =>
             {
                 try
@@ -1137,25 +1407,48 @@ foreach (var lab in labConfigs)
                 }
             })));
         }
+        */
 
         processedLabNames.Add(lab.LabName);
         labsProcessed++;
 
-        // ── Reset ClaimLineRefresh after a successful full refresh ────────────
-        // Only resets when both files were actually inserted (not just skipped),
-        // so a failed or partial run keeps the flag true and retries next cycle.
+        // ─────────────────────────────────────────────────────────────────────
+        // STEP 18 — Persist run state
+        //
+        //   a) Write the RunId just processed into the lab's JSON config as
+        //      LastProcessedRunId, so the next execution's STEP 8 comparison sees
+        //      it as unchanged and skips the heavy refresh SPs.
+        //   b) Reset ClaimLineRefresh to false so a forced refresh runs once.
+        //
+        // Both only happen here, at the end of a successful pass — a lab that
+        // failed earlier keeps its old RunId and refresh flag and retries next run.
+        // ─────────────────────────────────────────────────────────────────────
+        log.Header($"STEP 18 — Persist run state — {lab.LabName}");
+
+        if (!string.IsNullOrWhiteSpace(latestRunId))
+        {
+            LabConfigLoader.TryWriteLastProcessedRunId(labConfigFolder, lab.LabName, latestRunId, log);
+        }
+        else
+        {
+            log.Warn($"  [STEP 18] No RunId available from sp_GetRecentSuccessRunByLab — " +
+                     $"LastProcessedRunId left unchanged for {lab.LabName}.");
+        }
+
         if (lab.ClaimLineRefresh)
             LabConfigLoader.TryResetClaimLineRefresh(labConfigFolder, lab.LabName, log);
-    }
-    else
-    {
-        labsSkipped++;
+
+        log.Info($"  [STEP 18] {lab.LabName} — run state persisted.");
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // STEP 17 (fallback path) — Excel report generation for labs whose main
+    // block did not queue a task.  [DISABLED - re-enable later if needed]
+    // ═════════════════════════════════════════════════════════════════════════
+    /*
     // ── Production Report Excel generation (runs regardless of insert outcome) ──
     // Always check whether this week's report exists; generate it if missing.
-    // Only queued when no task was already started for this lab above
-    // (i.e. when claimInserted && lineInserted was false).
+    // Only queued when no task was already started for this lab above.
     if (lab.ClaimLineInsert && !string.IsNullOrWhiteSpace(lab.DbConnectionString)
         && !reportTasks.Any(t => t.LabName.Equals(lab.LabName, StringComparison.OrdinalIgnoreCase)
             && t.ReportType.Equals("Production", StringComparison.OrdinalIgnoreCase)))
@@ -1185,7 +1478,7 @@ foreach (var lab in labConfigs)
             && t.ReportType.Equals("Collection", StringComparison.OrdinalIgnoreCase)))
     {
         var capturedLabCollection2 = lab;
-        var forceCollectionRegenerate = claimInserted || lineInserted;
+        var forceCollectionRegenerate = dataChanged;
         reportTasks.Add((lab.LabName, "Collection", Task.Run(async () =>
         {
             try
@@ -1205,11 +1498,14 @@ foreach (var lab in labConfigs)
             }
         })));
     }
+    */
 
     log.Blank();
 }
 
 // ── Await all background Production Report tasks ─────────────────────────────
+// [DISABLED - STEP 17 Excel report generation]
+/*
 if (reportTasks.Count > 0)
 {
     log.Header("Waiting for Production Reports");
@@ -1217,6 +1513,7 @@ if (reportTasks.Count > 0)
     await Task.WhenAll(reportTasks.Select(t => t.Task));
     log.Info("  All Production Report tasks completed.");
 }
+*/
 
 // ── Final report ──────────────────────────────────────────────────────────────
 log.Header("Run complete");
@@ -1225,18 +1522,23 @@ if (processedLabNames.Count > 0)
     log.Info($"  Processed Labs: {string.Join(", ", processedLabNames)}");
 log.Info($"  Skipped   : {labsSkipped}");
 log.Info($"  Failed    : {labsFailed}");
+log.Info($"  Exit code : {(labsFailed > 0 ? 1 : 0)}");
 
 return labsFailed > 0 ? 1 : 0;
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Local helper: RunId validation gate.
-// Before processing a lab's latest input files, fetch the latest successfully
-// completed RunId (sp_GetRecentSuccessRunByLab on LRNMaster) and compare it with
-// the RunId prefix of the latest input file. Returns true when processing should
-// continue, false when the lab must be skipped. Applies to both the normal flow
-// and the ClaimLineRefresh=true flow. Every step is logged with separators.
-// ─────────────────────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+// [DISABLED - handled by external app]
+//
+// Old file-based RunId validation gate. It compared the RunId prefix of the
+// latest Claim/Line INPUT FILE against sp_GetRecentSuccessRunByLab, because this
+// app used to read those files itself.
+//
+// Superseded by the STEP 8 change detection in the main loop, which compares
+// sp_GetRecentSuccessRunByLab against LastProcessedRunId stored in the lab's JSON
+// config — no input file is inspected.
+// ═════════════════════════════════════════════════════════════════════════════
+/*
 static bool RunIdGatePassed(
     ClaimLineCSVDataCapture.Models.LabConfig lab,
     string? masterConnectionString,
@@ -1322,13 +1624,17 @@ static bool RunIdGatePassed(
     log.Header($"RunId Validation — {lab.LabName} — {(matched ? "PASSED" : "SKIPPED")}");
     return matched;
 }
+*/
+// ═════════════════ end [DISABLED - handled by external app] ══════════════════
 
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Local helper: runs a lab's Collection Summary refresher and logs each SP's
 // result, mirroring the production-report logging pattern used elsewhere.
+// Returns the SP results so STEP 16b can report the group's overall status,
+// or null when the refresher itself threw before producing any results.
 // ─────────────────────────────────────────────────────────────────────────────
-static void RunCollectionSummary(
+static List<(string SpName, long ElapsedMs, string? Error)>? RunCollectionSummary(
     ClaimLineCSVDataCapture.Services.AppLogger log,
     ClaimLineCSVDataCapture.Services.ClaimLineDbService db,
     string tag,
@@ -1351,13 +1657,31 @@ static void RunCollectionSummary(
         log.Info($"  [{tag}] {passed}/{results.Count} SP(s) succeeded.");
         if (failed > 0)
             log.Warn($"  [{tag}] {failed} SP(s) failed — see errors above.");
+
+        return results;
     }
     catch (Exception ex)
     {
         log.Error($"  [{tag}] Unexpected error running Collection Summary SPs: {ex.Message}");
+        return null;
     }
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+// STEP 17 helper methods — Excel report generation.
+//
+// [DISABLED - re-enable later if needed]
+//
+// Everything from here to the end of the file supports the Production Report and
+// Collection Summary Report workbooks. To re-enable, uncomment this block along
+// with:
+//   * the `using LRN.ProductionReports.*` directives at the top of this file
+//   * the productionReportRepo / collectionSummaryRepo instantiations (STEP 5)
+//   * the `reportTasks` declaration
+//   * the two STEP 17 queuing blocks inside the lab loop
+//   * the "Await all background Production Report tasks" block
+// ═════════════════════════════════════════════════════════════════════════════
+/*
 static async Task<string> GenerateProductionReportExcelAsync(
     ClaimLineCSVDataCapture.Models.LabConfig lab,
     string workingFolder,
@@ -1761,5 +2085,7 @@ static (DateOnly WeekStart, DateOnly WeekEnd) ResolveCurrentWeekBounds(string? w
     var weekStart = today.AddDays(-offset);
     return (weekStart, weekStart.AddDays(6));
 }
+*/
+// ═════════ end STEP 17 helpers [DISABLED - re-enable later if needed] ════════
 
 

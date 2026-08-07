@@ -24,13 +24,13 @@ public sealed class ExecSummaryRow
     /// True when the description starts with whitespace (sub-row / indented bullet).
     /// Derived from the SP returning descriptions with leading spaces.
     /// </summary>
-    public bool IsSubRow => Description.StartsWith("  ", StringComparison.Ordinal);
+    public bool IsSubRow => (Description ?? "").StartsWith("  ", StringComparison.Ordinal);
 
     /// <summary>
     /// True when the description starts with four or more leading spaces,
     /// indicating a second-level sub-row (e.g. D.5.1 PanelType under D.5 Coding Exception).
     /// </summary>
-    public bool IsSubSubRow => Description.StartsWith("    ", StringComparison.Ordinal);
+    public bool IsSubSubRow => (Description ?? "").StartsWith("    ", StringComparison.Ordinal);
 
     /// <summary>Values keyed by (Year, Month). Year=0, Month=0 is the grand total.</summary>
     public Dictionary<(int Year, int Month), decimal> ValuesByYearMonth { get; set; } = [];

@@ -600,6 +600,8 @@ public class CollectionSummaryController : Controller
 
         // Soft-fail per sheet when a Collection Summary SP is not deployed on a lab DB
         // (SqlException 2812). One missing SP must not fail the whole Collection Report.
+        // Also soft-fail SqlNullValueException so a single nullable column read cannot
+        // abort the entire CollectionReport export (typed getters throw "Data is Null…").
         static async Task<T> AwaitOrDefaultAsync<T>(
             Task<T> task, T fallback, string sheet, string lab, ILogger logger)
         {
@@ -613,6 +615,13 @@ public class CollectionSummaryController : Controller
                 logger.LogWarning(
                     "Collection export sheet '{Sheet}' skipped for lab {Lab}: missing SP/table ({Number}: {Message}).",
                     sheet, lab, ex.Number, ex.Message);
+                return fallback;
+            }
+            catch (System.Data.SqlTypes.SqlNullValueException ex)
+            {
+                logger.LogWarning(ex,
+                    "Collection export sheet '{Sheet}' skipped for lab {Lab}: null DB value on reader.",
+                    sheet, lab);
                 return fallback;
             }
         }

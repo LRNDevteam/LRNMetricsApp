@@ -11,7 +11,9 @@
     string FmtCount(decimal v, string cat) =>
         (cat == "Cash" || cat == "Avg")
             ? v.ToString("C0")
-            : ((long)v).ToString("N0");
+            : (v is >= long.MinValue and <= long.MaxValue
+                ? ((long)v).ToString("N0")
+                : v.ToString("N0"));
 
     bool IsDollar(string cat) => cat is "Cash" or "Avg";
 
@@ -659,7 +661,7 @@
                             </button>
                         </div>
                         <datalist id="esDescList">
-                            @foreach (var d in Model.Rows.Select(r => r.Description.Trim()).Where(d => !string.IsNullOrWhiteSpace(d)).Distinct().OrderBy(d => d))
+                            @foreach (var d in Model.Rows.Select(r => (r.Description ?? "").Trim()).Where(d => !string.IsNullOrWhiteSpace(d)).Distinct().OrderBy(d => d))
                             {
                                 <option value="@d"></option>
                             }
@@ -864,14 +866,82 @@
                                 <tr class="es-section-row">
                                     <td class="es-section-cell" colspan="@totalCols">@sectionNum. @TabLabel(tab)</td>
                                 </tr>
-                                @foreach (var row in rows)
+                                string? drillParentTitle = null;
+                                string? drillSubParentTitle = null;
+                                foreach (var row in rows)
                                 {
                                     bool isSub = row.IsSubRow;
                                     string rClass = row.IsSubSubRow ? "es-sub-sub-row"
                                                   : isSub           ? "es-sub-row"
                                                   :                   "es-cat-row";
                                     bool dollarRow = IsDollar(row.Category);
-                                    bool canDrill = row.Category is "PMS" or "Cash" or "LIS";
+
+                                    var leafTitle = (row.Description ?? "").Trim();
+                                    if (!isSub)
+                                    {
+                                        drillParentTitle = leafTitle;
+                                        drillSubParentTitle = null;
+                                    }
+                                    // Insight heading: parent - child (and grandparent - parent - child for sub-sub).
+                                    string insightRowTitle;
+                                    if (row.IsSubSubRow)
+                                    {
+                                        if (!string.IsNullOrEmpty(drillParentTitle) && !string.IsNullOrEmpty(drillSubParentTitle))
+                                            insightRowTitle = $"{drillParentTitle} - {drillSubParentTitle} - {leafTitle}";
+                                        else if (!string.IsNullOrEmpty(drillSubParentTitle))
+                                            insightRowTitle = $"{drillSubParentTitle} - {leafTitle}";
+                                        else if (!string.IsNullOrEmpty(drillParentTitle))
+                                            insightRowTitle = $"{drillParentTitle} - {leafTitle}";
+                                        else
+                                            insightRowTitle = leafTitle;
+                                    }
+                                    else if (isSub && !string.IsNullOrEmpty(drillParentTitle))
+                                    {
+                                        insightRowTitle = $"{drillParentTitle} - {leafTitle}";
+                                    }
+                                    else
+                                    {
+                                        insightRowTitle = leafTitle;
+                                    }
+                                    if (isSub && !row.IsSubSubRow)
+                                        drillSubParentTitle = leafTitle;
+
+                                    // LIS Breakdown analytical drill-through: the Total No. of Samples
+                                    // (RowCode L_0) and Billable Samples - Resulted (RowCode L_A) rows
+                                    // send their Grand Total / Year Total cells to the LisDrill action
+                                    // (Excel logic: MoM, 6-mo avg, 9-day comparison, top panels).
+                                    string? lisDrillMetric = null;
+                                    if (row.Category == "LIS")
+                                    {
+                                        var descNorm = leafTitle;
+                                        if (row.RowCode == "L_0"
+                                            || descNorm.Equals("Total No. of Samples", StringComparison.OrdinalIgnoreCase)
+                                            || descNorm.Equals("Total Samples", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            lisDrillMetric = "Samples";
+                                        }
+                                        else if (row.RowCode == "L_A"
+                                            || descNorm.StartsWith("Billable Samples", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            lisDrillMetric = "Billable";
+                                        }
+                                        else if (row.RowCode == "L_B"
+                                            || descNorm.Equals("Not Resulted", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            lisDrillMetric = "NotResulted";
+                                        }
+                                    }
+
+                                    // Panel-specific sub-rows (dynamic per-panel breakdown under Billable /
+                                    // Coding Exception): no Insight drill links — display values only.
+                                    // Patterns: B1.{Panel}, L_A.{Panel}, L_B.{Panel}, or 4-space sub-sub-rows.
+                                    var rc = row.RowCode ?? "";
+                                    bool isPanelSpecificRow =
+                                        row.IsSubSubRow
+                                        || rc.StartsWith("B1.", StringComparison.OrdinalIgnoreCase)
+                                        || rc.StartsWith("L_A.", StringComparison.OrdinalIgnoreCase)
+                                        || rc.StartsWith("L_B.", StringComparison.OrdinalIgnoreCase);
+                                    var gTot = RowGrandTotal(row);
 
                                     <tr class="@rClass" data-row-code="@row.RowCode">
                                         <td class="col-desc">
@@ -879,7 +949,7 @@
                                             {
                                                 <span class="dollar-badge">$</span>
                                             }
-                                            @row.Description.TrimStart()
+                                            @leafTitle
                                         </td>
                                         @foreach (var year in esYears)
                                         {
@@ -888,38 +958,37 @@
                                             {
                                                 row.ValuesByYearMonth.TryGetValue((year, m), out var v);
                                                 string cellVal = FmtCount(v, row.Category);
-                                                if (canDrill && v != 0)
-                                                {
-                                                    string drillUrl = Url.Action("Detail", "ExecutiveSummary", new {
-                                                        lab         = Model.SelectedLab,
-                                                        category    = row.Category,
-                                                        rowCode     = row.RowCode,
-                                                        description = row.Description.TrimStart(),
-                                                        year,
-                                                        month       = m,
-                                                        value       = v,
-                                                    })!;
-                                                    <td><a href="@drillUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@cellVal</a></td>
-                                                }
-                                                else
-                                                {
-                                                    <td><span class="es-pill@(dollarRow ? " es-pill-dollar" : "")">@cellVal</span></td>
-                                                }
+                                                // Monthly cells are display-only — drill links live on the
+                                                // Year Total / Grand Total cells of the two LIS rows only.
+                                                <td><span class="es-pill@(dollarRow ? " es-pill-dollar" : "")">@cellVal</span></td>
                                             }
                                             var yrTot = RowYearTotal(row, year);
-                                            @if (canDrill && yrTot != 0)
+                                            @* Prefer rowCode (lab-specific LisDrillRowDef) over generic
+                                               metric=Billable — Inhealth Billable is RowCode B, not L_A. *@
+                                            @if (!isPanelSpecificRow && (row.Category == "LIS" || row.Category == "PMS" || row.Category == "Cash") && !string.IsNullOrEmpty(row.RowCode) && yrTot != 0)
                                             {
-                                                string yrUrl = Url.Action("Detail", "ExecutiveSummary", new {
-                                                    lab         = Model.SelectedLab,
-                                                    category    = row.Category,
-                                                    rowCode     = row.RowCode,
-                                                    description = row.Description.TrimStart(),
+                                                string yrRowUrl = Url.Action("LisDrill", "ExecutiveSummary", new {
+                                                    lab      = Model.SelectedLab,
+                                                    rowCode  = row.RowCode,
+                                                    rowTitle = insightRowTitle,
+                                                    category = row.Category,
                                                     year,
-                                                    month       = 0,
-                                                    value       = yrTot,
+                                                    value    = yrTot,
                                                 })!;
                                                 <td class="es-year-total">
-                                                    <a href="@yrUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@FmtCount(yrTot, row.Category)</a>
+                                                    <a href="@yrRowUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@FmtCount(yrTot, row.Category)</a>
+                                                </td>
+                                            }
+                                            else if (!isPanelSpecificRow && lisDrillMetric != null && yrTot != 0)
+                                            {
+                                                string yrDrillUrl = Url.Action("LisDrill", "ExecutiveSummary", new {
+                                                    lab    = Model.SelectedLab,
+                                                    metric = lisDrillMetric,
+                                                    year,
+                                                    value  = yrTot,
+                                                })!;
+                                                <td class="es-year-total">
+                                                    <a href="@yrDrillUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@FmtCount(yrTot, row.Category)</a>
                                                 </td>
                                             }
                                             else
@@ -927,20 +996,30 @@
                                                 <td class="es-year-total"><span class="es-pill@(dollarRow ? " es-pill-dollar" : "")">@FmtCount(yrTot, row.Category)</span></td>
                                             }
                                         }
-                                        @{ var gTot = RowGrandTotal(row); }
-                                        @if (canDrill && gTot != 0)
+                                        @if (!isPanelSpecificRow && (row.Category == "LIS" || row.Category == "PMS" || row.Category == "Cash") && !string.IsNullOrEmpty(row.RowCode) && gTot != 0)
                                         {
-                                            string gtUrl = Url.Action("Detail", "ExecutiveSummary", new {
-                                                lab         = Model.SelectedLab,
-                                                category    = row.Category,
-                                                rowCode     = row.RowCode,
-                                                description = row.Description.TrimStart(),
-                                                year        = 0,
-                                                month       = 0,
-                                                value       = gTot,
+                                            string gtRowUrl = Url.Action("LisDrill", "ExecutiveSummary", new {
+                                                lab      = Model.SelectedLab,
+                                                rowCode  = row.RowCode,
+                                                rowTitle = insightRowTitle,
+                                                category = row.Category,
+                                                year     = 0,
+                                                value    = gTot,
                                             })!;
                                             <td class="es-grand">
-                                                <a href="@gtUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@FmtCount(gTot, row.Category)</a>
+                                                <a href="@gtRowUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@FmtCount(gTot, row.Category)</a>
+                                            </td>
+                                        }
+                                        else if (!isPanelSpecificRow && lisDrillMetric != null && gTot != 0)
+                                        {
+                                            string gtDrillUrl = Url.Action("LisDrill", "ExecutiveSummary", new {
+                                                lab    = Model.SelectedLab,
+                                                metric = lisDrillMetric,
+                                                year   = 0,
+                                                value  = gTot,
+                                            })!;
+                                            <td class="es-grand">
+                                                <a href="@gtDrillUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@FmtCount(gTot, row.Category)</a>
                                             </td>
                                         }
                                         else

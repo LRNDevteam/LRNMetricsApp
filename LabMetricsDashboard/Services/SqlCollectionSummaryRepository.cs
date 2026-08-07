@@ -77,6 +77,46 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         return false;
     }
 
+    // Null-safe readers — SP / snapshot rows can surface DBNull after new nullable
+    // ClaimLevelData columns (PaymentPercent, Adjudicated*, FullyPaid*, Bucket30/60, …)
+    // were added. Typed getters (GetString/GetInt32/GetDateTime/…) throw
+    // SqlNullValueException: "Data is Null. This method or property cannot be called on Null values."
+    private static string GetStringOrEmpty(SqlDataReader r, string column)
+    {
+        var o = r.GetOrdinal(column);
+        return r.IsDBNull(o) ? string.Empty : Convert.ToString(r.GetValue(o)) ?? string.Empty;
+    }
+
+    private static int GetInt32OrDefault(SqlDataReader r, string column, int defaultValue = 0)
+    {
+        var o = r.GetOrdinal(column);
+        return r.IsDBNull(o) ? defaultValue : Convert.ToInt32(r.GetValue(o));
+    }
+
+    private static byte GetByteOrDefault(SqlDataReader r, string column, byte defaultValue = 0)
+    {
+        var o = r.GetOrdinal(column);
+        return r.IsDBNull(o) ? defaultValue : Convert.ToByte(r.GetValue(o));
+    }
+
+    private static decimal GetDecimalOrDefault(SqlDataReader r, string column, decimal defaultValue = 0m)
+    {
+        var o = r.GetOrdinal(column);
+        return r.IsDBNull(o) ? defaultValue : Convert.ToDecimal(r.GetValue(o));
+    }
+
+    private static DateTime? GetDateTimeOrNull(SqlDataReader r, string column)
+    {
+        var o = r.GetOrdinal(column);
+        return r.IsDBNull(o) ? null : Convert.ToDateTime(r.GetValue(o));
+    }
+
+    private static decimal? GetDecimalOrNull(SqlDataReader r, string column)
+    {
+        if (!HasColumn(r, column)) return null;
+        var o = r.GetOrdinal(column);
+        return r.IsDBNull(o) ? null : Convert.ToDecimal(r.GetValue(o));
+    }
 
     private static SqlParameter[] BuildCollectionReadSpParameters(
         List<string>? filterPayerNames,
@@ -101,6 +141,30 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             new SqlParameter("@CheckDateTo", DateValue(filterCheckDateTo)),
         ];
     }
+
+    /// <summary>
+    /// Labs whose live/filter Top5 Reimbursement % path prefers
+    /// <c>usp_Get{prefix}_CS_Top5ReimbursementPct</c> (same set as aggregate SP routing).
+    /// Includes Certus (<c>usp_GetCert_CS_Top5ReimbursementPct</c>). BT / Cove / Elix / RT use
+    /// snapshot or inline SQL instead.
+    /// </summary>
+    private static bool IsTop5ReimbursementPctSpLab(string? prefix) =>
+        string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(prefix, "Cert", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Labs whose live/filter Top5 Payments path prefers
+    /// <c>usp_Get{prefix}_CS_Top5ReimbursementPay</c> (same set as aggregate Pay SP routing).
+    /// </summary>
+    private static bool IsTop5ReimbursementPaySpLab(string? prefix) =>
+        string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Tries each Collection Summary prefix candidate (e.g. Cert then CERT for Certus).
@@ -169,14 +233,19 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         await using var r = await cmd.ExecuteReaderAsync(ct);
         while (await r.ReadAsync(ct))
         {
+            var panel = GetStringOrEmpty(r, "PanelName");
+            var payer = GetStringOrEmpty(r, "PayerName");
+            if (string.IsNullOrWhiteSpace(panel) && string.IsNullOrWhiteSpace(payer))
+                continue;
+
             raw.Add(new CollectionRawPivotRow(
-                PanelName: r.GetString(r.GetOrdinal("PanelName")),
-                PayerName: r.GetString(r.GetOrdinal("PayerName")),
-                BillYear: r.GetInt32(r.GetOrdinal("BillYear")),
-                BillMonth: r.GetByte(r.GetOrdinal("BillMonth")),
-                LineItemCount: r.GetInt32(r.GetOrdinal("NoOfClaims")),
-                InsurancePaid: r.GetDecimal(r.GetOrdinal("InsurancePayment")),
-                PayerRank: r.GetByte(r.GetOrdinal("PayerRank"))));
+                PanelName: panel,
+                PayerName: payer,
+                BillYear: GetInt32OrDefault(r, "BillYear"),
+                BillMonth: GetByteOrDefault(r, "BillMonth"),
+                LineItemCount: GetInt32OrDefault(r, "NoOfClaims"),
+                InsurancePaid: GetDecimalOrDefault(r, "InsurancePayment"),
+                PayerRank: GetByteOrDefault(r, "PayerRank")));
         }
 
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms",
@@ -214,15 +283,27 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         await using var r = await cmd.ExecuteReaderAsync(ct);
         while (await r.ReadAsync(ct))
         {
+            // WeekStart/WeekEnd may be NULL on empty-schema / partial snapshot rows.
+            // GetDateTime on DBNull throws SqlNullValueException ("Data is Null…").
+            var weekStart = GetDateTimeOrNull(r, "WeekStart");
+            var weekEnd = GetDateTimeOrNull(r, "WeekEnd");
+            if (weekStart is null || weekEnd is null)
+                continue;
+
+            var panel = GetStringOrEmpty(r, "PanelName");
+            var payer = GetStringOrEmpty(r, "PayerName");
+            if (string.IsNullOrWhiteSpace(panel) && string.IsNullOrWhiteSpace(payer))
+                continue;
+
             rows.Add((
-                r.GetString(r.GetOrdinal("PanelName")),
-                r.GetString(r.GetOrdinal("PayerName")),
-                r.GetByte(r.GetOrdinal("PayerRank")),
-                r.GetByte(r.GetOrdinal("WeekKey")),
-                r.GetDateTime(r.GetOrdinal("WeekStart")),
-                r.GetDateTime(r.GetOrdinal("WeekEnd")),
-                r.GetInt32(r.GetOrdinal("NoOfClaims")),
-                r.GetDecimal(r.GetOrdinal("InsurancePayment"))));
+                panel,
+                payer,
+                GetByteOrDefault(r, "PayerRank"),
+                GetByteOrDefault(r, "WeekKey"),
+                weekStart.Value,
+                weekEnd.Value,
+                GetInt32OrDefault(r, "NoOfClaims"),
+                GetDecimalOrDefault(r, "InsurancePayment")));
         }
 
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms",
@@ -292,19 +373,21 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
             do
             {
                 rawRows.Add(new PanelAveragesRawRow(
-                    PanelName:         r.GetString(r.GetOrdinal("PanelName")),
-                    PayerName:         r.GetString(r.GetOrdinal("PayerName")),
-                    ClaimCount:        r.GetInt32  (r.GetOrdinal("NoOfClaims")),
-                    TotalCharges:      r.GetDecimal(r.GetOrdinal("TotalCharges")),
-                    CarrierPayment:    r.GetDecimal(r.GetOrdinal("CarrierPayment")),
-                    FullyPaidCount:    r.GetInt32  (r.GetOrdinal("FullyPaidCount")),
-                    FullyPaidAmount:   r.GetDecimal(r.GetOrdinal("FullyPaidAmount")),
-                    AdjudicatedCount:  adjCountOrd.HasValue  ? r.GetInt32  (adjCountOrd.Value)  : 0,
-                    AdjudicatedAmount: adjAmountOrd.HasValue ? r.GetDecimal(adjAmountOrd.Value) : 0m,
-                    Days30Count:       r.GetInt32  (r.GetOrdinal("Days30Count")),
-                    Days30Amount:      r.GetDecimal(r.GetOrdinal("Days30Amount")),
-                    Days60Count:       r.GetInt32  (r.GetOrdinal("Days60Count")),
-                    Days60Amount:      r.GetDecimal(r.GetOrdinal("Days60Amount"))));
+                    PanelName:         GetStringOrEmpty(r, "PanelName"),
+                    PayerName:         GetStringOrEmpty(r, "PayerName"),
+                    ClaimCount:        GetInt32OrDefault(r, "NoOfClaims"),
+                    TotalCharges:      GetDecimalOrDefault(r, "TotalCharges"),
+                    CarrierPayment:    GetDecimalOrDefault(r, "CarrierPayment"),
+                    FullyPaidCount:    GetInt32OrDefault(r, "FullyPaidCount"),
+                    FullyPaidAmount:   GetDecimalOrDefault(r, "FullyPaidAmount"),
+                    AdjudicatedCount:  adjCountOrd.HasValue && !r.IsDBNull(adjCountOrd.Value)
+                                           ? Convert.ToInt32(r.GetValue(adjCountOrd.Value)) : 0,
+                    AdjudicatedAmount: adjAmountOrd.HasValue && !r.IsDBNull(adjAmountOrd.Value)
+                                           ? Convert.ToDecimal(r.GetValue(adjAmountOrd.Value)) : 0m,
+                    Days30Count:       GetInt32OrDefault(r, "Days30Count"),
+                    Days30Amount:      GetDecimalOrDefault(r, "Days30Amount"),
+                    Days60Count:       GetInt32OrDefault(r, "Days60Count"),
+                    Days60Amount:      GetDecimalOrDefault(r, "Days60Amount")));
             }
             while (await r.ReadAsync(ct));
         }
@@ -358,19 +441,19 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         while (await r.ReadAsync(ct))
         {
             rawRows.Add(new PanelAveragesRawRow(
-                PanelName:         r.GetString(r.GetOrdinal("PanelName")),
-                PayerName:         r.GetString(r.GetOrdinal("PayerName")),
-                ClaimCount:        r.GetInt32  (r.GetOrdinal("NoOfClaims")),
-                TotalCharges:      r.GetDecimal(r.GetOrdinal("TotalCharges")),
-                CarrierPayment:    r.GetDecimal(r.GetOrdinal("CarrierPayment")),
-                FullyPaidCount:    r.GetInt32  (r.GetOrdinal("FullyPaidCount")),
-                FullyPaidAmount:   r.GetDecimal(r.GetOrdinal("FullyPaidAmount")),
-                AdjudicatedCount:  r.GetInt32  (r.GetOrdinal("AdjudicatedCount")),
-                AdjudicatedAmount: r.GetDecimal(r.GetOrdinal("AdjudicatedAmount")),
-                Days30Count:       r.GetInt32  (r.GetOrdinal("Days30Count")),
-                Days30Amount:      r.GetDecimal(r.GetOrdinal("Days30Amount")),
-                Days60Count:       r.GetInt32  (r.GetOrdinal("Days60Count")),
-                Days60Amount:      r.GetDecimal(r.GetOrdinal("Days60Amount"))));
+                PanelName:         GetStringOrEmpty(r, "PanelName"),
+                PayerName:         GetStringOrEmpty(r, "PayerName"),
+                ClaimCount:        GetInt32OrDefault(r, "NoOfClaims"),
+                TotalCharges:      GetDecimalOrDefault(r, "TotalCharges"),
+                CarrierPayment:    GetDecimalOrDefault(r, "CarrierPayment"),
+                FullyPaidCount:    GetInt32OrDefault(r, "FullyPaidCount"),
+                FullyPaidAmount:   GetDecimalOrDefault(r, "FullyPaidAmount"),
+                AdjudicatedCount:  GetInt32OrDefault(r, "AdjudicatedCount"),
+                AdjudicatedAmount: GetDecimalOrDefault(r, "AdjudicatedAmount"),
+                Days30Count:       GetInt32OrDefault(r, "Days30Count"),
+                Days30Amount:      GetDecimalOrDefault(r, "Days30Amount"),
+                Days60Count:       GetInt32OrDefault(r, "Days60Count"),
+                Days60Amount:      GetDecimalOrDefault(r, "Days60Amount")));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rawRows.Count, sw.ElapsedMilliseconds);
         return BuildPanelAveragesResult(rawRows);
@@ -443,10 +526,11 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
                                $"SP '{spName}' result set has neither 'VisitCount' nor 'Cnt' column.");
             }
 
-            var payer  = r.GetString (r.GetOrdinal("PayerName"));
-            var bucket = NormalizeAgingBucket(r.GetString(r.GetOrdinal("AgingBucket")));
-            var cnt    = r.GetInt32  (cntOrdinal);
-            var bal    = r.GetDecimal(r.GetOrdinal("InsuranceBalance"));
+            var payer  = GetStringOrEmpty(r, "PayerName");
+            if (string.IsNullOrWhiteSpace(payer)) continue;
+            var bucket = NormalizeAgingBucket(GetStringOrEmpty(r, "AgingBucket"));
+            var cnt    = r.IsDBNull(cntOrdinal) ? 0 : Convert.ToInt32(r.GetValue(cntOrdinal));
+            var bal    = GetDecimalOrDefault(r, "InsuranceBalance");
             if (!perPayer.TryGetValue(payer, out var dict))
                 perPayer[payer] = dict = new Dictionary<string, (int, decimal)>(StringComparer.OrdinalIgnoreCase);
             dict[bucket] = (cnt, bal);
@@ -504,11 +588,11 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         while (await r.ReadAsync(ct))
         {
             rows.Add(new PanelPaymentRow(
-                PanelName:         r.GetString (r.GetOrdinal("PanelName")),
-                NoOfClaims:        r.GetInt32  (r.GetOrdinal("NoOfClaims")),
-                InsurancePayments: r.GetDecimal(r.GetOrdinal("InsurancePayments")),
-                BillYear:          HasColumn(r, "BilledYear")  ? Convert.ToInt32(r.GetValue(r.GetOrdinal("BilledYear")))  : 0,
-                BillMonth:         HasColumn(r, "BilledMonth") ? Convert.ToInt32(r.GetValue(r.GetOrdinal("BilledMonth"))) : 0));
+                PanelName:         GetStringOrEmpty(r, "PanelName"),
+                NoOfClaims:        GetInt32OrDefault(r, "NoOfClaims"),
+                InsurancePayments: GetDecimalOrDefault(r, "InsurancePayments"),
+                BillYear:          HasColumn(r, "BilledYear")  ? GetInt32OrDefault(r, "BilledYear")  : 0,
+                BillMonth:         HasColumn(r, "BilledMonth") ? GetInt32OrDefault(r, "BilledMonth") : 0));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rows.Count, sw.ElapsedMilliseconds);
         return new PanelPaymentResult(rows);
@@ -541,11 +625,11 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         while (await r.ReadAsync(ct))
         {
             rows.Add(new RepPaymentFlatRow(
-                SalesRepName:      r.GetString(r.GetOrdinal("SalesRepName")),
-                Year:              Convert.ToInt32(r.GetValue(r.GetOrdinal("CheckYear"))),
-                Month:             Convert.ToByte (r.GetValue(r.GetOrdinal("CheckMonth"))),
-                NoOfClaims:        r.GetInt32 (r.GetOrdinal("NoOfClaims")),
-                InsurancePayments: r.GetDecimal(r.GetOrdinal("InsurancePayment"))));
+                SalesRepName:      GetStringOrEmpty(r, "SalesRepName"),
+                Year:              GetInt32OrDefault(r, "CheckYear"),
+                Month:             GetByteOrDefault(r, "CheckMonth"),
+                NoOfClaims:        GetInt32OrDefault(r, "NoOfClaims"),
+                InsurancePayments: GetDecimalOrDefault(r, "InsurancePayment")));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rows.Count, sw.ElapsedMilliseconds);
         return new RepPaymentResult(rows);
@@ -577,16 +661,17 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         await using var r = await cmd.ExecuteReaderAsync(ct);
         while (await r.ReadAsync(ct))
         {
-            var payer    = r.GetString(r.GetOrdinal("PayerName"));
+            var payer    = GetStringOrEmpty(r, "PayerName");
+            if (string.IsNullOrWhiteSpace(payer)) continue;
 
             // Use IsDBNull guards: some SP paths intentionally return NULLs
             // (e.g. no-filter snapshot paths that store CAST(NULL AS INT) for
             // BillYear/BillMonth). Convert.ToInt32(DBNull.Value) would throw.
             var insPayOrd = r.GetOrdinal("InsurancePayment");
-            var insPay    = r.IsDBNull(insPayOrd) ? 0m : r.GetDecimal(insPayOrd);
+            var insPay    = r.IsDBNull(insPayOrd) ? 0m : Convert.ToDecimal(r.GetValue(insPayOrd));
 
             var pctOrd = r.GetOrdinal("PaymentPct");
-            var pct    = r.IsDBNull(pctOrd) ? 0m : r.GetDecimal(pctOrd);
+            var pct    = r.IsDBNull(pctOrd) ? 0m : Convert.ToDecimal(r.GetValue(pctOrd));
 
             int? billYear  = null;
             int? billMonth = null;
@@ -670,14 +755,17 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         while (await r.ReadAsync(ct))
         {
             decimal? snapshotPct = paymentPctOrdinal >= 0 && !r.IsDBNull(paymentPctOrdinal)
-                ? r.GetDecimal(paymentPctOrdinal)
+                ? Convert.ToDecimal(r.GetValue(paymentPctOrdinal))
                 : (decimal?)null;
 
+            var cpt = GetStringOrEmpty(r, "CPTCode");
+            if (string.IsNullOrWhiteSpace(cpt)) continue;
+
             rows.Add(new CptPaymentPctRow(
-                CptCode:              r.GetString (r.GetOrdinal("CPTCode")),
-                SumServiceUnits:      r.GetDecimal(r.GetOrdinal("SumUnits")),
-                PaidInsurancePayment: r.GetDecimal(r.GetOrdinal("PaidInsurancePayment")),
-                PaidChargeAmount:     r.GetDecimal(r.GetOrdinal("PaidChargeAmount")),
+                CptCode:              cpt,
+                SumServiceUnits:      GetDecimalOrDefault(r, "SumUnits"),
+                PaidInsurancePayment: GetDecimalOrDefault(r, "PaidInsurancePayment"),
+                PaidChargeAmount:     GetDecimalOrDefault(r, "PaidChargeAmount"),
                 SnapshotPaymentPct:   snapshotPct));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rows.Count, sw.ElapsedMilliseconds);
@@ -712,14 +800,14 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         while (await r.ReadAsync(ct))
         {
             flat.Add((
-                r.GetString (r.GetOrdinal("ClaimStatus")),
-                r.GetString (r.GetOrdinal("PanelName")),
-                r.GetString (r.GetOrdinal("CptCode")),
-                r.GetString (r.GetOrdinal("PayerName")),
-                r.GetInt32  (r.GetOrdinal("NoOfClaims")),
-                r.GetDecimal(r.GetOrdinal("InsurancePayment")),
-                r.GetDecimal(r.GetOrdinal("InsuranceBalance")),
-                r.GetDecimal(r.GetOrdinal("PatientBalance"))));
+                GetStringOrEmpty(r, "ClaimStatus"),
+                GetStringOrEmpty(r, "PanelName"),
+                GetStringOrEmpty(r, "CptCode"),
+                GetStringOrEmpty(r, "PayerName"),
+                GetInt32OrDefault(r, "NoOfClaims"),
+                GetDecimalOrDefault(r, "InsurancePayment"),
+                GetDecimalOrDefault(r, "InsuranceBalance"),
+                GetDecimalOrDefault(r, "PatientBalance")));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, flat.Count, sw.ElapsedMilliseconds);
         return BuildStatusSummaryHierarchy(flat);
@@ -752,12 +840,12 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         while (await r.ReadAsync(ct))
         {
             rows.Add(new ProviderSummaryRow(
-                Rank:               Convert.ToInt32(r.GetValue(r.GetOrdinal("ProviderRank"))),
-                ReferringProvider:  r.GetString (r.GetOrdinal("ReferringProvider")),
-                NoOfClaims:         r.GetInt32  (r.GetOrdinal("NoOfClaims")),
-                InsurancePayments:  r.GetDecimal(r.GetOrdinal("InsurancePayments")),
-                InsuranceBalance:   r.GetDecimal(r.GetOrdinal("InsuranceBalance")),
-                PatientBalance:     r.GetDecimal(r.GetOrdinal("PatientBalance"))));
+                Rank:               GetInt32OrDefault(r, "ProviderRank"),
+                ReferringProvider:  GetStringOrEmpty(r, "ReferringProvider"),
+                NoOfClaims:         GetInt32OrDefault(r, "NoOfClaims"),
+                InsurancePayments:  GetDecimalOrDefault(r, "InsurancePayments"),
+                InsuranceBalance:   GetDecimalOrDefault(r, "InsuranceBalance"),
+                PatientBalance:     GetDecimalOrDefault(r, "PatientBalance")));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rows.Count, sw.ElapsedMilliseconds);
         return new ProviderSummaryResult
@@ -1459,28 +1547,18 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         await using var r = await cmd.ExecuteReaderAsync(ct);
         while (await r.ReadAsync(ct))
         {
-            // NorthWest, Augustus, and Phi_Life SPs return PaymentPct column
-            var hasPaymentPctColumn = spName.Contains("NW_CS", StringComparison.OrdinalIgnoreCase) ||
-                                       spName.Contains("Aug_CS", StringComparison.OrdinalIgnoreCase) ||
-                                       spName.Contains("Phi_CS", StringComparison.OrdinalIgnoreCase);
-            decimal? paymentPctFromSp = null;
-            if (hasPaymentPctColumn)
-            {
-                try
-                {
-                    var ordinal = r.GetOrdinal("PaymentPct");
-                    if (!r.IsDBNull(ordinal))
-                        paymentPctFromSp = r.GetDecimal(ordinal);
-                }
-                catch { /* Column doesn't exist - fallback to calculation */ }
-            }
+            // Certus (and NW/Aug/Phi) return PaymentPct — Certus maps AvgPaymentPct AS PaymentPct.
+            // Read by column presence so newly added PaymentPct/AvgPaymentPct never trips
+            // GetDecimal on DBNull.
+            decimal? paymentPctFromSp =
+                GetDecimalOrNull(r, "PaymentPct") ?? GetDecimalOrNull(r, "AvgPaymentPct");
 
             rows.Add(new InsuranceReimbursementRow(
-                Rank:                r.GetByte   (r.GetOrdinal("PayerRank")),
-                PayerName:           r.GetString  (r.GetOrdinal("PayerName")),
-                SumInsurancePayment: r.GetDecimal (r.GetOrdinal("SumInsurancePayment")),
-                SumChargeAmount:     r.GetDecimal (r.GetOrdinal("SumChargeAmount")),
-                UniqueVisitCount:    r.GetInt32   (r.GetOrdinal("UniqueVisitCount")),
+                Rank:                GetByteOrDefault(r, "PayerRank"),
+                PayerName:           GetStringOrEmpty(r, "PayerName"),
+                SumInsurancePayment: GetDecimalOrDefault(r, "SumInsurancePayment"),
+                SumChargeAmount:     GetDecimalOrDefault(r, "SumChargeAmount"),
+                UniqueVisitCount:    GetInt32OrDefault(r, "UniqueVisitCount"),
                 PaymentPctFromSp:    paymentPctFromSp));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rows.Count, sw.ElapsedMilliseconds);
@@ -1523,10 +1601,10 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
         while (await r.ReadAsync(ct))
         {
             rows.Add(new InsuranceTotalPaymentRow(
-                Rank:             r.GetByte   (r.GetOrdinal("PayerRank")),
-                PayerName:        r.GetString  (r.GetOrdinal("PayerName")),
-                TotalPayments:    r.GetDecimal (r.GetOrdinal("TotalPayments")),
-                UniqueVisitCount: r.GetInt32   (r.GetOrdinal("UniqueVisitCount"))));
+                Rank:             GetByteOrDefault(r, "PayerRank"),
+                PayerName:        GetStringOrEmpty(r, "PayerName"),
+                TotalPayments:    GetDecimalOrDefault(r, "TotalPayments"),
+                UniqueVisitCount: GetInt32OrDefault(r, "UniqueVisitCount")));
         }
         _logger.LogInformation("CollectionSummary[SP] {Sp}: rows={N}, {Ms}ms", spName, rows.Count, sw.ElapsedMilliseconds);
         return new Top5TotalPaymentsResult(rows);
@@ -1544,20 +1622,28 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
-        // Labs with a dedicated Top5 read SP route through it.
-        // The SP handles @HasFilter internally (snapshot vs live).
+        // Labs with a dedicated Top5 % read SP (NW/Aug/Phi/PCR/IHD/Certus).
+        // The SP handles @HasFilter internally (snapshot vs live). Certus returns AvgPaymentPct AS PaymentPct.
+        // If the SP is not deployed (2812/208), fall back to live ClaimLevelData so CS still loads.
         var top5Prefix = LabCollectionPrefix.GetPrefix(labName);
-        if (string.Equals(top5Prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(top5Prefix, "Aug", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(top5Prefix, "Phi", StringComparison.OrdinalIgnoreCase))
+        if (IsTop5ReimbursementPctSpLab(top5Prefix))
         {
-            return await GetTop5ReimbursementViaSpAsync(
-                connectionString, top5Prefix,
-                filterPayerNames, filterPanelNames,
-                filterFirstBillFrom, filterFirstBillTo,
-                filterDosFrom, filterDosTo,
-                filterCheckDateFrom, filterCheckDateTo,
-                ct).ConfigureAwait(false);
+            try
+            {
+                return await GetTop5ReimbursementViaSpAsync(
+                    connectionString, top5Prefix!,
+                    filterPayerNames, filterPanelNames,
+                    filterFirstBillFrom, filterFirstBillTo,
+                    filterDosFrom, filterDosTo,
+                    filterCheckDateFrom, filterCheckDateTo,
+                    ct).ConfigureAwait(false);
+            }
+            catch (SqlException ex) when (ex.Number is 2812 or 208)
+            {
+                _logger.LogWarning(
+                    "CollectionSummary SP usp_Get{Prefix}_CS_Top5ReimbursementPct missing for lab {Lab}; falling back to live ClaimLevelData.",
+                    top5Prefix, labName);
+            }
         }
 
         // ?? Build WHERE clauses for the data query ??????????????
@@ -1630,19 +1716,27 @@ public sealed partial class SqlCollectionSummaryRepository : ICollectionSummaryR
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
-        // Labs with a dedicated Top5 read SP route through it.
+        // Same allowlist as aggregate Top5 Pay SP routing (NW/Phi/PCR/IHD). Cert/Aug/BT/Cove/Elix/RT
+        // read snapshot or inline — Azure Certus has refresh/Pay snapshot but not always Get Pay SP.
         var top5PayPrefix = LabCollectionPrefix.GetPrefix(labName);
-        if (string.Equals(top5PayPrefix, "NW", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(top5PayPrefix, "Aug", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(top5PayPrefix, "Phi", StringComparison.OrdinalIgnoreCase))
+        if (IsTop5ReimbursementPaySpLab(top5PayPrefix))
         {
-            return await GetTop5TotalPaymentsViaSpAsync(
-                connectionString, top5PayPrefix,
-                filterPayerNames, filterPanelNames,
-                filterFirstBillFrom, filterFirstBillTo,
-                filterDosFrom, filterDosTo,
-                filterCheckDateFrom, filterCheckDateTo,
-                ct).ConfigureAwait(false);
+            try
+            {
+                return await GetTop5TotalPaymentsViaSpAsync(
+                    connectionString, top5PayPrefix!,
+                    filterPayerNames, filterPanelNames,
+                    filterFirstBillFrom, filterFirstBillTo,
+                    filterDosFrom, filterDosTo,
+                    filterCheckDateFrom, filterCheckDateTo,
+                    ct).ConfigureAwait(false);
+            }
+            catch (SqlException ex) when (ex.Number is 2812 or 208)
+            {
+                _logger.LogWarning(
+                    "CollectionSummary SP usp_Get{Prefix}_CS_Top5ReimbursementPay missing for lab {Lab}; falling back to live ClaimLevelData.",
+                    top5PayPrefix, labName);
+            }
         }
 
         // ?? Build WHERE clauses ?????????????????????????????????

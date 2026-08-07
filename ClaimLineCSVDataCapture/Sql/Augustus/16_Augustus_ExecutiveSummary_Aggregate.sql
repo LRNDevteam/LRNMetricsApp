@@ -16,10 +16,10 @@
 -- "Cash Breakdown" / "Average Payment Per Claim" spec images):
 --
 --   PMS Breakdown
---   F      No. of Billed Claims          -> BillingStatus = Billed AND ClaimStatus <> 'Billed amount 0'
+--   F      No. of Billed Claims          -> FirstBilledDate <> '' AND ClaimStatus <> 'Billed amount 0'
 --   F.1      No. of Claims Billed in IRCM   -> F AND Source = IRCM
 --   F.2      No. of Claims Billed in Daq Billing -> F AND Source = Daq
---   G      No. of Unbilled Claims         -> BillingStatus = Blank AND ClaimStatus <> 'Billed amount 0'
+--   G      No. of Unbilled Claims         -> FirstBilledDate = '' AND ClaimStatus <> 'Billed amount 0'
 --   H      Client bill claims             -> ClaimStatus = 'Billed amount 0'
 --   I      No. of Fully Paid Claims       -> ClaimStatus = 'Fully Paid'
 --   J      No. of Patient Paid Claims     -> ClaimStatus = 'Patient paid'
@@ -33,10 +33,10 @@
 --   O.3      No. of No Response from Payor -> ClaimStatus = 'No Response'
 --
 --   Cash Breakdown
---   P      Total Billed ($)              -> Billed = Billed AND ClaimStatus <> 'Billed amount 0'; SUM(ChargeAmount)
+--   P      Total Billed ($)              -> FirstBilledDate <> '' AND ClaimStatus <> 'Billed amount 0'; SUM(ChargeAmount)
 --   P.1      Total Charge of Claims Billed (IRCM) -> P AND Source = IRCM
 --   P.2      Total Charge of Claims Billed (Daq)  -> P AND Source = Daq
---   Q      Total Unbilled ($)            -> Billed = Blank AND ClaimStatus <> 'Billed amount 0'; SUM(ChargeAmount)
+--   Q      Total Unbilled ($)            -> FirstBilledDate = '' AND ClaimStatus <> 'Billed amount 0'; SUM(ChargeAmount)
 --   R      Insurance Payment ($)         -> Ins. Payment > 0 AND ClaimStatus = 'Fully Paid'; SUM(InsurancePayment)
 --   S      Partially Paid ($)            -> ClaimStatus = 'Partially Paid'; SUM(InsurancePayment)
 --   T      Patient Paid ($)              -> Pat. Payment > 0; SUM(PatientPayment)

@@ -66,7 +66,7 @@ public sealed class SalesRepSummaryViewModel
 }
 
 /// <summary>
-/// One row of the Sales Rep Summary table — aggregated from Claim Level records for a single sales rep.
+/// One row of the Sales Rep Summary table ï¿½ aggregated from Claim Level records for a single sales rep.
 /// </summary>
 public sealed record SalesRepSummaryRow
 {
@@ -90,7 +90,7 @@ public sealed record SalesRepSummaryRow
     public decimal AverageAllowedAmount { get; init; }
     public decimal AverageInsurancePaidAmount { get; init; }
 
-    // Percentages (0–100, rounded to nearest int)
+    // Percentages (0ï¿½100, rounded to nearest int)
     public decimal AllowedOnBilledPct => TotalBilledCharges == 0 ? 0
         : Math.Round(TotalAllowedAmount / TotalBilledCharges * 100, 0);
 

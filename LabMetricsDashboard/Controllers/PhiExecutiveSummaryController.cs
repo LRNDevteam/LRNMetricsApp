@@ -31,6 +31,10 @@ public class PhiExecutiveSummaryController : Controller
             ["NWL"]               = "NW",
             ["PCRLabsofAmerica"]  = "PCR",
             ["PCRLOA"]            = "PCR",
+            ["PCR_Dx_AL"]         = "PCR",
+            ["PCR_Dx_CO"]         = "PCR",
+            ["PCRAL"]             = "PCR",
+            ["PCRCO"]             = "PCR",
             ["Beech_Tree"]        = "BT",
             ["RisingTides"]       = "RT",
         };

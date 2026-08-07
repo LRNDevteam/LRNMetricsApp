@@ -1,0 +1,97 @@
+﻿Warning: Null value is eliminated by an aggregate or other SET operation.
+2026-06-09 Jun 2026 559 May 2026 1900 -70.58 1864.83 -70.02 Jun (1-9) 559 May (1-9) 591 -5.41
+Sep 2025 Sep 438 0
+Oct 2025 Oct 831 0
+Nov 2025 Nov 853 0
+Dec 2025 Dec 1238 0
+Jan 2026 Jan 1681 0
+Feb 2026 Feb 1914 0
+Mar 2026 Mar 2293 0
+Apr 2026 Apr 2163 0
+May 2026 May 1900 0
+Jun 2026 Jun 559 1
+UTI,UTI (Specimen Source) 4857 35.02 236 189 -19.92
+Wound,Wound (Specimen Source) 2704 19.50 142 123 -13.38
+Womens Health,Womens Health (Specimen Source) 2023 14.59 69 93 34.78
+RPP,RPP (Specimen Source) 1532 11.05 61 86 40.98
+Fungus,Fungus (Specimen Source) 866 6.24 31 24 -22.58
+Comprehensive PGx Panel 514 3.71 12 0 -100.00
+Urinalysis,Urinalysis (Specimen Source) 431 3.11 15 3 -80.00
+STI,STI (Specimen Source) 367 2.65 10 21 110.00
+GI,GI (Specimen Source) 277 2.00 15 20 33.33
+6001 Stimulants,6002 Benzodiazepines,6003 Opiates/Synthetics,6004 Muscle Relaxers/Sleeping Aids,6005 208 1.50 0 0 NULL
+6001 Stimulants,6002 Benzodiazepines,6003 Opiates/Synthetics,6004 Muscle Relaxers/Sleeping Aids,6006 41 .30 0 0 NULL
+Comprehensive Panel 13 .09 0 0 NULL
+CARDIO & THROMBOPHILIA PANEL,ONCOLOGY PANEL 7 .05 0 0 NULL
+Screening 6 .04 0 0 NULL
+Unspecified 3 .02 0 0 NULL
+Dec 2025 0 1238 .00
+Jan 2026 0 1681 .00
+Feb 2026 0 1914 .00
+Mar 2026 0 2293 .00
+Apr 2026 0 2163 .00
+May 2026 0 1900 .00
+Jun 2026 0 559 .00
+Dec 2025 Dec 353
+Jan 2026 Jan 482
+Feb 2026 Feb 578
+Mar 2026 Mar 599
+Apr 2026 Apr 620
+May 2026 May 591
+Jun 2026 Jun 559
+Comprehensive PGx Panel 2025 12 0 23
+Comprehensive PGx Panel 2026 1 0 18
+Comprehensive PGx Panel 2026 2 0 16
+Comprehensive PGx Panel 2026 3 0 10
+Comprehensive PGx Panel 2026 4 0 26
+Comprehensive PGx Panel 2026 5 0 12
+Fungus,Fungus (Specimen Source) 2025 12 0 17
+Fungus,Fungus (Specimen Source) 2026 1 0 10
+Fungus,Fungus (Specimen Source) 2026 2 0 46
+Fungus,Fungus (Specimen Source) 2026 3 0 46
+Fungus,Fungus (Specimen Source) 2026 4 0 43
+Fungus,Fungus (Specimen Source) 2026 5 0 31
+Fungus,Fungus (Specimen Source) 2026 6 0 24
+RPP,RPP (Specimen Source) 2025 12 0 42
+RPP,RPP (Specimen Source) 2026 1 0 52
+RPP,RPP (Specimen Source) 2026 2 0 76
+RPP,RPP (Specimen Source) 2026 3 0 67
+RPP,RPP (Specimen Source) 2026 4 0 67
+RPP,RPP (Specimen Source) 2026 5 0 61
+RPP,RPP (Specimen Source) 2026 6 0 86
+STI,STI (Specimen Source) 2025 12 0 4
+STI,STI (Specimen Source) 2026 1 0 36
+STI,STI (Specimen Source) 2026 2 0 18
+STI,STI (Specimen Source) 2026 3 0 19
+STI,STI (Specimen Source) 2026 4 0 9
+STI,STI (Specimen Source) 2026 5 0 10
+STI,STI (Specimen Source) 2026 6 0 21
+Urinalysis,Urinalysis (Specimen Source) 2025 12 0 11
+Urinalysis,Urinalysis (Specimen Source) 2026 1 0 20
+Urinalysis,Urinalysis (Specimen Source) 2026 2 0 2
+Urinalysis,Urinalysis (Specimen Source) 2026 3 0 28
+Urinalysis,Urinalysis (Specimen Source) 2026 4 0 15
+Urinalysis,Urinalysis (Specimen Source) 2026 5 0 15
+Urinalysis,Urinalysis (Specimen Source) 2026 6 0 3
+UTI,UTI (Specimen Source) 2025 12 0 104
+UTI,UTI (Specimen Source) 2026 1 0 179
+UTI,UTI (Specimen Source) 2026 2 0 222
+UTI,UTI (Specimen Source) 2026 3 0 225
+UTI,UTI (Specimen Source) 2026 4 0 206
+UTI,UTI (Specimen Source) 2026 5 0 236
+UTI,UTI (Specimen Source) 2026 6 0 189
+Womens Health,Womens Health (Specimen Source) 2025 12 0 57
+Womens Health,Womens Health (Specimen Source) 2026 1 0 63
+Womens Health,Womens Health (Specimen Source) 2026 2 0 95
+Womens Health,Womens Health (Specimen Source) 2026 3 0 80
+Womens Health,Womens Health (Specimen Source) 2026 4 0 82
+Womens Health,Womens Health (Specimen Source) 2026 5 0 69
+Womens Health,Womens Health (Specimen Source) 2026 6 0 93
+Wound,Wound (Specimen Source) 2025 12 0 86
+Wound,Wound (Specimen Source) 2026 1 0 74
+Wound,Wound (Specimen Source) 2026 2 0 95
+Wound,Wound (Specimen Source) 2026 3 0 112
+Wound,Wound (Specimen Source) 2026 4 0 156
+Wound,Wound (Specimen Source) 2026 5 0 142
+Wound,Wound (Specimen Source) 2026 6 0 123
+SMOKE|LIS|OK

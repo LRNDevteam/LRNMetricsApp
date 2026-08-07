@@ -1,0 +1,1578 @@
+@model LabMetricsDashboard.Models.ExecSummaryLisDrillViewModel
+@using System.Globalization
+@{
+    ViewData["Title"] = "Insight Drill-Through — " + Model.MetricTitle;
+    Layout = "~/Views/Shared/_Layout.cshtml";
+
+    // WeekFolder end day → CutoffDate.Day → ComparableDayWindow → 9
+    var dayWin = AnalysisRangeInfo.ResolveComparableDayWindow(
+        Model.AnalysisRange?.WeekFolder,
+        Model.Summary.CutoffDate,
+        fallback: Model.ComparableDayWindow > 0 ? Model.ComparableDayWindow : 9);
+
+    var ci = CultureInfo.InvariantCulture;
+    // Cash drills must show US "$" — InvariantCulture's "C" uses ¤; server culture may use another symbol.
+    var usd = CultureInfo.GetCultureInfo("en-US");
+    bool isCash = Model.IsCashDrill;
+    string Num(long v)      => isCash ? v.ToString("C0", usd) : v.ToString("N0", ci);
+    string Dec(decimal? v)  => v is { } d
+        ? (isCash ? d.ToString("C0", usd) : d.ToString("#,##0.###", ci))
+        : "—";
+    string Pct(decimal? v)  => v is { } d ? (d >= 0 ? "+" : "") + d.ToString("0.0", ci) + "%" : "—";
+    string DeltaCls(decimal? v) => v is { } d ? (d >= 0 ? "up" : "down") : "flat";
+
+    var months      = Model.Monthly;
+    // Prefer the SP's IsPartial flag; if absent (older SP), treat the latest
+    // month as the in-progress/partial one so the caution banner still shows.
+    var partial     = months.FirstOrDefault(m => m.IsPartial)
+                      ?? (months.Count > 0 ? months[^1] : null);
+
+    // Trend chart: year-scoped drills show all months in range (e.g. Jan–Jul);
+    // Grand Total keeps a trailing window so bars stay readable.
+    const int idtMaxBars = 7;
+    var chartMonths = Model.Year != 0 || months.Count <= idtMaxBars
+        ? months
+        : months.Skip(months.Count - idtMaxBars).ToList();
+
+    // KPI / panel "Average 6 Months" label — WeekRange end month + 5 prior
+    // (matches SP Avg6 / Avg6Months: e.g. June end → Jan–Jun).
+    var avgMonthsForLabel = months.Count > 6 ? months.TakeLast(6).ToList() : months.ToList();
+    string latestSh = months.Count > 0 ? months[^1].ShortLabel : "";
+    string avgRange = avgMonthsForLabel.Count > 0
+        ? $"{avgMonthsForLabel[0].ShortLabel}–{avgMonthsForLabel[^1].ShortLabel}"
+        : "6-mo";
+    string periodRange = months.Count > 0 ? $"{months[0].ShortLabel}–{months[^1].ShortLabel}" : "";
+    string scopeYear = Model.Year == 0 ? (months.Count > 0 ? "" : "") : Model.Year.ToString();
+    string periodLabel = (periodRange + " " + (Model.Year == 0 ? "" : Model.Year.ToString())).Trim();
+
+    string prevMoLabel = string.IsNullOrEmpty(Model.Summary.PrevMonthLabel)
+        ? (months.Count >= 2 ? months[^2].ShortLabel : "Prev")
+        : (Model.Summary.PrevMonthLabel.Length >= 3 ? Model.Summary.PrevMonthLabel[..3] : Model.Summary.PrevMonthLabel);
+    string latestMoLabel = string.IsNullOrEmpty(Model.Summary.LatestMonthLabel)
+        ? (months.Count > 0 ? months[^1].ShortLabel : "Latest")
+        : (Model.Summary.LatestMonthLabel.Length >= 3 ? Model.Summary.LatestMonthLabel[..3] : Model.Summary.LatestMonthLabel);
+    bool isPmsSource = string.Equals(Model.SourceLabel, "ClaimLevelData", StringComparison.OrdinalIgnoreCase)
+                       && !Model.IsCashDrill;
+    string themeClass = Model.ChartThemeClass; // idt-lis | idt-pms | idt-cash
+    // Solid / partial / stack palette by theme
+    string barSolid = isCash ? "#BE7B2C" : isPmsSource || Model.IsFullyPaidInsight ? "#6B5B95" : "#1f7a46";
+    string barPartial = isCash ? "#E8D3B0" : isPmsSource || Model.IsFullyPaidInsight ? "#C4B8E0" : "#a8d5b5";
+    string[] stackPalette = isCash
+        ? ["#8B5A2B", "#BE7B2C", "#D4A574", "#E8D3B0"]
+        : isPmsSource || Model.IsFullyPaidInsight
+            ? ["#4A3F6B", "#6B5B95", "#8B7BB5", "#C4B8E0"]
+            : ["#145C32", "#1f7a46", "#3FA066", "#a8d5b5"];
+    bool useStacked = Model.UseStackedTrend;
+    bool hasRowHeading = !string.IsNullOrWhiteSpace(Model.RowTitleOverride);
+    // Only show the generic Samples/Billable/NotResulted blurb when this is a
+    // metric-level drill (no ES row heading). Row drills use RowTitleOverride.
+    string? metricDesc =
+        Model.DescriptionOverride != null ? Model.DescriptionOverride :
+        hasRowHeading ? null :
+        Model.IsBillable    ? "Specimens with a resulted status (RessultedStatus = 'Resulted')." :
+        Model.IsNotResulted ? "Samples collected but not yet resulted in the LIS — nothing downstream (billing, payment) can happen until this clears." :
+                              "All specimens received across all statuses (billable, self-pay, client-bill, rejected, not-resulted).";
+
+    // Chart scale (based on the visible window)
+    decimal maxVal = chartMonths.Count > 0 ? chartMonths.Max(m => (decimal)m.Total) : 0m;
+    decimal avgVal = Model.Summary.Avg6 ?? 0m;
+    decimal scale  = Math.Max(maxVal, avgVal);
+    if (scale <= 0) scale = 1;
+    scale *= 1.20m;                       // headroom above the tallest bar
+    decimal avgPct = avgVal / scale * 100m;
+    const double barsAreaPx = 254.0;      // chart height (280) minus x-label strip (26)
+
+    string cutoffStr = Model.Summary.CutoffDate?.ToString("MM/dd/yyyy", ci);
+}
+
+<style>
+    /* Page-local: fill ≥97% of main content width (layout is already container-fluid). */
+    .idt-wrap {
+        width: 97%;
+        max-width: none;
+        margin-inline: auto;
+    }
+    @@media (max-width: 768px) {
+        .idt-wrap { width: 100%; }
+    }
+    .idt-h1 { font-size: 1.6rem; font-weight: 800; color: #1f2733; margin: 0; }
+    .idt-sub { color: #6b7688; font-size: .92rem; margin-top: .35rem; max-width: none; }
+
+    .idt-warn {
+        display: flex; gap: .7rem; align-items: flex-start;
+        background: #fdeceb; border: 1px solid #f6cfcc; border-radius: 12px;
+        padding: .9rem 1.1rem; margin: 1.1rem 0 .4rem; color: #9a3b34; font-size: .9rem; line-height: 1.5;
+    }
+    .idt-warn .bi { color: #d97b34; font-size: 1.1rem; margin-top: .05rem; }
+
+    .idt-back { display: inline-flex; align-items: center; gap: .4rem; color: #3a4c66;
+                text-decoration: none; font-weight: 600; font-size: .9rem; margin: 1rem 0; }
+    .idt-back:hover { color: #12808f; }
+
+    .idt-metric-head { display: flex; align-items: center; gap: .6rem; margin-top: .4rem; }
+    .idt-metric-title { font-size: 1.5rem; font-weight: 800; color: #1f2733; margin: 0; }
+
+    .idt-tag { display: inline-flex; align-items: center; font-size: .72rem; font-weight: 700;
+               padding: .2rem .6rem; border-radius: 999px; letter-spacing: .01em; }
+    .idt-tag-real  { background: #e4f5ea; color: #1f7a46; }
+    .idt-tag-amber { background: #fbf3e2; color: #9a7220; border: 1px solid #eddcb5; }
+    .idt-metric-desc { color: #6b7688; font-size: .92rem; margin: .55rem 0 0; }
+
+    /* KPI cards */
+    .idt-kpis { display: grid; gap: .9rem; margin: 1.1rem 0;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+    .idt-kpi { background: #fff; border: 1px solid #e6eaf0; border-radius: 14px; padding: 1rem 1.15rem; }
+    .idt-kpi-label { font-size: .68rem; letter-spacing: .06em; text-transform: uppercase;
+                     color: #8a94a6; font-weight: 700; }
+    .idt-kpi-value { font-size: 1.9rem; font-weight: 800; color: #1f2733; margin-top: .35rem; letter-spacing: -.01em; }
+    .idt-kpi-value.up   { color: #1f7a46; }
+    .idt-kpi-value.down { color: #b23b34; }
+
+    /* Panel card */
+    .idt-card { background: #fff; border: 1px solid #e6eaf0; border-radius: 16px; padding: 1.2rem 1.3rem; margin: 1.1rem 0; }
+    .idt-card-head { display: flex; align-items: center; gap: .6rem; margin-bottom: 1rem; }
+    .idt-card-title { font-size: 1.05rem; font-weight: 800; color: #1f2733; margin: 0; }
+
+    /* Two-column row: trend (left 50%) + 9-day/result-rate tabs (right 50%) */
+    .idt-2col { display: flex; gap: 1.1rem; align-items: flex-start; }
+    .idt-2col > details { flex: 1 1 0; min-width: 0; }
+    /* Equal, fixed height when open; inner region scrolls on overflow. */
+    .idt-2col > details[open] { height: 430px; display: flex; flex-direction: column; overflow: hidden; }
+    .idt-2col > details[open] > summary,
+    .idt-2col > details[open] > .idt-tabs { flex: 0 0 auto; }
+    .idt-cardscroll { flex: 1 1 auto; min-height: 0; max-height: 300px; overflow-y: auto; }
+    .idt-cardscroll .idt-tbl thead th { position: sticky; top: 0; background: #fff; z-index: 1; }
+
+    /* Insurance Balance: Stacked (50%) + Breakdown (50%) — compact type */
+    .idt-ib-row > details[open] { height: 400px; }
+    .idt-ib-row .idt-card-title { font-size: .88rem; }
+    .idt-ib-row .idt-tag { font-size: .62rem; padding: .12rem .4rem; }
+    .idt-ib-row .idt-chart { height: 220px; margin-top: .7rem; }
+    .idt-ib-row .idt-bar-val { font-size: .58rem; }
+    .idt-ib-row .idt-bars { gap: 8px; }
+    .idt-ib-row .idt-legend { gap: .65rem; margin-top: .55rem; font-size: .7rem; }
+    .idt-ib-row .idt-swatch { width: 10px; height: 10px; }
+    .idt-ib-row .idt-foot { font-size: .72rem; margin-top: .55rem; }
+    .idt-ib-row .idt-tbl thead th { font-size: .62rem; padding: .35rem .25rem; }
+    .idt-ib-row .idt-tbl td { font-size: .78rem; padding: .42rem .25rem; }
+    .idt-ib-row .idt-tbl td.name { font-size: .76rem; }
+    .idt-ib-status {
+        display: inline-flex; align-items: center; gap: .35rem;
+        font-weight: 700;
+    }
+    .idt-ib-status .idt-swatch { flex: 0 0 auto; }
+
+    @@media (max-width: 860px) {
+        .idt-2col { flex-direction: column; }
+        .idt-2col > details { width: 100%; }
+        .idt-2col > details[open] { height: auto; }
+        .idt-ib-row > details[open] { height: auto; }
+    }
+
+    /* Trend chart (fills its column) */
+    .idt-chart { position: relative; height: 280px; margin-top: 1.2rem; }
+    .idt-bars { position: absolute; inset: 0 0 26px 0; display: flex; align-items: flex-end;
+                gap: 12px; padding: 0 4px; }
+    .idt-bar-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; }
+    .idt-bar { width: 72%; max-width: 60px; border-radius: 8px 8px 0 0; background: #1f7a46; }
+    .idt-bar.partial { background: #a8d5b5; }
+    /* Theme: LIS = green, PMS = violet, Cash = brown */
+    .idt-lis .idt-bar,
+    .idt-wrap.idt-lis .idt-bar { background: #1f7a46; }
+    .idt-lis .idt-bar.partial,
+    .idt-wrap.idt-lis .idt-bar.partial { background: #a8d5b5; }
+    .idt-lis .idt-swatch,
+    .idt-wrap.idt-lis .idt-swatch { background: #1f7a46; }
+    .idt-lis .idt-tab.active { color: #1f7a46; border-bottom-color: #1f7a46; }
+
+    .idt-pms .idt-bar,
+    .idt-wrap.idt-pms .idt-bar { background: #6B5B95; }
+    .idt-pms .idt-bar.partial,
+    .idt-wrap.idt-pms .idt-bar.partial { background: #C4B8E0; }
+    .idt-pms .idt-swatch,
+    .idt-wrap.idt-pms .idt-swatch { background: #6B5B95; }
+    .idt-pms .idt-tab.active { color: #6B5B95; border-bottom-color: #6B5B95; }
+
+    .idt-cash .idt-bar,
+    .idt-wrap.idt-cash .idt-bar { background: #BE7B2C; }
+    .idt-cash .idt-bar.partial,
+    .idt-wrap.idt-cash .idt-bar.partial { background: #E8D3B0; }
+    .idt-cash .idt-swatch,
+    .idt-wrap.idt-cash .idt-swatch { background: #BE7B2C; }
+    .idt-cash .idt-tab.active { color: #BE7B2C; border-bottom-color: #BE7B2C; }
+
+    /* Stacked bars (Insurance Balance subcategories) */
+    .idt-bar-stack {
+        width: 72%; max-width: 60px;
+        display: flex; flex-direction: column-reverse; justify-content: flex-start;
+        border-radius: 8px 8px 0 0; overflow: hidden;
+    }
+    .idt-stack-seg { width: 100%; min-height: 0; flex: 0 0 auto; }
+    .idt-stack-seg:last-child { border-radius: 8px 8px 0 0; }
+    .idt-bar-val { font-size: .68rem; font-weight: 700; color: #33475b; margin-bottom: 4px;
+                   font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .idt-bar-x { position: absolute; bottom: 0; font-size: .74rem; color: #6b7688; font-family: ui-monospace, monospace; }
+    .idt-avgline { position: absolute; left: 4px; right: 4px; border-top: 2px dashed #7c8698; }
+    .idt-avglabel { position: absolute; right: .6rem; transform: translateY(-1.35rem);
+                    font-size: .78rem; color: #6b7688; font-family: ui-monospace, monospace; }
+    .idt-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 1.1rem; margin-top: .9rem; font-size: .8rem; color: #6b7688; }
+    .idt-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; background: #1f7a46; margin-right: .35rem; vertical-align: middle; }
+
+    /* Panel / rate tables */
+    .idt-tbl { width: 100%; border-collapse: collapse; }
+    .idt-tbl thead th { text-align: left; font-size: .7rem; letter-spacing: .05em; text-transform: uppercase;
+                        color: #8a94a6; font-weight: 700; padding: .5rem .4rem; border-bottom: 1px solid #eceff3; }
+    .idt-tbl thead th.r, .idt-tbl td.r { text-align: right; }
+    .idt-tbl td { padding: .7rem .4rem; border-bottom: 1px solid #f1f3f6; font-size: .92rem; color: #2b3441; vertical-align: middle; }
+    .idt-tbl td.name { font-weight: 600; }
+    .idt-num { font-variant-numeric: tabular-nums; }
+    .idt-sharebar { height: 9px; border-radius: 6px; background: #eef1f4; overflow: hidden; margin-bottom: .3rem; }
+    .idt-sharebar > i { display: block; height: 100%; background: #bfe0d0; border-radius: 6px; }
+    .idt-share-pct { font-size: .82rem; color: #4a5666; font-variant-numeric: tabular-nums; }
+    .idt-foot { color: #8a94a6; font-size: .82rem; margin-top: 1rem; }
+    .delta.up { color: #1f7a46; } .delta.down { color: #b23b34; } .delta.flat { color: #8a94a6; }
+
+    /* Tab pane subheads (By Panel · MOM · Insurance) */
+    .idt-subhead {
+        display: flex; align-items: center; gap: .55rem; flex-wrap: wrap;
+        font-size: .95rem; font-weight: 800; color: #1f2733; margin: 0 0 .85rem;
+    }
+    .idt-note { color: #6b7688; font-size: .88rem; line-height: 1.5; margin: .2rem 0 1rem; }
+
+    /* Insurance → Panel Group nested accordion */
+    .idt-ins-parent { cursor: pointer; user-select: none; }
+    .idt-ins-parent:hover td { background: #f7fafc; }
+    .idt-ins-parent td.name { display: flex; align-items: center; gap: .45rem; }
+    .idt-ins-chevron {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 1.05rem; height: 1.05rem; flex: 0 0 auto;
+        color: #9aa4b2; font-size: .72rem; line-height: 1;
+        transition: transform .18s ease;
+    }
+    .idt-ins-parent[aria-expanded="true"] .idt-ins-chevron { transform: rotate(90deg); }
+    .idt-ins-child td { padding-top: .45rem; padding-bottom: .45rem; font-size: .86rem;
+                        color: #4a5666; background: #fafbfc; border-bottom-color: #eef1f4; }
+    .idt-ins-child td.name { font-weight: 500; padding-left: 1.85rem; color: #5a6575; }
+    .idt-ins-child td.name::before {
+        content: ''; display: inline-block; width: .55rem; height: .55rem;
+        margin-right: .45rem; border-left: 1.5px solid #c5ced8; border-bottom: 1.5px solid #c5ced8;
+        vertical-align: .15rem; opacity: .7;
+    }
+
+    /* Panel → Clinic accordion (default open) */
+    .idt-pc-toolbar { display: flex; align-items: center; gap: .55rem; margin: 0 0 .85rem; flex-wrap: wrap; }
+    .idt-pc-toolbar .idt-daynote { font-size: .8rem; color: #6b7688; margin-right: auto; }
+    .idt-pc-btn {
+        border: 1px solid #d5dbe3; background: #fff; color: #3a4c66;
+        font-size: .78rem; font-weight: 700; padding: .28rem .7rem; border-radius: 8px; cursor: pointer;
+    }
+    .idt-pc-btn:hover { background: #f4f7fa; border-color: #b8c2cf; }
+    .idt-pc-parent { cursor: pointer; user-select: none; background: #eef6fb; }
+    .idt-pc-parent:hover td { background: #e4f0f8; }
+    .idt-pc-parent td { font-weight: 700; }
+    .idt-pc-parent td.name { display: flex; align-items: center; gap: .45rem; }
+    .idt-pc-chevron {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 1.05rem; height: 1.05rem; flex: 0 0 auto;
+        color: #6b8799; font-size: .72rem; line-height: 1;
+        transition: transform .18s ease;
+    }
+    .idt-pc-parent[aria-expanded="true"] .idt-pc-chevron { transform: rotate(90deg); }
+    .idt-pc-child td { padding-top: .45rem; padding-bottom: .45rem; font-size: .86rem; color: #4a5666; background: #fafbfc; }
+    .idt-pc-child td.name { font-weight: 500; padding-left: 1.85rem; color: #5a6575; }
+    .idt-pc-child td.name::before {
+        content: ''; display: inline-block; width: .55rem; height: .55rem;
+        margin-right: .45rem; border-left: 1.5px solid #c5ced8; border-bottom: 1.5px solid #c5ced8;
+        vertical-align: .15rem; opacity: .7;
+    }
+    .idt-pc-child:nth-child(even of .idt-pc-child) td { background: #f5f8fb; }
+
+    /* Collapsible cards (details/summary) */
+    details.idt-card > summary {
+        list-style: none; cursor: pointer; user-select: none;
+        display: flex; align-items: center; gap: .6rem; margin-bottom: 1rem;
+    }
+    details.idt-card > summary::-webkit-details-marker { display: none; }
+    details.idt-card > summary::after {
+        content: '\25BE'; margin-left: auto; color: #9aa4b2; font-size: 1rem; transition: transform .2s;
+    }
+    details.idt-card:not([open]) > summary::after { transform: rotate(-90deg); }
+    details.idt-card:not([open]) > summary { margin-bottom: 0; }
+
+    /* Tabs */
+    .idt-tabs { display: flex; gap: .3rem; margin-bottom: 1rem; border-bottom: 1px solid #eceff3; }
+    .idt-tab { border: none; background: none; font-size: .82rem; font-weight: 700; color: #8a94a6;
+               padding: .55rem .95rem; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .idt-tab:hover { color: #4a5666; }
+    .idt-tab.active { color: #1f7a46; border-bottom-color: #1f7a46; }
+    .idt-tabpane[hidden] { display: none; }
+
+    /* Download / Print PDF toolbar */
+    .idt-toolbar {
+        display: flex; align-items: center; justify-content: space-between; gap: .75rem;
+        flex-wrap: wrap; margin: 1rem 0;
+    }
+    .idt-toolbar .idt-back { margin: 0; }
+    .idt-print-btn {
+        display: inline-flex; align-items: center; gap: .4rem;
+        border: 1px solid #c5ced8; background: #fff; color: #3a4c66;
+        font-size: .86rem; font-weight: 700; padding: .42rem .9rem; border-radius: 8px; cursor: pointer;
+    }
+    .idt-print-btn:hover { background: #f4f7fa; border-color: #b8c2cf; color: #12808f; }
+    .idt-print-only { display: none !important; }
+
+    /* Browser Print → Save as PDF (no server PDF library in this project). */
+    @@media print {
+        @@page { size: letter; margin: .55in .5in; }
+
+        body { background: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .lmd-navbar, .lmd-menubar, .lmd-breadcrumb, footer.footer,
+        .idt-no-print, .idt-toolbar .idt-print-btn, .idt-pc-btn, .idt-tabs { display: none !important; }
+
+        .container-fluid { padding-left: 0 !important; padding-right: 0 !important; }
+        .idt-wrap { width: 100% !important; max-width: none !important; margin: 0 !important; }
+
+        .idt-chart, .idt-legend { display: none !important; }
+        .idt-print-only { display: block !important; }
+        table.idt-print-only { display: table !important; width: 100%; margin-top: .75rem; }
+        .idt-print-subhead {
+            font-size: .95rem; font-weight: 800; color: #1f2733;
+            margin: 0 0 .55rem;
+        }
+
+        .idt-2col { display: block !important; }
+        .idt-2col > details { width: 100% !important; height: auto !important; overflow: visible !important; }
+        .idt-cardscroll { max-height: none !important; overflow: visible !important; }
+        .idt-tbl thead th { position: static !important; }
+
+        .idt-tabpane[hidden] { display: block !important; }
+        .idt-tabpane + .idt-tabpane { margin-top: 1.1rem; padding-top: .9rem; border-top: 1px solid #eceff3; }
+
+        details.idt-card { break-inside: avoid; page-break-inside: avoid; }
+        details.idt-card > summary::after { display: none !important; }
+
+        .idt-kpi { break-inside: avoid; }
+        .idt-back { display: none !important; }
+    }
+</style>
+
+<div class="idt-wrap @themeClass">
+    <h1 class="idt-h1">Executive Summary — Insight Drill-Through</h1>
+    <div class="idt-sub">Analytical drill-through sourced live from LIMSMaster.</div>
+
+    <div class="mt-2">
+        @await Html.PartialAsync("_AnalysisRangeBanner", Model.AnalysisRange)
+        @if (!string.IsNullOrWhiteSpace(Model.LimsRunId))
+        {
+            <div class="px-1" style="font-size:.82rem;color:#374151;margin-top:-.35rem">
+                <span class="fw-semibold text-secondary" style="font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;">LIMS RunID:</span>
+                <span class="ms-1 fw-semibold" style="color:#0e3460;">@Model.LimsRunId</span>
+            </div>
+        }
+    </div>
+
+    @if (string.IsNullOrEmpty(Model.ErrorMessage) && partial is not null)
+    {
+        <div class="idt-warn">
+            <i class="bi bi-exclamation-triangle-fill"></i>
+            <div>
+                <strong>Read @partial.MonthLabel with care:</strong> the report’s data range cuts off at @(cutoffStr ?? "the latest run date"), so the @partial.MonthLabel column reflects roughly the start of the month only. Month-over-month comparisons treat @partial.ShortLabel as partial; Average 6 Months still includes it. Treat any "@partial.ShortLabel drop" as a cutoff artifact, not a real trend, unless a metric says otherwise.
+            </div>
+        </div>
+    }
+
+    <div class="idt-toolbar">
+        <a href="@Model.BackUrl" class="idt-back"><i class="bi bi-arrow-left"></i> Back to Executive Summary</a>
+        <button type="button" class="idt-print-btn" id="idt-download-pdf" title="Opens the browser print dialog — choose Save as PDF">
+            <i class="bi bi-file-earmark-pdf"></i> Download / Print PDF
+        </button>
+    </div>
+
+    <div class="idt-metric-head">
+        <h2 class="idt-metric-title">@Model.MetricTitle</h2>
+        <span class="idt-tag idt-tag-amber">Scope: @Model.ScopeLabel</span>
+    </div>
+    @if (Model.IsFullyPaidInsight)
+    {
+        <div style="display:flex;gap:.45rem;flex-wrap:wrap;margin-top:.55rem">
+            <span class="idt-tag idt-tag-real">Core figures: real</span>
+        </div>
+    }
+    @if (Model.IsMismatchFormulaInsight)
+    {
+        <div style="display:flex;gap:.45rem;flex-wrap:wrap;margin-top:.55rem">
+            <span class="idt-tag idt-tag-real">Formula — PMS − LIS</span>
+        </div>
+    }
+    @if (!string.IsNullOrWhiteSpace(metricDesc))
+    {
+        <p class="idt-metric-desc">@metricDesc</p>
+    }
+
+    @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+    {
+        <div class="idt-warn" style="background:#fbf3e2;border-color:#eddcb5;color:#8a6d20">
+            <i class="bi bi-info-circle-fill"></i><div>@Model.ErrorMessage</div>
+        </div>
+    }
+    else if (!Model.HasData && Model.IsMismatchFormulaInsight)
+    {
+        @* Should be rare after ES backfill — never use the claim-filter dead-end copy. *@
+        <div class="idt-card text-center text-muted" style="padding:1.4rem">
+            <div>This mismatch metric is a period count difference (PMS Billed − LIS Billed), not a claim-level filter.</div>
+            @if (Model.SelectedValue is { } svMis && svMis != 0)
+            {
+                <div class="mt-2" style="font-size:.9rem">
+                    Executive Summary cell showed <strong>@(((long)svMis).ToString("N0"))</strong>.
+                    Summary KPIs could not be loaded from <code>usp_Get*_ExecutiveSummary</code> for this lab/year.
+                </div>
+            }
+        </div>
+    }
+    else if (!Model.HasData)
+    {
+        <div class="idt-card text-center text-muted" style="padding:1.4rem">
+            <div>No claim-level records matched this drill filter.</div>
+            @if (Model.SelectedValue is { } sv && sv != 0)
+            {
+                <div class="mt-2" style="font-size:.9rem">
+                    Executive Summary cell showed <strong>@(isCash ? sv.ToString("C0", usd) : ((long)sv).ToString("N0"))</strong>.
+                </div>
+            }
+        </div>
+    }
+    else
+    {
+        var s = Model.Summary;
+
+        <!-- KPI cards -->
+        <div class="idt-kpis">
+            <div class="idt-kpi">
+                <div class="idt-kpi-label">Latest (@latestSh@(partial is not null ? " · Partial" : ""))</div>
+                <div class="idt-kpi-value">@Num(s.LatestCount)</div>
+            </div>
+            <div class="idt-kpi">
+                <div class="idt-kpi-label">MoM Change</div>
+                <div class="idt-kpi-value @DeltaCls(s.MoMChangePct)">@Pct(s.MoMChangePct)</div>
+            </div>
+            <div class="idt-kpi">
+                <div class="idt-kpi-label">Avg 6 Months (@avgRange)</div>
+                <div class="idt-kpi-value">@Dec(s.Avg6)</div>
+            </div>
+            <div class="idt-kpi">
+                <div class="idt-kpi-label">Vs. Avg</div>
+                <div class="idt-kpi-value @DeltaCls(s.CurrVsAvgPct)">@Pct(s.CurrVsAvgPct)</div>
+            </div>
+        </div>
+
+        <!-- Trend (left) + 9-day/result-rate tabs (right), 50/50 -->
+        <div class="idt-2col">
+        @if (months.Count > 0)
+        {
+            <details class="idt-card @themeClass" open>
+                <summary class="idt-card-head">
+                    <h3 class="idt-card-title">Monthly Trend@(string.IsNullOrEmpty(scopeYear) ? "" : " — " + scopeYear)</h3>
+                    @if (Model.ShowTrendFromSummaryBadge)
+                    {
+                        <span class="idt-tag idt-tag-real">@(Model.IsMismatchFormulaInsight ? "Formula — PMS − LIS" : "Real — from summary")</span>
+                    }
+                    <span class="idt-tag">MoM</span>
+                </summary>
+                <div class="idt-chart">
+                    @if (avgVal > 0)
+                    {
+                        var avgBottomPx = (26.0 + (double)avgPct / 100.0 * barsAreaPx).ToString("0.##", ci);
+                        <div class="idt-avgline" style="bottom:@(avgBottomPx)px">
+                            <span class="idt-avglabel">avg (@avgRange)</span>
+                        </div>
+                    }
+                    <div class="idt-bars">
+                        @foreach (var m in chartMonths)
+                        {
+                            var isPartialBar = m.IsPartial || ReferenceEquals(m, partial);
+                            var hPct = ((double)((decimal)m.Total / scale * 100m)).ToString("0.##", ci);
+                            <div class="idt-bar-col">
+                                <span class="idt-bar-val">@Num(m.Total)</span>
+                                <div class="idt-bar @(isPartialBar ? "partial" : "")"
+                                     style="height:@hPct%;background:@(isPartialBar ? barPartial : barSolid)"
+                                     title="@m.MonthLabel: @Num(m.Total)"></div>
+                            </div>
+                        }
+                    </div>
+                    <div class="idt-bars" style="inset:auto 0 0 0; height:26px; align-items:flex-end;">
+                        @foreach (var m in chartMonths)
+                        {
+                            <div class="idt-bar-col" style="justify-content:flex-end;">
+                                <span style="font-size:.74rem;color:#6b7688;font-family:ui-monospace,monospace;">@m.ShortLabel</span>
+                            </div>
+                        }
+                    </div>
+                </div>
+                <div class="idt-legend">
+                    <span><span class="idt-swatch" style="background:@barSolid"></span>@Model.MetricTitle</span>
+                    @if (partial is not null)
+                    {
+                        <span><span class="idt-swatch" style="background:@barPartial"></span>Faded bar = partial month (@partial.ShortLabel)</span>
+                    }
+                </div>
+                @* Print/PDF: chart → table (browser print cannot reliably render bar charts). *@
+                <table class="idt-tbl idt-print-only" aria-label="Monthly trend for PDF">
+                    <thead>
+                        <tr>
+                            <th>Month</th>
+                            <th class="r">@Model.MetricTitle</th>
+                            <th class="r">Partial</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var m in months)
+                        {
+                            var isPartialRow = m.IsPartial || ReferenceEquals(m, partial);
+                            <tr>
+                                <td class="name">@m.MonthLabel</td>
+                                <td class="r idt-num">@Num(m.Total)</td>
+                                <td class="r">@(isPartialRow ? "Yes" : "")</td>
+                            </tr>
+                        }
+                        @if (avgVal > 0)
+                        {
+                            <tr>
+                                <td class="name">Avg 6 Months (@avgRange)</td>
+                                <td class="r idt-num">@Dec(s.Avg6)</td>
+                                <td class="r"></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </details>
+        }
+
+        @* N-Day Range & Result Rate — tabbed, collapsible *@
+        @if (Model.NineDayRange.Count > 0 || Model.RatePanels.Count > 0)
+        {
+            <details class="idt-card" open>
+                <summary class="idt-card-head">
+                    <h3 class="idt-card-title">@dayWin-Day Range &amp; Result Rate</h3>
+                </summary>
+                <div class="idt-tabs">
+                    <button type="button" class="idt-tab active" data-idt-tab="d9">Data for @dayWin Days Range</button>
+                    <button type="button" class="idt-tab" data-idt-tab="rr">Result Rate</button>
+                </div>
+
+                <div class="idt-cardscroll">
+                <div class="idt-tabpane" data-idt-pane="d9">
+                    <h4 class="idt-print-only idt-print-subhead">Data for @dayWin Days Range</h4>
+                    @if (Model.NineDayRange.Count > 0)
+                    {
+                        <table class="idt-tbl">
+                            <thead>
+                                <tr>
+                                    <th>Metric</th>
+                                    @foreach (var d in Model.NineDayRange)
+                                    {
+                                        <th class="r">@d.ShortLabel</th>
+                                    }
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td class="name">Received — first @dayWin days</td>
+                                    @foreach (var d in Model.NineDayRange)
+                                    {
+                                        <td class="r idt-num">@Num(d.Received9)</td>
+                                    }
+                                </tr>
+                            </tbody>
+                        </table>
+                        <div class="idt-foot">@(isCash ? "Dollar amounts" : "Samples received") in the first @dayWin days of each month — the comparable window while the current month is partial@(isCash ? " (DayWindow only on this band)" : "").</div>
+                    }
+                    else
+                    {
+                        <div class="idt-foot">No @dayWin-day data available for this selection.</div>
+                    }
+                </div>
+
+                <div class="idt-tabpane" data-idt-pane="rr" hidden>
+                    <h4 class="idt-print-only idt-print-subhead">Result Rate</h4>
+                    @if (Model.RatePanels.Count > 0)
+                    {
+                        var rrMonths = Model.RatePanels
+                            .Select(x => (x.Year, x.Month)).Distinct()
+                            .OrderBy(x => x.Year).ThenBy(x => x.Month).ToList();
+                        var rrPanels = Model.RatePanels
+                            .GroupBy(x => x.Panel)
+                            .Select(g => new { Panel = g.Key, Recv = g.Sum(v => v.Received9) })
+                            .OrderByDescending(x => x.Recv)
+                            .Select(x => x.Panel).ToList();
+                        var rrLookup = Model.RatePanels
+                            .GroupBy(x => (x.Panel, x.Year, x.Month))
+                            .ToDictionary(g => g.Key, g => g.First());
+                        string RrMon(int y, int m) =>
+                            y is >= 1 and <= 9999 && m is >= 1 and <= 12
+                                ? new DateTime(y, m, 1).ToString("MMM", ci).ToUpperInvariant()
+                                : "—";
+
+                        <table class="idt-tbl">
+                            <thead>
+                                <tr>
+                                    <th>Panel</th>
+                                    @foreach (var (y, m) in rrMonths)
+                                    {
+                                        <th class="r">@RrMon(y, m)</th>
+                                    }
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var pn in rrPanels)
+                                {
+                                    <tr>
+                                        <td class="name">@pn</td>
+                                        @foreach (var (y, m) in rrMonths)
+                                        {
+                                            if (rrLookup.TryGetValue((pn, y, m), out var cell) && cell.Received9 > 0)
+                                            {
+                                                var rate = (double)cell.Resulted9 / cell.Received9 * 100.0;
+                                                <td class="r idt-num" title="@Num(cell.Resulted9) / @Num(cell.Received9)">@rate.ToString("0", ci)%</td>
+                                            }
+                                            else
+                                            {
+                                                <td class="r idt-num">—</td>
+                                            }
+                                        }
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                        <div class="idt-foot">Samples resulted in the first @dayWin days ÷ samples received in the first @dayWin days, per panel per month.</div>
+                    }
+                    else
+                    {
+                        <div class="idt-foot">No result-rate data available for this selection.</div>
+                    }
+                </div>
+                </div>
+            </details>
+        }
+        </div>
+
+        @* Billed vs. Billed Mismatches — same ES summary row as the PMS grid (pmsgrid) *@
+        @if (Model.HasSummaryMismatch)
+        {
+            var mmMonths = Model.SummaryMismatchMonths
+                .Select(x => (x.Year, x.Month))
+                .Distinct()
+                .OrderBy(x => x.Year).ThenBy(x => x.Month)
+                .ToList();
+            // Match the trend chart's visible trailing window when possible.
+            if (chartMonths.Count > 0 && mmMonths.Count > chartMonths.Count)
+                mmMonths = mmMonths.Skip(mmMonths.Count - chartMonths.Count).ToList();
+
+            var mmLookup = Model.SummaryMismatchMonths
+                .GroupBy(x => (x.Year, x.Month))
+                .ToDictionary(g => g.Key, g => g.Sum(v => v.Count));
+            string MmMon(int y, int m) =>
+                y is >= 1 and <= 9999 && m is >= 1 and <= 12
+                    ? new DateTime(y, m, 1).ToString("MMM", ci).ToUpperInvariant()
+                    : "—";
+            var mmTitle = string.IsNullOrWhiteSpace(Model.SummaryMismatchTitle)
+                ? "Billed Mismatches"
+                : Model.SummaryMismatchTitle!;
+
+            <details class="idt-card" open>
+                <summary class="idt-card-head">
+                    <h3 class="idt-card-title">Billed vs. Billed Mismatches (real, from summary)</h3>
+                    <span class="idt-tag idt-tag-real">Real</span>
+                </summary>
+                <table class="idt-tbl">
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            @foreach (var (y, m) in mmMonths)
+                            {
+                                <th class="r">@MmMon(y, m)</th>
+                            }
+                            <th class="r">Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="name">@mmTitle</td>
+                            @foreach (var (y, m) in mmMonths)
+                            {
+                                var cell = mmLookup.TryGetValue((y, m), out var cv) ? cv : 0L;
+                                <td class="r idt-num">@(cell == 0 ? "—" : cell.ToString("N0", ci))</td>
+                            }
+                            <td class="r idt-num" style="font-weight:700">@Num(Model.SummaryMismatchTotal)</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div class="idt-foot">Shown against the Billed total above.</div>
+            </details>
+        }
+
+        @* Fully Paid Rate vs. Billed Claims — always for Fully Paid PMS (even if months empty) *@
+        @if (Model.IsFullyPaidInsight)
+        {
+            var rateMonths = Model.FullyPaidRateMonths.ToList();
+            // Align visible window with the Monthly Trend chart when possible.
+            if (chartMonths.Count > 0 && rateMonths.Count > chartMonths.Count)
+                rateMonths = rateMonths.Skip(rateMonths.Count - chartMonths.Count).ToList();
+
+            var rateMax = rateMonths.Where(x => x.RatePct is not null).Select(x => x.RatePct!.Value)
+                .DefaultIfEmpty(0m).Max();
+            var rateAvg = Model.FullyPaidRateAvg ?? 0m;
+            var rateScale = Math.Max(rateMax, rateAvg);
+            if (rateScale <= 0) rateScale = 100m;
+            rateScale *= 1.15m;
+            var rateAvgPct = rateAvg / rateScale * 100m;
+            var rateAvgRange = Model.FullyPaidRateAvgRange ?? avgRange;
+            string RateMon(int y, int m) =>
+                y is >= 1 and <= 9999 && m is >= 1 and <= 12
+                    ? new DateTime(y, m, 1).ToString("MMM", ci).ToUpperInvariant()
+                    : "—";
+
+            <details class="idt-card @themeClass" open>
+                <summary class="idt-card-head">
+                    <h3 class="idt-card-title">Fully Paid Rate vs. Billed Claims</h3>
+                    <span class="idt-tag idt-tag-real">Real</span>
+                </summary>
+                @if (rateMonths.Count == 0)
+                {
+                    <div class="idt-foot">Rate series unavailable for this selection. Confirm <code>usp_Get*_ExecutiveSummary</code> returns PMS Fully Paid and Billed rows, or redeploy <code>LisDrillRowDef</code> Sec1 (Billed denominator) for this lab.</div>
+                }
+                else
+                {
+                <div class="idt-chart">
+                    @if (rateAvg > 0)
+                    {
+                        var avgBottomPx = (26.0 + (double)rateAvgPct / 100.0 * barsAreaPx).ToString("0.##", ci);
+                        <div class="idt-avgline" style="bottom:@(avgBottomPx)px">
+                            <span class="idt-avglabel">avg (@rateAvgRange)</span>
+                        </div>
+                    }
+                    <div class="idt-bars">
+                        @foreach (var rm in rateMonths)
+                        {
+                            var isPartialBar = rm.IsPartial;
+                            if (rm.RatePct is { } rp)
+                            {
+                                var hPct = ((double)(rp / rateScale * 100m)).ToString("0.##", ci);
+                                <div class="idt-bar-col">
+                                    <span class="idt-bar-val">@rp.ToString("0.0", ci)%</span>
+                                    <div class="idt-bar @(isPartialBar ? "partial" : "")"
+                                         style="height:@hPct%;background:@(isPartialBar ? barPartial : barSolid)"
+                                         title="@rm.MonthLabel: @rm.FullyPaidCount.ToString("N0", ci) / @rm.BilledCount.ToString("N0", ci) = @rp.ToString("0.0", ci)%"></div>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="idt-bar-col">
+                                    <span class="idt-bar-val">—</span>
+                                    <div class="idt-bar partial" style="height:0;background:@barPartial" title="@rm.MonthLabel: —"></div>
+                                </div>
+                            }
+                        }
+                    </div>
+                    <div class="idt-bars" style="inset:auto 0 0 0; height:26px; align-items:flex-end;">
+                        @foreach (var rm in rateMonths)
+                        {
+                            <div class="idt-bar-col" style="justify-content:flex-end;">
+                                <span style="font-size:.74rem;color:#6b7688;font-family:ui-monospace,monospace;">@rm.ShortLabel</span>
+                            </div>
+                        }
+                    </div>
+                </div>
+                <table class="idt-tbl" style="margin-top:1rem">
+                    <thead>
+                        <tr>
+                            <th>Month</th>
+                            @foreach (var rm in rateMonths)
+                            {
+                                <th class="r">@RateMon(rm.Year, rm.Month)</th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="name">Fully Paid / Billed (Claims)</td>
+                            @foreach (var rm in rateMonths)
+                            {
+                                <td class="r idt-num">@(rm.RatePct is { } p ? p.ToString("0.0", ci) + "%" : "—")</td>
+                            }
+                        </tr>
+                    </tbody>
+                </table>
+                <div class="idt-foot">Fully Paid ÷ Billed (Claims) from the Executive Summary PMS grid (same source as the Index). Partial month excluded from the average.</div>
+                }
+            </details>
+        }
+
+        @* Parent subcategory stack (Other Samples, Insurance Balance, …) + Breakdown 50/50.
+           Other StatusBreakdown drills without stacking stay full-width below. *@
+        @if (useStacked && chartMonths.Count > 0)
+        {
+            var stackStatuses = Model.StatusBreakdown
+                .GroupBy(x => x.Status?.Trim() ?? "", StringComparer.OrdinalIgnoreCase)
+                .Where(g => g.Key.Length > 0)
+                .Select(g => new { Status = g.Key, Total = g.Sum(v => v.Count) })
+                .OrderByDescending(x => x.Total)
+                .Select(x => x.Status)
+                .ToList();
+            var stackLookup = Model.StatusBreakdown
+                .GroupBy(x => (Status: (x.Status ?? "").Trim(), x.Year, x.Month))
+                .ToDictionary(g => g.Key, g => g.Sum(v => v.Count));
+            var statusColor = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            for (var si = 0; si < stackStatuses.Count; si++)
+                statusColor[stackStatuses[si]] = stackPalette[si % stackPalette.Length];
+
+            decimal stackMax = 0m;
+            foreach (var m in chartMonths)
+            {
+                if (!DateTime.TryParseExact(m.MonthLabel, "MMM yyyy", CultureInfo.InvariantCulture,
+                        DateTimeStyles.None, out var dt))
+                    continue;
+                long sum = 0;
+                foreach (var st in stackStatuses)
+                    if (stackLookup.TryGetValue((st, dt.Year, dt.Month), out var cv)) sum += cv;
+                if (sum > stackMax) stackMax = sum;
+            }
+            decimal stackScale = stackMax > 0 ? stackMax * 1.20m : 1m;
+
+            var sbMonths = Model.StatusBreakdown
+                .Select(x => (x.Year, x.Month))
+                .Distinct()
+                .OrderBy(x => x.Year).ThenBy(x => x.Month)
+                .ToList();
+            // Align breakdown months with the stacked chart window when possible.
+            if (chartMonths.Count > 0 && sbMonths.Count > chartMonths.Count)
+                sbMonths = sbMonths.Skip(sbMonths.Count - chartMonths.Count).ToList();
+            string IbMon(int y, int m) =>
+                y is >= 1 and <= 9999 && m is >= 1 and <= 12
+                    ? new DateTime(y, m, 1).ToString("MMM", ci).ToUpperInvariant()
+                    : "—";
+
+            <div class="idt-2col idt-ib-row">
+            <details class="idt-card @themeClass" open>
+                <summary class="idt-card-head">
+                    <h3 class="idt-card-title">@Model.MetricTitle — Stacked@(string.IsNullOrEmpty(scopeYear) ? "" : " — " + scopeYear)</h3>
+                    <span class="idt-tag idt-tag-amber">Stacked</span>
+                </summary>
+                <div class="idt-chart">
+                    <div class="idt-bars">
+                        @foreach (var m in chartMonths)
+                        {
+                            var isPartialBar = m.IsPartial || ReferenceEquals(m, partial);
+                            long stackTotal = 0;
+                            var segs = new List<(string Status, long Count, string Color)>();
+                            if (DateTime.TryParseExact(m.MonthLabel, "MMM yyyy", CultureInfo.InvariantCulture,
+                                    DateTimeStyles.None, out var mdt))
+                            {
+                                for (var si = 0; si < stackStatuses.Count; si++)
+                                {
+                                    var st = stackStatuses[si];
+                                    stackLookup.TryGetValue((st, mdt.Year, mdt.Month), out var cnt);
+                                    if (cnt <= 0) continue;
+                                    stackTotal += cnt;
+                                    segs.Add((st, cnt, stackPalette[si % stackPalette.Length]));
+                                }
+                            }
+
+                            if (stackTotal <= 0)
+                            {
+                                <div class="idt-bar-col">
+                                    <span class="idt-bar-val">0</span>
+                                    <div class="idt-bar" style="height:0%;background:@barSolid"
+                                         title="@m.MonthLabel: 0"></div>
+                                </div>
+                            }
+                            else
+                            {
+                                var hPctS = ((double)((decimal)stackTotal / stackScale * 100m)).ToString("0.##", ci);
+                                <div class="idt-bar-col">
+                                    <span class="idt-bar-val">@Num(stackTotal)</span>
+                                    <div class="idt-bar-stack" style="height:@hPctS%"
+                                         title="@m.MonthLabel: @Num(stackTotal)">
+                                        @foreach (var seg in segs)
+                                        {
+                                            var segPct = ((double)seg.Count * 100.0 / stackTotal).ToString("0.##", ci);
+                                            <div class="idt-stack-seg"
+                                                 style="height:@segPct%;background:@(isPartialBar ? barPartial : seg.Color)"
+                                                 title="@seg.Status: @Num(seg.Count)"></div>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        }
+                    </div>
+                    <div class="idt-bars" style="inset:auto 0 0 0; height:26px; align-items:flex-end;">
+                        @foreach (var m in chartMonths)
+                        {
+                            <div class="idt-bar-col" style="justify-content:flex-end;">
+                                <span style="font-size:.62rem;color:#6b7688;font-family:ui-monospace,monospace;">@m.ShortLabel</span>
+                            </div>
+                        }
+                    </div>
+                </div>
+                <div class="idt-legend">
+                    @for (var si = 0; si < stackStatuses.Count; si++)
+                    {
+                        <span><span class="idt-swatch" style="background:@stackPalette[si % stackPalette.Length]"></span>@stackStatuses[si]</span>
+                    }
+                    @if (partial is not null)
+                    {
+                        <span><span class="idt-swatch" style="background:@barPartial"></span>Faded = partial (@partial.ShortLabel)</span>
+                    }
+                </div>
+                <div class="idt-foot">Subcategory mix by month. Separate from MoM Monthly Trend above.</div>
+            </details>
+
+            <details class="idt-card @themeClass" open>
+                <summary class="idt-card-head">
+                    <h3 class="idt-card-title">@Model.MetricTitle — Breakdown</h3>
+                </summary>
+                <div class="idt-cardscroll">
+                <table class="idt-tbl">
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            @foreach (var (y, m) in sbMonths)
+                            {
+                                <th class="r">@IbMon(y, m)</th>
+                            }
+                            <th class="r">Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var st in stackStatuses)
+                        {
+                            long rowTotal = 0;
+                            var rowColor = statusColor.TryGetValue(st, out var rc) ? rc : barSolid;
+                            <tr style="border-left:3px solid @rowColor">
+                                <td class="name">
+                                    <span class="idt-ib-status" style="color:@rowColor">
+                                        <span class="idt-swatch" style="background:@rowColor"></span>@st
+                                    </span>
+                                </td>
+                                @foreach (var (y, m) in sbMonths)
+                                {
+                                    var cell = stackLookup.TryGetValue((st, y, m), out var cv) ? cv : 0;
+                                    rowTotal += cell;
+                                    <td class="r idt-num">@(cell == 0 ? "—" : Num(cell))</td>
+                                }
+                                <td class="r idt-num" style="font-weight:700;color:@rowColor">@Num(rowTotal)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                </div>
+                <div class="idt-foot">Same subcategory colors as the stacked chart.</div>
+            </details>
+            </div>
+        }
+        else if (Model.StatusBreakdown.Count > 0 && !Model.IsFullyPaidInsight)
+        {
+            var sbMonths = Model.StatusBreakdown
+                .Select(x => (x.Year, x.Month))
+                .Distinct()
+                .OrderBy(x => x.Year).ThenBy(x => x.Month)
+                .ToList();
+            var sbStatuses = Model.StatusBreakdown
+                .GroupBy(x => x.Status)
+                .Select(g => new { Status = g.Key, Total = g.Sum(v => v.Count) })
+                .OrderByDescending(x => x.Total)
+                .Select(x => x.Status)
+                .ToList();
+            var sbLookup = Model.StatusBreakdown
+                .GroupBy(x => (x.Status, x.Year, x.Month))
+                .ToDictionary(g => g.Key, g => g.Sum(v => v.Count));
+            string MonShort(int y, int m) =>
+                y is >= 1 and <= 9999 && m is >= 1 and <= 12
+                    ? new DateTime(y, m, 1).ToString("MMM", ci).ToUpperInvariant()
+                    : "—";
+
+            <details class="idt-card" open>
+                <summary class="idt-card-head">
+                    <h3 class="idt-card-title">@(Model.IsNotResulted ? "Not Resulted — Status Breakdown" : Model.MetricTitle + " — Breakdown")</h3>
+                </summary>
+                <table class="idt-tbl">
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            @foreach (var (y, m) in sbMonths)
+                            {
+                                <th class="r">@MonShort(y, m)</th>
+                            }
+                            <th class="r">Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var st in sbStatuses)
+                        {
+                            long rowTotal = 0;
+                            <tr>
+                                <td class="name">@st</td>
+                                @foreach (var (y, m) in sbMonths)
+                                {
+                                    var cell = sbLookup.TryGetValue((st, y, m), out var cv) ? cv : 0;
+                                    rowTotal += cell;
+                                    <td class="r idt-num">@(cell == 0 ? "—" : Num(cell))</td>
+                                }
+                                <td class="r idt-num" style="font-weight:700">@Num(rowTotal)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                <div class="idt-foot">Distinct not-yet-resulted specimens grouped by client status, over the trailing months in range.</div>
+            </details>
+        }
+
+        // Drilled ES row heading (RowTitleOverride → RowTitle/MetricTitle).
+        // Never hardcode "Billable Resulted" / "Total Samples" for row drills.
+        // Already inside the HasData else { } — no @{ } wrapper (RZ1010).
+        var drillRowTitle = Model.RowTitle;
+
+        // Panel → Clinic + MoM (+ Insurance when real insurers exist).
+        // Hide flat by-Panel for Fully Paid when Top-10 Insurance already nests panels.
+        // Mismatch formula drills have no claim-level panel set.
+        var showPanelMomBand = !Model.IsNotResulted && Model.Panels.Count > 0
+            && !(Model.IsFullyPaidInsight && Model.Insurers.Count > 0)
+            && !Model.IsMismatchFormulaInsight;
+        // Top 10 Insurance tab only when ClaimLevelData returned real insurers — never sample rows.
+        var showInsInBundle = showPanelMomBand && Model.Insurers.Count > 0;
+        var insuranceBundled = showInsInBundle;
+
+        @if (Model.IsMismatchFormulaInsight && Model.Panels.Count == 0 && Model.Insurers.Count == 0)
+        {
+            <div class="idt-card" style="padding:.85rem 1.1rem;color:#5c6b7a;font-size:.9rem;line-height:1.45">
+                Claim-level Top 10 (panels / insurers) is not applicable — this KPI is a period count difference from the Executive Summary, not a set of matching claims.
+            </div>
+        }
+
+        @* Panel · MOM Comparison · Top 10 Insurance (real data only) *@
+        @if (showPanelMomBand)
+        {
+            var panelTop = Model.Panels.Take(10).ToList();
+            var hasPcNest = panelTop.Any(p => p.Clinics.Count > 0);
+            var forceInsAccordion = Model.IsFullyPaidInsight;
+            var hasInsPanels = Model.Insurers.Any(i => i.Panels.Count > 0);
+            // Declare locals here (plain C#). Never use @{ } inside @if/@else bodies (RZ1010).
+            var hasInsNest = Model.Insurers.Any(i =>
+                (forceInsAccordion || i.Panels.Count > 0) && i.Panels.Count > 0);
+            var pcIdx = 0;
+            var momIdx = 0;
+            var realIdx = 0;
+            <details class="idt-card" open>
+                <summary class="idt-card-head">
+                    <h3 class="idt-card-title">@drillRowTitle</h3>
+                    @if (Model.Insurers.Count > 0)
+                    {
+                        <span class="idt-tag idt-tag-real">ClaimLevelData</span>
+                    }
+                </summary>
+
+                <div class="idt-tabs" role="tablist" aria-label="@drillRowTitle detail tabs">
+                    <button type="button" class="idt-tab active" role="tab" aria-selected="true"
+                            data-idt-tab="panel">By Panel</button>
+                    <button type="button" class="idt-tab" role="tab" aria-selected="false"
+                            data-idt-tab="mom">MOM Comparison</button>
+                    @if (showInsInBundle)
+                    {
+                        <button type="button" class="idt-tab" role="tab" aria-selected="false"
+                                data-idt-tab="ins">Top 10 Insurance</button>
+                    }
+                </div>
+
+                @* ── Tab: By Panel / Clinic ── *@
+                <div class="idt-tabpane" data-idt-pane="panel" role="tabpanel">
+                    <h4 class="idt-subhead">@drillRowTitle by Panel</h4>
+                    @if (hasPcNest)
+                    {
+                        <div class="idt-pc-toolbar" data-idt-pc-toolbar="panels">
+                            <span class="idt-daynote">Average of trailing 6 months (@avgRange)</span>
+                            <button type="button" class="idt-pc-btn" data-idt-pc-all="open">Open all</button>
+                            <button type="button" class="idt-pc-btn" data-idt-pc-all="close">Close all</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="idt-pc-toolbar">
+                            <span class="idt-daynote">Average of trailing 6 months (@avgRange)</span>
+                        </div>
+                    }
+                    <table class="idt-tbl" id="idt-panel-clinic-tbl">
+                        <thead>
+                            <tr>
+                                <th>@(hasPcNest ? "Panel / Clinic" : "Panel")</th>
+                                <th class="r">Average 6 Months</th>
+                                <th style="width:38%">Share %</th>
+                            </tr>
+                        </thead>
+                            <tbody>
+                                @foreach (var p in panelTop)
+                                {
+                                    var avgValP = p.Avg6Months > 0 ? p.Avg6Months : (decimal)p.PeriodTotal;
+                                    var w = Math.Max(0, Math.Min(100, (double)p.SharePct)).ToString("0.##", ci);
+                                    var parentId = "idt-pc-p-" + pcIdx;
+                                    if (p.Clinics.Count > 0)
+                                    {
+                                        <tr class="idt-pc-parent" role="button" tabindex="0"
+                                            aria-expanded="true"
+                                            data-idt-pc-toggle="@parentId"
+                                            data-idt-pc-group="panels">
+                                            <td class="name">
+                                                <span class="idt-pc-chevron" aria-hidden="true">&#9656;</span>
+                                                @p.Panel
+                                            </td>
+                                            <td class="r idt-num">@Dec(avgValP)</td>
+                                            <td>
+                                                <div class="idt-sharebar"><i style="width:@w%"></i></div>
+                                                <span class="idt-share-pct">@p.SharePct.ToString("0.0", ci)%</span>
+                                            </td>
+                                        </tr>
+                                        @foreach (var c in p.Clinics)
+                                        {
+                                            var avgC = c.Avg6Months > 0 ? c.Avg6Months : (decimal)c.PeriodTotal;
+                                            var wc = Math.Max(0, Math.Min(100, (double)c.SharePct)).ToString("0.##", ci);
+                                            <tr class="idt-pc-child" data-idt-pc-parent="@parentId" data-idt-pc-group="panels">
+                                                <td class="name">@c.Clinic</td>
+                                                <td class="r idt-num">@Dec(avgC)</td>
+                                                <td>
+                                                    <div class="idt-sharebar"><i style="width:@wc%"></i></div>
+                                                    <span class="idt-share-pct">@c.SharePct.ToString("0.0", ci)%</span>
+                                                </td>
+                                            </tr>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <tr>
+                                            <td class="name">@p.Panel</td>
+                                            <td class="r idt-num">@Dec(avgValP)</td>
+                                            <td>
+                                                <div class="idt-sharebar"><i style="width:@w%"></i></div>
+                                                <span class="idt-share-pct">@p.SharePct.ToString("0.0", ci)%</span>
+                                            </td>
+                                        </tr>
+                                    }
+                                    pcIdx++;
+                                }
+                            </tbody>
+                    </table>
+                    <div class="idt-foot">Top @panelTop.Count panels by Average 6 Months (@avgRange, including the WeekRange end month)@(hasPcNest ? "; top 10 clinics nested under each panel" : ""). Row filters from LisDrillRowDef.</div>
+                </div>
+
+                @* ── Tab: MOM Comparison ── *@
+                <div class="idt-tabpane" data-idt-pane="mom" role="tabpanel" hidden>
+                    <h4 class="idt-subhead">@drillRowTitle — MOM Comparison</h4>
+                    @if (hasPcNest)
+                    {
+                        <div class="idt-pc-toolbar" data-idt-pc-toolbar="mom">
+                            <span class="idt-daynote">Full month</span>
+                            <button type="button" class="idt-pc-btn" data-idt-pc-all="open">Open all</button>
+                            <button type="button" class="idt-pc-btn" data-idt-pc-all="close">Close all</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="idt-pc-toolbar">
+                            <span class="idt-daynote">Full month</span>
+                        </div>
+                    }
+                    <table class="idt-tbl" id="idt-mom-clinic-tbl">
+                        <thead>
+                            <tr>
+                                <th>@(hasPcNest ? "Panel / Clinic" : "Panel")</th>
+                                <th class="r">@prevMoLabel</th>
+                                <th class="r">@latestMoLabel</th>
+                                <th class="r">MoM Δ</th>
+                            </tr>
+                        </thead>
+                            <tbody>
+                            @foreach (var p in panelTop)
+                            {
+                                var parentId = "idt-pc-m-" + momIdx;
+                                if (p.Clinics.Count > 0)
+                                {
+                                    <tr class="idt-pc-parent" role="button" tabindex="0"
+                                        aria-expanded="true"
+                                        data-idt-pc-toggle="@parentId"
+                                        data-idt-pc-group="mom">
+                                        <td class="name">
+                                            <span class="idt-pc-chevron" aria-hidden="true">&#9656;</span>
+                                            @p.Panel
+                                        </td>
+                                        <td class="r idt-num">@Num(p.Prev9Day)</td>
+                                        <td class="r idt-num">@Num(p.Latest9Day)</td>
+                                        <td class="r idt-num delta @DeltaCls(p.MoMDeltaPct)">@Pct(p.MoMDeltaPct)</td>
+                                    </tr>
+                                    @foreach (var c in p.Clinics)
+                                    {
+                                        <tr class="idt-pc-child" data-idt-pc-parent="@parentId" data-idt-pc-group="mom">
+                                            <td class="name">@c.Clinic</td>
+                                            <td class="r idt-num">@Num(c.Prev9Day)</td>
+                                            <td class="r idt-num">@Num(c.Latest9Day)</td>
+                                            <td class="r idt-num delta @DeltaCls(c.MoMDeltaPct)">@Pct(c.MoMDeltaPct)</td>
+                                        </tr>
+                                    }
+                                }
+                                else
+                                {
+                                    <tr>
+                                        <td class="name">@p.Panel</td>
+                                        <td class="r idt-num">@Num(p.Prev9Day)</td>
+                                        <td class="r idt-num">@Num(p.Latest9Day)</td>
+                                        <td class="r idt-num delta @DeltaCls(p.MoMDeltaPct)">@Pct(p.MoMDeltaPct)</td>
+                                    </tr>
+                                }
+                                momIdx++;
+                            }
+                        </tbody>
+                    </table>
+                    <div class="idt-foot">Full-month counts for @prevMoLabel vs @latestMoLabel. MoM Δ = (latest − previous) ÷ previous.</div>
+                </div>
+
+                @* ── Tab: Top 10 Insurance & by Panel (real insurers only) ── *@
+                @if (showInsInBundle)
+                {
+                    <div class="idt-tabpane" data-idt-pane="ins" role="tabpanel" hidden>
+                        <h4 class="idt-subhead">
+                            @drillRowTitle — Top 10 Insurance &amp; by Panel
+                            <span class="idt-tag idt-tag-real">ClaimLevelData</span>
+                        </h4>
+                        @if (forceInsAccordion)
+                        {
+                            <div class="idt-note">
+                                Expand an insurance row to see nested panel groups@(hasInsPanels ? "" : " (distributed from by-panel shares when Set 9 is unavailable)"). Default collapsed.
+                            </div>
+                        }
+                        @if (hasInsNest)
+                        {
+                            <div class="idt-pc-toolbar" data-idt-ins-toolbar>
+                                <span class="idt-daynote">Click an insurer to expand nested panels</span>
+                                <button type="button" class="idt-pc-btn" data-idt-ins-all="open">Open all</button>
+                                <button type="button" class="idt-pc-btn" data-idt-ins-all="close">Close all</button>
+                            </div>
+                        }
+                        <table class="idt-tbl">
+                            <thead>
+                                <tr>
+                                    <th>Insurance</th>
+                                    <th class="r">@(isCash ? "Amount" : "Claims")</th>
+                                    <th class="r">MoM Δ</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var ir in Model.Insurers)
+                                {
+                                    var parentId = "idt-real-ins-" + realIdx;
+                                    var canExpand = forceInsAccordion || ir.Panels.Count > 0;
+                                    if (canExpand && ir.Panels.Count > 0)
+                                    {
+                                        <tr class="idt-ins-parent" role="button" tabindex="0"
+                                            aria-expanded="false"
+                                            data-idt-ins-toggle="@parentId">
+                                            <td class="name">
+                                                <span class="idt-ins-chevron" aria-hidden="true">&#9656;</span>
+                                                @ir.Payer
+                                            </td>
+                                            <td class="r idt-num">@Num(ir.Claims)</td>
+                                            <td class="r idt-num delta @DeltaCls(ir.MoMPct)">@Pct(ir.MoMPct)</td>
+                                        </tr>
+                                        @foreach (var pg in ir.Panels)
+                                        {
+                                            <tr class="idt-ins-child" data-idt-ins-parent="@parentId" hidden>
+                                                <td class="name">@pg.Panel</td>
+                                                <td class="r idt-num">@Num(pg.Claims)</td>
+                                                <td class="r idt-num delta @DeltaCls(pg.MoMPct)">@Pct(pg.MoMPct)</td>
+                                            </tr>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <tr>
+                                            <td class="name">@ir.Payer</td>
+                                            <td class="r idt-num">@Num(ir.Claims)</td>
+                                            <td class="r idt-num delta @DeltaCls(ir.MoMPct)">@Pct(ir.MoMPct)</td>
+                                        </tr>
+                                    }
+                                    realIdx++;
+                                }
+                            </tbody>
+                        </table>
+                        <div class="idt-foot">@(isCash ? "Dollar amounts" : "Distinct claims") in scope, grouped by payer@(forceInsAccordion || hasInsPanels ? " with panel groups nested under each insurer (click to expand)" : ""). MoM compares the latest month vs the previous month.</div>
+                    </div>
+                }
+            </details>
+        }
+
+        @* Standalone Top-10 insurance (e.g. Fully Paid when by-Panel is suppressed) *@
+        @if (!insuranceBundled && Model.Insurers.Count > 0)
+        {
+            var forceInsAccordion = Model.IsFullyPaidInsight;
+            var hasInsPanels = Model.Insurers.Any(i => i.Panels.Count > 0);
+            var realIdx = 0;
+            <details class="idt-card" open>
+                <summary class="idt-card-head">
+                    <h3 class="idt-card-title">@Model.MetricTitle — Top 10 Insurance@(forceInsAccordion || hasInsPanels ? " &amp; by Panel" : "")</h3>
+                    <span class="idt-tag idt-tag-real">ClaimLevelData</span>
+                </summary>
+                @if (forceInsAccordion)
+                {
+                    <div class="idt-note">
+                        Expand an insurance row to see nested panel groups@(hasInsPanels ? "" : " (distributed from by-panel shares when Set 9 is unavailable)"). Default collapsed.
+                    </div>
+                }
+                <table class="idt-tbl">
+                    <thead>
+                        <tr>
+                            <th>Insurance</th>
+                            <th class="r">@(isCash ? "Amount" : "Claims")</th>
+                            <th class="r">MoM Δ</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var ir in Model.Insurers)
+                        {
+                            var parentId = "idt-real-ins-" + realIdx;
+                            var canExpand = forceInsAccordion || ir.Panels.Count > 0;
+                            if (canExpand && ir.Panels.Count > 0)
+                            {
+                                <tr class="idt-ins-parent" role="button" tabindex="0"
+                                    aria-expanded="false"
+                                    data-idt-ins-toggle="@parentId">
+                                    <td class="name">
+                                        <span class="idt-ins-chevron" aria-hidden="true">&#9656;</span>
+                                        @ir.Payer
+                                    </td>
+                                    <td class="r idt-num">@Num(ir.Claims)</td>
+                                    <td class="r idt-num delta @DeltaCls(ir.MoMPct)">@Pct(ir.MoMPct)</td>
+                                </tr>
+                                @foreach (var pg in ir.Panels)
+                                {
+                                    <tr class="idt-ins-child" data-idt-ins-parent="@parentId" hidden>
+                                        <td class="name">@pg.Panel</td>
+                                        <td class="r idt-num">@Num(pg.Claims)</td>
+                                        <td class="r idt-num delta @DeltaCls(pg.MoMPct)">@Pct(pg.MoMPct)</td>
+                                    </tr>
+                                }
+                            }
+                            else
+                            {
+                                <tr>
+                                    <td class="name">@ir.Payer</td>
+                                    <td class="r idt-num">@Num(ir.Claims)</td>
+                                    <td class="r idt-num delta @DeltaCls(ir.MoMPct)">@Pct(ir.MoMPct)</td>
+                                </tr>
+                            }
+                            realIdx++;
+                        }
+                    </tbody>
+                </table>
+                <div class="idt-foot">@(isCash ? "Dollar amounts" : "Distinct claims") in scope, grouped by payer@(forceInsAccordion || hasInsPanels ? " with panel groups nested under each insurer (click to expand)" : ""). MoM compares the latest month vs the previous month.</div>
+            </details>
+        }
+
+        <a href="@Model.BackUrl" class="idt-back idt-no-print"><i class="bi bi-arrow-left"></i> Back to Executive Summary</a>
+    }
+</div>
+
+<script nonce='@Context.Items["CspNonce"]'>
+    // Tab switching (N-Day Range card + Panel/MOM/Insurance band).
+    document.querySelectorAll('.idt-tabs').forEach(function (tabs) {
+        var container = tabs.parentElement;
+        tabs.querySelectorAll('.idt-tab').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var key = btn.getAttribute('data-idt-tab');
+                tabs.querySelectorAll('.idt-tab').forEach(function (b) {
+                    var on = b === btn;
+                    b.classList.toggle('active', on);
+                    b.setAttribute('aria-selected', on ? 'true' : 'false');
+                });
+                container.querySelectorAll('.idt-tabpane').forEach(function (p) {
+                    p.hidden = p.getAttribute('data-idt-pane') !== key;
+                });
+            });
+        });
+    });
+
+    // Insurance → Panel Group accordion (default collapsed) + Open all / Close all.
+    (function () {
+        function setInsOpen(parent, open) {
+            var key = parent.getAttribute('data-idt-ins-toggle');
+            if (!key) return;
+            parent.setAttribute('aria-expanded', open ? 'true' : 'false');
+            document.querySelectorAll('[data-idt-ins-parent="' + key + '"]').forEach(function (row) {
+                row.hidden = !open;
+            });
+        }
+        function toggleIns(parent) {
+            var open = parent.getAttribute('aria-expanded') === 'true';
+            setInsOpen(parent, !open);
+        }
+        document.querySelectorAll('.idt-ins-parent[data-idt-ins-toggle]').forEach(function (parent) {
+            parent.addEventListener('click', function (e) {
+                e.stopPropagation();
+                toggleIns(parent);
+            });
+            parent.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleIns(parent);
+                }
+            });
+        });
+        document.querySelectorAll('[data-idt-ins-toolbar]').forEach(function (bar) {
+            var root = bar.closest('.idt-tabpane') || bar.closest('details') || bar.parentElement;
+            bar.querySelectorAll('[data-idt-ins-all]').forEach(function (btn) {
+                btn.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    var open = btn.getAttribute('data-idt-ins-all') === 'open';
+                    root.querySelectorAll('.idt-ins-parent[data-idt-ins-toggle]').forEach(function (parent) {
+                        setInsOpen(parent, open);
+                    });
+                });
+            });
+        });
+    })();
+
+    // Panel → Clinic accordion (default open) + Open all / Close all.
+    (function () {
+        function setPcOpen(parent, open) {
+            var key = parent.getAttribute('data-idt-pc-toggle');
+            if (!key) return;
+            parent.setAttribute('aria-expanded', open ? 'true' : 'false');
+            document.querySelectorAll('[data-idt-pc-parent="' + key + '"]').forEach(function (row) {
+                row.hidden = !open;
+            });
+        }
+        document.querySelectorAll('.idt-pc-parent[data-idt-pc-toggle]').forEach(function (parent) {
+            // Default open — children are visible (no hidden attr in markup).
+            setPcOpen(parent, parent.getAttribute('aria-expanded') !== 'false');
+            parent.addEventListener('click', function (e) {
+                e.stopPropagation();
+                var open = parent.getAttribute('aria-expanded') === 'true';
+                setPcOpen(parent, !open);
+            });
+            parent.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    var open = parent.getAttribute('aria-expanded') === 'true';
+                    setPcOpen(parent, !open);
+                }
+            });
+        });
+        document.querySelectorAll('[data-idt-pc-toolbar]').forEach(function (bar) {
+            var group = bar.getAttribute('data-idt-pc-toolbar');
+            bar.querySelectorAll('[data-idt-pc-all]').forEach(function (btn) {
+                btn.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    var open = btn.getAttribute('data-idt-pc-all') === 'open';
+                    document.querySelectorAll('.idt-pc-parent[data-idt-pc-group="' + group + '"]').forEach(function (parent) {
+                        setPcOpen(parent, open);
+                    });
+                });
+            });
+        });
+    })();
+
+    // Download / Print PDF — expand drill content, then browser print (Save as PDF).
+    (function () {
+        var btn = document.getElementById('idt-download-pdf');
+        if (!btn) return;
+
+        var snapshot = null;
+
+        function captureState() {
+            snapshot = {
+                details: [],
+                panes: [],
+                tabs: [],
+                ins: [],
+                pc: []
+            };
+            document.querySelectorAll('details.idt-card').forEach(function (d) {
+                snapshot.details.push({ el: d, open: d.open });
+            });
+            document.querySelectorAll('.idt-tabpane').forEach(function (p) {
+                snapshot.panes.push({ el: p, hidden: p.hidden });
+            });
+            document.querySelectorAll('.idt-tab').forEach(function (t) {
+                snapshot.tabs.push({
+                    el: t,
+                    active: t.classList.contains('active'),
+                    selected: t.getAttribute('aria-selected')
+                });
+            });
+            document.querySelectorAll('.idt-ins-parent[data-idt-ins-toggle]').forEach(function (parent) {
+                snapshot.ins.push({
+                    el: parent,
+                    expanded: parent.getAttribute('aria-expanded') === 'true'
+                });
+            });
+            document.querySelectorAll('.idt-pc-parent[data-idt-pc-toggle]').forEach(function (parent) {
+                snapshot.pc.push({
+                    el: parent,
+                    expanded: parent.getAttribute('aria-expanded') === 'true'
+                });
+            });
+        }
+
+        function expandForPrint() {
+            document.querySelectorAll('details.idt-card').forEach(function (d) {
+                d.open = true;
+            });
+            document.querySelectorAll('.idt-tabpane').forEach(function (p) {
+                p.hidden = false;
+            });
+            document.querySelectorAll('.idt-ins-parent[data-idt-ins-toggle]').forEach(function (parent) {
+                var key = parent.getAttribute('data-idt-ins-toggle');
+                parent.setAttribute('aria-expanded', 'true');
+                document.querySelectorAll('[data-idt-ins-parent="' + key + '"]').forEach(function (row) {
+                    row.hidden = false;
+                });
+            });
+            document.querySelectorAll('.idt-pc-parent[data-idt-pc-toggle]').forEach(function (parent) {
+                var key = parent.getAttribute('data-idt-pc-toggle');
+                parent.setAttribute('aria-expanded', 'true');
+                document.querySelectorAll('[data-idt-pc-parent="' + key + '"]').forEach(function (row) {
+                    row.hidden = false;
+                });
+            });
+        }
+
+        function restoreState() {
+            if (!snapshot) return;
+            snapshot.details.forEach(function (s) { s.el.open = s.open; });
+            snapshot.panes.forEach(function (s) { s.el.hidden = s.hidden; });
+            snapshot.tabs.forEach(function (s) {
+                s.el.classList.toggle('active', s.active);
+                if (s.selected != null) s.el.setAttribute('aria-selected', s.selected);
+            });
+            snapshot.ins.forEach(function (s) {
+                var key = s.el.getAttribute('data-idt-ins-toggle');
+                s.el.setAttribute('aria-expanded', s.expanded ? 'true' : 'false');
+                document.querySelectorAll('[data-idt-ins-parent="' + key + '"]').forEach(function (row) {
+                    row.hidden = !s.expanded;
+                });
+            });
+            snapshot.pc.forEach(function (s) {
+                var key = s.el.getAttribute('data-idt-pc-toggle');
+                s.el.setAttribute('aria-expanded', s.expanded ? 'true' : 'false');
+                document.querySelectorAll('[data-idt-pc-parent="' + key + '"]').forEach(function (row) {
+                    row.hidden = !s.expanded;
+                });
+            });
+            snapshot = null;
+        }
+
+        btn.addEventListener('click', function () {
+            captureState();
+            expandForPrint();
+            window.setTimeout(function () { window.print(); }, 50);
+        });
+
+        window.addEventListener('afterprint', restoreState);
+    })();
+</script>

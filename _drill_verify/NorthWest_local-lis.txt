@@ -1,0 +1,1 @@
+﻿SMOKE|LIS|FAIL|Each GROUP BY expression must contain at least one column that is not an outer reference.

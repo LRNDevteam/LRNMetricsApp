@@ -1,0 +1,5 @@
+﻿DEFS|32|LIS=17|PMS=15
+KEYLIS|C|Yet to be Validated
+KEYPMS|I|No. of Fully Paid Claims
+SPLIS|17
+SPPMS|18

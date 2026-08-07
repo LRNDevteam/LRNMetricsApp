@@ -1,0 +1,87 @@
+﻿Warning: Null value is eliminated by an aggregate or other SET operation.
+2026-05-29 May 2026 137 Apr 2026 142 -3.52 1638.50 -91.64 May (1-9) 38 Apr (1-9) 52 -26.92
+May 2025 May 5339 0
+Jun 2025 Jun 4995 0
+Jul 2025 Jul 5853 0
+Aug 2025 Aug 6124 0
+Sep 2025 Sep 6075 0
+Oct 2025 Oct 5806 0
+Nov 2025 Nov 3812 0
+Dec 2025 Dec 1773 0
+Jan 2026 Jan 1998 0
+Feb 2026 Feb 1812 0
+Mar 2026 Mar 294 0
+Apr 2026 Apr 142 0
+May 2026 May 137 1
+Covid 40191 66.97 3 2 -33.33
+RPP 6090 10.15 0 0 NULL
+RPP w ABR 2493 4.15 0 0 NULL
+ABR Panel, UTI Panel, Urinalysis 2390 3.98 5 5 .00
+ABR Panel, UTI Panel 2272 3.79 17 10 -41.18
+UTI Panel 1525 2.54 2 1 -50.00
+RPP w ABX 945 1.57 0 0 NULL
+UTI w ABX 883 1.47 0 0 NULL
+Comprehensive Neurology Panel 671 1.12 0 0 NULL
+UTI Panel, Urinalysis 588 .98 0 0 NULL
+ABR Panel, Wound Panel 360 .60 17 6 -64.71
+Immuno Panel 271 .45 0 0 NULL
+Thyroid NGS 243 .40 0 0 NULL
+Cardio NGS Panel 211 .35 0 0 NULL
+Hereditary Cancer Panel 139 .23 8 5 -37.50
+Nov 2025 0 3812 .00
+Dec 2025 0 1773 .00
+Jan 2026 0 1998 .00
+Feb 2026 0 1812 .00
+Mar 2026 0 294 .00
+Apr 2026 0 142 .00
+May 2026 0 137 .00
+Nov 2025 Nov 979
+Dec 2025 Dec 689
+Jan 2026 Jan 150
+Feb 2026 Feb 450
+Mar 2026 Mar 150
+Apr 2026 Apr 52
+May 2026 May 38
+ABR Panel, UTI Panel 2025 11 0 18
+ABR Panel, UTI Panel 2025 12 0 14
+ABR Panel, UTI Panel 2026 1 0 16
+ABR Panel, UTI Panel 2026 2 0 15
+ABR Panel, UTI Panel 2026 3 0 8
+ABR Panel, UTI Panel 2026 4 0 17
+ABR Panel, UTI Panel 2026 5 0 10
+ABR Panel, UTI Panel, Urinalysis 2025 11 0 72
+ABR Panel, UTI Panel, Urinalysis 2025 12 0 41
+ABR Panel, UTI Panel, Urinalysis 2026 1 0 1
+ABR Panel, UTI Panel, Urinalysis 2026 2 0 5
+ABR Panel, UTI Panel, Urinalysis 2026 3 0 4
+ABR Panel, UTI Panel, Urinalysis 2026 4 0 5
+ABR Panel, UTI Panel, Urinalysis 2026 5 0 5
+Covid 2025 11 0 815
+Covid 2025 12 0 457
+Covid 2026 1 0 24
+Covid 2026 2 0 373
+Covid 2026 3 0 118
+Covid 2026 4 0 3
+Covid 2026 5 0 2
+RPP 2025 11 0 8
+RPP 2025 12 0 39
+RPP 2026 1 0 45
+RPP 2026 2 0 1
+RPP 2026 3 0 0
+RPP w ABR 2025 11 0 1
+RPP w ABR 2025 12 0 17
+RPP w ABR 2026 1 0 10
+RPP w ABR 2026 2 0 2
+RPP w ABX 2025 11 0 4
+RPP w ABX 2025 12 0 10
+RPP w ABX 2026 1 0 2
+UTI Panel 2025 11 0 22
+UTI Panel 2025 12 0 44
+UTI Panel 2026 1 0 20
+UTI Panel 2026 2 0 18
+UTI Panel 2026 4 0 2
+UTI Panel 2026 5 0 1
+UTI w ABX 2025 11 0 2
+UTI w ABX 2025 12 0 43
+UTI w ABX 2026 1 0 10
+SMOKE|LIS|OK

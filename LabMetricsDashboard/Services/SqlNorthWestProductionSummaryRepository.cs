@@ -1241,7 +1241,7 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
                     WHEN TRY_CAST({dateExpr} AS DATE) IS NULL OR YEAR(TRY_CAST({dateExpr} AS DATE)) <= 1900 THEN 0
                     ELSE MONTH(TRY_CAST({dateExpr} AS DATE))
                 END AS SplitMonth,
-                COUNT_BIG(*) AS RowCount
+                COUNT_BIG(*) AS TotalRows
             FROM {parts.FromClause}
             {parts.WhereClause}
             GROUP BY

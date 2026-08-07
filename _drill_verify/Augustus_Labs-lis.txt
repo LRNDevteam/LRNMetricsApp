@@ -1,0 +1,77 @@
+﻿Warning: Null value is eliminated by an aggregate or other SET operation.
+Warning: Null value is eliminated by an aggregate or other SET operation.
+2026-07-18 Jul 2026 232 Jun 2026 70 231.43 77.00 201.30 Jul (1-9) 35 Jun (1-9) 26 34.62
+Jul 2025 Jul 390 0
+Aug 2025 Aug 189 0
+Sep 2025 Sep 56 0
+Oct 2025 Oct 149 0
+Nov 2025 Nov 98 0
+Dec 2025 Dec 68 0
+Jan 2026 Jan 52 0
+Feb 2026 Feb 62 0
+Mar 2026 Mar 86 0
+Apr 2026 Apr 66 0
+May 2026 May 126 0
+Jun 2026 Jun 70 0
+Jul 2026 Jul 232 1
+Unspecified 1441 42.55 0 1 NULL
+ROUTINE BLOOD 839 24.77 5 15 200.00
+LABCORP 604 17.83 15 17 13.33
+In-House 297 8.77 0 0 NULL
+Molecular Biology 173 5.11 3 2 -33.33
+Toxicology 112 3.31 3 0 -100.00
+Sdx 2 .06 0 0 NULL
+Jan 2026 52 1648 3.16
+Feb 2026 62 1697 3.65
+Mar 2026 86 1885 4.56
+Apr 2026 66 1945 3.39
+May 2026 126 1712 7.36
+Jun 2026 70 1454 4.81
+Jul 2026 232 836 27.75
+Jan 2026 Jan 511
+Feb 2026 Feb 524
+Mar 2026 Mar 518
+Apr 2026 Apr 498
+May 2026 May 711
+Jun 2026 Jun 478
+Jul 2026 Jul 404
+In-House 2026 1 0 0
+In-House 2026 2 0 3
+In-House 2026 3 0 2
+In-House 2026 5 0 1
+LABCORP 2026 1 13 19
+LABCORP 2026 2 15 18
+LABCORP 2026 3 25 29
+LABCORP 2026 4 14 14
+LABCORP 2026 5 17 17
+LABCORP 2026 6 15 16
+LABCORP 2026 7 17 17
+Molecular Biology 2026 1 1 122
+Molecular Biology 2026 2 0 132
+Molecular Biology 2026 3 4 109
+Molecular Biology 2026 4 0 106
+Molecular Biology 2026 5 7 112
+Molecular Biology 2026 6 3 73
+Molecular Biology 2026 7 2 62
+ROUTINE BLOOD 2026 1 1 354
+ROUTINE BLOOD 2026 2 0 350
+ROUTINE BLOOD 2026 3 0 348
+ROUTINE BLOOD 2026 4 1 370
+ROUTINE BLOOD 2026 5 2 532
+ROUTINE BLOOD 2026 6 5 334
+ROUTINE BLOOD 2026 7 15 310
+Toxicology 2026 1 0 0
+Toxicology 2026 2 0 4
+Toxicology 2026 3 0 5
+Toxicology 2026 4 0 1
+Toxicology 2026 5 0 41
+Toxicology 2026 6 3 53
+Toxicology 2026 7 0 5
+Unspecified 2026 1 1 17
+Unspecified 2026 2 1 18
+Unspecified 2026 3 0 25
+Unspecified 2026 4 1 8
+Unspecified 2026 5 8 16
+Unspecified 2026 6 0 2
+Unspecified 2026 7 1 10
+SMOKE|LIS|OK

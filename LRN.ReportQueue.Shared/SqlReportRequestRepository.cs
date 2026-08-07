@@ -15,6 +15,14 @@ public sealed class SqlReportRequestRepository : IReportRequestRepository
     /// </summary>
     private static readonly ConcurrentDictionary<string, bool> ProgressColumnCache = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Per-DB cache: whether dbo.UserReqReports itself exists.
+    /// COL_LENGTH returns NULL when the table is missing (no exception), so without this
+    /// every badge poll re-queries and throws SqlException 208 — flooding the VS debugger
+    /// Output window and often looking like the app "closed" while debugging.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, bool> TableExistsCache = new(StringComparer.OrdinalIgnoreCase);
+
     private readonly ILogger<SqlReportRequestRepository> _logger;
 
     public SqlReportRequestRepository(ILogger<SqlReportRequestRepository> logger)
@@ -270,6 +278,9 @@ public sealed class SqlReportRequestRepository : IReportRequestRepository
         int top = 20, CancellationToken ct = default)
     {
         userName = (userName ?? string.Empty).Trim();
+        if (!await UserReqReportsExistsAsync(connectionString, ct))
+            return [];
+
         var includeProgress = await HasProgressPercentAsync(connectionString, ct);
         try
         {
@@ -281,6 +292,14 @@ public sealed class SqlReportRequestRepository : IReportRequestRepository
             _logger.LogInformation(
                 "UserReqReports.ProgressPercent missing on this lab DB; using schema without progress until migration is applied.");
             return await ReadUserReportsAsync(connectionString, userName, top, includeProgress: false, ct);
+        }
+        catch (SqlException ex) when (ex.Number == 208) // Invalid object name — table vanished / never deployed
+        {
+            MarkTableMissing(connectionString);
+            _logger.LogWarning(
+                "dbo.UserReqReports is missing on {Db}; skipping until the UserReqReports scripts are deployed. {Message}",
+                CacheKey(connectionString), ex.Message);
+            return [];
         }
     }
 
@@ -473,11 +492,47 @@ public sealed class SqlReportRequestRepository : IReportRequestRepository
         }
     }
 
+    private async Task<bool> UserReqReportsExistsAsync(string connectionString, CancellationToken ct)
+    {
+        var key = CacheKey(connectionString);
+        if (TableExistsCache.TryGetValue(key, out var cached))
+            return cached;
+
+        const string sql = "SELECT CASE WHEN OBJECT_ID(N'dbo.UserReqReports', N'U') IS NULL THEN 0 ELSE 1 END;";
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+            await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 10 };
+            var present = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct) ?? 0) == 1;
+            TableExistsCache[key] = present;
+            if (!present)
+            {
+                _logger.LogWarning(
+                    "dbo.UserReqReports is missing on {Db}. Deploy SQL_Scripts/UserReqReports before the Reports badge can load this lab.",
+                    key);
+            }
+            return present;
+        }
+        catch (SqlException ex)
+        {
+            // Connectivity / permission issues — do not cache forever; treat as absent this call.
+            _logger.LogDebug(ex, "UserReqReports existence check failed for {Db}", key);
+            return false;
+        }
+    }
+
     private async Task<bool> HasProgressPercentAsync(string connectionString, CancellationToken ct)
     {
         var key = CacheKey(connectionString);
         if (ProgressColumnCache.TryGetValue(key, out var cached))
             return cached;
+
+        if (!await UserReqReportsExistsAsync(connectionString, ct))
+        {
+            ProgressColumnCache[key] = false;
+            return false;
+        }
 
         const string sql = "SELECT CASE WHEN COL_LENGTH('dbo.UserReqReports', 'ProgressPercent') IS NULL THEN 0 ELSE 1 END;";
         try
@@ -497,6 +552,7 @@ public sealed class SqlReportRequestRepository : IReportRequestRepository
         }
         catch (SqlException ex) when (ex.Number is 208 or 207) // table/column missing
         {
+            if (ex.Number == 208) MarkTableMissing(connectionString);
             ProgressColumnCache[key] = false;
             return false;
         }
@@ -504,6 +560,13 @@ public sealed class SqlReportRequestRepository : IReportRequestRepository
 
     private static void MarkProgressColumnMissing(string connectionString) =>
         ProgressColumnCache[CacheKey(connectionString)] = false;
+
+    private static void MarkTableMissing(string connectionString)
+    {
+        var key = CacheKey(connectionString);
+        TableExistsCache[key] = false;
+        ProgressColumnCache[key] = false;
+    }
 
     private static SqlCommand StoredProc(SqlConnection conn, string name, int timeoutSeconds) =>
         new(name, conn) { CommandType = CommandType.StoredProcedure, CommandTimeout = timeoutSeconds };

@@ -9,7 +9,7 @@ namespace LabMetricsDashboard.Services;
 /// and by every <c>13_{Lab}_CollectionSummary.sql</c> / <c>11_NorthWest_CollectionSummary.sql</c> deployment file.
 /// Keep all three in sync when adding a new lab.
 /// </summary>
-internal static class LabCollectionPrefix
+public static class LabCollectionPrefix
 {
     private static readonly Dictionary<string, string> _map = new(StringComparer.OrdinalIgnoreCase)
     {

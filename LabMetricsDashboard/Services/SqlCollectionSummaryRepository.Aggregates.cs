@@ -63,36 +63,53 @@ public sealed partial class SqlCollectionSummaryRepository
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
 
-        // NorthWest, Augustus, Phi_Life, and PCR route through dedicated read SPs 
-        // (usp_GetNW_CS_Top5ReimbursementPct, usp_GetAug_CS_Top5ReimbursementPct, usp_GetPhi_CS_Top5ReimbursementPct, usp_GetPCR_CS_Top5ReimbursementPct),
-        // matching every other Collection Summary tab for these labs. The SP returns the
-        // snapshot on the no-filter path and aggregates live from ClaimLevelData when filters are supplied.
-        // These SPs also return the PaymentPct column calculated from the data.
+        // NorthWest, Augustus, Phi_Life, PCR, IHD, and Certus route through dedicated read SPs
+        // (usp_Get{prefix}_CS_Top5ReimbursementPct). Certus returns AvgPaymentPct AS PaymentPct.
+        // If the read SP is not deployed yet (2812/208), fall through to the snapshot table so the
+        // Collection Summary page still loads.
         if (string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "Phi", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(prefix, "PCR", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase))
+            string.Equals(prefix, "IHD", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(prefix, "Cert", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(prefix, "CERT", StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogInformation("CollectionSummary[Aggregate] Top5ReimbursementPct({Prefix}): routing to SP usp_Get{Prefix}_CS_Top5ReimbursementPct", prefix, prefix);
-            return await GetTop5ReimbursementViaSpAsync(
-                connectionString, prefix,
-                filterPayerNames: null, filterPanelNames: null,
-                filterFirstBillFrom: null, filterFirstBillTo: null,
-                filterDosFrom: null, filterDosTo: null,
-                filterCheckDateFrom: null, filterCheckDateTo: null,
-                ct).ConfigureAwait(false);
+            try
+            {
+                return await GetTop5ReimbursementViaSpAsync(
+                    connectionString, prefix,
+                    filterPayerNames: null, filterPanelNames: null,
+                    filterFirstBillFrom: null, filterFirstBillTo: null,
+                    filterDosFrom: null, filterDosTo: null,
+                    filterCheckDateFrom: null, filterCheckDateTo: null,
+                    ct).ConfigureAwait(false);
+            }
+            catch (SqlException ex) when (ex.Number is 2812 or 208)
+            {
+                _logger.LogWarning(
+                    "CollectionSummary[Aggregate] Top5ReimbursementPct({Prefix}): SP/table missing ({Number}); falling back to snapshot table {Prefix}_CS_Top5ReimbursementPct",
+                    prefix, ex.Number, prefix);
+            }
         }
 
         _logger.LogInformation("CollectionSummary[Aggregate] Top5ReimbursementPct({Prefix}): reading snapshot table {Prefix}_CS_Top5ReimbursementPct", prefix, prefix);
 
-        // Only NorthWest and Augustus snapshot tables have PaymentPct column.
-        // (Phi_Life routes through SP above, so it doesn't need table PaymentPct)
+        // Snapshot tables: PaymentPct (NW/Aug) or AvgPaymentPct (Certus).
         var hasPaymentPctColumn = string.Equals(prefix, "NW", StringComparison.OrdinalIgnoreCase) ||
                                    string.Equals(prefix, "Aug", StringComparison.OrdinalIgnoreCase);
+        var hasAvgPaymentPctColumn = string.Equals(prefix, "Cert", StringComparison.OrdinalIgnoreCase) ||
+                                      string.Equals(prefix, "CERT", StringComparison.OrdinalIgnoreCase);
         var sql = hasPaymentPctColumn
             ? $"""
               SELECT PayerRank, PayerName, SumInsurancePayment, SumChargeAmount, UniqueVisitCount, PaymentPct
+              FROM   dbo.{prefix}_CS_Top5ReimbursementPct
+              ORDER  BY PayerRank;
+              """
+            : hasAvgPaymentPctColumn
+            ? $"""
+              SELECT PayerRank, PayerName, SumInsurancePayment, SumChargeAmount, UniqueVisitCount, AvgPaymentPct AS PaymentPct
               FROM   dbo.{prefix}_CS_Top5ReimbursementPct
               ORDER  BY PayerRank;
               """
@@ -110,15 +127,17 @@ public sealed partial class SqlCollectionSummaryRepository
         await using var r = await cmd.ExecuteReaderAsync(ct);
         while (await r.ReadAsync(ct))
         {
+            decimal? pct = null;
+            if ((hasPaymentPctColumn || hasAvgPaymentPctColumn) && HasColumn(r, "PaymentPct") && !r.IsDBNull(r.GetOrdinal("PaymentPct")))
+                pct = Convert.ToDecimal(r.GetValue(r.GetOrdinal("PaymentPct")));
+
             rows.Add(new InsuranceReimbursementRow(
-                Rank:                r.GetByte(r.GetOrdinal("PayerRank")),
-                PayerName:           r.GetString(r.GetOrdinal("PayerName")),
-                SumInsurancePayment: r.GetDecimal(r.GetOrdinal("SumInsurancePayment")),
-                SumChargeAmount:     r.GetDecimal(r.GetOrdinal("SumChargeAmount")),
-                UniqueVisitCount:    r.GetInt32(r.GetOrdinal("UniqueVisitCount")),
-                PaymentPctFromSp:    hasPaymentPctColumn && !r.IsDBNull(r.GetOrdinal("PaymentPct"))
-                                        ? r.GetDecimal(r.GetOrdinal("PaymentPct"))
-                                        : null));
+                Rank:                r.IsDBNull(r.GetOrdinal("PayerRank")) ? 0 : Convert.ToByte(r.GetValue(r.GetOrdinal("PayerRank"))),
+                PayerName:           r.IsDBNull(r.GetOrdinal("PayerName")) ? string.Empty : Convert.ToString(r.GetValue(r.GetOrdinal("PayerName"))) ?? string.Empty,
+                SumInsurancePayment: r.IsDBNull(r.GetOrdinal("SumInsurancePayment")) ? 0m : Convert.ToDecimal(r.GetValue(r.GetOrdinal("SumInsurancePayment"))),
+                SumChargeAmount:     r.IsDBNull(r.GetOrdinal("SumChargeAmount")) ? 0m : Convert.ToDecimal(r.GetValue(r.GetOrdinal("SumChargeAmount"))),
+                UniqueVisitCount:    r.IsDBNull(r.GetOrdinal("UniqueVisitCount")) ? 0 : Convert.ToInt32(r.GetValue(r.GetOrdinal("UniqueVisitCount"))),
+                PaymentPctFromSp:    pct));
         }
 
         _logger.LogInformation("CollectionSummary[Aggregate] Top5ReimbursementPct({Prefix}): rows={N}, {Ms}ms",

@@ -117,26 +117,27 @@ public class PredictionController : Controller
                     "[{Lab}] DB index: skipping full line load ({RowCount} rows in source table); aggregates from PV_* snapshots / SPs.",
                     selectedLab, dbProbe.RowCount);
             }
-            catch (Exception ex)
+            catch (OperationCanceledException ex)
             {
-                _logger.LogError(ex, "[{Lab}] Prediction DB probe failed.", selectedLab);
-                PredictionDbDiagnostic diag;
-                try
-                {
-                    diag = await _dbRepo.ProbeAsync(
-                        labConfig!.DbConnectionString ?? string.Empty, HttpContext.RequestAborted);
-                }
-                catch
-                {
-                    diag = new PredictionDbDiagnostic(false, false, 0, null, null, ex.Message);
-                }
-
+                _logger.LogWarning(ex, "[{Lab}] Prediction DB probe timed out or was canceled.", selectedLab);
                 return View(new PredictionAnalysisViewModel
                 {
                     AvailableLabs        = availableLabs,
                     SelectedLab          = selectedLab,
                     PredictionAvailable  = false,
-                    ErrorMessage         = $"Failed to load Prediction Analysis for {selectedLab}: {diag.ErrorMessage ?? ex.Message}",
+                    ErrorMessage         = $"Prediction Analysis is temporarily unavailable for {selectedLab}: database probe timed out or was canceled.",
+                    CurrentWeekStartDate = weekStart,
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[{Lab}] Prediction DB probe failed.", selectedLab);
+                return View(new PredictionAnalysisViewModel
+                {
+                    AvailableLabs        = availableLabs,
+                    SelectedLab          = selectedLab,
+                    PredictionAvailable  = false,
+                    ErrorMessage         = $"Failed to load Prediction Analysis for {selectedLab}: {ex.Message}",
                     CurrentWeekStartDate = weekStart,
                 });
             }

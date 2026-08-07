@@ -519,10 +519,15 @@ builder.Services.AddRateLimiter(options =>
 
 // Compress large HTML responses (Coding Summary renders all tabs in one page;
 // gzip/brotli typically shrinks it 10-20x, cutting transfer time drastically).
-builder.Services.AddResponseCompression(options =>
+// Skip in Development: Brotli breaks Browser Link / Hot Reload script injection and
+// can make IIS Express look like it "closes" mid-navigation while debugging.
+if (!builder.Environment.IsDevelopment())
 {
-	options.EnableForHttps = true;
-});
+	builder.Services.AddResponseCompression(options =>
+	{
+		options.EnableForHttps = true;
+	});
+}
 
 builder.Services.AddControllersWithViews(options =>
 {
@@ -789,7 +794,10 @@ if (app.Environment.IsDevelopment())
 {
 	app.UseHttpsRedirection();
 }
-app.UseResponseCompression();
+else
+{
+	app.UseResponseCompression();
+}
 app.UseStaticFiles();
 app.UseRouting();
 app.UseRequestTimeouts();

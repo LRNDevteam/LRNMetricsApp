@@ -387,6 +387,12 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
         ModeInsurancePaidSameLab   = Dec(r, "ModeInsurancePaidSameLab"),
     };
 
+    // Probe is advisory only (Home tiles / Prediction availability). Keep it short so a
+    // slow or unreachable lab DB cannot hang the site or surface as an unhandled cancel.
+    private const int ProbeConnectTimeoutSeconds = 5;
+    private const int ProbeCommandTimeoutSeconds = 8;
+    private const int ProbeBudgetSeconds = 12;
+
     /// <inheritdoc/>
     public async Task<PredictionDbDiagnostic> ProbeAsync(
         string connectionString,
@@ -398,19 +404,31 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
 
         try
         {
-            await using var conn = new SqlConnection(connectionString);
-            await conn.OpenAsync(cancellationToken);
+            var csb = new SqlConnectionStringBuilder(connectionString)
+            {
+                // Cap connect time even if lab config omitted / used a long timeout.
+                ConnectTimeout = ProbeConnectTimeoutSeconds
+            };
 
-            // SP 4: usp_ProbePredictionDb � checks table + SP existence
+            // Self-limit the whole probe. Link caller CT when provided, but never let a
+            // cancel escape — always return a soft-failure diagnostic instead.
+            using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            probeCts.CancelAfter(TimeSpan.FromSeconds(ProbeBudgetSeconds));
+            var ct = probeCts.Token;
+
+            await using var conn = new SqlConnection(csb.ConnectionString);
+            await conn.OpenAsync(ct);
+
+            // SP 4: usp_ProbePredictionDb — checks table + SP existence
             bool tableExists, procExists;
             await using (var cmd = new SqlCommand("dbo.usp_ProbePredictionDb", conn)
                          {
                              CommandType    = CommandType.StoredProcedure,
-                             CommandTimeout = 30
+                             CommandTimeout = ProbeCommandTimeoutSeconds
                          })
-            await using (var r = await cmd.ExecuteReaderAsync(cancellationToken))
+            await using (var r = await cmd.ExecuteReaderAsync(ct))
             {
-                if (!await r.ReadAsync(cancellationToken))
+                if (!await r.ReadAsync(ct))
                     return new PredictionDbDiagnostic(false, false, 0, null, null,
                         "Database probe returned no rows (unexpected).");
                 tableExists = r.GetBoolean(0);
@@ -427,15 +445,15 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
                     "Stored procedure dbo.usp_GetPayerValidationReport is missing. " +
                     "Run PredictionAnalysisApp/Database/02_CreateStoredProcedures.sql against this lab's database.");
 
-            // SP 5: usp_GetPayerValidationRunStats � latest RunId + total row count
+            // SP 5: usp_GetPayerValidationRunStats — latest RunId + total row count
             await using (var cmd = new SqlCommand("dbo.usp_GetPayerValidationRunStats", conn)
                          {
                              CommandType    = CommandType.StoredProcedure,
-                             CommandTimeout = 60
+                             CommandTimeout = ProbeCommandTimeoutSeconds
                          })
-            await using (var r = await cmd.ExecuteReaderAsync(cancellationToken))
+            await using (var r = await cmd.ExecuteReaderAsync(ct))
             {
-                if (!await r.ReadAsync(cancellationToken))
+                if (!await r.ReadAsync(ct))
                 {
                     return new PredictionDbDiagnostic(true, true, 0, null, null,
                         "dbo.PayerValidationReport exists but is empty. " +
@@ -456,15 +474,25 @@ public sealed class SqlPredictionDbRepository : IPredictionDbRepository
                     weekFolder, fileName);
             }
         }
+        catch (OperationCanceledException ex)
+        {
+            // Includes TaskCanceledException. Treat as soft failure so Home / Prediction
+            // can show "unavailable" instead of crashing or hanging the request.
+            _logger.LogWarning(ex,
+                "Prediction DB probe timed out or was canceled (connect≤{Connect}s, command≤{Command}s, budget≤{Budget}s).",
+                ProbeConnectTimeoutSeconds, ProbeCommandTimeoutSeconds, ProbeBudgetSeconds);
+            return new PredictionDbDiagnostic(false, false, 0, null, null,
+                "Prediction database probe timed out or was canceled. Prediction features may be temporarily unavailable.");
+        }
         catch (SqlException ex)
         {
-            _logger.LogError(ex, "Prediction DB probe failed.");
+            _logger.LogWarning(ex, "Prediction DB probe failed.");
             return new PredictionDbDiagnostic(false, false, 0, null, null,
                 $"SQL error while probing Prediction database: {ex.Message}");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Prediction DB probe failed.");
+            _logger.LogWarning(ex, "Prediction DB probe failed.");
             return new PredictionDbDiagnostic(false, false, 0, null, null,
                 $"Failed to probe Prediction database: {ex.Message}");
         }

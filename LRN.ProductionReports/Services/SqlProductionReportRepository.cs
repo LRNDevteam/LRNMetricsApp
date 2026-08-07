@@ -2114,6 +2114,15 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         DateOnly? filterFirstBillTo = null,
         DateOnly? filterFirstBilledFrom = null,
         DateOnly? filterFirstBilledTo = null,
+        // Collection report additions (2026-07-31). All optional/NULL — Production callers
+        // pass nothing and behave exactly as before.
+        //   filterCheckDate* -> sent only when set; targets the CheckDate column (Collection SPs only).
+        //   panelColumn      -> lab-specific Panel column, sent as @PanelColumn (Collection SPs only).
+        //   excludeColumns   -> column names dropped from the written sheet (e.g. RecordId, FileLogId).
+        DateOnly? filterCheckDateFrom = null,
+        DateOnly? filterCheckDateTo = null,
+        string? panelColumn = null,
+        IReadOnlyCollection<string>? excludeColumns = null,
         int threshold = 50_000,
         CancellationToken ct = default)
     {
@@ -2137,7 +2146,8 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             filterDosFrom, filterDosTo,
             filterFirstBillFrom, filterFirstBillTo,
             filterFirstBilledFrom, filterFirstBilledTo,
-            ct).ConfigureAwait(false);
+            ct,
+            panelColumn, filterCheckDateFrom, filterCheckDateTo).ConfigureAwait(false);
 
         _logger.LogInformation("[SpExportFile] Buckets={Count} SP={Sp}", buckets.Count, bucketSpName);
 
@@ -2202,7 +2212,8 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                     filterFirstBillFrom, filterFirstBillTo,
                     filterFirstBilledFrom, filterFirstBilledTo,
                     bucketIdx, buckets.Count, _logger,
-                    ct).ConfigureAwait(false);
+                    ct,
+                    panelColumn, filterCheckDateFrom, filterCheckDateTo, excludeColumns).ConfigureAwait(false);
                 sw.Stop();
 
                 bucketFiles.Add((bucketFile, sheetName, written));
@@ -2290,7 +2301,11 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         DateOnly? firstBilledFrom, DateOnly? firstBilledTo,
         int bucketIdx, int bucketTotal,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? panelColumn = null,
+        DateOnly? checkDateFrom = null,
+        DateOnly? checkDateTo = null,
+        IReadOnlyCollection<string>? excludeColumns = null)
     {
         if (File.Exists(bucketFile)) File.Delete(bucketFile);
 
@@ -2307,7 +2322,8 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             dosFrom, dosTo, cedFrom, cedTo,
             firstBilledFrom, firstBilledTo,
             bucketIdx, bucketTotal, logger,
-            ct).ConfigureAwait(false);
+            ct,
+            panelColumn, checkDateFrom, checkDateTo, excludeColumns).ConfigureAwait(false);
 
         workbookPart.Workbook.Save();
         return written;
@@ -2371,7 +2387,11 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         DateOnly? firstBilledFrom, DateOnly? firstBilledTo,
         int bucketIdx, int bucketTotal,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? panelColumn = null,
+        DateOnly? checkDateFrom = null,
+        DateOnly? checkDateTo = null,
+        IReadOnlyCollection<string>? excludeColumns = null)
     {
         await using var conn = new SqlConnection(connectionString);
         await using var cmd  = new SqlCommand(dataSpName, conn)
@@ -2392,13 +2412,33 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         cmd.Parameters.Add(new SqlParameter("@CEDTo",           SqlDbType.Date) { Value = cedTo.HasValue           ? cedTo.Value.ToDateTime(TimeOnly.MinValue)           : DBNull.Value });
         cmd.Parameters.Add(new SqlParameter("@FirstBilledFrom", SqlDbType.Date) { Value = firstBilledFrom.HasValue ? firstBilledFrom.Value.ToDateTime(TimeOnly.MinValue) : DBNull.Value });
         cmd.Parameters.Add(new SqlParameter("@FirstBilledTo",   SqlDbType.Date) { Value = firstBilledTo.HasValue   ? firstBilledTo.Value.ToDateTime(TimeOnly.MinValue)   : DBNull.Value });
+        // Collection additions (2026-07-31): sent only when supplied -> Production data SPs unchanged.
+        if (!string.IsNullOrWhiteSpace(panelColumn))
+            cmd.Parameters.Add(new SqlParameter("@PanelColumn", SqlDbType.NVarChar, 128) { Value = panelColumn });
+        if (checkDateFrom.HasValue)
+            cmd.Parameters.Add(new SqlParameter("@CheckDateFrom", SqlDbType.Date) { Value = checkDateFrom.Value.ToDateTime(TimeOnly.MinValue) });
+        if (checkDateTo.HasValue)
+            cmd.Parameters.Add(new SqlParameter("@CheckDateTo",   SqlDbType.Date) { Value = checkDateTo.Value.ToDateTime(TimeOnly.MinValue) });
 
         await conn.OpenAsync(ct).ConfigureAwait(false);
         await using var rdr = await cmd.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false);
 
-        int colCount = rdr.FieldCount;
+        // Column projection: drop any excluded columns (e.g. RecordId / FileLogId) from the
+        // written sheet. Build the kept-column index list once; cell letters are assigned by
+        // OUTPUT position so the sheet has no gaps.
+        int srcColCount = rdr.FieldCount;
+        var keepIdx = new List<int>(srcColCount);
+        for (int i = 0; i < srcColCount; i++)
+        {
+            var name = rdr.GetName(i);
+            if (excludeColumns is { Count: > 0 } && excludeColumns.Contains(name, StringComparer.OrdinalIgnoreCase))
+                continue;
+            keepIdx.Add(i);
+        }
+
+        int colCount = keepIdx.Count;
         var headers  = new string[colCount];
-        for (int i = 0; i < colCount; i++) headers[i] = rdr.GetName(i);
+        for (int i = 0; i < colCount; i++) headers[i] = rdr.GetName(keepIdx[i]);
 
         // Cache column names ? cell-reference prefixes so we don't recompute per cell.
         var colRefs = new string[colCount];
@@ -2429,8 +2469,9 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                 writer.WriteStartElement(new Row { RowIndex = rowIdx });
                 for (int c = 0; c < colCount; c++)
                 {
-                    if (rdr.IsDBNull(c)) continue;
-                    var val = rdr.GetValue(c);
+                    int src = keepIdx[c];   // map output column -> source reader ordinal (excludes dropped columns)
+                    if (rdr.IsDBNull(src)) continue;
+                    var val = rdr.GetValue(src);
                     WriteValueCell(writer, $"{colRefs[c]}{rowIdx}", val);
                 }
                 writer.WriteEndElement(); // </row>
@@ -2714,7 +2755,12 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         DateOnly? dosFrom,    DateOnly? dosTo,
         DateOnly? cedFrom,    DateOnly? cedTo,
         DateOnly? firstBilledFrom, DateOnly? firstBilledTo,
-        CancellationToken ct)
+        CancellationToken ct,
+        // Collection additions (2026-07-31): sent only when supplied, so the Production
+        // bucket SPs (which have neither parameter) are called exactly as before.
+        string? panelColumn = null,
+        DateOnly? checkDateFrom = null,
+        DateOnly? checkDateTo = null)
     {
         var result = new List<SpExportBucket>();
 
@@ -2734,6 +2780,12 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         cmd.Parameters.Add(new SqlParameter("@CEDTo",           SqlDbType.Date) { Value = cedTo.HasValue          ? cedTo.Value.ToDateTime(TimeOnly.MinValue)          : DBNull.Value });
         cmd.Parameters.Add(new SqlParameter("@FirstBilledFrom", SqlDbType.Date) { Value = firstBilledFrom.HasValue ? firstBilledFrom.Value.ToDateTime(TimeOnly.MinValue) : DBNull.Value });
         cmd.Parameters.Add(new SqlParameter("@FirstBilledTo",   SqlDbType.Date) { Value = firstBilledTo.HasValue   ? firstBilledTo.Value.ToDateTime(TimeOnly.MinValue)   : DBNull.Value });
+        if (!string.IsNullOrWhiteSpace(panelColumn))
+            cmd.Parameters.Add(new SqlParameter("@PanelColumn", SqlDbType.NVarChar, 128) { Value = panelColumn });
+        if (checkDateFrom.HasValue)
+            cmd.Parameters.Add(new SqlParameter("@CheckDateFrom", SqlDbType.Date) { Value = checkDateFrom.Value.ToDateTime(TimeOnly.MinValue) });
+        if (checkDateTo.HasValue)
+            cmd.Parameters.Add(new SqlParameter("@CheckDateTo",   SqlDbType.Date) { Value = checkDateTo.Value.ToDateTime(TimeOnly.MinValue) });
 
         await conn.OpenAsync(ct).ConfigureAwait(false);
         await using var rdr = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);

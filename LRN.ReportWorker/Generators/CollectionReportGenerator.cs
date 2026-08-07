@@ -2,6 +2,7 @@ using ClosedXML.Excel;
 using LabMetricsDashboard.Controllers;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
+using LRN.ProductionReports.Services;
 using LRN.ReportQueue.Shared;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -30,17 +31,20 @@ public sealed class CollectionReportGenerator : IReportGenerator
     private readonly IServiceProvider _services;
     private readonly LabSettings _labSettings;
     private readonly ICollectionSummaryRepository _repo;
+    private readonly IProductionReportRepository _prodRepo;   // for the shared SP-export streamer
     private readonly ILogger<CollectionReportGenerator> _logger;
 
     public CollectionReportGenerator(
         IServiceProvider services,
         LabSettings labSettings,
         ICollectionSummaryRepository repo,
+        IProductionReportRepository prodRepo,
         ILogger<CollectionReportGenerator> logger)
     {
         _services    = services;
         _labSettings = labSettings;
         _repo        = repo;
+        _prodRepo    = prodRepo;
         _logger      = logger;
     }
 
@@ -125,7 +129,7 @@ public sealed class CollectionReportGenerator : IReportGenerator
     {
         // Summary sheets via ClosedXML (small). Raw Claim/Line sheets streamed with
         // OpenXml and merged in — ClosedXML SaveAs OOMs when those sheets are huge.
-        using (var wb = CollectionSummaryExcelExportBuilder.CreateWorkbook(
+        using (var wb = LabMetricsDashboard.Services.CollectionSummaryExcelExportBuilder.CreateWorkbook(
             vm, [], [], job.LabName, f.ToActiveFilterList()))
         {
             foreach (var placeholder in wb.Worksheets
@@ -137,21 +141,55 @@ public sealed class CollectionReportGenerator : IReportGenerator
                 wb.SaveAs(fs);
         }
         await progress(20);
+        _ = (claimCount, lineCount);   // pre-counts drive GenerateAsync's log/progress only
 
-        var totalAll = Math.Max(1, claimCount + lineCount);
+        // Raw Claim/Line sheets now stream through the SAME bucketed SP export mechanism the
+        // Production Summary report uses (memory-flat, SQL-pre-split), but against Collection-
+        // specific SPs that honour ALL Collection filters — including CheckDate — and filter
+        // Payer/Panel on the columns the Collection filter dropdown is built from
+        // (PayerName_Raw + the lab-specific panel column). RecordId/FileLogId are dropped per
+        // the client's field selection (2026-07-31).
+        //
+        // Filter mapping into AppendSpExportSheetsToFileAsync:
+        //   Collection "First Bill" (fb*) -> FirstBilledDate  => filterFirstBilled*
+        //   Collection DOS (dos*)         -> DateOfService     => filterDos*
+        //   Collection CheckDate (cd*)    -> CheckDate         => filterCheckDate*
+        //   (ChargeEnteredDate / filterFirstBill* is unused by Collection -> left null)
+        var sqlRepo = _prodRepo as SqlProductionReportRepository
+            ?? throw new InvalidOperationException(
+                "Production report repository must be SqlProductionReportRepository for the Collection SP export.");
 
-        var (claimQuery, claimParams) = _repo.BuildClaimLevelExportQuery(
-            payerFilter, panelFilter, fbFrom, fbTo, dosFrom, dosTo, cdFrom, cdTo);
-        var claimRows = await OpenXmlRowStreamer.AppendSqlSheetsToWorkbookAsync(
-            tempPath, connStr, claimQuery, claimParams, "ClaimLevelData",
-            done => progress((byte)(20 + Math.Min(35, done * 35L / totalAll))), ct);
+        var claimPanelColumn = LabCollectionPrefix.GetPanelColumn(job.LabName);   // PanelType (NW) / PanelName
+        string[] excludeColumns = ["RecordId", "FileLogId"];
+
+        var claimRows = await sqlRepo.AppendSpExportSheetsToFileAsync(
+            tempPath, connStr,
+            "dbo.usp_GetCollectionClaimLevelExportBuckets",
+            "dbo.usp_GetCollectionClaimLevelExportDataByDateRange",
+            "ClaimLevel", LRN.ProductionReports.Services.ExcelTheme.TabGreen,
+            filterPayerNames: payerFilter,
+            filterPanelNames: panelFilter,
+            filterDosFrom: dosFrom, filterDosTo: dosTo,
+            filterFirstBilledFrom: fbFrom, filterFirstBilledTo: fbTo,
+            filterCheckDateFrom: cdFrom, filterCheckDateTo: cdTo,
+            panelColumn: claimPanelColumn,
+            excludeColumns: excludeColumns,
+            ct: ct).ConfigureAwait(false);
         await progress(55);
 
-        var (lineQuery, lineParams) = _repo.BuildLineLevelExportQuery(
-            payerFilter, panelFilter, fbFrom, fbTo, dosFrom, dosTo, cdFrom, cdTo);
-        var lineRows = await OpenXmlRowStreamer.AppendSqlSheetsToWorkbookAsync(
-            tempPath, connStr, lineQuery, lineParams, "LineLevelData",
-            done => progress((byte)(55 + Math.Min(35, done * 35L / totalAll))), ct);
+        var lineRows = await sqlRepo.AppendSpExportSheetsToFileAsync(
+            tempPath, connStr,
+            "dbo.usp_GetCollectionLineLevelExportBuckets",
+            "dbo.usp_GetCollectionLineLevelExportDataByDateRange",
+            "LineLevel", LRN.ProductionReports.Services.ExcelTheme.TabGold,
+            filterPayerNames: payerFilter,
+            filterPanelNames: panelFilter,
+            filterDosFrom: dosFrom, filterDosTo: dosTo,
+            filterFirstBilledFrom: fbFrom, filterFirstBilledTo: fbTo,
+            filterCheckDateFrom: cdFrom, filterCheckDateTo: cdTo,
+            panelColumn: null,   // line table uses Panelname for every lab (SP default)
+            excludeColumns: excludeColumns,
+            ct: ct).ConfigureAwait(false);
 
         await progress(95);
         return claimRows + lineRows;

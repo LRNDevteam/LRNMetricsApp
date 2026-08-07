@@ -21,6 +21,61 @@ public sealed class ClaimLineDbService
     }
 
     /// <summary>
+    /// A representative source file for a RunId, read from this lab database's
+    /// <c>dbo.LineClaimFileLogs</c> and used for the LRNMaster report-run log
+    /// parameter <c>@SourceFileName</c>.
+    /// </summary>
+    /// <param name="FileName">The logged CSV file name (may be null if the column is empty).</param>
+    /// <param name="FileType">Either <c>claimlevel</c> or <c>linelevel</c>.</param>
+    public readonly record struct RunSourceFileInfo(string? FileName, string FileType);
+
+    /// <summary>
+    /// Returns one representative source file logged for <paramref name="runId"/>.
+    /// <para>
+    /// Each report type is built from several tables — Production and Collection
+    /// Summary from ClaimLevel, Executive Summary from LIMSMaster + ClaimLevel +
+    /// LineLevel — so no single file is "the" source. Any one logged file is
+    /// sufficient to identify the run, and a Claim Level file is preferred because it
+    /// contributes to all three report types. Falls back to the most recently inserted
+    /// row of any type.
+    /// </para>
+    /// No row count is returned: with multiple contributing tables a single count would
+    /// be misleading, so callers send <c>@RowCount = 0</c>.
+    /// <para>
+    /// Returns <c>null</c> when no file-log row exists for the RunId (for example when
+    /// the external ingestion app has not yet logged the run).
+    /// </para>
+    /// </summary>
+    public RunSourceFileInfo? GetSourceFileForRun(string runId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(runId);
+
+        using var conn = new SqlConnection(_connectionString);
+        conn.Open();
+
+        using var cmd = new SqlCommand(
+            """
+            SELECT TOP 1 FileName, FileType
+            FROM   dbo.LineClaimFileLogs
+            WHERE  RunId = @RunId
+            ORDER  BY CASE WHEN FileType = 'claimlevel' THEN 0 ELSE 1 END,
+                      InsertedDateTime DESC,
+                      FileLogId DESC
+            """, conn)
+        { CommandTimeout = 60 };
+
+        cmd.Parameters.AddWithValue("@RunId", runId);
+
+        using var reader = cmd.ExecuteReader();
+        if (!reader.Read())
+            return null;
+
+        return new RunSourceFileInfo(
+            reader.IsDBNull(0) ? null : reader.GetString(0),
+            reader.IsDBNull(1) ? string.Empty : reader.GetString(1));
+    }
+
+    /// <summary>
     /// Returns the latest <c>SourceFullPath</c> from <c>LineClaimFileLogs</c>
     /// for the given lab and file type, or null if no rows exist.
     /// </summary>

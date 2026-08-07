@@ -28,11 +28,15 @@
   // The app resets this to false automatically after a successful run.
   "ClaimLineRefresh": true,
 
-  // ── RunId validation gate ─────────────────────────────────────────────────
+  // ── RunId change detection ────────────────────────────────────────────────
+  // The RunId this app last processed. Managed automatically: the app writes the
+  // value here at the end of a successful run. Leave as "" for a new lab so the
+  // first execution is always treated as changed.
+  "LastProcessedRunId": "",
+
   // Lab name passed to sp_GetRecentSuccessRunByLab (LRNMaster) to fetch the
-  // latest successfully completed RunId. The latest input file is only processed
-  // when its RunId prefix (text before the first underscore in the file name)
-  // matches that completed RunId. Applies to ClaimLineRefresh=true as well.
+  // latest successfully completed RunId. Refresh processing runs when that RunId
+  // DIFFERS from LastProcessedRunId above, or when ClaimLineRefresh = true.
   "FetchLatestCompletedRunIDParameter": "Phi Life",
 
   // ── Paths ─────────────────────────────────────────────────────────────────

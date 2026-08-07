@@ -111,6 +111,15 @@
         background: rgba(255, 255, 255, .22);
         }
 
+        .nav-lab-btn.nav-lab-locked {
+        opacity: .6;
+        cursor: not-allowed;
+        }
+
+        .nav-lab-btn.nav-lab-locked:hover {
+        background: rgba(255, 255, 255, .12);
+        }
+
         .nav-lab-btn .bi-chevron-down {
         font-size: .55rem;
         opacity: .7;
@@ -829,6 +838,10 @@
             var pageLabel = ViewData["PageLabel"] as string;
             var allLabKeys = LabSettingsInstance.Labs.Keys.OrderBy(x => x).ToList();
 
+            // Pages can lock the navbar lab selector (e.g. the LIS drill-through,
+            // whose data is scoped to the lab it was opened from).
+            var disableLabSwitch = ViewData["DisableLabSwitch"] as bool? ?? false;
+
             // Restrict the navbar lab selector to labs the signed-in user is assigned to.
             // Admins see every lab. Anonymous (login screen) sees nothing.
             var isAdmin = User?.IsInRole("Admin") ?? false;
@@ -899,24 +912,37 @@
             <div class="nav-toolbar">
                 @if (!string.IsNullOrEmpty(activeLab) && availableLabs.Count > 0)
                 {
-                    <span class="nav-lab-wrap" id="navLabWrap">
-                        <span class="nav-lab-btn" id="navLabBtn" tabindex="0" title="Switch lab">
-                            <i class="bi bi-building"></i>
-                            @activeLab
-                            <i class="bi bi-chevron-down"></i>
+                    if (disableLabSwitch)
+                    {
+                        <span class="nav-lab-wrap">
+                            <span class="nav-lab-btn nav-lab-locked" title="Lab switching is locked on this page">
+                                <i class="bi bi-building"></i>
+                                @activeLab
+                                <i class="bi bi-lock-fill"></i>
+                            </span>
                         </span>
-                        <div class="nav-lab-panel" id="navLabPanel">
-                            <input type="text" class="nav-lab-search" id="navLabSearch"
-                                   placeholder="Search labs…" autocomplete="off" />
-                            <div class="nav-lab-list" id="navLabList">
-                                @foreach (var lab in availableLabs)
-                                {
-                                    <a href="#" data-lab="@lab"
-                                       class="@(lab == activeLab ? "active" : "")">@lab</a>
-                                }
+                    }
+                    else
+                    {
+                        <span class="nav-lab-wrap" id="navLabWrap">
+                            <span class="nav-lab-btn" id="navLabBtn" tabindex="0" title="Switch lab">
+                                <i class="bi bi-building"></i>
+                                @activeLab
+                                <i class="bi bi-chevron-down"></i>
+                            </span>
+                            <div class="nav-lab-panel" id="navLabPanel">
+                                <input type="text" class="nav-lab-search" id="navLabSearch"
+                                       placeholder="Search labs…" autocomplete="off" />
+                                <div class="nav-lab-list" id="navLabList">
+                                    @foreach (var lab in availableLabs)
+                                    {
+                                        <a href="#" data-lab="@lab"
+                                           class="@(lab == activeLab ? "active" : "")">@lab</a>
+                                    }
+                                </div>
                             </div>
-                        </div>
-                    </span>
+                        </span>
+                    }
                 }
                 @if ((User?.Identity?.IsAuthenticated ?? false) && canSeeLabMaster)
                 {
@@ -1034,10 +1060,19 @@
         <!-- Breadcrumb bar — shown when a lab is selected -->
         @if (!string.IsNullOrEmpty(selectedLab))
         {
+            var bcParent    = ViewData["BreadcrumbParent"] as string;
+            var bcParentUrl = ViewData["BreadcrumbParentUrl"] as string;
             <div class="lmd-breadcrumb d-flex align-items-center flex-wrap gap-1">
                 <a asp-controller="Home" asp-action="Index">Home</a>
                 <span class="bc-sep">›</span>
-                <a asp-controller="Dashboard" asp-action="Index" asp-route-lab="@selectedLab">Revenue Dashboard</a>
+                @if (!string.IsNullOrEmpty(bcParent))
+                {
+                    <a href="@(string.IsNullOrEmpty(bcParentUrl) ? "#" : bcParentUrl)">@bcParent</a>
+                }
+                else
+                {
+                    <a asp-controller="Dashboard" asp-action="Index" asp-route-lab="@selectedLab">Revenue Dashboard</a>
+                }
                 @if (!string.IsNullOrEmpty(pageLabel))
                 {
                     <span class="bc-sep">›</span>

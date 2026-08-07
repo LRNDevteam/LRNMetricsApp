@@ -31,7 +31,7 @@ public class HomeController : Controller
         _cache = cache;
     }
 
-    public async Task<IActionResult> Index(string? sort)
+    public async Task<IActionResult> Index(string? sort, string? lab = null)
     {
         // Non-admin users should never see the Home landing (lab tiles).
         // Send them straight to the Revenue Dashboard.
@@ -39,6 +39,14 @@ public class HomeController : Controller
         {
             return RedirectToAction("Index", "Dashboard");
         }
+
+        // Persist the navbar lab selection. The Home page previously never wrote the
+        // lmd_selected_lab cookie, so switching labs here showed the new lab on this page
+        // (via ?lab=) but reverted on the next navigation. Resolving here writes the cookie
+        // and sets ViewData["SelectedLab"] so the choice carries to every other page — the
+        // same pattern every content controller (Dashboard, CollectionSummary, …) already uses.
+        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        ViewData["SelectedLab"] = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
 
         var resolvedSort = string.IsNullOrWhiteSpace(sort) ? "latest" : sort;
 
@@ -127,8 +135,18 @@ public class HomeController : Controller
             entry.AbsoluteExpirationRelativeToNow = RunInfoCacheDuration;
             try
             {
-                var diag = await _predictionRepo.ProbeAsync(connectionString, HttpContext.RequestAborted);
+                // Do not pass HttpContext.RequestAborted: a client disconnect / request
+                // abort mid-probe previously surfaced as TaskCanceledException noise and
+                // could leave Home waiting on WhenAll while SQL work was canceled.
+                // ProbeAsync applies its own short connect/command/budget timeouts.
+                var diag = await _predictionRepo.ProbeAsync(connectionString, CancellationToken.None);
                 return diag.IsReady ? diag : null;
+            }
+            catch (OperationCanceledException ex)
+            {
+                _logger.LogWarning(ex,
+                    "Home tile: prediction run info probe canceled/timed out for lab '{LabName}'.", labName);
+                return null;
             }
             catch (Exception ex)
             {

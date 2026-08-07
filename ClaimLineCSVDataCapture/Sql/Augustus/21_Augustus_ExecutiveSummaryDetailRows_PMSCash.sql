@@ -86,11 +86,11 @@ BEGIN
         b.PatientAdjustments
     FROM #Base b
     WHERE
-        -- ── PMS ──────────────────────────────────────────────────────────────
-           (@RowCode = 'F'    AND b.BillStatus='Billed' AND b.ClaimStatus<>'Billed amount 0')
-        OR (@RowCode = 'F.1'  AND b.BillStatus='Billed' AND b.ClaimStatus<>'Billed amount 0' AND b.Source='IRCM')
-        OR (@RowCode = 'F.2'  AND b.BillStatus='Billed' AND b.ClaimStatus<>'Billed amount 0' AND b.Source='Daq')
-        OR (@RowCode = 'G'    AND (b.BillStatus='' OR b.BillStatus IS NULL) AND b.ClaimStatus<>'Billed amount 0')
+        -- ── PMS (same predicates as usp_RefreshAug_ExecutiveSummary) ─────────
+           (@RowCode = 'F'    AND ISNULL(LTRIM(RTRIM(CONVERT(NVARCHAR(50), b.FirstBilledDate))), '') <> '' AND b.ClaimStatus<>'Billed amount 0')
+        OR (@RowCode = 'F.1'  AND ISNULL(LTRIM(RTRIM(CONVERT(NVARCHAR(50), b.FirstBilledDate))), '') <> '' AND b.ClaimStatus<>'Billed amount 0' AND b.Source='IRCM')
+        OR (@RowCode = 'F.2'  AND ISNULL(LTRIM(RTRIM(CONVERT(NVARCHAR(50), b.FirstBilledDate))), '') <> '' AND b.ClaimStatus<>'Billed amount 0' AND b.Source='Daq')
+        OR (@RowCode = 'G'    AND ISNULL(LTRIM(RTRIM(CONVERT(NVARCHAR(50), b.FirstBilledDate))), '') = '' AND b.ClaimStatus<>'Billed amount 0')
         OR (@RowCode = 'H'    AND b.ClaimStatus='Billed amount 0')
         OR (@RowCode = 'I'    AND b.ClaimStatus='Fully Paid')
         OR (@RowCode = 'J'    AND b.ClaimStatus='Patient paid')
@@ -102,11 +102,11 @@ BEGIN
         OR (@RowCode = 'O.1'  AND b.ClaimStatus='Fully Denied')
         OR (@RowCode = 'O.2'  AND b.ClaimStatus='Partially Denied')
         OR (@RowCode = 'O.3'  AND b.ClaimStatus='No Response')
-        -- ── Cash ─────────────────────────────────────────────────────────────
-        OR (@RowCode = 'P'    AND b.BillStatus='Billed' AND b.ClaimStatus<>'Billed amount 0')
-        OR (@RowCode = 'P.1'  AND b.BillStatus='Billed' AND b.ClaimStatus<>'Billed amount 0' AND b.Source='IRCM')
-        OR (@RowCode = 'P.2'  AND b.BillStatus='Billed' AND b.ClaimStatus<>'Billed amount 0' AND b.Source='Daq')
-        OR (@RowCode = 'Q'    AND (b.BillStatus='' OR b.BillStatus IS NULL) AND b.ClaimStatus<>'Billed amount 0')
+        -- ── Cash (FirstBilledDate for P/Q; amounts as aggregate) ──────────────
+        OR (@RowCode = 'P'    AND ISNULL(LTRIM(RTRIM(CONVERT(NVARCHAR(50), b.FirstBilledDate))), '') <> '' AND b.ClaimStatus<>'Billed amount 0')
+        OR (@RowCode = 'P.1'  AND ISNULL(LTRIM(RTRIM(CONVERT(NVARCHAR(50), b.FirstBilledDate))), '') <> '' AND b.ClaimStatus<>'Billed amount 0' AND b.Source='IRCM')
+        OR (@RowCode = 'P.2'  AND ISNULL(LTRIM(RTRIM(CONVERT(NVARCHAR(50), b.FirstBilledDate))), '') <> '' AND b.ClaimStatus<>'Billed amount 0' AND b.Source='Daq')
+        OR (@RowCode = 'Q'    AND ISNULL(LTRIM(RTRIM(CONVERT(NVARCHAR(50), b.FirstBilledDate))), '') = '' AND b.ClaimStatus<>'Billed amount 0')
         OR (@RowCode = 'R'    AND b.InsurancePayment > 0 AND b.ClaimStatus='Fully Paid')
         OR (@RowCode = 'S'    AND b.ClaimStatus='Partial Paid')
         OR (@RowCode = 'T'    AND b.PatientPayment > 0)

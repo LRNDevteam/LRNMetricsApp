@@ -7,7 +7,7 @@ namespace LabMetricsDashboard.Services;
 
 /// <summary>
 /// Reads Monthly Claim Volume data from <c>dbo.ClaimLevelData</c>.
-/// Groups by PanelName × Year/Month(FirstBilledDate), counts unique ClaimIDs,
+/// Groups by PanelName ï¿½ Year/Month(FirstBilledDate), counts unique ClaimIDs,
 /// and sums ChargeAmount. Includes top-3 payer drill-down per panel.
 /// </summary>
 public sealed class SqlProductionReportRepository : IProductionReportRepository
@@ -62,7 +62,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             ? "TRY_CAST(ChargeEnteredDate AS DATE)"
             : "TRY_CAST(FirstBilledDate AS DATE)";
 
-        // Rule4 = PanelType; Rule3 (Augustus) = PanelNew only — no PanelName fallback.
+        // Rule4 = PanelType; Rule3 (Augustus) = PanelNew only ï¿½ no PanelName fallback.
         // panelNewStrict=true  (ProductionSummaryReport): use bare PanelNew, PanelNew IS NOT NULL guard.
         // panelNewStrict=false (standard ProductionReport): use PanelNew; null/empty displayed as '(No PanelNew)'.
         var rule3PanelExpr  = panelNewStrict
@@ -121,7 +121,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         }
 
         // Rule3 (Augustus): require ChargeEnteredDate. Rows with null/empty PanelNew
-        // are kept and displayed as '(No PanelNew)' — no PanelName fallback.
+        // are kept and displayed as '(No PanelNew)' ï¿½ no PanelName fallback.
         if (isRule3)
         {
             whereClauses.Add("TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL");
@@ -203,7 +203,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         // Query 1: filter option lists (unfiltered).
         // Rule4 = PanelType; Rule3 (Augustus) = PanelNew; others = PanelName.
         // Dropdown options: always use the real PanelNew column so '(No PanelNew)' rows are
-        // not listed as a selectable filter — they are a display-only label for unassigned rows.
+        // not listed as a selectable filter ï¿½ they are a display-only label for unassigned rows.
         var panelOptionsCol = isRule4 ? "PanelType" : isRule3 ? "PanelNew" : "PanelName";
         var optionsSql = $"""
             SELECT DISTINCT LTRIM(RTRIM(PayerName_Raw)) FROM dbo.ClaimLevelData
@@ -212,7 +212,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             WHERE {panelOptionsCol} IS NOT NULL AND LTRIM(RTRIM({panelOptionsCol})) <> '' ORDER BY 1;
             """;
 
-        // Query 2: panel × month aggregation (unique claim count + sum charges).
+        // Query 2: panel ï¿½ month aggregation (unique claim count + sum charges).
         // Year/Month columns come from the rule-selected date source (FirstBilledDate by default,
         // ChargeEnteredDate when rule = "Rule1" / "Rule2" / "Rule3" / "Rule4").
         // Row column comes from panelColumnExpr ("PanelName" today; will be "PanelNameNew" for Rule3/Rule4 in future).
@@ -449,13 +449,13 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         var isRule4 = string.Equals(rule, "Rule4", StringComparison.OrdinalIgnoreCase);
         var isRule5 = string.Equals(rule, "Rule5", StringComparison.OrdinalIgnoreCase);
         _ = isRule1; // legacy default behavior; flag kept for readability
-        _ = isRule2; // FirstBilledDate + PayerName not blank — same as default branch
+        _ = isRule2; // FirstBilledDate + PayerName not blank ï¿½ same as default branch
         var useChargeEnteredDate = isRule3 || isRule4 || isRule5;
         var weekDateExpr = useChargeEnteredDate
             ? "TRY_CAST(ChargeEnteredDate AS DATE)"
             : "TRY_CAST(FirstBilledDate AS DATE)";
 
-        // Resolve lab-specific week boundary (Mon–Sun by default).
+        // Resolve lab-specific week boundary (Monï¿½Sun by default).
         var weekStartDay = WeekRangeHelper.ResolveWeekStart(weekRange);
 
         // Determine the last 4 complete weeks based on today + chosen week-start day.
@@ -471,7 +471,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             $"{weekDateExpr} <= @WeekEnd",
         };
 
-        // Rule4 (NorthWest) does NOT require FirstBilledDate — it uses ClaimStatus exclusion.
+        // Rule4 (NorthWest) does NOT require FirstBilledDate ï¿½ it uses ClaimStatus exclusion.
         // All other rules keep the legacy FirstBilledDate guard.
         if (!isRule4)
         {
@@ -517,14 +517,14 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         }
 
         // Rule3 (Augustus): rows with null/empty PanelNew are kept and shown as '(No PanelNew)'.
-        // No PanelName fallback — coalesce to label handled in SELECT/GROUP BY.
+        // No PanelName fallback ï¿½ coalesce to label handled in SELECT/GROUP BY.
         if (isRule3)
         {
             // No additional WHERE guard; null PanelNew rendered as '(No PanelNew)' in the pivot.
         }
 
         // Rule3 panel expression: strict (ProductionSummaryReport) = bare PanelNew with IS NOT NULL guard;
-        // non-strict (ProductionReport) = ISNULL(PanelNew, '(No PanelNew)') — no PanelName fallback.
+        // non-strict (ProductionReport) = ISNULL(PanelNew, '(No PanelNew)') ï¿½ no PanelName fallback.
         var rule3WeekPanelExpr = panelNewStrict
             ? "PanelNew"
             : "ISNULL(NULLIF(LTRIM(RTRIM(PanelNew)),''), '(No PanelNew)')";
@@ -594,7 +594,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
 
         var whereStr = string.Join(" AND ", whereClauses);
 
-        // Query: panel × payer × week-date aggregation within the 4-week window.
+        // Query: panel ï¿½ payer ï¿½ week-date aggregation within the 4-week window.
         // Rule4 (NW) = PanelType; Rule3 (Augustus) = PanelNew only, null ? '(No PanelNew)'; others = PanelName.
         var weekPanelExpr = isRule4 ? "PanelType" : isRule3 ? rule3WeekPanelExpr : "PanelName";
         var pivotSql = $"""
@@ -1412,7 +1412,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         }
         else if (isRule3)
         {
-            // Augustus: row = PanelNew only — no PanelName fallback.
+            // Augustus: row = PanelNew only ï¿½ no PanelName fallback.
             // Null/empty PanelNew rows are labelled '(No PanelNew)' so they remain visible.
             agingSql = $"""
                 SELECT
@@ -2157,7 +2157,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                     WHEN TRY_CAST(FirstBilledDate AS DATE) IS NULL OR YEAR(TRY_CAST(FirstBilledDate AS DATE)) <= 1900 THEN 0
                     ELSE YEAR(TRY_CAST(FirstBilledDate AS DATE))
                 END AS SplitYear,
-                COUNT_BIG(*) AS RowCount
+                COUNT_BIG(*) AS TotalRows
             FROM {tableName}
             {whereStr}
             GROUP BY
@@ -2188,7 +2188,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         CancellationToken ct)
     {
         var sql = $"""
-            SELECT MONTH(TRY_CAST(FirstBilledDate AS DATE)) AS SplitMonth, COUNT_BIG(*) AS RowCount
+            SELECT MONTH(TRY_CAST(FirstBilledDate AS DATE)) AS SplitMonth, COUNT_BIG(*) AS TotalRows
             FROM {tableName}
             {AppendWhere(whereStr, BuildYearFilter(year))}
             GROUP BY MONTH(TRY_CAST(FirstBilledDate AS DATE))

@@ -32,12 +32,30 @@ public sealed class LabConfig
     public bool ClaimLineRefresh { get; set; }
 
     /// <summary>
+    /// The RunId this app last processed for the lab, persisted back into the lab's
+    /// JSON config file (next to <see cref="ClaimLineRefresh"/>) at the end of a
+    /// successful run.
+    /// <para>
+    /// On each execution the app calls <c>sp_GetRecentSuccessRunByLab</c> (LRNMaster)
+    /// to obtain the latest successfully completed RunId and compares it with this
+    /// value. Downstream processing runs only when the two differ (a new successful
+    /// run has landed) or when <see cref="ClaimLineRefresh"/> is <c>true</c>.
+    /// </para>
+    /// Leave empty/absent on a brand-new lab — the first run will then always be
+    /// treated as changed.
+    /// </summary>
+    public string? LastProcessedRunId { get; set; }
+
+    /// <summary>
     /// Lab name passed to the <c>sp_GetRecentSuccessRunByLab</c> stored procedure
     /// (run against the LRNMaster database via the appsettings <c>DefaultConnection</c>)
     /// to fetch the latest successfully completed RunId for this lab.
-    /// Used to gate ingestion: the latest input file is only processed when its RunId
-    /// prefix (the text before the first underscore in the file name, e.g.
-    /// <c>20260522R0118</c>) matches the latest completed RunId.
+    /// <para>
+    /// The returned RunId (e.g. <c>20260522R0118</c>) is compared with
+    /// <see cref="LastProcessedRunId"/>. When the two differ a new successful run has
+    /// landed and the refresh steps execute; when they match nothing has changed and
+    /// the lab is skipped unless <see cref="ClaimLineRefresh"/> forces a re-run.
+    /// </para>
     /// Example: <c>"PCR Labs of America"</c>.
     /// </summary>
     public string? FetchLatestCompletedRunIDParameter { get; set; }
