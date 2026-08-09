@@ -296,9 +296,18 @@ public static class DenialDashboardExcelExportBuilder
 			"MUE Validation Required"
 		};
 
-		var effectiveLineHeaders = lineHeaders
+		var baseHeaders = lineHeaders
 			.Where(h => !string.IsNullOrWhiteSpace(h) && !excludedHeaders.Contains(h.Trim()))
 			.ToList();
+
+		// Excel refuses any cell over 32,767 characters — NorthWest's
+		// "Covered ICD 10 codes as per Payer Policy" blows past it and used to fail the whole
+		// export with "Cells can hold a maximum of 32,767 characters. (Parameter 'text')".
+		// Measure the real overflow first, then spill each long value across
+		// "{Header} (cont. 1)", "(cont. 2)" … columns. Columns that fit are untouched, so a
+		// lab with no oversized values gets exactly the same sheet as before.
+		var overflow = MeasureOverflow(baseHeaders, lineRows);
+		var effectiveLineHeaders = BuildHeadersWithOverflow(baseHeaders, overflow);
 
 		var ws1 = wb.AddWorksheet("Line Item");
 		ExcelTheme.ApplyDefaults(ws1);
@@ -322,24 +331,30 @@ public static class DenialDashboardExcelExportBuilder
 		for (int r = 0; r < lineRows.Count; r++)
 		{
 			var row = lineRows[r];
-			for (int c = 0; c < effectiveLineHeaders.Count; c++)
+			var col = 1;
+			foreach (var header in baseHeaders)
 			{
-				var key = effectiveLineHeaders[c];
-				row.TryGetValue(key, out var val);
-				ws1.Cell(r + 2, c + 1).Value = val ?? string.Empty;
+				row.TryGetValue(header, out var val);
+				var extras = overflow.GetValueOrDefault(header);
+
+				if (extras == 0)
+				{
+					ws1.Cell(r + 2, col++).Value = val ?? string.Empty;
+					continue;
+				}
+
+				// Chunk boundaries prefer a comma, so a code is never cut in half.
+				var chunks = IcdCellSplitter.Split(val ?? string.Empty);
+				for (var part = 0; part <= extras; part++)
+					ws1.Cell(r + 2, col++).Value = part < chunks.Count ? chunks[part] : string.Empty;
 			}
 		}
 
 		if (lineRows.Count > 0)
 		{
+			// No zebra banding: plain white rows under a green header.
 			var dataRange = ws1.Range(2, 1, lineRows.Count + 1, effectiveLineHeaders.Count);
-			for (int r = 0; r < lineRows.Count; r++)
-			{
-				bool isEven = ((r + 1) % 2 == 0);
-				var rowRange = dataRange.Row(r + 1);
-				rowRange.Style.Fill.BackgroundColor = isEven ? ExcelTheme.BandedRowBg : XLColor.White;
-			}
-
+			dataRange.Style.Fill.BackgroundColor = XLColor.White;
 			dataRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
 			dataRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
 		}
@@ -425,9 +440,10 @@ public static class DenialDashboardExcelExportBuilder
 
 		if (lineRows.Count > 0 && effectiveLineHeaders.Count > 0)
 		{
-			var tableRange = ws1.Range(1, 1, lineRows.Count + 1, effectiveLineHeaders.Count);
-			var table = tableRange.CreateTable();
-			table.Theme = XLTableTheme.TableStyleMedium2;
+			// AutoFilter rather than CreateTable(): a ClosedXML table theme repaints the header
+			// and forces banded rows, which is exactly what we no longer want. This keeps the
+			// filter dropdowns, the green header and plain white rows.
+			ws1.Range(1, 1, lineRows.Count + 1, effectiveLineHeaders.Count).SetAutoFilter();
 		}
 
 		foreach (var colName in effectiveLineHeaders)
@@ -621,14 +637,12 @@ public static class DenialDashboardExcelExportBuilder
 			}
 
 			ws.Cell(excelRow, 5).Style.Alignment.WrapText = true;
-			ws.Range(excelRow, 1, excelRow, headers.Count).Style.Fill.BackgroundColor =
-				r % 2 == 0 ? ExcelTheme.BandedRowBg : XLColor.White;
+			ws.Range(excelRow, 1, excelRow, headers.Count).Style.Fill.BackgroundColor = XLColor.White;
 		}
 
 		if (records.Count > 0)
 		{
-			var table = ws.Range(1, 1, records.Count + 1, headers.Count).CreateTable();
-			table.Theme = XLTableTheme.TableStyleMedium4;
+			ws.Range(1, 1, records.Count + 1, headers.Count).SetAutoFilter();
 
 			var priorityColumn = ws.Column(6);
 			priorityColumn.AddConditionalFormat().WhenContains("High").Fill.SetBackgroundColor(ExcelTheme.BadBg);
@@ -708,14 +722,12 @@ public static class DenialDashboardExcelExportBuilder
 			foreach (var wrapColumn in new[] { 2, 11, 12, 13 })
 				ws.Cell(excelRow, wrapColumn).Style.Alignment.WrapText = true;
 
-			ws.Range(excelRow, 1, excelRow, headers.Count).Style.Fill.BackgroundColor =
-				r % 2 == 0 ? ExcelTheme.BandedRowBg : XLColor.White;
+			ws.Range(excelRow, 1, excelRow, headers.Count).Style.Fill.BackgroundColor = XLColor.White;
 		}
 
 		if (insights.Count > 0)
 		{
-			var table = ws.Range(1, 1, insights.Count + 1, headers.Count).CreateTable();
-			table.Theme = XLTableTheme.TableStyleMedium9;
+			ws.Range(1, 1, insights.Count + 1, headers.Count).SetAutoFilter();
 		}
 		else
 		{
@@ -944,6 +956,46 @@ public static class DenialDashboardExcelExportBuilder
 		{
 			ws.Column(c).Width = 16;
 		}
+	}
+
+	/// <summary>Suffix for a spill column holding part <paramref name="part"/> of an oversized value.</summary>
+	private static string OverflowHeader(string header, int part) => $"{header} (cont. {part})";
+
+	/// <summary>
+	/// How many EXTRA columns each header needs so its longest value fits Excel's
+	/// 32,767-character cell limit. Zero for every column that already fits, which is the
+	/// normal case — the spill columns only appear for labs that actually overflow.
+	/// </summary>
+	private static Dictionary<string, int> MeasureOverflow(
+		List<string> headers,
+		List<Dictionary<string, string>> rows)
+	{
+		var extras = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+		foreach (var header in headers)
+		{
+			var maxParts = 1;
+			foreach (var row in rows)
+			{
+				if (!row.TryGetValue(header, out var value)) continue;
+				if (value is null || value.Length <= IcdCellSplitter.MaxCellLength) continue;
+				var parts = IcdCellSplitter.Split(value).Count;
+				if (parts > maxParts) maxParts = parts;
+			}
+			extras[header] = maxParts - 1;
+		}
+		return extras;
+	}
+
+	private static List<string> BuildHeadersWithOverflow(List<string> headers, Dictionary<string, int> extras)
+	{
+		var result = new List<string>(headers.Count);
+		foreach (var header in headers)
+		{
+			result.Add(header);
+			for (var part = 1; part <= extras.GetValueOrDefault(header); part++)
+				result.Add(OverflowHeader(header, part));
+		}
+		return result;
 	}
 
 	private static void SetWidth(IXLWorksheet ws, List<string> headers, string header, double width)

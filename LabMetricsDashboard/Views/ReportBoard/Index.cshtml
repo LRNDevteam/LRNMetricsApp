@@ -17,12 +17,25 @@
         _ => "b3"
     };
 
+    // Colour states the RUN OUTCOME, never whether the current user can click through:
+    // completed is green even when the report cannot be opened (unmapped lab, feature off,
+    // role blocked). Those cells simply don't lift on hover, and the tooltip says why.
+    // Only "not produced for this lab" is greyed out.
     string CellClass(LabReportStatus cell) => cell.Status switch
     {
-        ReportRunStatus.Success => cell.IsLinkable ? "ok" : "noroute",
+        ReportRunStatus.Success => "ok",
         ReportRunStatus.Failed => "fail",
         ReportRunStatus.Pending => "wait",
         _ => "none"
+    };
+
+    /// <summary>Pill styling for the card list — same four states as the matrix cells.</summary>
+    string PillClass(LabReportStatus cell) => cell.Status switch
+    {
+        ReportRunStatus.Success => "done",
+        ReportRunStatus.Failed => "bad",
+        ReportRunStatus.Pending => "pending",
+        _ => "off"
     };
 
     string StatusLabel(LabReportStatus cell) => cell.Status switch
@@ -33,9 +46,63 @@
         _ => "Not configured"
     };
 
+    // Plain-English completion state — this is what every tooltip leads with, so the board
+    // answers "did this report complete?" without the reader decoding a colour.
+    string StatusWord(LabReportStatus cell) => cell.Status switch
+    {
+        ReportRunStatus.Success => cell.IsLinkable ? "Completed" : "Completed (cannot be opened from here)",
+        ReportRunStatus.Failed => "Not completed (failed)",
+        ReportRunStatus.Pending => "Not completed (still running)",
+        // Never marked as a failure: this report is simply not part of the lab's run.
+        _ => "Not produced for this lab"
+    };
+
+    /// <summary>What clicking does, appended to the tooltip so the cell advertises its own action.</summary>
+    string ActionHint(LabReportStatus cell) => cell.Status switch
+    {
+        ReportRunStatus.Success when cell.IsLinkable => " · click to open the report",
+        ReportRunStatus.Failed => " · click to download the error log (Excel)",
+        _ => string.Empty
+    };
+
+    /// <summary>
+    /// The blocked reason, but only when it adds something <see cref="StatusWord"/> has not
+    /// already said. For Failed / Pending / NotConfigured the controller's reason is a
+    /// restatement ("Not produced for this lab." under "Not produced for this lab"), which is
+    /// what made tooltips read the same sentence twice. Only a COMPLETED report has a reason
+    /// worth showing — it explains why a finished report still cannot be opened.
+    /// </summary>
+    string ExtraReason(LabReportStatus cell)
+    {
+        if (cell.Status != ReportRunStatus.Success || string.IsNullOrWhiteSpace(cell.BlockedReason))
+            return string.Empty;
+
+        // Belt and braces: never repeat the status sentence even if the wording converges.
+        var reason = cell.BlockedReason.TrimEnd('.', ' ');
+        return reason.Equals(StatusWord(cell).TrimEnd('.', ' '), StringComparison.OrdinalIgnoreCase)
+            ? string.Empty
+            : $" · {reason}";
+    }
+
     string Tooltip(LabReportStatus cell) =>
-        $"{cell.Catalog.DisplayName} — {StatusLabel(cell)}"
-        + (string.IsNullOrWhiteSpace(cell.BlockedReason) ? "" : $" · {cell.BlockedReason}");
+        $"{cell.Catalog.DisplayName} — {StatusWord(cell)}" + ExtraReason(cell) + ActionHint(cell);
+
+    // Corner badge stamped on the report's own icon: tick = completed, cross = did not
+    // complete, dash = not part of this lab's run.
+    string BadgeIcon(LabReportStatus cell) => cell.Status switch
+    {
+        ReportRunStatus.Success => "bi-check-lg",
+        ReportRunStatus.Failed or ReportRunStatus.Pending => "bi-x-lg",
+        _ => "bi-dash-lg"
+    };
+
+    string BadgeClass(LabReportStatus cell) => cell.Status switch
+    {
+        ReportRunStatus.Success => "bg-ok",
+        ReportRunStatus.Failed => "bg-fail",
+        ReportRunStatus.Pending => "bg-wait",
+        _ => "bg-none"
+    };
 
     string DotClass(LabReportStatus cell) => cell.Status switch
     {
@@ -44,6 +111,11 @@
         ReportRunStatus.Pending => "d-wait",
         _ => "d-none"
     };
+
+    /// <summary>How many labs completed this report — shown under each column header.</summary>
+    int CompletedFor(ReportCatalogEntry column) => Model.Rows.Count(r =>
+        r.Reports.Any(x => x.Catalog.TrackerColumn == column.TrackerColumn
+                           && x.Status == ReportRunStatus.Success));
 
     // Relative "run timeline" label for each lab's latest run (e.g. "6 d ago").
     string RelativeTime(DateTime? when)
@@ -114,7 +186,8 @@
     .rcb-board thead tr.band th.lab-h { background:#0a1628; }
     .rcb-board tbody tr:hover td { background:#f8fbff; }
     .rcb-board tbody tr:hover td.lab-c { background:#f1f7ff; }
-    .rcb-board td { border-bottom:1px solid var(--line-soft); padding:.42rem .3rem; text-align:center; vertical-align:middle; }
+    /* Horizontal padding leaves room for the status badge that overhangs each cell. */
+    .rcb-board td { border-bottom:1px solid var(--line-soft); padding:.5rem .45rem; text-align:center; vertical-align:middle; }
     .rcb-board td.lab-c { padding:.6rem .8rem; }
     .rcb-labrow { display:flex; align-items:center; gap:.6rem; cursor:pointer; }
     .rcb-av { width:32px; height:32px; border-radius:9px; color:#fff; font-weight:800; display:flex; align-items:center; justify-content:center; font-size:.85rem; flex:0 0 auto; }
@@ -123,17 +196,45 @@
     .rcb-labweek { font-size:.64rem; color:#0d6efd; background:#eff6ff; border-radius:5px; padding:1px 5px; display:inline-block; margin-top:2px; font-weight:700; }
     .rcb-unmapped { font-size:.6rem; color:#b45309; background:#fffbeb; border:1px solid var(--wait-line); border-radius:5px; padding:0 4px; margin-left:.3rem; font-weight:700; }
 
-    .rcb-cell { display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; border-radius:9px; font-size:.85rem; text-decoration:none; border:1px solid transparent; transition:transform .12s ease, box-shadow .12s ease; }
+    /* Column header carries the report's OWN icon, so every cell beneath it is visibly the
+       same report as the card list and the drawer use. */
+    .rcb-colhead { display:flex; flex-direction:column; align-items:center; gap:1px; line-height:1.15; }
+    .rcb-colhead > i { font-size:.95rem; color:var(--ink-2); }
+    .rcb-colhead .lbl { font-size:.63rem; }
+    .rcb-colhead .cnt { font-size:.58rem; font-weight:700; color:var(--faint); font-family:var(--mono); letter-spacing:0; text-transform:none; }
+
+    .rcb-cell { position:relative; display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; border-radius:9px; font-size:.85rem; text-decoration:none; border:1px solid transparent; transition:transform .12s ease, box-shadow .12s ease; }
     .rcb-cell.ok { background:var(--ok-bg); border-color:var(--ok-line); color:#047857; }
     .rcb-cell.ok:hover { transform:translateY(-2px); box-shadow:0 4px 10px rgba(16,185,129,.28); }
     .rcb-cell.fail { background:var(--fail-bg); border-color:var(--fail-line); color:#b91c1c; }
     .rcb-cell.fail:hover { transform:translateY(-2px); box-shadow:0 4px 10px rgba(239,68,68,.25); }
     .rcb-cell.wait { background:var(--wait-bg); border-color:var(--wait-line); color:#b45309; }
     .rcb-cell.none { background:var(--none-bg); border-color:#e2e8f0; color:var(--none); }
-    .rcb-cell.noroute { background:#f5f3ff; border-color:#ddd6fe; color:#7c3aed; }
+    /* Completed but not openable — keeps its green "done" colour, loses the click affordance. */
+    .rcb-cell.blocked { cursor:default; opacity:.72; }
+    .rcb-cell.blocked:hover { transform:none; box-shadow:none; }
 
-    .rcb-legend { display:flex; gap:1.1rem; flex-wrap:wrap; align-items:center; padding:.65rem 1rem; background:#0a1628; color:rgba(255,255,255,.75); font-size:.72rem; font-weight:600; }
-    .rcb-legend i { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:.35rem; vertical-align:-1px; }
+    /* Tick / cross stamped on the report icon — status readable without relying on colour. */
+    .rcb-badge { position:absolute; right:-4px; bottom:-4px; width:15px; height:15px; border-radius:50%;
+        display:flex; align-items:center; justify-content:center; font-size:.5rem; color:#fff; font-weight:700;
+        border:2px solid #fff; box-shadow:0 1px 3px rgba(15,23,42,.28); }
+    .rcb-badge.bg-ok { background:var(--ok); } .rcb-badge.bg-fail { background:var(--fail); }
+    .rcb-badge.bg-wait { background:var(--wait); } .rcb-badge.bg-none { background:#cbd5e1; }
+    .rcb-badge.bg-noroute { background:#7c3aed; }
+
+    .rcb-legend { padding:.7rem 1rem .75rem; background:#0a1628; color:rgba(255,255,255,.82); font-size:.72rem; font-weight:600; }
+    .rcb-legend-items { display:flex; flex-wrap:wrap; gap:.4rem .45rem; }
+    .rcb-legend .lg { display:inline-flex; align-items:center; gap:.4rem; white-space:nowrap;
+        background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.13); border-radius:999px; padding:.24rem .7rem .24rem .3rem; }
+    .rcb-legend .lg.dim { opacity:.68; }
+    .rcb-legend .lg em { font-style:normal; font-weight:500; color:rgba(255,255,255,.52); }
+    .rcb-legend .mk { width:17px; height:17px; border-radius:50%; color:#fff; display:inline-flex;
+        align-items:center; justify-content:center; flex:0 0 auto; }
+    .rcb-legend .mk i { font-size:.55rem; line-height:1; }
+    .rcb-legend .mk.ok { background:var(--ok); } .rcb-legend .mk.fail { background:var(--fail); }
+    .rcb-legend .mk.wait { background:var(--wait); } .rcb-legend .mk.none { background:#94a3b8; }
+    .rcb-legend-hint { margin-top:.55rem; padding-top:.5rem; border-top:1px solid rgba(255,255,255,.1);
+        display:flex; align-items:center; gap:.4rem; font-size:.69rem; font-weight:500; color:rgba(255,255,255,.55); }
 
     /* cards */
     .rcb-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(370px,1fr)); gap:1.1rem; }
@@ -150,6 +251,12 @@
     a.rcb-rep:hover { background:#f1f7ff; color:#0d6efd; }
     .rcb-rep .dot { width:7px; height:7px; border-radius:50%; flex:0 0 auto; }
     .rcb-rep .arrow { margin-left:auto; color:var(--faint); font-size:.75rem; }
+    /* Same report icon + tick/cross the matrix uses, so a report looks identical in both views. */
+    .rcb-rep .rep-ic { font-size:.82rem; color:var(--muted); flex:0 0 auto; }
+    .rcb-rep .mk { font-size:.75rem; margin-left:.15rem; flex:0 0 auto; }
+    .rcb-rep .mk.ok { color:var(--ok); } .rcb-rep .mk.fail { color:var(--fail); }
+    .rcb-rep .mk.wait { color:var(--wait); } .rcb-rep .mk.none { color:var(--none); }
+    a.rcb-rep:hover .rep-ic { color:#0d6efd; }
     .rcb-rep.off { color:var(--faint); font-weight:500; }
     .rcb-rep.bad { color:#b91c1c; }
     .d-ok { background:var(--ok); } .d-fail { background:var(--fail); } .d-none { background:var(--none); } .d-wait { background:var(--wait); }
@@ -159,7 +266,16 @@
     .rcb-rep-row .rcb-rep { flex:0 0 auto; border:1px solid var(--line); background:#f8fafc; padding:.3rem .6rem; border-radius:999px; font-size:.72rem; }
     a.rcb-rep-row .rcb-rep:hover, .rcb-rep-row a.rcb-rep:hover { background:#eff6ff; border-color:#bfdbfe; color:#0d6efd; }
     .rcb-rep-row .rcb-rep .arrow { margin-left:2px; }
-    .rcb-rep-row .rcb-rep.bad { border-color:var(--fail-line); background:var(--fail-bg); }
+    /* Every pill is tinted by its run outcome, so a card reads at a glance like the matrix row. */
+    .rcb-rep-row .rcb-rep.done { border-color:var(--ok-line); background:var(--ok-bg); color:#065f46; }
+    .rcb-rep-row a.rcb-rep.done:hover { background:#d1fae5; border-color:#6ee7b7; color:#047857; }
+    .rcb-rep-row .rcb-rep.done .rep-ic { color:#059669; }
+    .rcb-rep-row .rcb-rep.bad { border-color:var(--fail-line); background:var(--fail-bg); color:#b91c1c; }
+    .rcb-rep-row a.rcb-rep.bad:hover { background:#fee2e2; border-color:#fca5a5; color:#991b1b; }
+    .rcb-rep-row .rcb-rep.bad .rep-ic { color:#dc2626; }
+    .rcb-rep-row .rcb-rep.pending { border-color:var(--wait-line); background:var(--wait-bg); color:#b45309; }
+    .rcb-rep-row .rcb-rep.pending .rep-ic { color:#d97706; }
+    /* Only "not produced for this lab" stays grey. */
     .rcb-rep-row .rcb-rep.off { border-style:dashed; }
     .rcb-card-foot { padding:.55rem .8rem; border-top:1px solid var(--line-soft); display:flex; gap:.35rem; flex-wrap:wrap; }
     .rcb-btn-s { border:1px solid var(--line); background:#fff; border-radius:8px; padding:.3rem .65rem; font-size:.7rem; font-weight:700; color:var(--ink-2); text-decoration:none; }
@@ -276,7 +392,14 @@
                         <tr class="cols">
                             @foreach (var column in Model.Columns)
                             {
-                                <th title="@column.DisplayName">@column.ShortName</th>
+                                var done = CompletedFor(column);
+                                <th title="@column.DisplayName — @done of @Model.Rows.Count lab@(Model.Rows.Count == 1 ? "" : "s") completed">
+                                    <span class="rcb-colhead">
+                                        <i class="bi @column.Icon" aria-hidden="true"></i>
+                                        <span class="lbl">@column.ShortName</span>
+                                        <span class="cnt">@done/@Model.Rows.Count</span>
+                                    </span>
+                                </th>
                             }
                         </tr>
                     </thead>
@@ -310,39 +433,35 @@
                                 </td>
                                 @foreach (var cell in row.Reports)
                                 {
+                                    @* Every state renders the report's OWN icon (the one in its column header,
+                                       card list and drawer) with a tick/cross badge for the run outcome — the
+                                       cell never changes identity, only its stamp. *@
                                     <td>
                                         @if (cell.IsLinkable)
                                         {
-                                            <a class="rcb-cell ok" title="@Tooltip(cell)"
+                                            <a class="rcb-cell ok" title="@Tooltip(cell)" aria-label="@Tooltip(cell)"
                                                asp-controller="@cell.Catalog.Controller" asp-action="@cell.Catalog.Action"
                                                asp-route-lab="@row.LabConfigKey" asp-route-runId="@row.RunId" asp-route-ActiveTab="@cell.Catalog.LinkTab">
-                                                <i class="bi @cell.Catalog.Icon"></i>
+                                                <i class="bi @cell.Catalog.Icon" aria-hidden="true"></i>
+                                                <span class="rcb-badge @BadgeClass(cell)" aria-hidden="true"><i class="bi @BadgeIcon(cell)"></i></span>
                                             </a>
                                         }
                                         else if (cell.Status == ReportRunStatus.Failed)
                                         {
-                                            <a class="rcb-cell fail" title="@Tooltip(cell) · download the error log (Excel)" download
+                                            <a class="rcb-cell fail" title="@Tooltip(cell)" aria-label="@Tooltip(cell)" download
                                                asp-action="RunErrorsCsv" asp-route-runId="@row.RunId"
                                                asp-route-lab="@row.LabConfigKey" asp-route-labName="@row.LabDisplayName"
                                                asp-route-report="@cell.Catalog.TrackerColumn">
-                                                <i class="bi bi-download"></i>
+                                                <i class="bi @cell.Catalog.Icon" aria-hidden="true"></i>
+                                                <span class="rcb-badge @BadgeClass(cell)" aria-hidden="true"><i class="bi @BadgeIcon(cell)"></i></span>
                                             </a>
                                         }
                                         else
                                         {
-                                            <span class="rcb-cell @CellClass(cell)" title="@Tooltip(cell)" tabindex="0">
-                                                @if (cell.Status == ReportRunStatus.Success)
-                                                {
-                                                    <i class="bi bi-lock-fill" style="font-size:.7rem"></i>
-                                                }
-                                                else if (cell.Status == ReportRunStatus.Pending)
-                                                {
-                                                    <i class="bi bi-hourglass-split" style="font-size:.7rem"></i>
-                                                }
-                                                else
-                                                {
-                                                    <span>·</span>
-                                                }
+                                            <span class="rcb-cell @CellClass(cell) @(cell.Status == ReportRunStatus.Success ? "blocked" : "")"
+                                                  title="@Tooltip(cell)" aria-label="@Tooltip(cell)" tabindex="0">
+                                                <i class="bi @cell.Catalog.Icon" aria-hidden="true"></i>
+                                                <span class="rcb-badge @BadgeClass(cell)" aria-hidden="true"><i class="bi @BadgeIcon(cell)"></i></span>
                                             </span>
                                         }
                                     </td>
@@ -353,12 +472,17 @@
                 </table>
             </div>
             <div class="rcb-legend">
-                <span><i style="background:#10b981"></i>Available — click to open</span>
-                <span><i style="background:#ef4444"></i>Failed — click to download the error log (Excel)</span>
-                <span><i style="background:#f59e0b"></i>Pending</span>
-                <span><i style="background:#7c3aed"></i>Ready but not available to you</span>
-                <span><i style="background:#cbd5e1"></i>Not configured for this lab</span>
-                <span style="margin-left:auto;opacity:.6">Click a lab name for the full report list</span>
+                <div class="rcb-legend-items">
+                    <span class="lg"><span class="mk ok"><i class="bi bi-check-lg"></i></span>Completed <em>— click to open</em></span>
+                    <span class="lg"><span class="mk fail"><i class="bi bi-x-lg"></i></span>Failed <em>— click for the error log</em></span>
+                    <span class="lg"><span class="mk wait"><i class="bi bi-x-lg"></i></span>Still running</span>
+                    <span class="lg dim"><span class="mk ok"><i class="bi bi-check-lg"></i></span>Completed <em>— faded, cannot open here</em></span>
+                    <span class="lg"><span class="mk none"><i class="bi bi-dash-lg"></i></span>Not produced for this lab</span>
+                </div>
+                <div class="rcb-legend-hint">
+                    <i class="bi bi-info-circle"></i>
+                    Hover any icon for its report name and status · click a lab name for the full list
+                </div>
             </div>
         </div>
 
@@ -402,27 +526,28 @@
                             <div class="rcb-rep-row">
                             @foreach (var cell in group)
                             {
+                                @* Report icon + tick/cross, matching the matrix cell for the same report. *@
                                 if (cell.IsLinkable)
                                 {
-                                    <a class="rcb-rep" title="@Tooltip(cell)"
+                                    <a class="rcb-rep done" title="@Tooltip(cell)" aria-label="@Tooltip(cell)"
                                        asp-controller="@cell.Catalog.Controller" asp-action="@cell.Catalog.Action"
                                        asp-route-lab="@row.LabConfigKey" asp-route-runId="@row.RunId" asp-route-ActiveTab="@cell.Catalog.LinkTab">
-                                        <span class="dot d-ok"></span>@cell.Catalog.DisplayName
+                                        <i class="bi @cell.Catalog.Icon rep-ic" aria-hidden="true"></i>@cell.Catalog.DisplayName<i class="bi @BadgeIcon(cell) mk ok" aria-hidden="true"></i>
                                     </a>
                                 }
                                 else if (cell.Status == ReportRunStatus.Failed)
                                 {
-                                    <a class="rcb-rep bad" title="@Tooltip(cell) · download the error log (Excel)" download
+                                    <a class="rcb-rep bad" title="@Tooltip(cell)" aria-label="@Tooltip(cell)" download
                                        asp-action="RunErrorsCsv" asp-route-runId="@row.RunId"
                                        asp-route-lab="@row.LabConfigKey" asp-route-labName="@row.LabDisplayName"
                                        asp-route-report="@cell.Catalog.TrackerColumn">
-                                        <span class="dot d-fail"></span>@cell.Catalog.DisplayName<span class="arrow">↓</span>
+                                        <i class="bi @cell.Catalog.Icon rep-ic" aria-hidden="true"></i>@cell.Catalog.DisplayName<i class="bi @BadgeIcon(cell) mk fail" aria-hidden="true"></i><span class="arrow">↓</span>
                                     </a>
                                 }
                                 else
                                 {
-                                    <span class="rcb-rep off" title="@Tooltip(cell)">
-                                        <span class="dot @DotClass(cell)"></span>@cell.Catalog.DisplayName
+                                    <span class="rcb-rep @PillClass(cell)" title="@Tooltip(cell)" aria-label="@Tooltip(cell)">
+                                        <i class="bi @cell.Catalog.Icon rep-ic" aria-hidden="true"></i>@cell.Catalog.DisplayName<i class="bi @BadgeIcon(cell) mk @CellClass(cell)" aria-hidden="true"></i>
                                     </span>
                                 }
                             }
@@ -467,26 +592,27 @@
                 <div class="rcb-dr-sec">@group.Key</div>
                 @foreach (var cell in group)
                 {
+                    @* Same report icon everywhere; the pill states completion in words. *@
                     if (cell.IsLinkable)
                     {
-                        <a class="rcb-dr-item" asp-controller="@cell.Catalog.Controller" asp-action="@cell.Catalog.Action"
+                        <a class="rcb-dr-item" title="@Tooltip(cell)" asp-controller="@cell.Catalog.Controller" asp-action="@cell.Catalog.Action"
                            asp-route-lab="@row.LabConfigKey" asp-route-runId="@row.RunId" asp-route-ActiveTab="@cell.Catalog.LinkTab">
-                            <i class="bi @cell.Catalog.Icon"></i> @cell.Catalog.DisplayName<span class="st ok">Open</span>
+                            <i class="bi @cell.Catalog.Icon"></i> @cell.Catalog.DisplayName<span class="st ok"><i class="bi bi-check-lg"></i> Completed · open</span>
                         </a>
                     }
                     else if (cell.Status == ReportRunStatus.Failed)
                     {
-                        <a class="rcb-dr-item" download asp-action="RunErrorsCsv" asp-route-runId="@row.RunId"
+                        <a class="rcb-dr-item" title="@Tooltip(cell)" download asp-action="RunErrorsCsv" asp-route-runId="@row.RunId"
                            asp-route-lab="@row.LabConfigKey" asp-route-labName="@row.LabDisplayName"
                            asp-route-report="@cell.Catalog.TrackerColumn">
-                            <i class="bi bi-download"></i> @cell.Catalog.DisplayName<span class="st fail">Error log</span>
+                            <i class="bi @cell.Catalog.Icon"></i> @cell.Catalog.DisplayName<span class="st fail"><i class="bi bi-x-lg"></i> Not completed · error log</span>
                         </a>
                     }
                     else
                     {
-                        <div class="rcb-dr-item" title="@cell.BlockedReason">
+                        <div class="rcb-dr-item" title="@Tooltip(cell)">
                             <i class="bi @cell.Catalog.Icon"></i> @cell.Catalog.DisplayName
-                            <span class="st @CellClass(cell)">@StatusLabel(cell)</span>
+                            <span class="st @CellClass(cell)"><i class="bi @BadgeIcon(cell)"></i> @StatusLabel(cell)</span>
                         </div>
                     }
                 }
