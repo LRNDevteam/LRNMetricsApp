@@ -144,11 +144,25 @@ SELECT CASE WHEN EXISTS (
         var tempPath = targetPath + ".tmp";
         try
         {
-            using (var workbook = DenialDashboardExcelExportBuilder.CreateWorkbook(exportData))
+            // The five summary sheets are small — ClosedXML handles them. The Line Item sheet
+            // is not: ClosedXML buffers a whole sheet's XML in a MemoryStream when saving and
+            // throws "Stream was too long" past 2 GB, which a wide lab with large ICD code
+            // lists reaches. Stream that one in afterwards at bounded memory instead.
+            using (var workbook = DenialDashboardExcelExportBuilder.CreateWorkbook(exportData, includeLineItemSheet: false))
             using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
             {
                 workbook.SaveAs(fs);
             }
+            await Progress(85);
+
+            var lineSheet = DenialDashboardExcelExportBuilder.BuildLineItemSheetData(exportData);
+            await OpenXmlRowStreamer.AppendRowsToWorkbookAsync(
+                tempPath,
+                DenialDashboardExcelExportBuilder.LineItemSheetName,
+                lineSheet.Headers,
+                lineSheet.Rows,
+                onRowsProgress: null,
+                ct);
 
             File.Move(tempPath, targetPath, overwrite: true);
         }

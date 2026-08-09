@@ -19,6 +19,20 @@ internal static class OpenXmlRowStreamer
     /// <summary>New worksheet every N data rows — keeps Excel usable and per-sheet XML smaller.</summary>
     public const int SheetSplitThreshold = 200_000;
 
+    /// <summary>
+    /// Second split trigger, on the worksheet's approximate XML size.
+    ///
+    /// System.IO.Packaging buffers each package part in a MemoryStream, which throws
+    /// "Stream was too long" past 2 GB — so ONE sheet part can never exceed that no matter how
+    /// it is written. A row cap alone does not bound this: a lab whose rows carry ~72 KB ICD
+    /// code lists blows past 2 GB in ~29K rows, well inside the 200K row cap. Splitting on
+    /// estimated bytes as well keeps every part comfortably under the limit.
+    /// </summary>
+    private const long SheetSplitBytes = 900_000_000;
+
+    /// <summary>Per-cell XML overhead (element, ref attribute, inline-string wrapper).</summary>
+    private const int CellXmlOverheadBytes = 48;
+
     public sealed record ColumnMap(int Ordinal, string Name, bool IsIcd);
 
     /// <summary>
@@ -309,20 +323,67 @@ internal static class OpenXmlRowStreamer
 
         var columns = BuildColumns(reader, excludedColumns: null);
         var headers = columns.Select(c => c.Name).ToArray();
+
+        return await AppendSheetsCoreAsync(
+            workbookPath, baseSheetName, headers, ReadRowsAsync(), onRowsProgress, ct);
+
+        async IAsyncEnumerable<object?[]> ReadRowsAsync()
+        {
+            while (await reader.ReadAsync(ct))
+            {
+                ct.ThrowIfCancellationRequested();
+                var values = new object?[columns.Count];
+                for (var c = 0; c < columns.Count; c++)
+                    values[c] = reader.IsDBNull(columns[c].Ordinal) ? null : reader.GetValue(columns[c].Ordinal);
+                yield return values;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Appends a sheet built from rows already in memory, using the same bounded-memory writer
+    /// the SQL variant uses. ClosedXML holds the entire sheet XML in a MemoryStream while
+    /// saving and dies with "Stream was too long" past 2 GB — this path never buffers more
+    /// than one row.
+    /// </summary>
+    public static Task<int> AppendRowsToWorkbookAsync(
+        string workbookPath,
+        string baseSheetName,
+        string[] headers,
+        IEnumerable<object?[]> rows,
+        Func<int, Task>? onRowsProgress,
+        CancellationToken ct)
+        => AppendSheetsCoreAsync(workbookPath, baseSheetName, headers, ToAsync(rows, ct), onRowsProgress, ct);
+
+    private static async IAsyncEnumerable<object?[]> ToAsync(
+        IEnumerable<object?[]> rows,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        foreach (var row in rows)
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return row;
+        }
+        await Task.CompletedTask;
+    }
+
+    private static async Task<int> AppendSheetsCoreAsync(
+        string workbookPath,
+        string baseSheetName,
+        string[] headers,
+        IAsyncEnumerable<object?[]> rowSource,
+        Func<int, Task>? onRowsProgress,
+        CancellationToken ct)
+    {
         var colRefs = BuildColRefs(Math.Max(1, headers.Length));
 
         // Column widths must be declared BEFORE <sheetData>, so sample the first rows into a
         // buffer, size the columns from what they actually contain, then write the buffer out
         // and keep streaming the rest.
+        await using var rowEnumerator = rowSource.GetAsyncEnumerator(ct);
         var sample = new List<object?[]>(WidthSampleRows);
-        while (sample.Count < WidthSampleRows && await reader.ReadAsync(ct))
-        {
-            ct.ThrowIfCancellationRequested();
-            var values = new object?[columns.Count];
-            for (var c = 0; c < columns.Count; c++)
-                values[c] = reader.IsDBNull(columns[c].Ordinal) ? null : reader.GetValue(columns[c].Ordinal);
-            sample.Add(values);
-        }
+        while (sample.Count < WidthSampleRows && await rowEnumerator.MoveNextAsync())
+            sample.Add(rowEnumerator.Current);
         var widths = MeasureColumnWidths(headers, sample);
 
         // Green header style, registered in the MAIN workbook's stylesheet: the bucket sheets
@@ -351,6 +412,7 @@ internal static class OpenXmlRowStreamer
         var totalRows = 0;
         var sheetIndex = 0;
         var sheetRowCount = 0;
+        long sheetBytes = 0;
         string? currentBucket = null;
         SpreadsheetDocument? bucketDoc = null;
         WorkbookPart? bucketWb = null;
@@ -384,6 +446,7 @@ internal static class OpenXmlRowStreamer
             {
                 sheetIndex++;
                 sheetRowCount = 0;
+                sheetBytes = 0;
                 excelRow = 1;
                 var sheetName = UniqueSheetName(
                     sheetIndex == 1 ? baseSheetName : $"{baseSheetName}_P{sheetIndex}", usedNames);
@@ -425,10 +488,26 @@ internal static class OpenXmlRowStreamer
                 excelRow++;
             }
 
-            void WriteBufferedRow(object?[] values)
+            void WriteRow(object?[] values)
             {
+                // Estimate before writing, so a row never straddles the size limit.
+                long rowBytes = 0;
+                for (var c = 0; c < values.Length && c < colRefs.Length; c++)
+                {
+                    if (values[c] is null) continue;
+                    rowBytes += CellXmlOverheadBytes + (values[c] is string s ? s.Length : 16);
+                }
+
+                if (writer is null
+                    || sheetRowCount >= SheetSplitThreshold
+                    || (sheetRowCount > 0 && sheetBytes + rowBytes > SheetSplitBytes))
+                {
+                    CloseBucket();
+                    OpenBucket();
+                }
+
                 writer!.WriteStartElement(new Row { RowIndex = excelRow });
-                for (var c = 0; c < values.Length; c++)
+                for (var c = 0; c < values.Length && c < colRefs.Length; c++)
                 {
                     if (values[c] is null) continue;
                     WriteValue(writer, $"{colRefs[c]}{excelRow}", values[c]!);
@@ -436,39 +515,18 @@ internal static class OpenXmlRowStreamer
                 writer.WriteEndElement();
                 excelRow++;
                 sheetRowCount++;
+                sheetBytes += rowBytes;
                 totalRows++;
             }
 
-            // The rows already pulled for width measurement, then the remainder of the reader.
+            // The rows already pulled for width measurement, then the rest of the source.
             foreach (var values in sample)
-            {
-                if (writer is null || sheetRowCount >= SheetSplitThreshold)
-                {
-                    CloseBucket();
-                    OpenBucket();
-                }
-                WriteBufferedRow(values);
-            }
+                WriteRow(values);
 
-            while (await reader.ReadAsync(ct))
+            while (await rowEnumerator.MoveNextAsync())
             {
                 ct.ThrowIfCancellationRequested();
-                if (writer is null || sheetRowCount >= SheetSplitThreshold)
-                {
-                    CloseBucket();
-                    OpenBucket();
-                }
-
-                writer!.WriteStartElement(new Row { RowIndex = excelRow });
-                for (var c = 0; c < columns.Count; c++)
-                {
-                    if (reader.IsDBNull(columns[c].Ordinal)) continue;
-                    WriteValue(writer, $"{colRefs[c]}{excelRow}", reader.GetValue(columns[c].Ordinal));
-                }
-                writer.WriteEndElement();
-                excelRow++;
-                sheetRowCount++;
-                totalRows++;
+                WriteRow(rowEnumerator.Current);
 
                 if (onRowsProgress is not null && totalRows % 10_000 == 0)
                     await onRowsProgress(totalRows);

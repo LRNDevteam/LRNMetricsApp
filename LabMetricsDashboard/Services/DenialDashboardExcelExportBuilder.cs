@@ -18,7 +18,16 @@ public static class DenialDashboardExcelExportBuilder
 	/// Line Item. Every sheet is written even when its tab has no rows, so the workbook
 	/// shape never changes between runs.
 	/// </summary>
-	public static XLWorkbook CreateWorkbook(DenialDashboardExportData data)
+	/// <summary>Line Item sheet name — also the sheet LRN.ReportWorker streams in separately.</summary>
+	public const string LineItemSheetName = "Line Item";
+
+	/// <param name="includeLineItemSheet">
+	/// False lets a caller append that sheet itself. LRN.ReportWorker does: ClosedXML holds the
+	/// whole sheet in memory while saving and throws "Stream was too long" once the XML passes
+	/// 2 GB, which a wide lab with large ICD code lists reaches. The five summary sheets are
+	/// small and stay on ClosedXML either way.
+	/// </param>
+	public static XLWorkbook CreateWorkbook(DenialDashboardExportData data, bool includeLineItemSheet = true)
 	{
 		var workbook = new XLWorkbook();
 
@@ -28,10 +37,59 @@ public static class DenialDashboardExcelExportBuilder
 		BuildSlaTrackerSheet(workbook, data.TaskRecords);
 		BuildDenialInsightSheet(workbook, data.Insights);
 
-		var (lineHeaders, lineRows) = BuildLineSheetRows(data.LineItems, data.Workflow);
-		BuildLineItemSheet(workbook, lineHeaders, lineRows);
+		if (includeLineItemSheet)
+		{
+			var (lineHeaders, lineRows) = BuildLineSheetRows(data.LineItems, data.Workflow);
+			BuildLineItemSheet(workbook, lineHeaders, lineRows);
+		}
 
 		return workbook;
+	}
+
+	/// <summary>
+	/// Headers plus the rows as flat arrays. <see cref="Rows"/> is lazy and single-pass: the
+	/// source line items are already a fully materialised list, so projecting eagerly would
+	/// hold a second copy of every value at once — on a lab with large ICD code lists that is
+	/// gigabytes. Enumerate it once.
+	/// </summary>
+	public sealed record LineItemSheetData(string[] Headers, IEnumerable<object?[]> Rows);
+
+	/// <summary>
+	/// The Line Item sheet's content as flat rows — the same columns, overflow spilling and
+	/// workflow fields <see cref="CreateWorkbook"/> writes, for callers that stream the sheet
+	/// instead of building it in memory.
+	/// </summary>
+	public static LineItemSheetData BuildLineItemSheetData(DenialDashboardExportData data)
+	{
+		var (lineHeaders, lineRows) = BuildLineSheetRows(data.LineItems, data.Workflow);
+		var headers = VisibleLineHeaders(lineHeaders);
+		var overflow = MeasureOverflow(headers, lineRows);
+		var effective = BuildHeadersWithOverflow(headers, overflow);
+
+		return new LineItemSheetData(effective.ToArray(), Project());
+
+		IEnumerable<object?[]> Project()
+		{
+			foreach (var row in lineRows)
+			{
+				var values = new object?[effective.Count];
+				var col = 0;
+				foreach (var header in headers)
+				{
+					row.TryGetValue(header, out var val);
+					var extras = overflow.GetValueOrDefault(header);
+					if (extras == 0)
+					{
+						values[col++] = val;
+						continue;
+					}
+
+					foreach (var chunk in ChunksFor(val, extras + 1))
+						values[col++] = chunk;
+				}
+				yield return values;
+			}
+		}
 	}
 
 	private static (List<string> Headers, List<Dictionary<string, string>> Rows) BuildLineSheetRows(
@@ -278,13 +336,6 @@ public static class DenialDashboardExcelExportBuilder
 
 	private static void BuildLineItemSheet(XLWorkbook wb, List<string> lineHeaders, List<Dictionary<string, string>> lineRows)
 	{
-		var excludedHeaders = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-		{
-			"DenialCode",
-			"Denial Code",
-			"Status Action Code"
-		};
-
 		var hiddenHeaders = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 		{
 			"Resolution",
@@ -296,9 +347,7 @@ public static class DenialDashboardExcelExportBuilder
 			"MUE Validation Required"
 		};
 
-		var baseHeaders = lineHeaders
-			.Where(h => !string.IsNullOrWhiteSpace(h) && !excludedHeaders.Contains(h.Trim()))
-			.ToList();
+		var baseHeaders = VisibleLineHeaders(lineHeaders);
 
 		// Excel refuses any cell over 32,767 characters — NorthWest's
 		// "Covered ICD 10 codes as per Payer Policy" blows past it and used to fail the whole
@@ -344,9 +393,8 @@ public static class DenialDashboardExcelExportBuilder
 				}
 
 				// Chunk boundaries prefer a comma, so a code is never cut in half.
-				var chunks = IcdCellSplitter.Split(val ?? string.Empty);
-				for (var part = 0; part <= extras; part++)
-					ws1.Cell(r + 2, col++).Value = part < chunks.Count ? chunks[part] : string.Empty;
+				foreach (var chunk in ChunksFor(val, extras + 1))
+					ws1.Cell(r + 2, col++).Value = chunk ?? string.Empty;
 			}
 		}
 
@@ -962,6 +1010,51 @@ public static class DenialDashboardExcelExportBuilder
 	private static string OverflowHeader(string header, int part) => $"{header} (cont. {part})";
 
 	/// <summary>
+	/// Ceiling on spill columns per source column — 5 extra columns is ~196K characters, far
+	/// past anything readable. Without a cap one pathological row would widen the sheet for
+	/// every row and can push the worksheet XML beyond what Excel (or the writer) can hold.
+	/// Anything past the cap is truncated with a visible marker rather than dropped silently.
+	/// </summary>
+	private const int MaxOverflowColumns = 5;
+
+	private static readonly HashSet<string> ExcludedLineHeaders = new(StringComparer.OrdinalIgnoreCase)
+	{
+		"DenialCode",
+		"Denial Code",
+		"Status Action Code",
+	};
+
+	/// <summary>The Line Item columns actually written, before overflow spilling.</summary>
+	private static List<string> VisibleLineHeaders(List<string> headers) => headers
+		.Where(h => !string.IsNullOrWhiteSpace(h) && !ExcludedLineHeaders.Contains(h.Trim()))
+		.ToList();
+
+	/// <summary>
+	/// Exactly <paramref name="slots"/> chunks for one value: the split parts, padded with
+	/// nulls, and the final slot marked when the value was longer than the cap allows.
+	/// </summary>
+	private static string?[] ChunksFor(string? value, int slots)
+	{
+		var result = new string?[slots];
+		if (string.IsNullOrEmpty(value)) return result;
+
+		var chunks = IcdCellSplitter.Split(value);
+		for (var i = 0; i < slots && i < chunks.Count; i++)
+			result[i] = chunks[i];
+
+		if (chunks.Count > slots)
+		{
+			var dropped = chunks.Skip(slots).Sum(c => c.Length);
+			var marker = $"…[+{dropped:N0} more characters truncated]";
+			var last = result[slots - 1] ?? string.Empty;
+			var keep = Math.Max(0, IcdCellSplitter.MaxCellLength - marker.Length);
+			result[slots - 1] = (last.Length > keep ? last[..keep] : last) + marker;
+		}
+
+		return result;
+	}
+
+	/// <summary>
 	/// How many EXTRA columns each header needs so its longest value fits Excel's
 	/// 32,767-character cell limit. Zero for every column that already fits, which is the
 	/// normal case — the spill columns only appear for labs that actually overflow.
@@ -981,7 +1074,7 @@ public static class DenialDashboardExcelExportBuilder
 				var parts = IcdCellSplitter.Split(value).Count;
 				if (parts > maxParts) maxParts = parts;
 			}
-			extras[header] = maxParts - 1;
+			extras[header] = Math.Min(maxParts - 1, MaxOverflowColumns);
 		}
 		return extras;
 	}
