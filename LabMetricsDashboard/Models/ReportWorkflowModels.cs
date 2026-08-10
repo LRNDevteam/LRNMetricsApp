@@ -3,11 +3,22 @@ namespace LabMetricsDashboard.Models;
 /// <summary>Status of one report within one run, as reported by the workflow tracker.</summary>
 public enum ReportRunStatus
 {
-    /// <summary>The tracker returned no value - this report is not produced for this lab.</summary>
+    /// <summary>This report is not produced for this lab at all — never a failure, always greyed.</summary>
     NotConfigured = 0,
     Success = 1,
     Failed = 2,
-    Pending = 3
+
+    /// <summary>
+    /// Available for this lab and expected in this run, but the tracker has no result yet —
+    /// the run is still working through it. Shown as a gear, not a cross.
+    /// </summary>
+    Pending = 3,
+
+    /// <summary>
+    /// Pending for longer than <see cref="ReportBoardViewModel.OverdueAfter"/> since the run's
+    /// source data landed. The pipeline has almost certainly stalled rather than being slow.
+    /// </summary>
+    Overdue = 4,
 }
 
 /// <summary>
@@ -26,7 +37,10 @@ public sealed record ReportCatalogEntry(
     string? LinkTab = null,
     // When set, this tile's run status is read from another tracker column instead of its own
     // (e.g. LIMS Master mirrors "LIS Summary": success if LIS Summary succeeded, else failed).
-    string? StatusFrom = null);
+    string? StatusFrom = null,
+    // Labs this report is produced for. Null = every lab (subject to FeatureFlag). Matched on a
+    // normalised token, so "Cove" also matches the "CoveLRN" database spelling.
+    string[]? AllowedLabs = null);
 
 public sealed class LabReportStatus
 {
@@ -60,6 +74,25 @@ public sealed class LabReportRow
     public int FailedCount => Reports.Count(r => r.Status == ReportRunStatus.Failed);
     public bool HasFailures => FailedCount > 0;
 
+    /// <summary>Available reports still waiting on this run.</summary>
+    public int PendingCount => Reports.Count(r => r.Status == ReportRunStatus.Pending);
+
+    /// <summary>Reports whose run stalled — the ones the page warns about.</summary>
+    public int OverdueCount => Reports.Count(r => r.Status == ReportRunStatus.Overdue);
+    public bool HasOverdue => OverdueCount > 0;
+
+    /// <summary>
+    /// True when this run's source data (LIS / Line Level / Claim Level) all landed, so every
+    /// other available report for the lab is expected to follow.
+    /// </summary>
+    public bool SourcesReady { get; init; }
+
+    /// <summary>Names of the overdue reports, for the page-level warning.</summary>
+    public List<string> OverdueReports => Reports
+        .Where(r => r.Status == ReportRunStatus.Overdue)
+        .Select(r => r.Catalog.DisplayName)
+        .ToList();
+
     /// <summary>Avatar initial for the lab tile.</summary>
     public string Initial => string.IsNullOrWhiteSpace(LabDisplayName) ? "?" : LabDisplayName.Trim()[..1].ToUpperInvariant();
 }
@@ -83,6 +116,17 @@ public sealed class ReportBoardViewModel
 
     public int TotalReady => Rows.Sum(r => r.ReadyCount);
     public int TotalFailed => Rows.Sum(r => r.FailedCount);
+    public int TotalPending => Rows.Sum(r => r.PendingCount);
+    public int TotalOverdue => Rows.Sum(r => r.OverdueCount);
+
+    /// <summary>
+    /// How long a report may stay Pending after its run's source data landed before the board
+    /// calls it stalled.
+    /// </summary>
+    public static readonly TimeSpan OverdueAfter = TimeSpan.FromDays(1);
+
+    /// <summary>Labs with at least one stalled report, for the warning banner.</summary>
+    public List<LabReportRow> OverdueRows => Rows.Where(r => r.HasOverdue).ToList();
 
     /// <summary>Column groups in display order, for the coloured band row above the matrix.</summary>
     public List<(string Group, int Span)> ColumnBands =>

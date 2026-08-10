@@ -70,7 +70,21 @@ public sealed class ReportBoardController : Controller
         var visibleLabs = VisibleLabKeys();
         var rows = new List<LabReportRow>();
 
-        foreach (var apiRow in fetch.Data?.Rows ?? [])
+        // A report the tracker has never returned a result for — for ANY lab in this fetch — is
+        // not part of the pipeline yet. Without this every such column would turn into a row of
+        // spinning gears (and, a day later, warnings) for a report nobody is waiting on.
+        var apiRows = fetch.Data?.Rows ?? [];
+        var producedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var apiRow in apiRows)
+        {
+            foreach (var (name, raw) in apiRow.Statuses)
+            {
+                if (ParseStatus(raw) is ReportRunStatus.Success or ReportRunStatus.Failed)
+                    producedColumns.Add(name);
+            }
+        }
+
+        foreach (var apiRow in apiRows)
         {
             var configKey = _labResolver.Resolve(apiRow.Lab);
 
@@ -81,15 +95,31 @@ public sealed class ReportBoardController : Controller
 
             var labConfig = configKey is not null && _labSettings.Labs.TryGetValue(configKey, out var cfg) ? cfg : null;
 
+            var labDisplayName = string.IsNullOrWhiteSpace(apiRow.Lab) ? (configKey ?? "Unknown lab") : apiRow.Lab!;
+
+            // The tracker returns ONE run per lab, so a report that has not caught up with the
+            // latest run shows up as a missing status inside it. Once the three source reports
+            // have succeeded, every other available report is expected — so a missing one is
+            // "still running" (and, past a day, stalled) rather than "not produced here".
+            var sourcesReady = ReportCatalog.SourceReportColumns.All(source =>
+                apiRow.Statuses.TryGetValue(source, out var raw) && ParseStatus(raw) == ReportRunStatus.Success);
+
+            var runAge = apiRow.SyncedOnDate is { } synced ? DateTime.Now - synced : (TimeSpan?)null;
+            var overdue = sourcesReady && runAge > ReportBoardViewModel.OverdueAfter;
+
             rows.Add(new LabReportRow
             {
-                LabDisplayName = string.IsNullOrWhiteSpace(apiRow.Lab) ? (configKey ?? "Unknown lab") : apiRow.Lab!,
+                LabDisplayName = labDisplayName,
                 LabConfigKey = configKey ?? string.Empty,
                 RunId = apiRow.RunId,
                 Week = apiRow.Week,
                 SyncedOn = apiRow.SyncedOnDate,
+                SourcesReady = sourcesReady,
                 Reports = columns
-                    .Select(column => BuildCell(column, apiRow, labConfig, configKey, routeAllowed))
+                    .Select(column => BuildCell(
+                        column, apiRow, labConfig, configKey, labDisplayName, routeAllowed,
+                        sourcesReady, overdue,
+                        producedColumns.Contains(column.StatusFrom ?? column.TrackerColumn)))
                     .ToList()
             });
         }
@@ -151,7 +181,14 @@ public sealed class ReportBoardController : Controller
         if (csv is null || csv.Content.Length == 0)
             return RedirectToAction(nameof(RunErrors), new { runId, lab, labName, report });
 
-        return File(csv.Content, csv.ContentType, csv.FileName);
+        // ErrorLog_<Report>_<Lab>_<RunId> — the API's own name says nothing about which report
+        // or lab the log belongs to, so several downloads are indistinguishable in a folder.
+        var extension = Path.GetExtension(csv.FileName);
+        if (string.IsNullOrWhiteSpace(extension)) extension = ".xlsx";
+        var fileName = LRN.ReportQueue.Shared.ReportFilePathBuilder.ComposeName(
+            "ErrorLog", report, string.IsNullOrWhiteSpace(labName) ? lab : labName, runId) + extension;
+
+        return File(csv.Content, csv.ContentType, fileName);
     }
 
     private LabReportStatus BuildCell(
@@ -159,13 +196,43 @@ public sealed class ReportBoardController : Controller
         ReportBoardApiRow apiRow,
         LabCsvConfig? labConfig,
         string? configKey,
-        IReadOnlyDictionary<string, bool> routeAllowed)
+        string labDisplayName,
+        IReadOnlyDictionary<string, bool> routeAllowed,
+        bool sourcesReady,
+        bool overdue,
+        bool producedAnywhere)
     {
         // A tile may derive its status from another report (StatusFrom) — LIMS Master mirrors
         // "LIS Summary": success when LIS Summary succeeded for this run, otherwise failed.
         var statusKey = column.StatusFrom ?? column.TrackerColumn;
         apiRow.Statuses.TryGetValue(statusKey, out var raw);
         var status = ParseStatus(raw);
+
+        // Reports this lab never produces stay greyed out — they are not late, they are absent
+        // by design. Three independent reasons, and NONE of them may override a status the
+        // tracker actually returned:
+        //   1. an explicit allow-list (Sales Rep Summary only runs for Cove and Elixir);
+        //   2. the lab's feature flag — but ONLY when the lab resolved to a configuration.
+        //      IsFeatureEnabled returns false for a null config, so applying it to an unmapped
+        //      lab greys out every flagged report even when the run succeeded;
+        //   3. the pipeline has never produced this report for ANY lab in this fetch, so it is
+        //      not wired up yet rather than late here.
+        var availableForLab =
+            ReportCatalog.IsAvailableForLab(column, configKey, labDisplayName)
+            && (labConfig is null || IsFeatureEnabled(column.FeatureFlag, labConfig))
+            && producedAnywhere;
+
+        if (!availableForLab)
+        {
+            status = ReportRunStatus.NotConfigured;
+        }
+        else if (status == ReportRunStatus.NotConfigured)
+        {
+            // No result yet for a report this lab DOES produce: still working through the run,
+            // or stalled once the source data has been sitting there for over a day.
+            // `sourcesReady` gates only the stalled verdict — see the caller.
+            status = overdue ? ReportRunStatus.Overdue : ReportRunStatus.Pending;
+        }
 
         string? blocked = null;
         var linkable = status == ReportRunStatus.Success;
@@ -175,7 +242,8 @@ public sealed class ReportBoardController : Controller
             blocked = status switch
             {
                 ReportRunStatus.Failed => "This report failed in the latest run.",
-                ReportRunStatus.Pending => "This report is still running.",
+                ReportRunStatus.Pending => "Waiting for this run to produce it.",
+                ReportRunStatus.Overdue => "The source data landed over a day ago and this report has still not been produced.",
                 _ => "Not produced for this lab."
             };
         }

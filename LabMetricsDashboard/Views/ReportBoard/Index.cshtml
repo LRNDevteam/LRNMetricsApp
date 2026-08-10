@@ -25,16 +25,18 @@
     {
         ReportRunStatus.Success => "ok",
         ReportRunStatus.Failed => "fail",
-        ReportRunStatus.Pending => "wait",
+        ReportRunStatus.Pending => "running",
+        ReportRunStatus.Overdue => "late",
         _ => "none"
     };
 
-    /// <summary>Pill styling for the card list — same four states as the matrix cells.</summary>
+    /// <summary>Pill styling for the card list — same states as the matrix cells.</summary>
     string PillClass(LabReportStatus cell) => cell.Status switch
     {
         ReportRunStatus.Success => "done",
         ReportRunStatus.Failed => "bad",
-        ReportRunStatus.Pending => "pending",
+        ReportRunStatus.Pending => "running",
+        ReportRunStatus.Overdue => "late",
         _ => "off"
     };
 
@@ -42,8 +44,9 @@
     {
         ReportRunStatus.Success => cell.IsLinkable ? "Ready" : "Ready (blocked)",
         ReportRunStatus.Failed => "Failed",
-        ReportRunStatus.Pending => "Pending",
-        _ => "Not configured"
+        ReportRunStatus.Pending => "In progress",
+        ReportRunStatus.Overdue => "Overdue",
+        _ => "Not produced"
     };
 
     // Plain-English completion state — this is what every tooltip leads with, so the board
@@ -52,7 +55,8 @@
     {
         ReportRunStatus.Success => cell.IsLinkable ? "Completed" : "Completed (cannot be opened from here)",
         ReportRunStatus.Failed => "Not completed (failed)",
-        ReportRunStatus.Pending => "Not completed (still running)",
+        ReportRunStatus.Pending => "In progress — not yet produced for this run",
+        ReportRunStatus.Overdue => "Overdue — still not produced more than a day after the source data landed",
         // Never marked as a failure: this report is simply not part of the lab's run.
         _ => "Not produced for this lab"
     };
@@ -89,10 +93,14 @@
 
     // Corner badge stamped on the report's own icon: tick = completed, cross = did not
     // complete, dash = not part of this lab's run.
+    // Gear = the run is still working on it; warning triangle = it has stalled. Neither is a
+    // cross: nothing has failed, the report simply is not there yet.
     string BadgeIcon(LabReportStatus cell) => cell.Status switch
     {
         ReportRunStatus.Success => "bi-check-lg",
-        ReportRunStatus.Failed or ReportRunStatus.Pending => "bi-x-lg",
+        ReportRunStatus.Failed => "bi-x-lg",
+        ReportRunStatus.Pending => "bi-gear-fill",
+        ReportRunStatus.Overdue => "bi-exclamation-triangle-fill",
         _ => "bi-dash-lg"
     };
 
@@ -100,7 +108,8 @@
     {
         ReportRunStatus.Success => "bg-ok",
         ReportRunStatus.Failed => "bg-fail",
-        ReportRunStatus.Pending => "bg-wait",
+        ReportRunStatus.Pending => "bg-running",
+        ReportRunStatus.Overdue => "bg-late",
         _ => "bg-none"
     };
 
@@ -137,6 +146,8 @@
            --ok:#10b981; --ok-bg:#ecfdf5; --ok-line:#a7f3d0;
            --fail:#ef4444; --fail-bg:#fef2f2; --fail-line:#fecaca;
            --wait:#f59e0b; --wait-bg:#fffbeb; --wait-line:#fde68a;
+           --running:#2563eb; --running-bg:#eff6ff; --running-line:#bfdbfe;
+           --late:#ea580c; --late-bg:#fff7ed; --late-line:#fed7aa;
            --none:#cbd5e1; --none-bg:#f8fafc;
            --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace; }
 
@@ -156,6 +167,20 @@
     .rcb-kpi b { display:block; font-size:1.15rem; font-weight:800; color:#fff; line-height:1.1; }
     .rcb-kpi span { font-size:.62rem; text-transform:uppercase; letter-spacing:.08em; color:rgba(255,255,255,.6); font-weight:700; }
     .rcb-kpi.bad b { color:#fca5a5; }
+    .rcb-kpi.late b { color:#fdba74; }
+
+    /* Stalled-run banner */
+    .rcb-warncard { position:relative; background:var(--late-bg); border:1px solid var(--late-line); border-left:4px solid var(--late);
+        border-radius:14px; padding:.85rem 2.6rem .85rem 1.1rem; margin-bottom:1.1rem; }
+    .rcb-warncard h2 { font-size:.9rem; font-weight:800; color:#9a3412; margin:0 0 .35rem; display:flex; align-items:center; gap:.45rem; }
+    .rcb-warn-x { position:absolute; top:.6rem; right:.7rem; width:26px; height:26px; border-radius:8px;
+        border:1px solid var(--late-line); background:#fff; color:#9a3412; cursor:pointer; font-size:.95rem;
+        line-height:1; display:flex; align-items:center; justify-content:center; padding:0; }
+    .rcb-warn-x:hover { background:var(--late); border-color:var(--late); color:#fff; }
+    .rcb-warncard ul { margin:0; padding-left:1.1rem; font-size:.8rem; color:var(--ink-2); }
+    .rcb-warncard li { margin-bottom:.15rem; }
+    .rcb-warncard .lab { font-weight:700; }
+    .rcb-warncard .rp { color:#9a3412; }
 
     /* toolbar */
     .rcb-toolbar { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; margin-bottom:.9rem; }
@@ -181,13 +206,25 @@
     .rcb-board thead tr.cols th { top:23px; }
     .rcb-board .band .b1 { background:#0e3460; } .rcb-board .band .b2 { background:#0d5c74; }
     .rcb-board .band .b3 { background:#0a7a74; } .rcb-board .band .b0 { background:#0a1628; }
-    .rcb-board th.lab-h, .rcb-board td.lab-c { position:sticky; left:0; z-index:2; background:#fff; text-align:left; min-width:250px; border-right:1px solid var(--line); }
+    /* Explicit width, not min-width: table-layout:fixed ignores min-width when sizing columns. */
+    .rcb-board th.lab-h, .rcb-board td.lab-c { position:sticky; left:0; z-index:2; background:#fff; text-align:left; width:270px; min-width:270px; border-right:1px solid var(--line); }
     .rcb-board thead th.lab-h { z-index:5; background:#f8fafc; }
     .rcb-board thead tr.band th.lab-h { background:#0a1628; }
     .rcb-board tbody tr:hover td { background:#f8fbff; }
     .rcb-board tbody tr:hover td.lab-c { background:#f1f7ff; }
-    /* Horizontal padding leaves room for the status badge that overhangs each cell. */
-    .rcb-board td { border-bottom:1px solid var(--line-soft); padding:.5rem .45rem; text-align:center; vertical-align:middle; }
+    /* Padding leaves room for the status badge that overhangs each cell on two sides. */
+    .rcb-board td { border-bottom:1px solid var(--line-soft); padding:.55rem .25rem; text-align:center; vertical-align:middle; }
+
+    /* Every report column is the SAME width, declared on a <colgroup>. Left to size themselves,
+       "FORECAST" and "COLLECT" made their columns far wider than "LIS" or "LINE", so the icons
+       below sat at uneven spacings and no longer lined up with their headers.
+       The widths MUST come from <col>: with table-layout:fixed the browser otherwise takes them
+       from the first row, which here is the band row of colspan cells, and divides those across
+       the columns they span — which skews every group differently. */
+    .rcb-board table { table-layout:fixed; width:auto; min-width:100%; }
+    .rcb-board col.rcb-lab-col { width:270px; }
+    .rcb-board col.rcb-rep-col { width:64px; }
+    .rcb-board thead tr.cols th { padding-left:.15rem; padding-right:.15rem; }
     .rcb-board td.lab-c { padding:.6rem .8rem; }
     .rcb-labrow { display:flex; align-items:center; gap:.6rem; cursor:pointer; }
     .rcb-av { width:32px; height:32px; border-radius:9px; color:#fff; font-weight:800; display:flex; align-items:center; justify-content:center; font-size:.85rem; flex:0 0 auto; }
@@ -203,23 +240,34 @@
     .rcb-colhead .lbl { font-size:.63rem; }
     .rcb-colhead .cnt { font-size:.58rem; font-weight:700; color:var(--faint); font-family:var(--mono); letter-spacing:0; text-transform:none; }
 
-    .rcb-cell { position:relative; display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; border-radius:9px; font-size:.85rem; text-decoration:none; border:1px solid transparent; transition:transform .12s ease, box-shadow .12s ease; }
+    .rcb-cell { position:relative; display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; border-radius:9px; font-size:.9rem; text-decoration:none; border:1px solid transparent; transition:transform .12s ease, box-shadow .12s ease; }
     .rcb-cell.ok { background:var(--ok-bg); border-color:var(--ok-line); color:#047857; }
     .rcb-cell.ok:hover { transform:translateY(-2px); box-shadow:0 4px 10px rgba(16,185,129,.28); }
     .rcb-cell.fail { background:var(--fail-bg); border-color:var(--fail-line); color:#b91c1c; }
     .rcb-cell.fail:hover { transform:translateY(-2px); box-shadow:0 4px 10px rgba(239,68,68,.25); }
     .rcb-cell.wait { background:var(--wait-bg); border-color:var(--wait-line); color:#b45309; }
+    /* In progress — blue, and the gear turns so it reads as "working", not "broken". */
+    .rcb-cell.running { background:var(--running-bg); border-color:var(--running-line); color:#1d4ed8; }
+    .rcb-cell.late { background:var(--late-bg); border-color:var(--late-line); color:#c2410c; }
     .rcb-cell.none { background:var(--none-bg); border-color:#e2e8f0; color:var(--none); }
     /* Completed but not openable — keeps its green "done" colour, loses the click affordance. */
     .rcb-cell.blocked { cursor:default; opacity:.72; }
     .rcb-cell.blocked:hover { transform:none; box-shadow:none; }
 
     /* Tick / cross stamped on the report icon — status readable without relying on colour. */
-    .rcb-badge { position:absolute; right:-4px; bottom:-4px; width:15px; height:15px; border-radius:50%;
-        display:flex; align-items:center; justify-content:center; font-size:.5rem; color:#fff; font-weight:700;
+    /* 18px with a .68rem glyph: a tick reads fine at 8px, but a gear or a warning triangle is
+       an unrecognisable blob until roughly this size. */
+    .rcb-badge { position:absolute; right:-5px; bottom:-5px; width:18px; height:18px; border-radius:50%;
+        display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700;
         border:2px solid #fff; box-shadow:0 1px 3px rgba(15,23,42,.28); }
+    .rcb-badge i { font-size:.68rem; line-height:1; display:block; }
     .rcb-badge.bg-ok { background:var(--ok); } .rcb-badge.bg-fail { background:var(--fail); }
     .rcb-badge.bg-wait { background:var(--wait); } .rcb-badge.bg-none { background:#cbd5e1; }
+    .rcb-badge.bg-running { background:var(--running); }
+    .rcb-badge.bg-late { background:var(--late); }
+    /* Slow, continuous turn — a live "this is working" cue that is easy to ignore. */
+    .rcb-badge.bg-running i { animation:rcb-spin 3.2s linear infinite; }
+    @@keyframes rcb-spin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
     .rcb-badge.bg-noroute { background:#7c3aed; }
 
     .rcb-legend { padding:.7rem 1rem .75rem; background:#0a1628; color:rgba(255,255,255,.82); font-size:.72rem; font-weight:600; }
@@ -233,6 +281,7 @@
     .rcb-legend .mk i { font-size:.55rem; line-height:1; }
     .rcb-legend .mk.ok { background:var(--ok); } .rcb-legend .mk.fail { background:var(--fail); }
     .rcb-legend .mk.wait { background:var(--wait); } .rcb-legend .mk.none { background:#94a3b8; }
+    .rcb-legend .mk.running { background:var(--running); } .rcb-legend .mk.late { background:var(--late); }
     .rcb-legend-hint { margin-top:.55rem; padding-top:.5rem; border-top:1px solid rgba(255,255,255,.1);
         display:flex; align-items:center; gap:.4rem; font-size:.69rem; font-weight:500; color:rgba(255,255,255,.55); }
 
@@ -256,6 +305,7 @@
     .rcb-rep .mk { font-size:.75rem; margin-left:.15rem; flex:0 0 auto; }
     .rcb-rep .mk.ok { color:var(--ok); } .rcb-rep .mk.fail { color:var(--fail); }
     .rcb-rep .mk.wait { color:var(--wait); } .rcb-rep .mk.none { color:var(--none); }
+    .rcb-rep .mk.running { color:var(--running); } .rcb-rep .mk.late { color:var(--late); }
     a.rcb-rep:hover .rep-ic { color:#0d6efd; }
     .rcb-rep.off { color:var(--faint); font-weight:500; }
     .rcb-rep.bad { color:#b91c1c; }
@@ -273,8 +323,10 @@
     .rcb-rep-row .rcb-rep.bad { border-color:var(--fail-line); background:var(--fail-bg); color:#b91c1c; }
     .rcb-rep-row a.rcb-rep.bad:hover { background:#fee2e2; border-color:#fca5a5; color:#991b1b; }
     .rcb-rep-row .rcb-rep.bad .rep-ic { color:#dc2626; }
-    .rcb-rep-row .rcb-rep.pending { border-color:var(--wait-line); background:var(--wait-bg); color:#b45309; }
-    .rcb-rep-row .rcb-rep.pending .rep-ic { color:#d97706; }
+    .rcb-rep-row .rcb-rep.running { border-color:var(--running-line); background:var(--running-bg); color:#1d4ed8; }
+    .rcb-rep-row .rcb-rep.running .rep-ic { color:#2563eb; }
+    .rcb-rep-row .rcb-rep.late { border-color:var(--late-line); background:var(--late-bg); color:#c2410c; }
+    .rcb-rep-row .rcb-rep.late .rep-ic { color:#ea580c; }
     /* Only "not produced for this lab" stays grey. */
     .rcb-rep-row .rcb-rep.off { border-style:dashed; }
     .rcb-card-foot { padding:.55rem .8rem; border-top:1px solid var(--line-soft); display:flex; gap:.35rem; flex-wrap:wrap; }
@@ -320,6 +372,7 @@
             <div class="rcb-kpi"><b>@Model.Columns.Count</b><span>Reports</span></div>
             <div class="rcb-kpi"><b>@Model.TotalReady</b><span>Available</span></div>
             <div class="rcb-kpi @(Model.TotalFailed > 0 ? "bad" : "")"><b>@Model.TotalFailed</b><span>Failed</span></div>
+            <div class="rcb-kpi @(Model.TotalOverdue > 0 ? "late" : "")"><b>@Model.TotalOverdue</b><span>Overdue</span></div>
             <div class="rcb-kpi"><b>@(Model.LastSyncedOn?.ToString("dd MMM") ?? "—")</b><span>Last sync</span></div>
         </div>
     </div>
@@ -342,6 +395,37 @@
             <a class="btn btn-sm btn-outline-danger" asp-action="Index" asp-route-view="@Model.View" asp-route-sort="@Model.Sort" asp-route-refresh="true">
                 <i class="bi bi-arrow-clockwise"></i> Retry
             </a>
+        </div>
+    }
+
+    @* Source data landed over a day ago and these reports never followed — the pipeline has
+       stalled, which is otherwise invisible because nothing "failed". *@
+    @if (Model.OverdueRows.Count > 0)
+    {
+        // Signature of WHAT is overdue, so dismissing today's warning does not hide tomorrow's
+        // different one — a new lab, run or report brings the banner back.
+        var warnSignature = string.Join("|", Model.OverdueRows
+            .Select(r => $"{r.LabConfigKey}:{r.RunId}:{string.Join(",", r.OverdueReports)}"));
+
+        <div class="rcb-warncard" role="alert" id="rcbWarn" data-warn-key="@warnSignature.GetHashCode():X">
+            <button type="button" class="rcb-warn-x" id="rcbWarnClose" aria-label="Dismiss this warning" title="Dismiss">
+                <i class="bi bi-x-lg"></i>
+            </button>
+            <h2>
+                <i class="bi bi-exclamation-triangle-fill"></i>
+                @Model.TotalOverdue report@(Model.TotalOverdue == 1 ? "" : "s") not generated
+                more than a day after the run's source data
+            </h2>
+            <ul>
+                @foreach (var row in Model.OverdueRows)
+                {
+                    <li>
+                        <span class="lab">@row.LabDisplayName</span>
+                        <span class="text-muted">(@(row.RunId ?? "no run"), synced @RelativeTime(row.SyncedOn))</span>
+                        — <span class="rp">@string.Join(", ", row.OverdueReports)</span>
+                    </li>
+                }
+            </ul>
         </div>
     }
 
@@ -381,6 +465,14 @@
         <div class="rcb-board @(Model.View == "cards" ? "rcb-hidden" : "")" id="rcbMatrix">
             <div class="rcb-scroll">
                 <table>
+                    @* Column widths live here so the colspan band row cannot skew them. *@
+                    <colgroup>
+                        <col class="rcb-lab-col" />
+                        @for (var c = 0; c < Model.Columns.Count; c++)
+                        {
+                            <col class="rcb-rep-col" />
+                        }
+                    </colgroup>
                     <thead>
                         <tr class="band">
                             <th class="lab-h b0" rowspan="2">Lab &amp; latest run</th>
@@ -411,6 +503,7 @@
                             <tr class="rcb-row"
                                 data-search="@($"{row.LabDisplayName} {row.RunId}".ToLowerInvariant())"
                                 data-failed="@(row.HasFailures ? "1" : "0")"
+                                data-overdue="@(row.HasOverdue ? "1" : "0")"
                                 data-ready="@row.ReadyCount">
                                 <td class="lab-c">
                                     <div class="rcb-labrow" role="button" tabindex="0" data-drawer="@i" aria-label="Open all reports for @row.LabDisplayName">
@@ -475,7 +568,8 @@
                 <div class="rcb-legend-items">
                     <span class="lg"><span class="mk ok"><i class="bi bi-check-lg"></i></span>Completed <em>— click to open</em></span>
                     <span class="lg"><span class="mk fail"><i class="bi bi-x-lg"></i></span>Failed <em>— click for the error log</em></span>
-                    <span class="lg"><span class="mk wait"><i class="bi bi-x-lg"></i></span>Still running</span>
+                    <span class="lg"><span class="mk running"><i class="bi bi-gear-fill"></i></span>In progress <em>— not produced yet</em></span>
+                    <span class="lg"><span class="mk late"><i class="bi bi-exclamation-triangle-fill"></i></span>Overdue <em>— over a day late</em></span>
                     <span class="lg dim"><span class="mk ok"><i class="bi bi-check-lg"></i></span>Completed <em>— faded, cannot open here</em></span>
                     <span class="lg"><span class="mk none"><i class="bi bi-dash-lg"></i></span>Not produced for this lab</span>
                 </div>
@@ -496,6 +590,7 @@
                 <div class="rcb-card rcb-row"
                      data-search="@($"{row.LabDisplayName} {row.RunId}".ToLowerInvariant())"
                      data-failed="@(row.HasFailures ? "1" : "0")"
+                                data-overdue="@(row.HasOverdue ? "1" : "0")"
                      data-ready="@row.ReadyCount">
                     <div class="rcb-card-head" style="background:linear-gradient(135deg,@colour,@(colour)cc)">
                         <div>
@@ -514,7 +609,15 @@
                         {
                             <span style="color:#b91c1c">@row.FailedCount failed</span>
                         }
-                        else
+                        @if (row.HasOverdue)
+                        {
+                            <span style="color:#c2410c"><i class="bi bi-exclamation-triangle-fill"></i> @row.OverdueCount overdue</span>
+                        }
+                        else if (row.PendingCount > 0)
+                        {
+                            <span style="color:#1d4ed8"><i class="bi bi-gear-fill"></i> @row.PendingCount running</span>
+                        }
+                        else if (!row.HasFailures)
                         {
                             <span style="color:#10b981">healthy</span>
                         }
@@ -639,6 +742,20 @@
 @section Scripts {
 <script nonce='@Context.Items["CspNonce"]'>
 (function(){
+  // Dismissible stalled-run warning. Keyed by WHAT is overdue, so closing it hides only this
+  // exact set — a new lab, run or report shows the banner again. Session-scoped: it comes back
+  // in a new browser session even if nothing changed.
+  const warn = document.getElementById('rcbWarn');
+  if (warn) {
+    const key = 'rcbWarnDismissed:' + (warn.dataset.warnKey || '');
+    try { if (sessionStorage.getItem(key) === '1') warn.style.display = 'none'; } catch (e) { }
+    const closeBtn = document.getElementById('rcbWarnClose');
+    if (closeBtn) closeBtn.addEventListener('click', function () {
+      warn.style.display = 'none';
+      try { sessionStorage.setItem(key, '1'); } catch (e) { }
+    });
+  }
+
   // Search / filter / drawer only. View and sort are server-rendered links so the URL keeps state.
   const rows = Array.from(document.querySelectorAll('.rcb-row'));
   const search = document.getElementById('rcbSearch');
@@ -653,7 +770,7 @@
     rows.forEach(row => {
       let show = true;
       if (q && !(row.dataset.search || '').includes(q)) show = false;
-      else if (filter === 'failed' && row.dataset.failed !== '1') show = false;
+      else if (filter === "failed" && row.dataset.failed !== "1" && row.dataset.overdue !== "1") show = false;
       else if (filter === 'incomplete' && Number(row.dataset.ready) >= incompleteBelow) show = false;
       row.classList.toggle('rcb-hidden', !show);
     });

@@ -570,6 +570,7 @@ public static class DenialDashboardExcelExportBuilder
 
 		row = WriteBreakdownBlock(ws, row, "Task Status", data.StatusBreakdown);
 		row = WriteBreakdownBlock(ws, row, "Priority", data.PriorityBreakdown);
+		row = WriteBreakdownBlock(ws, row, "Assigned To", data.AssignedToBreakdown);
 		row = WriteBreakdownBlock(ws, row, "Action Category", data.ActionCategoryBreakdown);
 		row = WriteBreakdownBlock(ws, row, "Classification", data.ClassificationBreakdown);
 		_ = WriteBreakdownBlock(ws, row, "Deadline", data.DeadlineBreakdown);

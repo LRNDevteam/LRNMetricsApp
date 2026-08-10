@@ -27,10 +27,17 @@ public class LisSummaryController : Controller
 		_logger = logger;
 	}
 
+	/// <summary>The selected range as a week label, matching the Report Control Board's format.</summary>
+	private static string WeekLabel(DateOnly? from, DateOnly? to)
+		=> from.HasValue && to.HasValue
+			? $"{from.Value:MM.dd.yyyy} - {to.Value:MM.dd.yyyy}"
+			: string.Empty;
+
 	[HttpGet]
 	public async Task<IActionResult> Index(
 		[FromQuery] LisSummaryFilters filters,
 		[FromQuery] string? lab,
+		[FromQuery] string? runId,
 		CancellationToken cancellationToken)
 	{
 		filters ??= new LisSummaryFilters();
@@ -126,6 +133,8 @@ public class LisSummaryController : Controller
 				LabOptions = labOptions,
 				CurrentLabName = selectedLabOption?.LabName ?? selectedLabName,
 				ConfiguredLabKey = selectedLabName,
+				RunId = runId?.Trim() ?? string.Empty,
+				WeekLabel = WeekLabel(filters.EffectiveDateFrom, filters.EffectiveDateTo),
 				Result = result,
 				LineData = lineData,
 				FilterOptions = filterOptions

@@ -536,7 +536,10 @@ public sealed record DenialDashboardReportFilters(
     string? DateOfServiceFrom   = null,
     string? DateOfServiceTo     = null,
     string? DenialDateFrom      = null,
-    string? DenialDateTo        = null)
+    string? DenialDateTo        = null,
+    // Identify the run in the downloaded file name; not filters.
+    string? RunId               = null,
+    string? WeekFolder          = null)
 {
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -607,7 +610,10 @@ public sealed record LisSummaryReportFilters(
     string? Clinic    = null,
     string? RefPhy    = null,
     string? SalesRep  = null,
-    string? Collector = null)
+    string? Collector = null,
+    // Identify the run in the downloaded file name; not filters.
+    string? RunId      = null,
+    string? WeekFolder = null)
 {
     private static readonly JsonSerializerOptions JsonOpts = new()
     {

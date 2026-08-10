@@ -24,13 +24,16 @@ public sealed class DenialDashboardReportGenerator : IReportGenerator
     public string ReportType => ReportTypes.DenialDashboard;
 
     private readonly IServiceProvider _services;
+    private readonly ReportStorageOptions _storage;
     private readonly ILogger<DenialDashboardReportGenerator> _logger;
 
     public DenialDashboardReportGenerator(
         IServiceProvider services,
+        Microsoft.Extensions.Options.IOptions<ReportStorageOptions> storage,
         ILogger<DenialDashboardReportGenerator> logger)
     {
         _services = services;
+        _storage = storage.Value;
         _logger = logger;
     }
 
@@ -84,6 +87,74 @@ SELECT CASE WHEN EXISTS (
                 "DenialLineItem / DenialTaskBoard / DenialInsight for this lab.");
     }
 
+    /// <summary>
+    /// Reports what each denial table actually holds on the connection being used.
+    ///
+    /// The SLA Tracker, Filter Panel and Denial Insight sheets ALL derive from
+    /// dbo.DenialTaskBoard (Denial Insight falls back to task-board-derived rows when
+    /// dbo.DenialInsight is empty), so when that one table returns nothing those three sheets
+    /// come out blank while Line Item — which reads dbo.DenialLineItem — is full. This says
+    /// which database was queried and what was in it, so the cause is visible in one run
+    /// instead of being inferred from an empty workbook.
+    /// </summary>
+    private async Task LogDenialTableCensusAsync(LabDbConfig lab, int labId, string runId, CancellationToken ct)
+    {
+        const string sql = @"
+SELECT
+    DB_NAME() AS [Db],
+    (SELECT COUNT(1) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='DenialTaskBoard') AS TaskBoardExists,
+    (SELECT COUNT(1) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='DenialInsight')   AS InsightExists;";
+
+        try
+        {
+            await using var connection = new SqlConnection(lab.DbConnectionString);
+            await connection.OpenAsync(ct);
+
+            string db;
+            bool taskBoard, insight;
+            await using (var cmd = new SqlCommand(sql, connection) { CommandTimeout = 60 })
+            await using (var rd = await cmd.ExecuteReaderAsync(ct))
+            {
+                if (!await rd.ReadAsync(ct)) return;
+                db = rd.GetString(0);
+                taskBoard = rd.GetInt32(1) > 0;
+                insight = rd.GetInt32(2) > 0;
+            }
+
+            var taskTotal = taskBoard ? await ScalarAsync(connection, "SELECT COUNT(1) FROM dbo.DenialTaskBoard", ct) : -1;
+            var taskForLab = taskBoard
+                ? await ScalarAsync(connection, $"SELECT COUNT(1) FROM dbo.DenialTaskBoard WHERE LabId = {labId}", ct)
+                : -1;
+            var insightForLab = insight
+                ? await ScalarAsync(connection, $"SELECT COUNT(1) FROM dbo.DenialInsight WHERE LabId = {labId}", ct)
+                : -1;
+
+            _logger.LogWarning(
+                "DenialDashboard census [{Lab} #{LabId}] db={Db} runId={RunId}: " +
+                "DenialTaskBoard exists={TaskBoardExists} rows={TaskTotal} rowsForLab={TaskForLab}; " +
+                "DenialInsight exists={InsightExists} rowsForLab={InsightForLab}. " +
+                "SLA Tracker / Filter Panel / Denial Insight are all built from DenialTaskBoard — " +
+                "if rowsForLab is 0 the tables are in a different database or under a different LabId " +
+                "than this lab's config JSON DbConnectionString points at.",
+                lab.LabName, labId, db, string.IsNullOrWhiteSpace(runId) ? "(none)" : runId,
+                taskBoard, taskTotal, taskForLab, insight, insightForLab);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "DenialDashboard census failed for {Lab}.", lab.LabName);
+        }
+
+        static async Task<int> ScalarAsync(SqlConnection connection, string sql, CancellationToken ct)
+        {
+            try
+            {
+                await using var cmd = new SqlCommand(sql, connection) { CommandTimeout = 120 };
+                return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+            }
+            catch { return -1; }
+        }
+    }
+
     public async Task<GeneratedReportFile> GenerateAsync(
         LabDbConfig lab, ClaimedReport job, string fileName, string targetPath,
         Func<byte, Task>? reportProgressAsync, CancellationToken ct)
@@ -129,6 +200,10 @@ SELECT CASE WHEN EXISTS (
         var insights = (await repo.GetInsightTableByLabAsync(labId, ct)).ToList();
         await Progress(30);
 
+        // An empty task board silently empties three of the six sheets — say why, once, here.
+        if (taskRecords.Count == 0)
+            await LogDenialTableCensusAsync(lab, labId, runId, ct);
+
         var breakdownSource = (await repo.GetBreakdownSourceByLabAsync(labId, filters, ct)).ToList();
         await Progress(45);
 
@@ -139,6 +214,13 @@ SELECT CASE WHEN EXISTS (
             labName, runId, filters, taskRecords, lineItems, insights, breakdownSource,
             f.ToActiveFilterList());
         await Progress(80);
+
+        // Denial_<Lab>_<RunId>_<Week>.xlsx — the run id from the page when it sent one,
+        // otherwise the one this lab's task board reports.
+        (fileName, targetPath) = ReportFilePathBuilder.BuildNamed(
+            _storage.RootPath, job.ReportType, job.RequestedBy, DateTime.Now,
+            ReportFilePathBuilder.ComposeName(
+                "Denial", labName, string.IsNullOrWhiteSpace(f.RunId) ? runId : f.RunId, f.WeekFolder));
 
         Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
         var tempPath = targetPath + ".tmp";

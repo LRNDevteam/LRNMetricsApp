@@ -171,11 +171,29 @@ public sealed class PayerValidationReportRepository
 		if (string.IsNullOrWhiteSpace(runId))
 			return null;
 
-		// RunId is compared bare so the predicate stays sargable: wrapping the column in
-		// LTRIM/RTRIM/ISNULL makes an index on RunId unusable and forces a full scan of a
-		// very wide table, which is what times out on the larger labs. SQL Server already
-		// ignores trailing blanks in '=', and a NULL RunId can never match a non-empty value,
-		// so the bare comparison returns the same rows.
+		await using var conn = new SqlConnection(lab.LabConnectionString);
+		await conn.OpenAsync(ct).ConfigureAwait(false);
+
+		// Fast path: bare '=' keeps the predicate sargable, so an index on RunId is a seek
+		// rather than a scan of a very wide table.
+		var run = await AggregateRunAsync(conn, runId.Trim(), ct).ConfigureAwait(false);
+		if (run is not null)
+			return run;
+
+		// Miss. The RunId comes from LRNMaster while this column is written by the upstream
+		// loader, and '=' does NOT ignore LEADING blanks (only trailing ones), so a value
+		// stored as ' R2026…' never matches. Find how the table actually spells it, then
+		// re-aggregate on that exact literal — one scan, only when the seek found nothing.
+		var stored = await ResolveStoredRunIdAsync(conn, runId.Trim(), ct).ConfigureAwait(false);
+
+		return stored is null
+			? null
+			: await AggregateRunAsync(conn, stored, ct).ConfigureAwait(false);
+	}
+
+	/// <summary>Run metadata for one exact stored RunId literal, or null when it has no rows.</summary>
+	private async Task<PayerValidationRun?> AggregateRunAsync(SqlConnection conn, string runId, CancellationToken ct)
+	{
 		var sql = $@"
 SELECT MAX(ISNULL(WeekFolder, ''))     AS WeekFolder,
        MAX(ISNULL(SourceFullPath, '')) AS SourceFullPath,
@@ -185,12 +203,10 @@ SELECT MAX(ISNULL(WeekFolder, ''))     AS WeekFolder,
 FROM {QualifiedTableName()}
 WHERE RunId = @RunId;";
 
-		await using var conn = new SqlConnection(lab.LabConnectionString);
 		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = CommandTimeoutSeconds };
 		cmd.Parameters.Add("@PayStatus", SqlDbType.NVarChar, 100).Value = _options.DeniedPayStatus;
-		cmd.Parameters.Add("@RunId", SqlDbType.NVarChar, 200).Value = runId.Trim();
+		cmd.Parameters.Add("@RunId", SqlDbType.NVarChar, 200).Value = runId;
 
-		await conn.OpenAsync(ct).ConfigureAwait(false);
 		await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
 		if (!await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -203,12 +219,68 @@ WHERE RunId = @RunId;";
 			return null;
 
 		return new PayerValidationRun(
-			RunId: runId.Trim(),
+			// The value as STORED, so every later query seeks on a literal that exists.
+			RunId: runId,
 			WeekFolder: reader.IsDBNull(0) ? "" : reader.GetString(0).Trim(),
 			SourceFullPath: reader.IsDBNull(1) ? "" : reader.GetString(1).Trim(),
 			InsertedDateTime: reader.IsDBNull(2) ? null : reader.GetDateTime(2),
 			DeniedRowCount: reader.IsDBNull(4) ? 0 : Convert.ToInt32(reader.GetValue(4)),
 			TotalRowCount: totalRowCount);
+	}
+
+	/// <summary>The table's own spelling of a RunId, ignoring surrounding whitespace. Null when absent.</summary>
+	private async Task<string?> ResolveStoredRunIdAsync(SqlConnection conn, string runId, CancellationToken ct)
+	{
+		var sql = $@"
+SELECT TOP (1) RunId
+FROM {QualifiedTableName()}
+WHERE LTRIM(RTRIM(ISNULL(RunId, ''))) = @RunId;";
+
+		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = CommandTimeoutSeconds };
+		cmd.Parameters.Add("@RunId", SqlDbType.NVarChar, 200).Value = runId;
+
+		var value = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+		return value is null or DBNull ? null : Convert.ToString(value);
+	}
+
+	/// <summary>
+	/// The most recent RunIds actually present, with their row counts. Used to explain a miss:
+	/// "no rows for R123" is far more actionable next to the ids the table does hold.
+	/// </summary>
+	public async Task<List<(string RunId, int TotalRows, int DeniedRows)>> GetRecentRunIdsAsync(
+		LabConfig lab, int top, CancellationToken ct)
+	{
+		// Aliased RunIdValue, not RunId: with GROUP BY ISNULL(RunId, …) an ORDER BY on the bare
+		// column name is ambiguous and SQL Server rejects it as not being in the GROUP BY.
+		var sql = $@"
+SELECT TOP (@Top)
+       ISNULL(RunId, '(null)')         AS RunIdValue,
+       COUNT_BIG(1)                    AS TotalRows,
+       SUM(CASE WHEN LTRIM(RTRIM(ISNULL(PayStatus, ''))) = @PayStatus THEN 1 ELSE 0 END) AS DeniedRows,
+       MAX(InsertedDateTime)           AS LastInserted
+FROM {QualifiedTableName()}
+GROUP BY ISNULL(RunId, '(null)')
+ORDER BY MAX(InsertedDateTime) DESC, RunIdValue DESC;";
+
+		var results = new List<(string, int, int)>();
+
+		await using var conn = new SqlConnection(lab.LabConnectionString);
+		await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = CommandTimeoutSeconds };
+		cmd.Parameters.Add("@Top", SqlDbType.Int).Value = top;
+		cmd.Parameters.Add("@PayStatus", SqlDbType.NVarChar, 100).Value = _options.DeniedPayStatus;
+
+		await conn.OpenAsync(ct).ConfigureAwait(false);
+		await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+		while (await reader.ReadAsync(ct).ConfigureAwait(false))
+		{
+			results.Add((
+				reader.GetString(0),
+				Convert.ToInt32(reader.GetInt64(1)),
+				reader.IsDBNull(2) ? 0 : Convert.ToInt32(reader.GetValue(2))));
+		}
+
+		return results;
 	}
 
 	/// <summary>

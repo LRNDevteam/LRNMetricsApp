@@ -28,13 +28,14 @@ public static class LisSummaryExcelExportBuilder
         string? salesRep,
         string? collector)
     {
+        // Sheet order: Filtered Values → LIS Summary → LIMS Master. The filters come first so a
+        // reader sees what the numbers cover before the numbers.
         var workbook = new XLWorkbook();
-        var sheet = workbook.Worksheets.Add("LIS Summary");
 
-        BuildSummarySheet(sheet, result, labName);
         BuildFilterSheet(
             workbook.Worksheets.Add(FilterSheetName),
             result, labName, dateType, dateFrom, dateTo, panel, clinic, refPhy, salesRep, collector);
+        BuildSummarySheet(workbook.Worksheets.Add("LIS Summary"), result, labName);
         BuildLineDataSheet(workbook.Worksheets.Add("LIMS Master"), lineData);
 
         workbook.Properties.Title = $"LIS Summary - {labName}";

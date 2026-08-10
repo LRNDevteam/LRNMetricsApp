@@ -1561,7 +1561,10 @@ else
             Clinic:    val('Clinic'),
             RefPhy:    val('RefPhy'),
             SalesRep:  val('SalesRep'),
-            Collector: val('Collector')
+            Collector: val('Collector'),
+            // Not filters — these name the downloaded file after the run it came from.
+            RunId:      '@Model.RunId' || null,
+            WeekFolder: '@Model.WeekLabel' || null
         };
 
         var body = new FormData();

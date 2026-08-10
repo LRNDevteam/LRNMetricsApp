@@ -156,9 +156,27 @@ public sealed class DenialDatabaseWorker : BackgroundService
 
             if (sourceRun is null)
             {
+                // Name the RunIds the table DOES hold. Without this, "no rows" is
+                // indistinguishable from a RunId mismatch between LRNMaster's run log and the
+                // loader that writes this table — which looks identical to an empty table even
+                // though SELECT ... WHERE PayStatus = 'Denied' returns plenty.
                 await CompleteAsSkippedAsync(lab, runId, startedOn,
-                    $"RunId {runId} has no rows in {SourceTableLabel(lab)}.", ct);
+                    $"RunId {runId} has no rows in {SourceTableLabel(lab)}. " +
+                    await DescribeAvailableRunsAsync(lab, ct), ct);
                 return;
+            }
+
+            // GetRunAsync falls back to a whitespace-tolerant lookup, so the table's spelling of
+            // the RunId can differ from LRNMaster's. Only the DATA queries follow the stored
+            // spelling — runId itself stays LRNMaster's value because the workflow tracker, the
+            // info log and the Report Control Board all key off that one.
+            if (!string.Equals(sourceRun.RunId, runId, StringComparison.Ordinal))
+            {
+                _logger.LogWarning(
+                    "Lab {LabName}: RunId from {Procedure} is '{RunLogRunId}' but {Table} stores it as " +
+                    "'{StoredRunId}'. Reading rows under the stored value; tracking stays on the run log's. " +
+                    "Fix the upstream loader so the two agree.",
+                    lab.LabName, _options.RecentSuccessRunProcedure, runId, SourceTableLabel(lab), sourceRun.RunId);
             }
 
             payerPolicySource = BuildSourceLabel(lab, sourceRun);
@@ -213,9 +231,10 @@ public sealed class DenialDatabaseWorker : BackgroundService
             // 3. Load denied rows from the lab database (PayerValidationReport)
             await _stepLogger.LogAsync(lab, "Load PayerValidationReport denied rows", "InProgress", payerPolicySource, claimActionMapperFile, outFile, null, ct);
 
+            // sourceRun.RunId, not runId — the stored spelling is the one that matches rows.
             var payerRows = await _payerValidationRepo.GetDeniedRowsAsync(
                 lab,
-                _options.ProcessLatestRunOnly ? runId : null,
+                _options.ProcessLatestRunOnly ? sourceRun.RunId : null,
                 ct);
 
             await _stepLogger.LogAsync(lab, "Load PayerValidationReport denied rows", "Completed", payerPolicySource, claimActionMapperFile, outFile,
@@ -226,7 +245,8 @@ public sealed class DenialDatabaseWorker : BackgroundService
                 await _stepLogger.LogAsync(lab, "Completed", "Completed", payerPolicySource, claimActionMapperFile, outFile, "No denied rows.", ct);
 
                 await CompleteAsSkippedAsync(lab, runId, startedOn,
-                    $"RunId {runId} has no '{_options.DeniedPayStatus}' rows in {SourceTableLabel(lab)}. Nothing to copy.", ct);
+                    $"RunId {sourceRun.RunId} has {sourceRun.TotalRowCount} row(s) in {SourceTableLabel(lab)} " +
+                    $"but none with PayStatus = '{_options.DeniedPayStatus}'. Nothing to copy.", ct);
                 return;
             }
 
@@ -405,6 +425,32 @@ public sealed class DenialDatabaseWorker : BackgroundService
     }
 
     /// <summary>"NWL_LRN.dbo.PayerValidationReport" - used in log messages and remarks.</summary>
+    /// <summary>
+    /// "The table holds R123 (400 rows, 120 denied), R122 (…)" — turns a bare "no rows for this
+    /// RunId" into something an operator can act on, because the usual cause is that the run log
+    /// and this table disagree about the id rather than the table being empty.
+    /// </summary>
+    private async Task<string> DescribeAvailableRunsAsync(LabConfig lab, CancellationToken ct)
+    {
+        try
+        {
+            var runs = await _payerValidationRepo.GetRecentRunIdsAsync(lab, 5, ct);
+
+            if (runs.Count == 0)
+                return "The table holds no rows at all.";
+
+            var listed = string.Join("; ", runs.Select(r =>
+                $"{r.RunId} ({r.TotalRows} rows, {r.DeniedRows} {_options.DeniedPayStatus})"));
+
+            return $"Most recent RunIds in the table: {listed}.";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Lab {LabName}: could not list the table's RunIds.", lab.LabName);
+            return "";
+        }
+    }
+
     private string SourceTableLabel(LabConfig lab)
     {
         var database = TryGetDatabaseName(lab.LabConnectionString);
