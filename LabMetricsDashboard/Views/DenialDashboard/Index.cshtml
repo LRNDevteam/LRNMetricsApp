@@ -1829,7 +1829,10 @@
                     DateOfServiceFrom: val('DateOfServiceFrom'),
                     DateOfServiceTo: val('DateOfServiceTo'),
                     DenialDateFrom: val('DenialDateFrom'),
-                    DenialDateTo: val('DenialDateTo')
+                    DenialDateTo: val('DenialDateTo'),
+                    // Not filters — these name the downloaded file after the run it came from.
+                    RunId: '@Model.CurrentRunId' || null,
+                    WeekFolder: '@Model.CurrentWeekFolder' || null
                 };
 
                 const body = new FormData();

@@ -930,6 +930,9 @@ public class DenialDashboardController : Controller
 			ActionCategoryBreakdown: BuildBreakdown(filteredRecords, x => x.EffectiveActionCategory),
 			ClassificationBreakdown: BuildBreakdown(filteredRecords, x => x.DenialClassification),
 			DeadlineBreakdown: BuildDeadlineBreakdown(filteredRecords),
+			// "(Unassigned)" rather than "(Blank)" — an unclaimed denial is the actionable case.
+			AssignedToBreakdown: BuildBreakdown(filteredRecords,
+				x => string.IsNullOrWhiteSpace(x.AssignedTo) ? "(Unassigned)" : x.AssignedTo.Trim()),
 			// Notes/assignment come from the UNFILTERED task board: a line item still carries its
 			// workflow state even when its task row is excluded by the current filters.
 			Workflow: new DenialWorkflowLineItemAnnotator(records),

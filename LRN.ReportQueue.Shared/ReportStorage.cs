@@ -23,13 +23,55 @@ public static class ReportFilePathBuilder
         string rootPath, string reportType, string labName, string userName, DateTime now)
     {
         var fileName = $"{Sanitize(labName)}_{Sanitize(reportType)}_{now:yyyyMMddHHmmss}.xlsx";
-        var folder = Path.Combine(
+        return (fileName, Path.Combine(Folder(rootPath, reportType, userName, now), fileName));
+    }
+
+    /// <summary>
+    /// Same folder layout, but the caller supplies the file name — used by reports that name
+    /// themselves after the run they came from
+    /// (e.g. <c>LIS_NorthWest_R20260806NWL0103_07.23.2026-07.29.2026.xlsx</c>) so a downloaded
+    /// file identifies its lab, run and week without being opened.
+    /// </summary>
+    public static (string FileName, string FullPath) BuildNamed(
+        string rootPath, string reportType, string userName, DateTime now, string fileNameWithoutExtension)
+    {
+        var safe = SanitizeFileName(fileNameWithoutExtension);
+        if (string.IsNullOrWhiteSpace(safe)) safe = $"{Sanitize(reportType)}_{now:yyyyMMddHHmmss}";
+        var fileName = $"{safe}.xlsx";
+        return (fileName, Path.Combine(Folder(rootPath, reportType, userName, now), fileName));
+    }
+
+    /// <summary>
+    /// Joins the non-empty parts with "_" — a missing run id or week folder collapses out
+    /// instead of leaving "__" in the middle of the name.
+    /// </summary>
+    public static string ComposeName(params string?[] parts) =>
+        string.Join("_", parts
+            .Select(p => SanitizeFileName(p ?? string.Empty))
+            .Where(p => p.Length > 0));
+
+    private static string Folder(string rootPath, string reportType, string userName, DateTime now) =>
+        Path.Combine(
             rootPath,
             Sanitize(reportType),
             now.Year.ToString(),
             now.ToString("MMMM", System.Globalization.CultureInfo.InvariantCulture),
             Sanitize(userName));
-        return (fileName, Path.Combine(folder, fileName));
+
+    /// <summary>
+    /// Keeps dots and dashes (week folders look like "07.23.2026 - 07.29.2026") but drops
+    /// path separators and other characters Windows rejects, and collapses whitespace.
+    /// Unlike <see cref="Sanitize"/> this is for a name PART, not a whole path segment.
+    /// </summary>
+    public static string SanitizeFileName(string value)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var chars = (value ?? string.Empty)
+            .Select(c => invalid.Contains(c) ? '-' : c)
+            .Where(c => c != '"')
+            .ToArray();
+        var collapsed = string.Join(" ", new string(chars).Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        return collapsed.Replace(" ", string.Empty).Trim('_', '-', '.');
     }
 
     /// <summary>Strips path separators / invalid chars so user or lab names can never escape the root.</summary>

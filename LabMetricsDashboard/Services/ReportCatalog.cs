@@ -16,6 +16,14 @@ public static class ReportCatalog
     public const string GroupSummary = "Summary reports";
     public const string GroupAnalytics = "Analytics & validation";
 
+    /// <summary>
+    /// Labs that produce a Sales Rep Summary. Matched loosely — see <see cref="LabToken"/>.
+    /// MUST stay declared above <see cref="Entries"/>: static field initialisers run in
+    /// declaration order, so an entry built before this one would capture null and silently
+    /// allow the report for every lab.
+    /// </summary>
+    private static readonly string[] SalesRepSummaryLabs = ["Cove", "Elixir"];
+
     /// <summary>Display order for the board, which is deliberately not the SP's column order.</summary>
     public static readonly IReadOnlyList<ReportCatalogEntry> Entries =
     [
@@ -31,7 +39,9 @@ public static class ReportCatalog
         new("Collection Summary",      "Collection Summary",      "Collect",  "bi-cash-stack",           GroupSummary,   "CollectionSummary",      "Index",                   "EnableCollectionReport"),
         new("Executive Summary",       "Executive Summary",       "Exec",     "bi-table",                GroupSummary,   "ExecutiveSummary",       "Index",                   null),
         new("Clinic Summary",          "Clinic Summary",          "Clinic",   "bi-hospital",             GroupSummary,   "Dashboard",              "ClinicSummary",           "EnableClinicsummary"),
-        new("Sales Rep Summary",       "Sales Rep Summary",       "Sales",    "bi-people-fill",          GroupSummary,   "Dashboard",              "SalesRepSummary",         "EnableSalesRepsummary"),
+        // Sales Rep Summary is only produced for Cove and Elixir; everywhere else it is greyed
+        // out as "not produced for this lab" rather than sitting empty as if it had failed.
+        new("Sales Rep Summary",       "Sales Rep Summary",       "Sales",    "bi-people-fill",          GroupSummary,   "Dashboard",              "SalesRepSummary",         "EnableSalesRepsummary", null, null, SalesRepSummaryLabs),
         new("Denial Report",           "Denial Report",           "Denial",   "bi-exclamation-triangle", GroupSummary,   "DenialDashboard",        "Index",                   null),
 
         new("Coding Validation",       "Coding Validation",       "Coding",   "bi-pencil-square",        GroupAnalytics, "Coding",                 "Summary",                 "EnableCoding"),
@@ -39,6 +49,49 @@ public static class ReportCatalog
         new("Prediction Analysis",     "Prediction Analysis",     "Predict",  "bi-activity",             GroupAnalytics, "Prediction",             "Index",                   "EnablePrediction"),
         new("Forecasting",             "Forecasting",             "Forecast", "bi-calendar3",            GroupAnalytics, "Prediction",             "ForecastingSummary",      "EnableForcast")
     ];
+
+    /// <summary>
+    /// The three source reports. When all three succeed for a run, every other report available
+    /// to that lab is expected to follow, so a missing one is "still running", not "never runs".
+    /// </summary>
+    public static readonly string[] SourceReportColumns =
+        ["LIS Summary", "Line Level Master", "Claim Level Master"];
+
+    /// <summary>
+    /// Normalises a lab name for comparison: letters and digits only, upper-cased, with a
+    /// trailing LRN/DTR dropped. Lets "Cove", "CoveLRN" and "Cove_LRN" all match one another.
+    /// </summary>
+    private static string LabToken(string? value)
+    {
+        var token = new string((value ?? string.Empty)
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToUpperInvariant)
+            .ToArray());
+        if (token.EndsWith("LRN", StringComparison.Ordinal)) token = token[..^3];
+        if (token.EndsWith("DTR", StringComparison.Ordinal)) token = token[..^3];
+        return token;
+    }
+
+    /// <summary>
+    /// Whether this report is produced for the lab at all, ignoring run status. False means the
+    /// cell is greyed with a dash — never a failure, and never "still running".
+    /// </summary>
+    public static bool IsAvailableForLab(ReportCatalogEntry entry, string? labKey, string? labDisplayName = null)
+    {
+        if (entry.AllowedLabs is not { Length: > 0 }) return true;
+
+        var candidates = new[] { labKey, labDisplayName }
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(LabToken)
+            .ToList();
+        if (candidates.Count == 0) return false;
+
+        return entry.AllowedLabs.Any(allowed =>
+        {
+            var token = LabToken(allowed);
+            return candidates.Any(c => c == token);
+        });
+    }
 
     /// <summary>True for always-shown tiles (e.g. LIMS Master) that the tracker SP does not return as
     /// a column of their own — they still appear on every lab (their status can mirror another report).</summary>

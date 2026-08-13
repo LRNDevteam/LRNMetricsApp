@@ -28,15 +28,18 @@ public sealed class LisSummaryReportGenerator : IReportGenerator
 
     private readonly LabSettings _labSettings;
     private readonly ILisSummaryRepository _repo;
+    private readonly ReportStorageOptions _storage;
     private readonly ILogger<LisSummaryReportGenerator> _logger;
 
     public LisSummaryReportGenerator(
         LabSettings labSettings,
         ILisSummaryRepository repo,
+        Microsoft.Extensions.Options.IOptions<ReportStorageOptions> storage,
         ILogger<LisSummaryReportGenerator> logger)
     {
         _labSettings = labSettings;
         _repo        = repo;
+        _storage     = storage.Value;
         _logger      = logger;
     }
 
@@ -75,6 +78,12 @@ public sealed class LisSummaryReportGenerator : IReportGenerator
             connStr, job.LabName, dateType, dateFrom, dateTo,
             f.Panel, f.Clinic, f.RefPhy, f.SalesRep, f.Collector, ct);
         await Progress(18);
+
+        // LIS_<Lab>_<RunId>_<Week>.xlsx — run id and week come from the page when it has them
+        // (the Report Control Board links carry them); both collapse out when it does not.
+        (fileName, targetPath) = ReportFilePathBuilder.BuildNamed(
+            _storage.RootPath, job.ReportType, job.RequestedBy, DateTime.Now,
+            ReportFilePathBuilder.ComposeName("LIS", job.LabName, f.RunId, f.WeekFolder));
 
         Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
         var tempPath = targetPath + ".tmp";

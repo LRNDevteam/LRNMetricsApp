@@ -91,7 +91,7 @@ public sealed class SqlLisSummaryRepository : ILisSummaryRepository
 				new TemplateRow("D", "ADCS Claims", "Bill To = ADCS Claims"),
 				new TemplateRow("1", "Billed", "Bill To = ADCS Claims AND Bill Status = Billed"),
 				new TemplateRow("2", "Unbilled", "Bill To = ADCS Claims AND Bill Status = Unbilled"),
-				new TemplateRow("•", "Non Billable", "Bill To = ADCS Claims AND Bill Status = Unbilled AND Final Status 2 = Non Billable"),
+				new TemplateRow("•", "Non Billable - Excluded Organizations", "Bill To = ADCS Claims AND Incorrect DOS = Blank AND Bill Status = Unbilled AND Final Status 2 = Non Billable - Excluded Organizations"),
 				new TemplateRow("E", "Client Bills", "Bill To = Client Bills"),
 				new TemplateRow("1", "Billed", "Bill To = Client Bills AND Bill Status = Billed"),
 				new TemplateRow("2", "Unbilled", "Bill To = Client Bills AND Bill Status = Unbilled"),

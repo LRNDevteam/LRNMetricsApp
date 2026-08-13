@@ -26,6 +26,8 @@ public sealed record DenialDashboardExportData(
     IReadOnlyList<BreakdownItem> ActionCategoryBreakdown,
     IReadOnlyList<BreakdownItem> ClassificationBreakdown,
     IReadOnlyList<BreakdownItem> DeadlineBreakdown,
+    // Workload per reviewer — who is carrying which denials, and how much balance.
+    IReadOnlyList<BreakdownItem> AssignedToBreakdown,
     // Resolves each line item's Denial Workflow assignment, status and notes.
     DenialWorkflowLineItemAnnotator Workflow,
     IReadOnlyList<(string Label, string? Value)> ActiveFilters);

@@ -19,6 +19,20 @@ internal static class OpenXmlRowStreamer
     /// <summary>New worksheet every N data rows — keeps Excel usable and per-sheet XML smaller.</summary>
     public const int SheetSplitThreshold = 200_000;
 
+    /// <summary>
+    /// Second split trigger, on the worksheet's approximate XML size.
+    ///
+    /// System.IO.Packaging buffers each package part in a MemoryStream, which throws
+    /// "Stream was too long" past 2 GB — so ONE sheet part can never exceed that no matter how
+    /// it is written. A row cap alone does not bound this: a lab whose rows carry ~72 KB ICD
+    /// code lists blows past 2 GB in ~29K rows, well inside the 200K row cap. Splitting on
+    /// estimated bytes as well keeps every part comfortably under the limit.
+    /// </summary>
+    private const long SheetSplitBytes = 900_000_000;
+
+    /// <summary>Per-cell XML overhead (element, ref attribute, inline-string wrapper).</summary>
+    private const int CellXmlOverheadBytes = 48;
+
     public sealed record ColumnMap(int Ordinal, string Name, bool IsIcd);
 
     /// <summary>
@@ -309,7 +323,72 @@ internal static class OpenXmlRowStreamer
 
         var columns = BuildColumns(reader, excludedColumns: null);
         var headers = columns.Select(c => c.Name).ToArray();
+
+        return await AppendSheetsCoreAsync(
+            workbookPath, baseSheetName, headers, ReadRowsAsync(), onRowsProgress, ct);
+
+        async IAsyncEnumerable<object?[]> ReadRowsAsync()
+        {
+            while (await reader.ReadAsync(ct))
+            {
+                ct.ThrowIfCancellationRequested();
+                var values = new object?[columns.Count];
+                for (var c = 0; c < columns.Count; c++)
+                    values[c] = reader.IsDBNull(columns[c].Ordinal) ? null : reader.GetValue(columns[c].Ordinal);
+                yield return values;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Appends a sheet built from rows already in memory, using the same bounded-memory writer
+    /// the SQL variant uses. ClosedXML holds the entire sheet XML in a MemoryStream while
+    /// saving and dies with "Stream was too long" past 2 GB — this path never buffers more
+    /// than one row.
+    /// </summary>
+    public static Task<int> AppendRowsToWorkbookAsync(
+        string workbookPath,
+        string baseSheetName,
+        string[] headers,
+        IEnumerable<object?[]> rows,
+        Func<int, Task>? onRowsProgress,
+        CancellationToken ct)
+        => AppendSheetsCoreAsync(workbookPath, baseSheetName, headers, ToAsync(rows, ct), onRowsProgress, ct);
+
+    private static async IAsyncEnumerable<object?[]> ToAsync(
+        IEnumerable<object?[]> rows,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        foreach (var row in rows)
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return row;
+        }
+        await Task.CompletedTask;
+    }
+
+    private static async Task<int> AppendSheetsCoreAsync(
+        string workbookPath,
+        string baseSheetName,
+        string[] headers,
+        IAsyncEnumerable<object?[]> rowSource,
+        Func<int, Task>? onRowsProgress,
+        CancellationToken ct)
+    {
         var colRefs = BuildColRefs(Math.Max(1, headers.Length));
+
+        // Column widths must be declared BEFORE <sheetData>, so sample the first rows into a
+        // buffer, size the columns from what they actually contain, then write the buffer out
+        // and keep streaming the rest.
+        await using var rowEnumerator = rowSource.GetAsyncEnumerator(ct);
+        var sample = new List<object?[]>(WidthSampleRows);
+        while (sample.Count < WidthSampleRows && await rowEnumerator.MoveNextAsync())
+            sample.Add(rowEnumerator.Current);
+        var widths = MeasureColumnWidths(headers, sample);
+
+        // Green header style, registered in the MAIN workbook's stylesheet: the bucket sheets
+        // are byte-copied into that package, so their style indices must resolve there.
+        var headerStyle = EnsureGreenHeaderStyle(workbookPath);
 
         var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         using (var probe = SpreadsheetDocument.Open(workbookPath, isEditable: false))
@@ -333,6 +412,7 @@ internal static class OpenXmlRowStreamer
         var totalRows = 0;
         var sheetIndex = 0;
         var sheetRowCount = 0;
+        long sheetBytes = 0;
         string? currentBucket = null;
         SpreadsheetDocument? bucketDoc = null;
         WorkbookPart? bucketWb = null;
@@ -366,6 +446,7 @@ internal static class OpenXmlRowStreamer
             {
                 sheetIndex++;
                 sheetRowCount = 0;
+                sheetBytes = 0;
                 excelRow = 1;
                 var sheetName = UniqueSheetName(
                     sheetIndex == 1 ? baseSheetName : $"{baseSheetName}_P{sheetIndex}", usedNames);
@@ -383,34 +464,69 @@ internal static class OpenXmlRowStreamer
 
                 writer = OpenXmlWriter.Create(wsPart);
                 writer.WriteStartElement(new Worksheet());
+
+                // Header row frozen on every split sheet, then the fixed column widths.
+                writer.WriteElement(new SheetViews(new SheetView
+                {
+                    WorkbookViewId = 0U,
+                    Pane = new Pane
+                    {
+                        VerticalSplit = 1D,
+                        TopLeftCell = "A2",
+                        ActivePane = PaneValues.BottomLeft,
+                        State = PaneStateValues.Frozen,
+                    },
+                }));
+                writer.WriteElement(BuildColumnsElement(widths));
+
                 writer.WriteStartElement(new SheetData());
 
                 writer.WriteStartElement(new Row { RowIndex = excelRow });
                 for (var c = 0; c < headers.Length; c++)
-                    WriteInline(writer, $"{colRefs[c]}{excelRow}", headers[c]);
+                    WriteInline(writer, $"{colRefs[c]}{excelRow}", headers[c], headerStyle);
                 writer.WriteEndElement();
                 excelRow++;
             }
 
-            while (await reader.ReadAsync(ct))
+            void WriteRow(object?[] values)
             {
-                ct.ThrowIfCancellationRequested();
-                if (writer is null || sheetRowCount >= SheetSplitThreshold)
+                // Estimate before writing, so a row never straddles the size limit.
+                long rowBytes = 0;
+                for (var c = 0; c < values.Length && c < colRefs.Length; c++)
+                {
+                    if (values[c] is null) continue;
+                    rowBytes += CellXmlOverheadBytes + (values[c] is string s ? s.Length : 16);
+                }
+
+                if (writer is null
+                    || sheetRowCount >= SheetSplitThreshold
+                    || (sheetRowCount > 0 && sheetBytes + rowBytes > SheetSplitBytes))
                 {
                     CloseBucket();
                     OpenBucket();
                 }
 
                 writer!.WriteStartElement(new Row { RowIndex = excelRow });
-                for (var c = 0; c < columns.Count; c++)
+                for (var c = 0; c < values.Length && c < colRefs.Length; c++)
                 {
-                    if (reader.IsDBNull(columns[c].Ordinal)) continue;
-                    WriteValue(writer, $"{colRefs[c]}{excelRow}", reader.GetValue(columns[c].Ordinal));
+                    if (values[c] is null) continue;
+                    WriteValue(writer, $"{colRefs[c]}{excelRow}", values[c]!);
                 }
                 writer.WriteEndElement();
                 excelRow++;
                 sheetRowCount++;
+                sheetBytes += rowBytes;
                 totalRows++;
+            }
+
+            // The rows already pulled for width measurement, then the rest of the source.
+            foreach (var values in sample)
+                WriteRow(values);
+
+            while (await rowEnumerator.MoveNextAsync())
+            {
+                ct.ThrowIfCancellationRequested();
+                WriteRow(rowEnumerator.Current);
 
                 if (onRowsProgress is not null && totalRows % 10_000 == 0)
                     await onRowsProgress(totalRows);
@@ -466,6 +582,127 @@ internal static class OpenXmlRowStreamer
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    /// <summary>Rows buffered to size the columns before <c>&lt;sheetData&gt;</c> is opened.</summary>
+    private const int WidthSampleRows = 200;
+
+    private const double MinColumnWidth = 12;
+    private const double MaxColumnWidth = 42;
+
+    /// <summary>Accent 6 Darker 25 % (#548235) — the same green ExcelTheme.HeaderBg uses.</summary>
+    private const string HeaderGreenArgb = "FF548235";
+
+    /// <summary>
+    /// Content-fitted width per column, clamped so nothing is clipped and no free-text column
+    /// runs off the screen. Approximates Excel's character-width unit from the longest sampled
+    /// value, which is all AdjustToContents does — and unlike it, costs nothing on a huge sheet.
+    /// </summary>
+    private static double[] MeasureColumnWidths(string[] headers, List<object?[]> sample)
+    {
+        var widths = new double[headers.Length];
+        for (var c = 0; c < headers.Length; c++)
+            widths[c] = headers[c].Length;
+
+        foreach (var row in sample)
+        {
+            for (var c = 0; c < headers.Length && c < row.Length; c++)
+            {
+                var text = row[c] switch
+                {
+                    null => null,
+                    string s => s,
+                    DateTime => "0000-00-00",
+                    _ => Convert.ToString(row[c], CultureInfo.InvariantCulture),
+                };
+                if (text is null) continue;
+                if (text.Length > widths[c]) widths[c] = text.Length;
+            }
+        }
+
+        for (var c = 0; c < widths.Length; c++)
+            widths[c] = Math.Clamp(widths[c] + 2, MinColumnWidth, MaxColumnWidth);
+
+        return widths;
+    }
+
+    private static Columns BuildColumnsElement(double[] widths)
+    {
+        var cols = new Columns();
+        for (var c = 0; c < widths.Length; c++)
+        {
+            cols.Append(new Column
+            {
+                Min = (uint)(c + 1),
+                Max = (uint)(c + 1),
+                Width = widths[c],
+                CustomWidth = true,
+            });
+        }
+        return cols;
+    }
+
+    /// <summary>
+    /// Appends a bold-white-on-green cell format to the workbook's existing (ClosedXML-built)
+    /// stylesheet and returns its index. Returns 0 — the default format — when the workbook has
+    /// no stylesheet, so a styling problem can never fail the export itself.
+    /// </summary>
+    private static uint EnsureGreenHeaderStyle(string workbookPath)
+    {
+        try
+        {
+            using var doc = SpreadsheetDocument.Open(workbookPath, isEditable: true);
+            var stylesPart = doc.WorkbookPart?.WorkbookStylesPart;
+            var stylesheet = stylesPart?.Stylesheet;
+            if (stylesheet is null) return 0;
+
+            stylesheet.Fonts ??= new Fonts();
+            // CT_Font is an ORDERED sequence — b, sz, color, name. Out-of-order children make
+            // the part schema-invalid and Excel offers to "repair" the workbook on open.
+            stylesheet.Fonts.Append(new Font(
+                new Bold(),
+                new FontSize { Val = 10D },
+                new Color { Rgb = "FFFFFFFF" },
+                new FontName { Val = "Calibri" }));
+            stylesheet.Fonts.Count = (uint)stylesheet.Fonts.ChildElements.Count;
+            var fontId = (uint)(stylesheet.Fonts.ChildElements.Count - 1);
+
+            stylesheet.Fills ??= new Fills();
+            stylesheet.Fills.Append(new Fill(new PatternFill
+            {
+                PatternType = PatternValues.Solid,
+                ForegroundColor = new ForegroundColor { Rgb = HeaderGreenArgb },
+                BackgroundColor = new BackgroundColor { Indexed = 64U },
+            }));
+            stylesheet.Fills.Count = (uint)stylesheet.Fills.ChildElements.Count;
+            var fillId = (uint)(stylesheet.Fills.ChildElements.Count - 1);
+
+            stylesheet.CellFormats ??= new CellFormats();
+            stylesheet.CellFormats.Append(new CellFormat
+            {
+                FontId = fontId,
+                FillId = fillId,
+                BorderId = 0U,
+                ApplyFont = true,
+                ApplyFill = true,
+                ApplyAlignment = true,
+                Alignment = new Alignment
+                {
+                    Horizontal = HorizontalAlignmentValues.Center,
+                    Vertical = VerticalAlignmentValues.Center,
+                },
+            });
+            stylesheet.CellFormats.Count = (uint)stylesheet.CellFormats.ChildElements.Count;
+            var styleIndex = (uint)(stylesheet.CellFormats.ChildElements.Count - 1);
+
+            stylesheet.Save();
+            return styleIndex;
+        }
+        catch
+        {
+            // Unstyled header beats no report.
+            return 0;
+        }
+    }
 
     private static List<ColumnMap> BuildColumns(SqlDataReader reader, HashSet<string>? excludedColumns)
     {
@@ -559,9 +796,11 @@ internal static class OpenXmlRowStreamer
         return sb.ToString();
     }
 
-    private static void WriteInline(OpenXmlWriter writer, string cellRef, string value)
+    private static void WriteInline(OpenXmlWriter writer, string cellRef, string value, uint? styleIndex = null)
     {
-        writer.WriteStartElement(new Cell { CellReference = cellRef, DataType = CellValues.InlineString });
+        var cell = new Cell { CellReference = cellRef, DataType = CellValues.InlineString };
+        if (styleIndex is > 0) cell.StyleIndex = styleIndex.Value;
+        writer.WriteStartElement(cell);
         writer.WriteStartElement(new InlineString());
         writer.WriteElement(new Text(SanitizeXml(value)));
         writer.WriteEndElement();

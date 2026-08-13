@@ -5,11 +5,15 @@ namespace LabMetricsDashboard.Services;
 
 public static class LisSummaryExcelExportBuilder
 {
-    private static readonly XLColor HeaderBlue = XLColor.FromHtml("#DCE8F6");
-    private static readonly XLColor YearBlue = XLColor.FromHtml("#BFD5EE");
-    private static readonly XLColor TotalYellow = XLColor.FromHtml("#FFF2CC");
-    private static readonly XLColor BorderColor = XLColor.FromHtml("#AFC4DF");
-    private static readonly XLColor SectionBlue = XLColor.FromHtml("#EAF3FF");
+    /// <summary>Sheet holding the filter snapshot, kept off the summary sheet itself.</summary>
+    public const string FilterSheetName = "Filtered Values";
+
+    // Green family, shared with the Denial Dashboard workbook via ExcelTheme.
+    private static readonly XLColor HeaderGreen = ExcelTheme.HeaderBg;      // #548235 month headers
+    private static readonly XLColor YearGreen = ExcelTheme.TitleBg;         // #385723 year band
+    private static readonly XLColor TotalGreen = ExcelTheme.GroupRowBg;     // #C5E0B4 total columns
+    private static readonly XLColor BorderColor = ExcelTheme.BorderColor;
+    private static readonly XLColor SectionGreen = ExcelTheme.BandedRowBg;  // #E2EFDA section rows
 
     public static XLWorkbook CreateWorkbook(
         LisSummaryResult result,
@@ -24,10 +28,14 @@ public static class LisSummaryExcelExportBuilder
         string? salesRep,
         string? collector)
     {
+        // Sheet order: Filtered Values → LIS Summary → LIMS Master. The filters come first so a
+        // reader sees what the numbers cover before the numbers.
         var workbook = new XLWorkbook();
-        var sheet = workbook.Worksheets.Add("LIS Summary");
 
-        BuildSummarySheet(sheet, result, labName, dateType, dateFrom, dateTo, panel, clinic, refPhy, salesRep, collector);
+        BuildFilterSheet(
+            workbook.Worksheets.Add(FilterSheetName),
+            result, labName, dateType, dateFrom, dateTo, panel, clinic, refPhy, salesRep, collector);
+        BuildSummarySheet(workbook.Worksheets.Add("LIS Summary"), result, labName);
         BuildLineDataSheet(workbook.Worksheets.Add("LIMS Master"), lineData);
 
         workbook.Properties.Title = $"LIS Summary - {labName}";
@@ -36,7 +44,11 @@ public static class LisSummaryExcelExportBuilder
         return workbook;
     }
 
-    private static void BuildSummarySheet(
+    /// <summary>
+    /// The run's filter snapshot on its own sheet. It used to sit in rows 2–12 of the summary
+    /// sheet, which pushed the pivot down and mixed metadata into the table.
+    /// </summary>
+    private static void BuildFilterSheet(
         IXLWorksheet sheet,
         LisSummaryResult result,
         string labName,
@@ -49,61 +61,91 @@ public static class LisSummaryExcelExportBuilder
         string? salesRep,
         string? collector)
     {
+        sheet.TabColor = ExcelTheme.TabGreen;
+        sheet.ShowGridLines = false;
+        ExcelTheme.ApplyDefaults(sheet);
+
+        sheet.Cell(1, 1).Value = "Filtered Values";
+        sheet.Range(1, 1, 1, 2).Merge();
+        var title = sheet.Cell(1, 1);
+        title.Style.Font.Bold = true;
+        title.Style.Font.FontSize = ExcelTheme.FontSizeTitle;
+        title.Style.Font.FontColor = XLColor.White;
+        title.Style.Fill.BackgroundColor = ExcelTheme.TitleBg;
+        title.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+        var values = new (string Label, string Value)[]
+        {
+            ("Lab", labName),
+            ("Logic Sheet", result.LogicSheetName),
+            ("Date Type", string.IsNullOrWhiteSpace(dateType) ? "Collected" : dateType),
+            ("Date From", FormatDateFilter(dateFrom)),
+            ("Date To", FormatDateFilter(dateTo)),
+            ("Panel", FormatFilter(panel)),
+            ("Clinic", FormatFilter(clinic)),
+            ("Ref Phy", FormatFilter(refPhy)),
+            ("Sales Rep", FormatFilter(salesRep)),
+            ("Collector", FormatFilter(collector)),
+            ("Top Source File name", string.IsNullOrWhiteSpace(result.SourceFileName) ? "-" : result.SourceFileName),
+            ("Generated On", DateTime.Now.ToString("dd MMM yyyy HH:mm")),
+        };
+
+        var row = 3;
+        foreach (var (label, value) in values)
+        {
+            var labelCell = sheet.Cell(row, 1);
+            labelCell.Value = label;
+            labelCell.Style.Font.Bold = true;
+            labelCell.Style.Font.FontColor = XLColor.White;
+            labelCell.Style.Fill.BackgroundColor = HeaderGreen;
+
+            sheet.Cell(row, 2).Value = value;
+            row++;
+        }
+
+        var table = sheet.Range(3, 1, row - 1, 2);
+        table.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        table.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+        table.Style.Border.OutsideBorderColor = BorderColor;
+        table.Style.Border.InsideBorderColor = BorderColor;
+        table.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+
+        sheet.Column(1).Width = 26;
+        sheet.Column(2).Width = 62;
+        sheet.Range(3, 2, row - 1, 2).Style.Alignment.WrapText = true;
+    }
+
+    private static void BuildSummarySheet(
+        IXLWorksheet sheet,
+        LisSummaryResult result,
+        string labName)
+    {
         var monthColumns = BuildMonthColumns(result.Months, result.Years);
+
+        // Gridlines off: only the summary table below carries borders, so the sheet reads as
+        // one bordered table on a clean page rather than a grid of empty cells.
+        sheet.ShowGridLines = false;
+        sheet.TabColor = ExcelTheme.TabGreen;
+        ExcelTheme.ApplyDefaults(sheet);
 
         var includeLogicColumn = false;
         var firstDataColumn = 3;
         var titleRow = 1;
-        var metaStartRow = 2;
-        var metaEndRow = 11;
-        var sampleNoteRow = 12;
-        var yearHeaderRow = 13;
-        var monthHeaderRow = 14;
-        var dataStartRow = 15;
+
+        // Filters now live on their own "Filtered Values" sheet, so the pivot starts near the
+        // top instead of below eleven rows of metadata.
+        var sampleNoteRow = 2;
+        var yearHeaderRow = 4;
+        var monthHeaderRow = 5;
+        var dataStartRow = 6;
 
         var lastColumn = firstDataColumn + monthColumns.Count;
 
-        sheet.Cell(titleRow, 1).Value = "LIS Summary";
+        sheet.Cell(titleRow, 1).Value = $"LIS Summary — {labName}";
         sheet.Range(titleRow, 1, titleRow, lastColumn).Merge();
         sheet.Cell(titleRow, 1).Style.Font.Bold = true;
-        sheet.Cell(titleRow, 1).Style.Font.FontSize = 16;
-        sheet.Cell(titleRow, 1).Style.Font.FontColor = XLColor.FromHtml("#1B3A5C");
-
-        sheet.Cell(2, 1).Value = "Lab";
-        sheet.Cell(2, 2).Value = labName;
-        sheet.Cell(3, 1).Value = "Logic Sheet";
-        sheet.Cell(3, 2).Value = result.LogicSheetName;
-        sheet.Cell(4, 1).Value = "Date Type";
-        sheet.Cell(4, 2).Value = string.IsNullOrWhiteSpace(dateType) ? "Collected" : dateType;
-        sheet.Cell(5, 1).Value = "Date From";
-        sheet.Cell(5, 2).Value = FormatDateFilter(dateFrom);
-        sheet.Cell(6, 1).Value = "Date To";
-        sheet.Cell(6, 2).Value = FormatDateFilter(dateTo);
-        sheet.Cell(7, 1).Value = "Panel";
-        sheet.Cell(7, 2).Value = FormatFilter(panel);
-        sheet.Cell(8, 1).Value = "Clinic";
-        sheet.Cell(8, 2).Value = FormatFilter(clinic);
-        sheet.Cell(9, 1).Value = "Ref Phy";
-        sheet.Cell(9, 2).Value = FormatFilter(refPhy);
-        sheet.Cell(10, 1).Value = "Sales Rep";
-        sheet.Cell(10, 2).Value = FormatFilter(salesRep);
-        sheet.Cell(11, 1).Value = "Collector";
-        sheet.Cell(11, 2).Value = FormatFilter(collector);
-        sheet.Cell(12, 1).Value = "Top Source File name";
-        sheet.Cell(12, 2).Value = string.IsNullOrWhiteSpace(result.SourceFileName) ? "-" : result.SourceFileName;
-
-        metaEndRow = 12;
-        sampleNoteRow = 13;
-        yearHeaderRow = 14;
-        monthHeaderRow = 15;
-        dataStartRow = 16;
-
-        sheet.Range(metaStartRow, 1, metaEndRow, 1).Style.Font.Bold = true;
-        sheet.Range(metaStartRow, 1, metaEndRow, 2).Style.Fill.BackgroundColor = SectionBlue;
-        sheet.Range(metaStartRow, 1, metaEndRow, 2).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-        sheet.Range(metaStartRow, 1, metaEndRow, 2).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
-        sheet.Range(metaStartRow, 1, metaEndRow, 2).Style.Border.OutsideBorderColor = BorderColor;
-        sheet.Range(metaStartRow, 1, metaEndRow, 2).Style.Border.InsideBorderColor = BorderColor;
+        sheet.Cell(titleRow, 1).Style.Font.FontSize = ExcelTheme.FontSizeTitle;
+        sheet.Cell(titleRow, 1).Style.Font.FontColor = ExcelTheme.TitleBg;
 
         sheet.Cell(sampleNoteRow, 1).Value = "Sample Count = Count [Rows]";
         sheet.Range(sampleNoteRow, 1, sampleNoteRow, Math.Min(lastColumn, 6)).Merge();
@@ -147,14 +189,17 @@ public static class LisSummaryExcelExportBuilder
         headerRange.Style.Font.Bold = true;
         headerRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
         headerRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-        headerRange.Style.Fill.BackgroundColor = HeaderBlue;
+        headerRange.Style.Font.FontColor = XLColor.White;
+        headerRange.Style.Fill.BackgroundColor = HeaderGreen;
         headerRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
         headerRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
         headerRange.Style.Border.OutsideBorderColor = BorderColor;
         headerRange.Style.Border.InsideBorderColor = BorderColor;
 
-        sheet.Range(yearHeaderRow, firstDataColumn, yearHeaderRow, lastColumn).Style.Fill.BackgroundColor = YearBlue;
-        sheet.Range(yearHeaderRow, lastColumn, monthHeaderRow, lastColumn).Style.Fill.BackgroundColor = TotalYellow;
+        sheet.Range(yearHeaderRow, firstDataColumn, yearHeaderRow, lastColumn).Style.Fill.BackgroundColor = YearGreen;
+        var grandTotalHeader = sheet.Range(yearHeaderRow, lastColumn, monthHeaderRow, lastColumn);
+        grandTotalHeader.Style.Fill.BackgroundColor = ExcelTheme.GoldAccent;
+        grandTotalHeader.Style.Font.FontColor = XLColor.Black;
 
         var rowNumber = dataStartRow;
         foreach (var row in result.Rows)
@@ -166,22 +211,15 @@ public static class LisSummaryExcelExportBuilder
 
         WriteGrandTotalRow(sheet, rowNumber, result, monthColumns, result.Years, firstDataColumn, lastColumn);
 
-        // Border for all used cells including title/meta/sample note/table.
-        var fullRange = sheet.Range(1, 1, rowNumber, lastColumn);
-        fullRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-        fullRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
-        fullRange.Style.Border.OutsideBorderColor = BorderColor;
-        fullRange.Style.Border.InsideBorderColor = XLColor.FromHtml("#DDE7F0");
-
-        // Stronger table borders.
+        // ONLY the summary table is bordered — the title and note rows above it stay clean.
         var tableRange = sheet.Range(yearHeaderRow, 1, rowNumber, lastColumn);
         tableRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
         tableRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
         tableRange.Style.Border.OutsideBorderColor = BorderColor;
         tableRange.Style.Border.InsideBorderColor = BorderColor;
 
-        // Keep row labels visible horizontally without freezing the metadata/filter rows above the counts.
-        sheet.SheetView.FreezeColumns(2);
+        // Freeze the label columns AND the two header rows, so months and row names both stay put.
+        sheet.SheetView.Freeze(monthHeaderRow, 2);
 
         sheet.Columns(firstDataColumn, lastColumn).Style.NumberFormat.Format = "#,##0";
         sheet.Column(1).Width = 10;
@@ -209,13 +247,14 @@ public static class LisSummaryExcelExportBuilder
 
     private static void BuildLineDataSheet(IXLWorksheet sheet, LisLineDataResult? lineData)
     {
-        sheet.TabColor = XLColor.FromHtml("#0D5F93");
+        sheet.TabColor = ExcelTheme.TabGreen;
+        ExcelTheme.ApplyDefaults(sheet);
 
         if (lineData is null || lineData.Columns.Count == 0)
         {
             sheet.Cell(1, 1).Value = "No LIMS Master data found for the selected filters.";
             sheet.Cell(1, 1).Style.Font.Bold = true;
-            sheet.Cell(1, 1).Style.Font.FontColor = XLColor.FromHtml("#1B3A5C");
+            sheet.Cell(1, 1).Style.Font.FontColor = ExcelTheme.TitleBg;
             sheet.Column(1).Width = 52;
             return;
         }
@@ -242,23 +281,44 @@ public static class LisSummaryExcelExportBuilder
         var header = sheet.Range(1, 1, 1, lastColumn);
         header.Style.Font.Bold = true;
         header.Style.Font.FontColor = XLColor.White;
-        header.Style.Fill.BackgroundColor = XLColor.FromHtml("#123B63");
+        header.Style.Fill.BackgroundColor = ExcelTheme.HeaderBg;
         header.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        header.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        header.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        header.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+        header.Style.Border.OutsideBorderColor = XLColor.White;
+        header.Style.Border.InsideBorderColor = XLColor.White;
 
         var usedRange = sheet.Range(1, 1, lastRow, lastColumn);
         usedRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
         usedRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
         usedRange.Style.Border.OutsideBorderColor = BorderColor;
-        usedRange.Style.Border.InsideBorderColor = XLColor.FromHtml("#DDE7F0");
-        usedRange.Style.Font.FontName = "Calibri";
-        usedRange.Style.Font.FontSize = 10;
+        usedRange.Style.Border.InsideBorderColor = BorderColor;
 
+        // Header frozen and filterable; widths fixed to the content so nothing is clipped and
+        // no column runs away on one long free-text value.
         sheet.SheetView.FreezeRows(1);
-        sheet.Columns(1, lastColumn).AdjustToContents(1, Math.Min(lastRow, 500));
-        foreach (var column in sheet.Columns(1, lastColumn))
+        sheet.Row(1).Height = 26;
+        usedRange.SetAutoFilter();
+        ApplyFixedColumnWidths(sheet, lastColumn, lastRow);
+    }
+
+    /// <summary>
+    /// Sizes every column to its content once, then clamps to a fixed band. AdjustToContents is
+    /// sampled over the first rows only — on a million-row sheet measuring every cell is far too
+    /// slow, and the header plus the first screenful already determine a sensible width.
+    /// </summary>
+    private static void ApplyFixedColumnWidths(IXLWorksheet sheet, int lastColumn, int lastRow, double min = 12, double max = 42)
+    {
+        var sampleLastRow = Math.Min(lastRow, 500);
+
+        // By index, not Columns(..): ClosedXML mutates its column collection while adjusting,
+        // which throws "Collection was modified" when enumerating the live collection.
+        for (var c = 1; c <= lastColumn; c++)
         {
-            if (column.Width < 12) column.Width = 12;
-            if (column.Width > 42) column.Width = 42;
+            var column = sheet.Column(c);
+            column.AdjustToContents(1, sampleLastRow);
+            column.Width = Math.Clamp(column.Width, min, max);
         }
     }
 
@@ -286,7 +346,7 @@ public static class LisSummaryExcelExportBuilder
         }
 
         sheet.Cell(rowNumber, col).Value = row.Total;
-        sheet.Cell(rowNumber, col).Style.Fill.BackgroundColor = TotalYellow;
+        sheet.Cell(rowNumber, col).Style.Fill.BackgroundColor = TotalGreen;
         sheet.Cell(rowNumber, col).Style.Font.Bold = true;
     }
 
@@ -315,7 +375,7 @@ public static class LisSummaryExcelExportBuilder
         sheet.Cell(rowNumber, col).Value = result.GrandTotal;
         var range = sheet.Range(rowNumber, 1, rowNumber, lastColumn);
         range.Style.Font.Bold = true;
-        range.Style.Fill.BackgroundColor = TotalYellow;
+        range.Style.Fill.BackgroundColor = TotalGreen;
     }
 
     private static void ApplyRowStyle(IXLWorksheet sheet, int rowNumber, int level, int lastColumn)
