@@ -1120,7 +1120,7 @@ public sealed partial class SqlCollectionSummaryRepository
                 filterCheckDateFrom: null, filterCheckDateTo: null,
                 ct).ConfigureAwait(false);
 
-        // NW uses ProcTotalPayment, all other labs use InsurancePayment.
+        // Prefer InsurancePayment; fall back to legacy ProcTotalPayment if present.
         var sqlA = $"""
             SELECT ProviderRank, ReferringProvider, NoOfClaims,
                    InsurancePayment AS InsurancePayments,

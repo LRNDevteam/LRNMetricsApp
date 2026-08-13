@@ -1,0 +1,809 @@
+@model LabMetricsDashboard.Models.ExecSummaryThreePillarViewModel
+@using System.Globalization
+@using System.Text
+@{
+    ViewData["Title"] = "Three-Pillar Diagnostic — " + Model.LabName;
+    Layout = "~/Views/Shared/_Layout.cshtml";
+
+    var ci = CultureInfo.InvariantCulture;
+    string Num(long v) => v.ToString("N0", ci);
+    string Pct(decimal? v) => v is { } d ? d.ToString("0.0", ci) + "%" : "—";
+    string Dec(decimal? v) => v is { } d ? d.ToString("#,##0.#", ci) : "—";
+    var monthOpts = new[] { 3, 6, 9, 12 };
+    var months = Model.LisMonthly;
+    var last = months.LastOrDefault();
+    var buckets = Model.BacklogBuckets.OrderBy(b => b.SortOrder).ToList();
+
+    // Compact month labels like reference charts: Jul25, Aug25, …
+    string ShortLbl(int y, int m) =>
+        CultureInfo.InvariantCulture.DateTimeFormat.GetAbbreviatedMonthName(m)[..3] + (y % 100).ToString("00", ci);
+
+    const double ChartW = 780;
+    string F(double v) => v.ToString("0.###", CultureInfo.InvariantCulture);
+    string Esc(string? s) => System.Net.WebUtility.HtmlEncode(s ?? "");
+    string FmtCnt(double v) => v >= 1000 ? v.ToString("#,##0", ci) : v.ToString("0.#", ci);
+    string FmtPct(double v) => v.ToString("0.0", ci) + "%";
+
+    void AppendRotatedLabel(StringBuilder sb, double cx, double cy, string text)
+    {
+        // ~-40° like the doc charts
+        sb.Append($"<text x='{F(cx)}' y='{F(cy)}' text-anchor='end' class='tpd-axis' transform='rotate(-40 {F(cx)} {F(cy)})'>{Esc(text)}</text>");
+    }
+
+    string SvgLine(IReadOnlyList<string> labels, IReadOnlyList<double> values, string stroke, string yTitle,
+        bool fill = false, string? fillColor = null, int? dashLast = null, bool asPct = false, bool rotateX = true)
+    {
+        if (labels.Count == 0 || values.Count == 0) return "<div class='tpd-empty'>No chart data.</div>";
+        double W = ChartW, H = 400, L = 62, R = 20, T = 32, B = rotateX ? 62 : 44;
+        var plotW = W - L - R; var plotH = H - T - B;
+        var min = values.Min(); var max = values.Max();
+        if (asPct) { min = 0; max = Math.Max(max * 1.05, 10); }
+        else
+        {
+            if (Math.Abs(max - min) < 1e-9) { min = Math.Min(0, min); max = max + 1; }
+            var pad = (max - min) * 0.12; min -= pad; max += pad;
+            if (min > 0 && min < (max - min) * 0.2) min = Math.Max(0, min - (max - min) * 0.05);
+        }
+        double Xn(int i) => L + (labels.Count == 1 ? plotW / 2 : i * plotW / (labels.Count - 1));
+        double Yn(double v) => T + plotH - (v - min) / (max - min) * plotH;
+        var sb = new StringBuilder();
+        sb.Append($"<svg viewBox='0 0 {W} {H}' class='tpd-svg' role='img' aria-label='{Esc(yTitle)}'>");
+        // axis lines
+        sb.Append($"<line x1='{F(L)}' y1='{F(T)}' x2='{F(L)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        sb.Append($"<line x1='{F(L)}' y1='{F(T + plotH)}' x2='{F(W - R)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        for (int g = 0; g <= 4; g++)
+        {
+            var gy = T + plotH * g / 4.0;
+            var gv = max - (max - min) * g / 4.0;
+            sb.Append($"<line x1='{F(L)}' y1='{F(gy)}' x2='{F(W - R)}' y2='{F(gy)}' class='tpd-grid'/>");
+            var ax = asPct
+                ? gv.ToString("0", ci)
+                : (gv >= 1000 ? (gv / 1000).ToString("0.#", ci) + "k" : gv.ToString("0.#", ci));
+            sb.Append($"<text x='{F(L - 8)}' y='{F(gy + 3)}' text-anchor='end' class='tpd-axis'>{Esc(ax)}</text>");
+        }
+        var pts = new StringBuilder();
+        for (int i = 0; i < values.Count; i++)
+            pts.Append($"{(i == 0 ? "M" : "L")}{F(Xn(i))},{F(Yn(values[i]))} ");
+        if (fill)
+        {
+            var area = pts.ToString() + $"L{F(Xn(values.Count - 1))},{F(T + plotH)} L{F(Xn(0))},{F(T + plotH)} Z";
+            sb.Append($"<path d='{area}' fill='{fillColor ?? "rgba(185,28,28,.12)"}' stroke='none'/>");
+        }
+        if (dashLast is int di && di > 0 && values.Count > 1)
+        {
+            var solid = new StringBuilder();
+            for (int i = 0; i < values.Count; i++)
+            {
+                if (i == di) break;
+                solid.Append($"{(i == 0 ? "M" : "L")}{F(Xn(i))},{F(Yn(values[i]))} ");
+            }
+            sb.Append($"<path d='{solid}' fill='none' stroke='{stroke}' stroke-width='2.2'/>");
+            sb.Append($"<path d='M{F(Xn(di - 1))},{F(Yn(values[di - 1]))} L{F(Xn(di))},{F(Yn(values[di]))}' fill='none' stroke='{stroke}' stroke-width='2.2' stroke-dasharray='5 4' opacity='.7'/>");
+        }
+        else
+            sb.Append($"<path d='{pts}' fill='none' stroke='{stroke}' stroke-width='2.2'/>");
+
+        for (int i = 0; i < values.Count; i++)
+        {
+            var op = (dashLast is int d2 && i == d2) ? "0.6" : "1";
+            var lbl = asPct ? FmtPct(values[i]) : FmtCnt(values[i]);
+            sb.Append($"<circle cx='{F(Xn(i))}' cy='{F(Yn(values[i]))}' r='4' fill='{stroke}' opacity='{op}'><title>{Esc(labels[i])}: {Esc(lbl)}</title></circle>");
+            sb.Append($"<text x='{F(Xn(i))}' y='{F(Yn(values[i]) - 9)}' text-anchor='middle' class='tpd-val'>{Esc(lbl)}</text>");
+            if (rotateX) AppendRotatedLabel(sb, Xn(i), T + plotH + 14, labels[i]);
+            else if (i % Math.Max(1, labels.Count / 8) == 0 || i == labels.Count - 1)
+                sb.Append($"<text x='{F(Xn(i))}' y='{F(H - 10)}' text-anchor='middle' class='tpd-axis'>{Esc(labels[i])}</text>");
+        }
+        sb.Append($"<text x='14' y='{F(H / 2)}' transform='rotate(-90 14 {F(H / 2)})' text-anchor='middle' class='tpd-axis-title'>{Esc(yTitle)}</text>");
+        sb.Append("</svg>");
+        return sb.ToString();
+    }
+
+    string SvgBars(IReadOnlyList<string> labels, IReadOnlyList<double> values, Func<int, string> colorFn, string yTitle, bool rotateX = true)
+    {
+        if (labels.Count == 0) return "<div class='tpd-empty'>No chart data.</div>";
+        double W = ChartW, H = 400, L = 58, R = 18, T = 32, B = rotateX ? 62 : 44;
+        var plotW = W - L - R; var plotH = H - T - B;
+        var max = Math.Max(1, values.Max());
+        var gap = plotW / labels.Count;
+        var bw = Math.Min(34, gap * 0.72);
+        var sb = new StringBuilder();
+        sb.Append($"<svg viewBox='0 0 {W} {H}' class='tpd-svg' role='img'>");
+        sb.Append($"<line x1='{F(L)}' y1='{F(T)}' x2='{F(L)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        sb.Append($"<line x1='{F(L)}' y1='{F(T + plotH)}' x2='{F(W - R)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        for (int g = 0; g <= 4; g++)
+        {
+            var gy = T + plotH * g / 4.0;
+            var gv = max - max * g / 4.0;
+            sb.Append($"<text x='{F(L - 8)}' y='{F(gy + 3)}' text-anchor='end' class='tpd-axis'>{Esc(gv >= 1000 ? (gv / 1000).ToString("0.#", ci) + "k" : gv.ToString("0.#", ci))}</text>");
+        }
+        for (int i = 0; i < labels.Count; i++)
+        {
+            var bh = values[i] / max * plotH;
+            var x = L + i * gap + (gap - bw) / 2;
+            var y = T + plotH - bh;
+            if (values[i] > 0)
+            {
+                sb.Append($"<rect x='{F(x)}' y='{F(y)}' width='{F(bw)}' height='{F(Math.Max(bh, 0.5))}' fill='{colorFn(i)}'><title>{Esc(labels[i])}: {FmtCnt(values[i])}</title></rect>");
+                sb.Append($"<text x='{F(x + bw / 2)}' y='{F(y - 5)}' text-anchor='middle' class='tpd-val'>{FmtCnt(values[i])}</text>");
+            }
+            if (rotateX) AppendRotatedLabel(sb, x + bw / 2, T + plotH + 14, labels[i]);
+        }
+        sb.Append($"<text x='14' y='{F(H / 2)}' transform='rotate(-90 14 {F(H / 2)})' text-anchor='middle' class='tpd-axis-title'>{Esc(yTitle)}</text>");
+        sb.Append("</svg>");
+        return sb.ToString();
+    }
+
+    string SvgDualBarsLine(IReadOnlyList<string> labels, IReadOnlyList<double> bars, IReadOnlyList<double> line)
+    {
+        if (labels.Count == 0) return "<div class='tpd-empty'>No chart data.</div>";
+        double W = ChartW, H = 420, L = 58, R = 52, T = 28, B = 62;
+        var plotW = W - L - R; var plotH = H - T - B;
+        var maxB = Math.Max(1, bars.Max());
+        // Match reference: left 0→nice max; right typically ~80–105 for near-100% resulted
+        var lineVals = line.Where(v => !double.IsNaN(v)).DefaultIfEmpty(100).ToList();
+        var minL = Math.Min(80, Math.Floor(lineVals.Min() / 5) * 5 - 5);
+        if (minL < 0) minL = 0;
+        var maxL = Math.Max(105, Math.Ceiling(lineVals.Max() / 5) * 5 + 5);
+        var gap = plotW / labels.Count;
+        var bw = Math.Min(36, gap * 0.78);
+        double Xcn(int i) => L + i * gap + gap / 2;
+        double Ybn(double v) => T + plotH - v / maxB * plotH;
+        double Yln(double v) => T + plotH - (v - minL) / (maxL - minL) * plotH;
+        var lastIdx = labels.Count - 1;
+        var sb = new StringBuilder();
+        sb.Append($"<svg viewBox='0 0 {W} {H}' class='tpd-svg' role='img'>");
+        sb.Append($"<line x1='{F(L)}' y1='{F(T)}' x2='{F(L)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        sb.Append($"<line x1='{F(W - R)}' y1='{F(T)}' x2='{F(W - R)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        sb.Append($"<line x1='{F(L)}' y1='{F(T + plotH)}' x2='{F(W - R)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        for (int g = 0; g <= 4; g++)
+        {
+            var gy = T + plotH * g / 4.0;
+            var gv = maxB - maxB * g / 4.0;
+            var lv = maxL - (maxL - minL) * g / 4.0;
+            sb.Append($"<text x='{F(L - 8)}' y='{F(gy + 3)}' text-anchor='end' class='tpd-axis'>{Esc(gv >= 1000 ? (gv / 1000).ToString("0.#", ci) + "k" : gv.ToString("0", ci))}</text>");
+            sb.Append($"<text x='{F(W - R + 8)}' y='{F(gy + 3)}' text-anchor='start' class='tpd-axis tpd-axis-red'>{Esc(lv.ToString("0", ci))}</text>");
+        }
+        for (int i = 0; i < labels.Count; i++)
+        {
+            var bh = bars[i] / maxB * plotH;
+            var x = L + i * gap + (gap - bw) / 2;
+            var y = T + plotH - bh;
+            var fill = i == lastIdx ? "rgba(148,163,184,.55)" : "rgba(148,163,184,.85)";
+            sb.Append($"<rect x='{F(x)}' y='{F(y)}' width='{F(bw)}' height='{F(Math.Max(bh, 0.5))}' fill='{fill}'><title>{Esc(labels[i])} samples: {FmtCnt(bars[i])}</title></rect>");
+            sb.Append($"<text x='{F(x + bw / 2)}' y='{F(y - 4)}' text-anchor='middle' class='tpd-val'>{FmtCnt(bars[i])}</text>");
+            AppendRotatedLabel(sb, Xcn(i), T + plotH + 14, labels[i]);
+        }
+        var path = new StringBuilder();
+        for (int i = 0; i < line.Count; i++)
+        {
+            if (double.IsNaN(line[i])) continue;
+            path.Append($"{(path.Length == 0 ? "M" : "L")}{F(Xcn(i))},{F(Yln(line[i]))} ");
+        }
+        if (path.Length > 0)
+            sb.Append($"<path d='{path}' fill='none' stroke='#B91C1C' stroke-width='2.2'/>");
+        for (int i = 0; i < line.Count; i++)
+        {
+            if (double.IsNaN(line[i])) continue;
+            sb.Append($"<circle cx='{F(Xcn(i))}' cy='{F(Yln(line[i]))}' r='4' fill='#B91C1C'><title>{Esc(labels[i])} % Resulted: {FmtPct(line[i])}</title></circle>");
+            sb.Append($"<text x='{F(Xcn(i))}' y='{F(Yln(line[i]) - 10)}' text-anchor='middle' class='tpd-val'>{FmtPct(line[i])}</text>");
+        }
+        sb.Append($"<text x='{F(W - 10)}' y='{F(H / 2)}' transform='rotate(90 {F(W - 10)} {F(H / 2)})' text-anchor='middle' class='tpd-axis-title tpd-axis-red'>% Resulted</text>");
+        sb.Append("</svg>");
+        return sb.ToString();
+    }
+
+    string SvgHFunnel(long collected, long resulted, long billed, decimal? pctR, decimal? pctBOfColl)
+    {
+        if (collected <= 0) return "<div class='tpd-empty'>No funnel data.</div>";
+        double W = ChartW, H = 300, L = 100, R = 130, T = 22, B = 40;
+        var plotW = W - L - R; var plotH = H - T - B;
+        var rows = new[]
+        {
+            (Label: "Collected", N: (double)collected, Pct: 100.0, Color: "#1E3A8A"),
+            (Label: "Resulted", N: (double)resulted, Pct: (double)(pctR ?? 0), Color: "#2563EB"),
+            (Label: "Billed", N: (double)billed, Pct: (double)(pctBOfColl ?? 0), Color: "#93C5FD"),
+        };
+        var max = rows[0].N;
+        // nice x max
+        var xMax = Math.Ceiling(max / 50000.0) * 50000;
+        if (xMax < max) xMax = max * 1.05;
+        if (xMax <= 0) xMax = 1;
+        var rowH = plotH / 3.15;
+        var sb = new StringBuilder();
+        sb.Append($"<svg viewBox='0 0 {W} {H}' class='tpd-svg' role='img'>");
+        sb.Append($"<line x1='{F(L)}' y1='{F(T)}' x2='{F(L)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        sb.Append($"<line x1='{F(L)}' y1='{F(T + plotH)}' x2='{F(L + plotW)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        for (int t = 0; t <= 6; t++)
+        {
+            var xv = xMax * t / 6.0;
+            var x = L + xv / xMax * plotW;
+            var tick = xv >= 1000 ? (xv / 1000).ToString("0", ci) + "k" : xv.ToString("0", ci);
+            sb.Append($"<text x='{F(x)}' y='{F(T + plotH + 16)}' text-anchor='middle' class='tpd-axis'>{Esc(tick)}</text>");
+        }
+        sb.Append($"<text x='{F(L + plotW / 2)}' y='{F(H - 4)}' text-anchor='middle' class='tpd-axis-title'>Samples</text>");
+        for (int i = 0; i < rows.Length; i++)
+        {
+            var y = T + i * (plotH / 3.0) + 4;
+            var bw = Math.Max(8, rows[i].N / xMax * plotW);
+            sb.Append($"<text x='{F(L - 10)}' y='{F(y + rowH * 0.55)}' text-anchor='end' class='tpd-funnel-label'>{Esc(rows[i].Label)}</text>");
+            sb.Append($"<rect x='{F(L)}' y='{F(y)}' width='{F(bw)}' height='{F(rowH * 0.7)}' fill='{rows[i].Color}'/>");
+            sb.Append($"<text x='{F(L + bw + 8)}' y='{F(y + rowH * 0.52)}' class='tpd-funnel-val'>{rows[i].N.ToString("N0", ci)} ({rows[i].Pct.ToString("0.0", ci)}%)</text>");
+        }
+        sb.Append("</svg>");
+        return sb.ToString();
+    }
+
+    string SvgAgeBars(IReadOnlyList<(string Label, long Count, string Color)> rows)
+    {
+        if (rows.Count == 0) return "<div class='tpd-empty'>No backlog.</div>";
+        // Width fills the 65% column; keep height moderate (not oversized).
+        double W = 720, H = 300, L = 58, R = 16, T = 28, B = 40;
+        var plotW = W - L - R; var plotH = H - T - B;
+        var max = Math.Max(1, rows.Max(r => r.Count));
+        var gap = plotW / rows.Count;
+        var bw = Math.Min(78, gap * 0.58);
+        var sb = new StringBuilder();
+        sb.Append($"<svg viewBox='0 0 {W} {H}' class='tpd-svg' role='img'>");
+        sb.Append($"<line x1='{F(L)}' y1='{F(T)}' x2='{F(L)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        sb.Append($"<line x1='{F(L)}' y1='{F(T + plotH)}' x2='{F(W - R)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        for (int g = 0; g <= 4; g++)
+        {
+            var gy = T + plotH * g / 4.0;
+            var gv = max - max * g / 4.0;
+            sb.Append($"<text x='{F(L - 10)}' y='{F(gy + 4)}' text-anchor='end' class='tpd-axis'>{Esc(gv >= 1000 ? gv.ToString("#,##0", ci) : gv.ToString("0", ci))}</text>");
+        }
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var bh = (double)rows[i].Count / max * plotH;
+            var x = L + i * gap + (gap - bw) / 2;
+            var y = T + plotH - bh;
+            sb.Append($"<rect x='{F(x)}' y='{F(y)}' width='{F(bw)}' height='{F(Math.Max(bh, 0.5))}' fill='{rows[i].Color}'><title>{Esc(rows[i].Label)}: {rows[i].Count:N0}</title></rect>");
+            sb.Append($"<text x='{F(x + bw / 2)}' y='{F(y - 8)}' text-anchor='middle' class='tpd-val-dark'>{rows[i].Count.ToString("N0", ci)}</text>");
+            sb.Append($"<text x='{F(x + bw / 2)}' y='{F(T + plotH + 20)}' text-anchor='middle' class='tpd-axis'>{Esc(rows[i].Label)}</text>");
+        }
+        sb.Append($"<text x='16' y='{F(H / 2)}' transform='rotate(-90 16 {F(H / 2)})' text-anchor='middle' class='tpd-axis-title'>Sample count</text>");
+        sb.Append("</svg>");
+        return sb.ToString();
+    }
+
+    string SvgTwoLines(IReadOnlyList<string> labels, IReadOnlyList<double> a, IReadOnlyList<double> b, string nameA, string nameB, string colorA, string colorB)
+    {
+        if (labels.Count == 0) return "<div class='tpd-empty'>No chart data.</div>";
+        var all = a.Concat(b).Where(v => !double.IsNaN(v)).ToList();
+        if (all.Count == 0) return "<div class='tpd-empty'>No chart data.</div>";
+        double W = ChartW, H = 420, L = 52, R = 20, T = 40, B = 62;
+        var plotW = W - L - R; var plotH = H - T - B;
+        var min = Math.Max(0, Math.Floor(all.Min() / 2.5) * 2.5 - 2.5);
+        var max = Math.Ceiling(all.Max() / 2.5) * 2.5 + 2.5;
+        if (max - min < 5) max = min + 5;
+        double Xn(int i) => L + (labels.Count == 1 ? plotW / 2 : i * plotW / (labels.Count - 1));
+        double Yn(double v) => T + plotH - (v - min) / (max - min) * plotH;
+        var sb = new StringBuilder();
+        sb.Append($"<svg viewBox='0 0 {W} {H}' class='tpd-svg' role='img'>");
+        sb.Append($"<line x1='{F(L)}' y1='{F(T)}' x2='{F(L)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        sb.Append($"<line x1='{F(L)}' y1='{F(T + plotH)}' x2='{F(W - R)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        for (int g = 0; g <= 4; g++)
+        {
+            var gy = T + plotH * g / 4.0;
+            var gv = max - (max - min) * g / 4.0;
+            sb.Append($"<line x1='{F(L)}' y1='{F(gy)}' x2='{F(W - R)}' y2='{F(gy)}' class='tpd-grid'/>");
+            sb.Append($"<text x='{F(L - 8)}' y='{F(gy + 3)}' text-anchor='end' class='tpd-axis'>{Esc(gv.ToString("0.#", ci))}</text>");
+        }
+        void Line(IReadOnlyList<double> vals, string color)
+        {
+            var p = new StringBuilder();
+            for (int i = 0; i < vals.Count; i++)
+            {
+                if (double.IsNaN(vals[i])) continue;
+                p.Append($"{(p.Length == 0 ? "M" : "L")}{F(Xn(i))},{F(Yn(vals[i]))} ");
+            }
+            sb.Append($"<path d='{p}' fill='none' stroke='{color}' stroke-width='2.2'/>");
+            for (int i = 0; i < vals.Count; i++)
+            {
+                if (double.IsNaN(vals[i])) continue;
+                sb.Append($"<circle cx='{F(Xn(i))}' cy='{F(Yn(vals[i]))}' r='4' fill='{color}'/>");
+                sb.Append($"<text x='{F(Xn(i))}' y='{F(Yn(vals[i]) - 9)}' text-anchor='middle' class='tpd-val'>{FmtPct(vals[i])}</text>");
+            }
+        }
+        Line(a, colorA); Line(b, colorB);
+        for (int i = 0; i < labels.Count; i++)
+            AppendRotatedLabel(sb, Xn(i), T + plotH + 14, labels[i]);
+        sb.Append($"<text x='{F(L)}' y='16' class='tpd-legend' fill='{colorA}'>● {Esc(nameA)}</text>");
+        sb.Append($"<text x='{F(L + 110)}' y='16' class='tpd-legend' fill='{colorB}'>● {Esc(nameB)}</text>");
+        sb.Append($"<text x='14' y='{F(H / 2)}' transform='rotate(-90 14 {F(H / 2)})' text-anchor='middle' class='tpd-axis-title'>% of total samples</text>");
+        sb.Append("</svg>");
+        return sb.ToString();
+    }
+
+    var labels = months.Select(m => ShortLbl(m.SortYear, m.SortMonth)).ToList();
+    var totals = months.Select(m => (double)m.TotalSamples).ToList();
+    var resultedPct = months.Select(m => m.PctResulted is { } p ? (double)p : double.NaN).ToList();
+    var billedPct = months.Select(m => m.PctBilledOfResulted is { } p ? (double)p : double.NaN).ToList();
+    var notRes = months.Select(m => (double)m.NotResulted).ToList();
+    var selfPct = months.Select(m => m.SelfPayPct is { } p ? (double)p : double.NaN).ToList();
+    var clientPct = months.Select(m => m.ClientBillPct is { } p ? (double)p : double.NaN).ToList();
+    var ageColors = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["0-7d"] = "#16A34A", ["8-14d"] = "#16A34A", ["15-30d"] = "#F59E0B", ["31-60d"] = "#F59E0B", ["60+d"] = "#DC2626"
+    };
+    var ageRows = buckets.Select(b => (b.AgeBucket, b.SampleCount, ageColors.TryGetValue(b.AgeBucket, out var c) ? c : "#3B82F6")).ToList();
+    var dayWin = Model.DayWindow > 0 ? Model.DayWindow : 9;
+    var asOfTxt = Model.AsOfDate?.ToString("yyyy-MM-dd") ?? "WeekRange end";
+    var scopeMonths = Model.TrailingMonths;
+}
+
+<style>
+    .tpd-wrap { max-width: 1140px; margin: 0 auto; padding-bottom: 3rem; }
+    .tpd-head { margin: 1.2rem 0 1rem; }
+    .tpd-head h1 { font-size: 1.55rem; font-weight: 800; color: #1f2733; margin: 0 0 .3rem; }
+    .tpd-head .tpd-sub { color: #6b7280; font-size: .9rem; }
+    .tpd-back { display: inline-block; margin-bottom: .8rem; color: #1f7a46; font-weight: 600; text-decoration: none; font-size: .85rem; }
+    .tpd-banner { background: #e8f6ee; border: 1px solid #b7dfc5; border-radius: 12px; padding: .8rem 1.1rem; margin-bottom: 1rem; font-size: .85rem; color: #145c32; }
+    .tpd-error { background: #fdecea; border: 1px solid #f3b7b0; color: #922; border-radius: 12px; padding: 1rem 1.2rem; }
+    .tpd-card { background: #fff; border: 1px solid #e6eaf0; border-radius: 14px; margin: .85rem 0; overflow: hidden; }
+    .tpd-card-title { font-size: 1.02rem; font-weight: 800; color: #1f2733; margin: 0; }
+    .tpd-card-sub { font-size: .78rem; color: #8a93a3; margin: .2rem 0 0; }
+    .tpd-insight { background: #fef2f2; border: 1px solid #fecaca; border-radius: 10px; padding: .75rem 1rem; font-size: .82rem; color: #7f1d1d; margin: 0 0 .75rem; }
+    .tpd-insight-ok { background: #eff6ff; border-color: #bfdbfe; color: #1e3a8a; }
+    .tpd-logic {
+        background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;
+        padding: .7rem .9rem; margin: 0 0 .9rem; font-size: .78rem; color: #334155; line-height: 1.45;
+    }
+    .tpd-logic strong { color: #0f172a; }
+    .tpd-logic code, .tpd-logic .mono {
+        font-family: ui-monospace, Consolas, monospace; font-size: .74rem;
+        background: #eef2f7; border-radius: 4px; padding: .05rem .28rem; color: #1e293b;
+    }
+    .tpd-logic ul { margin: .35rem 0 0; padding-left: 1.1rem; }
+    .tpd-logic li { margin: .15rem 0; }
+    .tpd-pillar { margin: 1.2rem 0 .4rem; padding: .55rem .9rem; border-radius: 10px; font-size: .78rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; background: #e8f6ee; color: #1f7a46; }
+    /* Period buttons = indigo (distinct from pillar tabs) */
+    .tpd-tabs {
+        display: flex; flex-wrap: wrap; gap: .4rem; margin: 1rem 0 1.1rem;
+        border-bottom: 1px solid #e6eaf0; padding-bottom: .55rem;
+    }
+    .tpd-tab {
+        appearance: none; border: 1px solid #bbf7d0; background: #f0fdf4; color: #166534;
+        border-radius: 999px; padding: .45rem .95rem; font-size: .82rem; font-weight: 700;
+        cursor: pointer; line-height: 1.2;
+    }
+    .tpd-tab:hover { border-color: #16a34a; color: #14532d; background: #dcfce7; }
+    .tpd-tab.active { background: #15803d; border-color: #15803d; color: #fff; }
+    .tpd-tab-panel { display: none; }
+    .tpd-tab-panel.active { display: block; }
+    .tpd-lazy-host { min-height: 120px; }
+    .tpd-lazy-status { color: #6b7280; font-size: .9rem; padding: 1.2rem .2rem; }
+    .tpd-lazy-status.error { color: #922; }
+    .tpd-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .8rem; margin-bottom: 1.4rem; }
+    .tpd-kpi { background: #fff; border: 1px solid #e6eaf0; border-radius: 14px; padding: .85rem 1rem; }
+    .tpd-kpi-label { font-size: .65rem; letter-spacing: .05em; text-transform: uppercase; color: #8a93a3; font-weight: 700; }
+    .tpd-kpi-value { font-size: 1.5rem; font-weight: 800; color: #1f2733; margin-top: .25rem; }
+    .tpd-tbl { width: 100%; border-collapse: collapse; font-size: .82rem; }
+    .tpd-tbl th { text-align: left; font-size: .68rem; letter-spacing: .04em; text-transform: uppercase; color: #8a93a3; font-weight: 700; padding: .4rem .5rem; border-bottom: 1px solid #e6eaf0; }
+    .tpd-tbl td { padding: .45rem .5rem; border-bottom: 1px solid #f1f3f6; color: #2a3140; }
+    .tpd-tbl td.num, .tpd-tbl th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .tpd-scroll { max-height: 320px; overflow-y: auto; }
+    .tpd-scroll thead th { position: sticky; top: 0; background: #fff; z-index: 1; }
+    .tpd-empty { color: #9aa3b0; font-size: .85rem; font-style: italic; padding: .5rem 0; }
+    .tpd-grid2 { display: grid; grid-template-columns: 1.2fr .8fr; gap: 1.1rem; align-items: start; }
+    .tpd-cash-grid { grid-template-columns: 1fr 1fr; }
+    .tpd-cash-grid .tpd-card { margin-top: 0; margin-bottom: 0; }
+    .tpd-toolbar { display: flex; flex-wrap: wrap; gap: .55rem; align-items: center; margin-bottom: 1rem; }
+    .tpd-toolbar label { font-size: .78rem; font-weight: 700; color: #5b6472; margin: 0; }
+    .tpd-month-btns { display: inline-flex; flex-wrap: wrap; gap: .35rem; }
+    .tpd-month-btns a {
+        display: inline-block; padding: .35rem .75rem; border-radius: 8px; font-size: .82rem; font-weight: 700;
+        text-decoration: none; border: 1px solid #c7d2fe; color: #3730a3; background: #eef2ff;
+    }
+    .tpd-month-btns a:hover { border-color: #4f46e5; color: #312e81; background: #e0e7ff; }
+    .tpd-month-btns a.active { background: #4f46e5; border-color: #4f46e5; color: #fff; }
+    .tpd-window-note { font-size: .78rem; color: #6b7280; margin-left: .25rem; }
+    .tpd-checks { font-size: .78rem; color: #5b6472; margin: 0 0 1rem; }
+    .tpd-soon { color: #6b7280; font-size: .88rem; padding: .2rem 0; }
+    .tpd-funnel-note { font-size: .82rem; color: #374151; margin-top: .6rem; }
+
+    .tpd-acc > summary.tpd-acc-head {
+        list-style: none; cursor: pointer; user-select: none;
+        display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem;
+        padding: 1rem 1.15rem; margin: 0;
+    }
+    .tpd-acc > summary.tpd-acc-head::-webkit-details-marker { display: none; }
+    .tpd-acc > summary.tpd-acc-head::marker { content: ""; }
+    .tpd-acc-head-text { flex: 1; min-width: 0; }
+    .tpd-acc-chevron {
+        flex: 0 0 auto; width: 1.6rem; height: 1.6rem; border-radius: 8px;
+        border: 1px solid #d7dde7; background: #f8fafc; color: #64748b;
+        display: inline-flex; align-items: center; justify-content: center;
+        font-size: .75rem; line-height: 1; transition: transform .15s ease, background .15s ease;
+        margin-top: .1rem;
+    }
+    .tpd-acc[open] > summary .tpd-acc-chevron { transform: rotate(180deg); background: #e8f6ee; border-color: #b7dfc5; color: #1f7a46; }
+    .tpd-acc > summary.tpd-acc-head:hover { background: #fafbfc; }
+    .tpd-acc-body { padding: 0 1.15rem 1.15rem; border-top: 1px solid #f1f3f6; }
+
+    .tpd-chart { max-width: 780px; margin: 0 auto; }
+    .tpd-chart-lg { max-width: none; width: 100%; margin: 0; }
+    .tpd-backlog-row {
+        display: grid;
+        grid-template-columns: 65% 35%;
+        gap: 1rem;
+        align-items: start;
+    }
+    .tpd-backlog-meta { max-width: none; margin: 0; padding-top: .35rem; }
+    @@media (max-width: 900px) {
+        .tpd-grid2, .tpd-cash-grid { grid-template-columns: 1fr; }
+        .tpd-backlog-row { grid-template-columns: 1fr; }
+    }
+    .tpd-svg { width: 100%; height: auto; display: block; }
+    .tpd-grid { stroke: #eef1f5; stroke-width: 1; }
+    .tpd-axis-line { stroke: #94a3b8; stroke-width: 1.2; }
+    .tpd-axis { font-size: 10px; fill: #64748b; font-family: system-ui, sans-serif; }
+    .tpd-axis-red { fill: #B91C1C !important; }
+    .tpd-axis-title { font-size: 11px; fill: #64748b; font-family: system-ui, sans-serif; }
+    .tpd-val { font-size: 9px; fill: #9CA3AF; font-family: system-ui, sans-serif; font-weight: 600; }
+    .tpd-val-dark { font-size: 11px; fill: #374151; font-family: system-ui, sans-serif; font-weight: 700; }
+    .tpd-legend { font-size: 11px; font-family: system-ui, sans-serif; font-weight: 600; }
+    .tpd-funnel-label { font-size: 12px; fill: #1f2733; font-weight: 700; font-family: system-ui, sans-serif; }
+    .tpd-funnel-val { font-size: 12px; fill: #4b5563; font-family: system-ui, sans-serif; }
+</style>
+
+<div class="tpd-wrap">
+    <a class="tpd-back" href="@Model.BackUrl">&larr; Back to Executive Summary</a>
+
+    <div class="tpd-head">
+        <h1>Three-Pillar Diagnostic — @Model.LabName</h1>
+        <div class="tpd-sub">Phase 1: LIS / Pipeline Health · scope: @Model.ScopeLabel</div>
+    </div>
+
+    <div class="tpd-toolbar">
+        <label>Period</label>
+        <div class="tpd-month-btns">
+            @foreach (var m in monthOpts)
+            {
+                var active = Model.TrailingMonths == m ? "active" : null;
+                <a class="@active"
+                   asp-controller="ExecutiveSummary"
+                   asp-action="ThreePillarDiagnostic"
+                   asp-route-lab="@Model.LabName"
+                   asp-route-months="@m">@m Months</a>
+            }
+        </div>
+        @if (Model.DayWindow > 0)
+        {
+            <span class="tpd-window-note">
+                Comparable window: days 1–@Model.DayWindow each month
+                @if (Model.AsOfDate is { } asOf)
+                {
+                    <text>· WeekRange end @asOf.ToString("MM/dd/yyyy")</text>
+                }
+            </span>
+        }
+    </div>
+
+    <div class="tpd-banner">
+        <strong>How months are built (Insights parity):</strong>
+        Source <code>dbo.LIMSMaster</code>, bucket date <code>RequestCollectDate</code>.
+        AsOf = Billed WeekRange <strong>end</strong> (@asOfTxt). DayWindow = day-of-month of AsOf (<strong>@dayWin</strong>).
+        Each month counts only <code>DAY(RequestCollectDate) BETWEEN 1 AND @dayWin</code>
+        (e.g. if end is the 23rd → Jan 1–23, Feb 1–23, …). Trailing <strong>@scopeMonths</strong> months inclusive.
+    </div>
+
+    <p class="tpd-checks"><strong>LIS checks:</strong> #1 Partial-period · #2 Aging/backlog · #3 Ratio-driver · #4 Maturity · #6 Status-transition</p>
+
+    @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+    {
+        <div class="tpd-error">@Model.ErrorMessage</div>
+    }
+    else if (!Model.HasData)
+    {
+        <div class="tpd-error">No LIS data returned for this scope.</div>
+    }
+    else
+    {
+        var pmsUrl = Url.Action("ThreePillarPmsPartial", "ExecutiveSummary", new { lab = Model.LabName, months = Model.TrailingMonths });
+        var cashUrl = Url.Action("ThreePillarCashPartial", "ExecutiveSummary", new { lab = Model.LabName, months = Model.TrailingMonths });
+
+        <div class="tpd-tabs" role="tablist" aria-label="Three pillars">
+            <button type="button" class="tpd-tab active" role="tab" aria-selected="true" data-tpd-tab="lis">Pillar 1 — LIS</button>
+            <button type="button" class="tpd-tab" role="tab" aria-selected="false" data-tpd-tab="pms" data-tpd-load="@pmsUrl">Pillar 2 — PMS</button>
+            <button type="button" class="tpd-tab" role="tab" aria-selected="false" data-tpd-tab="cash" data-tpd-load="@cashUrl">Pillar 3 — Cash</button>
+        </div>
+
+        <div class="tpd-tab-panel active" id="tpd-panel-lis" role="tabpanel">
+        <div class="tpd-kpis">
+            <div class="tpd-kpi"><div class="tpd-kpi-label">Backlog (Resulted, Not in AMD)</div><div class="tpd-kpi-value">@Num(Model.BacklogSummary.TotalBacklog)</div></div>
+            <div class="tpd-kpi"><div class="tpd-kpi-label">Median Backlog Age</div><div class="tpd-kpi-value">@Dec(Model.BacklogSummary.MedianAgeDays) d</div></div>
+            <div class="tpd-kpi"><div class="tpd-kpi-label">Backlog &gt; 60 Days</div><div class="tpd-kpi-value">@Pct(Model.BacklogSummary.PctOver60Days)</div></div>
+            <div class="tpd-kpi"><div class="tpd-kpi-label">Latest % Billed of Resulted</div><div class="tpd-kpi-value">@Pct(last?.PctBilledOfResulted)</div></div>
+        </div>
+
+        <div class="tpd-pillar">Pillar 1 — Pipeline Health (LIS Breakdown)</div>
+
+        <details class="tpd-card tpd-acc" open>
+            <summary class="tpd-acc-head">
+                <div class="tpd-acc-head-text">
+                    <div class="tpd-card-title">Monthly Collected Sample Volume</div>
+                    <p class="tpd-card-sub">Total Samples trend · Check #1</p>
+                </div>
+                <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <div class="tpd-acc-body">
+                <div class="tpd-logic">
+                    <strong>Fetch logic</strong>
+                    <ul>
+                        <li>Table: <code>LIMSMaster</code> · Count: <code>COUNT(DISTINCT Accession)</code></li>
+                        <li>Date: <code>RequestCollectDate</code> in month · Day filter: <code>DAY(RequestCollectDate) BETWEEN 1 AND @dayWin</code></li>
+                        <li>No status filter — all accessions in the comparable day window</li>
+                    </ul>
+                </div>
+                <div class="tpd-chart">@Html.Raw(SvgLine(labels, totals, "#1D4ED8", "Samples collected", dashLast: labels.Count > 1 ? labels.Count - 1 : null))</div>
+            </div>
+        </details>
+
+        <details class="tpd-card tpd-acc" open>
+            <summary class="tpd-acc-head">
+                <div class="tpd-acc-head-text">
+                    <div class="tpd-card-title">Total Samples &amp; % Resulted — Last @scopeMonths Months</div>
+                    <p class="tpd-card-sub">Bars = volume · Red line = % Resulted (right axis)</p>
+                </div>
+                <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <div class="tpd-acc-body">
+                <div class="tpd-insight tpd-insight-ok">
+                    Focus on the <strong>% Resulted</strong> line. A sharp dip in the latest month is often Check #1 (partial-period), not a true quality drop.
+                </div>
+                <div class="tpd-logic">
+                    <strong>Fetch logic</strong>
+                    <ul>
+                        <li><strong>Total Samples</strong> = <code>COUNT(DISTINCT Accession)</code> where day ≤ @dayWin</li>
+                        <li><strong>Resulted</strong> = same window + <code>RessultedStatus = 'Resulted'</code></li>
+                        <li><strong>% Resulted</strong> = Resulted ÷ Total Samples × 100</li>
+                    </ul>
+                </div>
+                <div class="tpd-chart">@Html.Raw(SvgDualBarsLine(labels, totals, resultedPct))</div>
+            </div>
+        </details>
+
+        <details class="tpd-card tpd-acc" open>
+            <summary class="tpd-acc-head">
+                <div class="tpd-acc-head-text">
+                    <div class="tpd-card-title">Sample-to-Claim Funnel (Full Period)</div>
+                    <p class="tpd-card-sub">Collected → Resulted → Billed over the selected comparable window</p>
+                </div>
+                <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <div class="tpd-acc-body">
+                <div class="tpd-logic">
+                    <strong>Fetch logic</strong>
+                    <ul>
+                        <li><strong>Collected</strong> = all accessions in DayWindow (same as Total Samples sum)</li>
+                        <li><strong>Resulted</strong> = <code>RessultedStatus = 'Resulted'</code></li>
+                        <li><strong>Billed</strong> = Resulted + <code>ClaimStatus='Billed'</code> + <code>BilledOrNot='Billed'</code> + <code>ClientStatus=''</code> (Billed to Insurance)</li>
+                        <li>% shown next to each bar = stage ÷ Collected × 100</li>
+                    </ul>
+                </div>
+                <div class="tpd-chart">@Html.Raw(SvgHFunnel(Model.FunnelPeriod.Collected, Model.FunnelPeriod.Resulted, Model.FunnelPeriod.BilledToInsurance, Model.FunnelPeriod.PctResulted, Model.FunnelPeriod.PctBilledOfCollected))</div>
+                <p class="tpd-funnel-note">
+                    Collected <strong>@Num(Model.FunnelPeriod.Collected)</strong>
+                    → Resulted <strong>@Num(Model.FunnelPeriod.Resulted)</strong> (@Pct(Model.FunnelPeriod.PctResulted))
+                    → Billed <strong>@Num(Model.FunnelPeriod.BilledToInsurance)</strong>
+                    (@Pct(Model.FunnelPeriod.PctBilledOfCollected) of collected; @Pct(Model.FunnelPeriod.PctBilledOfResulted) of resulted).
+                </p>
+            </div>
+        </details>
+
+        <details class="tpd-card tpd-acc" open>
+            <summary class="tpd-acc-head">
+                <div class="tpd-acc-head-text">
+                    <div class="tpd-card-title">Backlog Age — Resulted Samples Never Entered in PMS (n=@Num(Model.BacklogSummary.TotalBacklog))</div>
+                    <p class="tpd-card-sub">Check #2 · open Resulted / Not-in-AMD backlog as of WeekRange end</p>
+                </div>
+                <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <div class="tpd-acc-body">
+                <div class="tpd-logic">
+                    <strong>Fetch logic</strong>
+                    <ul>
+                        <li>Population (not DayWindow-capped): <code>RessultedStatus='Resulted'</code> + <code>ClaimStatus='Not Entered in AMD'</code> + <code>BilledOrNot='UnBilled'</code> + <code>ClientStatus IN ('', 'Billing Review Required')</code></li>
+                        <li><strong>AgeDays</strong> = <code>DATEDIFF(DAY, RequestCollectDate, @@AsOfDate)</code> (@asOfTxt)</li>
+                        <li>Buckets: 0–7 / 8–14 / 15–30 / 31–60 / 60+</li>
+                    </ul>
+                </div>
+                <div class="tpd-backlog-row">
+                    <div class="tpd-chart tpd-chart-lg">@Html.Raw(SvgAgeBars(ageRows))</div>
+                    <div class="tpd-backlog-meta">
+                        @if (buckets.Count == 0) { <div class="tpd-empty">No backlog.</div> }
+                        else
+                        {
+                            <table class="tpd-tbl">
+                                <thead><tr><th>Age Bucket</th><th class="num">Samples</th></tr></thead>
+                                <tbody>
+                                @foreach (var b in buckets)
+                                {
+                                    <tr><td>@b.AgeBucket</td><td class="num">@Num(b.SampleCount)</td></tr>
+                                }
+                                </tbody>
+                            </table>
+                            <p class="tpd-funnel-note">Median <strong>@Dec(Model.BacklogSummary.MedianAgeDays) d</strong>; <strong>@Pct(Model.BacklogSummary.PctOver60Days)</strong> over 60 days.</p>
+                        }
+                    </div>
+                </div>
+            </div>
+        </details>
+
+        <details class="tpd-card tpd-acc" open>
+            <summary class="tpd-acc-head">
+                <div class="tpd-acc-head-text">
+                    <div class="tpd-card-title">% of Resulted Samples Billed to Insurance</div>
+                    <p class="tpd-card-sub">Resulted → billed pipeline rate by month</p>
+                </div>
+                <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <div class="tpd-acc-body">
+                <div class="tpd-insight">A multi-month decline before the partial latest month is a real resulted→billed pipeline leak (Check #3).</div>
+                <div class="tpd-logic">
+                    <strong>Fetch logic</strong>
+                    <ul>
+                        <li><strong>Resulted</strong> = <code>RessultedStatus='Resulted'</code> (DayWindow)</li>
+                        <li><strong>Billed to Insurance</strong> = Resulted + <code>ClaimStatus='Billed'</code> + <code>BilledOrNot='Billed'</code> + <code>ClientStatus=''</code></li>
+                        <li><strong>% Billed of Resulted</strong> = Billed to Insurance ÷ Resulted × 100</li>
+                    </ul>
+                </div>
+                <div class="tpd-chart">@Html.Raw(SvgLine(labels, billedPct.Select(v => double.IsNaN(v) ? 0 : v).ToList(), "#B91C1C", "% billed to insurance of resulted", fill: true, fillColor: "rgba(185,28,28,.14)", dashLast: labels.Count > 1 ? labels.Count - 1 : null, asPct: true))</div>
+            </div>
+        </details>
+
+        <details class="tpd-card tpd-acc" open>
+            <summary class="tpd-acc-head">
+                <div class="tpd-acc-head-text">
+                    <div class="tpd-card-title">Not Resulted Samples — Monthly Trend</div>
+                    <p class="tpd-card-sub">Latest month in red (often Check #1 partial-period spike)</p>
+                </div>
+                <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <div class="tpd-acc-body">
+                <div class="tpd-logic">
+                    <strong>Fetch logic</strong>
+                    <ul>
+                        <li><code>COUNT(DISTINCT Accession)</code> where <code>RessultedStatus = 'Not Resulted'</code></li>
+                        <li>Same DayWindow comparable filter: days 1–@dayWin of each month</li>
+                    </ul>
+                </div>
+                <div class="tpd-chart">@Html.Raw(SvgBars(labels, notRes, i => i == labels.Count - 1 ? "#B91C1C" : "#1E3A8A", "Not Resulted (count)"))</div>
+            </div>
+        </details>
+
+        <details class="tpd-card tpd-acc" open>
+            <summary class="tpd-acc-head">
+                <div class="tpd-acc-head-text">
+                    <div class="tpd-card-title">Self Pay % vs Client Bill % of Total Samples</div>
+                    <p class="tpd-card-sub">Check #6 status-transition</p>
+                </div>
+                <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <div class="tpd-acc-body">
+                <div class="tpd-insight tpd-insight-ok">When Self Pay falls and Client Bill rises together, volume moved between categories — not a net volume change.</div>
+                <div class="tpd-logic">
+                    <strong>Fetch logic</strong>
+                    <ul>
+                        <li><strong>Self Pay</strong> = Resulted + <code>ClientStatus = 'Self Pay'</code></li>
+                        <li><strong>Client Bill</strong> = Resulted + <code>ClientStatus = 'Client Bill'</code></li>
+                        <li><strong>%</strong> = count ÷ Total Samples × 100 (DayWindow)</li>
+                    </ul>
+                </div>
+                <div class="tpd-chart">@Html.Raw(SvgTwoLines(labels, selfPct, clientPct, "Self Pay %", "Client Bill %", "#2563EB", "#D97706"))</div>
+            </div>
+        </details>
+
+        <details class="tpd-card tpd-acc" open>
+            <summary class="tpd-acc-head">
+                <div class="tpd-acc-head-text">
+                    <div class="tpd-card-title">LIS Monthly Detail</div>
+                    <p class="tpd-card-sub">Month-by-month breakdown for the selected comparable window</p>
+                </div>
+                <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <div class="tpd-acc-body">
+                <div class="tpd-logic">
+                    <strong>Fetch logic</strong> — same filters as charts above; rows from <code>usp_GetBeechTree_ThreePillarLisDiagnostic</code> RS1.
+                </div>
+                <div class="tpd-scroll">
+                <table class="tpd-tbl">
+                    <thead>
+                        <tr>
+                            <th>Month</th><th class="num">Total Samples</th><th class="num">Resulted</th><th class="num">% Resulted</th>
+                            <th class="num">Billed to Ins</th><th class="num">% Billed of Resulted</th>
+                            <th class="num">Self Pay %</th><th class="num">Client Bill %</th><th class="num">Not Resulted</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var m in months)
+                    {
+                        <tr>
+                            <td>@ShortLbl(m.SortYear, m.SortMonth)</td>
+                            <td class="num">@Num(m.TotalSamples)</td>
+                            <td class="num">@Num(m.Resulted)</td>
+                            <td class="num">@Pct(m.PctResulted)</td>
+                            <td class="num">@Num(m.BilledToInsurance)</td>
+                            <td class="num">@Pct(m.PctBilledOfResulted)</td>
+                            <td class="num">@Pct(m.SelfPayPct)</td>
+                            <td class="num">@Pct(m.ClientBillPct)</td>
+                            <td class="num">@Num(m.NotResulted)</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+                </div>
+            </div>
+        </details>
+        </div><!-- /lis panel -->
+
+        <div class="tpd-tab-panel" id="tpd-panel-pms" role="tabpanel" hidden>
+            <div class="tpd-pillar">Pillar 2 — Revenue Realization (PMS)</div>
+            <div class="tpd-lazy-host" data-tpd-lazy="pms">
+                <div class="tpd-lazy-status">Click the PMS tab to load this pillar (loads when the SP is available).</div>
+            </div>
+        </div>
+
+        <div class="tpd-tab-panel" id="tpd-panel-cash" role="tabpanel" hidden>
+            <div class="tpd-pillar">Pillar 3 — Leakage &amp; Risk (Cash)</div>
+            <div class="tpd-lazy-host" data-tpd-lazy="cash">
+                <div class="tpd-lazy-status">Click the Cash tab to load this pillar (loads when the SP is available).</div>
+            </div>
+        </div>
+    }
+</div>
+
+<script nonce="@Context.Items["CspNonce"]">
+(function () {
+    var tabs = document.querySelectorAll('.tpd-tab');
+    var loaded = {};
+
+    function showPanel(name) {
+        document.querySelectorAll('.tpd-tab-panel').forEach(function (p) {
+            var on = p.id === 'tpd-panel-' + name;
+            p.classList.toggle('active', on);
+            if (on) p.removeAttribute('hidden');
+            else p.setAttribute('hidden', 'hidden');
+        });
+        tabs.forEach(function (t) {
+            var on = t.getAttribute('data-tpd-tab') === name;
+            t.classList.toggle('active', on);
+            t.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+    }
+
+    function loadPanel(tab) {
+        var name = tab.getAttribute('data-tpd-tab');
+        var url = tab.getAttribute('data-tpd-load');
+        if (!url || loaded[name]) return;
+        var host = document.querySelector('[data-tpd-lazy="' + name + '"]');
+        if (!host) return;
+        host.innerHTML = '<div class="tpd-lazy-status">Loading…</div>';
+        fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' }, credentials: 'same-origin' })
+            .then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.text();
+            })
+            .then(function (html) {
+                host.innerHTML = html;
+                loaded[name] = true;
+            })
+            .catch(function (err) {
+                host.innerHTML = '<div class="tpd-lazy-status error">Could not load pillar: '
+                    + (err && err.message ? err.message : 'unknown error') + '</div>';
+            });
+    }
+
+    tabs.forEach(function (tab) {
+        tab.addEventListener('click', function () {
+            var name = tab.getAttribute('data-tpd-tab');
+            showPanel(name);
+            loadPanel(tab);
+        });
+    });
+
+    // Ensure LIS panel is visible on first paint (styles + hidden attrs).
+    showPanel('lis');
+})();
+</script>

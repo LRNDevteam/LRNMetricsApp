@@ -7,6 +7,8 @@ namespace CaptureDataApp.Services;
 /// <summary>
 /// Persists CodingValidation rows and the Financial Summary to SQL Server
 /// using TVP bulk insert and the stored procedures created in 01_CreateTables.sql.
+/// CodingMaster capture/aggregates now run in LRN.CodingMaster.Runner STEP 4.
+/// This CaptureDataApp copy is kept but the Program.cs coding path is disabled.
 /// </summary>
 public sealed class CodingDbService
 {

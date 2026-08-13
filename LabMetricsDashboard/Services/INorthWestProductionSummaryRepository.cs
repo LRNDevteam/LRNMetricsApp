@@ -7,6 +7,7 @@ using SharedProductionReportResult = LRN.ProductionReports.Services.ProductionRe
 using SharedRawDataSegment = LRN.ProductionReports.Services.RawDataSegment;
 using SharedUnbilledAgingResult = LRN.ProductionReports.Services.UnbilledAgingResult;
 using SharedWeeklyClaimVolumeResult = LRN.ProductionReports.Services.WeeklyClaimVolumeResult;
+using HighestPayerBreakdownResult = LRN.ProductionReports.Services.HighestPayerBreakdownResult;
 
 
 namespace LabMetricsDashboard.Services;
@@ -29,7 +30,7 @@ public interface INorthWestProductionSummaryRepository
     Task<(List<string> PayerNames, List<string> PanelNames)> GetFilterOptionsAsync(
         string connectionString, CancellationToken ct = default);
 
-    /// <summary>Calls usp_GetNW_MonthlyBilledProductionSummary — monthly panel + top-3 payer pivot.</summary>
+    /// <summary>Calls usp_GetNW_MonthlyBilledProductionSummary â€” monthly panel + top-3 payer pivot.</summary>
     Task<SharedProductionReportResult> GetMonthlyAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
@@ -58,7 +59,7 @@ public interface INorthWestProductionSummaryRepository
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default);
 
-    /// <summary>Calls usp_GetNW_WeeklyBilledProductionSummary — last-4-week panel + top-3 payer pivot (Thu–Wed).</summary>
+    /// <summary>Calls usp_GetNW_WeeklyBilledProductionSummary â€” last-4-week panel + top-3 payer pivot (Thuâ€“Wed).</summary>
     Task<SharedWeeklyClaimVolumeResult> GetWeeklyAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
@@ -71,7 +72,7 @@ public interface INorthWestProductionSummaryRepository
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default);
 
-    /// <summary>Calls usp_GetNW_CodingBreakdown — coding panel + CPT drill-down (2 result sets).</summary>
+    /// <summary>Calls usp_GetNW_CodingBreakdown â€” coding panel + CPT drill-down (2 result sets).</summary>
     Task<SharedCodingResult> GetCodingAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
@@ -84,7 +85,7 @@ public interface INorthWestProductionSummaryRepository
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default);
 
-    /// <summary>Calls usp_GetNW_PayerBreakdown — payer × month pivot.</summary>
+    /// <summary>Calls usp_GetNW_PayerBreakdown â€” payer Ã— month pivot.</summary>
     Task<SharedPayerBreakdownResult> GetPayerBreakdownAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
@@ -97,7 +98,46 @@ public interface INorthWestProductionSummaryRepository
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default);
 
-    /// <summary>Calls usp_GetNW_PayerByPanel — payer × panel pivot.</summary>
+    /// <summary>Calls usp_GetNW_PanelBreakdown â€” panel Ã— month unique ClaimID + ChargeAmount.</summary>
+    Task<SharedPayerBreakdownResult> GetPanelBreakdownAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default);
+
+    /// <summary>Calls usp_GetNW_InsightBreakdown ï¿½ top 10 payers by ChargeEnteredDate for Source Daq or Webpm.</summary>
+    Task<SharedPayerBreakdownResult> GetInsightBreakdownAsync(
+        string connectionString,
+        string source,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default);
+
+    /// <summary>Calls usp_GetNW_HighestPayerBreakdown ï¿½ Source (Daq/WebPM) groups with PayerName_Raw children.</summary>
+    Task<HighestPayerBreakdownResult> GetHighestPayerBreakdownAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default);
+
     Task<SharedPayerPanelResult> GetPayerByPanelAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
@@ -110,7 +150,7 @@ public interface INorthWestProductionSummaryRepository
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default);
 
-    /// <summary>Calls usp_GetNW_UnbilledAging — payer × aging bucket pivot.</summary>
+    /// <summary>Calls usp_GetNW_UnbilledAging â€” payer Ã— aging bucket pivot.</summary>
     Task<SharedUnbilledAgingResult> GetUnbilledAgingAsync(
         string connectionString,
         List<string>? filterPayerNames = null,
@@ -123,7 +163,7 @@ public interface INorthWestProductionSummaryRepository
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default);
 
-    /// <summary>Calls usp_GetNW_CPTBreakdown — payer × month line-count + charge pivot.</summary>
+    /// <summary>Calls usp_GetNW_CPTBreakdown â€” payer Ã— month line-count + charge pivot.</summary>
     Task<SharedCptBreakdownResult> GetCptBreakdownAsync(
         string connectionString,
         List<string>? filterPayerNames = null,

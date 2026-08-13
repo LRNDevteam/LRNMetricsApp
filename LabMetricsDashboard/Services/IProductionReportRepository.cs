@@ -10,7 +10,7 @@ public interface IProductionReportRepository
 {
     /// <summary>
     /// Returns the pivot data for the Monthly Claim Volume table:
-    /// grouped by PanelName × Year(FirstBilledDate) / Month(FirstBilledDate).
+    /// grouped by PanelName Ã— Year(FirstBilledDate) / Month(FirstBilledDate).
     /// Each panel includes top-3 payer drill-down rows.
     /// When <paramref name="rule"/> is <c>"Rule1"</c> the column date source
     /// switches to <c>ChargeEnteredDate</c> while the row filter retains
@@ -48,7 +48,7 @@ public interface IProductionReportRepository
         bool panelNewStrict = false);   // true ? PanelNew only (ProductionSummaryReport); false ? PanelNew with PanelName fallback (ProductionReport)
     /// <summary>
     /// Returns the pivot data for the Weekly Claim Volume table:
-    /// grouped by PanelName × Week for the last 4 weeks. Each panel includes
+    /// grouped by PanelName Ã— Week for the last 4 weeks. Each panel includes
     /// top-3 payer drill-down rows.
     /// The <paramref name="rule"/> selects the column date source and filter:
     /// <c>"Rule2"</c> and the default use <c>FirstBilledDate</c> with <c>PayerName</c> not blank;
@@ -85,7 +85,7 @@ public interface IProductionReportRepository
 
     /// <summary>
     /// Returns the Payer Breakdown table data:
-    /// grouped by PayerName × Year/Month(ChargeEnteredDate).
+    /// grouped by PayerName Ã— Year/Month(ChargeEnteredDate).
     /// </summary>
     Task<PayerBreakdownResult> GetPayerBreakdownAsync(
         string connectionString,
@@ -103,7 +103,7 @@ public interface IProductionReportRepository
 
     /// <summary>
     /// Returns the Payer X Panel cross-tab data:
-    /// grouped by PayerName × PanelName where ChargeEnteredDate is a valid date.
+    /// grouped by PayerName Ã— PanelName where ChargeEnteredDate is a valid date.
     /// </summary>
     Task<PayerPanelResult> GetPayerPanelAsync(
         string connectionString,
@@ -121,7 +121,7 @@ public interface IProductionReportRepository
 
     /// <summary>
     /// Returns the Unbilled X Aging table data:
-    /// rows where FirstBilledDate is blank, grouped by PanelName × AgingBucket(DaystoDOS).
+    /// rows where FirstBilledDate is blank, grouped by PanelName Ã— AgingBucket(DaystoDOS).
     /// </summary>
     Task<UnbilledAgingResult> GetUnbilledAgingAsync(
         string connectionString,
@@ -137,7 +137,7 @@ public interface IProductionReportRepository
 
     /// <summary>
     /// Returns the CPT Breakdown table data from LineLevelData:
-    /// grouped by CPTCode × Year/Month(FirstBilledDate).
+    /// grouped by CPTCode Ã— Year/Month(FirstBilledDate).
     /// </summary>
     Task<CptBreakdownResult> GetCptBreakdownAsync(
         string connectionString,
@@ -237,7 +237,9 @@ public sealed record PayerBreakdownResult(
     List<int> Years,
     List<PayerBreakdownRow> PayerRows,
     Dictionary<string, int> GrandTotalByMonth,
-    int GrandTotal);
+    int GrandTotal,
+    Dictionary<string, decimal>? GrandTotalChargesByMonth = null,
+    decimal GrandTotalCharges = 0);
 
 /// <summary>Result container for the Payer X Panel cross-tab table.</summary>
 public sealed record PayerPanelResult(

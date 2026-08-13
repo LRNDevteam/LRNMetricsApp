@@ -79,7 +79,11 @@ BEGIN
 
             UNION ALL
             SELECT RoleID, 'PMS', Description, ESYear, ESMonth,
-                   CAST(ESMonthClaimCount AS DECIMAL(18,2)), 2, Id
+                   -- Aria % rows store the ratio in ESMonthChargeAmount (ClaimCount is INT → would truncate to 0)
+                   CASE WHEN RoleID IN ('S.1.AP','S.3.AP')
+                        THEN ESMonthChargeAmount
+                        ELSE CAST(ESMonthClaimCount AS DECIMAL(18,2)) END,
+                   2, Id
             FROM dbo.NW_ES_PMS
 
             UNION ALL
@@ -549,6 +553,14 @@ BEGIN
         ORDER BY CASE name WHEN 'FirstBillDate' THEN 0 WHEN 'FirstBilledDate' THEN 1
                            WHEN 'First_Bill_Date' THEN 2 ELSE 3 END);
 
+    -- ARIA age uses Last Billed Date when present; else FirstBilledDate (mirrors file 30).
+    DECLARE @LastBillDateCol SYSNAME = (
+        SELECT TOP 1 name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.ClaimLevelData')
+          AND name IN ('LastBillDate','LastBilledDate','Last_Bill_Date','LastBilled','LastBill')
+        ORDER BY CASE name
+            WHEN 'LastBillDate' THEN 0 WHEN 'LastBilledDate' THEN 1
+            WHEN 'Last_Bill_Date' THEN 2 WHEN 'LastBilled' THEN 3 ELSE 4 END);
+
     DECLARE @EmedixSubDateCol SYSNAME = (
         SELECT TOP 1 name FROM sys.columns WHERE object_id=OBJECT_ID('dbo.ClaimLevelData')
           AND name IN ('EmedixSubmissionDate','EmedixSubmitDate','Emedix_Submission_Date','EmedixDate')
@@ -604,6 +616,7 @@ BEGIN
         ClaimType        NVARCHAR(200) NOT NULL,
         ClaimStatus      NVARCHAR(200) NOT NULL,
         FirstBilledDate  DATE          NULL,
+        LastBilledDate   DATE          NULL,
         ChargeAmount     DECIMAL(18,2) NOT NULL,
         InsurancePayment DECIMAL(18,2) NOT NULL,
         ActualPayment    DECIMAL(18,2) NOT NULL,
@@ -633,10 +646,16 @@ BEGIN
                  THEN N'(@bt IS NULL OR TRY_CAST([' + @FirstBillDateCol + N'] AS DATE) <= @bt)'
                  ELSE N'(1=1)' END;
 
-        -- FirstBilledDate captured into #Base (needed for the ARIA "submitted/not
-        -- submitted in the last 30 days" rows below — mirrors file 30).
+        -- FirstBilledDate captured for ARIA age (anchor day + 30-day lookback).
+        -- LastBilledDate kept for parity with aggregate #Base shape.
         DECLARE @FBDExpr NVARCHAR(300) = CASE WHEN @FirstBillDateCol IS NOT NULL
             THEN N'TRY_CAST([' + @FirstBillDateCol + N'] AS DATE)'
+            ELSE N'CAST(NULL AS DATE)' END;
+        DECLARE @LBDExpr NVARCHAR(300) = CASE
+            WHEN @LastBillDateCol IS NOT NULL
+                THEN N'TRY_CAST([' + @LastBillDateCol + N'] AS DATE)'
+            WHEN @FirstBillDateCol IS NOT NULL
+                THEN N'TRY_CAST([' + @FirstBillDateCol + N'] AS DATE)'
             ELSE N'CAST(NULL AS DATE)' END;
 
         DECLARE @BaseSql NVARCHAR(MAX) = N'
@@ -647,6 +666,7 @@ BEGIN
                 ISNULL(LTRIM(RTRIM([' + @ClaimTypeCol + N'])),''''),
                 ISNULL(LTRIM(RTRIM(ClaimStatus)),''''),
                 ' + @FBDExpr + N',
+                ' + @LBDExpr + N',
                 ISNULL(TRY_CAST(ChargeAmount AS DECIMAL(18,2)),0),
                 ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)),0),
                 ' + @ActExpr + N', ' + @DupExpr + N',
@@ -681,52 +701,30 @@ BEGIN
     DROP TABLE IF EXISTS #Periods;
     SELECT DISTINCT ESYear, ESMonth INTO #Periods FROM #Base;
 
-    -- ── ARIA "submitted / not submitted in the last 30 days" scalars ─────────
-    -- Mirrors usp_RefreshNW_ExecutiveSummary (file 30) exactly: point-in-time
-    -- snapshot (not period-bucketed), broadcast to every ESYear/ESMonth row
-    -- below. Anchor = most recent FirstBilledDate not in the future; window =
-    -- anchor minus one calendar month. Each group mirrors the same parent-row
-    -- filter conditions used in file 30 (ClaimType exclusion, ClaimStatus, and
-    -- for the AC.1/AC.3 dollar rows the Billed IN ('Billed','Billed - Client')
-    -- condition), with the FirstBilledDate window layered on top.
-    DECLARE @AriaAnchor      DATE = (SELECT MAX(FirstBilledDate) FROM #Base WHERE FirstBilledDate <= CAST(GETDATE() AS DATE));
-    DECLARE @AriaWindowStart DATE = DATEADD(MONTH, -1, @AriaAnchor);
+    -- ── ARIA — per DOS period (same simple rule as file 30) ──
+    -- Anchor = MAX(FirstBilledDate) < today; every month AsOf = same day; lookback 30.
+    DECLARE @AriaAnchor DATE = (
+        SELECT MAX(FirstBilledDate) FROM #Base
+        WHERE FirstBilledDate IS NOT NULL AND FirstBilledDate < CAST(GETDATE() AS DATE));
+    IF @AriaAnchor IS NULL SET @AriaAnchor = DATEADD(DAY, -1, CAST(GETDATE() AS DATE));
+    DECLARE @AriaDay INT = DAY(@AriaAnchor);
 
-    -- S.1 (Count of AccessionNumber, ClaimStatus = 'Fully Denied')
-    DECLARE @S1_A1 DECIMAL(18,2) = (SELECT COUNT(DISTINCT AccessionNumber) FROM #Base
-        WHERE ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='Fully Denied'
-          AND @AriaAnchor IS NOT NULL AND FirstBilledDate BETWEEN @AriaWindowStart AND @AriaAnchor);
-    DECLARE @S1_A2 DECIMAL(18,2) = (SELECT COUNT(DISTINCT AccessionNumber) FROM #Base
-        WHERE ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='Fully Denied'
-          AND (@AriaAnchor IS NULL OR FirstBilledDate IS NULL OR FirstBilledDate < @AriaWindowStart OR FirstBilledDate > @AriaAnchor));
-    DECLARE @S1_AP DECIMAL(18,2) = CASE WHEN ISNULL(@S1_A2,0) > 0 THEN @S1_A1 / @S1_A2 ELSE 0 END;
-
-    -- S.3 (Count of AccessionNumber, ClaimStatus = 'No Response')
-    DECLARE @S3_A1 DECIMAL(18,2) = (SELECT COUNT(DISTINCT AccessionNumber) FROM #Base
-        WHERE ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='No Response'
-          AND @AriaAnchor IS NOT NULL AND FirstBilledDate BETWEEN @AriaWindowStart AND @AriaAnchor);
-    DECLARE @S3_A2 DECIMAL(18,2) = (SELECT COUNT(DISTINCT AccessionNumber) FROM #Base
-        WHERE ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='No Response'
-          AND (@AriaAnchor IS NULL OR FirstBilledDate IS NULL OR FirstBilledDate < @AriaWindowStart OR FirstBilledDate > @AriaAnchor));
-    DECLARE @S3_AP DECIMAL(18,2) = CASE WHEN ISNULL(@S3_A2,0) > 0 THEN @S3_A1 / @S3_A2 ELSE 0 END;
-
-    -- AC.1 (SUM of InsuranceBalance, ClaimStatus = 'Fully Denied')
-    DECLARE @AC1_A1 DECIMAL(18,2) = (SELECT ISNULL(SUM(InsuranceBalance),0) FROM #Base
-        WHERE Billed IN ('Billed','Billed - Client') AND ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='Fully Denied'
-          AND @AriaAnchor IS NOT NULL AND FirstBilledDate BETWEEN @AriaWindowStart AND @AriaAnchor);
-    DECLARE @AC1_A2 DECIMAL(18,2) = (SELECT ISNULL(SUM(InsuranceBalance),0) FROM #Base
-        WHERE Billed IN ('Billed','Billed - Client') AND ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='Fully Denied'
-          AND (@AriaAnchor IS NULL OR FirstBilledDate IS NULL OR FirstBilledDate < @AriaWindowStart OR FirstBilledDate > @AriaAnchor));
-    DECLARE @AC1_AP DECIMAL(18,2) = CASE WHEN ISNULL(@AC1_A2,0) > 0 THEN @AC1_A1 / @AC1_A2 ELSE 0 END;
-
-    -- AC.3 (SUM of InsuranceBalance, ClaimStatus = 'No Response')
-    DECLARE @AC3_A1 DECIMAL(18,2) = (SELECT ISNULL(SUM(InsuranceBalance),0) FROM #Base
-        WHERE Billed IN ('Billed','Billed - Client') AND ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='No Response'
-          AND @AriaAnchor IS NOT NULL AND FirstBilledDate BETWEEN @AriaWindowStart AND @AriaAnchor);
-    DECLARE @AC3_A2 DECIMAL(18,2) = (SELECT ISNULL(SUM(InsuranceBalance),0) FROM #Base
-        WHERE Billed IN ('Billed','Billed - Client') AND ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND ClaimStatus='No Response'
-          AND (@AriaAnchor IS NULL OR FirstBilledDate IS NULL OR FirstBilledDate < @AriaWindowStart OR FirstBilledDate > @AriaAnchor));
-    DECLARE @AC3_AP DECIMAL(18,2) = CASE WHEN ISNULL(@AC3_A2,0) > 0 THEN @AC3_A1 / @AC3_A2 ELSE 0 END;
+    IF OBJECT_ID('tempdb..#PeriodWindow') IS NOT NULL DROP TABLE #PeriodWindow;
+    SELECT
+        p.ESYear, p.ESMonth,
+        AsOfDate = CASE
+            WHEN (
+                CASE WHEN @AriaDay > DAY(EOMONTH(DATEFROMPARTS(p.ESYear, p.ESMonth, 1)))
+                     THEN EOMONTH(DATEFROMPARTS(p.ESYear, p.ESMonth, 1))
+                     ELSE DATEFROMPARTS(p.ESYear, p.ESMonth, @AriaDay) END
+            ) > @AriaAnchor THEN @AriaAnchor
+            ELSE
+                CASE WHEN @AriaDay > DAY(EOMONTH(DATEFROMPARTS(p.ESYear, p.ESMonth, 1)))
+                     THEN EOMONTH(DATEFROMPARTS(p.ESYear, p.ESMonth, 1))
+                     ELSE DATEFROMPARTS(p.ESYear, p.ESMonth, @AriaDay) END
+        END
+    INTO #PeriodWindow
+    FROM #Periods p;
 
     -- Combine LIS (#LisOut) + PMS/Cash/Avg (live from ClaimLevelData)
     SELECT RowCode, 'LIS' AS Category, Description, ESYear AS BillYear, ESMonth AS BillMonth, MetricValue FROM #LisOut
@@ -796,38 +794,215 @@ BEGIN
 
     UNION ALL
     -- AF  Average Payment ($) - Total Pay/Adjudicated Claims
+    --     = (Fully Paid Ins $ + Partially Paid $)
+    --       / (ADCS + Fully Paid + Adj/WO + Fully Denied + Partially Denied
+    --          + Partially Paid + Partially Adjusted + Patient Paid + Pat Resp)
     SELECT 'AF','Avg','Average Payment ($) - Total Pay/Adjudicated Claims',b.ESYear,b.ESMonth,
-           CASE WHEN COUNT(CASE WHEN b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND b.ClaimStatus IN ('Fully Paid','Fully Adjusted','Fully Denied','Partially Denied') THEN b.AccessionNumber END)>0
-                THEN SUM(CASE WHEN b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND b.ClaimStatus IN ('Fully Paid','Partially Paid') THEN b.InsurancePayment ELSE 0 END)
-                   / COUNT(CASE WHEN b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries') AND b.ClaimStatus IN ('Fully Paid','Fully Adjusted','Fully Denied','Partially Denied') THEN b.AccessionNumber END)
+           CASE WHEN COUNT(CASE
+                    WHEN b.ClaimType = 'ADCS - Invoice' THEN b.AccessionNumber
+                    WHEN b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries')
+                     AND b.ClaimStatus IN (
+                         'Fully Paid','Fully Adjusted','Fully Denied','Partially Denied',
+                         'Partially Paid','Partial Paid','Partially Adjusted',
+                         'Patient Paid','Pat Responsibility')
+                    THEN b.AccessionNumber END) > 0
+                THEN SUM(CASE
+                        WHEN b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries')
+                         AND b.ClaimStatus IN ('Fully Paid','Partially Paid','Partial Paid')
+                        THEN b.InsurancePayment ELSE 0 END)
+                   / COUNT(CASE
+                        WHEN b.ClaimType = 'ADCS - Invoice' THEN b.AccessionNumber
+                        WHEN b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries')
+                         AND b.ClaimStatus IN (
+                             'Fully Paid','Fully Adjusted','Fully Denied','Partially Denied',
+                             'Partially Paid','Partial Paid','Partially Adjusted',
+                             'Patient Paid','Pat Responsibility')
+                        THEN b.AccessionNumber END)
                 ELSE 0 END
     FROM #Base b GROUP BY b.ESYear, b.ESMonth
 
     UNION ALL
-    -- S.1 / S.3 / AC.1 / AC.3 ARIA rows (mirrors file 30's aggregate refresh)
-    SELECT 'S.1.A1','PMS','    Aria Submitted in the last 30 Days',p.ESYear,p.ESMonth,@S1_A1 FROM #Periods p
+    -- S.1 / S.3 ARIA (PMS) — FirstBilledDate window per month AsOf (not DOS-filtered)
+    SELECT 'S.1.A1','PMS','    Aria Submitted in the last 30 Days',w.ESYear,w.ESMonth,
+           COUNT(b.AccessionNumber)
+    FROM #PeriodWindow w
+    LEFT JOIN #Base b
+      ON b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries')
+     AND b.ClaimStatus = 'Fully Denied'
+     AND b.FirstBilledDate IS NOT NULL
+     AND DATEDIFF(DAY, b.FirstBilledDate, w.AsOfDate) BETWEEN 0 AND 30
+    GROUP BY w.ESYear, w.ESMonth
     UNION ALL
-    SELECT 'S.1.A2','PMS','    Aria not submitted in the last 30 Days',p.ESYear,p.ESMonth,@S1_A2 FROM #Periods p
+    SELECT 'S.1.A2','PMS','    Aria not submitted in the last 30 Days',w.ESYear,w.ESMonth,
+           COUNT(b.AccessionNumber)
+    FROM #PeriodWindow w
+    LEFT JOIN #Base b
+      ON b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries')
+     AND b.ClaimStatus = 'Fully Denied'
+     AND (b.FirstBilledDate IS NULL
+          OR DATEDIFF(DAY, b.FirstBilledDate, w.AsOfDate) NOT BETWEEN 0 AND 30)
+    GROUP BY w.ESYear, w.ESMonth
     UNION ALL
-    SELECT 'S.1.AP','PMS','    % of the claim submitted in the last 30 Days',p.ESYear,p.ESMonth,@S1_AP FROM #Periods p
+    SELECT 'S.1.AP','PMS','    % of the claim submitted in the last 30 Days',a1.ESYear,a1.ESMonth,
+           CASE WHEN ISNULL(a2.MetricValue,0) > 0 THEN CAST(a1.MetricValue AS DECIMAL(18,4)) / a2.MetricValue ELSE 0 END
+    FROM (
+        SELECT w.ESYear, w.ESMonth, COUNT(b.AccessionNumber) AS MetricValue
+        FROM #PeriodWindow w
+        LEFT JOIN #Base b
+          ON b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries')
+         AND b.ClaimStatus = 'Fully Denied'
+         AND b.FirstBilledDate IS NOT NULL
+         AND DATEDIFF(DAY, b.FirstBilledDate, w.AsOfDate) BETWEEN 0 AND 30
+        GROUP BY w.ESYear, w.ESMonth
+    ) a1
+    JOIN (
+        SELECT w.ESYear, w.ESMonth, COUNT(b.AccessionNumber) AS MetricValue
+        FROM #PeriodWindow w
+        LEFT JOIN #Base b
+          ON b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries')
+         AND b.ClaimStatus = 'Fully Denied'
+         AND (b.FirstBilledDate IS NULL
+              OR DATEDIFF(DAY, b.FirstBilledDate, w.AsOfDate) NOT BETWEEN 0 AND 30)
+        GROUP BY w.ESYear, w.ESMonth
+    ) a2 ON a2.ESYear = a1.ESYear AND a2.ESMonth = a1.ESMonth
     UNION ALL
-    SELECT 'S.3.A1','PMS','    Claim filed by ARIA in the last 30 days',p.ESYear,p.ESMonth,@S3_A1 FROM #Periods p
+    SELECT 'S.3.A1','PMS','    Claim filed by ARIA in the last 30 days',w.ESYear,w.ESMonth,
+           COUNT(b.AccessionNumber)
+    FROM #PeriodWindow w
+    LEFT JOIN #Base b
+      ON b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries')
+     AND b.ClaimStatus = 'No Response'
+     AND b.FirstBilledDate IS NOT NULL
+     AND DATEDIFF(DAY, b.FirstBilledDate, w.AsOfDate) BETWEEN 0 AND 30
+    GROUP BY w.ESYear, w.ESMonth
     UNION ALL
-    SELECT 'S.3.A2','PMS','    Claims not filed in the last 30 days',p.ESYear,p.ESMonth,@S3_A2 FROM #Periods p
+    SELECT 'S.3.A2','PMS','    Claims not filed in the last 30 days',w.ESYear,w.ESMonth,
+           COUNT(b.AccessionNumber)
+    FROM #PeriodWindow w
+    LEFT JOIN #Base b
+      ON b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries')
+     AND b.ClaimStatus = 'No Response'
+     AND (b.FirstBilledDate IS NULL
+          OR DATEDIFF(DAY, b.FirstBilledDate, w.AsOfDate) NOT BETWEEN 0 AND 30)
+    GROUP BY w.ESYear, w.ESMonth
     UNION ALL
-    SELECT 'S.3.AP','PMS','    % of the claim submitted in the last 30 Days',p.ESYear,p.ESMonth,@S3_AP FROM #Periods p
+    SELECT 'S.3.AP','PMS','    % of the claim submitted in the last 30 Days',a1.ESYear,a1.ESMonth,
+           CASE WHEN ISNULL(a2.MetricValue,0) > 0 THEN CAST(a1.MetricValue AS DECIMAL(18,4)) / a2.MetricValue ELSE 0 END
+    FROM (
+        SELECT w.ESYear, w.ESMonth, COUNT(b.AccessionNumber) AS MetricValue
+        FROM #PeriodWindow w
+        LEFT JOIN #Base b
+          ON b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries')
+         AND b.ClaimStatus = 'No Response'
+         AND b.FirstBilledDate IS NOT NULL
+         AND DATEDIFF(DAY, b.FirstBilledDate, w.AsOfDate) BETWEEN 0 AND 30
+        GROUP BY w.ESYear, w.ESMonth
+    ) a1
+    JOIN (
+        SELECT w.ESYear, w.ESMonth, COUNT(b.AccessionNumber) AS MetricValue
+        FROM #PeriodWindow w
+        LEFT JOIN #Base b
+          ON b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries')
+         AND b.ClaimStatus = 'No Response'
+         AND (b.FirstBilledDate IS NULL
+              OR DATEDIFF(DAY, b.FirstBilledDate, w.AsOfDate) NOT BETWEEN 0 AND 30)
+        GROUP BY w.ESYear, w.ESMonth
+    ) a2 ON a2.ESYear = a1.ESYear AND a2.ESMonth = a1.ESMonth
     UNION ALL
-    SELECT 'AC.1.A1','Cash','    Claim filed by ARIA in the last 30 days',p.ESYear,p.ESMonth,@AC1_A1 FROM #Periods p
+    -- AC.1 / AC.3 ARIA (Cash $) — FirstBilledDate window (not DOS-filtered)
+    SELECT 'AC.1.A1','Cash','    Aria Submitted in the last 30 Days',w.ESYear,w.ESMonth,
+           ISNULL(SUM(b.InsuranceBalance),0)
+    FROM #PeriodWindow w
+    LEFT JOIN #Base b
+      ON b.Billed IN ('Billed','Billed - Client')
+     AND b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries')
+     AND b.ClaimStatus = 'Fully Denied'
+     AND b.FirstBilledDate IS NOT NULL
+     AND DATEDIFF(DAY, b.FirstBilledDate, w.AsOfDate) BETWEEN 0 AND 30
+    GROUP BY w.ESYear, w.ESMonth
     UNION ALL
-    SELECT 'AC.1.A2','Cash','    Claims not filed in the last 30 days',p.ESYear,p.ESMonth,@AC1_A2 FROM #Periods p
+    SELECT 'AC.1.A2','Cash','    Aria not submitted in the last 30 Days',w.ESYear,w.ESMonth,
+           ISNULL(SUM(b.InsuranceBalance),0)
+    FROM #PeriodWindow w
+    LEFT JOIN #Base b
+      ON b.Billed IN ('Billed','Billed - Client')
+     AND b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries')
+     AND b.ClaimStatus = 'Fully Denied'
+     AND (b.FirstBilledDate IS NULL
+          OR DATEDIFF(DAY, b.FirstBilledDate, w.AsOfDate) NOT BETWEEN 0 AND 30)
+    GROUP BY w.ESYear, w.ESMonth
     UNION ALL
-    SELECT 'AC.1.AP','Cash','    % of the claim submitted in the last 30 Days',p.ESYear,p.ESMonth,@AC1_AP FROM #Periods p
+    SELECT 'AC.1.AP','Cash','    % of the claim submitted in the last 30 Days',a1.ESYear,a1.ESMonth,
+           CASE WHEN ISNULL(a2.MetricValue,0) > 0 THEN a1.MetricValue / a2.MetricValue ELSE 0 END
+    FROM (
+        SELECT w.ESYear, w.ESMonth, ISNULL(SUM(b.InsuranceBalance),0) AS MetricValue
+        FROM #PeriodWindow w
+        LEFT JOIN #Base b
+          ON b.Billed IN ('Billed','Billed - Client')
+         AND b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries')
+         AND b.ClaimStatus = 'Fully Denied'
+         AND b.FirstBilledDate IS NOT NULL
+         AND DATEDIFF(DAY, b.FirstBilledDate, w.AsOfDate) BETWEEN 0 AND 30
+        GROUP BY w.ESYear, w.ESMonth
+    ) a1
+    JOIN (
+        SELECT w.ESYear, w.ESMonth, ISNULL(SUM(b.InsuranceBalance),0) AS MetricValue
+        FROM #PeriodWindow w
+        LEFT JOIN #Base b
+          ON b.Billed IN ('Billed','Billed - Client')
+         AND b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries')
+         AND b.ClaimStatus = 'Fully Denied'
+         AND (b.FirstBilledDate IS NULL
+              OR DATEDIFF(DAY, b.FirstBilledDate, w.AsOfDate) NOT BETWEEN 0 AND 30)
+        GROUP BY w.ESYear, w.ESMonth
+    ) a2 ON a2.ESYear = a1.ESYear AND a2.ESMonth = a1.ESMonth
     UNION ALL
-    SELECT 'AC.3.A1','Cash','    Claim filed by ARIA in the last 30 days',p.ESYear,p.ESMonth,@AC3_A1 FROM #Periods p
+    SELECT 'AC.3.A1','Cash','    Aria Submitted in the last 30 Days',w.ESYear,w.ESMonth,
+           ISNULL(SUM(b.InsuranceBalance),0)
+    FROM #PeriodWindow w
+    LEFT JOIN #Base b
+      ON b.Billed IN ('Billed','Billed - Client')
+     AND b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries')
+     AND b.ClaimStatus = 'No Response'
+     AND b.FirstBilledDate IS NOT NULL
+     AND DATEDIFF(DAY, b.FirstBilledDate, w.AsOfDate) BETWEEN 0 AND 30
+    GROUP BY w.ESYear, w.ESMonth
     UNION ALL
-    SELECT 'AC.3.A2','Cash','    Claims not filed in the last 30 days',p.ESYear,p.ESMonth,@AC3_A2 FROM #Periods p
+    SELECT 'AC.3.A2','Cash','    Aria not submitted in the last 30 Days',w.ESYear,w.ESMonth,
+           ISNULL(SUM(b.InsuranceBalance),0)
+    FROM #PeriodWindow w
+    LEFT JOIN #Base b
+      ON b.Billed IN ('Billed','Billed - Client')
+     AND b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries')
+     AND b.ClaimStatus = 'No Response'
+     AND (b.FirstBilledDate IS NULL
+          OR DATEDIFF(DAY, b.FirstBilledDate, w.AsOfDate) NOT BETWEEN 0 AND 30)
+    GROUP BY w.ESYear, w.ESMonth
     UNION ALL
-    SELECT 'AC.3.AP','Cash','    % of the claim submitted in the last 30 Days',p.ESYear,p.ESMonth,@AC3_AP FROM #Periods p
+    SELECT 'AC.3.AP','Cash','    % of the claim submitted in the last 30 Days',a1.ESYear,a1.ESMonth,
+           CASE WHEN ISNULL(a2.MetricValue,0) > 0 THEN a1.MetricValue / a2.MetricValue ELSE 0 END
+    FROM (
+        SELECT w.ESYear, w.ESMonth, ISNULL(SUM(b.InsuranceBalance),0) AS MetricValue
+        FROM #PeriodWindow w
+        LEFT JOIN #Base b
+          ON b.Billed IN ('Billed','Billed - Client')
+         AND b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries')
+         AND b.ClaimStatus = 'No Response'
+         AND b.FirstBilledDate IS NOT NULL
+         AND DATEDIFF(DAY, b.FirstBilledDate, w.AsOfDate) BETWEEN 0 AND 30
+        GROUP BY w.ESYear, w.ESMonth
+    ) a1
+    JOIN (
+        SELECT w.ESYear, w.ESMonth, ISNULL(SUM(b.InsuranceBalance),0) AS MetricValue
+        FROM #PeriodWindow w
+        LEFT JOIN #Base b
+          ON b.Billed IN ('Billed','Billed - Client')
+         AND b.ClaimType NOT IN ('ADCS - Invoice','Test Patient Entries')
+         AND b.ClaimStatus = 'No Response'
+         AND (b.FirstBilledDate IS NULL
+              OR DATEDIFF(DAY, b.FirstBilledDate, w.AsOfDate) NOT BETWEEN 0 AND 30)
+        GROUP BY w.ESYear, w.ESMonth
+    ) a2 ON a2.ESYear = a1.ESYear AND a2.ESMonth = a1.ESMonth
 
     ORDER BY BillYear, BillMonth, Category, RowCode;
 
@@ -837,6 +1012,7 @@ BEGIN
     DROP TABLE IF EXISTS #LisOut;
     DROP TABLE IF EXISTS #Base;
     DROP TABLE IF EXISTS #Periods;
+    DROP TABLE IF EXISTS #PeriodWindow;
 END;
 GO
 

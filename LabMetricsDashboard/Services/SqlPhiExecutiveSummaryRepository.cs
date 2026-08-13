@@ -2294,4 +2294,675 @@ public sealed class SqlPhiExecutiveSummaryRepository
             });
         }
     }
+
+    /// <summary>
+    /// Beech Tree Three-Pillar Diagnostic — LIS Breakdown only
+    /// (dbo.usp_GetBeechTree_ThreePillarLisDiagnostic). PMS/Cash loaded by
+    /// separate SPs in later phases.
+    /// </summary>
+    public async Task<ExecSummaryThreePillarViewModel> GetBeechTreeThreePillarLisAsync(
+        string connectionString,
+        string labName,
+        int trailingMonths,
+        int dayWindow,
+        DateTime? asOfDate,
+        CancellationToken ct = default)
+    {
+        var vm = new ExecSummaryThreePillarViewModel
+        {
+            LabName = labName,
+            TrailingMonths = trailingMonths,
+            DayWindow = dayWindow,
+            AsOfDate = asOfDate,
+        };
+        var sw = Stopwatch.StartNew();
+        const string spName = "dbo.usp_GetBeechTree_ThreePillarLisDiagnostic";
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+            await using var cmd = new SqlCommand(spName, conn)
+            { CommandType = System.Data.CommandType.StoredProcedure, CommandTimeout = 90 };
+            cmd.Parameters.AddWithValue("@Year", 0);
+            cmd.Parameters.AddWithValue("@TrailingMonths", trailingMonths);
+            cmd.Parameters.AddWithValue("@DayWindow", dayWindow);
+            cmd.Parameters.AddWithValue("@AsOfDate", (object?)asOfDate?.Date ?? DBNull.Value);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+
+            Dictionary<string, int> Map()
+            {
+                var m = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < r.FieldCount; i++) m[r.GetName(i)] = i;
+                return m;
+            }
+            long L(Dictionary<string, int> m, string c) =>
+                m.TryGetValue(c, out var i) && !r.IsDBNull(i) ? Convert.ToInt64(r.GetValue(i)) : 0L;
+            int I(Dictionary<string, int> m, string c) =>
+                m.TryGetValue(c, out var i) && !r.IsDBNull(i) ? Convert.ToInt32(r.GetValue(i)) : 0;
+            string S(Dictionary<string, int> m, string c) =>
+                m.TryGetValue(c, out var i) && !r.IsDBNull(i) ? Convert.ToString(r.GetValue(i)) ?? "" : "";
+            decimal? DN(Dictionary<string, int> m, string c) =>
+                m.TryGetValue(c, out var i) && !r.IsDBNull(i) ? Convert.ToDecimal(r.GetValue(i)) : (decimal?)null;
+
+            // RS1 — monthly LIS breakdown
+            var map = Map();
+            while (await r.ReadAsync(ct))
+            {
+                var row = new ThreePillarLisMonth
+                {
+                    MonthLabel = S(map, "MonthLabel"),
+                    SortYear = I(map, "SortYear"),
+                    SortMonth = I(map, "SortMonth"),
+                    TotalSamples = L(map, "TotalSamples"),
+                    Resulted = L(map, "Resulted"),
+                    PctResulted = DN(map, "PctResulted"),
+                    BilledToInsurance = L(map, "BilledToInsurance"),
+                    PctBilledOfResulted = DN(map, "PctBilledOfResulted"),
+                    SelfPay = L(map, "SelfPay"),
+                    SelfPayPct = DN(map, "SelfPayPct"),
+                    ClientBill = L(map, "ClientBill"),
+                    ClientBillPct = DN(map, "ClientBillPct"),
+                    NotResulted = L(map, "NotResulted"),
+                };
+                vm.LisMonthly.Add(row);
+                vm.LisFunnel.Add(new ThreePillarLisFunnelMonth
+                {
+                    MonthLabel = row.MonthLabel,
+                    Collected = row.TotalSamples,
+                    Resulted = row.Resulted,
+                    BilledToInsurance = row.BilledToInsurance,
+                });
+                vm.PctBilledOfResulted.Add(new ThreePillarPctBilledOfResultedMonth
+                {
+                    MonthLabel = row.MonthLabel,
+                    Resulted = row.Resulted,
+                    BilledToInsurance = row.BilledToInsurance,
+                    PctBilledOfResulted = row.PctBilledOfResulted,
+                });
+                vm.SelfPayClientBill.Add(new ThreePillarSelfPayClientBillMonth
+                {
+                    MonthLabel = row.MonthLabel,
+                    TotalSamples = row.TotalSamples,
+                    SelfPay = row.SelfPay,
+                    ClientBill = row.ClientBill,
+                    SelfPayPct = row.SelfPayPct,
+                    ClientBillPct = row.ClientBillPct,
+                });
+                vm.NotResulted.Add(new ThreePillarNotResultedMonth
+                {
+                    MonthLabel = row.MonthLabel,
+                    NotResulted = row.NotResulted,
+                });
+            }
+
+            // RS2 — backlog summary
+            await r.NextResultAsync(ct); map = Map();
+            if (await r.ReadAsync(ct))
+                vm.BacklogSummary = new ThreePillarBacklogSummary
+                {
+                    TotalBacklog = L(map, "TotalBacklog"),
+                    MedianAgeDays = DN(map, "MedianAgeDays"),
+                    PctOver60Days = DN(map, "PctOver60Days"),
+                };
+
+            // RS3 — backlog buckets
+            await r.NextResultAsync(ct); map = Map();
+            while (await r.ReadAsync(ct))
+                vm.BacklogBuckets.Add(new ThreePillarAgeBucket
+                {
+                    AgeBucket = S(map, "AgeBucket"),
+                    SortOrder = I(map, "SortOrder"),
+                    SampleCount = L(map, "SampleCount"),
+                });
+
+            // RS4 — full-period funnel
+            if (await r.NextResultAsync(ct))
+            {
+                map = Map();
+                if (await r.ReadAsync(ct))
+                    vm.FunnelPeriod = new ThreePillarLisFunnelPeriod
+                    {
+                        Collected = L(map, "Collected"),
+                        Resulted = L(map, "Resulted"),
+                        BilledToInsurance = L(map, "BilledToInsurance"),
+                        PctResulted = DN(map, "PctResulted"),
+                        PctBilledOfCollected = DN(map, "PctBilledOfCollected"),
+                        PctBilledOfResulted = DN(map, "PctBilledOfResulted"),
+                    };
+            }
+
+            vm.LisLoaded = true;
+            _logger.LogInformation(
+                "ThreePillar LIS loaded for lab='{Lab}' months={Months} dayWin={Day} asOf={AsOf} rows={M} backlog={B} in {Ms}ms",
+                labName, trailingMonths, dayWindow, asOfDate?.ToString("yyyy-MM-dd"),
+                vm.LisMonthly.Count, vm.BacklogSummary.TotalBacklog, sw.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ThreePillar LIS failed for lab='{Lab}'", labName);
+            vm.ErrorMessage = $"Failed to load LIS diagnostic: {ex.Message}";
+        }
+        return vm;
+    }
+
+    /// <summary>
+    /// Beech Tree Three-Pillar Pillar 2 (PMS) — dbo.usp_GetBeechTree_ThreePillarPmsDiagnostic.
+    /// </summary>
+    public async Task<ExecSummaryThreePillarViewModel> GetBeechTreeThreePillarPmsAsync(
+        string connectionString,
+        string labName,
+        int trailingMonths,
+        int dayWindow,
+        DateTime? asOfDate,
+        CancellationToken ct = default)
+    {
+        var vm = new ExecSummaryThreePillarViewModel
+        {
+            LabName = labName,
+            TrailingMonths = trailingMonths,
+            DayWindow = dayWindow,
+            AsOfDate = asOfDate,
+        };
+        var sw = Stopwatch.StartNew();
+        const string spName = "dbo.usp_GetBeechTree_ThreePillarPmsDiagnostic";
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+            await using var cmd = new SqlCommand(spName, conn)
+            { CommandType = System.Data.CommandType.StoredProcedure, CommandTimeout = 120 };
+            cmd.Parameters.AddWithValue("@TrailingMonths", trailingMonths);
+            cmd.Parameters.AddWithValue("@DayWindow", dayWindow);
+            cmd.Parameters.AddWithValue("@AsOfDate", (object?)asOfDate?.Date ?? DBNull.Value);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+
+            Dictionary<string, int> Map()
+            {
+                var m = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < r.FieldCount; i++) m[r.GetName(i)] = i;
+                return m;
+            }
+            long L(Dictionary<string, int> m, string c) =>
+                m.TryGetValue(c, out var i) && !r.IsDBNull(i) ? Convert.ToInt64(r.GetValue(i)) : 0L;
+            int I(Dictionary<string, int> m, string c) =>
+                m.TryGetValue(c, out var i) && !r.IsDBNull(i) ? Convert.ToInt32(r.GetValue(i)) : 0;
+            string S(Dictionary<string, int> m, string c) =>
+                m.TryGetValue(c, out var i) && !r.IsDBNull(i) ? Convert.ToString(r.GetValue(i)) ?? "" : "";
+            decimal? DN(Dictionary<string, int> m, string c) =>
+                m.TryGetValue(c, out var i) && !r.IsDBNull(i) ? Convert.ToDecimal(r.GetValue(i)) : (decimal?)null;
+            decimal D(Dictionary<string, int> m, string c) =>
+                m.TryGetValue(c, out var i) && !r.IsDBNull(i) ? Convert.ToDecimal(r.GetValue(i)) : 0m;
+
+            // 1) Reconciliation
+            var map = Map();
+            while (await r.ReadAsync(ct))
+                vm.Reconciliation.Add(new ThreePillarReconciliationMonth
+                {
+                    MonthLabel = S(map, "MonthLabel"),
+                    PmsBilled = L(map, "PmsBilled"),
+                    LisBilledToInsurance = L(map, "LisBilledToInsurance"),
+                    Gap = L(map, "Gap"),
+                });
+
+            // 2) Fully Adjusted %
+            await r.NextResultAsync(ct); map = Map();
+            while (await r.ReadAsync(ct))
+                vm.FullyAdjusted.Add(new ThreePillarFullyAdjustedMonth
+                {
+                    MonthLabel = S(map, "MonthLabel"),
+                    BilledClaims = L(map, "BilledClaims"),
+                    FullyAdjusted = L(map, "FullyAdjusted"),
+                    PctFullyAdjusted = DN(map, "PctFullyAdjusted"),
+                });
+
+            // 3) Reason Pareto
+            await r.NextResultAsync(ct); map = Map();
+            while (await r.ReadAsync(ct))
+                vm.FullyAdjustedReasons.Add(new ThreePillarFullyAdjustedReason
+                {
+                    TransactionCodeCombined = S(map, "TransactionCodeCombined"),
+                    MatchingCount = L(map, "MatchingCount"),
+                });
+
+            // 4) Fully Paid %
+            await r.NextResultAsync(ct); map = Map();
+            while (await r.ReadAsync(ct))
+                vm.FullyPaid.Add(new ThreePillarFullyPaidMonth
+                {
+                    MonthLabel = S(map, "MonthLabel"),
+                    BilledClaims = L(map, "BilledClaims"),
+                    FullyPaid = L(map, "FullyPaid"),
+                    PctFullyPaid = DN(map, "PctFullyPaid"),
+                });
+
+            // 5) Insurance Balance trend
+            await r.NextResultAsync(ct); map = Map();
+            while (await r.ReadAsync(ct))
+                vm.InsuranceBalanceTrend.Add(new ThreePillarInsuranceBalanceMonth
+                {
+                    MonthLabel = S(map, "MonthLabel"),
+                    BilledClaims = L(map, "BilledClaims"),
+                    InsuranceBalanceClaims = L(map, "InsuranceBalanceClaims"),
+                    PctInsuranceBalance = DN(map, "PctInsuranceBalance"),
+                    FullyDeniedClaims = L(map, "FullyDeniedClaims"),
+                    NoResponseClaims = L(map, "NoResponseClaims"),
+                    PartiallyDeniedClaims = L(map, "PartiallyDeniedClaims"),
+                    InsuranceBalanceAmt = D(map, "InsuranceBalanceAmt"),
+                });
+
+            // 6) Panel avg allowed/paid
+            await r.NextResultAsync(ct); map = Map();
+            while (await r.ReadAsync(ct))
+                vm.PanelAvgAllowedPaid.Add(new ThreePillarPanelAvgAllowedPaid
+                {
+                    Panelname = S(map, "Panelname"),
+                    MonthLabelDos = S(map, "MonthLabel_DOS"),
+                    AvgAllowed = D(map, "AvgAllowed"),
+                    AllowedClaimCount = L(map, "AllowedClaimCount"),
+                    AvgPaidByPaymentDate = DN(map, "AvgPaidByPaymentDate"),
+                    PaidClaimCount = L(map, "PaidClaimCount"),
+                });
+
+            // 7) Panel × payer MOM
+            await r.NextResultAsync(ct); map = Map();
+            while (await r.ReadAsync(ct))
+                vm.PanelPayerMom.Add(new ThreePillarPanelPayerMom
+                {
+                    Panelname = S(map, "Panelname"),
+                    PayerName = S(map, "PayerName"),
+                    PriorMonthLabel = S(map, "PriorMonthLabel"),
+                    LatestMonthLabel = S(map, "LatestMonthLabel"),
+                    PriorAllowed = D(map, "PriorAllowed"),
+                    PriorPaid = D(map, "PriorPaid"),
+                    PriorN = L(map, "PriorN"),
+                    LatestAllowed = D(map, "LatestAllowed"),
+                    LatestPaid = D(map, "LatestPaid"),
+                    LatestN = L(map, "LatestN"),
+                    MomPctPaid = DN(map, "MomPctPaid"),
+                });
+
+            // 8) Maturity curve
+            await r.NextResultAsync(ct); map = Map();
+            while (await r.ReadAsync(ct))
+                vm.MaturityCurve.Add(new ThreePillarMaturityPoint
+                {
+                    DOSMonthLabel = S(map, "DOSMonthLabel"),
+                    DaySinceDOS = I(map, "DaySinceDOS"),
+                    PctAllowedPaid = DN(map, "PctAllowedPaid"),
+                });
+
+            // 9) Denial by carrier
+            await r.NextResultAsync(ct); map = Map();
+            while (await r.ReadAsync(ct))
+                vm.DenialByCarrier.Add(new ThreePillarDenialByCarrier
+                {
+                    PayerName = S(map, "PayerName"),
+                    TotalAllowed = D(map, "TotalAllowed"),
+                    DeniedAllowed = D(map, "DeniedAllowed"),
+                    DenialRatePct = DN(map, "DenialRatePct"),
+                });
+
+            // 10) Top denial reasons
+            await r.NextResultAsync(ct); map = Map();
+            while (await r.ReadAsync(ct))
+                vm.TopDenialReasons.Add(new ThreePillarTopDenialReason
+                {
+                    PayerName = S(map, "PayerName"),
+                    DenialCode = S(map, "DenialCode"),
+                    MonthLabel = S(map, "MonthLabel"),
+                    DenialCount = L(map, "DenialCount"),
+                });
+
+            vm.PmsLoaded = true;
+            _logger.LogInformation(
+                "ThreePillar PMS loaded for lab='{Lab}' months={Months} dayWin={Day} recon={R} in {Ms}ms",
+                labName, trailingMonths, dayWindow, vm.Reconciliation.Count, sw.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ThreePillar PMS failed for lab='{Lab}'", labName);
+            vm.ErrorMessage = $"Failed to load PMS diagnostic: {ex.Message}";
+        }
+        return vm;
+    }
+
+    /// <summary>
+    /// Beech Tree "Three-Pillar Framework &amp; 7-Check Diagnostic" prototype page.
+    /// Calls the standalone dbo.usp_GetBeechTree_ThreePillarDiagnosticDrill (does
+    /// NOT touch/share any existing LIS/PMS/Cash drill Core procedure) and reads
+    /// its 15 result sets in order.
+    /// </summary>
+    public async Task<ExecSummaryThreePillarViewModel> GetBeechTreeThreePillarDiagnosticAsync(
+        string connectionString, string labName, int year, CancellationToken ct = default)
+    {
+        var vm = new ExecSummaryThreePillarViewModel { LabName = labName, Year = year };
+        var sw = Stopwatch.StartNew();
+        const string spName = "dbo.usp_GetBeechTree_ThreePillarDiagnosticDrill";
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+            await using var cmd = new SqlCommand(spName, conn)
+            { CommandType = System.Data.CommandType.StoredProcedure, CommandTimeout = 120 };
+            cmd.Parameters.AddWithValue("@Year", year);
+            // Source doc uses Jan 2025–Jul 2026 (~19 months). Year=0 = trailing window.
+            cmd.Parameters.AddWithValue("@TrailingMonths", 19);
+            cmd.Parameters.AddWithValue("@AsOfDate", DBNull.Value);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+
+            Dictionary<string, int> Map()
+            {
+                var m = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < r.FieldCount; i++) m[r.GetName(i)] = i;
+                return m;
+            }
+            long L(Dictionary<string, int> m, string c) =>
+                m.TryGetValue(c, out var i) && !r.IsDBNull(i) ? Convert.ToInt64(r.GetValue(i)) : 0L;
+            int I(Dictionary<string, int> m, string c) =>
+                m.TryGetValue(c, out var i) && !r.IsDBNull(i) ? Convert.ToInt32(r.GetValue(i)) : 0;
+            string S(Dictionary<string, int> m, string c) =>
+                m.TryGetValue(c, out var i) && !r.IsDBNull(i) ? Convert.ToString(r.GetValue(i)) ?? "" : "";
+            decimal? DN(Dictionary<string, int> m, string c) =>
+                m.TryGetValue(c, out var i) && !r.IsDBNull(i) ? Convert.ToDecimal(r.GetValue(i)) : (decimal?)null;
+            decimal D(Dictionary<string, int> m, string c) =>
+                m.TryGetValue(c, out var i) && !r.IsDBNull(i) ? Convert.ToDecimal(r.GetValue(i)) : 0m;
+
+            // 1) LIS funnel
+            var map = Map();
+            while (await r.ReadAsync(ct))
+                vm.LisFunnel.Add(new ThreePillarLisFunnelMonth
+                {
+                    MonthLabel = S(map, "MonthLabel"), Collected = L(map, "Collected"),
+                    Resulted = L(map, "Resulted"), BilledToInsurance = L(map, "BilledToInsurance"),
+                });
+
+            // 2a) Backlog summary
+            await r.NextResultAsync(ct); map = Map();
+            if (await r.ReadAsync(ct))
+                vm.BacklogSummary = new ThreePillarBacklogSummary
+                {
+                    TotalBacklog = L(map, "TotalBacklog"), MedianAgeDays = DN(map, "MedianAgeDays"),
+                    PctOver60Days = DN(map, "PctOver60Days"),
+                };
+
+            // 2b) Backlog buckets
+            await r.NextResultAsync(ct); map = Map();
+            while (await r.ReadAsync(ct))
+                vm.BacklogBuckets.Add(new ThreePillarAgeBucket
+                {
+                    AgeBucket = S(map, "AgeBucket"), SortOrder = I(map, "SortOrder"),
+                    SampleCount = L(map, "SampleCount"),
+                });
+
+            // 3) % Billed of Resulted
+            await r.NextResultAsync(ct); map = Map();
+            while (await r.ReadAsync(ct))
+                vm.PctBilledOfResulted.Add(new ThreePillarPctBilledOfResultedMonth
+                {
+                    MonthLabel = S(map, "MonthLabel"), Resulted = L(map, "Resulted"),
+                    BilledToInsurance = L(map, "BilledToInsurance"),
+                    PctBilledOfResulted = DN(map, "PctBilledOfResulted"),
+                });
+
+            // 4) Self Pay % vs Client Bill %
+            await r.NextResultAsync(ct); map = Map();
+            while (await r.ReadAsync(ct))
+                vm.SelfPayClientBill.Add(new ThreePillarSelfPayClientBillMonth
+                {
+                    MonthLabel = S(map, "MonthLabel"), TotalSamples = L(map, "TotalSamples"),
+                    SelfPay = L(map, "SelfPay"), ClientBill = L(map, "ClientBill"),
+                    SelfPayPct = DN(map, "SelfPayPct"), ClientBillPct = DN(map, "ClientBillPct"),
+                });
+
+            // 5) Not Resulted
+            await r.NextResultAsync(ct); map = Map();
+            while (await r.ReadAsync(ct))
+                vm.NotResulted.Add(new ThreePillarNotResultedMonth
+                {
+                    MonthLabel = S(map, "MonthLabel"), NotResulted = L(map, "NotResulted"),
+                });
+
+            // 6) Cross-file reconciliation
+            await r.NextResultAsync(ct); map = Map();
+            while (await r.ReadAsync(ct))
+                vm.Reconciliation.Add(new ThreePillarReconciliationMonth
+                {
+                    MonthLabel = S(map, "MonthLabel"), PmsBilled = L(map, "PmsBilled"),
+                    LisBilledToInsurance = L(map, "LisBilledToInsurance"), Gap = L(map, "Gap"),
+                });
+
+            // 7a) Fully Adjusted %
+            await r.NextResultAsync(ct); map = Map();
+            while (await r.ReadAsync(ct))
+                vm.FullyAdjusted.Add(new ThreePillarFullyAdjustedMonth
+                {
+                    MonthLabel = S(map, "MonthLabel"), BilledClaims = L(map, "BilledClaims"),
+                    FullyAdjusted = L(map, "FullyAdjusted"), PctFullyAdjusted = DN(map, "PctFullyAdjusted"),
+                });
+
+            // 7b) Fully Adjusted reason Pareto
+            await r.NextResultAsync(ct); map = Map();
+            while (await r.ReadAsync(ct))
+                vm.FullyAdjustedReasons.Add(new ThreePillarFullyAdjustedReason
+                {
+                    TransactionCodeCombined = S(map, "TransactionCodeCombined"),
+                    MatchingCount = L(map, "MatchingCount"),
+                });
+
+            // 8) Fully Paid %
+            await r.NextResultAsync(ct); map = Map();
+            while (await r.ReadAsync(ct))
+                vm.FullyPaid.Add(new ThreePillarFullyPaidMonth
+                {
+                    MonthLabel = S(map, "MonthLabel"), BilledClaims = L(map, "BilledClaims"),
+                    FullyPaid = L(map, "FullyPaid"), PctFullyPaid = DN(map, "PctFullyPaid"),
+                });
+
+            // 9) Denial rate by carrier
+            await r.NextResultAsync(ct); map = Map();
+            while (await r.ReadAsync(ct))
+                vm.DenialByCarrier.Add(new ThreePillarDenialByCarrier
+                {
+                    PayerName = S(map, "PayerName"), TotalAllowed = D(map, "TotalAllowed"),
+                    DeniedAllowed = D(map, "DeniedAllowed"), DenialRatePct = DN(map, "DenialRatePct"),
+                });
+
+            // 10) Top denial reasons by payer
+            await r.NextResultAsync(ct); map = Map();
+            while (await r.ReadAsync(ct))
+                vm.TopDenialReasons.Add(new ThreePillarTopDenialReason
+                {
+                    PayerName = S(map, "PayerName"), DenialCode = S(map, "DenialCode"),
+                    MonthLabel = S(map, "MonthLabel"), DenialCount = L(map, "DenialCount"),
+                });
+
+            // 11) Aging decomposition of open Insurance Balance
+            await r.NextResultAsync(ct); map = Map();
+            while (await r.ReadAsync(ct))
+                vm.InsuranceBalanceAging.Add(new ThreePillarAgeBucket
+                {
+                    AgeBucket = S(map, "AgeBucket"), SortOrder = I(map, "SortOrder"),
+                    SampleCount = L(map, "ClaimCount"), BalanceTotal = D(map, "BalanceTotal"),
+                });
+
+            // 12) Patient collections reality check
+            await r.NextResultAsync(ct); map = Map();
+            if (await r.ReadAsync(ct))
+                vm.PatientCollections = new ThreePillarPatientCollectionsReality
+                {
+                    OpenPatientBalanceClaims = L(map, "OpenPatientBalanceClaims"),
+                    OpenBalanceTotal = D(map, "OpenBalanceTotal"),
+                    ClaimsWithAnyPayment = L(map, "ClaimsWithAnyPayment"),
+                    CollectionsRealityPct = DN(map, "CollectionsRealityPct"),
+                };
+
+            // 13) Panel-level Avg Allowed/Paid
+            await r.NextResultAsync(ct); map = Map();
+            while (await r.ReadAsync(ct))
+                vm.PanelAvgAllowedPaid.Add(new ThreePillarPanelAvgAllowedPaid
+                {
+                    Panelname = S(map, "Panelname"), MonthLabelDos = S(map, "MonthLabel_DOS"),
+                    AvgAllowed = D(map, "AvgAllowed"), AllowedClaimCount = L(map, "AllowedClaimCount"),
+                    AvgPaidByPaymentDate = DN(map, "AvgPaidByPaymentDate"), PaidClaimCount = L(map, "PaidClaimCount"),
+                });
+
+            // 14) DOS-cohort maturity curve
+            await r.NextResultAsync(ct); map = Map();
+            while (await r.ReadAsync(ct))
+                vm.MaturityCurve.Add(new ThreePillarMaturityPoint
+                {
+                    DOSMonthLabel = S(map, "DOSMonthLabel"), DaySinceDOS = I(map, "DaySinceDOS"),
+                    PctAllowedPaid = DN(map, "PctAllowedPaid"),
+                });
+
+            // 15) Insurance Balance % + composition
+            if (await r.NextResultAsync(ct))
+            {
+                map = Map();
+                while (await r.ReadAsync(ct))
+                    vm.InsuranceBalanceTrend.Add(new ThreePillarInsuranceBalanceMonth
+                    {
+                        MonthLabel = S(map, "MonthLabel"),
+                        BilledClaims = L(map, "BilledClaims"),
+                        InsuranceBalanceClaims = L(map, "InsuranceBalanceClaims"),
+                        PctInsuranceBalance = DN(map, "PctInsuranceBalance"),
+                        FullyDeniedClaims = L(map, "FullyDeniedClaims"),
+                        NoResponseClaims = L(map, "NoResponseClaims"),
+                        PartiallyDeniedClaims = L(map, "PartiallyDeniedClaims"),
+                        InsuranceBalanceAmt = D(map, "InsuranceBalanceAmt"),
+                    });
+            }
+
+            // 16) Cash headline metrics
+            if (await r.NextResultAsync(ct))
+            {
+                map = Map();
+                while (await r.ReadAsync(ct))
+                    vm.CashHeadline.Add(new ThreePillarCashHeadlineMonth
+                    {
+                        MonthLabel = S(map, "MonthLabel"),
+                        TotalBilledAmt = D(map, "TotalBilledAmt"),
+                        InsurancePaymentFullyPaid = D(map, "InsurancePaymentFullyPaid"),
+                        CollectionRatePct = DN(map, "CollectionRatePct"),
+                        PatientWOAmt = D(map, "PatientWOAmt"),
+                        PatientBalanceAmt = D(map, "PatientBalanceAmt"),
+                        PatientPaymentAmt = D(map, "PatientPaymentAmt"),
+                        FullyAdjustedAmt = D(map, "FullyAdjustedAmt"),
+                    });
+            }
+
+            _logger.LogInformation(
+                "ThreePillarDiagnostic loaded for lab='{Lab}' year={Year} funnelMonths={F} panels={P} in {Ms}ms",
+                labName, year, vm.LisFunnel.Count, vm.PanelAvgAllowedPaid.Count, sw.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ThreePillarDiagnostic failed for lab='{Lab}'", labName);
+            vm.ErrorMessage = $"Failed to load diagnostic drill-through: {ex.Message}";
+        }
+        return vm;
+    }
+
+    /// <summary>
+    /// Beech Tree Three-Pillar Pillar 3 (Cash) — dbo.usp_GetBeechTree_ThreePillarCashDiagnostic.
+    /// </summary>
+    public async Task<ExecSummaryThreePillarViewModel> GetBeechTreeThreePillarCashAsync(
+        string connectionString,
+        string labName,
+        int trailingMonths,
+        int dayWindow,
+        DateTime? asOfDate,
+        CancellationToken ct = default)
+    {
+        var vm = new ExecSummaryThreePillarViewModel
+        {
+            LabName = labName,
+            TrailingMonths = trailingMonths,
+            DayWindow = dayWindow,
+            AsOfDate = asOfDate,
+            CashLoaded = true,
+        };
+        var sw = Stopwatch.StartNew();
+        const string spName = "dbo.usp_GetBeechTree_ThreePillarCashDiagnostic";
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+            await using var cmd = new SqlCommand(spName, conn)
+            { CommandType = System.Data.CommandType.StoredProcedure, CommandTimeout = 120 };
+            cmd.Parameters.AddWithValue("@TrailingMonths", trailingMonths);
+            cmd.Parameters.AddWithValue("@DayWindow", dayWindow);
+            cmd.Parameters.AddWithValue("@AsOfDate", (object?)asOfDate?.Date ?? DBNull.Value);
+
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+
+            Dictionary<string, int> Map()
+            {
+                var m = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < r.FieldCount; i++) m[r.GetName(i)] = i;
+                return m;
+            }
+            long L(Dictionary<string, int> m, string c) =>
+                m.TryGetValue(c, out var i) && !r.IsDBNull(i) ? Convert.ToInt64(r.GetValue(i)) : 0L;
+            string S(Dictionary<string, int> m, string c) =>
+                m.TryGetValue(c, out var i) && !r.IsDBNull(i) ? Convert.ToString(r.GetValue(i)) ?? "" : "";
+            decimal? DN(Dictionary<string, int> m, string c) =>
+                m.TryGetValue(c, out var i) && !r.IsDBNull(i) ? Convert.ToDecimal(r.GetValue(i)) : (decimal?)null;
+            decimal D(Dictionary<string, int> m, string c) =>
+                m.TryGetValue(c, out var i) && !r.IsDBNull(i) ? Convert.ToDecimal(r.GetValue(i)) : 0m;
+
+            var map = Map();
+            while (await r.ReadAsync(ct))
+                vm.CashHeadline.Add(new ThreePillarCashHeadlineMonth
+                {
+                    MonthLabel = S(map, "MonthLabel"),
+                    TotalBilledAmt = D(map, "TotalBilledAmt"),
+                    InsurancePaymentFullyPaid = D(map, "InsurancePaymentFullyPaid"),
+                    CollectionRatePct = DN(map, "CollectionRatePct"),
+                    PartiallyPaidAmt = D(map, "PartiallyPaidAmt"),
+                    PctPartiallyPaidOfBilled = DN(map, "PctPartiallyPaidOfBilled"),
+                    PatientWOAmt = D(map, "PatientWOAmt"),
+                    PatientBalanceAmt = D(map, "PatientBalanceAmt"),
+                    PatientPaymentAmt = D(map, "PatientPaymentAmt"),
+                    WriteOffRatioPct = DN(map, "WriteOffRatioPct"),
+                    PatientCollectionRatePct = DN(map, "PatientCollectionRatePct"),
+                    FullyAdjustedAmt = D(map, "FullyAdjustedAmt"),
+                    PctFullyAdjustedOfBilled = DN(map, "PctFullyAdjustedOfBilled"),
+                    InsuranceBalanceAmt = D(map, "InsuranceBalanceAmt"),
+                    PctInsuranceBalanceOfBilled = DN(map, "PctInsuranceBalanceOfBilled"),
+                    FullyDeniedIBAmt = D(map, "FullyDeniedIBAmt"),
+                    NoResponseIBAmt = D(map, "NoResponseIBAmt"),
+                    PartiallyDeniedIBAmt = D(map, "PartiallyDeniedIBAmt"),
+                    NoResponseSharePct = DN(map, "NoResponseSharePct"),
+                });
+
+            if (await r.NextResultAsync(ct))
+            {
+                map = Map();
+                while (await r.ReadAsync(ct))
+                {
+                    var code = S(map, "TransactionCodeCombined");
+                    if (string.IsNullOrWhiteSpace(code)) continue;
+                    vm.CashWriteOffReasons.Add(new ThreePillarFullyAdjustedReason
+                    {
+                        TransactionCodeCombined = code,
+                        MatchingCount = L(map, "MatchingCount"),
+                    });
+                }
+            }
+
+            _logger.LogInformation(
+                "ThreePillarCash loaded for lab='{Lab}' months={M} rows={N} reasons={R} in {Ms}ms",
+                labName, trailingMonths, vm.CashHeadline.Count, vm.CashWriteOffReasons.Count, sw.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ThreePillarCash failed for lab='{Lab}'", labName);
+            vm.ErrorMessage = $"Failed to load Cash diagnostic: {ex.Message}";
+        }
+        return vm;
+    }
 }

@@ -669,15 +669,18 @@ BEGIN
     INSERT INTO dbo.IHD_CS_InsuranceVsAging
         (PayerName, AgingBucket, VisitCount, InsuranceBalance, RefreshedAt)
     SELECT
-        LTRIM(RTRIM(PayerName_Raw))                                  AS PayerName,
-        LTRIM(RTRIM(ISNULL(AgingBucket, '(blank)')))                 AS AgingBucket,
-        COUNT(NULLIF(LTRIM(RTRIM(ClaimID)), ''))                     AS VisitCount,
-        ISNULL(SUM(TRY_CAST(InsuranceBalance AS DECIMAL(18,2))), 0)  AS InsuranceBalance,
+        LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(PayerName_Raw)), ''), 'Unknown'))) AS PayerName,
+        LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(AgingBucket)), ''), '(blank)')))   AS AgingBucket,
+        COUNT(NULLIF(LTRIM(RTRIM(ClaimID)), ''))                                  AS VisitCount,
+        ISNULL(SUM(TRY_CAST(InsuranceBalance AS DECIMAL(18,2))), 0)               AS InsuranceBalance,
         GETDATE()
     FROM dbo.ClaimLevelData
     WHERE ISNULL(TRY_CAST(InsuranceBalance AS DECIMAL(18,2)), 0) <> 0
-      AND NOT (LTRIM(RTRIM(ClaimStatus)) = 'No Response' AND LTRIM(RTRIM(BilledUnbilled)) = 'Unbilled')
-    GROUP BY LTRIM(RTRIM(PayerName_Raw)), LTRIM(RTRIM(ISNULL(AgingBucket, '(blank)')));
+      AND NOT (LTRIM(RTRIM(ISNULL(ClaimStatus, ''))) = 'No Response'
+               AND LTRIM(RTRIM(ISNULL(BilledUnbilled, ''))) = 'Unbilled')
+    GROUP BY
+        LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(PayerName_Raw)), ''), 'Unknown'))),
+        LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(AgingBucket)), ''), '(blank)')));
 
     PRINT 'usp_RefreshIHD_CS_InsuranceVsAging completed.';
 END
@@ -755,13 +758,14 @@ BEGIN
 
     ;WITH base AS (
         SELECT
-            LTRIM(RTRIM(PayerName_Raw))                          AS PayerName,
-            LTRIM(RTRIM(Panelname))                              AS PanelName,
-            TRY_CAST(InsurancePayment AS DECIMAL(18,2))          AS InsPay,
-            TRY_CAST(PaymentPercent   AS DECIMAL(9,4))           AS PayPct
+            LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(PayerName_Raw)), ''), 'Unknown'))) AS PayerName,
+            LTRIM(RTRIM(ISNULL(Panelname, '')))                                      AS PanelName,
+            TRY_CAST(InsurancePayment AS DECIMAL(18,2))                              AS InsPay,
+            TRY_CAST(PaymentPercent   AS DECIMAL(9,4))                               AS PayPct
         FROM dbo.ClaimLevelData
         WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) <> 0
-          AND NOT (LTRIM(RTRIM(ClaimStatus)) = 'No Response' AND LTRIM(RTRIM(BilledUnbilled)) = 'Unbilled')
+          AND NOT (LTRIM(RTRIM(ISNULL(ClaimStatus, ''))) = 'No Response'
+                   AND LTRIM(RTRIM(ISNULL(BilledUnbilled, ''))) = 'Unbilled')
     ),
     agg AS (
         SELECT PayerName,
@@ -786,58 +790,24 @@ GO
 
 
 -- 11. CPT vs Payment %
---     Source: ClaimLevelData -- InHealthDTR does not have individual CPTCode on ClaimLevel,
---     so parse the first token from CPTCodeXUnitsXModifier (format: "CPT x Units x Modifier")
+--     Source: LineLevelData (separate CPTCode/Units — ClaimLevel CPTCodeXUnitsXModifier is a
+--     comma-joined list like "87481*5(59,90),87500*1(90),..." which truncated NVARCHAR(50)).
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshIHD_CS_CptVsPaymentPct
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    ;WITH parsed AS (
+    ;WITH agg AS (
         SELECT
-            LTRIM(RTRIM(
-                CASE
-                    WHEN CHARINDEX(' x ', CPTCodeXUnitsXModifier) > 0
-                    THEN LEFT(CPTCodeXUnitsXModifier, CHARINDEX(' x ', CPTCodeXUnitsXModifier) - 1)
-                    ELSE CPTCodeXUnitsXModifier
-                END
-            )) AS CPTCode,
-            -- Extract Units: second token between first and second ' x '
-            CASE
-                WHEN CHARINDEX(' x ', CPTCodeXUnitsXModifier) > 0
-                     AND CHARINDEX(' x ', CPTCodeXUnitsXModifier, CHARINDEX(' x ', CPTCodeXUnitsXModifier) + 3) > 0
-                THEN SUBSTRING(
-                    CPTCodeXUnitsXModifier,
-                    CHARINDEX(' x ', CPTCodeXUnitsXModifier) + 3,
-                    CHARINDEX(' x ', CPTCodeXUnitsXModifier, CHARINDEX(' x ', CPTCodeXUnitsXModifier) + 3)
-                        - (CHARINDEX(' x ', CPTCodeXUnitsXModifier) + 3)
-                )
-                WHEN CHARINDEX(' x ', CPTCodeXUnitsXModifier) > 0
-                THEN SUBSTRING(
-                    CPTCodeXUnitsXModifier,
-                    CHARINDEX(' x ', CPTCodeXUnitsXModifier) + 3,
-                    LEN(CPTCodeXUnitsXModifier)
-                )
-                ELSE '1'
-            END AS Units,
-            TRY_CAST(InsurancePayment AS DECIMAL(18,2)) AS InsPay,
-            TRY_CAST(ChargeAmount     AS DECIMAL(18,2)) AS ChgAmt,
-            LTRIM(RTRIM(ClaimStatus))                   AS ClaimStatus
-        FROM dbo.ClaimLevelData
-        WHERE CPTCodeXUnitsXModifier IS NOT NULL
-          AND LTRIM(RTRIM(CPTCodeXUnitsXModifier)) <> ''
-    ),
-    agg AS (
-        SELECT
-            CPTCode,
-            ISNULL(SUM(TRY_CAST(Units AS DECIMAL(18,2))), 0)  AS SumUnits,
-            ISNULL(SUM(CASE WHEN ClaimStatus IN ('Fully Paid','Partially Paid')
-                            THEN InsPay ELSE 0 END), 0)       AS PaidIns,
-            ISNULL(SUM(CASE WHEN ClaimStatus IN ('Fully Paid','Partially Paid')
-                            THEN ChgAmt ELSE 0 END), 0)       AS PaidChg
-        FROM parsed
+            LEFT(LTRIM(RTRIM(CPTCode)), 50)                            AS CPTCode,
+            ISNULL(SUM(TRY_CAST(Units AS DECIMAL(18,2))), 0)           AS SumUnits,
+            ISNULL(SUM(CASE WHEN LTRIM(RTRIM(ClaimStatus)) IN ('Fully Paid','Partially Paid')
+                            THEN TRY_CAST(InsurancePayment AS DECIMAL(18,2)) ELSE 0 END), 0) AS PaidIns,
+            ISNULL(SUM(CASE WHEN LTRIM(RTRIM(ClaimStatus)) IN ('Fully Paid','Partially Paid')
+                            THEN TRY_CAST(ChargeAmount     AS DECIMAL(18,2)) ELSE 0 END), 0) AS PaidChg
+        FROM dbo.LineLevelData
         WHERE CPTCode IS NOT NULL AND LTRIM(RTRIM(CPTCode)) <> ''
-        GROUP BY CPTCode
+        GROUP BY LEFT(LTRIM(RTRIM(CPTCode)), 50)
     )
     SELECT CPTCode, SumUnits, PaidIns, PaidChg,
            CASE WHEN PaidChg > 0

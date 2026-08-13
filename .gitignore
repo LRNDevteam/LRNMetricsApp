@@ -7,3 +7,6 @@ obj/
 /LRN.WebUI/dist
 /scripts/Analyze-Biggest-Local.ps1
 /LRN.ReportWorker/Properties/PublishProfiles/FolderProfile.pubxml
+
+# Billing agent secrets — never commit credentials
+/BillingAgent/credentials.local.json

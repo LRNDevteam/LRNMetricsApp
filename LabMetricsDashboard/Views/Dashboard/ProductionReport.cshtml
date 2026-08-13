@@ -1,4 +1,4 @@
-﻿@using LRN.ProductionReports.Models
+@using LRN.ProductionReports.Models
 @model LRN.ProductionReports.Models.ProductionReportViewModel
 @{
     ViewData["Title"]       = $"Production Report – {Model.SelectedLab}";
@@ -62,14 +62,74 @@
         .OrderBy(g => g.Key)
         .ToDictionary(g => g.Key, g => g.OrderBy(m => m).ToList());
 
+    var pbShowCharges = true;
     int PbCell(Dictionary<string, int>? d, string mk)
         => d is not null && d.TryGetValue(mk, out var v) ? v : 0;
     int PbYear(Dictionary<int, int>? d, int y)
         => d is not null && d.TryGetValue(y, out var v) ? v : 0;
+    decimal PbCharges(Dictionary<string, decimal>? d, string mk)
+        => d is not null && d.TryGetValue(mk, out var v) ? v : 0m;
+    decimal PbYearCharges(Dictionary<int, decimal>? d, int y)
+        => d is not null && d.TryGetValue(y, out var v) ? v : 0m;
     int PbGrandYear(int year) =>
         Model.PayerBreakdownGrandByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
+    decimal PbGrandYearCharges(int year) =>
+        Model.PayerBreakdownGrandChargesByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
     int pbGrandTotal = Model.PayerBreakdownGrandByMonth
         .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value);
+    decimal pbGrandTotalCharges = Model.PayerBreakdownGrandChargesByMonth
+        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value);
+
+    // Panel Breakdown helpers (same month/year layout as Payer Breakdown)
+    var pnlYears  = Model.PanelBreakdownYears.Where(y => y > 1900).ToList();
+    var pnlMonths = Model.PanelBreakdownMonths.Where(m => int.Parse(m[..4]) > 1900).ToList();
+    var pnlMonthsByYear = pnlMonths
+        .GroupBy(m => int.Parse(m[..4]))
+        .OrderBy(g => g.Key)
+        .ToDictionary(g => g.Key, g => g.OrderBy(m => m).ToList());
+    int PnlGrandYear(int year) =>
+        Model.PanelBreakdownGrandByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
+    decimal PnlGrandYearCharges(int year) =>
+        Model.PanelBreakdownGrandChargesByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
+    int pnlGrandTotal = Model.PanelBreakdownGrandByMonth
+        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value);
+    decimal pnlGrandTotalCharges = Model.PanelBreakdownGrandChargesByMonth
+        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value);
+
+    Dictionary<int, List<string>> InsightMonthsByYear(IEnumerable<string> months) => months
+        .Where(m => int.Parse(m[..4]) > 1900)
+        .GroupBy(m => int.Parse(m[..4]))
+        .OrderBy(g => g.Key)
+        .ToDictionary(g => g.Key, g => g.OrderBy(m => m).ToList());
+    int InsightGrandYear(Dictionary<string, int> byMonth, int year) =>
+        byMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
+    decimal InsightGrandYearCharges(Dictionary<string, decimal> byMonth, int year) =>
+        byMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value);
+
+    var daqYears = Model.InsightDaqYears.Where(y => y > 1900).ToList();
+    var daqMonthsByYear = InsightMonthsByYear(Model.InsightDaqMonths);
+    int daqGrandTotal = Model.InsightDaqGrandByMonth
+        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value);
+    decimal daqGrandTotalCharges = Model.InsightDaqGrandChargesByMonth
+        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value);
+
+    var webYears = Model.InsightWebPmYears.Where(y => y > 1900).ToList();
+    var webMonthsByYear = InsightMonthsByYear(Model.InsightWebPmMonths);
+    int webGrandTotal = Model.InsightWebPmGrandByMonth
+        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value);
+    decimal webGrandTotalCharges = Model.InsightWebPmGrandChargesByMonth
+        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value);
+
+    var hpYears = Model.HighestPayerYears.Where(y => y > 1900).ToList();
+    var hpMonthsByYear = InsightMonthsByYear(Model.HighestPayerMonths);
+    int HpGrandYearClaims(int year) =>
+        Model.HighestPayerGrandByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value.ClaimCount);
+    decimal HpGrandYearCharges(int year) =>
+        Model.HighestPayerGrandByMonth.Where(kv => kv.Key.StartsWith($"{year:D4}")).Sum(kv => kv.Value.BilledCharges);
+    int hpGrandClaims = Model.HighestPayerGrandByMonth
+        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.ClaimCount);
+    decimal hpGrandCharges = Model.HighestPayerGrandByMonth
+        .Where(kv => int.Parse(kv.Key[..4]) > 1900).Sum(kv => kv.Value.BilledCharges);
 
     // Payer X Panel helpers
     var pxpPanels = Model.PayerPanelColumns;
@@ -87,6 +147,7 @@
 
     // CPT Breakdown helpers
     var cptShowUnits = Model.CptUnitsLabel != "No. of Claims";
+    var cptShowCountOfUnits = true;
     var cptYears  = Model.CptBreakdownYears.Where(y => y > 1900).ToList();
     var cptMonths = Model.CptBreakdownMonths.Where(m => int.Parse(m[..4]) > 1900).ToList();
     var cptMonthsByYear = cptMonths
@@ -195,6 +256,23 @@ th.pr-month-data, td.pr-month-data {
 .pr-payer-row:hover td { background: #f8fafc; }
 .pr-payer-row:hover td:first-child { background: #f8fafc; }
 
+.pr-hp-toggle {
+    cursor: pointer;
+    user-select: none;
+}
+.pr-hp-toggle td:first-child {
+    cursor: pointer;
+}
+.pr-hp-chevron {
+    display: inline-block;
+    margin-right: .35rem;
+    font-size: .7rem;
+    transition: transform .18s ease;
+}
+.pr-hp-toggle.pr-hp-open .pr-hp-chevron { transform: rotate(90deg); }
+.pr-hp-child { display: none; }
+.pr-hp-child.pr-hp-shown { display: table-row; }
+
 .pr-total-row td {
     background: #0e3460 !important; color: #fff !important;
     font-weight: 800; border-top: 2px solid #0a2a4a;
@@ -300,6 +378,45 @@ th.pr-month-data, td.pr-month-data {
     box-shadow: 0 4px 14px rgba(14,52,96,.30);
 }
 .pr-tabs .nav-link.active i { opacity: 1; }
+
+.pr-insight-toolbar {
+    display: flex;
+    align-items: center;
+    margin-bottom: .65rem;
+}
+.pr-source-toggle {
+    display: inline-grid;
+    grid-template-columns: 1fr 1fr;
+    min-width: 240px;
+    padding: 3px;
+    background: #e8eef6;
+    border: 1px solid #c9d4e3;
+    border-radius: 8px;
+}
+.pr-source-toggle-btn {
+    border: 0;
+    background: transparent;
+    padding: .42rem .85rem;
+    font-size: .72rem;
+    font-weight: 800;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: #64748b;
+    border-radius: 6px;
+    cursor: pointer;
+    line-height: 1.2;
+}
+.pr-source-toggle-btn:hover { color: #0f172a; }
+.pr-source-toggle-btn[data-source="daq"].active {
+    background: #0f766e;
+    color: #fff;
+    box-shadow: 0 1px 6px rgba(15,118,110,.35);
+}
+.pr-source-toggle-btn[data-source="webpm"].active {
+    background: #6d28d9;
+    color: #fff;
+    box-shadow: 0 1px 6px rgba(109,40,217,.35);
+}
 </style>
 
 <!-- Page heading -->
@@ -583,6 +700,30 @@ th.pr-month-data, td.pr-month-data {
                 <i class="bi bi-list-ol"></i> CPT Breakdown
             </button>
         </li>
+        @if (Model.IsNorthWestLab)
+        {
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="panel-breakdown-tab" data-bs-toggle="pill"
+                    data-bs-target="#panel-breakdown-pane" type="button" role="tab"
+                    aria-controls="panel-breakdown-pane" aria-selected="false">
+                <i class="bi bi-layers"></i> Panel Breakdown
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="insight-tab" data-bs-toggle="pill"
+                    data-bs-target="#insight-pane" type="button" role="tab"
+                    aria-controls="insight-pane" aria-selected="false">
+                <i class="bi bi-lightbulb"></i> Insight
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="highest-payer-tab" data-bs-toggle="pill"
+                    data-bs-target="#highest-payer-pane" type="button" role="tab"
+                    aria-controls="highest-payer-pane" aria-selected="false">
+                <i class="bi bi-trophy"></i> Highest payer Breakdown
+            </button>
+        </li>
+        }
     </ul>
 
     <div class="tab-content" id="prTabContent">
@@ -1088,6 +1229,7 @@ th.pr-month-data, td.pr-month-data {
                     </div>
                     <div class="pr-scroll">
                         <table class="pr-table">
+                            @{ var pbMetricCols = pbShowCharges ? 2 : 1; }
                             <colgroup>
                                 <col style="width:220px" />
                                 @foreach (var year in pbYears)
@@ -1095,21 +1237,24 @@ th.pr-month-data, td.pr-month-data {
                                     var pbMons = pbMonthsByYear.ContainsKey(year) ? pbMonthsByYear[year] : new List<string>();
                                     foreach (var mk in pbMons)
                                     {
-                                        <col style="width:72px" />
+                                        <col style="width:@(pbShowCharges ? 56 : 72)px" />
+                                        if (pbShowCharges) { <col style="width:72px" /> }
                                     }
-                                    <col style="width:80px" />
+                                    <col style="width:@(pbShowCharges ? 62 : 80)px" />
+                                    if (pbShowCharges) { <col style="width:78px" /> }
                                 }
-                                <col style="width:86px" />
+                                <col style="width:@(pbShowCharges ? 62 : 86)px" />
+                                @if (pbShowCharges) { <col style="width:86px" /> }
                             </colgroup>
                             <thead>
                                 <tr>
-                                    <th rowspan="2">Payer</th>
+                                    <th rowspan="@(pbShowCharges ? 3 : 2)">Payer</th>
                                     @foreach (var year in pbYears)
                                     {
                                         var pbMons = pbMonthsByYear.ContainsKey(year) ? pbMonthsByYear[year] : new List<string>();
-                                        <th colspan="@(pbMons.Count + 1)">@year</th>
+                                        <th colspan="@((pbMons.Count + 1) * pbMetricCols)">@year</th>
                                     }
-                                    <th class="pr-grand-total">Grand Total</th>
+                                    <th colspan="@pbMetricCols" class="pr-grand-total">Grand Total</th>
                                 </tr>
                                 <tr>
                                     @foreach (var year in pbYears)
@@ -1117,12 +1262,33 @@ th.pr-month-data, td.pr-month-data {
                                         var pbMons = pbMonthsByYear.ContainsKey(year) ? pbMonthsByYear[year] : new List<string>();
                                         foreach (var mk in pbMons)
                                         {
-                                            <th class="pr-month-data">@MonthLabel(mk)</th>
+                                            if (pbShowCharges) { <th colspan="2">@MonthLabel(mk)</th> }
+                                            else { <th class="pr-month-data">@MonthLabel(mk)</th> }
                                         }
-                                        <th class="pr-year-total">Year @year Total</th>
+                                        if (pbShowCharges) { <th colspan="2" class="pr-year-total">Year @year Total</th> }
+                                        else { <th class="pr-year-total">Year @year Total</th> }
                                     }
-                                    <th class="pr-grand-total"></th>
+                                    @if (pbShowCharges) { <th colspan="2" class="pr-grand-total"></th> }
+                                    else { <th class="pr-grand-total"></th> }
                                 </tr>
+                                @if (pbShowCharges)
+                                {
+                                    <tr>
+                                        @foreach (var year in pbYears)
+                                        {
+                                            var pbMons = pbMonthsByYear.ContainsKey(year) ? pbMonthsByYear[year] : new List<string>();
+                                            foreach (var mk in pbMons)
+                                            {
+                                                <th class="pr-month-data">No. of Claims</th>
+                                                <th class="pr-month-data">Charge Amount</th>
+                                            }
+                                            <th class="pr-year-total">No. of Claims</th>
+                                            <th class="pr-year-total">Charge Amount</th>
+                                        }
+                                        <th class="pr-grand-total">No. of Claims</th>
+                                        <th class="pr-grand-total">Charge Amount</th>
+                                    </tr>
+                                }
                             </thead>
                             <tbody>
                                 @foreach (var payer in Model.PayerBreakdownRows)
@@ -1135,10 +1301,22 @@ th.pr-month-data, td.pr-month-data {
                                             foreach (var mk in pbMons)
                                             {
                                                 <td class="pr-month-data">@PbCell(payer.ByMonth, mk).ToString("N0")</td>
+                                                @if (pbShowCharges)
+                                                {
+                                                    <td class="pr-month-data">@PbCharges(payer.ByMonthCharges, mk).ToString("C0")</td>
+                                                }
                                             }
                                             <td class="pr-year-total">@PbYear(payer.ByYear, year).ToString("N0")</td>
+                                            @if (pbShowCharges)
+                                            {
+                                                <td class="pr-year-total">@PbYearCharges(payer.ByYearCharges, year).ToString("C0")</td>
+                                            }
                                         }
                                         <td class="pr-grand-total">@payer.GrandTotal.ToString("N0")</td>
+                                        @if (pbShowCharges)
+                                        {
+                                            <td class="pr-grand-total">@payer.GrandTotalCharges.ToString("C0")</td>
+                                        }
                                     </tr>
                                 }
                             </tbody>
@@ -1151,10 +1329,22 @@ th.pr-month-data, td.pr-month-data {
                                         foreach (var mk in pbMons)
                                         {
                                             <td class="pr-month-data">@PbCell(Model.PayerBreakdownGrandByMonth, mk).ToString("N0")</td>
+                                            @if (pbShowCharges)
+                                            {
+                                                <td class="pr-month-data">@PbCharges(Model.PayerBreakdownGrandChargesByMonth, mk).ToString("C0")</td>
+                                            }
                                         }
                                         <td class="pr-year-total">@PbGrandYear(year).ToString("N0")</td>
+                                        @if (pbShowCharges)
+                                        {
+                                            <td class="pr-year-total">@PbGrandYearCharges(year).ToString("C0")</td>
+                                        }
                                     }
                                     <td class="pr-grand-total">@pbGrandTotal.ToString("N0")</td>
+                                    @if (pbShowCharges)
+                                    {
+                                        <td class="pr-grand-total">@pbGrandTotalCharges.ToString("C0")</td>
+                                    }
                                 </tr>
                             </tfoot>
                         </table>
@@ -1374,6 +1564,7 @@ th.pr-month-data, td.pr-month-data {
                 <div class="pr-wrap">
                     <div class="pr-scroll">
                         <table class="pr-table">
+                            @{ var cptMetricCols = 2; }
                             <colgroup>
                                 <col style="width:140px" />
                                 @foreach (var year in cptYears)
@@ -1396,11 +1587,9 @@ th.pr-month-data, td.pr-month-data {
                                     @foreach (var year in cptYears)
                                     {
                                         var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
-                                        int monthDataCols = mons.Count * 2;
-                                        int yearTotalCols = 2;
-                                        <th colspan="@(monthDataCols + yearTotalCols)">@year</th>
+                                        <th colspan="@((mons.Count + 1) * cptMetricCols)">@year</th>
                                     }
-                                    <th colspan="2" class="pr-grand-total">Grand Total</th>
+                                    <th colspan="@cptMetricCols" class="pr-grand-total">Grand Total</th>
                                 </tr>
                                 <tr>
                                     @foreach (var year in cptYears)
@@ -1408,11 +1597,11 @@ th.pr-month-data, td.pr-month-data {
                                         var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
                                         foreach (var mk in mons)
                                         {
-                                            <th colspan="2">@MonthLabel(mk)</th>
+                                            <th colspan="@cptMetricCols">@MonthLabel(mk)</th>
                                         }
-                                        <th colspan="2" class="pr-year-total">Year @year Total</th>
+                                        <th colspan="@cptMetricCols" class="pr-year-total">Year @year Total</th>
                                     }
-                                    <th colspan="2" class="pr-grand-total"></th>
+                                    <th colspan="@cptMetricCols" class="pr-grand-total"></th>
                                 </tr>
                                 <tr>
                                     @foreach (var year in cptYears)
@@ -1420,13 +1609,13 @@ th.pr-month-data, td.pr-month-data {
                                         var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
                                         foreach (var mk in mons)
                                         {
-                                            <th class="pr-month-data">@Model.CptUnitsLabel</th>
+                                            <th class="pr-month-data">@(cptShowCountOfUnits ? "Count of Units" : Model.CptUnitsLabel)</th>
                                             <th class="pr-month-data">Billed Amount</th>
                                         }
-                                        <th class="pr-year-total">@Model.CptUnitsLabel</th>
+                                        <th class="pr-year-total">@(cptShowCountOfUnits ? "Count of Units" : Model.CptUnitsLabel)</th>
                                         <th class="pr-year-total">Billed Amount</th>
                                     }
-                                    <th class="pr-grand-total">@Model.CptUnitsLabel</th>
+                                    <th class="pr-grand-total">@(cptShowCountOfUnits ? "Count of Units" : Model.CptUnitsLabel)</th>
                                     <th class="pr-grand-total">Billed Amount</th>
                                 </tr>
                             </thead>
@@ -1440,13 +1629,13 @@ th.pr-month-data, td.pr-month-data {
                                             var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
                                             foreach (var mk in mons)
                                             {
-                                                <td class="pr-month-data">@(cptShowUnits ? CptUnits(row.ByMonth, mk).ToString("N0") : CptClaims(row.ByMonth, mk).ToString("N0"))</td>
+                                                <td class="pr-month-data">@(cptShowCountOfUnits || !cptShowUnits ? CptClaims(row.ByMonth, mk).ToString("N0") : CptUnits(row.ByMonth, mk).ToString("N0"))</td>
                                                 <td class="pr-month-data">@CptCharges(row.ByMonth, mk).ToString("C0")</td>
                                             }
-                                            <td class="pr-year-total">@(cptShowUnits ? CptYearUnits(row.ByYear, year).ToString("N0") : CptYearClaims(row.ByYear, year).ToString("N0"))</td>
+                                            <td class="pr-year-total">@(cptShowCountOfUnits || !cptShowUnits ? CptYearClaims(row.ByYear, year).ToString("N0") : CptYearUnits(row.ByYear, year).ToString("N0"))</td>
                                             <td class="pr-year-total">@CptYearCharges(row.ByYear, year).ToString("C0")</td>
                                         }
-                                        <td class="pr-grand-total">@(cptShowUnits ? row.GrandTotalUnits.ToString("N0") : row.GrandTotalClaims.ToString("N0"))</td>
+                                        <td class="pr-grand-total">@(cptShowCountOfUnits || !cptShowUnits ? row.GrandTotalClaims.ToString("N0") : row.GrandTotalUnits.ToString("N0"))</td>
                                         <td class="pr-grand-total">@row.GrandTotalCharges.ToString("C0")</td>
                                     </tr>
                                 }
@@ -1459,13 +1648,13 @@ th.pr-month-data, td.pr-month-data {
                                         var mons = cptMonthsByYear.ContainsKey(year) ? cptMonthsByYear[year] : new List<string>();
                                         foreach (var mk in mons)
                                         {
-                                            <td class="pr-month-data">@(cptShowUnits ? CptUnits(Model.CptBreakdownGrandByMonth, mk).ToString("N0") : CptClaims(Model.CptBreakdownGrandByMonth, mk).ToString("N0"))</td>
+                                            <td class="pr-month-data">@(cptShowCountOfUnits || !cptShowUnits ? CptClaims(Model.CptBreakdownGrandByMonth, mk).ToString("N0") : CptUnits(Model.CptBreakdownGrandByMonth, mk).ToString("N0"))</td>
                                             <td class="pr-month-data">@CptCharges(Model.CptBreakdownGrandByMonth, mk).ToString("C0")</td>
                                         }
-                                        <td class="pr-year-total">@(cptShowUnits ? CptGrandYearUnits(year).ToString("N0") : CptGrandYearClaims(year).ToString("N0"))</td>
+                                        <td class="pr-year-total">@(cptShowCountOfUnits || !cptShowUnits ? CptGrandYearClaims(year).ToString("N0") : CptGrandYearUnits(year).ToString("N0"))</td>
                                         <td class="pr-year-total">@CptGrandYearCharges(year).ToString("C0")</td>
                                     }
-                                    <td class="pr-grand-total">@(cptShowUnits ? cptGrandUnits.ToString("N0") : cptGrandClaims.ToString("N0"))</td>
+                                    <td class="pr-grand-total">@(cptShowCountOfUnits || !cptShowUnits ? cptGrandClaims.ToString("N0") : cptGrandUnits.ToString("N0"))</td>
                                     <td class="pr-grand-total">@cptGrandCharges.ToString("C0")</td>
                                 </tr>
                             </tfoot>
@@ -1483,12 +1672,453 @@ th.pr-month-data, td.pr-month-data {
             }
         </div>
 
+        @if (Model.IsNorthWestLab)
+        {
+        <div class="tab-pane fade" id="panel-breakdown-pane" role="tabpanel" aria-labelledby="panel-breakdown-tab">
+            @if (Model.PanelBreakdownRows.Count > 0 && pnlYears.Count > 0)
+            {
+                <div class="pr-wrap">
+                    <div class="pr-filter-summary">
+                        <span class="filter-dot">•</span>
+                        <span><span class="filter-label">Filter:</span>
+                            <span class="filter-key-2">ChargeEnteredDate</span> is a valid date
+                            &nbsp;·&nbsp; FirstBilledDate is a date, or blank with Emedix date</span>
+                    </div>
+                    <div class="pr-scroll">
+                        <table class="pr-table">
+                            <colgroup>
+                                <col style="width:220px" />
+                                @foreach (var year in pnlYears)
+                                {
+                                    var pnlMons = pnlMonthsByYear.ContainsKey(year) ? pnlMonthsByYear[year] : new List<string>();
+                                    foreach (var mk in pnlMons)
+                                    {
+                                        <col style="width:56px" />
+                                        <col style="width:72px" />
+                                    }
+                                    <col style="width:62px" />
+                                    <col style="width:78px" />
+                                }
+                                <col style="width:62px" />
+                                <col style="width:86px" />
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th rowspan="3">Panel</th>
+                                    @foreach (var year in pnlYears)
+                                    {
+                                        var pnlMons = pnlMonthsByYear.ContainsKey(year) ? pnlMonthsByYear[year] : new List<string>();
+                                        <th colspan="@((pnlMons.Count + 1) * 2)">@year</th>
+                                    }
+                                    <th colspan="2" class="pr-grand-total">Grand Total</th>
+                                </tr>
+                                <tr>
+                                    @foreach (var year in pnlYears)
+                                    {
+                                        var pnlMons = pnlMonthsByYear.ContainsKey(year) ? pnlMonthsByYear[year] : new List<string>();
+                                        foreach (var mk in pnlMons)
+                                        {
+                                            <th colspan="2">@MonthLabel(mk)</th>
+                                        }
+                                        <th colspan="2" class="pr-year-total">Year @year Total</th>
+                                    }
+                                    <th colspan="2" class="pr-grand-total"></th>
+                                </tr>
+                                <tr>
+                                    @foreach (var year in pnlYears)
+                                    {
+                                        var pnlMons = pnlMonthsByYear.ContainsKey(year) ? pnlMonthsByYear[year] : new List<string>();
+                                        foreach (var mk in pnlMons)
+                                        {
+                                            <th class="pr-month-data">No. of Claims</th>
+                                            <th class="pr-month-data">Charge Amount</th>
+                                        }
+                                        <th class="pr-year-total">No. of Claims</th>
+                                        <th class="pr-year-total">Charge Amount</th>
+                                    }
+                                    <th class="pr-grand-total">No. of Claims</th>
+                                    <th class="pr-grand-total">Charge Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var panel in Model.PanelBreakdownRows)
+                                {
+                                    <tr class="pr-panel-row">
+                                        <td>@panel.PayerName</td>
+                                        @foreach (var year in pnlYears)
+                                        {
+                                            var pnlMons = pnlMonthsByYear.ContainsKey(year) ? pnlMonthsByYear[year] : new List<string>();
+                                            foreach (var mk in pnlMons)
+                                            {
+                                                <td class="pr-month-data">@PbCell(panel.ByMonth, mk).ToString("N0")</td>
+                                                <td class="pr-month-data">@PbCharges(panel.ByMonthCharges, mk).ToString("C0")</td>
+                                            }
+                                            <td class="pr-year-total">@PbYear(panel.ByYear, year).ToString("N0")</td>
+                                            <td class="pr-year-total">@PbYearCharges(panel.ByYearCharges, year).ToString("C0")</td>
+                                        }
+                                        <td class="pr-grand-total">@panel.GrandTotal.ToString("N0")</td>
+                                        <td class="pr-grand-total">@panel.GrandTotalCharges.ToString("C0")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr class="pr-total-row">
+                                    <td>Grand Total</td>
+                                    @foreach (var year in pnlYears)
+                                    {
+                                        var pnlMons = pnlMonthsByYear.ContainsKey(year) ? pnlMonthsByYear[year] : new List<string>();
+                                        foreach (var mk in pnlMons)
+                                        {
+                                            <td class="pr-month-data">@PbCell(Model.PanelBreakdownGrandByMonth, mk).ToString("N0")</td>
+                                            <td class="pr-month-data">@PbCharges(Model.PanelBreakdownGrandChargesByMonth, mk).ToString("C0")</td>
+                                        }
+                                        <td class="pr-year-total">@PnlGrandYear(year).ToString("N0")</td>
+                                        <td class="pr-year-total">@PnlGrandYearCharges(year).ToString("C0")</td>
+                                    }
+                                    <td class="pr-grand-total">@pnlGrandTotal.ToString("N0")</td>
+                                    <td class="pr-grand-total">@pnlGrandTotalCharges.ToString("C0")</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5 text-muted">
+                    <div style="font-size:2rem;opacity:.4">&#128202;</div>
+                    <div class="fw-semibold mt-2">No Panel Breakdown data available</div>
+                    <div class="small mt-1"><strong>Reason:</strong> No billed claim-level data found. Try adjusting your filters.</div>
+                </div>
+            }
+        </div>
+
+        <div class="tab-pane fade" id="insight-pane" role="tabpanel" aria-labelledby="insight-tab">
+            <div class="pr-insight-toolbar">
+                <div class="pr-source-toggle" id="insightSourceToggle" role="tablist" aria-label="Billing source">
+                    <button class="pr-source-toggle-btn active" id="insight-daq-tab" type="button" role="tab"
+                            data-bs-toggle="pill" data-bs-target="#insight-daq-pane" data-source="daq"
+                            aria-controls="insight-daq-pane" aria-selected="true">Daq</button>
+                    <button class="pr-source-toggle-btn" id="insight-webpm-tab" type="button" role="tab"
+                            data-bs-toggle="pill" data-bs-target="#insight-webpm-pane" data-source="webpm"
+                            aria-controls="insight-webpm-pane" aria-selected="false">WebPM</button>
+                </div>
+            </div>
+            <div class="tab-content" id="insightSubTabContent">
+            @{
+                var insightTabs = new[]
+                {
+                    new {
+                        PaneId = "insight-daq-pane",
+                        Active = true,
+                        SourceLabel = "Daq",
+                        EmptyTitle = "No Insight Daq data available",
+                        Rows = Model.InsightDaqRows,
+                        Years = daqYears,
+                        MonthsByYear = daqMonthsByYear,
+                        GrandByMonth = Model.InsightDaqGrandByMonth,
+                        GrandChargesByMonth = Model.InsightDaqGrandChargesByMonth,
+                        GrandTotal = daqGrandTotal,
+                        GrandTotalCharges = daqGrandTotalCharges,
+                    },
+                    new {
+                        PaneId = "insight-webpm-pane",
+                        Active = false,
+                        SourceLabel = "Webpm",
+                        EmptyTitle = "No Insight WebPM data available",
+                        Rows = Model.InsightWebPmRows,
+                        Years = webYears,
+                        MonthsByYear = webMonthsByYear,
+                        GrandByMonth = Model.InsightWebPmGrandByMonth,
+                        GrandChargesByMonth = Model.InsightWebPmGrandChargesByMonth,
+                        GrandTotal = webGrandTotal,
+                        GrandTotalCharges = webGrandTotalCharges,
+                    },
+                };
+            }
+            @foreach (var tab in insightTabs)
+            {
+                <div class="tab-pane fade @(tab.Active ? "show active" : "")" id="@tab.PaneId" role="tabpanel">
+                    @if (tab.Rows.Count > 0 && tab.Years.Count > 0)
+                    {
+                        <div class="pr-wrap">
+                            <div class="pr-scroll">
+                                <table class="pr-table">
+                                    <colgroup>
+                                        <col style="width:220px" />
+                                        @foreach (var year in tab.Years)
+                                        {
+                                            var insMons = tab.MonthsByYear.ContainsKey(year) ? tab.MonthsByYear[year] : new List<string>();
+                                            foreach (var mk in insMons)
+                                            {
+                                                <col style="width:56px" />
+                                                <col style="width:72px" />
+                                            }
+                                            <col style="width:62px" />
+                                            <col style="width:78px" />
+                                        }
+                                        <col style="width:62px" />
+                                        <col style="width:86px" />
+                                    </colgroup>
+                                    <thead>
+                                        <tr>
+                                            <th rowspan="3">Payer</th>
+                                            @foreach (var year in tab.Years)
+                                            {
+                                                var insMons = tab.MonthsByYear.ContainsKey(year) ? tab.MonthsByYear[year] : new List<string>();
+                                                <th colspan="@((insMons.Count + 1) * 2)">@year</th>
+                                            }
+                                            <th colspan="2" class="pr-grand-total">Grand Total</th>
+                                        </tr>
+                                        <tr>
+                                            @foreach (var year in tab.Years)
+                                            {
+                                                var insMons = tab.MonthsByYear.ContainsKey(year) ? tab.MonthsByYear[year] : new List<string>();
+                                                foreach (var mk in insMons)
+                                                {
+                                                    <th colspan="2">@MonthLabel(mk)</th>
+                                                }
+                                                <th colspan="2" class="pr-year-total">Year @year Total</th>
+                                            }
+                                            <th colspan="2" class="pr-grand-total"></th>
+                                        </tr>
+                                        <tr>
+                                            @foreach (var year in tab.Years)
+                                            {
+                                                var insMons = tab.MonthsByYear.ContainsKey(year) ? tab.MonthsByYear[year] : new List<string>();
+                                                foreach (var mk in insMons)
+                                                {
+                                                    <th class="pr-month-data">No. of Claims</th>
+                                                    <th class="pr-month-data">Charge Amount</th>
+                                                }
+                                                <th class="pr-year-total">No. of Claims</th>
+                                                <th class="pr-year-total">Charge Amount</th>
+                                            }
+                                            <th class="pr-grand-total">No. of Claims</th>
+                                            <th class="pr-grand-total">Charge Amount</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var payer in tab.Rows)
+                                        {
+                                            <tr class="pr-panel-row">
+                                                <td>@payer.PayerName</td>
+                                                @foreach (var year in tab.Years)
+                                                {
+                                                    var insMons = tab.MonthsByYear.ContainsKey(year) ? tab.MonthsByYear[year] : new List<string>();
+                                                    foreach (var mk in insMons)
+                                                    {
+                                                        <td class="pr-month-data">@PbCell(payer.ByMonth, mk).ToString("N0")</td>
+                                                        <td class="pr-month-data">@PbCharges(payer.ByMonthCharges, mk).ToString("C0")</td>
+                                                    }
+                                                    <td class="pr-year-total">@PbYear(payer.ByYear, year).ToString("N0")</td>
+                                                    <td class="pr-year-total">@PbYearCharges(payer.ByYearCharges, year).ToString("C0")</td>
+                                                }
+                                                <td class="pr-grand-total">@payer.GrandTotal.ToString("N0")</td>
+                                                <td class="pr-grand-total">@payer.GrandTotalCharges.ToString("C0")</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                    <tfoot>
+                                        <tr class="pr-total-row">
+                                            <td>Grand Total</td>
+                                            @foreach (var year in tab.Years)
+                                            {
+                                                var insMons = tab.MonthsByYear.ContainsKey(year) ? tab.MonthsByYear[year] : new List<string>();
+                                                foreach (var mk in insMons)
+                                                {
+                                                    <td class="pr-month-data">@PbCell(tab.GrandByMonth, mk).ToString("N0")</td>
+                                                    <td class="pr-month-data">@PbCharges(tab.GrandChargesByMonth, mk).ToString("C0")</td>
+                                                }
+                                                <td class="pr-year-total">@InsightGrandYear(tab.GrandByMonth, year).ToString("N0")</td>
+                                                <td class="pr-year-total">@InsightGrandYearCharges(tab.GrandChargesByMonth, year).ToString("C0")</td>
+                                            }
+                                            <td class="pr-grand-total">@tab.GrandTotal.ToString("N0")</td>
+                                            <td class="pr-grand-total">@tab.GrandTotalCharges.ToString("C0")</td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="text-center py-5 text-muted">
+                            <div style="font-size:2rem;opacity:.4">&#128202;</div>
+                            <div class="fw-semibold mt-2">@tab.EmptyTitle</div>
+                            <div class="small mt-1"><strong>Reason:</strong> No billed claim-level data found for Source = @tab.SourceLabel. Try adjusting your filters.</div>
+                        </div>
+                    }
+                </div>
+            }
+            </div>
+        </div>
+
+        <div class="tab-pane fade" id="highest-payer-pane" role="tabpanel" aria-labelledby="highest-payer-tab">
+            @if (Model.HighestPayerRows.Count > 0 && hpYears.Count > 0)
+            {
+                <div class="pr-wrap">
+                    <div class="pr-scroll">
+                        <table class="pr-table">
+                            <colgroup>
+                                <col style="width:240px" />
+                                @foreach (var year in hpYears)
+                                {
+                                    var hpMons = hpMonthsByYear.ContainsKey(year) ? hpMonthsByYear[year] : new List<string>();
+                                    foreach (var mk in hpMons)
+                                    {
+                                        <col style="width:56px" />
+                                        <col style="width:72px" />
+                                    }
+                                    <col style="width:62px" />
+                                    <col style="width:78px" />
+                                }
+                                <col style="width:62px" />
+                                <col style="width:86px" />
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th rowspan="3">Source &amp; Payer</th>
+                                    @foreach (var year in hpYears)
+                                    {
+                                        var hpMons = hpMonthsByYear.ContainsKey(year) ? hpMonthsByYear[year] : new List<string>();
+                                        <th colspan="@((hpMons.Count + 1) * 2)">@year</th>
+                                    }
+                                    <th colspan="2" class="pr-grand-total">Grand Total</th>
+                                </tr>
+                                <tr>
+                                    @foreach (var year in hpYears)
+                                    {
+                                        var hpMons = hpMonthsByYear.ContainsKey(year) ? hpMonthsByYear[year] : new List<string>();
+                                        foreach (var mk in hpMons)
+                                        {
+                                            <th colspan="2">@MonthLabel(mk)</th>
+                                        }
+                                        <th colspan="2" class="pr-year-total">Year @year Total</th>
+                                    }
+                                    <th colspan="2" class="pr-grand-total"></th>
+                                </tr>
+                                <tr>
+                                    @foreach (var year in hpYears)
+                                    {
+                                        var hpMons = hpMonthsByYear.ContainsKey(year) ? hpMonthsByYear[year] : new List<string>();
+                                        foreach (var mk in hpMons)
+                                        {
+                                            <th class="pr-month-data">No. of Claims</th>
+                                            <th class="pr-month-data">Charge Amount</th>
+                                        }
+                                        <th class="pr-year-total">No. of Claims</th>
+                                        <th class="pr-year-total">Charge Amount</th>
+                                    }
+                                    <th class="pr-grand-total">No. of Claims</th>
+                                    <th class="pr-grand-total">Charge Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @{ var hpSrcIdx = 0; }
+                                @foreach (var src in Model.HighestPayerRows)
+                                {
+                                    var hpGroupId = $"hp-src-{hpSrcIdx++}";
+                                    <tr class="pr-panel-row pr-hp-toggle" data-hp-group="@hpGroupId" role="button" aria-expanded="false" title="Open / close payers">
+                                        <td><i class="bi bi-chevron-right pr-hp-chevron" aria-hidden="true"></i>@src.PanelName</td>
+                                        @foreach (var year in hpYears)
+                                        {
+                                            var hpMons = hpMonthsByYear.ContainsKey(year) ? hpMonthsByYear[year] : new List<string>();
+                                            foreach (var mk in hpMons)
+                                            {
+                                                <td class="pr-month-data">@CellClaims(src.ByMonth, mk).ToString("N0")</td>
+                                                <td class="pr-month-data">@CellCharges(src.ByMonth, mk).ToString("C0")</td>
+                                            }
+                                            <td class="pr-year-total">@YearClaims(src.ByYear, year).ToString("N0")</td>
+                                            <td class="pr-year-total">@YearCharges(src.ByYear, year).ToString("C0")</td>
+                                        }
+                                        <td class="pr-grand-total">@src.TotalClaims.ToString("N0")</td>
+                                        <td class="pr-grand-total">@src.TotalCharges.ToString("C0")</td>
+                                    </tr>
+                                    @foreach (var payer in src.TopPayers)
+                                    {
+                                        <tr class="pr-payer-row pr-hp-child" data-hp-parent="@hpGroupId">
+                                            <td>@payer.PayerName</td>
+                                            @foreach (var year in hpYears)
+                                            {
+                                                var hpMons = hpMonthsByYear.ContainsKey(year) ? hpMonthsByYear[year] : new List<string>();
+                                                foreach (var mk in hpMons)
+                                                {
+                                                    <td class="pr-month-data">@CellClaims(payer.ByMonth, mk).ToString("N0")</td>
+                                                    <td class="pr-month-data">@CellCharges(payer.ByMonth, mk).ToString("C0")</td>
+                                                }
+                                                <td class="pr-year-total">@YearClaims(payer.ByYear, year).ToString("N0")</td>
+                                                <td class="pr-year-total">@YearCharges(payer.ByYear, year).ToString("C0")</td>
+                                            }
+                                            <td class="pr-grand-total">@payer.TotalClaims.ToString("N0")</td>
+                                            <td class="pr-grand-total">@payer.TotalCharges.ToString("C0")</td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                            <tfoot>
+                                <tr class="pr-total-row">
+                                    <td>Grand Total</td>
+                                    @foreach (var year in hpYears)
+                                    {
+                                        var hpMons = hpMonthsByYear.ContainsKey(year) ? hpMonthsByYear[year] : new List<string>();
+                                        foreach (var mk in hpMons)
+                                        {
+                                            <td class="pr-month-data">@CellClaims(Model.HighestPayerGrandByMonth, mk).ToString("N0")</td>
+                                            <td class="pr-month-data">@CellCharges(Model.HighestPayerGrandByMonth, mk).ToString("C0")</td>
+                                        }
+                                        <td class="pr-year-total">@HpGrandYearClaims(year).ToString("N0")</td>
+                                        <td class="pr-year-total">@HpGrandYearCharges(year).ToString("C0")</td>
+                                    }
+                                    <td class="pr-grand-total">@hpGrandClaims.ToString("N0")</td>
+                                    <td class="pr-grand-total">@hpGrandCharges.ToString("C0")</td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5 text-muted">
+                    <div style="font-size:2rem;opacity:.4">&#128202;</div>
+                    <div class="fw-semibold mt-2">No Highest Payer Breakdown data available</div>
+                    <div class="small mt-1"><strong>Reason:</strong> No billed claim-level data found. Try adjusting your filters.</div>
+                </div>
+            }
+        </div>
+        }
+
     </div>
 }
 
 <script nonce='@Context.Items["CspNonce"]'>
     // Multi-select dropdown widget (matches Clinic Summary pattern)
     document.addEventListener('DOMContentLoaded', function () {
+        var sourceToggle = document.getElementById('insightSourceToggle');
+        if (sourceToggle) {
+            sourceToggle.addEventListener('click', function (e) {
+                var btn = e.target.closest('.pr-source-toggle-btn');
+                if (!btn) return;
+                sourceToggle.querySelectorAll('.pr-source-toggle-btn').forEach(function (b) {
+                    var on = b === btn;
+                    b.classList.toggle('active', on);
+                    b.setAttribute('aria-selected', on ? 'true' : 'false');
+                });
+            });
+        }
+
+        document.querySelectorAll('.pr-hp-toggle').forEach(function (row) {
+            row.addEventListener('click', function () {
+                var group = row.getAttribute('data-hp-group');
+                var open = row.classList.toggle('pr-hp-open');
+                row.setAttribute('aria-expanded', open ? 'true' : 'false');
+                document.querySelectorAll('.pr-hp-child[data-hp-parent="' + group + '"]').forEach(function (child) {
+                    child.classList.toggle('pr-hp-shown', open);
+                });
+            });
+        });
+
         document.querySelectorAll('.pr-ms').forEach(function (ms) {
             var btn = ms.querySelector('.pr-ms-btn');
             var panel = ms.querySelector('.pr-ms-panel');

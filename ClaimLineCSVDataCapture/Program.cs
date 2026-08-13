@@ -1,4 +1,4 @@
-﻿// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 //  ClaimLineCSVDataCapture
 //
 //  SCOPE (revised):
@@ -1261,29 +1261,15 @@ foreach (var lab in labConfigs)
         //   EXEC dbo.usp_ReportRunIdInfoLog_Insert   (log)
         //   EXEC dbo.usp_ReportsWorkflowTracker_Upsert (tracker)
         //
-        //   @ReportType / @ReportName : 'Production Summary' (12),
-        //                               'Collection Summary' (4),
-        //                               'Executive Summary'  (6)
-        //   @SourceSystem             : lab config FetchLatestCompletedRunIDParameter
-        //                               (the LRNMaster-facing lab name, e.g. 'Phi Life')
-        //   @SourceFileName           : one representative file from dbo.LineClaimFileLogs
-        //                               for this RunId (Claim Level preferred). These
-        //                               reports aggregate several tables — Production and
-        //                               Collection from ClaimLevel, Executive Summary from
-        //                               LIMSMaster + ClaimLevel + LineLevel — so any one
-        //                               logged file identifies the run. The full source
-        //                               list is recorded in @LogMessage.
-        //   @RowCount                 : 0. With multiple contributing tables a single
-        //                               count would be misleading.
-        //   @Status                   : Success only when every SP in the group passed.
-        //
-        // A report type with no results (SPs not deployed for the lab) is skipped.
-        // Every call is exception-isolated inside ReportRunLogger — a logging failure
-        // can never fail the lab or change the process exit code.
+        // Runs for BOTH new-RunId and ClaimLineRefresh-forced refreshes.
+        // ClaimLineRefresh often keeps the same RunId — still must log/upsert so
+        // the workflow tracker shows the re-refresh. Prefer latestRunId, then
+        // LastProcessedRunId, then a CLR- synthetic id so we never skip.
         // ─────────────────────────────────────────────────────────────────────
         if (reportRunLogger.Enabled)
         {
             log.Header($"STEP 16b — Report run logging — {lab.LabName}");
+            log.Info($"  [STEP 16b] Trigger — runIdChanged={runIdChanged}, ClaimLineRefresh={lab.ClaimLineRefresh}");
 
             // Lab identity as LRNMaster knows it (same value used for
             // sp_GetRecentSuccessRunByLab); fall back to the config key.
@@ -1291,14 +1277,23 @@ foreach (var lab in labConfigs)
                 ? lab.LabName
                 : lab.FetchLatestCompletedRunIDParameter!;
 
+            // Effective RunId for log/tracker (ClaimLineRefresh must not skip when
+            // latest lookup is empty — fall back to stored, then synthetic).
+            var reportRunId = !string.IsNullOrWhiteSpace(latestRunId)
+                ? latestRunId!
+                : (!string.IsNullOrWhiteSpace(storedRunId)
+                    ? storedRunId!
+                    : $"CLR-{lab.LabName}-{DateTime.UtcNow:yyyyMMddHHmmss}");
+
+            if (!string.Equals(reportRunId, latestRunId, StringComparison.OrdinalIgnoreCase))
+                log.Warn($"  [STEP 16b] latestRunId='{latestRunId ?? "(none)"}' — using reportRunId='{reportRunId}' for log/tracker.");
+
             // One representative source file for this RunId, from the lab's
             // LineClaimFileLogs (Claim Level preferred — see GetSourceFileForRun).
             string? srcFileName = null;
             try
             {
-                var fileInfo = string.IsNullOrWhiteSpace(latestRunId)
-                    ? null
-                    : db.GetSourceFileForRun(latestRunId!);
+                var fileInfo = db.GetSourceFileForRun(reportRunId);
 
                 if (fileInfo is { } fi)
                 {
@@ -1308,13 +1303,13 @@ foreach (var lab in labConfigs)
                 }
                 else
                 {
-                    log.Warn($"  [STEP 16b] No LineClaimFileLogs row for RunId '{latestRunId ?? "(none)"}' — " +
+                    log.Warn($"  [STEP 16b] No LineClaimFileLogs row for RunId '{reportRunId}' — " +
                              $"@SourceFileName will be sent as NULL.");
                 }
             }
             catch (Exception ex)
             {
-                log.Error($"  [STEP 16b] Failed to read LineClaimFileLogs for RunId '{latestRunId}': {ex.Message} — " +
+                log.Error($"  [STEP 16b] Failed to read LineClaimFileLogs for RunId '{reportRunId}': {ex.Message} — " +
                           $"continuing with NULL @SourceFileName.");
             }
 
@@ -1335,9 +1330,11 @@ foreach (var lab in labConfigs)
 
                 var groupSucceeded = results.All(r => r.Error is null);
                 var message        = ReportRunLogger.BuildGroupMessage(reportType, results);
+                if (lab.ClaimLineRefresh && !runIdChanged)
+                    message = "[ClaimLineRefresh] " + message;
 
                 reportRunLogger.Report(
-                    runId:          latestRunId!,
+                    runId:          reportRunId,
                     reportType:     reportType,
                     sourceSystem:   sourceSystem,
                     sourceFileName: srcFileName,
@@ -1347,6 +1344,12 @@ foreach (var lab in labConfigs)
             }
 
             log.Blank();
+        }
+        else
+        {
+            log.Warn($"  [STEP 16b] Report run logging DISABLED (ReportRunLogging:Enabled=false) — " +
+                     $"LRNMaster log/tracker NOT updated for {lab.LabName} " +
+                     $"(runIdChanged={runIdChanged}, ClaimLineRefresh={lab.ClaimLineRefresh}).");
         }
 
         // ═════════════════════════════════════════════════════════════════════
@@ -1779,6 +1782,8 @@ static async Task<string> GenerateProductionReportExcelAsync(
         PayerBreakdownRows = payerBreakdownResult.PayerRows,
         PayerBreakdownGrandByMonth = payerBreakdownResult.GrandTotalByMonth,
         PayerBreakdownGrandTotal = payerBreakdownResult.GrandTotal,
+        PayerBreakdownGrandChargesByMonth = payerBreakdownResult.GrandTotalChargesByMonth ?? [],
+        PayerBreakdownGrandTotalCharges = payerBreakdownResult.GrandTotalCharges,
         PayerPanelColumns = payerPanelResult.PanelColumns,
         PayerPanelRows = payerPanelResult.PayerRows,
         PayerPanelGrandByPanel = payerPanelResult.GrandTotalByPanel,

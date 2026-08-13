@@ -1,0 +1,510 @@
+@model LabMetricsDashboard.Models.ExecSummaryThreePillarViewModel
+@using System.Globalization
+@using System.Text
+@{
+    var ci = CultureInfo.InvariantCulture;
+    var usd = CultureInfo.GetCultureInfo("en-US");
+    string Money(decimal v) => v.ToString("C0", usd);
+    string MoneyFull(decimal v) => v.ToString("C0", usd);
+    string Pct(decimal? v) => v is { } d ? d.ToString("0.0", ci) + "%" : "—";
+    string ShortLbl(string monthLabel)
+    {
+        if (string.IsNullOrWhiteSpace(monthLabel)) return "";
+        var parts = monthLabel.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length >= 2 && int.TryParse(parts[^1], out var y))
+            return parts[0][..Math.Min(3, parts[0].Length)] + (y % 100).ToString("00", ci);
+        return monthLabel;
+    }
+    string F(double v) => v.ToString("0.###", CultureInfo.InvariantCulture);
+    string Esc(string? s) => System.Net.WebUtility.HtmlEncode(s ?? "");
+    const double W = 720;
+
+    void RotLabel(StringBuilder sb, double cx, double cy, string text) =>
+        sb.Append($"<text x='{F(cx)}' y='{F(cy)}' text-anchor='end' class='tpd-axis' transform='rotate(-40 {F(cx)} {F(cy)})'>{Esc(text)}</text>");
+
+    string FmtAxisMoney(double v)
+    {
+        if (Math.Abs(v) >= 1_000_000) return (v / 1_000_000).ToString("0.#", ci) + "M";
+        if (Math.Abs(v) >= 1_000) return (v / 1_000).ToString("0.#", ci) + "K";
+        return v.ToString("0", ci);
+    }
+
+    string SvgBars(IReadOnlyList<string> labels, IReadOnlyList<double> values, string fill, string yTitle)
+    {
+        if (labels.Count == 0) return "<div class='tpd-empty'>No chart data.</div>";
+        double H = 300, L = 58, R = 18, T = 24, B = 56;
+        var plotW = W - L - R; var plotH = H - T - B;
+        var max = Math.Max(1, values.DefaultIfEmpty(0).Max() * 1.08);
+        var gap = 0.28;
+        var bw = plotW / labels.Count * (1 - gap);
+        double Xn(int i) => L + i * plotW / labels.Count + (plotW / labels.Count - bw) / 2;
+        double Yn(double v) => T + plotH - v / max * plotH;
+        var sb = new StringBuilder();
+        sb.Append($"<svg viewBox='0 0 {W} {H}' class='tpd-svg' role='img'>");
+        sb.Append($"<line x1='{F(L)}' y1='{F(T)}' x2='{F(L)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        sb.Append($"<line x1='{F(L)}' y1='{F(T + plotH)}' x2='{F(W - R)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        for (int g = 0; g <= 4; g++)
+        {
+            var gy = T + plotH * g / 4.0;
+            var gv = max - max * g / 4.0;
+            sb.Append($"<line x1='{F(L)}' y1='{F(gy)}' x2='{F(W - R)}' y2='{F(gy)}' class='tpd-grid'/>");
+            sb.Append($"<text x='{F(L - 8)}' y='{F(gy + 3)}' text-anchor='end' class='tpd-axis'>{Esc(FmtAxisMoney(gv))}</text>");
+        }
+        for (int i = 0; i < labels.Count; i++)
+        {
+            var h = Math.Max(1, values[i] / max * plotH);
+            sb.Append($"<rect x='{F(Xn(i))}' y='{F(Yn(values[i]))}' width='{F(bw)}' height='{F(h)}' fill='{fill}'/>");
+            RotLabel(sb, Xn(i) + bw / 2, T + plotH + 14, labels[i]);
+        }
+        sb.Append($"<text x='14' y='{F(H / 2)}' transform='rotate(-90 14 {F(H / 2)})' text-anchor='middle' class='tpd-axis-title'>{Esc(yTitle)}</text>");
+        sb.Append("</svg>");
+        return sb.ToString();
+    }
+
+    string SvgPctLine(IReadOnlyList<string> labels, IReadOnlyList<double> values, string stroke, string yTitle)
+    {
+        if (labels.Count == 0) return "<div class='tpd-empty'>No chart data.</div>";
+        double H = 300, L = 52, R = 18, T = 28, B = 56;
+        var plotW = W - L - R; var plotH = H - T - B;
+        var vals = values.Where(v => !double.IsNaN(v)).DefaultIfEmpty(0).ToList();
+        var min = Math.Max(0, vals.Min() - 2);
+        var max = Math.Max(vals.Max() + 2, min + 1);
+        double Xn(int i) => L + (labels.Count == 1 ? plotW / 2 : i * plotW / (labels.Count - 1));
+        double Yn(double v) => T + plotH - (v - min) / (max - min) * plotH;
+        var sb = new StringBuilder();
+        sb.Append($"<svg viewBox='0 0 {W} {H}' class='tpd-svg' role='img'>");
+        sb.Append($"<line x1='{F(L)}' y1='{F(T)}' x2='{F(L)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        sb.Append($"<line x1='{F(L)}' y1='{F(T + plotH)}' x2='{F(W - R)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        for (int g = 0; g <= 4; g++)
+        {
+            var gy = T + plotH * g / 4.0;
+            var gv = max - (max - min) * g / 4.0;
+            sb.Append($"<line x1='{F(L)}' y1='{F(gy)}' x2='{F(W - R)}' y2='{F(gy)}' class='tpd-grid'/>");
+            sb.Append($"<text x='{F(L - 8)}' y='{F(gy + 3)}' text-anchor='end' class='tpd-axis'>{Esc(gv.ToString("0.0", ci))}</text>");
+        }
+        var pts = new StringBuilder();
+        for (int i = 0; i < values.Count; i++)
+        {
+            if (double.IsNaN(values[i])) continue;
+            pts.Append($"{(pts.Length == 0 ? "M" : "L")}{F(Xn(i))},{F(Yn(values[i]))} ");
+        }
+        sb.Append($"<path d='{pts}' fill='none' stroke='{stroke}' stroke-width='2.2'/>");
+        for (int i = 0; i < values.Count; i++)
+        {
+            if (double.IsNaN(values[i])) continue;
+            sb.Append($"<circle cx='{F(Xn(i))}' cy='{F(Yn(values[i]))}' r='3.5' fill='{stroke}'/>");
+            RotLabel(sb, Xn(i), T + plotH + 14, labels[i]);
+        }
+        sb.Append($"<text x='14' y='{F(H / 2)}' transform='rotate(-90 14 {F(H / 2)})' text-anchor='middle' class='tpd-axis-title'>{Esc(yTitle)}</text>");
+        sb.Append("</svg>");
+        return sb.ToString();
+    }
+
+    string SvgMoneyLine(IReadOnlyList<string> labels, IReadOnlyList<double> values, string stroke, string yTitle)
+    {
+        if (labels.Count == 0) return "<div class='tpd-empty'>No chart data.</div>";
+        double H = 300, L = 58, R = 18, T = 28, B = 56;
+        var plotW = W - L - R; var plotH = H - T - B;
+        var vals = values.Where(v => !double.IsNaN(v)).DefaultIfEmpty(0).ToList();
+        var min = Math.Max(0, vals.Min() * 0.9);
+        var max = Math.Max(vals.Max() * 1.1, min + 1);
+        double Xn(int i) => L + (labels.Count == 1 ? plotW / 2 : i * plotW / (labels.Count - 1));
+        double Yn(double v) => T + plotH - (v - min) / (max - min) * plotH;
+        var sb = new StringBuilder();
+        sb.Append($"<svg viewBox='0 0 {W} {H}' class='tpd-svg' role='img'>");
+        sb.Append($"<line x1='{F(L)}' y1='{F(T)}' x2='{F(L)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        sb.Append($"<line x1='{F(L)}' y1='{F(T + plotH)}' x2='{F(W - R)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        for (int g = 0; g <= 4; g++)
+        {
+            var gy = T + plotH * g / 4.0;
+            var gv = max - (max - min) * g / 4.0;
+            sb.Append($"<line x1='{F(L)}' y1='{F(gy)}' x2='{F(W - R)}' y2='{F(gy)}' class='tpd-grid'/>");
+            sb.Append($"<text x='{F(L - 8)}' y='{F(gy + 3)}' text-anchor='end' class='tpd-axis'>{Esc(FmtAxisMoney(gv))}</text>");
+        }
+        var pts = new StringBuilder();
+        for (int i = 0; i < values.Count; i++)
+        {
+            if (double.IsNaN(values[i])) continue;
+            pts.Append($"{(pts.Length == 0 ? "M" : "L")}{F(Xn(i))},{F(Yn(values[i]))} ");
+        }
+        sb.Append($"<path d='{pts}' fill='none' stroke='{stroke}' stroke-width='2.2'/>");
+        for (int i = 0; i < values.Count; i++)
+        {
+            if (double.IsNaN(values[i])) continue;
+            sb.Append($"<circle cx='{F(Xn(i))}' cy='{F(Yn(values[i]))}' r='3.5' fill='{stroke}'/>");
+            RotLabel(sb, Xn(i), T + plotH + 14, labels[i]);
+        }
+        sb.Append($"<text x='14' y='{F(H / 2)}' transform='rotate(-90 14 {F(H / 2)})' text-anchor='middle' class='tpd-axis-title'>{Esc(yTitle)}</text>");
+        sb.Append("</svg>");
+        return sb.ToString();
+    }
+
+    string SvgDualMoney(IReadOnlyList<string> labels, IReadOnlyList<double> a, IReadOnlyList<double> b,
+        string nameA, string nameB, string colorA, string colorB)
+    {
+        if (labels.Count == 0) return "<div class='tpd-empty'>No chart data.</div>";
+        var all = a.Concat(b).Where(v => !double.IsNaN(v)).DefaultIfEmpty(0).ToList();
+        double H = 320, L = 58, R = 18, T = 36, B = 56;
+        var plotW = W - L - R; var plotH = H - T - B;
+        var min = Math.Max(0, all.Min() * 0.9);
+        var max = Math.Max(all.Max() * 1.1, min + 1);
+        double Xn(int i) => L + (labels.Count == 1 ? plotW / 2 : i * plotW / (labels.Count - 1));
+        double Yn(double v) => T + plotH - (v - min) / (max - min) * plotH;
+        var sb = new StringBuilder();
+        sb.Append($"<svg viewBox='0 0 {W} {H}' class='tpd-svg' role='img'>");
+        sb.Append($"<line x1='{F(L)}' y1='{F(T)}' x2='{F(L)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        sb.Append($"<line x1='{F(L)}' y1='{F(T + plotH)}' x2='{F(W - R)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        for (int g = 0; g <= 4; g++)
+        {
+            var gy = T + plotH * g / 4.0;
+            var gv = max - (max - min) * g / 4.0;
+            sb.Append($"<line x1='{F(L)}' y1='{F(gy)}' x2='{F(W - R)}' y2='{F(gy)}' class='tpd-grid'/>");
+            sb.Append($"<text x='{F(L - 8)}' y='{F(gy + 3)}' text-anchor='end' class='tpd-axis'>{Esc(FmtAxisMoney(gv))}</text>");
+        }
+        void Line(IReadOnlyList<double> vals, string color, bool squares)
+        {
+            var p = new StringBuilder();
+            for (int i = 0; i < vals.Count; i++)
+            {
+                if (double.IsNaN(vals[i])) continue;
+                p.Append($"{(p.Length == 0 ? "M" : "L")}{F(Xn(i))},{F(Yn(vals[i]))} ");
+            }
+            sb.Append($"<path d='{p}' fill='none' stroke='{color}' stroke-width='2.2'/>");
+            for (int i = 0; i < vals.Count; i++)
+            {
+                if (double.IsNaN(vals[i])) continue;
+                if (squares)
+                    sb.Append($"<rect x='{F(Xn(i) - 3.5)}' y='{F(Yn(vals[i]) - 3.5)}' width='7' height='7' fill='{color}'/>");
+                else
+                    sb.Append($"<circle cx='{F(Xn(i))}' cy='{F(Yn(vals[i]))}' r='3.5' fill='{color}'/>");
+            }
+        }
+        Line(a, colorA, false); Line(b, colorB, true);
+        for (int i = 0; i < labels.Count; i++) RotLabel(sb, Xn(i), T + plotH + 14, labels[i]);
+        sb.Append($"<text x='{F(L)}' y='16' class='tpd-legend' fill='{colorA}'>● {Esc(nameA)}</text>");
+        sb.Append($"<text x='{F(L + 180)}' y='16' class='tpd-legend' fill='{colorB}'>■ {Esc(nameB)}</text>");
+        sb.Append("</svg>");
+        return sb.ToString();
+    }
+
+    string SvgStackedComposition(IReadOnlyList<string> labels,
+        IReadOnlyList<double> fullyDenied, IReadOnlyList<double> noResp, IReadOnlyList<double> partial)
+    {
+        if (labels.Count == 0) return "<div class='tpd-empty'>No chart data.</div>";
+        double H = 300, L = 48, R = 18, T = 36, B = 56;
+        var plotW = W - L - R; var plotH = H - T - B;
+        double Xn(int i) => L + (labels.Count == 1 ? plotW / 2 : i * plotW / (labels.Count - 1));
+        double Yn(double v) => T + plotH - v / 100.0 * plotH;
+        var sb = new StringBuilder();
+        sb.Append($"<svg viewBox='0 0 {W} {H}' class='tpd-svg' role='img'>");
+        sb.Append($"<line x1='{F(L)}' y1='{F(T)}' x2='{F(L)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        sb.Append($"<line x1='{F(L)}' y1='{F(T + plotH)}' x2='{F(W - R)}' y2='{F(T + plotH)}' class='tpd-axis-line'/>");
+        for (int g = 0; g <= 5; g++)
+        {
+            var pct = 100 - g * 20;
+            var gy = Yn(pct);
+            sb.Append($"<line x1='{F(L)}' y1='{F(gy)}' x2='{F(W - R)}' y2='{F(gy)}' class='tpd-grid'/>");
+            sb.Append($"<text x='{F(L - 8)}' y='{F(gy + 3)}' text-anchor='end' class='tpd-axis'>{pct}</text>");
+        }
+        string Poly(Func<int, double> bottom, Func<int, double> top, string fill)
+        {
+            var p = new StringBuilder();
+            for (int i = 0; i < labels.Count; i++)
+                p.Append($"{(i == 0 ? "M" : "L")}{F(Xn(i))},{F(Yn(top(i)))} ");
+            for (int i = labels.Count - 1; i >= 0; i--)
+                p.Append($"L{F(Xn(i))},{F(Yn(bottom(i)))} ");
+            p.Append("Z");
+            return $"<path d='{p}' fill='{fill}' stroke='none' opacity='0.85'/>";
+        }
+        double Fd(int i) => fullyDenied[i];
+        double Nr(int i) => fullyDenied[i] + noResp[i];
+        double Pt(int i) => fullyDenied[i] + noResp[i] + partial[i];
+        sb.Append(Poly(_ => 0, Fd, "#F59E0B"));
+        sb.Append(Poly(Fd, Nr, "#B91C1C"));
+        sb.Append(Poly(Nr, Pt, "#94A3B8"));
+        for (int i = 0; i < labels.Count; i++) RotLabel(sb, Xn(i), T + plotH + 14, labels[i]);
+        sb.Append($"<text x='{F(L)}' y='16' class='tpd-legend' fill='#F59E0B'>■ Fully Denied</text>");
+        sb.Append($"<text x='{F(L + 120)}' y='16' class='tpd-legend' fill='#B91C1C'>■ No Response</text>");
+        sb.Append($"<text x='{F(L + 240)}' y='16' class='tpd-legend' fill='#94A3B8'>■ Partially Denied</text>");
+        sb.Append("</svg>");
+        return sb.ToString();
+    }
+
+    string SvgHBars(IReadOnlyList<(string Label, double Value)> rows)
+    {
+        if (rows.Count == 0) return "<div class='tpd-empty'>No chart data.</div>";
+        double H = Math.Max(220, 28 + rows.Count * 28), L = 120, R = 90, T = 12, B = 36;
+        var plotW = W - L - R; var plotH = H - T - B;
+        var max = Math.Max(1, rows.Max(r => r.Value));
+        var rowH = plotH / rows.Count;
+        var sb = new StringBuilder();
+        sb.Append($"<svg viewBox='0 0 {W} {H}' class='tpd-svg' role='img'>");
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var y = T + i * rowH + 4;
+            var bw = Math.Max(2, rows[i].Value / max * plotW);
+            sb.Append($"<text x='{F(L - 8)}' y='{F(y + rowH * 0.55)}' text-anchor='end' class='tpd-funnel-label'>{Esc(rows[i].Label)}</text>");
+            sb.Append($"<rect x='{F(L)}' y='{F(y)}' width='{F(bw)}' height='{F(rowH * 0.62)}' fill='#1D4ED8'/>");
+            sb.Append($"<text x='{F(L + bw + 6)}' y='{F(y + rowH * 0.52)}' class='tpd-funnel-val'>{rows[i].Value.ToString("N0", ci)}</text>");
+        }
+        sb.Append($"<text x='{F(L + plotW / 2)}' y='{F(H - 6)}' text-anchor='middle' class='tpd-axis-title'>Count</text>");
+        sb.Append("</svg>");
+        return sb.ToString();
+    }
+
+    var rows = Model.CashHeadline;
+    var labels = rows.Select(r => ShortLbl(r.MonthLabel)).ToList();
+    var billed = rows.Select(r => (double)r.TotalBilledAmt).ToList();
+    var collRate = rows.Select(r => r.CollectionRatePct is { } p ? (double)p : double.NaN).ToList();
+    var partPaid = rows.Select(r => (double)r.PartiallyPaidAmt).ToList();
+    var ibPct = rows.Select(r => r.PctInsuranceBalanceOfBilled is { } p ? (double)p : double.NaN).ToList();
+    var fdShare = new List<double>();
+    var nrShare = new List<double>();
+    var pdShare = new List<double>();
+    foreach (var r in rows)
+    {
+        var tot = (double)(r.FullyDeniedIBAmt + r.NoResponseIBAmt + r.PartiallyDeniedIBAmt);
+        if (tot <= 0) { fdShare.Add(0); nrShare.Add(0); pdShare.Add(0); continue; }
+        fdShare.Add((double)r.FullyDeniedIBAmt / tot * 100);
+        nrShare.Add((double)r.NoResponseIBAmt / tot * 100);
+        pdShare.Add((double)r.PartiallyDeniedIBAmt / tot * 100);
+    }
+    var wo = rows.Select(r => (double)r.PatientWOAmt).ToList();
+    var pbal = rows.Select(r => (double)r.PatientBalanceAmt).ToList();
+    var reasons = Model.CashWriteOffReasons
+        .Where(r => !string.IsNullOrWhiteSpace(r.TransactionCodeCombined) && r.MatchingCount > 0)
+        .Select(r => (r.TransactionCodeCombined, (double)r.MatchingCount))
+        .ToList();
+}
+
+@if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+{
+    <div class="tpd-error">@Model.ErrorMessage</div>
+}
+else if (!Model.CashLoaded || !Model.CashHasData)
+{
+    <div class="tpd-error">No Cash diagnostic data for this window.</div>
+}
+else
+{
+    <div class="tpd-logic" style="margin-bottom:1rem">
+        <strong>Cash scope</strong> — @Model.ScopeLabel · source <code>ClaimLevelData</code>
+        (+ <code>BTWOSummary</code> for write-off reasons).
+        Dollar metrics use DOS days <strong>1–@Model.DayWindow</strong> (same WeekRange comparable window as LIS/PMS).
+        Latest-month dips often reflect Check #1 (partial period) — read Collection Rate with Insurance Balance together.
+    </div>
+
+    <details class="tpd-card tpd-acc" open>
+        <summary class="tpd-acc-head">
+            <div class="tpd-acc-head-text">
+                <div class="tpd-card-title">1. Total Billed $ — Monthly Trend</div>
+                <p class="tpd-card-sub">Monthly $ Billed = SUM(ChargeAmount) WHERE Billed · GROUP BY DOS month</p>
+            </div>
+            <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
+        </summary>
+        <div class="tpd-acc-body">
+            <div class="tpd-logic">
+                <strong>Fetch logic</strong>
+                <ul>
+                    <li><strong>Total Billed $</strong> = <code>SUM(ChargeAmount)</code> where BillStatus = <code>Billed</code> (ES <code>BilledUnbilled</code>)</li>
+                    <li>Comparable window = DOS day 1–@Model.DayWindow</li>
+                </ul>
+            </div>
+            <div class="tpd-chart">@Html.Raw(SvgBars(labels, billed, "#2563EB", "Total Billed $"))</div>
+            <p class="tpd-funnel-note">Shrinking billed base is independent of collections performance — read alongside LIS % Billed to Insurance.</p>
+        </div>
+    </details>
+
+    <details class="tpd-card tpd-acc" open>
+        <summary class="tpd-acc-head">
+            <div class="tpd-acc-head-text">
+                <div class="tpd-card-title">2. Partially Paid $ — Monthly Trend</div>
+                <p class="tpd-card-sub">Partially Paid $ ÷ Total Billed $ × 100</p>
+            </div>
+            <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
+        </summary>
+        <div class="tpd-acc-body">
+            <div class="tpd-logic">
+                <strong>Fetch logic</strong>
+                <ul>
+                    <li><strong>Partially Paid $</strong> = Insurance Payment where Billed + ClaimStatus IN (<code>Partially Paid</code>, <code>Partial Paid</code>)</li>
+                    <li><strong>%</strong> = Partially Paid $ ÷ Total Billed $ × 100</li>
+                </ul>
+            </div>
+            <div class="tpd-chart">@Html.Raw(SvgMoneyLine(labels, partPaid, "#15803D", "Partially Paid $"))</div>
+            <p class="tpd-funnel-note">Small vs billed base; latest-month drops often track maturity (Check #1), not a standalone escalation.</p>
+        </div>
+    </details>
+
+    <details class="tpd-card tpd-acc" open>
+        <summary class="tpd-acc-head">
+            <div class="tpd-acc-head-text">
+                <div class="tpd-card-title">3. Collection Rate — Insurance Payment / Total Billed</div>
+                <p class="tpd-card-sub">Fully Paid Ins $ ÷ Total Billed $ × 100</p>
+            </div>
+            <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
+        </summary>
+        <div class="tpd-acc-body">
+            <div class="tpd-insight tpd-insight-ok">Best headline metric for a monthly lab-owner review — pair with Insurance Balance $ below.</div>
+            <div class="tpd-logic">
+                <strong>Fetch logic</strong>
+                <ul>
+                    <li><strong>Collection Rate</strong> = Fully Paid <code>InsurancePayment</code> ÷ Total Billed $ × 100</li>
+                </ul>
+            </div>
+            <div class="tpd-chart">@Html.Raw(SvgPctLine(labels, collRate, "#15803D", "Collection Rate %"))</div>
+        </div>
+    </details>
+
+    <div class="tpd-grid2 tpd-cash-grid">
+        <details class="tpd-card tpd-acc" open>
+            <summary class="tpd-acc-head">
+                <div class="tpd-acc-head-text">
+                    <div class="tpd-card-title">4a. % Insurance Balance $ of Total Billed</div>
+                    <p class="tpd-card-sub">IB $ ÷ Total Billed $ × 100</p>
+                </div>
+                <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <div class="tpd-acc-body">
+                <div class="tpd-logic">
+                    <strong>Fetch logic</strong>
+                    <ul>
+                        <li><strong>% IB $</strong> = SUM(InsuranceBalance) for Fully Denied / No Response / Partially Denied ÷ Total Billed $ × 100</li>
+                    </ul>
+                </div>
+                <div class="tpd-chart">@Html.Raw(SvgPctLine(labels, ibPct, "#B91C1C", "% of Total Billed"))</div>
+            </div>
+        </details>
+
+        <details class="tpd-card tpd-acc" open>
+            <summary class="tpd-acc-head">
+                <div class="tpd-acc-head-text">
+                    <div class="tpd-card-title">4b. Insurance Balance $ Composition</div>
+                    <p class="tpd-card-sub">Fully Denied / No Response / Partially Denied share of open IB $</p>
+                </div>
+                <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <div class="tpd-acc-body">
+                <div class="tpd-logic">
+                    <strong>Fetch logic</strong>
+                    <ul>
+                        <li><strong>Share</strong> = status IB $ ÷ (FD + NR + PD) IB $ × 100</li>
+                    </ul>
+                </div>
+                <div class="tpd-chart">@Html.Raw(SvgStackedComposition(labels, fdShare, nrShare, pdShare))</div>
+                <p class="tpd-funnel-note">No Response overtaking Fully Denied is the same root cause as the PMS count view — in dollars.</p>
+            </div>
+        </details>
+    </div>
+
+    <details class="tpd-card tpd-acc" open>
+        <summary class="tpd-acc-head">
+            <div class="tpd-acc-head-text">
+                <div class="tpd-card-title">5. Patient Write-Off vs Patient Balance</div>
+                <p class="tpd-card-sub">Write-off ratio and Patient Collection Rate</p>
+            </div>
+            <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
+        </summary>
+        <div class="tpd-acc-body">
+            <div class="tpd-logic">
+                <strong>Fetch logic</strong>
+                <ul>
+                    <li><strong>Write-off ratio</strong> = Patient WO $ ÷ (Patient WO $ + Patient Balance $) × 100</li>
+                    <li><strong>Patient Collection Rate</strong> = Patient Payment $ ÷ (Patient Payment $ + Patient Balance $) × 100</li>
+                </ul>
+            </div>
+            <div class="tpd-chart">@Html.Raw(SvgDualMoney(labels, wo, pbal, "Patient Write-Off", "Patient Balance", "#2563EB", "#D97706"))</div>
+            <div class="tpd-scroll" style="margin-top:.75rem;max-height:280px">
+                <table class="tpd-tbl">
+                    <thead>
+                        <tr>
+                            <th>Month</th>
+                            <th class="num">WO $</th>
+                            <th class="num">Patient Bal $</th>
+                            <th class="num">WO Ratio</th>
+                            <th class="num">Pat Coll. Rate</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var r in rows)
+                    {
+                        <tr>
+                            <td>@ShortLbl(r.MonthLabel)</td>
+                            <td class="num">@MoneyFull(r.PatientWOAmt)</td>
+                            <td class="num">@MoneyFull(r.PatientBalanceAmt)</td>
+                            <td class="num">@Pct(r.WriteOffRatioPct)</td>
+                            <td class="num">@Pct(r.PatientCollectionRatePct)</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </details>
+
+    <details class="tpd-card tpd-acc" open>
+        <summary class="tpd-acc-head">
+            <div class="tpd-acc-head-text">
+                <div class="tpd-card-title">6. Fully Adjusted $ — Write-Off Reason Pareto</div>
+                <p class="tpd-card-sub">Reason % of Fully Adjusted matching counts · BTWOSummary</p>
+            </div>
+            <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
+        </summary>
+        <div class="tpd-acc-body">
+            <div class="tpd-insight tpd-insight-ok">WOINS + WOOON typically dominate. Prefer $ by reason from PMS when available — more decision-useful than count alone.</div>
+            <div class="tpd-logic">
+                <strong>Fetch logic</strong>
+                <ul>
+                    <li><strong>Reason %</strong> = SUM(count for reason) ÷ SUM(Fully Adjusted matching counts) × 100</li>
+                    <li>Claims: Billed + ClaimStatus IN (<code>Complete W/O</code>, <code>Fully Adjusted</code>)</li>
+                </ul>
+            </div>
+            <div class="tpd-chart">@Html.Raw(SvgHBars(reasons))</div>
+        </div>
+    </details>
+
+    <details class="tpd-card tpd-acc" open>
+        <summary class="tpd-acc-head">
+            <div class="tpd-acc-head-text">
+                <div class="tpd-card-title">Cash monthly detail</div>
+                <p class="tpd-card-sub">All Cash headline $ metrics by DOS month (DayWindow-capped)</p>
+            </div>
+            <span class="tpd-acc-chevron" aria-hidden="true">▾</span>
+        </summary>
+        <div class="tpd-acc-body">
+            <div class="tpd-scroll">
+                <table class="tpd-tbl">
+                    <thead>
+                        <tr>
+                            <th>Month</th>
+                            <th class="num">Total Billed</th>
+                            <th class="num">Fully Paid Ins $</th>
+                            <th class="num">Coll. Rate</th>
+                            <th class="num">Partially Paid $</th>
+                            <th class="num">IB $</th>
+                            <th class="num">% IB</th>
+                            <th class="num">NR Share</th>
+                            <th class="num">Fully Adj $</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var r in rows)
+                    {
+                        <tr>
+                            <td>@ShortLbl(r.MonthLabel)</td>
+                            <td class="num">@MoneyFull(r.TotalBilledAmt)</td>
+                            <td class="num">@MoneyFull(r.InsurancePaymentFullyPaid)</td>
+                            <td class="num">@Pct(r.CollectionRatePct)</td>
+                            <td class="num">@MoneyFull(r.PartiallyPaidAmt)</td>
+                            <td class="num">@MoneyFull(r.InsuranceBalanceAmt)</td>
+                            <td class="num">@Pct(r.PctInsuranceBalanceOfBilled)</td>
+                            <td class="num">@Pct(r.NoResponseSharePct)</td>
+                            <td class="num">@MoneyFull(r.FullyAdjustedAmt)</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </details>
+}

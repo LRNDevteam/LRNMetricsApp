@@ -1,4 +1,4 @@
--- RisingTides ó CPT Breakdown (line-level)
+-- RisingTides ù CPT Breakdown (line-level)
 -- Rule:
 --   Source  : LineLevelData
 --   Filter  : TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
@@ -51,7 +51,7 @@ BEGIN
 
     DROP TABLE IF EXISTS #Raw;
 
-    PRINT 'usp_RefreshNW_CPTBreakdown completed ó ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
+    PRINT 'usp_RefreshNW_CPTBreakdown completed ù ' + CAST(@@ROWCOUNT AS NVARCHAR(20)) + ' rows.';
 END
 GO
 

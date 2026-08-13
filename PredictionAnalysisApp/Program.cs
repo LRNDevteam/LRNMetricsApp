@@ -325,8 +325,24 @@ try
                     // the insert step (whether rows were just inserted or the file was a re-run).
                     // The dashboard reads these snapshots so the user does not pay the cost of
                     // scanning PayerValidationReport on every page load.
-                    labDbService.RefreshAggregatesForRun(
+                    labDbService.LogPredictionForecastingWorkflow(
+                        masterDbConnectionString: lab.MasterDbConnectionString,
+                        status: "InProgress",
+                        requestedRunId: runId,
+                        sourceFileName: Path.GetFileName(latestInputFile.FullName),
+                        logMessage: $"Legacy capture aggregate InProgress for lab '{lab.LabName}'.");
+
+                    var aggregateOk = labDbService.RefreshAggregatesForRun(
                         lab.LabName, runId, weekStartDate: null, lab.MasterDbConnectionString);
+
+                    labDbService.LogPredictionForecastingWorkflow(
+                        masterDbConnectionString: lab.MasterDbConnectionString,
+                        status: aggregateOk ? "Success" : "Failed",
+                        requestedRunId: runId,
+                        sourceFileName: Path.GetFileName(latestInputFile.FullName),
+                        logMessage: aggregateOk
+                            ? $"Legacy capture aggregate Success for lab '{lab.LabName}'."
+                            : $"Legacy capture aggregate Failed for lab '{lab.LabName}'.");
 
                     // Reset DataRefresh flag so the next scheduled run is not re-processed.
                     if (lab.DataRefresh)
@@ -510,17 +526,59 @@ try
             db.UpdateFileStatus(runId, 4);
             AppLogger.LogDb($"[{lab.LabName}] FileStatus → 4 (Aggregate InProgress) for RunId={runId}.");
 
+            // Report Control Board + info log: Prediction Analysis (11) + Forecasting (7).
+            // RunId from lab PayerValidationReport; log SP lives on LRNMaster (Azure MI).
+            // @SourceSystem='PayerValidationReport', @CreatedBy='PredictionAnalysis'
+            db.LogPredictionForecastingWorkflow(
+                masterDbConnectionString: lab.MasterDbConnectionString,
+                status: "InProgress",
+                requestedRunId: runId,
+                logMessage: $"Aggregate refresh InProgress for lab '{lab.LabName}'.");
+
             // STEP 4 — execute the aggregate stored procedures:
             //          dbo.usp_RefreshAllPredictionAggregates (which runs the PV_*
             //          refresh SPs: SummaryBuckets, ValidationByPayer,
             //          PayerPayStatusBreakdown, DenialBreakdown, NoResponseBreakdown,
             //          AdjustedByPayer, SummaryMetrics, FilterOptions) plus
             //          dbo.usp_EnrichPV_DenialDescriptionFromMaster.
-            db.RefreshAggregatesForRun(lab.LabName, runId, weekStartDate: null, lab.MasterDbConnectionString);
+            var aggregateOk = db.RefreshAggregatesForRun(
+                lab.LabName, runId, weekStartDate: null, lab.MasterDbConnectionString);
 
-            // STEP 5 — mark Aggregate Completed (FileStatus = 5).
-            db.UpdateFileStatus(runId, 5);
-            AppLogger.LogDb($"[{lab.LabName}] FileStatus → 5 (Aggregate Completed) for RunId={runId}.");
+            if (aggregateOk)
+            {
+                // STEP 5 — mark Aggregate Completed (FileStatus = 5).
+                db.UpdateFileStatus(runId, 5);
+                AppLogger.LogDb($"[{lab.LabName}] FileStatus → 5 (Aggregate Completed) for RunId={runId}.");
+
+                db.LogPredictionForecastingWorkflow(
+                    masterDbConnectionString: lab.MasterDbConnectionString,
+                    status: "Success",
+                    requestedRunId: runId,
+                    logMessage: $"Aggregate refresh Success for lab '{lab.LabName}'.");
+            }
+            else
+            {
+                // Leave FileStatus at 4 (InProgress) so the board can show failure; reset to 3
+                // so the next scheduled run can retry this RunId.
+                try { db.UpdateFileStatus(runId, 3); }
+                catch (Exception resetEx)
+                {
+                    AppLogger.LogDbWarn($"[{lab.LabName}] FileStatus reset to 3 failed: {resetEx.Message}");
+                }
+
+                db.LogPredictionForecastingWorkflow(
+                    masterDbConnectionString: lab.MasterDbConnectionString,
+                    status: "Failed",
+                    requestedRunId: runId,
+                    logMessage: $"Aggregate refresh Failed for lab '{lab.LabName}'. See app log for details.");
+
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"\n[ERROR] Aggregate refresh failed for lab '{lab.LabName}', RunId={runId}.");
+                Console.ResetColor();
+                AppLogger.LogError($"[Lab {labIndex}/{labs.Count}] FAILED  : {lab.LabName} | Aggregate refresh failed | RunId: {runId}");
+                labFailed++;
+                continue;
+            }
 
             // STEP 6 — reset DataRefresh in {LabName}.json so the next run is not forced.
             if (forceAggregate)
@@ -543,6 +601,28 @@ try
                 try   { File.Delete(processingCopy); }
                 catch { /* ignore cleanup errors */ }
             }
+
+            // Best-effort Failed tracker/log when we already know the RunId.
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(runId)
+                    && lab.EnableDatabaseInsert
+                    && !string.IsNullOrWhiteSpace(lab.DbConnectionString))
+                {
+                    var failDb = new PredictionDbService(
+                        lab.DbConnectionString,
+                        lab.DbInsertChunkSize,
+                        lab.DbAggregateChunkSize,
+                        lab.DbAggregateRefreshTimeoutSeconds,
+                        lab.DbAggregateLargeLabRowThreshold);
+                    failDb.LogPredictionForecastingWorkflow(
+                        masterDbConnectionString: lab.MasterDbConnectionString,
+                        status: "Failed",
+                        requestedRunId: runId,
+                        logMessage: $"PredictionAnalysis failed: {ex.Message}");
+                }
+            }
+            catch { /* never block error path */ }
 
             Console.ForegroundColor = ConsoleColor.Red;
             Console.WriteLine($"\n[ERROR] Lab '{lab.LabName}' failed: {ex.Message}");

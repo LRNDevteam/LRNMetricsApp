@@ -2201,6 +2201,10 @@ public class DashboardController : Controller
             WeeklyClaimVolumeResult   weeklyResult;
             CodingResult              codingResult;
             PayerBreakdownResult      pbResult;
+            PayerBreakdownResult      pnlResult = new([], [], [], new Dictionary<string, int>(), 0);
+            PayerBreakdownResult      insightDaqResult = new([], [], [], new Dictionary<string, int>(), 0);
+            PayerBreakdownResult      insightWebResult = new([], [], [], new Dictionary<string, int>(), 0);
+            HighestPayerBreakdownResult hpResult = new([], [], [], new Dictionary<string, ProductionMonthCell>(), 0, 0);
             PayerPanelResult          pxpResult;
             UnbilledAgingResult       uaResult;
             CptBreakdownResult        cptResult;
@@ -2274,8 +2278,12 @@ public class DashboardController : Controller
                     var t5 = _nwSummaryRepo.GetPayerByPanelAsync(connStr, null, null, null, null, null, null, null, null, ct);
                     var t6 = _nwSummaryRepo.GetUnbilledAgingAsync(connStr, null, null, null, null, null, null, null, null, ct);
                     var t7 = _nwSummaryRepo.GetCptBreakdownAsync(connStr, null, null, null, null, null, null, null, null, ct);
+                    var t8 = _nwSummaryRepo.GetPanelBreakdownAsync(connStr, null, null, null, null, null, null, null, null, ct);
+                    var t9 = _nwSummaryRepo.GetInsightBreakdownAsync(connStr, "Daq", null, null, null, null, null, null, null, null, ct);
+                    var t10 = _nwSummaryRepo.GetInsightBreakdownAsync(connStr, "Webpm", null, null, null, null, null, null, null, null, ct);
+                    var t11 = _nwSummaryRepo.GetHighestPayerBreakdownAsync(connStr, null, null, null, null, null, null, null, null, ct);
 
-                    await Task.WhenAll(t1, t2, t3, t4, t5, t6, t7);
+                    await Task.WhenAll(t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11);
 
                     monthlyResult = t1.Result;
                     weeklyResult  = t2.Result;
@@ -2284,6 +2292,10 @@ public class DashboardController : Controller
                     pxpResult     = t5.Result;
                     uaResult      = t6.Result;
                     cptResult     = t7.Result;
+                    pnlResult     = t8.Result;
+                    insightDaqResult = t9.Result;
+                    insightWebResult = t10.Result;
+                    hpResult      = t11.Result;
                 }
             }
             else
@@ -2425,7 +2437,31 @@ public class DashboardController : Controller
                                 dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg,
                                 ct, rule: productionRule);
 
-                await Task.WhenAll(t1, t2, t3, t4, t5, t6, t7);
+                var t8 = isNorthWestLab
+                    ? _nwSummaryRepo.GetPanelBreakdownAsync(connStr,
+                        livePayerFilter, livePanelFilter,
+                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                    : Task.FromResult(new PayerBreakdownResult([], [], [], new Dictionary<string, int>(), 0));
+
+                var emptyInsight = Task.FromResult(new PayerBreakdownResult([], [], [], new Dictionary<string, int>(), 0));
+                var t9 = isNorthWestLab
+                    ? _nwSummaryRepo.GetInsightBreakdownAsync(connStr, "Daq",
+                        livePayerFilter, livePanelFilter,
+                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                    : emptyInsight;
+                var t10 = isNorthWestLab
+                    ? _nwSummaryRepo.GetInsightBreakdownAsync(connStr, "Webpm",
+                        livePayerFilter, livePanelFilter,
+                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                    : emptyInsight;
+                var emptyHp = Task.FromResult(new HighestPayerBreakdownResult([], [], [], new Dictionary<string, ProductionMonthCell>(), 0, 0));
+                var t11 = isNorthWestLab
+                    ? _nwSummaryRepo.GetHighestPayerBreakdownAsync(connStr,
+                        livePayerFilter, livePanelFilter,
+                        dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct)
+                    : emptyHp;
+
+                await Task.WhenAll(t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11);
 
                 monthlyResult = t1.Result;
                 weeklyResult  = t2.Result;
@@ -2434,6 +2470,10 @@ public class DashboardController : Controller
                 pxpResult     = t5.Result;
                 uaResult      = t6.Result;
                 cptResult     = t7.Result;
+                pnlResult     = t8.Result;
+                insightDaqResult = t9.Result;
+                insightWebResult = t10.Result;
+                hpResult      = t11.Result;
             }
 
             // ── Post-process: apply Exclude logic ─────────────────────────────
@@ -2449,6 +2489,10 @@ public class DashboardController : Controller
 
                 pbResult.PayerRows.RemoveAll(r => excPayers.Contains(r.PayerName));
                 pxpResult.PayerRows.RemoveAll(r => excPayers.Contains(r.PayerName));
+                insightDaqResult.PayerRows.RemoveAll(r => excPayers.Contains(r.PayerName));
+                insightWebResult.PayerRows.RemoveAll(r => excPayers.Contains(r.PayerName));
+                foreach (var src in hpResult.SourceRows)
+                    src.TopPayers.RemoveAll(tp => excPayers.Contains(tp.PayerName));
 
                 // Unbilled Aging rows for NW are keyed by PayerName (stored in PanelName slot)
                 uaResult.PanelRows.RemoveAll(r => excPayers.Contains(r.PanelName));
@@ -2461,6 +2505,7 @@ public class DashboardController : Controller
                 monthlyResult.PanelRows.RemoveAll(p => excPanels.Contains(p.PanelName));
                 weeklyResult.PanelRows.RemoveAll(p => excPanels.Contains(p.PanelName));
                 codingResult.PanelRows.RemoveAll(p => excPanels.Contains(p.PanelName));
+                pnlResult.PayerRows.RemoveAll(r => excPanels.Contains(r.PayerName));
 
                 foreach (var r in pxpResult.PayerRows)
                 {
@@ -2512,6 +2557,35 @@ public class DashboardController : Controller
                 PayerBreakdownRows         = pbResult.PayerRows,
                 PayerBreakdownGrandByMonth = pbResult.GrandTotalByMonth,
                 PayerBreakdownGrandTotal   = pbResult.GrandTotal,
+                PayerBreakdownGrandChargesByMonth = pbResult.GrandTotalChargesByMonth ?? [],
+                PayerBreakdownGrandTotalCharges   = pbResult.GrandTotalCharges,
+                PanelBreakdownMonths              = pnlResult.Months,
+                PanelBreakdownYears               = pnlResult.Years,
+                PanelBreakdownRows                = pnlResult.PayerRows,
+                PanelBreakdownGrandByMonth        = pnlResult.GrandTotalByMonth,
+                PanelBreakdownGrandTotal          = pnlResult.GrandTotal,
+                PanelBreakdownGrandChargesByMonth = pnlResult.GrandTotalChargesByMonth ?? [],
+                PanelBreakdownGrandTotalCharges   = pnlResult.GrandTotalCharges,
+                InsightDaqMonths                  = insightDaqResult.Months,
+                InsightDaqYears                   = insightDaqResult.Years,
+                InsightDaqRows                    = insightDaqResult.PayerRows,
+                InsightDaqGrandByMonth            = insightDaqResult.GrandTotalByMonth,
+                InsightDaqGrandTotal              = insightDaqResult.GrandTotal,
+                InsightDaqGrandChargesByMonth     = insightDaqResult.GrandTotalChargesByMonth ?? [],
+                InsightDaqGrandTotalCharges       = insightDaqResult.GrandTotalCharges,
+                InsightWebPmMonths                = insightWebResult.Months,
+                InsightWebPmYears                 = insightWebResult.Years,
+                InsightWebPmRows                  = insightWebResult.PayerRows,
+                InsightWebPmGrandByMonth          = insightWebResult.GrandTotalByMonth,
+                InsightWebPmGrandTotal            = insightWebResult.GrandTotal,
+                InsightWebPmGrandChargesByMonth   = insightWebResult.GrandTotalChargesByMonth ?? [],
+                InsightWebPmGrandTotalCharges     = insightWebResult.GrandTotalCharges,
+                HighestPayerMonths                = hpResult.Months,
+                HighestPayerYears                 = hpResult.Years,
+                HighestPayerRows                  = hpResult.SourceRows,
+                HighestPayerGrandByMonth          = hpResult.GrandTotalByMonth,
+                HighestPayerGrandTotalClaims      = hpResult.GrandTotalClaims,
+                HighestPayerGrandTotalCharges     = hpResult.GrandTotalCharges,
                 PayerPanelColumns          = pxpResult.PanelColumns,
                 PayerPanelRows             = pxpResult.PayerRows,
                 PayerPanelGrandByPanel     = pxpResult.GrandTotalByPanel,
@@ -2823,6 +2897,8 @@ public class DashboardController : Controller
                 PayerBreakdownRows       = pbResult.PayerRows,
                 PayerBreakdownGrandByMonth = pbResult.GrandTotalByMonth,
                 PayerBreakdownGrandTotal   = pbResult.GrandTotal,
+                PayerBreakdownGrandChargesByMonth = pbResult.GrandTotalChargesByMonth ?? [],
+                PayerBreakdownGrandTotalCharges   = pbResult.GrandTotalCharges,
                 PayerPanelColumns           = pxpResult.PanelColumns,
                 PayerPanelRows              = pxpResult.PayerRows,
                 PayerPanelGrandByPanel      = pxpResult.GrandTotalByPanel,
@@ -3027,8 +3103,20 @@ public class DashboardController : Controller
             var t7 = _nwSummaryRepo.GetCptBreakdownAsync(
                 connStr, payerArg, panelArg,
                 dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
+            var t8 = _nwSummaryRepo.GetPanelBreakdownAsync(
+                connStr, payerArg, panelArg,
+                dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
+            var t9 = _nwSummaryRepo.GetInsightBreakdownAsync(
+                connStr, "Daq", payerArg, panelArg,
+                dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
+            var t10 = _nwSummaryRepo.GetInsightBreakdownAsync(
+                connStr, "Webpm", payerArg, panelArg,
+                dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
+            var t11 = _nwSummaryRepo.GetHighestPayerBreakdownAsync(
+                connStr, payerArg, panelArg,
+                dosFromArg, dosToArg, fbFromArg, fbToArg, fbldFromArg, fbldToArg, ct);
 
-            await Task.WhenAll(t1, t2, t3, t4, t5, t6, t7);
+            await Task.WhenAll(t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11);
 
             var monthlyResult = t1.Result;
             var weeklyResult  = t2.Result;
@@ -3037,6 +3125,10 @@ public class DashboardController : Controller
             var pxpResult     = t5.Result;
             var uaResult      = t6.Result;
             var cptResult     = t7.Result;
+            var pnlResult     = t8.Result;
+            var insightDaqResult = t9.Result;
+            var insightWebResult = t10.Result;
+            var hpResult      = t11.Result;
 
             _logger.LogInformation(
                 "[NWExcelExport] Data fetched in {Ms}ms — Monthly={M} panels, Weekly={W} panels",
@@ -3103,6 +3195,35 @@ public class DashboardController : Controller
                 PayerBreakdownRows      = pbResult.PayerRows,
                 PayerBreakdownGrandByMonth = pbResult.GrandTotalByMonth,
                 PayerBreakdownGrandTotal   = pbResult.GrandTotal,
+                PayerBreakdownGrandChargesByMonth = pbResult.GrandTotalChargesByMonth ?? [],
+                PayerBreakdownGrandTotalCharges   = pbResult.GrandTotalCharges,
+                PanelBreakdownMonths              = pnlResult.Months,
+                PanelBreakdownYears               = pnlResult.Years,
+                PanelBreakdownRows                = pnlResult.PayerRows,
+                PanelBreakdownGrandByMonth        = pnlResult.GrandTotalByMonth,
+                PanelBreakdownGrandTotal          = pnlResult.GrandTotal,
+                PanelBreakdownGrandChargesByMonth = pnlResult.GrandTotalChargesByMonth ?? [],
+                PanelBreakdownGrandTotalCharges   = pnlResult.GrandTotalCharges,
+                InsightDaqMonths                  = insightDaqResult.Months,
+                InsightDaqYears                   = insightDaqResult.Years,
+                InsightDaqRows                    = insightDaqResult.PayerRows,
+                InsightDaqGrandByMonth            = insightDaqResult.GrandTotalByMonth,
+                InsightDaqGrandTotal              = insightDaqResult.GrandTotal,
+                InsightDaqGrandChargesByMonth     = insightDaqResult.GrandTotalChargesByMonth ?? [],
+                InsightDaqGrandTotalCharges       = insightDaqResult.GrandTotalCharges,
+                InsightWebPmMonths                = insightWebResult.Months,
+                InsightWebPmYears                 = insightWebResult.Years,
+                InsightWebPmRows                  = insightWebResult.PayerRows,
+                InsightWebPmGrandByMonth          = insightWebResult.GrandTotalByMonth,
+                InsightWebPmGrandTotal            = insightWebResult.GrandTotal,
+                InsightWebPmGrandChargesByMonth   = insightWebResult.GrandTotalChargesByMonth ?? [],
+                InsightWebPmGrandTotalCharges     = insightWebResult.GrandTotalCharges,
+                HighestPayerMonths                = hpResult.Months,
+                HighestPayerYears                 = hpResult.Years,
+                HighestPayerRows                  = hpResult.SourceRows,
+                HighestPayerGrandByMonth          = hpResult.GrandTotalByMonth,
+                HighestPayerGrandTotalClaims      = hpResult.GrandTotalClaims,
+                HighestPayerGrandTotalCharges     = hpResult.GrandTotalCharges,
                 PayerPanelColumns           = pxpResult.PanelColumns,
                 PayerPanelRows              = pxpResult.PayerRows,
                 PayerPanelGrandByPanel      = pxpResult.GrandTotalByPanel,

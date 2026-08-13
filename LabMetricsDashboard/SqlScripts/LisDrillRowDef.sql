@@ -252,7 +252,14 @@ GO
    require BilledUnbilled/BillStatus='Billed'; that condition is dropped here
    (a denial status implies billed) — verify against the summary $ totals.
    ===================================================================== */
-DELETE FROM dbo.LisDrillRowDef WHERE Source = N'Cash' AND RowTitle = N'Insurance Balance ($)';
+-- Clear IB ($) Cash rows, plus any prior BT mis-seeds (AJ was Patient WO in
+-- an older Cash.sql; AK* collided with Avg RoleIDs). Safe to re-run.
+DELETE FROM dbo.LisDrillRowDef
+WHERE Source = N'Cash'
+  AND (
+        RowTitle = N'Insurance Balance ($)'
+     OR (LabPrefix = N'BT' AND RowCode IN (N'AI', N'AJ', N'AJ.1', N'AJ.2', N'AJ.3', N'AK', N'AK1', N'AK2', N'AK3'))
+  );
 
 INSERT INTO dbo.LisDrillRowDef
     (LabPrefix, RowCode, RowTitle, DateCol, Source, AmountCol,

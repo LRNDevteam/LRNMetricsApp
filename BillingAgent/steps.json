@@ -1,0 +1,16 @@
+{
+  "_comment": "Non-sensitive automation steps. No credentials here — those live in credentials.local.json. Replace the example below with your actual billing-system flow.",
+  "name": "Example: submit a billing entry",
+  "loginStep": {
+    "usernameField": "Username field label or selector, e.g. '#login-username'",
+    "passwordField": "Password field label or selector, e.g. '#login-password'",
+    "submitButton": "Login button label, e.g. 'Sign In'"
+  },
+  "steps": [
+    { "action": "navigate", "target": "URL to go to after login, e.g. the billing entry form page" },
+    { "action": "type", "field": "Field label or selector", "value": "What to type, or {{variable}} if it changes each run" },
+    { "action": "select", "field": "Dropdown label", "value": "Option to choose" },
+    { "action": "click", "target": "Button/link label, e.g. 'Save'" },
+    { "action": "verify", "target": "Text or element that confirms success, e.g. 'Entry saved'" }
+  ]
+}

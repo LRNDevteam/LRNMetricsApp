@@ -19,8 +19,9 @@ public sealed class LabConfig
     public string? DbConnectionString { get; set; }
 
     /// <summary>
-    /// Connection string for LRNMaster � used to look up
-    /// <c>DenialMapperSuperMaster.DenialDescription</c> when enriching denial aggregates.
+    /// Connection string for LRNMaster — used to look up
+    /// <c>DenialMapperSuperMaster.DenialDescription</c> when enriching denial aggregates,
+    /// and as the target database for Prediction/Forecasting log + tracker writes.
     /// </summary>
     public string? MasterDbConnectionString { get; set; }
 

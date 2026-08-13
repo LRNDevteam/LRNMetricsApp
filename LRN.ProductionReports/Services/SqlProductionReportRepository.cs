@@ -1080,12 +1080,16 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         {
             var byMonth = new Dictionary<string, int>();
             var byYear = new Dictionary<int, int>();
+            var byMonthCharges = new Dictionary<string, decimal>();
+            var byYearCharges = new Dictionary<int, decimal>();
 
             foreach (var r in rows)
             {
                 var mk = $"{r.EnteredYear:D4}-{r.EnteredMonth:D2}";
                 byMonth[mk] = byMonth.TryGetValue(mk, out var em) ? em + r.ClaimCount : r.ClaimCount;
                 byYear[r.EnteredYear] = byYear.TryGetValue(r.EnteredYear, out var ey) ? ey + r.ClaimCount : r.ClaimCount;
+                byMonthCharges[mk] = byMonthCharges.TryGetValue(mk, out var cm) ? cm + r.TotalCharges : r.TotalCharges;
+                byYearCharges[r.EnteredYear] = byYearCharges.TryGetValue(r.EnteredYear, out var cy) ? cy + r.TotalCharges : r.TotalCharges;
             }
 
             payerRows.Add(new PayerBreakdownRow
@@ -1094,30 +1098,40 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                 ByMonth = byMonth,
                 ByYear = byYear,
                 GrandTotal = byMonth.Values.Sum(),
+                ByMonthCharges = byMonthCharges,
+                ByYearCharges = byYearCharges,
+                GrandTotalCharges = byMonthCharges.Values.Sum(),
             });
         }
 
         payerRows = payerRows.OrderByDescending(p => p.GrandTotal).ToList();
 
         var grandByMonth = new Dictionary<string, int>();
+        var grandChargesByMonth = new Dictionary<string, decimal>();
         foreach (var p in payerRows)
         {
             foreach (var (mk, cnt) in p.ByMonth)
             {
                 grandByMonth[mk] = grandByMonth.TryGetValue(mk, out var eg) ? eg + cnt : cnt;
             }
+            foreach (var (mk, ch) in p.ByMonthCharges)
+            {
+                grandChargesByMonth[mk] = grandChargesByMonth.TryGetValue(mk, out var ec) ? ec + ch : ch;
+            }
         }
 
         int grandTotal = payerRows.Sum(p => p.GrandTotal);
+        decimal grandTotalCharges = payerRows.Sum(p => p.GrandTotalCharges);
 
-        return new PayerBreakdownResult(months, years, payerRows, grandByMonth, grandTotal);
+        return new PayerBreakdownResult(months, years, payerRows, grandByMonth, grandTotal, grandChargesByMonth, grandTotalCharges);
     }
 
     private sealed record RawPayerBreakdownRow(
         string PayerName,
         int EnteredYear,
         int EnteredMonth,
-        int ClaimCount);
+        int ClaimCount,
+        decimal TotalCharges = 0);
 
     // ?? Payer X Panel ????????????????????????????????????????????????????
 
@@ -3881,7 +3895,7 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         AddProductionFilterParameters(cmd, filterPayerNames, filterPanelNames, filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo, filterFirstBilledFrom, filterFirstBilledTo);
         await using var rdr = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
-        var payerMonth = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
+        var payerMonth = new Dictionary<string, Dictionary<string, (int c, decimal ch)>>(StringComparer.OrdinalIgnoreCase);
         var allMonths = new SortedSet<string>();
 
         while (await rdr.ReadAsync(ct).ConfigureAwait(false))
@@ -3889,34 +3903,46 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             var payer = rdr.GetString(0);
             var month = rdr.GetString(1);
             var count = rdr.GetInt32(2);
+            var charges = rdr.FieldCount > 3 && !rdr.IsDBNull(3) ? rdr.GetDecimal(3) : 0m;
 
             allMonths.Add(month);
             if (!payerMonth.TryGetValue(payer, out var byMonth))
                 payerMonth[payer] = byMonth = [];
-            byMonth[month] = byMonth.GetValueOrDefault(month) + count;
+            var prev = byMonth.GetValueOrDefault(month);
+            byMonth[month] = (prev.c + count, prev.ch + charges);
         }
 
         var months = allMonths.ToList();
         var years = months.Select(m => int.Parse(m[..4], CultureInfo.InvariantCulture)).Distinct().OrderBy(y => y).ToList();
         var grandByMonth = new Dictionary<string, int>();
+        var grandChargesByMonth = new Dictionary<string, decimal>();
         var payerRows = new List<PayerBreakdownRow>();
 
-        foreach (var (payer, byMonth) in payerMonth.OrderByDescending(x => x.Value.Values.Sum()))
+        foreach (var (payer, byMonth) in payerMonth.OrderByDescending(x => x.Value.Values.Sum(v => v.c)))
         {
-            var byYear = years.ToDictionary(y => y, y => byMonth.Where(kv => kv.Key.StartsWith($"{y:D4}", StringComparison.Ordinal)).Sum(kv => kv.Value));
-            foreach (var (month, count) in byMonth)
-                grandByMonth[month] = grandByMonth.GetValueOrDefault(month) + count;
+            var byYear = years.ToDictionary(y => y, y => byMonth.Where(kv => kv.Key.StartsWith($"{y:D4}", StringComparison.Ordinal)).Sum(kv => kv.Value.c));
+            var byYearCharges = years.ToDictionary(y => y, y => byMonth.Where(kv => kv.Key.StartsWith($"{y:D4}", StringComparison.Ordinal)).Sum(kv => kv.Value.ch));
+            foreach (var (month, v) in byMonth)
+            {
+                grandByMonth[month] = grandByMonth.GetValueOrDefault(month) + v.c;
+                grandChargesByMonth[month] = grandChargesByMonth.GetValueOrDefault(month) + v.ch;
+            }
 
             payerRows.Add(new PayerBreakdownRow
             {
                 PayerName = payer,
-                ByMonth = byMonth,
+                ByMonth = byMonth.ToDictionary(kv => kv.Key, kv => kv.Value.c),
                 ByYear = byYear,
-                GrandTotal = byMonth.Values.Sum(),
+                GrandTotal = byMonth.Values.Sum(v => v.c),
+                ByMonthCharges = byMonth.ToDictionary(kv => kv.Key, kv => kv.Value.ch),
+                ByYearCharges = byYearCharges,
+                GrandTotalCharges = byMonth.Values.Sum(v => v.ch),
             });
         }
 
-        return new PayerBreakdownResult(months, years, payerRows, grandByMonth, grandByMonth.Values.Sum());
+        return new PayerBreakdownResult(
+            months, years, payerRows, grandByMonth, grandByMonth.Values.Sum(),
+            grandChargesByMonth, grandChargesByMonth.Values.Sum());
     }
 
     private async Task<PayerPanelResult> GetPayerPanelFromStoredProcedureAsync(
@@ -4080,8 +4106,18 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             var cpt = rdr.GetString(0);
             var month = rdr.GetString(1);
             var claimCount = rdr.GetInt32(2);
-            var unitsValue = rdr.GetValue(3);
-            var units = unitsValue is decimal decimalUnits ? decimalUnits : Convert.ToDecimal(unitsValue, CultureInfo.InvariantCulture);
+            // NorthWest Billed Units is COUNT(Units), not SUM(Units). CPTCount is the
+            // count of unit/line rows (snapshot still stores SUM in BilledUnits until refresh).
+            decimal units;
+            if (string.Equals(spPrefix, NorthWestPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                units = claimCount;
+            }
+            else
+            {
+                var unitsValue = rdr.GetValue(3);
+                units = unitsValue is decimal decimalUnits ? decimalUnits : Convert.ToDecimal(unitsValue, CultureInfo.InvariantCulture);
+            }
             var charges = rdr.GetDecimal(4);
 
             allMonths.Add(month);

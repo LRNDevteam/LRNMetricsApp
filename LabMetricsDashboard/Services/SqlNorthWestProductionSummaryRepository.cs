@@ -8,6 +8,7 @@ using SharedProductionReportResult = LRN.ProductionReports.Services.ProductionRe
 using SharedRawDataSegment = LRN.ProductionReports.Services.RawDataSegment;
 using SharedUnbilledAgingResult = LRN.ProductionReports.Services.UnbilledAgingResult;
 using SharedWeeklyClaimVolumeResult = LRN.ProductionReports.Services.WeeklyClaimVolumeResult;
+using HighestPayerBreakdownResult = LRN.ProductionReports.Services.HighestPayerBreakdownResult;
 using System.Data;
 using Microsoft.Data.SqlClient;
 
@@ -533,44 +534,58 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
                 filterFirstBilledFrom, filterFirstBilledTo);
             await using var rdr = await cmd.ExecuteReaderAsync(ct);
 
-            var payerMonth = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
+            var payerMonth = new Dictionary<string, Dictionary<string, (int c, decimal ch)>>(StringComparer.OrdinalIgnoreCase);
             var allMonths  = new SortedSet<string>();
 
             while (await rdr.ReadAsync(ct))
             {
-                var payer = rdr.GetString(0);
-                var month = rdr.GetString(1);
-                var count = rdr.GetInt32(2);
+                var payer   = rdr.GetString(0);
+                var month   = rdr.GetString(1);
+                var count   = rdr.GetInt32(2);
+                var charges = ReadDecimalByNameOrIndex(rdr, 3, "TotalCharges", "ChargeAmount", "BilledCharges");
 
                 allMonths.Add(month);
                 if (!payerMonth.TryGetValue(payer, out var mm)) payerMonth[payer] = mm = [];
-                mm[month] = mm.GetValueOrDefault(month) + count;
+                var prev = mm.GetValueOrDefault(month);
+                mm[month] = (prev.c + count, prev.ch + charges);
             }
 
-            var months       = allMonths.ToList();
-            var years        = months.Select(m => int.Parse(m[..4])).Distinct().OrderBy(y => y).ToList();
-            var grandByMonth = new Dictionary<string, int>();
-            var payerRows    = new List<PayerBreakdownRow>();
+            var months              = allMonths.ToList();
+            var years               = months.Select(m => int.Parse(m[..4])).Distinct().OrderBy(y => y).ToList();
+            var grandByMonth        = new Dictionary<string, int>();
+            var grandChargesByMonth = new Dictionary<string, decimal>();
+            var payerRows           = new List<PayerBreakdownRow>();
 
-            foreach (var (payer, mm) in payerMonth.OrderByDescending(x => x.Value.Values.Sum()))
+            foreach (var (payer, mm) in payerMonth.OrderByDescending(x => x.Value.Values.Sum(v => v.c)))
             {
                 var byYear = years.ToDictionary(
                     y => y,
-                    y => mm.Where(kv => kv.Key.StartsWith($"{y:D4}")).Sum(kv => kv.Value));
+                    y => mm.Where(kv => kv.Key.StartsWith($"{y:D4}")).Sum(kv => kv.Value.c));
+                var byYearCharges = years.ToDictionary(
+                    y => y,
+                    y => mm.Where(kv => kv.Key.StartsWith($"{y:D4}")).Sum(kv => kv.Value.ch));
 
-                foreach (var (mk, cnt) in mm)
-                    grandByMonth[mk] = grandByMonth.GetValueOrDefault(mk) + cnt;
+                foreach (var (mk, v) in mm)
+                {
+                    grandByMonth[mk]        = grandByMonth.GetValueOrDefault(mk) + v.c;
+                    grandChargesByMonth[mk] = grandChargesByMonth.GetValueOrDefault(mk) + v.ch;
+                }
 
                 payerRows.Add(new PayerBreakdownRow
                 {
-                    PayerName  = payer,
-                    ByMonth    = mm,
-                    ByYear     = byYear,
-                    GrandTotal = mm.Values.Sum(),
+                    PayerName         = payer,
+                    ByMonth           = mm.ToDictionary(kv => kv.Key, kv => kv.Value.c),
+                    ByYear            = byYear,
+                    GrandTotal        = mm.Values.Sum(v => v.c),
+                    ByMonthCharges    = mm.ToDictionary(kv => kv.Key, kv => kv.Value.ch),
+                    ByYearCharges     = byYearCharges,
+                    GrandTotalCharges = mm.Values.Sum(v => v.ch),
                 });
             }
 
-        return new SharedPayerBreakdownResult(months, years, payerRows, grandByMonth, grandByMonth.Values.Sum());
+        return new SharedPayerBreakdownResult(
+            months, years, payerRows, grandByMonth, grandByMonth.Values.Sum(),
+            grandChargesByMonth, grandChargesByMonth.Values.Sum());
         }
         catch (Exception ex)
         {
@@ -578,6 +593,518 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
         return new SharedPayerBreakdownResult([], [], [], new Dictionary<string, int>(), 0);
         }
     }
+
+    // ?? Panel Breakdown ???????????????????????????????????????????????????????
+    /// <inheritdoc/>
+    public async Task<SharedPayerBreakdownResult> GetPanelBreakdownAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+
+            try
+            {
+                await using var cmd = new SqlCommand("dbo.usp_GetNW_PanelBreakdown", conn)
+                {
+                    CommandType    = CommandType.StoredProcedure,
+                    CommandTimeout = 180,
+                };
+                AddNWFilterParameters(cmd, filterPayerNames, filterPanelNames,
+                    filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo,
+                    filterFirstBilledFrom, filterFirstBilledTo);
+                await using var rdr = await cmd.ExecuteReaderAsync(ct);
+                return await ReadPanelOrPayerBreakdownAsync(rdr, ct);
+            }
+            catch (SqlException ex) when (ex.Number is 2812 or 208)
+            {
+                _logger.LogWarning(ex,
+                    "NW usp_GetNW_PanelBreakdown not deployed; using live ClaimLevelData query.");
+            }
+
+            await using var liveCmd = new SqlCommand(BuildNwPanelBreakdownLiveSql(), conn)
+            {
+                CommandTimeout = 180,
+            };
+            AddNWFilterParameters(liveCmd, filterPayerNames, filterPanelNames,
+                filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo,
+                filterFirstBilledFrom, filterFirstBilledTo);
+            await using var liveRdr = await liveCmd.ExecuteReaderAsync(ct);
+            return await ReadPanelOrPayerBreakdownAsync(liveRdr, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "NW GetPanelBreakdownAsync failed.");
+            return new SharedPayerBreakdownResult([], [], [], new Dictionary<string, int>(), 0);
+        }
+    }
+
+    private static async Task<SharedPayerBreakdownResult> ReadPanelOrPayerBreakdownAsync(
+        SqlDataReader rdr, CancellationToken ct)
+    {
+        var rowMonth = new Dictionary<string, Dictionary<string, (int c, decimal ch)>>(StringComparer.OrdinalIgnoreCase);
+        var allMonths = new SortedSet<string>();
+
+        while (await rdr.ReadAsync(ct))
+        {
+            var name    = rdr.GetString(0);
+            var month   = rdr.GetString(1);
+            var count   = rdr.GetInt32(2);
+            var charges = ReadDecimalByNameOrIndex(rdr, 3, "TotalCharges", "ChargeAmount", "BilledCharges");
+
+            allMonths.Add(month);
+            if (!rowMonth.TryGetValue(name, out var mm)) rowMonth[name] = mm = [];
+            var prev = mm.GetValueOrDefault(month);
+            mm[month] = (prev.c + count, prev.ch + charges);
+        }
+
+        var months              = allMonths.ToList();
+        var years               = months.Select(m => int.Parse(m[..4])).Distinct().OrderBy(y => y).ToList();
+        var grandByMonth        = new Dictionary<string, int>();
+        var grandChargesByMonth = new Dictionary<string, decimal>();
+        var rows                = new List<PayerBreakdownRow>();
+
+        foreach (var (name, mm) in rowMonth.OrderByDescending(x => x.Value.Values.Sum(v => v.c)))
+        {
+            var byYear = years.ToDictionary(
+                y => y,
+                y => mm.Where(kv => kv.Key.StartsWith($"{y:D4}")).Sum(kv => kv.Value.c));
+            var byYearCharges = years.ToDictionary(
+                y => y,
+                y => mm.Where(kv => kv.Key.StartsWith($"{y:D4}")).Sum(kv => kv.Value.ch));
+
+            foreach (var (mk, v) in mm)
+            {
+                grandByMonth[mk]        = grandByMonth.GetValueOrDefault(mk) + v.c;
+                grandChargesByMonth[mk] = grandChargesByMonth.GetValueOrDefault(mk) + v.ch;
+            }
+
+            rows.Add(new PayerBreakdownRow
+            {
+                PayerName         = name,
+                ByMonth           = mm.ToDictionary(kv => kv.Key, kv => kv.Value.c),
+                ByYear            = byYear,
+                GrandTotal        = mm.Values.Sum(v => v.c),
+                ByMonthCharges    = mm.ToDictionary(kv => kv.Key, kv => kv.Value.ch),
+                ByYearCharges     = byYearCharges,
+                GrandTotalCharges = mm.Values.Sum(v => v.ch),
+            });
+        }
+
+        return new SharedPayerBreakdownResult(
+            months, years, rows, grandByMonth, grandByMonth.Values.Sum(),
+            grandChargesByMonth, grandChargesByMonth.Values.Sum());
+    }
+
+    private static string BuildNwPanelBreakdownLiveSql() => """
+        DECLARE @PayerList TABLE (Value NVARCHAR(500) NOT NULL PRIMARY KEY);
+        DECLARE @PanelList TABLE (Value NVARCHAR(500) NOT NULL PRIMARY KEY);
+
+        IF NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL
+            INSERT INTO @PayerList(Value)
+            SELECT DISTINCT LTRIM(RTRIM(value))
+            FROM STRING_SPLIT(@PayerNames, '|')
+            WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+        IF NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL
+            INSERT INTO @PanelList(Value)
+            SELECT DISTINCT LTRIM(RTRIM(value))
+            FROM STRING_SPLIT(@PanelNames, '|')
+            WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+        DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
+        DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+        SELECT
+            LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(PanelType)), ''), 'Unknown'))) AS PanelName,
+            FORMAT(TRY_CAST(ChargeEnteredDate AS DATE), 'yyyy-MM')               AS BilledYearMonth,
+            COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))                    AS ClaimCount,
+            ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0)              AS TotalCharges
+        FROM   dbo.ClaimLevelData
+        WHERE  LTRIM(RTRIM(ClaimStatus)) NOT IN (
+                   'Unbilled in Daq','Unbilled in Daq - PR',
+                   'Unbilled in Webpm','Unbilled in Webpm - PR',
+                   'Billed amount 0')
+          AND  TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL
+          AND  (
+                   (TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+                    AND LTRIM(RTRIM(ISNULL(FirstBilledDate, ''))) <> '')
+                OR TRY_CAST(EmedixSubmissionDate AS DATE) IS NOT NULL
+               )
+          AND  (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw,'Unknown'))) IN (SELECT Value FROM @PayerList))
+          AND  (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(PanelType)),''), 'Unknown'))) IN (SELECT Value FROM @PanelList))
+          AND  (@DosFrom          IS NULL OR TRY_CAST(DateOfService     AS DATE) >= @DosFrom)
+          AND  (@DosTo            IS NULL OR TRY_CAST(DateOfService     AS DATE) <= @DosTo)
+          AND  (@FirstBillFrom    IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) >= @FirstBillFrom)
+          AND  (@FirstBillTo      IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) <= @FirstBillTo)
+          AND  (@FirstBilledFrom  IS NULL OR TRY_CAST(FirstBilledDate   AS DATE) >= @FirstBilledFrom)
+          AND  (@FirstBilledTo    IS NULL OR TRY_CAST(FirstBilledDate   AS DATE) <= @FirstBilledTo)
+        GROUP BY
+            LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(PanelType)), ''), 'Unknown'))),
+            FORMAT(TRY_CAST(ChargeEnteredDate AS DATE), 'yyyy-MM')
+        ORDER BY PanelName, BilledYearMonth
+        """;
+
+    // ?? Insight Daq / WebPM ???????????????????????????????????????????????????
+    /// <inheritdoc/>
+    public async Task<SharedPayerBreakdownResult> GetInsightBreakdownAsync(
+        string connectionString,
+        string source,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default)
+    {
+        var sourceName = source.StartsWith("Web", StringComparison.OrdinalIgnoreCase) ? "Webpm" : "Daq";
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+
+            try
+            {
+                await using var cmd = new SqlCommand("dbo.usp_GetNW_InsightBreakdown", conn)
+                {
+                    CommandType    = CommandType.StoredProcedure,
+                    CommandTimeout = 180,
+                };
+                cmd.Parameters.Add(new SqlParameter("@Source", SqlDbType.NVarChar, 20) { Value = sourceName });
+                AddNWFilterParameters(cmd, filterPayerNames, filterPanelNames,
+                    filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo,
+                    filterFirstBilledFrom, filterFirstBilledTo);
+                await using var rdr = await cmd.ExecuteReaderAsync(ct);
+                return TakeTopPayers(await ReadPanelOrPayerBreakdownAsync(rdr, ct), 10);
+            }
+            catch (SqlException ex) when (ex.Number is 2812 or 208)
+            {
+                _logger.LogWarning(ex,
+                    "NW usp_GetNW_InsightBreakdown not deployed; using live ClaimLevelData query. Source={Source}",
+                    sourceName);
+            }
+
+            await using var liveCmd = new SqlCommand(BuildNwInsightLiveSql(), conn)
+            {
+                CommandTimeout = 180,
+            };
+            liveCmd.Parameters.Add(new SqlParameter("@Source", SqlDbType.NVarChar, 20) { Value = sourceName });
+            AddNWFilterParameters(liveCmd, filterPayerNames, filterPanelNames,
+                filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo,
+                filterFirstBilledFrom, filterFirstBilledTo);
+            await using var liveRdr = await liveCmd.ExecuteReaderAsync(ct);
+            return TakeTopPayers(await ReadPanelOrPayerBreakdownAsync(liveRdr, ct), 10);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "NW GetInsightBreakdownAsync failed. Source={Source}", sourceName);
+            return new SharedPayerBreakdownResult([], [], [], new Dictionary<string, int>(), 0);
+        }
+    }
+
+    private static SharedPayerBreakdownResult TakeTopPayers(SharedPayerBreakdownResult result, int top)
+    {
+        if (result.PayerRows.Count <= top) return result;
+        var topRows = result.PayerRows.Take(top).ToList();
+        var names = topRows.Select(r => r.PayerName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var months = result.Months;
+        var grandByMonth = months.ToDictionary(m => m, m => topRows.Sum(r => r.ByMonth.GetValueOrDefault(m)));
+        var grandCharges = months.ToDictionary(m => m, m => topRows.Sum(r => r.ByMonthCharges.GetValueOrDefault(m)));
+        return new SharedPayerBreakdownResult(
+            months, result.Years, topRows, grandByMonth, grandByMonth.Values.Sum(),
+            grandCharges, grandCharges.Values.Sum());
+    }
+
+    private static string BuildNwInsightLiveSql() => """
+        DECLARE @SourceName NVARCHAR(20) =
+            CASE WHEN UPPER(LTRIM(RTRIM(@Source))) LIKE 'WEBPM%' THEN N'Webpm' ELSE N'Daq' END;
+
+        DECLARE @PayerList TABLE (Value NVARCHAR(450) NOT NULL);
+        DECLARE @PanelList TABLE (Value NVARCHAR(450) NOT NULL);
+
+        IF NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL
+            INSERT INTO @PayerList(Value)
+            SELECT DISTINCT LTRIM(RTRIM(value))
+            FROM STRING_SPLIT(@PayerNames, '|')
+            WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+        IF NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL
+            INSERT INTO @PanelList(Value)
+            SELECT DISTINCT LTRIM(RTRIM(value))
+            FROM STRING_SPLIT(@PanelNames, '|')
+            WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+        DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
+        DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+        ;WITH Agg AS
+        (
+            SELECT
+                LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))) AS PayerName,
+                FORMAT(TRY_CAST(ChargeEnteredDate AS DATE), 'yyyy-MM') AS BilledYearMonth,
+                COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), '')) AS ClaimCount,
+                ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0) AS TotalCharges
+            FROM dbo.ClaimLevelData
+            CROSS APPLY (
+                SELECT LTRIM(RTRIM(ISNULL(dbo.GetAdditionalField(AdditionalFields, 'Source'), ''))) AS SourceValue
+            ) src
+            WHERE LTRIM(RTRIM(ClaimStatus)) NOT IN (
+                      'Unbilled in Daq','Unbilled in Daq - PR',
+                      'Unbilled in Webpm','Unbilled in Webpm - PR',
+                      'Billed amount 0')
+              AND TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL
+              AND (
+                      (TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+                       AND LTRIM(RTRIM(ISNULL(FirstBilledDate, ''))) <> '')
+                   OR TRY_CAST(EmedixSubmissionDate AS DATE) IS NOT NULL
+                  )
+              AND (
+                      (@SourceName = N'Daq'   AND UPPER(src.SourceValue) LIKE 'DAQ%')
+                   OR (@SourceName = N'Webpm' AND UPPER(src.SourceValue) LIKE 'WEBPM%')
+                  )
+              AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw,'Unknown'))) IN (SELECT Value FROM @PayerList))
+              AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(PanelType)),''), 'Unknown'))) IN (SELECT Value FROM @PanelList))
+              AND (@DosFrom          IS NULL OR TRY_CAST(DateOfService     AS DATE) >= @DosFrom)
+              AND (@DosTo            IS NULL OR TRY_CAST(DateOfService     AS DATE) <= @DosTo)
+              AND (@FirstBillFrom    IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) >= @FirstBillFrom)
+              AND (@FirstBillTo      IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) <= @FirstBillTo)
+              AND (@FirstBilledFrom  IS NULL OR TRY_CAST(FirstBilledDate   AS DATE) >= @FirstBilledFrom)
+              AND (@FirstBilledTo    IS NULL OR TRY_CAST(FirstBilledDate   AS DATE) <= @FirstBilledTo)
+            GROUP BY
+                LTRIM(RTRIM(ISNULL(PayerName_Raw, 'Unknown'))),
+                FORMAT(TRY_CAST(ChargeEnteredDate AS DATE), 'yyyy-MM')
+        ),
+        Top10 AS
+        (
+            SELECT PayerName
+            FROM (
+                SELECT PayerName,
+                       ROW_NUMBER() OVER (ORDER BY SUM(ClaimCount) DESC, PayerName) AS rn
+                FROM Agg
+                GROUP BY PayerName
+            ) x
+            WHERE rn <= 10
+        )
+        SELECT a.PayerName, a.BilledYearMonth, a.ClaimCount, a.TotalCharges
+        FROM Agg a
+        INNER JOIN Top10 t ON t.PayerName = a.PayerName
+        ORDER BY a.PayerName, a.BilledYearMonth
+        """;
+
+    /// <inheritdoc/>
+    public async Task<HighestPayerBreakdownResult> GetHighestPayerBreakdownAsync(
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            await using var conn = new SqlConnection(connectionString);
+            await conn.OpenAsync(ct);
+
+            try
+            {
+                await using var cmd = new SqlCommand("dbo.usp_GetNW_HighestPayerBreakdown", conn)
+                {
+                    CommandType    = CommandType.StoredProcedure,
+                    CommandTimeout = 180,
+                };
+                AddNWFilterParameters(cmd, filterPayerNames, filterPanelNames,
+                    filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo,
+                    filterFirstBilledFrom, filterFirstBilledTo);
+                await using var rdr = await cmd.ExecuteReaderAsync(ct);
+                return await ReadHighestPayerBreakdownAsync(rdr, ct);
+            }
+            catch (SqlException ex) when (ex.Number is 2812 or 208)
+            {
+                _logger.LogWarning(ex,
+                    "NW usp_GetNW_HighestPayerBreakdown not deployed; using live ClaimLevelData query.");
+            }
+
+            await using var liveCmd = new SqlCommand(BuildNwHighestPayerLiveSql(), conn)
+            {
+                CommandTimeout = 180,
+            };
+            AddNWFilterParameters(liveCmd, filterPayerNames, filterPanelNames,
+                filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo,
+                filterFirstBilledFrom, filterFirstBilledTo);
+            await using var liveRdr = await liveCmd.ExecuteReaderAsync(ct);
+            return await ReadHighestPayerBreakdownAsync(liveRdr, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "NW GetHighestPayerBreakdownAsync failed.");
+            return new HighestPayerBreakdownResult([], [], [], new Dictionary<string, ProductionMonthCell>(), 0, 0);
+        }
+    }
+
+    private static async Task<HighestPayerBreakdownResult> ReadHighestPayerBreakdownAsync(
+        SqlDataReader rdr, CancellationToken ct)
+    {
+        var data = new Dictionary<string, Dictionary<string, Dictionary<string, (int c, decimal ch)>>>(
+            StringComparer.OrdinalIgnoreCase);
+        var allMonths = new SortedSet<string>();
+
+        while (await rdr.ReadAsync(ct))
+        {
+            var source  = rdr.GetString(0);
+            var payer   = rdr.GetString(1);
+            var month   = rdr.GetString(2);
+            var count   = rdr.GetInt32(3);
+            var charges = ReadDecimalByNameOrIndex(rdr, 4, "TotalCharges", "ChargeAmount", "BilledCharges");
+
+            allMonths.Add(month);
+            if (!data.TryGetValue(source, out var payers))
+                data[source] = payers = new(StringComparer.OrdinalIgnoreCase);
+            if (!payers.TryGetValue(payer, out var mm))
+                payers[payer] = mm = [];
+            var prev = mm.GetValueOrDefault(month);
+            mm[month] = (prev.c + count, prev.ch + charges);
+        }
+
+        var months = allMonths.ToList();
+        var years  = months.Select(m => int.Parse(m[..4])).Distinct().OrderBy(y => y).ToList();
+        var grandByMonth = new Dictionary<string, ProductionMonthCell>();
+        var sourceRows = new List<ProductionPanelRow>();
+
+        foreach (var (source, payers) in data.OrderByDescending(s => s.Value.Sum(p => p.Value.Values.Sum(v => v.c))))
+        {
+            var payerRows = new List<ProductionPayerDrillDown>();
+            var sourceMonth = new Dictionary<string, (int c, decimal ch)>();
+
+            foreach (var (payer, mm) in payers.OrderByDescending(p => p.Value.Values.Sum(v => v.c)))
+            {
+                foreach (var (mk, v) in mm)
+                {
+                    var prev = sourceMonth.GetValueOrDefault(mk);
+                    sourceMonth[mk] = (prev.c + v.c, prev.ch + v.ch);
+                }
+
+                payerRows.Add(new ProductionPayerDrillDown
+                {
+                    PayerName    = payer,
+                    ByMonth      = mm.ToDictionary(kv => kv.Key, kv => new ProductionMonthCell(kv.Value.c, kv.Value.ch)),
+                    ByYear       = years.ToDictionary(
+                        y => y,
+                        y => new ProductionYearTotal(
+                            mm.Where(kv => kv.Key.StartsWith($"{y:D4}")).Sum(kv => kv.Value.c),
+                            mm.Where(kv => kv.Key.StartsWith($"{y:D4}")).Sum(kv => kv.Value.ch))),
+                    TotalClaims  = mm.Values.Sum(v => v.c),
+                    TotalCharges = mm.Values.Sum(v => v.ch),
+                });
+            }
+
+            foreach (var (mk, v) in sourceMonth)
+            {
+                var g = grandByMonth.GetValueOrDefault(mk) ?? new ProductionMonthCell(0, 0m);
+                grandByMonth[mk] = new ProductionMonthCell(g.ClaimCount + v.c, g.BilledCharges + v.ch);
+            }
+
+            sourceRows.Add(new ProductionPanelRow
+            {
+                PanelName    = source,
+                ByMonth      = sourceMonth.ToDictionary(kv => kv.Key, kv => new ProductionMonthCell(kv.Value.c, kv.Value.ch)),
+                ByYear       = years.ToDictionary(
+                    y => y,
+                    y => new ProductionYearTotal(
+                        sourceMonth.Where(kv => kv.Key.StartsWith($"{y:D4}")).Sum(kv => kv.Value.c),
+                        sourceMonth.Where(kv => kv.Key.StartsWith($"{y:D4}")).Sum(kv => kv.Value.ch))),
+                TotalClaims  = sourceMonth.Values.Sum(v => v.c),
+                TotalCharges = sourceMonth.Values.Sum(v => v.ch),
+                TopPayers    = payerRows,
+            });
+        }
+
+        return new HighestPayerBreakdownResult(
+            months, years, sourceRows, grandByMonth,
+            grandByMonth.Values.Sum(v => v.ClaimCount),
+            grandByMonth.Values.Sum(v => v.BilledCharges));
+    }
+
+    private static string BuildNwHighestPayerLiveSql() => """
+        DECLARE @PayerList TABLE (Value NVARCHAR(450) NOT NULL);
+        DECLARE @PanelList TABLE (Value NVARCHAR(450) NOT NULL);
+
+        IF NULLIF(LTRIM(RTRIM(@PayerNames)), '') IS NOT NULL
+            INSERT INTO @PayerList(Value)
+            SELECT DISTINCT LTRIM(RTRIM(value))
+            FROM STRING_SPLIT(@PayerNames, '|')
+            WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+        IF NULLIF(LTRIM(RTRIM(@PanelNames)), '') IS NOT NULL
+            INSERT INTO @PanelList(Value)
+            SELECT DISTINCT LTRIM(RTRIM(value))
+            FROM STRING_SPLIT(@PanelNames, '|')
+            WHERE NULLIF(LTRIM(RTRIM(value)), '') IS NOT NULL;
+
+        DECLARE @HasPayerFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PayerList) THEN 1 ELSE 0 END;
+        DECLARE @HasPanelFilter BIT = CASE WHEN EXISTS (SELECT 1 FROM @PanelList) THEN 1 ELSE 0 END;
+
+        SELECT
+            CASE
+                WHEN UPPER(src.SourceValue) LIKE 'DAQ%'   THEN N'Daq'
+                WHEN UPPER(src.SourceValue) LIKE 'WEBPM%' THEN N'WebPM'
+            END AS SourceName,
+            ISNULL(NULLIF(LTRIM(RTRIM(PayerName_Raw)), ''), N'* none *') AS PayerName,
+            FORMAT(TRY_CAST(ChargeEnteredDate AS DATE), 'yyyy-MM') AS BilledYearMonth,
+            COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), '')) AS ClaimCount,
+            ISNULL(SUM(TRY_CAST(ChargeAmount AS DECIMAL(18,2))), 0) AS TotalCharges
+        FROM dbo.ClaimLevelData
+        CROSS APPLY (
+            SELECT LTRIM(RTRIM(ISNULL(dbo.GetAdditionalField(AdditionalFields, 'Source'), ''))) AS SourceValue
+        ) src
+        WHERE LTRIM(RTRIM(ClaimStatus)) NOT IN (
+                  'Unbilled in Daq','Unbilled in Daq - PR',
+                  'Unbilled in Webpm','Unbilled in Webpm - PR',
+                  'Billed amount 0')
+          AND TRY_CAST(ChargeEnteredDate AS DATE) IS NOT NULL
+          AND (
+                  (TRY_CAST(FirstBilledDate AS DATE) IS NOT NULL
+                   AND LTRIM(RTRIM(ISNULL(FirstBilledDate, ''))) <> '')
+               OR TRY_CAST(EmedixSubmissionDate AS DATE) IS NOT NULL
+              )
+          AND (
+                  UPPER(src.SourceValue) LIKE 'DAQ%'
+               OR UPPER(src.SourceValue) LIKE 'WEBPM%'
+              )
+          AND (@HasPayerFilter = 0 OR LTRIM(RTRIM(ISNULL(PayerName_Raw,'Unknown'))) IN (SELECT Value FROM @PayerList)
+               OR ISNULL(NULLIF(LTRIM(RTRIM(PayerName_Raw)), ''), N'* none *') IN (SELECT Value FROM @PayerList))
+          AND (@HasPanelFilter = 0 OR LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(PanelType)),''), 'Unknown'))) IN (SELECT Value FROM @PanelList))
+          AND (@DosFrom          IS NULL OR TRY_CAST(DateOfService     AS DATE) >= @DosFrom)
+          AND (@DosTo            IS NULL OR TRY_CAST(DateOfService     AS DATE) <= @DosTo)
+          AND (@FirstBillFrom    IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) >= @FirstBillFrom)
+          AND (@FirstBillTo      IS NULL OR TRY_CAST(ChargeEnteredDate AS DATE) <= @FirstBillTo)
+          AND (@FirstBilledFrom  IS NULL OR TRY_CAST(FirstBilledDate   AS DATE) >= @FirstBilledFrom)
+          AND (@FirstBilledTo    IS NULL OR TRY_CAST(FirstBilledDate   AS DATE) <= @FirstBilledTo)
+        GROUP BY
+            CASE
+                WHEN UPPER(src.SourceValue) LIKE 'DAQ%'   THEN N'Daq'
+                WHEN UPPER(src.SourceValue) LIKE 'WEBPM%' THEN N'WebPM'
+            END,
+            ISNULL(NULLIF(LTRIM(RTRIM(PayerName_Raw)), ''), N'* none *'),
+            FORMAT(TRY_CAST(ChargeEnteredDate AS DATE), 'yyyy-MM')
+        ORDER BY SourceName, PayerName, BilledYearMonth
+        """;
 
     // ?? Payer ? Panel ?????????????????????????????????????????????????????????
     /// <inheritdoc/>
@@ -746,8 +1273,8 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
         DateOnly? filterFirstBilledTo = null,
         CancellationToken ct = default)
     {
-        // SP returns: PayerName, BilledYearMonth, CPTCount, TotalCharges
-        // PayerName is used as the CptCode row key (NW uses a payer-level CPT summary).
+        // SP returns: CPTCode, BilledYearMonth, CPTCount, BilledUnits, TotalCharges
+        // Billed Units is COUNT(Units), not SUM(Units). CPTCount is COUNT(*) of line rows.
         try
         {
             await using var conn = new SqlConnection(connectionString);
@@ -769,9 +1296,11 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
             {
                 var payer      = rdr.GetString(0);
                 var month      = rdr.GetString(1);
-                var claimCount = rdr.GetInt32(2);           // CPTCount  ? No. of Claims
-                var units      = rdr.GetDecimal(3);         // BilledUnits
-                var charges    = rdr.GetDecimal(4);         // TotalCharges
+                var claimCount = rdr.GetInt32(2);           // CPTCount = COUNT(*) of line rows
+                // Billed Units = COUNT(Units), not SUM(Units). CPTCount is the count of
+                // unit/line rows already returned by the SP (snapshot and live).
+                var units      = claimCount;
+                var charges    = ReadDecimalByNameOrIndex(rdr, 4, "TotalCharges", "BilledCharges", "ChargeAmount");
 
                 allMonths.Add(month);
                 if (!cptMonth.TryGetValue(payer, out var mm)) cptMonth[payer] = mm = [];
@@ -1448,6 +1977,24 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
     // ?? Shared parameter helper ???????????????????????????????????????????????
     // Adds the 8 standard filter parameters expected by every dbo.usp_GetNW_* read SP.
     // Passing all as NULL triggers the SP's no-filter snapshot branch.
+    private static decimal ReadDecimalByNameOrIndex(System.Data.Common.DbDataReader rdr, int fallbackIndex, params string[] names)
+    {
+        for (var i = 0; i < rdr.FieldCount; i++)
+        {
+            var col = rdr.GetName(i);
+            foreach (var name in names)
+            {
+                if (string.Equals(col, name, StringComparison.OrdinalIgnoreCase))
+                    return rdr.IsDBNull(i) ? 0m : Convert.ToDecimal(rdr.GetValue(i), System.Globalization.CultureInfo.InvariantCulture);
+            }
+        }
+
+        if (fallbackIndex >= 0 && fallbackIndex < rdr.FieldCount && !rdr.IsDBNull(fallbackIndex))
+            return Convert.ToDecimal(rdr.GetValue(fallbackIndex), System.Globalization.CultureInfo.InvariantCulture);
+
+        return 0m;
+    }
+
     private static void AddNWFilterParameters(
         SqlCommand cmd,
         List<string>? filterPayerNames = null,

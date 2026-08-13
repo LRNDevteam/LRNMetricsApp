@@ -8,12 +8,21 @@
     static string MonthName(int m) => m == 0 ? "Total" :
         System.Globalization.CultureInfo.InvariantCulture.DateTimeFormat.GetAbbreviatedMonthName(m);
 
-    string FmtCount(decimal v, string cat) =>
-        (cat == "Cash" || cat == "Avg")
-            ? v.ToString("C0")
-            : (v is >= long.MinValue and <= long.MaxValue
-                ? ((long)v).ToString("N0")
-                : v.ToString("N0"));
+    bool IsAriaPctRow(string? rowCode) =>
+        rowCode is "S.1.AP" or "S.3.AP" or "AC.1.AP" or "AC.3.AP";
+
+    // PMS/LIS counts: integer. Cash/Avg: currency.
+    // Aria % rows store Submitted/NotSubmitted as a decimal ratio in MetricValue
+    // (e.g. 0.1409). Casting to long truncates every month to 0 — that was why
+    // "% of the claim submitted in the last 30 Days" showed all zeros.
+    string FmtCount(decimal v, string cat, string? rowCode = null) =>
+        IsAriaPctRow(rowCode)
+            ? v.ToString("0.####")
+            : (cat == "Cash" || cat == "Avg")
+                ? v.ToString("C0")
+                : (v is >= long.MinValue and <= long.MaxValue
+                    ? ((long)v).ToString("N0")
+                    : v.ToString("N0"));
 
     bool IsDollar(string cat) => cat is "Cash" or "Avg";
 
@@ -56,10 +65,23 @@
     // averages produces a meaningless number. Prefer the SP's per-year
     // (year, 0) sentinel when present; otherwise (additive rows, or labs whose
     // SP does not yet emit the sentinel) fall back to summing the months.
+    // Aria A1/A2/AP are FirstBilledDate windows (not DOS buckets) — summing
+    // months double-counts; prefer (year,0) sentinel or (0,0) grand.
+    bool IsAriaWindowRow(ExecSummaryRow row) =>
+        row.RowCode is "S.1.A1" or "S.1.A2" or "S.1.AP"
+            or "S.3.A1" or "S.3.A2" or "S.3.AP"
+            or "AC.1.A1" or "AC.1.A2" or "AC.1.AP"
+            or "AC.3.A1" or "AC.3.A2" or "AC.3.AP";
+
     decimal RowYearTotal(ExecSummaryRow row, int year)
     {
         if (row.Category == "Avg" && row.ValuesByYearMonth.TryGetValue((year, 0), out var yearSentinel))
             return yearSentinel;
+        if (IsAriaWindowRow(row) && row.ValuesByYearMonth.TryGetValue((year, 0), out var ariaYear))
+            return ariaYear;
+        // Aria without year sentinel: do not sum months (meaningless); show blank/0
+        if (IsAriaWindowRow(row))
+            return 0m;
         return row.ValuesByYearMonth.Where(kv => kv.Key.Year == year && kv.Key.Month != 0).Sum(kv => kv.Value);
     }
 
@@ -71,6 +93,8 @@
     decimal RowGrandTotal(ExecSummaryRow row)
     {
         // "Avg" rows are always a precomputed sentinel (never additive).
+        // Aria window rows also use (0,0) — monthly columns are independent
+        // FirstBilledDate snapshots and must not be summed.
         // Rows with NO monthly (Year!=0) buckets at all - i.e. the filtered/
         // live-reaggregation path, which collapses everything into a single
         // (BillYear=0, BillMonth=0) "filtered total" row - must also read the
@@ -79,7 +103,7 @@
         // whenever a date/dimension filter was applied, even though the SP
         // returned the correct value in the (0,0) row.
         bool hasMonthlyBuckets = row.ValuesByYearMonth.Keys.Any(k => k.Year != 0 && k.Month != 0);
-        if (row.Category == "Avg" || !hasMonthlyBuckets)
+        if (row.Category == "Avg" || IsAriaWindowRow(row) || !hasMonthlyBuckets)
         {
             row.ValuesByYearMonth.TryGetValue((0, 0), out var total);
             return total;
@@ -358,6 +382,13 @@
     <h2 class="mb-0 fw-bold" style="font-size:1.15rem">
         <i class="bi bi-grid-3x3-gap-fill me-1"></i>Executive Summary
     </h2>
+    <div class="page-actions">
+        <button type="button" data-ni-open
+                class="btn btn-sm btn-outline-primary ni-btn-open"
+                title="Open Notes &amp; Insights for this report">
+            <i class="bi bi-journal-text me-1"></i>Notes &amp; Insights
+        </button>
+    </div>
 </div>
 
 <!-- ── Analysis-range / RunID banner (shared partial) ───── -->
@@ -676,7 +707,7 @@
             </div>
 
             <!-- Actions -->
-            <div class="px-3 pb-3 pt-2 d-flex gap-2 align-items-center">
+            <div class="px-3 pb-3 pt-2 d-flex gap-2 align-items-center flex-wrap">
                 <button type="submit" class="btn btn-sm btn-primary">
                     <i class="bi bi-funnel-fill me-1"></i>Apply Filters
                 </button>
@@ -684,16 +715,22 @@
                    class="btn btn-sm btn-outline-secondary">
                     <i class="bi bi-x-circle me-1"></i>Clear All
                 </a>
-                <button type="button" data-ni-open
-                        class="btn btn-sm btn-outline-primary ms-auto ni-btn-open"
-                        title="Open Notes &amp; Insights for this report">
-                    <i class="bi bi-journal-text me-1"></i>Notes &amp; Insights
-                </button>
-                <button type="button" id="esExportExcelBtn"
-                        class="btn btn-sm btn-outline-success"
-                        title="Export includes last 4 weeks of Notes in a separate sheet">
-                    <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
-                </button>
+                <div class="ms-auto d-flex gap-2 align-items-center flex-wrap">
+                    <button type="button" id="esExportExcelBtn"
+                            class="btn btn-sm btn-success"
+                            title="Export includes last 4 weeks of Notes in a separate sheet">
+                        <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
+                    </button>
+                    @if (Model.SelectedLab.Equals("Beech_Tree", StringComparison.OrdinalIgnoreCase))
+                    {
+                        <a asp-controller="ExecutiveSummary" asp-action="ThreePillarDiagnostic"
+                           asp-route-lab="@Model.SelectedLab" asp-route-months="12"
+                           class="btn btn-sm btn-outline-primary"
+                           title="Three-Pillar Diagnostic page with charts (not an Excel export)">
+                            <i class="bi bi-clipboard2-pulse me-1"></i>Three-Pillar Diagnostic
+                        </a>
+                    }
+                </div>
             </div>
         </form>
     </div>
@@ -727,7 +764,9 @@
         setTimeout(function () { hidden.value = ''; }, 1000);
     }
 
-    btn.addEventListener('click', function () {
+    btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
         var fd = new FormData(form);
         var val = function (n) { return (fd.get(n) || '').toString().trim() || null; };
         var num = function (n) { var v = val(n); return v != null && !isNaN(v) ? parseInt(v, 10) : null; };
@@ -957,7 +996,7 @@
                                             foreach (var m in mons)
                                             {
                                                 row.ValuesByYearMonth.TryGetValue((year, m), out var v);
-                                                string cellVal = FmtCount(v, row.Category);
+                                                string cellVal = FmtCount(v, row.Category, row.RowCode);
                                                 // Monthly cells are display-only — drill links live on the
                                                 // Year Total / Grand Total cells of the two LIS rows only.
                                                 <td><span class="es-pill@(dollarRow ? " es-pill-dollar" : "")">@cellVal</span></td>
@@ -976,7 +1015,7 @@
                                                     value    = yrTot,
                                                 })!;
                                                 <td class="es-year-total">
-                                                    <a href="@yrRowUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@FmtCount(yrTot, row.Category)</a>
+                                                    <a href="@yrRowUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@FmtCount(yrTot, row.Category, row.RowCode)</a>
                                                 </td>
                                             }
                                             else if (!isPanelSpecificRow && lisDrillMetric != null && yrTot != 0)
@@ -988,12 +1027,12 @@
                                                     value  = yrTot,
                                                 })!;
                                                 <td class="es-year-total">
-                                                    <a href="@yrDrillUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@FmtCount(yrTot, row.Category)</a>
+                                                    <a href="@yrDrillUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@FmtCount(yrTot, row.Category, row.RowCode)</a>
                                                 </td>
                                             }
                                             else
                                             {
-                                                <td class="es-year-total"><span class="es-pill@(dollarRow ? " es-pill-dollar" : "")">@FmtCount(yrTot, row.Category)</span></td>
+                                                <td class="es-year-total"><span class="es-pill@(dollarRow ? " es-pill-dollar" : "")">@FmtCount(yrTot, row.Category, row.RowCode)</span></td>
                                             }
                                         }
                                         @if (!isPanelSpecificRow && (row.Category == "LIS" || row.Category == "PMS" || row.Category == "Cash") && !string.IsNullOrEmpty(row.RowCode) && gTot != 0)
@@ -1007,7 +1046,7 @@
                                                 value    = gTot,
                                             })!;
                                             <td class="es-grand">
-                                                <a href="@gtRowUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@FmtCount(gTot, row.Category)</a>
+                                                <a href="@gtRowUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@FmtCount(gTot, row.Category, row.RowCode)</a>
                                             </td>
                                         }
                                         else if (!isPanelSpecificRow && lisDrillMetric != null && gTot != 0)
@@ -1019,12 +1058,12 @@
                                                 value  = gTot,
                                             })!;
                                             <td class="es-grand">
-                                                <a href="@gtDrillUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@FmtCount(gTot, row.Category)</a>
+                                                <a href="@gtDrillUrl" class="es-drill-link@(dollarRow ? " es-link-dollar" : "")">@FmtCount(gTot, row.Category, row.RowCode)</a>
                                             </td>
                                         }
                                         else
                                         {
-                                            <td class="es-grand"><span class="es-pill@(dollarRow ? " es-pill-dollar" : "")">@FmtCount(gTot, row.Category)</span></td>
+                                            <td class="es-grand"><span class="es-pill@(dollarRow ? " es-pill-dollar" : "")">@FmtCount(gTot, row.Category, row.RowCode)</span></td>
                                         }
                                     </tr>
                                 }

@@ -786,4 +786,184 @@ public sealed class ExecutiveSummaryController : Controller
 
         return View("LisDrill", result);
     }
+
+    /// <summary>
+    /// Three-Pillar Diagnostic — phase 1 LIS Breakdown.
+    /// Trailing months (3/6/9/12) + WeekRange end-day comparable window
+    /// (same logic as Executive Summary Insights DayWindow).
+    /// URL: /ExecutiveSummary/ThreePillarDiagnostic?lab=Beech_Tree&amp;months=6
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> ThreePillarDiagnostic(
+        string? lab,
+        int?    months = null,
+        int?    year = null, // legacy querystring; ignored when months is set
+        CancellationToken ct = default)
+    {
+        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var labName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+
+        // Allowed trailing windows (doc / Insights style).
+        var allowed = new[] { 3, 6, 9, 12, 19 };
+        var trailingMonths = months is int m && allowed.Contains(m) ? m : 12;
+
+        ViewData["Title"]             = "Three-Pillar Diagnostic";
+        ViewData["SelectedLab"]       = labName;
+        ViewData["DisableLabSwitch"]  = true;
+        ViewData["BreadcrumbParent"]    = "Executive Summary";
+        ViewData["BreadcrumbParentUrl"] = Url.Action("Index", "ExecutiveSummary", new { lab = labName });
+
+        var backUrl = Url.Action("Index", "ExecutiveSummary", new { lab = labName }) ?? "/ExecutiveSummary";
+        var vm = new ExecSummaryThreePillarViewModel
+        {
+            LabName = labName,
+            TrailingMonths = trailingMonths,
+            Year = year ?? 0,
+            BackUrl = backUrl,
+        };
+
+        var isBeechTree = string.Equals(labName, "Beech_Tree", StringComparison.OrdinalIgnoreCase);
+        if (!isBeechTree)
+        {
+            vm.ErrorMessage =
+                $"This diagnostic view is a Beech_Tree prototype pending client review — not yet available for '{labName}'.";
+            return View(vm);
+        }
+
+        if (!_labSettings.Labs.TryGetValue(labName, out var config)
+            || string.IsNullOrWhiteSpace(config.DbConnectionString))
+        {
+            vm.ErrorMessage = "Lab not configured.";
+            return View(vm);
+        }
+
+        // Same WeekRange end / DayWindow resolution as LisDrill / Insights.
+        var analysisRange = await _analysisRange.GetAsync(config.DbConnectionString, ct);
+        ViewData["AnalysisRange"] = analysisRange;
+        var asOf = analysisRange.WeekRangeEndDate?.Date ?? DateTime.Today.Date;
+        var dayWindow = AnalysisRangeInfo.ResolveComparableDayWindow(
+            analysisRange.WeekFolder, asOf, fallback: 9);
+
+        vm.AsOfDate = asOf;
+        vm.DayWindow = dayWindow;
+        vm.WeekFolder = analysisRange.WeekFolder;
+
+        const string lisSp = "dbo.usp_GetBeechTree_ThreePillarLisDiagnostic";
+        if (!await _repo.StoredProcedureExistsAsync(config.DbConnectionString, lisSp, ct))
+        {
+            vm.ErrorMessage =
+                $"'{lisSp}' has not been deployed yet. Run SqlScripts/usp_GetBeechTree_ThreePillarLisDiagnostic.sql against the Beech_Tree lab database.";
+            return View(vm);
+        }
+
+        vm = await _repo.GetBeechTreeThreePillarLisAsync(
+            config.DbConnectionString, labName, trailingMonths, dayWindow, asOf, ct);
+        vm.BackUrl = backUrl;
+        vm.WeekFolder = analysisRange.WeekFolder;
+        vm.AsOfDate ??= asOf;
+        if (vm.DayWindow <= 0) vm.DayWindow = dayWindow;
+        if (vm.TrailingMonths <= 0) vm.TrailingMonths = trailingMonths;
+        return View(vm);
+    }
+
+    /// <summary>
+    /// Lazy-load fragment for Pillar 2 (PMS). Called when the PMS tab is clicked.
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> ThreePillarPmsPartial(
+        string? lab, int? months = null, CancellationToken ct = default)
+    {
+        var vm = await BuildThreePillarShellAsync(lab, months, ct);
+        if (!string.IsNullOrWhiteSpace(vm.ErrorMessage))
+            return PartialView("_ThreePillarPms", vm);
+
+        if (!_labSettings.Labs.TryGetValue(vm.LabName, out var config)
+            || string.IsNullOrWhiteSpace(config.DbConnectionString))
+        {
+            vm.ErrorMessage = "Lab not configured.";
+            return PartialView("_ThreePillarPms", vm);
+        }
+
+        const string sp = "dbo.usp_GetBeechTree_ThreePillarPmsDiagnostic";
+        if (!await _repo.StoredProcedureExistsAsync(config.DbConnectionString, sp, ct))
+        {
+            vm.ErrorMessage =
+                $"'{sp}' has not been deployed yet. Run SqlScripts/usp_GetBeechTree_ThreePillarPmsDiagnostic.sql against the Beech_Tree lab database, then click this tab again.";
+            return PartialView("_ThreePillarPms", vm);
+        }
+
+        var asOf = vm.AsOfDate ?? DateTime.Today.Date;
+        var dayWindow = vm.DayWindow > 0 ? vm.DayWindow : 9;
+        vm = await _repo.GetBeechTreeThreePillarPmsAsync(
+            config.DbConnectionString, vm.LabName, vm.TrailingMonths, dayWindow, asOf, ct);
+        return PartialView("_ThreePillarPms", vm);
+    }
+
+    /// <summary>
+    /// Lazy-load fragment for Pillar 3 (Cash). Called when the Cash tab is clicked.
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> ThreePillarCashPartial(
+        string? lab, int? months = null, CancellationToken ct = default)
+    {
+        var vm = await BuildThreePillarShellAsync(lab, months, ct);
+        if (!string.IsNullOrWhiteSpace(vm.ErrorMessage))
+            return PartialView("_ThreePillarCash", vm);
+
+        if (!_labSettings.Labs.TryGetValue(vm.LabName, out var config)
+            || string.IsNullOrWhiteSpace(config.DbConnectionString))
+        {
+            vm.ErrorMessage = "Lab not configured.";
+            return PartialView("_ThreePillarCash", vm);
+        }
+
+        const string sp = "dbo.usp_GetBeechTree_ThreePillarCashDiagnostic";
+        if (!await _repo.StoredProcedureExistsAsync(config.DbConnectionString, sp, ct))
+        {
+            vm.ErrorMessage =
+                $"'{sp}' has not been deployed yet. Run SqlScripts/usp_GetBeechTree_ThreePillarCashDiagnostic.sql against the Beech_Tree lab database, then click this tab again.";
+            return PartialView("_ThreePillarCash", vm);
+        }
+
+        vm = await _repo.GetBeechTreeThreePillarCashAsync(
+            config.DbConnectionString, vm.LabName, vm.TrailingMonths, vm.DayWindow, vm.AsOfDate, ct);
+        vm.CashLoaded = true;
+        return PartialView("_ThreePillarCash", vm);
+    }
+
+    private async Task<ExecSummaryThreePillarViewModel> BuildThreePillarShellAsync(
+        string? lab, int? months, CancellationToken ct)
+    {
+        var availableLabs = _labSettings.Labs.Keys.OrderBy(x => x).ToList();
+        var labName = LabSelectionHelper.Resolve(HttpContext, lab, availableLabs);
+        var allowed = new[] { 3, 6, 9, 12, 19 };
+        var trailingMonths = months is int m && allowed.Contains(m) ? m : 12;
+        var vm = new ExecSummaryThreePillarViewModel
+        {
+            LabName = labName,
+            TrailingMonths = trailingMonths,
+        };
+
+        if (!string.Equals(labName, "Beech_Tree", StringComparison.OrdinalIgnoreCase))
+        {
+            vm.ErrorMessage =
+                $"This diagnostic view is a Beech_Tree prototype — not yet available for '{labName}'.";
+            return vm;
+        }
+
+        if (!_labSettings.Labs.TryGetValue(labName, out var config)
+            || string.IsNullOrWhiteSpace(config.DbConnectionString))
+        {
+            vm.ErrorMessage = "Lab not configured.";
+            return vm;
+        }
+
+        var analysisRange = await _analysisRange.GetAsync(config.DbConnectionString, ct);
+        var asOf = analysisRange.WeekRangeEndDate?.Date ?? DateTime.Today.Date;
+        vm.AsOfDate = asOf;
+        vm.DayWindow = AnalysisRangeInfo.ResolveComparableDayWindow(
+            analysisRange.WeekFolder, asOf, fallback: 9);
+        vm.WeekFolder = analysisRange.WeekFolder;
+        return vm;
+    }
 }

@@ -1,4 +1,4 @@
-﻿namespace LRN.ProductionReports.Models;
+namespace LRN.ProductionReports.Models;
 
 /// <summary>
 /// View model for the Production Report page.
@@ -119,6 +119,63 @@ public sealed class ProductionReportViewModel
 
     /// <summary>Grand total claim count across all payers.</summary>
     public int PayerBreakdownGrandTotal { get; init; }
+
+    /// <summary>Grand total ChargeAmount per month across all payers.</summary>
+    public Dictionary<string, decimal> PayerBreakdownGrandChargesByMonth { get; init; } = [];
+
+    /// <summary>Grand total ChargeAmount across all payers.</summary>
+    public decimal PayerBreakdownGrandTotalCharges { get; init; }
+
+    // ?? Panel Breakdown ???????????????????????????????????????????
+
+    /// <summary>Ordered list of year/month column keys for Panel Breakdown (ChargeEnteredDate).</summary>
+    public List<string> PanelBreakdownMonths { get; init; } = [];
+
+    /// <summary>Ordered list of distinct years in the Panel Breakdown data.</summary>
+    public List<int> PanelBreakdownYears { get; init; } = [];
+
+    /// <summary>Panel rows for the Panel Breakdown table, sorted by grand total descending.</summary>
+    public List<PayerBreakdownRow> PanelBreakdownRows { get; init; } = [];
+
+    /// <summary>Grand total unique ClaimID count per month across all panels.</summary>
+    public Dictionary<string, int> PanelBreakdownGrandByMonth { get; init; } = [];
+
+    /// <summary>Grand total unique ClaimID count across all panels.</summary>
+    public int PanelBreakdownGrandTotal { get; init; }
+
+    /// <summary>Grand total ChargeAmount per month across all panels.</summary>
+    public Dictionary<string, decimal> PanelBreakdownGrandChargesByMonth { get; init; } = [];
+
+    /// <summary>Grand total ChargeAmount across all panels.</summary>
+    public decimal PanelBreakdownGrandTotalCharges { get; init; }
+
+    public List<string> InsightDaqMonths { get; init; } = [];
+    public List<int> InsightDaqYears { get; init; } = [];
+    public List<PayerBreakdownRow> InsightDaqRows { get; init; } = [];
+    public Dictionary<string, int> InsightDaqGrandByMonth { get; init; } = [];
+    public int InsightDaqGrandTotal { get; init; }
+    public Dictionary<string, decimal> InsightDaqGrandChargesByMonth { get; init; } = [];
+    public decimal InsightDaqGrandTotalCharges { get; init; }
+
+    public List<string> InsightWebPmMonths { get; init; } = [];
+    public List<int> InsightWebPmYears { get; init; } = [];
+    public List<PayerBreakdownRow> InsightWebPmRows { get; init; } = [];
+    public Dictionary<string, int> InsightWebPmGrandByMonth { get; init; } = [];
+    public int InsightWebPmGrandTotal { get; init; }
+    public Dictionary<string, decimal> InsightWebPmGrandChargesByMonth { get; init; } = [];
+    public decimal InsightWebPmGrandTotalCharges { get; init; }
+
+    public List<string> HighestPayerMonths { get; init; } = [];
+    public List<int> HighestPayerYears { get; init; } = [];
+    public List<ProductionPanelRow> HighestPayerRows { get; init; } = [];
+    public Dictionary<string, ProductionMonthCell> HighestPayerGrandByMonth { get; init; } = [];
+    public int HighestPayerGrandTotalClaims { get; init; }
+    public decimal HighestPayerGrandTotalCharges { get; init; }
+
+    /// <summary>True when this page is the NorthWest Production Summary.</summary>
+    public bool IsNorthWestLab =>
+        SelectedLab.Equals("NorthWest", StringComparison.OrdinalIgnoreCase)
+        || SelectedLab.Equals("NorthWest_Labs", StringComparison.OrdinalIgnoreCase);
 
     // ?? Payer X Panel ?????????????????????????????????????????????
 
@@ -329,6 +386,15 @@ public sealed class PayerBreakdownRow
 
     /// <summary>Grand total claim count for this payer.</summary>
     public int GrandTotal { get; init; }
+
+    /// <summary>Per-month SUM(ChargeAmount) keyed by "yyyy-MM" (ChargeEnteredDate).</summary>
+    public Dictionary<string, decimal> ByMonthCharges { get; init; } = [];
+
+    /// <summary>Per-year SUM(ChargeAmount) keyed by year.</summary>
+    public Dictionary<int, decimal> ByYearCharges { get; init; } = [];
+
+    /// <summary>Grand total ChargeAmount for this payer.</summary>
+    public decimal GrandTotalCharges { get; init; }
 }
 
 // ?? Payer X Panel models ???????????????????????????????????????????????????

@@ -64,16 +64,18 @@ VALUES
      N'BilledUnbilled', N'=', N'Billed', N'ClaimStatus', N'<>', N'Complete W/O', NULL,NULL,NULL, NULL,NULL,NULL),
  (N'BT', N'AH', N'Patient Balance ($)', N'DateofService', N'Cash', N'PatientBalance',
      N'ClaimStatus', N'NOT IN', N'Unbilled,Unbilled - PB', NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL),
- (N'BT', N'AJ', N'Patient WO', N'DateofService', N'Cash', N'PatientAdjustments',
-     N'BilledUnbilled', N'=', N'Billed', NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL),
- (N'BT', N'AK', N'Insurance Balance ($)', N'DateofService', N'Cash', N'InsuranceBalance',
-     N'BilledUnbilled', N'=', N'Billed', NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL),
- (N'BT', N'AK1', N'Fully Denied', N'DateofService', N'Cash', N'InsuranceBalance',
-     N'BilledUnbilled', N'=', N'Billed', N'ClaimStatus', N'=', N'Fully Denied', NULL,NULL,NULL, NULL,NULL,NULL),
- (N'BT', N'AK2', N'No Response', N'DateofService', N'Cash', N'InsuranceBalance',
-     N'BilledUnbilled', N'=', N'Billed', N'ClaimStatus', N'=', N'No Response', NULL,NULL,NULL, NULL,NULL,NULL),
- (N'BT', N'AK3', N'Partially Denied', N'DateofService', N'Cash', N'InsuranceBalance',
-     N'BilledUnbilled', N'=', N'Billed', N'ClaimStatus', N'NOT IN', N'No Response,Fully Denied', NULL,NULL,NULL, NULL,NULL,NULL);
+ -- RoleIDs match 16_BeechTree_ExecutiveSummary_Aggregate Cash:
+ --   AI Patient WO · AJ Insurance Balance ($)  (AK/AL/AM are Avg, not Cash)
+ (N'BT', N'AI', N'Patient WO', N'DateofService', N'Cash', N'PatientAdjustments',
+     N'PatientAdjustments', N'>', N'0', NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL),
+ (N'BT', N'AJ', N'Insurance Balance ($)', N'DateofService', N'Cash', N'InsuranceBalance',
+     N'ClaimStatus', N'IN', N'Fully Denied,No Response,Partially Denied', NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL),
+ (N'BT', N'AJ.1', N'Fully Denied', N'DateofService', N'Cash', N'InsuranceBalance',
+     N'ClaimStatus', N'=', N'Fully Denied', NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL),
+ (N'BT', N'AJ.2', N'No Response', N'DateofService', N'Cash', N'InsuranceBalance',
+     N'ClaimStatus', N'=', N'No Response', NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL),
+ (N'BT', N'AJ.3', N'Partially Denied', N'DateofService', N'Cash', N'InsuranceBalance',
+     N'ClaimStatus', N'=', N'Partially Denied', NULL,NULL,NULL, NULL,NULL,NULL, NULL,NULL,NULL);
 GO
 /* -- Augustus (Aug) --------------------------------------------------- */
 DELETE FROM dbo.LisDrillRowDef WHERE LabPrefix = N'Aug' AND Source = N'Cash';

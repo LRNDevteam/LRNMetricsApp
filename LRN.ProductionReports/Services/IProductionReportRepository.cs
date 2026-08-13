@@ -224,6 +224,15 @@ public sealed record ProductionReportResult(
     int GrandTotalClaims,
     decimal GrandTotalCharges);
 
+/// <summary>Source groups (Daq / WebPM) with payer children for Highest Payer Breakdown.</summary>
+public sealed record HighestPayerBreakdownResult(
+    List<string> Months,
+    List<int> Years,
+    List<ProductionPanelRow> SourceRows,
+    Dictionary<string, ProductionMonthCell> GrandTotalByMonth,
+    int GrandTotalClaims,
+    decimal GrandTotalCharges);
+
 /// <summary>Result container for the Weekly Claim Volume table.</summary>
 public sealed record WeeklyClaimVolumeResult(
     List<WeekColumn> WeekColumns,
@@ -244,7 +253,9 @@ public sealed record PayerBreakdownResult(
     List<int> Years,
     List<PayerBreakdownRow> PayerRows,
     Dictionary<string, int> GrandTotalByMonth,
-    int GrandTotal);
+    int GrandTotal,
+    Dictionary<string, decimal>? GrandTotalChargesByMonth = null,
+    decimal GrandTotalCharges = 0);
 
 /// <summary>Result container for the Payer X Panel cross-tab table.</summary>
 public sealed record PayerPanelResult(

@@ -559,7 +559,8 @@ public class PredictionDbService
     /// COUNT(DISTINCT VisitNumber) / SUMs do not change.
     /// </para>
     /// </summary>
-    public void RefreshAggregatesForRun(
+    /// <returns><c>true</c> when the aggregate refresh SP succeeded; enrich failures are non-fatal.</returns>
+    public bool RefreshAggregatesForRun(
         string labName,
         string? runId,
         DateTime? weekStartDate = null,
@@ -568,9 +569,10 @@ public class PredictionDbService
         if (string.IsNullOrWhiteSpace(runId))
         {
             AppLogger.LogDbWarn($"[{labName}] Aggregate refresh skipped — RunId is blank.");
-            return;
+            return false;
         }
 
+        var aggregateOk = false;
         try
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -598,6 +600,8 @@ public class PredictionDbService
                     "Chunking loads WorkingBase only — aggregate counts/results identical to single-pass.");
                 cmd.ExecuteNonQuery();
             }
+
+            aggregateOk = true;
 
             // Always attempt SP enrich after aggregates (idempotent; no-op if LRNMaster unreachable).
             try
@@ -631,6 +635,7 @@ public class PredictionDbService
             // Never block the prediction pipeline because aggregate refresh failed.
             AppLogger.LogDbError(
                 $"[{labName}] Aggregate snapshot refresh failed (dashboard will fall back to live SPs)", ex);
+            aggregateOk = false;
         }
 
         // Cross-server enrich (lab DB + LRNMaster may differ) — requires MasterDbConnectionString.
@@ -647,6 +652,154 @@ public class PredictionDbService
                 AppLogger.LogDbWarn(
                     $"[{labName}] DenialDescription C# enrich from LRNMaster failed: {enrichEx.Message}");
             }
+        }
+
+        return aggregateOk;
+    }
+
+    /// <summary>
+    /// Writes Prediction Analysis (ReportTypeId 11) and Forecasting (ReportTypeId 7)
+    /// via <c>LRNMaster.dbo.usp_LogPredictionForecastingWorkflow</c> (same Azure MI as
+    /// the Insert/Upsert SPs). RunId is resolved from the lab
+    /// <c>dbo.PayerValidationReport</c> when not supplied. Never throws.
+    /// </summary>
+    public void LogPredictionForecastingWorkflow(
+        string? masterDbConnectionString,
+        string status,
+        string? requestedRunId = null,
+        string? sourceFileName = null,
+        string? logMessage = null,
+        long? rowCount = null,
+        string sourceSystem = "PayerValidationReport",
+        string createdBy = "PredictionAnalysis")
+    {
+        if (string.IsNullOrWhiteSpace(masterDbConnectionString))
+        {
+            AppLogger.LogDbWarn(
+                "[ReportLog] MasterDbConnectionString not set — skipping Prediction/Forecasting log+tracker.");
+            return;
+        }
+
+        try
+        {
+            var runId = ResolvePayerValidationRunId(requestedRunId);
+            if (string.IsNullOrWhiteSpace(runId))
+            {
+                AppLogger.LogDbWarn(
+                    "[ReportLog] No RunId in lab PayerValidationReport — skipping Prediction/Forecasting log+tracker.");
+                return;
+            }
+
+            long? rows = rowCount;
+            if (rows is null)
+                rows = CountPayerValidationRows(runId);
+
+            using var conn = new SqlConnection(masterDbConnectionString);
+            conn.Open();
+
+            using var cmd = new SqlCommand("dbo.usp_LogPredictionForecastingWorkflow", conn)
+            {
+                CommandType    = CommandType.StoredProcedure,
+                CommandTimeout = 60
+            };
+
+            cmd.Parameters.AddWithValue("@RunId", runId);
+            cmd.Parameters.AddWithValue("@Status", status);
+            cmd.Parameters.AddWithValue("@SourceSystem", sourceSystem);
+            cmd.Parameters.AddWithValue("@CreatedBy", createdBy);
+            cmd.Parameters.AddWithValue("@SourceFileName",
+                (object?)(string.IsNullOrWhiteSpace(sourceFileName) ? null : sourceFileName) ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@LogMessage",
+                (object?)(string.IsNullOrWhiteSpace(logMessage) ? null : logMessage) ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@RowCount", (object?)rows ?? DBNull.Value);
+
+            AppLogger.LogDb(
+                $"[ReportLog] EXEC LRNMaster.dbo.usp_LogPredictionForecastingWorkflow " +
+                $"@RunId='{runId}', @SourceSystem='{sourceSystem}', @Status='{status}', @CreatedBy='{createdBy}'");
+
+            cmd.ExecuteNonQuery();
+
+            AppLogger.LogDb(
+                $"[ReportLog] Prediction Analysis + Forecasting → {status} (RunId={runId}).");
+        }
+        catch (Exception ex)
+        {
+            AppLogger.LogDbWarn(
+                $"[ReportLog] usp_LogPredictionForecastingWorkflow failed (non-fatal): {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Prefer <paramref name="requestedRunId"/> when it exists in lab
+    /// <c>PayerValidationReport</c>; otherwise newest DISTINCT RunId.
+    /// </summary>
+    public string? ResolvePayerValidationRunId(string? requestedRunId = null)
+    {
+        try
+        {
+            using var conn = new SqlConnection(_connectionString);
+            conn.Open();
+
+            if (!string.IsNullOrWhiteSpace(requestedRunId))
+            {
+                using (var check = new SqlCommand(
+                    """
+                    SELECT TOP (1) CONVERT(VARCHAR(30), RunId)
+                    FROM dbo.PayerValidationReport WITH (NOLOCK)
+                    WHERE CONVERT(VARCHAR(30), RunId) = @RunId
+                    """, conn))
+                {
+                    check.Parameters.AddWithValue("@RunId", requestedRunId.Trim());
+                    check.CommandTimeout = 60;
+                    var hit = check.ExecuteScalar();
+                    if (hit is not null and not DBNull)
+                        return Convert.ToString(hit);
+                }
+            }
+
+            using var cmd = new SqlCommand(
+                """
+                SELECT TOP (1) CONVERT(VARCHAR(30), RunId)
+                FROM dbo.PayerValidationReport WITH (NOLOCK)
+                WHERE RunId IS NOT NULL AND CONVERT(VARCHAR(30), RunId) <> ''
+                GROUP BY CONVERT(VARCHAR(30), RunId)
+                ORDER BY MAX(ReportId) DESC
+                """, conn)
+            {
+                CommandTimeout = 60
+            };
+            var result = cmd.ExecuteScalar();
+            return result is null or DBNull ? null : Convert.ToString(result);
+        }
+        catch (Exception ex)
+        {
+            AppLogger.LogDbWarn($"[ReportLog] ResolvePayerValidationRunId failed: {ex.Message}");
+            return string.IsNullOrWhiteSpace(requestedRunId) ? null : requestedRunId.Trim();
+        }
+    }
+
+    private long? CountPayerValidationRows(string runId)
+    {
+        try
+        {
+            using var conn = new SqlConnection(_connectionString);
+            conn.Open();
+            using var cmd = new SqlCommand(
+                """
+                SELECT COUNT_BIG(1)
+                FROM dbo.PayerValidationReport WITH (NOLOCK)
+                WHERE CONVERT(VARCHAR(30), RunId) = @RunId
+                """, conn)
+            {
+                CommandTimeout = 60
+            };
+            cmd.Parameters.AddWithValue("@RunId", runId);
+            var result = cmd.ExecuteScalar();
+            return result is null or DBNull ? null : Convert.ToInt64(result);
+        }
+        catch
+        {
+            return null;
         }
     }
 

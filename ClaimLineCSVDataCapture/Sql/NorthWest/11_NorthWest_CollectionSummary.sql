@@ -217,7 +217,7 @@ CREATE TABLE dbo.NW_CS_ProviderSummary
     ProviderRank      INT             NOT NULL,
     ReferringProvider NVARCHAR(500)   NOT NULL,
     NoOfClaims        INT             NOT NULL DEFAULT 0,
-    ProcTotalPayment  DECIMAL(18,2)   NOT NULL DEFAULT 0,
+    InsurancePayment  DECIMAL(18,2)   NOT NULL DEFAULT 0,  -- was ProcTotalPayment; NW ClaimLevelData has InsurancePayment
     InsuranceBalance  DECIMAL(18,2)   NOT NULL DEFAULT 0,
     PatientBalance    DECIMAL(18,2)   NOT NULL DEFAULT 0,
     RefreshedAt       DATETIME        NOT NULL DEFAULT GETDATE()
@@ -1420,28 +1420,30 @@ GO
 
 
   
-CREATE  or Alter  PROCEDURE dbo.usp_RefreshNW_CS_InsuranceVsAging    
-AS    
-BEGIN    
-    SET NOCOUNT ON;    
-    
-    TRUNCATE TABLE dbo.NW_CS_InsuranceVsAging;    
-    
-    INSERT INTO dbo.NW_CS_InsuranceVsAging    
-        (PayerName, AgingBucket, VisitCount, InsuranceBalance, RefreshedAt)    
-    SELECT    
-        LTRIM(RTRIM(PayerName_Raw))                                  AS PayerName,          
-  LTRIM(RTRIM(ISNULL(Aging, '(blank)')))                 AS AgingBucket,    
-        COUNT( NULLIF(LTRIM(RTRIM(AccessionNumber)), ''))    AS VisitCount,    
-        ISNULL(SUM(TRY_CAST(InsuranceBalance AS DECIMAL(18,2))), 0)  AS InsuranceBalance,    
-        GETDATE()    
-    FROM dbo.ClaimLevelData    
-    WHERE   LTRIM(RTRIM(ClaimStatus)) = 'No Response'    
-    GROUP BY LTRIM(RTRIM(PayerName_Raw)), LTRIM(RTRIM(ISNULL(Aging, '(blank)')));    
-    
-    PRINT 'usp_RefreshNW_CS_InsuranceVsAging completed.';    
-END 
-go
+CREATE OR ALTER PROCEDURE dbo.usp_RefreshNW_CS_InsuranceVsAging
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    TRUNCATE TABLE dbo.NW_CS_InsuranceVsAging;
+
+    INSERT INTO dbo.NW_CS_InsuranceVsAging
+        (PayerName, AgingBucket, VisitCount, InsuranceBalance, RefreshedAt)
+    SELECT
+        LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(PayerName_Raw)), ''), 'Unknown'))) AS PayerName,
+        LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(Aging)), ''), '(blank)')))         AS AgingBucket,
+        COUNT(NULLIF(LTRIM(RTRIM(AccessionNumber)), ''))                         AS VisitCount,
+        ISNULL(SUM(TRY_CAST(InsuranceBalance AS DECIMAL(18,2))), 0)              AS InsuranceBalance,
+        GETDATE()
+    FROM dbo.ClaimLevelData
+    WHERE LTRIM(RTRIM(ISNULL(ClaimStatus, ''))) = 'No Response'
+    GROUP BY
+        LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(PayerName_Raw)), ''), 'Unknown'))),
+        LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(Aging)), ''), '(blank)')));
+
+    PRINT 'usp_RefreshNW_CS_InsuranceVsAging completed.';
+END
+GO
 
 --CREATE OR ALTER PROCEDURE dbo.usp_RefreshNW_CS_InsuranceVsAging
 --AS
@@ -1593,89 +1595,89 @@ GO
 
 -- 10. Insurance vs Payment %  (Filter: InsurancePayment > 0, Row: PayerName_Raw, Col: NoOfClaimID, InsPayment, Pct)
 
-CREATE or Alter  PROCEDURE dbo.usp_RefreshNW_CS_InsuranceVsPaymentPct  
-AS  
-BEGIN  
-    SET NOCOUNT ON;  
-  
-    ;WITH base AS  
-    (  
-        SELECT  
-            LTRIM(RTRIM(PayerName_Raw)) AS PayerName,  
-            LTRIM(RTRIM(Panelname)) AS PanelName,  
-  
-            TRY_CAST(InsurancePayment AS DECIMAL(18,2)) AS InsPay,  
-            TRY_CAST(PaymentPercent AS DECIMAL(9,4)) AS PayPct,  
-  
-            CheckDateValue =  
-                COALESCE(  
-                    TRY_CONVERT(DATE, CheckDate, 101),  
-                    TRY_CONVERT(DATE, CheckDate, 120),  
-                    TRY_CONVERT(DATE, CheckDate)  
-                )  
-        FROM dbo.ClaimLevelData  
-        WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0    
-  --AND TRY_CAST(CheckDate AS DATE) IS NOT NULL and CheckDate<>''  
-     -- AND YEAR(TRY_CAST(CheckDate AS DATE)) > 1900  
-    ),  
-    filtered AS  
-    (  
-        SELECT  
-            PayerName,  
-            PanelName,  
-            InsPay,  
-            PayPct  
-        FROM base  
-       -- WHERE CheckDateValue <> '2026-04-01'   
-    ),  
-    agg AS  
-    (  
-        SELECT  
-            PayerName,  
-            COUNT(*) AS PanelGroupCount,  
-            ISNULL(SUM(InsPay), 0) AS InsurancePayment,  
-            ROUND(ISNULL(AVG(PayPct), 0) * 100, 0) AS PaymentPct  
-        FROM filtered  
-        GROUP BY PayerName  
-    ),  
-    grand AS  
-    (  
-        SELECT NULLIF(SUM(InsurancePayment), 0) AS Total  
-        FROM agg  
-    )  
-    SELECT  
-        a.PayerName,  
-        a.PanelGroupCount,  
-        a.InsurancePayment,  
-        a.PaymentPct  
-    INTO #out  
-    FROM agg a  
-    CROSS JOIN grand g;  
-  
-    TRUNCATE TABLE dbo.NW_CS_InsuranceVsPaymentPct;  
-  
-    INSERT INTO dbo.NW_CS_InsuranceVsPaymentPct  
-    (  
-        PayerName,  
-        NoOfPaidClaims,  
-		InsurancePayment,  
-        PaymentPct,  
-        RefreshedAt  
-    )  
-    SELECT  
-        PayerName,  
-        PanelGroupCount,  
-        InsurancePayment,  
-        PaymentPct,  
-        GETDATE()  
-    FROM #out  
-    ORDER BY InsurancePayment DESC;  
-  
-    DROP TABLE IF EXISTS #out;  
-  
-    PRINT 'usp_RefreshNW_CS_InsuranceVsPaymentPct completed.';  
-END;  
-go
+CREATE OR ALTER PROCEDURE dbo.usp_RefreshNW_CS_InsuranceVsPaymentPct
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    ;WITH base AS
+    (
+        SELECT
+            LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(PayerName_Raw)), ''), 'Unknown'))) AS PayerName,
+            LTRIM(RTRIM(ISNULL(Panelname, ''))) AS PanelName,
+
+            TRY_CAST(InsurancePayment AS DECIMAL(18,2)) AS InsPay,
+            TRY_CAST(PaymentPercent AS DECIMAL(9,4)) AS PayPct,
+
+            CheckDateValue =
+                COALESCE(
+                    TRY_CONVERT(DATE, CheckDate, 101),
+                    TRY_CONVERT(DATE, CheckDate, 120),
+                    TRY_CONVERT(DATE, CheckDate)
+                )
+        FROM dbo.ClaimLevelData
+        WHERE ISNULL(TRY_CAST(InsurancePayment AS DECIMAL(18,2)), 0) > 0
+  --AND TRY_CAST(CheckDate AS DATE) IS NOT NULL and CheckDate<>''
+     -- AND YEAR(TRY_CAST(CheckDate AS DATE)) > 1900
+    ),
+    filtered AS
+    (
+        SELECT
+            PayerName,
+            PanelName,
+            InsPay,
+            PayPct
+        FROM base
+       -- WHERE CheckDateValue <> '2026-04-01'
+    ),
+    agg AS
+    (
+        SELECT
+            PayerName,
+            COUNT(*) AS PanelGroupCount,
+            ISNULL(SUM(InsPay), 0) AS InsurancePayment,
+            ROUND(ISNULL(AVG(PayPct), 0) * 100, 0) AS PaymentPct
+        FROM filtered
+        GROUP BY PayerName
+    ),
+    grand AS
+    (
+        SELECT NULLIF(SUM(InsurancePayment), 0) AS Total
+        FROM agg
+    )
+    SELECT
+        a.PayerName,
+        a.PanelGroupCount,
+        a.InsurancePayment,
+        a.PaymentPct
+    INTO #out
+    FROM agg a
+    CROSS JOIN grand g;
+
+    TRUNCATE TABLE dbo.NW_CS_InsuranceVsPaymentPct;
+
+    INSERT INTO dbo.NW_CS_InsuranceVsPaymentPct
+    (
+        PayerName,
+        NoOfPaidClaims,
+        InsurancePayment,
+        PaymentPct,
+        RefreshedAt
+    )
+    SELECT
+        PayerName,
+        PanelGroupCount,
+        InsurancePayment,
+        PaymentPct,
+        GETDATE()
+    FROM #out
+    ORDER BY InsurancePayment DESC;
+
+    DROP TABLE IF EXISTS #out;
+
+    PRINT 'usp_RefreshNW_CS_InsuranceVsPaymentPct completed.';
+END;
+GO
 
 --CREATE OR ALTER PROCEDURE dbo.usp_RefreshNW_CS_InsuranceVsPaymentPct
 --AS
@@ -1858,6 +1860,16 @@ GO
 
 
 -- 13. Provider Summary
+-- Align with Get SP + BeechTree: InsurancePayment (NW ClaimLevelData has no ProcTotalPayment).
+-- Safe migrate if an older NW_CS_ProviderSummary still has ProcTotalPayment.
+IF OBJECT_ID('dbo.NW_CS_ProviderSummary','U') IS NOT NULL
+   AND COL_LENGTH('dbo.NW_CS_ProviderSummary', 'InsurancePayment') IS NULL
+   AND COL_LENGTH('dbo.NW_CS_ProviderSummary', 'ProcTotalPayment') IS NOT NULL
+BEGIN
+    EXEC sp_rename 'dbo.NW_CS_ProviderSummary.ProcTotalPayment', 'InsurancePayment', 'COLUMN';
+END
+GO
+
 CREATE OR ALTER PROCEDURE dbo.usp_RefreshNW_CS_ProviderSummary
 AS
 BEGIN
@@ -1867,7 +1879,7 @@ BEGIN
         SELECT
             LTRIM(RTRIM(ReferringProvider))                              AS ReferringProvider,
             COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ClaimID)), ''))            AS NoOfClaims,
-            ISNULL(SUM(TRY_CAST(ProcTotalPayment AS DECIMAL(18,2))), 0)  AS ProcTotalPayment,
+            ISNULL(SUM(TRY_CAST(InsurancePayment AS DECIMAL(18,2))), 0)  AS InsurancePayment,
             ISNULL(SUM(TRY_CAST(InsuranceBalance AS DECIMAL(18,2))), 0)  AS InsuranceBalance,
             ISNULL(SUM(TRY_CAST(PatientBalance   AS DECIMAL(18,2))), 0)  AS PatientBalance
         FROM dbo.ClaimLevelData
@@ -1877,16 +1889,16 @@ BEGIN
     )
     SELECT
         ROW_NUMBER() OVER (ORDER BY NoOfClaims DESC) AS ProviderRank,
-        ReferringProvider, NoOfClaims, ProcTotalPayment, InsuranceBalance, PatientBalance
+        ReferringProvider, NoOfClaims, InsurancePayment, InsuranceBalance, PatientBalance
     INTO #out
     FROM agg;
 
     TRUNCATE TABLE dbo.NW_CS_ProviderSummary;
     INSERT INTO dbo.NW_CS_ProviderSummary
         (ProviderRank, ReferringProvider, NoOfClaims,
-         ProcTotalPayment, InsuranceBalance, PatientBalance, RefreshedAt)
+         InsurancePayment, InsuranceBalance, PatientBalance, RefreshedAt)
     SELECT ProviderRank, ReferringProvider, NoOfClaims,
-           ProcTotalPayment, InsuranceBalance, PatientBalance, GETDATE()
+           InsurancePayment, InsuranceBalance, PatientBalance, GETDATE()
     FROM #out
     ORDER BY ProviderRank;
 

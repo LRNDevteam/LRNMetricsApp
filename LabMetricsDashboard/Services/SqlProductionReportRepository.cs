@@ -1055,12 +1055,16 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         {
             var byMonth = new Dictionary<string, int>();
             var byYear = new Dictionary<int, int>();
+            var byMonthCharges = new Dictionary<string, decimal>();
+            var byYearCharges = new Dictionary<int, decimal>();
 
             foreach (var r in rows)
             {
                 var mk = $"{r.EnteredYear:D4}-{r.EnteredMonth:D2}";
                 byMonth[mk] = byMonth.TryGetValue(mk, out var em) ? em + r.ClaimCount : r.ClaimCount;
                 byYear[r.EnteredYear] = byYear.TryGetValue(r.EnteredYear, out var ey) ? ey + r.ClaimCount : r.ClaimCount;
+                byMonthCharges[mk] = byMonthCharges.TryGetValue(mk, out var cm) ? cm + r.TotalCharges : r.TotalCharges;
+                byYearCharges[r.EnteredYear] = byYearCharges.TryGetValue(r.EnteredYear, out var cy) ? cy + r.TotalCharges : r.TotalCharges;
             }
 
             payerRows.Add(new PayerBreakdownRow
@@ -1069,30 +1073,40 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                 ByMonth = byMonth,
                 ByYear = byYear,
                 GrandTotal = byMonth.Values.Sum(),
+                ByMonthCharges = byMonthCharges,
+                ByYearCharges = byYearCharges,
+                GrandTotalCharges = byMonthCharges.Values.Sum(),
             });
         }
 
         payerRows = payerRows.OrderByDescending(p => p.GrandTotal).ToList();
 
         var grandByMonth = new Dictionary<string, int>();
+        var grandChargesByMonth = new Dictionary<string, decimal>();
         foreach (var p in payerRows)
         {
             foreach (var (mk, cnt) in p.ByMonth)
             {
                 grandByMonth[mk] = grandByMonth.TryGetValue(mk, out var eg) ? eg + cnt : cnt;
             }
+            foreach (var (mk, ch) in p.ByMonthCharges)
+            {
+                grandChargesByMonth[mk] = grandChargesByMonth.TryGetValue(mk, out var ec) ? ec + ch : ch;
+            }
         }
 
         int grandTotal = payerRows.Sum(p => p.GrandTotal);
+        decimal grandTotalCharges = payerRows.Sum(p => p.GrandTotalCharges);
 
-        return new PayerBreakdownResult(months, years, payerRows, grandByMonth, grandTotal);
+        return new PayerBreakdownResult(months, years, payerRows, grandByMonth, grandTotal, grandChargesByMonth, grandTotalCharges);
     }
 
     private sealed record RawPayerBreakdownRow(
         string PayerName,
         int EnteredYear,
         int EnteredMonth,
-        int ClaimCount);
+        int ClaimCount,
+        decimal TotalCharges = 0);
 
     // ?? Payer X Panel ????????????????????????????????????????????????????
 
