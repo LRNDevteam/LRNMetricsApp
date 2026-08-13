@@ -19,6 +19,15 @@ public enum ReportRunStatus
     /// source data landed. The pipeline has almost certainly stalled rather than being slow.
     /// </summary>
     Overdue = 4,
+
+    /// <summary>
+    /// Deliberately not offered to this lab — the report is switched off, or the lab is not on the
+    /// report's lab list (ReportAvailability in appsettings, or the lab's own feature flag).
+    /// Shown as a padlock: nothing is late and nothing failed, the door is simply closed.
+    /// Distinct from <see cref="NotConfigured"/>, which means the pipeline has never produced this
+    /// report for ANY lab, so it is not wired up yet rather than withheld from this one.
+    /// </summary>
+    NotAvailable = 5,
 }
 
 /// <summary>

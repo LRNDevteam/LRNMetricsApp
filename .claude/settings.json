@@ -1,7 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(dotnet build \"c:\\\\Users\\\\abdul\\\\source\\\\repos\\\\LRNDevteam\\\\LRNMetricsApp\\\\LRN.MasterFileProcessorWorker\\\\LRN.MasterFileProcessorWorker.csproj\" --nologo -v q)"
+      "PowerShell(dotnet build \"c:\\\\Users\\\\abdul\\\\source\\\\repos\\\\LRNDevteam\\\\LRNMetricsApp\\\\LRN.MasterFileProcessorWorker\\\\LRN.MasterFileProcessorWorker.csproj\" --nologo -v q)",
+      "PowerShell(sqlcmd -S \"lrnanalytics-sqlmi.public.4e3a76f4ed99.database.windows.net,3342\" -d NWL_LRN -U sqladmin -P \"Labrevnavigator@26\" -C -Q $q -W -s \"|\")",
+      "PowerShell(Remove-Item -Force 'LRN.AveragesImport\\\\Database\\\\03_Add_Mode_Median_Columns.sql' -Confirm:$false)",
+      "PowerShell(dotnet test tests\\\\LabMetricsDashboard.Tests\\\\LabMetricsDashboard.Tests.csproj --nologo -v q 2>&1)",
+      "PowerShell($c = Get-Content \"LabMetricsDashboard\\\\appsettings.json\" -Raw | ConvertFrom-Json; $c.ReportAvailability.Reports.PSObject.Properties | ForEach-Object { \"$\\($_.Name\\) -> Enabled=$\\($_.Value.Enabled\\) Labs=$\\($_.Value.Labs -join ', '\\)\" })",
+      "PowerShell(sqlcmd -S \"lrnanalytics-sqlmi.public.4e3a76f4ed99.database.windows.net,3342\" -d Certus_LRN -U sqladmin -P \"Labrevnavigator@26\" -C -Q $q -W -s \"|\" -t 600)",
+      "PowerShell(sqlcmd -S \"lrnanalytics-sqlmi.public.4e3a76f4ed99.database.windows.net,3342\" -d LRNMaster -U sqladmin -P \"Labrevnavigator@26\" -C -Q \"SET NOCOUNT ON; EXEC sp_GetRecentSuccessRunByLab;\" -W -s \"|\" -t 300)",
+      "PowerShell(sqlcmd -S \"ReportEngine\\\\SQLEXPRESS\" -d Augustus_LRN -U sa -P \"LRN_DevAdmin@2025!\" -C -Q \"SET NOCOUNT ON; SELECT MAX\\(LEN\\(Panelname\\)\\) AS ClaimPanel, MAX\\(LEN\\(PayerName\\)\\) AS ClaimPayer, MAX\\(LEN\\(Global_Payer_ID\\)\\) AS ClaimPayerId, MAX\\(LEN\\(LabName\\)\\) AS ClaimLab FROM dbo.ClaimLevelData; SELECT MAX\\(LEN\\(Panelname\\)\\) AS LinePanel, MAX\\(LEN\\(CPTCode\\)\\) AS LineCpt, MAX\\(LEN\\(PayerName\\)\\) AS LinePayer, MAX\\(LEN\\(Payer_Common_Code\\)\\) AS LineCommon FROM dbo.LineLevelData;\" -W -s \"|\" -t 600)",
+      "PowerShell(sqlcmd -S \"lrnanalytics-sqlmi.public.4e3a76f4ed99.database.windows.net,3342\" -d LRNMaster -U sqladmin -P \"Labrevnavigator@26\" -C -Q $q -W -s \"|\" -t 300)"
     ]
   }
 }

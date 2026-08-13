@@ -20,13 +20,14 @@
     // Colour states the RUN OUTCOME, never whether the current user can click through:
     // completed is green even when the report cannot be opened (unmapped lab, feature off,
     // role blocked). Those cells simply don't lift on hover, and the tooltip says why.
-    // Only "not produced for this lab" is greyed out.
+    // Only the two absences are greyed: locked (padlock) and not produced (dash).
     string CellClass(LabReportStatus cell) => cell.Status switch
     {
         ReportRunStatus.Success => "ok",
         ReportRunStatus.Failed => "fail",
         ReportRunStatus.Pending => "running",
         ReportRunStatus.Overdue => "late",
+        ReportRunStatus.NotAvailable => "locked",
         _ => "none"
     };
 
@@ -37,6 +38,7 @@
         ReportRunStatus.Failed => "bad",
         ReportRunStatus.Pending => "running",
         ReportRunStatus.Overdue => "late",
+        ReportRunStatus.NotAvailable => "locked",
         _ => "off"
     };
 
@@ -46,6 +48,7 @@
         ReportRunStatus.Failed => "Failed",
         ReportRunStatus.Pending => "In progress",
         ReportRunStatus.Overdue => "Overdue",
+        ReportRunStatus.NotAvailable => "Not available",
         _ => "Not produced"
     };
 
@@ -57,6 +60,8 @@
         ReportRunStatus.Failed => "Not completed (failed)",
         ReportRunStatus.Pending => "In progress — not yet produced for this run",
         ReportRunStatus.Overdue => "Overdue — still not produced more than a day after the source data landed",
+        // Locked on purpose: this lab is not set up for the report. Never a failure.
+        ReportRunStatus.NotAvailable => "Not available for this lab",
         // Never marked as a failure: this report is simply not part of the lab's run.
         _ => "Not produced for this lab"
     };
@@ -73,12 +78,14 @@
     /// The blocked reason, but only when it adds something <see cref="StatusWord"/> has not
     /// already said. For Failed / Pending / NotConfigured the controller's reason is a
     /// restatement ("Not produced for this lab." under "Not produced for this lab"), which is
-    /// what made tooltips read the same sentence twice. Only a COMPLETED report has a reason
-    /// worth showing — it explains why a finished report still cannot be opened.
+    /// what made tooltips read the same sentence twice. Two states have a reason worth showing:
+    /// a COMPLETED report (why a finished report still cannot be opened) and a LOCKED one (which
+    /// setting closed it, and for which labs it is open).
     /// </summary>
     string ExtraReason(LabReportStatus cell)
     {
-        if (cell.Status != ReportRunStatus.Success || string.IsNullOrWhiteSpace(cell.BlockedReason))
+        if (cell.Status is not (ReportRunStatus.Success or ReportRunStatus.NotAvailable)
+            || string.IsNullOrWhiteSpace(cell.BlockedReason))
             return string.Empty;
 
         // Belt and braces: never repeat the status sentence even if the wording converges.
@@ -92,7 +99,8 @@
         $"{cell.Catalog.DisplayName} — {StatusWord(cell)}" + ExtraReason(cell) + ActionHint(cell);
 
     // Corner badge stamped on the report's own icon: tick = completed, cross = did not
-    // complete, dash = not part of this lab's run.
+    // complete, padlock = this lab is not set up for the report, dash = the pipeline does not
+    // produce it for anyone yet.
     // Gear = the run is still working on it; warning triangle = it has stalled. Neither is a
     // cross: nothing has failed, the report simply is not there yet.
     string BadgeIcon(LabReportStatus cell) => cell.Status switch
@@ -101,6 +109,7 @@
         ReportRunStatus.Failed => "bi-x-lg",
         ReportRunStatus.Pending => "bi-gear-fill",
         ReportRunStatus.Overdue => "bi-exclamation-triangle-fill",
+        ReportRunStatus.NotAvailable => "bi-lock-fill",
         _ => "bi-dash-lg"
     };
 
@@ -110,6 +119,7 @@
         ReportRunStatus.Failed => "bg-fail",
         ReportRunStatus.Pending => "bg-running",
         ReportRunStatus.Overdue => "bg-late",
+        ReportRunStatus.NotAvailable => "bg-lock",
         _ => "bg-none"
     };
 
@@ -149,6 +159,9 @@
            --running:#2563eb; --running-bg:#eff6ff; --running-line:#bfdbfe;
            --late:#ea580c; --late-bg:#fff7ed; --late-line:#fed7aa;
            --none:#cbd5e1; --none-bg:#f8fafc;
+           /* Locked — slate, deliberately a shade darker than --none: "closed on purpose" must
+              read as a decision, while --none ("not wired up yet") stays the faintest thing here. */
+           --lock:#64748b; --lock-bg:#f1f5f9; --lock-line:#cbd5e1;
            --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace; }
 
     /* hero */
@@ -250,6 +263,9 @@
     .rcb-cell.running { background:var(--running-bg); border-color:var(--running-line); color:#1d4ed8; }
     .rcb-cell.late { background:var(--late-bg); border-color:var(--late-line); color:#c2410c; }
     .rcb-cell.none { background:var(--none-bg); border-color:#e2e8f0; color:var(--none); }
+    /* Not available for this lab — a padlock, not a dash. Dashed border says "closed on purpose"
+       at a glance, before the reader has resolved the small badge glyph. */
+    .rcb-cell.locked { background:var(--lock-bg); border-color:var(--lock-line); border-style:dashed; color:var(--lock); cursor:default; }
     /* Completed but not openable — keeps its green "done" colour, loses the click affordance. */
     .rcb-cell.blocked { cursor:default; opacity:.72; }
     .rcb-cell.blocked:hover { transform:none; box-shadow:none; }
@@ -265,6 +281,7 @@
     .rcb-badge.bg-wait { background:var(--wait); } .rcb-badge.bg-none { background:#cbd5e1; }
     .rcb-badge.bg-running { background:var(--running); }
     .rcb-badge.bg-late { background:var(--late); }
+    .rcb-badge.bg-lock { background:var(--lock); }
     /* Slow, continuous turn — a live "this is working" cue that is easy to ignore. */
     .rcb-badge.bg-running i { animation:rcb-spin 3.2s linear infinite; }
     @@keyframes rcb-spin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
@@ -282,6 +299,7 @@
     .rcb-legend .mk.ok { background:var(--ok); } .rcb-legend .mk.fail { background:var(--fail); }
     .rcb-legend .mk.wait { background:var(--wait); } .rcb-legend .mk.none { background:#94a3b8; }
     .rcb-legend .mk.running { background:var(--running); } .rcb-legend .mk.late { background:var(--late); }
+    .rcb-legend .mk.locked { background:var(--lock); }
     .rcb-legend-hint { margin-top:.55rem; padding-top:.5rem; border-top:1px solid rgba(255,255,255,.1);
         display:flex; align-items:center; gap:.4rem; font-size:.69rem; font-weight:500; color:rgba(255,255,255,.55); }
 
@@ -306,6 +324,7 @@
     .rcb-rep .mk.ok { color:var(--ok); } .rcb-rep .mk.fail { color:var(--fail); }
     .rcb-rep .mk.wait { color:var(--wait); } .rcb-rep .mk.none { color:var(--none); }
     .rcb-rep .mk.running { color:var(--running); } .rcb-rep .mk.late { color:var(--late); }
+    .rcb-rep .mk.locked { color:var(--lock); }
     a.rcb-rep:hover .rep-ic { color:#0d6efd; }
     .rcb-rep.off { color:var(--faint); font-weight:500; }
     .rcb-rep.bad { color:#b91c1c; }
@@ -327,8 +346,10 @@
     .rcb-rep-row .rcb-rep.running .rep-ic { color:#2563eb; }
     .rcb-rep-row .rcb-rep.late { border-color:var(--late-line); background:var(--late-bg); color:#c2410c; }
     .rcb-rep-row .rcb-rep.late .rep-ic { color:#ea580c; }
-    /* Only "not produced for this lab" stays grey. */
+    /* Only the two absences stay grey: not produced anywhere (dashed) and locked (padlock). */
     .rcb-rep-row .rcb-rep.off { border-style:dashed; }
+    .rcb-rep-row .rcb-rep.locked { border-color:var(--lock-line); border-style:dashed; background:var(--lock-bg); color:var(--lock); font-weight:500; }
+    .rcb-rep-row .rcb-rep.locked .rep-ic { color:var(--lock); }
     .rcb-card-foot { padding:.55rem .8rem; border-top:1px solid var(--line-soft); display:flex; gap:.35rem; flex-wrap:wrap; }
     .rcb-btn-s { border:1px solid var(--line); background:#fff; border-radius:8px; padding:.3rem .65rem; font-size:.7rem; font-weight:700; color:var(--ink-2); text-decoration:none; }
     .rcb-btn-s.pri { background:#0d6efd; border-color:#0d6efd; color:#fff; }
@@ -348,6 +369,7 @@
     .st.ok { background:var(--ok-bg); color:#047857; } .st.fail { background:var(--fail-bg); color:#b91c1c; }
     .st.none { background:#f1f5f9; color:var(--faint); } .st.wait { background:var(--wait-bg); color:#b45309; }
     .st.noroute { background:#f5f3ff; color:#7c3aed; }
+    .st.locked { background:var(--lock-bg); color:var(--lock); }
     .rcb-meta { display:grid; grid-template-columns:auto 1fr; gap:.2rem .8rem; font-size:.75rem; padding:.6rem .7rem; background:#f8fafc; border-radius:10px; margin:0; }
     .rcb-meta dt { color:var(--faint); font-weight:600; }
     .rcb-meta dd { margin:0; font-family:var(--mono); color:var(--ink); font-size:.72rem; }
@@ -571,6 +593,7 @@
                     <span class="lg"><span class="mk running"><i class="bi bi-gear-fill"></i></span>In progress <em>— not produced yet</em></span>
                     <span class="lg"><span class="mk late"><i class="bi bi-exclamation-triangle-fill"></i></span>Overdue <em>— over a day late</em></span>
                     <span class="lg dim"><span class="mk ok"><i class="bi bi-check-lg"></i></span>Completed <em>— faded, cannot open here</em></span>
+                    <span class="lg"><span class="mk locked"><i class="bi bi-lock-fill"></i></span>Not available <em>— this lab is not set up for it</em></span>
                     <span class="lg"><span class="mk none"><i class="bi bi-dash-lg"></i></span>Not produced for this lab</span>
                 </div>
                 <div class="rcb-legend-hint">
