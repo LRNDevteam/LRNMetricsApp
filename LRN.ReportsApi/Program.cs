@@ -6,6 +6,21 @@ using System.IO.Compression;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.Data.SqlClient;
 
+// Utility mode: LRN.ReportsApi.exe --hash-secret <secret>
+// Prints the ExternalApiClients:Clients[].SecretHash verifier for an external API client and
+// exits. It runs the same ApiSecretHasher the token endpoint verifies with, so the generated
+// value cannot drift from what the server accepts. See docs/ExternalApiAccess_Guide.md.
+if (args.Length >= 1 && args[0].Equals("--hash-secret", StringComparison.OrdinalIgnoreCase))
+{
+    if (args.Length < 2 || string.IsNullOrWhiteSpace(args[1]))
+    {
+        Console.Error.WriteLine("Usage: LRN.ReportsApi --hash-secret <secret>");
+        return 1;
+    }
+    Console.WriteLine(LRN.ReportsApi.Security.ApiSecretHasher.Hash(args[1]));
+    return 0;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Secrets (connection strings, JWT signing key, import API key, webhook URLs) live in
@@ -29,6 +44,8 @@ catch (Exception ex)
     Console.Error.WriteLine($"API file logger initialization failed: {ex}");
 }
 
+builder.Services.Configure<ExternalApiClientOptions>(
+    builder.Configuration.GetSection(ExternalApiClientOptions.Section));
 builder.Services.Configure<DenialWorkflowOptions>(builder.Configuration.GetSection("Workflow"));
 builder.Services.Configure<DenialWorkflowSupportOptions>(builder.Configuration.GetSection("DenialWorkflowSupport"));
 builder.Services.Configure<DenialCodeMasterExportOptions>(builder.Configuration.GetSection("DenialCodeMasterExport"));
@@ -292,6 +309,7 @@ app.MapGet("/", () => Results.Ok("LRN.ReportsApi running"));
 app.MapGet("/health", () => Results.Ok("LRN.ReportsApi running"));
 app.MapControllers();
 app.Run();
+return 0;
 
 static void ApplySecurityHeaders(HttpContext context, bool isDevelopment)
 {

@@ -114,4 +114,15 @@ public sealed class CptLookupPageViewModel
     public string CptExportUrl { get; set; } = string.Empty;
     public string PanelExportUrl { get; set; } = string.Empty;
     public string LabsUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// POST target that queues the export in LRN.ReportWorker instead of building it inside
+    /// the request. The direct *ExportUrl endpoints stay as the fallback for when the shared
+    /// queue lab is not configured — but an unfiltered export through those exceeds the
+    /// dashboard's 120s HttpClient timeout, so this is the normal path.
+    /// </summary>
+    public string QueueExportUrl { get; set; } = string.Empty;
+
+    /// <summary>False when the shared LRNMaster queue lab is missing; the page then downloads inline.</summary>
+    public bool BackgroundExportEnabled { get; set; }
 }

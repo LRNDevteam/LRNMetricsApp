@@ -18,11 +18,53 @@ public sealed class UserReportService
     public UserReportService(
         LabSettings labSettings,
         IReportRequestRepository repo,
-        ILogger<UserReportService> logger)
+        ILogger<UserReportService> logger,
+        IConfiguration configuration)
     {
         _labSettings = labSettings;
         _repo        = repo;
         _logger      = logger;
+
+        // The shared queue lab is loaded from its own {LabConfigFolder}\<name>.json and kept OUT
+        // of LabSettings.Labs on purpose: controllers build their lab pickers from Labs.Keys, so
+        // listing it there would offer "LRNMaster" as a selectable lab on every dashboard.
+        var shared = configuration["Analytics:SharedReportLab"];
+        if (string.IsNullOrWhiteSpace(shared)) shared = ReportQueueLabs.Master;
+
+        var folder = configuration["LabConfig:LabConfigFolder"];
+        var cfg = string.IsNullOrWhiteSpace(folder) ? null : LabDbConfigLoader.Load(folder, shared);
+        if (cfg is { DbEnabled: true } && !string.IsNullOrWhiteSpace(cfg.DbConnectionString))
+        {
+            SharedReportLab = shared;
+            _sharedConnectionString = cfg.DbConnectionString;
+        }
+        else
+        {
+            _logger.LogWarning(
+                "Shared report lab '{Lab}' not found or not DB-enabled under '{Folder}' — cross-lab queued "
+                + "reports (CPT & Panel Lookup) will fall back to the synchronous download.", shared, folder);
+        }
+    }
+
+    /// <summary>
+    /// Lab entry the cross-lab reports queue against — CPT &amp; Panel Lookup reads LRNMaster and
+    /// has no owning lab, but the queue table lives in a lab DB. Null when it is not configured,
+    /// which callers treat as "background export unavailable" rather than an error.
+    /// </summary>
+    public string? SharedReportLab { get; }
+
+    private readonly string? _sharedConnectionString;
+
+    /// <summary>
+    /// Every lab whose UserReqReports queue this service reads or writes: the DB-enabled labs
+    /// plus the shared cross-lab entry. Queue-only — not a list of labs to show a user.
+    /// </summary>
+    private IEnumerable<KeyValuePair<string, string>> QueueLabs()
+    {
+        foreach (var kv in _labSettings.Labs.Where(kv => IsReportQueueLab(kv.Value)))
+            yield return new(kv.Key, kv.Value.DbConnectionString!);
+        if (SharedReportLab is not null && _sharedConnectionString is not null)
+            yield return new(SharedReportLab, _sharedConnectionString);
     }
 
     /// <summary>
@@ -34,10 +76,16 @@ public sealed class UserReportService
         && (cfg.DBEnabled || cfg.LineClaimEnable);
 
     /// <summary>Connection string for a lab, or null when the lab isn't DB-enabled.</summary>
-    public string? ResolveConnectionString(string labName) =>
-        _labSettings.Labs.TryGetValue(labName, out var cfg) && IsReportQueueLab(cfg)
-            ? cfg.DbConnectionString
+    public string? ResolveConnectionString(string labName)
+    {
+        if (_labSettings.Labs.TryGetValue(labName, out var cfg) && IsReportQueueLab(cfg))
+            return cfg.DbConnectionString;
+        // The shared cross-lab queue is deliberately absent from LabSettings.Labs.
+        return SharedReportLab is not null
+               && labName.Equals(SharedReportLab, StringComparison.OrdinalIgnoreCase)
+            ? _sharedConnectionString
             : null;
+    }
 
     public async Task<long> QueueAsync(
         string labName, string reportType, string userName, int? userId,
@@ -71,9 +119,9 @@ public sealed class UserReportService
         if (string.IsNullOrEmpty(userName))
             return [];
 
-        var labs = _labSettings.Labs
-            .Where(kv => IsReportQueueLab(kv.Value))
-            .ToList();
+        // Includes the shared cross-lab queue, otherwise a queued CPT/Panel Lookup export would
+        // never appear in the user's Reports badge or panel.
+        var labs = QueueLabs().ToList();
 
         // Fail fast on labs missing UserReqReports so the panel isn't blocked by long timeouts.
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -84,7 +132,7 @@ public sealed class UserReportService
         {
             try
             {
-                return await _repo.GetUserReportsAsync(kv.Value.DbConnectionString!, userName, perLabTop, queryCt);
+                return await _repo.GetUserReportsAsync(kv.Value, userName, perLabTop, queryCt);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || ct.IsCancellationRequested)
             {

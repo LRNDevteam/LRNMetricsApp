@@ -248,8 +248,10 @@
         panelOptions: '@Model.PanelOptionsUrl',
         cptExport: '@Model.CptExportUrl',
         panelExport: '@Model.PanelExportUrl',
+        queueExport: '@Model.QueueExportUrl',
         labs: '@Model.LabsUrl'
     };
+    const backgroundExport = @(Model.BackgroundExportEnabled ? "true" : "false");
 
     const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
     const num = new Intl.NumberFormat('en-US');
@@ -259,6 +261,9 @@
 
     // Column sets per tab. `key` doubles as the sortColumn sent to the API.
     const CPT_COLUMNS = [
+        // Lab first: with the Lab filter on "All Labs" the grid interleaves rows from every lab,
+        // and CPT + panel + payer alone do not say which one a row belongs to.
+        { key: 'labName', label: 'Lab', render: r => text(r.labName) },
         { key: 'cptCode', label: 'CPT', render: r => `<span class="cl-code">${esc(r.cptCode)}</span>` },
         { key: 'panelName', label: 'Panel', render: r => text(r.panelName) },
         { key: 'payerDisplayName', label: 'Payer', render: r => payer(r.payerDisplayName) },
@@ -277,6 +282,7 @@
     ];
 
     const PANEL_COLUMNS = [
+        { key: 'labName', label: 'Lab', render: r => text(r.labName) },
         { key: 'panelName', label: 'Panel', render: r => text(r.panelName) },
         { key: 'payerId', label: 'Payer ID', render: r => r.payerId ? `<span class="cl-code">${esc(r.payerId)}</span>` : `<span class="cl-muted">none</span>` },
         { key: 'payerDisplayName', label: 'Payer', render: r => payer(r.payerDisplayName) },
@@ -698,8 +704,55 @@
     $('nextBtn').onclick = () => { if (page < totalPages) { page++; load(); } };
     $('lastBtn').onclick = () => { if (page < totalPages) { page = totalPages; load(); } };
     $('detailClose').onclick = closeDetail;
-    $('exportBtn').onclick = () => {
+    // Direct download. Kept as the fallback only: an export with no lab and no window filter
+    // cannot finish inside the dashboard's 120s HttpClient timeout, which is why the default
+    // path below hands the job to LRN.ReportWorker instead.
+    function legacyDownload() {
         window.location = (tab === 'cpt' ? urls.cptExport : urls.panelExport) + '?' + new URLSearchParams(filterParams());
+    }
+
+    $('exportBtn').onclick = () => {
+        const btn = $('exportBtn');
+        if (!backgroundExport) { legacyDownload(); return; }
+
+        const body = new FormData();
+        body.append('tab', tab);
+        const af = document.querySelector('#lrnReportsAf input[name="__RequestVerificationToken"]');
+        if (af) body.append('__RequestVerificationToken', af.value);
+
+        const original = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Queuing…';
+
+        // Filters ride on the query string so the server reads them exactly as the direct
+        // export endpoints do — one parsing path, no drift between the two.
+        fetch(urls.queueExport + '?' + new URLSearchParams(filterParams()), { method: 'POST', body: body })
+            .then(r => r.json().then(j => ({ ok: r.ok, status: r.status, j: j })))
+            .then(res => {
+                if (res.ok) {
+                    btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Generating - watch Reports';
+                    if (window.lrnShowReportAlert) window.lrnShowReportAlert('success');
+                    if (window.lrnReportsBadgeRefresh) window.lrnReportsBadgeRefresh();
+                    setTimeout(() => { btn.disabled = false; btn.innerHTML = original; }, 8000);
+                } else if (res.status === 400) {
+                    btn.disabled = false; btn.innerHTML = original;
+                    legacyDownload();
+                } else {
+                    btn.disabled = false; btn.innerHTML = original;
+                    const qMsg = res.j && res.j.message ? res.j.message : '';
+                    if (window.lrnShowReportAlert) {
+                        if (res.status === 409 || /already/i.test(qMsg)) {
+                            window.lrnShowReportAlert('info');
+                        } else {
+                            window.lrnShowReportAlert('error', { message: qMsg || 'Could not queue the export.' });
+                        }
+                    }
+                }
+            })
+            .catch(() => {
+                btn.disabled = false; btn.innerHTML = original;
+                legacyDownload();
+            });
     };
 
     renderHead();

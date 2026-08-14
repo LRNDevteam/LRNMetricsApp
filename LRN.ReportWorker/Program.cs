@@ -100,6 +100,13 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddSingleton<IReportGenerator, CodingSummaryReportGenerator>();
         services.AddSingleton<IReportGenerator, LisSummaryReportGenerator>();
         services.AddSingleton<IReportGenerator, DenialDashboardReportGenerator>();
+        // Two report types, one class: registered per tab so the factory can key on ReportType.
+        services.AddSingleton<IReportGenerator>(sp => CptLookupReportGenerator.ForCpt(
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<ReportStorageOptions>>(),
+            sp.GetRequiredService<ILogger<CptLookupReportGenerator>>()));
+        services.AddSingleton<IReportGenerator>(sp => CptLookupReportGenerator.ForPanel(
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<ReportStorageOptions>>(),
+            sp.GetRequiredService<ILogger<CptLookupReportGenerator>>()));
         services.AddSingleton<ReportGeneratorFactory>();
 
         services.AddSingleton<ReportJobProcessor>();

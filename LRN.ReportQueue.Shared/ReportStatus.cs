@@ -66,4 +66,22 @@ public static class ReportTypes
     public const string CodingSummary      = "CodingSummary";
     public const string LisSummary         = "LisSummary";
     public const string DenialDashboard    = "DenialDashboard";
+    public const string CptLookup          = "CptLookup";
+    public const string PanelLookup        = "PanelLookup";
+}
+
+/// <summary>
+/// Queue "labs" that are not a real lab. The report queue lives in a per-lab database, so a
+/// cross-lab report needs one to live in — CPT &amp; Panel Lookup reads LRNMaster (CPTAverage,
+/// PanelAverage, LabModes, LabMedians) and its Lab filter is optional, so no single lab owns it.
+/// </summary>
+public static class ReportQueueLabs
+{
+    /// <summary>
+    /// LabSettings key of the shared LRNMaster queue. Needs a config JSON of this name whose
+    /// DbConnectionString points at LRNMaster, listed alongside the real labs in both
+    /// LabConfig:Labs (web) and ReportWorker:Labs (worker), and dbo.UserReqReports deployed to
+    /// LRNMaster. Overridable with Analytics:SharedReportLab.
+    /// </summary>
+    public const string Master = "LRNMaster";
 }

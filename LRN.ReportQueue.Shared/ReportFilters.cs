@@ -692,3 +692,52 @@ public sealed record CodingSummaryFilters(
         return list;
     }
 }
+
+/// <summary>
+/// Filters for the CPT &amp; Panel Lookup export (ReportTypes.CptLookup / PanelLookup).
+/// Mirrors LRN.ReportsApi's LookupQuery minus paging — the generator pages internally.
+/// Unlike the per-lab reports this one reads LRNMaster and LabId is optional: null means
+/// every lab, which is exactly the unfiltered export that used to time out at the API's
+/// 120s HttpClient limit and is why the job moved to LRN.ReportWorker.
+/// </summary>
+public sealed record CptLookupReportFilters(
+    string? CptCode       = null,
+    string? PanelName     = null,
+    string? Payer         = null,
+    string? WindowType    = null,
+    int?    LabId         = null,
+    string? SortColumn    = null,
+    string? SortDirection = null,
+    // Lab name for the file name; LabId alone does not name the file.
+    string? LabName       = null)
+{
+    private static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    public string ToJson() => JsonSerializer.Serialize(this, JsonOpts);
+
+    public static CptLookupReportFilters FromJson(string? json) =>
+        string.IsNullOrWhiteSpace(json)
+            ? new CptLookupReportFilters()
+            : JsonSerializer.Deserialize<CptLookupReportFilters>(json, JsonOpts)
+              ?? new CptLookupReportFilters();
+
+    public List<(string Label, string? Value)> ToActiveFilterList()
+    {
+        var list = new List<(string, string?)>();
+        Add("Lab", string.IsNullOrWhiteSpace(LabName) ? (LabId?.ToString()) : LabName);
+        Add("CPT Code", CptCode);
+        Add("Panel", PanelName);
+        Add("Payer", Payer);
+        Add("Window", WindowType);
+        if (list.Count == 0) list.Add(("Scope", "All labs — no filters applied"));
+        return list;
+
+        void Add(string label, string? value)
+        {
+            if (!string.IsNullOrWhiteSpace(value)) list.Add((label, value));
+        }
+    }
+}

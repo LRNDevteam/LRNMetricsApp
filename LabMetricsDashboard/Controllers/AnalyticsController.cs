@@ -1,5 +1,7 @@
+using System.Security.Claims;
 using LabMetricsDashboard.Models;
 using LabMetricsDashboard.Services;
+using LRN.ReportQueue.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -17,10 +19,17 @@ namespace LabMetricsDashboard.Controllers;
 public sealed class AnalyticsController : Controller
 {
     private readonly ILabAnalyticsApiClient _api;
+    private readonly UserReportService _reports;
+    private readonly ILogger<AnalyticsController> _logger;
 
-    public AnalyticsController(ILabAnalyticsApiClient api)
+    public AnalyticsController(
+        ILabAnalyticsApiClient api,
+        UserReportService reports,
+        ILogger<AnalyticsController> logger)
     {
-        _api = api;
+        _api     = api;
+        _reports = reports;
+        _logger  = logger;
     }
 
     // GET /Analytics/CptLookup
@@ -38,7 +47,9 @@ public sealed class AnalyticsController : Controller
             PanelOptionsUrl = Url.Action(nameof(PanelOptions)) ?? string.Empty,
             CptExportUrl = Url.Action(nameof(ExportCpt)) ?? string.Empty,
             PanelExportUrl = Url.Action(nameof(ExportPanel)) ?? string.Empty,
-            LabsUrl = Url.Action(nameof(LookupLabs)) ?? string.Empty
+            LabsUrl = Url.Action(nameof(LookupLabs)) ?? string.Empty,
+            QueueExportUrl = Url.Action(nameof(QueueExport)) ?? string.Empty,
+            BackgroundExportEnabled = _reports.SharedReportLab is not null
         });
     }
 
@@ -82,5 +93,77 @@ public sealed class AnalyticsController : Controller
     {
         var result = await _api.ExportPanelAsync(Request.Query, ct);
         return File(result.Content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", result.FileName);
+    }
+
+    /// <summary>
+    /// POST /Analytics/QueueExport — hands the export to LRN.ReportWorker and returns immediately.
+    ///
+    /// Building this workbook inline (ExportCpt / ExportPanel above) has to finish inside the
+    /// dashboard's 120s HttpClient timeout; an export with no lab and no window filter does not,
+    /// and the user got a TaskCanceledException rather than a file. Queued, the same work runs
+    /// without a request clock and lands in the Reports panel.
+    ///
+    /// Queued against the SHARED lab, not a real one: the data is LRNMaster-wide and the Lab
+    /// filter is optional, so no single lab owns the job.
+    /// </summary>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> QueueExport([FromForm] string? tab, CancellationToken ct)
+    {
+        var lab = _reports.SharedReportLab;
+        if (lab is null)
+            return BadRequest(new { message = "Background export is not configured. Use the direct download instead." });
+
+        var panel = string.Equals(tab, "panel", StringComparison.OrdinalIgnoreCase);
+        var labId = int.TryParse(Request.Query["labId"], out var id) ? id : (int?)null;
+
+        // Resolve the lab's display name for the file name; LabId alone would not name the file.
+        string? labName = null;
+        if (labId is not null)
+        {
+            try
+            {
+                labName = (await _api.GetLabsAsync(ct))
+                    .FirstOrDefault(l => l.LabId == labId)?.LabName;
+            }
+            catch (Exception ex)
+            {
+                // Cosmetic only — the export still runs, the file is just named by id.
+                _logger.LogWarning(ex, "Could not resolve lab name for LabId {LabId}; queuing anyway.", labId);
+            }
+        }
+
+        var filters = new CptLookupReportFilters(
+            CptCode:       Blank(Request.Query["cptCode"]),
+            PanelName:     Blank(Request.Query["panelName"]),
+            Payer:         Blank(Request.Query["payer"]),
+            WindowType:    Blank(Request.Query["windowType"]),
+            LabId:         labId,
+            SortColumn:    Blank(Request.Query["sortColumn"]),
+            SortDirection: Blank(Request.Query["sortDirection"]),
+            LabName:       labName);
+
+        try
+        {
+            var reportId = await _reports.QueueAsync(
+                lab,
+                panel ? ReportTypes.PanelLookup : ReportTypes.CptLookup,
+                User.Identity?.Name ?? string.Empty,
+                int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var uid) ? uid : null,
+                filters.ToJson(),
+                ct);
+
+            return Json(new { reportId, status = "Queued" });
+        }
+        catch (DuplicateReportRequestException)
+        {
+            return Conflict(new { message = "This export is already being generated for you. Check the Reports badge." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+
+        static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
     }
 }

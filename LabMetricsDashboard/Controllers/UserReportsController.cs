@@ -175,6 +175,11 @@ public class UserReportsController : Controller
                     LisSummaryReportFilters.FromJson(filterDetails).ToJson()),
                 "denialdashboard" or "denialreport" => (ReportTypes.DenialDashboard,
                     DenialDashboardReportFilters.FromJson(filterDetails).ToJson()),
+                // Cross-lab: these two are queued against ReportQueueLabs.Master, not a real lab.
+                "cptlookup" => (ReportTypes.CptLookup,
+                    CptLookupReportFilters.FromJson(filterDetails).ToJson()),
+                "panellookup" => (ReportTypes.PanelLookup,
+                    CptLookupReportFilters.FromJson(filterDetails).ToJson()),
                 _ => throw new NotSupportedException($"Unknown report type '{reportType}'."),
             };
         }
