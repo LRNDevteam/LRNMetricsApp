@@ -255,10 +255,10 @@ public sealed class AllLabsCollectionExcelBuilder
         bool includeLineRaw  = lineCount  <= CollectionSummaryExcelExportBuilder.RawDataRowLimit;
 
         var claimRows = includeClaimRaw
-            ? await _repo.GetClaimLevelDataExportAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct)
+            ? await _repo.GetClaimLevelDataExportAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct)
             : [];
         var lineRows = includeLineRaw
-            ? await _repo.GetLineLevelDataExportAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, ct)
+            ? await _repo.GetLineLevelDataExportAsync(connStr, payerFilter, panelFilter, fbFromN, fbToN, dosFromN, dosToN, cdFromN, cdToN, labName, ct)
             : [];
 
         // Build a standalone workbook for this lab, then copy its sheets into the combined workbook

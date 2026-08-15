@@ -171,13 +171,22 @@ internal static class OpenXmlRowStreamer
 
                 Dictionary<int, string[]>? overflowTexts = doIcdSplit ? new() : null;
 
+                // SequentialAccess requires every source ordinal to be read in order,
+                // including columns later dropped from the sheet (ingest / __* names).
+                var raw = new object?[reader.FieldCount];
+                for (var i = 0; i < reader.FieldCount; i++)
+                {
+                    var v = reader.GetValue(i);
+                    raw[i] = v is DBNull ? null : v;
+                }
+
                 for (var c = 0; c < columns.Count; c++)
                 {
                     var col = columns[c];
-                    if (reader.IsDBNull(col.Ordinal))
+                    var val = raw[col.Ordinal];
+                    if (val is null)
                         continue;
 
-                    var val = reader.GetValue(col.Ordinal);
                     if (doIcdSplit && col.IsIcd && overflowStarts.TryGetValue(c, out _)
                         && val is string s && s.Length > IcdCellSplitter.MaxCellLength)
                     {
@@ -289,8 +298,7 @@ internal static class OpenXmlRowStreamer
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct);
         await using var cmd = new SqlCommand(dataSql, conn) { CommandTimeout = commandTimeoutSeconds };
-        foreach (var p in parameters)
-            cmd.Parameters.Add(new SqlParameter(p.ParameterName, p.Value ?? DBNull.Value));
+        DetailExportStreamer.ApplyCommand(cmd, dataSql, parameters);
 
         await using var reader = await cmd.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct);
         return await WriteFromReaderAsync(
@@ -316,8 +324,7 @@ internal static class OpenXmlRowStreamer
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct);
         await using var cmd = new SqlCommand(dataSql, conn) { CommandTimeout = commandTimeoutSeconds };
-        foreach (var p in parameters)
-            cmd.Parameters.Add(new SqlParameter(p.ParameterName, p.Value ?? DBNull.Value));
+        DetailExportStreamer.ApplyCommand(cmd, dataSql, parameters);
 
         await using var reader = await cmd.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct);
 
@@ -332,9 +339,15 @@ internal static class OpenXmlRowStreamer
             while (await reader.ReadAsync(ct))
             {
                 ct.ThrowIfCancellationRequested();
+                var raw = new object?[reader.FieldCount];
+                for (var i = 0; i < reader.FieldCount; i++)
+                {
+                    var v = reader.GetValue(i);
+                    raw[i] = v is DBNull ? null : v;
+                }
                 var values = new object?[columns.Count];
                 for (var c = 0; c < columns.Count; c++)
-                    values[c] = reader.IsDBNull(columns[c].Ordinal) ? null : reader.GetValue(columns[c].Ordinal);
+                    values[c] = raw[columns[c].Ordinal];
                 yield return values;
             }
         }

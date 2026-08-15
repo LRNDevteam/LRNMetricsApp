@@ -2137,7 +2137,9 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         DateOnly? filterCheckDateTo = null,
         string? panelColumn = null,
         IReadOnlyCollection<string>? excludeColumns = null,
+        IReadOnlyList<string>? includeColumns = null,
         int threshold = 50_000,
+        bool includeBucketType = true,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
@@ -2227,7 +2229,8 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
                     filterFirstBilledFrom, filterFirstBilledTo,
                     bucketIdx, buckets.Count, _logger,
                     ct,
-                    panelColumn, filterCheckDateFrom, filterCheckDateTo, excludeColumns).ConfigureAwait(false);
+                    panelColumn, filterCheckDateFrom, filterCheckDateTo, excludeColumns,
+                    includeColumns, includeBucketType).ConfigureAwait(false);
                 sw.Stop();
 
                 bucketFiles.Add((bucketFile, sheetName, written));
@@ -2301,6 +2304,68 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
     }
 
     /// <summary>
+    /// Streams NorthWest ClaimLevel + LineLevel sheets onto an existing workbook on disk
+    /// using <c>usp_GetNW_*Export*</c> SPs and OpenXml (no ClosedXML raw dump — avoids OOM).
+    /// </summary>
+    public async Task<int> AppendNorthWestClaimLineSheetsToFileAsync(
+        string filePath,
+        string connectionString,
+        List<string>? filterPayerNames = null,
+        List<string>? filterPanelNames = null,
+        DateOnly? filterDosFrom = null,
+        DateOnly? filterDosTo = null,
+        DateOnly? filterFirstBillFrom = null,
+        DateOnly? filterFirstBillTo = null,
+        DateOnly? filterFirstBilledFrom = null,
+        DateOnly? filterFirstBilledTo = null,
+        IReadOnlyList<string>? claimIncludeColumns = null,
+        IReadOnlyList<string>? lineIncludeColumns = null,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var claimRows = await AppendSpExportSheetsToFileAsync(
+                filePath, connectionString,
+                "dbo.usp_GetNW_ClaimLevelExportBuckets",
+                "dbo.usp_GetNW_ClaimLevelExportByRange",
+                "ClaimLevel", ExcelTheme.TabGreen,
+                filterPayerNames, filterPanelNames,
+                filterDosFrom, filterDosTo,
+                filterFirstBillFrom, filterFirstBillTo,
+                filterFirstBilledFrom, filterFirstBilledTo,
+                includeColumns: claimIncludeColumns,
+                threshold: 300_000,
+                includeBucketType: false,
+                ct: ct).ConfigureAwait(false);
+
+            var lineRows = await AppendSpExportSheetsToFileAsync(
+                filePath, connectionString,
+                "dbo.usp_GetNW_LineLevelExportBuckets",
+                "dbo.usp_GetNW_LineLevelExportByRange",
+                "LineLevel", ExcelTheme.TabGold,
+                filterPayerNames, filterPanelNames,
+                filterDosFrom, filterDosTo,
+                filterFirstBillFrom, filterFirstBillTo,
+                filterFirstBilledFrom, filterFirstBilledTo,
+                includeColumns: lineIncludeColumns,
+                threshold: 300_000,
+                includeBucketType: false,
+                ct: ct).ConfigureAwait(false);
+
+            return claimRows + lineRows;
+        }
+        catch (SqlException ex) when (ex.Number is 2812 or 208)
+        {
+            throw new InvalidOperationException(
+                "NorthWest Claim/Line export stored procedures are missing. " +
+                "Deploy usp_GetNW_ClaimLevelExportBuckets, usp_GetNW_ClaimLevelExportByRange, " +
+                "usp_GetNW_LineLevelExportBuckets, and usp_GetNW_LineLevelExportByRange " +
+                "(ClaimLineCSVDataCapture/Sql/NorthWest/14_NorthWest_ReadSPs.sql).",
+                ex);
+        }
+    }
+
+    /// <summary>
     /// Creates a brand-new minimal single-sheet .xlsx file at <paramref name="bucketFile"/>,
     /// streaming the rows from the data SP via <see cref="OpenXmlWriter"/>.
     /// </summary>
@@ -2319,7 +2384,9 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         string? panelColumn = null,
         DateOnly? checkDateFrom = null,
         DateOnly? checkDateTo = null,
-        IReadOnlyCollection<string>? excludeColumns = null)
+        IReadOnlyCollection<string>? excludeColumns = null,
+        IReadOnlyList<string>? includeColumns = null,
+        bool includeBucketType = true)
     {
         if (File.Exists(bucketFile)) File.Delete(bucketFile);
 
@@ -2337,7 +2404,8 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             firstBilledFrom, firstBilledTo,
             bucketIdx, bucketTotal, logger,
             ct,
-            panelColumn, checkDateFrom, checkDateTo, excludeColumns).ConfigureAwait(false);
+            panelColumn, checkDateFrom, checkDateTo, excludeColumns,
+            includeColumns, includeBucketType).ConfigureAwait(false);
 
         workbookPart.Workbook.Save();
         return written;
@@ -2405,7 +2473,9 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         string? panelColumn = null,
         DateOnly? checkDateFrom = null,
         DateOnly? checkDateTo = null,
-        IReadOnlyCollection<string>? excludeColumns = null)
+        IReadOnlyCollection<string>? excludeColumns = null,
+        IReadOnlyList<string>? includeColumns = null,
+        bool includeBucketType = true)
     {
         await using var conn = new SqlConnection(connectionString);
         await using var cmd  = new SqlCommand(dataSpName, conn)
@@ -2415,7 +2485,9 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         };
 
         // CVEXP-ALL: tell the data SP which slice to return (ALL/UNDATED bypass the date range).
-        cmd.Parameters.Add(new SqlParameter("@BucketType",      SqlDbType.VarChar, 20) { Value = (object?)bucketType ?? "RANGE" });
+        // NorthWest ByRange SPs do not accept @BucketType.
+        if (includeBucketType)
+            cmd.Parameters.Add(new SqlParameter("@BucketType",      SqlDbType.VarChar, 20) { Value = (object?)bucketType ?? "RANGE" });
         cmd.Parameters.Add(new SqlParameter("@FromDate",        SqlDbType.Date) { Value = fromDate.HasValue        ? fromDate.Value.ToDateTime(TimeOnly.MinValue)        : DBNull.Value });
         cmd.Parameters.Add(new SqlParameter("@ToDate",          SqlDbType.Date) { Value = toDate.HasValue          ? toDate.Value.ToDateTime(TimeOnly.MinValue)          : DBNull.Value });
         cmd.Parameters.Add(new SqlParameter("@PayerNames",      SqlDbType.NVarChar, -1) { Value = (object?)payerNames ?? DBNull.Value });
@@ -2437,17 +2509,36 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         await conn.OpenAsync(ct).ConfigureAwait(false);
         await using var rdr = await cmd.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false);
 
-        // Column projection: drop any excluded columns (e.g. RecordId / FileLogId) from the
-        // written sheet. Build the kept-column index list once; cell letters are assigned by
-        // OUTPUT position so the sheet has no gaps.
+        // Column projection:
+        //   includeColumns  -> whitelist in Select_Script order (Claim/Line page columns).
+        //   excludeColumns  -> dropped names (e.g. RecordId / FileLogId) when no whitelist.
+        // SequentialAccess: consume every source ordinal in order, then write keepIdx.
         int srcColCount = rdr.FieldCount;
-        var keepIdx = new List<int>(srcColCount);
+        var nameToOrd = new Dictionary<string, int>(srcColCount, StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < srcColCount; i++)
+            nameToOrd[rdr.GetName(i)] = i;
+
+        var keepIdx = new List<int>(srcColCount);
+        if (includeColumns is { Count: > 0 })
         {
-            var name = rdr.GetName(i);
-            if (excludeColumns is { Count: > 0 } && excludeColumns.Contains(name, StringComparer.OrdinalIgnoreCase))
-                continue;
-            keepIdx.Add(i);
+            foreach (var name in includeColumns)
+            {
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                if (excludeColumns is { Count: > 0 } && excludeColumns.Contains(name, StringComparer.OrdinalIgnoreCase))
+                    continue;
+                if (nameToOrd.TryGetValue(name, out var ord))
+                    keepIdx.Add(ord);
+            }
+        }
+        else
+        {
+            for (int i = 0; i < srcColCount; i++)
+            {
+                var name = rdr.GetName(i);
+                if (excludeColumns is { Count: > 0 } && excludeColumns.Contains(name, StringComparer.OrdinalIgnoreCase))
+                    continue;
+                keepIdx.Add(i);
+            }
         }
 
         int colCount = keepIdx.Count;
@@ -2481,11 +2572,16 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
             while (await rdr.ReadAsync(ct).ConfigureAwait(false))
             {
                 writer.WriteStartElement(new Row { RowIndex = rowIdx });
+                var raw = new object?[srcColCount];
+                for (int i = 0; i < srcColCount; i++)
+                {
+                    var v = rdr.GetValue(i);
+                    raw[i] = v is DBNull ? null : v;
+                }
                 for (int c = 0; c < colCount; c++)
                 {
-                    int src = keepIdx[c];   // map output column -> source reader ordinal (excludes dropped columns)
-                    if (rdr.IsDBNull(src)) continue;
-                    var val = rdr.GetValue(src);
+                    var val = raw[keepIdx[c]];
+                    if (val is null) continue;
                     WriteValueCell(writer, $"{colRefs[c]}{rowIdx}", val);
                 }
                 writer.WriteEndElement(); // </row>

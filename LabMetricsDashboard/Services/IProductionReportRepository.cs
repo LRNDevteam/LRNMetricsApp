@@ -161,6 +161,7 @@ public interface IProductionReportRepository
         DateOnly? filterFirstBillTo = null,
         DateOnly? filterFirstBilledFrom = null,
         DateOnly? filterFirstBilledTo = null,
+        string? labName = null,
         CancellationToken ct = default);
 
     /// <summary>Returns ClaimLevelData rows pre-split into Excel sheet segments, respecting Production Report filters.</summary>
@@ -174,6 +175,7 @@ public interface IProductionReportRepository
         DateOnly? filterFirstBillTo = null,
         DateOnly? filterFirstBilledFrom = null,
         DateOnly? filterFirstBilledTo = null,
+        string? labName = null,
         CancellationToken ct = default);
 
     /// <summary>Returns all LineLevelData rows for Excel export, respecting Production Report filters.</summary>
@@ -187,6 +189,7 @@ public interface IProductionReportRepository
         DateOnly? filterFirstBillTo = null,
         DateOnly? filterFirstBilledFrom = null,
         DateOnly? filterFirstBilledTo = null,
+        string? labName = null,
         CancellationToken ct = default);
 
     /// <summary>Returns LineLevelData rows pre-split into Excel sheet segments, respecting Production Report filters.</summary>
@@ -200,6 +203,7 @@ public interface IProductionReportRepository
         DateOnly? filterFirstBillTo = null,
         DateOnly? filterFirstBilledFrom = null,
         DateOnly? filterFirstBilledTo = null,
+        string? labName = null,
         CancellationToken ct = default);
 
     /// <summary>Returns the most recent WeekFolder and RunId from LineClaimFileLogs.</summary>

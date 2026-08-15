@@ -1769,17 +1769,13 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         DateOnly? filterFirstBillTo = null,
         DateOnly? filterFirstBilledFrom = null,
         DateOnly? filterFirstBilledTo = null,
+        string? labName = null,
         CancellationToken ct = default)
     {
         var (whereStr, parameters) = BuildExportFilters(filterPayerNames, filterPanelNames, filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo, filterFirstBilledFrom, filterFirstBilledTo, "ce");
 
         var sql = $"""
-            SELECT [ClaimID],[AccessionNumber],[PayerName],[PayerType],[BillingProvider],[ReferringProvider],
-                   [ClinicName],[SalesRepname],[PatientID],[PatientDOB],[DateofService],[ChargeEnteredDate],
-                   [FirstBilledDate],[Panelname],[CPTCodeXUnitsXModifier],[POS],[TOS],[ChargeAmount],[AllowedAmount],
-                   [InsurancePayment],[PatientPayment],[TotalPayments],[InsuranceAdjustments],[PatientAdjustments],
-                   [TotalAdjustments],[InsuranceBalance],[PatientBalance],[TotalBalance],[CheckDate],[ClaimStatus],
-                   [DenialCode],[ICDCode],[DaystoDOS],[RollingDays],[DaystoBill],[DaystoPost],[ICDPointer],[InsertedDateTime]
+            SELECT {GetClaimLevelExportColumns(labName)}
             FROM dbo.ClaimLevelData
             {whereStr}
             """;
@@ -1798,10 +1794,11 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         DateOnly? filterFirstBillTo = null,
         DateOnly? filterFirstBilledFrom = null,
         DateOnly? filterFirstBilledTo = null,
+        string? labName = null,
         CancellationToken ct = default)
     {
         var (whereStr, parameters) = BuildExportFilters(filterPayerNames, filterPanelNames, filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo, filterFirstBilledFrom, filterFirstBilledTo, "ces");
-        return GetRawDataExportSegmentsAsync(connectionString, "dbo.ClaimLevelData", GetClaimLevelExportColumns(), "ClaimLevel", whereStr, parameters, ct);
+        return GetRawDataExportSegmentsAsync(connectionString, "dbo.ClaimLevelData", GetClaimLevelExportColumns(labName), "ClaimLevel", whereStr, parameters, ct);
     }
 
     /// <inheritdoc />
@@ -1815,20 +1812,13 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         DateOnly? filterFirstBillTo = null,
         DateOnly? filterFirstBilledFrom = null,
         DateOnly? filterFirstBilledTo = null,
+        string? labName = null,
         CancellationToken ct = default)
     {
         var (whereStr, parameters) = BuildExportFilters(filterPayerNames, filterPanelNames, filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo, filterFirstBilledFrom, filterFirstBilledTo, "le");
 
         var sql = $"""
-            SELECT [ClaimID],[AccessionNumber],[PayerName],[PayerType],[BillingProvider],[ReferringProvider],
-                   [ClinicName],[SalesRepname],[PatientID],[PatientDOB],[DateofService],[ChargeEnteredDate],
-                   [FirstBilledDate],[Panelname],[CPTCode],[Units],[Modifier],[POS],[TOS],
-                   [ChargeAmount],[ChargeAmountPerUnit],[AllowedAmount],[AllowedAmountPerUnit],
-                   [InsurancePayment],[InsurancePaymentPerUnit],[PatientPayment],[PatientPaymentPerUnit],
-                   [TotalPayments],[InsuranceAdjustments],[PatientAdjustments],[TotalAdjustments],
-                   [InsuranceBalance],[PatientBalance],[PatientBalancePerUnit],[TotalBalance],
-                   [CheckDate],[PostingDate],[ClaimStatus],[PayStatus],[DenialCode],[DenialDate],
-                   [ICDCode],[DaystoDOS],[RollingDays],[DaystoBill],[DaystoPost],[ICDPointer]
+            SELECT {GetLineLevelExportColumns(labName)}
             FROM dbo.LineLevelData
             {whereStr}
             """;
@@ -1847,10 +1837,11 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         DateOnly? filterFirstBillTo = null,
         DateOnly? filterFirstBilledFrom = null,
         DateOnly? filterFirstBilledTo = null,
+        string? labName = null,
         CancellationToken ct = default)
     {
         var (whereStr, parameters) = BuildExportFilters(filterPayerNames, filterPanelNames, filterDosFrom, filterDosTo, filterFirstBillFrom, filterFirstBillTo, filterFirstBilledFrom, filterFirstBilledTo, "les");
-        return GetRawDataExportSegmentsAsync(connectionString, "dbo.LineLevelData", GetLineLevelExportColumns(), "LineLevel", whereStr, parameters, ct);
+        return GetRawDataExportSegmentsAsync(connectionString, "dbo.LineLevelData", GetLineLevelExportColumns(labName), "LineLevel", whereStr, parameters, ct);
     }
 
     private async Task<List<RawDataSegment>> GetRawDataExportSegmentsAsync(
@@ -2079,26 +2070,15 @@ public sealed class SqlProductionReportRepository : IProductionReportRepository
         return (null, null);
     }
 
-    private static string GetClaimLevelExportColumns() => """
-        [ClaimID],[AccessionNumber],[PayerName],[PayerType],[BillingProvider],[ReferringProvider],
-        [ClinicName],[SalesRepname],[PatientID],[PatientDOB],[DateofService],[ChargeEnteredDate],
-        [FirstBilledDate],[Panelname],[CPTCodeXUnitsXModifier],[POS],[TOS],[ChargeAmount],[AllowedAmount],
-        [InsurancePayment],[PatientPayment],[TotalPayments],[InsuranceAdjustments],[PatientAdjustments],
-        [TotalAdjustments],[InsuranceBalance],[PatientBalance],[TotalBalance],[CheckDate],[ClaimStatus],
-        [DenialCode],[ICDCode],[DaystoDOS],[RollingDays],[DaystoBill],[DaystoPost],[ICDPointer],[InsertedDateTime]
-        """;
+    private static string GetClaimLevelExportColumns(string? labName) =>
+        string.IsNullOrWhiteSpace(labName)
+            ? "*"
+            : LabClaimLineColumnCatalog.GetExportSelectList(labName, isLineLevel: false);
 
-    private static string GetLineLevelExportColumns() => """
-        [ClaimID],[AccessionNumber],[PayerName],[PayerType],[BillingProvider],[ReferringProvider],
-        [ClinicName],[SalesRepname],[PatientID],[PatientDOB],[DateofService],[ChargeEnteredDate],
-        [FirstBilledDate],[Panelname],[CPTCode],[Units],[Modifier],[POS],[TOS],
-        [ChargeAmount],[ChargeAmountPerUnit],[AllowedAmount],[AllowedAmountPerUnit],
-        [InsurancePayment],[InsurancePaymentPerUnit],[PatientPayment],[PatientPaymentPerUnit],
-        [TotalPayments],[InsuranceAdjustments],[PatientAdjustments],[TotalAdjustments],
-        [InsuranceBalance],[PatientBalance],[PatientBalancePerUnit],[TotalBalance],
-        [CheckDate],[PostingDate],[ClaimStatus],[PayStatus],[DenialCode],[DenialDate],
-        [ICDCode],[DaystoDOS],[RollingDays],[DaystoBill],[DaystoPost],[ICDPointer]
-        """;
+    private static string GetLineLevelExportColumns(string? labName) =>
+        string.IsNullOrWhiteSpace(labName)
+            ? "*"
+            : LabClaimLineColumnCatalog.GetExportSelectList(labName, isLineLevel: true);
 
     private static string BuildYearFilter(int year) => year > 0
         ? "YEAR(TRY_CAST(FirstBilledDate AS DATE)) = @splitYear"

@@ -34,6 +34,9 @@ public sealed class LineLevelViewModel
     // Current page of records (already sliced)
     public List<LineRecord> Records { get; init; } = [];
 
+    /// <summary>Column headings from this lab's LineLevel Select_Script.</summary>
+    public IReadOnlyList<string> DisplayColumns { get; init; } = [];
+
     public PageInfo Paging { get; init; } = new(1, 50, 0, 0);
 
     /// <summary>Full path of the source CSV file that was loaded.</summary>

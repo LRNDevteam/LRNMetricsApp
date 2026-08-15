@@ -17,7 +17,8 @@ namespace LRN.ReportWorker.Generators;
 /// pre-generated snapshot" fast path is deliberately NOT replicated, so queued
 /// exports always reflect current data and current formatting.
 /// NorthWest uses INorthWestProductionSummaryRepository + the NW green-palette
-/// builder; Augustus uses IAugustusProductionSummaryRepository for summaries then
+/// builder (summary sheets via ClosedXML, Claim/Line raw streamed with OpenXml).
+/// Augustus uses IAugustusProductionSummaryRepository for summaries then
 /// the standard Excel builder + claim/line streaming; every other lab uses
 /// IProductionReportRepository + the standard builder.
 /// </summary>
@@ -243,6 +244,7 @@ public sealed class ProductionReportGenerator : IReportGenerator
             "dbo.usp_GetClaimLevelExportDataByDateRange",
             "ClaimLevel", LRN.ProductionReports.Services.ExcelTheme.TabGreen,
             payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo,
+            includeColumns: LabClaimLineColumnCatalog.GetClaimColumns(job.LabName),
             ct: ct);
         await progress(75);
 
@@ -252,6 +254,7 @@ public sealed class ProductionReportGenerator : IReportGenerator
             "dbo.usp_GetLineLevelExportDataByDateRange",
             "LineLevel", LRN.ProductionReports.Services.ExcelTheme.TabGold,
             payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo,
+            includeColumns: LabClaimLineColumnCatalog.GetLineColumns(job.LabName),
             ct: ct);
         await progress(95);
 
@@ -370,6 +373,7 @@ public sealed class ProductionReportGenerator : IReportGenerator
             "dbo.usp_GetClaimLevelExportDataByDateRange",
             "ClaimLevel", LRN.ProductionReports.Services.ExcelTheme.TabGreen,
             payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo,
+            includeColumns: LabClaimLineColumnCatalog.GetClaimColumns(job.LabName),
             ct: ct);
         await progress(75);
 
@@ -379,6 +383,7 @@ public sealed class ProductionReportGenerator : IReportGenerator
             "dbo.usp_GetLineLevelExportDataByDateRange",
             "LineLevel", LRN.ProductionReports.Services.ExcelTheme.TabGold,
             payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo,
+            includeColumns: LabClaimLineColumnCatalog.GetLineColumns(job.LabName),
             ct: ct);
         await progress(95);
 
@@ -406,17 +411,7 @@ public sealed class ProductionReportGenerator : IReportGenerator
         var t11 = _nwRepo.GetHighestPayerBreakdownAsync(connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
 
         await Task.WhenAll(t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11);
-        await progress(35);
-
-        var claimSegmentsTask = _nwRepo.GetClaimLevelDataExportSegmentsAsync(
-            connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
-        var lineSegmentsTask = _nwRepo.GetLineLevelDataExportSegmentsAsync(
-            connStr, payerArg, panelArg, dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo, ct);
-        await Task.WhenAll(claimSegmentsTask, lineSegmentsTask);
-
-        var claimSegments = claimSegmentsTask.Result;
-        var lineSegments  = lineSegmentsTask.Result;
-        await progress(70);
+        await progress(45);
 
         var monthlyResult = t1.Result;
         var weeklyResult  = t2.Result;
@@ -507,14 +502,28 @@ public sealed class ProductionReportGenerator : IReportGenerator
             CptBreakdownGrandTotalCharges   = cptResult.GrandTotalCharges,
         };
 
-        using var workbook = NorthWestProductionSummaryExcelExportBuilder.CreateWorkbook(
-            vm, job.LabName, claimSegments, lineSegments, _logger);
-        await progress(88);
-
-        using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+        using (var workbook = NorthWestProductionSummaryExcelExportBuilder.CreateWorkbook(vm, job.LabName))
+        {
+            using var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None);
             workbook.SaveAs(fs);
+        }
+        await progress(55);
 
-        return claimSegments.Sum(s => s.Rows.Count) + lineSegments.Sum(s => s.Rows.Count);
+        var sqlRepo = _repo as SqlProductionReportRepository
+            ?? throw new InvalidOperationException("Production report repository must be SqlProductionReportRepository for streamed exports.");
+
+        var rawRows = await sqlRepo.AppendNorthWestClaimLineSheetsToFileAsync(
+            tempPath, connStr, payerArg, panelArg,
+            dosFrom, dosTo, fbFrom, fbTo, fbldFrom, fbldTo,
+            LabClaimLineColumnCatalog.GetClaimColumns("NorthWest"),
+            LabClaimLineColumnCatalog.GetLineColumns("NorthWest"),
+            ct);
+        await progress(95);
+
+        _logger.LogInformation(
+            "ProductionReport {ReportId} [{Lab}]: NW workbook saved with streamed Claim/Line sheets ({Raw:N0} raw rows).",
+            job.ReportId, job.LabName, rawRows);
+        return rawRows;
     }
 
     private static DateOnly? ParseDate(string? value) =>

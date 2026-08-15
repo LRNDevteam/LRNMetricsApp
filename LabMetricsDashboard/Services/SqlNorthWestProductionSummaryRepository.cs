@@ -1521,15 +1521,8 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
             filterFirstBilledFrom, filterFirstBilledTo);
 
         var whereStr = "WHERE " + string.Join(" AND ", where);
-        const string selectColumns = """
-            c.[ClaimID],c.[AccessionNumber],c.[PayerName_Raw],c.[PanelType],c.[ClaimStatus],
-            c.[DateOfService],c.[ChargeEnteredDate],c.[FirstBilledDate],
-            c.[PanelName],c.[CPTCodeXUnitsXModifier],c.[ChargeAmount],
-            c.[InsurancePayment],c.[PatientPayment],c.[TotalPayments],
-            c.[InsuranceAdjustments],c.[PatientAdjustments],c.[TotalAdjustments],
-            c.[InsuranceBalance],c.[PatientBalance],c.[TotalBalance],
-            c.[DenialCode],c.[ICDCode],c.[DaystoDOS],c.[DaystoBill],c.[InsertedDateTime]
-            """;
+        var selectColumns = LabClaimLineColumnCatalog.ToAliasedSqlSelectList(
+            LabClaimLineColumnCatalog.GetClaimColumns("NorthWest"), "c");
 
         return new NwExportSqlParts(
             selectColumns,
@@ -1593,17 +1586,8 @@ public sealed class SqlNorthWestProductionSummaryRepository : INorthWestProducti
             filterFirstBilledFrom, filterFirstBilledTo);
 
         var whereStr = "WHERE " + string.Join(" AND ", where);
-        const string selectColumns = """
-            l.[ClaimID],l.[AccessionNumber],c.[PayerName_Raw],c.[PanelType],c.[ClaimStatus],
-            l.[DateOfService],l.[ChargeEnteredDate],l.[FirstBilledDate],
-            l.[CPTCode],l.[Units],l.[Modifier],l.[POS],l.[TOS],
-            l.[ChargeAmount],l.[AllowedAmount],
-            l.[InsurancePayment],l.[PatientPayment],l.[TotalPayments],
-            l.[InsuranceAdjustments],l.[PatientAdjustments],l.[TotalAdjustments],
-            l.[InsuranceBalance],l.[PatientBalance],l.[TotalBalance],
-            l.[ClaimStatus] AS LineStatus,l.[DenialCode],l.[ICDCode],
-            l.[DaystoDOS],l.[DaystoBill]
-            """;
+        var selectColumns = LabClaimLineColumnCatalog.ToAliasedSqlSelectList(
+            LabClaimLineColumnCatalog.GetLineColumns("NorthWest"), "l");
 
         return new NwExportSqlParts(
             selectColumns,
