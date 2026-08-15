@@ -468,6 +468,12 @@ builder.Services
     .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddSingleton<ILabNameResolver, LabNameResolver>();
 
+// Which reports the board offers to which labs — the padlocked cells. Bound with IOptionsMonitor
+// (not Get<T>()) so editing the "ReportAvailability" section of appsettings.json takes effect on
+// the next page load, without restarting the site.
+builder.Services.Configure<ReportAvailabilitySettings>(configuration.GetSection("ReportAvailability"));
+builder.Services.AddSingleton<IReportAvailabilityService, ReportAvailabilityService>();
+
 // Dynamic role-based navbar (Menu Master + Role Menu Mapping via LRN.ReportsApi).
 // Short timeout: this client sits on the hot path of EVERY page (navbar + MenuAccessFilter).
 // A slow/unreachable Reports API must fail fast so pages keep rendering (menu falls back

@@ -76,12 +76,39 @@ public class ReportCatalogTests
         Assert.True(exec < denial);
     }
 
-    [Fact]
-    public void Error_Log_is_never_shown_on_the_board()
+    // Report types that stay in dbo.ReportTypeMaster and keep running — the board just never
+    // renders a column for them.
+    [Theory]
+    [InlineData("Error Log")]
+    [InlineData("CPT Averages")]
+    [InlineData("Panel Averages")]
+    public void Hidden_report_types_are_never_shown_on_the_board(string hidden)
     {
-        var ordered = ReportCatalog.Order(["LIS Summary", "Error Log"]);
+        var ordered = ReportCatalog.Order(["LIS Summary", hidden]);
 
-        Assert.DoesNotContain(ordered, c => c.TrackerColumn.Equals("Error Log", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(ordered, c => c.TrackerColumn.Equals(hidden, StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(ordered, c => c.TrackerColumn == "LIS Summary");
+    }
+
+    // ReportTypeMaster is hand-maintained, so the hide must survive its spelling.
+    [Theory]
+    [InlineData("CPTAverages")]
+    [InlineData("cpt averages")]
+    [InlineData("Panel  Averages")]
+    [InlineData("Error_Log")]
+    public void Hiding_ignores_spacing_and_casing(string spelling)
+    {
+        Assert.True(ReportCatalog.IsHidden(spelling));
+        Assert.DoesNotContain(ReportCatalog.Order(["LIS Summary", spelling]),
+            c => c.TrackerColumn.Equals(spelling, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Real_reports_are_not_hidden()
+    {
+        Assert.False(ReportCatalog.IsHidden("Collection Summary"));
+        Assert.False(ReportCatalog.IsHidden("Coding Validation"));
+        Assert.False(ReportCatalog.IsHidden(null));
     }
 
     [Fact]

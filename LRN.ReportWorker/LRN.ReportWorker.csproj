@@ -24,14 +24,21 @@
     <!-- Web project referenced so Prediction/Forecasting exports reuse the SAME
          view-model builders, Excel builders and stored procedures as the pages. -->
     <ProjectReference Include="..\LabMetricsDashboard\LabMetricsDashboard.csproj" />
+    <!-- API project referenced so the CPT / Panel Lookup export runs the SAME
+         SqlCptLookupRepository queries and column set as the page's own grid.
+         net8.0 assets consumed by a net9.0 host, which is supported. -->
+    <ProjectReference Include="..\LRN.ReportsApi\LRN.ReportsApi.csproj" />
   </ItemGroup>
 
-  <!-- Drop LabMetricsDashboard content that collides with this worker's publish folder
-       (NETSDK1152: appsettings.json, appsettings.Development.json, web.config, etc.). -->
+  <!-- Drop referenced web/API project content that collides with this worker's publish folder
+       (NETSDK1152: appsettings.json, appsettings.Development.json, web.config, etc.).
+       The worker's OWN appsettings must win — LRN.ReportsApi's carries the master
+       connection strings this service is deliberately not configured with. -->
   <Target Name="ExcludeDashboardContentFromPublish" AfterTargets="ComputeResolvedFilesToPublishList">
     <ItemGroup>
       <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
-                             Condition="$([System.String]::Copy('%(ResolvedFileToPublish.FullPath)').Contains('LabMetricsDashboard'))
+                             Condition="( $([System.String]::Copy('%(ResolvedFileToPublish.FullPath)').Contains('LabMetricsDashboard'))
+                                          OR $([System.String]::Copy('%(ResolvedFileToPublish.FullPath)').Contains('LRN.ReportsApi')) )
                                         AND (
                                           '%(Filename)%(Extension)' == 'appsettings.json'
                                           OR '%(Filename)%(Extension)' == 'appsettings.Development.json'

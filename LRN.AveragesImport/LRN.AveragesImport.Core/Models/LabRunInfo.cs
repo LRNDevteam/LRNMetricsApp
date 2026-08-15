@@ -2,7 +2,7 @@ namespace LRN.AveragesImport.Core.Models;
 
 /// <summary>
 /// One successful run from sp_GetRecentSuccessRunByLab, already resolved
-/// against the configured lab mapping (LabId + FolderName).
+/// against the configured lab mapping (LabId + source connection string).
 /// </summary>
 public sealed class LabRunInfo
 {
@@ -14,8 +14,8 @@ public sealed class LabRunInfo
     /// <summary>Numeric lab id from the config mapping — written to CPTAverage.LabID / PanelAverage.LabId.</summary>
     public required int LabId { get; init; }
 
-    /// <summary>On-disk folder name from the config mapping (e.g. "Augustus").</summary>
-    public required string FolderName { get; init; }
+    /// <summary>Connection string of the lab database holding dbo.LineLevelData.</summary>
+    public required string ConnectionString { get; init; }
 
     public DateTime? StartTimeIst { get; init; }
     public DateTime? EndTimeIst { get; init; }

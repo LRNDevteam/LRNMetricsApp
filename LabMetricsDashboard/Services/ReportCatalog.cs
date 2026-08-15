@@ -60,8 +60,10 @@ public static class ReportCatalog
     /// <summary>
     /// Normalises a lab name for comparison: letters and digits only, upper-cased, with a
     /// trailing LRN/DTR dropped. Lets "Cove", "CoveLRN" and "Cove_LRN" all match one another.
+    /// Public so the configured lab lists in <see cref="ReportAvailabilityService"/> match labs
+    /// exactly the way the built-in <see cref="ReportCatalogEntry.AllowedLabs"/> list does.
     /// </summary>
-    private static string LabToken(string? value)
+    public static string LabToken(string? value)
     {
         var token = new string((value ?? string.Empty)
             .Where(char.IsLetterOrDigit)
@@ -99,11 +101,20 @@ public static class ReportCatalog
         => trackerColumn is not null && AlwaysShow.Contains(trackerColumn);
 
     /// <summary>
-    /// Tracker columns that are run artifacts, not reports, and must never appear on the board
-    /// (as a tile or a matrix/worklist column) even though the SP still returns them.
+    /// Report types the board never shows as a column, even though dbo.ReportTypeMaster returns
+    /// them: run artifacts (Error Log) and inputs the pipeline consumes rather than reports anyone
+    /// opens (CPT / Panel Averages, which feed Collection Summary).
+    /// Matched on a normalised key, so spacing and casing in ReportTypeMaster cannot un-hide one.
     /// </summary>
     private static readonly HashSet<string> Hidden =
-        new(StringComparer.OrdinalIgnoreCase) { "Error Log" };
+        new(StringComparer.Ordinal) { HiddenKey("Error Log"), HiddenKey("CPT Averages"), HiddenKey("Panel Averages") };
+
+    /// <summary>Letters and digits only — "CPT Averages", "CPT  averages" and "CPTAverages" all match.</summary>
+    private static string HiddenKey(string? value)
+        => new((value ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+
+    /// <summary>True for a tracker column that must never become a board column. See <see cref="Hidden"/>.</summary>
+    public static bool IsHidden(string? trackerColumn) => Hidden.Contains(HiddenKey(trackerColumn));
 
     private static readonly Dictionary<string, ReportCatalogEntry> ByColumn =
         Entries.ToDictionary(e => e.TrackerColumn, StringComparer.OrdinalIgnoreCase);
@@ -125,8 +136,9 @@ public static class ReportCatalog
     /// </summary>
     public static List<ReportCatalogEntry> Order(IEnumerable<string> trackerColumns)
     {
-        // Drop run-artifact columns (e.g. Error Log) entirely — never a tile or a matrix column.
-        var visibleTracker = trackerColumns.Where(c => !Hidden.Contains(c)).ToList();
+        // Drop hidden report types (Error Log, CPT / Panel Averages) entirely — never a tile or a
+        // matrix column. They stay in dbo.ReportTypeMaster and still run; the board just ignores them.
+        var visibleTracker = trackerColumns.Where(c => !IsHidden(c)).ToList();
         var present = new HashSet<string>(visibleTracker, StringComparer.OrdinalIgnoreCase);
         // Known catalog entries that the tracker produced, PLUS always-on nav tiles (LIMS Master) that
         // are shortcuts to a page rather than a tracked report, so they show on every lab.

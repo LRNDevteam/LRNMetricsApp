@@ -18,6 +18,7 @@ public sealed class ReportBoardController : Controller
     private readonly ILabNameResolver _labResolver;
     private readonly LabSettings _labSettings;
     private readonly IMenuService _menuService;
+    private readonly IReportAvailabilityService _availability;
     private readonly ILogger<ReportBoardController> _logger;
 
     public ReportBoardController(
@@ -25,12 +26,14 @@ public sealed class ReportBoardController : Controller
         ILabNameResolver labResolver,
         LabSettings labSettings,
         IMenuService menuService,
+        IReportAvailabilityService availability,
         ILogger<ReportBoardController> logger)
     {
         _api = api;
         _labResolver = labResolver;
         _labSettings = labSettings;
         _menuService = menuService;
+        _availability = availability;
         _logger = logger;
     }
 
@@ -209,20 +212,26 @@ public sealed class ReportBoardController : Controller
         var status = ParseStatus(raw);
 
         // Reports this lab never produces stay greyed out — they are not late, they are absent
-        // by design. Three independent reasons, and NONE of them may override a status the
-        // tracker actually returned:
-        //   1. an explicit allow-list (Sales Rep Summary only runs for Cove and Elixir);
-        //   2. the lab's feature flag — but ONLY when the lab resolved to a configuration.
-        //      IsFeatureEnabled returns false for a null config, so applying it to an unmapped
-        //      lab greys out every flagged report even when the run succeeded;
-        //   3. the pipeline has never produced this report for ANY lab in this fetch, so it is
-        //      not wired up yet rather than late here.
-        var availableForLab =
-            ReportCatalog.IsAvailableForLab(column, configKey, labDisplayName)
-            && (labConfig is null || IsFeatureEnabled(column.FeatureFlag, labConfig))
-            && producedAnywhere;
+        // by design. Two distinct absences, and the board must not conflate them:
+        //
+        //   LOCKED (padlock) — withheld from THIS lab on purpose: the ReportAvailability section
+        //     in appsettings, or, for a report with no rule there, the catalog's built-in lab list
+        //     (Sales Rep Summary only runs for Cove and Elixir) plus the lab's feature flag. The
+        //     flag is only consulted when the lab resolved to a configuration: IsFeatureEnabled
+        //     returns false for a null config, so applying it to an unmapped lab would lock every
+        //     flagged report even when the run succeeded.
+        //
+        //   NOT CONFIGURED (dash) — the pipeline has never produced this report for ANY lab in
+        //     this fetch, so it is not wired up yet rather than withheld here.
+        var availability = _availability.Evaluate(
+            column, configKey, labDisplayName,
+            labConfig is null || IsFeatureEnabled(column.FeatureFlag, labConfig));
 
-        if (!availableForLab)
+        if (!availability.IsAvailable)
+        {
+            status = ReportRunStatus.NotAvailable;
+        }
+        else if (!producedAnywhere)
         {
             status = ReportRunStatus.NotConfigured;
         }
@@ -244,6 +253,7 @@ public sealed class ReportBoardController : Controller
                 ReportRunStatus.Failed => "This report failed in the latest run.",
                 ReportRunStatus.Pending => "Waiting for this run to produce it.",
                 ReportRunStatus.Overdue => "The source data landed over a day ago and this report has still not been produced.",
+                ReportRunStatus.NotAvailable => availability.LockReason ?? "This report is not available for this lab.",
                 _ => "Not produced for this lab."
             };
         }

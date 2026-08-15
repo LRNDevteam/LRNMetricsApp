@@ -4,7 +4,7 @@ public enum ImportStatus
 {
     Imported,
     SkippedAlreadyImported,
-    FileNotFound,
+    NoSourceData,
     Failed
 }
 
@@ -16,7 +16,9 @@ public sealed class ImportResult
     public required string FileType { get; init; }
     public required ImportStatus Status { get; init; }
     public int RowsImported { get; init; }
-    public int BadRows { get; init; }
-    public string? FileName { get; init; }
+
+    /// <summary>Source the aggregate was computed from, e.g. "CoveLRN.dbo.LineLevelData".</summary>
+    public string? Source { get; init; }
+
     public string? Error { get; init; }
 }

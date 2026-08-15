@@ -1,4 +1,5 @@
 using System.Data;
+using System.Text;
 using LRN.AveragesImport.Core.Configuration;
 using LRN.AveragesImport.Core.Data;
 using LRN.AveragesImport.Core.Models;
@@ -12,7 +13,7 @@ public interface ILabRunProvider
 {
     /// <summary>
     /// Calls sp_GetRecentSuccessRunByLab, keeps only OverallStatus = 'SUCCESS' rows,
-    /// and resolves each against the configured lab mapping (LabId + FolderName).
+    /// and resolves each against the configured lab mapping (LabId + source connection).
     /// </summary>
     Task<IReadOnlyList<LabRunInfo>> GetSuccessRunsAsync(CancellationToken ct);
 }
@@ -37,9 +38,31 @@ public sealed class LabRunProvider : ILabRunProvider
     {
         var settings = _settings.Value;
 
-        var labsByName = settings.Labs
-            .Where(l => !string.IsNullOrWhiteSpace(l.LabName))
+        var configured = settings.Labs.Where(l => !string.IsNullOrWhiteSpace(l.LabName)).ToList();
+
+        var labsByName = configured
             .ToDictionary(l => l.LabName.Trim(), l => l, StringComparer.OrdinalIgnoreCase);
+
+        // The SP reports display names ("Augustus Labs", "PCR Labs of America") while the
+        // config uses compact ones ("Augustus_Labs", "PCRLabsofAmerica"), and Beech_Tree /
+        // BeechTree differ the other way. Matching on letters and digits only bridges both
+        // without having to keep the two spellings in sync by hand. Exact match still wins;
+        // this is only the fallback. A normalized key claimed by two configured labs is
+        // dropped from the fallback map so an ambiguous name never silently picks one.
+        var labsByNormalizedName = configured
+            .GroupBy(l => NormalizeLabName(l.LabName), StringComparer.Ordinal)
+            .Where(g => g.Count() == 1)
+            .ToDictionary(g => g.Key, g => g.Single(), StringComparer.Ordinal);
+
+        foreach (var ambiguous in configured
+                     .GroupBy(l => NormalizeLabName(l.LabName), StringComparer.Ordinal)
+                     .Where(g => g.Count() > 1))
+        {
+            _logger.LogWarning(
+                "Configured labs {LabNames} all reduce to '{Normalized}' — name-normalizing fallback disabled for them; " +
+                "their ImportSettings:Labs LabName must match the SP exactly",
+                string.Join(", ", ambiguous.Select(l => l.LabName)), ambiguous.Key);
+        }
 
         var runs = new List<LabRunInfo>();
         var spLabNames = new List<string>();
@@ -79,9 +102,25 @@ public sealed class LabRunProvider : ILabRunProvider
 
                 if (!labsByName.TryGetValue(labName, out var mapping))
                 {
+                    if (!labsByNormalizedName.TryGetValue(NormalizeLabName(labName), out mapping))
+                    {
+                        _logger.LogWarning(
+                            "Lab {LabName} (run {RunId}) returned by SP has no entry in ImportSettings:Labs — skipping",
+                            labName, runId);
+                        continue;
+                    }
+
+                    _logger.LogInformation(
+                        "SP lab {SpLabName} matched configured lab {ConfiguredLabName} (LabId {LabId}) by name normalization",
+                        labName, mapping.LabName, mapping.LabId);
+                }
+
+                if (string.IsNullOrWhiteSpace(mapping.ConnectionString))
+                {
                     _logger.LogWarning(
-                        "Lab {LabName} (run {RunId}) returned by SP has no entry in ImportSettings:Labs — skipping",
-                        labName, runId);
+                        "Lab {LabName} (LabId {LabId}, run {RunId}) has no ConnectionString in ImportSettings:Labs — " +
+                        "its averages cannot be aggregated; skipping",
+                        labName, mapping.LabId, runId);
                     continue;
                 }
 
@@ -90,21 +129,38 @@ public sealed class LabRunProvider : ILabRunProvider
                     RunId = runId.Trim(),
                     LabName = labName,
                     LabId = mapping.LabId,
-                    FolderName = mapping.FolderName,
+                    ConnectionString = mapping.ConnectionString,
                     StartTimeIst = GetDateTime(reader, "StartTimeIST"),
                     EndTimeIst = GetDateTime(reader, "EndTimeIST")
                 });
             }
         }
 
-        foreach (var configured in settings.Labs)
+        // Same two-step comparison as the lookup above, or a lab matched by normalization
+        // would still be reported here as missing.
+        var seenNormalized = spLabNames.Select(NormalizeLabName).ToHashSet(StringComparer.Ordinal);
+        foreach (var lab in settings.Labs)
         {
-            if (!spLabNames.Any(n => string.Equals(n, configured.LabName?.Trim(), StringComparison.OrdinalIgnoreCase)))
+            if (!seenNormalized.Contains(NormalizeLabName(lab.LabName ?? string.Empty)))
                 _logger.LogInformation("Configured lab {LabName} (LabId {LabId}) had no row from the SP this cycle",
-                    configured.LabName, configured.LabId);
+                    lab.LabName, lab.LabId);
         }
 
         return runs;
+    }
+
+    /// <summary>
+    /// Reduces a lab name to its letters and digits, lower-cased, so that spacing and
+    /// separator differences between the SP and the config do not break the match:
+    /// "Augustus Labs", "Augustus_Labs" and "augustuslabs" all reduce to "augustuslabs".
+    /// </summary>
+    private static string NormalizeLabName(string name)
+    {
+        var buffer = new StringBuilder(name.Length);
+        foreach (var c in name)
+            if (char.IsLetterOrDigit(c))
+                buffer.Append(char.ToLowerInvariant(c));
+        return buffer.ToString();
     }
 
     private static string? GetString(SqlDataReader reader, string column)

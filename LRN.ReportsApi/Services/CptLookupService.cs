@@ -50,6 +50,18 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
             ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is missing. It must point to LRNMaster.");
     }
 
+    /// <summary>
+    /// Builds against an explicit LRNMaster connection instead of ConnectionStrings:DefaultConnection.
+    /// LRN.ReportWorker uses this: it has no master connection string of its own and instead reads
+    /// LRNMaster through the shared queue lab's own DbConnectionString.
+    /// </summary>
+    public SqlCptLookupRepository(string connectionString)
+    {
+        _connectionString = string.IsNullOrWhiteSpace(connectionString)
+            ? throw new ArgumentException("A LRNMaster connection string is required.", nameof(connectionString))
+            : connectionString;
+    }
+
     // ── SQL fragments ────────────────────────────────────────────────────────
 
     // MAX() is safe: the mode/median value is constant within a key (verified —
@@ -67,14 +79,29 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
     // so a lab-wide figure is never silently passed off as the payer's own rate.
     // The fallback lifts coverage from 4,218 to 7,027 rows, against a hard ceiling of
     // 7,098 (the rows whose lab has any LabModes data at all).
-    private const string RateCtes = """
-        WITH mode_payer AS (
+    /// <summary>
+    /// The four rate CTEs, WITHOUT the leading <c>WITH</c> so callers can compose them with
+    /// other CTEs.
+    ///
+    /// <paramref name="scopedToLab"/> pushes <c>WHERE LabId = @LabId</c> into each base-table
+    /// scan. That is provably equivalent whenever the outer query also filters
+    /// <c>a.LabID = @LabId</c>: every join predicate includes <c>LabId = a.LabID</c>, so a CTE
+    /// row for another lab could never join anyway. Without it, one page of one lab aggregates
+    /// the whole of LabModes and LabMedians four times over.
+    /// </summary>
+    private static string RateCteBody(bool scopedToLab)
+    {
+        var labFilter = scopedToLab ? "WHERE LabId = @LabId" : "";
+
+        return $"""
+        mode_payer AS (
             SELECT LabId, REPLACE(UPPER(CPTCode), ' ', '') AS CptKey, PanelName, RollingDays, PayerName,
                    MAX(ModeAllowedAmount)           AS ModeAllowedAmount,
                    MAX(ModeInsurancePaymentAmount)  AS ModeInsurancePaymentAmount,
                    MAX(AllowedAmountPerUnitMode)    AS AllowedAmountPerUnitMode,
                    MAX(InsurancePaymentPerUnitMode) AS InsurancePaymentPerUnitMode
             FROM dbo.LabModes
+            {labFilter}
             GROUP BY LabId, REPLACE(UPPER(CPTCode), ' ', ''), PanelName, RollingDays, PayerName
         ),
         mode_lab AS (
@@ -84,6 +111,7 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
                    MAX(AllowedAmountPerUnitMode)    AS AllowedAmountPerUnitMode,
                    MAX(InsurancePaymentPerUnitMode) AS InsurancePaymentPerUnitMode
             FROM dbo.LabModes
+            {labFilter}
             GROUP BY LabId, REPLACE(UPPER(CPTCode), ' ', ''), PanelName, RollingDays
         ),
         median_payer AS (
@@ -93,6 +121,7 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
                    MAX(AllowedAmountPerUnitMedian)      AS AllowedAmountPerUnitMedian,
                    MAX(InsurancePaymentPerUnitMedian)   AS InsurancePaymentPerUnitMedian
             FROM dbo.LabMedians
+            {labFilter}
             GROUP BY LabId, REPLACE(UPPER(CPTCode), ' ', ''), PanelName, RollingDays, PayerName
         ),
         median_lab AS (
@@ -102,12 +131,14 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
                    MAX(AllowedAmountPerUnitMedian)      AS AllowedAmountPerUnitMedian,
                    MAX(InsurancePaymentPerUnitMedian)   AS InsurancePaymentPerUnitMedian
             FROM dbo.LabMedians
+            {labFilter}
             GROUP BY LabId, REPLACE(UPPER(CPTCode), ' ', ''), PanelName, RollingDays
         )
         """;
+    }
 
-    private const string CptFrom = """
-        FROM dbo.CPTAverage a
+    /// <summary>The rate joins alone, so the driving table can be either CPTAverage or one page of it.</summary>
+    private const string CptJoins = """
         LEFT JOIN mode_payer mp
                ON mp.LabId       = a.LabID
               AND mp.CptKey      = REPLACE(UPPER(a.CPTCode), ' ', '')
@@ -130,6 +161,72 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
               AND dl.CptKey      = REPLACE(UPPER(a.CPTCode), ' ', '')
               AND ISNULL(dl.PanelName, '') = ISNULL(a.PanelName, '')
               AND dl.RollingDays = a.WindowType
+        """;
+
+    private const string CptFrom = $"""
+        FROM dbo.CPTAverage a
+        {CptJoins}
+        """;
+
+    /// <summary>The same joins, driven by one page of CPTAverage rather than all of it.</summary>
+    private const string CptFromPage = $"""
+        FROM page a
+        {CptJoins}
+        """;
+
+    /// <summary>
+    /// True when the sort needs a joined rate value, which forces the joins to run before
+    /// paging. Every other sort is on a CPTAverage column, so the page can be taken first.
+    /// </summary>
+    private static bool SortsOnJoinedRate(string orderBy, params string[] aliases) =>
+        aliases.Any(alias => orderBy.Contains(alias, StringComparison.Ordinal));
+
+    /// <summary>The CPT page query. Separated from the I/O so its SQL can be inspected and parsed in isolation.</summary>
+    private static string BuildCptPageSql(string where, string orderBy, bool scoped, bool pageFirst) => pageFirst
+        ? $"""
+        WITH page AS (
+            SELECT *
+            FROM dbo.CPTAverage a
+            WHERE {where}
+            ORDER BY {orderBy}
+            OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
+        ),
+        {RateCteBody(scoped)}
+        SELECT {CptSelect}
+        {CptFromPage}
+        ORDER BY {orderBy};
+        """
+        : $"""
+        WITH {RateCteBody(scoped)}
+        SELECT {CptSelect}
+        {CptFrom}
+        WHERE {where}
+        ORDER BY {orderBy}
+        OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
+        """;
+
+    /// <summary>The Panel page query. Same split, same reason.</summary>
+    private static string BuildPanelPageSql(string where, string orderBy, bool scoped, bool pageFirst) => pageFirst
+        ? $"""
+        WITH page AS (
+            SELECT *
+            FROM dbo.PanelAverage p
+            WHERE {where}
+            ORDER BY {orderBy}
+            OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
+        ),
+        {PanelModeCteBody(scoped)}
+        SELECT {PanelSelect}
+        {PanelFromPage}
+        ORDER BY {orderBy};
+        """
+        : $"""
+        WITH {PanelModeCteBody(scoped)}
+        SELECT {PanelSelect}
+        {PanelFrom}
+        WHERE {where}
+        ORDER BY {orderBy}
+        OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
         """;
 
     // Expression fragments reused by the SELECT list and the sort whitelist, so a
@@ -169,12 +266,14 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
     // per-line averages: summing the CPT modes overshoots the matching PanelAverage
     // row by 5-12x, while the average lands in the same range. ModeCptCount is
     // returned so the grid can show how many CPTs a panel figure rests on.
-    private const string PanelModeCtes = """
-        WITH cpt_mode AS (
+    /// <summary>Panel mode CTEs without the leading <c>WITH</c>. See <see cref="RateCteBody"/> for why the lab filter is safe.</summary>
+    private static string PanelModeCteBody(bool scopedToLab) => $"""
+        cpt_mode AS (
             SELECT LabId, PanelName, RollingDays, PayerName, REPLACE(UPPER(CPTCode), ' ', '') AS CptKey,
                    MAX(ModeAllowedAmount)          AS ModeAllowed,
                    MAX(ModeInsurancePaymentAmount) AS ModePaid
             FROM dbo.LabModes
+            {(scopedToLab ? "WHERE LabId = @LabId" : "")}
             GROUP BY LabId, PanelName, RollingDays, PayerName, REPLACE(UPPER(CPTCode), ' ', '')
         ),
         panel_mode_payer AS (
@@ -195,8 +294,7 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
         )
         """;
 
-    private const string PanelFrom = """
-        FROM dbo.PanelAverage p
+    private const string PanelJoins = """
         LEFT JOIN panel_mode_payer pmp
                ON pmp.LabId       = p.LabId
               AND ISNULL(pmp.PanelName, '') = ISNULL(p.PanelName, '')
@@ -206,6 +304,16 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
                ON pml.LabId       = p.LabId
               AND ISNULL(pml.PanelName, '') = ISNULL(p.PanelName, '')
               AND pml.RollingDays = p.WindowType
+        """;
+
+    private const string PanelFrom = $"""
+        FROM dbo.PanelAverage p
+        {PanelJoins}
+        """;
+
+    private const string PanelFromPage = $"""
+        FROM page p
+        {PanelJoins}
         """;
 
     private const string PanelModeAllowedExpr = "COALESCE(pmp.ModeAllowedAmount, pml.ModeAllowedAmount)";
@@ -301,16 +409,22 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
         await using var conn = new SqlConnection(_connectionString);
         await conn.OpenAsync(ct);
 
-        // Count and KPI totals in one round trip — the KPI row describes every
-        // matching row, not just the page currently on screen.
+        var scoped = query.LabId.HasValue;
+
+        // Count and KPI totals in one round trip — the KPI row describes every matching row,
+        // not just the page currently on screen.
+        //
+        // No rate CTEs here: every aggregate reads CPTAverage and so does every filter, and
+        // each rate CTE groups by exactly the columns it joins on, so the LEFT JOINs are 1:1
+        // and cannot change a COUNT, an AVG or a SUM. Computing them was pure waste — it
+        // aggregated LabModes and LabMedians four times to produce numbers it discarded.
         await using (var summary = new SqlCommand($"""
-            {RateCtes}
             SELECT COUNT(1),
                    AVG(a.AvgAllowedAmountPerUnit),
                    AVG(a.AvgPaidAmountPerUnit),
                    SUM(CAST(ISNULL(a.DeniedLineCount,0) AS BIGINT)),
                    SUM(CAST(ISNULL(a.TotalLineCount,0) AS BIGINT))
-            {CptFrom}
+            FROM dbo.CPTAverage a
             WHERE {where};
             """, conn))
         {
@@ -320,14 +434,13 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
             if (await reader.ReadAsync(ct)) ReadSummary(reader, result);
         }
 
-        await using var cmd = new SqlCommand($"""
-            {RateCtes}
-            SELECT {CptSelect}
-            {CptFrom}
-            WHERE {where}
-            ORDER BY {orderBy}
-            OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
-            """, conn);
+        // Take the page from CPTAverage FIRST, then join rates to those rows only. Joining
+        // before paging made every request hash the whole aggregated rate set against the whole
+        // filtered table to then throw away all but one page. Only a sort on a joined rate
+        // column has to keep the old order, because the sort key does not exist until the join.
+        var pageFirst = !SortsOnJoinedRate(orderBy, "mp.", "ml.", "dp.", "dl.");
+
+        await using var cmd = new SqlCommand(BuildCptPageSql(where, orderBy, scoped, pageFirst), conn);
         cmd.Parameters.AddRange(Clone(parameters));
         cmd.Parameters.AddWithValue("@Offset", (query.Page - 1) * query.PageSize);
         cmd.Parameters.AddWithValue("@PageSize", query.PageSize);
@@ -366,14 +479,11 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
             if (await reader.ReadAsync(ct)) ReadSummary(reader, result);
         }
 
-        await using var cmd = new SqlCommand($"""
-            {PanelModeCtes}
-            SELECT {PanelSelect}
-            {PanelFrom}
-            WHERE {where}
-            ORDER BY {orderBy}
-            OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
-            """, conn);
+        // Same shape as the CPT tab: page PanelAverage first, then join modes to that page.
+        var scoped = query.LabId.HasValue;
+        var pageFirst = !SortsOnJoinedRate(orderBy, "pmp.", "pml.");
+
+        await using var cmd = new SqlCommand(BuildPanelPageSql(where, orderBy, scoped, pageFirst), conn);
         cmd.Parameters.AddRange(Clone(parameters));
         cmd.Parameters.AddWithValue("@Offset", (query.Page - 1) * query.PageSize);
         cmd.Parameters.AddWithValue("@PageSize", query.PageSize);
@@ -400,7 +510,7 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
         await using var conn = new SqlConnection(_connectionString);
         await conn.OpenAsync(ct);
         await using var cmd = new SqlCommand($"""
-            {RateCtes}
+            WITH {RateCteBody(scopedToLab: true)}
             SELECT {CptSelect}
             {CptFrom}
             WHERE {string.Join(" AND ", parts)}
@@ -428,7 +538,7 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
         await using var conn = new SqlConnection(_connectionString);
         await conn.OpenAsync(ct);
         await using var cmd = new SqlCommand($"""
-            {PanelModeCtes}
+            WITH {PanelModeCteBody(scopedToLab: true)}
             SELECT {PanelSelect}
             {PanelFrom}
             WHERE {string.Join(" AND ", parts)}
@@ -441,21 +551,37 @@ public sealed class SqlCptLookupRepository : ICptLookupRepository
         return items;
     }
 
+    /// <summary>Row ceiling for one export. Exposed so LRN.ReportWorker can report truncation.</summary>
+    public static int MaxExportRows => ExportRowCap;
+
     public async Task<byte[]> ExportCptAsync(LookupQuery query, CancellationToken ct)
-    {
-        query.Page = 1;
-        query.PageSize = ExportRowCap;
-        var rows = (await GetCptAsync(query, ct)).Items;
-        return BuildExcel("CPT Lookup", CptExcelColumns, rows);
-    }
+        => BuildCptExcel(await ReadCptExportRowsAsync(query, ct));
 
     public async Task<byte[]> ExportPanelAsync(LookupQuery query, CancellationToken ct)
+        => BuildPanelExcel(await ReadPanelExportRowsAsync(query, ct));
+
+    // Read and build are split so the background generator in LRN.ReportWorker can count the
+    // rows it wrote (and notice it hit the cap) while still producing byte-identical workbooks
+    // to the synchronous endpoint — the column set lives here only.
+    public async Task<IReadOnlyList<CptLookupRow>> ReadCptExportRowsAsync(LookupQuery query, CancellationToken ct)
     {
         query.Page = 1;
         query.PageSize = ExportRowCap;
-        var rows = (await GetPanelAsync(query, ct)).Items;
-        return BuildExcel("Panel Lookup", PanelExcelColumns, rows);
+        return (await GetCptAsync(query, ct)).Items;
     }
+
+    public async Task<IReadOnlyList<PanelLookupRow>> ReadPanelExportRowsAsync(LookupQuery query, CancellationToken ct)
+    {
+        query.Page = 1;
+        query.PageSize = ExportRowCap;
+        return (await GetPanelAsync(query, ct)).Items;
+    }
+
+    public static byte[] BuildCptExcel(IReadOnlyList<CptLookupRow> rows)
+        => BuildExcel("CPT Lookup", CptExcelColumns, rows);
+
+    public static byte[] BuildPanelExcel(IReadOnlyList<PanelLookupRow> rows)
+        => BuildExcel("Panel Lookup", PanelExcelColumns, rows);
 
     public Task<IReadOnlyList<string>> GetCptOptionsAsync(string? field, string? term, int? labId, CancellationToken ct)
         => GetOptionsAsync("dbo.CPTAverage", CptFilterFields, "LabID", field, term, labId, ct);
